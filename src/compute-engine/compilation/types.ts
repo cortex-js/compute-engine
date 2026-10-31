@@ -1659,13 +1659,21 @@ export interface CompileTarget<Expr = unknown> {
    * when the value of the parameter is finite for certain (every call of the
    * function in the compiled expression passes a value that is finite for
    * certain; a declared parameter type is not enough), and `magnitude`
-   * is a bound of its absolute value, when one is known. Read by the NaN
-   * guard proof of the shader targets (`gpuProvablyFinite`,
-   * `gpu-finite-proof.ts`). Absent outside such a body.
+   * is a bound of its absolute value, when one is known. `range`, when
+   * present, is an interval `[lower, upper]` that holds the value. The
+   * index of a `Sum` or `Product` with two integer bounds known at compile
+   * time has a fact too, in the body of that `Sum` or `Product`
+   * (`gpuLoopIndexFacts`). Read by the NaN guard proof of the shader
+   * targets (`gpuProvablyFinite`, `gpu-finite-proof.ts`). Absent outside
+   * such a body.
    */
   gpuParameterFacts?: ReadonlyMap<
     string,
-    { readonly finite: boolean; readonly magnitude: number | undefined }
+    {
+      readonly finite: boolean;
+      readonly magnitude: number | undefined;
+      readonly range?: readonly [number, number];
+    }
   >;
 
   /**

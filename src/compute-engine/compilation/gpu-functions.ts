@@ -103,7 +103,7 @@ import {
   gpuReadInvariants,
   readStringLiteral,
 } from './gpu-reduce.js';
-import { gpuProvablyFinite } from './gpu-finite-proof.js';
+import { gpuLoopIndexFacts, gpuProvablyFinite } from './gpu-finite-proof.js';
 import {
   GPU_NAN_SAFE_UNARY,
   GPU_OPERATORS,
@@ -1233,6 +1233,9 @@ function compileGPUSumProduct(
           var: (id) => (id === index ? kStr : target.var(id)),
           ...termScope,
           hoist: BaseCompiler.canHoist(target) ? termSink : undefined,
+          // The term reads the index as the literal `k`, finite for certain:
+          // the NaN guard proof uses it (`gpuLoopIndexFacts`).
+          gpuParameterFacts: gpuLoopIndexFacts(args[0], index, k, k, target),
         };
         if (canProveCounter)
           recordGPUCounter(innerTarget, index, k, k, String(k));
@@ -1372,6 +1375,15 @@ function compileGPUSumProduct(
         : target.var(id),
     ...bodyScope,
     hoist: bodySink,
+    // With two integer bounds known here, the index is finite for certain in
+    // the body, and the NaN guard proof uses it (`gpuLoopIndexFacts`).
+    gpuParameterFacts: gpuLoopIndexFacts(
+      args[0],
+      index,
+      lowerNum,
+      upperNum,
+      target
+    ),
   };
   if (canProveCounter && bothConstant)
     recordGPUCounter(bodyTarget, index, lowerNum, upperNum, index);

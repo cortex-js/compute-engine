@@ -1034,9 +1034,14 @@ and `Chunk` have it (pins in
 
 ### CE-699. The implicit variable of `Integrate`, `D` and `Series` depends on the order of boxing and assignment
 
-**Status:** decided, to implement. User decision 2026-10-31: option (a) for
-`Integrate`, `D` and `Series`. `Limit` and `NLimit` already follow it
-(commit `afbcdfc3e`).
+**Status:** done 2026-10-31. User decision 2026-10-31: option (a) for
+`Integrate`, `D` and `Series`; `NIntegrate` and `ND` follow it too (the same
+order defect). `Limit` and `NLimit` follow it since commit `afbcdfc3e`. The
+rule is `isImplicitVariableCandidate()`
+(`boxed-expression/implicit-variable-rule.ts`). Remaining limitation: a
+symbol with no declaration that receives a value that is not a number after
+boxing is still a candidate (its type is unknown at boxing), and `subs()` on
+a non-canonical `Integrate` still replaces the implicit variable.
 
 An operator that does not write its variable takes it from the unknowns of
 its body: a symbol with an assigned value is not an unknown. So the result
@@ -3031,12 +3036,25 @@ CE-695 (`docs/plans/2026-10-31-ce695-power-corner-area.md`).
 same for the step at `1e-150` and `1e-300`, a bump of the same area at `1e-80`
 and `1e-150`, and the step or the bump on `1/(x·ln²x)` at `1e-300`: 7 of the
 162 cases of `docs/scratch/2026-10-30-ce691-quadrature/sweep-zero.mts`. The
-probable cause (not traced): the shell that holds the step is larger than the
-shells before it, and the shells of a logarithmic corner decrease slowly, so
-the test of `shellsDiverge()` (`numerics/gauss-kronrod.ts`: the sum of the
-last 20 shells against the 20 before) reads a sum that does not shrink. The sweep reads the estimate of a
-divergent result as a value, so these cases count there as an error that is
-too small. A caller gets no value.
+sweep reads the estimate of a divergent result as a value, so these cases count
+there as an error that is too small. A caller gets no value.
+
+The cause (traced 2026-10-31): `shellsDiverge()` (`numerics/gauss-kronrod.ts`)
+runs after each new corner shell, and it fires on the first shell that holds
+the step. That shell is 2 to 3 times the shells before it, so the ratio of the
+last block of 20 shells to the block before jumps above `SHELL_DECAY` (0.99):
+`0.96 → 1.03` for the step at `1e-80` (263 shells), `0.88 → 1.87` at
+`1e-150`. The branch "the ratio has stopped falling" tests
+`last >= before·(1 − SHELL_TREND_FLAT)`, which any rise passes, and reads a
+pole. The step shell stays in the recent block for 20 shells, so a test of the
+last three ratios only fires 2 shells later. A fix must tell a single large
+shell from a pole: for example, require the ratio to stay at least
+`SHELL_DECAY` for a whole block (the step then moves into the earlier block,
+and the ratio falls far below 1), or refuse a block that holds a local peak of
+the shells. Both change which integrals are divergent: next to a nonzero bound
+the corner has only about 48 shells, too few for a ratio that persists over a
+block, and `tailUnresolved()` then decides. A fix needs a spec measured on the
+divergent and the convergent corpora, and a decision of the user.
 
 ### CE-702. A converged result next to a singular bound misses a feature inside the last corner panel
 

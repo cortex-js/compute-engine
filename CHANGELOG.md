@@ -64,11 +64,42 @@
 
 ### Bug Fixes
 
+- **A closure returned through two or more calls keeps the call that made
+  it.** When a call ended, each closure in its result was rebuilt on the
+  frame of that call, also a closure that an inner call had made and already
+  rebuilt on its own frame. The closure then lost the parameters and the
+  locals of the inner call. With `mk = n ↦ (() ↦ Block(n := n + 1, n))` and
+  `wrap = m ↦ mk(m)`, `wrap(5)()` gave `n + 1`; it is now `6`. With
+  `mk = n ↦ Block(k := 1, x ↦ x + k)` and `w = () ↦ mk(5)`, `w()(2)` gave
+  `k + 2`; it is now `3`. With
+  `P2 = (y, w) ↦ (x ↦ Block(s := y, y := 2, s + x))` and
+  `wrap = (a, b) ↦ P2(a, b)`, `wrap(q, 1)(5)` gave `7`; it is now `q + 5`,
+  the value of `P2(q, 1)(5)`. Now a call rebuilds only a closure that reads
+  its own frame. Also, the result of a call that holds such a closure is no
+  longer kept by the memo of the applications of a function: two calls
+  `wrap(5)` give two counters, not one shared counter.
+
 - **GLSL and WGSL: `sin(|(x, x, x, x)|)` no longer drops its NaN guard.** The
   absolute value of a vector or point is emitted as `length(…)`, which
   overflows to `+∞` in f32 for a large `x`; the shader used the built-in `sin`
   anyway and could give a number where the result is NaN. Now the guard is
   dropped only when the norm cannot overflow.
+
+- **`Solve` with a float over a discrete domain.** The interpreter compares
+  numbers within the tolerance, so `Solve(x = 2.0000000000001, x ∈ ℤ)` gave
+  `[]` although the equation is `True` at `x = 2`, and
+  `Solve(x = 2.0000000000001, x ∈ Range(0, 10, 0.5))` gave the root
+  `2.0000000000001`, which is not an element of the range. Over a domain
+  with integer or rational elements or a finite number of elements, such a
+  predicate is now checked at each element of the domain when the domain has
+  at most 10,000 elements (`Range(-10, 10)` gives `[2]`;
+  `x² ≤ 3.9999999999999` over `-5..5` gives `[-2, -1, 0, 1, 2]`, where a
+  compiled filter gave `[-1, 0, 1]`). Otherwise `Solve` stays unevaluated
+  (`ℤ`, `ℚ`, a larger `Range`). The same applies to an unknown declared
+  `integer` or `rational`: `0.5n = 1` stays unevaluated, because the
+  tolerance accepts values far from a root when a side is flat
+  (`10⁻¹² n = 5·10⁻¹³` holds at every integer from -99 to 100). Over
+  `Interval` and `RealNumbers` the result does not change.
 
 - **`Solve` of an equality chain over a domain that cannot be enumerated.**
   A chain `a = b = c` with exact sides over a real `Interval`, `RealNumbers`,
@@ -337,13 +368,19 @@
   Before, a predicate such as `y ↦ AsyncOnly(y) > 6` threw "predicate must
   return True or False" in `CountIf`, `Find`, `Position` and `IndexWhere`.
   For a callback with no such operator, the value of `evaluateAsync()` is the
-  value of `evaluate()`. There is one exception: a `Sort` or `Ordering`
-  comparator that is not consistent (it does not give opposite answers for
-  the two orders of a pair, for example `(a, b) ↦ a > b` over equal elements)
-  can give a different order of the elements under `evaluateAsync()`, because
-  the asynchronous route sorts with a stable merge sort that awaits each
-  comparison. `Map`, `Filter` and the other lazy views still compute their
-  elements without awaiting them (ROADMAP CE-111.4); for `Map`,
+  value of `evaluate()`, with two exceptions. `Sort` and `Ordering` with a
+  comparator use a stable merge sort that awaits each comparison on the
+  asynchronous route, so a comparator that is not transitive can give a
+  different order there. `IndexWhere` checks whether a predicate step met a
+  collection whose elements are not known only up to the first `await` of
+  that step: when the part after the first `await` walks such a collection
+  and still answers `True`, it can give an index where `evaluate()` gives no
+  answer. Only the callback is awaited: these
+  operators read the elements of a lazy source synchronously, so
+  `Find(Map(AsyncOnly, [1, 2]), y ↦ y > 6)` gives `AsyncOnly(2)`. The same is
+  true of `ChunkBy` on a source larger than the eager limit, of `Count` with a
+  predicate, and of the lazy views `Map`, `Filter`, `Scan`, `FlatMap`,
+  `TakeWhile`, `DropWhile` and `Tabulate` (ROADMAP CE-111.4). For `Map`,
   `evaluateAsync({ materialization: true })` gives the awaited values.
 
 - **A numeric integral with a step or a bump next to a singular bound reports
@@ -599,6 +636,45 @@
   engine rebuild the expression from the held operands and loses that work.
 
 ### Behavior Changes
+
+- **The parameter of a family of roots is a new integer symbol.** It is the
+  parameter of `Solve` of a periodic equation, and of diophantine and
+  congruence solutions. It is no longer a symbol that the user declared or
+  used, and it is declared `integer` in the global scope. Before, after
+  `ce.declare('t', 'number')`, `Solve(sin x = 0, x)` returned `[π t]` with
+  the user's `t`, and `ce.assign('t', 0.5)` then gave π/2, which is not a
+  root. The result is now `[π t_1]`. When the user has no symbol `t`, the
+  result is still `[π t]`, and its `t` refuses a value that is not an
+  integer, also when the solve ran inside a function call:
+  `ce.assign('t', 0.5)` throws a type error. After such a solve,
+  `ce.declare('t', 'number')` in the global scope throws "already declared".
+  The free parameter of an identity (`x = x` gives `[t]`) is declared
+  `number`.
+
+- **The implicit variable of `Integrate`, `D`, `Series`, `NIntegrate` and `ND`
+  no longer depends on the order of boxing and assignment.** It is now chosen
+  from the symbols written in the expression, with or without an assigned
+  value, as for `Limit`, and it is a bound variable, so it hides the assigned
+  value. After `x := 4`, `∫₀¹ √x` is 2/3 (it was 2 when `x` was assigned
+  first), and `D(x^3)` is `3x^2` (it stayed unevaluated). A bare-symbol
+  integrand is the variable too: `∫₀¹ x` is 1/2 also when `x` has a value. A
+  constant such as `Pi`, or a symbol whose type cannot hold a number (a list,
+  a string, a function), is not chosen. The two orders give the same result
+  when the assigned value is a number, or when the symbol was declared with a
+  type that cannot hold a number before boxing. The implicit variable of an
+  `Integrate` is no longer reported as an unknown of the integral, and
+  `subs()` no longer replaces it in the integrand, so `\int_0^1\int_0^1 xy` is
+  1/4 (it was `y/2`). `D` of a symbol declared `function` is the derivative of
+  that function: `D(f, x)` is `f'(x)` (it was 0). With nothing assigned, the
+  variable is the same as before.
+
+- **Under `evaluateAsync()`, `Sort` and `Ordering` with a comparator sort with
+  a stable merge sort.** Before, they used the synchronous sort of
+  `evaluate()`. For a comparator that is transitive, the order is the same as
+  before, also for a boolean comparator such as `(a, b) ↦ a < b` over
+  repeated elements. A comparator that is not transitive can give a different
+  order than `evaluate()` gives. See the Bug Fixes entry on collection
+  operators that await their callback.
 
 - **An extra operand of `Hold` is an error.** `Hold` takes one operand, and
   the others were dropped with no error: `ce.box(['Hold', 'x', 1])` and

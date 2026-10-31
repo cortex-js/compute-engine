@@ -523,6 +523,33 @@ declines when anything else in its statement has an effect, also when that
 code comes after it. Binding caller code in order, as random draws are bound,
 is not implemented. A form with no caller code compiles as before.
 
+### NaN-safe helpers on the shader targets
+
+On GLSL and WGSL, `sin`, `cos`, `sign`, `min`, `max` and `clamp` call a
+NaN-safe helper (`_gpu_sin`, `_gpu_min`, …), because a GPU built-in can turn a
+NaN operand into a number. The built-in is emitted only when the operand is
+finite for certain (`gpuProvablyFinite()`,
+`src/compute-engine/compilation/gpu-finite-proof.ts`). The proof includes f32
+overflow, rounding, the flush of subnormal values to 0, and the error of the
+GPU functions. When the proof is not certain, the helper stays.
+
+The proof uses these facts, among others:
+
+- The index of a `Sum` or `Product` whose bounds are integer literals (in
+  the loop body: integers known at compile time) is finite, inside its bounds.
+- A call of a user function is finite when its body is finite for the
+  arguments of that call. This rule applies only under `angularUnit: 'rad'`,
+  because the emitted body is rewritten for the other units.
+- A divisor is not zero when a lower bound of its magnitude is a normal f32
+  value. For `cos(u)` with `|u| < π/2`, the lower bound is `cos(|u|)` minus
+  the GPU error of `cos`.
+
+The error of `cos` is the one exception to "certain": WGSL specifies an
+absolute error of at most 2⁻¹¹ on [-π, π], but GLSL ES 3.00 specifies none.
+On GLSL the proof assumes an absolute error of at most 2⁻⁶ on [-π/2, π/2]
+(user decision 2026-10-31). On a driver with a larger error, a quotient by
+`cos(u)²` that this rule proves finite can be `±∞` or NaN.
+
 ## Complex modes
 
 `strict` preserves real-lane assumptions and declines on an incompatible

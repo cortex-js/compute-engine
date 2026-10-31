@@ -15,6 +15,11 @@ import {
 } from '../boxed-expression/function-literal.js';
 import { boundVariableNames } from '../boxed-expression/binders.js';
 import { gpuOperandShape } from './gpu-shapes.js';
+import { exactRationalDivisor } from './compiler-type-facts.js';
+import {
+  absCompilesToPointNorm,
+  absCompilesToPointListNorm,
+} from './compiler-core.js';
 
 /** The largest finite f32 value, 2¹²⁸ − 2¹⁰⁴. */
 const GPU_F32_MAX = 3.4028234663852886e38;
@@ -73,18 +78,20 @@ const GPU_F32_BOUNDED_HEADS = new Set([
 
 /**
  * Is `x` finite for certain in the shader, so that a NaN-safe helper of it
- * (`gpuNaNSafeLibrary`) can be the built-in? Five conditions:
+ * (`gpuNaNSafeLibrary`) can be the built-in? Seven conditions:
  *
  * - its static type is a finite real, or it is a `vec2`–`vec4` whose cells
  *   are finite reals (`gpuFiniteRealCells`). The rules below then apply to
  *   each component: a written vector `[t, k, 1]` is finite when each of its
- *   components is, and arithmetic over vectors is componentwise. Inside the
- *   body of an emitted user-function definition, a scalar operand that
- *   reads a parameter is typed `number` (the engine types a parameter so),
- *   and is then proven from its parts alone: each symbol it reads must be a
- *   finite real by its own type or its value, each head must be one that
- *   the last condition accepts, and a constant subtree must have a real
- *   value;
+ *   components is, and arithmetic over vectors is componentwise. A scalar
+ *   operand of another static type is proven from its parts alone: each
+ *   symbol it reads must be a finite real by its own type or its value (or
+ *   have a fact, see below), each head must be one that the last condition
+ *   accepts, and a constant subtree must have a real value. This is how an
+ *   operand that reads a parameter of the body of an emitted user-function
+ *   definition is proven (the engine types a parameter `number`), and an
+ *   operand that calls a user function or divides by an operand that is
+ *   not a literal;
  * - each symbol it reads has a DECLARED type (a symbol declared `real`
  *   holds a finite value). An inferred type is not a promise of the host: a
  *   parameter of `p(k) := cos(1.9k)` called with `0/0` is NaN, and a
@@ -111,11 +118,21 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   parameter type (`F: (real, real) -> real`) does NOT make the parameter
  *   finite: the argument `exp(x)` is a `real` but overflows to `+∞` in f32
  *   before the call, and the check of each argument applies the overflow
- *   rules below. A function used as a value, and a parameter that the body
+ *   rules below. The index of an enclosing `Sum` or `Product` whose two
+ *   bounds are integer literals is such an argument: `w(j)` in
+ *   `Sum(w(j), Limits(j, 1, 300))` passes a finite value of magnitude at
+ *   most 300. A function used as a value, and a parameter that the body
  *   binds again or assigns, have no facts. The shader route and
  *   `compileFunction` record no call sites (and open no session of the
  *   common-subexpression pass, without which nothing is proven), so every
  *   parameter keeps the guard there;
+ * - the index of a `Sum` or `Product` whose two bounds are integers known
+ *   at compile time is finite for certain in its body, in an interval from
+ *   the lower to the upper bound (`gpuLoopIndexFacts`);
+ * - a call of a user function is finite for certain when its body, proven
+ *   with the parameters described by the arguments of that call, is
+ *   (`userCall` in `gpuFiniteProof`): `cos(θ(j))` with
+ *   `θ := j ↦ -1.35 + 2.7(j - 0.5)/300` in the body of that `Sum`;
  * - it reads no name that the caller maps to its own source: `vars` can map
  *   `ExponentialE` to a run-time input, `functions` can map `Gamma` to code
  *   of the caller's, and the static type does not describe either. A name
@@ -151,7 +168,12 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *     number literals that are not rationals and one of the others, such
  *     as `2x` or `-0.14·cos(T)`, or a sum of these) and whose `n`-th power
  *     stays within half the largest f32;
- *   - a quotient by a number literal (`quotientStaysFinite`), and a
+ *   - a quotient by a number literal, or by an operand with a known lower
+ *     bound of its magnitude (`lowerMagnitude`: `cos(u)` where an interval
+ *     of `u` is within `(-π/2, π/2)`, its small powers and products)
+ *     (`quotientStaysFinite`), a power `b^(-n)` for `n` from 2 to 4, which
+ *     the shader computes as the quotient `1 / b^n`
+ *     (`reciprocalPowerBound`), and a
  *     floored modulo (`modStaysFinite`), whose quotient cannot overflow:
  *     `mod(R, 10⁻³⁰)` with `R: real<0..10¹⁷>` is NaN in f32;
  *   - a pure subtree with no unknowns, whose value is finite in f32.
@@ -177,17 +199,51 @@ export function gpuProvablyFinite(
   target: CompileTarget<Expression>,
   guardOperand = false
 ): boolean {
-  // The static type of an expression that reads a parameter of the body
-  // being compiled says nothing (the parameter is typed `number`), so a
-  // scalar operand is then proven from its parts alone (`strict`).
+  // A scalar operand whose static type is not a finite real is proven from
+  // its parts alone (`strict`). The static type of an expression that reads
+  // a parameter of the body being compiled says nothing (the parameter is
+  // typed `number`), and neither does the type of a call of a user function
+  // (`theta(1)` with `theta := j ↦ -1.35 + 0.009(j - 0.5)` is typed
+  // `number`). The type of a quotient by an operand that is not a literal
+  // holds `±∞` and NaN (`x / cos(0.2)²` is typed `infinity | nan | real`),
+  // where the quotient rule can show that the divisor is not 0.
   let strict = false;
   if (!gpuFiniteRealCells(x)) {
-    const facts = target.gpuParameterFacts;
-    if (facts === undefined || facts.size === 0) return false;
     if (gpuOperandShape(x) !== 'scalar') return false;
     strict = true;
   }
-  return gpuFiniteProof(target, strict)?.finite(x, guardOperand) === true;
+  // An error raised while the proof reads the operand (a reference that the
+  // target refuses) leaves the operand unproven: the helper stays, and the
+  // emission of the operand reports the error, if any. The proofs of the
+  // bodies of user functions that this proof calls share one budget
+  // (`withUserCallBudget`).
+  return withUserCallBudget(() => {
+    try {
+      return gpuFiniteProof(target, strict)?.finite(x, guardOperand) === true;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'CancellationError') throw err;
+      return false;
+    }
+  });
+}
+
+/**
+ * Run `fn`, a root proof, with a new budget of
+ * `GPU_USER_CALL_PROOFS_PER_ROOT` proofs of user-function bodies
+ * (`GPU_USER_CALL_BUDGET`), then restore the budget of the enclosing root
+ * proof, if any. Each entry point that reads a proof (`gpuProvablyFinite`,
+ * the magnitude rounds of `gpuRecordCallSiteFacts`) runs in it: outside a
+ * root proof the budget is 0, and every call that has no shared result
+ * (`GPU_USER_CALL_FACTS`) would be refused.
+ */
+function withUserCallBudget<T>(fn: () => T): T {
+  const budget = GPU_USER_CALL_BUDGET.left;
+  GPU_USER_CALL_BUDGET.left = GPU_USER_CALL_PROOFS_PER_ROOT;
+  try {
+    return fn();
+  } finally {
+    GPU_USER_CALL_BUDGET.left = budget;
+  }
 }
 
 /**
@@ -210,6 +266,7 @@ function gpuFiniteProof(
   | {
       finite: (e: Expression, top?: boolean) => boolean;
       magnitude: (e: Expression) => number | undefined;
+      range: (e: Expression) => readonly [number, number] | undefined;
     }
   | undefined {
   // The names the caller maps to its own source (`vars`, `functions`,
@@ -258,14 +315,16 @@ function gpuFiniteProof(
   // read as the shader computes it: rewritten for the engine's angular unit,
   // as `tryFoldKnownSymbol()` rewrites it before it compiles it. In degree
   // mode `c := |\arccos(-1) - \pi|` is about 176.86 in the shader, not 0.
+  // A symbol with no value is read first, without asking `target.var`: a
+  // target can refuse a reference to some names (a list in the parameter
+  // struct of `compileFieldFunction()` is read only by position).
   const bakedValue = (e: Expression & { symbol: string }) => {
+    const stored = e.engine._getSymbolValue(e.symbol);
+    if (stored === undefined) return undefined;
     if (isMapped(e.symbol) || target.boundVars?.has(e.symbol) === true)
       return undefined;
     if (target.var(e.symbol) !== undefined) return undefined;
-    const stored = e.engine._getSymbolValue(e.symbol);
-    return stored === undefined
-      ? undefined
-      : BaseCompiler.foldedValueInRadians(stored, target);
+    return BaseCompiler.foldedValueInRadians(stored, target);
   };
   // `top` is true for the operand of the guarded call itself, and for a term
   // of a sum, difference or negation in that position: only there is a
@@ -318,7 +377,12 @@ function gpuFiniteProof(
     } else if (
       isFunction(e) &&
       caller.isOverriddenOperator?.(e.operator) !== true &&
-      e.ops.every((op) => finite(op, top && sum))
+      // The divisor of a quotient is read as the operand of a guarded call
+      // is (`top`): a small power is accepted there, since the quotient
+      // rule reads its bound (`quotientStaysFinite`).
+      e.ops.every((op, i) =>
+        finite(op, (top && sum) || (e.operator === 'Divide' && i === 1))
+      )
     ) {
       // A subtree that the emitter folds into one literal (`gpuFoldedValue`)
       // is finite in the shader when its value is finite in f32 (`Γ(20)`,
@@ -330,7 +394,10 @@ function gpuFiniteProof(
         return true;
       }
       if (e.operator === 'Multiply') result = productStaysFinite(e.ops);
-      else if (e.operator === 'Power') result = top && smallPowerStaysFinite(e);
+      else if (e.operator === 'Power')
+        result =
+          (top && smallPowerStaysFinite(e)) ||
+          reciprocalPowerBound(e) !== undefined;
       // A sum, read through nested sums, differences and negations
       // (`-u^2 - v^2 - w^2` is a sum of `Negate(Power(…))` terms), is
       // finite when its terms cannot overflow together (`sumStaysFinite`).
@@ -354,17 +421,52 @@ function gpuFiniteProof(
       else if (e.operator === 'List' || e.operator === 'Tuple') result = true;
       else if (e.operator === 'Divide') result = quotientStaysFinite(e);
       else if (e.operator === 'Mod') result = modStaysFinite(e);
+      // `Abs` of a point or of a complex value is emitted as its Euclidean
+      // norm (`length(…)`), which can overflow f32 when each component is
+      // finite: `|(x, x, x, x)|` is `+∞` for `x = 2·10³⁸`. The test of a
+      // point is the one of the emitter (`absCompilesToPointNorm()` in
+      // `compiler-core.ts`). The norm is finite when `n·m²` is at most half
+      // the largest f32, less a margin of 2⁻¹⁰ for the rounding, for the `n`
+      // components and the bound `m` of their magnitudes (`magnitude`). A
+      // complex value has 2 components, and its bound is not known here.
+      // `Abs` of a list of points is the list of their norms
+      // (`absCompilesToPointListNorm()`), and is not proven. `Abs` of a
+      // list of numbers (`|[x, y, z]|`) is the component-wise `abs`, which
+      // cannot overflow, and is accepted with the heads below.
+      else if (
+        e.operator === 'Abs' &&
+        e.nops === 1 &&
+        (absCompilesToPointNorm(e.op1) ||
+          absCompilesToPointListNorm(e.op1) ||
+          BaseCompiler.isComplexValued(e.op1))
+      ) {
+        const shape = gpuOperandShape(e.op1);
+        const m =
+          typeof shape === 'number' &&
+          absCompilesToPointNorm(e.op1) &&
+          !BaseCompiler.isComplexValued(e.op1)
+            ? magnitude(e.op1)
+            : undefined;
+        result =
+          typeof shape === 'number' &&
+          m !== undefined &&
+          shape * m * m * (1 + 2 ** -10) <= GPU_F32_MAX / 2;
+      }
       // Over finite operands, `Smoothstep` has no defined value when its two
       // edges are equal. The static type of the node excludes it for symbols,
       // but a parameter of the body being compiled is typed `number`, and so
-      // is the node: then the edges must be two different literals.
+      // is the node: then (and whenever the proof is `strict`) the edges
+      // must be two different literals.
       else if (
-        facts !== undefined &&
+        (facts !== undefined || strict) &&
         e.operator === 'Smoothstep' &&
         !e.type.matches('finite_real')
       )
         result = isNumber(e.op1) && isNumber(e.op2) && !e.op1.isSame(e.op2);
-      else result = GPU_F32_BOUNDED_HEADS.has(e.operator);
+      else if (GPU_F32_BOUNDED_HEADS.has(e.operator)) result = true;
+      // A call of a user function: finite when its body is finite for the
+      // arguments of this call (`userCall`).
+      else result = userCall(e)?.finite === true;
     }
     memo.set(e, result);
     return result;
@@ -435,6 +537,26 @@ function gpuFiniteProof(
       const m = powerBaseMagnitude(e.op1);
       if (m !== undefined && smallPowerStaysFinite(e))
         return Math.max(1, m) ** e.op2.re * (1 + 2 ** -10);
+      // `b^(-n)`, which the shader computes as `1.0 / b^n`.
+      const q = reciprocalPowerBound(e);
+      if (q !== undefined) return q;
+    }
+    // A quotient by an operand that is not a literal, which the quotient
+    // rule accepts (`quotientStaysFinite`): the bound `m` of the dividend
+    // over the lower bound `l` of the magnitude of the divisor
+    // (`lowerMagnitude`), with a margin for the error of the division
+    // (2.5 ulp). `x·cos(u)^{-1}` is `x · (1 / cos(u))`.
+    else if (
+      isFunction(e) &&
+      e.operator === 'Divide' &&
+      e.nops === 2 &&
+      !isNumber(e.op2) &&
+      finite(e)
+    ) {
+      const m = magnitude(e.op1, depth + 1);
+      const l = lowerMagnitude(e.op2);
+      if (m !== undefined && l !== undefined && quotientStaysFinite(e))
+        return (m / l) * (1 + 2 ** -20);
     } else if (isFunction(e) && e.operator === 'Multiply') {
       let bound = 1;
       for (const op of e.ops) {
@@ -446,6 +568,13 @@ function gpuFiniteProof(
         bound *= m;
       }
       if (Number.isFinite(bound)) return bound;
+    }
+    // A call of a user function that `finite` accepts: the bound of its body
+    // for the arguments of this call (`userCall`).
+    else if (isFunction(e) && finite(e)) {
+      const call = userCall(e);
+      if (call?.finite === true && call.magnitude !== undefined)
+        return call.magnitude;
     }
     // A library constant (`Pi`) that the caller does not map has a value
     // known here. The shader reads a symbol that is not a constant from its
@@ -592,11 +721,25 @@ function gpuFiniteProof(
   // languages specify the error of a division, 2.5 ulp): finite when `a`
   // has a magnitude `m` with `m / |d|` at most half the largest f32, or,
   // when `a` has no known magnitude, when `|d| ≥ 2` (the quotient is then
-  // at most half of `a`). Any other divisor is refused: `x / 10⁻³⁰` is
-  // `+∞` in f32 for `|x| ≥ 3.5·10⁸`, and a divisor that can be 0 or tiny
-  // makes the quotient `±∞` or NaN.
+  // at most half of `a`). A divisor that is not a literal is accepted under
+  // the same conditions, with a lower bound `l` of its magnitude in place
+  // of `|d|` (`lowerMagnitude`) and a known bound of its magnitude of at
+  // most 2¹²⁶: `x / cos(θ(j))²` with `θ(j)` in [-1.35, 1.35] (`l` about
+  // 0.04). Any other divisor is refused: `x / 10⁻³⁰` is `+∞` in f32 for
+  // `|x| ≥ 3.5·10⁸`, and a divisor that can be 0 or tiny makes the
+  // quotient `±∞` or NaN.
   const quotientStaysFinite = (e: Expression): boolean => {
-    if (!isFunction(e) || !isNumber(e.op2) || e.op2.im !== 0) return false;
+    if (!isFunction(e) || e.nops !== 2) return false;
+    if (!isNumber(e.op2)) {
+      const l = lowerMagnitude(e.op2);
+      const M = magnitude(e.op2);
+      if (l === undefined || !(l >= 2 ** -126)) return false;
+      if (M === undefined || M > 2 ** 126) return false;
+      const m = magnitude(e.op1);
+      if (m === undefined) return l >= 2;
+      return m / l <= GPU_F32_MAX / 2;
+    }
+    if (e.op2.im !== 0) return false;
     const d = Math.abs(e.op2.re);
     if (!(d >= 2 ** -126 && d <= 2 ** 126)) return false;
     const m = magnitude(e.op1);
@@ -670,6 +813,34 @@ function gpuFiniteProof(
     return (
       m !== undefined && Math.max(1, m) ** n * (1 + 2 ** -10) <= GPU_F32_MAX / 2
     );
+  };
+  // A bound of the magnitude of `b^(-n)` with an integer literal `n` from 2
+  // to 4, whose operands are finite (checked by `finite` before), or
+  // `undefined` when it can be `±∞`. The shader computes it as
+  // `1.0 / _gpu_pow2(b)`–`1.0 / _gpu_pow4(b)`, the quotient of 1 by the
+  // product `b^n`, so the rule of a quotient by an operand that is not a
+  // literal applies (`quotientStaysFinite`), with the same margins:
+  // `b^n` must have a bound of at most 2¹²⁶ (`smallPowerStaysFinite` and
+  // `powerBaseMagnitude`), and a lower bound `l` of its magnitude of at
+  // least 2⁻¹²⁶ (`lowerMagnitude` of `b`, to the power `n`, less the
+  // margin of the rule for `b^n`). The bound is then `1 / l`, with a margin
+  // for the error of the division (2.5 ulp). `x·cos(u)^{-2}` with `u` in
+  // [-1.35, 1.35] is finite, as `x / cos(u)²` is. The exponent -1 does not
+  // occur: `b^{-1}` is the quotient `1 / b`.
+  const reciprocalPowerBound = (e: Expression): number | undefined => {
+    if (!isFunction(e, 'Power') || !isNumber(e.op2) || e.op2.im !== 0)
+      return undefined;
+    const n = -e.op2.re;
+    if (!Number.isInteger(n) || n < 2 || n > 4) return undefined;
+    const m = powerBaseMagnitude(e.op1);
+    if (m === undefined || Math.max(1, m) ** n * (1 + 2 ** -10) > 2 ** 126)
+      return undefined;
+    const l = lowerMagnitude(e.op1);
+    if (l === undefined) return undefined;
+    const low = l ** n * (1 - 2 ** -20);
+    if (!(low >= 2 ** -126)) return undefined;
+    const q = (1 / low) * (1 + 2 ** -20);
+    return q <= GPU_F32_MAX / 2 ? q : undefined;
   };
   // A bound of the magnitude of the base `b` of a small power, for three
   // forms only: a term, the negation of a term, or a sum or a difference of
@@ -749,7 +920,550 @@ function gpuFiniteProof(
     const m = Math.max(Math.abs(lower), Math.abs(upper));
     return Number.isFinite(m) ? m : undefined;
   };
-  return { finite, magnitude: (e) => magnitude(e) };
+  // A rational literal `p/q` for which `exactRationalDivisor()` gives `p`
+  // and `q` (both safe integers, `q > 1` and not a power of two) is not
+  // written as one f32 value: the emitter writes a product by it as a
+  // division and a product, `t / q * p`. The intermediate
+  // `t / q` can then be below the smallest normal f32 and be flushed to 0
+  // before the product by `p`: with `t = 10⁻³⁰` and
+  // `p/q = 8999999999999999/9000000000000000`, `t / q` is about
+  // 1.1·10⁻⁴⁶, and the product is 0, while `p/q·t` is about 10⁻³⁰. The
+  // literal itself is the quotient of two values that are each rounded to
+  // f32. An interval or a lower bound computed from the value `p/q` does
+  // not hold for these, so `range` and `lowerMagnitude` refuse the literal
+  // alone, and read a product with one as the two steps of the shader. An
+  // upper bound does hold (`magnitude`): `|t / q| ≤ |t|` for `q ≥ 1`, and
+  // the rules that read a bound keep a margin of half the largest f32.
+  //
+  // Any other rational literal (`1/2`, or `1/(3·10⁴⁰)`, whose `q` is not a
+  // safe integer) is written as one f32 literal, the value `p/q` rounded,
+  // and is read as any other number literal: its interval is widened by
+  // 2⁻¹²⁶ for a flush to 0, and its lower bound must be a normal f32.
+  const isExactRationalDivisor = (e: Expression): boolean =>
+    exactRationalDivisor(e) !== undefined;
+  // An interval `[lower, upper]` that holds the value of the finite `e` in
+  // the shader, or `undefined` when none is known. The interval of a sum, a
+  // difference, a negation, a product and a quotient by a number literal is
+  // computed from the intervals of the operands, then widened for the
+  // rounding of the f32 operations: by `n·2⁻²²` times the sum of the
+  // magnitudes of the `n` operands for a sum or a difference, by `n·2⁻²²`
+  // times the bound of a product of `n` factors, and by 2⁻¹²⁶ for each
+  // result that can be flushed to 0. A product with a partial product that
+  // excludes 0 and can be below 2⁻¹⁰⁰ has no interval from this rule. A
+  // number literal is widened for its rounding to f32. The
+  // interval of a parameter or of the index of a `Sum` is the `range` of
+  // its fact (none when the fact has no `range`); the interval of a call of
+  // a user function is the interval of its body for the arguments of the
+  // call (`userCall`). A symbol whose value the shader computes in its
+  // place has the interval of that value, and a subtree that the emitter
+  // folds into one literal has the interval of that literal.
+  //
+  // `lowerMagnitude` reads these intervals for a lower bound, so no other
+  // function node has an interval, even when `magnitude` gives it a bound.
+  // That bound is the exact bound of the value (1 for `sin`, `cos` and
+  // `tanh`, π/2 for `arctan`), but the error of a GPU trigonometric
+  // function is absolute: WGSL specifies 2⁻¹¹ only for an argument in
+  // [-π, π], and GLSL specifies none. So `1.0004 + sin(t)`, with the
+  // interval `[-1, 1]` for `sin(t)`, would get the lower bound 4·10⁻⁴,
+  // while the shader can compute 0 or less for it. The same holds for a
+  // parameter fact with no `range`, whose magnitude can be such a bound.
+  // Only a symbol that the shader reads as the host's input (its declared
+  // range, a promise of the host) or a library constant of known
+  // magnitude `m` is in `[-m, m]` (`magnitude`).
+  //
+  // A rational literal that the emitter writes as a division
+  // (`isExactRationalDivisor`) has no interval, and
+  // neither has a quotient by one; a product with one is read as the shader
+  // computes it (see the `Multiply` case).
+  const range = (
+    e: Expression,
+    depth = 0
+  ): readonly [number, number] | undefined => {
+    if (depth > 32 || !finite(e) || isExactRationalDivisor(e)) return undefined;
+    const widen = (
+      lo: number,
+      hi: number,
+      error: number,
+      operations = 1
+    ): readonly [number, number] | undefined => {
+      const flush = operations * 2 ** -126;
+      const r = [lo - error - flush, hi + error + flush] as const;
+      return Math.max(-r[0], r[1]) <= GPU_F32_MAX / 2 ? r : undefined;
+    };
+    if (isNumber(e))
+      return e.im === 0
+        ? widen(e.re, e.re, Math.abs(e.re) * 2 ** -23)
+        : undefined;
+    if (isSymbol(e)) {
+      const fact = facts?.get(e.symbol);
+      if (fact?.finite === true) return fact.range;
+      const baked = bakedValue(e);
+      if (baked !== undefined) return range(baked, depth + 1);
+    } else if (isFunction(e)) {
+      const h = e.operator;
+      if (h === 'Negate' && e.nops === 1) {
+        const r = range(e.op1, depth + 1);
+        if (r !== undefined) return [-r[1], -r[0]];
+      } else if ((h === 'Add' || h === 'Subtract') && e.nops >= 1) {
+        let lo = 0;
+        let hi = 0;
+        let size = 0;
+        let known = true;
+        e.ops.forEach((op, i) => {
+          const r = known ? range(op, depth + 1) : undefined;
+          if (r === undefined) {
+            known = false;
+            return;
+          }
+          if (h === 'Subtract' && i > 0) {
+            lo -= r[1];
+            hi -= r[0];
+          } else {
+            lo += r[0];
+            hi += r[1];
+          }
+          size += Math.max(-r[0], r[1]);
+        });
+        if (known) return widen(lo, hi, e.nops * 2 ** -22 * size, e.nops);
+      } else if (h === 'Multiply' && e.nops >= 1) {
+        // A rational factor `p/q` (`isExactRationalDivisor`) is not read as a
+        // factor: the shader divides the product of the other factors by
+        // `q`, then multiplies the quotient by `p` (`t / q * p`). Each of the
+        // two steps is a product of an interval by a value, with the same
+        // test of a flush to 0 and a margin of 2⁻²⁰ for the rounding of the
+        // integer to f32 and of the operation. A product with two such
+        // factors has no interval.
+        const rationals = e.ops.filter(isExactRationalDivisor);
+        let lo = 1;
+        let hi = 1;
+        let known = rationals.length <= 1 && rationals.length < e.nops;
+        const scale = (
+          r: readonly [number, number] | undefined,
+          c: number
+        ): readonly [number, number] | undefined => {
+          if (r === undefined) return undefined;
+          const a = Math.min(r[0] * c, r[1] * c);
+          const b = Math.max(r[0] * c, r[1] * c);
+          if (
+            (a > 0 || b < 0) &&
+            Math.min(Math.abs(a), Math.abs(b)) < 2 ** -100
+          )
+            return undefined;
+          return widen(a, b, 2 ** -20 * Math.max(-a, b));
+        };
+        for (const op of e.ops) {
+          if (!known) break;
+          if (isExactRationalDivisor(op)) continue;
+          const r = range(op, depth + 1);
+          if (r === undefined) {
+            known = false;
+            break;
+          }
+          const corners = [lo * r[0], lo * r[1], hi * r[0], hi * r[1]];
+          lo = Math.min(...corners);
+          hi = Math.max(...corners);
+          // A partial product that does not hold 0 and that can be below the
+          // smallest normal f32 can be flushed to 0 by the shader, out of the
+          // interval, and a later factor does not bring it back. An interval
+          // that holds 0 holds the flushed value too.
+          if (
+            (lo > 0 || hi < 0) &&
+            Math.min(Math.abs(lo), Math.abs(hi)) < 2 ** -100
+          ) {
+            known = false;
+            break;
+          }
+        }
+        let r =
+          known && Number.isFinite(lo) && Number.isFinite(hi)
+            ? widen(lo, hi, e.nops * 2 ** -22 * Math.max(-lo, hi))
+            : undefined;
+        const rational =
+          rationals[0] === undefined
+            ? undefined
+            : exactRationalDivisor(rationals[0]);
+        if (rational !== undefined) {
+          r = scale(r, 1 / rational.q);
+          if (rational.p !== 1) r = scale(r, rational.p);
+        }
+        if (r !== undefined) return r;
+      } else if (
+        h === 'Divide' &&
+        e.nops === 2 &&
+        isNumber(e.op2) &&
+        !isExactRationalDivisor(e.op2) &&
+        e.op2.im === 0 &&
+        Math.abs(e.op2.re) >= 2 ** -126 &&
+        Math.abs(e.op2.re) <= 2 ** 126
+      ) {
+        const r = range(e.op1, depth + 1);
+        const d = e.op2.re;
+        if (r !== undefined) {
+          const a = r[0] / d;
+          const b = r[1] / d;
+          return widen(
+            Math.min(a, b),
+            Math.max(a, b),
+            2 ** -21 * Math.max(Math.abs(a), Math.abs(b))
+          );
+        }
+      } else {
+        const r = userCall(e)?.range;
+        if (r !== undefined) return r;
+      }
+      const v = gpuFoldedValue(e);
+      return v !== undefined && Number.isFinite(v)
+        ? widen(v, v, Math.abs(v) * 2 ** -23)
+        : undefined;
+    }
+    const m = magnitude(e);
+    return m === undefined ? undefined : [-m, m];
+  };
+  // A lower bound `l > 0` of the magnitude of the finite `e` in the shader,
+  // or `undefined` when `e` can be 0 or none is known:
+  // - a number literal: its magnitude, less the rounding to f32;
+  // - `cos(u)`, where the interval of `u` (`range`) is within
+  //   `[-M, M]` for `M < π/2`: `cos(M)` less `GPU_TRIG_ERROR`, the largest
+  //   absolute error of the shader `cos` that this rule allows for. On WGSL
+  //   this is within the specified bound (2⁻¹¹ on [-π, π]). On GLSL it is an
+  //   assumption about the drivers, not a bound of the specification, which
+  //   gives no accuracy for `cos` (see `GPU_TRIG_ERROR`). Only when
+  //   the angular unit of the engine is the radian: the body of a user
+  //   function that `userCall` reads is not rewritten for the angular unit
+  //   (the shader computes `cos(2πu)` for `cos(u)` under `'turn'`, which is
+  //   0 at `u = 0.25`);
+  // - a power `b^n` with an integer literal `n` from 2 to 4, which the
+  //   shader computes as products (`_gpu_pow2`–`_gpu_pow4`): `l^n` for the
+  //   lower bound `l` of `b`, less a margin for the rounding;
+  // - a product: the product of the lower bounds of its factors, less a
+  //   margin for the rounding;
+  // - any other operand whose interval (`range`) does not hold 0: the
+  //   smaller magnitude of the two ends.
+  // The operand is checked as a divisor is (`finite` with `top`), so that a
+  // small power is accepted. A rational literal that the emitter writes as
+  // a division has no lower bound (`isExactRationalDivisor`); a product
+  // with one is read as the shader
+  // computes it.
+  const lowerMagnitude = (e: Expression, depth = 0): number | undefined => {
+    if (depth > 32 || !finite(e, true) || isExactRationalDivisor(e))
+      return undefined;
+    const positive = (v: number): number | undefined =>
+      Number.isFinite(v) && v >= 2 ** -126 ? v : undefined;
+    if (isNumber(e))
+      return e.im === 0 ? positive(Math.abs(e.re) * (1 - 2 ** -23)) : undefined;
+    if (isFunction(e, 'Cos') && e.nops === 1) {
+      if (e.engine.angularUnit !== 'rad') return undefined;
+      const r = range(e.op1, depth + 1);
+      if (r === undefined) return undefined;
+      const M = Math.max(-r[0], r[1]);
+      if (!(M < Math.PI / 2)) return undefined;
+      return positive(Math.cos(M) - GPU_TRIG_ERROR);
+    }
+    if (
+      isFunction(e, 'Power') &&
+      isNumber(e.op2) &&
+      e.op2.im === 0 &&
+      Number.isInteger(e.op2.re) &&
+      e.op2.re >= 2 &&
+      e.op2.re <= 4
+    ) {
+      const l = lowerMagnitude(e.op1, depth + 1);
+      return l === undefined
+        ? undefined
+        : positive(l ** e.op2.re * (1 - 2 ** -20));
+    }
+    if (isFunction(e, 'Multiply')) {
+      // A rational factor `p/q` is applied last, as the shader does (see
+      // `range`): a division of the product of the other factors by `q`,
+      // then a product by `p`, each with a margin of 2⁻²⁰.
+      const rationals = e.ops.filter(isExactRationalDivisor);
+      if (rationals.length > 1 || rationals.length === e.nops) return undefined;
+      let l = 1;
+      for (const op of e.ops) {
+        if (isExactRationalDivisor(op)) continue;
+        const f = lowerMagnitude(op, depth + 1);
+        if (f === undefined) return undefined;
+        l *= f;
+        // A partial product below the smallest normal f32 can be flushed to
+        // 0, and a later factor does not bring it back: 2⁻¹⁰⁰ keeps a margin.
+        if (!(l >= 2 ** -100)) return undefined;
+      }
+      l *= 1 - e.nops * 2 ** -22;
+      const rational =
+        rationals[0] === undefined
+          ? undefined
+          : exactRationalDivisor(rationals[0]);
+      if (rational !== undefined) {
+        l = (l / rational.q) * (1 - 2 ** -20);
+        if (!(l >= 2 ** -100)) return undefined;
+        l *= Math.abs(rational.p) * (1 - 2 ** -20);
+      }
+      return positive(l);
+    }
+    const r = range(e, depth + 1);
+    if (r === undefined || (r[0] <= 0 && r[1] >= 0)) return undefined;
+    return positive(Math.min(Math.abs(r[0]), Math.abs(r[1])));
+  };
+  // A call `F(a₁, …, aₙ)` of a user function `F` whose literal has one
+  // expression as its body (`Block(b)`, or `b` alone) and `n` parameters,
+  // each a plain name that the body does not bind again or assign
+  // (`gpuReboundNames`). When each argument is a finite scalar here, the
+  // body `b` is proven with the parameters described by the facts of this
+  // call: finite, with the bound of the magnitude of each argument. The
+  // value of the call is finite when `b` is, and it has the bound of `b`.
+  // This is sound whatever other calls of `F` pass: the proof is about the
+  // value that this call computes. The shader computes `b` in f32 from the
+  // values of the arguments, in the emitted definition of `F` or at an
+  // inline call site, and the rules of `finite` and `magnitude` describe
+  // that f32 computation. A head that the caller maps to its own code
+  // (`functions`, `operators`), a name that a binder of the compiled
+  // expression binds (a lambda parameter that shadows `F`), a recursive
+  // call and a call nested more than 8 levels deep are not proven.
+  //
+  // A call is not proven either when the angular unit of the engine is not
+  // the radian. The proof reads the STORED body of `F`, but the compiler
+  // emits that body rewritten for the angular unit (`definitionBodyExpr()`
+  // in `compile-cse.ts` calls `rewriteAngularUnit()`): in degree mode
+  // `F(t) := arctan(t)` is at most π/2 in the stored body, but the shader
+  // computes `arctan(t)` in degrees, up to 90.
+  //
+  // The result for one call depends only on the callee, the facts of the
+  // arguments, the bound names and the other fields of the target, so it
+  // is kept for the whole compilation (`GPU_USER_CALL_FACTS`), not only for
+  // this proof: else a callee body would be proven again for each call,
+  // each guarded operand and each round of `gpuRecordCallSiteFacts`, and
+  // nested calls would cost a power of the number of calls in each body.
+  // The proofs of bodies that one root proof (`gpuProvablyFinite`) can do
+  // are also counted (`GPU_USER_CALL_BUDGET`): past the limit, a call is
+  // not proven, and the helper stays.
+  const userCalls = new Map<Expression, GPUCallFact | undefined>();
+  const userCall = (e: Expression): GPUCallFact | undefined => {
+    if (!isFunction(e)) return undefined;
+    if (userCalls.has(e)) return userCalls.get(e);
+    userCalls.set(e, undefined);
+    const h = e.operator;
+    if (
+      e.engine.angularUnit !== 'rad' ||
+      target.boundVars?.has(h) === true ||
+      facts?.has(h) === true ||
+      caller.isOverriddenOperator?.(h) === true ||
+      target.unrollSkipHeads?.has(h) === true ||
+      target.overridesHead?.(h) === true
+    )
+      return undefined;
+    if (
+      GPU_USER_CALLS_IN_PROOF.includes(h) ||
+      GPU_USER_CALLS_IN_PROOF.length >= 8
+    ) {
+      GPU_USER_CALL_BUDGET.refusals += 1;
+      return undefined;
+    }
+    let literal: Expression | undefined;
+    try {
+      literal = BaseCompiler.userFunctionLiteral(e.engine, h);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'CancellationError') throw err;
+      return undefined;
+    }
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
+    const params = literal.ops.slice(1);
+    if (params.length !== e.nops) return undefined;
+    let body = literal.ops[0];
+    if (isFunction(body, 'Block')) {
+      if (body.nops !== 1) return undefined;
+      body = body.ops[0];
+    }
+    const rebound = gpuReboundNames(literal.ops[0]);
+    const names = params.map((p) => functionLiteralParameterName(p));
+    if (
+      params.some((p) => isRestParameter(p)) ||
+      names.some((n) => n === '' || rebound.has(n)) ||
+      new Set(names).size !== names.length
+    )
+      return undefined;
+    const argumentFacts = new Map<string, GPUParameterFact>();
+    for (let i = 0; i < names.length; i++) {
+      const arg = e.ops[i];
+      if (gpuOperandShape(arg) !== 'scalar' || !finite(arg)) return undefined;
+      argumentFacts.set(names[i], {
+        finite: true,
+        magnitude: magnitude(arg),
+        range: range(arg),
+      });
+    }
+    const boundVars = new Set(target.boundVars ?? []);
+    for (const n of names) boundVars.add(n);
+    const inner: CompileTarget<Expression> = {
+      ...target,
+      boundVars,
+      gpuParameterFacts: argumentFacts,
+    };
+    // The key of the result in `GPU_USER_CALL_FACTS`: the callee, the bound
+    // names and the facts of the arguments, by value. The other fields of
+    // the target and the names that the code writes are compared by
+    // identity (`gpuSameProofContext`).
+    const key = [
+      h,
+      [...boundVars].sort().join(','),
+      ...names.map((n) => {
+        const f = argumentFacts.get(n)!;
+        return `${f.magnitude}:${f.range?.[0]}:${f.range?.[1]}`;
+      }),
+    ].join('\u0000');
+    const shared =
+      target.userFunctions === undefined
+        ? undefined
+        : GPU_USER_CALL_FACTS.get(target.userFunctions);
+    const hit = shared
+      ?.get(key)
+      ?.find(
+        (entry) =>
+          entry.written === written && gpuSameProofContext(entry.target, inner)
+      );
+    if (hit !== undefined) {
+      userCalls.set(e, hit.fact);
+      return hit.fact;
+    }
+    if (GPU_USER_CALL_BUDGET.left <= 0) {
+      GPU_USER_CALL_BUDGET.refusals += 1;
+      return undefined;
+    }
+    GPU_USER_CALL_BUDGET.left -= 1;
+    const proof = gpuFiniteProof(inner, true);
+    if (proof === undefined) return undefined;
+    const refusals = GPU_USER_CALL_BUDGET.refusals;
+    GPU_USER_CALLS_IN_PROOF.push(h);
+    let result: GPUCallFact;
+    try {
+      const isFinite = proof.finite(body);
+      result = {
+        finite: isFinite,
+        magnitude: isFinite ? proof.magnitude(body) : undefined,
+        range: isFinite ? proof.range(body) : undefined,
+      };
+    } finally {
+      GPU_USER_CALLS_IN_PROOF.pop();
+    }
+    userCalls.set(e, result);
+    // A result that a limit cut short (recursion, depth, budget) is weaker
+    // than the result for the same key with no limit, and is not shared.
+    if (
+      target.userFunctions !== undefined &&
+      GPU_USER_CALL_BUDGET.refusals === refusals
+    ) {
+      let byKey = GPU_USER_CALL_FACTS.get(target.userFunctions);
+      if (byKey === undefined)
+        GPU_USER_CALL_FACTS.set(target.userFunctions, (byKey = new Map()));
+      const entries = byKey.get(key);
+      const entry = { target: inner, written, fact: result };
+      if (entries === undefined) byKey.set(key, [entry]);
+      else entries.push(entry);
+    }
+    return result;
+  };
+  return {
+    finite,
+    magnitude: (e) => magnitude(e),
+    range: (e) => range(e),
+  };
+}
+
+/** What `gpuFiniteProof` knows of the value of a call of a user function
+ * (`userCall`): whether it is finite for certain, a bound of its magnitude
+ * and an interval that holds it, when they are known. */
+type GPUCallFact = {
+  readonly finite: boolean;
+  readonly magnitude: number | undefined;
+  readonly range: readonly [number, number] | undefined;
+};
+
+/**
+ * The largest absolute error of the shader `cos` that the lower bound of
+ * `|cos(u)|` for `|u| < π/2` allows for (`lowerMagnitude` of
+ * `gpuFiniteProof`). The rule applies only for `|u| < π/2`.
+ *
+ * On WGSL the bound is specified: the absolute error of `cos` is at most
+ * 2⁻¹¹ for an argument in [-π, π], and 2⁻⁶ is larger.
+ *
+ * On GLSL the bound is an ASSUMPTION about the drivers, not a bound of the
+ * specification: GLSL ES 3.00 gives no accuracy for `cos`. The proof
+ * assumes that the absolute error of `cos` is at most 2⁻⁶ (32 times the
+ * WGSL bound) on [-π/2, π/2]. If a driver has a larger error, a quotient by
+ * `cos(u)` or its powers that this rule proves finite can be `±∞` or NaN
+ * there, and the built-in that replaces its NaN-safe helper gives that
+ * value.
+ *
+ * A quotient by `cos(u)²` with `|u| ≤ 1.35` is then proven finite: its
+ * divisor is at least `(cos(1.35) − 2⁻⁶)² ≈ 0.04`.
+ */
+const GPU_TRIG_ERROR = 2 ** -6;
+
+/**
+ * The user functions whose body `gpuFiniteProof` is proving for a call
+ * (`userCall`), innermost last. A call of a function that is already on the
+ * list is recursive and is not proven, and the list holds at most 8 names,
+ * so that the proof of nested calls ends.
+ */
+const GPU_USER_CALLS_IN_PROOF: string[] = [];
+
+/**
+ * The work that the proofs of user-function bodies (`userCall` in
+ * `gpuFiniteProof`) can still do for the current root proof
+ * (`gpuProvablyFinite`). `left` is the number of bodies that can still be
+ * proven; each root proof starts with `GPU_USER_CALL_PROOFS_PER_ROOT`.
+ * `refusals` counts the calls that a limit left unproven (a recursive call,
+ * a call nested more than 8 levels deep, or no budget left): a result
+ * computed while it grew is not shared (`GPU_USER_CALL_FACTS`).
+ */
+const GPU_USER_CALL_BUDGET = { left: 0, refusals: 0 };
+
+/** The number of user-function bodies that one root proof can prove
+ * (`GPU_USER_CALL_BUDGET`). A result found in `GPU_USER_CALL_FACTS` is not
+ * counted. */
+const GPU_USER_CALL_PROOFS_PER_ROOT = 4096;
+
+/**
+ * The results of `userCall` in `gpuFiniteProof`, for one compilation: by the
+ * user-function registry of the compilation (`CompileTarget.userFunctions`,
+ * one object per compilation), then by a key of the callee, the bound names
+ * and the facts of the arguments. Each entry also holds the target of the
+ * proof of the body and the names that the code writes (`GPU_WRITTEN_NAMES`)
+ * when it was proven: a result is reused only for a target whose other
+ * fields are the same objects (`gpuSameProofContext`), since the proof reads
+ * them (`var`, `varsKeys`, the common-subexpression session, …).
+ */
+const GPU_USER_CALL_FACTS = new WeakMap<
+  object,
+  Map<
+    string,
+    Array<{
+      readonly target: CompileTarget<Expression>;
+      readonly written: ReadonlySet<string> | 'all' | undefined;
+      readonly fact: GPUCallFact;
+    }>
+  >
+>();
+
+/**
+ * Do the targets `a` and `b` of two proofs of a user-function body give the
+ * same result for the same key of `GPU_USER_CALL_FACTS`? Each field of the
+ * targets, other than the bound names and the parameter facts (which are
+ * in the key), must be the same value or object.
+ */
+function gpuSameProofContext(
+  a: CompileTarget<Expression>,
+  b: CompileTarget<Expression>
+): boolean {
+  const x = a as unknown as Record<string, unknown>;
+  const y = b as unknown as Record<string, unknown>;
+  const keys = Object.keys(x);
+  if (keys.length !== Object.keys(y).length) return false;
+  for (const k of keys) {
+    if (k === 'boundVars' || k === 'gpuParameterFacts') continue;
+    if (!(k in y) || x[k] !== y[k]) return false;
+  }
+  return true;
 }
 
 /** What is known of the value of one parameter of a user function on the
@@ -757,6 +1471,8 @@ function gpuFiniteProof(
 type GPUParameterFact = {
   readonly finite: boolean;
   readonly magnitude: number | undefined;
+  /** An interval `[lower, upper]` that holds the value, when one is known. */
+  readonly range?: readonly [number, number];
 };
 
 /**
@@ -844,9 +1560,13 @@ function gpuReboundNames(body: Expression): Set<string> {
  * another number of arguments than it has parameters. A position is not
  * finite when the body binds the name of the parameter again or assigns
  * it, or when the parameter is a rest or destructuring parameter. An
- * argument that reads a name bound by an enclosing binder of its call (the
- * index of a `Sum`, a local of a `Block`, the parameter of a lambda) is not
- * finite for certain here. When the literal of a called function cannot be
+ * argument that reads a name bound by an enclosing binder of its call (a
+ * local of a `Block`, the parameter of a lambda, the index of a `Sum` with
+ * a bound that is not a literal) is not finite for certain here. The index
+ * of a `Sum` or `Product` whose two bounds are integer literals, and that
+ * its body does not bind again or assign, is the exception: it is finite,
+ * with the magnitude of the larger bound and the interval of the two
+ * bounds (`gpuLiteralLoopIndexFact`). When the literal of a called function cannot be
  * read, or the walk passes 100,000 nodes, no fact is recorded at all.
  *
  * The walk also records the names that the compiled code writes
@@ -895,6 +1615,9 @@ export function gpuRecordCallSiteFacts(
     callee: string;
     args: ReadonlyArray<Expression>;
     bound: ReadonlySet<string>;
+    // The bound names that are the index of an enclosing `Sum` or `Product`
+    // with literal integer bounds, finite for certain (`gpuLoopIndexFact`).
+    indices: ReadonlyMap<string, GPUParameterFact>;
   };
   const sites: Site[] = [];
   // The parameter names of each function reached (`''` for a parameter
@@ -924,10 +1647,12 @@ export function gpuRecordCallSiteFacts(
     });
     pending.push([body, h]);
   };
+  const noIndices: ReadonlyMap<string, GPUParameterFact> = new Map();
   const walk = (
     node: Expression,
     callerName: string | undefined,
-    bound: ReadonlySet<string>
+    bound: ReadonlySet<string>,
+    indices: ReadonlyMap<string, GPUParameterFact> = noIndices
   ): void => {
     if (isSymbol(node)) {
       const s = node.symbol;
@@ -973,7 +1698,14 @@ export function gpuRecordCallSiteFacts(
     const literal = literalOf(h);
     if (literal !== undefined) {
       if (bound.has(h)) escaped.add(h);
-      else sites.push({ caller: callerName, callee: h, args: node.ops, bound });
+      else
+        sites.push({
+          caller: callerName,
+          callee: h,
+          args: node.ops,
+          bound,
+          indices,
+        });
       reach(h, literal);
     }
     // The parameters of the calling function are not bound names here:
@@ -989,7 +1721,19 @@ export function gpuRecordCallSiteFacts(
       }
     }
     const inner = binds.length === 0 ? bound : new Set([...bound, ...binds]);
-    for (const op of node.ops) walk(op, callerName, inner);
+    // A name that this node binds hides the index of the same name of an
+    // enclosing `Sum` or `Product`; the index of this node, when it is one
+    // with two literal integer bounds, has its own fact.
+    let innerIndices = indices;
+    if (binds.length > 0) {
+      const next = new Map(indices);
+      for (const name of binds) next.delete(name);
+      const fact = gpuLiteralLoopIndexFact(node);
+      if (fact !== undefined && binds.includes(fact[0]))
+        next.set(fact[0], fact[1]);
+      innerIndices = next.size === 0 ? noIndices : next;
+    }
+    for (const op of node.ops) walk(op, callerName, inner, innerIndices);
   };
   while (pending.length > 0) {
     const [node, callerName] = pending.pop()!;
@@ -1017,9 +1761,13 @@ export function gpuRecordCallSiteFacts(
     );
   // The target that reads an argument of `site`: the root target, with the
   // parameters of the calling function bound and described by their facts.
+  // The index of an enclosing `Sum` or `Product` with literal integer
+  // bounds is described by its fact, which replaces the fact of a parameter
+  // of the same name: the argument reads the index under that name.
   const contextOf = (site: Site): CompileTarget<Expression> => {
-    if (site.caller === undefined) return target;
-    const { names } = functions.get(site.caller)!;
+    if (site.caller === undefined && site.indices.size === 0) return target;
+    const names =
+      site.caller === undefined ? [] : functions.get(site.caller)!.names;
     const facts = new Map<string, GPUParameterFact>();
     names.forEach((p, i) => {
       if (p !== '')
@@ -1028,15 +1776,25 @@ export function gpuRecordCallSiteFacts(
           magnitude: magnitudes.get(site.caller!)![i],
         });
     });
+    for (const [name, fact] of site.indices) facts.set(name, fact);
     const boundVars = new Set(target.boundVars ?? []);
     for (const p of names) if (p !== '') boundVars.add(p);
+    for (const name of site.indices.keys()) boundVars.add(name);
     return { ...target, boundVars, gpuParameterFacts: facts };
   };
-  const readsBound = (e: Expression, bound: ReadonlySet<string>): boolean => {
+  // Does `e` read a name of `bound` that has no fact of a loop index?
+  const readsBound = (
+    e: Expression,
+    bound: ReadonlySet<string>,
+    indices: ReadonlyMap<string, GPUParameterFact>
+  ): boolean => {
     if (bound.size === 0) return false;
-    if (isSymbol(e)) return bound.has(e.symbol);
+    if (isSymbol(e)) return bound.has(e.symbol) && !indices.has(e.symbol);
     if (!isFunction(e)) return false;
-    return bound.has(e.operator) || e.ops.some((op) => readsBound(op, bound));
+    return (
+      bound.has(e.operator) ||
+      e.ops.some((op) => readsBound(op, bound, indices))
+    );
   };
   let changed = true;
   while (changed) {
@@ -1047,7 +1805,10 @@ export function gpuRecordCallSiteFacts(
       const context = contextOf(site);
       site.args.forEach((arg, i) => {
         if (!facts[i]) return;
-        if (readsBound(arg, site.bound) || !gpuProvablyFinite(arg, context)) {
+        if (
+          readsBound(arg, site.bound, site.indices) ||
+          !gpuProvablyFinite(arg, context)
+        ) {
           facts[i] = false;
           changed = true;
         }
@@ -1067,14 +1828,16 @@ export function gpuRecordCallSiteFacts(
       const proof = facts.some((f) => f)
         ? gpuFiniteProof(contextOf(site), true)
         : undefined;
-      site.args.forEach((arg, i) => {
-        const m = facts[i] ? proof?.magnitude(arg) : undefined;
-        const known = bounds[i];
-        bounds[i] =
-          m === undefined || known === undefined
-            ? undefined
-            : Math.max(known, m);
-      });
+      withUserCallBudget(() =>
+        site.args.forEach((arg, i) => {
+          const m = facts[i] ? proof?.magnitude(arg) : undefined;
+          const known = bounds[i];
+          bounds[i] =
+            m === undefined || known === undefined
+              ? undefined
+              : Math.max(known, m);
+        })
+      );
     }
     for (const bounds of next.values())
       bounds.forEach((m, i) => {
@@ -1129,4 +1892,76 @@ export function gpuDefinitionParameterFacts(
     if (site?.finite === true) facts.set(p, site);
   });
   return facts.size === 0 ? undefined : facts;
+}
+
+/**
+ * The parameter facts (`CompileTarget.gpuParameterFacts`) for the body of a
+ * `Sum` or `Product` over the index `index`, compiled under `target`: the
+ * facts of `target`, where the index replaces any fact of the same name,
+ * since the body reads the index under that name.
+ *
+ * The index is finite for certain, with the bound `max(|lower|, |upper|)`
+ * of its magnitude, when both bounds are integers known at compile time
+ * (`lower` and `upper`, `undefined` otherwise) of magnitude at most 2²⁴,
+ * and when the body does not bind the name of the index again or assign
+ * it (`gpuReboundNames`). The shader then runs the 32-bit integer counter
+ * through each integer from `lower` to `upper`, and the body reads its
+ * exact `float` value. A bound that the compiler cannot fold to a constant
+ * (a symbol of unknown value, a parameter, or a bound that names the index
+ * itself) gives no fact: `Sum(f(j), Limits(j, 1, n))` with `n` declared
+ * `real` keeps the guards of the body.
+ *
+ * `undefined` when there is no fact at all.
+ */
+export function gpuLoopIndexFacts(
+  body: Expression,
+  index: string,
+  lower: number | undefined,
+  upper: number | undefined,
+  target: CompileTarget<Expression>
+): ReadonlyMap<string, GPUParameterFact> | undefined {
+  const facts = new Map(target.gpuParameterFacts ?? []);
+  facts.delete(index);
+  const fact = gpuLoopIndexFact(body, index, lower, upper);
+  if (fact !== undefined) facts.set(index, fact);
+  return facts.size === 0 ? undefined : facts;
+}
+
+/** The fact of the index of a `Sum` or `Product` (`gpuLoopIndexFacts`), or
+ * `undefined` when the index is not finite for certain. */
+function gpuLoopIndexFact(
+  body: Expression,
+  index: string,
+  lower: number | undefined,
+  upper: number | undefined
+): GPUParameterFact | undefined {
+  if (lower === undefined || upper === undefined) return undefined;
+  if (!Number.isInteger(lower) || !Number.isInteger(upper)) return undefined;
+  const m = Math.max(Math.abs(lower), Math.abs(upper));
+  if (m > 2 ** 24) return undefined;
+  if (boundVariableNames(body).includes(index)) return undefined;
+  if (gpuReboundNames(body).has(index)) return undefined;
+  return { finite: true, magnitude: m, range: [lower, upper] };
+}
+
+/**
+ * The index of the `Sum` or `Product` node `node` and its fact, when the
+ * node has one indexing set whose two bounds are integer number literals
+ * (`gpuLoopIndexFact`): `Sum(w(j), Limits(j, 1, 300))` gives `j`, finite,
+ * of magnitude at most 300. `undefined` for any other node, and for a bound
+ * that is not a literal (`Limits(j, 1, n)`).
+ */
+function gpuLiteralLoopIndexFact(
+  node: Expression
+): [string, GPUParameterFact] | undefined {
+  if (!isFunction(node) || node.nops !== 2) return undefined;
+  if (node.operator !== 'Sum' && node.operator !== 'Product') return undefined;
+  const limits = node.ops[1];
+  if (!isFunction(limits, 'Limits') || limits.nops !== 3) return undefined;
+  const [index, lower, upper] = limits.ops;
+  if (!isSymbol(index) || !isNumber(lower) || !isNumber(upper))
+    return undefined;
+  if (lower.im !== 0 || upper.im !== 0) return undefined;
+  const fact = gpuLoopIndexFact(node.ops[0], index.symbol, lower.re, upper.re);
+  return fact === undefined ? undefined : [index.symbol, fact];
 }

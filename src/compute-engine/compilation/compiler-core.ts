@@ -2641,6 +2641,29 @@ export function _compileInner(
 }
 
 /**
+ * True when `compileExpr` compiles `Abs(arg)` as the Euclidean norm of the
+ * point `arg` (`Norm`): a tuple (by its type), a union whose every arm is a
+ * tuple, or a gated point (`isGatedPoint`). See the rewrite of `Abs` in
+ * `compileExpr` for why. The NaN guard proof of the shader targets
+ * (`gpuFiniteProof` in `gpu-finite-proof.ts`) reads the same test: a norm
+ * can overflow f32 when each component is finite, the component-wise
+ * `abs` of a list cannot.
+ */
+export function absCompilesToPointNorm(arg: Expression): boolean {
+  return isTuple(arg) || isUnionOfPoints(arg) || isGatedPoint(arg);
+}
+
+/**
+ * True when `compileExpr` compiles `Abs(arg)` as the list of the norms of
+ * the points of the point list `arg` (`Norm`), on every target. The
+ * JavaScript target can instead read the shape at run time
+ * (`_SYS.absShape`) for some operand types; that test comes first there.
+ */
+export function absCompilesToPointListNorm(arg: Expression): boolean {
+  return isPointListValue(arg) || isGatedPointList(arg);
+}
+
+/**
  * Compile a function expression
  */
 export function compileExpr(
@@ -2888,11 +2911,7 @@ export function compileExpr(
   // `When((t, 1), c)`) is a point too when it is present. Without this,
   // the Python target emitted `np.abs(…)` over it, the component-wise
   // `abs`.
-  if (
-    h === 'Abs' &&
-    args.length === 1 &&
-    (isTuple(args[0]) || isUnionOfPoints(args[0]) || isGatedPoint(args[0]))
-  ) {
+  if (h === 'Abs' && args.length === 1 && absCompilesToPointNorm(args[0])) {
     return core.compileExpr(engine, 'Norm', args, prec, target);
   }
 
@@ -2928,11 +2947,7 @@ export function compileExpr(
       isNestedPointCollectionType(args[0].type.type))
   )
     return `_SYS.absShape(${core.compile(args[0], target)})`;
-  if (
-    h === 'Abs' &&
-    args.length === 1 &&
-    (isPointListValue(args[0]) || isGatedPointList(args[0]))
-  ) {
+  if (h === 'Abs' && args.length === 1 && absCompilesToPointListNorm(args[0])) {
     return core.compileExpr(engine, 'Norm', args, prec, target);
   }
 
