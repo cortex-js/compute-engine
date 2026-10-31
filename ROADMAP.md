@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-690.
+Next free reference: CE-692.
 
 **Entry format.**
 
@@ -2665,6 +2665,86 @@ inner integral diverges on the two lines through it (a set of zero measure), and
 1.9451, for example by splitting the domain at the point, or a change of
 variables around it, when the singular set is a point where the integrand grows
 like `1/r^p` with `p` less than the dimension.
+
+### CE-690. Rounding noise next to a singular bound stops the extrapolation of the corner shells
+
+**Status:** design needed; defect (accuracy); numerics. User decision
+2026-10-30: record it as a design item. GitHub issue #494 (closed by the fix of
+the infinite error, commit `fb5469f19`).
+
+`N(Integrate(t ↦ cos(t/2)/√(cos t − cos ½), [0, ½]))` is
+`2.2214414411509225 ± 0.0007` (true error `2.8e-8`); 0.170.0 gave
+`2.221441469078394 ± 8.3e-12` (true error `7.9e-13`). In doubles,
+`cos t − cos ½` cancels next to ½, so the integrand is noisy there. The corner
+shells at ½ number 25 and 26 fail the accuracy test (relative errors `3.5e-8`
+and `1.2e-7` against `SHELL_RELATIVE_ERROR = 1e-8`), and shell 27 passes it by
+chance (`4.5e-11`). `extrapolateCorner()` (`numerics/endpoint-quadrature.ts`)
+reads an accurate shell after an inaccurate one as a feature of the integrand
+(`featureAfterShells`), and refuses to extrapolate. The rule exists for a step
+next to the pole: `(x < 0.3 ? 0 : 1) + |x − c|^(−1/2)` with `c = 0.3 + 1e-6`.
+
+The fix needs a test that tells rounding noise from a small feature. Two tests
+were measured and rejected, on 900 integrals (a step or a bump of height 1,
+`1e-2` or `1e-4` at 30 distances from 1e-3 to 1e-11 of a pole `(c − x)^(−1/2)`
+at `c` = 0.3, 0.7, 1, 3.7, 1000.5):
+
+- A second extrapolation, of the shells up to the last accurate one, compared
+  with the first: it agrees for a step too, because the Levin transform reads
+  the early shells, and the error of the inaccurate shell makes the tolerance
+  wide. A step at `d = 1e-6` from 0.3 gave `± 2e-12` for a true error of `1e-6`.
+- The extrapolation kept with its error enlarged by 10 times the errors of the
+  inaccurate shells, used only when that is less than the error of the corner
+  panels: 26 cases that are correct today got an error that is too small, all
+  with height `1e-2` (`± 9.0e-11` for a true error of `1.1e-10`). The error of
+  the shell that holds a small feature can be more than 10 times smaller than
+  the area that the extrapolation leaves out.
+
+A sound test could estimate the rounding noise of the integrand directly (the
+change of `f` between neighboring doubles at the nodes of a shell, compared with
+the smooth change), or compare the accurate shells after the inaccurate ones
+with the shells that the model of the first shells predicts.
+
+- **CE-690.1** (decision needed) A quadrature result that did not converge and
+  is next to a singular bound (`singularCorner`) reports at least
+  `|estimate|/√mcSamples` (`integrateRealPart()`, `library/calculus.ts`): for
+  the integral above, `± 7.0e-4` (`2.22/√10⁷`), although the error of the
+  quadrature, which already covers the difference with tanh-sinh and the
+  uncertainty of the corners, is `1.2e-7`. The floor exists because the error of
+  a result that did not converge can be far too small. Options: (a) keep the
+  floor (nothing changes); (b) do not apply it to a `singularCorner` result,
+  after a measurement that shows its error covers the true error on the endpoint
+  test corpus. With (b) the integral above is `± 1.2e-7`.
+
+### CE-691. A step or a bump near a singular bound gives an error smaller than the true error
+
+**Status:** design needed; wrong value; numerics.
+
+`adaptiveQuadrature` with `singularEndpoints` of a pole `(c − x)^(−1/2)` on
+`[c − 0.3, c]` plus a feature at the distance `d` from `c` (a step of height
+`J`, area `J·d`, or a bump of height `J` and width `d/4`) reports an error
+smaller than the true error in 187 of 900 cases (`c` = 0.3, 0.7, 1, 3.7, 1000.5;
+`J` = 1, `1e-2`, `1e-4`; 30 values of `d` from 1e-3 to 1e-11). The result is
+`extrapolated` in these cases. Two causes:
+
+- The feature is nearer to `c` than about `ACCURATE_SHELL_SPACINGS = 2²⁰`
+  spacings of the doubles at `c`. The shells there are too narrow to be read as
+  accurate (`accurateShells()`, `numerics/endpoint-quadrature.ts`), so the value
+  of the corner nearer than the last accurate shell comes from a model of a
+  singularity AT the bound, and nothing reads the integrand there. A step of
+  height 1 at `d = 1e-10` from 0.3 gives `± 1.4e-13` for a true error of
+  `1e-10`; at `d = 1e-8` from 1000.5, `± 4.5e-12` for `1e-8`. The true error is
+  up to `1.5e4` times the error.
+- The feature is small, and the shell that holds it passes the accuracy test
+  (`SHELL_RELATIVE_ERROR = 1e-8`), so no feature is seen (`featureAfterShells`
+  in `extrapolateCorner()`), and the extrapolation leaves out the area of the
+  feature. A step of height `1e-4` is missed at distances up to `7.9e-5` from
+  0.3 (true error up to 2.3 times the error) and `3.3e-6` from 1000.5 (15
+  times).
+
+A fix could compare the model of the shells with samples of the integrand nearer
+to `c`, and with the shells after the last accurate one, and add the difference
+to the error. It must keep correct today's covered cases, and it is related to
+CE-690, which needs the opposite (fewer refusals under rounding noise).
 
 ### CE-561. An interval one double wide reports `0 ± 0`
 
