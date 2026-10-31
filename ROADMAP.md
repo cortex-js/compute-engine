@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-664.
+Next free reference: CE-680.
 
 **Entry format.**
 
@@ -88,22 +88,26 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ### CE-663. A list literal fixes the type of its free symbols as `number` for the life of the engine
 
-**Status:** fixed (pending commit); types. Reported in GitHub issue #485
-(0.170.0, 0.171.0); reproduced at `1f36c5d48` (0.175.0) on 2026-10-30. User
-decision 2026-10-30: option (c), with one addition. A list literal does not
-infer its free symbols. An operator that requires a numeric vector or matrix
-infers the cells of a literal operand as numbers
-(`Determinant([[a, b], [c, d]])` infers the four symbols). The narrowing of the
-symbols of an arithmetic cell (CE-39.6) stays. Still open: `Reverse([p, q])` and
-`Sort([p, q])` infer `p` as a number, because their generic `T` is solved from
-the list type `vector<2>` itself (`distributeLiteralElementInference()`,
-`validate.ts`). Also open (limitation of the simple, sound version): for a
-function assigned `g := x ↦ Length([-x, y])`, `y` is recorded as a number cell
-(`noteDefinitionCapturedTypes()`, `function-literal.ts`), so after `y := "abc"`
-the compiled `g` is refused, although the result `2` does not depend on `y`.
-This refusal also occurred before this change. A precise version must find
-whether the result depends on the element types of the list; it is a separate
-task.
+**Status:** partly fixed (`cca0280f4`; the generic route pending commit); types.
+Reported in GitHub issue #485 (0.170.0, 0.171.0); reproduced at `1f36c5d48`
+(0.175.0) on 2026-10-30. User decision 2026-10-30: option (c), with one
+addition. A list literal does not infer its free symbols. An operator that
+requires a numeric vector or matrix infers the cells of a literal operand as
+numbers (`Determinant([[a, b], [c, d]])` infers the four symbols). The narrowing
+of the symbols of an arithmetic cell (CE-39.6) stays. Fixed after `cca0280f4`:
+`Reverse([p, q])` and `Sort([p, q])` inferred `p` as a number, because their
+generic `T` is solved from the list type `vector<2>` itself; at a generic
+parameter, a list literal now gets only the declared bound of the variable
+(`distributeLiteralElementInference()`, `validate.ts`). Still open:
+`Mean([p, q])` does not infer `p`, although `Mean` requires numbers: its
+parameter is a union (`collection<nothing | number> | distribution | number`),
+and the distribution gives nothing for a union. Also open (limitation of the
+simple, sound version): for a function assigned `g := x ↦ Length([-x, y])`, `y`
+is recorded as a number cell (`noteDefinitionCapturedTypes()`,
+`function-literal.ts`), so after `y := "abc"` the compiled `g` is refused,
+although the result `2` does not depend on `y`. This refusal also occurred
+before this change. A precise version must find whether the result depends on
+the element types of the list; it is a separate task.
 
 Since CE-39.4 (option (a), user decision 2026-10-25), boxing a list literal
 narrows each free symbol in it to `number` (`narrowFreeSymbolCells()`,
@@ -533,11 +537,117 @@ but it refuses programs that are correct for a record with more fields.
 
 ## Collections, absence and broadcasting
 
+### CE-679. A `Range` with a `NaN` bound: the interpreter and the compile targets disagree
+
+**Status:** open; defect (wrong values), decision needed. Found 2026-10-30
+in the review of the interval-js loop over a literal list (session
+compute-engine-61); measured by session compute-engine-2c.
+
+With `n` declared `number` and `n = NaN`:
+
+| Expression                 | Interpreter | `javascript` | `interval-js` |
+| -------------------------- | ----------- | ------------ | ------------- |
+| `Loop` over `Range(1, n)`  | 0           | 0            | `entire`      |
+| `Sum(Range(1, n))`         | no value    | 0            | `entire`      |
+| `Map(k ↦ 2k, Range(1, n))` | no value    | `[]`         | `entire`      |
+| `Count(Range(1, n))`       | no value    | 0            | not measured  |
+
+The `Loop` is `c ≔ 0; Loop(c ≔ c + k, k ∈ Range(1, n)); c`. The interpreter
+runs no pass of the loop (it reads the range as empty), but leaves `Sum`,
+`Map` and `Count` of the same range unevaluated. `docs/ERROR-MODEL.md` decides
+only a big-operator BOUND that evaluates to `NaN` (`Sum(x, (x, 1, n))` answers
+`NaN`), not a `Range` collection. `javascript` gives a value where the
+interpreter has none (`rangeCount` is `NaN`, and `Array.from` reads a `NaN`
+length as 0). `interval-js` answers `entire` for every row (`boundInterval`
+in `interval/collections.ts` refuses a non-finite bound), which is never
+wrong but has no value for the `Loop`.
+
+Options:
+
+- (a) `Range(1, NaN)` is the empty range: `Sum` is 0, `Map` is `[]`,
+  `Count` is 0 in the interpreter (the `Loop` stays 0); `javascript` stays as
+  it is; `_IA.range` gives `[]` for a `NaN` bound.
+- (b) `Range(1, NaN)` has no value, as a big-operator bound has: `Sum` and
+  `Count` are `NaN`, `Map` has no value, and the `Loop` has no value either
+  (an interpreter change); `javascript` gives `NaN` / no value; interval-js
+  keeps `entire` or gives `empty`.
+
+If nothing is decided, `javascript` keeps giving values where the
+interpreter has none, and interval-js keeps `entire` for the `Loop`.
+
+### CE-678. interval-js: `broadcast()` refuses a list input that `run()` accepts
+
+**Status:** open; missing capability, decision needed (it extends the
+documented `broadcast()` contract). Found 2026-10-30.
+
+With `L` declared `list<number>`, the `interval-js` code of `x + Sum(L)`
+accepts `L` in `run()`: `run({ x: { lo: 1, hi: 1 }, L: [1, 2] })` gives the
+point 4. `broadcast({ x: new Float64Array([1, 1, 2, 2]), L: [1, 2] })` throws
+"the input for "L" must be a Float64Array or a number". The `javascript`
+result binds such a variable once for the whole batch (a shared input) and
+gives `[4, 5]`. The header of `compilation/broadcast.ts` makes shared inputs
+`javascript` only, and `readShape` gives the reason "its compiled code reads
+no list". That reason is no longer true: interval-js code reads a list input
+in `Sum(L)` and in a loop over `L`. With `L` absent, each cell gives `empty`,
+as `run()` does.
+
+Options:
+
+- (a) Accept a shared input on interval-js, as on `javascript`: the
+  variables that the code reads as a list (`collectionReadInputs`) and the
+  `shared` option. Each element is converted to an interval once, before the
+  cell loop, as `run()` converts it. To decide: the form of an interval
+  element, either a plain array of numbers (point elements) and of `{ lo, hi }`
+  objects, or also a `Float64Array` read as `lo, hi` pairs, as an interval
+  column is.
+- (b) Keep the refusal, and correct the reason in `readShape` and the
+  header: the caller runs `run()` once per cell for such an expression.
+
+If nothing is decided, an interval-js expression that reads a list input
+cannot be broadcast.
+
+### CE-665. A point beside a longer list is zipped to the shorter length, with no error, under heads that read it by position
+
+**Status:** open; wrong value. Found 2026-10-30 while fixing CE-661.
+
+`Power((1, 2), [3, 4, 5])` is typed `vector<3>` but evaluates to `[1, 16]`, and
+`Arctan2([3, 4, 5], (1, 2))` evaluates to `[arctan(3), arctan(2)]`. These heads
+read the point by position (the point is a participant, not a lifted value), so
+the lengths 2 and 3 disagree; the agreement rule of `docs/BROADCAST-MODEL.md`
+gives `incompatible-dimensions` for that, and the type and the value disagree
+today.
+
+### CE-666. The count of a list can be larger than the number of elements of its value
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-661.
+
+`[If(0 < u, Nothing, (1, 1)), (2, 3)]` has `count` 2, but when the condition is
+true its value has one element (`Nothing` is dropped). A broadcast over such a
+list inherits the count. A count that can depend on a free variable should be
+`undefined`, as for `Range(1, Floor(u))`.
+
+### CE-667. A point added to a list of numbers is not refused when the list holds `When` elements
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-661.
+
+`Add([3, 4, 5], (1, 2))` is refused at canonicalization (a point and a list of
+numbers do not combine). `Add([When(1, 1 < 0), When(u, 0 < u), 3], (1, 2))` is
+not: it evaluates to a list of 3 `Error` elements, and since CE-661 its count
+is 3. Expected: the same refusal as the list of plain numbers, since the
+elements of the `When` list are numbers or gaps.
+
 ### CE-661. The count and the elements of a family of points are not known before evaluation
 
-**Status:** open; capability, medium. Tycho ledger row 477. CE-536 is not
-required first: this work answers `count` and `at()` without the evaluation that
-CE-536 makes faster.
+**Status:** fixed (pending commit), 2026-10-30; capability, medium. Tycho ledger
+row 477. The `count` of the input below is 34 before evaluation, and `at(k)`
+reads each element without evaluating the body
+(`test/compute-engine/ce-661-point-family-count-at.test.ts`). `at(k)` returns
+the element evaluated, not the unevaluated form: the `at` handler of `When` must
+see values, and `at()` must agree with `each()`. A new operator-definition hook
+`elementAt(expr, k)` is the `at()` twin of `elementCount`. The structural read
+is used only for a valid, pure expression with a known count and no evaluation
+cached for the current generation; a vector times a matrix, and a tuple with a
+list component, are read by evaluation.
 
 Input: a body of the form
 `Add(T, PointList(Add(Multiply(c, PointX(PointList(PointX(J), PointY(J)))), …), …, 0.4))`,
@@ -870,6 +980,15 @@ and `Chunk` have it (pins in
   correct broadcast type lift. Both are tracked in CE-103.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-671. The error of a product with an absent cell has a `Divide` frame
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-618.
+
+With `I = ∫_0^1 x^x dx`, `(y·[Error("missing"), I]).evaluate()` gives an error
+whose trace has a `Divide` frame, which does not belong in a product, while
+`.N()` gives `y·Error("missing")`. Expected: the two routes give the same
+result, with a trace of the operations that ran.
 
 ### CE-660. The interpreter runs a `Loop` over a list with no value zero times
 
@@ -2483,6 +2602,25 @@ iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
 
+### CE-670. `N()` does not approximate an integral in a list that also holds a string
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-618.
+
+With `I = ∫_0^1 x^x dx`, `(y·[I, "a"]).N()` gives `[y·I, Error(…)]`: the
+integral stays unevaluated. `(y·[I, J]).N()` approximates it, and so should the
+list with a string cell (the string cell keeps its error).
+`([I, "b"]·[2, J]).N()` behaves the same way.
+
+### CE-672. `N()` and `evaluate()` disagree on `+∞` times a list of an integral and 0
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-618.
+
+With `I = ∫_0^1 x^x dx`, `(+∞·[I, 0]).N()` gives `[Measurement(+∞, +∞), NaN]`,
+and `evaluate()` gives `[+∞·I, Indeterminate]`. The second cell is `NaN` on one
+route and `Indeterminate` on the other, and the first cell is a `Measurement` on
+one route only. Expected: the same values, `N()` being the numeric form of
+`evaluate()`.
+
 ### CE-600. An engine computes at the precision of the engine built last, not its own
 
 **Status:** open; defect (needs a design). Found 2026-10-28 while measuring why
@@ -3243,9 +3381,106 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-664. The `python` target compiles no call of a user function
+
+**Status:** open; defect (decline). Found 2026-10-30 while fixing CE-658.
+
+With `g(t) := t^2 + 1`, `compile(g(x) + x, { to: "python" })` declines: "the
+operator is known to the engine but target 'python' has no lowering for it". The
+`javascript`, `interval-js`, `glsl` and `wgsl` targets compile it. Because of
+this, `f(x) + x` with `f(t) := At(P, 1)` (CE-658) also declines on `python`.
+Expected: a call of a user function compiles on `python` as on the other targets
+(a nested `def` or the body written in place), with the interpreter's value.
+
+### CE-669. `interval-js` declines a value assigned to a typed local that reads a parameter with no type
+
+**Status:** open; defect (decline). Found 2026-10-30 while fixing CE-662.
+
+`Function(Block(Declare(z, "number"), Assign(z, u + 1), Tuple(z, 2)), u)` called
+as `f(x)`: the interpreter gives `(x + 1, 2)`. Since CE-662 the compiled code
+tests a value that is not of the declared type for certain, and `interval-js`
+has no run-time test, so it declines: `u` has no type, so `u + 1` can be a list.
+A sound fix proves the parameter from the argument of each call site (here `x`,
+a number), as `gpuRecordCallSiteFacts` does for finiteness on the GPU targets.
+
+### CE-673. Compiled code does not check a function literal assigned to a local declared with a signature
+
+**Status:** open; wrong value. Found 2026-10-30 while fixing CE-662.
+
+`Block(Declare(k, "(real) -> real"), Assign(k, Function("abc", a)), k(x))`: the
+interpreter gives `incompatible-type` ("real", "string"); the compiled code
+returns `"abc"`. CE-662 checks values against the declared type of a local, but
+not a function literal under a signature: the interpreter first gives the
+literal's parameters their declared types (`assignFn` in
+`engine-declarations.ts`, with `ascribeDeclaredParameterTypes()` and
+`reconcileFunctionLiteralReturn()`), and plain subtyping would decline
+`(u) => 2u` for `(real) -> real` (`compile-block-local-function.test.ts`,
+"compiles with a declared signature"). Fix: reconcile the literal with the
+declared signature as the interpreter does, then classify its result type as
+CE-662 does.
+
+### CE-674. GPU: `Smoothstep` with very large edges gives NaN, and the built-in `sin` of it gives 0
+
+**Status:** open; wrong value. Found 2026-10-30 while fixing CE-619.
+
+`Sin(Smoothstep(-3e38, 3e38, y))` emits
+`sin(_gpu_smoothstep(-3e+38, 3e+38, y))`. In f32, `e1 − e0` is `+∞`, and
+`y − e0` is `+∞` for `y ≥ 0.4·10³⁸`, so the step computes `∞/∞ = NaN`, and the
+built-in `sin` of NaN gives 0 on Apple GPUs. `Smoothstep` is in
+`GPU_F32_BOUNDED_HEADS` (`gpu-target.ts`) with no check of its edges. Fix:
+accept it as bounded only when `|e1 − e0|` and the edges have known sizes within
+the f32 range, and the edges do not round to the same f32 value.
+
+### CE-675. GPU: a rational literal with a large numerator and denominator may be emitted as an infinite f32 literal
+
+**Status:** open; defect (not reproduced). Found 2026-10-30 while fixing CE-619.
+
+The finiteness proof checks the value of a number literal (`|v| ≤ GPU_F32_MAX`),
+not the numerator and denominator that a shader target may emit separately
+(`x * 2.0 / 3.0`). A rational with a numerator and a denominator above 3.4·10³⁸
+has a finite value but would be `+∞ / +∞` in f32. First check how such a
+rational is emitted on `glsl` and `wgsl`; if it is emitted as a quotient, either
+emit its value or refuse it in the proof. `productBound` (the power-base rule)
+also refuses every rational factor, which is safe but loses `(x/2)^2`.
+
+### CE-676. A compiled `ReplaceAt` with an index past the end differs from the interpreter
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-662.
+
+The interpreter keeps `ReplaceAt([1, 2], 5, 1)` unevaluated, and stores it in a
+`list<real>` local with no error. The compiled code does something else (code
+older than CE-662), and with CE-662 the element test of the new value can throw
+where the interpreter stores the unevaluated expression. Expected: the compiled
+code gives the interpreter's result, or the compile declines for an index that
+can be out of range.
+
+### CE-677. The JavaScript shape test of an argument has no test for a vector of open length
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-662.
+
+`jsCollectionShapeGuard` (`compilation/base-compiler.ts`) returns no test for a
+declared `vector<T>` whose length is open (`dimensions: [-1]`), so a value that
+is not a list passes. Expected: the test checks that the value is a list (of any
+length) of the element type, as for `list<T>`.
+
 ### CE-662. Compiled code does not check the declared type of a local when a value is assigned to it
 
-**Status:** open; defect.
+**Status:** fixed (pending commit), 2026-10-30; defect. Each value assigned to a
+local declared with a type (`Assign`, the value of `Declare`, an Epsil typed
+`let`) is classified at compile time (`assertLocalWritesMatchDeclarations()`,
+`compilation/base-compiler.ts`): certain (its static type is a subtype of the
+declared type and is a fact about the value: no test), never (no common value:
+every target declines) or undecidable (`javascript` throws and `python` raises
+`incompatible-type` when the value fails a run-time test; `glsl`, `wgsl` and
+`interval-js` decline, and so does every target for a declared type with no
+simple test, such as `rational` or a tuple). For `ReplaceAt(xs, i, v)` only `v`
+is tested. Tests:
+`test/compute-engine/compile-declared-local-assignment-type.test.ts`. Still a
+decline by this simple rule: on `interval-js`,
+`Function(Block(Declare(z, "number"), Assign(z, u + 1), Tuple(z, 2)), u)`,
+because the parameter `u` has no type (it can be a list) and `interval-js` has
+no run-time test; proving the parameter from the argument of each call is
+CE-669.
 
 `Block(Declare(p, "integer"), Assign(p, 0.5), p)`: the interpreter returns
 `Error(ErrorCode("incompatible-type", "integer", "0.5"), "p")`;
@@ -3359,8 +3594,17 @@ error. Python reports `NameError` at run time for the same block.
 
 ### CE-658. JavaScript: a coordinate of a point-or-point-list symbol with an assigned point declines
 
-**Status:** open; defect (decline). Found 2026-10-30 from Tycho ledger row 479,
-on the main tree after commit `f169546e9`.
+**Status:** fixed (pending commit), 2026-10-30; defect (decline). Found
+2026-10-30 from Tycho ledger row 479, on the main tree after commit `f169546e9`.
+Every target now runs the point rewrite at its compile entry
+(`inlinePointValuesAtRoot()` in `compilation/point-value-inlining.ts`, the code
+moved from `gpu-target.ts`). The three examples below compile on `javascript`
+and `interval-js`; `At(P, 1) + x` and `At(P, 2) - x` also on `python`, where
+`f(x) + x` still declines because `python` compiles no call of a user function
+(CE-664). A `vars` entry for `P` still wins over the assigned value; a call
+whose head the caller overrides, or whose argument reads caller-supplied `vars`
+source, is left as written. Tests:
+`test/compute-engine/ce-658-point-or-point-list-coordinate.test.ts`.
 
 With `P: tuple<number, number> | list<tuple<number, number>>` and `P := (3, 4)`,
 the interpreter gives `At(P, 1) + x` = `3 + x`. The `glsl` and `wgsl` targets
@@ -4100,13 +4344,26 @@ By design the helper stays for a product of two symbols with no declared range
 
 ### CE-619. The GPU finiteness proof accepts operands that overflow f32
 
-**Status:** open; defect. Found 2026-10-28 while working on CE-565.6; each item
-measured on main with GLSL. When the proof (`gpuFiniteProof`, `gpu-target.ts`)
-accepts an operand that is `+∞` or NaN in f32, the shader emits the built-in
-(`sin`, `min`, …) instead of the NaN-safe helper, and `sin(∞)` gives 0 on Apple
-GPUs where the helper gives NaN. A larger attempt to prove `exp` and more powers
-finite was found unsound in three review rounds and dropped; these holes need
-fixing before such rules come back.
+**Status:** fixed (pending commit), 2026-10-30, all five sub-items; defect.
+Tests: `test/compute-engine/ce-619-gpu-finite-proof-overflow.test.ts`. A value
+of unknown size now counts as any finite f32 value: a product needs a known size
+for every factor (or only literals of magnitude at most 1 beside one unknown
+factor), a sum adds the sizes of its terms (one unknown term is accepted beside
+terms that add up to at most 2¹⁰⁰), `Mod` and `Divide` need a divisor bound, a
+type range is read only for a host-input symbol with a declared range, a
+constant subtree gives its value only when the emitter folds it into one
+literal, a stored value is read in radians, and `abs`, `min`, `max` give a bound
+only for real scalar operands. Cost: the NaN-safe helper comes back for a
+product of a literal larger than 1 and a `real` with no range (`\sin(2x+1)`),
+and for a sum of two such terms; a declared range removes it. Tycho's voronoi
+base still uses the built-in `min`. Found while fixing, not fixed: CE-674,
+CE-675. Found 2026-10-28 while working on CE-565.6; each item measured on main
+with GLSL. When the proof (`gpuFiniteProof`, `gpu-target.ts`) accepts an operand
+that is `+∞` or NaN in f32, the shader emits the built-in (`sin`, `min`, …)
+instead of the NaN-safe helper, and `sin(∞)` gives 0 on Apple GPUs where the
+helper gives NaN. A larger attempt to prove `exp` and more powers finite was
+found unsound in three review rounds and dropped; these holes need fixing before
+such rules come back.
 
 - **CE-619.1** A function parameter counts as a host input: `F(p) := \sin(Hp)`
   with `H: real<0..1e19>`, called as `F(Hx)`, emits `sin(H * p)`, but `p` holds
@@ -5291,6 +5548,17 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
+### CE-668. The first `at()` of an evaluated lazy `Map` view advances the generation, so its cached evaluation is never used
+
+**Status:** open; performance. Found 2026-10-30 while fixing CE-661.
+
+Evaluate `Add(L, 1)` with `L` a symbol holding a list of 10,000 numbers, then
+compare `ce._cacheGeneration()` before and after `v.at(2)`: it advances by 4. So
+the `_eagerSource` cache of `_materializedAt()` (`boxed-function.ts`) never hits
+for such an expression, and a loop of `at()` on that route evaluates the whole
+list once per element (about 3.2 s for 10,000 reads, against about 65 ms by the
+structural read of CE-661). The cause is not found yet.
+
 ### CE-603. Reading the elements of a `Map` of 1,000 symbolic sums evaluates each sum with its free variable
 
 **Status:** open; performance. Tycho ledger row 474, 2026-10-28; instrument
@@ -5318,7 +5586,24 @@ and arithmetic speed item.
 ### CE-618. A product with a list operand evaluates each cell product again, and `Integrate` has no evaluate memo
 
 **Status:** open; performance. Found 2026-10-28 while fixing CE-604 (Tycho row
-476, fixed by keeping the call on the list route of `Integrate`).
+476, fixed by keeping the call on the list route of `Integrate`). The first cost
+is fixed (pending commit) 2026-10-30: a cell product of `mulTensors` uses each
+cell, and a scalar known to be a value, as its own value
+(`evaluateCellProduct()`, `cellProductOperandIsValue()`), so `y·c(y, L, E)` runs
+the `Integrate` handler 6 times, not 12 (139 → 84–97 ms, results identical;
+`test/compute-engine/ce-618-cell-product-operands-evaluated-once.test.ts`).
+Tycho row 474 is not changed by it (13–14× the boxing time; that cost is
+CE-603). Still open: (a) a scalar made of several factors is evaluated again for
+each cell: `Held(1)·y·[1, 2]` calls `Held` 3 times; a fix evaluates the combined
+scalar once before it scales the cells, which changes some results (`0.5·π`
+would become a float before the cell products), so it needs a decision; (b) the
+second cost below. An evaluation of an unevaluated integral advances the `any`
+axis 18 times: the antiderivative rules declare the pattern symbols `_a`, `__b`
+and `_n` and infer their types in the scope that
+`establishedAntiderivativeInRadians` pushes, the binders of new `Function` and
+`Integrate` nodes declare `x`, and the pops of those scopes advance the axis.
+This is the cause of CE-535; a memo of `Integrate` needs CE-535's design or step
+3b of the evaluation-cache plan, which the user postponed on 2026-10-30.
 
 Two costs remain when a list of unevaluated integrals is multiplied or evaluated
 again:

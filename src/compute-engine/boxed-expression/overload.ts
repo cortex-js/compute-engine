@@ -105,6 +105,11 @@ export interface OverloadResolution {
    * open type (§4.2 ground invariant).
    */
   viable: ReadonlyArray<FunctionSignature>;
+  /** The arms of `viable`, in the same order, AS DECLARED: a polytype arm
+   * keeps its `where` clause. The literal-element inference of
+   * `validateArguments` reads a variable of such an arm as its bound,
+   * because the variable is solved from the operands themselves. */
+  viableDeclared: ReadonlyArray<FunctionSignature>;
   /** Set only when the operand types do not decide which arm the call takes
    * at run time, and the operator is not lazy: the results of the arms the
    * call can take, for result typing to JOIN instead of reading `selected`'s
@@ -1055,6 +1060,7 @@ export function resolveOverload(
         selectedInstance: undefined,
         selectedSolution: undefined,
         viable,
+        viableDeclared: viable,
         unresolved: unresolvedArm(
           ops,
           arms.map((arm) =>
@@ -1074,6 +1080,7 @@ export function resolveOverload(
       selectedInstance: selected,
       selectedSolution: undefined,
       viable,
+      viableDeclared: viable,
       undecidedResults: undecidedJoin(
         ops,
         arms.map((arm) =>
@@ -1154,6 +1161,7 @@ export function resolveOverload(
       selectedInstance: undefined,
       selectedSolution: undefined,
       viable: [],
+      viableDeclared: [],
       unresolved: unresolvedArm(ops, joinArms, policies),
     };
 
@@ -1196,6 +1204,7 @@ export function resolveOverload(
     selectedInstance: best.instance,
     selectedSolution: best.solution,
     viable: candidates.map((c) => c.instance),
+    viableDeclared: candidates.map((c) => c.declared),
     selectedPermutation: best.permutation,
     permutationAmbiguous,
     undecidedResults: undecidedJoin(ops, joinArms, policies),

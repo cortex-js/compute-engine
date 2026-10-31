@@ -2572,6 +2572,25 @@ export function runtimeConformanceError(
  */
 
 /**
+ * True when the element type of the declared parameter `param` is ground or
+ * a bare type variable (`list<T>`, `indexed_collection<T>`), or `param` has
+ * no element type (a bare `T`, whose bound is read as a whole). Then reading
+ * the variable as its bound gives a requirement on the elements: the
+ * variable is covariant there. A variable deeper in the element type (under
+ * a function type, or in a named type that is not covariant) is not.
+ */
+function elementIsBareOrGround(param: Type | undefined): boolean {
+  if (param === undefined || freeTypeVariables(param).size === 0) return true;
+  if (typeof param === 'object' && param.kind === 'variable') return true;
+  const element = collectionElementType(param);
+  if (element === undefined) return false;
+  return (
+    freeTypeVariables(element).size === 0 ||
+    (typeof element === 'object' && element.kind === 'variable')
+  );
+}
+
+/**
  * PHASE 2 of `docs/INFERENCE_ROADMAP.md` (2026-08-18): distribute a
  * collection parameter's ELEMENT type onto the symbol elements of a
  * List/Tuple LITERAL operand, so `f([a, b])` against `(list<number>) -> …`
@@ -4002,8 +4021,12 @@ export function validateArguments(
    * call-site instantiation below reuses it instead of solving the same arm
    * against the same operands with the same context a second time. */
   let armSolution: TypeInferenceResult | undefined;
+  /** The arms that the operand inference joins (`viableArms`, or the
+   * signature), as declared, before an instantiation (`distributionTypeAt`). */
+  let declaredArms: ReadonlyArray<FunctionSignature>;
   if (signature.kind === 'signature') {
     sig = signature;
+    declaredArms = [signature];
   } else {
     const arms = overloadArms(signature);
     if (!arms) return null;
@@ -4098,7 +4121,7 @@ export function validateArguments(
     );
     if (internals?.resolutionOut !== undefined)
       internals.resolutionOut.resolution = resolution;
-    let { selected, viable, selectedSolution } = resolution;
+    let { selected, viable, viableDeclared, selectedSolution } = resolution;
     // R1 second pass (see `ValidateArgumentsInternals.overlapTrial`): no arm
     // is STRICTLY viable — before blaming, re-resolve with the overlap
     // admission active inside the trials, so an operand that merely overlaps
@@ -4116,7 +4139,7 @@ export function validateArguments(
       if (second.selected) {
         if (internals?.resolutionOut !== undefined)
           internals.resolutionOut.resolution = second;
-        ({ selected, viable, selectedSolution } = second);
+        ({ selected, viable, viableDeclared, selectedSolution } = second);
       }
     }
     if (!selected) {
@@ -4173,6 +4196,7 @@ export function validateArguments(
     }
     sig = selected;
     viableArms = viable;
+    declaredArms = viableDeclared;
     armSolution = selectedSolution;
   }
 
@@ -4356,6 +4380,51 @@ export function validateArguments(
     if (t === undefined || !hasKindArm(t, kinds)) return t;
     const numeric = withoutKindArms(t, kinds);
     return numeric === 'never' ? t : numeric;
+  };
+
+  // Give the elements of a list literal operand an element type
+  // (`distributeLiteralElementInference()`), for the type `t` that the
+  // narrowing below writes on the operand. At a parameter that a type variable
+  // types, `t` is solved from the types of the operands themselves: in
+  // `Reverse([p, q])`, `T` is solved from the type `vector<2>` of the list,
+  // which reads the free symbol `p` as a number cell without requiring one.
+  // Distributing `T = number` made `p` a number, so a later `p ∧ q` was an
+  // error. So when an arm is generic, the element type comes from the
+  // declared arms with each variable read as its bound
+  // (`readTypeVariablesAsBounds()`, `unknown` for a variable with no bound),
+  // joined over the arms that the operand inference joins (the viable arms
+  // of an overload set): only what the signature requires is distributed.
+  // The bound is an upper bound, so it is a requirement only where the
+  // variable is covariant. So a generic parameter distributes only when its
+  // element type is ground or a bare variable (`list<T>`,
+  // `indexed_collection<T>`; `elementIsBareOrGround()`). Under a function
+  // type (`list<(T) -> number>`) the bound `number` would require more of an
+  // element than the call does (`(integer) -> number` is valid with
+  // `T = integer`), and so would a named type that is not covariant in its
+  // parameter (`list<sink<T>>`): such a parameter distributes nothing. A
+  // ground signature distributes `t`, as before.
+  // (ROADMAP CE-663, user decision 2026-10-30.)
+  const genericArms = declaredArms.some(
+    (arm) => (arm.typeParams?.length ?? 0) > 0
+  );
+  // Built on the first list literal operand only.
+  let boundArms: FunctionSignature[] | undefined;
+  const distribute = (op: Expression, idx: number, t: Type): void => {
+    if (!isFunction(op, 'List') && !isFunction(op, 'Tuple')) return;
+    let d: Type | undefined = t;
+    if (genericArms) {
+      if (
+        !declaredArms.every((arm) =>
+          elementIsBareOrGround(parameterPositions(arm, idx + 1)[idx])
+        )
+      )
+        return;
+      boundArms ??= declaredArms.map(
+        (arm) => readTypeVariablesAsBounds(arm) as FunctionSignature
+      );
+      d = joinParamAt(boundArms, idx);
+    }
+    if (d !== undefined) distributeLiteralElementInference(op, d);
   };
 
   let i = 0;
@@ -5496,7 +5565,7 @@ export function validateArguments(
           !couldBeUnkeyedCollectionOperand(finalOps[i])
         ) {
           finalOps[i]._infer(() => t);
-          distributeLiteralElementInference(finalOps[i], t);
+          distribute(finalOps[i], i, t);
         }
       i += 1;
     }
@@ -5509,7 +5578,7 @@ export function validateArguments(
           !couldBeUnkeyedCollectionOperand(finalOps[i])
         ) {
           finalOps[i]._infer(() => t);
-          distributeLiteralElementInference(finalOps[i], t);
+          distribute(finalOps[i], i, t);
         }
       i += 1;
     }
@@ -5522,7 +5591,7 @@ export function validateArguments(
             !couldBeUnkeyedCollectionOperand(op)
           ) {
             op._infer(() => t);
-            distributeLiteralElementInference(op, t);
+            distribute(op, i, t);
           }
         i += 1;
       }

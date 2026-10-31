@@ -148,6 +148,76 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
     ce.box(['Length', ['List', 'p', 'q']]);
     expect(ce.box('p').type.toString()).toBe('unknown');
   });
+
+  test('a generic signature distributes the bound of its variable', () => {
+    // `T: number` is a requirement of the signature, not a reading of the
+    // type of the list.
+    const ce = new ComputeEngine();
+    ce.declare('G', {
+      signature: '(list<T>) -> T where T: number',
+      evaluate: () => ce.number(0),
+    } as any);
+    ce.box(['G', ['List', 'p', 'q']]);
+    expect(ce.box('p').type.toString()).toBe('number');
+  });
+
+  test('a variable under a function type distributes nothing', () => {
+    // The bound `number` of `T` would require `(number) -> number` of `f`,
+    // more than the call does: `(integer) -> number` is valid with
+    // `T = integer`.
+    const ce = new ComputeEngine();
+    ce.declare('H', {
+      signature: '(list<(T) -> number>, T) -> number where T: number',
+      evaluate: () => ce.number(0),
+    } as any);
+    ce.box(['H', ['List', 'f'], 1]);
+    expect(ce.box('f').type.toString()).toBe('unknown');
+  });
+
+  test('a variable in a contravariant named type distributes nothing', () => {
+    // `sink<number>` is a subtype of `sink<integer>`, so the bound would
+    // require more of `s` than `T = integer` does.
+    const ce = new ComputeEngine();
+    ce.declareType('sink', 'tuple<run: (T) -> nothing>', {
+      typeParams: [{ name: 'T', variance: 'in' }],
+    });
+    ce.declare('K', {
+      signature: '(list<sink<T>>, T) -> number where T: number',
+      evaluate: () => ce.number(0),
+    } as any);
+    ce.box(['K', ['List', 's'], 1]);
+    expect(ce.box('s').type.toString()).toBe('unknown');
+  });
+
+  test('a rejected generic arm does not cancel the requirement of a viable arm', () => {
+    // Only the first arm takes `([p, q], 1)`: its `list<number>` requires
+    // numbers of the cells, and the generic arm, which needs a string, is
+    // not joined.
+    const ce = new ComputeEngine();
+    ce.declare('F', {
+      signature:
+        '((list<number>, number) -> number) & ((T, string) -> T where T: any)',
+      evaluate: () => ce.number(0),
+    } as any);
+    ce.box(['F', ['List', 'p', 'q'], 1]);
+    expect(ce.box('p').type.toString()).toBe('number');
+  });
+
+  test.each(['Reverse', 'Sort'])(
+    'a generic operator does not infer from the type of the list (%s)',
+    (op) => {
+      // The type variable of the signature is solved from the type
+      // `vector<2>` of the list itself, which is no requirement on `p`.
+      const ce = new ComputeEngine();
+      ce.box([op, ['List', 'p', 'q']]);
+      expect(ce.box('p').type.toString()).toBe('unknown');
+      expect(ce.box(['And', 'p', 'q']).evaluate().json).toEqual([
+        'And',
+        'p',
+        'q',
+      ]);
+    }
+  );
 });
 
 describe('CE-39.4: WHICH SYMBOLS A LITERAL LIST READS AS NUMBERS', () => {

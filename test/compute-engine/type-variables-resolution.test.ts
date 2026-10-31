@@ -106,9 +106,11 @@ describe('LAZY-IDLE — the solver never touches a lazy operand', () => {
 
 describe('`OverloadResolution` carries only what a caller consumes', () => {
   // The interface briefly grew `viableDeclared`/`bindings` with no consumer.
-  // What survives is `selectedInstance` (the value-arm JOIN needs a GROUND arm)
-  // and `selectedSolution` (`validateArguments` reuses it instead of re-solving
-  // the same arm against the same operands).
+  // What survives is `selectedInstance` (the value-arm JOIN needs a GROUND arm),
+  // `selectedSolution` (`validateArguments` reuses it instead of re-solving
+  // the same arm against the same operands), and `viableDeclared` (the
+  // literal-element inference of `validateArguments` reads a type variable of
+  // a viable arm as its bound, ROADMAP CE-663).
   const ce = fresh();
 
   test('a generic selected arm exposes its solve, ground arms do not', () => {
@@ -140,8 +142,17 @@ describe('`OverloadResolution` carries only what a caller consumes', () => {
       [ce.number(2)],
       [arm('(number) -> number')]
     );
-    expect('viableDeclared' in r).toBe(false);
     expect('bindings' in r).toBe(false);
+  });
+
+  test('the declared viable arms follow the order of the viable arms', () => {
+    const arms = [arm('(T) -> T where T: number'), arm('(number) -> number')];
+    const r = resolveOverload(ce, [ce.number(2)], arms);
+    expect(r.viable.length).toBe(2);
+    expect(r.viableDeclared).toEqual(arms);
+    // The generic arm keeps its clause; its instance in `viable` does not.
+    expect(r.viableDeclared[0].typeParams?.length).toBe(1);
+    expect(r.viable[0].typeParams).toBeUndefined();
   });
 });
 
