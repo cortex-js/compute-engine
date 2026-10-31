@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-663.
+Next free reference: CE-664.
 
 **Entry format.**
 
@@ -85,6 +85,64 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-663. A list literal fixes the type of its free symbols as `number` for the life of the engine
+
+**Status:** decision needed; types. Reported in GitHub issue #485 (0.170.0,
+0.171.0); reproduced at `1f36c5d48` (0.175.0) on 2026-10-30.
+
+Since CE-39.4 (option (a), user decision 2026-10-25), boxing a list literal
+narrows each free symbol in it to `number` (`narrowFreeSymbolCells()`,
+`boxed-expression/canonical-utils.ts`), also when the list is not evaluated or
+assigned. A later boolean use of the symbol is then an error, and the result
+depends on the order of the uses:
+
+```js
+const ce = new ComputeEngine();
+ce.box(['List', 'p', 'q']); // only boxed
+ce.box('p').type; // number (it was unknown)
+ce.box(['And', 'p', 'q']).evaluate(); // incompatible-type error
+// The other order: And(p, q) first makes p boolean, and [p, q] is valid.
+```
+
+Unlike `p + 1`, the list does not require a number: `[p, q]` is also a valid
+list of propositions, sets or strings. The number reading comes from the
+convention of `classifyCellD()` (`library/collections.ts`) that types `[p, q]`
+as `vector<2>`. A REPL or notebook that shows `[p, q]` in one cell makes `p ∧ q`
+an error in every later cell, and library code that only boxes a list changes
+the types of the session.
+
+Measured 2026-10-30 with the narrowing turned off: 5 of the 10 tests in
+`ce-39-literal-cell-types.test.ts` fail. Three only assert that the symbol
+becomes `number`. Two are real gaps: with `L := [u, v]`, `At(L, 1)` is typed
+`number` and its value `u` is typed `unknown` (`.matches()` is false), and
+`PseudoInverse([[x, y], [z, w]])` is typed `matrix` with a value typed
+`list<list<list<list<any> | number | tuple> | number | tuple>>`.
+`AdjugateMatrix` of the same matrix stays `matrix<2x2>`. The full suite was not
+run.
+
+Options:
+
+- (a) Keep the current rule (it is documented in the CHANGELOG of 0.170.0) and
+  answer the issue: declare the symbol (`ce.declare('p', 'boolean')`) before the
+  list is boxed.
+- (b) Narrow only when a list literal is assigned (`L := [u, v]`), not when it
+  is boxed or passed as an argument. The issue's example works. `L := [p, q]`
+  followed by `p ∧ q` is still an error. `At([u, v], 1)` keeps the gap above.
+- (c) Never narrow from a list literal (the 0.167.0 behavior). This reverses the
+  user decision of 2026-10-25 on CE-39.4 (option (a)). The list keeps its type
+  (`[p, q]` is still `vector<2>`); only the symbols are no longer changed. A use
+  that requires a number (`p + 1`, `Negate(p)`) still narrows `p`. The CE-39.6
+  narrowing of the symbols in an arithmetic cell built with `.neg()` or `.add()`
+  can be kept: such a cell does require a number. The measurement above turned
+  off both kinds of narrowing. The two gaps above come back: an `unknown` value
+  is admitted at a declared type (`docs/TYPE-SYSTEM.md`, "A value whose type is
+  `unknown`"), but the value and the static type disagree under `.matches()`.
+  The `PseudoInverse` type needs its own fix.
+- (d) Keep (a) as the default and add an engine option that turns the narrowing
+  off.
+
+If nothing is decided, the current rule (a) stays and the issue stays open.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
@@ -832,10 +890,10 @@ that acts by effect. The two designs considered:
 
 **Status:** open; defect. Found 2026-10-28 by the last review round of CE-601.
 It does not give a result that 0.173.0 did not give (0.173.0 kept every host
-result); it causes extra host calls. The fix needs one count of the
-evaluations in progress for each evaluation number, shared by the synchronous
-and the asynchronous evaluations (`evaluation-epoch.ts`); the store guard of
-the evaluation-cache migration does not decide it.
+result); it causes extra host calls. The fix needs one count of the evaluations
+in progress for each evaluation number, shared by the synchronous and the
+asynchronous evaluations (`evaluation-epoch.ts`); the store guard of the
+evaluation-cache migration does not decide it.
 
 - **CE-621.2** A nested `evaluateAsync()` started by a handler without a carried
   context stack gets the parent's evaluation number but its own pending count;
@@ -846,54 +904,52 @@ the evaluation-cache migration does not decide it.
 
 ### CE-657. A cache keeps a random draw or the value of an impure operator when the node does not look impure
 
-**Status:** open; wrong values; needs a design. Found 2026-10-30 by the
-reviews of the store-guard work (evaluation-cache plan, step 1); the same on
-HEAD `d1b7d0838`. Taken out of step 1 by user decision 2026-10-30, after four
+**Status:** open; wrong values; needs a design. Found 2026-10-30 by the reviews
+of the store-guard work (evaluation-cache plan, step 1); the same on HEAD
+`d1b7d0838`. Taken out of step 1 by user decision 2026-10-30, after four
 attempted designs each gave a new defect.
 
-`isPure` of a node does not follow the value of a symbol it reads, and the
-store guard (`boxed-expression/store-guard.ts`) counts only host code that
-states no purity. So a cache can keep a value that changes at each
-evaluation:
+`isPure` of a node does not follow the value of a symbol it reads, and the store
+guard (`boxed-expression/store-guard.ts`) counts only host code that states no
+purity. So a cache can keep a value that changes at each evaluation:
 
 - A symbol whose value draws or calls an impure operator: with `q` a host
-  operator declared `pure: false` and `ce.declare('r', { value: ce.box(['q']) })`,
-  `r` alone gives 2, then 3, but `Reverse(List(5, r))` gives `[1,5]` at every
-  evaluation, and two concurrent `evaluateAsync()` calls share one call of
-  `q`. The same with `r` holding `Random()`, a dictionary that holds `q()`,
-  a raw (not canonical) `Random()`, `ReleaseHold(Hold(Random()))`, or
-  `At(Map(x ↦ x + q(), [1,2]), 1)`.
+  operator declared `pure: false` and
+  `ce.declare('r', { value: ce.box(['q']) })`, `r` alone gives 2, then 3, but
+  `Reverse(List(5, r))` gives `[1,5]` at every evaluation, and two concurrent
+  `evaluateAsync()` calls share one call of `q`. The same with `r` holding
+  `Random()`, a dictionary that holds `q()`, a raw (not canonical) `Random()`,
+  `ReleaseHold(Hold(Random()))`, or `At(Map(x ↦ x + q(), [1,2]), 1)`.
 - A draw under a seed served under another seed: `r := Random()`,
-  `x = Reverse(List(1, r))`; `WithRandomSeed(3, x)`, then
-  `WithRandomSeed(4, x)` on the same `x` gives the seed-3 draw, and `x` alone
-  gives it again.
+  `x = Reverse(List(1, r))`; `WithRandomSeed(3, x)`, then `WithRandomSeed(4, x)`
+  on the same `x` gives the seed-3 draw, and `x` alone gives it again.
 
 Attempts and why each failed:
 
 - Count when a symbol whose value is not `isPure` is read: it also counted
   undeclared function calls (`a := g(1)`), so many caches stopped storing (a
-  sequence workload went from 45 ms to 963 ms), and it changed the result of
-  the sequence term memo, which defines one draw per term.
-- Count only a value that calls a nondeterministic operator, found by a walk
-  of the value: the walk missed a raw value, `ReleaseHold`, and a function
-  literal applied by `Map`.
+  sequence workload went from 45 ms to 963 ms), and it changed the result of the
+  sequence term memo, which defines one draw per term.
+- Count only a value that calls a nondeterministic operator, found by a walk of
+  the value: the walk missed a raw value, `ReleaseHold`, and a function literal
+  applied by `Map`.
 - Exempt the draws made inside a `WithRandomSeed` frame: gave the seed case
   above.
-- Count at the evaluation of each nondeterministic operator, and take back
-  the draws of a seeded frame when it ends: not reviewed to the end; it makes
-  a count go down, and it is not clear that a computation holding the whole
-  frame is deterministic when the seed is not a constant.
+- Count at the evaluation of each nondeterministic operator, and take back the
+  draws of a seeded frame when it ends: not reviewed to the end; it makes a
+  count go down, and it is not clear that a computation holding the whole frame
+  is deterministic when the seed is not a constant.
 
-What a design must decide: which caches define a result and must keep one
-set of draws per instance (today: the element memo, the facet memo, the
-materialized `at()` cell, the sequence terms; see `docs/RANDOMNESS-MODEL.md`
-§6), and how a seeded frame is identified so that its draws can be cached
-only with it. The same design decides one related gap: the element memo
-accepts the provisional counts of the store guard (a cut cycle, a re-entrant
-signature read, an iteration limit, a provisional lazy value or cell), so it
-can keep an element computed from a provisional answer, where the other
-caches refuse such a store; it accepts them today so that its draws and host
-calls stay the same as before the store guard. The cost limit is the paired benchmark of
+What a design must decide: which caches define a result and must keep one set of
+draws per instance (today: the element memo, the facet memo, the materialized
+`at()` cell, the sequence terms; see `docs/RANDOMNESS-MODEL.md` §6), and how a
+seeded frame is identified so that its draws can be cached only with it. The
+same design decides one related gap: the element memo accepts the provisional
+counts of the store guard (a cut cycle, a re-entrant signature read, an
+iteration limit, a provisional lazy value or cell), so it can keep an element
+computed from a provisional answer, where the other caches refuse such a store;
+it accepts them today so that its draws and host calls stay the same as before
+the store guard. The cost limit is the paired benchmark of
 `benchmarks/evaluation-caches.ts` (no workload slower than 1.25×).
 
 ### CE-649. An async host handler that evaluates the node containing it waits on itself
@@ -3292,10 +3348,10 @@ error. Python reports `NameError` at run time for the same block.
 **Status:** open; defect (decline). Found 2026-10-30 from Tycho ledger row 479,
 on the main tree after commit `f169546e9`.
 
-With `P: tuple<number, number> | list<tuple<number, number>>` and
-`P := (3, 4)`, the interpreter gives `At(P, 1) + x` = `3 + x`. The `glsl` and
-`wgsl` targets compile it to `x + 3.0`: they write the point in place of `P`
-before the compilation (`gpuInlinePointValues()` and `gpuInlinePointCalls()` in
+With `P: tuple<number, number> | list<tuple<number, number>>` and `P := (3, 4)`,
+the interpreter gives `At(P, 1) + x` = `3 + x`. The `glsl` and `wgsl` targets
+compile it to `x + 3.0`: they write the point in place of `P` before the
+compilation (`gpuInlinePointValues()` and `gpuInlinePointCalls()` in
 `gpu-target.ts`). The `javascript` target declines it with "an operand may be a
 point (a tuple) and another operand is a number", because the check of `Add` in
 `base-compiler.ts` reads the declared type of `At(P, 1)`,
@@ -3304,9 +3360,9 @@ way, at the check of scalar arithmetic over a possibly list-valued operand, and
 so does `f(x) + x` with `f(t) := At(P, 1)`.
 
 A change of only the `Add` check is not sufficient: the next check that reads a
-declared type declines. The expected fix is to write the assigned point in
-place of such a symbol, and to replace such a call by its body, at the compile
-entry of every target, as the GPU targets do.
+declared type declines. The expected fix is to write the assigned point in place
+of such a symbol, and to replace such a call by its body, at the compile entry
+of every target, as the GPU targets do.
 
 Expected: the three examples above compile on `javascript`, `interval-js` and
 `python`, and give the interpreter's values.
@@ -3318,31 +3374,31 @@ CE-636. Also at HEAD `fee72a864`.
 
 `Block(n ≔ 0; Loop(Block(n ≔ i; If(i > x, Break)), i ∈ 1..5); n + 1)` at
 `x = 2`: the interpreter and Python give 4. `interval-js` gives the point
-interval 6. In a `Loop` body, the statement-form `If` of the `Break` is
-emitted as `if (_.x !== undefined && (_.x < i)) { break }`. On `interval-js`,
-`_.x` is an interval object, so the JavaScript comparison `_.x < i` is always
-false and the loop never stops early. Expected: the condition of a statement
-`If` on `interval-js` goes through the interval comparison, and the compiler
-refuses the loop when the comparison is not certain over the whole input
-interval, because a loop cannot take both paths.
+interval 6. In a `Loop` body, the statement-form `If` of the `Break` is emitted
+as `if (_.x !== undefined && (_.x < i)) { break }`. On `interval-js`, `_.x` is
+an interval object, so the JavaScript comparison `_.x < i` is always false and
+the loop never stops early. Expected: the condition of a statement `If` on
+`interval-js` goes through the interval comparison, and the compiler refuses the
+loop when the comparison is not certain over the whole input interval, because a
+loop cannot take both paths.
 
 ### CE-652. JavaScript, GLSL, WGSL: a `Sum`/`Product` bound that names the loop index reads the new index
 
 **Status:** open; defect (wrong value). Found 2026-10-30 in the review of
 CE-636. Also at HEAD `fee72a864`.
 
-In `Sum(n, Limits(n, 1, n))` the upper bound `n` is evaluated in the
-enclosing scope: it is the outer `n`, not the index. With
+In `Sum(n, Limits(n, 1, n))` the upper bound `n` is evaluated in the enclosing
+scope: it is the outer `n`, not the index. With
 `Block(Declare(n); If(x > 3, n ≔ 5); Sum(n, Limits(n, 1, n)))` at `x = 5`, the
 interpreter and Python give 15. JavaScript gives 1: the loop is emitted as
 `let n = 1; const _upper = Math.floor(n); …`, so the bound reads the new index
 (five template strings in `javascript-target.ts`). A lower bound that names the
 index, `Limits(n, n, 10)`, becomes `let n = n`, which throws a `ReferenceError`
-when the code runs. GLSL and WGSL emit `for (int n = 1; n <= int(floor(n));
-n++)`, which reads the index in the test at each pass. Python and `interval-js`
-evaluate the bounds in the enclosing scope and are correct. Expected: every
-target evaluates the bounds before the index is declared, or gives the index
-a fresh name when a bound names it.
+when the code runs. GLSL and WGSL emit
+`for (int n = 1; n <= int(floor(n)); n++)`, which reads the index in the test at
+each pass. Python and `interval-js` evaluate the bounds in the enclosing scope
+and are correct. Expected: every target evaluates the bounds before the index is
+declared, or gives the index a fresh name when a bound names it.
 
 ### CE-653. JavaScript: a `Return` inside a block used as a value returns only from that block
 
@@ -3350,11 +3406,11 @@ a fresh name when a bound names it.
 CE-636. Also at HEAD `fee72a864`.
 
 In `Block(tmp ≔ Block(42, Return(0)); tmp + 1)` the interpreter's result is
-`Return(0)`: a `Return` ends the whole program. The `javascript` target
-compiles the inner block as a nested function whose `return` gives only the
-value of that block, so the outer block continues and gives 1. Expected: a
-`Return` in a value position ends the compiled function, as in the
-interpreter, or the compiler refuses it.
+`Return(0)`: a `Return` ends the whole program. The `javascript` target compiles
+the inner block as a nested function whose `return` gives only the value of that
+block, so the outer block continues and gives 1. Expected: a `Return` in a value
+position ends the compiled function, as in the interpreter, or the compiler
+refuses it.
 
 ### CE-654. Compiled code: a constant shortcut drops an assignment in the operand it skips
 
@@ -3369,24 +3425,12 @@ returns `0` for an operand that is the literal 0. When the skipped operand
 contains an assignment, the assignment does not happen. Example:
 `Block(Declare(y, integer); s ≔ Power(Block(y ≔ 1; x), 0); y)`. The interpreter
 gives 1. At HEAD, JavaScript returned `undefined`, and GLSL and WGSL read an
-unassigned `y`. Since CE-636, JavaScript throws `read-before-declaration` at
-the read, and GLSL and WGSL refuse. Expected: a shortcut applies only when the
+unassigned `y`. Since CE-636, JavaScript throws `read-before-declaration` at the
+read, and GLSL and WGSL refuse. Expected: a shortcut applies only when the
 skipped operand has no effect (no assignment, and pure). Otherwise the operand
 is evaluated and its value discarded. When every lowering keeps this rule, the
 operators can return to the list that the CE-636 analysis treats as evaluating
 all operands (`STRICT_OPERATORS` in `base-compiler.ts`).
-
-### CE-655. interval-js: a `Loop` over `Range(1, x)` with an input bound gives 0
-
-**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
-CE-636. Also at HEAD `fee72a864`.
-
-A `Loop` statement whose range has an input as its upper bound, for example
-`Block(s ≔ 0; Loop(s ≔ s + i, i ∈ Range(1, x)); s)` at `x = 3`, gives 0 on
-`interval-js`. The interpreter gives 6. Expected: the loop runs over the range
-when the bound interval is a single integer, and the compiler refuses the loop
-when the bound interval holds more than one integer, because the number of
-passes is then not known.
 
 ### CE-656. JavaScript: a condition on a block local that holds an absent input is decided
 
@@ -3397,17 +3441,16 @@ CE-636. Also at HEAD `fee72a864`.
 `w` not supplied: the interpreter cannot decide `v > 0`, runs neither branch,
 and gives the symbol `y`. JavaScript emits
 `v = _.w; ((0 < v) ? (y = 1) : (y = 2)); return y` and gives 2. With the input
-in the condition directly, `If(w > 0, 1, 2)` gives `null`, because the
-condition gets the guard `_.w !== undefined`. `operandInputNodes()` in
-`base-compiler.ts`, which decides which operands of a condition may be absent,
-follows a symbol to its value only through the engine's global value, not
-through an assignment to a block local. The same happens with `v ≔ 2w`, a
-declared `v`, a value from a loop, a function parameter that receives an absent
-input, and an outer block local read in a nested block. The CE-636 analysis
-reads the same answer, so it treats such a condition as decided. Expected: a
-condition operand that is a block local or a parameter whose value can come
-from an absent input is treated as possibly absent, so the condition gets the
-guard.
+in the condition directly, `If(w > 0, 1, 2)` gives `null`, because the condition
+gets the guard `_.w !== undefined`. `operandInputNodes()` in `base-compiler.ts`,
+which decides which operands of a condition may be absent, follows a symbol to
+its value only through the engine's global value, not through an assignment to a
+block local. The same happens with `v ≔ 2w`, a declared `v`, a value from a
+loop, a function parameter that receives an absent input, and an outer block
+local read in a nested block. The CE-636 analysis reads the same answer, so it
+treats such a condition as decided. Expected: a condition operand that is a
+block local or a parameter whose value can come from an absent input is treated
+as possibly absent, so the condition gets the guard.
 
 ### CE-643. Compilation: the shared-subexpression harvest takes about 0.6 s for 160 repeated terms
 

@@ -55,8 +55,10 @@ export const RANGE_COUNT_TOLERANCE_CAP = 1e-3;
  *   `0.30000000000000004`.
  *
  * The JavaScript compile target calls this function at run time as the
- * helper `_SYS.rangeCount` (`compilation/javascript-target.ts`). Code emitted
- * for a target without `_SYS` calls a copy, `RANGE_COUNT_JS_SOURCE` (below),
+ * helper `_SYS.rangeCount` (`compilation/javascript-target.ts`), and the
+ * interval target's run-time range `_IA.range` (`interval/collections.ts`)
+ * calls it directly. Code emitted for a custom target without `_SYS` calls a
+ * copy, `RANGE_COUNT_JS_SOURCE` (below),
  * and the Python target emits the same formula (`pyRangeCount()` in
  * `compilation/python-target.ts`). Keep the three in agreement.
  */
@@ -85,8 +87,8 @@ export function rangeCount(lower: number, upper: number, step: number): number {
 
 /**
  * JavaScript source of a function expression that computes the same value as
- * `rangeCount()`. Emitted code that runs without the `_SYS` runtime helpers
- * (the `interval-javascript` target) calls it as
+ * `rangeCount()`. Code that `BaseCompiler.compileRangeIterable` emits for a
+ * custom target without the `_SYS` runtime helpers calls it as
  * `${RANGE_COUNT_JS_SOURCE}(lo, hi, step)`. The JavaScript target calls
  * `_SYS.rangeCount`, which is `rangeCount()` itself. A test in
  * `test/compute-engine/range-count-tolerance.test.ts` checks that this source

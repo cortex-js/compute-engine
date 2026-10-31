@@ -26533,10 +26533,13 @@ export class BaseCompiler {
     const narrowedElements = binders.map((b) => b.clause);
 
     // For wrapping targets (e.g. interval-js where `target.number(0)` is
-    // `_IA.point(0)`), a loop variable over a `Range` must be wrapped wherever
-    // it appears in the body or in an inner collection expression: the
-    // iterable of a `Range` (`compileRangeIterable`) emits plain numbers, and
-    // `_IA.add(x, y)` invoked with raw numbers produces incorrect intervals.
+    // `_IA.point(0)`), a loop variable over a `Range` with number-literal
+    // bounds must be wrapped wherever it appears in the body or in an inner
+    // collection expression: the iterable of such a range
+    // (`compileRangeIterable`) emits plain numbers, and `_IA.add(x, y)`
+    // invoked with raw numbers produces incorrect intervals. A `Range` with
+    // a bound read at run time iterates `_IA.range`, whose elements are
+    // point intervals already, so it is a source like the others below.
     // Any other source is a collection value of the target, whose elements
     // are usually wrapped already (on interval-js, `run()` converts each
     // element of a list input to a `{lo, hi}` interval, and a compiled list
@@ -26549,10 +26552,19 @@ export class BaseCompiler {
     // interval-js does.
     const loopVarSet = new Set(binders.flatMap((b) => b.names));
     const needsWrap = target.number(0) !== '0';
+    // A name can be bound by more than one clause (`k ∈ Range(1, 2)`, then
+    // `k ∈ Range(1, n)`), and this rule applies to every use of the name.
+    // So the unconditional wrap is only for a name that every one of its
+    // clauses binds over a literal range; a name with any other source gets
+    // the `typeof` test.
     const wrappedVars = new Set(
-      binders
-        .filter((b) => isFunction(b.clause.ops[1], 'Range'))
-        .flatMap((b) => b.names)
+      [...loopVarSet].filter((name) =>
+        binders.every(
+          (b) =>
+            !b.names.includes(name) ||
+            BaseCompiler.isLiteralRange(b.clause.ops[1])
+        )
+      )
     );
     // The wrap rule below re-wraps each loop variable as a NUMBER; a
     // destructured leaf is a component of a tuple value, whose wrapping on
@@ -26955,6 +26967,19 @@ export class BaseCompiler {
   }
 
   /**
+   * `true` when `expr` is a `Range` whose bounds (and step, if present) are
+   * number literals: `compileRangeIterable` then spells its elements as
+   * plain numbers at compile time, on every target.
+   */
+  private static isLiteralRange(expr: Expression): boolean {
+    if (!isFunction(expr, 'Range')) return false;
+    const [lo, hi, step] = expr.ops;
+    return (
+      isNumber(lo) && isNumber(hi) && (step === undefined || isNumber(step))
+    );
+  }
+
+  /**
    * Compile a `Range(lo, hi)` or `Range(lo, hi, step)` expression into a JS
    * iterable expression. Mirrors the runtime semantics in
    * `library/collections.ts` Range:
@@ -26974,11 +26999,7 @@ export class BaseCompiler {
     const stepExpr = rangeExpr.ops[2];
 
     // Fast path: all bounds (and step, if present) are numeric constants.
-    if (
-      isNumber(loExpr) &&
-      isNumber(hiExpr) &&
-      (stepExpr === undefined || isNumber(stepExpr))
-    ) {
+    if (BaseCompiler.isLiteralRange(rangeExpr)) {
       const lo = loExpr.re;
       const hi = hiExpr.re;
       // When step is omitted, auto-direct: +1 if hi >= lo, else -1.
@@ -26995,8 +27016,28 @@ export class BaseCompiler {
 
     // General path: compute bounds (and step) at runtime. The count is
     // `rangeCount`: the runtime helper `_SYS.rangeCount` on the JavaScript
-    // target, and an inline copy of it on a target whose emitted code runs
-    // without `_SYS` (`interval-javascript`).
+    // target, and an inline copy of it on a custom target whose emitted code
+    // runs without `_SYS`.
+    //
+    // On interval-js a bound is an interval at run time, and the plain
+    // arithmetic of the `Array.from` forms below on such objects gives an
+    // empty array: `Loop(c ≔ c + k, k ∈ Range(1, n))` at `n = 3` would give
+    // 0, where the interpreter gives 6. So there the iterable is `_IA.range`,
+    // the run-time range of the target: an array of point intervals when
+    // every bound is one number, and `entire` when a bound is a wide
+    // interval, because the number of elements is then not known. A bound
+    // that inexact interval arithmetic computes (`Range(1, n/3)`) is such a
+    // wide interval even at a point input, and a count above
+    // `MAX_RUNTIME_COLLECTION_LENGTH` also gives `entire`. `entire` is not
+    // iterable, so the `for … of` over it throws a `TypeError`: the `catch`
+    // of `run()` then answers `entire` for the whole result, and a cell of
+    // `broadcast`, which answers the kind `error` for any cell that throws,
+    // gives `error`. The loop variable over it is not wrapped again
+    // (`compileElementLoops` wraps a number only, by a `typeof` test).
+    if (target.language === 'interval-javascript')
+      return `_IA.range(${rangeExpr.ops
+        .map((op) => BaseCompiler.compileRangeOperand(op, target))
+        .join(', ')})`;
     const countFn =
       target.language === 'javascript'
         ? '_SYS.rangeCount'

@@ -2,6 +2,30 @@
 
 ### Bug Fixes
 
+- **A list literal no longer fixes the type of its free symbols as `number`**
+  (ROADMAP CE-663, GitHub issue #485). Since 0.170.0, boxing `[p, q]` made `p`
+  a `number` for the life of the engine, also when the list was never
+  evaluated or assigned, so a later `p ∧ q` was an `incompatible-type` error,
+  and the result depended on the order of the uses. Now `p` stays `unknown`,
+  and `p ∧ q` gives `p` the type `boolean`. The list is still typed
+  `vector<2>`. A use that requires a number still infers the symbol: `p + 1`,
+  or a matrix operator applied to the literal. `Determinant`, `PseudoInverse`
+  and `AdjugateMatrix` of `[[x, y], [z, w]]` infer the four cells as numbers,
+  and the value of `PseudoInverse` is a `matrix<2x2>`. An operator whose
+  parameter is `matrix | vector` (`MatrixMultiply`) infers nothing: a cell of
+  its operand could be a vector or a number. Other changes:
+  - With `L := [u, v]`, `At(L, 1)` is typed `number`, and its value `u` is
+    typed `unknown` (it was typed `number`).
+  - `At([u, v], 1, 2)` stays unevaluated, as `u` can still be a list (it was
+    an `incompatible-dimensions` error).
+  - `TupleFrom([p, q])` is typed `tuple` (it was `tuple<number, number>`).
+  - In LaTeX, `N(2.3)` after `[N, 1]` is the call of the library `N`, as
+    after `(N, 1)` (it was the product `2.3N`).
+  - In a function literal, `x ↦ [-x, y]` is still typed
+    `(x: unknown) -> vector<2>`, and `y` stays `unknown`. A function `g`
+    assigned this literal keeps its check: after `y := "abc"`, `g(3)` is an
+    `incompatible-type` error, and the compiled `g` is refused.
+
 - **Interval target: a loop over a list input gives the correct value.** With
   `L` declared `list<number>` and `L = [1, 2, 3]`, the `interval-js` code of
   `Block(c := 5, Loop(c := c + k, Element(k, L)), c)` gave an interval whose
@@ -14,6 +38,16 @@
   before any code runs, as on the JavaScript target: before, the loop gave
   `entire` and `Sum(L)` gave `undefined`. The `code` of such a result starts
   with this test.
+- **Interval target: a loop over a range with an input bound gives the correct
+  value** (ROADMAP CE-655). With `n = 3`, the `interval-js` code of
+  `Block(c := 0, Loop(c := c + k, Element(k, Range(1, n))), c)` gave the point
+  interval `0`, and `[2k for k in 1..n]` gave an empty list: the code computed
+  the length of the range with plain arithmetic on the bound intervals. The two
+  now give `6` and `2`, `4`, `6`, as the interpreter does. This also applies
+  to a range with a step, a range that counts down, and an inner range whose
+  bound is the variable of an outer loop. When a bound is an interval that is
+  not a single number, the number of elements is not known: `run()` gives
+  `entire`, and a cell of `broadcast()` gives the kind `error`.
 
 ## 0.175.0 _2026-10-30_
 
