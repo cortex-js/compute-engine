@@ -20,6 +20,8 @@ function engine(): ComputeEngine {
     signature: '() -> unknown',
     evaluateAsync: async () => ce.box(['Function', ['Add', 'x', 1], 'x']),
   } as never);
+  // A list with no value: a walk of `Join([x], v)` misses its elements.
+  ce.declare('v', 'list<integer>');
   return ce;
 }
 
@@ -112,7 +114,11 @@ describe('APPLY: THE CELLS OF A MAP ARE EVALUATED ROW BY ROW', () => {
       const expr = ce.box([
         'Apply',
         ['Function', ['Trace', 'y', { str: 'cell' }], 'y'],
-        ['Map', ['Function', ['Trace', 'k', { str: 'element' }], 'k'], ['Range', 1, 3]],
+        [
+          'Map',
+          ['Function', ['Trace', 'k', { str: 'element' }], 'k'],
+          ['Range', 1, 3],
+        ],
       ]);
       const result =
         route === 'evaluate' ? expr.evaluate() : await expr.evaluateAsync();
@@ -242,5 +248,406 @@ describe('PIPE AWAITS ITS APPLICATION', () => {
     const sync = expr.evaluate({ numericApproximation: true });
     const awaited = await expr.evaluateAsync({ numericApproximation: true });
     expect(awaited.json).toEqual(sync.json);
+  });
+});
+
+// The eager collection operators that apply a callback (a reducer, a
+// predicate, a key function) await each application under `evaluateAsync()`,
+// so that an operator in the callback that has only an `evaluateAsync`
+// handler is evaluated. For a callback with no such operator, the value is
+// the value that `evaluate()` gives. The elements of a lazy source are still
+// computed synchronously when they are read (ROADMAP CE-111.4).
+
+/** The value of `json` under `evaluate()` and under `evaluateAsync()`. */
+async function bothValues(json: unknown): Promise<[string, string]> {
+  const ce = engine();
+  const expr = ce.box(json as never);
+  const sync = expr.evaluate().toString();
+  const awaited = (await expr.evaluateAsync()).toString();
+  return [sync, awaited];
+}
+
+const ADD_ASYNC = ['Function', ['Add', 'a', ['AsyncOnly', 'b']], 'a', 'b'];
+const ADD = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
+
+describe('REDUCE AND FOLD AWAIT THEIR REDUCER', () => {
+  test('a seedless reduce', async () => {
+    // 1 + AsyncOnly(2) = 1 + 7
+    expect(await asyncValue(['Reduce', ['List', 1, 2], ADD_ASYNC])).toBe('8');
+  });
+
+  test('a seeded reduce', async () => {
+    expect(await asyncValue(['Reduce', ['List', 1, 2], ADD_ASYNC, 100])).toBe(
+      '113'
+    );
+  });
+
+  test('a fold', async () => {
+    // 0 + AsyncOnly(1) + AsyncOnly(2) = 6 + 7
+    expect(await asyncValue(['Fold', ADD_ASYNC, 0, ['List', 1, 2]])).toBe('13');
+  });
+
+  test('a seed with an asynchronous operator is awaited', async () => {
+    // The seed `AsyncOnly(1)` is 6, and the fold over an empty list is
+    // the seed.
+    expect(await asyncValue(['Fold', ADD, ['AsyncOnly', 1], ['List']])).toBe(
+      '6'
+    );
+  });
+
+  test('a fold under a numeric approximation', async () => {
+    expect(await asyncValue(['Reduce', ['List', 1, 2], ADD_ASYNC], true)).toBe(
+      '8'
+    );
+  });
+
+  test('a reducer with no asynchronous operator agrees with evaluate', async () => {
+    for (const json of [
+      ['Fold', ADD, 0, ['List', 1, 2, 'Nothing']],
+      ['Fold', 'Add', 0, ['List', 1, 2]],
+      ['Reduce', ['List'], ADD],
+      ['Reduce', ['List'], ADD, 7],
+    ]) {
+      const [sync, awaited] = await bothValues(json);
+      expect(awaited).toBe(sync);
+    }
+  });
+});
+
+describe('ANY AND ALL AWAIT THEIR PREDICATE', () => {
+  const OVER_SEVEN = ['Function', ['Greater', ['AsyncOnly', 'y'], 7], 'y'];
+
+  test('any', async () => {
+    // AsyncOnly(3) = 8 > 7
+    expect(await asyncValue(['Any', ['List', 1, 2, 3], OVER_SEVEN])).toBe(
+      '"True"'
+    );
+  });
+
+  test('all', async () => {
+    // AsyncOnly(1) = 6 is not > 7
+    expect(await asyncValue(['All', ['List', 1, 2, 3], OVER_SEVEN])).toBe(
+      '"False"'
+    );
+  });
+
+  test('without a predicate, the elements are awaited', async () => {
+    expect(
+      await asyncValue(['Any', ['List', ['Greater', ['AsyncOnly', 1], 5]]])
+    ).toBe('"True"');
+  });
+
+  test('a predicate with no asynchronous operator agrees with evaluate', async () => {
+    const positive = ['Function', ['Greater', 'y', 0], 'y'];
+    for (const json of [
+      ['Any', ['List'], positive],
+      ['All', ['List', 1, 'Nothing', 3], positive],
+      ['All', ['List', 1, 'Missing', 3], positive],
+    ]) {
+      const [sync, awaited] = await bothValues(json);
+      expect(awaited).toBe(sync);
+    }
+  });
+});
+
+describe('MAXBY, MINBY, ARGMAX AND ARGMIN AWAIT THEIR KEY', () => {
+  const NEGATED = ['Function', ['Negate', ['AsyncOnly', 'y']], 'y'];
+
+  test('a key function with an asynchronous operator', async () => {
+    const xs = ['List', 1, 2, 3];
+    expect(await asyncValue(['MaxBy', xs, NEGATED])).toBe('1');
+    expect(await asyncValue(['MinBy', xs, NEGATED])).toBe('3');
+    expect(await asyncValue(['ArgMax', xs, NEGATED])).toBe('1');
+    expect(await asyncValue(['ArgMin', xs, NEGATED])).toBe('3');
+  });
+
+  test('a bare-symbol key', async () => {
+    expect(await asyncValue(['MaxBy', ['List', 1, 3, 2], 'AsyncOnly'])).toBe(
+      '3'
+    );
+  });
+
+  test('a key with no asynchronous operator agrees with evaluate', async () => {
+    for (const json of [
+      ['MaxBy', ['List'], 'Negate'],
+      ['MaxBy', ['List', 3, 1, 2], 'Negate'],
+      ['ArgMin', ['List', 3, 1, 2], ['Function', ['Square', 'y'], 'y']],
+    ]) {
+      const [sync, awaited] = await bothValues(json);
+      expect(awaited).toBe(sync);
+    }
+  });
+});
+
+describe('COUNTIF, FIND AND POSITION AWAIT THEIR PREDICATE', () => {
+  // AsyncOnly(y) > 6 holds for y = 2 and y = 3.
+  const OVER_SIX = ['Function', ['Greater', ['AsyncOnly', 'y'], 6], 'y'];
+  const xs = ['List', 1, 2, 3];
+
+  test('a predicate with an asynchronous operator', async () => {
+    expect(await asyncValue(['CountIf', xs, OVER_SIX])).toBe('2');
+    expect(await asyncValue(['Find', xs, OVER_SIX])).toBe('2');
+    expect(await asyncValue(['Position', xs, OVER_SIX])).toBe('[2,3]');
+  });
+
+  test('a predicate with no asynchronous operator agrees with evaluate', async () => {
+    const overOne = ['Function', ['Greater', 'y', 1], 'y'];
+    for (const json of [
+      ['CountIf', ['List', 1, 'Nothing', 3], overOne],
+      ['Find', ['List', 1], overOne],
+      ['Position', ['List'], overOne],
+      // A predicate that does not answer a boolean is an error value.
+      ['Find', ['List', 1, 2], ['Function', ['Add', 'y', 1], 'y']],
+    ]) {
+      const [sync, awaited] = await bothValues(json);
+      expect(awaited).toBe(sync);
+    }
+  });
+});
+
+describe('GROUPBY, PARTITION AND CHUNKBY AWAIT THEIR CALLBACK', () => {
+  const OVER_SIX = ['Function', ['Greater', ['AsyncOnly', 'y'], 6], 'y'];
+
+  test('a callback with an asynchronous operator', async () => {
+    expect(await asyncValue(['GroupBy', ['List', 1, 2, 3], OVER_SIX])).toBe(
+      '{"False" -> [1], "True" -> [2,3]}'
+    );
+    expect(await asyncValue(['Partition', ['List', 1, 2, 3], OVER_SIX])).toBe(
+      '[[2,3],[1]]'
+    );
+    expect(await asyncValue(['ChunkBy', ['List', 1, 2, 3, 1], OVER_SIX])).toBe(
+      '[[1],[2,3],[1]]'
+    );
+  });
+
+  test('a callback with no asynchronous operator agrees with evaluate', async () => {
+    const parity = ['Function', ['Mod', 'y', 2], 'y'];
+    for (const json of [
+      ['GroupBy', ['List', 1, 2, 3, 4], parity],
+      ['GroupBy', ['List'], parity],
+      [
+        'Partition',
+        ['List', 1, 2, 3, 4],
+        ['Function', ['Greater', 'y', 2], 'y'],
+      ],
+      ['ChunkBy', ['List', 1, 1, 2, 3, 3], parity],
+    ]) {
+      const [sync, awaited] = await bothValues(json);
+      expect(awaited).toBe(sync);
+    }
+  });
+});
+
+describe('THE AWAITED WALKS HONOR THE ABORT SIGNAL', () => {
+  test('an aborted signal cancels the walk', async () => {
+    const ce = engine();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      ce
+        .box(['Fold', ADD_ASYNC, 0, ['List', 1, 2, 3]] as never)
+        .evaluateAsync({ signal: controller.signal })
+    ).rejects.toThrow('Operation canceled');
+  });
+});
+
+const FLAT_MAP = [
+  'FlatMap',
+  ['List', 1, 2],
+  ['Function', ['Join', ['List', 'x'], 'v'], 'x'],
+];
+
+describe('INDEXWHERE AWAITS ITS PREDICATE', () => {
+  test('a predicate with an asynchronous operator', async () => {
+    // AsyncOnly(2) = 7 > 6
+    expect(
+      await asyncValue([
+        'IndexWhere',
+        ['List', 1, 2, 3],
+        ['Function', ['Greater', ['AsyncOnly', 'y'], 6], 'y'],
+      ])
+    ).toBe('2');
+  });
+
+  test('a predicate with no asynchronous operator agrees with evaluate', async () => {
+    const overOne = ['Function', ['Greater', 'y', 1], 'y'];
+    for (const json of [
+      ['IndexWhere', ['List', 1, 2, 3], overOne],
+      // Not found in a finite source: 0
+      ['IndexWhere', ['List', 0, 1], overOne],
+      ['IndexWhere', ['List'], overOne],
+      ['IndexWhere', ['List', 1, 'Nothing', 3], overOne],
+      // A source that is not known to be finite and has no match: no answer
+      ['IndexWhere', ['Repeat', 1], overOne],
+      [
+        'IndexWhere',
+        ['Range', 1, 5000],
+        ['Function', ['Equal', 'y', 4000], 'y'],
+      ],
+      // A predicate that does not answer a boolean is an error value.
+      ['IndexWhere', ['List', 1, 2], ['Function', ['Add', 'y', 1], 'y']],
+      // A source, or a predicate, that walks a `FlatMap` whose callback
+      // returns `Join([x], v)` for a valueless `v`: the walk misses elements.
+      ['IndexWhere', FLAT_MAP, ['Function', ['Equal', 'y', 1], 'y']],
+      [
+        'IndexWhere',
+        ['List', 1, 2],
+        [
+          'Function',
+          ['And', ['Greater', 'y', 0], ['Greater', ['Count', FLAT_MAP], 0]],
+          'y',
+        ],
+      ],
+      // The iterator of the `Filter` stops at the iteration limit before it
+      // gives an element: no answer.
+      [
+        'IndexWhere',
+        [
+          'Filter',
+          ['Range', 1, 'PositiveInfinity'],
+          ['Function', ['Less', 'x', 0], 'x'],
+        ],
+        overOne,
+      ],
+    ]) {
+      const [sync, awaited] = await bothValues(json);
+      expect(awaited).toBe(sync);
+    }
+  });
+});
+
+describe('INDEXWHERE OVER A FINITE SOURCE KEEPS THE ITERATION LIMIT', () => {
+  test('a predicate that exceeds the iteration limit throws on both routes', async () => {
+    // A `Loop` body past `ce.iterationLimit` cancels the evaluation. Over a
+    // finite source the search does not turn that cancellation into "no
+    // answer", on either route.
+    const json = [
+      'IndexWhere',
+      ['List', 1, 2],
+      [
+        'Function',
+        [
+          'Greater',
+          ['Loop', ['Add', 'k', 1], ['Element', 'k', ['Range', 1, 100000]]],
+          0,
+        ],
+        'y',
+      ],
+    ];
+    const ce = engine();
+    expect(() => ce.box(json as never).evaluate()).toThrow(
+      'Operation canceled'
+    );
+    await expect(ce.box(json as never).evaluateAsync()).rejects.toThrow(
+      'Operation canceled'
+    );
+  });
+});
+
+describe('SORT AND ORDERING AWAIT THEIR KEY OR COMPARATOR', () => {
+  const NEGATED_KEY = ['Function', ['Negate', ['AsyncOnly', 'y']], 'y'];
+  // `AsyncOnly(a) < b + 5` is `a < b`: an ascending comparator.
+  const ASCENDING = [
+    'Function',
+    ['Less', ['AsyncOnly', 'a'], ['Add', 'b', 5]],
+    'a',
+    'b',
+  ];
+  const xs = ['List', 1, 3, 2];
+
+  test('a key function with an asynchronous operator', async () => {
+    expect(await asyncValue(['Sort', xs, NEGATED_KEY])).toBe('[3,2,1]');
+    expect(await asyncValue(['Ordering', xs, NEGATED_KEY])).toBe('[2,3,1]');
+  });
+
+  test('a bare-symbol key', async () => {
+    expect(await asyncValue(['Sort', ['List', 3, 1, 2], 'AsyncOnly'])).toBe(
+      '[1,2,3]'
+    );
+  });
+
+  test('a comparator with an asynchronous operator', async () => {
+    expect(await asyncValue(['Sort', ['List', 4, 1, 3, 1, 2], ASCENDING])).toBe(
+      '[1,1,2,3,4]'
+    );
+    expect(await asyncValue(['Ordering', xs, ASCENDING])).toBe('[1,3,2]');
+  });
+
+  test('a key or a consistent comparator with no asynchronous operator agrees with evaluate', async () => {
+    const list = ['List', 3, 1, 2, 3, 1, 5, 4, 2, 2, 9, 0, 7];
+    for (const json of [
+      ['Sort', list, ['Function', ['Mod', 'y', 3], 'y']],
+      ['Ordering', list, ['Function', ['Subtract', 'a', 'b'], 'a', 'b']],
+      ['Sort', list, ['Function', ['Subtract', 'b', 'a'], 'a', 'b']],
+      ['Sort', ['List', 1, 'NaN', 3, 'Missing', 2], 'Negate'],
+      ['Sort', ['List'], ['Function', ['Subtract', 'a', 'b'], 'a', 'b']],
+      // A strict boolean comparator answers `False` for both orders of two
+      // equal elements: the equal elements keep their order on both routes.
+      ['Ordering', ['List', 1, 1], ['Function', ['Less', 'a', 'b'], 'a', 'b']],
+      ['Ordering', list, ['Function', ['Less', 'a', 'b'], 'a', 'b']],
+      ['Ordering', list, ['Function', ['Greater', 'a', 'b'], 'a', 'b']],
+      [
+        'Sort',
+        ['List', 2, 2, 2, 1, 1],
+        ['Function', ['Greater', 'a', 'b'], 'a', 'b'],
+      ],
+    ]) {
+      const [sync, awaited] = await bothValues(json);
+      expect(awaited).toBe(sync);
+    }
+  });
+});
+
+describe('THE AWAITED WALKS CHECK THE ABORT SIGNAL BETWEEN TWO STEPS', () => {
+  // An operator that has only an `evaluateAsync` handler and aborts the
+  // evaluation on its second call. The evaluation then rejects, and the
+  // operator is not called for the third element. The test does not show
+  // which check stops the third call: the check of the walk after the
+  // awaited step, or a check in the evaluation of the next application,
+  // which receives the same signal.
+  function abortingEngine(): {
+    ce: ComputeEngine;
+    signal: AbortSignal;
+    calls: () => number;
+  } {
+    const ce = new ComputeEngine();
+    const controller = new AbortController();
+    let calls = 0;
+    ce.declare('AbortOnSecond', {
+      signature: '(number) -> number',
+      evaluateAsync: async ([x]) => {
+        calls += 1;
+        if (calls === 2) controller.abort();
+        return ce.number(x.re);
+      },
+    } as never);
+    return { ce, signal: controller.signal, calls: () => calls };
+  }
+
+  test('a fold', async () => {
+    const { ce, signal, calls } = abortingEngine();
+    const reducer = [
+      'Function',
+      ['Add', 'a', ['AbortOnSecond', 'b']],
+      'a',
+      'b',
+    ];
+    await expect(
+      ce
+        .box(['Fold', reducer, 0, ['List', 1, 2, 3]] as never)
+        .evaluateAsync({ signal })
+    ).rejects.toThrow('Operation canceled');
+    expect(calls()).toBe(2);
+  });
+
+  test('a count', async () => {
+    const { ce, signal, calls } = abortingEngine();
+    const predicate = ['Function', ['Greater', ['AbortOnSecond', 'y'], 0], 'y'];
+    await expect(
+      ce
+        .box(['CountIf', ['List', 1, 2, 3], predicate] as never)
+        .evaluateAsync({ signal })
+    ).rejects.toThrow('Operation canceled');
+    expect(calls()).toBe(2);
   });
 });

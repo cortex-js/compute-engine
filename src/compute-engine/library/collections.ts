@@ -119,6 +119,7 @@ import {
   canonicalFunctionLiteral,
   isApplicableDef,
   lookupApplicable,
+  type ApplyOptions,
 } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
@@ -10690,7 +10691,10 @@ const reduceEvaluate = <R>(
   options: EvaluateHandlerOptions,
   // Runs a fold to its end: `runWalk` on the synchronous route, and
   // `runWalkAsync` (which answers a promise) on the asynchronous one.
-  drive: (fold: Generator<any, Expression | undefined, any>) => R
+  drive: (fold: Generator<any, Expression | undefined, any>) => R,
+  // How the reducer is applied: `undefined` on the synchronous route, and
+  // `asyncCallbackRoute()` on the asynchronous one (see `CallbackRoute`).
+  route: CallbackRoute = undefined
 ): Expression | undefined | R => {
   const { engine: ce, numericApproximation } = options;
   // `Reduce` holds its operands, but a source that is not a collection value
@@ -10729,15 +10733,30 @@ const reduceEvaluate = <R>(
   // `Fold((a, x) => Length(a), Range(1, 5000), [0])` answered `11`
   // (`operandOptions`, `boxed-expression/boxed-function.ts`, states the
   // rule for the operands of every operator).
+  //
+  // On the asynchronous route (`route` is defined), the seed is evaluated
+  // with `evaluateAsync()` and awaited, as the reducer is, so that a seed
+  // that holds an operator with only an `evaluateAsync` handler is evaluated.
+  // `awaitedOperandOptions()` does not carry `materialization`.
   let seedValue: Expression | undefined = undefined;
-  const seed = (): Expression => {
-    if (seedValue === undefined)
-      seedValue =
-        initial?.evaluate(
+  const seed = function* (): Generator<
+    PromiseLike<unknown>,
+    Expression,
+    unknown
+  > {
+    if (seedValue === undefined) {
+      if (initial === undefined) seedValue = ce.Nothing;
+      else if (route !== undefined)
+        seedValue = (yield initial.evaluateAsync(
+          awaitedOperandOptions(options)
+        )) as Expression;
+      else
+        seedValue = initial.evaluate(
           (options.materialization ?? false) === false
             ? options
             : { ...options, materialization: false }
-        ) ?? ce.Nothing;
+        );
+    }
     return seedValue;
   };
 
@@ -10799,8 +10818,10 @@ const reduceEvaluate = <R>(
     if (compiled && compiled.calling === 'lambda' && compiled.run) {
       // The interpreted reducer, needed by the fast path too (below).
       const fInterp = applicable(fn);
-      const stepInterp = (acc: Expression, x: Expression): Expression =>
-        settled(numeric(fInterp([acc, x]) ?? absenceMarker(ce, collection)));
+      const stepInterp = function* (acc: Expression, x: Expression) {
+        const r = yield* applyCallback(fInterp, [acc, x], route);
+        return settled(numeric(r ?? absenceMarker(ce, collection)));
+      };
       return drive(
         (function* () {
           // With an explicit initial value, fold it in from the start; do
@@ -10843,7 +10864,7 @@ const reduceEvaluate = <R>(
             if (first && hasInitial) {
               // The seed takes the same reading as an element: an underflowed
               // seed (`10^-400`) is NaN, so that the exact fold recovers it.
-              const { value, re } = machineStep(ce, initial!, seed());
+              const { value, re } = machineStep(ce, initial!, yield* seed());
               accumulator = Number.isFinite(re) ? re : value;
             }
             if (first && !hasInitial) {
@@ -10857,8 +10878,8 @@ const reduceEvaluate = <R>(
               accumulator =
                 typeof next === 'number' && Number.isFinite(next)
                   ? next
-                  : stepInterp(ce.number(accumulator), value);
-            } else accumulator = stepInterp(accumulator, item);
+                  : yield* stepInterp(ce.number(accumulator), value);
+            } else accumulator = yield* stepInterp(accumulator, item);
             first = false;
             yield;
           }
@@ -10868,7 +10889,7 @@ const reduceEvaluate = <R>(
           // An empty fold is its seed; a seedless fold of an empty
           // collection has nothing to seed from — `Nothing`, as the
           // interpreted path answers.
-          if (empty) return hasInitial ? seed() : ce.Nothing;
+          if (empty) return hasInitial ? yield* seed() : ce.Nothing;
           return typeof accumulator === 'number'
             ? ce.expr(accumulator)
             : accumulator;
@@ -10881,8 +10902,10 @@ const reduceEvaluate = <R>(
   const f = applicable(fn);
   // A reducer that produced no value is a computation failure: fold in
   // the marker rather than the erasure symbol.
-  const step = (acc: Expression, x: Expression): Expression =>
-    settled(numeric(f([acc, x]) ?? absenceMarker(ce, collection)));
+  const step = function* (acc: Expression, x: Expression) {
+    const r = yield* applyCallback(f, [acc, x], route);
+    return settled(numeric(r ?? absenceMarker(ce, collection)));
+  };
 
   if (!hasInitial) {
     // SEEDLESS: seed with the FIRST element and fold from the second —
@@ -10896,13 +10919,16 @@ const reduceEvaluate = <R>(
     // `Nothing` sentinel the accumulator's first VALUE, which apply-time
     // validation rejects for an annotated reducer.
     return drive(
-      (function* (): Generator<Expression | undefined, Expression | undefined> {
+      (function* (): Generator<
+        Expression | PromiseLike<unknown> | undefined,
+        Expression | undefined
+      > {
         let acc: Expression | undefined = undefined;
         // See the compiled fold above: a walk that missed elements does not
         // give the fold of the collection.
         const walk = new MeasuredWalk(() => collection.each());
         for (const x of walk) {
-          acc = acc === undefined ? settled(numeric(x)) : step(acc, x);
+          acc = acc === undefined ? settled(numeric(x)) : yield* step(acc, x);
           yield acc;
         }
         if (walk.missedElements) return undefined;
@@ -10917,20 +10943,23 @@ const reduceEvaluate = <R>(
   // SEEDED: the seed is read at the first step, or at the return of an
   // empty fold, and not at all when the walk declines (see `seed` above).
   return drive(
-    (function* (): Generator<Expression | undefined, Expression | undefined> {
+    (function* (): Generator<
+      Expression | PromiseLike<unknown> | undefined,
+      Expression | undefined
+    > {
       let acc: Expression | undefined = undefined;
       let walked = 0;
       // See the compiled fold above: a walk that missed elements does not
       // give the fold of the collection.
       const walk = new MeasuredWalk(() => collection.each());
       for (const x of walk) {
-        acc = step(acc ?? seed(), x);
+        acc = yield* step(acc ?? (yield* seed()), x);
         walked += 1;
         yield acc;
       }
       if (walk.missedElements) return undefined;
       if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
-      return acc ?? seed();
+      return acc ?? (yield* seed());
     })()
   );
 };
@@ -13812,10 +13841,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([collection, fn], { engine: ce }) =>
       runWalk(quantifierWalk('Any', collection, fn, ce), ce),
     // The same walk, suspended between time slices; the abort signal is
-    // honored between two elements.
+    // honored between two elements. The predicate is awaited
+    // (`asyncCallbackRoute`), so an operator in it that has only an
+    // `evaluateAsync` handler is evaluated.
     evaluateAsync: ([collection, fn], options) =>
       runWalkAsync(
-        quantifierWalk('Any', collection, fn, options.engine),
+        quantifierWalk(
+          'Any',
+          collection,
+          fn,
+          options.engine,
+          asyncCallbackRoute(options)
+        ),
         options
       ),
   },
@@ -13857,7 +13894,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       runWalk(quantifierWalk('All', collection, fn, ce), ce),
     evaluateAsync: ([collection, fn], options) =>
       runWalkAsync(
-        quantifierWalk('All', collection, fn, options.engine),
+        quantifierWalk(
+          'All',
+          collection,
+          fn,
+          options.engine,
+          asyncCallbackRoute(options)
+        ),
         options
       ),
   },
@@ -14768,12 +14811,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         options,
         reduceEvaluate(ops, options, (fold) => runWalk(fold, options.engine))
       ),
-    // The same fold, suspended between time slices.
+    // The same fold, suspended between time slices, with the reducer
+    // awaited (`asyncCallbackRoute`).
     evaluateAsync: async (ops, options) =>
       withExactFoldFallbackAsync(
         options,
-        await reduceEvaluate(ops, options, (fold) =>
-          runWalkAsync(fold, options)
+        await reduceEvaluate(
+          ops,
+          options,
+          (fold) => runWalkAsync(fold, options),
+          asyncCallbackRoute(options)
         )
       ),
   },
@@ -19423,34 +19470,38 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
-      // An element-valued predicate failure (see `predicateErrorValue`) is
-      // reported as the operator's result. Collected here rather than thrown:
-      // stop the walk (by reporting a match) and return the error below.
-      const predErrors: Expression[] = [];
-      // An undecided verdict (`isUndecidedVerdict`) leaves the first match
-      // unknown: the walk stops there, and the operator stays unevaluated.
-      let undecided = false;
+      // An element-valued predicate failure, or an undecided verdict, ends
+      // the search (see `indexWhereTest`). Kept here rather than thrown:
+      // stop the walk (by reporting a match) and answer it below.
+      let stop: Expression | 'undecided' | undefined = undefined;
       // A source that cannot be searched has no first match to index AND no
       // grounds for the NOT-FOUND `0` — stay inert (see `searchIndex`).
       const index = searchIndex(xs, (x) => {
-        const applied = f([x]);
-        const pred = selectionVerdict(applied);
-        if (pred === 'True') return true;
-        if (pred === 'False') return false;
-        const err = predicateErrorValue(applied);
-        if (err) {
-          predErrors.push(err);
-          return true;
-        }
-        if (applied !== undefined && isUndecidedVerdict(applied)) {
-          undecided = true;
-          return true;
-        }
-        throw predicateResultError('IndexWhere', fn);
+        const test = indexWhereTest(f([x]), fn);
+        if (typeof test === 'boolean') return test;
+        stop = test;
+        return true;
       });
-      if (predErrors.length > 0) return predErrors[0];
-      if (undecided) return undefined;
+      if (stop === 'undecided') return undefined;
+      if (stop !== undefined) return stop;
       return index === undefined ? undefined : ce.number(index);
+    },
+    // The same search, with the predicate awaited (`asyncCallbackRoute`).
+    // It walks the source with `each()` (`indexWhereAsyncWalk`), not with
+    // the `indexWhere` collection handler, whose predicate is synchronous.
+    evaluateAsync: ([xs, fn], options) => {
+      const f = applicable(fn);
+      if (!f) return Promise.resolve(options.engine.Zero);
+      return runWalkAsync(
+        indexWhereAsyncWalk(
+          xs,
+          fn,
+          f,
+          options.engine,
+          asyncCallbackRoute(options)
+        ),
+        options
+      );
     },
   },
 
@@ -19489,37 +19540,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }),
         context.engine._typeResolver
       ),
-    evaluate: ([xs, fn], { engine: ce }) => {
-      const refused = unindexedCollectionOperandError(ce, 'Find', xs);
-      if (refused) return refused;
-      const f = applicable(fn);
-      if (!f) return ce.Nothing;
-      // A source that cannot be enumerated has no first match to report AND no
-      // grounds for the NOT-FOUND `Nothing` — stay inert (see
-      // `isEnumerableSource`).
-      if (!isEnumerableSource(xs)) return undefined;
-      // A walk that meets an inner collection that it cannot walk ends early
-      // (see `MeasuredWalk`): a match before that point is the first match,
-      // but the end of the walk is not grounds for `Nothing`.
-      const walk = new MeasuredWalk(() => xs.each());
-      for (const item of walk) {
-        const applied = f([item]);
-        const pred = selectionVerdict(applied);
-        if (pred === 'False') continue;
-        if (pred === 'True') return item;
-        // See `predicateErrorValue`: an element-valued predicate failure is
-        // surfaced as the operator's result.
-        const err = predicateErrorValue(applied);
-        if (err) return err;
-        // An undecided verdict leaves the first match unknown
-        // (`isUndecidedVerdict`).
-        if (applied !== undefined && isUndecidedVerdict(applied))
-          return undefined;
-        throw predicateResultError('Find', fn);
-      }
-      if (walk.missedElements) return undefined;
-      return ce.Nothing;
-    },
+    evaluate: ([xs, fn], { engine: ce }) => runWalk(findWalk(xs, fn, ce), ce),
+    // The same walk, with the predicate awaited (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        findWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        options
+      ),
   },
 
   CountIf: {
@@ -19544,42 +19571,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(collection<T>, predicate: (T) any -> boolean) -> integer where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'CountIf', ops, 1, PER_ELEMENT_SUPPLY),
-    evaluate: ([xs, fn], { engine: ce }) => {
-      const f = applicable(fn);
-      if (!f) return ce.Zero;
-      // Stay inert on non-finite or unknown-length input: a count requires
-      // totality (walking every element).
-      if (xs.isFiniteCollection !== true) return undefined;
-      // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
-      // is finite (at most 2 elements) yet has no elements to walk, and the
-      // loop below would count 0. See `isEnumerableSource`.
-      if (!isEnumerableSource(xs)) return undefined;
-      let count = 0;
-      // A walk that meets an inner collection that it cannot walk ends early
-      // and misses elements (see `MeasuredWalk`), so its count is not the
-      // count: `CountIf(Take(FlatMap([1, 2], x ↦ Join([x], v)), 3), x ↦ x >
-      // 0)` was `0`.
-      const walk = new MeasuredWalk(() => xs.each());
-      for (const item of walk) {
-        const applied = f([item]);
-        const pred = selectionVerdict(applied);
-        if (pred === 'False') continue;
-        if (pred === 'True') count++;
-        else {
-          // See `predicateErrorValue`: an element-valued predicate failure is
-          // surfaced as the operator's result.
-          const err = predicateErrorValue(applied);
-          if (err) return err;
-          // An undecided verdict leaves the count unknown
-          // (`isUndecidedVerdict`).
-          if (applied !== undefined && isUndecidedVerdict(applied))
-            return undefined;
-          throw predicateResultError('CountIf', fn);
-        }
-      }
-      if (walk.missedElements) return undefined;
-      return ce.number(count);
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(countIfWalk(xs, fn, ce), ce),
+    // The same walk, with the predicate awaited (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        countIfWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        options
+      ),
   },
 
   Position: {
@@ -19605,42 +19604,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1, PER_ELEMENT_SUPPLY),
-    evaluate: ([xs, fn], { engine: ce }) => {
-      const refused = unindexedCollectionOperandError(ce, 'Position', xs);
-      if (refused) return refused;
-      const f = applicable(fn);
-      if (!f) return ce.function('List', []);
-      // Stay inert on non-finite or unknown-length input: reporting positions
-      // requires totality (walking every element).
-      if (xs.isFiniteCollection !== true) return undefined;
-      // Finiteness is not enumerability — see `CountIf`.
-      if (!isEnumerableSource(xs)) return undefined;
-      const indices: Expression[] = [];
-      let index = 1;
-      // The result can hold an index for each element, so the source is
-      // walked with the bound of an eager operator (`eagerElementWalk()`).
-      const walk = eagerElementWalk(xs);
-      if (walk === undefined) return undefined;
-      for (const item of walk) {
-        const applied = f([item]);
-        const pred = selectionVerdict(applied);
-        if (pred === 'True') indices.push(ce.number(index));
-        else if (pred !== 'False') {
-          // See `predicateErrorValue`: an element-valued predicate failure is
-          // surfaced as the operator's result.
-          const err = predicateErrorValue(applied);
-          if (err) return err;
-          // An undecided verdict leaves the positions unknown
-          // (`isUndecidedVerdict`).
-          if (applied !== undefined && isUndecidedVerdict(applied))
-            return undefined;
-          throw predicateResultError('Position', fn);
-        }
-        index++;
-      }
-      if (!walk.complete) return undefined;
-      return ce.function('List', indices);
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(positionWalk(xs, fn, ce), ce),
+    // The same walk, with the predicate awaited (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        positionWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        options
+      ),
   },
 
   // Return the indexes of the elements so they are in sorted order.
@@ -19667,42 +19638,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateFiniteSource,
     // One index per element: length-preserving over the source.
     elementCount: elementCountOfIndexedSource,
-    evaluate: ([xs, fn], { engine: ce }) => {
-      // Stay inert on non-finite or unknown-length input, aligning with Sort:
-      // an empty List would falsely claim a complete ordering.
-      if (xs.isFiniteCollection !== true) return undefined;
-      // Same for a finite-but-unwalkable source (`Take(xs, 2)` over a valueless
-      // `xs`), where the walk below finds no elements to order. This is a cheap
-      // early decline: it answers before the sort walk reads any element.
-      if (!isEnumerableSource(xs)) return undefined;
-      // A value with no positions (a `Set` held by a symbol declared
-      // `unknown` or `collection<T>`, which the signature check admits before
-      // the value is known) has no ordering to report. Refuse it with the
-      // type error that the literal operand `Ordering(Set(3, 1))` gets, as
-      // `Sort` does. Without this test, the sort walk read `undefined`
-      // elements and failed with an internal error.
-      if (!isString(xs) && xs.isIndexedCollection !== true)
-        return refusedOperandError(ce, 'Ordering', 1, 'indexed_collection', xs);
-      // A comparator whose declared parameter type is disjoint from the
-      // element type (see `comparatorParameterError`).
-      const cmpError = comparatorParameterError(ce, 'Ordering', xs, fn);
-      if (cmpError) return cmpError;
-      // As for `Sort`: the order demands the value of every element, so a
-      // failed cell gives its error.
-      const source = sortSource(xs);
-      const failed = firstFailedElementError(source);
-      if (failed !== undefined && failed !== 'incomplete') return failed;
-      const indices = sortedIndices(source, fn);
-      // `sortedIndices` returns `undefined` when the order cannot be decided —
-      // a key that cannot be computed, or a pair of keys that compare neither
-      // equal nor less in either direction (a list key; a NaN key sorts
-      // last, see `nanLastOrder`). A
-      // permutation of N elements has N entries, so a truncated or empty index
-      // list would be a wrong count, not a decline. Stay unevaluated, the same
-      // answer `Sort` gives for the same input. Fixed 2026-09-22.
-      if (!indices) return undefined;
-      return ce.function('List', indices);
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(orderingWalk(xs, fn, ce), ce),
+    // The same walk, with the key function or the comparator awaited
+    // (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        orderingWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        options
+      ),
   },
 
   Sort: {
@@ -19741,47 +19685,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateFiniteSource,
     // A permutation of the source: length-preserving.
     elementCount: elementCountOfIndexedSource,
-    evaluate: ([xs, fn], { engine: ce }) => {
-      // Eager collection results rebuild as `List`, never the source's head
-      // (a `Range`/`Linspace` head would reinterpret the sorted elements as
-      // lo/hi/step). Stay inert on non-finite or unknown-length input.
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-      // The sort reads its source by position. A value that is not indexed (a
-      // `Set` held by a symbol declared with the abstract type
-      // `collection<T>`, which the signature admits) has no positions:
-      // `xs.at(i)` answered `undefined` and the comparison crashed on it with
-      // an internal error. It is the same type error the literal operand
-      // gets from the signature check (`Sort(Set(3, 1))`).
-      if (!isString(xs) && xs.isIndexedCollection !== true)
-        return refusedOperandError(ce, 'Sort', 1, 'indexed_collection', xs);
-      // A failed cell (an element that is, or holds, an `Error`) cannot be
-      // ordered: the order demands the value of every element, so the sort
-      // answers the error of the first failed cell, as `Max` does. The
-      // elements of a lazy source are read once (`sortSource()`), so that a
-      // failed element of a valid source (`Sort(Map(h, xs))`) is seen too.
-      // A source too large to be read into a list is checked as far as the
-      // bound of the walk (`'incomplete'`): a failed element after it makes
-      // the order undetermined, and the sort then stays unevaluated.
-      const source = sortSource(xs);
-      const failed = firstFailedElementError(source);
-      if (failed !== undefined && failed !== 'incomplete') return failed;
-      // A comparator whose declared parameter type is disjoint from the
-      // element type (see `comparatorParameterError`).
-      const cmpError = comparatorParameterError(ce, 'Sort', xs, fn);
-      if (cmpError) return cmpError;
-      const indices = sortedIndices(source, fn);
-      if (!indices) return undefined;
-      const elements = indices.map((i) => source.at(i)!);
-      // The string arm: a sorted string is a string. `Sort` is eager and has
-      // no lazy collection handlers, so the join happens here rather than in
-      // `evaluateStringPreservingCollection`. Re-segmentation caveat:
-      // rejoining the sorted characters can merge or split grapheme clusters,
-      // so the result may hold a different number of characters than the
-      // input — sorting moves a combining mark next to whatever character now
-      // precedes it.
-      if (isString(xs)) return joinCharacters(ce, elements);
-      return ce.function('List', elements);
-    },
+    evaluate: ([xs, fn], { engine: ce }) => runWalk(sortWalk(xs, fn, ce), ce),
+    // The same walk, with the key function or the comparator awaited
+    // (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        sortWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        options
+      ),
   },
 
   // Return the element of the collection that maximizes/minimizes the unary
@@ -19825,7 +19736,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       runWalk(extremumWalk(xs, fn, ce, 'max', 'element'), ce),
     evaluateAsync: ([xs, fn], options) =>
       runWalkAsync(
-        extremumWalk(xs, fn, options.engine, 'max', 'element'),
+        extremumWalk(
+          xs,
+          fn,
+          options.engine,
+          'max',
+          'element',
+          asyncCallbackRoute(options)
+        ),
         options
       ),
   },
@@ -19868,7 +19786,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       runWalk(extremumWalk(xs, fn, ce, 'min', 'element'), ce),
     evaluateAsync: ([xs, fn], options) =>
       runWalkAsync(
-        extremumWalk(xs, fn, options.engine, 'min', 'element'),
+        extremumWalk(
+          xs,
+          fn,
+          options.engine,
+          'min',
+          'element',
+          asyncCallbackRoute(options)
+        ),
         options
       ),
   },
@@ -19921,7 +19846,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       runWalk(extremumWalk(xs, fn, ce, 'max', 'index'), ce),
     evaluateAsync: ([xs, fn], options) =>
       runWalkAsync(
-        extremumWalk(xs, fn, options.engine, 'max', 'index'),
+        extremumWalk(
+          xs,
+          fn,
+          options.engine,
+          'max',
+          'index',
+          asyncCallbackRoute(options)
+        ),
         options
       ),
   },
@@ -19965,7 +19897,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       runWalk(extremumWalk(xs, fn, ce, 'min', 'index'), ce),
     evaluateAsync: ([xs, fn], options) =>
       runWalkAsync(
-        extremumWalk(xs, fn, options.engine, 'min', 'index'),
+        extremumWalk(
+          xs,
+          fn,
+          options.engine,
+          'min',
+          'index',
+          asyncCallbackRoute(options)
+        ),
         options
       ),
   },
@@ -20720,134 +20659,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1, PER_ELEMENT_SUPPLY),
-    evaluate: ([xs, arg, stepArg], { engine: ce }) => {
-      const refused = unindexedCollectionOperandError(ce, 'Partition', xs);
-      if (refused) return refused;
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-
-      // A settled size that is a number but not an integer (`Partition(xs,
-      // h(3))` with `h(3) = 1.5`) is the same type error `Chunk` answers
-      // through the generic runtime conformance check; that check stands down
-      // for this slot (its declared type is open), and `toInteger` below
-      // would otherwise round the value and accept it silently.
-      if (isNumber(arg) && arg.isInteger === false)
-        return ce.typeError('integer', arg.type, arg);
-
-      // Partition(collection, n) and Partition(collection, n, step)
-      const n = toInteger(arg);
-      if (n !== null) {
-        if (n <= 0) return undefined;
-        // Small finite sources materialize eagerly (all existing semantics);
-        // larger — or unknown-length — sources stay symbolic and are served
-        // lazily by the `collection` handlers below (Tycho item 52). The
-        // predicate form below is EXEMPT (it needs totality — no lazy view).
-        const size = xs.count;
-        if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
-          return undefined;
-        const all = Array.from(xs.each()) as Expression[];
-        const result: Expression[] = [];
-
-        // Every inner run below is emitted through `innerRun`, which makes it a
-        // STRING when the source is a string. Joining a run's grapheme clusters
-        // re-runs segmentation, and two adjacent clusters can merge — but only
-        // when the source itself contained a lone combining mark, the only way
-        // a cluster can begin with a character that attaches to what precedes
-        // it (`docs/STRING_ROADMAP.md`, design constraint 3).
-
-        // Partition(collection, n, step) → sliding windows of length `n`
-        // whose starts are `step` apart; only COMPLETE windows are emitted.
-        if (stepArg !== undefined) {
-          const step = toInteger(stepArg);
-          if (step === null || step <= 0) return undefined;
-          for (let i = 0; i + n <= all.length; i += step)
-            result.push(innerRun(ce, xs, all.slice(i, i + n)));
-          return ce.function('List', result);
-        }
-
-        // Partition(collection, n) → consecutive chunks EACH of size `n`; the
-        // trailing chunk may be shorter when `n` does not divide the length.
-        for (let i = 0; i < all.length; i += n)
-          result.push(innerRun(ce, xs, all.slice(i, i + n)));
-
-        return ce.function('List', result);
-      }
-
-      // The size form with a size that has no value yet (`Partition(xs, n)`
-      // with `n` a free integer) is NOT a predicate: stay unevaluated until
-      // `n` binds. Without this it fell into the predicate arm below and threw
-      // a raw `Error` out of `evaluate()` — the operand is typed `integer`,
-      // so no spell-check hint was ever going to help.
-      if (arg.type.matches('number')) return undefined;
-
-      // An ABSENT size is not a predicate either. The operand was admitted at
-      // boxing because its type only MAY be absent — `integer | missing`, the
-      // type of a default-less piecewise — and evaluation has now settled it,
-      // so the type error the boxing seam mints for a proven `Missing` is due
-      // here instead (`docs/ERROR-MODEL.md` §2, rule 2: the check re-runs when
-      // the evidence arrives). `Chunk` and `Take`, whose size parameter is a
-      // plain `integer`, answer exactly this error through the generic runtime
-      // conformance check; that check stands down for this slot because its
-      // declared type is open (it carries the free type variable `T`). Without
-      // the guard the absence reached `applicable()` below and came back as
-      // "Missing is not a function", blaming an arm the author never used.
-      if (isSymbol(arg, 'Missing'))
-        return ce.typeError('integer', arg.type, arg);
-
-      // Partition(collection, predicate)
-      const fn = applicable(arg);
-      if (!fn) return undefined;
-
-      const trueGroup: Expression[] = [];
-      const falseGroup: Expression[] = [];
-      // The two groups hold every element: the source is walked with the
-      // bound of an eager operator (`eagerElementWalk()`).
-      const walk = eagerElementWalk(xs);
-      if (walk === undefined) return undefined;
-      for (const item of walk) {
-        const applied = fn([item]);
-        // A `Missing` answer puts the element in the FALSE group: a partition
-        // keeps every element, and "not decidedly satisfied" is the group a
-        // selection would leave it out of (`selectionVerdict`).
-        const pred = selectionVerdict(applied);
-        if (pred === 'True') trueGroup.push(item);
-        else if (pred === 'False') falseGroup.push(item);
-        else {
-          // An element-valued predicate failure (see `predicateErrorValue`) is
-          // an error, not an undecided predicate: surface it as the operator's
-          // result before the "undecided" arm below can swallow it.
-          const err = predicateErrorValue(applied);
-          if (err) return err;
-          if (
-            applied === undefined ||
-            applied.type.isUnknown ||
-            applied.type.matches('boolean')
-          )
-            // An UNDECIDED predicate, in either of its two shapes: unresolved —
-            // a symbol declared `function` with no value applies to a symbolic
-            // `g(x)` typed `unknown` — or resolved but not decidable yet, an
-            // unevaluated relation already typed `boolean` (`x => x > n` with
-            // `n` free, which is neither `True` nor `False`). Both are undecided,
-            // not wrong: stay unevaluated, mirroring `If`, which reserves its
-            // throw for a condition that is not boolean at all. The throw below
-            // keeps the case the spell-check hint was written for: a predicate
-            // that resolves to a concrete non-boolean (`x => x + 1`).
-            return undefined;
-          throw predicateResultError('Partition', arg);
-        }
-      }
-      if (!walk.complete) return undefined;
-
-      // The two predicate groups are inner runs like any other: for a string
-      // source each comes back as a string, so `Partition("a1b2", isDigit)` is
-      // `["12", "ab"]`. A group is a SUBSEQUENCE rather than a contiguous run,
-      // but the re-segmentation caveat is the same — clusters can only merge
-      // when the source contained a lone combining mark
-      // (`docs/STRING_ROADMAP.md`, design constraint 3).
-      return ce.function('List', [
-        innerRun(ce, xs, trueGroup),
-        innerRun(ce, xs, falseGroup),
-      ]);
-    },
+    evaluate: ([xs, arg, stepArg], { engine: ce }) =>
+      runWalk(partitionWalk(xs, arg, stepArg, ce), ce),
+    // The same walk, with the predicate awaited (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, arg, stepArg], options) =>
+      runWalkAsync(
+        partitionWalk(
+          xs,
+          arg,
+          stepArg,
+          options.engine,
+          asyncCallbackRoute(options)
+        ),
+        options
+      ),
     // Lazy view for the chunk/window forms past the eager threshold. The
     // predicate form has no lazy view (it needs totality over the source), so
     // `partitionWindowParams` returns `undefined` for it and every facet stays
@@ -21014,58 +20839,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
-    evaluate: ([xs, fn], { engine: ce }) => {
-      const refused = unindexedCollectionOperandError(ce, 'ChunkBy', xs);
-      if (refused) return refused;
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-      // Small finite sources materialize eagerly (all existing semantics);
-      // larger — or unknown-length — sources stay symbolic and are served
-      // lazily by the `collection` handlers below (Tycho item 52).
-      const size = xs.count;
-      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
-        return undefined;
-      const f = applicable(fn);
-      if (!f) return undefined;
-
-      const runs: Expression[][] = [];
-      let currentKey: Expression | undefined = undefined;
-      let current: Expression[] = [];
-      // The runs hold every element: the source is walked with the bound of
-      // an eager operator (`eagerElementWalk()`).
-      const walk = eagerElementWalk(xs);
-      if (walk === undefined) return undefined;
-      for (const item of walk) {
-        const key = f([item]) ?? ce.Nothing;
-        // Compare run keys with `.isSame()` — exact structural/symbolic
-        // equality, the engine's internal-comparison convention. `.isEqual()`
-        // is deliberately avoided: it can be undetermined and can equate
-        // structurally-distinct exact values, which would make the run
-        // boundaries unstable.
-        if (current.length === 0) {
-          current = [item];
-          currentKey = key;
-        } else if (currentKey!.isSame(key)) {
-          current.push(item);
-        } else {
-          runs.push(current);
-          current = [item];
-          currentKey = key;
-        }
-      }
-      if (!walk.complete) return undefined;
-      if (current.length > 0) runs.push(current);
-
-      // Each run is emitted through `innerRun`, which makes it a STRING when
-      // the source is a string. Joining a run's grapheme clusters re-runs
-      // segmentation, and two adjacent clusters can merge — but only when the
-      // source itself contained a lone combining mark, the only way a cluster
-      // can begin with a character that attaches to what precedes it
-      // (`docs/STRING_ROADMAP.md`, design constraint 3).
-      return ce.function(
-        'List',
-        runs.map((r) => innerRun(ce, xs, r))
-      );
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(chunkByWalk(xs, fn, ce), ce),
+    // The same walk, with the key function awaited (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        chunkByWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        options
+      ),
     // Lazy view (Dedup-shape streaming). Runs of an infinite source are
     // unknowable, so `count`/`isFinite` mirror `Dedup`: known only for a finite
     // source.
@@ -21221,62 +21002,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // depends on the key function and the element walk, so never `true` —
     // see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
-    evaluate: ([xs, fn], { engine: ce }) => {
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-      const f = applicable(fn);
-      if (!f) return undefined;
-
-      const groups: Record<string, Expression[]> = {};
-
-      // The groups hold every element: the source is walked with the bound
-      // of an eager operator (`eagerElementWalk()`).
-      const walk = eagerElementWalk(xs);
-      if (walk === undefined) return undefined;
-      for (const item of walk) {
-        const keyExpr = f([item]) ?? ce.Nothing;
-
-        // A key that is an inert application of an operator that was only
-        // auto-declared by this very use (no operator definition, inferred
-        // value type) is almost certainly a typo (`Even` for `IsEven`): every
-        // element would land in its own garbage group ("Even(1)", "Even(2)",
-        // …). Report it like Filter reports a broken predicate. Explicitly
-        // declared symbols are untouched — grouping by a symbolic key is
-        // legitimate.
-        if (isFunction(keyExpr)) {
-          const keyDef = ce.lookupDefinition(keyExpr.operator);
-          if (
-            keyDef !== undefined &&
-            'value' in keyDef &&
-            keyDef.value?.inferredType === true
-          ) {
-            throw new Error(
-              `Unknown function "${keyExpr.operator}" in GroupBy key function. ${spellCheckMessage(keyExpr)}`
-            );
-          }
-        }
-
-        // A character key is the same value as the one-character string
-        // (`ce.string('a').isSame(ce.character('a'))`), so it groups under
-        // the same text key: `toString()` would quote it (`"a"`).
-        const key =
-          (isSymbol(keyExpr) ? keyExpr.symbol : undefined) ??
-          (isString(keyExpr) || isCharacter(keyExpr)
-            ? keyExpr.string
-            : undefined) ??
-          keyExpr.toString();
-
-        if (!(key in groups)) groups[key] = [];
-        groups[key].push(item);
-      }
-      if (!walk.complete) return undefined;
-
-      return ce.function(
-        'Dictionary',
-        Object.entries(groups).map(([k, vals]) =>
-          ce._fn('Tuple', [ce.string(k), ce.function('List', vals)])
-        )
-      );
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(groupByWalk(xs, fn, ce), ce),
+    // The same walk, with the key function awaited (`asyncCallbackRoute`).
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        groupByWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        options
+      ),
   },
 
   // Similar to Transpose, but acts on a sequence of collections
@@ -22380,8 +22113,12 @@ function quantifierWalk(
   kind: 'Any' | 'All',
   collection: Expression,
   fn: Expression | undefined,
-  ce: ComputeEngine
-): Generator<undefined, Expression | undefined> | undefined {
+  ce: ComputeEngine,
+  // How the predicate is applied (see `CallbackRoute`).
+  route: CallbackRoute = undefined
+):
+  | Generator<PromiseLike<unknown> | undefined, Expression | undefined>
+  | undefined {
   const f = fn ? applicable(fn) : undefined;
   // A source that cannot be enumerated decides nothing: the walk below would
   // see no elements and fall to `defaultValue` — `Any(xs, p) → False`,
@@ -22410,7 +22147,10 @@ function quantifierWalk(
   const limit =
     collection.isFiniteCollection === true ? Infinity : ce.iterationLimit;
   let read = 0;
-  return (function* (): Generator<undefined, Expression | undefined> {
+  return (function* (): Generator<
+    PromiseLike<unknown> | undefined,
+    Expression | undefined
+  > {
     if (limit <= 0) return undefined;
     // The walk ends early when it meets an inner collection that it cannot
     // walk (see `MeasuredWalk`). A short-circuit on an element before that
@@ -22420,7 +22160,14 @@ function quantifierWalk(
     const walk = new MeasuredWalk(() => collection.each());
     for (const item of walk) {
       read += 1;
-      const result = f ? f([item]) : item.evaluate();
+      // Without a predicate, the element itself is the answer. On the
+      // asynchronous route it is evaluated with `evaluateAsync()` and
+      // awaited, as the predicate is.
+      const result = f
+        ? yield* applyCallback(f, [item], route)
+        : route === undefined
+          ? item.evaluate()
+          : ((yield item.evaluateAsync(route)) as Expression);
       const s = sym(result);
       if (s === shortSym) return shortValue;
       if (s !== definiteSym) {
@@ -22485,6 +22232,83 @@ async function runWalkAsync<R>(
     options.signal,
     ce._deadlineFrame
   );
+}
+
+/**
+ * How the walk of an eager collection operator applies its callback (a
+ * reducer, a predicate, a key function). The synchronous handler passes
+ * `undefined`: the callback is applied as it always was, with no options.
+ * The asynchronous handler passes the options of `asyncCallbackRoute()`, and
+ * with them `applicable()` answers a `Promise` for a function literal, a
+ * composition and a symbol callee, so that an operator in the callback that
+ * has only an `evaluateAsync` handler is evaluated.
+ *
+ * Only the callback is awaited. The walk reads the elements of its source
+ * with `each()`, and the elements of a lazy view are computed synchronously
+ * when they are read, on both routes. So, with `AsyncOnly` an operator that
+ * has only an `evaluateAsync` handler, `Find(Map(AsyncOnly, [1, 2]), y ↦ y >
+ * 6)` gives the element `AsyncOnly(2)` unevaluated (the awaited predicate
+ * evaluates its own copy of the element). An operator that serves a large
+ * source through its lazy view (`ChunkBy` past the eager limit) applies its
+ * callback synchronously too. A fix needs an asynchronous element iterator
+ * (ROADMAP CE-111.4).
+ */
+type CallbackRoute = ApplyOptions | undefined;
+
+/**
+ * The options with which the walk of an eager collection operator applies
+ * its callback under `evaluateAsync()` (see `CallbackRoute`): the abort
+ * signal, the effect handlers, the evaluation-context stack and the
+ * precision window of this evaluation, and `awaitStatements`. The
+ * synchronous handler applies the callback with no options, so
+ * `numericApproximation` is not passed either: the value of a callback with
+ * no asynchronous operator is then the same on the two routes.
+ */
+function asyncCallbackRoute(options: EvaluateHandlerOptions): ApplyOptions {
+  return {
+    ...awaitedOperandOptions(options, { numericApproximation: undefined }),
+    awaitStatements: true,
+  };
+}
+
+/**
+ * Run a walk on the synchronous route, where it cannot yield (see
+ * `applyCallback`): its first step is its end. Unlike `run()`, it reads no
+ * clock, so it costs nothing per comparison of a sort. A walk that yields
+ * here is a defect of the caller, and it throws.
+ */
+function runUnyielding<R>(walk: Generator<unknown, R, unknown>): R {
+  const step = walk.next();
+  if (!step.done)
+    throw new Error(
+      'A collection walk on the synchronous route yielded: only the asynchronous route can apply a callback that answers a Promise'
+    );
+  return step.value;
+}
+
+/**
+ * Apply the callback `f` of a collection walk to `args` on `route` (see
+ * `CallbackRoute`), as a step of the walk: `yield* applyCallback(…)`.
+ *
+ * On the asynchronous route the application can answer a `Promise`. It is
+ * yielded to the driver, `runAsync` (through `runWalkAsync`), which awaits
+ * it and hands the settled value back. The walk then continues in the
+ * registry and the evaluation-context stack of this evaluation, because
+ * `runWalkAsync` runs each step of the walk inside `withEvaluationEffects`.
+ * On the synchronous route the application never answers a `Promise`, so
+ * nothing is yielded and the walk is unchanged.
+ */
+function* applyCallback(
+  f: (
+    xs: ReadonlyArray<Expression>,
+    options?: ApplyOptions
+  ) => Expression | undefined,
+  args: ReadonlyArray<Expression>,
+  route: CallbackRoute
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  const result = f(args, route);
+  if (isThenable(result)) return (yield result) as Expression | undefined;
+  return result;
 }
 
 /**
@@ -25382,6 +25206,21 @@ export function sortedIndices(
   expr: Expression,
   fn: Expression | undefined = undefined
 ): number[] | undefined {
+  // On the synchronous route nothing is yielded (see `applyCallback`), so
+  // the walk runs to its end in one step.
+  return runUnyielding(sortedIndicesWalk(expr, fn, undefined));
+}
+
+/**
+ * The walk of `sortedIndices`, shared by the synchronous and asynchronous
+ * handlers of `Sort` and `Ordering`, which differ only in how the key
+ * function or the comparator is applied (`route`, see `CallbackRoute`).
+ */
+function* sortedIndicesWalk(
+  expr: Expression,
+  fn: Expression | undefined,
+  route: CallbackRoute
+): Generator<PromiseLike<unknown>, number[] | undefined, unknown> {
   const l = smallCount(expr);
   if (l === undefined || !Number.isFinite(l) || l < 1) return undefined;
 
@@ -25435,7 +25274,7 @@ export function sortedIndices(
         absent.add(i);
         continue;
       }
-      const key = f([x]);
+      const key = yield* applyCallback(f, [x], route);
       if (key === undefined) return undefined;
       keys.set(i, key);
     }
@@ -25462,13 +25301,13 @@ export function sortedIndices(
   }
 
   const cmpFn = f
-    ? (a: Expression, b: Expression) => {
+    ? function* (a: Expression, b: Expression) {
         // NaN sorts last whatever the comparator: a comparator that computes
         // `b - a` or `a > b` has no answer for a NaN operand. So a
         // descending sort puts NaN last too (see `nanLastOrder`).
         const nan = nanLastOrder(a, b);
         if (nan !== undefined) return nan;
-        const r = f([a, b]);
+        const r = yield* applyCallback(f, [a, b], route);
         // A boolean comparator (Elixir-style): True means the first argument
         // sorts first. Previously a boolean result was silently treated as
         // "greater" (never negative, never zero), so e.g.
@@ -25482,15 +25321,66 @@ export function sortedIndices(
         if (r?.isNaN === true) return 0;
         return r?.isNegative ? -1 : r?.isSame(0) ? 0 : 1;
       }
-    : defaultCmp;
+    : undefined;
 
-  indices.sort((i, j) => {
-    const va = expr.at(i)!;
-    const vb = expr.at(j)!;
-    return cmpFn(va, vb);
-  });
+  if (cmpFn === undefined)
+    indices.sort((i, j) => defaultCmp(expr.at(i)!, expr.at(j)!));
+  else if (route === undefined)
+    // On the synchronous route nothing is yielded (see `applyCallback`), so
+    // each comparison runs to its end in one step.
+    indices.sort((i, j) => runUnyielding(cmpFn(expr.at(i)!, expr.at(j)!)));
+  else {
+    // On the asynchronous route a comparison can yield, and
+    // `Array.prototype.sort` cannot wait for one. So the order is computed by
+    // a stable merge sort written as a generator (`mergeSortWalk`). It asks
+    // each comparison in the order `Array.prototype.sort` asks it (later
+    // item first) and reads the answer the same way, so a comparator that
+    // answers a tie or "greater" in both orders of a pair (a boolean
+    // comparator `(a, b) ↦ a > b` over two equal elements) keeps the input
+    // order on both routes. The two algorithms ask different pairs, so a
+    // comparator that is not a consistent order in another way (one that is
+    // not transitive, `a < b`, `b < c` and `c < a`) can still give a
+    // different order on the two routes. The synchronous route keeps
+    // `Array.prototype.sort`, so that its results do not change.
+    const sorted = yield* mergeSortWalk(indices, (i, j) =>
+      cmpFn(expr.at(i)!, expr.at(j)!)
+    );
+    // Copied element by element: a spread passes every index as an
+    // argument, which a large list takes past the engine's argument limit.
+    for (let k = 0; k < sorted.length; k++) indices[k] = sorted[k];
+  }
 
   return f === undefined && undeterminedDefault ? undefined : indices;
+}
+
+/**
+ * A stable merge sort of `items`, written as a generator so that a
+ * comparison can yield (see `applyCallback`): `compare(a, b)` is negative
+ * when `a` goes before `b`. As in `Array.prototype.sort`, the comparison is
+ * asked with the LATER item first, `compare(later, earlier)`, and the later
+ * item moves before the earlier one only when the answer is negative. So
+ * two items that compare as a tie, or as "greater" in both orders (a
+ * boolean comparator over two equal elements reads `False` as greater),
+ * keep their order in `items`.
+ */
+function* mergeSortWalk<T>(
+  items: ReadonlyArray<T>,
+  compare: (a: T, b: T) => Generator<PromiseLike<unknown>, number, unknown>
+): Generator<PromiseLike<unknown>, T[], unknown> {
+  if (items.length <= 1) return [...items];
+  const middle = items.length >> 1;
+  const left = yield* mergeSortWalk(items.slice(0, middle), compare);
+  const right = yield* mergeSortWalk(items.slice(middle), compare);
+  const merged: T[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    if ((yield* compare(right[j], left[i])) < 0) merged.push(right[j++]);
+    else merged.push(left[i++]);
+  }
+  while (i < left.length) merged.push(left[i++]);
+  while (j < right.length) merged.push(right[j++]);
+  return merged;
 }
 
 /** The position of NaN in a `Sort`/`Ordering`: NaN is always LAST, in an
@@ -25568,6 +25458,597 @@ function canonicalOptimumForm(
   return engine._fn(operator, [fn, d]);
 }
 
+/** The eager walk of `GroupBy`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the key function is applied (`route`,
+ * see `CallbackRoute`). */
+function* groupByWalk(
+  xs: Expression,
+  fn: Expression,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+  const f = applicable(fn);
+  if (!f) return undefined;
+
+  const groups: Record<string, Expression[]> = {};
+
+  // The groups hold every element: the source is walked with the bound
+  // of an eager operator (`eagerElementWalk()`).
+  const walk = eagerElementWalk(xs);
+  if (walk === undefined) return undefined;
+  for (const item of walk) {
+    const keyExpr = (yield* applyCallback(f, [item], route)) ?? ce.Nothing;
+
+    // A key that is an inert application of an operator that was only
+    // auto-declared by this very use (no operator definition, inferred
+    // value type) is almost certainly a typo (`Even` for `IsEven`): every
+    // element would land in its own garbage group ("Even(1)", "Even(2)",
+    // …). Report it like Filter reports a broken predicate. Explicitly
+    // declared symbols are untouched — grouping by a symbolic key is
+    // legitimate.
+    if (isFunction(keyExpr)) {
+      const keyDef = ce.lookupDefinition(keyExpr.operator);
+      if (
+        keyDef !== undefined &&
+        'value' in keyDef &&
+        keyDef.value?.inferredType === true
+      ) {
+        throw new Error(
+          `Unknown function "${keyExpr.operator}" in GroupBy key function. ${spellCheckMessage(keyExpr)}`
+        );
+      }
+    }
+
+    // A character key is the same value as the one-character string
+    // (`ce.string('a').isSame(ce.character('a'))`), so it groups under
+    // the same text key: `toString()` would quote it (`"a"`).
+    const key =
+      (isSymbol(keyExpr) ? keyExpr.symbol : undefined) ??
+      (isString(keyExpr) || isCharacter(keyExpr)
+        ? keyExpr.string
+        : undefined) ??
+      keyExpr.toString();
+
+    if (!(key in groups)) groups[key] = [];
+    groups[key].push(item);
+  }
+  if (!walk.complete) return undefined;
+
+  return ce.function(
+    'Dictionary',
+    Object.entries(groups).map(([k, vals]) =>
+      ce._fn('Tuple', [ce.string(k), ce.function('List', vals)])
+    )
+  );
+}
+
+/** The eager walk of `Partition`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the predicate is applied (`route`,
+ * see `CallbackRoute`). */
+function* partitionWalk(
+  xs: Expression,
+  arg: Expression,
+  stepArg: Expression | undefined,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  const refused = unindexedCollectionOperandError(ce, 'Partition', xs);
+  if (refused) return refused;
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+
+  // A settled size that is a number but not an integer (`Partition(xs,
+  // h(3))` with `h(3) = 1.5`) is the same type error `Chunk` answers
+  // through the generic runtime conformance check; that check stands down
+  // for this slot (its declared type is open), and `toInteger` below
+  // would otherwise round the value and accept it silently.
+  if (isNumber(arg) && arg.isInteger === false)
+    return ce.typeError('integer', arg.type, arg);
+
+  // Partition(collection, n) and Partition(collection, n, step)
+  const n = toInteger(arg);
+  if (n !== null) {
+    if (n <= 0) return undefined;
+    // Small finite sources materialize eagerly (all existing semantics);
+    // larger — or unknown-length — sources stay symbolic and are served
+    // lazily by the `collection` handlers below (Tycho item 52). The
+    // predicate form below is EXEMPT (it needs totality — no lazy view).
+    const size = xs.count;
+    if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
+      return undefined;
+    const all = Array.from(xs.each()) as Expression[];
+    const result: Expression[] = [];
+
+    // Every inner run below is emitted through `innerRun`, which makes it a
+    // STRING when the source is a string. Joining a run's grapheme clusters
+    // re-runs segmentation, and two adjacent clusters can merge — but only
+    // when the source itself contained a lone combining mark, the only way
+    // a cluster can begin with a character that attaches to what precedes
+    // it (`docs/STRING_ROADMAP.md`, design constraint 3).
+
+    // Partition(collection, n, step) → sliding windows of length `n`
+    // whose starts are `step` apart; only COMPLETE windows are emitted.
+    if (stepArg !== undefined) {
+      const step = toInteger(stepArg);
+      if (step === null || step <= 0) return undefined;
+      for (let i = 0; i + n <= all.length; i += step)
+        result.push(innerRun(ce, xs, all.slice(i, i + n)));
+      return ce.function('List', result);
+    }
+
+    // Partition(collection, n) → consecutive chunks EACH of size `n`; the
+    // trailing chunk may be shorter when `n` does not divide the length.
+    for (let i = 0; i < all.length; i += n)
+      result.push(innerRun(ce, xs, all.slice(i, i + n)));
+
+    return ce.function('List', result);
+  }
+
+  // The size form with a size that has no value yet (`Partition(xs, n)`
+  // with `n` a free integer) is NOT a predicate: stay unevaluated until
+  // `n` binds. Without this it fell into the predicate arm below and threw
+  // a raw `Error` out of `evaluate()` — the operand is typed `integer`,
+  // so no spell-check hint was ever going to help.
+  if (arg.type.matches('number')) return undefined;
+
+  // An ABSENT size is not a predicate either. The operand was admitted at
+  // boxing because its type only MAY be absent — `integer | missing`, the
+  // type of a default-less piecewise — and evaluation has now settled it,
+  // so the type error the boxing seam mints for a proven `Missing` is due
+  // here instead (`docs/ERROR-MODEL.md` §2, rule 2: the check re-runs when
+  // the evidence arrives). `Chunk` and `Take`, whose size parameter is a
+  // plain `integer`, answer exactly this error through the generic runtime
+  // conformance check; that check stands down for this slot because its
+  // declared type is open (it carries the free type variable `T`). Without
+  // the guard the absence reached `applicable()` below and came back as
+  // "Missing is not a function", blaming an arm the author never used.
+  if (isSymbol(arg, 'Missing')) return ce.typeError('integer', arg.type, arg);
+
+  // Partition(collection, predicate)
+  const fn = applicable(arg);
+  if (!fn) return undefined;
+
+  const trueGroup: Expression[] = [];
+  const falseGroup: Expression[] = [];
+  // The two groups hold every element: the source is walked with the
+  // bound of an eager operator (`eagerElementWalk()`).
+  const walk = eagerElementWalk(xs);
+  if (walk === undefined) return undefined;
+  for (const item of walk) {
+    const applied = yield* applyCallback(fn, [item], route);
+    // A `Missing` answer puts the element in the FALSE group: a partition
+    // keeps every element, and "not decidedly satisfied" is the group a
+    // selection would leave it out of (`selectionVerdict`).
+    const pred = selectionVerdict(applied);
+    if (pred === 'True') trueGroup.push(item);
+    else if (pred === 'False') falseGroup.push(item);
+    else {
+      // An element-valued predicate failure (see `predicateErrorValue`) is
+      // an error, not an undecided predicate: surface it as the operator's
+      // result before the "undecided" arm below can swallow it.
+      const err = predicateErrorValue(applied);
+      if (err) return err;
+      if (
+        applied === undefined ||
+        applied.type.isUnknown ||
+        applied.type.matches('boolean')
+      )
+        // An UNDECIDED predicate, in either of its two shapes: unresolved —
+        // a symbol declared `function` with no value applies to a symbolic
+        // `g(x)` typed `unknown` — or resolved but not decidable yet, an
+        // unevaluated relation already typed `boolean` (`x => x > n` with
+        // `n` free, which is neither `True` nor `False`). Both are undecided,
+        // not wrong: stay unevaluated, mirroring `If`, which reserves its
+        // throw for a condition that is not boolean at all. The throw below
+        // keeps the case the spell-check hint was written for: a predicate
+        // that resolves to a concrete non-boolean (`x => x + 1`).
+        return undefined;
+      throw predicateResultError('Partition', arg);
+    }
+  }
+  if (!walk.complete) return undefined;
+
+  // The two predicate groups are inner runs like any other: for a string
+  // source each comes back as a string, so `Partition("a1b2", isDigit)` is
+  // `["12", "ab"]`. A group is a SUBSEQUENCE rather than a contiguous run,
+  // but the re-segmentation caveat is the same — clusters can only merge
+  // when the source contained a lone combining mark
+  // (`docs/STRING_ROADMAP.md`, design constraint 3).
+  return ce.function('List', [
+    innerRun(ce, xs, trueGroup),
+    innerRun(ce, xs, falseGroup),
+  ]);
+}
+
+/** The eager walk of `ChunkBy`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the key function is applied (`route`,
+ * see `CallbackRoute`). */
+function* chunkByWalk(
+  xs: Expression,
+  fn: Expression,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  const refused = unindexedCollectionOperandError(ce, 'ChunkBy', xs);
+  if (refused) return refused;
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+  // Small finite sources materialize eagerly (all existing semantics);
+  // larger — or unknown-length — sources stay symbolic and are served
+  // lazily by the `collection` handlers below (Tycho item 52).
+  const size = xs.count;
+  if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION) return undefined;
+  const f = applicable(fn);
+  if (!f) return undefined;
+
+  const runs: Expression[][] = [];
+  let currentKey: Expression | undefined = undefined;
+  let current: Expression[] = [];
+  // The runs hold every element: the source is walked with the bound of
+  // an eager operator (`eagerElementWalk()`).
+  const walk = eagerElementWalk(xs);
+  if (walk === undefined) return undefined;
+  for (const item of walk) {
+    const key = (yield* applyCallback(f, [item], route)) ?? ce.Nothing;
+    // Compare run keys with `.isSame()` — exact structural/symbolic
+    // equality, the engine's internal-comparison convention. `.isEqual()`
+    // is deliberately avoided: it can be undetermined and can equate
+    // structurally-distinct exact values, which would make the run
+    // boundaries unstable.
+    if (current.length === 0) {
+      current = [item];
+      currentKey = key;
+    } else if (currentKey!.isSame(key)) {
+      current.push(item);
+    } else {
+      runs.push(current);
+      current = [item];
+      currentKey = key;
+    }
+  }
+  if (!walk.complete) return undefined;
+  if (current.length > 0) runs.push(current);
+
+  // Each run is emitted through `innerRun`, which makes it a STRING when
+  // the source is a string. Joining a run's grapheme clusters re-runs
+  // segmentation, and two adjacent clusters can merge — but only when the
+  // source itself contained a lone combining mark, the only way a cluster
+  // can begin with a character that attaches to what precedes it
+  // (`docs/STRING_ROADMAP.md`, design constraint 3).
+  return ce.function(
+    'List',
+    runs.map((r) => innerRun(ce, xs, r))
+  );
+}
+
+/**
+ * The test of one element by the predicate of `IndexWhere`, shared by its
+ * synchronous and asynchronous handlers: `true` for a match, `false` for no
+ * match, the error of an element-valued predicate failure (see
+ * `predicateErrorValue`), which is the answer of the operator, and
+ * `'undecided'` for an undecided verdict (`isUndecidedVerdict`), which
+ * leaves the first match unknown. A predicate that answers a value that is
+ * not a boolean throws.
+ */
+function indexWhereTest(
+  applied: Expression | undefined,
+  fn: Expression
+): boolean | Expression | 'undecided' {
+  const pred = selectionVerdict(applied);
+  if (pred === 'True') return true;
+  if (pred === 'False') return false;
+  const err = predicateErrorValue(applied);
+  if (err) return err;
+  if (applied !== undefined && isUndecidedVerdict(applied)) return 'undecided';
+  throw predicateResultError('IndexWhere', fn);
+}
+
+/**
+ * The search of `IndexWhere` on the asynchronous route, with the predicate
+ * applied on `route` (see `CallbackRoute`). It has the rules of
+ * `searchIndex` and of the `indexWhere` handler that it uses
+ * (`collectionIndexWhere`, `collection-utils.ts`): a source that cannot be
+ * enumerated or is not indexed has no answer; only a source known to be
+ * finite gives the not-found `0`; any other source is read for at most
+ * `ce.iterationLimit` elements and has no answer past that; and a walk that
+ * misses elements (see `MeasuredWalk`) has no not-found answer. The
+ * synchronous handler keeps the `indexWhere` handler of the source, which
+ * an operator can define (a held restricted collection does, in
+ * `library/control-structures.ts`). That handler only changes how the
+ * elements are read, not which index matches.
+ *
+ * Each predicate step is measured for an inner collection that it cannot
+ * walk, as the synchronous route measures the whole search, up to its first
+ * `await`. The part of an awaited step after its first `await` is not
+ * measured: the count of incomplete walks is for the process
+ * (`incomplete-walks.ts`), and another evaluation can change it while the
+ * step waits. So when that part walks a collection with elements that are
+ * not known and still answers `True`, the asynchronous route can give an
+ * index where the synchronous route gives no answer. (A predicate that
+ * counts such a collection, `y ↦ AsyncOnly(y) > 0 ∧ Count(FlatMap([1, 2],
+ * x ↦ Join([x], v))) > 0` for a valueless `v`, does not show it: the count
+ * stays unevaluated, so the predicate is undecided on both routes.)
+ */
+function* indexWhereAsyncWalk(
+  xs: Expression,
+  fn: Expression,
+  f: (
+    xs: ReadonlyArray<Expression>,
+    options?: ApplyOptions
+  ) => Expression | undefined,
+  ce: ComputeEngine,
+  route: CallbackRoute
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  if (!isEnumerableSource(xs)) return undefined;
+  if (xs.isIndexedCollection !== true) return undefined;
+  const finite = xs.isFiniteCollection === true;
+  const limit = finite ? Infinity : ce.iterationLimit;
+  const walk = new MeasuredWalk(() => xs.each());
+  let index = 0;
+  // Whether a step of the predicate that answered synchronously met an
+  // inner collection that it cannot walk. Then the search has no index and
+  // no not-found answer, as on the synchronous route
+  // (`unlessWalkMissedElements` in `searchIndex`).
+  let predicateMissed = false;
+  try {
+    for (const x of walk) {
+      index += 1;
+      const before = incompleteWalkCount();
+      const result = f([x], route);
+      // Read before any `await`, so that the synchronous part of the step
+      // is measured on both branches (see the doc comment above).
+      if (incompleteWalkCount() !== before) predicateMissed = true;
+      const applied = isThenable(result)
+        ? ((yield result) as Expression | undefined)
+        : result;
+      const test = indexWhereTest(applied, fn);
+      if (test === true) return predicateMissed ? undefined : ce.number(index);
+      if (test === 'undecided') return undefined;
+      if (test !== false) return test;
+      if (index >= limit) return undefined;
+    }
+  } catch (e) {
+    // Over a source that is not known to be finite, the source iterator can
+    // stop at the iteration limit before it gives an element (`Filter` over
+    // an unbounded source that nothing matches): the search has no answer,
+    // as in `searchIndex`. Over a finite source the cancellation propagates,
+    // as it does from `searchIndex`, and so do other cancellations (a
+    // timeout, the abort signal).
+    if (
+      !finite &&
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+  if (walk.missedElements || predicateMissed || !finite) return undefined;
+  return ce.Zero;
+}
+
+/** The walk of `Ordering`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the key function or the comparator
+ * is applied (`route`, see `CallbackRoute`). */
+function* orderingWalk(
+  xs: Expression,
+  fn: Expression | undefined,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  // Stay inert on non-finite or unknown-length input, aligning with Sort:
+  // an empty List would falsely claim a complete ordering.
+  if (xs.isFiniteCollection !== true) return undefined;
+  // Same for a finite-but-unwalkable source (`Take(xs, 2)` over a valueless
+  // `xs`), where the walk below finds no elements to order. This is a cheap
+  // early decline: it answers before the sort walk reads any element.
+  if (!isEnumerableSource(xs)) return undefined;
+  // A value with no positions (a `Set` held by a symbol declared
+  // `unknown` or `collection<T>`, which the signature check admits before
+  // the value is known) has no ordering to report. Refuse it with the
+  // type error that the literal operand `Ordering(Set(3, 1))` gets, as
+  // `Sort` does. Without this test, the sort walk read `undefined`
+  // elements and failed with an internal error.
+  if (!isString(xs) && xs.isIndexedCollection !== true)
+    return refusedOperandError(ce, 'Ordering', 1, 'indexed_collection', xs);
+  // A comparator whose declared parameter type is disjoint from the
+  // element type (see `comparatorParameterError`).
+  const cmpError = comparatorParameterError(ce, 'Ordering', xs, fn);
+  if (cmpError) return cmpError;
+  // As for `Sort`: the order demands the value of every element, so a
+  // failed cell gives its error.
+  const source = sortSource(xs);
+  const failed = firstFailedElementError(source);
+  if (failed !== undefined && failed !== 'incomplete') return failed;
+  const indices = yield* sortedIndicesWalk(source, fn, route);
+  // `sortedIndices` returns `undefined` when the order cannot be decided —
+  // a key that cannot be computed, or a pair of keys that compare neither
+  // equal nor less in either direction (a list key; a NaN key sorts
+  // last, see `nanLastOrder`). A
+  // permutation of N elements has N entries, so a truncated or empty index
+  // list would be a wrong count, not a decline. Stay unevaluated, the same
+  // answer `Sort` gives for the same input. Fixed 2026-09-22.
+  if (!indices) return undefined;
+  return ce.function('List', indices);
+}
+
+/** The walk of `Sort`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the key function or the comparator
+ * is applied (`route`, see `CallbackRoute`). */
+function* sortWalk(
+  xs: Expression,
+  fn: Expression | undefined,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  // Eager collection results rebuild as `List`, never the source's head
+  // (a `Range`/`Linspace` head would reinterpret the sorted elements as
+  // lo/hi/step). Stay inert on non-finite or unknown-length input.
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+  // The sort reads its source by position. A value that is not indexed (a
+  // `Set` held by a symbol declared with the abstract type
+  // `collection<T>`, which the signature admits) has no positions:
+  // `xs.at(i)` answered `undefined` and the comparison crashed on it with
+  // an internal error. It is the same type error the literal operand
+  // gets from the signature check (`Sort(Set(3, 1))`).
+  if (!isString(xs) && xs.isIndexedCollection !== true)
+    return refusedOperandError(ce, 'Sort', 1, 'indexed_collection', xs);
+  // A failed cell (an element that is, or holds, an `Error`) cannot be
+  // ordered: the order demands the value of every element, so the sort
+  // answers the error of the first failed cell, as `Max` does. The
+  // elements of a lazy source are read once (`sortSource()`), so that a
+  // failed element of a valid source (`Sort(Map(h, xs))`) is seen too.
+  // A source too large to be read into a list is checked as far as the
+  // bound of the walk (`'incomplete'`): a failed element after it makes
+  // the order undetermined, and the sort then stays unevaluated.
+  const source = sortSource(xs);
+  const failed = firstFailedElementError(source);
+  if (failed !== undefined && failed !== 'incomplete') return failed;
+  // A comparator whose declared parameter type is disjoint from the
+  // element type (see `comparatorParameterError`).
+  const cmpError = comparatorParameterError(ce, 'Sort', xs, fn);
+  if (cmpError) return cmpError;
+  const indices = yield* sortedIndicesWalk(source, fn, route);
+  if (!indices) return undefined;
+  const elements = indices.map((i) => source.at(i)!);
+  // The string arm: a sorted string is a string. `Sort` is eager and has
+  // no lazy collection handlers, so the join happens here rather than in
+  // `evaluateStringPreservingCollection`. Re-segmentation caveat:
+  // rejoining the sorted characters can merge or split grapheme clusters,
+  // so the result may hold a different number of characters than the
+  // input — sorting moves a combining mark next to whatever character now
+  // precedes it.
+  if (isString(xs)) return joinCharacters(ce, elements);
+  return ce.function('List', elements);
+}
+
+/** The walk of `Find`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the predicate is applied (`route`,
+ * see `CallbackRoute`). */
+function* findWalk(
+  xs: Expression,
+  fn: Expression,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  const refused = unindexedCollectionOperandError(ce, 'Find', xs);
+  if (refused) return refused;
+  const f = applicable(fn);
+  if (!f) return ce.Nothing;
+  // A source that cannot be enumerated has no first match to report AND no
+  // grounds for the NOT-FOUND `Nothing` — stay inert (see
+  // `isEnumerableSource`).
+  if (!isEnumerableSource(xs)) return undefined;
+  // A walk that meets an inner collection that it cannot walk ends early
+  // (see `MeasuredWalk`): a match before that point is the first match,
+  // but the end of the walk is not grounds for `Nothing`.
+  const walk = new MeasuredWalk(() => xs.each());
+  for (const item of walk) {
+    const applied = yield* applyCallback(f, [item], route);
+    const pred = selectionVerdict(applied);
+    if (pred === 'False') continue;
+    if (pred === 'True') return item;
+    // See `predicateErrorValue`: an element-valued predicate failure is
+    // surfaced as the operator's result.
+    const err = predicateErrorValue(applied);
+    if (err) return err;
+    // An undecided verdict leaves the first match unknown
+    // (`isUndecidedVerdict`).
+    if (applied !== undefined && isUndecidedVerdict(applied)) return undefined;
+    throw predicateResultError('Find', fn);
+  }
+  if (walk.missedElements) return undefined;
+  return ce.Nothing;
+}
+
+/** The walk of `CountIf`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the predicate is applied (`route`,
+ * see `CallbackRoute`). */
+function* countIfWalk(
+  xs: Expression,
+  fn: Expression,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  const f = applicable(fn);
+  if (!f) return ce.Zero;
+  // Stay inert on non-finite or unknown-length input: a count requires
+  // totality (walking every element).
+  if (xs.isFiniteCollection !== true) return undefined;
+  // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
+  // is finite (at most 2 elements) yet has no elements to walk, and the
+  // loop below would count 0. See `isEnumerableSource`.
+  if (!isEnumerableSource(xs)) return undefined;
+  let count = 0;
+  // A walk that meets an inner collection that it cannot walk ends early
+  // and misses elements (see `MeasuredWalk`), so its count is not the
+  // count: `CountIf(Take(FlatMap([1, 2], x ↦ Join([x], v)), 3), x ↦ x >
+  // 0)` was `0`.
+  const walk = new MeasuredWalk(() => xs.each());
+  for (const item of walk) {
+    const applied = yield* applyCallback(f, [item], route);
+    const pred = selectionVerdict(applied);
+    if (pred === 'False') continue;
+    if (pred === 'True') count++;
+    else {
+      // See `predicateErrorValue`: an element-valued predicate failure is
+      // surfaced as the operator's result.
+      const err = predicateErrorValue(applied);
+      if (err) return err;
+      // An undecided verdict leaves the count unknown
+      // (`isUndecidedVerdict`).
+      if (applied !== undefined && isUndecidedVerdict(applied))
+        return undefined;
+      throw predicateResultError('CountIf', fn);
+    }
+  }
+  if (walk.missedElements) return undefined;
+  return ce.number(count);
+}
+
+/** The walk of `Position`, shared by its synchronous and asynchronous
+ * handlers, which differ only in how the predicate is applied (`route`,
+ * see `CallbackRoute`). */
+function* positionWalk(
+  xs: Expression,
+  fn: Expression,
+  ce: ComputeEngine,
+  route: CallbackRoute = undefined
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  const refused = unindexedCollectionOperandError(ce, 'Position', xs);
+  if (refused) return refused;
+  const f = applicable(fn);
+  if (!f) return ce.function('List', []);
+  // Stay inert on non-finite or unknown-length input: reporting positions
+  // requires totality (walking every element).
+  if (xs.isFiniteCollection !== true) return undefined;
+  // Finiteness is not enumerability — see `CountIf`.
+  if (!isEnumerableSource(xs)) return undefined;
+  const indices: Expression[] = [];
+  let index = 1;
+  // The result can hold an index for each element, so the source is
+  // walked with the bound of an eager operator (`eagerElementWalk()`).
+  const walk = eagerElementWalk(xs);
+  if (walk === undefined) return undefined;
+  for (const item of walk) {
+    const applied = yield* applyCallback(f, [item], route);
+    const pred = selectionVerdict(applied);
+    if (pred === 'True') indices.push(ce.number(index));
+    else if (pred !== 'False') {
+      // See `predicateErrorValue`: an element-valued predicate failure is
+      // surfaced as the operator's result.
+      const err = predicateErrorValue(applied);
+      if (err) return err;
+      // An undecided verdict leaves the positions unknown
+      // (`isUndecidedVerdict`).
+      if (applied !== undefined && isUndecidedVerdict(applied))
+        return undefined;
+      throw predicateResultError('Position', fn);
+    }
+    index++;
+  }
+  if (!walk.complete) return undefined;
+  return ce.function('List', indices);
+}
+
 /** Shared driver for `MaxBy`/`MinBy`/`ArgMax`/`ArgMin`. Enumerates a finite
  * collection, computing the unary key `f(x)` (or the element itself when `f`
  * is absent) once per element, and tracks the extremum. First occurrence wins
@@ -25579,25 +26060,39 @@ function extremumWalk(
   fn: Expression | undefined,
   ce: ComputeEngine,
   mode: 'max' | 'min',
-  want: 'element' | 'index'
-): Generator<undefined, Expression | undefined, unknown> | undefined {
+  want: 'element' | 'index',
+  // How the key function is applied (see `CallbackRoute`).
+  route: CallbackRoute = undefined
+):
+  | Generator<PromiseLike<unknown> | undefined, Expression | undefined, unknown>
+  | undefined {
   if (!isWalkableFiniteCollection(xs)) return undefined;
-  return extremumBy(xs, fn ? applicable(fn) : undefined, ce, mode, want);
+  return extremumBy(xs, fn ? applicable(fn) : undefined, ce, mode, want, route);
 }
 
 function* extremumBy(
   xs: Expression,
-  f: ((xs: ReadonlyArray<Expression>) => Expression | undefined) | undefined,
+  f:
+    | ((
+        xs: ReadonlyArray<Expression>,
+        options?: ApplyOptions
+      ) => Expression | undefined)
+    | undefined,
   ce: ComputeEngine,
   mode: 'max' | 'min',
-  want: 'element' | 'index'
-): Generator<undefined, Expression | undefined, unknown> {
+  want: 'element' | 'index',
+  route: CallbackRoute
+): Generator<
+  PromiseLike<unknown> | undefined,
+  Expression | undefined,
+  unknown
+> {
   let best: Expression | undefined = undefined;
   let bestKey: Expression | undefined = undefined;
   let index = 0;
   for (const item of xs.each()) {
     index += 1;
-    const key = f ? f([item]) : item;
+    const key = f ? yield* applyCallback(f, [item], route) : item;
     if (key === undefined) return undefined;
     // A failed cell, or a key computed from one, cannot be compared: the
     // comparison demands its value, so the answer is its error, as for `Max`.
