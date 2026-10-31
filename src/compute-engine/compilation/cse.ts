@@ -2484,10 +2484,14 @@ class Harvester {
     if (this.skippabilityQuery && !this.isEffectFreeUnderOracles(node))
       return false;
 
-    for (const operand of node.ops)
+    // Only the operands that emit code are checked: for a `Function` literal,
+    // its body and not its parameters (see `codeOperands`).
+    const operands = codeOperands(node);
+
+    for (const operand of operands)
       if (this.isOpaqueCallableOperand(operand)) return false;
 
-    for (const operand of node.ops) if (!this.isEligible(operand)) return false;
+    for (const operand of operands) if (!this.isEligible(operand)) return false;
 
     return true;
   }
@@ -2682,8 +2686,9 @@ class Harvester {
     } else if (this.isUserFunctionApplication(node)) {
       if (!this.isAdmissibleUserFnCallee(node.operator)) return false;
     } else if (node.operatorDefinition === undefined) return false;
-    if (node.ops.some((op) => this.isOpaqueCallableOperand(op))) return false;
-    return node.ops.every((op) => this.calleeBodyClean(op));
+    const operands = codeOperands(node);
+    if (operands.some((op) => this.isOpaqueCallableOperand(op))) return false;
+    return operands.every((op) => this.calleeBodyClean(op));
   }
 
   /**
@@ -3319,6 +3324,26 @@ function functionLiteralParamNames(
       names.push((param.ops[0] as Expression & { symbol: string }).symbol);
   }
   return names;
+}
+
+/**
+ * The operands of `node` that emit code, which the eligibility walks check.
+ *
+ * For a `Function` literal this is only its body, `ops[0]`. The other operands
+ * are parameters: they declare names and emit no code. A parameter is a
+ * symbol, a `Typed(name, type)` ascription, a destructuring `Tuple`, or a rest
+ * `Spread(name)`. Parameters stay non-canonical, so a parameter that is an
+ * application (`Typed`, `Tuple` or `Spread`) has no bound operator definition,
+ * and the eligibility walks refuse an application without one.
+ * Canonicalization writes the inferred element type of a callback parameter
+ * as a `Typed` ascription, so a check of the parameters would refuse every
+ * such callback, and every `Map` or `Sum` that holds one. For every other
+ * node this is all of `node.ops`.
+ */
+function codeOperands(
+  node: Expression & FunctionInterface
+): ReadonlyArray<Expression> {
+  return node.operator === 'Function' ? node.ops.slice(0, 1) : node.ops;
 }
 
 // Region keys need a stable identity per node OBJECT (the tree may be a DAG,

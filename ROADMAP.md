@@ -5630,10 +5630,16 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ### CE-689. Evaluating nested folds recomputes the types and effects of the body at every step
 
-**Status:** open; performance, large. GitHub issue #487 (2026-10-30). User
-decision 2026-10-30: do it as a separate item, after the box part of the issue
-(fixed: the comparison type with an operand that may be an absent collection,
-and the rejected-fixpoint record of `FoldRefinementState`, `collections.ts`).
+**Status:** decision needed; performance, large. GitHub issue #487
+(2026-10-30). User decision 2026-10-30: a separate item, after the box part of
+the issue (fixed in `e8b748554`: the comparison type with an operand that may
+be an absent collection, and the rejected-fixpoint record of
+`FoldRefinementState`, `collections.ts`). That decision named step 3b of the
+evaluation-cache plan; the cause is the one of Decision 2 of that plan (see
+below), which the user decided "no" on 2026-10-30. The user said on
+2026-10-30 that the decisions of the evaluation-cache plan are open to
+revisiting, and that part of the committed cache work may be incorrect: a
+new decision is needed, with the measurements of this workload.
 
 The expression of the issue is about 1.8 KB of MathJSON: 8 `Fold`s nested 4
 deep (`test/compute-engine/fixtures/rsk-row-insertion.ts`). Measured on the
@@ -5643,8 +5649,15 @@ built packages (mean of 10 calls after a warm-up, 2026-10-30): `Apply` of a
 bindings, which moves the engine generation, so the types (`boundCallType`,
 `functionLiteralSignatureType`) and effects (`isPure`, read by the
 shared-evaluation memo in `evaluate()`) of the body are computed again at
-every step. The fix is step 3b of the evaluation-cache plan (a dependency stamp
-per value cache, `docs/plans/2026-10-30-evaluation-cache-status-handoff.md`).
+every step. This is §5.3 of
+`docs/plans/2026-10-30-evaluation-cache-architecture.md`: each call of a
+function literal declares its parameters in a new scope, which moves the `any`
+version, the key of the type, sign and structural caches of every node. The fix
+is step 7 of that plan (a cache key per activation), which Decision 2 rejected
+on 2026-10-30 (the decision of 2026-09-24 in CE-334 stays: a simple version
+gave wrong results, and the measured gain on the Tycho workloads was small).
+CE-334, CE-531 and CE-321 record the earlier measurements. Not yet measured:
+how much of the `Apply` time of this workload is such misses.
 
 The box route is also still slower than in 0.156.0 (30 ms on 0.156.0, 106 ms on
 0.173.0, built packages). One canonical pass of the same tree with no fold
