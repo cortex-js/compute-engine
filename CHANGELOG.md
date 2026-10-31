@@ -35,6 +35,21 @@
 
 ### Bug Fixes
 
+- **A numeric integral with a step or a bump next to a singular bound reports
+  an error that covers its true error** (ROADMAP CE-691).
+  `∫ (x < 0.3 − 1.27·10⁻¹⁰ ? 0 : 1) + 1/√(0.3 − x) dx` on `[0, 0.3]` was
+  extrapolated with an error of `1.4e-13`, and its true error was `1.3e-10`.
+  The extrapolation next to a singular bound reads the integrand only down to
+  about `2²⁰` doubles from the bound, and it took the part nearer than that
+  for a pure singularity. The integrand is now also read at 4 points per
+  octave of the distance to the bound, and a step, a bump, a zero or a change
+  of sign there stops the extrapolation: the result has the error of the
+  Gauss–Kronrod value: `± 1.0e-8` here, for a true error of `6.5e-9`. Such
+  results are less accurate than before, but their error is correct. An
+  integral with no feature next to the bound gives the same result as before.
+  Of 900 such integrals, 187 had an error smaller than their true error; none
+  does now.
+
 - **A numeric integral whose integrand is infinite at some doubles next to a
   singular bound has a finite error** (GitHub issue #494). In
   `∫₀^½ cos(t/2)/√(cos t − cos ½) dt`, `cos t − cos ½` is 0 in doubles at ½

@@ -749,22 +749,52 @@ export function uncountedArea(corner: CornerSeries): number {
   return cornerModelArea(corner, last.width, true);
 }
 
-/** `UNCOUNTED_SAFETY` times the integral over the distances `[0, delta]`
+/**
+ * `UNCOUNTED_SAFETY` times the integral over the distances `[0, delta]`
  * from the endpoint of the model of the shells of `uncountedArea`: `+∞` for
  * a ratio of at least 1. When there is no model, `fallbackArea` with
- * `fallback`, else 0. */
+ * `fallback`, else 0.
+ *
+ * The result is the larger of two areas: the area of the model of the
+ * deepest shells (`cornerModel`), and the area of the model of the deepest
+ * shells whose values are accurate enough for their ratios to mean
+ * something (`skipNoisy`). The deepest shells can be only some doubles wide,
+ * and their values are then off by several percent. For `1/√(0.3 − x)` with
+ * a step at `1.6e-9` from `0.3` (the step stops the extrapolation), the
+ * shells 2 to 16 doubles wide have ratios `0.745`, `0.721` and `0.56` that
+ * fall toward the endpoint, the model of the deepest shells has the ratio
+ * `0.567` instead of `2^(−1/2)`, and the area that tanh-sinh leaves out was
+ * `4.7e-9` instead of about `2e-8`: the result was `± 4.7e-9` for a true
+ * error of `1.08e-8`. The larger of the two areas is used, not the model of
+ * the accurate shells alone: for `(x − 10⁹)^(−1/2) + 1.33e-5·(x − 10⁹)^(−0.99)`
+ * on `[10⁹, 10⁹ + 1]`, the deepest shells carry the second term, and the
+ * model of the accurate shells alone made the error `1.851e-3` for a true
+ * error of `1.865e-3` (`1.890e-3` with the deepest shells).
+ */
 function cornerModelArea(
   corner: CornerSeries,
   delta: number,
   fallback = false
 ): number {
-  const model = cornerModel(corner, delta);
-  if (model === undefined) return fallback ? fallbackArea(corner, delta) : 0;
-  if (model === 'divergent') return Number.POSITIVE_INFINITY;
-  return Number.isFinite(model.area)
-    ? UNCOUNTED_SAFETY * model.area
-    : Number.POSITIVE_INFINITY;
+  const area = (skipNoisy: boolean) => {
+    const model = cornerModel(corner, delta, skipNoisy);
+    if (model === undefined) return fallback ? fallbackArea(corner, delta) : 0;
+    if (model === 'divergent') return Number.POSITIVE_INFINITY;
+    return Number.isFinite(model.area)
+      ? UNCOUNTED_SAFETY * model.area
+      : Number.POSITIVE_INFINITY;
+  };
+  return Math.max(area(false), area(true));
 }
+
+/**
+ * The largest relative error of a shell (its QUADPACK error, see
+ * `CornerSeries.shellQuadpackErrors`) that `cornerModel` reads with
+ * `skipNoisy`: a quarter of `UNCOUNTED_RATIO_SPREAD`, so that the errors of
+ * the four shells of a window do not change their ratios by more than the
+ * spread that reads as one ratio.
+ */
+const MODEL_SHELL_RELATIVE_ERROR = UNCOUNTED_RATIO_SPREAD / 4;
 
 /**
  * The largest relative difference between the value of a finite last corner
@@ -862,10 +892,23 @@ function fallbackArea(corner: CornerSeries, delta: number): number {
  * `undefined`. `'divergent'` for a ratio of at least 1 that the ratios agree
  * on, `undefined` when there is no model. `sign` is the sign of the shells
  * of the window, and `ratio` the ratio `r`.
+ *
+ * With `skipNoisy`, a window that holds a shell whose relative error is
+ * more than `MODEL_SHELL_RELATIVE_ERROR` is skipped, and the search goes on
+ * toward wider shells (see `cornerModelArea`). Such a window still gives no
+ * model when its ratios do not agree (`UNCOUNTED_RATIO_SPREAD`), fall toward
+ * the endpoint, and the deepest one is below `1/2`, as without `skipNoisy`:
+ * that is the sign of a zero of the integrand next to the
+ * endpoint, and the shells farther out do not describe the integrand past
+ * that zero. For `(x − 10⁹)^(−0.9)·(x − 10⁹ − 10⁻⁷)` the deepest shells have
+ * relative errors up to `0.74` and ratios that fall to `0.38`; the model of
+ * the shells farther out made the error `1.1e-7` for a true error of
+ * `1.9e-7`.
  */
 function cornerModel(
   corner: CornerSeries,
-  delta: number
+  delta: number,
+  skipNoisy = false
 ):
   | { area: number; low: number | undefined; sign: number; ratio: number }
   | 'divergent'
@@ -888,6 +931,24 @@ function cornerModel(
     if (!window.every(Number.isFinite)) continue;
     const ratios = [1, 2, 3].map((i) => window[i] / window[i - 1]);
     if (!ratios.every((q) => q > 0)) continue;
+    if (skipNoisy) {
+      const errors = corner.shellQuadpackErrors ?? corner.shellErrors;
+      let noisy = false;
+      for (let k = j - 3; k <= j; k++)
+        if (!(errors[k] <= MODEL_SHELL_RELATIVE_ERROR * Math.abs(shells[k])))
+          noisy = true;
+      if (noisy) {
+        const spread = Math.max(...ratios) - Math.min(...ratios);
+        if (
+          !(spread <= UNCOUNTED_RATIO_SPREAD * Math.max(...ratios)) &&
+          ratios[0] >= ratios[1] &&
+          ratios[1] >= ratios[2] &&
+          ratios[2] < 0.5
+        )
+          return undefined;
+        continue;
+      }
+    }
     let r = Math.max(...ratios);
     let low: number | undefined = Math.min(...ratios);
     if (!(r - low <= UNCOUNTED_RATIO_SPREAD * r)) {
@@ -2031,6 +2092,221 @@ function outsidePoleShape(
   });
 }
 
+/** The number of samples per octave of the distance to the endpoint in
+ * `featureNearEndpoint`. A bump whose width is a quarter of its distance to
+ * the endpoint holds at least one sample. */
+const FEATURE_SAMPLES_PER_OCTAVE = 4;
+
+/** The number of accurate shells, counted back from the last one, over which
+ * `featureNearEndpoint` reads the integrand: the shells of the partial sums
+ * of the ε-algorithm (`EPSILON_SUMS` sums and one more shell). */
+const FEATURE_SHELLS = EPSILON_SUMS + 1;
+
+/** The number of octaves past the last accurate shell over which
+ * `featureNearEndpoint` reads the integrand, toward the endpoint. At a
+ * nonzero endpoint the last accurate shell is about `ACCURATE_SHELL_SPACINGS
+ * = 2²⁰` spacings of the doubles from it, so these octaves reach the
+ * `FEATURE_MIN_SPACINGS` limit first. */
+const FEATURE_NARROW_OCTAVES = 20;
+
+/** The smallest distance to a nonzero endpoint, in spacings of the doubles
+ * there, at which `featureNearEndpoint` tests a sample. Nearer, the samples
+ * are only some doubles apart. */
+const FEATURE_MIN_SPACINGS = 64;
+
+/** The number of fourth differences on each side of a sample that give its
+ * noise level in `featureNearEndpoint` (two octaves). */
+const FEATURE_NOISE_WINDOW = 8;
+
+/**
+ * The smallest ratio of the fourth difference at a sample to the noise level
+ * next to it that `featureNearEndpoint` reads as a feature. The factors 20,
+ * 100 and 1000 gave the same results on the 900 steps and bumps of
+ * `docs/scratch/2026-10-30-ce691-quadrature/sweep.mts`, on 420 integrals with
+ * no feature and on 80 integrals with rounding noise (`cancel.mts`). 100
+ * leaves a margin against noise that is not uniform: in the interpreted
+ * integrand `y^(−1/2)·e^(−y/2)` of Tycho row 422, the fourth difference at
+ * the border of a part with rounding noise was 27 times the noise level of
+ * the other side.
+ */
+const FEATURE_NOISE_RATIO = 100;
+
+/** The smallest fourth difference of the exponents that
+ * `featureNearEndpoint` reads as a feature, when the noise level is 0. */
+const FEATURE_MIN_DIFFERENCE = 1e-13;
+
+/**
+ * Whether the integrand has a feature (a step, a bump, a zero) next to the
+ * endpoint of `corner` that the extrapolation of its shells does not see.
+ * `direction` points from the endpoint into the interval. The function polls
+ * `deadline` before each sample.
+ *
+ * The extrapolation reads the accurate shells only (`accurateShells`). The
+ * value nearer to the endpoint than the last accurate shell, at the
+ * distance `D`, is a model of a singularity AT the endpoint. Next to a
+ * nonzero endpoint, `D` is about `2²⁰` spacings of the doubles. A shell that
+ * holds a small feature can also pass the accuracy test, and the
+ * ε-algorithm then reads partial sums that do not converge geometrically.
+ * For `(c − x)^(−1/2)` on `[c − 0.3, c]` plus a step or a bump at the
+ * distance `d` from `c`, the error was smaller than the true error in 180
+ * of 900 extrapolated cases (`docs/scratch/2026-10-30-ce691-quadrature/
+ * sweep.mts`): a step of height 1 at `d = 1.27e-10` from `0.3` gave
+ * `± 1.4e-13` for a true error of `1.3e-10`, and a step of height `1e-4` at
+ * `d = 2.59e-7` from `0.7` gave `± 2.5e-12` for `2.6e-11`.
+ *
+ * The function reads `|f|` at `FEATURE_SAMPLES_PER_OCTAVE` points per octave
+ * of the distance `t` to the endpoint, from the outer edge of the last
+ * `FEATURE_SHELLS` accurate shells to `D/2^FEATURE_NARROW_OCTAVES` (at
+ * least `FEATURE_MIN_SPACINGS` spacings of the doubles from the endpoint),
+ * and some samples past each end of that range. Each sample is at a double,
+ * and `t` is its exact distance to the endpoint. Next to an endpoint where
+ * `|f| = t^(−p)·h(t)`, the exponent between two samples,
+ * `e = ln(|f(t₂)|/|f(t₁)|)/ln(t₁/t₂)`, changes slowly from one pair of
+ * samples to the next: it is `p` for a power, `p + O(1/ln t)` for a
+ * logarithmic factor, and `p + O(t)` for a smooth factor. A step between two
+ * samples changes one exponent, and a bump two. The test reads the fourth
+ * difference of the exponents at each sample, and compares it with the
+ * noise level next to it: the larger of the medians of the
+ * `FEATURE_NOISE_WINDOW` fourth differences on each side, without the five
+ * that the sample changes. A feature is a fourth difference larger than
+ * `FEATURE_NOISE_RATIO` times the noise level plus `FEATURE_MIN_DIFFERENCE`.
+ *
+ * The noise level comes from the samples, not from the doubles next to a
+ * sample: for `1/√(1 − x²)` next to 1, `x²` moves by an exact step between
+ * neighboring doubles, so the rounding error of `1 − x²` (`2e-9` in the
+ * exponents) is the same for neighbors. One median over both sides is not
+ * used either: the samples of the interpreted integrand of Tycho row 422 have
+ * rounding noise farther than `3e-11` from the endpoint and none nearer, and
+ * at the border that median came from the side with no noise.
+ *
+ * A sample of `0` nearer to the endpoint than the outer samples past the
+ * tested range and not nearer than its near end is a feature, and so is a
+ * sample whose sign is not the sign of the accurate shells, and a sample that
+ * is not finite farther from the endpoint than `D` (the shells there are
+ * finite, so it is another singular point). Nearer than `D`, a sample that
+ * is not finite stops the samples: `x^(−0.99)` overflows at the denormals
+ * next to 0. Not tested when the accurate shells change sign: next to an
+ * endpoint where the integrand oscillates (`cos(ln t)/t^0.999` at 0), the
+ * exponents have poles at the zeros of the integrand.
+ *
+ * Not seen: a feature smaller than `FEATURE_NOISE_RATIO` times the noise
+ * level, a bump narrower than about a quarter of an octave of `t` (it can
+ * fall between two samples), a feature nearer than `FEATURE_MIN_SPACINGS`
+ * spacings to a nonzero endpoint, a feature in the shells farther from
+ * the endpoint than the tested range, which the Levin u-transform and the
+ * model of `shellTail` can read, and a feature in the outer octave of the
+ * tested range when the corner panel ends there (fewer than about
+ * `FEATURE_SHELLS + 3` accurate shells: at a large endpoint such as `10⁵`).
+ */
+function featureNearEndpoint(
+  f: (x: number) => number,
+  corner: CornerSeries,
+  direction: 1 | -1,
+  deadline: number | DeadlineFrame | undefined
+): boolean {
+  const e = corner.endpoint;
+  const spacing = Math.max(Math.abs(e) * Number.EPSILON, Number.MIN_VALUE);
+  const n = accurateShells(corner).count;
+  const accurate = corner.shells.slice(0, n);
+  if (!(accurate.every((v) => v > 0) || accurate.every((v) => v < 0)))
+    return false;
+  const sign = Math.sign(accurate[0]);
+  // The distance of the last accurate shell to the endpoint.
+  const last = corner.width / 2 ** n;
+  // The tested range, `[near, far]`.
+  const far = corner.width / 2 ** Math.max(0, n - FEATURE_SHELLS);
+  const near = Math.max(
+    FEATURE_MIN_SPACINGS * spacing,
+    last / 2 ** FEATURE_NARROW_OCTAVES
+  );
+  // Past each end of the tested range, enough samples for the window of
+  // the noise level, the five fourth differences that a sample changes, and
+  // the four exponents of a fourth difference. Not farther than the corner
+  // panel, which is inside the interval.
+  const extra = FEATURE_NOISE_WINDOW + 5;
+  const top = Math.min(
+    corner.width,
+    far * 2 ** (extra / FEATURE_SAMPLES_PER_OCTAVE)
+  );
+  const bottom = Math.max(
+    spacing,
+    near / 2 ** (extra / FEATURE_SAMPLES_PER_OCTAVE)
+  );
+  const distances: number[] = [];
+  const values: number[] = [];
+  for (let i = 0; ; i++) {
+    const target = top / 2 ** (i / FEATURE_SAMPLES_PER_OCTAVE);
+    if (!(target >= bottom)) break;
+    const x = e + direction * target;
+    const t = Math.abs(x - e);
+    if (!(t > 0)) break;
+    // Next to the endpoint, two targets can round to the same double.
+    if (distances.length > 0 && t === distances[distances.length - 1]) continue;
+    checkDeadline(deadline);
+    const y = f(x);
+    const v = Math.abs(y);
+    if (v === 0) {
+      if (t >= near) return true;
+      break;
+    }
+    if (!Number.isFinite(v)) {
+      if (t >= last) return true;
+      break;
+    }
+    // A step that changes the sign of the integrand and not its magnitude
+    // (`(t < d ? −1 : 1)/√t`) leaves the exponents of `|f|` unchanged.
+    if (Math.sign(y) !== sign) return true;
+    distances.push(t);
+    values.push(v);
+  }
+  // `exponents[i]` is the exponent between the samples `i` and `i + 1`.
+  const exponents: number[] = [];
+  for (let i = 0; i + 1 < distances.length; i++)
+    exponents.push(
+      Math.log(values[i + 1] / values[i]) /
+        Math.log(distances[i] / distances[i + 1])
+    );
+  // `differences[i]` is the fourth difference centered on the exponent
+  // `i + 2`, the exponent between the samples `i + 2` and `i + 3`.
+  const differences: number[] = [];
+  for (let i = 2; i + 2 < exponents.length; i++)
+    differences.push(
+      Math.abs(
+        exponents[i - 2] -
+          4 * exponents[i - 1] +
+          6 * exponents[i] -
+          4 * exponents[i + 1] +
+          exponents[i + 2]
+      )
+    );
+  const median = (v: number[]) => {
+    const sorted = [...v].sort((p, q) => p - q);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+  for (let i = 0; i < differences.length; i++) {
+    const t = distances[i + 2];
+    if (!(t >= near && t <= far)) continue;
+    // A change of one exponent changes the five fourth differences from
+    // `i − 2` to `i + 2`: they are left out of the noise level.
+    const before = differences.slice(
+      Math.max(0, i - 2 - FEATURE_NOISE_WINDOW),
+      Math.max(0, i - 2)
+    );
+    const after = differences.slice(i + 3, i + 3 + FEATURE_NOISE_WINDOW);
+    // At the outer end of the range, the corner panel can leave no room for
+    // samples past it (few accurate shells). A noise level from the side
+    // toward the endpoint only is not used there: the fourth differences of a
+    // smooth factor such as `exp(10⁻⁴·t⁵)` fall by `2^(−5/4)` per sample
+    // toward the endpoint, and that side gave a noise level 181 times
+    // smaller than the fourth difference at the sample.
+    if (before.length < 4 || after.length < 4) continue;
+    const noise = Math.max(median(before), median(after));
+    if (differences[i] > FEATURE_NOISE_RATIO * noise + FEATURE_MIN_DIFFERENCE)
+      return true;
+  }
+  return false;
+}
+
 /** The double next to `x` toward `+∞` (`direction` 1) or `−∞` (−1). */
 export function nextDouble(x: number, direction: 1 | -1): number {
   if (Number.isNaN(x) || x === direction * Infinity) return x;
@@ -2293,7 +2569,26 @@ function resolveCorners(
   let tailSpread = 0;
   let oscillates = false;
   for (const corner of corners) {
-    const x = extrapolateCorner(corner);
+    let x = extrapolateCorner(corner);
+    // A feature of the integrand next to the endpoint that the shells do not
+    // show (`featureNearEndpoint`) stops the extrapolation, as a feature
+    // that the shells show does (`featureAfterShells` in
+    // `extrapolateCorner`). The correction of the refused extrapolation and
+    // its error stay in the uncertainty of the Gauss–Kronrod result, as for
+    // an extrapolation that is not used (see `tailSpread` below). When a
+    // corner already failed, the result is not extrapolated, and the
+    // integrand is not sampled.
+    if (
+      x.ok &&
+      !failed &&
+      featureNearEndpoint(
+        f,
+        corner,
+        corner === gk.lo ? 1 : -1,
+        options.deadline
+      )
+    )
+      x = { ok: false, spread: Math.abs(x.value - corner.value) + x.error };
     if (x.ok) {
       estimate += x.value - corner.value;
       error += x.error - corner.error;

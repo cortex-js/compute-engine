@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-695.
+Next free reference: CE-698.
 
 **Entry format.**
 
@@ -2754,14 +2754,29 @@ with the shells that the model of the first shells predicts.
 
 ### CE-691. A step or a bump near a singular bound gives an error smaller than the true error
 
-**Status:** design needed; wrong value; numerics.
+**Status:** fixed (pending commit), 2026-10-30; wrong value; numerics. User
+decision 2026-10-30: option A of
+`docs/plans/2026-10-30-ce691-feature-next-to-singular-bound.md` (a feature
+next to the bound stops the extrapolation; it does not add an error to an
+extrapolated value). The integrand is read at 4 points per octave of the
+distance to the bound (`featureNearEndpoint`,
+`numerics/endpoint-quadrature.ts`), and the area next to the bound is the
+larger of the areas of two models of the deepest shells (`cornerModelArea`).
+On the 900 cases below: 0 uncovered (187 before), 0 newly uncovered. The 420
+results that were extrapolated are not extrapolated any more (every one has a
+feature in the tested range); for the 222 of them that were correct, the error
+grew from about `1e-13` to `1e-8` (median `1.9e-13 → 6e-8` at 0.7). No result
+of 420 integrals with no feature changed its extrapolation or its convergence.
+Tests: `test/compute-engine/quadrature-feature-near-endpoint.test.ts`. What
+the fix does not see: CE-695, CE-696, CE-697.
 
-`adaptiveQuadrature` with `singularEndpoints` of a pole `(c − x)^(−1/2)` on
+The record of the defect: `adaptiveQuadrature` with `singularEndpoints` of a
+pole `(c − x)^(−1/2)` on
 `[c − 0.3, c]` plus a feature at the distance `d` from `c` (a step of height
 `J`, area `J·d`, or a bump of height `J` and width `d/4`) reports an error
 smaller than the true error in 187 of 900 cases (`c` = 0.3, 0.7, 1, 3.7, 1000.5;
 `J` = 1, `1e-2`, `1e-4`; 30 values of `d` from 1e-3 to 1e-11). The result is
-`extrapolated` in these cases. Two causes:
+`extrapolated` in 180 of these cases. Three causes:
 
 - The feature is nearer to `c` than about `ACCURATE_SHELL_SPACINGS = 2²⁰`
   spacings of the doubles at `c`. The shells there are too narrow to be read as
@@ -2778,10 +2793,74 @@ smaller than the true error in 187 of 900 cases (`c` = 0.3, 0.7, 1, 3.7, 1000.5;
   0.3 (true error up to 2.3 times the error) and `3.3e-6` from 1000.5 (15
   times).
 
-A fix could compare the model of the shells with samples of the integrand nearer
-to `c`, and with the shells after the last accurate one, and add the difference
-to the error. It must keep correct today's covered cases, and it is related to
-CE-690, which needs the opposite (fewer refusals under rounding noise).
+- (Found during the fix, 7 cases at 0.3, not extrapolated.) When a step stops
+  the extrapolation, the area that tanh-sinh leaves out came from a model of
+  the shells 2 to 16 doubles wide, whose values are off by 5 to 9 %: the ratio
+  `0.567` instead of `2^(−1/2)`. A step of height 1 at `1.61e-9` from 0.3 gave
+  `± 4.7e-9` for a true error of `1.08e-8`.
+
+The fix adds a second refusal of the extrapolation; CE-690 asks for fewer
+refusals under rounding noise. `featureNearEndpoint` reads its noise level from
+the samples, so it does not fire on the 80 integrals with the cancellation of
+CE-690 (`docs/scratch/2026-10-30-ce691-quadrature/cancel.mts`: `covered 80`
+before and after).
+
+### CE-695. After a refused extrapolation, the error of a corner whose shells decrease like a power is too small
+
+**Status:** open; wrong value; numerics. Found 2026-10-30 while measuring
+CE-691; older than that fix (the same results at commit `fb5469f19`).
+
+`1/(x·ln²x)` on `[0, ½]` plus a step of area `1e-6` at `1e-3` from 0 (height
+`1e-3` on `[0, 1e-3]`): the extrapolation is refused (the step is seen), and
+the result is `± 1.28e-3` for a true error of `1.38e-3`. The same for 65 of the
+162 cases of `1/(x·ln²x)`, `1/(x·(−ln x)³)` and `x^(−1/2)·(−ln x)` with a step
+or a bump of area `1e-6`, `1e-9` or `1e-12` at `1e-3` to `1e-300` from 0
+(`docs/scratch/2026-10-30-ce691-quadrature/sweep-zero.mts`; these 65 are not
+extrapolated). The tail of such a corner past its last shell is not small
+(about `1/(n·ln 2)` after `n` shells of `1/(x·ln²x)`), and the widened error of
+the Gauss–Kronrod value (`spread` of `extrapolateCorner`, `resolveCorners`)
+does not cover it. A fix of CE-696 that refuses more extrapolations makes more
+results take this route, so this entry comes first.
+
+### CE-696. A small feature in the shells that the Levin u-transform does not read is not seen
+
+**Status:** open; wrong value; numerics. Found 2026-10-30 while measuring
+CE-691; older than that fix.
+
+`1/(x·ln²x)` on `[0, ½]` plus a step of area `1e-12` at `1e-8` from 0: the
+result is extrapolated, `± 2.05e-13`, for a true error of `9.8e-13` (the whole
+area of the step). The Levin value of these shells reads the partial sums near
+the shells 8 and 16 (`LEVIN_START`), and the shells after them have no effect on
+the value: with and without the step it is `0.288539008177816` for the corner.
+`featureNearEndpoint` reads the integrand only next to the last 21 accurate
+shells. 16 of the 162 cases of `sweep-zero.mts` are like this (11 of
+`1/(x·ln²x)` with the area `1e-12`, 5 of `1/(x·(−ln x)³)` with the area
+`1e-6`). A test of the
+differences of the shells did not see the step: the smooth part of the
+differences of `ln` of these shells is about `1e-5` at shell 20, and the step
+changes them by about `1e-10`. A fix needs a model of the shells (for
+example, compare the partial sums with the Levin model of the tail), or a test
+of the integrand over every shell that the method reads (up to about 1000
+octaves next to 0, too many evaluations for an interpreted integrand at 4 per
+octave).
+
+### CE-697. Features next to a singular bound that `featureNearEndpoint` does not see
+
+**Status:** open; wrong value (low); numerics. Found 2026-10-30 with the fix of
+CE-691.
+
+`featureNearEndpoint` (`numerics/endpoint-quadrature.ts`) does not see a
+feature smaller than 100 times the rounding noise of the integrand, a bump
+narrower than about a quarter of an octave of the distance (it falls between
+two samples), a feature nearer than 64 spacings of the doubles to a nonzero
+bound, a feature next to a bound where the shells change sign (the test does
+not run), or a feature in the outer octave of the tested range when the corner
+panel ends there (fewer than about 24 accurate shells, at a large bound such as
+`10⁵`; a noise level from one side only refused the smooth
+`t^(−1/2)·exp(10⁻⁴·t⁵)`). Measured: a bump of height `1e-8` and width `2.5e-4` at `1e-3` from
+0.3, on `(0.3 − x)^(−1/2)`, is `± 1.57e-13` for a true error of `1.93e-13`,
+before and after the fix (`sweep.mts` with `SWEEP_HEIGHTS=1e-6,1e-8`: 1 of 600
+cases). The other limits are not measured.
 
 ### CE-561. An interval one double wide reports `0 ± 0`
 
@@ -5833,6 +5912,22 @@ Measured 2026-10-30 at `399b29e6c` (session compute-engine-7b):
   (1,691 files, 73,269 tests). The experiment has no guard for a type
   handler that reads the value of a parameter through the call frame;
   such a guard is needed before it can ship.
+- The guard, tried 2026-10-30 (worktree `/tmp/wt-compute-engine-7b`): a
+  type computation that looks up a name that a call has bound keeps its
+  type under the `any` version only. With it the gain is gone (3,043
+  type misses per `Apply` instead of 6,332; no time saved). The type
+  computations of a function body read the values of the parameters:
+  the operand views read `BoxedSymbol.value` (`isFiniteBroadcastParticipant`,
+  `isNumericScalarOperandView`, `isTuple`, `isTextAtom`), and
+  `structureOfExpression` (`operand-descriptor.ts`) compares the lookup of
+  a symbol by name with its own definition (`lookupByName`), which inside
+  a call finds the activation. So at HEAD the type of a node of a body
+  can depend on the values of the call in which it is read. A type
+  handler that reads a parameter by name (`lookupDefinition('x')`) gives
+  `integer` in a call `g(3)` and `string` in `g("ab")` at HEAD; without
+  the guard it gave the type computed at boxing, `any`, in both calls.
+  The experiment was right on this workload only because these value
+  reads did not change any type here.
 - Timing of every first-parent commit from 0.156.0 to 0.158.0, 0.167.0 to
   0.169.0 and 0.170.0 to 0.173.0: no commit stands out from the noise
   (commits that change only documentation show rises of 2 to 6 ms). The
