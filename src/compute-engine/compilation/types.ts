@@ -1609,8 +1609,13 @@ export interface CompileTarget<Expr = unknown> {
    *
    * The shared compiler consults it only in the positions that CONSUME a
    * collection value whole: the body of an emitted user-function definition
-   * (a helper that returns a list), and an argument of a call whose callee
-   * binds its parameters whole (`userFunctionParamsAreScalar` is false). A
+   * (a helper that returns a list), an argument of a call whose callee
+   * binds its parameters whole (`userFunctionParamsAreScalar` is false), and
+   * the source of an `Element` clause of a `Loop` or a `Comprehension`. A
+   * loop source must be iterated by `for … of`, so the compiler asks the
+   * hook there only for a `List`, `Tuple` or `Map` (inline or as a symbol's
+   * value), whose spelling is an array (a `Map` whose own source has no
+   * array value excepted). A
    * target that declares it has no ordinary lowering for a collection
    * literal — the interval target keeps its `List` out of the function table
    * on purpose (see `compileIntervalCollectionOperand`) — so the array

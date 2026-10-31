@@ -21,6 +21,11 @@
   - `TupleFrom([p, q])` is typed `tuple` (it was `tuple<number, number>`).
   - In LaTeX, `N(2.3)` after `[N, 1]` is the call of the library `N`, as after
     `(N, 1)` (it was the product `2.3N`).
+  - `Reverse([p, q])` and `Sort([p, q])` leave `p` as `unknown`. The type
+    variable `T` of their signature was solved from the type `vector<2>` of the
+    list, and that `number` was then written back on `p`. At a generic
+    parameter, the elements of a list literal now get only what the declared
+    bound of the variable requires.
   - In a function literal, `x ↦ [-x, y]` is still typed
     `(x: unknown) -> vector<2>`, and `y` stays `unknown`. A function `g`
     assigned this literal keeps its check: after `y := "abc"`, `g(3)` is an
@@ -50,48 +55,49 @@
 - **Interval target: a range with a computed bound has a value when its length
   is known.** At `n = 1`, `n/3` is an interval about one ulp wide around 1/3,
   because interval division rounds outward. The `interval-js` code of
-  `Block(c := 0, Loop(c := c + k, Element(k, Range(n/3, 5))), c)` gave
-  `entire`, because every bound that is not a single number gave `entire`.
-  Now a range whose number of elements is the same for every value inside its
-  bounds gives that many elements, each an interval that holds the
-  interpreter's element: here the result holds `11.67`, the interpreter's
-  value. A range whose number of elements can change inside its bounds still
-  gives `entire`, for example `Range(0, 2, n/3)`, where `2 / (n/3)` is near 6.
+  `Block(c := 0, Loop(c := c + k, Element(k, Range(n/3, 5))), c)` gave `entire`,
+  because every bound that is not a single number gave `entire`. Now a range
+  whose number of elements is the same for every value inside its bounds gives
+  that many elements, each an interval that holds the interpreter's element:
+  here the result holds `11.67`, the interpreter's value. A range whose number
+  of elements can change inside its bounds still gives `entire`, for example
+  `Range(0, 2, n/3)`, where `2 / (n/3)` is near 6.
 - **Compiled code: a coordinate of a point-or-point-list symbol with an assigned
   point compiles on `javascript`, `interval-js` and `python`** (ROADMAP CE-658).
   With `P: tuple<number, number> | list<tuple<number, number>>` and
   `P := (3, 4)`, `At(P, 1) + x` and `At(P, 2) - x` failed with "an operand may
   be a point (a tuple) and another operand is a number"; they now compile to
   `x + 3` and `-x + 4`, as on `glsl` and `wgsl`. On `javascript` and
-  `interval-js`, a call such as `f(x) + x` with `f(t) := At(P, 1)` compiles
-  too. The compiled code holds the value the point had at compile time. A `P`
-  that a `vars` entry maps, a `P` with no value, and a `P` that holds a list of
-  points behave as before. A call whose head the `operators` option overrides,
-  or whose argument reads `vars` source, is not replaced by its body.
+  `interval-js`, a call such as `f(x) + x` with `f(t) := At(P, 1)` compiles too.
+  The compiled code holds the value the point had at compile time. A `P` that a
+  `vars` entry maps, a `P` with no value, and a `P` that holds a list of points
+  behave as before. A call whose head the `operators` option overrides, or whose
+  argument reads `vars` source, is not replaced by its body.
 - **Compiled code tests a value assigned to a `Block` local declared with a
   type** (ROADMAP CE-662). With `Declare(p, "integer")`, the interpreter gives
   an `incompatible-type` error for `Assign(p, 0.5)` and for `Assign(p, u/2)` at
   `u = 1`; the compiled code had no test and gave `0.5`. Each assigned value is
   now classified at compile time:
-  - a value whose static type is a subtype of the declared type compiles with
-    no test, as before;
-  - a value that is never of the declared type (`0.5` into `integer`, a point
-    or a string into `real`) fails to compile on every target;
-  - another value is tested when the code runs: JavaScript throws an `Error`
-    and Python raises a `TypeError`, with `incompatible-type` and the name of
-    the local. GLSL, WGSL and interval JavaScript refuse to compile such a
-    value, and so does every target for a declared type that has no simple
-    test (`rational`, a tuple, a matrix).
+  - a value whose static type is a subtype of the declared type compiles with no
+    test, as before;
+  - a value that is never of the declared type (`0.5` into `integer`, a point or
+    a string into `real`) fails to compile on every target;
+  - another value is tested when the code runs: JavaScript throws an `Error` and
+    Python raises a `TypeError`, with `incompatible-type` and the name of the
+    local. GLSL, WGSL and interval JavaScript refuse to compile such a value,
+    and so does every target for a declared type that has no simple test
+    (`rational`, a tuple, a matrix).
 
   The test is for `integer`, `real`, number ranges such as `real<0..1>`,
   `number`, `boolean`, `string`, unions of these, and lists and vectors of
   these. A local declared `real` refuses `NaN` and `±∞`, as the interpreter
-  does. For `ReplaceAt(xs, i, v)` assigned to `xs`, declared `list<T>`, only
-  `v` is tested, so the update stays in place. A type written as a symbol
+  does. For `ReplaceAt(xs, i, v)` assigned to `xs`, declared `list<T>`, only `v`
+  is tested, so the update stays in place. A type written as a symbol
   (`Declare(p, integer)`) is checked as a string type is, and a `list<T^0>`
   local accepts only an empty list. The type of a free input that the engine
-  inferred from a use (`h(x)` with `h: (integer) -> integer`) is not taken as
-  a proof that the value is of the declared type.
+  inferred from a use (`h(x)` with `h: (integer) -> integer`) is not taken as a
+  proof that the value is of the declared type.
+
 - **Shader targets: the NaN guard stays on operands that can overflow f32**
   (ROADMAP CE-619). The proof that an operand of `sin`, `cos`, `min`, `max`,
   `sign` or `clamp` is finite, which lets the GLSL and WGSL targets call the
@@ -122,6 +128,16 @@
 
 ### Behavior Changes
 
+- **Interval target: a loop over a literal list compiles.** On `interval-js`, a
+  `Loop` or a `Comprehension` over a `List`, a `Tuple` or a `Map`, written
+  inline or held as the value of a symbol, refused to compile ("no lowering"),
+  and the interpreter evaluated it. It now compiles, and gives the
+  interpreter's value: `Block(c := 0, Loop(c := c + k, Element(k, [1, n, 3])),
+  c)` at `n = 5` is the point interval `9`. A loop over a `When`, `If` or
+  `Which` still refuses to compile, because its value is not always a list. A
+  loop over a `Linspace` still refuses too: `Linspace` has no lowering on
+  `interval-js`.
+
 - **JavaScript target: a `vars` entry that is the default spelling `_.<name>`
   gets the checks at entry of an unmapped input.** With `L` declared
   `list<number>` and `vars: { L: '_.L' }`, `Sum(L)` and `Length(L)` threw a
@@ -134,25 +150,24 @@
 ### Performance
 
 - **The count and the elements of a family of points are known before
-  evaluation** (ROADMAP CE-661). `count` of a sum or product of a list of
-  points and a point is known: `Add(L, PointList(1.8, 0))` with `L` a list of
-  four points has the count 4. `PointX`, `PointY` and `PointZ` of a list of
-  points have the count of the list, `PointList` with list components has the
-  smallest count of them, and a `ListJoin` of such operands has the sum of
-  their counts. `at(k)` of a broadcast, of `PointX`, `PointY`, `PointZ` and of
-  `PointList` builds the element `k` from the elements of the operands and
-  evaluates only that element, instead of evaluating the whole expression,
-  when the count is known, the expression is pure, and no evaluation of it is
-  cached. A new operator definition hook, `elementAt(expr, k)`, is the `at()`
-  twin of `elementCount`.
-- **A product of a scalar and a list, or of two lists, no longer evaluates
-  each cell a second time** (ROADMAP CE-618). A list of integrals that stay
+  evaluation** (ROADMAP CE-661). `count` of a sum or product of a list of points
+  and a point is known: `Add(L, PointList(1.8, 0))` with `L` a list of four
+  points has the count 4. `PointX`, `PointY` and `PointZ` of a list of points
+  have the count of the list, `PointList` with list components has the smallest
+  count of them, and a `ListJoin` of such operands has the sum of their counts.
+  `at(k)` of a broadcast, of `PointX`, `PointY`, `PointZ` and of `PointList`
+  builds the element `k` from the elements of the operands and evaluates only
+  that element, instead of evaluating the whole expression, when the count is
+  known, the expression is pure, and no evaluation of it is cached. A new
+  operator definition hook, `elementAt(expr, k)`, is the `at()` twin of
+  `elementCount`.
+- **A product of a scalar and a list, or of two lists, no longer evaluates each
+  cell a second time** (ROADMAP CE-618). A list of integrals that stay
   unevaluated, such as `y·[∫ f(x, 1) dx, ∫ f(x, 2) dx]`, tried each
   antiderivative twice: once to evaluate the list, and again in each cell
-  product. A scalar that is already a value is also not evaluated again for
-  each cell. `y·c(y, L, E)` with `E` a list of 6 takes about 85 ms, before
-  140 ms. The values and errors are the same, also for string cells and absent
-  cells.
+  product. A scalar that is already a value is also not evaluated again for each
+  cell. `y·c(y, L, E)` with `E` a list of 6 takes about 85 ms, before 140 ms.
+  The values and errors are the same, also for string cells and absent cells.
 
 ## 0.175.0 _2026-10-30_
 

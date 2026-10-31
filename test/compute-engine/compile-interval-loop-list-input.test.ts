@@ -119,3 +119,112 @@ describe('interval-js: a loop over a list input', () => {
     expect(compiled(json).run!({})).toEqual({ kind: 'empty' });
   });
 });
+
+/** `Block(c := 0, Loop(c := c + body, ...clauses), c)`. */
+function sumLoop(body: unknown, ...clauses: unknown[]) {
+  return [
+    'Block',
+    ['Assign', 'c', 0],
+    ['Loop', ['Assign', 'c', ['Add', 'c', body]], ...clauses],
+    'c',
+  ];
+}
+
+describe('interval-js: a loop over a literal collection', () => {
+  // The interval target spells a literal collection only where it is
+  // consumed whole (`CompileTarget.compileCollectionValue`); a loop source
+  // is such a position.
+  test.each([
+    ['List', ['List', 1, 2, 3], 6],
+    ['Tuple', ['Tuple', 1, 2, 3], 6],
+    [
+      'Map',
+      ['Map', ['Function', ['Multiply', 2, 'u'], 'u'], ['List', 1, 2, 3]],
+      12,
+    ],
+  ])('a %s source', (_name, source, value) => {
+    const json = sumLoop('k', ['Element', 'k', source]);
+    expect(interpret(json)).toBe(value);
+    expect(compiled(json).run!({})).toEqual(point(value as number));
+  });
+
+  test('a symbol whose assigned value is a list', () => {
+    const ce = new ComputeEngine();
+    ce.assign('A', ce.box(['List', 1, 2, 3]));
+    const fn = compile(ce.box(sumLoop('k', ['Element', 'k', 'A']) as any), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.run!({})).toEqual(point(6));
+  });
+
+  test('a list of lists: each element is an array of intervals', () => {
+    const json = sumLoop(
+      ['Sum', 'k'],
+      ['Element', 'k', ['List', ['List', 1, 2], ['List', 3, 4]]]
+    );
+    expect(compiled(json).run!({})).toEqual(point(10));
+  });
+
+  test('an inner literal list that reads the outer loop variable', () => {
+    // j runs over [1, 2], then over [1, 3].
+    const json = sumLoop(
+      'j',
+      ['Element', 'k', 'L'],
+      ['Element', 'j', ['List', 1, 'k']]
+    );
+    expect(compiled(json).run!({ L: [2, 3] })).toEqual(point(7));
+  });
+
+  test('a Map and a Tuple whose elements read an input', () => {
+    // An input keeps the constant pass from computing the source, so the
+    // run-time spelling of the `Map` and of the `Tuple` runs.
+    const ce = new ComputeEngine();
+    ce.declare('n', 'real');
+    const map = sumLoop('k', [
+      'Element',
+      'k',
+      ['Map', ['Function', ['Multiply', 2, 'u'], 'u'], ['List', 1, 'n', 3]],
+    ]);
+    const tuple = sumLoop('k', ['Element', 'k', ['Tuple', 1, 'n', 3]]);
+    for (const [json, value] of [
+      [map, 18],
+      [tuple, 9],
+    ] as const) {
+      const fn = compile(ce.box(json as any), { to: 'interval-js' });
+      expect(fn.success).toBe(true);
+      expect(fn.run!({ n: 5 })).toEqual(point(value));
+    }
+  });
+
+  test.each([
+    ['When', ['When', ['List', 1, 2], ['Less', 't', 1]]],
+    ['If', ['If', ['Less', 't', 1], ['List', 1, 2], 7]],
+  ])(
+    'a %s source declines: its value is not always an array',
+    (_name, source) => {
+      const ce = new ComputeEngine();
+      ce.declare('t', 'real');
+      const fn = compile(
+        ce.box(sumLoop('k', ['Element', 'k', source]) as any),
+        { to: 'interval-js', fallback: false }
+      );
+      expect(fn.success).toBe(false);
+    }
+  );
+
+  test('a comprehension over a list with an input', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'real');
+    const fn = compile(
+      ce.box([
+        'Comprehension',
+        ['Multiply', 2, 'k'],
+        ['Element', 'k', ['List', 1, 'n', 3]],
+      ]),
+      { to: 'interval-js' }
+    );
+    expect(fn.success).toBe(true);
+    expect(fn.run!({ n: 5 })).toEqual([point(2), point(10), point(6)]);
+  });
+});

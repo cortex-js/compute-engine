@@ -446,7 +446,8 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
  * This is the one place the array spelling of a collection-BUILDING head is
  * emitted, and it is reached only from the positions that consume a
  * collection value whole: the compilation root, the body root of an emitted
- * helper and a whole-bound call argument (both through
+ * helper, a whole-bound call argument and the source of a loop over a
+ * `List`, `Tuple` or `Map` (all three through
  * `CompileTarget.compileCollectionValue`), the operand of an accessor or a
  * reducer, a `Map` source, and an operand of the element-wise broadcast
  * (`tryIntervalBroadcast`). There is deliberately no `List`/`Range`/`Map`
@@ -6137,7 +6138,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       },
       // The array spelling of a collection-building expression, for the
       // consuming positions the shared compiler owns (a helper's body root,
-      // a whole-bound call argument). See `compileIntervalCollectionValue`.
+      // a whole-bound call argument, the source of a loop over a `List`,
+      // `Tuple` or `Map`). See `compileIntervalCollectionValue`.
       compileCollectionValue: (e, t) => {
         const code = compileIntervalCollectionValue(e, t);
         if (code !== undefined) SPELLED_COLLECTION_VALUES.add(e);
