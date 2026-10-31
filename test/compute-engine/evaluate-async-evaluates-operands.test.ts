@@ -734,7 +734,6 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
     'NumeratorDenominator',
     'NumericApproximation',
     'PartialFraction',
-    'Pipe',
     'Polynomial',
     'PolynomialDegree',
     'PolynomialGCD',
@@ -820,6 +819,8 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
       'ArgMax',
       'ArgMin',
       'Reduce',
+      // `x |> f` is `f(x)`: the application is awaited.
+      'Pipe',
       // The global scan on the engine's kernel pool (`findFitAsync`,
       // `findRootAsync`).
       'FindFit',

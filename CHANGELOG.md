@@ -35,6 +35,189 @@
 
 ### Bug Fixes
 
+- **A held binder keeps its own index when a parameter has the same name.**
+  `(k ↦ Hold(Sum(k·y, Limits(k, 1, 3))))(5)` gave
+  `Hold(Sum(5·y, Limits(5, 1, 3)))`; it now keeps the `Sum`, and released it
+  gives `6y`. The same holds for a held `Product`, `Comprehension` and definite
+  `Integrate`. The bounds of the index's own clause still get the value:
+  `(k ↦ Hold(Sum(j·y, Limits(j, 1, k))))(5)` gives
+  `Hold(Sum(j·y, Limits(j, 1, 5)))`. The variable of a held `D`, the expansion
+  variable of a held `Series` and the variable of a held indefinite `Integrate`
+  are free, as for `subs()`: when the parameter is such a variable, the call
+  stays unevaluated (`(k ↦ Hold(D(k^2, k)))(3)` gave the invalid
+  `Hold(D(9, 3))`), and a parameter in the body only gets its value
+  (`(k ↦ Hold(D(k·y, y)))(5)` gives `Hold(D(5·y, y))`).
+
+- **The value of a parameter is put in a returned function that reads it from
+  a nested block, and a returned closure that writes a parameter shares it.**
+  With `F2 = (y, w) ↦ (x ↦ y^x)`, `F2(x)(5)(y)` gave `y^y`: the partial
+  application `F2(x)` left `y` in the inner function. It now gives `x^y`. The
+  same defect gave `6a` instead of `6u` for `(a, b) ↦ If(b, Σ_{j=1}^{2} (z ↦
+  a·j·z)(2), 0)` applied to `u`, then to `True`. A returned closure that
+  assigns a parameter now keeps that parameter as a variable it shares, as in
+  JavaScript: the counter `n ↦ (() ↦ Block(n := n + 1, n))` applied to `5`
+  gives `6`, then `7`, where it gave an `incompatible-type` error. With
+  `P = (y, w) ↦ (x ↦ Block(s := y, y := 2, s + x))`, `P(q, 1)(5)` gave `7`
+  and assigned `2` to the caller's `q`; it now gives `q + 5`, a second
+  application gives `7`, and `q` is not changed. When the result cannot keep
+  the parameter in a closure (a partial application, a read of the parameter
+  outside the closure, or a held write), the call stays unevaluated instead of
+  giving a wrong value. For example, `(y, w) ↦ (x ↦ Block(Block(y := 2,
+  y + x)))` applied to `q`, then `1`, then `5` gave `7` and now stays
+  unevaluated (ROADMAP CE-698). A call that stays unevaluated after its body
+  ran keeps the side effects of the body, and each evaluation of the
+  unevaluated call runs the body again.
+
+- **GLSL/WGSL: `First`, `Second`, `Third` and `Last` index an array.** They
+  now read their element as `At` with a constant index does. A declared list
+  of points (`P: list<tuple<real, real>^3>`, a `vec2[3]` in the shader) gave
+  `P.x`, which is not a valid shader; it now gives `P[0]`. A list of 5 or more
+  numbers is subscripted too, and `Last` of it compiles. A position past the
+  end gives NaN, as in the interpreter (`Third` of a pair was `p.z`). A matrix,
+  a list of unknown length, a list of strings and a constructed boolean tuple
+  now decline where they gave an invalid swizzle. An element of a point that
+  can be absent (`First(At(P, k))`, `First(When((x, y), x > 0))`) and a
+  boolean vector (`b: tuple<boolean, boolean>`) are still read with a swizzle.
+
+- **GLSL/WGSL: a block local that receives a list of points by its type
+  declines.** A copy of a declared `list<tuple<real, real>^3>`, of another such
+  local, or the result of a call was declared with the number of points as its
+  width (`vec3 Q; Q = P;` over a `vec2[3]`). It now declines, as a written list
+  of points already did.
+
+- **GLSL/WGSL: a `Loop` over several `Element` clauses visits every
+  combination.** The shader loop read only the first clause, so
+  `Loop(s := s + j, Element(i, 1..3), Element(j, 1..3))` read `j` as an input
+  and gave `3·j` instead of 18. Each clause now emits a nested `for` loop, the
+  first clause outermost, as in the interpreter. The guard of a clause
+  (`Element(i, 1..5, i > 2)`) is now tested; it was dropped, on one clause
+  too. A body that can `Break`, an inner range that reads an outer index, and
+  two clauses with the same index decline.
+
+- **GLSL/WGSL: a free symbol whose tuple type has no shader type declines.** A
+  pair of points (`tuple<tuple<real, real>, tuple<real, real>>`), a mixed tuple,
+  a tuple of complex numbers, a one-element tuple and the bare `tuple` type
+  were emitted as a bare name with `freeSymbolTypes[…].lowered = "point"`. A
+  tuple of more than 4 real numbers now reports `float[N]` (`array<f32, N>`).
+
+- **GLSL/WGSL: code supplied by the caller runs once, in order, and only in
+  the branch that is taken.** Caller code is a `vars` entry whose string is
+  source (`W: 'nextValue()'`), a head mapped through `functions` or
+  `operators`, or an operator's own `compile` handler: it can count its calls
+  or change shader state. The shader targets repeated it (`Cot(W)` emitted
+  `cos(nextValue()) / sin(nextValue())`), moved it ahead of earlier code
+  (`W + Max(V)` with `V: 'vec3(nextValue())'` called `V` first), or ran it in
+  a branch that is not taken (WGSL `select` in `If(c, W, 0)`). Such a form now
+  compiles only where the order is kept: WGSL takes the `if` statement form
+  for a branch with caller code, and a hoist of caller code declines when the
+  statement reads another `vars` input or caller code before it. Otherwise
+  the compile declines. A `vars` entry that is the read of one variable
+  (`u_x`, `params.x`) can still be written twice, and a form with no caller
+  code compiles as before; one exception is `Cot([r, x, 1])` with
+  `r := Random()`, which declines because it drew twice.
+
+- **A compiled comparison chain evaluates the operands that the interpreter
+  evaluates.** `Less(√(Random() − ½), √(Random() − ½), 0)` drew only the
+  first operand when it was complex; the interpreter draws both and then
+  answers `False`, so every later draw of a seeded sequence was different. A
+  chained `Equal` or `NotEqual` with an impure operand, such as
+  `Equal(0.1, Random(), 0.9, Random())`, drew every operand before the first
+  pair, where the interpreter stops at the first `False` pair. An `Equal` chain
+  with an operand whose type admits `missing` before an operand with an effect
+  now declines. The Python target joins a chain over operands that may be
+  complex with `and`; it emitted `&&`.
+
+- **Compiled chained comparisons run caller code once, in operand order.**
+  An operand that runs code the caller supplied (a `vars` entry such as
+  `W: 'nextValue()'`, or a head mapped through `functions` that is not
+  declared pure) is now bound once and evaluated in operand order, and not
+  after a pair that is `false`, as the interpreter evaluates it. The
+  JavaScript, interval-js and Python targets copied that code into each pair
+  and into the NaN test of an absent input, so `x < W < 3` called
+  `nextValue()` up to five times. An earlier operand keeps the value it had
+  before the caller code ran. A run-time broadcast chain (an operand of
+  unknown type) now evaluates a later operand with an effect only after the
+  pairs before it. A chain that cannot keep this order falls back to the
+  interpreter: on Python, an element-wise or collection `Equal` with such an
+  operand, or one after a pair that may read an absent operand.
+
+- **A chained `NotEqual` with an impure middle operand evaluates it once.**
+  `1 ≠ Random() ≠ 2` became `And(1 ≠ Random(), Random() ≠ 2)`, which drew two
+  values. The chain now stays n-ary when a middle operand is impure (also a
+  symbol whose value draws), in the interpreter and in compiled code, and each
+  pair keeps the rules for `Missing` and NaN.
+
+- **`simplify()` and `factor()` of a chain of 3 or more operands keep every
+  operand.** `Less(x, z, y).simplify()` gave `Less(x, z)`, and `1 < 3 < 2`
+  simplified to `True`; it now gives `False`. `Equal(x, y, 1)` and
+  `Equal(x, y, 2)` are no longer reported as the same relation.
+
+- **Compiled JavaScript: real-only heads apply the run-time realness rule.**
+  `Binomial`, `Choose`, `AGM`, `Degrees`, `EllipticF`, `EllipticPi`, the
+  two-operand `EllipticE` and `Hypergeometric1F1` passed the `{re, im}` object
+  of an operand such as `√x` to a real kernel: `Binomial(a, √x)` at `a = 3,
+  x = 4` gave 0 instead of 3, and `AGM(√x)` gave `Infinity`. The kernel now
+  runs on the real part when the imaginary part is exactly zero, and gives NaN
+  otherwise. The iteration count of `Mandelbrot` and `Julia` and the seed of
+  `WithRandomSeed` accept such an operand when its value is real.
+
+- **A comparison chain counts every link in assumptions and solvers.** A chain
+  of three or more operands (`a < b < c`, `a = b = c`) is the conjunction of
+  its adjacent pairs; several places read only the first two operands.
+  `assume(x = 2 = 3)` is now a contradiction, and `assume(y = 2 = z)` gives `z`
+  the value 2; a link that is not a predicate makes the chain
+  `'not-a-predicate'`, as in an `And`. `verify(-1 < x < 5)` is no longer `true`
+  when only `x > -1` is known. The system solvers split a chain into its
+  links, so `[x + y = 1 = x - y]` solves to `x = 1, y = 0`, and `0 ≤ x ≤ 2`
+  bounds an inequality region on both sides. The integration of `If` and
+  `Which` accepts a chain condition (`∫₋₂² [0 < x < 1] dx = 1`). `DSolve`,
+  `RSolve`, the integer-equation solver and `Solve` over a domain no longer
+  solve an equality chain as its first equation: they stay unevaluated when
+  they cannot use every link (`Solve(x² = 4 = x + 2, x ∈ [-10, 10])` gave the
+  correct `[2]` and now stays unevaluated).
+
+- **An `Integrate` whose `Limits` names no variable gives its value.**
+  `["Integrate", 2, ["Limits", 0, 1]]` and `\int_0^1 x` gave 0 under
+  `evaluate()` (the integral was taken with respect to the placeholder
+  `Nothing`) and stayed unevaluated under `N()`. The variable is now the
+  parameter of the integrand (a `Typed` parameter too; with mixed named and
+  unnamed limits, the parameters that no named limit uses, in order), and an
+  integrand with no parameter is a constant `c` whose integral is
+  `c·(b − a)`: `\int_0^1 2` is 2, `\int_0^1 x` is 1/2, `\int_0^∞ 10^{-12}` is
+  `+∞`, and equal bounds give 0. `evaluate()`, `N()`, `NIntegrate` and
+  compiled code agree, also with several limits (`∫₀¹∫₀² x·y` is 1); compiled
+  code now handles an unnamed limit with no closed form by quadrature. A bare
+  symbol whose value is a function, and an indefinite integral with no
+  variable, stay unevaluated. `\int_0^1 x` no longer declares `x` in the
+  enclosing scope.
+
+- **Statistics of one datum or of equal data.** `Skewness` and `Kurtosis` of
+  data whose values are all equal, one datum included, are now NaN under
+  `.N()` and in compiled JavaScript, as the exact route gives `Indeterminate`.
+  A datum such as `√2` gave `+∞`, `-∞` or a tiny number from rounding error.
+  Under `.N()`, the sample `Variance` and `StandardDeviation` of `[√2]` are NaN
+  instead of `+∞`, and `PopulationVariance` of equal data is exactly 0.
+  `Skewness` and `Kurtosis` also no longer lose precision when the mean is
+  large compared with the spread: the central moments are accumulated from the
+  deviations from the first datum, by the same one-pass update in machine and
+  high precision, and not expanded from raw power sums. The machine skewness
+  of `[10⁸, 10⁸ + 1, 10⁸ + 3]` was about `1.16·10⁸` and is now `0.3818…`, and
+  `[5·10¹⁰², −5·10¹⁰²]` no longer overflows.
+
+- **`evaluateAsync()` of `Apply` and `Pipe` awaits the application.** With an
+  operator `AsyncOnly` that has only an `evaluateAsync` handler,
+  `["Apply", ["Function", ["Negate", ["AsyncOnly", "y"]], "y"], 1]` stayed
+  `-AsyncOnly(1)` under `evaluateAsync()`, while the call `g(1)` of
+  `g := y ↦ -AsyncOnly(y)` gave the value. The same was true for a
+  composition (`Apply(Composition(Negate, AsyncOnly), 1)`), for each cell of a
+  function literal mapped over a list or a tuple
+  (`Apply(y ↦ AsyncOnly(y), [1, 2])` is now `[6, 7]`), and for a pipe
+  (`1 |> AsyncOnly`, `1 |> y ↦ -AsyncOnly(y)`, a call stage such as
+  `xs |> Take(AsyncOnly(-3))`, and a stage `F()` whose value is a function
+  that an asynchronous-only `F` returns). For an expression with no such
+  operator, the value of `evaluateAsync()` is the value of `evaluate()`, also
+  under `numericApproximation` and for an error argument.
+
 - **A numeric integral with a step or a bump next to a singular bound reports
   an error that covers its true error** (ROADMAP CE-691).
   `∫ (x < 0.3 − 1.27·10⁻¹⁰ ? 0 : 1) + 1/√(0.3 − x) dx` on `[0, 0.3]` was
@@ -276,6 +459,29 @@
 
 ### Behavior Changes
 
+- **The type of a node of a function body no longer depends on the values of
+  a call** (GitHub issue #487). A type computation reads the declared
+  (static) bindings only: in the body of a function literal, a parameter is
+  the parameter of the literal, with no value, in every call. A type handler
+  that read a parameter by name (`lookupDefinition('x')`) inside the body of
+  `g = x ↦ …` saw the value of the call, so the type of the same node was
+  `integer` in `g(3)` and `string` in `g("ab")`. Now it is the type read
+  outside every call in both. Evaluation, and the sign and value of a node,
+  still read the values of the call.
+
+- **`Limit` and `NLimit` find their implicit variable whatever the order of
+  boxing and assignment.** The two-operand form `Limit(expr, point)` does not
+  write its variable. It used only the symbols of `expr` that had no value, so
+  after `x := 4`, `Limit(√x, a)` was the limit of the constant 2, and before
+  the assignment it was `√a`. The variable is now the first, in sorted order,
+  of the symbols that `expr` reads from outside, with or without an assigned
+  value (when nothing is assigned this is the variable chosen before), so the
+  result is `√a` in both orders. A parenthesized `expr` follows the same rule.
+  The function literal now has the variable as its only parameter:
+  `Limit(y·z, 2)` canonicalizes to `Limit(Function(y·z, y), 2)` (it was
+  `Function(y·z, y, z)`), and `z` is a free symbol, which compiled code now
+  reads as an input (it read an unbound parameter and gave NaN).
+
 - **A function parameter declared `any`, `expression` or `value` receives a
   collection argument whole** (GitHub issue #488). These types admit a
   collection, but such a parameter was read as a scalar parameter, and the
@@ -333,6 +539,17 @@
   source text is the caller's own value and is not checked, as before.
 
 ### Performance
+
+- **A call of a function literal no longer makes the engine type the nodes of
+  the body again** (GitHub issue #487). Each call declares its parameters in
+  a new scope and pops its frame at the end, and both moved the key of every
+  cached type. One `Apply` of the issue's function (8 nested `Fold`s, 75
+  calls of function literals) computed 6,332 types again, each to the same
+  result. The type cache now has a key of its own, which these two events do
+  not move: that `Apply` takes about 19 ms instead of about 100 ms (from
+  source). A type that depends on the scope it is read in is still kept for
+  each call frame, and one computed while a recursive derivation is in
+  progress is computed again after each call.
 
 - **Compiled code computes a value that does not depend on a callback's
   parameter once, not once per element** (GitHub issue #497). In

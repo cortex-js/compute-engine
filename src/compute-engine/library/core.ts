@@ -77,6 +77,7 @@ import {
   inlineCallParameters,
   isStatementListScope,
   snapshotRunVariables,
+  type ApplyOptions,
 } from '../function-utils.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
 import {
@@ -1386,17 +1387,23 @@ function applyLiteralMapType(
  * are the `incompatible-dimensions` error; a large source, or one of unknown
  * length (a `Filter`), gives the lazy `Map` form
  * (`lazyBroadcastMapIfNeeded`); otherwise the mapped arguments are
- * zipped and `Apply(fn, …row)` is evaluated per cell, a scalar argument, a
- * tuple (a point) or a string repeated whole in every cell. The per-cell
- * `Apply` maps again over a cell that is itself a collection, as the named
- * route does, so a nested list is mapped at every depth.
+ * zipped into one `Apply(fn, …row)` per cell, a scalar argument, a tuple (a
+ * point) or a string repeated whole in every cell. The per-cell `Apply` maps
+ * again over a cell that is itself a collection, as the named route does, so
+ * a nested list is mapped at every depth.
+ *
+ * The cells are returned unevaluated (`ApplyCells`), so that the
+ * synchronous and the asynchronous handlers of `Apply` each evaluate them
+ * their own way and then build the same list (`applyCellsValue`). The rows
+ * are read one at a time, each after the cell before it is evaluated, because
+ * a lazy argument computes its elements as they are read.
  */
 function applyLiteralMapped(
   ce: ComputeEngine,
   fn: Expression,
   args: ReadonlyArray<Expression>,
   numericApproximation: boolean | undefined
-): Expression | undefined {
+): Expression | ApplyCells | undefined {
   const mapped = (x: Expression) => isBroadcastableCollection(x);
   // The arguments of a rest parameter are bound whole, after the mapped
   // ones, in every cell (`mappedArgumentCount`).
@@ -1423,20 +1430,47 @@ function applyLiteralMapped(
   );
   if (lazy) return lazy;
   const rows = zipBroadcast(args, mapped);
-  const results: Expression[] = [];
-  while (true) {
-    const { done, value } = rows.next();
-    if (done) break;
-    results.push(
-      ce
-        ._fn('Apply', [fn, ...value, ...rest])
-        .evaluate({ numericApproximation })
-    );
-  }
-  // An element that fails says that the application was element-wise, as
-  // on the named routes (`annotateBroadcastErrors`).
+  return {
+    collection: 'List',
+    nextCall: () => {
+      const { done, value } = rows.next();
+      return done ? undefined : ce._fn('Apply', [fn, ...value, ...rest]);
+    },
+  };
+}
+
+/**
+ * The cells of a mapped application of a function literal, before they are
+ * evaluated: each call of `nextCall` reads the next row and gives its
+ * `Apply`, and `undefined` after the last row. A handler evaluates each
+ * `Apply` before it asks for the next one. `collection` is the head of the
+ * value, `List` for a map over collections (`applyLiteralMapped`) and
+ * `Tuple` for a map over the components of a tuple
+ * (`applyLiteralOverTuples`).
+ */
+type ApplyCells = {
+  collection: 'List' | 'Tuple';
+  nextCall: () => Expression | undefined;
+};
+
+function isApplyCells(x: Expression | ApplyCells | undefined): x is ApplyCells {
+  return x !== undefined && 'nextCall' in x && 'collection' in x;
+}
+
+/**
+ * The value of a mapped application of a function literal, from the values
+ * of its cells (`results`, in the order of the rows). An element that
+ * fails says that the application was element-wise, as on the named routes
+ * (`annotateBroadcastErrors`).
+ */
+function applyCellsValue(
+  ce: ComputeEngine,
+  cells: ApplyCells,
+  results: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression {
   return ce._fn(
-    'List',
+    cells.collection,
     annotateBroadcastErrors(
       'Apply',
       listedBroadcastCells(ce, results, numericApproximation)
@@ -1450,14 +1484,14 @@ function applyLiteralMapped(
  * tuple of the values of `Apply(fn, …)` at each component
  * (`declaredScalarTupleCells`). A symbol with no value and a tuple type at
  * such a parameter holds the application. `undefined` when the
- * application does not map over a tuple.
+ * application does not map over a tuple. As for `applyLiteralMapped`, the
+ * cells are returned unevaluated (`ApplyCells`).
  */
 function applyLiteralOverTuples(
   ce: ComputeEngine,
   fn: Expression,
-  args: ReadonlyArray<Expression>,
-  numericApproximation: boolean | undefined
-): Expression | undefined {
+  args: ReadonlyArray<Expression>
+): Expression | ApplyCells | undefined {
   if (!isFunction(fn, 'Function')) return undefined;
   const isScalarParam = declaredScalarParams(fn);
   if (isScalarParam === undefined) return undefined;
@@ -1465,19 +1499,143 @@ function applyLiteralOverTuples(
   if (cells === undefined) return undefined;
   if (cells === 'hold') return ce._fn('Apply', [fn, ...args]);
   if (!Array.isArray(cells)) return cells;
-  return ce._fn(
-    'Tuple',
-    annotateBroadcastErrors(
-      'Apply',
-      listedBroadcastCells(
-        ce,
-        cells.map((cell) =>
-          ce._fn('Apply', [fn, ...cell]).evaluate({ numericApproximation })
-        ),
-        numericApproximation
-      )
-    )
-  );
+  let k = 0;
+  return {
+    collection: 'Tuple',
+    nextCall: () => {
+      const cell = cells[k++];
+      return cell === undefined ? undefined : ce._fn('Apply', [fn, ...cell]);
+    },
+  };
+}
+
+/**
+ * The steps of the evaluation of `Apply(fn, …args)` that come before the
+ * application of `fn`, shared by the synchronous and the asynchronous
+ * handlers of `Apply`. `ops` is `[fn, …args]`, evaluated. The answer is:
+ * - the value of the evaluation, when a step decides it (an error, a held
+ *   application, a lazy map);
+ * - the cells of a mapped application (`ApplyCells`), which the handler
+ *   evaluates;
+ * - `undefined` when `fn` must be applied to the arguments.
+ */
+function applyBeforeApplication(
+  engine: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | ApplyCells | undefined {
+  // A function literal with scalar parameters maps over a collection
+  // argument, like a named user function (`applyLiteralMaps`). An error
+  // callee or argument bubbles first, as `apply()` does; an error inside a
+  // collection's cell is not an error argument (`errorValue` stops at a
+  // collection literal) and stays in its cell.
+  if (applyLiteralMaps(ops[0], ops.slice(1))) {
+    const err =
+      errorValue(ops[0]) ??
+      ops
+        .slice(1)
+        .map((a) => errorValue(a))
+        .find((e) => e !== undefined);
+    if (err !== undefined) return err;
+    const mapped = applyLiteralMapped(
+      engine,
+      ops[0],
+      ops.slice(1),
+      numericApproximation
+    );
+    if (mapped !== undefined) return mapped;
+  }
+  // An argument of a function literal that is an error (refused when the
+  // call was boxed, `validatedLiteralApplicationOperands`, or an error when
+  // evaluated) is the value of the application, with the breadcrumb frame of
+  // this `Apply` and the position of the argument, as a call of a named
+  // function gives it (`ErrorFrame('h', 1)`).
+  if (isFunction(ops[0], 'Function')) {
+    for (let k = 1; k < ops.length; k++) {
+      const err = errorValue(ops[k], { operator: 'Apply', index: k + 1 });
+      if (err !== undefined) return err;
+    }
+  }
+  // A function literal maps over a TUPLE argument at a parameter declared as
+  // a scalar, as the named routes do (`declaredScalarTupleCells`, user
+  // decision 2026-10-03): `Apply((u: real) ↦ 2u, (a, b))` is `(2a, 2b)`.
+  return applyLiteralOverTuples(engine, ops[0], ops.slice(1));
+}
+
+/**
+ * The options of the application of `fn` in `Apply(fn, …args)`, shared by
+ * the synchronous and the asynchronous handlers of `Apply`. `ops` is
+ * `[fn, …args]`, evaluated, and `expression` is the node being evaluated.
+ */
+function applyApplicationOptions(
+  engine: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  expression: Expression | undefined,
+  numericApproximation: boolean | undefined
+): ApplyOptions {
+  // Under `.N()`, the written arguments (the operands of `expression`) are
+  // recorded behind the activations (`exactArgumentSources`), as a call of a
+  // named function records them (`applyFunctionLiteralWith`,
+  // `boxed-function.ts`), so that a jump in the body reads the exact value of
+  // its operand: `Apply(x ↦ Floor(x), (25! − 1)/24!).N()` was 25, for 24.
+  const exactSources =
+    numericApproximation &&
+    expression !== undefined &&
+    isFunction(expression) &&
+    expression.nops === ops.length
+      ? exactArgumentSources(engine, expression.ops.slice(1))
+      : undefined;
+  // The breadcrumb of a surplus argument names this `Apply`, whose first
+  // argument is its second operand (`ApplyOptions.arityFrame`). Under `.N()`
+  // the body runs with the numeric request, as the body of a named function
+  // does (`applyFunctionLiteralWith`): a jump in it then reads the recorded
+  // argument. Applied exactly, the body read the approximation bound to the
+  // parameter, and the numeric pass over the result in
+  // `applyAfterApplication` could not undo that.
+  return {
+    arityFrame: { operator: 'Apply', firstArgumentIndex: 2 },
+    exactSources,
+    ...(numericApproximation ? { numericApproximation: true } : {}),
+  };
+}
+
+/**
+ * The steps of the evaluation of `Apply(fn, …args)` that come after the
+ * application of `fn`, shared by the synchronous and the asynchronous
+ * handlers of `Apply`. `result` is the value of the application and `ops`
+ * is `[fn, …args]`, evaluated.
+ */
+function applyAfterApplication(
+  result: Expression,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression {
+  // An argument that the literal refuses (a parameter declared `real` and a
+  // string argument) is the value of the application, as for a call of a
+  // named function (`_refusedArgumentError` in `boxed-function.ts`).
+  // `apply()` marks the argument with the error in an inert `Apply`, and
+  // that form is not kept here.
+  const refused = refusedLiteralArgumentError(result, ops.slice(1), 'Apply', 1);
+  if (refused !== undefined) return refused;
+  if (!numericApproximation) return result;
+  // N(f(x)) = N of the applied result: without this, e.g.
+  // `Apply(Derivative(LambertW), 0.5).N()` returned the symbolic derivative
+  // with `LambertW(0.5)` unevaluated. Guard: when the application stayed
+  // symbolic (unresolved symbolic derivative, returned as an `Apply`
+  // expression), re-entering N() here would recurse forever.
+  if (isFunction(result, 'Apply')) {
+    // An application of a `Derivative` with no symbolic closed form (the
+    // differentiation growth budget tripped on a deeply-nested body, the
+    // head stayed unresolved, or the closed form was incomplete and the
+    // `Derivative` handler kept the node inert) numericizes through the
+    // stencil fallback — the SAME `centeredDiffHigherOrder` the compiled
+    // javascript target emits as `_SYS.nd`, so the two routes agree
+    // bit-for-bit (Tycho item 177, user-ruled shared-budget fallback
+    // 2026-08-14). Only under `numericApproximation`: plain `evaluate()`
+    // returned above, keeping the exactness contract (symbolic, unchanged).
+    return numericDerivativeOfApply(result) ?? result;
+  }
+  return result.N();
 }
 
 /**
@@ -1510,6 +1668,243 @@ function pipeLiteralStage(
     );
   } else if (stage.nops !== 2) return undefined; // body + one parameter
   return canonicalWithFreshPlaceholders(stage);
+}
+
+/**
+ * What the evaluation of `Pipe(x, stage)` does once its topic `x` is known
+ * (`PipeStep`), shared by the synchronous and the asynchronous handlers of
+ * `Pipe`: the stage is examined, and the value is either known now, or is
+ * the value of an expression to evaluate, or is the application of a callee
+ * to the topic. The examination never evaluates the topic. A stage that is
+ * lifted to a constant function, or that is held with an unknown type, is
+ * evaluated first (see the comment in `pipeStep`): the step
+ * `evaluateStage` holds that stage, and `next` gives the step that follows
+ * from its value. The synchronous handler evaluates the stage and the
+ * asynchronous handler awaits it, so that a stage such as `F()`, where `F`
+ * has only an `evaluateAsync` handler and returns a function, is applied.
+ */
+type PipeStep =
+  | PipeFinalStep
+  | {
+      kind: 'evaluateStage';
+      stage: Expression;
+      next: (value: Expression) => PipeFinalStep;
+    };
+
+/** A step of a pipe (`PipeStep`) that does not evaluate the stage first. */
+type PipeFinalStep =
+  | { kind: 'value'; value: Expression | undefined }
+  | {
+      kind: 'evaluate';
+      expr: Expression;
+      /** An error that the value embeds is the value of the pipe. */
+      embeddedError: boolean;
+    }
+  | {
+      kind: 'apply';
+      callee: Expression;
+      args: Expression[];
+      options: ApplyOptions | undefined;
+    };
+
+function pipeStep(
+  ce: ComputeEngine,
+  x: Expression,
+  rawStage: Expression,
+  numericApproximation: boolean | undefined
+): PipeStep {
+  // Implicit topic argument: `xs |> Take(10)` fills the missing
+  // argument slot with `_`, i.e. `xs |> Take(_, 10)` — and for a
+  // callback-first operator, `xs |> Map(f)` is `xs |> Map(f, _)` (see
+  // `pipeStageWithImplicitTopic` for the gate and slot placement). The
+  // rewritten stage is raw, exactly like the held operand, so the
+  // shorthand machinery below binds the topic to the placeholder as
+  // usual.
+  const stageForMap = pipeStageWithImplicitTopic(ce, rawStage, x) ?? rawStage;
+
+  // The completed call is built with the piped value IN its slot, not
+  // through the `_` placeholder, which is the identity-function
+  // shorthand at a function slot: `[2] |> Map("s")` put `_` in the
+  // callback slot of `Map`, so the stage became `Map(x ↦ x, "s")`,
+  // whose value `["s"]` was reported as the stage that is not a
+  // function. With the piped value in its slot, the call is
+  // `Map([2], "s")`, which reports `[2]` and its type, as the direct
+  // call does. This is the call that the static check canonicalizes
+  // (`pipeStageAsCall`). A piped `Nothing` is erased below, as on the
+  // direct route, so it keeps the placeholder route. The value is the
+  // value the placeholder route gave: an error that the call embeds is
+  // the value of the pipe (`errorValue`), as for the application of a
+  // function literal whose body evaluates to that call.
+  if (stageForMap !== rawStage && !isSymbol(x, 'Nothing')) {
+    const completed = pipeStageAsCall(ce, x, rawStage);
+    if (completed?.topicAt !== undefined)
+      return { kind: 'evaluate', expr: completed.call, embeddedError: true };
+  }
+
+  // A unary function-literal stage is a call: `xs |> x ↦ x^2` and
+  // `xs |> _^2` are `Apply(x ↦ x^2, xs)`, which maps over a list or
+  // binds whole as the same call does (`pipeImplicitMap`). The stage
+  // is canonical when this pipe was canonicalized, raw when it is
+  // evaluated from a held form.
+  const mapped = pipeImplicitMap(ce, x, stageForMap);
+  if (mapped !== undefined)
+    return { kind: 'evaluate', expr: mapped, embeddedError: false };
+
+  const f = canonicalWithFreshPlaceholders(stageForMap);
+
+  // The right operand must be applicable. A statically-refutable rhs — a
+  // literal number, string, or boolean — can never be a function, so
+  // return an `incompatible-type` error (covering the non-strict route
+  // and an rhs that evaluated to a bare literal at runtime). This check
+  // stays here rather than in the type system, which cannot validate the
+  // held (lazy) operands, and rather than in `apply()`, whose
+  // constant-nullary shorthand (`Apply(3, 5)` → `3`, a documented
+  // `Apply` behavior with its own pins) must be preserved: `Pipe` is
+  // deliberately stricter than `Apply`. Anything else non-applicable
+  // stays inert (returns `undefined`).
+  if (isRefutablePipeTarget(f))
+    return {
+      kind: 'value',
+      value: ce.typeError('function', f.type, f.toString()),
+    };
+
+  // A stage that `apply()` would lift to a CONSTANT function — one that
+  // is not a function literal, a symbol, or an expression that denotes
+  // a function, and that has neither a slot (`_`, `_1`…`_9`) nor a
+  // free unknown to become a parameter (`5 |> y + 1` is `y ↦ y + 1`) —
+  // ignores the piped value: `[1,2] |> 10 + [3,4][1]` gave `13`. Such
+  // a stage is evaluated instead, and its VALUE is the function to
+  // apply. A value that is provably not a function is the same
+  // `incompatible-type` error as a literal stage (`[1,2] |> 10 + 3`),
+  // because a stage that ignores the piped value is almost certainly a
+  // mistake (user decision 2026-09-30). The explicit spelling of a
+  // constant function, a nullary literal (`() => 7`), is a function
+  // literal and is not affected. A value whose type can still be a
+  // function (an unknown function such as `Compose(Sqrt, Sqrt)`, typed
+  // `unknown`) leaves the pipe unevaluated, as a stage that is an
+  // undefined symbol does: it can evaluate once the function is
+  // defined.
+  if (!isSymbol(f) && !isFunction(f, 'Function')) {
+    const lifted = canonicalFunctionLiteral(f);
+    // A stage whose free unknowns became parameters is applied as
+    // lifted here, so that `apply()` does not lift it a second time.
+    if (isFunction(lifted, 'Function') && lifted.nops > 1)
+      return pipeApplicationStep(ce, x, lifted, numericApproximation);
+    // A stage of UNKNOWN type comes back unchanged from
+    // `canonicalFunctionLiteral`, held as a function value (its
+    // `isHeldCallee`): `Compose(Sqrt, Sqrt)` for an undefined
+    // `Compose`. Its VALUE decides, as for a constant lift below: a
+    // value that is still of unknown type leaves the pipe
+    // unevaluated, where `apply()` would answer an inert `Apply`.
+    const held = lifted === f && !isFunction(f, 'Function') && f.type.isUnknown;
+    if ((isFunction(lifted, 'Function') && lifted.nops === 1) || held)
+      return {
+        kind: 'evaluateStage',
+        stage: f,
+        next: (callee) =>
+          pipeEvaluatedStageStep(ce, x, callee, numericApproximation),
+      };
+  }
+  return pipeApplicationStep(ce, x, f, numericApproximation);
+}
+
+/**
+ * The step of a pipe whose stage was evaluated (`PipeStep`, step
+ * `evaluateStage`), from `callee`, the value of the stage: the
+ * `incompatible-type` error when the value cannot be a function, a pipe left
+ * unevaluated when its type is still unknown, and the application of the
+ * value otherwise (see the comment in `pipeStep`).
+ */
+function pipeEvaluatedStageStep(
+  ce: ComputeEngine,
+  x: Expression,
+  callee: Expression,
+  numericApproximation: boolean | undefined
+): PipeFinalStep {
+  if (isRefutablePipeTarget(callee))
+    return {
+      kind: 'value',
+      value: ce.typeError('function', callee.type, callee.toString()),
+    };
+  if (
+    !isSymbol(callee) &&
+    !isFunction(callee, 'Function') &&
+    !isFunction(callee, 'Error') &&
+    !callee.type.matches('function')
+  ) {
+    const t = callee.type.type;
+    if (freeTypeVariables(t).size === 0 && provablyDisjoint(t, 'function'))
+      return {
+        kind: 'value',
+        value: ce.typeError('function', callee.type, callee.toString()),
+      };
+    return { kind: 'value', value: undefined };
+  }
+  return pipeApplicationStep(ce, x, callee, numericApproximation);
+}
+
+/** The step of a pipe that applies `callee` to the topic `x` (`PipeStep`). */
+function pipeApplicationStep(
+  ce: ComputeEngine,
+  x: Expression,
+  callee: Expression,
+  numericApproximation: boolean | undefined
+): PipeFinalStep {
+  // `Nothing` is ERASED from the call argument list, uniformly on every
+  // application route (error-propagation design §4): `Nothing |> f` is
+  // `f()`, exactly like `f(Nothing)`. Erasure is a rule on the WRITTEN
+  // argument (like `flattenOps` on the direct route and `Apply`'s
+  // canonical handler): a topic that merely *evaluates* to `Nothing` is
+  // bound, as it is by `f(g())`.
+  //
+  // Under `.N()` the application gets the numeric request, as `f(x)`
+  // does under `.N()`, and the written topic is recorded behind the
+  // activation of a function literal (`exactArgumentSources`), as
+  // `Apply` does: a function that jumps (`Floor`, a comparison) then
+  // reads an exact topic exactly. Applied exactly, `x |> Floor` in the
+  // body of a user function read the float bound to the parameter `x`,
+  // and the numeric pass over the result (`pipeAfterApplication`) could
+  // not undo that.
+  const args = isSymbol(x, 'Nothing') ? [] : [x];
+  return {
+    kind: 'apply',
+    callee,
+    args,
+    options: numericApproximation
+      ? {
+          numericApproximation: true,
+          exactSources: exactArgumentSources(ce, args),
+        }
+      : undefined,
+  };
+}
+
+/**
+ * The value of a pipe whose step is an expression to evaluate (`PipeStep`),
+ * from the value of that expression.
+ */
+function pipeEvaluatedValue(
+  step: { embeddedError: boolean },
+  value: Expression
+): Expression {
+  if (!step.embeddedError || value.isValid) return value;
+  return errorValue(value) ?? value;
+}
+
+/**
+ * The value of a pipe whose step is an application (`PipeStep`), from the
+ * value of that application.
+ */
+function pipeAfterApplication(
+  result: Expression,
+  numericApproximation: boolean | undefined
+): Expression {
+  if (!numericApproximation) return result;
+  // Mirror `Apply`: under N(), numericize the applied result unless it
+  // stayed symbolic as an `Apply` expression (re-entering N() there would
+  // recurse forever).
+  if (isFunction(result, 'Apply')) return result;
+  return result.N();
 }
 
 /**
@@ -5945,108 +6340,80 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             callArgs),
         ]);
       },
+      // The two handlers run the same steps, in the same order
+      // (`applyBeforeApplication`, `applyApplicationOptions`,
+      // `applyAfterApplication`). They differ only in how they evaluate the
+      // cells of a mapped application and the application itself: the
+      // asynchronous handler awaits them, so that an operator in the body
+      // that has only an `evaluateAsync` handler is evaluated.
       evaluate: (ops, { numericApproximation, engine, expression }) => {
-        // A function literal with scalar parameters maps over a collection
-        // argument, like a named user function (`applyLiteralMaps`). An
-        // error callee or argument bubbles first, as `apply()` does; an
-        // error inside a collection's cell is not an error argument
-        // (`errorValue` stops at a collection literal) and stays in its cell.
-        if (applyLiteralMaps(ops[0], ops.slice(1))) {
-          const err =
-            errorValue(ops[0]) ??
-            ops
-              .slice(1)
-              .map((a) => errorValue(a))
-              .find((e) => e !== undefined);
-          if (err !== undefined) return err;
-          const mapped = applyLiteralMapped(
-            engine,
-            ops[0],
-            ops.slice(1),
-            numericApproximation
-          );
-          if (mapped !== undefined) return mapped;
-        }
-        // An argument of a function literal that is an error (refused when
-        // the call was boxed, `validatedLiteralApplicationOperands`, or an
-        // error when evaluated) is the value of the application, with the
-        // breadcrumb frame of this `Apply` and the position of the argument,
-        // as a call of a named function gives it (`ErrorFrame('h', 1)`).
-        if (isFunction(ops[0], 'Function')) {
-          for (let k = 1; k < ops.length; k++) {
-            const err = errorValue(ops[k], { operator: 'Apply', index: k + 1 });
-            if (err !== undefined) return err;
-          }
-        }
-        // A function literal maps over a TUPLE argument at a parameter
-        // declared as a scalar, as the named routes do
-        // (`declaredScalarTupleCells`, user decision 2026-10-03):
-        // `Apply((u: real) ↦ 2u, (a, b))` is `(2a, 2b)`.
-        const tupleMapped = applyLiteralOverTuples(
+        const before = applyBeforeApplication(
           engine,
-          ops[0],
-          ops.slice(1),
+          ops,
           numericApproximation
         );
-        if (tupleMapped !== undefined) return tupleMapped;
-        // Under `.N()`, the written arguments (`expression`, the node being
-        // evaluated) are recorded behind the activations
-        // (`exactArgumentSources`), as a call of a named function records
-        // them (`applyFunctionLiteralWith`, `boxed-function.ts`), so that a
-        // jump in the body reads the exact value of its operand:
-        // `Apply(x ↦ Floor(x), (25! − 1)/24!).N()` was 25, for 24.
-        const exactSources =
-          numericApproximation &&
-          expression !== undefined &&
-          isFunction(expression) &&
-          expression.nops === ops.length
-            ? exactArgumentSources(engine, expression.ops.slice(1))
-            : undefined;
-        // The breadcrumb of a surplus argument names this `Apply`, whose
-        // first argument is its second operand (`ApplyOptions.arityFrame`).
-        // Under `.N()` the body runs with the numeric request, as the body
-        // of a named function does (`applyFunctionLiteralWith`): a jump in
-        // it then reads the recorded argument. Applied exactly, the body
-        // read the approximation bound to the parameter, and the numeric
-        // pass over the result below could not undo that.
-        const result = apply(ops[0], ops.slice(1), {
-          arityFrame: { operator: 'Apply', firstArgumentIndex: 2 },
-          exactSources,
-          ...(numericApproximation ? { numericApproximation: true } : {}),
-        });
-        // An argument that the literal refuses (a parameter declared `real`
-        // and a string argument) is the value of the application, as for a
-        // call of a named function (`_refusedArgumentError` in
-        // `boxed-function.ts`). `apply()` marks the argument with the error
-        // in an inert `Apply`, and that form is not kept here.
-        const refused = refusedLiteralArgumentError(
-          result,
-          ops.slice(1),
-          'Apply',
-          1
-        );
-        if (refused !== undefined) return refused;
-        if (!numericApproximation) return result;
-        // N(f(x)) = N of the applied result: without this, e.g.
-        // `Apply(Derivative(LambertW), 0.5).N()` returned the symbolic
-        // derivative with `LambertW(0.5)` unevaluated. Guard: when the
-        // application stayed symbolic (unresolved symbolic derivative,
-        // returned as an `Apply` expression), re-entering N() here would
-        // recurse forever.
-        if (isFunction(result, 'Apply')) {
-          // An application of a `Derivative` with no symbolic closed form
-          // (the differentiation growth budget tripped on a deeply-nested
-          // body, the head stayed unresolved, or the closed form was
-          // incomplete and the `Derivative` handler kept the node inert)
-          // numericizes through the stencil fallback — the SAME
-          // `centeredDiffHigherOrder` the compiled javascript target emits
-          // as `_SYS.nd`, so the two routes agree bit-for-bit (Tycho item
-          // 177, user-ruled shared-budget fallback 2026-08-14). Only under
-          // `numericApproximation`: plain `evaluate()` returned above,
-          // keeping the exactness contract (symbolic, unchanged).
-          return numericDerivativeOfApply(result) ?? result;
+        if (isApplyCells(before)) {
+          const results: Expression[] = [];
+          for (
+            let call = before.nextCall();
+            call !== undefined;
+            call = before.nextCall()
+          )
+            results.push(call.evaluate({ numericApproximation }));
+          return applyCellsValue(engine, before, results, numericApproximation);
         }
-        return result.N();
+        if (before !== undefined) return before;
+        const result = apply(
+          ops[0],
+          ops.slice(1),
+          applyApplicationOptions(engine, ops, expression, numericApproximation)
+        );
+        return applyAfterApplication(result, ops, numericApproximation);
+      },
+      // After an `await`, the evaluation context of this evaluation is no
+      // longer current, so each step that follows one runs in
+      // `withEvaluationContext`, as in the handler of `ApplyWhole`.
+      evaluateAsync: async (ops, options) => {
+        const { numericApproximation, engine, expression } = options;
+        const inContext = <T>(fn: () => T): T =>
+          engine.withEvaluationContext(options, fn);
+        const before = applyBeforeApplication(
+          engine,
+          ops,
+          numericApproximation
+        );
+        if (isApplyCells(before)) {
+          const results: Expression[] = [];
+          while (true) {
+            const call = inContext(() => before.nextCall());
+            if (call === undefined) break;
+            results.push(
+              await inContext(() =>
+                call.evaluateAsync(awaitedOperandOptions(options))
+              )
+            );
+          }
+          return inContext(() =>
+            applyCellsValue(engine, before, results, numericApproximation)
+          );
+        }
+        if (before !== undefined) return before;
+        // With `awaitStatements`, `apply()` answers a `Promise` for a
+        // function literal or a composition, and an expression when it
+        // declines to await (an argument with a free symbol).
+        const result = await apply(ops[0], ops.slice(1), {
+          ...awaitedOperandOptions(options),
+          ...applyApplicationOptions(
+            engine,
+            ops,
+            expression,
+            numericApproximation
+          ),
+          awaitStatements: true,
+        });
+        return inContext(() =>
+          applyAfterApplication(result, ops, numericApproximation)
+        );
       },
     },
 
@@ -6185,145 +6552,71 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `f` decide whether to evaluate it.
         if (isFunction(x, 'Pipe')) x = x.evaluate({ numericApproximation });
 
-        // Implicit topic argument: `xs |> Take(10)` fills the missing
-        // argument slot with `_`, i.e. `xs |> Take(_, 10)` — and for a
-        // callback-first operator, `xs |> Map(f)` is `xs |> Map(f, _)` (see
-        // `pipeStageWithImplicitTopic` for the gate and slot placement). The
-        // rewritten stage is raw, exactly like the held operand, so the
-        // shorthand machinery below binds the topic to the placeholder as
-        // usual.
-        const stageForMap =
-          pipeStageWithImplicitTopic(ce, rawStage, x) ?? rawStage;
-
-        // The completed call is built with the piped value IN its slot, not
-        // through the `_` placeholder, which is the identity-function
-        // shorthand at a function slot: `[2] |> Map("s")` put `_` in the
-        // callback slot of `Map`, so the stage became `Map(x ↦ x, "s")`,
-        // whose value `["s"]` was reported as the stage that is not a
-        // function. With the piped value in its slot, the call is
-        // `Map([2], "s")`, which reports `[2]` and its type, as the direct
-        // call does. This is the call that the static check canonicalizes
-        // (`pipeStageAsCall`). A piped `Nothing` is erased below, as on the
-        // direct route, so it keeps the placeholder route. The value is the
-        // value the placeholder route gave: an error that the call embeds is
-        // the value of the pipe (`errorValue`), as for the application of a
-        // function literal whose body evaluates to that call.
-        if (stageForMap !== rawStage && !isSymbol(x, 'Nothing')) {
-          const completed = pipeStageAsCall(ce, x, rawStage);
-          if (completed?.topicAt !== undefined) {
-            const result = completed.call.evaluate({ numericApproximation });
-            return result.isValid ? result : (errorValue(result) ?? result);
-          }
+        let step = pipeStep(ce, x, rawStage, numericApproximation);
+        if (step.kind === 'evaluateStage')
+          step = step.next(step.stage.evaluate());
+        if (step.kind === 'value') return step.value;
+        if (step.kind === 'evaluate')
+          return pipeEvaluatedValue(
+            step,
+            step.expr.evaluate({ numericApproximation })
+          );
+        const result = apply(step.callee, step.args, step.options);
+        return pipeAfterApplication(result, numericApproximation);
+      },
+      // The same steps as `evaluate`, in the same order (`pipeStep`,
+      // `pipeEvaluatedValue`, `pipeAfterApplication`), with the chained
+      // topic, the call that the stage makes and the application awaited, so
+      // that an operator that has only an `evaluateAsync` handler is
+      // evaluated: `x |> f` is `f(x)` under `evaluateAsync()` too. After an
+      // `await`, the evaluation context of this evaluation is no longer
+      // current, so each step that follows one runs in
+      // `withEvaluationContext`, as in the handler of `ApplyWhole`.
+      evaluateAsync: async (ops, options) => {
+        const { engine: ce, numericApproximation } = options;
+        const inContext = <T>(fn: () => T): T =>
+          ce.withEvaluationContext(options, fn);
+        // The topic and the stage are bound as in `evaluate`.
+        let x = ops[0]?.canonical;
+        const rawStage = ops[1];
+        if (x === undefined || rawStage === undefined) return undefined;
+        if (isFunction(x, 'Pipe')) {
+          const inner = x;
+          x = await inner.evaluateAsync(awaitedOperandOptions(options));
         }
-
-        // A unary function-literal stage is a call: `xs |> x ↦ x^2` and
-        // `xs |> _^2` are `Apply(x ↦ x^2, xs)`, which maps over a list or
-        // binds whole as the same call does (`pipeImplicitMap`). The stage
-        // is canonical when this pipe was canonicalized, raw when it is
-        // evaluated from a held form.
-        const mapped = pipeImplicitMap(ce, x, stageForMap);
-        if (mapped !== undefined)
-          return mapped.evaluate({ numericApproximation });
-
-        const f = canonicalWithFreshPlaceholders(stageForMap);
-
-        // The right operand must be applicable. A statically-refutable rhs — a
-        // literal number, string, or boolean — can never be a function, so
-        // return an `incompatible-type` error (covering the non-strict route
-        // and an rhs that evaluated to a bare literal at runtime). This check
-        // stays here rather than in the type system, which cannot validate the
-        // held (lazy) operands, and rather than in `apply()`, whose
-        // constant-nullary shorthand (`Apply(3, 5)` → `3`, a documented
-        // `Apply` behavior with its own pins) must be preserved: `Pipe` is
-        // deliberately stricter than `Apply`. Anything else non-applicable
-        // stays inert (returns `undefined`).
-        if (isRefutablePipeTarget(f))
-          return ce.typeError('function', f.type, f.toString());
-
-        // A stage that `apply()` would lift to a CONSTANT function — one that
-        // is not a function literal, a symbol, or an expression that denotes
-        // a function, and that has neither a slot (`_`, `_1`…`_9`) nor a
-        // free unknown to become a parameter (`5 |> y + 1` is `y ↦ y + 1`) —
-        // ignores the piped value: `[1,2] |> 10 + [3,4][1]` gave `13`. Such
-        // a stage is evaluated instead, and its VALUE is the function to
-        // apply. A value that is provably not a function is the same
-        // `incompatible-type` error as a literal stage (`[1,2] |> 10 + 3`),
-        // because a stage that ignores the piped value is almost certainly a
-        // mistake (user decision 2026-09-30). The explicit spelling of a
-        // constant function, a nullary literal (`() => 7`), is a function
-        // literal and is not affected. A value whose type can still be a
-        // function (an unknown function such as `Compose(Sqrt, Sqrt)`, typed
-        // `unknown`) leaves the pipe unevaluated, as a stage that is an
-        // undefined symbol does: it can evaluate once the function is
-        // defined.
-        let callee = f;
-        if (!isSymbol(f) && !isFunction(f, 'Function')) {
-          const lifted = canonicalFunctionLiteral(f);
-          // A stage whose free unknowns became parameters is applied as
-          // lifted here, so that `apply()` does not lift it a second time.
-          if (isFunction(lifted, 'Function') && lifted.nops > 1)
-            callee = lifted;
-          // A stage of UNKNOWN type comes back unchanged from
-          // `canonicalFunctionLiteral`, held as a function value (its
-          // `isHeldCallee`): `Compose(Sqrt, Sqrt)` for an undefined
-          // `Compose`. Its VALUE decides, as for a constant lift below: a
-          // value that is still of unknown type leaves the pipe
-          // unevaluated, where `apply()` would answer an inert `Apply`.
-          const held =
-            lifted === f && !isFunction(f, 'Function') && f.type.isUnknown;
-          if ((isFunction(lifted, 'Function') && lifted.nops === 1) || held) {
-            callee = f.evaluate();
-            if (isRefutablePipeTarget(callee))
-              return ce.typeError('function', callee.type, callee.toString());
-            if (
-              !isSymbol(callee) &&
-              !isFunction(callee, 'Function') &&
-              !isFunction(callee, 'Error') &&
-              !callee.type.matches('function')
-            ) {
-              const t = callee.type.type;
-              if (
-                freeTypeVariables(t).size === 0 &&
-                provablyDisjoint(t, 'function')
-              )
-                return ce.typeError('function', callee.type, callee.toString());
-              return undefined;
-            }
-          }
-        }
-
-        // `Nothing` is ERASED from the call argument list, uniformly on every
-        // application route (error-propagation design §4): `Nothing |> f` is
-        // `f()`, exactly like `f(Nothing)`. Erasure is a rule on the WRITTEN
-        // argument (like `flattenOps` on the direct route and `Apply`'s
-        // canonical handler): a topic that merely *evaluates* to `Nothing` is
-        // bound, as it is by `f(g())`.
-        //
-        // Under `.N()` the application gets the numeric request, as `f(x)`
-        // does under `.N()`, and the written topic is recorded behind the
-        // activation of a function literal (`exactArgumentSources`), as
-        // `Apply` does: a function that jumps (`Floor`, a comparison) then
-        // reads an exact topic exactly. Applied exactly, `x |> Floor` in the
-        // body of a user function read the float bound to the parameter `x`,
-        // and the numeric pass over the result below could not undo that.
-        const args = isSymbol(x, 'Nothing') ? [] : [x];
-        const result = apply(
-          callee,
-          args,
-          numericApproximation
-            ? {
-                numericApproximation: true,
-                exactSources: exactArgumentSources(ce, args),
-              }
-            : undefined
+        const topic = x;
+        let step = inContext(() =>
+          pipeStep(ce, topic, rawStage, numericApproximation)
         );
-
-        if (!numericApproximation) return result;
-        // Mirror `Apply`: under N(), numericize the applied result unless it
-        // stayed symbolic as an `Apply` expression (re-entering N() there
-        // would recurse forever).
-        if (isFunction(result, 'Apply')) return result;
-        return result.N();
+        if (step.kind === 'evaluateStage') {
+          const { stage, next } = step;
+          // The stage is evaluated exactly, as `evaluate` does.
+          const callee = await inContext(() =>
+            stage.evaluateAsync(
+              awaitedOperandOptions(options, { numericApproximation: false })
+            )
+          );
+          step = inContext(() => next(callee));
+        }
+        if (step.kind === 'value') return step.value;
+        if (step.kind === 'evaluate') {
+          const value = await inContext(() =>
+            step.expr.evaluateAsync(awaitedOperandOptions(options))
+          );
+          return inContext(() => pipeEvaluatedValue(step, value));
+        }
+        // With `awaitStatements`, `apply()` answers a `Promise` for a
+        // function literal or a composition, and an expression otherwise.
+        const result = await inContext(() =>
+          apply(step.callee, step.args, {
+            ...awaitedOperandOptions(options),
+            ...step.options,
+            awaitStatements: true,
+          })
+        );
+        return inContext(() =>
+          pipeAfterApplication(result, numericApproximation)
+        );
       },
     },
 

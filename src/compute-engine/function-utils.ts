@@ -2328,10 +2328,17 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
   /**
    * Run the body statements with `evaluateStatementsAsync()`, so that the
    * application returns a `Promise` that yields between time slices and
-   * honors the abort signal. Set by the asynchronous route of a named
-   * function (`applyFunctionLiteralAsync`) and by nothing else, together
-   * with the `_effects`, `_contextStack` and `_precisionWindow` of that
-   * evaluation. Declined (the application is synchronous) when an argument
+   * honors the abort signal. Set by every asynchronous application route,
+   * together with the `_effects`, `_contextStack` and `_precisionWindow` of
+   * that evaluation: the call of a named function (`boxed-function.ts`), the
+   * `evaluateAsync` handlers of `Apply`, `ApplyWhole` and `Pipe`
+   * (`library/core.ts`), and the multi-clause selector
+   * (`selectAndApplyAwaiting`, `multi-clause.ts`). With the flag, `apply()`
+   * answers a `Promise` for a function literal, a composition, a symbol
+   * callee, and a callee that `makeLambda` applies through an `Apply` call
+   * (an expression that `canonicalFunctionLiteral` does not change into a
+   * literal). The application of a
+   * function literal declines to await (it is synchronous) when an argument
    * has a free symbol. When another application of the same literal with
    * awaited statements is suspended and this one is not in its call frame,
    * this one starts when that one ends (`blockingAsyncApplication()`).
@@ -2583,6 +2590,30 @@ export function compositionLiteral(
 }
 
 /**
+ * The value of `call`, an application that `apply()` makes on the
+ * asynchronous route (`ApplyOptions.awaitStatements`), as a `Promise`, as
+ * for a function literal on that route. The call is evaluated with
+ * `evaluateAsync`, so an operator that has only an `evaluateAsync` handler
+ * is evaluated, with the abort signal, the effect handlers, the
+ * evaluation-context stack and the precision window of the enclosing
+ * evaluation, as each statement of a body is (`evaluateStatementsAsync`).
+ * The `Promise` is typed as an `Expression` because `apply()` and the
+ * function that `makeLambda` returns answer one on that route only.
+ */
+function awaitedApplication(
+  call: Expression,
+  options: ApplyOptions
+): Expression {
+  return call.evaluateAsync({
+    signal: options.signal,
+    numericApproximation: options.numericApproximation,
+    _effects: options._effects,
+    _contextStack: options._contextStack,
+    _precisionWindow: options._precisionWindow,
+  }) as unknown as Expression;
+}
+
+/**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
@@ -2642,20 +2673,9 @@ export function apply(
         : args;
     const call = composedApplication(fn.engine, fn.ops, callArgs);
     // On the asynchronous route (`awaitStatements`), the nested call is
-    // evaluated with `evaluateAsync`, so a step that has only an
-    // `evaluateAsync` handler is evaluated, with the abort signal, the effect
-    // handlers, the evaluation-context stack and the precision window of the
-    // enclosing evaluation, as each statement of a body is
-    // (`evaluateStatementsAsync`). The answer is then a `Promise`, as for a
-    // function literal on that route.
-    if (options?.awaitStatements)
-      return call.evaluateAsync({
-        signal: options.signal,
-        numericApproximation: options.numericApproximation,
-        _effects: options._effects,
-        _contextStack: options._contextStack,
-        _precisionWindow: options._precisionWindow,
-      }) as unknown as Expression;
+    // awaited (`awaitedApplication`), so a step that has only an
+    // `evaluateAsync` handler is evaluated.
+    if (options?.awaitStatements) return awaitedApplication(call, options);
     return call.evaluate(
       options?.numericApproximation ? { numericApproximation: true } : undefined
     );
@@ -6664,10 +6684,15 @@ function makeLambda(
             ? { operator: expr.operatorDefinition }
             : undefined;
       const binding = callableBindingInContext(ce, sym, own);
-      return (
-        applyNamedLiteral(ce, sym, args, options, binding) ??
-        callableApplication(ce, sym, args, binding).evaluate(options)
-      );
+      // On the asynchronous route (`awaitStatements`), `applyNamedLiteral`
+      // declines, and the call is awaited (`awaitedApplication`): an
+      // operator that has only an `evaluateAsync` handler is evaluated, so
+      // `1 |> f` is `f(1)` under `evaluateAsync()`.
+      const answer = applyNamedLiteral(ce, sym, args, options, binding);
+      if (answer !== undefined) return answer;
+      const call = callableApplication(ce, sym, args, binding);
+      if (options?.awaitStatements) return awaitedApplication(call, options);
+      return call.evaluate(options);
     };
   }
 
@@ -6687,8 +6712,11 @@ function makeLambda(
   // member evaluates to the protocol-dispatching literal), then applies.
   if (expr.operator !== 'Function') {
     const fnExpr = expr;
-    return (args, options) =>
-      ce.function('Apply', [fnExpr, ...args]).evaluate(options);
+    return (args, options) => {
+      const call = ce.function('Apply', [fnExpr, ...args]);
+      if (options?.awaitStatements) return awaitedApplication(call, options);
+      return call.evaluate(options);
+    };
   }
 
   console.assert(expr.operator === 'Function');
