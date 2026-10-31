@@ -1,6 +1,7 @@
 import { cacheOff } from '../../common/cache-switches.js';
 import { registerProvedAbsentDomain } from '../boxed-expression/proved-absent-domain.js';
 import { beginStoreGuard } from '../boxed-expression/store-guard.js';
+import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
 import { callableBindingInContext } from '../boxed-expression/binders.js';
 import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
@@ -1899,12 +1900,25 @@ function predicateResultError(operator: string, fn: Expression): Error {
  * is not a boolean (`x ↦ x + 1`) is a malformed predicate, reported by
  * {@link predicateResultError}. So is a boolean that has no unknown: no later
  * value can decide it, as `0 < "a"` for the string element `"a"`.
+ *
+ * A boolean that holds a call of an operator with only an `evaluateAsync`
+ * handler is undecided too, although it has no unknown: `evaluate()` cannot
+ * run that operator, and `evaluateAsync()` can decide the boolean later.
+ * With `AsyncOnly(x)` declared `(number) -> number` with only an
+ * `evaluateAsync` handler, `y ↦ AsyncOnly(y) > 10` is a well-formed
+ * predicate, and `Length(Filter(Range(1, 10), y ↦ AsyncOnly(y) > 10))`
+ * stays unevaluated under `evaluate()`; it is not reported as a malformed
+ * predicate. A call of a name that has no definition at all (`Foo(y) > 10`)
+ * is not such a call, and keeps the error with its spelling hint. When that
+ * call is inside an asynchronous-only call (`AsyncOnly(Foo(y)) > 10`), the
+ * verdict is undecided, and the error is not reported: the boolean holds a
+ * call that `evaluate()` cannot run.
  */
 function isUndecidedVerdict(applied: Expression): boolean {
   return (
     applied.isValid &&
     applied.type.matches('boolean') &&
-    applied.unknowns.length > 0
+    (applied.unknowns.length > 0 || hasAsyncOnlyApplication(applied))
   );
 }
 

@@ -109,7 +109,11 @@
   the value of `P2(q, 1)(5)`. Now a call rebuilds only a closure that reads
   its own frame, and keeps the frames of the other calls in its chain:
   with `f(n) = Block(k := n, DefineFunction(g, b ↦ (x ↦ k + x)), g(0))`,
-  `f(5)(1)` is `6`. A closure that a recursive call makes and that a deeper
+  `f(5)(1)` is `6`. Such a closure also keeps the locals of the block that
+  defines the local function: with
+  `f = n ↦ If(n > 0, Block(Declare(q), q := 10n, DefineFunction(g, b ↦ (x ↦ q + x)), g(0)), 0)`,
+  `f(5)(1)` is `51`, also when `f(7)` is made before `f(5)` is applied (it
+  gave `71`). A closure that a recursive call makes and that a deeper
   call of the same function returns no longer takes the parameters of the
   deeper call: with `h = (g, k) ↦ If(k = 0, g, h(x ↦ x + k, k − 1))`,
   `h(x ↦ x, 3)(100)` gave `100`; it is now `101`. Also, the result of a
@@ -420,6 +424,19 @@
   predicate, and of the lazy views `Map`, `Filter`, `Scan`, `FlatMap`,
   `TakeWhile`, `DropWhile` and `Tabulate` (ROADMAP CE-111.4). For `Map`,
   `evaluateAsync({ materialization: true })` gives the awaited values.
+
+- **Under `evaluate()`, a predicate that calls an operator with only an
+  `evaluateAsync` handler leaves its reader unevaluated, and no longer
+  throws.** With the same `AsyncOnly`,
+  `Length(Filter(Range(1, 10), y ↦ AsyncOnly(y) > 10))` threw "Filter
+  predicate must return "True" or "False"" out of `evaluate()`, because
+  `AsyncOnly(1) > 10` has no unknown and was read as a malformed predicate.
+  `evaluate()` cannot run `AsyncOnly`, so the verdict is undecided, as for
+  `y > n` with `n` free: `Length(…)`, `First(Filter(…))`, `CountIf`, `Find`,
+  `Position` and `IndexWhere` stay unevaluated, and `evaluateAsync()` decides
+  the eager readers (`CountIf([4, 6, 8], y ↦ AsyncOnly(y) > 10)` is `2`). A
+  call of a name with no definition (`Foo(y) > 10`) still throws, with its
+  spelling hint.
 
 - **A numeric integral with a step or a bump next to a singular bound reports
   an error that covers its true error** (ROADMAP CE-691).
