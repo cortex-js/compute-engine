@@ -98,7 +98,7 @@ describe('The Function-literal construction seam is the only builder', () => {
       // definition's literal to read `escapingWrite` and the inferred set,
       // and builds `EffectContractError` for the message. It builds no
       // arrow.
-      'compute-engine/compilation/base-compiler.ts',
+      'compute-engine/compilation/compile-locals.ts',
       'compute-engine/engine-declarations.ts',
       // The provisional re-derivation checks a rebuilt VALUE-bound literal
       // against its declared effects contract (`installRebuiltLiteral`): it

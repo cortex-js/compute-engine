@@ -25,7 +25,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
 
 const CELLS = [10, 20, 30, 40, 50];
 
@@ -182,7 +182,9 @@ describe('a reduction over a Range-indexed gather is a counted loop', () => {
     ce.declare('P', 'list<number^5>');
     ce.declare('a', 'real');
     ce.declare('b', 'real');
-    expect(code(ce, '\\operatorname{total}(P[a...b])')).toContain('_SYS.range(');
+    expect(code(ce, '\\operatorname{total}(P[a...b])')).toContain(
+      '_SYS.range('
+    );
   });
 });
 
@@ -220,7 +222,7 @@ describe('the counted-range prologue of an integer range', () => {
    *  emitted rather than folded away. */
   const TEX = '[k x \\operatorname{for} k=a...b]';
 
-  test('the count is the interpreter\'s `rangeCount`, which floors a fractional run-time bound', () => {
+  test("the count is the interpreter's `rangeCount`, which floors a fractional run-time bound", () => {
     // The clamp, the floor and the zero-step test are inside the runtime
     // helper `_SYS.rangeCount` (`numerics/range-count.ts`), shared with the
     // interpreter's `Range` count.
@@ -360,14 +362,14 @@ describe('the counted loop compiles each of its operands once', () => {
     // body and closes over the finished strings.
     const ce = engine();
     ce.declare('x', 'real');
-    const original = BaseCompiler.compile;
+    const original = core.compile;
     let floors = 0;
-    const spy = jest.spyOn(BaseCompiler, 'compile').mockImplementation(((
+    const spy = jest.spyOn(core, 'compile').mockImplementation(((
       e: any,
       t: any
     ) => {
       if (e?.operator === 'Floor') floors++;
-      return original.call(BaseCompiler, e, t);
+      return original.call(core, e, t);
     }) as any);
     try {
       const r = compile(

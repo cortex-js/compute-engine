@@ -207,6 +207,17 @@ gpu-target.ts split. What it does, and what the rehearsal found:
   HEAD). The scripts now resolve identifiers against locals and refuse to
   write over a tracked file.
 
+**Done on the main tree 2026-10-30**, after the gpu-target.ts commit
+(`97bb4cc71`): 44 modules (the empty `compiler-support.ts` is not written),
+the facade, and five test edits. Gates: tsc, `npm run typecheck`, oxlint,
+madge, prettier clean; full suite 73,207 tests passed, 4,280 snapshots
+unchanged. Dual review: Codex's four findings were pre-existing code (one
+refuted by a run, three reproduced and recorded as CE-686, CE-687, CE-688);
+Claude's eight were fixed (a typed `hubs` object so tsc checks every hub
+against `CoreHooks`, comment wording, a needless import alias, unused test
+imports, the empty module). Step 4 (trim the facade, import from the modules
+at the call sites) stays open.
+
 ## 4. Design for the recursive core
 
 ### 4.1 The cycle

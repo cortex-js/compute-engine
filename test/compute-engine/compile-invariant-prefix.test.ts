@@ -24,6 +24,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
 import type { CompileTarget } from '../../src/compute-engine/compilation/types';
 
 const ce = new ComputeEngine();
@@ -234,7 +235,7 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
     // the call site takes the ordinary call.
     const json = SUM_OF_W;
     const spy = jest
-      .spyOn(BaseCompiler, 'hasCodeOverride')
+      .spyOn(core, 'hasCodeOverride')
       .mockReturnValue(false);
     try {
       const { source, run } = compiled(json, { to: 'interval-js' });

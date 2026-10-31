@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import { TEST_PYTHON } from './test-python';
 
 import { ComputeEngine, compile } from '../../src/compute-engine';
-import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
 
 /**
  * A compiled value has a LANE: on the JavaScript target a complex value is a
@@ -294,11 +294,11 @@ describe('The lane question about a user-function call', () => {
     ce.assign('h', ce.parse('s \\mapsto s + \\imaginaryI'));
     const seen: string[][] = [];
     const prune = jest
-      .spyOn(BaseCompiler, 'pruneUnreferencedVariantBases')
+      .spyOn(core, 'pruneUnreferencedVariantBases')
       .mockImplementation(function (this: unknown, registry, rootCode) {
         seen.push([...registry.defs.keys()]);
         prune.mockRestore();
-        return BaseCompiler.pruneUnreferencedVariantBases(registry, rootCode);
+        return core.pruneUnreferencedVariantBases(registry, rootCode);
       });
     const r = compile(ce.parse('h(2) + x'), {
       to: 'javascript',

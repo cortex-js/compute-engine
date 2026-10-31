@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
 
 //
 // CE-564.2. The definitions below come from a Desmos document (Tycho census,
@@ -61,11 +61,7 @@ function engineWithDefinitions(): ComputeEngine {
         'Block',
         [
           'Sqrt',
-          [
-            'Add',
-            ['Power', ['At', 'p', 1], 2],
-            ['Power', ['At', 'p', 2], 2],
-          ],
+          ['Add', ['Power', ['At', 'p', 1], 2], ['Power', ['At', 'p', 2], 2]],
         ],
       ],
       ['Typed', 'p', V2],
@@ -131,7 +127,10 @@ function engineWithDefinitions(): ComputeEngine {
                 [
                   'Add',
                   ['At', 'p', 1],
-                  ['Floor', ['Add', ['Negate', ['At', 'p', 1]], ['At', 'p', 2]]],
+                  [
+                    'Floor',
+                    ['Add', ['Negate', ['At', 'p', 1]], ['At', 'p', 2]],
+                  ],
                 ],
                 2,
               ],
@@ -262,9 +261,9 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
   // only the definitions of its own failure).
   test('r([x, y]) on interval-js compiles when the copy fails', () => {
     const ce = engineWithDefinitions();
-    const original = (BaseCompiler as any).ensureSpecializedUserCallEmitted;
+    const original = core.ensureSpecializedUserCallEmitted;
     const spy = jest
-      .spyOn(BaseCompiler as any, 'ensureSpecializedUserCallEmitted')
+      .spyOn(core, 'ensureSpecializedUserCallEmitted')
       .mockImplementation(function (this: unknown, ...args: any[]) {
         const emitted = original.apply(this, args);
         if (args[1] === 'r') throw new Error('the copy of r does not compile');
@@ -390,9 +389,7 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
       // The interpreter refuses it: `f` of a point is a tuple minus a
       // number.
       const ce = engineWithDefinitions();
-      expect(ce.box(['r', ['Tuple', 0.3, 0.4]]).evaluate().isValid).toBe(
-        false
-      );
+      expect(ce.box(['r', ['Tuple', 0.3, 0.4]]).evaluate().isValid).toBe(false);
       const message = declineMessage(ce, ['r', ['Tuple', 'x', 'y']], to);
       expect(message).toMatch(/call of `f`/);
       expect(message).not.toMatch(/invalid expression/);

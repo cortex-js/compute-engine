@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-683.
+Next free reference: CE-689.
 
 **Entry format.**
 
@@ -583,7 +583,8 @@ giving no value for such a `Linspace`.
 **Status:** open; defect (wrong values). Found 2026-10-30 in the review of
 the interval-js loop over a literal list (session compute-engine-61);
 measured by session compute-engine-2c. User decision 2026-10-30: option (b),
-`Range(1, NaN)` has no value.
+`Range(1, NaN)` has no value. Implemented, not yet reviewed a second time or
+applied: `docs/scratch/2026-10-30-ce679-range-nan-handoff.md`.
 
 With `n` declared `number` and `n = NaN`:
 
@@ -3404,6 +3405,31 @@ function, so the reduction can run over it (`sum(L)`, or `np.sum(L)` for an
 array). `Product`, `Max` and `Min` over a list input are probably in the same
 case; check them in the fix.
 
+### CE-683. Write the host's input contract in the compilation documents, and remove the guards it makes unnecessary
+
+**Status:** open; task (documentation and code). User decision 2026-10-30: the
+host must respect what the program declares OR IMPLIES about a value, also a
+type that the engine inferred from a use. When the host does not, the compiled
+result is undefined: it may differ from the interpreter, give a wrong value,
+throw or hang. For an error or a contract violation in general, compiled code
+need not match the interpreter, nor throw or give an error consistently. This
+decision applies to every compile target, and it replaces the earlier rule that
+an inferred type "is not a promise about the value the caller passes"
+(`docs/COMPILATION-MODEL.md`, the paragraph on the `Array.isArray` guard of a
+user-function call, user rulings 2026-08-30 and 2026-09-07).
+
+Work: (a) state the contract in `docs/COMPILATION-MODEL.md` and
+`docs/ERROR-MODEL.md`, and rewrite the guard paragraph; (b) find the run-time
+guards and compile-time declines that exist only to defend against a host that
+breaks an inferred type (start with the `Array.isArray` guard of an argument
+whose scalar type was inferred from its use), and remove them, with the
+emitted code and the decline counts before and after measured and reported;
+(c) keep every guard that defends against something other than a contract
+violation (a value the program itself can produce, such as a list from a
+broadcast). Example: `x` appears only in `h(x)` with `h: (number) -> number`;
+today a list passed for `x` is guarded and broadcast; after (b) the guard is
+not emitted, and a list for `x` breaks the contract.
+
 ### CE-664. The `python` target compiles no call of a user function
 
 **Status:** open; defect (decline). Found 2026-10-30 while fixing CE-658.
@@ -3500,7 +3526,8 @@ length) of the element type, as for `list<T>`.
 
 ### CE-662. Compiled code does not check the declared type of a local when a value is assigned to it
 
-**Status:** open; defect. User decision 2026-10-30: option B (a smaller rule),
+**Status:** open; defect. The contract below applies to every target (user
+decision 2026-10-30, CE-683). User decision 2026-10-30: option B (a smaller rule),
 with this contract: the host must respect what the program declares or
 implies about a value (an argument of `h(x)` with `h: (integer) -> integer`
 must be an integer). When the host does not, the compiled result is undefined:
@@ -5173,6 +5200,84 @@ element types, and a two-dimensional `Tabulate` returns lazy rows. Compiler
 guards refuse a `Tabulate` or `Scan` that can omit elements until the targets
 have a distinct representation for an omitted element. `Iterate` is not
 supported by the compiler. Custom accumulator delivery policies are unchanged.
+
+### CE-684. Shader targets: a reduction over a vector splat reads one component
+
+**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
+gpu-target.ts split; the code is older than the split.
+
+With `xs` declared `list<real^3>` and `y` declared `real`,
+`Sum(PointY(PointList(xs, y)))` evaluates to `6` for `xs = [1, 2, 3]`,
+`y = 2` (three points, each with `y` as its second coordinate), and
+`Product(...)` to `8`. The GLSL and WGSL code for both is `((y))`: the
+projection lowers to the splat constructor `vec3(y)`, and
+`gpuScalarComponents` (`gpu-extrema.ts`) takes a constructor's operands as its
+components, so the one operand `y` stands for one component instead of three.
+The fix: when a `vecN` constructor has fewer operands than `N`, repeat the
+single operand (a splat) `N` times, keeping it evaluated once (a temporary when
+it is not a plain symbol or literal), or return `undefined` so the
+temporary-and-swizzle path is taken; add the two expressions above to
+`compile-gpu-extremum.test.ts` with their interpreter values.
+
+### CE-685. Shader targets: `freeSymbolTypes` reports a list of points as an array of floats
+
+**Status:** open; defect. Found 2026-10-30 by the Codex review of the
+gpu-target.ts split; the code is older than the split.
+
+With `P` declared `list<tuple<real, real>^3>` and `k` an integer, `At(P, k)`
+compiles on GLSL and WGSL to `_gpu_atp2_3(P, k)`, whose helper parameter is an
+array of `vec2`, but `freeSymbolTypes.P.lowered` is `float[3]` (GLSL) and
+`array<f32, 3>` (WGSL). A host that declares the input from that metadata
+declares an incompatible type. `gpuLoweredSymbolTypeHook` (`gpu-shapes.ts`)
+reports every fixed-length array as an array of floats. The fix: read the
+element shape of the list and report `vec2[3]` and `array<vec2f, 3>` here, and
+the equivalent for the other point arities the `At` lowering supports; test
+with the `freeSymbolTypes` of this expression on both targets.
+
+### CE-686. JavaScript: a real guard over a complex operand skips the draws of the other operands
+
+**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
+base-compiler.ts split; the code is older than the split (`compileExpr`'s
+real-operand guard, now in compiler-core.ts).
+
+With `x` declared `real`, `Max(Sqrt(x), Random())` compiles in `auto` mode to
+`((_tv1) => (_SYS.cisreal(_tv1) ? Math.max(_SYS.creal(_tv1), _SYS.drawNextRandomNumber()) : NaN))(_SYS.csqrt({re: _.x, im: 0}))`:
+the draw is inside the guard's true branch, so for `x = -4` the code gives
+`NaN` and consumes no draw, while the interpreter evaluates both operands and
+consumes one. The draw-consumption contract (`docs/RANDOMNESS-MODEL.md` §5)
+says every operation consumes a fixed number of indices, so the next seeded
+draw differs between the two. The fix: evaluate the operands that are not
+maybe-complex in their original order before the guard, binding the
+effectful ones to temporaries like the complex ones.
+
+### CE-687. JavaScript: two operand positions that share one impure node draw once
+
+**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
+base-compiler.ts split; the code is older than the split.
+
+Build `e = ce.box(['Sqrt', ['Subtract', ['Random'], 0.5]])` and compile
+`ce.function('Max', [e, e])`: the real-operand guard collects the maybe-complex
+operands in a `Set`, so the shared node gets one temporary and the code draws
+once, `Math.max(_SYS.creal(_tv1), _SYS.creal(_tv1))`. The interpreter
+evaluates each operand position and draws twice, so its value is the maximum
+of two draws. The fix: one binding per operand position (or fail closed when
+an impure node occurs more than once).
+
+### CE-688. A `Break` after a `Continue` in a loop over several `Element` clauses leaves only the innermost loop
+
+**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
+base-compiler.ts split; the code is older than the split.
+
+`assertBreakLeavesWholeLoop` (compile-match.ts) declines a multi-clause loop
+whose body has an escaping `Break`, but it tests `escapingControl(body) ===
+'Break'`, and `escapingControl` returns the FIRST control instruction it finds.
+For the body `Block(If(s < 0, Continue()), Assign(s, s + 1), Break())` over
+`Element(i, Range(1, 3))` and `Element(j, Range(1, 3))`, it finds the
+`Continue`, the check passes, and the emitted `break` leaves only the inner
+`for`: the compiled program gives `3`, the interpreter `1`. The fix: a
+predicate that searches every reachable descendant for an escaping `Break`,
+respecting nested `Loop` and `Function` boundaries, used by the check; add
+this program to `compile-loop-destructuring.test.ts`.
 
 ## LaTeX parsing and serialization
 
