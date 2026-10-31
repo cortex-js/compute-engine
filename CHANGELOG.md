@@ -231,7 +231,11 @@
   with a list argument is typed from the body: with
   `g := (t: expression) ↦ 2t`, `g([1, 2, 3])` is typed `vector<integer^3>`.
   When the argument is itself declared `any`, `expression` or `value`, the
-  call is typed `any`.
+  call is typed `any`. Compiled code declines (falls back to the interpreter)
+  a call where an argument that can be a collection reaches a parameter
+  declared `expression`, and a function literal with such a parameter that
+  is compiled as a function value: `((t: expression) ↦ 2t)([[1, 2], [3, 4]])`
+  gave `null` in compiled JavaScript, and now gives `[[2, 4], [6, 8]]`.
 
 - **Interval target: a loop over a literal list compiles.** On `interval-js`, a
   `Loop` or a `Comprehension` over a `List`, a `Tuple` or a `Map`, written
@@ -262,6 +266,16 @@
   source text is the caller's own value and is not checked, as before.
 
 ### Performance
+
+- **Compiled code computes a value that does not depend on a callback's
+  parameter once, not once per element** (GitHub issue #497). In
+  `Sum(Map(k ↦ At(u, k) + Length(u), Range(1, Length(u))))` with
+  `u = Map(j ↦ Mod(j², 7), Range(1, n))`, the JavaScript code built `u` twice
+  for each `k`. The callback of `u` gets the inferred type of its parameter,
+  `j: integer`, and the compiler did not share or move any expression that
+  holds a callback with a typed parameter. Now `u` is built once, on the first
+  call of the callback over `k`: at `n = 32`, one call is about 6 times faster.
+  Two copies of such an expression in one body are also computed once now.
 
 - **The count and the elements of a family of points are known before
   evaluation** (ROADMAP CE-661). `count` of a sum or product of a list of points

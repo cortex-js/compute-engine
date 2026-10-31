@@ -2341,13 +2341,18 @@ function bareAccumulatorName(raw: Expression | undefined): string | undefined {
  * current type, the type is widened by the body's result, and the loop stops
  * when it no longer changes. Returns the admitted literal (the admission's
  * verdict, as `canonicalCallbackOperand` gives it) with the type it settled
- * on, or `undefined` when the loop does not settle in three steps, the body's
- * result is a top type, or the settled literal's accumulator does not admit
- * the fixpoint.
+ * on. Returns `'rejected'` when the body's result is a top type, or when the
+ * loop settles and the settled literal's accumulator does not admit the
+ * fixpoint: with a seed and enclosing bindings that are the same or wider,
+ * the same answer is expected when the types of the body are monotone in
+ * them (see the rejected records of `FoldRefinementState`). Returns
+ * `undefined` for the other failures: the literal is not accepted or is not
+ * a `Function`, its result type cannot be read, its accumulator has no
+ * binding, or the loop does not settle in `maxSteps` steps.
  *
  * Each step is a pass over the body (`beginFoldPass`), and a nested fold
  * refined in a step records its fixpoint for the next step
- * (`recordedFixpoints`).
+ * (`FoldRefinementState`).
  */
 function fixpointLiteral(
   state: FoldRefinementState,
@@ -2357,7 +2362,7 @@ function fixpointLiteral(
   arity: FoldCallbackArity,
   firstOrdinal: number,
   maxSteps: number
-): { literal: Expression; type: Type } | undefined {
+): { literal: Expression; type: Type } | 'rejected' | undefined {
   let t: Type = start;
   for (let step = 0; step < maxSteps; step++) {
     beginFoldPass(state, firstOrdinal);
@@ -2367,7 +2372,8 @@ function fixpointLiteral(
     if (literal === undefined || !isFunction(literal, 'Function'))
       return undefined;
     const result = functionResult(literal.type.type);
-    if (result === undefined || isKindOpenOperandType(result)) return undefined;
+    if (result === undefined) return undefined;
+    if (isKindOpenOperandType(result)) return 'rejected';
     const next = widen(t, result);
     if (isSubtype(next, t) && isSubtype(t, next)) {
       // The pre-declared type is an inferred one, so a use in the body may
@@ -2376,7 +2382,8 @@ function fixpointLiteral(
       // receives, or its signature would claim a narrower type than the
       // fold delivers.
       const bound = accumulatorBindingType(literal);
-      if (bound === undefined || !isSubtype(t, bound)) return undefined;
+      if (bound === undefined) return undefined;
+      if (!isSubtype(t, bound)) return 'rejected';
       const admitted = canonicalCallbackOperand(literal, arity);
       if (admitted === undefined) return undefined;
       return { literal: admitted, type: t };
@@ -2462,6 +2469,35 @@ const FIXPOINT_STEPS = 3;
  * starts from, in the pass that did not settle, in an admission pass that
  * refined them, or in an earlier invocation at this site.
  *
+ * A nested fold whose fixpoint is REJECTED (`fixpointLiteral`: the settled
+ * type is not admitted by the accumulator's binding, or the body's result is
+ * a top type) keeps its admitted literal, as every fold whose fixpoint fails
+ * does, and records the rejection with the type of its seed. The next step
+ * of the enclosing fold, when the seed's type is the same or wider, then
+ * admits it once, with its nested folds refined from scratch
+ * (`forgetRecordsUnder` first, as for any admission pass), and does not run
+ * its fixpoint. This assumes that the rejection repeats: the seed and the
+ * enclosing bindings only widen from one step to the next, and with types
+ * that are monotone in them, the settled type only widens and the uses that
+ * narrow the binding are the same. The assumption is not checked. When it
+ * fails (a type of the body is narrower under a wider binding), the fold
+ * keeps its admitted literal where the iteration from the seed would have
+ * settled: a less precise type, never an unsound one, since that literal is
+ * what every failed fixpoint gives. No shape is known where the assumption
+ * fails. It needs, for example, a comparison with an operand that may be an
+ * absent collection to have a `missing` arm in its result type
+ * (`boundCallType`, `boxed-expression/boxed-function.ts`). A record whose
+ * seed type is not below the current one is dropped, and the fold is
+ * refined as a new one.
+ *
+ * Without this record such a fold cost four passes in every step of every
+ * enclosing fold (the admission, two fixpoint steps, the admission again
+ * with its nested folds refined), and a chain of them multiplied the passes
+ * at each level: a fold whose accumulator is joined (`Join(acc, …)`) in the
+ * branch of an `If` whose condition may be undecided (a comparison with a
+ * collection) settles on a type with a `missing` arm, which the binding that
+ * `Join` narrows does not admit (issue #487).
+ *
  * The key is the fold's position in the enclosing passes (`foldSiteKey`), so
  * two folds that spell the same literal at different sites of one body never
  * share a record, whatever their seeds or their enclosing bindings. The
@@ -2507,8 +2543,13 @@ const FIXPOINT_STEPS = 3;
  */
 type FoldRefinementState = {
   /** The fixpoints of the nested folds, by site key, each with the raw node
-   * that identifies the fold at that site (`foldIdentity`). */
-  records: Map<string, { guard: Expression; type: Type }>;
+   * that identifies the fold at that site (`foldIdentity`). For a fold whose
+   * fixpoint was rejected, `type` is `undefined` and `seed` is the type of
+   * its seed. */
+  records: Map<
+    string,
+    { guard: Expression; type: Type | undefined; seed?: Type }
+  >;
   /** How many fold canonical handlers are running, one inside the other. */
   depth: number;
   /**
@@ -2750,8 +2791,26 @@ function refinedFoldCombiner(
       ? undefined
       : foldSiteKey(state);
   const entry = key === undefined ? undefined : state.records.get(key);
-  const recorded =
-    entry !== undefined && entry.guard === identity ? entry.type : undefined;
+  const hit = entry !== undefined && entry.guard === identity;
+  // A fold whose fixpoint was rejected in the previous step of the enclosing
+  // fold, with a seed whose type is now the same or wider, is assumed to be
+  // rejected again: it is admitted once, with its nested folds refined from
+  // scratch, and the record stays (see `FoldRefinementState`). Otherwise the
+  // record is dropped and the fold is refined below as a new one.
+  if (hit && entry.type === undefined) {
+    const seed = seedType();
+    if (
+      seed !== undefined &&
+      entry.seed !== undefined &&
+      isSubtype(entry.seed, seed)
+    ) {
+      forgetRecordsUnder(state);
+      beginFoldPass(state, firstOrdinal);
+      return canonicalCallbackOperand(raw, arity);
+    }
+    state.records.delete(key!);
+  }
+  const recorded = hit ? entry.type : undefined;
   if (recorded !== undefined) {
     const seed = seedType();
     if (seed !== undefined && !isKindOpenOperandType(seed)) {
@@ -2766,7 +2825,7 @@ function refinedFoldCombiner(
       );
       const seedAfter = seedType();
       if (
-        settled !== undefined &&
+        typeof settled === 'object' &&
         isFunction(settled.literal, 'Function') &&
         seedAfter !== undefined &&
         isSubtype(seedAfter, seed) &&
@@ -2863,7 +2922,15 @@ function refinedFoldCombiner(
     firstOrdinal,
     FIXPOINT_STEPS
   );
-  if (settled === undefined) return admitted();
+  if (typeof settled !== 'object') {
+    const literal = admitted();
+    // A rejection is recorded, with the seed's type, for the next step of
+    // the enclosing fold; a fixpoint that does not settle in its steps may
+    // settle at a wider type, so it is not.
+    if (settled === 'rejected' && key !== undefined)
+      state.records.set(key, { guard: identity!, type: undefined, seed });
+    return literal;
+  }
   if (key !== undefined && isFunction(settled.literal, 'Function'))
     state.records.set(key, { guard: identity!, type: settled.type });
   return settled.literal;

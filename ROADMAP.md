@@ -5628,58 +5628,30 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
-### CE-689. Boxing and evaluating nested folds whose fixpoint is rejected costs about 3.5× what it did in 0.156.0
+### CE-689. Evaluating nested folds recomputes the types and effects of the body at every step
 
-**Status:** decision needed; performance. GitHub issue #487 (2026-10-30).
+**Status:** open; performance, large. GitHub issue #487 (2026-10-30). User
+decision 2026-10-30: do it as a separate item, after the box part of the issue
+(fixed: the comparison type with an operand that may be an absent collection,
+and the rejected-fixpoint record of `FoldRefinementState`, `collections.ts`).
 
 The expression of the issue is about 1.8 KB of MathJSON: 8 `Fold`s nested 4
-deep, with `If`, `At`, `Join`, `Count`, `Min`, `Range`. Measured on the built
-packages (mean of 10 calls after a warm-up, 2026-10-30): `box` 30 ms (0.156.0), 65 ms (0.169.0),
-106 ms (0.173.0); `Apply` of a `Function` boxed once 23, 33, 42 ms. One
-canonical pass of the same tree with no fold handler (`Fold` renamed) went from
-3 to 5 ms, so about half of the growth is the cost of each pass and the other
-half is the number of passes.
+deep (`test/compute-engine/fixtures/rsk-row-insertion.ts`). Measured on the
+built packages (mean of 10 calls after a warm-up, 2026-10-30): `Apply` of a
+`Function` boxed once takes 23 ms on 0.156.0, 33 ms on 0.169.0 and 42 ms on
+0.173.0. No fold fixpoint runs on that route, but each step of a fold changes
+bindings, which moves the engine generation, so the types (`boundCallType`,
+`functionLiteralSignatureType`) and effects (`isPure`, read by the
+shared-evaluation memo in `evaluate()`) of the body are computed again at
+every step. The fix is step 3b of the evaluation-cache plan (a dependency stamp
+per value cache, `docs/plans/2026-10-30-evaluation-cache-status-handoff.md`).
 
-Box: one box makes 241 passes over callback bodies. The accumulators of the
-inner folds (`bacc`, `tacc`, `nacc`) are joined (`Join(acc, …)`) in a branch of
-an `If` whose condition compares with `At(st, 2)`, which can be a list. Since
-commit `418b4854e` (0.168.0) such a condition can be undecided and the `If` has
-a `missing` arm (`mayBeUndecidedCondition`, `control-structures.ts`). So the
-fixpoint of the fold settles on `list<unknown> | missing`, the binding that
-`Join` narrows is `list<unknown>`, and `fixpointLiteral()` (`collections.ts`)
-rejects it. A rejected fold costs 4 passes (admission, 2 steps, admission
-again), it writes no record, and every step of every enclosing fold repeats
-them.
-
-A prototype that records the rejection, so that the next step of the enclosing
-fold admits the fold once (164 passes; box 188 → 139 ms from source, median of
-15), gives the
-same types for the issue's expression and for the #462 shapes. It changes one
-type: in
-`Fold((st, k) => [Join(st[1], Fold((b, g) => If(st[1][g] > st[2], Join(b, [st[1][g]]), b), [], 1..Count(st[1]))), st[2]], [[3, 1, 4], 2], 1..2)`
-the inner accumulator is `b: collection<any>` with the prototype and
-`b: list<unknown>` at HEAD. The cause: the type of `If` is not monotone in its
-condition. With `y: list<integer> | integer`, `If(x > y, Join(b, [x]), b)` has
-a `missing` arm; with the wider `y: collection | integer`, the condition is
-`broadcastable<boolean>` and the `If` has none. So the inner fold is rejected
-at the first step of the enclosing fold and settles at the second. The
-prototype is in the worktree `/tmp/wt-compute-engine-40-i487`.
-
-Evaluation: no fold fixpoint runs (`Apply` of a boxed `Function`), but each
-step of a fold changes bindings, which moves the engine generation, so the
-types (`boundCallType`, `functionLiteralSignatureType`) and effects (`isPure`
-read by the shared-evaluation memo in `evaluate()`) of the body are computed
-again at every step. This is step 3b of the evaluation-cache plan (a
-dependency stamp per value cache,
-`docs/plans/2026-10-30-evaluation-cache-status-handoff.md`), which the user
-postponed on 2026-10-30.
-
-Decision: (a) take the rejected record and accept the less precise type where
-the `If` type is not monotone; (b) first make the `If` type monotone (a
-condition that can hold a collection gives the `missing` arm whatever its
-static shape), which may also remove the rejection in the issue's expression;
-(c) do step 3b of the evaluation-cache plan for the evaluation part. If
-nothing is decided, the cost stays as in 0.173.0.
+The box route is also still slower than in 0.156.0 (30 ms on 0.156.0, 106 ms on
+0.173.0, built packages). One canonical pass of the same tree with no fold
+handler (`Fold` renamed) went from 3 to 5 ms, so part of the growth is the cost
+of each pass, and the fold fixpoint repeats that cost: the inner folds are still
+rejected at every step (the `If` in their body can be `Missing`), and each
+rejected fold costs 4 passes in the first step of each enclosing fold.
 
 ### CE-668. The first `at()` of an evaluated lazy `Map` view advances the generation, so its cached evaluation is never used
 

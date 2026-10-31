@@ -14075,6 +14075,17 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         // Only the comparisons give a present cell for present operands; any
         // other `handle` operator may answer `Missing` for present inputs, so
         // its cell type keeps the `missing` arm it declares.
+        //
+        // An operand absent as a whole whose present type only MAY be a
+        // collection (`collection | integer | missing`) gives the arm too:
+        // when it is absent, it is a collection that is absent or a scalar
+        // that is absent, and the comparison is `Missing` in both cases
+        // (`y < x` is `Missing` for `y = Missing` and `x = 3`). Its cells
+        // are not known to be present, so the cell type keeps any `missing`
+        // arm. Before, such an operand gave no arm: `y < x` was typed
+        // `broadcastable<boolean>`, which does not hold `Missing`, while the
+        // narrower `y: list<integer> | missing` gave the arm, so a wider
+        // operand type gave a narrower result type (issue #487).
         if (def.resolvedMissingBehavior === 'handle' && !threadedAbsence) {
           let absentWhole = false;
           let absentElsewhere = false;
@@ -14088,7 +14099,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
             ) {
               absentWhole = true;
               if (typeContainsMissing(present)) absentElsewhere = true;
-            } else absentElsewhere = true;
+            } else {
+              if (present !== undefined && !cannotHoldAList(present))
+                absentWhole = true;
+              absentElsewhere = true;
+            }
           }
           // An operand that is not typed as absent, but whose type can hold an
           // absent value (`unknown`, `any`: the `Undefined` symbol), also
