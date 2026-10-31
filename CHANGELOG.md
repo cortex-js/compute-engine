@@ -61,6 +61,30 @@
 
 ### Bug Fixes
 
+- **An expression with a sub-expression of type `error` declines on every
+  compile target.** With `u` declared `real` and `ADD = (x, y) ↦ x + y`, the
+  expression `ADD("ab", u)` is valid, but its type is `error`, and the
+  interpreter gives an error. The `javascript` target compiled it, and
+  `run({ u: 2 })` gave the string `"ab2"`. `Apply((x, y) ↦ x + y, "ab", u)`,
+  `ADD(p, u)` with `p: boolean` (`3`) and a call of a user function whose body
+  has the type `error` were wrong the same way. Now the compilation declines
+  on `javascript`, `interval-js`, `glsl`, `wgsl` and `python`, also when the
+  sub-expression is in a branch of an `If`, in the body of a function or in
+  the stored value of a symbol that the expression reads. A name bound where
+  it occurs (a parameter, a `Sum` index, a name that a `Block` statement
+  assigns, after that statement) is not read as the global definition:
+  `Apply((G) ↦ G + 1, u)` still compiles when the global `G` has a body of
+  type `error`. A bound name is not followed to its global definition, but
+  a node whose own static type is `error` declines also when it is a call of
+  a bound name: `G() + u`, with `G` replaced through `functions`, declines
+  when type inference gives it the type `error` from the engine's `G`. The
+  diagnostic has the code `'static-type-error'` and the kind `'correctness'`,
+  its `value` is the sub-expression, and `unsupported` holds `ErrorCode`, as
+  for an invalid expression, so that a host can tell an
+  error in the expression from an operator with no lowering. An invalid
+  expression now has `ErrorCode` in `unsupported` on every target too:
+  before, `Error("x")` had an empty `unsupported`.
+
 - **Compiled JavaScript folds with an accumulator that becomes a list.** With
   `M` declared `list<vector<2>>`, `Reduce(M, (a, t) ↦ a + t, 0)` compiled, and
   `run({ M: [[1, 2], [3, 4]] })` gave the strings `["1,23", "1,24"]` where the
@@ -789,6 +813,19 @@
   engine rebuild the expression from the held operands and loses that work.
 
 ### Behavior Changes
+
+- **The contract of compiled code.** The compiled value equals the value of
+  the interpreter for a well-typed expression whose inputs are supplied and
+  hold values of their declared (or inferred) types: with `u: real`,
+  compiled `ADD(1, u)` gives `3` at `u = 2`, as the interpreter does. A
+  compilation declines when a sub-expression is invalid or has the static
+  type `error`, and the result has `ErrorCode` in `unsupported`: `"ab" + u`
+  and `ADD("ab", u)` decline. Every other case is unspecified, and the
+  compiled code does not need to check for it: it can give any value, `NaN`,
+  or throw. Examples are an error that the static type does not show
+  (`If(u > 1, "ab", 1) + 1` has the type `integer` and can give `"ab1"`), an
+  input value outside its type (`"ab"` for `u`), and an input left out. See
+  `docs/COMPILATION-MODEL.md`, "Fail closed".
 
 - **A curried function is the deferred call of the original function, and
   its value equals the full call.** A call of a function literal with fewer

@@ -176,6 +176,18 @@ What the decision does NOT change:
 - **A comparison of two collections with an absent cell** keeps the
   2026-09-21 marker ruling: the comparison is `Missing` and a branch on it
   takes no arm.
+- **An error that the static type does not show, or an input value outside
+  its declared type**, in compiled code. *Contract* (user decision
+  2026-10-31, option (b) of
+  `docs/plans/2026-10-31-compiled-code-contract-for-errors.md`): an
+  expression with an invalid sub-expression, or a sub-expression whose
+  static type is `error`, declines (`ADD("ab", u)` with
+  `ADD = (x, y) ↦ x + y`). Otherwise, when the interpreter gives an error,
+  the compiled result is unspecified (`If(u > 1, "ab", 1) + 1` can give
+  `"ab1"` on `javascript`), and so is a run with an input value outside its
+  declared type (`"ab"`, `NaN` or `7` for an input declared `real`, `real`,
+  `real<0..5>`). The full statement is in `docs/COMPILATION-MODEL.md`, "Fail
+  closed".
 - **An unsupplied variable** of a compiled JavaScript function (a variable
   the caller leaves out of the vars object, which reads as `undefined`).
   *Contract* (user decision 2026-10-31): the caller must supply every input

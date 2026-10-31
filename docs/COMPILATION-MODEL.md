@@ -13,6 +13,60 @@ With fallback enabled, a decline returns an interpreted runner. With fallback
 disabled, the decline is visible to the caller. Runtime exceptions from
 successfully compiled user code are not silently reinterpreted.
 
+**What is guaranteed.** The compiled value equals the interpreter's value
+for a well-typed expression whose inputs are supplied and hold values of
+their declared types (or, for an input with no declaration, the type that
+the engine infers). An expression that has a sub-expression that is invalid,
+or whose static type is `error`, declines on every target: `"ab" + u` and,
+with `ADD = (x, y) ↦ x + y`, `ADD("ab", u)` both decline. The result of the
+decline has the token `ErrorCode` in `unsupported`, which a host reads to tell
+an error in the expression from an operator that has no lowering
+(`assertNoStaticTypeError()`, `compilation/compile-static-type-error.ts`; the
+token is added by `buildInterpreterFallback()`,
+`compilation/compile-references.ts`); its diagnostic has the code
+`'static-type-error'` and the kind `'correctness'`. The check walks into every
+operand, which includes every `If`/`Which` branch, the bodies of function
+literals and the values of a dictionary: `If(u > 1, ADD("ab", u), 1)` declines,
+also when the branch is not taken. It also walks into the body of each user
+function, and into the stored value of each symbol, that the code reaches by
+a name that is free where it occurs (the compiler emits that body and
+inlines that value). A name bound where it occurs (a parameter, the index of
+a `Sum`, a name that a `Block` statement assigns, after that statement, a
+`vars` key, a function or an operator that the caller replaces) is not
+followed to its global definition. Every node, a bound symbol and a call of
+a bound name included, still declines when its own static type is `error`.
+Type inference can read that type from the global definition of the name, so
+this simple version can decline where the interpreter has a value: with a
+global `G` whose body has the type `error`, `G() + u` with `G` replaced
+through `functions` declines; a symbol that a `Block` assigns, such as `v` in
+`Block(v := 1, v + 1)`, declines in the same way when its stored value has
+the type `error`. The value of an assignment reads the outer name:
+`Block(G := Equal(G(), 1), G)` calls the global `G`. The check does not go
+into a `Hold`.
+Every other case is unspecified: the compiled code can give any value,
+`NaN`, or throw, and the host validates its inputs if it needs to.
+
+- An error that the static type does not show: `If(u > 1, "ab", 1) + 1` (its
+  static type is `integer`) can give `"ab1"` on `javascript`;
+  `Sum(p, k = 1..u)` with `p: boolean` can give `2`.
+- An input value outside its declared type: `"ab"`, `true`, `[1, 2]` or
+  `{re, im}` for an input declared `real`.
+- A non-finite value for an input declared `real` (`real` holds only finite
+  values): the `javascript` target computes as for an input declared
+  `real | signed_infinity | nan`; a GPU target can assume a finite value
+  (`a - a` is `0`, `a/a` is `1`). `NaN` and `±Infinity` keep their meaning
+  in an input declared `real | signed_infinity | nan`.
+- A value outside a declared range (`7` for `real<0..5>`): the `javascript`
+  target computes with the value; a GPU target can use the range (it can
+  drop `|x|` for `x` in `real<0..5>`).
+- An input left out (see `docs/ERROR-MODEL.md`, "An unsupplied variable").
+
+A typed array for a `list` input and a string for a bare
+`indexed_collection` input are values of their types and keep the
+guarantee. Checks that exist only for the unspecified cases can be removed;
+the decision and the survey of these checks are in
+`docs/plans/2026-10-31-compiled-code-contract-for-errors.md`.
+
 One value carve-out is ruled (pole-encoding ruling, 2026-08-28): where the
 interpreter answers the projective infinity `~oo` — a division pole, a Gamma
 or Factorial pole, an embedded `~oo` constant — a float-only target answers

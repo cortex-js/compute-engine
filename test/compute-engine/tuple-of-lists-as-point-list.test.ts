@@ -393,12 +393,16 @@ describe('Arithmetic over a MathJSON Tuple with a list coordinate fails closed',
   });
 
   test.each(cases)('%s declines to compile to JavaScript', (_, json) => {
-    expect(() =>
-      compile(declaredEngine().box(json), {
-        to: 'javascript',
-        fallback: false,
-      } as any)
-    ).toThrow(/tuple with a list coordinate/);
+    expect(
+      () =>
+        compile(declaredEngine().box(json), {
+          to: 'javascript',
+          fallback: false,
+        } as any)
+      // The expression has the static type `error`, so the static-type-error
+      // decline (`assertNoStaticTypeError()`, compile-static-type-error.ts)
+      // runs before the check that names a tuple with a list coordinate.
+    ).toThrow(/type 'error'/);
   });
 
   test('a tuple of scalars still adds, scales and compiles', () => {
@@ -488,12 +492,16 @@ describe('A function applied to each coordinate of a MathJSON Tuple with a list 
   });
 
   test.each(cases)('%s declines to compile to JavaScript', (_, json) => {
-    expect(() =>
-      compile(declaredEngine().box(json), {
-        to: 'javascript',
-        fallback: false,
-      } as any)
-    ).toThrow(/tuple with a list coordinate/);
+    expect(
+      () =>
+        compile(declaredEngine().box(json), {
+          to: 'javascript',
+          fallback: false,
+        } as any)
+      // The expression has the static type `error`, so the static-type-error
+      // decline (`assertNoStaticTypeError()`, compile-static-type-error.ts)
+      // runs before the check that names a tuple with a list coordinate.
+    ).toThrow(/type 'error'/);
   });
 
   test('a function of a tuple of scalars still applies to each coordinate', () => {
@@ -876,12 +884,16 @@ describe('Sqrt and Root over a MathJSON Tuple with a list coordinate fail closed
     }
   });
   test.each(cases)('%s declines to compile to JavaScript', (_, json) => {
-    expect(() =>
-      compile(declaredEngine().box(json), {
-        to: 'javascript',
-        fallback: false,
-      } as any)
-    ).toThrow(/tuple with a list coordinate/);
+    expect(
+      () =>
+        compile(declaredEngine().box(json), {
+          to: 'javascript',
+          fallback: false,
+        } as any)
+      // The expression has the static type `error`, so the static-type-error
+      // decline (`assertNoStaticTypeError()`, compile-static-type-error.ts)
+      // runs before the check that names a tuple with a list coordinate.
+    ).toThrow(/type 'error'/);
   });
 });
 

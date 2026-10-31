@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-711.
+Next free reference: CE-712.
 
 **Entry format.**
 
@@ -3810,6 +3810,48 @@ References: do not take references for `Re(a)` far below 0 from mpmath's
 the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
+
+### CE-711. Remove the compile checks that exist only for unspecified cases
+
+**Status:** open; cleanup, large. User decision 2026-10-31 (option (b) of
+`docs/plans/2026-10-31-compiled-code-contract-for-errors.md`).
+
+Compiled code now equals the interpreter only for a well-typed expression
+whose inputs hold values of their types; an expression with a
+sub-expression whose static type is `error` declines; every other error case
+is unspecified (`docs/COMPILATION-MODEL.md`, "Fail closed"). Many checks
+exist only for the unspecified cases and can go, in steps, each with its
+tests: for example the `run()` entry refusals of a non-number at a scalar
+input and of a non-string at a text input (`checkEntry`,
+`javascript-runtime.ts`), the same refusals in `broadcast()` and in the
+interval runner, `callResultGuard` and `declaredTopGuard`
+(`compile-expr-handlers.ts`), and the folds and projections that refuse a
+non-number operand that the static type does not show
+(`refuseBuiltinFoldOfNonNumbers`, `refuseNonNumericScalarProjection`,
+`javascript-target.ts`). The plan lists about 40 checks with their class; a
+check that also protects a well-typed expression stays (string and
+aggregate comparisons, complex lanes, `Missing`/`Nothing` values, declared
+`broadcastable<T>` parameters, multi-clause dispatch, domain guards). Each
+step reports the declines removed per target and the per-call cost saved.
+Open entries whose case is now unspecified (for example CE-706, an untyped
+parameter given a list) are re-read against the new rule in the first step.
+
+These stay, because the host Tycho depends on them (answer of the session
+tycho-desk, 2026-10-31): the `RangeError` of `Mod`, `Remainder`, `GCD` and
+`LCM` for a finite operand beyond ±(2^53 − 1), which Tycho turns into a gap
+of a plot; a complete `freeSymbols` list in the compile result, which Tycho
+uses to refuse to run a kernel that reads a name that nobody supplies; and
+the `unbound` decline, which names a call of a name with no binding in
+`unsupported`.
+
+Possibly dead since the static-type-error decline (`assertNoStaticTypeError()`,
+`compilation/compile-static-type-error.ts`) runs first: the GPU check
+"dimensions must agree" (`gpu-shapes.ts`, `Multiply(M2, M3)` with `M2` a
+2×2 and `M3` a 3×3 matrix), the JavaScript check "may be a point"
+(`Add(P, 1)` with `P` a point), and the check "tuple with a list
+coordinate". The shapes that their tests used now have the static type
+`error` and decline before these checks. For each check, find a shape that
+has no `error` type and still reaches it; if none exists, remove the check.
 
 ### CE-706. A compiled root function with an untyped parameter gives `null` for a list argument
 

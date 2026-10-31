@@ -309,12 +309,14 @@ describe('A point with an undecided component type beside a list', () => {
         .evaluate()
         .toString()
     ).toMatch(/incompatible-type/);
+    // The product has the static type `error`, so the compilation declines
+    // before the point check of the JavaScript target.
     expect(() =>
       compile(new ComputeEngine().box(tuple as never), {
         to: 'javascript',
         fallback: false,
       })
-    ).toThrow(/tuple with a list coordinate/);
+    ).toThrow(/type 'error'/);
   });
 
   test('the parsed product is a list of points', () => {

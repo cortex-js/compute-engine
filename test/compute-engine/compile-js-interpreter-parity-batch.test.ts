@@ -168,9 +168,11 @@ describe('CE-221: the sum of a point and a number declines', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'broadcastable<tuple<number, number>>');
     const expr = ce.box([h, a, b] as never);
+    // The sum has the static type `error`, so the compilation declines
+    // before the point check of the JavaScript target.
     expect(() =>
       compile(expr, { to: 'javascript', fallback: false } as never)
-    ).toThrow(/may be a point/);
+    ).toThrow(/type 'error'/);
   });
 
   test('the product of a point and a number still compiles', () => {

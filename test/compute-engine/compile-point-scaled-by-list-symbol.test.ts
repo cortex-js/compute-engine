@@ -78,7 +78,9 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     // The same list built as a MathJSON `Tuple` is data, not a point, and
-    // arithmetic over it declines (user decision 2026-09-25).
+    // arithmetic over it declines (user decision 2026-09-25). The sum has the
+    // static type `error`, so the compilation declines before the point
+    // check of the JavaScript target.
     expect(() =>
       compile(
         ce.box([
@@ -88,7 +90,7 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/tuple with a list coordinate/);
+    ).toThrow(/type 'error'/);
   });
 
   test('a direct Range binding (type `range`) scales a point and matches the interpreter', () => {

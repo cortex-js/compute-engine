@@ -36,22 +36,29 @@ nightly run, tell the user; do not take over that investigation unless asked.
   snapshots or pinned emissions change (measure and report them instead), or a
   sub-agent reported it as "not fixed". Use permanent `CE-<n>` references,
   allocated from the next-free-reference line.
-- When a rule that compiled code must follow (agreement with the interpreter)
-  needs a hard static analysis, implement the simple, sound version first: it
-  may give no value where the interpreter has one, and that case is documented
-  with an example, but it never gives a value where the interpreter has none,
-  when the caller supplies every input. A run with an input left out gives an
-  unspecified result (`docs/ERROR-MODEL.md`, "An unsupplied variable"). A more
-  precise version is a separate task, done when the user asks for it.
-- A reachable shape that a compile target declines (it falls back to the
-  interpreter) or that gives a different value from the interpreter is a defect,
-  even when a corpus shows it only a few times. How often it occurs sets the
-  priority of the fix; it never closes the item. Do not resolve a ROADMAP entry
-  with "the decline stays" or "no consumer has asked".
+- Compiled code must agree with the interpreter for a well-typed expression
+  whose inputs are supplied and hold values of their declared (or inferred)
+  types. A compilation declines when a sub-expression is invalid or has the
+  static type `error`. Every other case is unspecified, and compiled code need
+  not check for it: an error that the static type does not show
+  (`If(u > 1, "ab", 1) + 1`), an input value outside its type (`"ab"` for an
+  input declared `real`, `NaN` for `real`, `7` for `real<0..5>`), an input
+  left out. The contract is in `docs/COMPILATION-MODEL.md`, "Fail closed".
+- When a rule that compiled code must follow (agreement with the interpreter
+  in the cases above) needs a hard static analysis, implement the simple, sound
+  version first: it may give no value where the interpreter has one, and that
+  case is documented with an example, but it never gives a different value. A
+  more precise version is a separate task, done when the user asks for it.
+- A reachable shape in the cases above that a compile target declines (it falls
+  back to the interpreter) or that gives a different value from the interpreter
+  is a defect, even when a corpus shows it only a few times. How often it occurs
+  sets the priority of the fix; it never closes the item. Do not resolve a
+  ROADMAP entry with "the decline stays" or "no consumer has asked".
 - Judge a design change first by correctness (compiled values equal the
-  interpreter's; no error becomes a value with no error) and by code-generation
-  coverage (declines removed per target). The number of changed tests and
-  snapshots is a cost to report, not a reason to choose.
+  interpreter's in the cases above; an expression whose static type is `error`
+  declines) and by code-generation coverage (declines removed per target). The
+  number of changed tests and snapshots is a cost to report, not a reason to
+  choose.
 - When working autonomously, continue independent work while a decision is
   pending. Report unresolved decisions and verification failures explicitly. At
   a design choice, take the option you recommend, continue to the end, and

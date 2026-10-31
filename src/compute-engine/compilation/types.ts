@@ -288,7 +288,9 @@ export type FieldFunctionResult = {
  *   comparison over a statically non-real operand). Nothing wrong was ever
  *   computed; the expression simply has no compiled value here.
  * - `'correctness'` — a value the compiler could have computed incorrectly is
- *   withdrawn instead (a complex-shaped value meeting a real-shaped binding).
+ *   withdrawn instead (a complex-shaped value meeting a real-shaped binding,
+ *   a sub-expression of static type `error` for which the interpreter gives
+ *   an error).
  *
  * A consumer counting declines must keep the two apart: the second kind is
  * a fix, not a regression.
@@ -302,8 +304,8 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  * compilation, carried on `CompilationResult.warnings`.
  *
  * - `code` — a stable machine-readable identifier: `'lane-mismatch'`,
- *   `'unsupported-mode'`, `'compile-error'` (the generic fail-closed
- *   decline), ….
+ *   `'unsupported-mode'`, `'static-type-error'` (a sub-expression of static
+ *   type `error`), `'compile-error'` (the generic fail-closed decline), ….
  * - `kind` — see `CompileDiagnosticKind`.
  * - `message` — the human-readable reason (same text as `error`).
  * - `boundary` — for a lane mismatch, the binding boundary that refused
@@ -312,7 +314,9 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  *   (the parameter `x` of `b`, the local `k`) or an honest description ("the
  *   accumulator of the `Reduce`") — never a compiler-internal temporary.
  * - `value` — the LaTeX of the complex-shaped expression that reached it;
- *   for a warning, the expression it is about, as `toString()` writes it.
+ *   for a `'static-type-error'` decline, the sub-expression of type `error`,
+ *   as `toString()` writes it; for a warning, the expression it is about, as
+ *   `toString()` writes it.
  */
 export type CompileDiagnostic = {
   code: string;

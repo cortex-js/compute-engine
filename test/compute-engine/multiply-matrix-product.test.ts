@@ -374,12 +374,15 @@ describe('compiled code', () => {
   it('matrices whose dimensions do not agree do not compile', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'matrix<number^(2x3)>');
+    // `a · a` has the static type `error`, so the static-type-error decline
+    // (`assertNoStaticTypeError()`, compile-static-type-error.ts) runs before
+    // the target's own check of the dimensions.
     expect(() =>
       compile(ce.box(['Multiply', 'a', 'a']), {
         to: 'javascript',
         fallback: false,
       })
-    ).toThrow(/incompatible-dimensions/);
+    ).toThrow(/type 'error'/);
   });
 
   it('a type that may hold points keeps the element-wise code', () => {

@@ -28,6 +28,7 @@ import {
   functionLiteralParameters,
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
+import { STATIC_TYPE_ERROR_CODE } from './compile-static-type-error.js';
 import { protocolOfSymbol } from '../engine-protocols.js';
 import { planProtocolDispatch } from './protocol-dispatch.js';
 import { matchPatternReferences } from '../boxed-expression/match-dispatch.js';
@@ -1520,6 +1521,19 @@ export function buildInterpreterFallback<T extends string>(
     // keeps the empty analysis.
     throwIfCallerCancellation(e, ce._deadlineFrame);
   }
+  // The decline of an invalid expression, and the decline of a
+  // sub-expression of static type `error` (`assertNoStaticTypeError()`,
+  // code `'static-type-error'`), report `ErrorCode` in `unsupported` on every
+  // target. A host reads this token to tell a decline for an error in the
+  // expression from a decline for a missing lowering. The reference analysis
+  // finds `ErrorCode` only inside an `Error` node, and only on some targets;
+  // a valid call whose type is `error` (`ADD("ab", u)` with `u: real`) has
+  // no such node.
+  if (
+    !refs.unsupported.includes('ErrorCode') &&
+    (diagnostic.code === STATIC_TYPE_ERROR_CODE || !expr.isValid)
+  )
+    refs = { ...refs, unsupported: [...refs.unsupported, 'ErrorCode'] };
 
   // The type report of the free symbols, read against the target the
   // analysis used. Like the analysis, it never breaks the fallback.

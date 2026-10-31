@@ -430,6 +430,7 @@ import {
   parameterTypesKey,
 } from './compile-callbacks.js';
 import { identifierPattern } from './compile-folded-values.js';
+import { assertNoStaticTypeError } from './compile-static-type-error.js';
 
 export function compile(
   expr: Expression | undefined,
@@ -456,6 +457,12 @@ export function compile(
       `Could not compile invalid expression: "${expr.toString()}"`
     );
   }
+  // A valid expression with a sub-expression of static type `error` declines
+  // too, on every target: the interpreter gives an error for it, and the
+  // compiled code would compute a value. The walk covers the whole
+  // expression and the user-function bodies it reaches, so it runs once, at
+  // the compilation boundary.
+  if (CompilerState._compileDepth === 0) assertNoStaticTypeError(expr, target);
   // First-class type values do not compile — a reified type expression has
   // no runtime representation on any target, and the type-algebra
   // operators consult the engine's type registry, which compiled code does

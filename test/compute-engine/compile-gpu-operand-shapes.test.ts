@@ -452,17 +452,17 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
       expect(() => emit(['Add', 'M2t', 'M3t'])).toThrow(
         /SAME dimensions.*\(mat2, mat3\)/s
       );
-      expect(() => emit(['Multiply', M2, M3])).toThrow(
-        /dimensions must agree.*\(mat2, mat3\)/s
-      );
+      // The product has the static type `error`, so the compilation
+      // declines before the shape check of the shader target.
+      expect(() => emit(['Multiply', M2, M3])).toThrow(/type 'error'/);
     }
   });
 
   it('a matrix-vector product with disagreeing dimensions declines', () => {
     for (const emit of [gi, wi])
-      expect(() => emit(['Multiply', M2, 'P'])).toThrow(
-        /must agree.*\(mat2, vec3\)/s
-      );
+      // The product has the static type `error`, so the compilation
+      // declines before the shape check of the shader target.
+      expect(() => emit(['Multiply', M2, 'P'])).toThrow(/type 'error'/);
   });
 
   it('a matrix of unknown dimensions declines', () => {
