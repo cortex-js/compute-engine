@@ -549,6 +549,85 @@ export function nameReachesAbsArg(
 }
 
 /**
+ * Does `expr` emit code that the caller supplied, once the values of the
+ * symbols it reads and the bodies of the user functions it calls are looked
+ * through, as a compilation target inlines them? Caller code is a symbol
+ * whose `vars` entry is caller source (`isStringVar`), or an application
+ * whose emission the caller supplied (`isCallerMapped`: a `functions` or
+ * `operators` entry, an operator's own `compile` handler). It can count its
+ * calls or draw a number, and the compiler cannot see inside it, so a pass
+ * that skips, repeats or moves the evaluation of `expr` must treat it as
+ * code with an effect. A call whose head is a `vars` key with caller source
+ * is caller code too. `readsInput` names a symbol whose reference reads an
+ * input of the compiled code (a plain `vars` read, a binder's variable): its
+ * stored value is not read, so the walk stops there. `localFunction` gives
+ * the literal of a function that the compiled block itself defines (it is
+ * called instead of an engine function with the same name): `null` when
+ * that literal cannot be read, which counts as caller code because its body
+ * is not known, and `undefined` when the name is not a block local.
+ *
+ * Each node, each symbol name and each function name is visited once, so a
+ * value that refers to itself ends the walk.
+ */
+export function reachesCallerCode(
+  expr: Expression,
+  caller: {
+    isStringVar?: (name: string) => boolean;
+    isCallerMapped: (node: Expression & FunctionInterface) => boolean;
+    readsInput?: (name: string) => boolean;
+    localFunction?: (
+      name: string
+    ) => (Expression & FunctionInterface) | null | undefined;
+  }
+): boolean {
+  const engine = expr.engine;
+  const seen = new Set<Expression>();
+  const symbols = new Set<string>();
+  const functions = new Set<string>();
+  const visit = (node: Expression): boolean => {
+    if (seen.has(node)) return false;
+    seen.add(node);
+    if (isSymbol(node)) {
+      const name = node.symbol;
+      if (caller.isStringVar?.(name) === true) return true;
+      if (symbols.has(name)) return false;
+      symbols.add(name);
+      // A block-local function passed by name (`Apply(f, 2)`, a callback)
+      // is the block's own binding, as in a call of `f`. It is looked up
+      // before `readsInput`: the block binds each of its locals, so the
+      // name is also a bound variable.
+      const local = caller.localFunction?.(name);
+      if (local === null) return true;
+      if (local !== undefined) return visit(local);
+      if (caller.readsInput?.(name) === true) return false;
+      const value = engine._getSymbolValue(name);
+      return value !== undefined && visit(value);
+    }
+    if (isDictionary(node)) return node.values.some(visit);
+    if (!isFunction(node)) return false;
+    if (
+      caller.isStringVar?.(node.operator) === true ||
+      caller.isCallerMapped(node) ||
+      node.ops.some(visit)
+    )
+      return true;
+    if (functions.has(node.operator)) return false;
+    functions.add(node.operator);
+    const local = caller.localFunction?.(node.operator);
+    if (local === null) return true;
+    if (local !== undefined) return visit(local);
+    const literal = userFunctionLiteral(engine, node.operator);
+    if (literal !== undefined) return visit(literal);
+    return (
+      multiClauseState(engine.lookupDefinition(node.operator))?.clauses.some(
+        (c) => visit(c.literal)
+      ) ?? false
+    );
+  };
+  return visit(expr);
+}
+
+/**
  * Is `expr` impure once every assigned symbol value it reaches is looked
  * through? `expr.isPure` stops at a symbol that has a value, so
  * `a := r + r` with `r := Random()` reports pure; the body of a called

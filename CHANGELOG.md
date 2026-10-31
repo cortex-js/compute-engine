@@ -18,6 +18,21 @@
   `listInputs`, so that `createIntervalRuntime().loadBroadcast()` reads the
   list the same way.
 
+- **New `Composition(f, g, h)`: the composition of functions, applied right to
+  left, as Wolfram's `Composition`.** `Composition(f, g, h)(x)` is
+  `f(g(h(x)))`, and the rightmost function takes all the arguments:
+  `["Apply", ["Composition", "Sin", "Exp"], 0]` evaluates to `sin(1)`, and
+  `Composition(Sqrt, Add)(3, 6)` to `3`. Nested compositions flatten,
+  `Identity` steps are removed, `Composition()` is `Identity` and
+  `Composition(f)` is `f`. A composition is a function value, so it works in
+  `Apply`, a call, `Pipe` and `Map`. When each step has a signature, the type
+  has the parameters of the last step and the result of the first:
+  `Composition(Sin, Exp)` is `(number) -> number`. An application compiles to
+  the nested call on every target. As a callback, `Map(Composition(Sin, Exp),
+  xs)` compiles to JavaScript when the last step has a fixed number of
+  parameters; when it does not (`Add`), the interpreter evaluates the `Map`.
+  (#495, contributed by [enumeratio](https://github.com/enumeratio) in #496)
+
 ### Bug Fixes
 
 - **A numeric integral whose integrand is infinite at some doubles next to a
@@ -56,7 +71,17 @@
   `G(x)(y)` is `x + y`. This applies to the parameters of a nested literal,
   destructuring parameters included, and to the index of a scoped operator
   such as `Sum`: with `S = y ↦ (x ↦ Sum(y·x·k, k, 1, 3))`, `S(k)(2)` is `12k`,
-  not `28`. A binder that captures nothing keeps its names.
+  not `28`. It also applies to a local of a `Block` (made by an assignment or
+  a `Declare`), and to a `Sum`, `Block` or literal held in `Hold`: with
+  `H = y ↦ Hold(Sum(y·k, k, 1, 3))`, `H(k)` released is `6k`, not `14`. A
+  binder that captures nothing keeps its names. After a rename, a named
+  argument of the renamed parameter must use the new name: `G(x)` accepts
+  `NamedArgument("x_1", 2)`, not `NamedArgument("x", 2)`. When a rename
+  cannot be decided before the call runs, the call stays unevaluated instead
+  of giving a wrong value. Examples: an assignment in a held `Block` to a name
+  that the argument holds (the assignment can write a variable declared
+  outside the block), and a local declared only by a `Declare` inside an `If`
+  branch (it is a local only when that branch runs).
 
 - **Compiled JavaScript and Python: a real-only head with an operand that may
   be complex now evaluates its operands as the interpreter does** (ROADMAP
@@ -76,7 +101,14 @@
   the interpreter takes two), or when it reads a symbol that another operand
   may assign (`Max(y, Assign(y, 1), y, Sqrt(x))`). With the default fallback,
   the interpreter then gives the value. A pure node at two positions beside a
-  draw (`Max(e, e, Random())` with `e = Sqrt(x)`) still compiles.
+  draw (`Max(e, e, Random())` with `e = Sqrt(x)`) still compiles. Code that
+  the caller supplies counts as an effect too: a `vars` entry that runs code
+  (`vars: { w: '_.draw()' }`), a head mapped through `functions` or
+  `operators`, or an operator's own `compile` handler. This also holds when
+  that code is reached through the value of a symbol (`r := 2w`), the body of
+  a user function, or a function defined in the compiled block, called or
+  passed by name (`Apply(f)`). So `Max(Sqrt(x), r)` calls `_.draw()` once
+  also at `x = -4`.
 
 - **GLSL and WGSL: a reduction over a vector constructor with fewer operands
   than components reads every component** (ROADMAP CE-684). With `xs`
@@ -241,16 +273,21 @@
   parameter declared with a scalar type such as `number` or `integer`. A
   call of a function declared `(any) -> any` with a list argument is now
   typed `any` (it was `list<any^3>` for a list of 3 elements). An alias of
-  one of these types (`type alias A = expression`) has the same effect. When
-  the result of the function is declared or inferred as a scalar, a call
-  with a list argument is typed from the body: with
+  one of these types (`type alias A = expression`) has the same effect. A
+  call with a list or tuple argument at such a parameter is typed from the
+  body, whatever the declared or inferred result: with
   `g := (t: expression) ↦ 2t`, `g([1, 2, 3])` is typed `vector<integer^3>`.
-  When the argument is itself declared `any`, `expression` or `value`, the
+  When the argument can be a collection but is not certainly one (it is
+  declared `any`, `expression`, `value`, or `list<integer> | integer`), the
   call is typed `any`. Compiled code declines (falls back to the interpreter)
   a call where an argument that can be a collection reaches a parameter
-  declared `expression`, and a function literal with such a parameter that
-  is compiled as a function value: `((t: expression) ↦ 2t)([[1, 2], [3, 4]])`
-  gave `null` in compiled JavaScript, and now gives `[[2, 4], [6, 8]]`.
+  declared `expression`: `((t: expression) ↦ 2t)([[1, 2], [3, 4]])` gave
+  `null` in compiled JavaScript, and now gives `[[2, 4], [6, 8]]`. A
+  function with such a parameter, literal or named, that is compiled as a
+  function value declines too, except at a callback consumer such as `Map`
+  whose elements cannot be collections: with `h := (t: expression) ↦ 2t`,
+  `Map(h, rows)` over `[[1, 2], [3, 4]]` gave `[null, null]`; it now
+  declines, and `Map(h, L)` with `L` declared `list<real>` still compiles.
 
 - **Interval target: a loop over a literal list compiles.** On `interval-js`, a
   `Loop` or a `Comprehension` over a `List`, a `Tuple` or a `Map`, written

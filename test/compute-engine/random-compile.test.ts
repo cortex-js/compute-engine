@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { reachesCallerCode } from '../../src/compute-engine/compilation/compile-folding';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 import { foldSeed, frameDraw } from '../../src/compute-engine/numerics/random';
 import {
@@ -1485,6 +1486,95 @@ describe('a real-operand guard over an impure node shared by two positions', () 
       result.run!({ x, draw: () => (++calls, 1) } as any);
       expect(calls).toBe(1);
     }
+  });
+
+  test('caller code reached through a symbol value runs whatever the guard decides', () => {
+    // `r := 2·w` with `w` mapped to `_.draw()`: the compiled code inlines
+    // the value of `r`, so the caller's call must run once also when √x is
+    // not real.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('w', 'real');
+    ce.assign('r', ce.box(['Multiply', 2, 'w'], { form: 'raw' }));
+    const expr = ce.box(['Max', ['Sqrt', 'x'], 'r']);
+    const result = compile(expr, {
+      fallback: false,
+      constantFold: false,
+      vars: { w: '_.draw()' },
+    })!;
+    expect(result.success).toBe(true);
+    for (const x of [4, -4]) {
+      let calls = 0;
+      const value = result.run!({ x, draw: () => (++calls, 1) } as any);
+      expect(calls).toBe(1);
+      if (x === 4) expect(value).toBe(2);
+    }
+  });
+
+  test('caller code in the body of a block-local function runs whatever the guard decides', () => {
+    // `f` is defined by the compiled block, so its body is read from the
+    // block, not from the engine.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('w', 'real');
+    const expr = ce.box([
+      'Block',
+      ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
+      ['Max', ['Sqrt', 'x'], ['f']],
+    ]);
+    const result = compile(expr, {
+      fallback: false,
+      constantFold: false,
+      vars: { w: '_.draw()' },
+    })!;
+    expect(result.success).toBe(true);
+    for (const x of [4, -4]) {
+      let calls = 0;
+      const value = result.run!({ x, draw: () => (++calls, 1) } as any);
+      expect(calls).toBe(1);
+      if (x === 4) expect(value).toBe(2);
+    }
+  });
+
+  test('caller code in a block-local function passed by name runs whatever the guard decides', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('w', 'real');
+    const expr = ce.box([
+      'Block',
+      ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
+      ['Max', ['Sqrt', 'x'], ['Apply', 'f']],
+    ]);
+    const result = compile(expr, {
+      fallback: false,
+      constantFold: false,
+      vars: { w: '_.draw()' },
+    })!;
+    expect(result.success).toBe(true);
+    for (const x of [4, -4]) {
+      let calls = 0;
+      const value = result.run!({ x, draw: () => (++calls, 1) } as any);
+      expect(calls).toBe(1);
+      if (x === 4) expect(value).toBe(2);
+    }
+  });
+
+  test('a block-local function name that is also a bound variable is looked through', () => {
+    // A block binds each of its locals, so `f` reads an input of the
+    // compiled code AND names the block's function. Its literal is read
+    // first.
+    const ce = new ComputeEngine();
+    const literal = ce.box(['Function', ['Multiply', 2, 'w']]) as any;
+    const options = {
+      isStringVar: (n: string) => n === 'w',
+      isCallerMapped: () => false,
+      readsInput: (n: string) => n === 'f',
+      localFunction: (n: string) => (n === 'f' ? literal : undefined),
+    };
+    expect(reachesCallerCode(ce.box('f'), options)).toBe(true);
+    expect(
+      reachesCallerCode(ce.box('f'), { ...options, localFunction: undefined })
+    ).toBe(false);
   });
 
   test('a symbol whose value assigns counts as a write', () => {

@@ -28,9 +28,7 @@ import {
   gpuRecordBoundDraws,
 } from './gpu-draw-order.js';
 import { isCallerMapped } from './cse.js';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
-import { userFunctionLiteral } from './compile-assignment-checks.js';
-import { multiClauseState } from '../multi-clause.js';
+import { reachesCallerCode } from './compile-folding.js';
 
 /**
  * Can the emitted source of `expr` be written more than once with the same
@@ -52,35 +50,10 @@ function gpuRepeatableSource(
   // but an operator declared with its own `compile` handler still emits
   // caller code there, and `isCallerMapped` finds it from the definition.
   const caller = target.cse?.harvestOptions ?? {};
-  // The walk looks through what a shader target inlines: the value of an
-  // assigned symbol, the body of a called user-defined function, and each
-  // clause of a multi-clause function. Each node and each name is visited
-  // once, so a value that refers to itself ends the walk.
-  const engine = expr.engine;
-  const seen = new Set<Expression>();
-  const names = new Set<string>();
-  const callerCode = (node: Expression): boolean => {
-    if (seen.has(node)) return false;
-    seen.add(node);
-    if (isSymbol(node)) {
-      if (caller.isStringVar?.(node.symbol) === true) return true;
-      if (names.has(node.symbol)) return false;
-      names.add(node.symbol);
-      const value = engine._getSymbolValue(node.symbol);
-      return value !== undefined && callerCode(value);
-    }
-    if (!isFunction(node)) return false;
-    if (isCallerMapped(node, caller) || node.ops.some(callerCode)) return true;
-    if (names.has(node.operator)) return false;
-    names.add(node.operator);
-    const literal = userFunctionLiteral(engine, node.operator);
-    if (literal !== undefined) return callerCode(literal);
-    const clauses = multiClauseState(
-      engine.lookupDefinition(node.operator)
-    )?.clauses;
-    return clauses?.some((c) => callerCode(c.literal)) ?? false;
-  };
-  return !callerCode(expr);
+  return !reachesCallerCode(expr, {
+    isStringVar: caller.isStringVar,
+    isCallerMapped: (node) => isCallerMapped(node, caller),
+  });
 }
 
 /**

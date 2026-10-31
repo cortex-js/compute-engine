@@ -174,6 +174,7 @@ import {
   foldValueBlocked,
   foldValueImpure,
   foldableCollectionElements,
+  reachesCallerCode,
   foldedRealNumber,
   hasUnknowns,
   jumpShiftRewrite,
@@ -1247,19 +1248,33 @@ export function realOperandGuard(
   // or `functions`, and `isCallerMapped` still finds a `compile` handler
   // there from the definition.
   const caller = target.cse?.harvestOptions ?? {};
-  const callerCode = (a: Expression): boolean => {
-    if (isSymbol(a)) return caller.isStringVar?.(a.symbol) === true;
-    if (!isFunction(a)) return false;
-    return isCallerMapped(a, caller) || a.ops.some(callerCode);
-  };
   // A symbol that `vars` maps to a plain read of an input, or that a binder
   // of the compiled code binds, is read from that input and never from its
   // stored value, so its value does not count.
+  const inputName = (name: string): boolean =>
+    caller.isStringVar?.(name) !== true &&
+    (target.varsKeys?.has(name) === true ||
+      target.boundVars?.has(name) === true);
+  // The walk looks through symbol values and user-function bodies, as the
+  // compiled code inlines them (`reachesCallerCode`).
+  // One answer per operand node: the walk can be long (values and bodies),
+  // and the tests below ask about the same operand several times.
+  const callerCodeMemo = new Map<Expression, boolean>();
+  const callerCode = (a: Expression): boolean => {
+    let known = callerCodeMemo.get(a);
+    if (known === undefined) {
+      known = reachesCallerCode(a, {
+        isStringVar: caller.isStringVar,
+        isCallerMapped: (node) => isCallerMapped(node, caller),
+        readsInput: inputName,
+        localFunction: (name) => blockLocalFunction(name, target),
+      });
+      callerCodeMemo.set(a, known);
+    }
+    return known;
+  };
   const readsInput = (a: Expression): boolean =>
-    isSymbol(a) &&
-    !callerCode(a) &&
-    (target.varsKeys?.has(a.symbol) === true ||
-      target.boundVars?.has(a.symbol) === true);
+    isSymbol(a) && inputName(a.symbol);
   const impure = (a: Expression): boolean =>
     a.isPure !== true ||
     callerCode(a) ||
@@ -1294,12 +1309,24 @@ export function realOperandGuard(
       if (seen.has(node)) return false;
       seen.add(node);
       if (isSymbol(node)) {
+        // A block-local function passed by name is the block's own binding.
+        // It is looked up before `readsInput`: the block binds each of its
+        // locals, so the name is also a bound variable.
+        const local = blockLocalFunction(node.symbol, target);
+        if (local === null) return true;
+        if (local !== undefined) return foldValueImpure(local);
         if (readsInput(node)) return false;
         const value = engine._getSymbolValue(node.symbol);
         return value !== undefined && foldValueImpure(value);
       }
       if (!isFunction(node)) return false;
       if (node.ops.some(visit)) return true;
+      // A function that the compiled block defines is called instead of an
+      // engine function with the same name; `null` means its literal cannot
+      // be read here, so its effects are not known.
+      const local = blockLocalFunction(node.operator, target);
+      if (local === null) return true;
+      if (local !== undefined) return foldValueImpure(local);
       const literal = userFunctionLiteral(engine, node.operator);
       if (literal !== undefined) return foldValueImpure(literal);
       return (
