@@ -385,12 +385,45 @@ describe('a renamed binder with nested scopes', () => {
       'Function',
       [
         'Block',
-        ['Block', ['Assign', 't_1', 2], ['Add', 't_1', 'y']],
+        ['Block', ['Assign', 't_1', 2], ['Add', 't', 't_1']],
         ['Add', 't', 't_1', 'x'],
       ],
       'x',
     ]);
   });
+
+  // y ↦ (x ↦ Block(Block(y^x))): the scope of the nested block holds the
+  // binding of the parameter x, which the block reads. That entry does not
+  // bind x: the rename of x renames the occurrence in the nested block too.
+  // Before, the occurrence kept the name x, and the substitution of y
+  // renamed it a second time: x_1 ↦ x^(x_2).
+  test.each([
+    ['', []],
+    [' with a Declare', [['Declare', 't', "'integer'"]]],
+  ])(
+    'a nested block reads the renamed parameter%s',
+    (_, statements: unknown[]) => {
+      const F = [
+        'Function',
+        [
+          'Function',
+          ['Block', ['Block', ...statements, ['Power', 'y', 'x']]],
+          'x',
+        ],
+        'y',
+      ];
+      expect(run([[F, 'x'], 'y']).json).toEqual(['Power', 'x', 'y']);
+      const engine = new ComputeEngine();
+      const r = run(['Apply', F, 'x'], engine);
+      expect(r.json).toEqual([
+        'Function',
+        ['Block', ['Block', ...statements, ['Power', 'x', 'x_1']]],
+        'x_1',
+      ]);
+      expect(run(['Apply', r, 'y'], engine).json).toEqual(['Power', 'x', 'y']);
+      expect(run(['Apply', r, 3], engine).json).toEqual(['Power', 'x', 3]);
+    }
+  );
 
   test('a sum in a renamed literal reads the renamed parameter', () => {
     // y ↦ (x ↦ Σ_{k=1}^{3} y·k·x) applied to x: x_1 ↦ Σ x·k·x_1, and

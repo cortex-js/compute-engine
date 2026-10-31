@@ -26,9 +26,9 @@ import {
 import {
   binderBoundAt,
   declaredBinders,
-  indefiniteIntegralVariables,
   mapOwnIndexClause,
   ownIndexClauseAt,
+  pointVariableNames,
   someOwnIndexClause,
 } from './boxed-expression/binding-sites.js';
 import { hasAsyncOnlyApplication } from './boxed-expression/async-only-descendants.js';
@@ -4586,12 +4586,69 @@ type ParameterSub = readonly [
  * rename cannot be decided before the result runs, the substitution throws
  * `UnavoidableCapture`, and the application declines
  * (`declineUnavoidableCapture`).
+ *
+ * A parameter that the result writes is not substituted at all (the
+ * written-parameter rule, `parameterWrites`). The substitution cannot
+ * replace the target of the write, and a read of the parameter after the
+ * write must give the written value, not the value of the argument; a
+ * check at each write cannot decide this, because two sibling blocks of
+ * the result can share the binding of the parameter, and a write in one
+ * changes what a read in the other gives. So, when the result holds an
+ * `Assign` or a `Declare` that writes the parameter `p`:
+ *
+ * - On a saturated call (`call` is `'saturated'`), every occurrence of `p`
+ *   keeps the binding of the parameter. `captureClosures` has made the call
+ *   frame the closure environment of each `Function` literal of the
+ *   result, so the literal reads and writes the value of `p` in that frame.
+ *   The literal then shares the binding of `p` across its applications:
+ *   capturing a binding does not freeze its value, and a parameter reads
+ *   the activation of its invocation, here the call that made the literal
+ *   (`docs/SCOPING-MODEL.md`, "Callable resolution"). With `mk = n ↦ (() ↦
+ *   Block(n := n + 1, n))`, `c = mk(5)` gives `6` for the first `c()` and
+ *   `7` for the second, as the same closure does in JavaScript. A write of
+ *   `p` outside every `Function` literal of the result (a statement of a
+ *   held `Block` at the top of the result) would run after the frame is
+ *   gone, so the application declines. So does a read of `p` outside every
+ *   `Function` literal: it keeps the binding of the parameter, which has
+ *   no frame after the call, and it resolves by name later. With a global
+ *   `y = 100`, `y ↦ Pair(Hold(y), () ↦ Block(y := y + 1, y))` applied to
+ *   `5` gave a held `y` that released to `100`. A `Function` node whose
+ *   body has no scope is not captured, so a write in it counts as a write
+ *   outside every literal: with a global `n = 100`, `n ↦ Hold(() ↦
+ *   Assign(n, 2))`, with the `Assign` boxed before, applied to `5`,
+ *   released and applied, set the global `n` to `2`.
+ * - A write or a read of `p` that denotes the parameter only by its name
+ *   (a symbol with no binding, in held content) declines too, also inside
+ *   a `Function` literal. `captureClosures` captures the frame only for a
+ *   literal whose body has a scope, so such an occurrence finds no frame
+ *   and resolves by name when it runs: with a global `y = 100`, `y ↦
+ *   Hold(() ↦ Block(y := y + 1, y))` applied to `5`, released and applied,
+ *   gave `101` and set the global `y` to `101`.
+ * - On a partial application (`call` is `'partial'`), the application
+ *   declines: its residual literal does not capture the call frame, so it
+ *   cannot share the written parameter with its later applications.
  */
 function bindingKeyedSubs(
   expr: Expression,
-  subs: ReadonlyArray<ParameterSub>
+  subs: ReadonlyArray<ParameterSub>,
+  call: 'saturated' | 'partial' = 'saturated'
 ): Expression {
-  const { visitSymbol, visitApplication } = parameterSubVisitors(subs);
+  const substituted = subs.filter((sub) => {
+    const writes = parameterWrites(expr, sub);
+    if ((writes & (WRITE_OUTSIDE_LITERAL | WRITE_IN_LITERAL)) === 0)
+      return true;
+    if (
+      call === 'partial' ||
+      (writes &
+        (WRITE_OUTSIDE_LITERAL | READ_OUTSIDE_LITERAL | MATCHED_BY_NAME)) !==
+        0
+    )
+      throw new UnavoidableCapture();
+    return false;
+  });
+  if (substituted.length === 0) return expr;
+  const { visitSymbol, visitApplication } = parameterSubVisitors(substituted);
+  const binds = parameterSubBinds(substituted);
   return rewriteWithBinders(
     expr,
     visitSymbol,
@@ -4599,8 +4656,319 @@ function bindingKeyedSubs(
     false,
     undefined,
     visitApplication,
-    captureAvoidingBinderVisitor(expr, subs)
+    captureAvoidingBinderVisitor(expr, substituted, binds),
+    binds
   );
+}
+
+/** A bit of `parameterWrites`: a write outside every `Function` literal. */
+const WRITE_OUTSIDE_LITERAL = 1;
+/** A bit of `parameterWrites`: a write inside a `Function` literal. */
+const WRITE_IN_LITERAL = 2;
+/** A bit of `parameterWrites`: a read outside every `Function` literal. */
+const READ_OUTSIDE_LITERAL = 4;
+/** A bit of `parameterWrites`: a read or a write that denotes the parameter
+ * only by its name. A `Function` literal that encloses it does not clear it. */
+const MATCHED_BY_NAME = 8;
+
+/**
+ * Where `expr` writes and reads the parameter of `sub`, as a set of bits:
+ * `WRITE_OUTSIDE_LITERAL` for a write that no `Function` literal of `expr`
+ * encloses, `WRITE_IN_LITERAL` for a write in a `Function` literal,
+ * `READ_OUTSIDE_LITERAL` for a read (a symbol occurrence, or a call whose
+ * operator is the parameter) that no `Function` literal encloses, and
+ * `MATCHED_BY_NAME` for a read or a write that denotes the parameter only by
+ * its name, wherever it is. `0` when `expr` has no occurrence of the
+ * parameter.
+ *
+ * A write is an `Assign` or a `Declare` whose target denotes the parameter:
+ * the symbol of the parameter, a tuple pattern that holds it, or an indexed
+ * target (`At`) whose collection is a write of it. A read of the parameter
+ * in an index (`At(L, y)`) is not a write. The symbol denotes the parameter
+ * when it has its name and its binding is the parameter's or an activation
+ * of it (`sameBindingDef`); a symbol that has no binding (in a held
+ * operand) denotes it by its name. The target of a canonical `Assign` or
+ * `Declare` has no binding either, but it denotes the parameter as the
+ * statement does, not by name. A held binder (a held `Block` whose
+ * `Declare` makes the name a local, a held `Sum` with the index `y`) binds
+ * the name by its syntax (`heldBoundNames`).
+ *
+ * An occurrence below a node that binds the name itself
+ * (`parameterOwnBinding`) denotes another binding and does not count.
+ *
+ * The walk enters the values of a dictionary, as the substitution does
+ * (`rewriteWithBinders`). It reads each node once: a result can share a
+ * subexpression on many paths (a tuple that holds the previous tuple
+ * twice), and without the memo the walk is exponential in the depth.
+ */
+function parameterWrites(expr: Expression, sub: ParameterSub): number {
+  const [binding, name] = sub;
+  // `0` when `def` (the binding of an occurrence of the name) is not the
+  // parameter's, `MATCHED_BY_NAME` when the occurrence has no binding or
+  // the parameter has none to compare, `BOUND` when the binding is the
+  // parameter's or an activation of it.
+  const BOUND = 1;
+  const match = (def: BoxedValueDefinition | undefined): number => {
+    if (def === undefined || binding === undefined) return MATCHED_BY_NAME;
+    return sameBindingDef(def, binding) ? BOUND : 0;
+  };
+  const denotes = (sym: Expression & { symbol: string }): number =>
+    sym.symbol !== name
+      ? 0
+      : match(
+          (sym as { valueDefinition?: BoxedValueDefinition }).valueDefinition
+        );
+  // How the target of a write denotes the parameter, as `match` does. The
+  // target of a canonical `Assign` or `Declare` has no binding: the write
+  // finds it in the scope where it runs, so it denotes the parameter as the
+  // statement does, not by name. The target of a held statement (it is
+  // not canonical) denotes the parameter by name.
+  const targetWrites = (target: Expression, canonical: boolean): number => {
+    if (isSymbol(target)) {
+      const matched = denotes(target);
+      return canonical && matched === MATCHED_BY_NAME && binding !== undefined
+        ? BOUND
+        : matched;
+    }
+    if (isFunction(target, 'Tuple'))
+      return target.ops.reduce(
+        (bits, op) => bits | targetWrites(op, canonical),
+        0
+      );
+    if (isFunction(target, 'At'))
+      return target.op1 === undefined ? 0 : targetWrites(target.op1, canonical);
+    return target.has(name) ? BOUND : 0;
+  };
+  // The reads of the target of a write: the indexes of an `At` target
+  // (`At(L, y)` reads `y`), not the names that it writes.
+  const targetReads = (target: Expression): number => {
+    if (isSymbol(target)) return 0;
+    if (isFunction(target, 'Tuple'))
+      return target.ops.reduce((bits, op) => bits | targetReads(op), 0);
+    if (isFunction(target, 'At'))
+      return target.ops.reduce(
+        (bits, op, i) => bits | (i === 0 ? targetReads(op) : walk(op)),
+        0
+      );
+    return walk(target);
+  };
+  const ownBinding = parameterOwnBinding([sub]);
+  const memo = new Map<Expression, number>();
+  const walk = (e: Expression): number => {
+    if (isSymbol(e)) {
+      const matched = denotes(e);
+      return matched === 0
+        ? 0
+        : READ_OUTSIDE_LITERAL | (matched & MATCHED_BY_NAME);
+    }
+    if (!isDictionary(e) && (!isFunction(e) || e._numericStore !== undefined))
+      return 0;
+    const known = memo.get(e);
+    if (known !== undefined) return known;
+    let result = 0;
+    if (isDictionary(e)) {
+      for (const key of e.keys) result |= walk(e.get(key)!);
+    } else if (isFunction(e)) {
+      const write =
+        (isFunction(e, 'Assign') || isFunction(e, 'Declare')) &&
+        e.op1 !== undefined;
+      if (write) {
+        const matched = targetWrites(e.op1, e.isCanonical);
+        if (matched !== 0)
+          result = WRITE_OUTSIDE_LITERAL | (matched & MATCHED_BY_NAME);
+      }
+      // A call whose operator is the parameter reads it, with the binding
+      // rules of the substitution (`applicationValue`): a call with no
+      // binding and no operator definition denotes the parameter by name.
+      if (e.operator === name) {
+        const def = e.valueDefinition;
+        const matched =
+          def === undefined && e.operatorDefinition !== undefined
+            ? 0
+            : match(def);
+        if (matched !== 0)
+          result |= READ_OUTSIDE_LITERAL | (matched & MATCHED_BY_NAME);
+      }
+      const own = ownBinding(e, name);
+      if (own !== 'all') {
+        // A held node has no scope: the operands where its index binds the
+        // name are read from its syntax (`binderBoundAt`).
+        const binders =
+          own === 'none'
+            ? undefined
+            : declaredBinders(e, own === 'held' ? 'pre' : 'post');
+        e.ops.forEach((op, i) => {
+          if (own === 'none') {
+            result |= write && i === 0 ? targetReads(op) : walk(op);
+            return;
+          }
+          const clause = ownIndexClauseAt(e, i, binders);
+          if (clause === undefined || clause.name !== name || !isFunction(op)) {
+            const bound =
+              own === 'held'
+                ? binderBoundAt(binders, name, i)
+                : boundVariableNamesInOperand(e, i, binders).includes(name);
+            if (!bound) result |= walk(op);
+            return;
+          }
+          // The operands of the clause that are outside the scope of its
+          // index (its bounds, its collection) read the enclosing binding.
+          op.ops.forEach((o, j) => {
+            if (clause.outside(j)) result |= walk(o);
+          });
+        });
+      }
+      // `captureClosures` makes the call frame the closure environment of a
+      // `Function` literal, so an occurrence bound to the parameter inside
+      // it reads and writes the frame. An occurrence matched by name keeps
+      // its bit. `captureClosures` captures only a literal whose body has a
+      // scope: any other `Function` node (a held literal whose body is a
+      // statement boxed before, such as `Function(Assign(n, 2))`) keeps the
+      // binding that its occurrences have, so a write in it stays a write
+      // outside every literal.
+      if (
+        isFunction(e, 'Function') &&
+        e.isCanonical &&
+        isFunction(e.op1) &&
+        e.op1.localScope !== undefined
+      ) {
+        if ((result & WRITE_OUTSIDE_LITERAL) !== 0) result |= WRITE_IN_LITERAL;
+        result &= ~(WRITE_OUTSIDE_LITERAL | READ_OUTSIDE_LITERAL);
+      }
+    }
+    memo.set(e, result);
+    return result;
+  };
+  return walk(expr);
+}
+
+/**
+ * True when the scope entry `entry` of `name` holds the binding of the
+ * parameter `name` of `subs` (`sameBindingDef`).
+ */
+function isParameterEntry(
+  subs: ReadonlyArray<ParameterSub>,
+  entry: BoxedDefinition | undefined,
+  name: string
+): boolean {
+  return (
+    entry !== undefined &&
+    'value' in entry &&
+    subs.some(
+      ([binding, param]) =>
+        param === name &&
+        binding !== undefined &&
+        sameBindingDef(entry.value, binding)
+    )
+  );
+}
+
+/**
+ * The names of the locals that the `Block` `node` makes for all of its
+ * statements (`blockLocals`). A local that a `Declare` in a branch of an
+ * `If` makes exists only from the statement that holds the `Declare`, and
+ * only when the branch runs: before it, the name denotes the enclosing
+ * binding, so such a local is not included.
+ */
+function wholeBlockLocalNames(node: Expression): string[] {
+  const result: string[] = [];
+  for (const [name, from] of blockLocals(node))
+    if (from === undefined) result.push(name);
+  return result;
+}
+
+/**
+ * How `node` binds `name` itself, so that an occurrence of `name` below it
+ * does not denote the parameter `name` of `subs`. `'all'`: in every
+ * operand (a `Function` literal whose parameter list holds the name, a
+ * `Block` that makes the name a local of the whole block). `'scope'`: in
+ * the operands where the scope of `node` holds the name with a binding
+ * that is not the parameter's (an index of a `Sum`, a local function); an
+ * index binds its own clause and the later ones only, and the bounds of
+ * its own clause are outside its scope (`boundVariableNamesInOperand`,
+ * `ownIndexClauseAt`). `'held'`: like `'scope'`, for a node that is not
+ * canonical (held content), which has no scope: an index of its clauses
+ * binds the name, read from its syntax (`heldBoundNames`). A held `Block`
+ * whose `Declare` makes the name a local gives `'all'`. `'none'`: in no
+ * operand. A scope entry that holds the binding of the parameter does not
+ * bind the name (`parameterSubBinds`).
+ */
+function parameterOwnBinding(
+  subs: ReadonlyArray<ParameterSub>
+): (node: Expression, name: string) => 'all' | 'scope' | 'held' | 'none' {
+  return (node, name) => {
+    if (isFunction(node, 'Function')) {
+      for (let i = 1; i < node.ops.length; i++)
+        if (functionLiteralParameterNames(node.ops[i]).includes(name))
+          return 'all';
+    } else if (
+      !node.isCanonical &&
+      node.localScope === undefined &&
+      heldBoundNames(node).includes(name)
+    )
+      return node.operator === 'Block' ? 'all' : 'held';
+    const locals = blockLocals(node);
+    if (locals.has(name))
+      return locals.get(name) === undefined ? 'all' : 'none';
+    const entry = node.localScope?.bindings.get(name);
+    if (entry !== undefined && !isParameterEntry(subs, entry, name))
+      return 'scope';
+    return 'none';
+  };
+}
+
+/**
+ * The hook of `bindingKeyedSubs` that gives the names that a node binds,
+ * from the names of its scope (`boundVariableNames`).
+ *
+ * A scope entry that holds the binding of the parameter of `subs` with the
+ * same name (`sameBindingDef`) does not bind the name: it holds the binding
+ * of a parameter of an enclosing literal. Canonicalization puts it there
+ * when a nested `Block` (the body of a nested literal, or an inner block of
+ * the body) reads the parameter, and an occurrence below it still denotes
+ * the parameter. When it counted as a binder, the substitution skipped the
+ * occurrence, and a later read found another binding of the name: with
+ * `F = (y, w) ↦ (x ↦ y^x)`, `F(x)(5)(y)` gave `y^y`, not `x^y`.
+ *
+ * A `Block` binds each local that it makes for all of its statements
+ * (`wholeBlockLocalNames`), also when its scope does not hold the binding
+ * of the local (a run of the block declares it again): a `Declare` of a
+ * fresh local `y` in a nested block makes a local of that block, which the
+ * substitution of the parameter `y` does not touch. A held `Block` (not
+ * canonical) has no scope: it binds the targets of its `Declare`
+ * statements (`heldBoundNames`), so `y ↦ Hold(Block(Declare(y), y))`
+ * applied to `5` keeps its block as it is. A held operator with binding
+ * sites (`Sum`, `Product`, `Comprehension`, `Integrate`, …) has no scope
+ * either: it binds the indexes of its clauses, read from its syntax
+ * (`heldBoundNames`), each in the operands where the index is in scope
+ * (`rewriteWithBinders`). So `k ↦ Hold(Sum(k·y, Limits(k, 1, 3)))` applied
+ * to `5` keeps its sum as it is, and `k ↦ Hold(Sum(j·y, Limits(j, 1, k)))`
+ * applied to `5` gives `Hold(Sum(j·y, Limits(j, 1, 5)))`: the bounds of a
+ * clause are outside the scope of its own index.
+ *
+ * A `Function` literal still binds each name of its parameter list. The
+ * literal that is applied can be in the result (a user function that calls
+ * itself from the callback of a lazy operator), and its parameter list and
+ * its body then hold the parameter's own binding. They must keep it (see
+ * `bindingKeyedSubs`).
+ */
+function parameterSubBinds(
+  subs: ReadonlyArray<ParameterSub>
+): (node: Expression, names: readonly string[]) => readonly string[] {
+  return (node, names) => {
+    if (isFunction(node, 'Function')) return names;
+    const held = !node.isCanonical && node.localScope === undefined;
+    const locals = held ? heldBoundNames(node) : wholeBlockLocalNames(node);
+    const kept = names.filter(
+      (name) =>
+        locals.includes(name) ||
+        !isParameterEntry(subs, node.localScope?.bindings.get(name), name)
+    );
+    const added = locals.filter((name) => !names.includes(name));
+    return kept.length === names.length && added.length === 0
+      ? names
+      : [...kept, ...added];
+  };
 }
 
 /** The two visitors of `bindingKeyedSubs` for `subs`: one for the symbol
@@ -4732,7 +5100,8 @@ function parameterSubVisitors(subs: ReadonlyArray<ParameterSub>): {
  */
 function captureAvoidingBinderVisitor(
   expr: Expression,
-  subs: ReadonlyArray<ParameterSub>
+  subs: ReadonlyArray<ParameterSub>,
+  binds: (node: Expression, names: readonly string[]) => readonly string[]
 ):
   | ((
       node: Expression,
@@ -4756,21 +5125,60 @@ function captureAvoidingBinderVisitor(
     );
     const bound = held
       ? new Set(heldBoundNames(node))
-      : new Set([...boundVariableNames(node), ...blockLocalNames(block)]);
+      : new Set([
+          ...binds(node, boundVariableNames(node)),
+          ...blockLocalNames(block),
+        ]);
     // The target of an `Assign` of a held block may or may not be a local
     // of the block when it is released (`heldBlockAssignTargets`): when it
     // would capture, the application declines.
     const maybeBound = held ? heldBlockAssignTargets(node) : undefined;
-    if (bound.size === 0 && (maybeBound?.size ?? 0) === 0) return undefined;
+    // The variable of a held `D`, `Series` or indefinite `Integrate` is free
+    // (`pointVariableNames()`): the value of the node is a function of it.
+    // A replacement of the variable inside the node gives an invalid node
+    // or the value of another expression (`D(k^2, k)` with `k` replaced by
+    // `3` is `D(9, 3)`), and a rename gives a function of another name. A
+    // value that holds the name, put in the node, is captured by the
+    // variable (`k ↦ Hold(D(k·y, y))` applied to `y` would give
+    // `D(y·y, y)`, whose value is `2y`, not `y`). In both cases the
+    // application declines.
+    const point = held ? pointVariableNames(node) : undefined;
+    if (
+      bound.size === 0 &&
+      (maybeBound?.size ?? 0) === 0 &&
+      point === undefined
+    )
+      return undefined;
     free ??= subs.map(([, , value]) => freeNamesOf(value));
+    // A sub that replaces the name `name` by the symbol `name` changes no
+    // occurrence of the node, as `pointEntries()` (`boxed-function.ts`)
+    // skips it: `(x ↦ Hold(D(x^2, x)))(x)` keeps the held node.
+    const isIdentity = (sub: ParameterSub, name: string) =>
+      sub[1] === name && isSymbol(sub[2], name);
     const capturesIn = (name: string) => {
       const capturing = subs.filter(
-        (sub, i) => free![i].has(name) && shadowed?.has(sub[1]) !== true
+        (sub, i) =>
+          free![i].has(name) &&
+          shadowed?.has(sub[1]) !== true &&
+          !isIdentity(sub, name)
       );
-      return capturing.length > 0 && substitutesIn(node, capturing, shadowed);
+      return (
+        capturing.length > 0 && substitutesIn(node, capturing, shadowed, binds)
+      );
     };
     for (const name of maybeBound ?? [])
       if (capturesIn(name)) throw new UnavoidableCapture();
+    for (const name of point ?? []) {
+      if (capturesIn(name)) throw new UnavoidableCapture();
+      const replaced = subs.filter(
+        (sub) =>
+          sub[1] === name &&
+          shadowed?.has(name) !== true &&
+          !isIdentity(sub, name)
+      );
+      if (replaced.length > 0 && substitutesIn(node, replaced, shadowed, binds))
+        throw new UnavoidableCapture();
+    }
     const names: string[] = [];
     for (const name of bound) if (capturesIn(name)) names.push(name);
     if (names.length === 0) return undefined;
@@ -4788,7 +5196,8 @@ function captureAvoidingBinderVisitor(
 function substitutesIn(
   node: Expression,
   subs: ReadonlyArray<ParameterSub>,
-  shadowed: ReadonlySet<string> | undefined
+  shadowed: ReadonlySet<string> | undefined,
+  binds: (node: Expression, names: readonly string[]) => readonly string[]
 ): boolean {
   const { symbolValue, applicationValue } = parameterSubVisitors(subs);
   try {
@@ -4804,7 +5213,9 @@ function substitutesIn(
       (app, _ops, sh) => {
         if (applicationValue(app, sh) !== undefined) throw SUBSTITUTES;
         return undefined;
-      }
+      },
+      undefined,
+      binds
     );
   } catch (e) {
     if (e === SUBSTITUTES) return true;
@@ -5125,6 +5536,34 @@ function renameBoundVariables(
       ? undefined
       : target;
   };
+  // True when the scope entry `entry` of `name` holds the binding that is
+  // renamed (`sameBindingDef`). Canonicalization puts the binding of a
+  // parameter of the literal in the scope of a nested `Block` that reads
+  // it. Such an entry does not bind the name: an occurrence below it still
+  // denotes the renamed binding, and is renamed too. This is the rule that
+  // the substitution uses for the parameter it replaces
+  // (`parameterSubBinds`). Without it, with `F = y ↦ (x ↦ Block(Block(y^x)))`,
+  // `F(x)` gave `x_1 ↦ Block(Block(x^(x_2)))`: the occurrence kept the
+  // name `x`, and the substitution of `y` renamed it a second time.
+  const isRenamedEntry = (
+    entry: BoxedDefinition | undefined,
+    name: string
+  ): boolean => {
+    const old = targets.get(name)?.old;
+    return (
+      old !== undefined &&
+      entry !== undefined &&
+      'value' in entry &&
+      sameBindingDef(entry.value, old)
+    );
+  };
+  const renameBinds = (node: Expression, bound: readonly string[]) => {
+    if (isFunction(node, 'Function')) return bound;
+    const kept = bound.filter(
+      (name) => !isRenamedEntry(node.localScope?.bindings.get(name), name)
+    );
+    return kept.length === bound.length ? bound : kept;
+  };
   const rename = (e: Expression, inScope: (name: string) => boolean) =>
     rewriteWithBinders(
       e,
@@ -5149,7 +5588,9 @@ function renameBoundVariables(
         return ce.function(target.id, [...ops], {
           form: app.isCanonical ? 'canonical' : 'raw',
         });
-      }
+      },
+      undefined,
+      renameBinds
     );
 
   // Each scope below the binder is copied onto the scope above it in the
@@ -5159,7 +5600,19 @@ function renameBoundVariables(
   // the fresh names are not declared: a run of a nested block that assigns
   // a renamed local wrote it outside the binder.
   const rerootMemo = new Map<Scope, Map<Expression, Expression>>();
-  const reroot = (e: Expression) => rerootScopes(e, newScope, rerootMemo);
+  // In a copy of a nested scope, an entry that holds the renamed binding
+  // (`isRenamedEntry`) is replaced by the entry of the fresh name, which
+  // the renamed occurrences below it denote.
+  const rebind = (bindings: Map<string, BoxedDefinition>) => {
+    for (const [name, { id }] of targets) {
+      if (!isRenamedEntry(bindings.get(name), name)) continue;
+      bindings.delete(name);
+      const entry = newScope.bindings.get(id);
+      if (entry !== undefined) bindings.set(id, entry);
+    }
+  };
+  const reroot = (e: Expression) =>
+    rerootScopes(e, newScope, rerootMemo, rebind);
 
   return ce._inScope(newScope, () => {
     if (isLiteral) {
@@ -5224,8 +5677,11 @@ function renameBoundVariables(
  *   is released, which is not known here (`heldBlockAssignTargets`);
  * - for an operator with binding sites (`Sum`, `Product`, `Comprehension`,
  *   …), the indexes of its clauses (`declaredBinders()`,
- *   `binding-sites.ts`), except the variable of an indefinite integral,
- *   which the value of the integral is a function of.
+ *   `binding-sites.ts`), except the variable of a `D`, the expansion
+ *   variable of a `Series` and the variable of an indefinite integral,
+ *   which the value of the node is a function of (`pointVariableNames()`).
+ *   Such a variable is free: an occurrence of it denotes the name of the
+ *   enclosing scope, and it is never renamed.
  *
  * A `Function` literal that is not canonical binds its parameters, which
  * `boundVariableNames` reads from its syntax already.
@@ -5235,9 +5691,9 @@ function heldBoundNames(node: Expression): readonly string[] {
   if (node.operator === 'Block') return [...heldBlockTargets(node, 'Declare')];
   const binders = declaredBinders(node, 'pre');
   if (binders === undefined) return [];
-  const indefinite = indefiniteIntegralVariables(node);
+  const free = pointVariableNames(node);
   return [...binders.visibleFrom.keys()].filter(
-    (name) => indefinite?.has(name) !== true
+    (name) => free?.has(name) !== true
   );
 }
 
@@ -5413,11 +5869,16 @@ function renameHeldBinder(
  * whose parent holds the locals that a closure captured
  * (`CLOSURE_LOCALS_SCOPES`, `captureNestedLocals`), which a copy would
  * replace with the copy of the enclosing scope.
+ *
+ * `rebind`, when given, is called with the bindings of each copy before the
+ * walk descends into it: the rename replaces there the entry of a renamed
+ * binding by the entry of its fresh name.
  */
 function rerootScopes(
   expr: Expression,
   parent: Scope,
-  memo: Map<Scope, Map<Expression, Expression>>
+  memo: Map<Scope, Map<Expression, Expression>>,
+  rebind?: (bindings: Map<string, BoxedDefinition>) => void
 ): Expression {
   if (!isFunction(expr) && !isDictionary(expr)) return expr;
   if (!expr.isCanonical) return expr;
@@ -5437,7 +5898,7 @@ function rerootScopes(
   if (isDictionary(expr)) {
     let changed = false;
     const entries = expr.entries.map(([key, value]) => {
-      const next = rerootScopes(value, parent, memo);
+      const next = rerootScopes(value, parent, memo, rebind);
       changed ||= next !== value;
       return ce._fn('KeyValuePair', [ce.string(key), next]);
     });
@@ -5447,17 +5908,18 @@ function rerootScopes(
       parent,
       bindings: new Map(expr.localScope.bindings),
     };
+    rebind?.(scope.bindings);
     copyAssignmentLocals(expr.localScope, scope);
     result = ce._fn(
       expr.operator,
-      expr.ops.map((op) => rerootScopes(op, scope, memo)),
+      expr.ops.map((op) => rerootScopes(op, scope, memo, rebind)),
       { scope, metadata: { sourceOffsets: expr.sourceOffsets } }
     );
   } else if (isFunction(expr) && expr.ops.length > 0) {
     // A store-backed list holds numbers only, and reading its `ops` would
     // box every element.
     if ((expr as { _numericStore?: unknown })._numericStore === undefined) {
-      const ops = expr.ops.map((op) => rerootScopes(op, parent, memo));
+      const ops = expr.ops.map((op) => rerootScopes(op, parent, memo, rebind));
       if (ops.some((op, i) => op !== expr.ops[i]))
         result = ce._fn(expr.operator, ops, {
           metadata: { sourceOffsets: expr.sourceOffsets },
@@ -5859,12 +6321,19 @@ function guardSymbolicRecursion(
 /**
  * Thrown by the substitution of the parameter values into the result of an
  * application (`bindingKeyedSubs`) when it cannot decide, before the result
- * runs, how to rename a binder of the result so that the binder does not
- * capture a name of a value. Caught by `declineUnavoidableCapture` around the
- * application, which then declines: the application stays inert and gives no
- * value, as for a `SymbolicRecursion`. A wrong value, or an error for the
- * user, is never the answer. The cases are listed in the doc comments of
+ * runs, how to substitute the values correctly: how to rename a binder of
+ * the result so that the binder does not capture a name of a value, or how
+ * to keep a parameter that the result writes. Caught by
+ * `declineUnavoidableCapture` around the application, which then declines:
+ * the application stays inert and gives no value, as for a
+ * `SymbolicRecursion`. A wrong value, or an error for the user, is never the
+ * answer. The cases are listed in the doc comments of `bindingKeyedSubs`,
  * `captureAvoidingBinderVisitor` and `renameBoundVariables`.
+ *
+ * The substitution runs after the body of the application, so a decline
+ * does not undo what the body did: an assignment of the body to a symbol of
+ * an enclosing scope stays done. Each evaluation of the inert application
+ * runs the body again, and does it again.
  *
  * Not an `Error`: it is control flow, like `SymbolicRecursion`.
  */
@@ -7713,7 +8182,7 @@ function makeLambda(
           ]);
         }
         if (prefixSubs.length > 0)
-          newBody = bindingKeyedSubs(newBody, prefixSubs);
+          newBody = bindingKeyedSubs(newBody, prefixSubs, 'partial');
       } finally {
         ce.popScope();
         ACTIVE_FRAMES.delete(freshScope);
@@ -7730,7 +8199,7 @@ function makeLambda(
       // ascription inside the Block (Phase 1).
       const curriedBody =
         substitutions.length > 0
-          ? bindingKeyedSubs(newBody, substitutions)
+          ? bindingKeyedSubs(newBody, substitutions, 'partial')
           : newBody;
       const finalBody =
         returnTypeOp !== undefined

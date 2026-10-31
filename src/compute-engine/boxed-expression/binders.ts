@@ -19,6 +19,7 @@ import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import {
+  binderBoundAt,
   declaredBinders,
   mapOwnIndexClause,
   ownIndexClauseAt,
@@ -82,10 +83,13 @@ const NO_BINDERS: readonly string[] = [];
  * 2026-09-27).
  *
  * `binders` is the node's clause ordering, `declaredBinders(expr, 'post')`
- * (`binding-sites.ts`). A walk over the operands computes it ONCE per node
- * and passes it in, so the selector is not re-run for every operand; the
- * default serves a one-off question. A name the scope binds that the
- * selectors do not order (a `Block` local) is in scope throughout.
+ * (`binding-sites.ts`) for a canonical node. A node that is not canonical
+ * and has no scope (held content) has its ordering read in the `'pre'`
+ * phase, which a raw tree can answer for (`rewriteWithBinders`). A walk
+ * over the operands computes it ONCE per node and passes it in, so the
+ * selector is not re-run for every operand; the default serves a one-off
+ * question. A name the scope binds that the selectors do not order (a
+ * `Block` local) is in scope throughout.
  */
 export function boundVariableNamesInOperand(
   expr: Expression,
@@ -982,7 +986,20 @@ export function rewriteWithBinders(
   visitBinder?: (
     node: Expression,
     shadowed: ReadonlySet<string> | undefined
-  ) => Expression | undefined
+  ) => Expression | undefined,
+  // Called for each function node with the names that it binds
+  // (`boundVariableNames`). It returns the names that shadow the walk into
+  // the operands of the node. A name that it removes does not shadow the
+  // walk: the scope of a nested `Block` can hold the binding of a parameter
+  // of an enclosing literal, which a lookup by name finds there, and an
+  // occurrence below it still denotes that parameter. A name that it adds
+  // and that the clause ordering of the node lists (the index of a clause
+  // of a held `Sum`) shadows the walk into the operands where the name is
+  // in scope only (`binderBoundAt()`). Another name that it adds shadows
+  // the walk into every operand: a local of a `Block` that a statement
+  // makes, which the scope of the block does not always hold
+  // (`bindingKeyedSubs`).
+  bindsNames?: (node: Expression, names: readonly string[]) => readonly string[]
 ): Expression {
   if (isSymbol(expr)) return visit(expr, shadowed);
 
@@ -1014,7 +1031,8 @@ export function rewriteWithBinders(
       false,
       memo,
       visitApplication,
-      visitBinder
+      visitBinder,
+      bindsNames
     );
   } else if (isDictionary(expr)) {
     // A dictionary is not a function node (`nops` 0): descend into its values
@@ -1030,7 +1048,8 @@ export function rewriteWithBinders(
         false,
         memo,
         visitApplication,
-        visitBinder
+        visitBinder,
+        bindsNames
       );
       if (next !== value) changed = true;
       return ce.function('KeyValuePair', [ce.string(key), next]);
@@ -1046,16 +1065,39 @@ export function rewriteWithBinders(
     // iterator clause's index shadows its own clause and the later ones, not
     // an earlier clause's collection or guard, where the same name denotes
     // the enclosing binding and must be rewritten as such.
-    const binds = skipRootBinds ? NO_BINDERS : boundVariableNames(expr);
-    // The clause ordering is read once per node, not once per operand.
+    const allBinds = skipRootBinds ? NO_BINDERS : boundVariableNames(expr);
+    const binds =
+      bindsNames === undefined || skipRootBinds
+        ? allBinds
+        : bindsNames(expr, allBinds);
+    // The clause ordering is read once per node, not once per operand. A
+    // node that is not canonical and has no scope (held content) is read
+    // in the phase that a raw tree can answer for.
+    const held = !expr.isCanonical && expr.localScope === undefined;
     const binders =
-      binds.length > 0 ? declaredBinders(expr, 'post') : undefined;
+      binds.length > 0
+        ? declaredBinders(expr, held ? 'pre' : 'post')
+        : undefined;
     const shadowedIn = (i: number): ReadonlySet<string> | undefined => {
       if (binds.length === 0) return shadowed;
-      const here =
+      let here =
         binders === undefined
           ? binds
           : boundVariableNamesInOperand(expr, i, binders);
+      // A name that `bindsNames` adds shadows every operand, except a name
+      // that the clause ordering of the node lists (the index of a clause
+      // of a held `Sum`): it shadows the operands where it is in scope
+      // only, as a name of the scope does.
+      if (here !== binds && binds !== allBinds)
+        here = [
+          ...here.filter((name) => binds.includes(name)),
+          ...binds.filter(
+            (name) =>
+              !allBinds.includes(name) &&
+              (!binders?.visibleFrom.has(name) ||
+                binderBoundAt(binders, name, i))
+          ),
+        ];
       if (here.length === 0) return shadowed;
       return new Set(shadowed ? [...shadowed, ...here] : here);
     };
@@ -1075,7 +1117,8 @@ export function rewriteWithBinders(
             false,
             memo,
             visitApplication,
-            visitBinder
+            visitBinder,
+            bindsNames
           )
         );
       return rewriteWithBinders(
@@ -1085,7 +1128,8 @@ export function rewriteWithBinders(
         false,
         memo,
         visitApplication,
-        visitBinder
+        visitBinder,
+        bindsNames
       );
     });
     const replaced = visitApplication?.(expr, next, shadowed);

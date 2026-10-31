@@ -830,6 +830,128 @@ export function indefiniteIntegralVariables(
 }
 
 /**
+ * The variables of the indefinite integrals of the `Integrate` node `expr`,
+ * which is not canonical (held content), read from its syntax with the
+ * rules of `canonicalLimitsSequence()` and `canonicalLimits()`
+ * (`library/utils.ts`), without canonicalizing any operand. A clause is a
+ * `Limits`, `Tuple`, `Triple`, `Pair`, `Single` or `Hold` of at most three
+ * operands, a parenthesized tuple of one to three operands, a `Set` of
+ * three operands whose first one is a symbol, or a flat span of operands
+ * that starts with a symbol (`flatLimitsSpan()`). The variable of a clause
+ * is its first operand, with one `Hold` around it removed. The integral is
+ * indefinite in the variable when the clause has no bounds, or when both of
+ * its bounds are `Nothing`. A `Range` clause has no variable, and an
+ * operand that is not a clause is ignored, as the canonical form drops it.
+ * `undefined` when there is no such variable.
+ *
+ * For example, `Integrate(k, Single(k))`, `Integrate(k, Tuple(Hold(k)))`
+ * and `Integrate(k, k)` are indefinite in `k`, and `Integrate(k, k, 0, 1)`
+ * is a definite integral, which binds `k`.
+ */
+function heldIndefiniteIntegralVariables(
+  expr: Expression
+): ReadonlySet<string> | undefined {
+  if (!isFunction(expr, 'Integrate')) return undefined;
+  const absent = (x: Expression | undefined): boolean =>
+    x === undefined || isSymbol(x, 'Nothing');
+  const unhold = (x: Expression | undefined): Expression | undefined =>
+    isFunction(x, 'Hold') ? x.op1 : x;
+  // The variable of the clause whose operands are `ops`, as
+  // `canonicalLimits()` reads it, when the clause has no bounds.
+  const variable = (ops: ReadonlyArray<Expression>): string | undefined => {
+    let index: Expression | undefined;
+    if (ops.length === 1) {
+      // `canonicalLimits()` removes each `Hold` around a single operand.
+      index = ops[0];
+      while (isFunction(index, 'Hold')) index = index.op1;
+    } else if (ops.length === 2) {
+      if (!absent(ops[1])) return undefined;
+      index = unhold(
+        isFunction(ops[0], 'Hold') || isSymbol(ops[0]) ? ops[0] : undefined
+      );
+      index = unhold(index);
+    } else if (ops.length === 3) {
+      if (!absent(ops[1]) || !absent(ops[2])) return undefined;
+      index = unhold(ops[0]);
+    }
+    return isSymbol(index) && index.symbol !== 'Nothing'
+      ? index.symbol
+      : undefined;
+  };
+  const clauses = expr.ops.slice(1);
+  let result: Set<string> | undefined;
+  const add = (name: string | undefined) => {
+    if (name !== undefined) (result ??= new Set()).add(name);
+  };
+  for (let i = 0; i < clauses.length; i++) {
+    const op = clauses[i];
+    const tuple = parenthesizedTupleOperands(op);
+    if (tuple !== undefined) {
+      if (tuple.length >= 1 && tuple.length <= 3) add(variable(tuple));
+    } else if (
+      isFunction(op) &&
+      ['Limits', 'Tuple', 'Triple', 'Pair', 'Single', 'Hold'].includes(
+        op.operator
+      )
+    ) {
+      if (op.nops <= 3) add(variable(op.ops));
+    } else if (isFunction(op, 'Set')) {
+      if (op.nops === 3 && isSymbol(op.op1)) add(variable(op.ops));
+    } else if (isSymbol(op)) {
+      const span = flatLimitsSpan(clauses, i);
+      add(variable(clauses.slice(i, i + span)));
+      i += span - 1;
+    }
+  }
+  return result;
+}
+
+/**
+ * The variables of `expr` that its value is a function of, although `expr`
+ * declares them as binding sites: each symbol operand after the function of
+ * a `D` and the expansion variable (second operand) of a `Series`, both also
+ * when a one-operand `Hold` wraps the symbol, the symbol `x` of each
+ * higher-order specification `Set(x, n)` of a `D` (also for an order of
+ * `0`, which the canonical form drops), also when a one-operand `Hold`
+ * wraps the `Set`, and the variables of an
+ * indefinite `Integrate` (`indefiniteIntegralVariables()`, or
+ * `heldIndefiniteIntegralVariables()` for a node that is not canonical).
+ * `undefined` when there is none.
+ *
+ * Such a variable is free: the value of `D(x^2, x)` is `2x`. It cannot be
+ * renamed (the value would then be a function of another name), and
+ * replacing it inside the node gives an invalid node (`D(9, 3)`). The
+ * `subs()` method applies its replacement to the value of the node at a
+ * point instead (`pointEntries()`, `boxed-function.ts`).
+ */
+export function pointVariableNames(
+  expr: Expression
+): ReadonlySet<string> | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (expr.operator === 'Integrate')
+    return expr.isCanonical
+      ? indefiniteIntegralVariables(expr)
+      : heldIndefiniteIntegralVariables(expr);
+  let variables: readonly Expression[];
+  if (expr.operator === 'D') variables = expr.ops.slice(1);
+  else if (expr.operator === 'Series')
+    variables = expr.ops[1] === undefined ? [] : [expr.ops[1]];
+  else return undefined;
+  let result: Set<string> | undefined;
+  for (let v of variables) {
+    // A variable may arrive wrapped in `Hold`, as for `siteFor()`.
+    while (isFunction(v, 'Hold') && v.nops === 1) v = v.op1;
+    // A higher-order specification of a `D`, `Set(x, n)`, is read from its
+    // syntax, as the canonical handler of `D` reads it: the order `n` is not
+    // a variable, and a replacement in it is a correct substitution.
+    if (expr.operator === 'D' && isFunction(v, 'Set') && v.nops === 2)
+      v = v.op1;
+    if (isSymbol(v)) (result ??= new Set()).add(v.symbol);
+  }
+  return result;
+}
+
+/**
  * The binders whose indexing clause is read outside the scope of its own
  * index: the bounds of a `Limits` clause and the collection of an `Element`
  * clause. In `∫₀ᵏ k dk`, `∏_{k=1}^{k} k` and `∑_{k ∈ 1..k} k`, the `k` of
