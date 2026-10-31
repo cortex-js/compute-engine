@@ -1108,6 +1108,46 @@ export function expressionParameterDecline(
 }
 
 /**
+ * True when the symbol `id` has a value definition that the host DECLARED
+ * with the type `expression` (or with a transparent alias of it). A type
+ * that the engine inferred is not counted.
+ *
+ * The interpreter accepts a collection as the value of such a symbol, and
+ * an element-wise operator maps over it: with `x` declared `expression` and
+ * `x = [1, 2]`, `2x` is `[2, 4]`. Compiled code reads such a symbol as a
+ * scalar, and it does not test the value at run time as it does for a
+ * symbol declared `any` or `value` (`declaredTopGuard`): `2x` compiled to
+ * `2 * _.x`, which gives `null` for `[1, 2]`. The JavaScript target
+ * declines a read of such a symbol as an input (`expressionInputDecline`),
+ * as it declines a parameter declared `expression`
+ * (`expressionParameterReadAt`).
+ */
+export function isExpressionDeclaredInput(
+  engine: ComputeEngine,
+  id: string
+): boolean {
+  const def = engine.lookupDefinition(id);
+  if (!isValueDef(def)) return false;
+  const value = def.value;
+  return (
+    value.inferredType !== true && isExpressionParameterType(value.type.type)
+  );
+}
+
+/** The error of a read of the input `id` that `isExpressionDeclaredInput`
+ * refuses. */
+export function expressionInputDecline(id: string): Error {
+  return new Error(
+    `Could not compile a read of "${id}": it is declared \`expression\`, ` +
+      `and its value can be a collection. The interpreter maps an ` +
+      `element-wise operator over a collection value, and compiled code ` +
+      `reads a symbol declared \`expression\` as a scalar. Declare it ` +
+      `\`any\` or \`value\` (compiled code then tests the value at run ` +
+      `time), or with a scalar or a collection type.`
+  );
+}
+
+/**
  * Is `a` a scalar by CONSTRUCTION rather than by its static type — a number,
  * string or character LITERAL, whose runtime value is the literal itself?
  *

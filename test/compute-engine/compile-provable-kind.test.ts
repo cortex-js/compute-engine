@@ -300,11 +300,17 @@ describe('a literal in a reduction body keeps the compiled row scalar', () => {
     return ce;
   }
 
-  test('the comparison compiles straight, with no run-time broadcast', () => {
+  // `x` has no type, so the compiled call `f(x)` maps `f` over a list value
+  // of `x` (`_SYS.bcastFn`), as the interpreter does. The comparison then
+  // tests the result of the call at run time: a number takes the straight
+  // comparison, and a list takes the broadcast, so `f([0.3, 2]) < 5` is
+  // `[false, false]`, the interpreter's value.
+  test('the comparison is straight for a number, and broadcast for a list', () => {
     const ce = engine();
     const r = compileJS(ce, 'f(x) < y');
-    expect(r.code).not.toContain('_SYS.bcast(');
+    expect(r.code).toMatch(/\? \(_tv\d+ < _\.y\) :/);
     expect(r.run({ x: 0.3, y: 5 })).toBe(false);
+    expect(r.run({ x: [0.3, 2], y: 5 })).toEqual([false, false]);
   });
 
   test('the compiled row agrees with the interpreter', () => {

@@ -104,6 +104,14 @@ export class CompilerState {
    */
   static declaredTopMode: 'scalar' | 'list' | undefined = undefined;
   /**
+   * The nodes that `mayHoldCallBroadcastResult` reads as scalar while the
+   * scalar branch of a run-time check of a call result is compiled
+   * (`callResultGuard` in `compile-expr-handlers.ts`): the calls whose values
+   * the check tested, and the operator nodes between them and the site. Empty
+   * outside such a branch.
+   */
+  static scalarCallResults: Set<unknown> = new Set();
+  /**
    * The kind lowering of the compilation in progress (`kind-lowering.ts`):
    * set at the compile boundary when the expression holds a kind value and
    * every kind type found has a representation on the target, `undefined`

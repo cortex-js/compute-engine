@@ -72,10 +72,27 @@ import { hideCheckedLocals } from './compile-locals.js';
 import { branchComplexCoercion } from './compile-shapes.js';
 import { isContradictedScalarFunctionBody } from './compile-conditions.js';
 
-/** Whether the value of `e` may be a collection, by its type. */
-export function mayBeCollectionValued(e: Expression): boolean {
+/**
+ * Whether the value of `e` may be a collection, by its type.
+ *
+ * `target` is the target that compiles `e`, when it is not the target of
+ * the call site in progress: for the body of an emitted user-function
+ * definition, the target of that body. A parameter of a function whose
+ * parameters are all scalar receives one element of a list argument (the
+ * call maps the function over the list), so a call in the body whose
+ * argument is such a parameter does not map over a list
+ * (`mayHoldCallBroadcastResult`). Read with the target of the call site,
+ * the parameter is a free symbol of type `unknown`, and the body of
+ * `g(s) := h(s)` was read as a possible list: the definition then recorded
+ * no lane, and `g(x)` was read as real when `h` returns a complex value.
+ */
+export function mayBeCollectionValued(
+  e: Expression,
+  target?: CompileTarget<Expression>
+): boolean {
   return (
-    e.type.matches('collection<any>') || possiblyCollectionTypedForCompile(e)
+    e.type.matches('collection<any>') ||
+    possiblyCollectionTypedForCompile(e, target)
   );
 }
 
@@ -941,10 +958,10 @@ export function tryEmitMultiClauseFunction(
     // clause bodies are coerced to the complex convention, real when no
     // clause body is complex, and no lane when a clause body may be a
     // collection. Recorded after the clause bodies compiled, so that a
-    // recursive call in them is checked (`setUserFunctionLane`).
-    const lane = plans.some((p) => mayBeCollectionValued(p.literal.ops[0]))
-      ? undefined
-      : coerce !== undefined;
+    // recursive call in them is checked (`setUserFunctionLane`). Each clause
+    // body is read with its own target, whose bound names are the
+    // parameters of the clause (`mayBeCollectionValued`).
+    let collectionClause = false;
     for (let i = 0; i < plans.length; i++) {
       const { params, bodyExpr, bodyTarget } = prepareUserFunctionBody(
         plans[i].literal,
@@ -966,6 +983,7 @@ export function tryEmitMultiClauseFunction(
         )
       );
       const body = coerce ? coerce(bodyExpr, compiled) : compiled;
+      if (mayBeCollectionValued(bodyExpr, bodyTarget)) collectionClause = true;
       registry.defs.set(
         helperNames[i],
         `const ${helperNames[i]} = (${params.join(', ')}) => ${body};`
@@ -1010,7 +1028,12 @@ export function tryEmitMultiClauseFunction(
       name,
       `const ${name} = (..._$a) => { const _$n = _$a.map(_SYS.creal); ${branches.join(' ')} throw new Error(${JSON.stringify(`no-matching-clause: ${h}`)}); };`
     );
-    setUserFunctionLane(registry, h, name, lane);
+    setUserFunctionLane(
+      registry,
+      h,
+      name,
+      collectionClause ? undefined : coerce !== undefined
+    );
   } catch (e) {
     removeDefinitionsAddedSince(registry, definedBefore);
     throw e;

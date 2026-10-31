@@ -890,15 +890,17 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
         ['List', 1, 2, 3],
       ] as never);
       expect(call.evaluate().toString()).toBe('6');
-      // Without constant folding, the JavaScript target declines `Sum` over
-      // an operand declared with a wide type (as for a free symbol declared
-      // `any`), and the interpreter computes the sum. The value is the
-      // same: the list is summed whole, not mapped.
+      // Without constant folding, the generated code computes the sum. At a
+      // parameter declared `any` or `value`, `Sum` compiles to a fold that
+      // tests the value at run time, as for a free symbol declared `any`.
+      // A parameter declared `expression` declines, and the interpreter
+      // computes the sum. The value is the same: the list is summed whole,
+      // not mapped.
       const result = compile(call, {
         to: 'javascript',
         constantFold: false,
       } as never)!;
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(type !== 'expression');
       expect(result.run!({})).toBe(6);
     }
   );

@@ -76,8 +76,12 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralParameterName,
+  functionLiteralParameterType,
   isRestParameter,
+  isScalarType,
+  isWideParameterType,
 } from '../boxed-expression/function-literal.js';
+import { freeSymbolNames } from '../boxed-expression/utils.js';
 import { compositionLiteral } from '../function-utils.js';
 import {
   absentBaseReadIsNumeric,
@@ -86,6 +90,7 @@ import {
 import {
   isPointListValue,
   isTuple,
+  isTextAtom,
   leafwardElementType,
 } from '../collection-utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
@@ -4823,9 +4828,126 @@ function pyCheckedCallbackArg(
     op,
     argTypes,
     undefined,
-    () => pyCallbackArg(kind, op, compile),
+    () => {
+      assertPyCallbackWideParams(kind, op, argTypes);
+      return pyCallbackArg(kind, op, compile);
+    },
     sources
   );
+}
+
+/**
+ * True when a value of the type `t` can be a collection: `t` is a
+ * collection type (a string excepted), or a union with such a member. A top
+ * type (`unknown`, `any`, `value`, `expression`) is not counted, as for
+ * `couldBeCollectionParticipant`: this target reads a value of such a type
+ * as a scalar. A nominal type is not counted either.
+ */
+function pyTypeCanBeCollection(t: Type, seen: Set<Type> = new Set()): boolean {
+  if (seen.has(t)) return false;
+  seen.add(t);
+  // A nominal value is atomic whatever its representation: the interpreter
+  // binds it whole and never maps over it.
+  if (BaseCompiler.isNominalAtomicType(t)) return false;
+  const r = resolveTypeForCompilation(t);
+  if (
+    r === 'unknown' ||
+    r === 'any' ||
+    r === 'value' ||
+    r === 'expression' ||
+    r === 'never'
+  )
+    return false;
+  if (isSubtype(r, 'string')) return false;
+  if (typeof r !== 'string' && r.kind === 'union')
+    return r.types.some((m) => pyTypeCanBeCollection(m, seen));
+  return isSubtype(r, 'collection');
+}
+
+/**
+ * Decline a callback `Function` literal (of `Map`, `Filter`, `Reduce`, …)
+ * that receives a value that can be a collection (`argTypes[i]`, see
+ * `pyTypeCanBeCollection`) at a parameter declared `any` or `value` that
+ * the body reads.
+ *
+ * The interpreter binds the collection whole to such a parameter, and each
+ * element-wise operator of the body maps over it. The emitted lambda reads
+ * the parameter as a scalar, and the Python operators do not map:
+ * `Map(((t: any) ↦ 2t), [[1, 2], [3, 4]])` is `[[2, 4], [6, 8]]` in the
+ * interpreter, and the lambda `2 * t` gives `[[1, 2, 1, 2], [3, 4, 3, 4]]`.
+ * A parameter declared `expression` is declined before, by
+ * `BaseCompiler.withCheckedCallback`.
+ *
+ * A parameter with no declaration (or declared `unknown`) is compiled at the
+ * type that the literal's signature gives it. The canonical form of the
+ * operator types such a parameter from the value it receives when it can:
+ * the element parameter of `Map` or `Reduce` gets the element type of the
+ * source. The ACCUMULATOR parameter of a fold (`Reduce`, `Scan`) receives
+ * the seed on the first step and the step's own result on the next steps
+ * (`BaseCompiler.foldAccumulatorArgType`), and the signature keeps it
+ * `unknown`. The emitted lambda then reads it as a scalar. For
+ * `Reduce([[1, 2], [3, 4]], (a, t) ↦ a + t, 0)` the step is
+ * `lambda a, t: [a + _tv1 for _tv1 in t]`: the first step gives `[1, 2]`,
+ * and the second step raises a `TypeError` (a list plus an integer), where
+ * the interpreter gives `[4, 6]`. So such a parameter is declined too when
+ * the value it receives can be a collection and its type in the signature
+ * cannot.
+ *
+ * A tuple is bound whole too, and each element-wise operator of the body
+ * maps over its components: a tuple is declined in the same way when the
+ * body reads the parameter.
+ */
+function assertPyCallbackWideParams(
+  kind: string,
+  op: Expression | undefined,
+  argTypes: ReadonlyArray<Type | undefined>
+): void {
+  const fn = op && (compositionLiteral(op) ?? op);
+  if (!fn || !isFunction(fn, 'Function')) return;
+  const params = fn.ops.slice(1);
+  const signature = resolveTypeForCompilation(fn.type.type);
+  const signatureArgs =
+    typeof signature !== 'string' && signature.kind === 'signature'
+      ? signature.args
+      : undefined;
+  let read: Set<string> | undefined;
+  for (const [i, t] of argTypes.entries()) {
+    const param = params[i];
+    if (param === undefined) break;
+    if (t === undefined || !pyTypeCanBeCollection(t)) continue;
+    const declared = functionLiteralParameterType(param);
+    const wide = declared !== undefined && isWideParameterType(declared);
+    const compiledAt = signatureArgs?.[i]?.type;
+    const scalarAtUndeclared =
+      (declared === undefined || declared === 'unknown') &&
+      (compiledAt === undefined || !pyTypeCanBeCollection(compiledAt));
+    if (!wide && !scalarAtUndeclared) continue;
+    const name = functionLiteralParameterName(param);
+    read ??= freeSymbolNames(fn.ops[0]);
+    if (!name || !read.has(name)) continue;
+    if (!wide)
+      throw new Error(
+        `Could not compile \`${kind}\`: parameter ${i + 1} of the function ` +
+          `receives a value of the type \`${typeToString(t)}\`, which can be ` +
+          `a collection, but the function is compiled with this parameter ` +
+          `read as a scalar` +
+          (compiledAt === undefined
+            ? ''
+            : ` (its type is \`${typeToString(compiledAt)}\`)`) +
+          `. The Python operators repeat or concatenate a list where the ` +
+          `interpreter maps over it. The interpreter evaluates it instead.`
+      );
+    throw new Error(
+      `Could not compile \`${kind}\`: parameter ${i + 1} of the function ` +
+        `receives a value of the type \`${typeToString(t)}\`, which can be a ` +
+        `collection, and it is declared \`${typeToString(declared)}\`. The ` +
+        `interpreter binds the collection whole and maps each element-wise ` +
+        `operator of the body over it. The Python lambda reads the parameter ` +
+        `as a scalar, and the Python operators repeat or concatenate a list. ` +
+        `Declare the parameter with a collection type (for example ` +
+        `\`list<number>\`).`
+    );
+  }
 }
 
 /** `pyFnArg` without the check of a predicate's result. */
@@ -5587,6 +5709,137 @@ function pyInverseTrig(
       return `np.vectorize(${fnCode}, otypes=[complex])(${compile(arg)})`;
     return `(${fnCode})(${compile(arg)})`;
   };
+}
+
+/**
+ * Decline the application of the `Function` literal `literal` to `args`
+ * when an argument can be a collection and its parameter is not declared
+ * with a collection type. `whole` is true for `ApplyWhole`, which binds
+ * every argument whole.
+ *
+ * The emitted call `(lambda t: …)(arg)` binds each argument whole, and the
+ * body reads a parameter that is not declared with a collection type as a
+ * scalar. The interpreter does not do that:
+ *
+ * - At a scalar parameter (no declaration, `unknown`, `number`, …), the
+ *   interpreter maps the function over the elements of the collection
+ *   (`isScalarType`): `((t) ↦ 2t)([[1, 2], [3, 4]])` is `[[2, 4], [6, 8]]`,
+ *   and `((t) ↦ 1)([1, 2])` is `[1, 1]`. The call is declined even when the
+ *   body does not read the parameter. (Under `ApplyWhole` the collection is
+ *   bound whole, and the call is declined only when the body reads the
+ *   parameter.)
+ * - At a parameter declared `any` or `value` (`isWideParameterType`), the
+ *   interpreter binds the collection whole, and each element-wise operator
+ *   of the body maps over it. The Python operators do not:
+ *   `2 * [[1, 2], [3, 4]]` repeats the list. The call is declined when the
+ *   body reads the parameter. (A parameter declared `expression` is
+ *   declined before, by `BaseCompiler.checkedAppliedLiteralCompile`.)
+ *
+ * An argument "can be a collection" when it is a collection, or when its
+ * type is a collection type or a union with a collection member
+ * (`couldBeCollectionParticipant`). An argument of a top type (`unknown`,
+ * `any`, `value`) is read as a scalar, as everywhere else on this target.
+ *
+ * A nominal value is not counted: the interpreter binds it whole, and the
+ * body reads it as one value, as the lambda does. A string and a tuple are
+ * bound whole at every parameter, and the Python operators of the body do
+ * not read them as the interpreter does: `((t) ↦ 2t)((1, 2))` is `(2, 4)`,
+ * and the lambda `2 * t` gives `(1, 2, 1, 2)`; for `((t) ↦ 2t)("abc")` the
+ * lambda gives `"abcabc"`. So a string or a tuple is declined when the body
+ * reads the parameter.
+ *
+ * This is the simple, sound reading. A precise version would map the
+ * lambda over the collection (for a scalar parameter), or compile the body
+ * with the parameter at the type of the argument (for `any` or `value`).
+ */
+function assertPyAppliedLiteralBindsScalars(
+  literal: Expression,
+  args: ReadonlyArray<Expression>,
+  whole: boolean
+): void {
+  if (!isFunction(literal, 'Function')) return;
+  const params = literal.ops.slice(1);
+  let read: Set<string> | undefined;
+  for (const [i, arg] of args.entries()) {
+    const param = params[i];
+    if (param === undefined) break;
+    if (arg.isCollection !== true && !couldBeCollectionParticipant(arg))
+      continue;
+    // A nominal value is atomic: the interpreter binds it whole, and the
+    // body reads it as one value, as the lambda does.
+    if (BaseCompiler.isNominalAtomicType(arg.type.type)) continue;
+    // The interpreter binds a string or a tuple whole at every parameter.
+    // The body is declined when it reads the parameter: the Python
+    // operators repeat or concatenate a string or a tuple.
+    const text = isTextAtom(arg);
+    const tuple = isTuple(arg) || text;
+    const declared = functionLiteralParameterType(param) ?? 'unknown';
+    // A parameter declared `string` admits only string operations in the
+    // body, and the Python target lowers those as the interpreter computes
+    // them (`((s: string) ↦ StringLength(s))("abc")` is 3).
+    if (
+      text &&
+      declared !== 'never' &&
+      isSubtype(resolveTypeForCompilation(declared), 'string')
+    )
+      continue;
+    const scalar = isScalarType(declared);
+    if (!scalar && !isWideParameterType(declared)) continue;
+    const name = functionLiteralParameterName(param);
+    if (whole || !scalar || tuple) {
+      read ??= freeSymbolNames(literal.ops[0]);
+      if (!name || !read.has(name)) continue;
+    }
+    if (text)
+      throw new Error(
+        `Could not compile \`${whole ? 'ApplyWhole' : 'Apply'}\`: argument ${i + 1} is a string, ` +
+          `and the body reads the parameter \`${name}\`, which is not declared ` +
+          `\`string\`: the Python operators \`*\` and \`+\` repeat or concatenate a ` +
+          `string where the interpreter does not. Declare the parameter \`string\`.`
+      );
+    const what =
+      scalar && !whole && !tuple
+        ? `the interpreter maps the function over the elements of the collection, ` +
+          `and the Python target has no such map for a function literal`
+        : `the body reads the parameter \`${name}\` as a scalar, while the ` +
+          `interpreter binds the collection whole and maps each element-wise ` +
+          `operator over it (the Python operators repeat or concatenate a list)`;
+    throw new Error(
+      `Could not compile \`${whole ? 'ApplyWhole' : 'Apply'}\`: argument ${i + 1} has the type ` +
+        `\`${arg.type.toString()}\`, which can be a collection, and its ` +
+        `parameter is not declared with a collection type: ${what}. ` +
+        `Declare the parameter with a collection type (for example ` +
+        `\`list<number>\`).`
+    );
+  }
+}
+
+/**
+ * The lowering of `Apply` (`whole` false) and of `ApplyWhole` (`whole`
+ * true): the call `(fn)(args)`, which binds each argument as given.
+ */
+function pyApply(
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  whole: boolean
+): string {
+  const head = whole ? 'ApplyWhole' : 'Apply';
+  if (args[0] == null)
+    throw new Error(`Could not compile \`${head}\`: missing function`);
+  // A collection at a parameter of the literal declared `expression` is
+  // declined; otherwise the literal is compiled as a checked callee.
+  if (isFunction(args[0], 'Function')) {
+    compile = BaseCompiler.checkedAppliedLiteralCompile(
+      args[0],
+      args.slice(1),
+      compile
+    );
+    assertPyAppliedLiteralBindsScalars(args[0], args.slice(1), whole);
+  }
+  return `(${compile(args[0])})(${args
+    .slice(1)
+    .map((a) => compile(a))
+    .join(', ')})`;
 }
 
 const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
@@ -7470,17 +7723,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         );
     }
     // A collection at a parameter of the literal declared `expression` is
-    // declined; otherwise the literal is compiled as a checked callee.
-    if (isFunction(args[0], 'Function'))
-      compile = BaseCompiler.checkedAppliedLiteralCompile(
-        args[0],
-        args.slice(1),
-        compile
-      );
-    return `(${compile(args[0])})(${args
-      .slice(1)
-      .map((a) => compile(a))
-      .join(', ')})`;
+    // declined, and so is a collection that the interpreter maps the
+    // literal over, or binds whole at a parameter that the Python operators
+    // read as a scalar (`pyApply`); otherwise the literal is compiled as a
+    // checked callee.
+    return pyApply(args, compile, false);
   },
   // --- Linear algebra (numpy; regular arrays only) ---------------------------
   Flatten: (args, compile) => {
@@ -7531,8 +7778,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
 // `ApplyWhole` (engine-internal, `library/core.ts`) applies a function to
 // arguments bound whole, which is what the `Apply` lowering emits: the call
 // `(fn)(args)` binds each argument as given. The lazy `Map` of a declared
-// `broadcastable<T>` map builds its per-element call with it.
-PYTHON_FUNCTIONS.ApplyWhole = PYTHON_FUNCTIONS.Apply;
+// `broadcastable<T>` map builds its per-element call with it. A collection
+// argument whose parameter the body reads as a scalar is declined, as for
+// `Apply` (`assertPyAppliedLiteralBindsScalars`).
+PYTHON_FUNCTIONS.ApplyWhole = (args, compile) => pyApply(args, compile, true);
 
 /**
  * Python/NumPy language target implementation

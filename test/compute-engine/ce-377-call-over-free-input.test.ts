@@ -112,21 +112,31 @@ describe('A CALL OF A USER FUNCTION OVER AN UNTYPED FREE INPUT (CE-377)', () => 
   test('complex: an input that holds a list at run time is read as the lane reads every free input', () => {
     // The complex lane reads a free input as one complex scalar
     // (`_SYS.cplx(_.x)`), with no run-time shape dispatch: `x + 1` is `NaN`
-    // at `x = [1, 2]`, and so is `h(x) + 1` with `h := t ↦ 2t`, which
-    // compiled before this fix.
-    // One engine per expression: a use such as `x + 1` narrows the type of
-    // the free input `x` to `number` by inference, and the next expression
-    // would then be typed and compiled for a declared number.
-    for (const json of [
-      ['Add', 'x', 1],
-      ['Add', ['h', 'x'], 1],
-    ]) {
+    // at `x = [1, 2]`. The use `x + 1` narrows the type of `x` to `number`
+    // by inference, so a list there breaks the host's input contract.
+    {
+      const ce = listEngine();
+      const value = js(ce.box(['Add', 'x', 1]), 'complex', {
+        x: [1, 2],
+      }) as { re: number };
+      expect(value.re).toBeNaN();
+    }
+    // `h(x) + 1` with `h := t ↦ 2t` does not narrow the type of `x`: the
+    // call maps `h` over a list (`_SYS.bcastFn`), and the `+` maps over the
+    // result of the call (`_SYS.bcast`), so the value is the interpreter's
+    // `[3, 5]`. (Before, the `+` read the result of the call as one scalar
+    // and gave `NaN`.)
+    {
       const ce = listEngine();
       ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't']));
-      const value = js(ce.box(json), 'complex', { x: [1, 2] }) as {
-        re: number;
-      };
-      expect(value.re).toBeNaN();
+      const expr = ce.box(['Add', ['h', 'x'], 1]);
+      expect(js(expr, 'complex', { x: [1, 2] })).toEqual([3, 5]);
+      expect(
+        expr
+          .subs({ x: ce.box(['List', 1, 2]) })
+          .evaluate()
+          .toString()
+      ).toBe('[3,5]');
     }
     // `g(x)[1]` may be a number or a list, and the complex lane dispatches
     // on the shape of its value when the code runs (ROADMAP CE-215.2): the

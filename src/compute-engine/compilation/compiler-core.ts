@@ -90,6 +90,7 @@ import {
   isRuntimePointShaped,
   literalDoubleRoundings,
   literalHasNoDoubleValue,
+  resetCallBroadcastMemo,
   typeHasPointArm,
   unionAdmitsFlatNumericList,
 } from './compiler-type-facts.js';
@@ -157,6 +158,8 @@ import {
   unsuppliedComparisonGuard,
   userFunctionSignature,
   withConditionOperands,
+  blockLocalOf,
+  _localValueFrames,
 } from './compile-absence.js';
 import {
   appliesToEachTupleCoordinate,
@@ -853,6 +856,10 @@ export function compile(
     // Written only after `resolveCompileMode`, like the latches above: its
     // throw escapes the `try`/`finally` below, which is what restores this.
     CompilerState._unrolledIndexValues = [];
+    // A host can redefine a user function between two compilations with the
+    // same target, and the answers of `mayHoldCallBroadcastResult` read
+    // those definitions.
+    resetCallBroadcastMemo();
     CompilerState._mode = nextMode;
     // The per-compilation report (`modeReport`) starts fresh: no head
     // promoted yet; the discipline is the one just latched.
@@ -6008,5 +6015,7 @@ const hubs: CoreHooks = {
   ensureSpecializedUserCallEmitted,
   pruneUnreferencedVariantBases,
   hasCodeOverride,
+  blockLocalOf,
+  topLocalValueFrame: () => _localValueFrames[_localValueFrames.length - 1],
 };
 Object.assign(core, hubs);

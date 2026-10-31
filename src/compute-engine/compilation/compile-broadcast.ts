@@ -4,7 +4,9 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types.js';
+import { withScratchScope } from '../scratch-scopes.js';
 import { provenPointWidth } from './javascript-value-facts.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
@@ -93,6 +95,34 @@ import { _popLocalComplex, _pushLocalComplex } from './compile-loops.js';
 import { compileValueOperand } from './compile-statements.js';
 import { cseAdmission } from './compile-cse.js';
 import { guardConnectiveAbsence } from './compile-conditionals.js';
+
+/**
+ * Run `f` with the element parameters `names` boxed as symbols.
+ *
+ * An element parameter (`_tv1`) is a name that no scope declares, so boxing
+ * it auto-declares it. Declared in the current scope, it would advance the
+ * engine-wide cache versions (`_anyVersion`, `_callableVersion`), and a
+ * compilation must not change the state of the engine. So the symbols are
+ * boxed in a scope of their own, created under the current scope and
+ * registered as a scratch scope while `f` runs (`withScratchScope()`,
+ * `scratch-scopes.ts`): a declaration, a repair or a type inference of these
+ * bindings advances no engine-wide version, and the bindings are discarded
+ * with the scope. Every other name resolves from the scope as it does from
+ * the current scope, because the new scope starts empty.
+ */
+function withElementSymbols<T>(
+  engine: ComputeEngine,
+  names: ReadonlyArray<string>,
+  f: (symbols: Expression[]) => T
+): T {
+  const scratch: Scope = {
+    parent: engine.context.lexicalScope,
+    bindings: new Map(),
+  };
+  return withScratchScope(engine, scratch, () =>
+    f(engine._inScope(scratch, () => names.map((name) => engine.expr(name))))
+  );
+}
 
 export function tryCompileBroadcast(
   engine: ComputeEngine,
@@ -1258,10 +1288,12 @@ export function tryCompileBroadcast(
       return dispatch
         ? dispatchingScalarBody(h, sources)
         : typeof fn === 'function'
-          ? fn(
-              params.map((p) => engine.expr(p)),
-              (expr) => compileValueOperand(expr, innerTarget),
-              innerTarget
+          ? withElementSymbols(engine, params, (symbols) =>
+              fn(
+                symbols,
+                (expr) => compileValueOperand(expr, innerTarget),
+                innerTarget
+              )
             )
           : `${fn}(${sources.join(', ')})`;
     } finally {
@@ -1762,10 +1794,8 @@ export function compileBroadcastUnary(
       var: (id: string) => (id === v ? code : target.var(id)),
       ...withBoundScope(target, [v]),
     };
-    return fn(
-      [engine.expr(v)],
-      (expr) => compileValueOperand(expr, innerTarget),
-      innerTarget
+    return withElementSymbols(engine, [v], (symbols) =>
+      fn(symbols, (expr) => compileValueOperand(expr, innerTarget), innerTarget)
     );
   };
   const out = target.broadcastUnary(
@@ -1892,8 +1922,15 @@ export function tryCompilePythonElementwise(
     };
     // The loop variable stands for ONE element, so it is not
     // collection-typed and the Python guard above does not fire again.
-    const elementArgs = args.map((a, i) => (i === index ? engine.expr(v) : a));
-    return core.compileExpr(engine, h, elementArgs, 0, innerTarget);
+    return withElementSymbols(engine, [v], ([element]) =>
+      core.compileExpr(
+        engine,
+        h,
+        args.map((a, i) => (i === index ? element : a)),
+        0,
+        innerTarget
+      )
+    );
   };
   const out = target.broadcastUnary(
     h,

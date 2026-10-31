@@ -229,7 +229,10 @@ describe('an unrolled Sum leaves no literal arithmetic', () => {
   });
 
   it('folds the literal arguments of a user-function call', () => {
+    // `s` is declared `real`: the call `f(0.1 i, s)` is then a scalar, and
+    // the `Sum` is unrolled.
     const ce = new ComputeEngine();
+    ce.declare('s', 'real');
     ce.assign('f', ce.parse('(x, y) \\mapsto x^2 + y'));
     const r = compile(ce.parse('\\sum_{i=1}^{3} f(0.1 i, s)'), {
       to: 'javascript',
@@ -238,6 +241,28 @@ describe('an unrolled Sum leaves no literal arithmetic', () => {
     const js = source(r);
     expect(js).not.toMatch(/0\.1 \* [123]/);
     expect(js).toContain(String(0.1 * 3));
+  });
+
+  it('a call that can map over an untyped input is summed element-wise', () => {
+    // An untyped `s` can be a list at run time, and the call `f(0.1 i, s)`
+    // then maps over it. The unrolled terms were joined with the scalar
+    // `+`, which concatenated the arrays as strings
+    // (`"1.01,2.01,3.011.04,…"` for `s = [1, 2, 3]`). The `Sum` is now the
+    // element-wise loop, whose accumulator adds lists.
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.parse('(x, y) \\mapsto x^2 + y'));
+    const expr = ce.parse('\\sum_{i=1}^{3} f(0.1 i, s)');
+    const r = compile(expr, { to: 'javascript', fallback: false });
+    expect(r.run!({ s: 2 })).toBeCloseTo(6.14, 12);
+    const list = r.run!({ s: [1, 2, 3] }) as number[];
+    expect(list).toHaveLength(3);
+    [3.14, 6.14, 9.14].forEach((v, i) => expect(list[i]).toBeCloseTo(v, 12));
+    expect(
+      expr
+        .subs({ s: ce.box(['List', 1, 2, 3]) })
+        .N()
+        .toString()
+    ).toBe('[3.14,6.14,9.14]');
   });
 });
 

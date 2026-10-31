@@ -64,6 +64,89 @@
 
 ### Bug Fixes
 
+- **Compiled JavaScript folds with an accumulator that becomes a list.** With
+  `M` declared `list<vector<2>>`, `Reduce(M, (a, t) ↦ a + t, 0)` compiled, and
+  `run({ M: [[1, 2], [3, 4]] })` gave the strings `["1,23", "1,24"]` where the
+  interpreter gives `[4, 6]`: the step read its accumulator `a`, which has no
+  declared type, as a number, and from the second step on JavaScript added a
+  list to a number. The seed `[0, 0]`, `Fold`, `Scan`, a product, and a step
+  that makes a list from a scalar seed over a range were wrong the same way.
+  The step is now compiled with the accumulator typed by the values the fold
+  passes to it (the seed joined with the step's result), so the step maps
+  over a list accumulator. A fold with a tuple seed over a list of tuples,
+  which declined, now compiles. A scalar fold keeps its code. A step whose
+  list accumulator is in the complex lane (`(a, t) ↦ a + i·t`) declines; it
+  gave `{re: null, im: null}` values.
+
+- **Compiled JavaScript maps an operator over a call that maps over a list.**
+  With `q(t) := 2t` and a free input `u` that nothing types, the compiled call
+  `q(u)` maps `q` over a list, as the interpreter does, but the operator
+  around the call read its result as one number: `1 + q(u)` compiled to
+  `_SYS.bcastFn(_fn_q, _.u) + 1`, and `run({ u: [1, 2, 3] })` gave the string
+  `"2,4,61"` where the interpreter gives `[3, 5, 7]`. The same was true for
+  `Multiply`, `Negate`, `Power`, `Sqrt`, `Less` and the other element-wise
+  operators, for a nested call `p(q(u))`, a branch of an `If`, and a block
+  local assigned `q(u)`. The operator now maps over the result of the call.
+  A call of a complex-valued function, `1 + h(u)` with `h(t) := t + i`, which
+  declined also for a `u` declared `list<number>`, now compiles. A free input
+  declared `number`, or narrowed to `number` by a use such as `u + 1`, keeps
+  the scalar code. The compiled code tests the value of the call at run time,
+  so a number still takes the scalar `+` and pays no closure call.
+
+- **A compilation no longer changes the cache versions of the engine.** A
+  compiled broadcast (`_SYS.bcast`) declared its element parameters (`_tv1`,
+  `_tv2`) in the current scope of the engine: compiling `L + 1` with `L` a
+  `list<number>` advanced the versions that the engine's caches key on, so
+  cached types and values were computed again after each such compilation.
+  The element parameters are now declared in a temporary scope.
+
+- **Compiled Python declines a function literal applied to a collection at a
+  parameter it reads as a scalar.** `((t) ↦ 2t)([[1, 2], [3, 4]])` compiled to
+  `((lambda t: 2 * t))([[1, 2], [3, 4]])`, which repeats the list in Python
+  and gives `[[1, 2], [3, 4], [1, 2], [3, 4]]`; the interpreter gives
+  `[[2, 4], [6, 8]]`. The same was true for a parameter with no declaration,
+  declared `unknown`, a scalar type, `any` or `value`, and for `Add`,
+  `Subtract`, `Divide`, `Power` and `Negate`. The Python target now declines
+  such a call (falls back to the interpreter) when the argument can be a
+  collection and the parameter is not declared with a collection type, and a
+  callback of `Map`, `Reduce`, `Filter`, … when its parameter declared `any`
+  or `value` receives a value that can be a collection. A parameter declared
+  with a collection type (`list<number>`) still compiles.
+
+- **Compiled Python declines a fold whose accumulator can become a
+  collection.** `Reduce([[1, 2], [3, 4]], (a, t) ↦ a + t, 0)` compiled to
+  `functools.reduce((lambda a, t: [a + _tv1 for _tv1 in t]), …, 0)`: the step
+  read the accumulator `a` as a number, but after the first step it holds the
+  list `[1, 2]`, and the second step raised a `TypeError` in Python. The
+  interpreter gives `[4, 6]`. The same was true for the seed `[0, 0]` and for
+  `Scan`. The Python target now declines (falls back to the interpreter) a
+  callback parameter with no declaration, or declared `unknown`, that
+  receives a value that can be a collection when the function is compiled
+  with that parameter read as a scalar. A fold over a list of numbers, and an
+  accumulator typed as a list from its uses (`(a, t) ↦ Join(a, t)`), still
+  compile.
+
+- **Compiled JavaScript declines an input declared `expression`.** The
+  interpreter accepts a collection as the value of a symbol declared
+  `expression`, and maps an element-wise operator over it: with
+  `ce.declare("x", "expression")` and `x = [1, 2]`, `2x` is `[2, 4]`. Compiled
+  code read such a symbol as a scalar: `2x` compiled to `2 * _.x`, and
+  `run({ x: [1, 2] })` gave `null`. Compiled code now declines (falls back to
+  the interpreter) when it reads a symbol declared `expression` as an input,
+  as it does for a function parameter declared `expression`. A symbol with an
+  assigned value is not an input, and still compiles. A symbol declared `any`
+  or `value` compiles, with a run-time test of its value.
+
+- **Compiled JavaScript sums a list held by a symbol declared `any` or
+  `value`.** With `ce.declare("x", "any")`, `Sum(x)` and `Product(x)` declined
+  ("no indexing set"), also in `Sum(x) + 1`, and for a parameter declared
+  `any` or `value` of a function literal (`(t: any) ↦ Sum(t)`). They now
+  compile to a fold that tests the value at run time, with the interpreter's
+  values: `run({ x: [1, 2, 3] })` gives 6, a nested list
+  `[[1, 2], [3, 4]]` gives `[4, 6]`, a numeric typed array is summed as a
+  list, and a number gives itself (`Sum(5)` is 5). A symbol declared
+  `expression` still declines.
+
 - **A local assigned lists of different shapes is typed by their elements.**
   In a block that assigns `L = [1, 2]` and then `L = [[1, 2]]`, `L` was typed
   `list<integer>`, which does not admit the second value. A callback mapped
@@ -437,6 +520,14 @@
   the eager readers (`CountIf([4, 6, 8], y ↦ AsyncOnly(y) > 10)` is `2`). A
   call of a name with no definition (`Foo(y) > 10`) still throws, with its
   spelling hint.
+
+- **`TakeWhile` and `DropWhile` stay unevaluated when the predicate cannot be
+  decided.** With `z` a symbol with no value, `TakeWhile([6, 7, 8], y ↦ y >
+  z)` was `[]` and its `Length` was `0`, and `DropWhile` gave `[6, 7, 8]`:
+  an undecided verdict was read as `False`, so the leading run was taken to
+  end at `6`. The views, their `Length` and their materialization now stay
+  unevaluated, as `Filter` does. This also applies to a predicate that calls
+  an operator with only an `evaluateAsync` handler, under `evaluate()`.
 
 - **A numeric integral with a step or a bump next to a singular bound reports
   an error that covers its true error** (ROADMAP CE-691).

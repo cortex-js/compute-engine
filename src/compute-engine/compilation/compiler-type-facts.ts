@@ -42,6 +42,7 @@ import {
   isString,
   isCharacter,
   isFunction,
+  isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { sortOperands } from '../boxed-expression/order.js';
@@ -53,6 +54,16 @@ import {
 } from '../numeric-value/exact-integer-value.js';
 import { CompilerState } from './compiler-state.js';
 import { core } from './compiler-core-hooks.js';
+import { isOperatorDef } from '../boxed-expression/utils.js';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
+import type { LocalEntry } from './compiler-types.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
+import {
+  blockLocalFunction,
+  provablyScalarArg,
+  userFunctionLiteral,
+  userFunctionParamsAreScalar,
+} from './compile-assignment-checks.js';
 
 /**
  * True when a symbol of `expr`, at any depth, has a type with an
@@ -1209,11 +1220,437 @@ export function exactRationalDivisor(
  * the list code, and chooses one with `Array.isArray`. The list code is
  * compiled while `declaredTopMode` is `'list'`, and then such a symbol is
  * read as a possible collection here.
+ *
+ * `target` is the target that compiles `e`, when it is not the target of
+ * the call site in progress (`CompilerState._callSiteTarget`): the body of
+ * an emitted user-function definition is read with the target of that
+ * body, whose bound names are the parameters (`mayHoldCallBroadcastResult`).
  */
-export function possiblyCollectionTypedForCompile(e: Expression): boolean {
+export function possiblyCollectionTypedForCompile(
+  e: Expression,
+  target?: CompileTarget<Expression>
+): boolean {
+  if (mayHoldCallBroadcastResult(e, target)) return true;
   if (CompilerState.declaredTopMode === 'list')
     return isPossiblyCollectionTyped(e);
   return isPossiblyCollectionTyped(e, { declaredSymbols: false });
+}
+
+/**
+ * Can the JavaScript value of `e` be a list at run time because a call of a
+ * user function in `e` maps over a list argument, when the static type of
+ * `e` is a scalar?
+ *
+ * The JavaScript call of a user function with scalar parameters maps the
+ * function over a list argument (`_SYS.bcastFn`), as the interpreter does.
+ * The static type of the call does not show this: with `q(t) := 2t` and a
+ * free `u` of type `unknown`, the engine types `q(u)` as `number`, but
+ * `run({ u: [1, 2, 3] })` gives the list `[2, 4, 6]`. An operator over such
+ * a call must then broadcast too: `1 + q(u)` is `[3, 5, 7]` in the
+ * interpreter, and the scalar `+` concatenated the array to the string
+ * `"2,4,61"`.
+ *
+ * The answer is `true` when `e` is a call of a user function whose
+ * parameters are all scalar and an argument that is not a tuple or a
+ * nominal value (the call binds those whole) can be a list: its static
+ * type does not prove a scalar (`provablyScalarArg`), or it is itself such
+ * a call, or an application of a library operator that broadcasts over
+ * such a call (`2 q(u)`, `Sin(q(u))`), or an `If`, `Which` or `Block`
+ * whose value can be such a call, or a local of a block being compiled
+ * that the block assigns such a value. An argument whose static type is a
+ * scalar is not tested: when the host passes a list there, it breaks the
+ * input contract (the host must respect the types that the program declares
+ * or implies, `docs/COMPILATION-MODEL.md`). The test can answer `true` for
+ * a call that the emitter compiles as a direct call (a constructed scalar
+ * argument that the static type does not prove), which only makes the
+ * enclosing operator take `_SYS.bcast`, which applies its closure directly
+ * to scalar operands.
+ *
+ * Only the JavaScript target maps a call over a list argument, so the
+ * answer is `false` on the other targets.
+ */
+export function mayHoldCallBroadcastResult(
+  e: Expression,
+  target: CompileTarget<Expression> | undefined = CompilerState._callSiteTarget
+): boolean {
+  if (target?.language !== 'javascript') return false;
+  if (CompilerState.scalarCallResults.has(e)) return false;
+  // A local of a block being compiled holds the values that the block
+  // assigns to it: `z := q(u); 1 + z`. The entry of a local is visited once
+  // on a path, so `z := z + q(u)` ends.
+  if (isSymbol(e)) {
+    const local = core.blockLocalOf(e);
+    if (local === undefined) return false;
+    if (visitingLocals.has(local)) {
+      localCycleCuts += 1;
+      return false;
+    }
+    visitingLocals.add(local);
+    try {
+      return local.values.some((v) => mayHoldCallBroadcastResult(v, target));
+    } finally {
+      visitingLocals.delete(local);
+    }
+  }
+  if (!isFunction(e) || e.ops.length === 0) return false;
+  if (!e.isCanonical && !e.isStructural) return false;
+  // The answer for a node that reads a block local depends on the block
+  // being compiled, so the memo of the compilation is used only outside a
+  // block (and outside the other binders that push a local shape frame), and
+  // outside the scalar branch of a run-time check of a call result. In the
+  // scalar branch, the answers are kept for one question only
+  // (`questionMemo`): an expression can hold the same node object at many
+  // positions, and a walk that follows every position takes a time
+  // exponential in the depth. In a local frame, the answers are kept while
+  // the frame is the innermost one (`localFrameMemo`). A block fills
+  // `localFunctions` in statement order on the same target, so an answer
+  // computed before `Declare(g, …)` can be wrong after it: while the target
+  // has block-local functions, the answers are kept for one question only,
+  // as in the scalar branch.
+  const inBlock =
+    (target.localFunctions?.size ?? 0) > 0 ||
+    (target.lexicalFunctions?.size ?? 0) > 0;
+  if (CompilerState.scalarCallResults.size > 0 || inBlock) {
+    if (questionMemo !== undefined)
+      return memoizedInQuestion(questionMemo, e, target);
+    questionMemo = new WeakMap();
+    try {
+      return memoizedInQuestion(questionMemo, e, target);
+    } finally {
+      questionMemo = undefined;
+    }
+  }
+  if (CompilerState._localVector.length > 0)
+    return memoizedInQuestion(localFrameMemo(target), e, target);
+  let memo = callBroadcastMemo.get(target);
+  if (memo === undefined) {
+    memo = new WeakMap();
+    callBroadcastMemo.set(target, memo);
+  }
+  const known = memo.get(e);
+  if (known !== undefined) return known;
+  const result = mayHoldCallBroadcastResultUncached(e, target);
+  memo.set(e, result);
+  return result;
+}
+
+/**
+ * The answers of `mayHoldCallBroadcastResult` outside a local frame, by
+ * target. The answers depend on the definitions of the user functions, which
+ * can change between two compilations, so the memo is cleared at the start
+ * of each outermost compilation (`resetCallBroadcastMemo`).
+ */
+let callBroadcastMemo = new WeakMap<
+  CompileTarget<Expression>,
+  WeakMap<Expression, boolean>
+>();
+
+/**
+ * The answers of `mayHoldCallBroadcastResult` inside a local frame, keyed by
+ * the innermost local shape frame (`CompilerState._localVector`). An answer
+ * there depends on the locals of the blocks being compiled, so a record is
+ * used only for the target and the innermost frame of block locals
+ * (`core.topLocalValueFrame`) that it was made for. A record whose frame was
+ * popped is not reached again, and the garbage collector removes it.
+ */
+let localFrameMemos = new WeakMap<
+  object,
+  {
+    target: CompileTarget<Expression>;
+    valueFrame: object | undefined;
+    memo: WeakMap<Expression, boolean>;
+  }
+>();
+
+function localFrameMemo(
+  target: CompileTarget<Expression>
+): WeakMap<Expression, boolean> {
+  const frames = CompilerState._localVector;
+  const frame = frames[frames.length - 1];
+  const valueFrame = core.topLocalValueFrame();
+  let record = localFrameMemos.get(frame);
+  if (
+    record === undefined ||
+    record.target !== target ||
+    record.valueFrame !== valueFrame
+  ) {
+    record = { target, valueFrame, memo: new WeakMap() };
+    localFrameMemos.set(frame, record);
+  }
+  return record.memo;
+}
+
+/**
+ * Clear the memos of `mayHoldCallBroadcastResult`. Called at the start of
+ * each outermost compilation, because a host can redefine a user function
+ * between two compilations that use the same target.
+ */
+export function resetCallBroadcastMemo(): void {
+  callBroadcastMemo = new WeakMap();
+  localFrameMemos = new WeakMap();
+}
+
+/**
+ * The answers of `mayHoldCallBroadcastResult` during the question in
+ * progress, inside a scalar branch, where the memo of the compilation is not
+ * used. `undefined` when no such question is in progress.
+ */
+let questionMemo: WeakMap<Expression, boolean> | undefined = undefined;
+
+/**
+ * The number of times that `mayHoldCallBroadcastResult` answered `false`
+ * for a block local because the walk was already visiting it (a local
+ * whose value reads the local, `z := z + q(u)`). That answer is not the
+ * answer of the node: it is only the answer on the path that is walked. An
+ * answer computed while the count changed is not kept in a memo.
+ */
+let localCycleCuts = 0;
+
+function memoizedInQuestion(
+  memo: WeakMap<Expression, boolean>,
+  e: Expression & { ops: ReadonlyArray<Expression> },
+  target: CompileTarget<Expression>
+): boolean {
+  const known = memo.get(e);
+  if (known !== undefined) return known;
+  const cuts = localCycleCuts;
+  const result = mayHoldCallBroadcastResultUncached(e, target);
+  if (cuts === localCycleCuts) memo.set(e, result);
+  return result;
+}
+
+/**
+ * The calls whose values make the JavaScript value of an operator over
+ * `args` a list at run time (`mayHoldCallBroadcastResult`), for a run-time
+ * check of those values (`callResultGuard` in `compile-expr-handlers.ts`).
+ *
+ * `calls` are the calls of user functions that map over a list argument,
+ * reached from `args` through applications of library operators that
+ * broadcast (`2 q(u)` in `2 q(u) + 1`). `between` are those applications.
+ * `others` are the other operands, at any depth under `args` and `between`
+ * (the `1` and the `2` in `2 q(u) + 1`): the caller must check that they are
+ * pure, since the check evaluates the calls before them.
+ *
+ * When no operand of the operator holds such a call, the result is
+ * `undefined`. It is `undefined` too when the check would evaluate a call
+ * that the operator `h` or an application in `between` evaluates only on a
+ * condition, or after an operand that it may not evaluate
+ * (`evaluatesOperandsConditionally`): a call reached through an `If`, a
+ * `Which`, a `Block` or a block local, a call in an operand of `And`, `Or`,
+ * `Implies`, `Nand` or `Nor` (`p ∧ q(u) > 0` does not call `q` when `p` is false), a call in
+ * a chain of comparisons (`y < 0 < q(u)` does not call `q` when `y < 0` is
+ * false). It is `undefined` also when an operand in `others` can be a
+ * collection by its static type (`q(u) + L`): the operator then maps over a
+ * list in both branches of the check, so the check changes nothing.
+ */
+export function callBroadcastSources(
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+):
+  | { calls: Expression[]; between: Expression[]; others: Expression[] }
+  | undefined {
+  if (args.length === 0) return undefined;
+  if (evaluatesOperandsConditionally(h, args.length)) return undefined;
+  const calls: Expression[] = [];
+  const between: Expression[] = [];
+  const others: Expression[] = [];
+  // An expression can hold the same node object at many positions: each
+  // node is visited once, so the walk is linear in the distinct nodes.
+  const visited = new Map<Expression, boolean>();
+  const visit = (e: Expression): boolean => {
+    const known = visited.get(e);
+    if (known !== undefined) return known;
+    const result = visitOnce(e);
+    visited.set(e, result);
+    return result;
+  };
+  const visitOnce = (e: Expression): boolean => {
+    if (!mayHoldCallBroadcastResult(e, target)) {
+      others.push(e);
+      return true;
+    }
+    if (!isFunction(e)) return false;
+    const h = e.operator;
+    if (
+      blockLocalFunction(h, target) !== undefined ||
+      userFunctionLiteral(e.engine, h) !== undefined
+    ) {
+      calls.push(e);
+      return true;
+    }
+    if (evaluatesOperandsConditionally(h, e.ops.length)) return false;
+    between.push(e);
+    return e.ops.every(visit);
+  };
+  if (!args.every(visit) || calls.length === 0) return undefined;
+  const possiblyCollection = (e: Expression): boolean =>
+    CompilerState.declaredTopMode === 'list'
+      ? isPossiblyCollectionTyped(e)
+      : isPossiblyCollectionTyped(e, { declaredSymbols: false });
+  if (others.some(possiblyCollection)) return undefined;
+  return { calls, between, others };
+}
+
+/**
+ * True when an application of `h` with `count` operands may leave an
+ * operand unevaluated, or evaluate it only after a test of another operand:
+ * `And`, `Or`, `Implies`, `Nand` and `Nor`, which stop at the first operand
+ * that decides the value, `If`, `Which`, `Block`, and a chain of more than
+ * two comparisons, which stops at the first pair that is false, in the
+ * interpreter and in the JavaScript code (`lazyChain` in
+ * `javascript-target.ts`). The `lazy` flag of a definition does not tell
+ * this: it is set on `Add` and `Multiply` too, which evaluate every operand.
+ */
+const CONDITIONAL_HEADS = new Set([
+  'And',
+  'Or',
+  'Implies',
+  'Nand',
+  'Nor',
+  'If',
+  'Which',
+  'Block',
+]);
+
+function evaluatesOperandsConditionally(h: string, count: number): boolean {
+  return CONDITIONAL_HEADS.has(h) || (count > 2 && isRelationalOperator(h));
+}
+
+/**
+ * Can the value of the block `block` be a list at run time because of a call
+ * that maps over a list argument (`mayHoldCallBroadcastResult`)?
+ *
+ * The value of the block is its last statement or the operand of a `Return`
+ * in it. When the block is not being compiled, a local of the block is not
+ * known through `core.blockLocalOf`, so a value that is a symbol is read
+ * through the values that the block assigns to that name, at any depth
+ * outside a function literal: in `Block(z := q(u), z)` the value `z` holds
+ * `q(u)`. The name is not checked against the scopes nested in the block,
+ * so the answer can be `true` when a nested local of the same name holds the
+ * call: this only makes the enclosing operator take `_SYS.bcast`.
+ */
+function blockValueMayHoldCallBroadcastResult(
+  block: Expression & { ops: ReadonlyArray<Expression> },
+  target: CompileTarget<Expression>
+): boolean {
+  const values: Expression[] = [block.ops[block.ops.length - 1]];
+  const assigned = new Map<string, Expression[]>();
+  // Record the value `value` for each symbol that the target `t` of an
+  // `Assign` or a `Declare` names: the symbol, or each leaf of a
+  // destructuring pattern (`Tuple`, `List`). A pattern matched by a literal
+  // `Tuple` or `List` of the same length gives each part its component, as
+  // the interpreter does: in `(z, y) := (q(u), 0)`, `z` holds `q(u)`. Any
+  // other value is given whole to each leaf.
+  const record = (t: Expression, value: Expression): void => {
+    if (isSymbol(t)) {
+      const list = assigned.get(t.symbol);
+      if (list === undefined) assigned.set(t.symbol, [value]);
+      else list.push(value);
+      return;
+    }
+    if (!isFunction(t) || (t.operator !== 'Tuple' && t.operator !== 'List'))
+      return;
+    const parts =
+      isFunction(value) &&
+      (value.operator === 'Tuple' || value.operator === 'List') &&
+      value.ops.length === t.ops.length
+        ? value.ops
+        : undefined;
+    t.ops.forEach((leaf, i) => record(leaf, parts?.[i] ?? value));
+  };
+  // Each node object once: a value built from shared subtrees
+  // (`t_n = Beta(t_{n-1}, t_{n-1})`) has few distinct nodes but
+  // exponentially many paths.
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): void => {
+    if (!isFunction(e) || e.operator === 'Function' || seen.has(e)) return;
+    seen.add(e);
+    if (e.operator === 'Return' && e.ops.length > 0) values.push(e.ops[0]);
+    const value =
+      e.operator === 'Assign'
+        ? e.ops[1]
+        : e.operator === 'Declare'
+          ? declaredValue(e.ops)
+          : undefined;
+    if (value !== undefined && e.ops.length > 0) record(e.ops[0], value);
+    e.ops.forEach(visit);
+  };
+  block.ops.forEach(visit);
+  // A name is read once on a path, so `z := z + 1` ends.
+  const holds = (v: Expression, names: Set<string>): boolean => {
+    if (mayHoldCallBroadcastResult(v, target)) return true;
+    if (!isSymbol(v) || names.has(v.symbol)) return false;
+    names.add(v.symbol);
+    try {
+      return (assigned.get(v.symbol) ?? []).some((w) => holds(w, names));
+    } finally {
+      names.delete(v.symbol);
+    }
+  };
+  return values.some((v) => holds(v, new Set()));
+}
+
+/**
+ * The value of the `Declare` whose operands are `ops`: the positional
+ * value of `Declare(sym, type, value)`, or else the `value` key of a
+ * trailing attributes `Dictionary`. `undefined` when the declaration has no
+ * value. This is the rule of `declareValueOperand` in
+ * `compile-declarations.ts`, which imports this module: an import of it
+ * here would make a dependency cycle.
+ */
+function declaredValue(ops: ReadonlyArray<Expression>): Expression | undefined {
+  let rest = ops.slice(1);
+  let attrsValue: Expression | undefined;
+  const last = rest[rest.length - 1];
+  if (last !== undefined && isDictionary(last)) {
+    attrsValue = last.get('value');
+    rest = rest.slice(0, -1);
+  }
+  return rest[1] ?? attrsValue;
+}
+
+/** The block locals that `mayHoldCallBroadcastResult` is visiting. */
+const visitingLocals = new Set<LocalEntry>();
+
+function mayHoldCallBroadcastResultUncached(
+  e: Expression & { ops: ReadonlyArray<Expression> },
+  target: CompileTarget<Expression>
+): boolean {
+  const h = e.operator;
+  const engine = e.engine;
+  // A block-local function is called before an engine function of the same
+  // name (`tryCompileLocalFunctionCall`). A local whose literal cannot be
+  // read here (`null`) is read with unknown parameters, which are scalar.
+  const local = blockLocalFunction(h, target);
+  const isUserCall =
+    local !== undefined || userFunctionLiteral(engine, h) !== undefined;
+  if (isUserCall) {
+    const scalarParams =
+      local === undefined
+        ? userFunctionParamsAreScalar(engine, h)
+        : local === null || paramsAreScalar(local.type.type);
+    if (!scalarParams) return false;
+    return e.ops.some(
+      (a) =>
+        !isTuple(a) &&
+        !isNominalAtomicType(a.type.type) &&
+        ((!provablyScalarArg(a) && !isConstructedScalar(a, target)) ||
+          mayHoldCallBroadcastResult(a, target))
+    );
+  }
+  // A conditional or a block gives the value of one of its branches, or of
+  // its last statement: `1 + If(w > 0, q(u), 0)`.
+  if (h === 'If')
+    return e.ops.slice(1).some((a) => mayHoldCallBroadcastResult(a, target));
+  if (h === 'Which')
+    return e.ops.some(
+      (a, i) => i % 2 === 1 && mayHoldCallBroadcastResult(a, target)
+    );
+  if (h === 'Block') return blockValueMayHoldCallBroadcastResult(e, target);
+  const def = engine.lookupDefinition(h);
+  if (!isOperatorDef(def) || def.operator.broadcastable !== true) return false;
+  return e.ops.some((a) => mayHoldCallBroadcastResult(a, target));
 }
 
 /**

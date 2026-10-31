@@ -846,6 +846,55 @@ arithmetic broadcast (`Add`, `Multiply`, … through `tryCompileBroadcast`) asks
 (`isConstructedScalar`). A change to one does not change the other: when an
 arithmetic broadcast does not go away, look at `javascript-value-facts.ts`.
 
+Both analyses read one more source of arrays, which a static type does not
+show: a call of a user function that maps over a list argument at run time
+(`mayHoldCallBroadcastResult` in `compiler-type-facts.ts`). With
+`q(t) := 2t` and a free input `u` that nothing types, the engine types
+`q(u)` as `number`, but the call is `_SYS.bcastFn(_fn_q, _.u)`, and
+`run({ u: [1, 2, 3] })` gives `[2, 4, 6]`. So an operator over the call maps
+over its result too: `1 + q(u)` compiles to `_SYS.bcast(…)` and gives the
+interpreter's `[3, 5, 7]`. The rule reaches through the arguments of nested
+calls (`1 + p(q(u))`), through library operators that broadcast
+(`1 + sin(q(u))`), through the branches of `If` and `Which`, the last
+statement of a `Block`, and the locals of a block that are assigned such a
+value (`z := q(u); 1 + z`). It is not applied to an argument whose static
+type is a scalar: a symbol declared `number`, or narrowed to `number` by a
+use such as `u + 1`, makes a list there a break of the host's input
+contract, and the scalar code stays. The rule can also flag a call that the
+emitter compiles as a direct call (an argument that is a scalar by
+construction but not by its static type); the operator then takes
+`_SYS.bcast`, which applies its closure directly to scalar operands. Only
+the JavaScript target maps a call over a list argument, so the rule does not
+apply on the other targets.
+
+The value of such a call is a number at almost every evaluation (a plot
+variable), and `_SYS.bcast` costs a closure call per evaluation. So when the
+calls are reached from the operator through library operators only
+(`1 + q(u)`, `1 + 2 q(u)`, `Sin(q(u)) + q(u)`), the code evaluates each call
+once, into a temporary, and tests it at run time (`callResultGuard` in
+`compile-expr-handlers.ts`): an array or an absent value takes the
+`_SYS.bcast` code, any other value takes the scalar code compiled with the
+call read as a scalar. A call in a branch of an `If` or a `Which`, the last
+statement of a `Block`, or a block local keeps the `_SYS.bcast` code with no
+test, because the test would evaluate the call before its branch is taken.
+
+An input that the host declared `any` or `value` can hold a list, and the
+JavaScript target tests its value at run time at an element-wise site: it
+emits the scalar code and the list code, and selects one with
+`Array.isArray` (`declaredTopGuard` in `compile-expr-handlers.ts`). The
+collection form of `Sum` and `Product` over such an input or over a
+parameter declared `any` or `value` (`Sum(x)`, no indexing set) compiles to a
+fold that tests the value at run time: a list is folded, a nested list
+element-wise (`[[1, 2], [3, 4]]` gives `[4, 6]`), and a scalar gives itself,
+as in the interpreter (`Sum(5)` is 5). An input
+declared `expression` (or with an alias of it) can hold a list too, but the
+compiled code has no such test for it, so the JavaScript target declines a
+read of it as an input, and the interpreter computes the value: with
+`ce.declare("x", "expression")`, `2x` declines, and `run({ x: [1, 2] })`
+gives `[2, 4]`. A symbol declared `expression` with an assigned value is not
+an input: its value is folded, and the expression compiles. A parameter
+declared `expression` declines in the shapes that ROADMAP CE-693 lists.
+
 A compiled user-function call whose parameters are all scalar carries a
 runtime `Array.isArray` guard around each argument that is not a literal, so
 a `run()` caller that supplies a list gets the interpreter's broadcast instead
@@ -975,6 +1024,27 @@ own, the arrow is bound once — a `const` where a statement sink exists, an
 immediately applied arrow otherwise — so the wrapper's two mentions of its
 callee do not build a fresh closure per element. A literal with a
 collection-typed parameter keeps the bare arrow.
+
+The Python target has none of these run-time tests, and its arithmetic
+operators do not map over a list (`2 * [[1, 2], [3, 4]]` repeats the list). It
+reads a parameter that is not declared with a collection type as a scalar. So
+an application of a function literal (`Apply`, `ApplyWhole`) declines when an
+argument can be a collection (it is one, or its type is a collection type or a
+union with one) and its parameter is not declared with a collection type: at a
+scalar parameter the interpreter maps the function over the elements
+(`((t) ↦ 2t)([[1, 2], [3, 4]])` is `[[2, 4], [6, 8]]`, and `((t) ↦ 1)([1, 2])`
+is `[1, 1]`), and at a parameter declared `any` or `value` that the body reads
+it binds the collection whole and maps each element-wise operator over it. A
+callback of `Map`, `Reduce`, `Filter`, … declines for the same reason when a
+parameter declared `any` or `value` that the body reads receives a value that
+can be a collection: `Map((t: any) ↦ 2t, [[1, 2], [3, 4]])` declines, and the
+interpreter gives `[[2, 4], [6, 8]]`. An argument of a top type (`unknown`,
+`any`, `value`) is read as a scalar, as everywhere else on this target. A
+parameter declared with a collection type (`list<number>`) compiles, through
+the list lowerings of the body. This is the simple, sound version: a precise
+one would map the lambda over the collection, or compile the body at the type
+of the argument (`assertPyAppliedLiteralBindsScalars` and
+`assertPyCallbackWideParams` in `python-target.ts`).
 
 Implicit Map compilation obeys the engine-wide `jit` gate. Exact-mode Map
 compilation requires an explicit proof that native-number execution preserves

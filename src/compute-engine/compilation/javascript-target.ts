@@ -112,6 +112,7 @@ import {
   topTypeBesideAbsence,
   typeContainsMissing,
   unfoldAliasOnDescent,
+  widen,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
@@ -544,6 +545,7 @@ import {
   countMayBeNaN,
 } from './base-compiler.js';
 export { countMayBeNaN } from './base-compiler.js';
+import { mayHoldCallBroadcastResult } from './compiler-type-facts.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
@@ -2813,6 +2815,9 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
   // A symbol declared `any` or `value` while the list code of a run-time
   // check of its value is compiled (`isDeclaredTopListOperand`).
   if (isDeclaredTopListOperand(e)) return true;
+  // A scalar-typed call of a user function that maps over a list argument
+  // at run time (`q(u)` with `u: unknown`), or an operator over one.
+  if (mayHoldCallBroadcastResult(e)) return true;
   // A top-typed APPLICATION is a genuine possibly-collection signal only when
   // bound: an UNBOUND (non-canonical, non-structural) arithmetic subexpression
   // (e.g. the `{ canonical: false }` grouping-preservation path) types
@@ -5655,7 +5660,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // An accumulator that only the fold can see is updated in place when
       // the step allows it (`inPlaceUpdateChains`). The seed is then copied
       // once, so the fold owns the one array that every step updates.
-      const chains = plan?.coerceSeed ? undefined : inPlaceUpdateChains(op);
+      // An accumulator that can be a collection is typed in the step
+      // (`listAccumulatorStep`), and the chains are read from that step,
+      // which is the one compiled.
+      const stepPlan = listAccumulatorStep('Reduce', plan, coll, init, target);
+      const chains = plan?.coerceSeed
+        ? undefined
+        : inPlaceUpdateChains(stepPlan === plan ? op : stepPlan!.op);
       for (const ops of chains ?? []) IN_PLACE_UPDATE_OPS.add(ops);
       try {
         // A parameter declared `expression` is checked against the type of
@@ -5665,7 +5676,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           op,
           argTypes,
           target,
-          () => customCombinerWithLanes(op, plan, compile, target),
+          () => customCombinerWithLanes(op, stepPlan, compile, target),
           [undefined, coll]
         );
       } finally {
@@ -7232,7 +7243,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
             op,
             argTypes,
             target,
-            () => customCombinerWithLanes(op, plan, compile, target),
+            () =>
+              customCombinerWithLanes(
+                op,
+                listAccumulatorStep('Scan', plan, coll, init, target),
+                compile,
+                target
+              ),
             [undefined, coll]
           )
         : undefined);
@@ -11360,8 +11377,18 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // `Sum(L)` with `vars: { L: '_.L' }` and no `L` has no value. On the
         // lambda route every string is caller source, so nothing is recorded
         // there.
+        // A symbol declared `expression` can hold a collection, and compiled
+        // code reads it as a scalar, so a read of it as an input (a `vars`
+        // entry, or the vars object) is declined
+        // (`isExpressionDeclaredInput`). A symbol with an assigned value is
+        // folded below, and is not declined.
+        const expressionInput = BaseCompiler.isExpressionDeclaredInput(
+          expr.engine,
+          id
+        );
         if (vars && Object.hasOwn(vars, id)) {
           const v = vars[id];
+          if (expressionInput) throw BaseCompiler.expressionInputDecline(id);
           if (typeof v === 'string' && !opaqueVar(id)) varsObjectRefs.add(id);
           return typeof v === 'string' ? v : JSON.stringify(v);
         }
@@ -11387,6 +11414,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         )
           return result;
         if (unknowns.includes(id)) {
+          if (expressionInput) throw BaseCompiler.expressionInputDecline(id);
           varsObjectRefs.add(id);
           return readInput(id);
         }
@@ -11394,6 +11422,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // BaseCompiler fold it (the way evaluate() does) rather than emitting a
         // bare `a` global, which would throw `ReferenceError` at run time.
         if (expr.engine._getSymbolValue(id) !== undefined) return undefined;
+        if (expressionInput) throw BaseCompiler.expressionInputDecline(id);
         // No value: a genuinely free symbol. It may be reachable only through a
         // folded value (e.g. `c` in `b = c + 1`), so `unknowns` — computed on
         // the surface expression — can miss it. Emit the vars-object lookup
@@ -12553,6 +12582,19 @@ function compileSumProduct(
     if (isPossiblyCollectionTypedJS(args[0])) {
       refuseNonNumericScalarProjection(kind, args[0]);
       return emitCollectionReduce(kind, args[0], target, true);
+    }
+    // A symbol declared `any` or `value` (`isDeclaredTopOperand`: an input,
+    // or a parameter of a function literal) can hold a list at run time, and
+    // the interpreter folds it as one: `Sum(x)` with `x = [1, 2, 3]` is 6,
+    // and with `x = [[1, 2], [3, 4]]` it is `[4, 6]`. The guarded fold
+    // dispatches on the run-time value, and gives a scalar as it is, as the
+    // interpreter does (`Sum(5)` is 5). The value is read through
+    // `_SYS.plainList`, because the host can pass a numeric typed array
+    // (`Float64Array`) for such a symbol, and the fold tests for a plain
+    // `Array`. This branch declined before ("no indexing set").
+    if (isDeclaredTopOperand(args[0])) {
+      refuseNonNumericScalarProjection(kind, args[0]);
+      return emitCollectionReduce(kind, args[0], target, true, true);
     }
     // A symbol typed as an abstract collection (declared or inferred): adding
     // or multiplying the elements needs no positions or order, so it is read
@@ -14332,6 +14374,93 @@ function customCombinerWithLanes(
 }
 
 /**
+ * The combiner plan `plan` of the fold `kind` over `coll` (seed `init`), with
+ * an inline combiner rebuilt so that its accumulator parameter is typed by
+ * the values the fold passes there, when one of these values can be a
+ * collection. Otherwise `plan` itself.
+ *
+ * The accumulator receives the seed and then the combiner's own result
+ * (`BaseCompiler.foldAccumulatorArgType`). A parameter that the literal does
+ * not declare is typed `unknown`, and the emitted arithmetic reads an
+ * `unknown` operand as a number. Thus with `t` a row of `[[1, 2], [3, 4]]`,
+ * `Reduce(rows, (a, t) ↦ a + t, 0)` emitted `[a + t[0], a + t[1]]`: the
+ * second step added the list `a` to a number, which JavaScript turns into the
+ * string `"1,23"`. The interpreter adds the lists element by element and
+ * gives `[4, 6]`. With the accumulator typed `number | vector<2>`, the body
+ * broadcasts over it, as it does over the element.
+ *
+ * The element parameter, when it is not declared, is typed by the element
+ * type of the source, the type that the literal of the fold gives it.
+ *
+ * A scalar accumulator (a type that is a subtype of `number`), a declared
+ * accumulator, and an accumulator whose type is not provable keep the
+ * literal as written, so the emitted code of a scalar fold does not change.
+ * So does an accumulator that can be something other than a number, a list
+ * or a tuple, such as a string: the step reads it through the run-time
+ * checks of an `unknown` value, and a type with a string arm would make the
+ * list operations of the step decline (`Join(acc, acc)` over a string
+ * seed).
+ * A combiner given by name is not rebuilt: a user function and a function
+ * local to a block, with parameters that are not declared, are called
+ * through a wrapper that maps over a list argument, as the interpreter does.
+ *
+ * The fold is declined when the rebuilt literal is not valid, when its
+ * result is not in the accumulator's type (each step could then give a
+ * deeper list than the type describes), or when the accumulator is in the
+ * complex lane (`plan.accComplex`), where the step lifts the accumulator to
+ * a complex scalar.
+ */
+function listAccumulatorStep(
+  kind: 'Reduce' | 'Scan',
+  plan: ReturnType<typeof BaseCompiler.combinerPlan>,
+  coll: Expression,
+  init: Expression | undefined | null,
+  target: CompileTarget<Expression>
+): ReturnType<typeof BaseCompiler.combinerPlan> {
+  const literal = plan?.op;
+  if (!isFunction(literal, 'Function') || literal.nops !== 3) return plan;
+  const [accParam, eltParam] = [literal.ops[1], literal.ops[2]];
+  if (functionLiteralParameterType(accParam) !== undefined) return plan;
+  let acc = BaseCompiler.foldAccumulatorArgType(coll, literal, init, target);
+  if (
+    acc === undefined ||
+    isSubtype(acc, 'number') ||
+    !isSubtype(acc, 'number | list<any> | tuple')
+  )
+    return plan;
+  const element =
+    functionLiteralParameterType(eltParam) === undefined
+      ? BaseCompiler.collectionElementTypeOf(coll)
+      : undefined;
+  // The type of the accumulator is a fixed point: the seed's type joined
+  // with the result of a step that receives that type. The first type
+  // describes a step that receives an `unknown` accumulator, and a step
+  // that receives a union can give a wider result (`(0 | vector<2>) +
+  // vector<2>` is `number | vector<2>`), so the join is computed again a
+  // few times. A step that makes the list deeper at each step has no fixed
+  // point, and is declined.
+  for (let i = 0; i < 4 && !plan!.accComplex; i++) {
+    const rebuilt = BaseCompiler.literalWithParameterTypes(
+      literal.engine,
+      literal,
+      [acc, element]
+    );
+    if (rebuilt === undefined) break;
+    const result = functionResult(rebuilt.type.type);
+    if (result === undefined || result === 'unknown' || result === 'any') break;
+    if (isSubtype(result, acc)) return { ...plan!, op: rebuilt };
+    acc = widen(acc, result);
+  }
+  throw new Error(
+    `Could not compile \`${kind}\`: the accumulator can be a collection ` +
+      `(type \`${typeToString(acc)}\`), and the combiner cannot be ` +
+      (plan!.accComplex
+        ? `compiled with a complex accumulator that is a collection.`
+        : `compiled with its accumulator at that type.`)
+  );
+}
+
+/**
  * Fail closed unless the collection's elements compile to JS primitives
  * with value equality. `includes`/`Set` use SameValueZero, which is reference
  * identity for compound elements (nested lists compile to arrays, tuples and
@@ -15733,12 +15862,17 @@ function countingWalkPlan(target: CompileTarget<Expression>): RangeWalkPlan {
  * identity seed (`0` for Sum, `1` for Product) makes the empty collection agree
  * with the interpreter (`Sum([]) = 0`, `Product([]) = 1`). Real-valued reduce,
  * consistent with the `Reduce` handler (complex-element folds are not lowered).
+ *
+ * With `plainList`, the guarded fold reads the operand through
+ * `_SYS.plainList`, which copies a numeric typed array to a plain array, so
+ * that the `Array.isArray` test of the fold sees it as a list.
  */
 function emitCollectionReduce(
   kind: 'Sum' | 'Product',
   coll: Expression,
   target: CompileTarget<Expression>,
-  guarded: boolean
+  guarded: boolean,
+  plainList = false
 ): string {
   if (!guarded) {
     const mapped = emitMappedReduction(kind, coll, target);
@@ -15859,7 +15993,7 @@ function emitCollectionReduce(
     kind,
     mixedFoldLane(coll),
     kind === 'Sum' && elementsMayDifferInShape(coll, true)
-  )}, ${identity}) : ${otherwise})(${code})`;
+  )}, ${identity}) : ${otherwise})(${plainList ? `_SYS.plainList(${code})` : code})`;
   // When a parent reads the fold as a complex value (`isComplexValued`: an
   // operand typed `broadcastable<complex>`), the fold must give one: a sum
   // of real elements, or the identity of an empty list, is a plain number.

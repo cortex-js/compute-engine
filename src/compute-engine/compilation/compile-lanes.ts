@@ -71,6 +71,7 @@ import type { ElementLane } from './compiler-types.js';
 import {
   compilationType,
   isBoundPossiblyCollectionTyped,
+  mayHoldCallBroadcastResult,
 } from './compiler-type-facts.js';
 
 /**
@@ -744,7 +745,7 @@ export function recordUserFunctionLane(
     registry,
     id,
     name,
-    mayBeCollectionValued(body) ? undefined : scalarComplex,
+    mayBeCollectionValued(body, target) ? undefined : scalarComplex,
     scalarComplex
   );
   // The lane of the entries of a collection body, read by a
@@ -915,8 +916,17 @@ export function _operandElementLane(
   // the same evidence. `'mixed'` lowers through the dispatching helpers,
   // which read the shape of the value when the code runs: a number, a
   // `{re, im}` object, or an array of either. (ROADMAP CE-215.2.)
+  //
+  // A call of a user function that maps over a list argument at run time
+  // (`mayHoldCallBroadcastResult`: `h(x) + 1` with `h := t ↦ t + i` and an
+  // untyped `x`) is not such a binding either: the compiled code computes
+  // its value, a `{re, im}` object or an array of them.
   if (isBoundPossiblyCollectionTyped(a))
-    return isCollectionFold(a) || complexDiscipline() ? 'mixed' : undefined;
+    return isCollectionFold(a) ||
+      complexDiscipline() ||
+      mayHoldCallBroadcastResult(a)
+      ? 'mixed'
+      : undefined;
   return 'mixed';
 }
 

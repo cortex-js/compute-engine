@@ -16,6 +16,7 @@ import type {
   ConditionNode,
   DeclineNote,
   ElementLane,
+  LocalEntry,
   FoldCostContext,
   UserFunctionRegistry,
 } from './compiler-types.js';
@@ -172,6 +173,10 @@ export interface CoreHooks {
     rootCode: string
   ): void;
   hasCodeOverride(expr: Expression): boolean;
+  blockLocalOf(e: Expression): LocalEntry | undefined;
+  /** The innermost frame of block locals (`_localValueFrames`), or
+   * `undefined` when no block is being compiled. */
+  topLocalValueFrame(): object | undefined;
 }
 
 /**
@@ -213,6 +218,8 @@ export const core: CoreHooks = {
   ),
   pruneUnreferencedVariantBases: notInstalled('pruneUnreferencedVariantBases'),
   hasCodeOverride: notInstalled('hasCodeOverride'),
+  blockLocalOf: notInstalled('blockLocalOf'),
+  topLocalValueFrame: notInstalled('topLocalValueFrame'),
 } as unknown as CoreHooks;
 
 function notInstalled(name: string): never {

@@ -785,8 +785,10 @@ import {
   ensureUserFunctionVariantEmitted,
   inlineCollectionValuedCallsAtRoot,
   inlinedUserFunctionCall,
+  expressionInputDecline,
   expressionParameterDecline,
   expressionParameterReadAt,
+  isExpressionDeclaredInput,
   isElementWiseOperand,
   isNominalAtomicArg,
   isRealListArg,
@@ -1992,6 +1994,8 @@ export class BaseCompiler {
     listArgumentAtOpenWholeParameter;
   static readonly expressionParameterReadAt = expressionParameterReadAt;
   static readonly expressionParameterDecline = expressionParameterDecline;
+  static readonly isExpressionDeclaredInput = isExpressionDeclaredInput;
+  static readonly expressionInputDecline = expressionInputDecline;
   static readonly isElementWiseOperand = isElementWiseOperand;
   static readonly provablyScalarArg = provablyScalarArg;
   static readonly certainlyScalarArg = certainlyScalarArg;
