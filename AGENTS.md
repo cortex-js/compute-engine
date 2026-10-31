@@ -39,8 +39,10 @@ nightly run, tell the user; do not take over that investigation unless asked.
 - When a rule that compiled code must follow (agreement with the interpreter)
   needs a hard static analysis, implement the simple, sound version first: it
   may give no value where the interpreter has one, and that case is documented
-  with an example, but it never gives a value where the interpreter has none.
-  A more precise version is a separate task, done when the user asks for it.
+  with an example, but it never gives a value where the interpreter has none,
+  when the caller supplies every input. A run with an input left out gives an
+  unspecified result (`docs/ERROR-MODEL.md`, "An unsupplied variable"). A more
+  precise version is a separate task, done when the user asks for it.
 - A reachable shape that a compile target declines (it falls back to the
   interpreter) or that gives a different value from the interpreter is a defect,
   even when a corpus shows it only a few times. How often it occurs sets the
