@@ -1587,6 +1587,12 @@ const OUTSIDE_MODEL_SAFETY = 2;
  * `offsetSingularity` reads the integrand. */
 export const OFFSET_SINGULARITY_SPACINGS = 2 ** 20;
 
+/** The largest number of consecutive doubles from an endpoint in a run of
+ * samples that are not finite in `offsetSingularity`. The doubles after the
+ * eighth are read one by one. When the double after the last one of the
+ * limit is inside the interval and not finite, the error is `+∞`. */
+const NON_FINITE_RUN_SPACINGS = 2 ** 10;
+
 /**
  * An error for a singular point some doubles inside or outside the endpoint
  * `e` of the interval (`other` is the other endpoint, `direction` points
@@ -1612,8 +1618,14 @@ export const OFFSET_SINGULARITY_SPACINGS = 2 ** 20;
  * the interval.
  *
  * Inside: the largest sample is not the first one and is more than 1.5
- * times the first one, or a sample is not finite. The point of largest
- * `|f|` near it is found to the double (`samplePeak`), and it is a singular
+ * times the first one, or a sample is not finite. Samples that are not
+ * finite at consecutive doubles are one singular point, at the far end of
+ * their run from `e`. The run ends at most `NON_FINITE_RUN_SPACINGS`
+ * doubles from `e`; when the double after that is also not finite, the
+ * error is `+∞`. A sample farther from `e` that is not
+ * finite is another singular point, and the error is `+∞`. When the
+ * largest sample is finite, the point of largest `|f|` near it is found to
+ * the double (`samplePeak`), and it is a singular
  * point only when `|f|` there is larger than at the doubles next to it by
  * more than `2⁻²⁰` relative: a smooth peak (`1/((x − 10⁶ − 10⁻⁵)² +
  * 10⁻¹²)`) is flat at that scale, and it was taken for a singularity (an
@@ -1707,7 +1719,56 @@ function offsetSingularity(
     !Number.isFinite(values[peak]) ||
     (peak > 0 && peak < values.length - 1 && values[peak] > 1.5 * values[0])
   ) {
+    // A run of samples that are not finite at consecutive doubles is one
+    // singular point, at the far end of the run from `e`. Next to a zero of
+    // a difference that cancels in doubles, the integrand is `+∞` at some
+    // doubles: `cos(t/2)/√(cos t − cos ½)` is `+∞` at ½ and at the 2 doubles
+    // below it, because `cos t − cos ½` is 0 there. With the singular point
+    // at the first double, the sample at the second double was read as a
+    // second singular point, and the error was `+∞`. The run is made of the
+    // samples at the distances 1 to 8 that follow the first sample that is
+    // not finite. When the run reaches the sample at the distance 8, the
+    // doubles after that sample are read one by one, each with `nextDouble`
+    // from the one before (`at(k)` does not give consecutive doubles when
+    // the spacing changes at a power of two), and the run ends at the last
+    // double that is not finite (`1/√(cos t − cos 0.05)` is `+∞` at more
+    // than 12 doubles below 0.05). The run ends at most
+    // `NON_FINITE_RUN_SPACINGS` doubles from `e`: when the double after that
+    // is also not finite, the error is `+∞`. The dyadic samples after 8 are not joined
+    // to the run: poles at 8 and 16 doubles from `e` are two singular
+    // points. When a sample farther from `e` than the end of the run is not
+    // finite, there are finite doubles between them, so it is another
+    // singular point, and the error is `+∞`. This is also true when there
+    // is no run (`+∞` at 1 and 5 doubles from `e`).
     let c = at(distances[peak]);
+    if (!Number.isFinite(values[peak])) {
+      let last = peak;
+      while (
+        last + 1 < values.length &&
+        distances[last + 1] === distances[last] + 1 &&
+        !Number.isFinite(values[last + 1])
+      )
+        last++;
+      c = at(distances[last]);
+      if (distances[last] === 8) {
+        let k = 8;
+        for (;;) {
+          const next = nextDouble(c, direction);
+          if (!inside(next)) break;
+          checkDeadline(deadline);
+          if (Number.isFinite(size(next))) break;
+          if (k === NON_FINITE_RUN_SPACINGS) return Number.POSITIVE_INFINITY;
+          c = next;
+          k++;
+        }
+      }
+      for (let i = 0; i < values.length; i++)
+        if (
+          direction * (at(distances[i]) - c) > 0 &&
+          !Number.isFinite(values[i])
+        )
+          return Number.POSITIVE_INFINITY;
+    }
     if (Number.isFinite(values[peak])) {
       const lo = at(distances[Math.max(0, peak - 1)]);
       const hi = at(distances[peak + 1]);

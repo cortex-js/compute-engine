@@ -20,6 +20,21 @@
 
 ### Bug Fixes
 
+- **A numeric integral whose integrand is infinite at some doubles next to a
+  singular bound has a finite error** (GitHub issue #494). In
+  `∫₀^½ cos(t/2)/√(cos t − cos ½) dt`, `cos t − cos ½` is 0 in doubles at ½
+  and at the 2 doubles below it, so the integrand is `+∞` there. The test of a
+  singular point some doubles inside a bound read the second of these doubles
+  as a second singular point, and the result was
+  `2.2214414411509225 ± PositiveInfinity`. A run of consecutive doubles where
+  the integrand is not finite is now one singular point, and the result is
+  `2.2214414411509225 ± 0.0007`, which covers the true error (`2.8e-8`). A
+  value that is not finite farther from the bound, past finite doubles, is
+  still a second singular point, and the error is still `+∞`. The value is
+  not the more accurate `2.221441469078394` of 0.170.0: the extrapolation of
+  the shells next to the bound that gave it can also hide a small step of the
+  integrand near the bound, and it is not used here.
+
 - **A comparison with an operand that may be an absent collection is typed
   with a `missing` arm** (GitHub issue #487). With `y` declared
   `collection | integer | missing`, `y < x` was typed `broadcastable<boolean>`,
