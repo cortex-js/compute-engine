@@ -25,7 +25,12 @@
  */
 
 import type { Interval, IntervalResult } from './types.js';
-import { rangeCount } from '../numerics/range-count.js';
+import {
+  rangeCount,
+  RANGE_COUNT_TOLERANCE,
+  RANGE_COUNT_TOLERANCE_CAP,
+} from '../numerics/range-count.js';
+import { add, mul } from './arithmetic.js';
 import {
   getValue,
   ok,
@@ -697,12 +702,26 @@ function isNumberArray(
 }
 
 /**
- * The scalar a run-time BOUND of a range stands for, or `undefined` when the
- * bound is not one number: a bound is an interval (bare, or wrapped in an
- * interval result), and only a POINT interval names one element count. A
- * wide bound would make the range's length depend on where in the bound the
- * true value lies, and a list of varying length has no array representation
- * on this target.
+ * The finite enclosure of a run-time BOUND of a range, or `undefined`. A
+ * bound is a number, or an interval (bare, or wrapped in an interval
+ * result). Only a result of the kind `interval` is accepted: a `partial`
+ * result (the bound is not defined for part of the inputs) or a `singular`
+ * one (it jumps inside the inputs) carries a flag that an element of the
+ * range array cannot carry, so the range would hide it.
+ */
+function boundInterval(bound: unknown): Interval | undefined {
+  const normalized = normalizeElement(bound);
+  if (normalized === undefined || normalized.kind !== 'interval')
+    return undefined;
+  const iv = normalized.value;
+  if (!Number.isFinite(iv.lo) || !Number.isFinite(iv.hi)) return undefined;
+  return iv;
+}
+
+/**
+ * The scalar a run-time count stands for, or `undefined` when the count is
+ * not one finite number. A wide count would make a length depend on where
+ * in the enclosure the true value lies.
  */
 function pointBound(bound: unknown): number | undefined {
   if (typeof bound === 'number')
@@ -716,46 +735,138 @@ function pointBound(bound: unknown): number | undefined {
 }
 
 /**
- * `Range(lo, hi, step)` at run time, as an array of point intervals — the
+ * The element count of `Range(lo, hi, step)` when it is the same for every
+ * value of the bounds inside their enclosures, or `undefined` when it is
+ * not. `step` does not contain 0.
+ *
+ * The interpreter's count, `rangeCount`, is `max(0, floor(q + t) + 1)` with
+ * the quotient `q = (hi − lo) / step` computed in floating point and a
+ * tolerance `t` that is 0 or `min(T·(1 + |q|), CAP)`. Each floating-point
+ * operation rounds monotonically, so for a step of one sign `q` is monotonic
+ * in each bound, and its least and greatest values over the enclosures are
+ * at the corners. With `t` between 0 and its value at the greatest `|q|`,
+ * the count lies between the two numbers below. When every operand is an
+ * exact rational, the `Range` handlers of the interpreter count with the
+ * exact quotient instead (`rationalRangeCount` in
+ * `library/range-closed-form.ts`), which can differ from the computed `q`
+ * by a rounding error: so the least count also takes the tolerance as a
+ * margin, below `q`. When the two numbers are equal, every value of the
+ * bounds gives that count. A quotient near a whole number can
+ * give two different numbers although the count does not change: the answer
+ * is then `undefined`, which is sound.
+ */
+function knownRangeCount(
+  lo: Interval,
+  hi: Interval,
+  step: Interval
+): number | undefined {
+  let qMin = Infinity;
+  let qMax = -Infinity;
+  for (const l of [lo.lo, lo.hi])
+    for (const h of [hi.lo, hi.hi])
+      for (const s of [step.lo, step.hi]) {
+        const q = (h - l) / s;
+        if (Number.isNaN(q)) return undefined;
+        qMin = Math.min(qMin, q);
+        qMax = Math.max(qMax, q);
+      }
+  const tolerance = Math.min(
+    RANGE_COUNT_TOLERANCE * (1 + Math.max(Math.abs(qMin), Math.abs(qMax))),
+    RANGE_COUNT_TOLERANCE_CAP
+  );
+  const least = Math.max(0, Math.floor(qMin - tolerance) + 1);
+  const greatest = Math.max(0, Math.floor(qMax + tolerance) + 1);
+  return least === greatest && Number.isFinite(least) ? least : undefined;
+}
+
+/**
+ * `Range(lo, hi, step)` at run time, as an array of intervals — the
  * interpreter's contract, mirrored from `literalRange` (`library/
- * collections.ts`): `Range(hi)` counts from 1 in steps of 1; a two-operand
- * range infers step ±1 from the order of its bounds; the elements are
+ * collections.ts`): `Range(hi)` is `Range(1, hi)`; a range without a step
+ * infers step ±1 from the order of its bounds; the elements are
  * `lo + i·step` for `i` below the count `rangeCount(lo, hi, step)`, which is
  * `max(0, floor((hi − lo) / step) + 1)` with a small tolerance for the
  * floating-point rounding of the quotient (a zero step is the empty range).
  *
- * Every bound must be a POINT interval at run time (`pointBound`): a wide
- * bound gives a range of varying length, which no array can hold, and the
- * answer is then `entire` — "cannot bound this" — never a range of some
- * length chosen from inside the bound. The same answer for a count past
- * `MAX_RUNTIME_COLLECTION_LENGTH`.
+ * When every bound is a POINT interval, the count is `rangeCount` and the
+ * elements are point intervals. A bound can also be a WIDE interval, for
+ * example the enclosure `n/3` at `n = 1`, which interval division rounds
+ * outward. The range then has an array value only when its length is the
+ * same for every value inside the bounds (`knownRangeCount`), and each
+ * element is the enclosure of `lo + i·step`. Otherwise the length depends on
+ * where in the bounds the true value lies, a list of varying length has no
+ * array representation on this target, and the answer is `entire` —
+ * "cannot bound this". The same answer for a range without a step whose
+ * direction is not known, for a step that contains 0 without being 0, for
+ * a bound that is a `partial` or `singular` result (`boundInterval`), and
+ * for a count past `MAX_RUNTIME_COLLECTION_LENGTH`.
  */
 export function range(
   first: unknown,
   second?: unknown,
   third?: unknown
 ): unknown {
-  const a = pointBound(first);
+  const a = boundInterval(first);
   if (a === undefined) return { kind: 'entire' };
-  let lo: number;
-  let hi: number;
-  let step: number;
-  if (second === undefined) [lo, hi, step] = [1, a, 1];
-  else {
-    const b = pointBound(second);
-    if (b === undefined) return { kind: 'entire' };
-    if (third === undefined) [lo, hi, step] = [a, b, b >= a ? 1 : -1];
+  let lo: Interval;
+  let hi: Interval;
+  let step: Interval;
+  if (third !== undefined) {
+    const b = second === undefined ? undefined : boundInterval(second);
+    const s = boundInterval(third);
+    if (b === undefined || s === undefined) return { kind: 'entire' };
+    [lo, hi, step] = [a, b, s];
+  } else {
+    // `Range(hi)` is `Range(1, hi)`. Without a step, the step is +1 when
+    // `hi >= lo` and −1 otherwise, so the direction must be the same for
+    // every value inside the two bounds.
+    if (second === undefined) [lo, hi] = [point(1), a];
     else {
-      const s = pointBound(third);
-      if (s === undefined) return { kind: 'entire' };
-      [lo, hi, step] = [a, b, s];
+      const b = boundInterval(second);
+      if (b === undefined) return { kind: 'entire' };
+      [lo, hi] = [a, b];
     }
+    if (hi.lo >= lo.hi) step = point(1);
+    else if (hi.hi < lo.lo) step = point(-1);
+    else return { kind: 'entire' };
   }
-  if (step === 0) return [];
-  const count = rangeCount(lo, hi, step);
-  if (!Number.isFinite(count) || count > MAX_RUNTIME_COLLECTION_LENGTH)
+  if (step.lo === 0 && step.hi === 0) return [];
+  if (step.lo <= 0 && step.hi >= 0) return { kind: 'entire' };
+  const points = lo.lo === lo.hi && hi.lo === hi.hi && step.lo === step.hi;
+  const count = points
+    ? rangeCount(lo.lo, hi.lo, step.lo)
+    : knownRangeCount(lo, hi, step);
+  if (
+    count === undefined ||
+    !Number.isFinite(count) ||
+    count > MAX_RUNTIME_COLLECTION_LENGTH
+  )
     return { kind: 'entire' };
   const out: Interval[] = new Array(count);
-  for (let i = 0; i < count; i++) out[i] = point(lo + i * step);
+  // An integer start and step whose elements are all safe integers give
+  // elements that `lo + i·step` computes exactly in floating point: point
+  // intervals.
+  if (
+    Number.isSafeInteger(lo.lo) &&
+    lo.lo === lo.hi &&
+    Number.isSafeInteger(step.lo) &&
+    step.lo === step.hi &&
+    Math.abs(lo.lo) + count * Math.abs(step.lo) <= Number.MAX_SAFE_INTEGER
+  ) {
+    for (let i = 0; i < count; i++) out[i] = point(lo.lo + i * step.lo);
+    return out;
+  }
+  // Otherwise `lo + i·step` can round. The interpreter can compute it in
+  // floating point, or exactly (a `bigint` element for an integer range past
+  // 2^53, a rational one when every operand is an exact rational), so a
+  // point of the floating-point value could miss its element. `add` and
+  // `mul` round each endpoint outward unless it is exact, so the enclosure
+  // holds the element for any `lo` and `step` inside their bounds, by
+  // either rule.
+  for (let i = 0; i < count; i++) {
+    const element = getValue(add(lo, mul(point(i), step)));
+    if (element === undefined) return { kind: 'entire' };
+    out[i] = element;
+  }
   return out;
 }

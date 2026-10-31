@@ -27023,12 +27023,11 @@ export class BaseCompiler {
     // arithmetic of the `Array.from` forms below on such objects gives an
     // empty array: `Loop(c ≔ c + k, k ∈ Range(1, n))` at `n = 3` would give
     // 0, where the interpreter gives 6. So there the iterable is `_IA.range`,
-    // the run-time range of the target: an array of point intervals when
-    // every bound is one number, and `entire` when a bound is a wide
-    // interval, because the number of elements is then not known. A bound
-    // that inexact interval arithmetic computes (`Range(1, n/3)`) is such a
-    // wide interval even at a point input, and a count above
-    // `MAX_RUNTIME_COLLECTION_LENGTH` also gives `entire`. `entire` is not
+    // the run-time range of the target: an array of intervals when the
+    // number of elements is the same for every value inside the bounds, and
+    // `entire` when it is not known (a bound such as `[2, 4]`, a quotient
+    // near a whole number, a count above `MAX_RUNTIME_COLLECTION_LENGTH`;
+    // `range` in `interval/collections.ts` gives the rule). `entire` is not
     // iterable, so the `for … of` over it throws a `TypeError`: the `catch`
     // of `run()` then answers `entire` for the whole result, and a cell of
     // `broadcast`, which answers the kind `error` for any cell that throws,
