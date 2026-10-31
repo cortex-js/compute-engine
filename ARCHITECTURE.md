@@ -1092,6 +1092,10 @@ language-agnostically and delegates formatting to a `LanguageTarget` /
 
 - `javascript-target.ts` — executable JavaScript (with `constant-folding.ts`).
 - `glsl-target.ts`, `wgsl-target.ts`, `gpu-target.ts` — GPU shaders.
+  `gpu-target.ts` is the re-export facade of the `gpu-*.ts` modules:
+  `gpu-shader-target.ts` (shared target class), `gpu-functions.ts` (operator
+  handlers), `gpu-at.ts`, `gpu-points.ts`, `gpu-reduce.ts`, `gpu-random.ts`,
+  `gpu-preambles.ts`, `gpu-shapes.ts`, `gpu-finite-proof.ts` and others.
 - `python-target.ts` — Python 3.
 - `interval-javascript-target.ts` — JavaScript with interval arithmetic.
 

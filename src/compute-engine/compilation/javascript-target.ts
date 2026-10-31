@@ -9859,7 +9859,7 @@ function complexPowLiteral(base: number, exp: number): string {
  * `{re, im}`/`vec2` consumer reading a scalar, or the reverse):
  * `BaseCompiler.isComplexValued` (base-compiler.ts) is what a PARENT consults,
  * this function is the JavaScript emitters' copy,
- * `gpuResultIsComplexValued` (gpu-target.ts) is the GPU emitters' copy, and
+ * `gpuResultIsComplexValued` (gpu-shapes.ts) is the GPU emitters' copy, and
  * `resultIsWideUnderComplexDiscipline` (this file) is the JavaScript copy of
  * the wide-type rule (`BaseCompiler.wideIsComplex`). Change one, change all
  * four.

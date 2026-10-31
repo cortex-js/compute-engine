@@ -385,7 +385,7 @@ rule:
   impure operand to a temporary (because the operand appears more than once in
   the emitted code), it binds every impure operand of that node, in argument
   order. Binding only one of them would run its draw before the draws of
-  operands written to its left (`javascript-target.ts` and `gpu-target.ts`,
+  operands written to its left (`javascript-target.ts` and `gpu-draw-order.ts`,
   the comments on binding impure chain operands).
 
 Consequence, stated rather than hidden: **editing a body so that it draws
@@ -720,7 +720,7 @@ is free. The host tiers, which evaluate left to right, have no such freedom.
 The mutable-counter design is required regardless (a loop body must advance),
 so this is a documented caveat awaiting a ruling rather than a defect with a
 known fix. The caveat is repeated at `allocGPURandomCounter`
-(`compilation/gpu-target.ts`).
+(`compilation/gpu-random.ts`).
 
 ## 9. Guidance: seed per cell, not per document
 
@@ -756,6 +756,6 @@ fragment, seeded from the fragment's own coordinates or index (§8).
 | `RandomSample` | `src/compute-engine/library/statistics.ts` |
 | shared `k` validation | `src/compute-engine/library/random-utils.ts` |
 | `_SYS` random helpers, domain descriptors | `src/compute-engine/compilation/javascript-target.ts` |
-| GPU frames, seed ABI, PCG3D preamble | `src/compute-engine/compilation/gpu-target.ts` |
+| GPU frames, seed ABI, PCG3D preamble | `src/compute-engine/compilation/gpu-random.ts`, `gpu-preambles.ts` |
 | stability vectors | `test/compute-engine/random-vectors.test.ts` |
 | GPU tier | `test/compute-engine/random-gpu.test.ts` |

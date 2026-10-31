@@ -50,7 +50,7 @@
  * is finite for certain: every call of the function in the expression that
  * this pass returns passes an argument that is finite for certain at that
  * position (`gpuProvablyFinite` and `gpuRecordCallSiteFacts` in
- * `gpu-target.ts`). A declared parameter type is not enough here: an
+ * `gpu-finite-proof.ts`). A declared parameter type is not enough here: an
  * argument such as `exp(x)` is a `real` that overflows in f32.
  */
 

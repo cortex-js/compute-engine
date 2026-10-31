@@ -7,7 +7,7 @@
  * expression that `compile(expr, { to: 'wgsl' })` declines is declined here
  * with the same diagnostic. Two compilation facts that the public options
  * cannot carry are given to it through `withTargetExtension`
- * (`gpu-target.ts`):
+ * (`gpu-shader-target.ts`):
  *
  * - each list parameter is a `'uniform-struct'` storage symbol, so that every
  *   positional read of it calls the reader of this file, and every other
@@ -618,7 +618,7 @@ export function compileWGSLFieldFunction(
       );
     // The structs of the storage buffers are named `CE_List_<element type>`,
     // and a WGSL module cannot declare a struct and another declaration
-    // with one name (`gpuStorageBufferOperand()` in `gpu-target.ts`).
+    // with one name (`gpuStorageBufferOperand()` in `gpu-at.ts`).
     if (value.startsWith('CE_List_'))
       invalid(
         `\`${option}\` is "${value}", which starts with \`CE_List_\`, the ` +
@@ -1314,7 +1314,7 @@ export function compileWGSLFieldFunction(
     helpers[helper] = source;
   // The declarations of the preamble that are not user-defined functions
   // (the names of the registry) are the shared library helpers that
-  // `preambleFor` (`gpu-target.ts`) adds: `_gpu_sin`, `_fractal_mandelbrot`,
+  // `preambleFor` (`gpu-shader-target.ts`) adds: `_gpu_sin`, `_fractal_mandelbrot`,
   // and the others. Each is a constant text or a text built from its name,
   // so a name always has the same source.
   const userHelpers = new Set(renames.values());

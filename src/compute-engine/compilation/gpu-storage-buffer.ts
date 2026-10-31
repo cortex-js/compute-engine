@@ -26,8 +26,8 @@
  * The functions of this module produce text only. They read no expression
  * and no compile target, so that each shader compilation route that accepts
  * the `storage` option can use them. The lowering that decides which helper
- * an expression calls is in `gpu-target.ts` (`compileGPUStorageBufferAt` and
- * the reductions).
+ * an expression calls is in `gpu-at.ts` (`compileGPUStorageBufferAt`) and
+ * `gpu-reduce.ts` (the reductions).
  *
  * Design record: section "Row 462 (CE-572)" of
  * `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`.

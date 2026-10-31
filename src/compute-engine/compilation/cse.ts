@@ -661,7 +661,7 @@ export function isCallerMapped(
  * it, and a uniform cannot be written by the shader. The target must answer
  * `false` when anything in the compiled expression can write a variable
  * with the name of the first identifier (see `gpuPlainUniformRead()`,
- * `gpu-target.ts`). The JavaScript targets do not pass it, because a bare
+ * `gpu-random.ts`). The JavaScript targets do not pass it, because a bare
  * global name or a property there can be a getter. Any other text (a call
  * `f()`, an operator `u.x + 1`, an index that is not a literal `v[i]`) stays
  * opaque on every target.

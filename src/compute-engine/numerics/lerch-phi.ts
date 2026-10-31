@@ -84,7 +84,7 @@ function logAccurate(z: Complex): Complex {
  * −Re(a) costs one term, so a base point further left (for example
  * a = −1e20, where adding 1 does not change the double at all) declines
  * instead of looping for that long. The GPU zeta helpers
- * (`_gpu_hurwitz_zeta`, `compilation/gpu-target.ts`) use the same budget.
+ * (`_gpu_hurwitz_zeta`, `compilation/gpu-preambles.ts`) use the same budget.
  */
 const MAX_BASE_SHIFT = 1_000_000;
 

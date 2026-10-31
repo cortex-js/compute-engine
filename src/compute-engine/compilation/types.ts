@@ -1661,7 +1661,7 @@ export interface CompileTarget<Expr = unknown> {
    * certain; a declared parameter type is not enough), and `magnitude`
    * is a bound of its absolute value, when one is known. Read by the NaN
    * guard proof of the shader targets (`gpuProvablyFinite`,
-   * `gpu-target.ts`). Absent outside such a body.
+   * `gpu-finite-proof.ts`). Absent outside such a body.
    */
   gpuParameterFacts?: ReadonlyMap<
     string,

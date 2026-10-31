@@ -49,14 +49,14 @@ import {
  * Neither GLSL nor WGSL has a `NaN` or an `Infinity` LITERAL — but both can
  * MAKE those values from a bit pattern, and the GPU target already routes the
  * masked (`When` / `Which` fall-through) NaN through exactly that mechanism
- * (`gpuNaN` in `gpu-target.ts`, which delegates here so there is exactly one
+ * (`gpuNaN` in `gpu-emit.ts`, which delegates here so there is exactly one
  * spelling). A non-finite CONSTANT is the same value reached by another route,
  * so it gets the same spelling instead of failing the compilation.
  *
  * Both targets go through the preamble helpers `_gpu_nan()` / `_gpu_inf()` —
  * one symbol a host can redefine without touching the generated code. The
  * helpers build the value from its bit pattern (`GPU_NAN_PREAMBLE_GLSL` and
- * `GPU_NAN_PREAMBLE_WGSL` in `gpu-target.ts`). WGSL cannot spell it inline:
+ * `GPU_NAN_PREAMBLE_WGSL` in `gpu-preambles.ts`). WGSL cannot spell it inline:
  * a bitcast of a CONSTANT to a non-finite f32 is a const-expression, and a
  * const-expression that evaluates to NaN or an infinity is a shader-creation
  * error (Chrome's compiler reports "value nan cannot be represented as
@@ -310,7 +310,7 @@ export function foldTerms(
  * already-parenthesized ternary. A caller that DOES hold the target should
  * compile the factor at the `*` precedence instead and let the shared
  * compiler place the parentheses (see `gpuMultiplicativeFactor` in
- * `gpu-target.ts`).
+ * `gpu-reduce.ts`).
  *
  * @param expr The source expression for the operand.
  * @param code The already-compiled operand code.
@@ -1251,14 +1251,14 @@ const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
  * The largest absolute INTEGER exponent a shader `pow` call folds at.
  *
  * It is the same bound the GPU target puts on inlining an integer power as
- * repeated multiplication (`GPU_POWI_INLINE_LIMIT` in `gpu-target.ts`, also 8),
+ * repeated multiplication (`GPU_POWI_INLINE_LIMIT` in `gpu-reduce.ts`, also 8),
  * and for the same reason: inside that range the target's own lowering of an
  * integer power over a LITERAL base — which is the only base this fold ever
  * sees — is a chain of multiplications written left to right, so folding that
  * way reproduces the code the target would have written. Past it the
  * target routes through the `_gpu_powi` preamble helper, whose arm for a large
  * exponent is the hardware `pow` — a value this compiler cannot predict. The
- * constant is repeated here rather than imported because `gpu-target.ts`
+ * constant is repeated here rather than imported because `gpu-reduce.ts`
  * imports this module, and the reverse import would close a cycle.
  */
 const GPU_POW_FOLD_LIMIT = 8;

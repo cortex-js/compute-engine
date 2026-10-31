@@ -7,7 +7,7 @@
  * declares at module scope (a storage buffer, a field function, its
  * parameter struct and variable) cannot be one of them.
  *
- * Used by `gpuStorageBufferOperand()` (`gpu-target.ts`) and by
+ * Used by `gpuStorageBufferOperand()` (`gpu-at.ts`) and by
  * `WGSLTarget.compileFieldFunction()` (`wgsl-field-function.ts`). This file
  * imports nothing, so both can import it with no circular dependency.
  */

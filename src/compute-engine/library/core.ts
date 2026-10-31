@@ -1094,7 +1094,7 @@ export function pipeStageAsCall(
  * `incompatible-type` errors instead of `12` (issue #448).
  *
  * The shader targets use the same test for an `Apply` they compile
- * (`gpuAppliedBody` in `compilation/gpu-target.ts`), so that the compiled
+ * (`gpuAppliedBody` in `compilation/gpu-functions.ts`), so that the compiled
  * code and the interpreter give a result of the same shape.
  */
 export function literalParamsMap(sig: Type): boolean {

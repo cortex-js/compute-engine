@@ -396,7 +396,7 @@ function operandRegions(
 /**
  * The operands of `node` that the shader targets write. `When(value,
  * True)` writes its value only, and `When(value, False)` writes a NaN
- * constant (the `When` handler of `GPU_FUNCTIONS`, `gpu-target.ts`). A
+ * constant (the `When` handler of `GPU_FUNCTIONS`, `gpu-functions.ts`). A
  * `When` that the caller replaces or compiles with its own handler
  * (`isCallerMapped`) receives all its operands.
  */

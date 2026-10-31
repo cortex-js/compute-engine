@@ -938,7 +938,7 @@ function collectUsedNames(
  * erasure and the tag carries no layout. Identity for every other type.
  *
  * Exported for the compile targets, which ask the same layout questions
- * (`gpuType` in gpu-target.ts).
+ * (`gpuType` in gpu-emit.ts).
  */
 /**
  * One validated `Element` clause of a loop (`BaseCompiler.elementClauseBinders`):
@@ -25513,7 +25513,7 @@ export class BaseCompiler {
       // A shader target declares each local as a variable (`var U` in
       // WGSL), which an expression can index with a run-time index. A read
       // of a list local then indexes it as it is, with no copy
-      // (`isVariableLocal` in `compileGPUAt`, `gpu-target.ts`).
+      // (`isVariableLocal` in `compileGPUAt`, `gpu-functions.ts`).
       if (isGPUTarget) recordVariableLocals(localTarget, locals);
 
       // The statement LIST is one INERT region — no binding is placed at the
@@ -29579,7 +29579,7 @@ export class BaseCompiler {
     // scalar, or the reverse): this predicate, which a PARENT expression
     // consults; `resultIsComplexValued` in `javascript-target.ts`, the
     // JavaScript emitters' copy; `gpuResultIsComplexValued` in
-    // `gpu-target.ts`, the GPU emitters' copy; and
+    // `gpu-shapes.ts`, the GPU emitters' copy; and
     // `resultIsWideUnderComplexDiscipline` in `javascript-target.ts`, the
     // copy of the wide-type rule at the end of this function, which the
     // `Power` emitter reads. Change one, change all four.
@@ -42939,7 +42939,7 @@ export class BaseCompiler {
    * around the call is the lane every free input already takes. `memo`
    * holds the answers of one top-level call, so a shared subexpression is
    * walked once. The shader targets read a free input as a float for the
-   * same reason, and `gpuAtBaseShape` (`gpu-target.ts`) reads the static
+   * same reason, and `gpuAtBaseShape` (`gpu-at.ts`) reads the static
    * length of a call's result through this type. ROADMAP CE-377 (landed
    * 2026-10-23).
    */
@@ -43616,7 +43616,7 @@ export class BaseCompiler {
         // The element type is `real` only when the argument's elements are
         // finite reals. The parameter is emitted as a declared vector of
         // that element type, and the GPU finiteness proof
-        // (`gpuProvablyFinite`, gpu-target.ts) then emits the built-in
+        // (`gpuProvablyFinite`, gpu-finite-proof.ts) then emits the built-in
         // `sin`, `sign`, `max` without the NaN guard. An element that can be
         // non-finite (a free symbol typed `number`, the `nan` of `0/0`, an
         // infinity) keeps its own type, so the guard stays: the interpreter
@@ -44759,7 +44759,7 @@ export class BaseCompiler {
    * a collection that is not indexed, as the run-time broadcast does. When
    * it is false, each argument is bound whole and its own type is checked.
    *
-   * The shader targets (`gpuAppliedBody`, `gpu-target.ts`) and the
+   * The shader targets (`gpuAppliedBody`, `gpu-functions.ts`) and the
    * JavaScript target (`Apply`, `javascript-target.ts`) use this check.
    */
   static appliedArgumentTypeMismatch(

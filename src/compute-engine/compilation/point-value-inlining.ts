@@ -474,19 +474,19 @@ function callTypeAdmitsInlinedPoint(type: Type): boolean {
 /**
  * Every symbol name in `expr` and in the definition of each user function it
  * reaches, transitively, parameters included. On the shader targets a symbol
- * is emitted with its own name (`gpuCheckIdentifier()` in `gpu-target.ts`),
+ * is emitted with its own name (`gpuCheckIdentifier()` in `gpu-reserved.ts`),
  * so this set holds every identifier that a local, an assignment target, a
  * loop or binder variable or a parameter of the compiled code can have. It
  * also holds names that are only read; that makes the set larger than
  * needed, which is safe for its use in `gpuPlainUniformRead()`
- * (`gpu-target.ts`).
+ * (`gpu-random.ts`).
  *
  * `written` is the subset that the compiled code declares or writes: the
  * target of a `Declare` or an `Assign`, a variable bound by a binder (the
  * index of a `Sum`, a `Loop` element), and a parameter of a function literal,
  * the reachable user-function definitions included. A variable of that name
  * exists in the emitted code: on a shader target, it hides a uniform of the
- * same name (`gpuRefuseShadowedVarsSources()` in `gpu-target.ts`), and a
+ * same name (`gpuRefuseShadowedVarsSources()` in `gpu-random.ts`), and a
  * point value that reads the name is not written in place of its symbol
  * (`inlinePointValues`).
  *

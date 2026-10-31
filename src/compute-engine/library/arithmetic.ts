@@ -13490,7 +13490,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // With `e0 > e1` the formula is used as written: the result falls from
       // 1 to 0 as `x` goes from `e1` to `e0`. The built-in has no defined
       // result when `e0 >= e1`, so the shader targets write the formula out
-      // (`_gpu_smoothstep`, `compilation/gpu-target.ts`), and every target
+      // (`_gpu_smoothstep`, `compilation/gpu-nan-safe.ts`), and every target
       // gives these values.
       evaluate: ([e0, e1, x], { engine: ce, numericApproximation }) => {
         const n = numericApproximation === true;
