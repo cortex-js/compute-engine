@@ -146,8 +146,29 @@ export type BroadcastEntryPlan =
       /** The variables declared `boolean`, for which an empty array is an
        * empty column. */
       booleans?: readonly string[];
+      /** The collection inputs that the code iterates, spreads, reduces or
+       * indexes: when `inputs` gives no value for one, no cell has a value
+       * (`requiredInputAbsent`). */
+      required?: { names: readonly string[] };
     }
   | { kind: 'args' };
+
+/**
+ * True when `inputs` gives no value for an input of `entry.required` (see
+ * `checkEntry` in `javascript-runtime.ts`, the same test that `run()`
+ * makes). The run then has no value for every cell: the cells are `NaN`,
+ * and none of them is counted as a failure, since no evaluation threw. The
+ * test is made once per batch, not once per cell.
+ */
+function requiredInputAbsent(
+  entry: BroadcastEntryPlan | undefined,
+  shape: BroadcastShape
+): boolean {
+  if (entry?.kind !== 'vars' || entry.required === undefined) return false;
+  return entry.required.names.some(
+    (n) => !shape.names.includes(n) && !shape.shared.some((s) => s.name === n)
+  );
+}
 
 /**
  * The `kind` codes of an `interval-js` broadcast, one per cell at offset
@@ -1118,6 +1139,24 @@ function broadcastNumbersRange(
     throw new TypeError(
       `broadcast: the output array holds ${out.length} values, ${stride * (to - from)} are needed`
     );
+  if (requiredInputAbsent(entry, shape)) {
+    // The cells are written in blocks of `STOP_CHECK_EVERY`, with the
+    // checks of the cell loop below before each block, so that a slice that
+    // is stopped or past its deadline writes and reports only the cells it
+    // wrote.
+    for (let i = from; i < to; i += STOP_CHECK_EVERY) {
+      if (
+        deadline !== undefined &&
+        (i - from) % DEADLINE_CHECK_EVERY === 0 &&
+        Date.now() > deadline
+      )
+        return i - from;
+      if (stop !== undefined && stop()) return i - from;
+      const end = Math.min(to, i + STOP_CHECK_EVERY);
+      out.fill(NaN, stride * (i - from), stride * (end - from));
+    }
+    return to - from;
+  }
   const complexNames =
     entry?.kind === 'vars' ? new Set(entry.complex) : new Set<string>();
   // The `{ re, im }` slot that each complex input reads, reused from cell to

@@ -88,13 +88,15 @@ the shared protocol §9 and `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §9.
 
 Before returning a delegated implementation:
 
-1. Run the checks assigned in the task. Otherwise, use focused tests or probes
-   when they provide useful implementation feedback: only the test files that
-   the change can affect, not a large batch. When the task asks for a final
-   wide check, run the full suite once under the box lock
-   (`docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §2). A compiler check can help
-   with a type-heavy change; repository-wide validation is not required from
-   every sub-agent.
+1. Run the checks assigned in the task. Otherwise run only: the test files
+   of the change (with `CE_TEST_PYTHON=1` too when the change edits the
+   Python compiler), the probes that a finding or a design question needs,
+   and `npx oxlint` on the changed source files. After a review fix, run only
+   the test files that the fix can affect. Do not run, unless the task
+   assigns it: a batch of many test files, the full suite, `npm run lint`,
+   `npm run test:python`, or a Prettier check or write (the pre-commit hook
+   formats staged source). The after-edit hook type-checks each edit, so run
+   the compiler by hand only when the hook is off or the task asks for it.
 2. Report changed files, exact commands and results, checks not run and why,
    recommended remaining validation, and unresolved issues. Returning unchecked
    work is acceptable when validation is delegated; identify it as unchecked.
@@ -117,11 +119,14 @@ decision, or state why it is not a defect. Only a defect that waits for a user
 decision goes to `ROADMAP.md` as an open entry. A queued follow-up is listed in
 the report and done after the current change is staged.
 
-The orchestrator combines the results and normally runs typecheck, lint,
-dependency checks, and the required test sets once on that combined tree. It can
-assign this work to a designated validator. It may reuse earlier results when
-the relevant code, configuration, and dependencies are unchanged; fixes require
-only the checks they can affect. Send concrete failures back to the responsible
+The orchestrator combines the results and runs, once on that combined tree,
+only the checks that no sub-agent ran on the same content: for example the
+dependency check after import changes, and, when it judges it useful, the
+full suite in the cases of `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §5. When it copies a sub-agent's files
+into the main tree and `cmp` shows them byte for byte the same, the
+sub-agent's results for those files stand, and it does not repeat them. It
+can assign this work to a designated validator. Fixes require only the
+checks they can affect. Send concrete failures back to the responsible
 sub-agent when that is the most effective way to resolve them.
 
 `npm run check:docs` is part of CI and can be run directly after instruction or

@@ -149,9 +149,9 @@ describe('a static width is emitted component by component', () => {
     // declaration, which reaches the `reduce` fold with no term-by-term arm.
     const fixed = compiled(newEngine({ V: 'list<real^3>' }), '\\sum(V)').run;
     const wide = compiled(newEngine({ V: 'list<real>' }), '\\sum(V)').run;
-    // An absent operand has no `reduce` method, on either lowering.
-    expect(() => wide({})).toThrow();
-    expect(() => fixed({})).toThrow();
+    // An absent operand gives no value, on either lowering.
+    expect(wide({})).toBeNaN();
+    expect(fixed({})).toBeNaN();
     // A SHORTER list sums its own elements, not three of them.
     expect(fixed({ V: [1, 2] })).toBe(wide({ V: [1, 2] }));
     expect(fixed({ V: [1, 2] })).toBe(3);

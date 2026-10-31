@@ -280,6 +280,40 @@ What the decision does NOT change:
   because `false` and `undefined` give the same result there; not for a
   string comparison (`Boole(s = t)` at `{}` is `0`)
   (`BaseCompiler.unsuppliedComparisonGuard`, `compilation/base-compiler.ts`).
+- **An unsupplied collection input** that the compiled code iterates or reads
+  as a collection (a `Loop` over `L`, `Sum(L)`, `Length(L)`, `Map(f, L)`) makes
+  the whole run have no value. The interpreter has no value for `Sum(L)` with
+  `L` declared `list<number>` and no value; the compiled code threw
+  `_.L is not iterable` or a `TypeError` on `.reduce`. The JavaScript runner
+  now tests these inputs at entry, before any code runs, and returns the
+  absence marker of the result (`NaN` for a number, `undefined` otherwise).
+  The test also covers an input read through the body of a user function that
+  the code calls or passes as a value, through a block-local function, through
+  a symbol value that the compiler folds into the code, and through a
+  block-local copy (`M ≔ L`, then `Length(M)`). A name bound by a parameter or
+  a loop index is matched by its scope, so `f := L ↦ Length(L)` does not hide
+  a free `L` in `f([1]) + Sum(L)`. `broadcast()` makes the same test once for
+  the shared inputs: the cells are `NaN` and are not counted as failures. Only
+  `undefined` is an absent value in JavaScript: `run({L: null})` still throws.
+  The test is too strict, which is accepted: it requires every such input
+  that the code may read, also where the run does not reach the read. So
+  `If(c, Sum(L), 0)` at `c` false and `Map(u ↦ Sum(L), [])` have no value
+  with `L` absent, where the interpreter gives `0` and `[]`. A name that the
+  code both tests for absence and iterates is required:
+  `If(IsMissing(L), 0, Sum(L))` has no value with `L` absent, where the
+  interpreter gives `0` for `L = Missing`. A name that the code only tests for
+  absence (`IsMissing(L)`, `Coalesce(L, …)`) and never iterates is not
+  required. It never gives a value where the interpreter has none
+  (`collectionReadInputs`, `compilation/base-compiler.ts`; `checkEntry`,
+  `compilation/javascript-runtime.ts`). In Python, a function from
+  `compileFunction()` or `compileVectorized()` and a lambda from
+  `compileLambda()` make the same test (`L is None`, the only absent value in
+  Python) and return `float('nan')` or `None`. The code of `compile()` and
+  `compileToSource()` has no entry of its own (the host places it), so it has
+  no test, and an absent input there still raises a `TypeError`
+  (`pythonNoValueGuard`, `compilation/python-target.ts`). The interpreter
+  rule for a `Loop` over such an input (it runs zero times today) is ROADMAP
+  CE-660.
 - **A `partial` operand** on `interval-js` (undefined over part of the cell
   only) gives at most `'maybe'`: where it is undefined the comparison is
   false, so it cannot hold over the whole cell. Before 2026-10-20 the

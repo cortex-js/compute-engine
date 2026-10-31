@@ -53,6 +53,21 @@
 
 ### Behavior Changes
 
+- **Compilation: an unsupplied collection input gives no value instead of an
+  error.** With `L` declared `list<number>`, a compiled
+  `Block(c := 5, Loop(c := c + k, Element(k, L)), c)`, `Sum(L)` or `Length(L)`
+  threw a `TypeError` (`_.L is not iterable`) at `run({})`. The run now returns
+  `NaN` for a number result and `undefined` for other results, before any code
+  runs, as the interpreter has no value for `Sum(L)`. The test also covers an
+  input read through a user function, a callback, a block-local copy
+  (`M ≔ L`) or a folded symbol value, and it applies to stored runtimes and to
+  `broadcast()` (the cells are `NaN`, with no failure counted). It is strict:
+  `If(c, Sum(L), 0)` with `c` false has no value too. `run({L: null})` still
+  throws. In Python, `compileFunction()`, `compileVectorized()` and
+  `compileLambda()` return `nan` or `None` for `L = None`; `compile()` and
+  `compileToSource()` do not change. See `docs/ERROR-MODEL.md`, "An
+  unsupplied collection input".
+
 - **`Series` drops a term whose constant coefficient is an unfolded 0 at every
   call** (CE-659). `Series(sin x + (sin²1 + cos²1 − 1)·x², x, 0, 5)` kept the
   `x²` term in a new engine and dropped it after the engine had tested that

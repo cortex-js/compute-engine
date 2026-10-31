@@ -3095,6 +3095,11 @@ export type StoredEntryPlan = {
   /** The symbols declared `boolean` (`vars` plans only). `broadcast()`
    * reads an empty array for one as an empty column. */
   booleans?: (string | number)[];
+  /** The collection inputs that the code iterates, spreads, reduces or
+   * indexes (`vars` plans only). When the caller leaves one out, the run
+   * gives `noValue` before any of its code runs (`entryNoValue` in
+   * `javascript-runtime.ts`). */
+  required?: { names: string[]; noValue: 'NaN' | 'undefined' };
 };
 
 /**

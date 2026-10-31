@@ -1060,10 +1060,13 @@ describe('PointList zip — constructed source widths', () => {
       [3, 30],
     ]);
     expect(r.run!({ k: 1, fixed: [] })).toEqual([]);
-    for (const fixed of [null, undefined, 3, { length: 3 }])
+    for (const fixed of [null, 3, { length: 3 }])
       expect(() => r.run!({ k: 1, fixed })).toThrow(
         /source component 2 is not an array/
       );
+    // An absent input is a run with no value, tested at entry
+    // (`compile-absent-collection-input.test.ts`).
+    expect(r.run!({ k: 1, fixed: undefined })).toBeUndefined();
     // A string is refused at entry, before the body reads it
     // (`compile-entry-string-refusal.test.ts`).
     expect(() => r.run!({ k: 1, fixed: 'abc' })).toThrow(

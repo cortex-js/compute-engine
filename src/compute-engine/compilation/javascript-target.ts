@@ -6,6 +6,7 @@ import {
   twoStageRunner,
   loadBatchBody,
   checkEntry,
+  entryNoValue,
   namedEntryError,
   storeEntryPlan,
   type EntryPlan,
@@ -10477,9 +10478,12 @@ export class ComputeEngineFunction extends Function {
         : (vars: unknown): unknown => body_(sys, vars);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
+        const args = entry ? checkEntry(entry, argumentsList) : argumentsList;
+        // A required collection input that the caller left out: the run has
+        // no value, and no code runs (`entryNoValue`).
+        if (args === undefined) return entryNoValue(entry!);
         const previous = setReconstructionDigits(reconstructionDigits);
         try {
-          const args = entry ? checkEntry(entry, argumentsList) : argumentsList;
           try {
             const value =
               inner !== undefined
@@ -10543,11 +10547,14 @@ export class ComputeEngineFunctionLiteral extends Function {
     const preamble = hoisted + perCall;
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
+        const callArgs = entry
+          ? checkEntry(entry, argumentsList)
+          : argumentsList;
+        // A positional plan requires no input, so `checkEntry` gives
+        // arguments here (`entryNoValue`).
+        if (callArgs === undefined) return entryNoValue(entry!);
         const previous = setReconstructionDigits(reconstructionDigits);
         try {
-          const callArgs = entry
-            ? checkEntry(entry, argumentsList)
-            : argumentsList;
           try {
             const value =
               inner !== undefined
@@ -11776,6 +11783,29 @@ function compileToTarget(
   const entryPlan = entryChecks
     ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
     : undefined;
+  // The collection inputs that the code iterates, spreads, reduces or
+  // indexes: when the caller leaves one out, the run has no value, and the
+  // runner gives the absence marker of the result before any code runs
+  // (`checkEntry` and `entryNoValue`).
+  if (entryPlan?.kind === 'vars') {
+    const names = BaseCompiler.collectionReadInputs(
+      expr,
+      target.varsObjectRefs
+    );
+    if (names.length > 0) {
+      const r = resolveTypeForCompilation(stripMissingFromType(expr.type.type));
+      entryPlan.required = {
+        names,
+        noValue:
+          r !== 'never' &&
+          r !== 'unknown' &&
+          r !== 'any' &&
+          isSubtype(r, 'number')
+            ? 'NaN'
+            : 'undefined',
+      };
+    }
+  }
   const broadcastOutputs = broadcastStrideOfType(expr.type.type);
   const reconstructionDigits = realPowerReconstructionDigits();
   // A body that writes an input first makes the vars object a local copy, so

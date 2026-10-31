@@ -65,6 +65,14 @@ nightly run, tell the user; do not take over that investigation unless asked.
 - Follow BUILD.md and the shared-box specifics for completion checks; after-edit
   hooks and commit-time formatting do not replace them. Capture test exit codes
   directly rather than relying on the exit status of an output-filtering pipe.
+- The instructions exist to make the work efficient. When one asks for work
+  that looks redundant in the case at hand (a check that already ran on the same
+  content, a full suite that the change cannot affect, a batch of test files
+  that a later run covers), do not do it without thinking: say why it looks
+  redundant and ask the user whether to do it. A sub-agent reports the question
+  to the orchestrator. This does not apply to the safety rules (git, the index,
+  the box lock, the dual review), which you follow as written (user decision
+  2026-10-30).
 
 ## Delegated work
 

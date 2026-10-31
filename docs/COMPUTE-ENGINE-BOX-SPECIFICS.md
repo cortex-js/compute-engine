@@ -43,14 +43,25 @@ Jest discovers the root `jest.config.cjs` automatically. Confirm that the
 expected test files ran. In zsh, use `${=FILES}` to split a variable containing
 several paths.
 
-**The final check of a task is the full suite, not a large batch.** While a
-task is in progress, run only the test files that its change can affect. At
-the end, take the box lock and run `npm test`, with no extra argument (a
-first argument that does not start with `--` is read as a test path by
-`scripts/test.sh`). With all workers, the full suite takes about 4 minutes; a
-batch of about 500 files with `-w 3` took 5 to 10 minutes, and covered less
-(measured 2026-10-30). A sub-agent does this too, with its own box-lock owner
-name, unless the task prompt gives the final check to the orchestrator.
+**Run only the test files that the change can affect, and never a large
+batch.** A batch of about 500 files with `-w 3` took 5 to 10 minutes,
+longer than the full suite (about 4 minutes with all workers), and covered
+less (measured 2026-10-30). The nightly run covers the full suite. Consider
+running it before staging only in the cases of §5 ("Checks before staging
+source changes"), and only when the change can affect what it tests. When you
+run it, run
+`npm test` with no extra argument under the box lock (a first argument that
+does not start with `--` is read as a test path by `scripts/test.sh`). A
+sub-agent never runs it unless its task prompt assigns it.
+
+**Each check runs once, in one place.** The task prompt says which checks
+the sub-agent runs; the orchestrator does not run them again on the same
+content. When the orchestrator copies a sub-agent's files into the main tree
+and `cmp` shows them byte for byte the same, the sub-agent's results for
+those files stand: do not repeat its tests, its lint, or its Python tests.
+On 2026-10-30 one change of 9 files ran the full suite three times, a
+383-file batch on each of four fix rounds, and lint and the Python tests in
+both trees; none of these runs found a defect.
 
 Take the box lock for full suites, aggregate CI, builds, corpus checks, and
 `npm run test:python`. Timing tests (`npm run test:perf`) also require the lock
@@ -110,8 +121,8 @@ Use `npx tsx scripts/where.ts <Operator>` to find tests for an operator. After
 import changes, also run `npm run check:deps`; no circular dependencies are
 allowed. Follow the shared protocol's staging queue and review requirements.
 
-Normally, leave the full suite to the nightly pipeline. Run it before staging
-when any of these applies:
+Normally, leave the full suite to the nightly pipeline. Consider running it
+before staging when any of these applies:
 
 - The change affects code under `src/compute-engine/boxed-expression/` or
   `src/common/type/`, Jest configuration (`jest.config.cjs`,

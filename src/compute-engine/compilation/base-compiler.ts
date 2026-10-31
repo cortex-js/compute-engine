@@ -38727,6 +38727,360 @@ export class BaseCompiler {
   private static readonly ABSENCE_DISCHARGING_HEADS: ReadonlySet<string> =
     new Set(['Coalesce', 'IsMissing', 'AssertPresent', 'If', 'Which', 'When']);
 
+  /**
+   * The heads that hold their operands as values without reading them as a
+   * collection: a collection input at their operand is not iterated
+   * (`collectionReadInputs`). `Tuple(L, 1)` holds the array `L`.
+   */
+  private static readonly COLLECTION_HOLDING_HEADS: ReadonlySet<string> =
+    new Set([
+      'List',
+      'Tuple',
+      'Pair',
+      'Single',
+      'Triple',
+      'Sequence',
+      'Hold',
+      'Apply',
+    ]);
+
+  /**
+   * The names of the caller inputs of `expr` (`refs`, the names that the
+   * code reads off the vars object) that the code iterates, spreads,
+   * reduces or indexes as a collection. The JavaScript runner tests each one
+   * at entry: when the caller leaves one out, the run has no value
+   * (`checkEntry` and `entryNoValue` in `javascript-runtime.ts`).
+   *
+   * A name is in the list when a symbol of that name, whose type is a
+   * collection with no `missing` arm (`list<number>`, `matrix<real>`,
+   * `string`), is:
+   * - the domain of an `Element` clause: the source of a `Loop`, of a
+   *   `Comprehension`, of a big operator, or the collection of a membership
+   *   test;
+   * - an operand of an operator that reads a whole collection: an operator
+   *   whose missing-value behavior is `propagate`, at a position where it
+   *   propagates (`Length`, `Map`, `Join`, `Take`, `Determinant`), an
+   *   operator that handles or passes through a `missing` operand and is
+   *   not lazy (`First`, `At`, `Max`, `Mean`), and the one-operand `Sum`
+   *   and `Product`.
+   *
+   * A read is not counted when:
+   * - an element-wise (broadcastable) operator makes it (`L + 1`): its
+   *   lowering gives `undefined` for an absent operand;
+   * - an operator only holds the value (`COLLECTION_HOLDING_HEADS`), or a
+   *   control-flow head reads it (`Assign`, `Block`, `If`);
+   * - a binder around the read binds the name. The binders are the
+   *   parameters of a function literal, for its body, and the indices of
+   *   the clauses of a `Sum`, `Product`, `Integrate`, `Loop` or
+   *   `Comprehension`: its body sees every index, the collection of a clause
+   *   is read outside the clause (in a `Comprehension`, it sees the indices
+   *   of the clauses before it), and the conditions of a clause see its own
+   *   index. A parameter `L` of one function does not hide a free `L`
+   *   elsewhere in the expression. These scopes are those of
+   *   `analyzeReferences`, with two differences: the variable of an
+   *   indefinite `Integrate(…, Limits(x, Nothing, Nothing))` is bound here,
+   *   where `analyzeReferences` reports it as a free input (it is a number,
+   *   never a collection input); and a block local is not a binder here,
+   *   it goes through the rule for assigned names below.
+   *
+   * A test for an absent value does not exempt an input. With
+   * `If(IsMissing(L), 0, Sum(L))`, `L` is required: the run has no value
+   * without `L`, where the interpreter gives 0 for `L` = `Missing` (the
+   * value that an absent input stands for). The runner does not know
+   * which branch the run takes, and a compiled result must never be a value
+   * that the interpreter does not give. An input that the code only tests
+   * (`IsMissing(L)`) has no counted read and is not required.
+   *
+   * Three cases reach a caller input through another name:
+   * - the body of a user function that the expression calls, or passes as
+   *   a callback, is walked as part of the expression: an engine-assigned
+   *   function (`userFunctionLiteral`) and a block-local function literal.
+   *   Each body is walked once, in its own scope, with its parameters bound.
+   *   With `k := t ↦ Sum(y)`, `f(k(1))` requires `y`;
+   * - the value of a symbol that the compiler folds into the code (an
+   *   engine-assigned value, `S := Sum(L)`) is walked as part of the
+   *   expression, once per symbol: `S + 1` requires `L`. The value is
+   *   walked with no name bound, so a name in it counts as free: that can
+   *   require an input that a binder around the folded symbol shadows,
+   *   which is stricter, and allowed;
+   * - a name that the expression assigns (a block local `M`, or an input
+   *   that the code writes) and iterates requires each caller collection
+   *   input that a value assigned to it reads, at any depth: with `M ≔ L`,
+   *   `Length(M)` requires `L`. The rule follows a local through the
+   *   locals it is assigned from. It applies also to a bound name that the
+   *   code assigns: with a parameter `M`, a body `M ≔ L; Length(M)`
+   *   requires `L`. It is conservative: it requires `L` also when a later
+   *   assignment replaces the value of `M` before the read, and it puts
+   *   together the values of every variable of the same name.
+   *
+   * Each of these rules can require an input that the run does not reach,
+   * and the run then has no value where the interpreter has one
+   * (`entryNoValue` in `javascript-runtime.ts`). That is stricter, which is
+   * allowed (user decision 2026-10-30).
+   */
+  static collectionReadInputs(
+    expr: Expression,
+    refs: ReadonlySet<string> | undefined
+  ): string[] {
+    if (refs === undefined || refs.size === 0) return [];
+    const engine = expr.engine;
+    // The scopes that each node was walked in, by a key: a node that is
+    // reached again with the same key adds nothing. The key is the set of
+    // the bound names that occur in the subtree of the node (`subtreeNames`),
+    // sorted and joined. Only those names change what the walk of the node
+    // finds: it tests the scope only for a symbol of the subtree, and the
+    // walks that start from the node into a user-function body or a folded
+    // value start in their own empty scope. Neither the identity of the
+    // scope nor its whole content is a key that stays small: a binder makes
+    // a new scope at each visit, and in an expression that shares a subtree
+    // under several binders (a DAG), each path gives another scope, so such
+    // a key walks the shared subtree once per path, an exponential count.
+    const seen = new Map<Expression, Set<string>>();
+    const rootScope: ReadonlySet<string> = new Set<string>();
+    // The names of the symbols in the subtree of each node, computed once
+    // per node.
+    const namesMemo = new Map<Expression, ReadonlySet<string>>();
+    const noNames: ReadonlySet<string> = new Set<string>();
+    const subtreeNames = (e: Expression): ReadonlySet<string> => {
+      const known = namesMemo.get(e);
+      if (known !== undefined) return known;
+      let names: ReadonlySet<string> = noNames;
+      if (isSymbol(e)) names = new Set([e.symbol]);
+      else if (isFunction(e)) {
+        const all = new Set<string>();
+        for (const op of e.ops) for (const n of subtreeNames(op)) all.add(n);
+        if (all.size > 0) names = all;
+      }
+      namesMemo.set(e, names);
+      return names;
+    };
+    const scopeKey = (e: Expression, scope: ReadonlySet<string>): string => {
+      if (scope.size === 0) return '';
+      const names = subtreeNames(e);
+      const inside: string[] = [];
+      for (const n of scope) if (names.has(n)) inside.push(n);
+      return inside.sort().join('\u0000');
+    };
+    // The names that the expression assigns (`Assign`, `Declare`).
+    const assigned = new Set<string>();
+    // The free names that the code iterates, spreads, reduces or indexes.
+    const iterated = new Set<string>();
+    // The bound names (a parameter, an index) that the code iterates: when
+    // the code also assigns such a name (`M ≔ L` in the body of a function
+    // with the parameter `M`), the inputs that its assigned values read are
+    // required.
+    const iteratedBound = new Set<string>();
+    // The names of the symbols of the expression whose type is a collection
+    // with no `missing` arm.
+    const collections = new Set<string>();
+    // For a name that the expression assigns, free or bound, the names of the
+    // symbols that its assigned values read. The values of every variable of
+    // that name are put together, which is stricter, and allowed.
+    const copies = new Map<string, Set<string>>();
+    // The folded symbols whose value was walked.
+    const foldedSeen = new Set<string>();
+    // The names that a value reads are taken whatever binds them: a bound
+    // name that is also an input counts as the input, which is stricter.
+    const recordCopy = (target: Expression | undefined, value: Expression) => {
+      if (target === undefined || !isSymbol(target)) return;
+      let names = copies.get(target.symbol);
+      if (names === undefined) copies.set(target.symbol, (names = new Set()));
+      // Each node once: a value built from shared subtrees has few distinct
+      // nodes but exponentially many paths.
+      const visited = new Set<Expression>();
+      const read = (x: Expression): void => {
+        if (visited.has(x)) return;
+        visited.add(x);
+        if (isSymbol(x)) names!.add(x.symbol);
+        else if (isFunction(x)) x.ops.forEach(read);
+      };
+      read(value);
+    };
+    const union = (
+      scope: ReadonlySet<string>,
+      more: ReadonlyArray<string>
+    ): ReadonlySet<string> => {
+      if (more.length === 0) return scope;
+      const s = new Set(scope);
+      for (const m of more) s.add(m);
+      return s;
+    };
+    // The names that the index of a clause binds (a symbol, or the leaves
+    // of a destructuring tuple).
+    const indexNames = (p: Expression | undefined): string[] => {
+      if (p === undefined) return [];
+      if (isSymbol(p)) return p.symbol === '_' ? [] : [p.symbol];
+      if (isFunction(p, 'Tuple')) return tuplePatternNames(p);
+      return [];
+    };
+    // The literal of the user function `id`, or `undefined`. A literal that
+    // cannot be compiled (`userFunctionLiteral` refuses it) is not walked:
+    // the compilation declines in that case anyway.
+    const userLiteral = (id: string): Expression | undefined => {
+      try {
+        return BaseCompiler.userFunctionLiteral(engine, id);
+      } catch {
+        return undefined;
+      }
+    };
+    const isCollectionInput = (
+      e: Expression
+    ): e is Expression & {
+      symbol: string;
+    } => {
+      if (!isSymbol(e)) return false;
+      const t = e.type.type;
+      if (typeContainsMissing(t)) return false;
+      const r = resolveTypeForCompilation(t);
+      return (
+        r !== 'never' &&
+        r !== 'unknown' &&
+        r !== 'any' &&
+        isSubtype(r, 'collection')
+      );
+    };
+    // A read of a collection whose name no binder around it binds. A read of
+    // a bound name is recorded in `iteratedBound`.
+    const isFreeCollection = (
+      e: Expression,
+      scope: ReadonlySet<string>
+    ): e is Expression & { symbol: string } => {
+      if (!isCollectionInput(e)) return false;
+      if (!scope.has(e.symbol)) return true;
+      iteratedBound.add(e.symbol);
+      return false;
+    };
+    const visit = (e: Expression, scope: ReadonlySet<string>): void => {
+      let scopes = seen.get(e);
+      if (scopes === undefined) seen.set(e, (scopes = new Set()));
+      const key = scopeKey(e, scope);
+      if (scopes.has(key)) return;
+      scopes.add(key);
+      if (isSymbol(e)) {
+        if (scope.has(e.symbol)) return;
+        if (isCollectionInput(e)) collections.add(e.symbol);
+        // A user function passed as a value (a callback of `Map`), walked
+        // in its own scope.
+        const literal = userLiteral(e.symbol);
+        if (literal !== undefined) {
+          visit(literal, rootScope);
+          return;
+        }
+        // A symbol whose value the compiler folds into the code: the value
+        // is read where the symbol is (`analyzeReferences`).
+        const value = engine._getSymbolValue(e.symbol);
+        if (value !== undefined && !foldedSeen.has(e.symbol)) {
+          foldedSeen.add(e.symbol);
+          visit(value, rootScope);
+        }
+        return;
+      }
+      if (!isFunction(e)) return;
+      const h = e.operator;
+      const ops = e.ops;
+      {
+        // A call of a user function: its body is part of the run, in its
+        // own scope.
+        const literal = userLiteral(h);
+        if (literal !== undefined) visit(literal, rootScope);
+      }
+      if (h === 'Function') {
+        visit(ops[0], union(scope, functionLiteralBoundNames(ops.slice(1))));
+        return;
+      }
+      if (
+        h === 'Sum' ||
+        h === 'Product' ||
+        h === 'Integrate' ||
+        h === 'Loop' ||
+        h === 'Comprehension'
+      ) {
+        // The scopes of `analyzeReferences`: the body sees every index; the
+        // collection of a clause is read outside the clause (a clause of a
+        // `Comprehension` sees the indices of the clauses before it); the
+        // conditions of a clause see its own index.
+        const indices: string[] = [];
+        let earlier = scope;
+        for (const clause of ops.slice(1)) {
+          if (!isFunction(clause)) {
+            visit(clause, scope);
+            continue;
+          }
+          const names = indexNames(clause.ops[0]);
+          indices.push(...names);
+          const outer = h === 'Comprehension' ? earlier : scope;
+          const own = union(outer, names);
+          clause.ops.slice(1).forEach((sub, i) => {
+            const subScope =
+              clause.operator === 'Element' && i >= 1 ? own : outer;
+            visit(sub, subScope);
+            if (
+              clause.operator === 'Element' &&
+              i === 0 &&
+              isFreeCollection(sub, subScope)
+            )
+              iterated.add(sub.symbol);
+          });
+          if (h === 'Comprehension') earlier = own;
+        }
+        if (ops[0] !== undefined) visit(ops[0], union(scope, indices));
+        if (!(h === 'Sum' || h === 'Product') || ops.length !== 1) return;
+      } else ops.forEach((op) => visit(op, scope));
+      if (h === 'Assign' || h === 'Declare') {
+        const value =
+          h === 'Assign' ? ops[1] : BaseCompiler.declareValueOperand(ops);
+        if (isSymbol(ops[0])) {
+          if (!scope.has(ops[0].symbol)) assigned.add(ops[0].symbol);
+          if (value !== undefined) recordCopy(ops[0], value);
+        }
+        return;
+      }
+      if (h === 'Element') {
+        // A membership test: the collection is searched.
+        if (ops[1] !== undefined && isFreeCollection(ops[1], scope))
+          iterated.add(ops[1].symbol);
+        return;
+      }
+      if (BaseCompiler.COLLECTION_HOLDING_HEADS.has(h)) return;
+      const reduction = (h === 'Sum' || h === 'Product') && ops.length === 1;
+      if (BaseCompiler.CONTROL_FLOW_HEADS.has(h) && !reduction) return;
+      if (BaseCompiler.ABSENCE_DISCHARGING_HEADS.has(h)) return;
+      const def = lookupApplicable(h, engine.context.lexicalScope);
+      if (!isOperatorDef(def)) return;
+      const operator = def.operator;
+      if (operator.broadcastable && !reduction) return;
+      const behavior = operator.resolvedMissingBehavior;
+      const handles =
+        (behavior === 'handle' || behavior === 'pass-through') &&
+        !operator.lazy;
+      if (!reduction && !handles && behavior !== 'propagate') return;
+      ops.forEach((op, i) => {
+        if (
+          isFreeCollection(op, scope) &&
+          (reduction || handles || operator.stripsMissingAt(i))
+        )
+          iterated.add(op.symbol);
+      });
+    };
+    visit(expr, rootScope);
+    // A caller input that is iterated is required, unless the expression
+    // assigns it. A name with assigned values (free or bound) is followed
+    // through those values.
+    const required = new Set<string>();
+    const followed = new Set<string>();
+    const resolve = (n: string): void => {
+      if (followed.has(n)) return;
+      followed.add(n);
+      if (!assigned.has(n) && refs.has(n) && collections.has(n))
+        required.add(n);
+      for (const m of copies.get(n) ?? []) resolve(m);
+    };
+    for (const n of iterated) resolve(n);
+    for (const n of iteratedBound)
+      for (const m of copies.get(n) ?? []) resolve(m);
+    return [...required];
+  }
+
   private static mayBeAbsentCollection(
     engine: ComputeEngine,
     a: Expression,

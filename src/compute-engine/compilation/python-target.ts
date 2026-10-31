@@ -7408,6 +7408,72 @@ const pythonIsStringTest = (p: string): string =>
 const pythonTypeError = (message: string): string =>
   `__import__("builtins").TypeError(${JSON.stringify(message)})`;
 
+/**
+ * The test of the required collection inputs of `expr`, and the value that
+ * the run gives when the test is true, or `undefined` when `expr` requires
+ * no input. This is the rule of the JavaScript runner (`checkEntry` and
+ * `entryNoValue` in `javascript-runtime.ts`): a collection input that the
+ * code iterates, spreads, reduces or indexes (`collectionReadInputs`) and
+ * that has no value makes the whole run have no value, before any of its
+ * code runs. The value is `float('nan')` when the result is a number, and
+ * `None` otherwise. Without the test, `len(L)` or `for k in L` raised a
+ * `TypeError` for `L = None`, where the interpreter has no value.
+ *
+ * The test is made by the routes that emit a function, which is the entry
+ * of a run: `compileFunction()`, `compileVectorized()` and
+ * `compileLambda()`. A caller passes `None` for an absent argument there.
+ * The code of `compile()` and `compileToSource()` is an expression or a
+ * body that the host places itself, with no entry of its own, and it takes
+ * no test: an absent input still raises a `TypeError` there.
+ *
+ * `None` is the only Python spelling of an absent value, so a `None`
+ * argument is absent. JavaScript has two (`undefined` and `null`): its
+ * runner reads only `undefined` as absent, and a `null` for a list input
+ * stays an error there.
+ *
+ * `parameters` are the parameters of the emitted function. Each is an
+ * input, also when the engine assigns the name a value. `read(name)` is
+ * the Python test that the input `name` has no value.
+ */
+function pythonNoValueGuard(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  parameters: ReadonlyArray<string>,
+  read: (name: string) => string
+): { test: string; value: string } | undefined {
+  // The parameters are inputs of the function, also those that the engine
+  // assigns a value: the function reads the argument, not the value.
+  const refs = new Set(
+    BaseCompiler.analyzeReferences(expr, target, new Set(parameters))
+      .freeSymbols
+  );
+  const tests = BaseCompiler.collectionReadInputs(expr, refs).map(read);
+  if (tests.length === 0) return undefined;
+  const r = resolveTypeForCompilation(stripMissingFromType(expr.type.type));
+  const numeric =
+    r !== 'never' && r !== 'unknown' && r !== 'any' && isSubtype(r, 'number');
+  return {
+    test: tests.join(' or '),
+    value: numeric ? "float('nan')" : 'None',
+  };
+}
+
+/**
+ * The Python test that the input `name` of a function body has no value: a
+ * parameter that is `None`, or a module global that is `None` or not
+ * defined (`pythonNoValueGuard`). A global is read with the builtin
+ * `globals()` through `__import__("builtins")`, as `compileFunction()`
+ * reads a written global.
+ */
+function pythonAbsentInputTest(
+  name: string,
+  parameters: ReadonlyArray<string>,
+  spelled: string
+): string {
+  if (parameters.includes(name)) return `${spelled} is None`;
+  return `__import__("builtins").globals().get(${JSON.stringify(spelled.normalize('NFKC'))}) is None`;
+}
+
 export class PythonTarget implements LanguageTarget<Expression> {
   /** Whether to include 'import numpy as np' in generated code */
   private includeImports: boolean;
@@ -8090,6 +8156,14 @@ export class PythonTarget implements LanguageTarget<Expression> {
     ))
       code += `    if ${pythonIsStringTest(p)}:\n        raise ${pythonTypeError(message)}\n`;
 
+    // A required collection input with no value: the run has no value
+    // (`pythonNoValueGuard`).
+    const guard = pythonNoValueGuard(expr, target, parameters, (n) =>
+      pythonAbsentInputTest(n, parameters, ids.name(n))
+    );
+    if (guard !== undefined)
+      code += `    if ${guard.test}:\n        return ${guard.value}\n`;
+
     if (body.includes('\n')) {
       // Block body — the block hook already put `return` on the last line.
       // Indent each statement under the `def`; do not wrap in `return`.
@@ -8265,6 +8339,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
             `(_ for _ in ()).throw(${pythonTypeError(message)}) if ${pythonIsStringTest(p)} else `
         )
         .join('')}(${lambdaBody})`;
+    // A required collection input with no value: the run has no value
+    // (`pythonNoValueGuard`). The test comes first, before any other code.
+    const guard = pythonNoValueGuard(expr, target, parameters, (n) =>
+      pythonAbsentInputTest(n, parameters, ids.name(n))
+    );
+    if (guard !== undefined)
+      lambdaBody = `${guard.value} if (${guard.test}) else (${lambdaBody})`;
     const code = `lambda ${params}: ${lambdaBody}`;
     pythonAssertNoShadowedBuiltin(
       code,
