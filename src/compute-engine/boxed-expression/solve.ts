@@ -1613,7 +1613,7 @@ function solveSingleSqrtEquation(
   const roots = realRootsOfSquaredEquation(
     ce,
     variable,
-    findUnivariateRoots(sqrtFree, variable, 0, undefined, child)
+    stepUnivariateRoots(sqrtFree, variable, 0, undefined, child)
   );
   if (roots.length > 0) adoptChildStats(stats, child);
   return roots;
@@ -1946,7 +1946,7 @@ function solveTwoSqrtEquationCore(
 
   // Solve the polynomial equation
   const child = childStats();
-  const solutions = findUnivariateRoots(
+  const solutions = stepUnivariateRoots(
     finalEquation,
     variable,
     0,
@@ -2159,7 +2159,7 @@ function solveNestedSqrtEquation(
   let uSolutions: ReadonlyArray<Expression>;
   const child = childStats();
   try {
-    uSolutions = findUnivariateRoots(
+    uSolutions = stepUnivariateRoots(
       uEquation,
       uSymbolName,
       0,
@@ -2368,7 +2368,7 @@ function solveByRationalPowerSubstitution(
       );
       traceStep(trace, 'solve.substituted-equation', asEquation(uExpr, uName));
     }
-    uRoots = findUnivariateRoots(uExpr, uName, 0, undefined, child);
+    uRoots = stepUnivariateRoots(uExpr, uName, 0, undefined, child);
   } finally {
     ce.popScope();
   }
@@ -2435,7 +2435,7 @@ function solveByPowerGcdSubstitution(
   ce.pushScope();
   try {
     ce.declare(uName, 'unknown');
-    uRoots = findUnivariateRoots(
+    uRoots = stepUnivariateRoots(
       fromCoefficients(reduced, uName),
       uName,
       0,
@@ -2861,7 +2861,7 @@ function solveByGeneratorSubstitution(
       exprU = substituteGenerator(normalized, g, u);
       if (exprU.has(x) || !exprU.has(uName) || exprU.isSame(u)) continue;
       const child = childStats();
-      uRoots = findUnivariateRoots(exprU, uName, depth + 1, undefined, child);
+      uRoots = stepUnivariateRoots(exprU, uName, depth + 1, undefined, child);
       adoptChildStats(combined, child);
       if (isBoundedGenerator(g, x))
         uRoots = rootsInUnitRange(exprU, uName, uRoots);
@@ -2875,7 +2875,7 @@ function solveByGeneratorSubstitution(
     for (const ur of uRoots) {
       const inverse = g.sub(ur);
       const child = childStats();
-      const roots = findUnivariateRoots(
+      const roots = stepUnivariateRoots(
         inverse,
         x,
         depth + 1,
@@ -2984,7 +2984,7 @@ function solveByZeroProduct(
       partial: false,
       userRule: false,
     };
-    const factorRoots = findUnivariateRoots(
+    const factorRoots = stepUnivariateRoots(
       base,
       x,
       depth + 1,
@@ -3134,7 +3134,7 @@ function solveByMultipleAngleTrig(
     partial: false,
     userRule: false,
   };
-  const roots = findUnivariateRoots(
+  const roots = stepUnivariateRoots(
     bases[0],
     x,
     depth + 1,
@@ -3259,7 +3259,7 @@ function solveInverseTrigEquation(
   const ce = lhs.engine;
   traceStep(trace, 'solve.apply-tangent', ce.function('Equal', [tanL, tanR]));
   const child = childStats();
-  const roots = findUnivariateRoots(
+  const roots = stepUnivariateRoots(
     ce.function('Equal', [tanL, tanR]),
     x,
     depth + 1,
@@ -3363,7 +3363,7 @@ function solveSingleLogarithm(
         : c.neg();
   const value = powerOfBase(base, exponent);
   const child = childStats();
-  const roots = findUnivariateRoots(
+  const roots = stepUnivariateRoots(
     ce.function('Equal', [argument, value]),
     x,
     depth + 1,
@@ -3761,7 +3761,7 @@ function solveSingleExponential(
     ? ce.function('Ln', [ratio])
     : ce.function('Log', [ratio, base]);
   const child = childStats();
-  const roots = findUnivariateRoots(
+  const roots = stepUnivariateRoots(
     ce.function('Equal', [f.op2, value]),
     x,
     depth + 1,
@@ -4022,7 +4022,7 @@ function solveScaledRealPower(
   for (const u0 of uRoots) {
     const inverse = base.sub(u0);
     const child = childStats();
-    const xRoots = findUnivariateRoots(inverse, x, depth + 1, undefined, child);
+    const xRoots = stepUnivariateRoots(inverse, x, depth + 1, undefined, child);
     adoptChildStats(combined, child);
     if (xRoots.length === 0 && !factorHasNoRoot(inverse, x, child))
       combined.partial = true;
@@ -4117,7 +4117,7 @@ function solveScaledFloatPower(
   if (isSymbol(base, x)) {
     const child = childStats();
     roots = [
-      ...findUnivariateRoots(
+      ...stepUnivariateRoots(
         ce.function('Equal', [ce.function('Power', [base, m]), value]),
         x,
         depth + 1,
@@ -4138,7 +4138,7 @@ function solveScaledFloatPower(
     try {
       ce.declare(uName, 'number');
       const child = childStats();
-      uRoots = findUnivariateRoots(
+      uRoots = stepUnivariateRoots(
         ce.function('Equal', [
           ce.function('Power', [ce.symbol(uName), m]),
           value,
@@ -4155,7 +4155,7 @@ function solveScaledFloatPower(
     for (const u0 of uRoots) {
       const inverse = base.sub(u0);
       const child = childStats();
-      const xRoots = findUnivariateRoots(
+      const xRoots = stepUnivariateRoots(
         inverse,
         x,
         depth + 1,
@@ -4229,7 +4229,7 @@ function solveScaledAbsoluteValue(
   for (const value of values) {
     const equation = ce.function('Subtract', [f.op1, value]);
     const child = childStats();
-    const allRoots = findUnivariateRoots(
+    const allRoots = stepUnivariateRoots(
       equation,
       x,
       depth + 1,
@@ -4452,7 +4452,7 @@ function solveLinearTrigArgument(
     };
     exprU = replaceArg(expr);
     if (exprU.has(x)) return null;
-    uRoots = findUnivariateRoots(exprU, uName, depth + 1, undefined, stats);
+    uRoots = stepUnivariateRoots(exprU, uName, depth + 1, undefined, stats);
   } finally {
     ce.popScope();
   }
@@ -4530,7 +4530,7 @@ function chainedEqualityRoots(
     };
     // The steps of the pairs are not recorded: the roots of a pair that is
     // not the source are not candidates of the chain.
-    const roots = findUnivariateRoots(pair, x, depth + 1, undefined, child);
+    const roots = stepUnivariateRoots(pair, x, depth + 1, undefined, child);
     if (roots.length === 0) continue;
     const isComplete =
       isPolynomialPair(pair) && !child.partial && !child.undecided;
@@ -4609,6 +4609,77 @@ export function findUnivariateRoots(
     userRule?: boolean;
   }
 ): ReadonlyArray<Expression> {
+  // A call from outside this module is a new solve: the state of a solve
+  // that is active (a host callback that solves another equation, or a
+  // solve of another engine) does not apply to it.
+  const outer = solvingInexactEquation;
+  solvingInexactEquation = !isExactTree(expr);
+  try {
+    return univariateRoots(expr, x, depth, trace, stats);
+  } finally {
+    solvingInexactEquation = outer;
+  }
+}
+
+/**
+ * The roots of an equation that a step of `findUnivariateRoots()` made from
+ * the equation that it solves (a substitution, an inversion, a factor). The
+ * equation is solved as a part of the same solve: when the solve is of an
+ * equation that holds a float, `solvingInexactEquation` stays `true`.
+ */
+function stepUnivariateRoots(
+  expr: Expression,
+  x: string,
+  depth = 0,
+  trace?: RuleSteps,
+  stats?: {
+    candidates: boolean;
+    undecided: boolean;
+    partial?: boolean;
+    userRule?: boolean;
+  }
+): ReadonlyArray<Expression> {
+  const outer = solvingInexactEquation;
+  solvingInexactEquation = outer || !isExactTree(expr);
+  try {
+    return univariateRoots(expr, x, depth, trace, stats);
+  } finally {
+    solvingInexactEquation = outer;
+  }
+}
+
+/**
+ * `true` while a solve of an equation that holds a float is active, also
+ * while it solves an equation that a step made from it
+ * (`stepUnivariateRoots()`). A step can remove the float:
+ * `n^{1.0} = 20000000000001/10^{13}` becomes the exact
+ * `n = 20000000000001/10^{13}` (`withExactIntegerExponents()`), but the
+ * evaluation of the original equation is `True` at `n = 2`, because
+ * `2^{1.0}` is a float and the comparison uses the tolerance. Thus the type
+ * filter of the roots (`filterRootsByType()`) reads this flag, not the
+ * equation that it receives.
+ *
+ * Each call of `findUnivariateRoots()` sets the flag from its own equation,
+ * and each call restores the previous value when it returns. Thus a solve
+ * that starts inside an active solve (from a host callback, or in another
+ * engine) does not get the flag of the active solve. The solve is
+ * synchronous, thus no other code runs between the set and the restore.
+ */
+let solvingInexactEquation = false;
+
+/** The roots of `expr` for `x`: see `findUnivariateRoots()`. */
+function univariateRoots(
+  expr: Expression,
+  x: string,
+  depth: number,
+  trace?: RuleSteps,
+  stats?: {
+    candidates: boolean;
+    undecided: boolean;
+    partial?: boolean;
+    userRule?: boolean;
+  }
+): ReadonlyArray<Expression> {
   const ce = expr.engine;
   if (stats) {
     stats.candidates = false;
@@ -4634,6 +4705,11 @@ export function findUnivariateRoots(
     };
     expr = stripBaseForm(expr);
   }
+
+  // Whether the equation, or the equation that it was made from, holds a
+  // float (`solvingInexactEquation`): the list of roots of an unknown of an
+  // `integer` or `rational` type is then not complete (`filterRootsByType()`).
+  const inexact = solvingInexactEquation;
 
   // Save the expression to solve BEFORE peeling, clearing denominators and
   // other transformations. This is crucial for validating roots: those
@@ -4678,7 +4754,7 @@ export function findUnivariateRoots(
         'solve.harmonize',
         isFunction(exact, 'Equal') ? exact : asEquation(exact, x)
       );
-      return findUnivariateRoots(exact, x, depth, trace, stats).map((root) =>
+      return stepUnivariateRoots(exact, x, depth, trace, stats).map((root) =>
         floatRoot(root)
       );
     }
@@ -4715,7 +4791,8 @@ export function findUnivariateRoots(
             : value.simplify();
         }),
         trace,
-        stats
+        stats,
+        inexact
       );
     }
   }
@@ -4901,7 +4978,7 @@ export function findUnivariateRoots(
         adoptChildStats(stats, trigStats);
       }
       const validated = validateRoots(originalExpr, x, trigRoots, trace, stats);
-      return filterRootsByType(ce, x, validated, trace, stats);
+      return filterRootsByType(ce, x, validated, trace, stats, inexact);
     }
   }
 
@@ -4926,7 +5003,8 @@ export function findUnivariateRoots(
         x,
         realRootsOfAbsEquation(originalExpr, x, validated, trace, stats),
         trace,
-        stats
+        stats,
+        inexact
       );
     }
   }
@@ -4946,7 +5024,7 @@ export function findUnivariateRoots(
         adoptChildStats(stats, absStats);
       }
       const validated = validateRoots(originalExpr, x, absRoots, trace, stats);
-      return filterRootsByType(ce, x, validated, trace, stats);
+      return filterRootsByType(ce, x, validated, trace, stats, inexact);
     }
   }
 
@@ -4976,7 +5054,7 @@ export function findUnivariateRoots(
         trace,
         stats
       );
-      return filterRootsByType(ce, x, validated, trace, stats);
+      return filterRootsByType(ce, x, validated, trace, stats, inexact);
     }
   }
 
@@ -5413,7 +5491,8 @@ export function findUnivariateRoots(
     x,
     realRootsOfAbsEquation(originalExpr, x, validatedRoots, trace, stats),
     trace,
-    stats
+    stats,
+    inexact
   );
 }
 
@@ -5502,7 +5581,7 @@ function solveAbsoluteValueSplit(
       return [];
     }
     const child = childStats();
-    const allRoots = findUnivariateRoots(
+    const allRoots = stepUnivariateRoots(
       branch,
       x,
       depth + 1,
@@ -6617,13 +6696,17 @@ function isExactTree(e: Expression): boolean {
  * value that the variable cannot hold. But the list without it is not known
  * to hold all the roots, thus `stats.undecided` is set to `true` (see
  * `findUnivariateRoots()`): the empty or reduced list is then not an answer.
+ *
+ * `inexact` is `true` when the equation holds a float. Then for an
+ * `integer` or `rational` type, `stats.undecided` is set, see below.
  */
 function filterRootsByType(
   ce: ComputeEngine,
   x: string,
   roots: ReadonlyArray<Expression>,
   trace?: RuleSteps,
-  stats?: { undecided: boolean }
+  stats?: { undecided: boolean },
+  inexact = false
 ): ReadonlyArray<Expression> {
   const varTypeObj = unknownType(ce, x);
   const vt = varTypeObj.type;
@@ -6687,6 +6770,28 @@ function filterRootsByType(
     const dropped = roots.filter((r) => !filtered.includes(r));
     traceStep(trace, 'solve.filter-domain', rootsAsEquations(ce, x, dropped));
   }
+
+  // The evaluation of an equation with a float compares the two sides within
+  // the tolerance of the engine: `2 = 2.0000000000001` is `True`. Thus a value
+  // of an `integer` or `rational` type that is not a root can satisfy the
+  // equation: `x = 2.0000000000001` for an integer `x` has the root
+  // `2.0000000000001`, which is not an integer, but the equation is `True` at
+  // `x = 2`. A list of the roots is then not known to hold all the
+  // solutions, also when the filter keeps each root.
+  // The integers near a root are not a test: the tolerance applies to the
+  // values of the two sides, not to the value of the unknown. The root of
+  // `10^{-12}·x = 5·10^{-13}` (with floats) is `0.5`, and the equation is
+  // `True` at each integer from `-99` to `100`. Thus `x = 2.5` and
+  // `x² = -4.0000000001` for an integer `x` give no answer.
+  // For a `real` type, the roots are the values of the list, and the values
+  // within the tolerance of a root are not listed: the list is complete.
+  if (
+    inexact &&
+    roots.length > 0 &&
+    (varTypeObj.matches('integer') || varTypeObj.matches('rational')) &&
+    stats
+  )
+    stats.undecided = true;
 
   return filtered;
 }

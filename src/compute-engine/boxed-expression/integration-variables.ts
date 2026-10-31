@@ -2,7 +2,7 @@ import type { Expression } from '../global-types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isFunction, isSymbol, sym } from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
-import { collectBinderNames } from './utils.js';
+import { collectBinderNames, implicitVariableCandidates } from './utils.js';
 import { isOperatorDef, isValueDef } from './definition-guards.js';
 
 // The variable of an integration limit that names no variable
@@ -19,18 +19,22 @@ import { isOperatorDef, isValueDef } from './definition-guards.js';
  * variable can be omitted when it is the argument of the function. The
  * limits that name no variable take the parameters that no named limit
  * uses, in order: in `Integrate(Function(b, a, b), Limits(Nothing, 0, 1),
- * Limits(a, 0, 2))`, the first limit takes `b`. A bare-symbol integrand that
- * has no value (`x` in `\int_0^1 x`) is the function `x ↦ x`, and its symbol
- * is the variable of the first limit that names no variable.
+ * Limits(a, 0, 2))`, the first limit takes `b`. A bare-symbol integrand
+ * (`x` in `\int_0^1 x`) is the function `x ↦ x`, and its symbol is the
+ * variable of the first limit that names no variable. This is also true when
+ * the symbol has an assigned value: the variable is a bound variable, and
+ * the order of boxing and assignment does not change it. A constant (`Pi`)
+ * is not a variable (`implicitVariableCandidates`).
  *
  * The result is:
  * - the name of the variable;
  * - `undefined` when the integrand has no parameter for the limit: the
  *   integrand does not depend on the variable of this limit, and its
- *   integral over `[a, b]` is `f·(b − a)`. The canonical form of `Integrate`
- *   makes the parameters of `f` from the unknowns of the integrand, so with
- *   `x := 4`, `\int_0^1 \sqrt{x}` has no parameter and its value is
- *   `√4·1 = 2`;
+ *   integral over `[a, b]` is `f·(b − a)`: `\int_0^1 \pi` is `π`. When
+ *   no limit names a variable, the canonical form of `Integrate` makes the
+ *   parameters of `f` from the symbols of the integrand, with or without a
+ *   value, so with `x := 4`, `\int_0^1 \sqrt{x}` has the parameter `x` and
+ *   its value is 2/3;
  * - `null` when the integral is not computed: a parameter that is not a
  *   name (a destructuring pattern), a bare-symbol integrand whose value is a
  *   function (`g` with `g := t ↦ t^2`, or `Sin`), which is not a constant.
@@ -66,7 +70,11 @@ export function implicitIntegrationVariable(
       (isValueDef(def) && isSubtype(def.value.type.type, 'function'))
     )
       return null;
-    if (position === 0 && !named.has(f.symbol) && f.unknowns.includes(f.symbol))
+    if (
+      position === 0 &&
+      !named.has(f.symbol) &&
+      implicitVariableCandidates(f).includes(f.symbol)
+    )
       return f.symbol;
   }
   return undefined;

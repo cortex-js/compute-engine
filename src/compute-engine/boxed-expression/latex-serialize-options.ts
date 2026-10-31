@@ -17,6 +17,7 @@ import {
 import { isNumberExpression, stringValue } from '../../math-json/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
 import { mayBeMatrixPowerBase } from './matrix-operand.js';
+import { isFunctionSymbolName } from './implicit-variable-rule.js';
 
 /**
  * The options the engine passes to the LaTeX serializer: the engine-wide
@@ -136,6 +137,8 @@ export function latexSerializeOptions(
         return undefined;
       }
     },
+    // The same test as the canonical form of `D` (`isFunctionSymbolName()`).
+    readsAsFunctionSymbol: (name: string) => isFunctionSymbolName(ce, name),
   };
 }
 

@@ -482,6 +482,362 @@ describe('Limit: all three canonical paths bind the variable uniformly', () => {
       expect(c.run!({ x: 7 })).toBe(14);
     });
   });
+
+  // `Integrate`, `D`, `Series`, `NIntegrate` and `ND` choose an implicit
+  // variable as `Limit` does: from the symbols of the body, with or without
+  // a value. The result is the same whether the value is assigned before or
+  // after boxing, and it is the result of the form with the variable
+  // written.
+  describe('the implicit variable of the other calculus operators ignores an assigned value', () => {
+    const assign = (ce: ComputeEngine) => {
+      ce.assign('x', 4);
+      ce.assign('y', 5);
+    };
+    // The implicit form, the same form with the variable written, and the
+    // value of `evaluate()`.
+    const cases: [string, any, any, string][] = [
+      [
+        'Integrate(√x, Limits(0, 1))',
+        ['Integrate', ['Sqrt', 'x'], ['Limits', 0, 1]],
+        ['Integrate', ['Sqrt', 'x'], ['Limits', 'x', 0, 1]],
+        '2/3',
+      ],
+      // Several symbols: `x` is the variable, `y` keeps its value.
+      [
+        'Integrate(x·y, Limits(0, 1))',
+        ['Integrate', ['Multiply', 'x', 'y'], ['Limits', 0, 1]],
+        ['Integrate', ['Multiply', 'x', 'y'], ['Limits', 'x', 0, 1]],
+        '5/2',
+      ],
+      // Two limits, two symbols: `x`, then `y`.
+      [
+        'Integrate(x·y, Limits(0, 1), Limits(0, 2))',
+        ['Integrate', ['Multiply', 'x', 'y'], ['Limits', 0, 1], ['Limits', 0, 2]],
+        [
+          'Integrate',
+          ['Multiply', 'x', 'y'],
+          ['Limits', 'x', 0, 1],
+          ['Limits', 'y', 0, 2],
+        ],
+        '1',
+      ],
+      // A bare symbol is the variable too.
+      [
+        'Integrate(x, Limits(0, 1))',
+        ['Integrate', 'x', ['Limits', 0, 1]],
+        ['Integrate', 'x', ['Limits', 'x', 0, 1]],
+        '1/2',
+      ],
+      // A constant is not a candidate.
+      [
+        'Integrate(π·x, Limits(0, 1))',
+        ['Integrate', ['Multiply', 'Pi', 'x'], ['Limits', 0, 1]],
+        ['Integrate', ['Multiply', 'Pi', 'x'], ['Limits', 'x', 0, 1]],
+        '1/2 * pi',
+      ],
+      ['D(x^3)', ['D', ['Power', 'x', 3]], ['D', ['Power', 'x', 3], 'x'], '3x^2'],
+      // Several symbols and one of them is `x`: `x` is the variable.
+      ['D(x·y)', ['D', ['Multiply', 'x', 'y']], ['D', ['Multiply', 'x', 'y'], 'x'], '5'],
+      [
+        'Series(sin x)',
+        ['Series', ['Sin', 'x']],
+        ['Series', ['Sin', 'x'], 'x'],
+        'x - 1/6 * x^3 + 1/120 * x^5 + BigO(x^7)',
+      ],
+      [
+        'NIntegrate(√x, 0, 1)',
+        ['NIntegrate', ['Sqrt', 'x'], 0, 1],
+        ['NIntegrate', ['Function', ['Sqrt', 'x'], 'x'], 0, 1],
+        '',
+      ],
+      [
+        'ND(x^3, 1)',
+        ['ND', ['Power', 'x', 3], 1],
+        ['ND', ['Function', ['Power', 'x', 3], 'x'], 1],
+        '',
+      ],
+    ];
+    // The compiled value of `e`, or `'declined'` when the compilation
+    // declines (`success: false`). An exception, at compile time or at run
+    // time, is not caught: it fails the test.
+    const run = (e: ReturnType<ComputeEngine['box']>): unknown => {
+      const c = compile(e, { to: 'javascript' });
+      return c.success ? c.run!({}) : 'declined';
+    };
+    for (const [label, implicit, written, value] of cases) {
+      for (const assignFirst of [true, false]) {
+        test(`${label}: ${assignFirst ? 'assign, then box' : 'box, then assign'}`, () => {
+          const ce = new ComputeEngine();
+          if (assignFirst) assign(ce);
+          const e = ce.box(implicit);
+          if (!assignFirst) assign(ce);
+          const w = ce.box(written);
+          if (value !== '') expect(e.evaluate().toString()).toBe(value);
+          // `NIntegrate` gives a float and `Integrate` a measurement: the
+          // numeric values are compared.
+          const numeric = (x: ReturnType<ComputeEngine['box']>) =>
+            x.operator === 'Measurement' ? x.op1.re : x.re;
+          const [n, nw] = [e.N(), w.N()];
+          if (Number.isNaN(numeric(n)) || Number.isNaN(numeric(nw)))
+            expect(n.toString()).toBe(nw.toString());
+          else expect(numeric(n)).toBeCloseTo(numeric(nw), 10);
+          const compiled = run(e);
+          const compiledWritten = run(w);
+          if (typeof compiled === 'number')
+            expect(compiled).toBeCloseTo(compiledWritten as number, 10);
+          else expect(compiled).toEqual(compiledWritten);
+        });
+      }
+    }
+
+    // With nothing assigned, the variable is the one chosen before this rule.
+    test('with nothing assigned, the variable is the same', () => {
+      const ce = new ComputeEngine();
+      expect(ce.box(['D', ['Multiply', 'x', 'y']]).json).toEqual([
+        'D',
+        ['Multiply', 'x', 'y'],
+        'x',
+      ]);
+      // Several symbols, none is `x`: no variable.
+      expect(ce.box(['D', ['Multiply', 'a', 'b']]).json).toEqual([
+        'D',
+        ['Multiply', 'a', 'b'],
+      ]);
+      expect(ce.box(['Series', ['Multiply', 'a', 'b']]).json).toEqual([
+        'Series',
+        ['Multiply', 'a', 'b'],
+      ]);
+      expect(
+        ce.box(['Integrate', ['Sqrt', 'x'], ['Limits', 0, 1]]).evaluate().toString()
+      ).toBe('2/3');
+    });
+
+    // Several symbols, none is `x`, one has a value: still no variable, in
+    // both orders. Before this rule, `a := 2` made `b` the only unknown,
+    // and so the variable, when `a` had its value at boxing.
+    test('D(a·b) with a := 2 has no variable, in both orders', () => {
+      for (const assignFirst of [true, false]) {
+        const ce = new ComputeEngine();
+        if (assignFirst) ce.assign('a', 2);
+        const e = ce.box(['D', ['Multiply', 'a', 'b']]);
+        if (!assignFirst) ce.assign('a', 2);
+        expect(e.json).toEqual(['D', ['Multiply', 'a', 'b']]);
+        expect(e.evaluate().toString()).toBe('D(a * b)');
+      }
+    });
+
+    // A symbol that cannot hold a number is not a candidate: a list, a
+    // string, a function. When its type is declared, both orders agree.
+    describe('a symbol whose type is not numeric is not the variable', () => {
+      const cases: [string, any, string][] = [
+        [
+          'Integrate(Sum(L)·t, Limits(0, 1))',
+          ['Integrate', ['Multiply', ['Sum', 'L'], 't'], ['Limits', 0, 1]],
+          '3',
+        ],
+        [
+          'D(Length(L)·t^2)',
+          ['D', ['Multiply', ['Length', 'L'], ['Power', 't', 2]]],
+          '6t',
+        ],
+        ['Limit(Sum(L)·t, 1)', ['Limit', ['Multiply', ['Sum', 'L'], 't'], 1], '6'],
+        [
+          'NIntegrate(Length(s)·t, 0, 1)',
+          ['NIntegrate', ['Multiply', ['Length', 's'], 't'], 0, 1],
+          '1',
+        ],
+        // A function-valued symbol in a raw `Apply`.
+        ['D(Apply(f, y))', ['D', ['Apply', 'f', 'y']], '2y'],
+      ];
+      const assign = (ce: ComputeEngine) => {
+        ce.assign('L', ce.box(['List', 1, 2, 3]));
+        ce.assign('s', ce.string('hi'));
+        ce.assign('f', ce.box(['Function', ['Power', 't', 2], 't']));
+      };
+      for (const [label, json, value] of cases) {
+        for (const assignFirst of [true, false]) {
+          test(`${label}, declared: ${assignFirst ? 'assign, then box' : 'box, then assign'}`, () => {
+            const ce = new ComputeEngine();
+            ce.declare('L', 'list<integer>');
+            ce.declare('s', 'string');
+            ce.declare('f', 'function');
+            if (assignFirst) assign(ce);
+            const e = ce.box(json);
+            if (!assignFirst) assign(ce);
+            expect(e.evaluate().toString()).toBe(value);
+            if (Number.isFinite(e.evaluate().re))
+              expect(e.N().re).toBeCloseTo(e.evaluate().re, 10);
+            else expect(e.N().toString()).toBe(value);
+          });
+        }
+      }
+      // With no declaration, the type is known when the value is assigned:
+      // assigned before boxing, the symbol is not a candidate. (Assigned
+      // after boxing, it was a candidate at boxing; see
+      // `implicitVariableCandidates`.)
+      test('not declared, assigned before boxing', () => {
+        const ce = new ComputeEngine();
+        ce.assign('L', ce.box(['List', 1, 2, 3]));
+        ce.assign('s', ce.string('hi'));
+        for (const [, json, value] of cases.slice(0, 4))
+          expect(ce.box(json).evaluate().toString()).toBe(value);
+      });
+    });
+
+    // The variable of a definite limit that names no variable is bound in
+    // the integrand, as a written variable is: it is not an unknown.
+    test('the implicit variable of Integrate is not an unknown', () => {
+      const ce = new ComputeEngine();
+      const xy = ['Multiply', 'x', 'y'];
+      expect(ce.box(['Integrate', xy, ['Limits', 0, 1]]).unknowns).toEqual(['y']);
+      expect(ce.box(['Integrate', xy, ['Limits', 'x', 0, 1]]).unknowns).toEqual(['y']);
+      expect(
+        ce.box(['Integrate', xy, ['Limits', 0, 1], ['Limits', 0, 1]]).unknowns
+      ).toEqual([]);
+      expect(ce.box(['Integrate', 'x', ['Limits', 0, 1]]).unknowns).toEqual([]);
+      // The variable of an indefinite integral is not bound.
+      expect(ce.box(['Integrate', xy, 'Nothing']).unknowns).toEqual(['x', 'y']);
+      expect(ce.box(['NIntegrate', xy, 0, 1]).unknowns).toEqual(['y']);
+      expect(ce.box(['ND', xy, 1]).unknowns).toEqual(['y']);
+    });
+
+    // The inner integral binds `x`, so the outer one takes `y`.
+    test('nested implicit integrals: ∫_0^1∫_0^1 xy is 1/4', () => {
+      for (const order of ['none', 'assign, then box', 'box, then assign']) {
+        const ce = new ComputeEngine();
+        if (order === 'assign, then box') ce.assign('x', 4);
+        const e = ce.parse('\\int_0^1\\int_0^1 xy');
+        if (order === 'box, then assign') ce.assign('x', 4);
+        expect(e.evaluate().toString()).toBe('1/4');
+        expect(e.N().re).toBeCloseTo(0.25, 12);
+      }
+      // The LaTeX of the form with two limits parses to the nested form,
+      // with the same value.
+      const ce = new ComputeEngine();
+      const single = ce.box([
+        'Integrate',
+        ['Multiply', 'x', 'y'],
+        ['Limits', 0, 1],
+        ['Limits', 0, 1],
+      ]);
+      expect(single.evaluate().toString()).toBe('1/4');
+      expect(ce.parse(single.latex).evaluate().toString()).toBe('1/4');
+    });
+
+    // With nothing assigned, a symbol that no limit takes is free: the
+    // literal has one parameter for one limit.
+    test('the canonical form of Integrate(x·y, Limits(0, 1))', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.box(['Integrate', ['Multiply', 'x', 'y'], ['Limits', 0, 1]]).json
+      ).toEqual([
+        'Integrate',
+        ['Function', ['Block', ['Multiply', 'x', 'y']], 'x'],
+        ['Limits', 'Nothing', 0, 1],
+      ]);
+      expect(
+        ce.box([
+          'Integrate',
+          ['Multiply', 'x', 'y'],
+          ['Limits', 0, 1],
+          ['Limits', 0, 2],
+        ]).json
+      ).toEqual([
+        'Integrate',
+        ['Function', ['Block', ['Multiply', 'x', 'y']], 'x', 'y'],
+        ['Limits', 'Nothing', 0, 1],
+        ['Limits', 'Nothing', 0, 2],
+      ]);
+    });
+
+    // `subs()` does not replace the implicit variable of an `Integrate` in
+    // the integrand, as for a written variable. A replacement in a bound, or
+    // of another symbol, is applied.
+    test('subs() keeps the implicit variable of Integrate', () => {
+      const ce = new ComputeEngine();
+      const xy = ['Multiply', 'x', 'y'];
+      for (const limit of [
+        ['Limits', 0, 1],
+        ['Limits', 'x', 0, 1],
+      ]) {
+        expect(
+          ce.box(['Integrate', xy, limit]).subs({ x: 3 }).evaluate().toString()
+        ).toBe('1/2 * y');
+        expect(
+          ce.box(['Integrate', xy, limit]).subs({ y: 3 }).evaluate().toString()
+        ).toBe('3/2');
+      }
+      expect(
+        ce.box(['Integrate', 'x', ['Limits', 0, 1]]).subs({ x: 3 }).evaluate().toString()
+      ).toBe('1/2');
+      expect(
+        ce
+          .box(['Integrate', xy, ['Limits', 0, 'x']])
+          .subs({ x: 3 })
+          .evaluate()
+          .toString()
+      ).toBe('9/2 * y');
+    });
+
+    // Every symbol of the integrand cannot hold a number: the literal has no
+    // parameter, and `L` keeps its value, in both orders.
+    test('Integrate(Length(L), Limits(0, 1)) with L: list<integer>', () => {
+      for (const assignFirst of [true, false]) {
+        const ce = new ComputeEngine();
+        ce.declare('L', 'list<integer>');
+        if (assignFirst) ce.assign('L', ce.box(['List', 1, 2, 3]));
+        const e = ce.box(['Integrate', ['Length', 'L'], ['Limits', 0, 1]]);
+        if (!assignFirst) ce.assign('L', ce.box(['List', 1, 2, 3]));
+        expect(e.json).toEqual([
+          'Integrate',
+          ['Function', ['Block', ['Length', 'L']]],
+          ['Limits', 'Nothing', 0, 1],
+        ]);
+        expect(e.evaluate().toString()).toBe('3');
+        expect(e.N().re).toBeCloseTo(3, 12);
+      }
+    });
+
+    // `D` reads its candidates from the canonical operand, as `Series` and
+    // `Limit` do: the inner integral binds `x`, so the variable is `y`.
+    test('D(∫₀¹ x·y): the variable is y', () => {
+      const ce = new ComputeEngine();
+      const integral = ['Integrate', ['Multiply', 'x', 'y'], ['Limits', 0, 1]];
+      const e = ce.box(['D', integral]);
+      expect(e.json).toEqual(ce.box(['D', integral, 'y']).json);
+      expect(e.op2.toString()).toBe('y');
+    });
+
+    // A constant is not the implicit variable of a bare-symbol integrand:
+    // `Pi` is not bound, and `subs()` replaces it.
+    test('Integrate(Pi, Limits(0, 1)): Pi is not bound', () => {
+      const ce = new ComputeEngine();
+      const e = ce.box(['Integrate', 'Pi', ['Limits', 0, 1]]);
+      expect(e.evaluate().toString()).toBe('pi');
+      expect(e.subs({ Pi: 2 }).evaluate().toString()).toBe('2');
+    });
+
+    // A symbol declared `function` has a value definition, not an operator
+    // definition. `D` reads it as a function symbol, as it reads a function
+    // defined with `g(x) := x^2`: it applies the symbol to the variables, and
+    // no implicit variable is chosen.
+    test('D of a symbol declared function', () => {
+      const ce = new ComputeEngine();
+      ce.parse('g(x) := x^2').evaluate();
+      ce.declare('f', 'function');
+      ce.declare('h', 'function');
+      ce.assign('h', ce.box(['Function', ['Power', 't', 3], 't']));
+      expect(ce.box(['D', 'g']).json).toEqual(['D', ['g']]);
+      expect(ce.box(['D', 'f']).json).toEqual(['D', ['f']]);
+      expect(ce.box(['D', 'h']).json).toEqual(['D', ['h']]);
+      expect(ce.parse('f \\rhd D').evaluate().toString()).toBe('D(f())');
+      expect(ce.box(['D', 'g', 'x']).evaluate().toString()).toBe('2x');
+      expect(ce.box(['D', 'f', 'x']).evaluate().toString()).toBe(
+        'Apply(Derivative(f, 1), x)'
+      );
+      expect(ce.box(['D', 'h', 'x']).evaluate().toString()).toBe('3x^2');
+    });
+  });
 });
 
 /**

@@ -73,9 +73,9 @@ D
 `;
 
 exports[`EULER DERIVATIVE NOTATION D^2_x f - second derivative 1`] = `
-\\frac{\\mathrm{d}^{2}f}{\\mathrm{d}x^{2}}
-D(D((x) => f, x), x)
-["D", ["D", ["Function", "f", "x"], "x"], "x"]
+\\frac{\\mathrm{d}^{2}f(x)}{\\mathrm{d}x^{2}}
+D(D(f(x), x), x)
+["D", ["D", ["f", "x"], "x"], "x"]
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_t x - different variable 1`] = `
@@ -91,9 +91,9 @@ D(x^2 + 1, x)
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_x f - first derivative 1`] = `
-\\frac{\\mathrm{d}f}{\\mathrm{d}x}
-D((x) => f, x)
-["D", ["Function", "f", "x"], "x"]
+\\frac{\\mathrm{d}f(x)}{\\mathrm{d}x}
+D(f(x), x)
+["D", ["f", "x"], "x"]
 `;
 
 exports[`EXOTIC INTEGRALS \\iiint 1`] = `

@@ -2970,10 +2970,12 @@ describe('INTEGRATE: a limit that names no variable', () => {
     expect(v.N().re).toBeCloseTo(0.5, 12);
   });
 
-  // With `x := 4`, the canonical integrand of `∫_0^1 √x` has no parameter:
-  // `x` has a value, so it is not an unknown of the integrand. The integrand
-  // is the constant `√4`. NIntegrate gives the same value.
-  test('with x := 4, ∫_0^1 √x is 2 under evaluate(), N() and NIntegrate', () => {
+  // With `x := 4`, the variable of `∫_0^1 √x` is still `x`: the implicit
+  // variable is chosen from the symbols of the integrand, with or without a
+  // value, and as a parameter of the integrand it hides the value. The
+  // integral is 2/3, as when `x` gets its value after boxing. NIntegrate
+  // gives the same value.
+  test('with x := 4, ∫_0^1 √x is 2/3 under evaluate(), N() and NIntegrate', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 4);
     const [exact, numeric] = both(ce, [
@@ -2981,11 +2983,11 @@ describe('INTEGRATE: a limit that names no variable', () => {
       ['Sqrt', 'x'],
       ['Limits', 0, 1],
     ]);
-    expect(exact).toBe('2');
-    expect(numeric).toBeCloseTo(2, 12);
+    expect(exact).toBe('2/3');
+    expect(numeric).toBeCloseTo(2 / 3, 12);
     expect(
       ce.box(['NIntegrate', ['Sqrt', 'x'], 0, 1]).evaluate().re
-    ).toBeCloseTo(2, 12);
+    ).toBeCloseTo(2 / 3, 12);
   });
 
   test('two limits with no variable: ∫∫ x·y and ∫∫ 2 agree under N()', () => {
@@ -3034,16 +3036,25 @@ describe('INTEGRATE: a limit that names no variable', () => {
     ).toEqual(['+oo', Infinity]);
   });
 
-  // The variable of a constant dimension does not capture a symbol of the
-  // integrand.
-  test('a bare symbol with a value is a constant, whatever its name', () => {
-    for (const name of ['NIntegrateVariable', 't']) {
+  // A bare symbol with a value is the variable of the first limit, as a
+  // symbol with no value is. The second limit has no symbol left: the
+  // integrand is constant in that dimension, and the variable of that
+  // dimension does not capture a symbol of the integrand, whatever its name.
+  test('a bare symbol with a value is the variable, whatever its name', () => {
+    for (const name of ['NIntegrateVariable', 'IntegrationVariable', 't']) {
       const ce = new ComputeEngine();
       ce.assign(name, 4);
-      const [exact, numeric] = both(ce, ['Integrate', name, ['Limits', 0, 1]]);
-      expect(exact).toBe('4');
-      expect(numeric).toBeCloseTo(4, 12);
+      expect(both(ce, ['Integrate', name, ['Limits', 0, 1]])[0]).toBe('1/2');
+      const [exact, numeric] = both(ce, [
+        'Integrate',
+        name,
+        ['Limits', 0, 1],
+        ['Limits', 0, 2],
+      ]);
+      expect(exact).toBe('1');
+      expect(numeric).toBeCloseTo(1, 12);
     }
+    // Two symbols for two limits: `t` and `x` are the variables.
     const ce = new ComputeEngine();
     ce.assign('t', 4);
     const [exact, numeric] = both(ce, [
@@ -3052,8 +3063,8 @@ describe('INTEGRATE: a limit that names no variable', () => {
       ['Limits', 0, 1],
       ['Limits', 0, 2],
     ]);
-    expect(exact).toBe('4');
-    expect(numeric).toBeCloseTo(4, 12);
+    expect(exact).toBe('1');
+    expect(numeric).toBeCloseTo(1, 12);
   });
 
   test('a typed parameter is the variable: ∫_0^1 (x: real) ↦ x² is 1/3', () => {
@@ -3216,13 +3227,22 @@ describe('INTEGRATE: a limit that names no variable', () => {
     ).toEqual(['0', '0', 0]);
   });
 
-  test('with c := 0, ∫_0^∞ c is 0 on every route', () => {
+  // An integrand with no symbol has no parameter for the limit: the
+  // integrand 0 is a constant, and its integral from 0 to ∞ is 0. A symbol
+  // is the variable of the limit, also when it has a value: with `c := 0`,
+  // the integral of `c` from 0 to ∞ is +∞.
+  test('∫_0^∞ 0 is 0 on every route; with c := 0, ∫_0^∞ c is +∞', () => {
     const ce = new ComputeEngine();
+    expect(
+      threeRoutes(
+        ce.box(['Integrate', 0, ['Limits', 'Nothing', 0, 'PositiveInfinity']])
+      )
+    ).toEqual(['0', '0', 0]);
     ce.assign('c', 0);
     expect(threeRoutes(ce.parse('\\int_0^\\infty c'))).toEqual([
-      '0',
-      '0',
-      0,
+      '+oo',
+      '+oo',
+      Infinity,
     ]);
   });
 

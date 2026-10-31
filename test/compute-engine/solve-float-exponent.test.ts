@@ -105,7 +105,12 @@ describe('Solve reads an integer-valued float exponent as a degree', () => {
     ]);
     // A polynomial equation with no real root. Before, there was no answer.
     expect(solveIn('x^{2.0} = -4', 'RealNumbers')).toEqual(['List']);
-    expect(solveIn('x^{2.0} = 2', 'Integers')).toEqual(['List']);
+    // An equation with a float over the integers stays unevaluated: the
+    // interpreter compares a float within the tolerance, and an empty list
+    // of exact roots does not prove that no integer is within the tolerance.
+    // Here no integer is (the answer would be `[]`), but `Solve` does not
+    // prove it.
+    expect(solveIn('x^{2.0} = 2', 'Integers')[0]).toBe('Solve');
   });
 
   test('a real unknown', () => {

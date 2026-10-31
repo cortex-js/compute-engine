@@ -412,8 +412,8 @@ describe('OPERATOR partial derivative', () => {
   test('\\partial_x f', () =>
     expect(check('\\partial_x f')).toMatchInlineSnapshot(`
       box       = ["D", "f", "x"]
-      canonical = ["D", ["Function", "f", "x"], "x"]
-      eval-auto = 0
+      canonical = ["D", ["f", "x"], "x"]
+      eval-auto = Apply(Derivative(f, 1), x)
     `));
 
   test('\\partial_x f(x)', () =>
@@ -425,8 +425,8 @@ describe('OPERATOR partial derivative', () => {
   test('\\frac{\\partial f}{\\partial x}', () =>
     expect(check('\\frac{\\partial f}{\\partial x}')).toMatchInlineSnapshot(`
       box       = ["D", "f", "x"]
-      canonical = ["D", ["Function", "f", "x"], "x"]
-      eval-auto = 0
+      canonical = ["D", ["f", "x"], "x"]
+      eval-auto = Apply(Derivative(f, 1), x)
     `));
 
   test('\\partial_{x,y} f(x,y)', () =>

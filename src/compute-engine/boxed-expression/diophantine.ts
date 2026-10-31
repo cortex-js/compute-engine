@@ -284,17 +284,50 @@ function isAssumedAbout(ce: ComputeEngine, name: string): boolean {
 }
 
 /**
- * `count` fresh integer-parameter symbols named `t, t_1, t_2, …`, skipping any
- * name that occurs in the equation or is bound to a value in the current
- * context (a bound `t` with a value would evaluate inside the result), is
- * declared with a type narrower than `number`, or is named by an assumption
- * in force. Nothing
- * is declared in the user's scope — the parameters surface as free symbols.
+ * The definitions that `freshParameters()` created for its parameters. A
+ * later call can use such a name again, so that the solutions of one engine
+ * use the same parameter `t`. A definition that is not in this set belongs to
+ * the user (declared, or created when the user used the name), and its name is
+ * not used as a parameter.
+ */
+const parameterDefinitions = new WeakSet<object>();
+
+/** The definition object of `name` in the current scope chain, if any. */
+function definitionOf(ce: ComputeEngine, name: string): object | undefined {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined) return undefined;
+  return 'value' in def ? def.value : def.operator;
+}
+
+/**
+ * `count` fresh parameter symbols named `t, t_1, t_2, …`, of type `type`:
+ * `integer` for a family of roots (`π t`, a diophantine solution), `number`
+ * for the free parameter of an identity (`x = x` has the solutions `[t]`).
+ *
+ * A name is skipped when it occurs in the equation, or when it has a
+ * definition in the current scope chain that `freshParameters()` did not
+ * create (a symbol that the user declared, or used in a canonical
+ * expression). A name whose definition `freshParameters()` created is used
+ * again, unless it has a different type (an identity after a family of roots
+ * gets `t_1`), is bound to a value (the value would evaluate inside the
+ * result), or is named by an assumption in force.
+ *
+ * A name with no definition is declared with the type `type` in the current
+ * scope. Thus, for an integer parameter, a later `ce.assign('t', 0.5)` is
+ * refused with a type error, and a family such as `π t` of an earlier result
+ * cannot evaluate to a value that is not a root. A use of the name after the solve (`ce.box(['Add', 't',
+ * 1])`) refers to this parameter.
+ *
+ * Limitation: a symbol in a non-canonical expression
+ * (`ce.parse('t+1', { canonical: false })`) has no definition until it is
+ * made canonical. If the user makes such an expression before the solve and
+ * makes it canonical after, its `t` is the parameter.
  */
 export function freshParameters(
   ce: ComputeEngine,
   eq: Expression,
-  count: number
+  count: number,
+  type: 'integer' | 'number' = 'integer'
 ): Expression[] {
   const used = new Set<string>(eq.symbols);
   const out: Expression[] = [];
@@ -303,16 +336,35 @@ export function freshParameters(
     const name = i === 0 ? 't' : `t_${i}`;
     i++;
     if (used.has(name)) continue;
-    const symbol = ce.symbol(name);
-    if (symbol.value !== undefined) continue; // bound to a value
-    // A parameter ranges over every value of the family it describes. A
-    // name declared with a type narrower than `number` (`t: integer`,
-    // `t: boolean`) or named by an assumption (`assume(t > 0)`) cannot do
-    // that, so it is not used.
-    const type = symbol.type.type;
-    if (typeof type !== 'string' || (type !== 'number' && type !== 'unknown'))
-      continue;
-    if (isAssumedAbout(ce, name)) continue;
+    // A parameter must not be a symbol of the user. If the user declared
+    // `t` (or used it) and later assigns a value to it, a family `π t` would
+    // evaluate with that value, which is not an integer in general, and give
+    // a value that is not a root.
+    const def = definitionOf(ce, name);
+    if (def !== undefined) {
+      if (!parameterDefinitions.has(def)) continue;
+      const symbol = ce.symbol(name);
+      if (symbol.type.type !== type) continue;
+      if (symbol.value !== undefined) continue; // bound to a value
+      // A parameter ranges over every value of its type. A name named by an
+      // assumption (`assume(t > 0)`) cannot do that, so it is not used.
+      if (isAssumedAbout(ce, name)) continue;
+    } else {
+      if (isAssumedAbout(ce, name)) continue;
+      // A temporary scope (the scope of a renamed solve, the activation
+      // scope of a function call) ends when its evaluation ends. A parameter
+      // declared there would disappear, and a later `ce.assign('t', 0.5)`
+      // would make a new binding with no type that the result reads by
+      // name. Not every temporary scope is marked (`noAutoDeclare`), so the
+      // parameter is declared in the global scope, the outermost scope of
+      // the user (`ce.contextStack[0]` is the system scope of the library).
+      // A user symbol `t` of an inner scope is found by the lookup above,
+      // and its name is not used.
+      const scope = ce.contextStack[1]?.lexicalScope ?? ce.context.lexicalScope;
+      ce.declare(name, type, scope);
+      const created = definitionOf(ce, name);
+      if (created !== undefined) parameterDefinitions.add(created);
+    }
     used.add(name);
     out.push(ce.symbol(name));
   }

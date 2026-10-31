@@ -204,6 +204,7 @@ export class Serializer {
       readsAsPointList: undefined,
       readsAsCardinality: undefined,
       readsAsMatrixPowerBase: undefined,
+      readsAsFunctionSymbol: undefined,
       exponentialE: '\\exponentialE',
       ...normalizeStyleOptions(options),
     } as Required<ResolvedSerializeLatexOptions>;

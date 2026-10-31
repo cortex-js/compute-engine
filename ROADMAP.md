@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-709.
+Next free reference: CE-710.
 
 **Entry format.**
 
@@ -1032,6 +1032,32 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
+### CE-709. `Solve` with a float over a real domain lists only exact roots, and can claim no solution
+
+**Status:** decision needed; wrong value.
+
+The interpreter compares numbers within `engine.tolerance` (1e-10). Over a
+real domain, `Solve` lists the exact roots of an equation with a float, not
+the values that the tolerance also accepts. When a root is just outside the
+domain, the result is `[]`, which is false:
+
+- `Solve(x = 10.0000000000001, x ∈ Interval(-10, 10))` gives `[]`, but
+  `Equal(10, 10.0000000000001)` is `True`, so `x = 10` is a solution.
+- `Solve(x² = -1e-20, x ∈ ℝ)` gives `[]`, but the equation is `True` at
+  `x = 0`.
+
+Over a discrete domain the same case now stays unevaluated (or is
+enumerated). Options:
+
+- **(a)** Over a real domain, an equation with a float stays unevaluated when
+  the domain or the real type removes a root. Cost: `x² = -1.5` over `ℝ`
+  changes from `[]` to no answer.
+- **(b)** Keep the current contract: over a real domain, `Solve` lists exact
+  roots, and a value within the tolerance of a root is not a separate
+  solution. Document it in the `Solve` reference with the example above.
+
+If nothing is decided, (b) stays in force but is not documented.
+
 ### CE-699. The implicit variable of `Integrate`, `D` and `Series` depends on the order of boxing and assignment
 
 **Status:** done 2026-10-31. User decision 2026-10-31: option (a) for
@@ -1643,10 +1669,27 @@ collection through `runAsync`) already yield and honour an abort signal.
   one with a free symbol in an argument run synchronously, because the scope of
   the body has room for one suspended frame. A recursive function yields in the
   statements of its outermost call only.
-- **CE-111.3** In the walk of a collection (`Any`, `All`, `MaxBy`, `MinBy`,
-  `ArgMax`, `ArgMin`, `Reduce`, `Fold`), a callback that is itself long runs to
-  its end first. An asynchronous application of the callback
-  (`ApplyOptions.awaitStatements`) would remove that.
+- **CE-111.5** Design needed. Under `evaluateAsync()`, `IndexWhere` checks
+  whether a predicate step met a collection whose elements are not known (an
+  incomplete walk) only up to the first `await` of that step. The synchronous
+  search (`searchIndex`, `library/collections.ts`) gives no answer when the
+  predicate meets such a collection, so that a missed element can never
+  become a "found" or "not found" answer. The asynchronous walk
+  (`indexWhereAsyncWalk`) reads the count `incompleteWalkCount()` before and
+  after each step, but that count is shared by the whole engine
+  (`boxed-expression/incomplete-walks.ts`), and another evaluation can change
+  it during an `await`. So when the part of a predicate step after its first
+  `await` walks a collection with unknown elements and still answers `True`,
+  `evaluateAsync()` can give an index where `evaluate()` gives no answer. No
+  input that shows the difference has been found: a predicate such as
+  `y ↦ AsyncOnly(y) > 0 ∧ Count(FlatMap([1, 2], x ↦ Join([x], v))) > 0`
+  (with `v` valueless) stays undecided on both routes, because the `Count`
+  stays unevaluated. A fix needs an incomplete-walk count that belongs to one
+  evaluation (its evaluation context), so that each `noteIncompleteWalk()`
+  call adds to the count of the evaluation that is current. The same count
+  would let the other asynchronous walks over lazy sources (CE-111.4) check
+  their reads across an `await`. Documented in the CHANGELOG entry of
+  `07b9f66fa`.
 - **CE-111.4** Design needed. The elements of a lazy collection are computed
   synchronously when they are read, also under `evaluateAsync()`. So an
   operator that has only an `evaluateAsync` handler stays unevaluated in each
@@ -4910,8 +4953,8 @@ of a Tycho frame on WebGPU) unless the operand is finite for certain
   `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions
   and animation can leave the range), so only a hard-bounded slider can carry
   it.
-- **CE-565.7** (Tycho ledger row 480, 2026-10-30) FIXED 2026-10-31, pending
-  commit. In Tycho's `kelvin-wake`, `\sum_{j=1}^{300} w(j)\cos(\ldots/\cos(\theta(j))^2)`
+- **CE-565.7** (Tycho ledger row 480, 2026-10-30) FIXED 2026-10-31
+  (`545deb5e0`), not yet released. In Tycho's `kelvin-wake`, `\sum_{j=1}^{300} w(j)\cos(\ldots/\cos(\theta(j))^2)`
   with `\theta(j) = -1.35 + 2.7\frac{j-0.5}{300}` kept `_gpu_min`, `_gpu_sin` and
   `_gpu_cos` (+9–10 % per WebGL draw). Now the GLSL and WGSL proof
   (`gpu-finite-proof.ts`) knows that the index of a `Sum`/`Product` with integer

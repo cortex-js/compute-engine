@@ -1949,6 +1949,20 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * @internal
    */
   readsAsMatrixPowerBase?: (base: MathJsonExpression) => boolean | undefined;
+
+  /**
+   * Whether the symbol `name` is a function symbol: a symbol with an
+   * operator definition, or a symbol declared with a function type. The
+   * derivative `D(x ↦ f, x)` of the constant function `x ↦ f` is then
+   * written `\frac{\mathrm{d}\left(f\right)}{\mathrm{d}x}`: the spelling
+   * `\frac{\mathrm{d}f}{\mathrm{d}x}` reads back as the derivative of
+   * `f(x)`. The compute engine supplies this function when it serializes an
+   * expression. A result of `undefined` means "unknown": the parenthesized
+   * spelling is then used, as when the function is not supplied.
+   *
+   * @internal
+   */
+  readsAsFunctionSymbol?: (name: string) => boolean | undefined;
 };
 
 /** The serialization options as seen by the serializer: the style options
@@ -1970,6 +1984,7 @@ export type ResolvedSerializeLatexOptions = Omit<
   | 'readsAsPointList'
   | 'readsAsCardinality'
   | 'readsAsMatrixPowerBase'
+  | 'readsAsFunctionSymbol'
 > & {
   readsAsPointList:
     | ((operands: ReadonlyArray<MathJsonExpression>) => boolean | undefined)
@@ -1978,6 +1993,7 @@ export type ResolvedSerializeLatexOptions = Omit<
     ((operand: MathJsonExpression) => boolean | undefined) | undefined;
   readsAsMatrixPowerBase:
     ((base: MathJsonExpression) => boolean | undefined) | undefined;
+  readsAsFunctionSymbol: ((name: string) => boolean | undefined) | undefined;
   applyFunctionStyle: (
     expr: MathJsonExpression,
     level: number

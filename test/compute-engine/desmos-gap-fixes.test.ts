@@ -207,9 +207,11 @@ describe('Desmos gap fixes', () => {
       });
 
       test('partial derivatives unaffected', () => {
+        // `f` is declared a function by the shared test engine: the
+        // derivative is that of `f(x)`.
         expect(parse('\\frac{\\partial f}{\\partial x}')).toEqual([
           'D',
-          ['Function', ['Block', 'f'], 'x'],
+          ['f', 'x'],
           'x',
         ]);
       });

@@ -1621,11 +1621,7 @@ describe('Predicate', () => {
       [
         D,
         [
-          Function,
-          [
-            Block,
-            f,
-          ],
+          f,
           x,
         ],
         x,

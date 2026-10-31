@@ -76,6 +76,45 @@ only the files of entry `compute-engine-79` in the staging queue).
     (`assumeConjunct`, `assume.ts`), so a later conjunct that creates them
     again cannot claim them, and the rollback does not remove them.
 
+## Found later in the same session (Solve chains, CE-699, Solve floats, family parameters)
+
+Each item is in older code, unless noted, and the form with the variable
+written gives the same result.
+
+15. **`D` of a definite integral with a free symbol stays unevaluated.**
+    `D(Integrate(x·y, Limits(x, 0, 1)), y)` gives `D(∫₀¹ x y dx, y)`;
+    expected 1/2.
+16. **`D(Sum(L), t)` with `L := [1, 2, 3]` stays unevaluated** (expected 0;
+    `D(Length(L), t)` gives 0).
+17. **A `Block` integrand.** `Integrate(Block(Assign(u, 2), u·t),
+    Limits(0, 1))` gives 2 under `evaluate()` and 1 under `N()` (1 is
+    correct). The indefinite form gives `t · Assign(u, 2)`: the integrator
+    reads the statements as factors.
+18. **`∫_0^∞ c\,dt` with `c := 0` stays unevaluated under `evaluate()`**;
+    `N()` gives 0.
+19. **`Series(x·y)` with `y := 5`:** `evaluate()` gives `x·y`, `N()` gives
+    `5x`.
+20. **`Series(sin x).N()` gives NaN** (also `Series(exp x).N()`).
+21. **`NIntegrate` has no JavaScript lowering:** it declines and falls back
+    to the interpreter.
+22. **Compiled symbolic derivative with an assigned variable.** `x := 4`,
+    `D(x^3, x)`: `evaluate()` gives `3x^2`, compiled JavaScript gives 48.
+    Check first whether this is a defect (compiled code always gives a
+    number; `N()` of `3x^2` is 48).
+23. **The parameter of a family of roots under an inner scope.** A user `t`
+    declared in an inner scope after a solve shadows the parameter of an
+    earlier result: `r = Solve(sin x = 0, x ∈ ℝ)`, `pushScope()`,
+    `declare('t', 'number')`, `assign('t', 0.5)`, `r.N()` gives π/2. A
+    sound fix needs a parameter name that the user cannot write. Also: the
+    side conditions are not passed to `freshParameters()`
+    (`boxed-expression/diophantine.ts`).
+24. **Compiled filter of the enumeration with an exact equation with large
+    terms** may remove a true solution because of float rounding. Not
+    reproduced: measure first.
+
+ROADMAP CE-709 (decision needed) records the real-domain case of `Solve`
+with a float.
+
 ## Decisions for the user (recorded, not for an agent)
 
 - ROADMAP CE-699: one rule for the implicit variable after an assignment

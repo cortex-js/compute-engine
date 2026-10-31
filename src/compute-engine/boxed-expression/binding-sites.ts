@@ -8,6 +8,7 @@ import type {
 
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
 import { isValueDef } from './definition-guards.js';
+import { isImplicitVariableCandidate } from './implicit-variable-rule.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
@@ -27,7 +28,8 @@ import {
  * `docs/SCOPING-MODEL.md`).
  *
  * This module is a LEAF, in the same tier as `binders.ts`: it may import
- * `type-guards.js`, `function-literal.js` and `binders.js`, and nothing from
+ * `type-guards.js`, `function-literal.js`, `binders.js`, `definition-guards.js`
+ * and `implicit-variable-rule.js` (leaf modules), and nothing from
  * `utils.ts`, `box.ts` or `library/`. The declaration is consumed once, at
  * canonicalization, and materialized as a `localScope`, which is the channel
  * `boundVariableNames` (and therefore `same()`, `rebindEscaping`,
@@ -793,6 +795,63 @@ export function bindsClauseSymbols(expr: Expression): boolean {
  */
 export function bindsStatementTargets(expr: Expression): boolean {
   return isFunction(expr) && expr.operator === 'Block';
+}
+
+/**
+ * The variables that the DEFINITE limits of the `Integrate` node `expr`
+ * bind without naming them (`Limits(Nothing, a, b)`, from `\int_a^b f` with
+ * no `dx`). `undefined` when there is none.
+ *
+ * The rule is that of `implicitIntegrationVariable()`
+ * (`integration-variables.ts`, which this leaf module cannot import): the
+ * limits that name no variable take, in order, the parameters of the
+ * function literal of the integrand that no named limit uses. A bare-symbol
+ * integrand is the variable of the first such limit, unless it is not a
+ * candidate (`isImplicitVariableCandidate()`): a function name, a constant
+ * such as `Pi`, a library symbol, a symbol that cannot hold a number. These variables are bound in the
+ * integrand only: in `Integrate(Function(x·y, x), Limits(Nothing, 0, 1))`,
+ * `x` is bound and `y` is free, as in the form with `Limits(x, 0, 1)`. The
+ * variable of an indefinite limit (`Limits(Nothing, Nothing, Nothing)`) is
+ * not bound (`indefiniteIntegralVariables`).
+ */
+export function implicitIntegralVariables(
+  expr: Expression
+): ReadonlySet<string> | undefined {
+  if (!isFunction(expr, 'Integrate')) return undefined;
+  const f = expr.ops[0];
+  if (f === undefined) return undefined;
+  const limits = expr.ops.slice(1);
+  const absent = (x: Expression | undefined): boolean =>
+    x === undefined || isSymbol(x, 'Nothing');
+  const named = new Set<string>();
+  for (const l of limits)
+    if (isFunction(l, 'Limits') && isSymbol(l.op1) && !absent(l.op1))
+      named.add(l.op1.symbol);
+  let names: string[];
+  if (isFunction(f, 'Function'))
+    names = f.ops
+      .slice(1)
+      .map((p) => functionLiteralParameterName(p))
+      .filter((name) => name !== '' && !named.has(name));
+  else if (isSymbol(f) && !named.has(f.symbol)) {
+    // The same rule as `implicitVariableCandidates()`: an operator name, a
+    // constant (`Pi`), a library symbol and a symbol that cannot hold a
+    // number are not variables.
+    if (!isImplicitVariableCandidate(f.engine, f.symbol, false))
+      return undefined;
+    names = [f.symbol];
+  } else return undefined;
+  let result: Set<string> | undefined;
+  let position = 0;
+  for (const l of limits) {
+    if (!isFunction(l, 'Limits') || !absent(l.op1)) continue;
+    const name = names[position];
+    position += 1;
+    if (name === undefined) break;
+    if (absent(l.ops[1]) && absent(l.ops[2])) continue;
+    (result ??= new Set()).add(name);
+  }
+  return result;
 }
 
 /**

@@ -64,6 +64,38 @@
 
 ### Bug Fixes
 
+- **A local assigned lists of different shapes is typed by their elements.**
+  In a block that assigns `L = [1, 2]` and then `L = [[1, 2]]`, `L` was typed
+  `list<integer>`, which does not admit the second value. A callback mapped
+  over `L` then had its parameter inferred `integer`, and
+  `Map((t) ↦ 2t, L)` was an `incompatible-type` error, while the compiled code
+  gave `[[2, 4]]`. `L` is now typed `list<integer | vector<integer^2>>`, and
+  the interpreter also gives `[[2, 4]]`. Two lists of the same rank keep their
+  rank: `[1, 2]` and then `[1.5, 2, 3]` type the local `vector<real>`, not
+  `list<real>`.
+
+- **A `Product` of a variable reads the value that the variable holds when
+  it is evaluated.** With `x` declared `any` and `x := [1, 2]`,
+  `ce.box(["Product", "x"])` was canonicalized as `Reduce(x, Multiply, 1)`.
+  After `x := 5`, that expression gave an `incompatible-type` error, while
+  the same `Product` boxed after the assignment gave `5`. A variable that
+  can be assigned a value that is not a collection (one declared with a type
+  that is not a collection type, or one with no declaration) now keeps the
+  `Product` head, as `Sum` does. A constant, a list literal and a variable
+  declared with a collection type (`L: list<integer>`) are still
+  canonicalized as `Reduce`.
+
+- **The product of a list of square matrices is typed as a matrix when the
+  list is typed as a tensor.** A variable with no declaration that holds two
+  2x2 matrices is typed `tensor<integer^(2x2x2)>`. Its `Product` was typed
+  `number`, which its value `[[2, 1], [4, 3]]` is not, and the compilation of
+  the `Product` refused it. It is now typed `matrix<integer^(2x2)>`, and the
+  compiled code gives the same value as the interpreter. `Reduce(L, Multiply,
+  1)` gets the same type. When the elements can be lists whose product the
+  type rules do not describe (a tensor of rank 4, a ragged list of matrices
+  and rows), the `Product` is typed `unknown`, as the `Reduce` form is, not
+  `number`.
+
 - **A closure returned through two or more calls keeps the call that made
   it.** When a call ended, each closure in its result was rebuilt on the
   frame of that call, also a closure that an inner call had made and already
@@ -75,9 +107,15 @@
   `P2 = (y, w) ↦ (x ↦ Block(s := y, y := 2, s + x))` and
   `wrap = (a, b) ↦ P2(a, b)`, `wrap(q, 1)(5)` gave `7`; it is now `q + 5`,
   the value of `P2(q, 1)(5)`. Now a call rebuilds only a closure that reads
-  its own frame. Also, the result of a call that holds such a closure is no
-  longer kept by the memo of the applications of a function: two calls
-  `wrap(5)` give two counters, not one shared counter.
+  its own frame, and keeps the frames of the other calls in its chain:
+  with `f(n) = Block(k := n, DefineFunction(g, b ↦ (x ↦ k + x)), g(0))`,
+  `f(5)(1)` is `6`. A closure that a recursive call makes and that a deeper
+  call of the same function returns no longer takes the parameters of the
+  deeper call: with `h = (g, k) ↦ If(k = 0, g, h(x ↦ x + k, k − 1))`,
+  `h(x ↦ x, 3)(100)` gave `100`; it is now `101`. Also, the result of a
+  call that holds a closure made in the call is no longer kept by the memo
+  of the applications of a function: two calls `wrap(5)` give two
+  counters, not one shared counter.
 
 - **GLSL and WGSL: `sin(|(x, x, x, x)|)` no longer drops its NaN guard.** The
   absolute value of a vector or point is emitted as `length(…)`, which
@@ -797,6 +835,19 @@
   source text is the caller's own value and is not checked, as before.
 
 ### Performance
+
+- **Compiling a callback whose body shares subexpressions takes linear
+  time** (a follow-up of GitHub issue #488). A boxed expression can hold the
+  same node object at several positions: `b_k = Arctan2(b_(k-1), b_(k-1))`
+  has `k` distinct nodes but `2^k` paths. Before the compiler moves the
+  invariant parts out of a callback (`Map(t ↦ b_k, [1, 2])`), it looks for
+  the names that the body assigns and for the parts that read the
+  parameter. These two walks went along every path, so the compilation took
+  820 ms at depth 26 and twice as long at each further level. Now each walk
+  visits a node object once: depth 40 compiles in about 10 ms. A body built
+  with `Add` is not a shared structure after canonicalization, because
+  `Add(b, b)` is flattened into one sum of `2^k` terms; its compilation time
+  stays proportional to that number of terms.
 
 - **GLSL and WGSL: a sum over an index with literal bounds that calls user
   functions of that index uses the built-in `sin`, `cos` and `min` again.** In

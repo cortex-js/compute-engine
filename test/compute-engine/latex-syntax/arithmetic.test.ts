@@ -785,13 +785,13 @@ describe('FRACTION mixed braced/unbraced arguments', () => {
 
   test('Leibniz derivative notation is untouched', () => {
     expect(ce.parse('\\frac{d}{dx}f')).toMatchInlineSnapshot(
-      `["D", ["Function", "f", "x"], "x"]`
+      `["D", ["f", "x"], "x"]`
     );
     expect(ce.parse('\\frac{\\partial f}{\\partial x}')).toMatchInlineSnapshot(
-      `["D", ["Function", "f", "x"], "x"]`
+      `["D", ["f", "x"], "x"]`
     );
     expect(ce.parse('\\frac{d^2}{dx^2}f')).toMatchInlineSnapshot(
-      `["D", ["D", ["Function", "f", "x"], "x"], "x"]`
+      `["D", ["D", ["f", "x"], "x"], "x"]`
     );
   });
 });

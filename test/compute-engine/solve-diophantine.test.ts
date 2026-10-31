@@ -225,6 +225,9 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
     try {
       ce.declare('n', 'integer');
       ce.declare('m', 'integer');
+      // An earlier solve declared the parameter `t` in the global scope. The
+      // declaration in this scope keeps the value 5 out of that parameter.
+      ce.declare('t', 'integer');
       ce.assign('t', 5); // `t` now has a value
       const r = ce
         .box([
@@ -247,6 +250,72 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
       }
     } finally {
       ce.popScope();
+    }
+  });
+
+  test('parameter name is fresh: a declared `t` with no value is not the parameter', () => {
+    const solveLinear = (engine: ComputeEngine) => {
+      engine.declare('n', 'integer');
+      engine.declare('m', 'integer');
+      return engine
+        .box([
+          'Solve',
+          ['Equal', ['Add', ['Multiply', 3, 'n'], ['Multiply', 4, 'm']], 7],
+          'n',
+          'm',
+        ])
+        .evaluate();
+    };
+    // With no symbol `t` of the user, the parameter is `t`.
+    expect(solveLinear(new ComputeEngine()).op1.op1.symbols).toContain('t');
+
+    // A `t` that the user declared is not the parameter: if it were, a value
+    // assigned to `t` later would make the tuple a value that is not a
+    // solution.
+    const engine = new ComputeEngine();
+    engine.declare('t', 'number');
+    const tuple = solveLinear(engine).op1;
+    expect(tuple.op1.symbols).not.toContain('t');
+    expect(tuple.op1.symbols).toContain('t_1');
+    engine.assign('t', 0.5);
+    for (const tv of [-2, 0, 3]) {
+      const nv = tuple.op1.subs({ t_1: engine.number(tv) }).N().re;
+      const mv = tuple.op2.subs({ t_1: engine.number(tv) }).N().re;
+      expect(3 * nv + 4 * mv).toBe(7);
+      expect(Number.isInteger(nv)).toBe(true);
+      expect(Number.isInteger(mv)).toBe(true);
+    }
+  });
+
+  test('parameter names are fresh: three parameters next to a declared `t`', () => {
+    const engine = new ComputeEngine();
+    engine.declare('t', 'number');
+    engine.declare('a', 'integer');
+    engine.declare('b', 'integer');
+    engine.declare('c', 'integer');
+    const r = engine
+      .box([
+        'Solve',
+        ['Equal', ['Add', ['Power', 'a', 2], ['Power', 'b', 2]], ['Power', 'c', 2]],
+        'a',
+        'b',
+        'c',
+      ])
+      .evaluate();
+    expect(r.operator).toBe('List');
+    const names = new Set(r.symbols);
+    expect(names.has('t')).toBe(false);
+    for (const n of ['t_1', 't_2', 't_3']) expect(names.has(n)).toBe(true);
+    engine.assign('t', 0.5);
+    // Each family is a Pythagorean triple for integer parameter values.
+    for (const tuple of r.ops!) {
+      const sub = {
+        t_1: engine.number(2),
+        t_2: engine.number(3),
+        t_3: engine.number(1),
+      };
+      const [a, b, c] = tuple.ops!.map((x) => x.subs(sub).N().re);
+      expect(a * a + b * b).toBe(c * c);
     }
   });
 

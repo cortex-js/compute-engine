@@ -236,6 +236,7 @@ import {
   binderBoundAt,
   bindsClauseSymbols,
   bindsStatementTargets,
+  implicitIntegralVariables,
   indefiniteIntegralVariables,
   type DeclaredBinders,
 } from './binding-sites.js';
@@ -21265,9 +21266,18 @@ function subsBinderView(expr: Expression):
       localVars.add(op.op1.symbol);
   }
   const indefinite = indefiniteIntegralVariables(expr);
+  // The variables of the definite limits of an `Integrate` that name no
+  // variable are bound in the integrand (operand 0) only, as the
+  // free-variable walk reads them (`implicitIntegralVariables()`): with
+  // `Limits(Nothing, 0, 1)`, `Integrate(x·y, …).subs({x: 3})` keeps `x`.
+  const implicit = new Set(
+    [...(implicitIntegralVariables(expr) ?? [])].filter(notWildcard)
+  );
   const readsFunctionBody = indexVars.size > 0;
-  const names = [...new Set([...indexVars, ...localVars])].filter(
-    (n) => notWildcard(n) && (localVars.has(n) || !indefinite?.has(n))
+  const names = [...new Set([...indexVars, ...localVars, ...implicit])].filter(
+    (n) =>
+      notWildcard(n) &&
+      (localVars.has(n) || implicit.has(n) || !indefinite?.has(n))
   );
   if (names.length === 0 && !readsFunctionBody) return undefined;
   return {
@@ -21277,6 +21287,7 @@ function subsBinderView(expr: Expression):
       names.filter(
         (n) =>
           localVars.has(n) ||
+          (i === 0 && implicit.has(n)) ||
           (indexVars.has(n) &&
             (sites === undefined || binderBoundAt(sites, n, i)))
       ),

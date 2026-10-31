@@ -229,12 +229,33 @@ describe('row 391: the derivative of a function literal', () => {
         'x',
       ],
     ],
-    // A symbol body keeps the function literal: it is the canonical form of
-    // `\frac{\mathrm{d}f}{\mathrm{d}x}`.
+    // A symbol body keeps the function literal `x ↦ f`, the constant
+    // function, whose derivative is 0. `f` is declared a function in the
+    // engine of this file, so the body is written in parentheses,
+    // `\frac{\mathrm{d}\left(f\right)}{\mathrm{d}x}`, which reads back as
+    // the same literal. The spelling without parentheses,
+    // `\frac{\mathrm{d}f}{\mathrm{d}x}`, reads back as the derivative of
+    // `f(x)`.
     [['D', ['Function', ['Block', 'f'], 'x'], 'x']],
   ])('%j round-trips', (json) => {
     const e = ce.box(json as any);
     expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+
+  // The body of `x ↦ f` is in parentheses only when `f` is a function
+  // symbol. Each spelling reads back with the same value, 0.
+  test('the spelling of the derivative of a constant function', () => {
+    const local = new ComputeEngine();
+    local.declare('f', 'function');
+    for (const [name, latex] of [
+      ['f', '\\frac{\\mathrm{d}\\left(f\\right)}{\\mathrm{d}x}'],
+      ['y', '\\frac{\\mathrm{d}y}{\\mathrm{d}x}'],
+    ]) {
+      const e = local.box(['D', ['Function', ['Block', name], 'x'], 'x']);
+      expect(e.latex).toBe(latex);
+      expect(local.parse(latex).json).toEqual(e.json);
+      expect(local.parse(latex).evaluate().toString()).toBe('0');
+    }
   });
 
   test('the canonical form is the derivative of the body, with the same value', () => {

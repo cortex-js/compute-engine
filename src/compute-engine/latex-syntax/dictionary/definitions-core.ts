@@ -4187,7 +4187,24 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // looser than `^` (`Rational`/`Divide`, `Sum`/`Product`, `Union`),
       // and leaves symbols, numbers, function applications (`\sin(x)`) and
       // already delimited bodies untouched.
-      const fnLatex = serializer.wrapShort(bodyToSerialize);
+      //
+      // A function literal whose body is a function symbol (`x ↦ f`, with `f`
+      // declared a function) has its body in parentheses:
+      // `\frac{\mathrm{d}\left(f\right)}{\mathrm{d}x}`. The literal is the
+      // constant function `x ↦ f`, whose derivative is 0, and the spelling
+      // without parentheses reads back as the derivative of `f(x)`. A body
+      // that is any other symbol keeps `\frac{\mathrm{d}y}{\mathrm{d}x}`,
+      // which reads back as `x ↦ y`. When the serializer cannot tell
+      // (`readsAsFunctionSymbol` is not supplied, or answers `undefined`),
+      // it uses the parentheses, which read back as `x ↦ f` in both cases.
+      const bodySymbol =
+        operator(innerFn) === 'Function' ? symbol(bodyToSerialize) : null;
+      const symbolBody =
+        bodySymbol !== null &&
+        (serializer.options.readsAsFunctionSymbol?.(bodySymbol) ?? true);
+      const fnLatex = symbolBody
+        ? `\\left(${serializer.serialize(bodyToSerialize)}\\right)`
+        : serializer.wrapShort(bodyToSerialize);
       const varLatex = serializer.serialize(dVariable);
 
       // The differentiand always goes in the NUMERATOR

@@ -63,6 +63,7 @@ import {
   bindsClauseSymbols,
   bindsStatementTargets,
   declaredBinders,
+  implicitIntegralVariables,
   indefiniteIntegralVariables,
   ownIndexClauseAt,
   scopeForRebuild,
@@ -74,7 +75,7 @@ import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import { isLibraryDefinition } from './implicit-variable-rule.js';
 import { isComparableKindValue, kindEqual, kindIs } from './kind-compare.js';
 
 // Lazy reference to break circular dependency:
@@ -1830,51 +1831,6 @@ export type ReferencesMemo = {
 type ReferenceMode = 'unknowns' | 'references';
 
 /**
- * True when `def`, the definition that the name `name` resolves to, was
- * installed by a library and not by the user. A library is the standard
- * library, a library given to the constructor (`libraries`), or a library
- * loaded with `ce.loadLibrary()`: a dependency graph keyed on the user's
- * cells has no cell for these names. The test reads:
- *
- * - the binding of the outermost (system) scope, where the standard library
- *   and the constructor's libraries are installed;
- * - `_libraryProvenance`, which records the binding each library installed,
- *   in the global scope for `ce.loadLibrary()`;
- * - for a library name that the current scope resolves to another binding,
- *   `shadowsLibraryName()` (`library-shadowing.ts`): an extension made with
- *   `ce.declare(name, patch, { extend: true })` that keeps the library's
- *   handlers is still the library operator.
- *
- * A user definition (`f(x) := …`, `ce.assign()`, `ce.declare()`) is none of
- * these. `def` is the binding (`{ value }` or `{ operator }`) or the
- * definition it holds.
- */
-function isLibraryDefinition(
-  engine: ComputeEngine,
-  name: string,
-  def: object | undefined
-): boolean {
-  if (def === undefined) return false;
-  const holds = (binding: unknown): boolean => {
-    if (binding === undefined || binding === null) return false;
-    const b = binding as { value?: object; operator?: object };
-    return (
-      b === def ||
-      (b.value !== undefined && b.value === def) ||
-      (b.operator !== undefined && b.operator === def)
-    );
-  };
-  const system = engine.contextStack[0]?.lexicalScope.bindings.get(name);
-  if (holds(system)) return true;
-  if (holds(engine._libraryProvenance.get(name)?.binding)) return true;
-  return (
-    system !== undefined &&
-    holds(engine.lookupDefinition(name)) &&
-    !shadowsLibraryName(engine, name)
-  );
-}
-
-/**
  * Whether `expr` has unknowns (the same answer as `expr.unknowns.length >
  * 0`), with a memo that the caller keeps between calls. The memo holds the
  * answer of each function node already walked, so a caller that asks the
@@ -2192,6 +2148,11 @@ function collectReferences(
   const siteVars = sites?.clauseLocal;
   const indexVars = new Set<string>(siteVars);
   const indefinite = indefiniteIntegralVariables(expr);
+  // The variables of the definite limits of an `Integrate` that name no
+  // variable are bound in the integrand (operand 0) only: in
+  // `Integrate(Function(x·y, x), Limits(Nothing, 0, 1))`, `x` is bound and
+  // `y` is free, as with `Limits(x, 0, 1)`.
+  const implicit = implicitIntegralVariables(expr);
   // Is the index `name` in scope in operand `i`? Always, for a structurally
   // recognized index; for a clause site, from its own clause onward and in
   // the body (every operand before the first clause) — the clause ordering
@@ -2263,6 +2224,11 @@ function collectReferences(
     )
       getReferences(op.ops[0], innerFree, innerRef, memo, mode);
     else getReferences(op, innerFree, innerRef, memo, mode);
+    if (i === 0 && implicit !== undefined)
+      for (const s of implicit) {
+        innerFree.delete(s);
+        innerRef.delete(s);
+      }
     if (indexVars.size === 0 && localVars.size === 0) {
       for (const s of innerFree) freeVars.add(s);
       for (const s of innerRef) refFns.add(s);

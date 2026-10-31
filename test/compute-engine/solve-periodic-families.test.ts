@@ -165,6 +165,133 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
     expect(s.has('t_1')).toBe(true);
   });
 
+  test('the parameter is not a symbol that the user declared or used', () => {
+    // With no symbol `t` of the user, the parameter is `t`.
+    const fresh = new ComputeEngine();
+    const solveSin = (engine: ComputeEngine) =>
+      engine
+        .box([
+          'Solve',
+          ['Equal', ['Sin', 'x'], 0],
+          ['Element', 'x', 'RealNumbers'],
+        ])
+        .evaluate();
+    expect(solveSin(fresh).json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+    // A second solve uses the same parameter.
+    expect(solveSin(fresh).json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+
+    // A `t` that the user declared is not the parameter. If it were, a value
+    // assigned to `t` later would give a value that is not a root.
+    const declared = new ComputeEngine();
+    declared.declare('t', 'number');
+    const r = solveSin(declared);
+    expect(r.has('t')).toBe(false);
+    expect(r.json).toEqual(['List', ['Multiply', 'Pi', 't_1']]);
+    declared.assign('t', 0.5);
+    for (const k of [-2, 0, 3]) {
+      const root = r.ops![0].subs({ t_1: declared.number(k) }).N().re;
+      expect(Math.abs(Math.sin(root))).toBeLessThan(1e-12);
+    }
+
+    // The same for a `t` that the user used in an expression.
+    const used = new ComputeEngine();
+    used.box(['Add', 't', 1]);
+    expect(solveSin(used).has('t')).toBe(false);
+
+    // A `t` that the user declared in an inner scope is not the parameter
+    // while the scope is open.
+    const inner = new ComputeEngine();
+    inner.pushScope();
+    try {
+      inner.declare('t', 'number');
+      expect(solveSin(inner).json).toEqual(['List', ['Multiply', 'Pi', 't_1']]);
+    } finally {
+      inner.popScope();
+    }
+    expect(solveSin(inner).json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+  });
+
+  test('the parameter is declared integer', () => {
+    // The parameter cannot receive a value that is not an integer, so an
+    // earlier result cannot become a value that is not a root.
+    const engine = new ComputeEngine();
+    const solveSin = () =>
+      engine
+        .box([
+          'Solve',
+          ['Equal', ['Sin', 'x'], 0],
+          ['Element', 'x', 'RealNumbers'],
+        ])
+        .evaluate();
+    const r = solveSin();
+    expect(engine.box('t').type.toString()).toBe('integer');
+    // A use of `t` after the solve refers to the parameter: a second solve
+    // uses `t` again.
+    engine.box(['Add', 't', 1]);
+    expect(solveSin().json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+    expect(() => engine.assign('t', 0.5)).toThrow(/integer/);
+    // The parameter cannot be declared again in the same scope.
+    expect(() => engine.declare('t', 'number')).toThrow(/already declared/);
+    engine.assign('t', 3);
+    expect(Math.abs(Math.sin(r.ops![0].N().re))).toBeLessThan(1e-12);
+
+    // A solve in a temporary scope declares the parameter in the scope of
+    // the caller. `x` is read by the body of `g`, so the unknown `x` is
+    // renamed and the solve runs in a temporary scope. If the parameter
+    // were declared there, it would disappear with the scope, and
+    // `assign('t', 0.25)` would give the value x + π/2, which is not a root.
+    const renamed = new ComputeEngine();
+    renamed.declare('g', 'function');
+    renamed.assign(
+      'g',
+      renamed.box(['Function', ['Sin', ['Subtract', 'a', 'x']], 'a'])
+    );
+    const rr = renamed.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate();
+    expect(rr.has('t')).toBe(true);
+    expect(renamed.box('t').type.toString()).toBe('integer');
+    expect(() => renamed.assign('t', 0.25)).toThrow(/integer/);
+
+    // The same for a solve in the activation scope of a function call.
+    const called = new ComputeEngine();
+    called.declare('F', 'function');
+    called.assign(
+      'F',
+      called.box([
+        'Function',
+        ['Solve', ['Equal', ['Sin', 'x'], 0], ['Element', 'x', 'RealNumbers']],
+      ])
+    );
+    expect(called.box(['F']).evaluate().json).toEqual([
+      'List',
+      ['Multiply', 'Pi', 't'],
+    ]);
+    expect(() => called.assign('t', 0.5)).toThrow(/integer/);
+
+    // A `t` declared in an inner scope after the solve is not the parameter
+    // of a second solve.
+    const later = new ComputeEngine();
+    later.box([
+      'Solve',
+      ['Equal', ['Sin', 'x'], 0],
+      ['Element', 'x', 'RealNumbers'],
+    ]);
+    later.pushScope();
+    try {
+      later.declare('t', 'number');
+      expect(
+        later
+          .box([
+            'Solve',
+            ['Equal', ['Sin', 'x'], 0],
+            ['Element', 'x', 'RealNumbers'],
+          ])
+          .evaluate().json
+      ).toEqual(['List', ['Multiply', 'Pi', 't_1']]);
+    } finally {
+      later.popScope();
+    }
+  });
+
   test('a float root gives a family', () => {
     checkFamilies(solve('\\cos x = 0.5'), (x) => Math.cos(x) - 0.5);
   });

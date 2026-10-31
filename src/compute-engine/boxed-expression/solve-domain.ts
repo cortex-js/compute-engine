@@ -45,7 +45,7 @@ import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 import { holdsKindValue } from './residue-class.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { halfTurnAngle } from './trigonometry.js';
-import { smallCount } from './collection-count.js';
+import { isFiniteCount, smallCount } from './collection-count.js';
 
 /**
  * Inequality relational operators. A univariate `Solve` of one of these is
@@ -405,7 +405,7 @@ export function emptyRootsAnswer(
     if (constants.every((constant) => !constant.has(x))) {
       if (constants.every((constant) => constant.isSame(0))) {
         if (conditioned || isRestrictedUnknown(ce, x)) return undefined;
-        return ce.function('List', freshParameters(ce, equation, 1));
+        return ce.function('List', freshParameters(ce, equation, 1, 'number'));
       }
       return undefined;
     }
@@ -1338,8 +1338,48 @@ export function solveOverDomain(
   const elemType = collectionElementType(domain.type.type);
   const refinedType: Type = elemType ?? 'number';
 
-  // 1. Symbolic solve (equations only), then membership filter.
-  if (isEquation) {
+  // The evaluation of a predicate with a float compares numbers within the
+  // tolerance of the engine: `2 = 2.0000000000001` is `True`. Over a
+  // discrete domain (integer or rational elements, or a finite count), an
+  // element that is not a root can then satisfy the equation, and a root
+  // can be a value that is not an element:
+  // - `Solve(x = 2.0000000000001, x ∈ ℤ)` has the root `2.0000000000001`,
+  //   which is not an integer, but the equation is `True` at `x = 2`;
+  // - `Solve(x = 2.5, x ∈ List(2.5, 2.50000000001))`: the equation is `True`
+  //   at each element, not only at the root `2.5`;
+  // - `Solve(x = 2.0000000000001, x ∈ Range(0, 10, 0.5))` has the root
+  //   `2.0000000000001`, which is not an element: the answer is `[2]`.
+  // Thus the symbolic roots are not used. A domain whose count is within the
+  // budget of the interpreter is enumerated, and each element is checked by
+  // the evaluation. Another domain gives no answer: `Solve(x = 2.5, x ∈ ℤ)`,
+  // `Solve(x² = -4.0000000001, x ∈ ℤ)` and
+  // `Solve(x = 2.0000000000001, x ∈ Range(0, 100000))` stay unevaluated.
+  // The integers near a root are not a test: the tolerance applies to the
+  // values of the two sides, not to the value of the unknown. The root of
+  // `10^{-12}·x = 5·10^{-13}` (with floats) is `0.5`, and the equation is
+  // `True` at each integer from `-99` to `100`.
+  // Over a domain of real or complex numbers (`Interval`, `RealNumbers`),
+  // the roots are the values of the list, and the values within the
+  // tolerance of a root are not listed: over `Interval(-10, 10)` the answer
+  // is `[2.0000000000001]`, and a root that the domain removes is not a
+  // solution.
+  const inexact = hasInexactLiteral(ceq);
+  const discreteInexact =
+    inexact &&
+    (isSubtype(refinedType, 'rational') || isFiniteCount(domain.count));
+  if (discreteInexact) {
+    const count = smallCount(domain);
+    if (
+      count === undefined ||
+      !Number.isFinite(count) ||
+      count > MAX_SOLVE_ENUMERATION_INTERPRETED
+    )
+      return undefined;
+  }
+
+  // 1. Symbolic solve (equations only), then membership filter. A predicate
+  // with a float over a discrete domain is enumerated (see above).
+  if (isEquation && !discreteInexact) {
     const stats = {
       candidates: false,
       undecided: false,
@@ -1483,15 +1523,28 @@ export function solveOverDomain(
     }
   }
 
-  // 2. Enumeration fallback.
+  // 2. Enumeration fallback. A chain `a = b = c` that cannot be enumerated
+  // (an `Interval`, or a domain over budget) is solved by one of its links
+  // (`chainRootsByLink()`).
   const count = smallCount(domain);
-  if (count === undefined || !Number.isFinite(count)) return undefined;
+  if (count === undefined || !Number.isFinite(count))
+    return chainRootsByLink(ce, ceq, spec, sideConditions);
 
   // Compile the predicate as a lambda `unknown ↦ predBody`. Only a genuine
   // compilation (`success`) enables the larger budget and the float sieve; the
   // interpreter fallback (`success: false`) uses the exact path directly.
+  // A chain is not compiled (`isUncompiledChain()`). A predicate with a float
+  // is not compiled: the float sieve can remove an element that the
+  // evaluation accepts within the tolerance. The residual of
+  // `x² = 4.0000000001` at `x = 2` is `-1e-10` for the evaluation, which is
+  // within the tolerance `1e-10`, but `-1.00000008e-10` for the compiled
+  // function, which is not. `x² ≤ 3.9999999999999` is `True` at `x = ±2` for
+  // the evaluation, but not for the compiled function. Thus a predicate with
+  // a float has the budget of the interpreter: over a `Range` of more than
+  // 10,000 elements, it gives no answer.
   const fnLit = ce.function('Function', [predBody, ce.symbol(unknown)]);
-  const compiled = implicitCompile(ce, fnLit);
+  const compiled =
+    isUncompiledChain(ceq) || inexact ? undefined : implicitCompile(ce, fnLit);
   const useCompiled =
     compiled !== undefined &&
     compiled.success === true &&
@@ -1504,7 +1557,8 @@ export function solveOverDomain(
   const budget = useCompiled
     ? MAX_SOLVE_ENUMERATION_COMPILED
     : MAX_SOLVE_ENUMERATION_INTERPRETED;
-  if (count > budget) return undefined; // over budget → stay inert
+  // Over budget: stay inert, or solve a chain by one of its links.
+  if (count > budget) return chainRootsByLink(ce, ceq, spec, sideConditions);
 
   const tol = ce.tolerance;
 
@@ -1546,6 +1600,114 @@ export function solveOverDomain(
 }
 
 /**
+ * Solve a chain of equalities `a = b = c = …` (an `Equal` with 3 or more
+ * operands) over the domain of `spec` when the domain cannot be enumerated.
+ *
+ * A solution of the chain is a root of each of its links `a = b`, `b = c`,
+ * …. Thus its solutions are the roots of one link at which the whole chain
+ * is `True`. The link is solved over the same domain, with the same
+ * condition and side conditions, by `solveOverDomain()`: a list from it
+ * holds all the roots of that link in the domain, thus the filtered list
+ * holds all the roots of the chain. `Solve(x² = 4 = x + 2, x ∈ [-10, 10])`
+ * gives `[2]`: the roots of `x² = 4` are `-2` and `2`, and at `-2` the
+ * chain is `4 = 4 = 0`, which is `False`.
+ *
+ * Each root is checked with the whole chain, not with each other link: the
+ * evaluation of a chain compares its first numeric side with each later
+ * side, with the tolerance of the engine. Two adjacent links can each be
+ * `True` while the chain is `False`: with the tolerance `1e-10`,
+ * `2 = 2.00000000008` and `2.00000000008 = 2.00000000016` are `True`, but
+ * `2 = 2.00000000008 = 2.00000000016` is `False`. A chain with a float
+ * gives no answer here (see below), but the check with the whole chain
+ * stays the same check as the enumeration of a `Range` does.
+ *
+ * The links are tried in order, and the first link that gives an answer is
+ * used. A link gives no answer when:
+ * - `solveOverDomain()` gives no answer for it: the link has no unknown, it
+ *   is an identity (`x = x`), or it has infinitely many roots (`x = |x|`).
+ *   `Solve(x = |x| = 2, x ∈ [-10, 10])` gives `[2]` from the link `|x| = 2`;
+ * - a root has a symbol that is not a free symbol of the link. Such a
+ *   symbol is a parameter that the solver made for a family of roots (`πt`
+ *   for `sin(x) = 0`), and its name is chosen from the link only. It can
+ *   thus have the name of a symbol of another link: for
+ *   `sin(x) = 0 = x − πt`, the root `πt` makes the last link `0 = 0`, but
+ *   the `t` of the user is not an integer;
+ * - the chain is neither `True` nor `False` at a root (a value that
+ *   evaluation cannot decide, or a parameter of the user, such as `a` in
+ *   `x² = 4 = x + a`): a list without that root could be wrong.
+ *
+ * A chain with a number literal that is not exact (a float such as
+ * `2.0000000000001`) gives no answer. The evaluation of the chain then
+ * accepts values within the tolerance of the engine that are not exact
+ * roots of a link, and the roots of a link do not show these values:
+ * `Solve(x = 2.0000000000001 = 2, x ∈ ℤ)` would give `[]`, because the root
+ * `2.0000000000001` of the first link is not an integer, but the chain is
+ * `True` at `x = 2`. The enumeration of a small `Range` checks each element
+ * with the chain, and gives `[2]`.
+ *
+ * Returns `undefined` (no answer) when `ceq` is not a chain, when it has a
+ * number literal that is not exact, or when no link gives an answer.
+ */
+function chainRootsByLink(
+  ce: ComputeEngine,
+  ceq: Expression,
+  spec: SolveSpec,
+  sideConditions: ReadonlyArray<Expression>
+): Expression[] | undefined {
+  if (!isFunction(ceq, 'Equal') || ceq.nops <= 2) return undefined;
+  if (hasInexactLiteral(ceq)) return undefined;
+  const links = ceq.ops
+    .slice(1)
+    .map((rhs, i) => ce.function('Equal', [ceq.ops[i], rhs]));
+  for (const link of links) {
+    const kept = rootsCheckedByChain(ce, link, ceq, spec, sideConditions);
+    if (kept !== undefined) return kept;
+  }
+  return undefined;
+}
+
+/**
+ * The roots of the link `link` of the chain `chain` over the domain of
+ * `spec` at which the whole chain is `True`. Returns `undefined` when the
+ * link gives no answer (`chainRootsByLink()` lists the cases).
+ */
+function rootsCheckedByChain(
+  ce: ComputeEngine,
+  link: Expression,
+  chain: Expression,
+  spec: SolveSpec,
+  sideConditions: ReadonlyArray<Expression>
+): Expression[] | undefined {
+  const roots = solveOverDomain(ce, link, spec, sideConditions);
+  if (roots === undefined) return undefined;
+  const linkSymbols = new Set(link.unknowns);
+  if (roots.some((root) => root.unknowns.some((s) => !linkSymbols.has(s))))
+    return undefined;
+  const kept: Expression[] = [];
+  for (const root of roots) {
+    const value = sym(chain.subs({ [spec.unknown]: root }).evaluate());
+    if (value === 'True') kept.push(root);
+    else if (value !== 'False') return undefined;
+  }
+  return kept;
+}
+
+/**
+ * Return `true` when `ceq` is a chain of equalities `a = b = c = …` (an
+ * `Equal` with 3 or more operands). The enumeration does not compile such a
+ * chain for its float sieve. The compiled chain compares its sides with
+ * `===`, but the interpreter compares them with the tolerance of the
+ * engine: `2 = 2 = 2.0000000000001` is `True` for the interpreter and
+ * `false` for the compiled code. The sieve would then remove a solution
+ * (`Solve(x = 2 = 2.0000000000001, x ∈ -10..10)` gave `[]`). Each
+ * candidate is checked by the interpreter instead, with the budget of the
+ * interpreter.
+ */
+function isUncompiledChain(ceq: Expression): boolean {
+  return isFunction(ceq, 'Equal') && ceq.nops > 2;
+}
+
+/**
  * Classify a canonical equation/predicate for enumeration:
  * - an `Equal` (or a bare numeric expression read as `= 0`) is an *equation*
  *   whose residual body (`lhs - rhs`) is tested against zero;
@@ -1557,9 +1719,11 @@ function classifyPredicate(ceq: Expression): {
   isEquation: boolean;
 } {
   // A chain `a = b = c` has no single residual: `a - b` drops the link
-  // `b = c`. It is a predicate, tested against `True` at each candidate. Thus
-  // a domain that cannot be enumerated gives no answer: `Solve(x² = 4 =
-  // x + 2, x ∈ [-10, 10])` stays unevaluated, although its solution is `2`.
+  // `b = c`. It is a predicate, tested against `True` at each candidate of
+  // an enumerable domain. Over a domain that cannot be enumerated, the
+  // roots of one link are checked with the whole chain
+  // (`chainRootsByLink()`): `Solve(x² = 4 = x + 2, x ∈ [-10, 10])` is
+  // `[2]`.
   if (isFunction(ceq, 'Equal') && ceq.nops > 2)
     return { predBody: ceq, isEquation: false };
   if (isFunction(ceq, 'Equal'))
@@ -1650,11 +1814,17 @@ export function solveOverMultipleDomains(
   // The compiled `run` is positional (`calling === 'lambda'`), its arguments in
   // spec order. Only a genuine compilation enables the larger budget and the
   // float sieve; the interpreter fallback uses the exact path directly.
+  // A chain is not compiled (`isUncompiledChain()`), and a predicate with a
+  // float is not compiled: the float sieve can remove a candidate that the
+  // evaluation accepts within the tolerance (see `solveOverDomain()`).
   const fnLit = ce.function('Function', [
     predBody,
     ...unknowns.map((u) => ce.symbol(u)),
   ]);
-  const compiled = implicitCompile(ce, fnLit);
+  const compiled =
+    isUncompiledChain(ceq) || hasInexactLiteral(ceq)
+      ? undefined
+      : implicitCompile(ce, fnLit);
   const useCompiled =
     compiled !== undefined &&
     compiled.success === true &&

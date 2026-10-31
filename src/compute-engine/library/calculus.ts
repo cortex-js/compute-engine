@@ -31,7 +31,8 @@ import {
   rebindEscaping,
   rebindEscapingCurrentScope,
   liftIntegrand,
-  defaultUnknown,
+  defaultImplicitVariable,
+  implicitVariableCandidates,
   hasSymbolicTranscendental,
   resolveToList,
   collectBinderNames,
@@ -63,6 +64,7 @@ import {
   limitsIndexSites,
   indefiniteIntegralVariables,
 } from '../boxed-expression/binding-sites.js';
+import { isFunctionSymbolName } from '../boxed-expression/implicit-variable-rule.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import {
   boundVariableBindings,
@@ -4852,7 +4854,10 @@ function functionLiteralOf(
 /**
  * The function literal of the first operand of the implicit form of `Limit`
  * and `NLimit`: `Limit(expr, point)` and `Limit(expr, point, direction)`,
- * where the variable is not written.
+ * where the variable is not written. `NIntegrate(expr, a, b)` and
+ * `ND(expr, point)` read their first operand the same way: the variable of
+ * `NIntegrate(√x, 0, 1)` is `x`, also after `x := 4`, so the value is 2/3,
+ * the value of `Integrate(√x, Limits(Nothing, 0, 1))`.
  *
  * The variable is a bound variable. It never takes the value assigned to a
  * symbol of the same name, and the order of boxing and assignment does not
@@ -4904,24 +4909,10 @@ function canonicalImplicitLimitFunction(
   if (params.some((p) => ANONYMOUS_SLOT_NAMES.has(p))) return fn;
 
   // The candidates: the unknowns of the body, and the user symbols that the
-  // body reads and that have a value (the `references` of the body less the
-  // applied functions).
-  const body = fn.op1;
-  const functions = new Set(body.referencedFunctions);
-  const candidates = new Set<string>();
-  // Every unknown stays a candidate, as in `canonicalFunctionLiteral()`: an
-  // unknown can be bound in a scope of its own and still have the name of an
-  // operator in the caller's scope (`N` in `x + N`). The operator test applies
-  // only to the names that `references` adds.
-  const unknowns = new Set(body.unknowns);
-  for (const s of [...body.unknowns, ...body.references]) {
-    if (ANONYMOUS_SLOT_NAMES.has(s) || functions.has(s)) continue;
-    const def = unknowns.has(s) ? undefined : ce.lookupDefinition(s);
-    if (def !== undefined && isOperatorDef(def)) continue;
-    candidates.add(s);
-  }
-  if (candidates.size === 0) return fn;
-  const v = [...candidates].sort()[0];
+  // body reads and that have a value (`implicitVariableCandidates`).
+  const candidates = implicitVariableCandidates(fn.op1);
+  if (candidates.length === 0) return fn;
+  const v = candidates[0];
   // The literal has the variable as its one parameter. The other symbols are
   // free: a literal `Function(y·z, y, z)` would make `z` a parameter that the
   // limit never binds, and compiled code read it as an unbound parameter
@@ -4933,6 +4924,63 @@ function canonicalImplicitLimitFunction(
       ce.symbol(v, { canonical: false }),
     ]) ?? fn
   );
+}
+
+/**
+ * The function literal of the integrand of `Integrate` when no limit names
+ * a variable (`Integrate(√x, Limits(Nothing, 0, 1))`), or `undefined` to
+ * keep `fn`, the literal that `canonicalFunctionLiteral()` made from the
+ * unknowns of `integrand`.
+ *
+ * The parameters are the implicit variables: the first symbols of the body
+ * in sorted order (`implicitVariableCandidates`), one for each limit that
+ * names no variable. A symbol with an assigned value is a candidate, so the
+ * order of boxing and assignment does not change the variables: after
+ * `x := 4`, the parameter of `√x` is `x`, and the integral is 2/3. When
+ * nothing has a value and there is one symbol for each limit, the
+ * parameters are those of `fn`. The other symbols are free, as in the
+ * implicit form of `Limit`: with `Function(x·y, x, y)` and one limit, `y`
+ * was a parameter that the integral never binds, and compiled code read the
+ * value of `y` where the interpreter kept the symbol `y`.
+ *
+ * A bare-symbol integrand, a `Function` literal and a literal with
+ * anonymous slots (`_`) keep `fn`, because they name their own parameters
+ * or are not a literal.
+ */
+function implicitLiteralParameters(
+  ce: ComputeEngine,
+  integrand: Expression,
+  fn: Expression,
+  limits: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (
+    isSymbol(integrand) ||
+    isFunction(integrand, 'Function') ||
+    !isFunction(fn, 'Function')
+  )
+    return undefined;
+  const params = fn.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  if (params.some((p) => p === '' || ANONYMOUS_SLOT_NAMES.has(p)))
+    return undefined;
+  const count = limits.filter(
+    (l) => isFunction(l, 'Limits') && sym(l.op1) === 'Nothing'
+  ).length;
+  if (count === 0) return undefined;
+  const chosen = implicitVariableCandidates(fn.op1).slice(0, count);
+  if (
+    chosen.length === params.length &&
+    chosen.every((v, i) => v === params[i])
+  )
+    return undefined;
+  // No candidate (every symbol of the body cannot hold a number, as `L` in
+  // `Length(L)` with `L: list<integer>`): the literal has no parameter, and
+  // its symbols keep their values. `canonicalFunctionLiteral()` reads an
+  // empty parameter list as "infer the parameters", and would bind `L`.
+  if (chosen.length === 0)
+    return canonicalFunctionLiteralArguments(ce, [integrand]);
+  return canonicalFunctionLiteral(integrand, {
+    params: chosen.map((v) => ce.symbol(v, { canonical: false })),
+  });
 }
 
 /**
@@ -5695,16 +5743,33 @@ volumes
         }
 
         // The differentiation variable may be omitted (`D(expr)`, e.g. from
-        // `expr |> D`): default to the expression's single free variable, or
-        // to `x` when there are several and one of them is `x`. A function
-        // symbol (`D(f)`) is excluded — it is handled by the function-symbol
-        // branch below, and must not have the inferred variable fed into its
+        // `expr |> D`): default to the expression's single symbol, or to `x`
+        // when there are several and one of them is `x`. A symbol with an
+        // assigned value is a candidate too, so the variable does not depend
+        // on whether the value was assigned before or after boxing
+        // (`defaultImplicitVariable`). The variable becomes the parameter of
+        // the function literal below, which hides the assigned value. The
+        // candidates are read from the CANONICAL operand, as for `Series` and
+        // `Limit`: in the held operand, an integral with no variable,
+        // `Integrate(x·y, Limits(0, 1))`, is not yet in the form that tells
+        // which symbol it binds, and `x` was read as free. A function symbol
+        // (`D(f)`) is excluded — it is handled by the function-symbol branch
+        // below, and must not have the inferred variable fed into its
         // argument list.
-        if (
-          ops.length === 1 &&
-          !(isSymbol(ops[0]) && ops[0].canonical.operatorDefinition)
-        ) {
-          const v = defaultUnknown(ops[0]);
+        //
+        // A function symbol is a symbol with an operator definition
+        // (`f(x) := 2x`) or a symbol whose DECLARED type is a function
+        // (`ce.declare('f', 'function')`, with or without a value): the
+        // second has a value definition, not an operator definition
+        // (`isFunctionSymbolName()`). The LaTeX serializer uses the same
+        // test to choose the spelling of `D(x ↦ f, x)`.
+        const operand = ops[0];
+        const isFunctionSymbol =
+          isSymbol(operand) &&
+          (operand.canonical.operatorDefinition !== undefined ||
+            isFunctionSymbolName(ce, operand.symbol));
+        if (ops.length === 1 && !isFunctionSymbol) {
+          const v = defaultImplicitVariable(ops[0].canonical);
           if (v !== undefined) ops = [ops[0], ce.symbol(v)];
         }
 
@@ -5724,7 +5789,7 @@ volumes
         // If the first argument is a function symbol (e.g., f where f(x):=2x),
         // apply it to the differentiation variables to produce a function call.
         // e.g., ['D', 'f', 'x'] → ['D', ['f', 'x'], 'x']
-        if (isSymbol(ops[0]) && ops[0].canonical.operatorDefinition) {
+        if (isFunctionSymbol && isSymbol(ops[0])) {
           const vars = ops.slice(1);
           const fCall = ce.function(ops[0].symbol, vars);
           return ce._fn('D', [fCall, ...vars], { scope });
@@ -5912,7 +5977,9 @@ volumes
         // A `Return` in an operand has no function to end (ROADMAP CE-96).
         const returnError = canonicalWithEscapingReturn(engine, 'ND', ops);
         if (returnError) return returnError;
-        const fn = canonicalFunctionLiteral(ops[0]);
+        // The variable is not written: it is chosen as for the implicit form
+        // of `Limit`, from the symbols of the body with or without a value.
+        const fn = canonicalImplicitLimitFunction(engine, ops[0]);
         if (!fn) return null;
         const x = checkOperandType(engine, ops[1]?.canonical, 'number');
         return engine._fn('ND', [fn, x]);
@@ -6385,11 +6452,26 @@ volumes
         if (isSymbol(integrand))
           integrand = devolveValueElements(ce, [integrand])[0];
 
-        const f = canonicalFunctionLiteral(
+        let f = canonicalFunctionLiteral(
           integrand,
           vars.length > 0 ? { params: vars } : undefined
         );
         if (!f) return null;
+
+        // When no limit names a variable (`\int_0^1 \sqrt{x}`, with no
+        // `dx`), the parameters of the literal are the implicit variables:
+        // the first symbols of the integrand in sorted order, one for each
+        // limit. A symbol with an assigned value is a candidate too
+        // (`implicitVariableCandidates`), and as a parameter it is a bound
+        // variable that hides the value. So after `x := 4`, `∫₀¹ √x` is
+        // 2/3, as it is when `x` gets its value after boxing. The other
+        // symbols of the integrand stay free: a parameter that no limit
+        // binds would be read as a constant by compiled code and as a
+        // symbol by the interpreter.
+        if (vars.length === 0) {
+          const implicit = implicitLiteralParameters(ce, integrand, f, limits);
+          if (implicit) f = implicit;
+        }
 
         return ce._fn('Integrate', [f, ...limits]);
       },
@@ -8003,7 +8085,9 @@ volumes
         );
         if (returnError) return returnError;
         const [body, lower, upper] = ops;
-        const fn = canonicalFunctionLiteral(body);
+        // The variable is not written: it is chosen as for the implicit form
+        // of `Limit`, from the symbols of the body with or without a value.
+        const fn = canonicalImplicitLimitFunction(engine, body);
         if (!fn) return null;
         // The two bounds are numbers. A `Tuple` of bounds
         // (`NIntegrate(f, (0, 2))`) or a missing bound is an error operand,
@@ -8571,13 +8655,24 @@ volumes
       canonical: (ops, { engine: ce }) => {
         const f = ops[0]?.canonical;
         if (!f) return null;
-        let x = ops[1];
+        const x = ops[1];
         // The expansion variable may be omitted (`Series(expr)`, e.g. from
-        // `expr |> Series`): default to the expression's single free
-        // variable, or to `x` when there are several and one of them is `x`.
+        // `expr |> Series`): default to the expression's single symbol, or
+        // to `x` when there are several and one of them is `x`. A symbol
+        // with an assigned value is a candidate too, so the variable does
+        // not depend on whether the value was assigned before or after
+        // boxing (`defaultImplicitVariable`). The expression is then boxed
+        // again with the variable written, so that the framework binds the
+        // variable in the scope of this node and the body reads the bound
+        // variable, not the assigned value. The result is the same as the
+        // form with the variable written.
         if (x === undefined) {
-          const v = defaultUnknown(f);
-          if (v !== undefined) x = ce.symbol(v);
+          const v = defaultImplicitVariable(f);
+          if (v === undefined) return null;
+          return ce.function('Series', [
+            ops[0],
+            ce.symbol(v, { canonical: false }),
+          ]);
         }
         if (!x || !isSymbol(x)) return null;
         const x0 = ops[2] ? ops[2].canonical : ce.Zero;

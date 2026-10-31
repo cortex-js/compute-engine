@@ -184,10 +184,46 @@ The governing value rule is:
 > but an assigned value of the same name does not. Free symbols resolve their
 > values normally.
 
-The implicit forms `Limit(expr, point)` and `NLimit(expr, point)` do not write
-their variable. It is found from the symbols written in `expr`, assigned or
-not (the first of them in sorted order, as for the unknowns of an unassigned body),
-so an assignment made before or after boxing does not change it.
+Some forms do not write their variable: `Limit(expr, point)`,
+`NLimit(expr, point)`, `NIntegrate(expr, a, b)`, `ND(expr, point)`,
+`Integrate(expr, Limits(Nothing, a, b))` (from `\int_a^b expr` with no `dx`),
+`D(expr)` and `Series(expr)`. The variable is found from the symbols written in
+`expr`, assigned or not: a constant (`Pi`), a library symbol, a function name,
+a symbol bound inside `expr`, and a symbol whose declared type, or the type of
+whose value, cannot hold a number (a list, a string, a boolean, a function) are
+not candidates. The variable is a bound variable that hides the assigned
+value: after `x := 4`, `\int_0^1 \sqrt{x}` is 2/3, and `D(x^3)` is `3x^2`.
+When nothing is assigned, the candidates are the unknowns of `expr`.
+
+Boxing before or after an assignment gives the same result only when one of
+these is true for each assigned symbol of `expr`:
+
+- the assigned value is a number;
+- the symbol was declared, before boxing, with a type that cannot hold a
+  number (`list<integer>`, `string`, `function`).
+
+In other cases the two orders can differ. A symbol with no declared type has
+an unknown type at boxing, so it is a candidate: boxed before
+`L := [1, 2, 3]`, `Integrate(Sum(L)·t, Limits(0, 1))` takes `L` as its
+variable; boxed after, it takes `t`.
+
+The variable of a definite limit of `Integrate` that names no variable is
+bound in the integrand, as a written variable is: it is not an unknown of the
+integral (`implicitIntegralVariables()` in `binding-sites.ts`). So in
+`\int_0^1\int_0^1 xy`, the inner integral binds `x` and the outer one takes
+`y`.
+
+- `Limit`, `NLimit`, `NIntegrate` and `ND` take the first candidate in sorted
+  order (code-unit order: `y` for `y·z`, `a` for `a·x`).
+- `Integrate` gives each limit that names no variable the next candidate in
+  sorted order, when no limit names a variable. A candidate that no limit takes
+  stays a free symbol.
+- `D` and `Series` take the single candidate, or `x` when there are several
+  candidates and one of them is `x`. With several candidates and no `x`, there
+  is no variable and the expression stays unevaluated.
+
+The implementation is `implicitVariableCandidates()` and
+`defaultImplicitVariable()` in `src/compute-engine/boxed-expression/utils.ts`.
 
 Shielding is implemented by a valueless shadow binding with the original type,
 not by renaming or by head-specific substitution. Binding tombstones prevent a
