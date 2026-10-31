@@ -527,7 +527,9 @@
   an undecided verdict was read as `False`, so the leading run was taken to
   end at `6`. The views, their `Length` and their materialization now stay
   unevaluated, as `Filter` does. This also applies to a predicate that calls
-  an operator with only an `evaluateAsync` handler, under `evaluate()`.
+  an operator with only an `evaluateAsync` handler, under `evaluate()`. The
+  compiled JavaScript function, run with no value for `z`, still gives `[]`
+  and `[6, 7]`, as it gives `[]` for `Filter` (ROADMAP CE-710).
 
 - **A numeric integral with a step or a bump next to a singular bound reports
   an error that covers its true error** (ROADMAP CE-691).

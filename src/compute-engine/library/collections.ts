@@ -15290,7 +15290,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // An element-valued predicate failure is EMITTED by the iterator (see
         // `predicateErrorValue`), so the prefix holds that one `Error` element
         // and the result is not empty.
-        return predicateErrorValue(applied) === undefined;
+        if (predicateErrorValue(applied) !== undefined) return false;
+        // An undecided verdict (`isUndecidedVerdict`) does not decide whether
+        // the first element is in the prefix.
+        if (applied !== undefined && isUndecidedVerdict(applied))
+          return undefined;
+        return true;
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -15324,7 +15329,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             const pred = f([value]);
             // A predicate that cannot be applied at all is a broken predicate:
             // throw, as Filter does. Otherwise take while the result is exactly
-            // True; stop at the first non-True result (False OR undetermined).
+            // True, and stop at the first result that is not True.
             if (pred === undefined) {
               throw new Error(
                 `Invalid TakeWhile predicate. ${spellCheckMessage(expr.op2)}`
@@ -15340,6 +15345,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // terminate: no later element can be in the prefix either.
             const err = predicateErrorValue(pred);
             if (err) return { value: err, done: false };
+            // An undecided verdict (`0 < z` for a `z` with no value, or a call
+            // that only `evaluateAsync()` can run; see `isUndecidedVerdict`)
+            // does not say whether the prefix ends here. The walk ends, and
+            // records that it missed an element (`noteIncompleteWalk()`), so
+            // that every reader of the walk (the evaluation of the
+            // `TakeWhile`, its count, its elements) stays unevaluated, as for
+            // `Filter`. A stop would claim that the prefix ends here:
+            // `TakeWhile([6, 7], y ↦ y > z)` is not `[]`.
+            if (isUndecidedVerdict(pred)) noteIncompleteWalk();
             return { value: undefined, done: true };
           },
         };
@@ -15475,6 +15489,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 // and passes through unchanged.
                 const err = predicateErrorValue(pred);
                 if (err) return { value: err, done: false };
+                // An undecided verdict (see `isUndecidedVerdict`) does not say
+                // whether the dropped run ends here, so no element after it is
+                // known to be in the result. The walk ends, and records that
+                // it missed an element (`noteIncompleteWalk()`), as the walk
+                // of `TakeWhile` does.
+                if (pred !== undefined && isUndecidedVerdict(pred)) {
+                  noteIncompleteWalk();
+                  return { value: undefined, done: true };
+                }
               }
               return { value, done: false };
             }
