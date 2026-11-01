@@ -260,6 +260,7 @@ import {
   // stamp is a STATEMENT-route concern and is deliberately absent from the
   // host API's options, which is what keeps host declarations unstamped.
   declareType,
+  markStatementDeclaration,
   retireBindingRecord,
 } from '../engine-declarations.js';
 import type { SumTypeVariant } from '../engine-declarations.js';
@@ -14057,7 +14058,10 @@ function* declareSteps(
       if (boundHasValue) def.value = boundValue;
       if (holdUntil) def.holdUntil = holdUntil;
       if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
-      ce.declare(symbolName, def);
+      // The statement also declares block-local bindings, whose writer
+      // closures must stay installable, so it does not enforce the
+      // default-`!scope` ceiling of `ce.declare()` (`markStatementDeclaration`).
+      ce.declare(symbolName, markStatementDeclaration(def));
       const created = ce.context.lexicalScope.bindings.get(symbolName);
       if (created)
         (created as { _declaredByStatement?: boolean })._declaredByStatement =

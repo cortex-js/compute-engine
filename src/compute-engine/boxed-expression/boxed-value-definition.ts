@@ -88,7 +88,7 @@ import {
   noteDefinitionCapturedTypes,
   signatureArgumentsOfSlots,
 } from './function-literal.js';
-import { isLatexString } from '../latex-syntax/utils.js';
+import { asLatexString, isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
@@ -193,6 +193,43 @@ const LIVE_TYPE_IN_FLIGHT = new Set<object>();
 /** The number of such re-entrant reads so far. Compared before and after a
  * computation, as `cycleDetectionCount()` is. */
 let liveTypeReentries = 0;
+/**
+ * Preparations of the value of a value definition, keyed by the definition
+ * object that is given to the constructor. See `prepareValueWhenBoxed()`.
+ */
+type ValuePreparation = (
+  def: Partial<ValueDefinition>,
+  value: Expression
+) => Partial<ValueDefinition>;
+const VALUE_PREPARATIONS = new WeakMap<object, ValuePreparation>();
+
+/**
+ * Prepare the value of `def` when a `_BoxedValueDefinition` is made from
+ * `def`: the constructor first converts the value (LaTeX, MathJSON, or a
+ * function that makes it) to an expression, then gives `def`, with the
+ * converted value, and the converted value to `prepare`, and is made from the
+ * definition that `prepare` returns (for example a reconciled function literal
+ * and a refined type). `prepare` can also throw to refuse the value.
+ *
+ * The constructor converts the value in the declaring scope, after the
+ * declaration installs the placeholder binding of the name, and with no
+ * temporary assumption in force; a preparation made before the declaration
+ * would see a different expression. A preparation that throws stops the
+ * construction, and the declaration then restores the previous binding
+ * (`declareSymbolValue()`). A constant keeps the original value as the one to
+ * compute again on a configuration change, and that computation is not
+ * prepared again.
+ *
+ * `def` must be an object that only this declaration uses: the preparation
+ * stays with the object.
+ */
+export function prepareValueWhenBoxed(
+  def: object,
+  prepare: ValuePreparation
+): void {
+  VALUE_PREPARATIONS.set(def, prepare);
+}
+
 export class _BoxedValueDefinition
   implements BoxedValueDefinition, ConfigurationChangeListener
 {
@@ -467,6 +504,15 @@ export class _BoxedValueDefinition
   ): void {
     const ce = this._engine;
 
+    // The value as the declaration gives it: a constant computes it again on
+    // a configuration change.
+    const givenValue = def.value;
+    const prepare = VALUE_PREPARATIONS.get(def);
+    if (prepare !== undefined) {
+      const value = dynamicValue(ce, def.value);
+      if (value !== undefined) def = prepare({ ...def, value }, value);
+    }
+
     if (def.wikidata) this.wikidata = def.wikidata;
     if (def.description) this.description = def.description;
     if (def.keywords) this.keywords = def.keywords;
@@ -480,7 +526,7 @@ export class _BoxedValueDefinition
     if (def.isConstant) {
       this._isConstant = def.isConstant;
       // Note it's OK for a constant to have no value (e.g. True)
-      this._defValue = def.value;
+      this._defValue = givenValue;
     }
 
     if (def.type) {
@@ -1893,6 +1939,9 @@ export class _BoxedValueDefinition
   }
 }
 
+/** The value of a value definition as an expression: a LaTeX string is
+ * parsed, a function is called once, MathJSON is boxed, and an expression is
+ * returned as it is. */
 function dynamicValue(
   ce: ComputeEngine,
   value:
@@ -1903,8 +1952,10 @@ function dynamicValue(
 ) {
   if (value === undefined) return undefined;
 
+  // A LaTeX string is delimited by `$` or `$$`; the parser reads only what is
+  // between the delimiters.
   if (isLatexString(value))
-    return ce.expr(parseLatex(value as string) ?? 'Undefined');
+    return ce.expr(parseLatex(asLatexString(value) ?? '') ?? 'Undefined');
 
   if (typeof value === 'function') return ce.expr(value(ce) ?? 'Undefined');
 

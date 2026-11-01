@@ -418,12 +418,16 @@ zero in the real-program corpus. Mechanics:
   callers. This supersedes the 2026-08-01 bare-specifier arc for the
   `scope` label on this route: a bare declared arrow still re-stamps
   freely for every other label (the arc's tests are retold with
-  `random`), but an escaping writer is refused. **Known residual**: the
-  declare-WITH-value route (`ce.declare(f, { type, value: literal })`)
-  stays ungated — it shares its code path with block-local `let`
-  bindings, whose writer closures must remain installable, and no
-  global-vs-local discriminator exists at that seam. Tracked in
-  `ROADMAP.md`.
+  `random`), but an escaping writer is refused. The declare-WITH-value
+  route (`ce.declare(f, { type, value: literal })`, or `{ value: literal }`
+  with no type) runs the same refusal for a declaration in the global
+  scope. **Known residual**: a `Declare` statement is not gated. It
+  serves block-local `let` bindings, whose writer closures must remain
+  installable, and also top-level Epsil `let` declarations, which the
+  static pass evaluates under pushed scopes, so neither the statement nor
+  the scope depth tells the two apart. A declaration in a nested scope is
+  not gated either: the engine binds function arguments and closure
+  captures there. Tracked in `ROADMAP.md`, CE-58.
 
 **Reads of non-local scope are not an effect.** Every expression with a
 free symbol reads the ambient scope; a label would infect essentially

@@ -2343,6 +2343,249 @@ describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
   });
 });
 
+describe('CE-58: the default-`!scope` ceiling on `ce.declare()` with a value', () => {
+  const writer = (counter: string) => [
+    'Function',
+    ['Block', ['Assign', counter, ['Add', counter, 1]], counter],
+  ];
+  const engineWithCounter = () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'dv_ctr', 0]).evaluate();
+    return ce;
+  };
+  const thrownBy = (f: () => void): unknown => {
+    try {
+      f();
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  };
+
+  it('a declared signature with no stated effects refuses an escaping writer', () => {
+    const ce = engineWithCounter();
+    const e = thrownBy(() =>
+      ce.declare('dv_f', {
+        type: '() -> number',
+        value: ce.box(writer('dv_ctr')),
+      })
+    );
+    expect(isEffectContractError(e)).toBe(true);
+    // Not installed, and the counter never moved.
+    expect(ce.lookupDefinition('dv_f')).toBeUndefined();
+    expect(ce.box('dv_ctr').evaluate().re).toBe(0);
+  });
+
+  it('a value with no type refuses an escaping writer', () => {
+    const ce = engineWithCounter();
+    const e = thrownBy(() =>
+      ce.declare('dv_f', { value: ce.box(writer('dv_ctr')) })
+    );
+    expect(isEffectContractError(e)).toBe(true);
+    expect(ce.lookupDefinition('dv_f')).toBeUndefined();
+  });
+
+  it('the stated `scope` contract opts in, and the write works', () => {
+    const ce = engineWithCounter();
+    ce.declare('dv_f', {
+      type: '() scope -> number',
+      value: ce.box(writer('dv_ctr')),
+    });
+    expect(ce.box(['dv_f']).evaluate().re).toBe(1);
+    expect(ce.box('dv_ctr').evaluate().re).toBe(1);
+  });
+
+  it('a body that writes only its own local installs', () => {
+    const ce = engineWithCounter();
+    ce.declare('dv_f', {
+      type: '() -> number',
+      value: ce.box([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'k', 'integer', 1],
+          ['Assign', 'k', ['Add', 'k', 1]],
+          'k',
+        ],
+      ]),
+    });
+    expect(ce.box(['dv_f']).evaluate().re).toBe(2);
+  });
+
+  it('a declaration in a nested host scope is not refused', () => {
+    const ce = engineWithCounter();
+    ce.pushScope();
+    ce.declare('dv_f', {
+      type: '() -> number',
+      value: ce.box(writer('dv_ctr')),
+    });
+    expect(ce.box(['dv_f']).evaluate().re).toBe(1);
+    ce.popScope();
+  });
+
+  it('a MathJSON, LaTeX or function value is checked too', () => {
+    const latex =
+      '$()\\mapsto\\left(\\mathrm{Assign}(\\mathrm{dv_ctr}, \\mathrm{dv_ctr}+1); \\mathrm{dv_ctr}\\right)$';
+    const values: [string, () => unknown][] = [
+      ['MathJSON', () => writer('dv_ctr')],
+      ['LaTeX', () => latex],
+      ['function', () => (ce: ComputeEngine) => ce.box(writer('dv_ctr'))],
+    ];
+    for (const [label, value] of values)
+      for (const type of [undefined, '() -> number']) {
+        const ce = engineWithCounter();
+        const e = thrownBy(() =>
+          ce.declare('dv_f', {
+            ...(type === undefined ? {} : { type }),
+            value: value() as any,
+          })
+        );
+        expect([label, type, isEffectContractError(e)]).toEqual([
+          label,
+          type,
+          true,
+        ]);
+        expect(ce.lookupDefinition('dv_f')).toBeUndefined();
+      }
+  });
+
+  it('a LaTeX value is parsed without its `$` delimiters', () => {
+    const ce = new ComputeEngine();
+    ce.declare('dv_x', { value: '$1+2$' });
+    ce.declare('dv_y', { value: '$$1+2$$' });
+    expect(ce.box('dv_x').evaluate().re).toBe(3);
+    expect(ce.box('dv_y').evaluate().re).toBe(3);
+  });
+
+  it('a literal that states its own effects is checked against them', () => {
+    const stated = (effects: string) => [
+      'Function',
+      [
+        'Typed',
+        ['Block', ['Assign', 'dv_ctr', ['Add', 'dv_ctr', 1]], 'dv_ctr'],
+        { str: `() ${effects} -> integer` },
+      ],
+    ];
+    // A stated `scope` opts in, with or without a declared type.
+    for (const type of [undefined, '() -> number']) {
+      const ce = engineWithCounter();
+      ce.declare('dv_f', {
+        ...(type === undefined ? {} : { type }),
+        value: stated('scope') as any,
+      });
+      expect(ce.box(['dv_f']).evaluate().re).toBe(1);
+    }
+    // A stated `pure` is a contract that the body breaks.
+    const ce = engineWithCounter();
+    const e = thrownBy(() =>
+      ce.declare('dv_f', { value: stated('pure') as any })
+    );
+    expect(isEffectContractError(e)).toBe(true);
+    expect(ce.lookupDefinition('dv_f')).toBeUndefined();
+  });
+
+  it('a refused writer leaves the previous binding, or none', () => {
+    const ce = engineWithCounter();
+    expect(
+      isEffectContractError(
+        thrownBy(() => ce.declare('dv_f', { value: writer('dv_ctr') as any }))
+      )
+    ).toBe(true);
+    expect(ce.lookupDefinition('dv_f')).toBeUndefined();
+    // An auto-declared binding (inferred, with no value) stays in place.
+    ce.box('dv_g');
+    const before = ce.lookupDefinition('dv_g');
+    expect(before).toBeDefined();
+    expect(
+      isEffectContractError(
+        thrownBy(() => ce.declare('dv_g', { value: writer('dv_ctr') as any }))
+      )
+    ).toBe(true);
+    expect(ce.lookupDefinition('dv_g')).toBe(before);
+  });
+
+  it('a MathJSON, LaTeX or factory value is reconciled with the declared signature', () => {
+    const literal = ['Function', ['Add', 'x', 1], 'x'];
+    const values: [string, unknown][] = [
+      ['MathJSON', literal],
+      ['LaTeX', '$x\\mapsto x+1$'],
+      ['factory', (e: ComputeEngine) => e.box(literal)],
+    ];
+    for (const [label, value] of values) {
+      const ce = new ComputeEngine();
+      ce.declare('dv_inc', {
+        type: '(integer) -> integer',
+        value: value as any,
+      });
+      expect([label, ce.box('dv_inc').type.toString()]).toEqual([
+        label,
+        '(integer) -> integer',
+      ]);
+      expect([label, ce.box(['dv_inc', 2]).evaluate().re]).toEqual([label, 3]);
+    }
+  });
+
+  it('a recursive MathJSON function value refers to its own name', () => {
+    const ce = new ComputeEngine();
+    ce.declare('dv_fact', {
+      value: [
+        'Function',
+        [
+          'If',
+          ['Less', 'n', 1],
+          1,
+          ['Multiply', 'n', ['dv_fact', ['Subtract', 'n', 1]]],
+        ],
+        'n',
+      ] as any,
+    });
+    expect(ce.box(['dv_fact', 5]).evaluate().re).toBe(120);
+  });
+
+  it('a constant with a factory value is computed again on a precision change', () => {
+    const ce = new ComputeEngine();
+    ce.declare('dv_k', {
+      isConstant: true,
+      value: (e: ComputeEngine) => e.number(e.precision),
+    });
+    const first = ce.box('dv_k').evaluate().re;
+    ce.precision = first + 10;
+    expect(ce.box('dv_k').evaluate().re).toBe(first + 10);
+  });
+
+  it('a factory value does not store a temporary assumption', () => {
+    const ce = new ComputeEngine();
+    ce.declare('dv_q', 'real');
+    ce.assume(ce.box(['Equal', 'dv_q', 5]));
+    ce.declare('dv_v', {
+      value: (e: ComputeEngine) => e.box('dv_q').evaluate(),
+    });
+    // The stored value is the symbol, not the assumed value 5.
+    const def = ce.lookupDefinition('dv_v') as any;
+    expect(def.value.value?.json).toBe('dv_q');
+  });
+
+  it('a `Declare` statement still installs a writer closure', () => {
+    const ce = engineWithCounter();
+    const r = ce
+      .box(['Declare', 'dv_g', { str: '() -> number' }, writer('dv_ctr')])
+      .evaluate();
+    expect(r.operator).not.toBe('Error');
+    expect(ce.box(['dv_g']).evaluate().re).toBe(1);
+    // A block-local `let` of a closure that changes a local of the block.
+    const local = ce
+      .box([
+        'Block',
+        ['Declare', 'dv_c', 'integer', 0],
+        ['Declare', 'dv_bump', { str: '() -> integer' }, writer('dv_c')],
+        ['dv_bump'],
+        ['dv_bump'],
+      ])
+      .evaluate();
+    expect(local.re).toBe(2);
+  });
+});
+
 describe('a return-type ascription does not project the returned lambda', () => {
   // The parser puts the return marker on the body's LAST statement, so a
   // function returning a lambda canonicalizes to

@@ -114,6 +114,7 @@ import type {
 
 import {
   _BoxedValueDefinition,
+  prepareValueWhenBoxed,
   refineConstructorPlaceholder,
 } from './boxed-expression/boxed-value-definition.js';
 import {
@@ -2833,98 +2834,153 @@ export function declareFn(
     let valueDef: Partial<ValueDefinition> = effectsDeclared
       ? { ...def, effectsDeclared }
       : def;
-    if (
-      def.type !== undefined &&
-      isFunction(def.value as Expression | undefined, 'Function')
-    ) {
-      // The resolver makes engine-local type names (`(meters) -> unknown`
-      // with a `type meters = number` alias) parse here, exactly as the
-      // value-definition constructor's own parse does — omitting it threw
-      // before that constructor was reached.
-      const declaredType0 =
-        def.type instanceof BoxedType
-          ? def.type.type
-          : parseType(def.type, ce._typeResolver);
-      // Placeholder refinement, as on the assign routes (two passes — the
-      // second, below, adopts the post-ascription result a pass-through body
-      // only shows after reconciliation): declared `unknown` slots adopt the
-      // literal's inferred slots, and the refined type is what the definition
-      // installs under.
-      // The body's result under the declared parameter types, as on the
-      // assign routes (`resultUnderDeclaredParameters`).
-      const typedResult = resultUnderDeclaredParameters(
-        ce,
-        def.value as Expression,
-        declaredType0
-      );
-      const withTypedResult = (t: Type): Type =>
-        typedResult === undefined ? t : withSignatureResult(t, typedResult);
-      let declaredType = refineDeclaredPlaceholders(
-        declaredType0,
-        withTypedResult((def.value as Expression).type.type)
-      );
-      if (hasFunctionSignature(declaredType)) {
-        // G11 (§2.4) — see the assign path. Checked FIRST, ahead of the
-        // arity/effects assertions: an overload set with a generic arm is not
-        // a shape one erased body can implement, so an arity diagnostic for it
-        // would name the wrong problem. A SINGLE generic signature proceeds
-        // through the ordinary reconciliation below, whose return step knows
-        // not to ascribe a variable-mentioning result (§2.4).
-        if (isPolymorphicType(declaredType))
-          assertSingleArmPolytype(
-            id,
-            def.value as Expression,
-            ce.type(declaredType)
-          );
-        // The literal must be arity-compatible with the declared signature
-        // (mirrors the assign path); otherwise a declared-arity call would
-        // silently partial-apply.
-        assertFunctionLiteralArity(
-          id,
-          def.value as Expression,
-          declaredType,
-          ce.type(declaredType).toString()
-        );
-        // The return is reconciled against the DECLARED result, not the one
-        // refined from the typed result above: that result is CE's derivation,
-        // not the host's contract, and ascribing it wrote a `Typed` marker into
-        // the stored literal (`x ↦ a` with `a: integer` stored
-        // `Typed(a, 'integer')`), which froze the result: a later retype of `a`
-        // could not change the signature. The declared result is `unknown`
-        // whenever there is a typed result, and `unknown` ascribes nothing.
-        const reconciled = reconcileFunctionLiteralReturn(
+    // The default-`!scope` ceiling (`docs/EFFECTS-MODEL.md`, "Scope is
+    // opt-in"): a function literal declared with no stated effects in the
+    // global scope must not write outside itself, as on the
+    // declare-then-assign routes. It is not enforced for a `Declare`
+    // statement (`STATEMENT_DECLARATIONS`), nor in a nested scope, where the
+    // engine binds the arguments of a function application and the captured
+    // values of a closure.
+    const checksScope =
+      scope === ce.contextStack[1]?.lexicalScope &&
+      !STATEMENT_DECLARATIONS.has(def);
+    // The declared-signature reconciliation and the effect checks of a
+    // function literal `value`. They give the definition to install:
+    // `prepared` with the reconciled literal and, when it is refined, the
+    // declared type.
+    const prepare = (
+      prepared: Partial<ValueDefinition>,
+      value: Expression
+    ): Partial<ValueDefinition> => {
+      let out = prepared;
+      let effectsChecked = false;
+      if (def.type !== undefined && isFunction(value, 'Function')) {
+        // The resolver makes engine-local type names (`(meters) -> unknown`
+        // with a `type meters = number` alias) parse here, exactly as the
+        // value-definition constructor's own parse does — omitting it threw
+        // before that constructor was reached.
+        const declaredType0 =
+          def.type instanceof BoxedType
+            ? def.type.type
+            : parseType(def.type, ce._typeResolver);
+        // Placeholder refinement, as on the assign routes (two passes — the
+        // second, below, adopts the post-ascription result a pass-through body
+        // only shows after reconciliation): declared `unknown` slots adopt the
+        // literal's inferred slots, and the refined type is what the definition
+        // installs under.
+        // The body's result under the declared parameter types, as on the
+        // assign routes (`resultUnderDeclaredParameters`).
+        const typedResult = resultUnderDeclaredParameters(
           ce,
-          ascribeDeclaredParameterTypes(
+          value,
+          declaredType0
+        );
+        const withTypedResult = (t: Type): Type =>
+          typedResult === undefined ? t : withSignatureResult(t, typedResult);
+        let declaredType = refineDeclaredPlaceholders(
+          declaredType0,
+          withTypedResult(value.type.type)
+        );
+        if (hasFunctionSignature(declaredType)) {
+          // G11 (§2.4) — see the assign path. Checked FIRST, ahead of the
+          // arity/effects assertions: an overload set with a generic arm is not
+          // a shape one erased body can implement, so an arity diagnostic for it
+          // would name the wrong problem. A SINGLE generic signature proceeds
+          // through the ordinary reconciliation below, whose return step knows
+          // not to ascribe a variable-mentioning result (§2.4).
+          if (isPolymorphicType(declaredType))
+            assertSingleArmPolytype(id, value, ce.type(declaredType));
+          // The literal must be arity-compatible with the declared signature
+          // (mirrors the assign path); otherwise a declared-arity call would
+          // silently partial-apply.
+          assertFunctionLiteralArity(
+            id,
+            value,
+            declaredType,
+            ce.type(declaredType).toString()
+          );
+          // The return is reconciled against the DECLARED result, not the one
+          // refined from the typed result above: that result is CE's derivation,
+          // not the host's contract, and ascribing it wrote a `Typed` marker into
+          // the stored literal (`x ↦ a` with `a: integer` stored
+          // `Typed(a, 'integer')`), which froze the result: a later retype of `a`
+          // could not change the signature. The declared result is `unknown`
+          // whenever there is a typed result, and `unknown` ascribes nothing.
+          const reconciled = reconcileFunctionLiteralReturn(
             ce,
-            def.value as Expression,
-            // As on the assign routes: a placeholder slot is not stamped
-            // (`placeholderSlotsAs`).
-            placeholderSlotsAs(declaredType, declaredType0, 'unknown')
-          ),
-          typedResult === undefined
-            ? declaredType
-            : withSignatureResult(declaredType, 'unknown')
-        );
-        assertDeclaredEffects(id, reconciled, declaredType, effectsDeclared);
-        // Second refinement pass — adopt the post-ascription result.
-        declaredType = refineDeclaredPlaceholders(
-          declaredType,
-          withTypedResult(reconciled.type.type)
-        );
-        valueDef = { ...valueDef, value: reconciled };
+            ascribeDeclaredParameterTypes(
+              ce,
+              value,
+              // As on the assign routes: a placeholder slot is not stamped
+              // (`placeholderSlotsAs`).
+              placeholderSlotsAs(declaredType, declaredType0, 'unknown')
+            ),
+            typedResult === undefined
+              ? declaredType
+              : withSignatureResult(declaredType, 'unknown')
+          );
+          if (checksScope)
+            assertScopeCeiling(
+              ce,
+              id,
+              reconciled,
+              declaredType,
+              effectsDeclared
+            );
+          else
+            assertDeclaredEffects(
+              id,
+              reconciled,
+              declaredType,
+              effectsDeclared
+            );
+          effectsChecked = true;
+          // Second refinement pass — adopt the post-ascription result.
+          declaredType = refineDeclaredPlaceholders(
+            declaredType,
+            withTypedResult(reconciled.type.type)
+          );
+          out = { ...out, value: reconciled };
+        }
+        // A declaration with `unknown` slots installs AS WRITTEN: the value
+        // definition keeps it as its signature skeleton and derives the
+        // refined signature from the stored value on each read
+        // (`_signatureSkeleton`). Installing the refinement instead would
+        // replace the placeholders with the body's type at this moment, and a
+        // head that the body calls and that is bound later could not change
+        // it.
+        if (
+          declaredType !== declaredType0 &&
+          !hasSignaturePlaceholder(declaredType0)
+        )
+          out = { ...out, type: ce.type(declaredType) };
       }
-      // A declaration with `unknown` slots installs AS WRITTEN: the value
-      // definition keeps it as its signature skeleton and derives the
-      // refined signature from the stored value on each read
-      // (`_signatureSkeleton`). Installing the refinement instead would
-      // replace the placeholders with the body's type at this moment, and a
-      // head that the body calls and that is bound later could not change
-      // it.
+      // A literal with no declared signature (`{ value }`, or a type such
+      // as `function`) gets the same ceiling. With no stated effects the
+      // declared type is not read, so `unknown` stands for it.
       if (
-        declaredType !== declaredType0 &&
-        !hasSignaturePlaceholder(declaredType0)
+        checksScope &&
+        !effectsChecked &&
+        !effectsDeclared &&
+        isFunction(value, 'Function')
       )
-        valueDef = { ...valueDef, type: ce.type(declaredType) };
+        assertScopeCeiling(ce, id, value, 'unknown', false);
+      return out;
+    };
+    // A boxed value is prepared here. Any other value (LaTeX, MathJSON, or
+    // a function that makes the value) is prepared by the value-definition
+    // constructor, after it converts the value: it converts it in the
+    // declaring scope, after the placeholder binding that lets a recursive
+    // literal refer to its own name, and with no temporary assumption in
+    // force. When the preparation throws, `declareSymbolValue()` restores
+    // the previous binding.
+    if (isExpression(def.value)) valueDef = prepare(valueDef, def.value);
+    else if (
+      def.value !== undefined &&
+      (def.type !== undefined || (checksScope && !effectsDeclared))
+    ) {
+      valueDef = { ...valueDef };
+      prepareValueWhenBoxed(valueDef, prepare);
     }
     ce._declareSymbolValue(id, valueDef, scope);
     return ce;
@@ -4844,6 +4900,62 @@ function assertFunctionLiteralArity(
 }
 
 /**
+ * The value definitions that the `Declare` operator passes to `ce.declare()`.
+ *
+ * `ce.declare(id, { value })` enforces the default-`!scope` ceiling
+ * (`docs/EFFECTS-MODEL.md`, "Scope is opt-in") only for a declaration in the
+ * global scope that does not come from a `Declare` statement. A `Declare`
+ * statement also declares block-local `let` bindings, and their writer
+ * closures (a closure that changes a local of its enclosing literal) must stay
+ * installable. The scope of the declaration cannot tell the two apart: the
+ * Epsil static pass evaluates top-level declarations under pushed scopes. So
+ * the statement marks its definition object here, and `declareFn()` reads the
+ * mark. A weak set keeps no definition alive.
+ */
+const STATEMENT_DECLARATIONS = new WeakSet<object>();
+
+/** Mark `def` as a definition that a `Declare` statement passes to
+ * `ce.declare()`: the declaration does not enforce the default-`!scope`
+ * ceiling. See `STATEMENT_DECLARATIONS`. */
+export function markStatementDeclaration<T extends object>(def: T): T {
+  STATEMENT_DECLARATIONS.add(def);
+  return def;
+}
+
+/**
+ * The default-`!scope` ceiling of `ce.declare(id, { value: literal })`.
+ *
+ * A literal that states its own effects (a full-signature return marker,
+ * `() scope -> integer`) is a contract when the declaration states none, as on
+ * the `ce.assign()` route: the effects that the walk of its body infers must be
+ * a subset of the stated ones, and the default ceiling does not apply.
+ * Otherwise `assertDeclaredEffects()` checks the literal against the declared
+ * type, and refuses a proven escaping write when no effects are stated.
+ */
+function assertScopeCeiling(
+  ce: IComputeEngine,
+  id: MathJsonSymbol,
+  literal: Expression,
+  declaredType: Type,
+  effectsDeclared: boolean
+): void {
+  if (!effectsDeclared) {
+    const stated = functionLiteralDeclaredEffects(literal);
+    if (stated !== undefined) {
+      const inferred = inferFunctionLiteralEffects(ce, literal, {
+        selfName: id,
+      }).effects;
+      if (!isEffectSubset(inferred, stated))
+        throw new EffectContractError(id, stated, inferred);
+      return;
+    }
+  }
+  assertDeclaredEffects(id, literal, declaredType, effectsDeclared, undefined, {
+    ce,
+  });
+}
+
+/**
  * Whether a declaration's type STATES its arrow's effects — a non-empty
  * specifier, or the `pure` keyword, which builds the stated-empty `effects: []`
  * (ruled 2026-08-01). Either way the statement is IN the type, so this is just
@@ -4897,9 +5009,11 @@ function assertDeclaredEffects(
    * the walk PROVES to write outside itself is refused instead of being
    * accepted-and-restamped. Passed by the declare-then-assign routes —
    * which install a GLOBAL named definition, so the ruling applies — and
-   * left off by the declare-WITH-value route, which also serves
-   * block-local `let` bindings whose writer closures (a closure mutating
-   * its enclosing literal's local) must stay installable. The trigger is
+   * by the declare-WITH-value route for a declaration in the global scope
+   * that does not come from a `Declare` statement. That statement also
+   * serves block-local `let` bindings whose writer closures (a closure
+   * mutating its enclosing literal's local) must stay installable
+   * (`STATEMENT_DECLARATIONS`). The trigger is
    * the walk's proven-mutation bit, never the arrow's `scope` label, so
    * `{any}` conservatism from unresolved forward references stays
    * optimistic. Requires `ce`. */

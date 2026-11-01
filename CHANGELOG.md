@@ -131,6 +131,19 @@
 
 ### Behavior Changes
 
+- **`ce.declare()` with a function value refuses a function that writes
+  outside itself** (CE-58). A named definition that states no effects must not
+  write outside itself (the `scope` effect is opt-in), but
+  `ce.declare('f', { type: '() -> number', value })`, and `{ value }` with no
+  type, installed a function literal that assigns to an outer variable. In the
+  global scope this call now throws the same effect-contract error as
+  `ce.declare('f', '() -> number')` followed by `ce.assign('f', value)`,
+  whether the value is an expression, MathJSON, LaTeX or a function that makes
+  it. Declare the `scope` effect (`'() scope -> number'`, or on the literal
+  itself) to allow the write; a literal that states its effects must keep to
+  them. A `Declare` statement (an Epsil `let`) and a declaration in a nested
+  scope are not changed: block-local writer closures stay installable.
+
 - **A compiled expression declines when an input has no type, and the
   result names the input.** An input (a free symbol of the compiled code)
   whose type is `unknown` or `any` now declines on every target, and
@@ -239,6 +252,10 @@
   call; `F.floor(x)` calls the member.
 
 ### Bug Fixes
+
+- **A LaTeX `value` of `ce.declare()` is parsed** (CE-58). A value such as
+  `'$1+2$'` gave an `unexpected-token` error, because the `$` delimiters were
+  passed to the parser. It now gives `3`.
 
 - **A statistics operator applied to a list literal infers the free symbols of
   the list as numbers** (CE-663). After `Mean([p, q])`, `p` and `q` are typed
@@ -447,7 +464,10 @@
   when the collection is in a list or a dictionary that the function
   returns, in another lazy collection (`Dedup(Map(f, xs))`), or in a
   variable that a returned function reads. A lazy collection created outside
-  every function call is read as before, in the context of its reader.
+  every function call is read as before, in the context of its reader. An
+  operator of the host whose collection calls a function operand when it is
+  read can set the new collection handler flag `callsCallbackOnRead` to get
+  the same behavior.
 
 - **The parameter of a function literal that is applied at once has the type
   of its argument in compiled code** (GitHub issue #498). With `n` declared
