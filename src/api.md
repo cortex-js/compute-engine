@@ -4623,6 +4623,8 @@ type OperandStructure =
      name: string;
      annotated: Type;
      rest: boolean;
+     optional: boolean;
+     default: ParameterDefault;
     }>;
   body: OperandStructure;
  }
@@ -4799,6 +4801,8 @@ Derive this call through Apply rather than resolving head by name.
      `name`: `string`;
      `annotated`: [`Type`](#type-3);
      `rest`: `boolean`;
+     `optional`: `boolean`;
+     `default`: [`ParameterDefault`](#parameterdefault);
     \}\>;
   `body`: [`OperandStructure`](#operandstructure);
  \}
@@ -4810,6 +4814,8 @@ parameters: ReadonlyArray<{
   name: string;
   annotated: Type;
   rest: boolean;
+  optional: boolean;
+  default: ParameterDefault;
 }>;
 ```
 
@@ -4818,7 +4824,11 @@ parameter (`(a, ...rest) => …`): it is always the last entry, it
 takes no annotation, and it binds a tuple of every argument from its
 own position onwards rather than occupying one positional slot. A
 consumer reading arity must therefore treat the entries before it as
-the required count and admit any number after.
+the required count and admit any number after. `optional` marks a
+parameter with a default value (`(x, k = 2) => x * k`), and
+`default` is that value: a call may leave the parameter out, and
+the parameter then receives its default. The parameters with a
+default come after the required ones.
 
 \{
   `kind`: `"tuple"`;
@@ -5496,6 +5506,31 @@ Set it on lazy operators that evaluate a function per element (`Map`,
 Leave it off structural reindexers (`Take`, `Reverse`, `Zip`, …), which
 re-serve their source's elements cheaply — when the source is itself a
 flagged instance, the source's own memo already absorbs the cost.
+
+Default: `false`
+
+</MemberCard>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.callsCallbackOnRead? {#callscallbackonread}
+
+```ts
+callsCallbackOnRead?: boolean;
+```
+
+Set on a lazy operator that calls a function operand when its elements
+are read, not when it is evaluated (`Map`, `Filter`, `Tabulate`, `Fill`,
+…). An instance created during a function call keeps the evaluation
+context of that call, and each read of the instance runs in it, so that
+a name that the callback reads by its binding in the context (the symbol
+default `d` of a parameter `(x, k = d) => x * k`) has the value it had in
+the call, also when the instance is read after the call has returned
+(`boxed-expression/lazy-view-context.ts`).
+
+Leave it off an operator that calls its function operand when it is
+evaluated (`Reduce`, `Sort`), and off an operator with no function
+operand.
 
 Default: `false`
 
@@ -6631,6 +6666,8 @@ type LambdaDefinition = {
   parameters: ReadonlyArray<{
      name: string;
      type: Type | undefined;
+     optional: boolean;
+     default: ParameterDefault;
     }>;
   body: Expression;
 };
@@ -11490,6 +11527,35 @@ return type.
 
 If a `type` handler is provided, the return type of the function should
 be a subtype of the return type in the signature.
+
+**Default values.** An optional parameter can have a default value,
+written after its type: `(x: number, factor: number = 2) -> number`.
+A parameter with a default is optional (it is not also marked `?`).
+The parameters with a default come after the required parameters and
+before the optional parameters without a default.
+
+A default is a number (a finite number, `NaN`, `+oo` or `-oo`), a
+string, `true` or `false`, a symbol, the empty list `[]` or the empty
+dictionary `{}`. A symbol default is the symbol itself, not its value
+when the operator is declared: `over: set = Integers`,
+`mode: symbol<Auto> | symbol<Manual> = Auto`. The symbol need not be
+declared. For another value, declare a constant and give its name.
+
+When the operator is declared, each default is checked against the
+type of its parameter, and the declaration throws if it does not fit:
+a number, a string, a boolean, `[]` or `{}` must match the type, a
+declared symbol must be a valid argument at that parameter, and for a
+parameter typed with literal symbol types the symbol must be one of
+them. A default is refused in an overloaded signature (an intersection
+of signatures), on a parameter whose type mentions a type variable, and
+anywhere other than the parameters of the top-level signature (for
+example in the type of a parameter that is itself a function).
+
+A call that leaves out a parameter with a default receives the default
+when it is canonicalized: `Scaled(3)` is the same expression as
+`Scaled(3, 2)`, and the `evaluate` handler, the `type` handler and the
+compiler see two operands. The default is inserted only when every
+required parameter has an argument. The signature prints the default.
 
 #### OperatorDefinition.inferredSignature?
 
