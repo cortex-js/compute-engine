@@ -7699,9 +7699,33 @@ export function captureNestedLocals(
     top = top.parent;
   }
   if (inUse.length === 0) return undefined;
+  // On the asynchronous route, a nested block runs in an activation of its
+  // scope (a copy with its own value definitions), and the chain of the
+  // literal holds the scope that the activation copies, which does not hold
+  // the values of this run. So the bindings are copied from the activation
+  // that is on the context stack (`liveScopeOf`). Copied from the scope
+  // itself, the literal read the local as a free symbol:
+  // `Apply(Function(Apply(Block(Declare(c, 'real', 5), k ↦ c + k), n), n), 1)`
+  // gave `c + 1` with `evaluateAsync()` and `6` with `evaluate()`.
+  //
+  // A copy of an activation is recorded as a run of its block, as
+  // `closeOverBlockRun` records its copies (`BLOCK_RUN_TEMPLATES`). The
+  // literal no longer has the block scope in its chain, so a function that
+  // the block defines (`DefineFunction`), called from the literal after the
+  // block ends, finds the locals of the run through this copy
+  // (`capturedRunOf`). Without it, with
+  // `Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), k ↦ h(k))`
+  // in a function body, `h` read `c` as a free symbol.
   let parent: Scope | null = top;
-  for (let i = inUse.length - 1; i >= 0; i--)
-    parent = snapshotNestedScope(ce, inUse[i], parent);
+  for (let i = inUse.length - 1; i >= 0; i--) {
+    const live = liveScopeOf(ce._evalContextStack, inUse[i]);
+    parent = snapshotNestedScope(ce, live, parent);
+    if (live !== inUse[i] && scopeActivationTemplate(live) === inUse[i]) {
+      if (isStatementListScope(live)) STATEMENT_LIST_SCOPES.add(parent);
+      BLOCK_RUN_TEMPLATES.set(parent.bindings, inUse[i]);
+      TEMPLATES_WITH_BLOCK_RUNS.add(inUse[i]);
+    }
+  }
   return captureClosures(ce, fn, parent!, inUse[0]);
 }
 
@@ -7747,7 +7771,10 @@ function snapshotNestedScope(
   // k = (x) => i * x`), the binding holds an operator definition that is
   // not the value definition the call was bound to, so the call finds its
   // callee by the scope that holds it. That scope is the block scope
-  // `source`, which this scope stands for.
+  // `source`, which this scope stands for. On the asynchronous route,
+  // `source` can be the activation of a run of the block, not the block
+  // scope; `scopeStandsFor` (`binders.ts`) follows the activation to the
+  // block scope that it copies.
   markCallableFrame(captured, source);
   return captured;
 }

@@ -276,6 +276,13 @@
 
 ### Bug Fixes
 
+- **With `evaluateAsync()`, a function literal that a block returns, applied
+  inside a function body, reads the locals of the block.**
+  `Apply(Function(Apply(Block(Declare(c, 'real', 5), k ↦ c + k), n), n), 1)`
+  gave `c + 1` with `evaluateAsync()` and `6` with `evaluate()`; it now gives
+  `6` on both routes, also when the literal calls a function that the block
+  defines, and for two asynchronous evaluations that run at the same time.
+
 - **A `Map` callback that calls a block local holding a function is
   evaluated.** `Block(Declare(c, 'real', 5), Assign(h, k ↦ c + k), Map(k ↦ h(k), [1, 2]))`,
   and the same with `Declare(g, 'unknown', x ↦ c + x)`, gave `[h(1), h(2)]`

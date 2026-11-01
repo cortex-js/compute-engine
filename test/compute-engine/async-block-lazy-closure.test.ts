@@ -562,3 +562,193 @@ describe('a function literal that leaves a block reads its locals on both routes
     expect(first[0]).not.toBe(first[1]);
   });
 });
+
+/**
+ * A function literal that a block evaluates in a function body, and that is
+ * applied in that body. When the literal is evaluated, it captures the
+ * nested blocks in use (`captureNestedLocals`). On the asynchronous route,
+ * the capture copied the bindings of the block scope, not those of the run
+ * of the block (its activation), so the literal read the local as a free
+ * symbol: `Apply(Function(Apply(Block(Declare(c, 'real', 5), k ↦ c + k), n),
+ * n), 1)` gave `c + 1` with `evaluateAsync()` and `6` with `evaluate()`.
+ */
+describe('a function literal evaluated in a block of a function body reads the locals of the run on both routes', () => {
+  const literal = ['Function', ['Add', 'c', 'k'], 'k'];
+  const block = ['Block', declareC(5), literal];
+  const bodyCases: [string, unknown, string][] = [
+    [
+      'applied in the function body',
+      ['Apply', ['Function', ['Apply', block, 'n'], 'n'], 1],
+      '6',
+    ],
+    [
+      'the block at the top level (control)',
+      ['Apply', block, 1],
+      '6',
+    ],
+    [
+      'the literal applied outside the function body (control)',
+      ['Apply', ['Apply', ['Function', block, 'n'], 1], 1],
+      '6',
+    ],
+    [
+      'two nested blocks',
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'Apply',
+            [
+              'Block',
+              ['Declare', 'd', { str: 'real' }, 10],
+              [
+                'Block',
+                declareC(5),
+                ['Function', ['Add', 'c', 'd', 'k'], 'k'],
+              ],
+            ],
+            'n',
+          ],
+          'n',
+        ],
+        1,
+      ],
+      '16',
+    ],
+    [
+      'the literal reads a parameter of the function',
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'Apply',
+            ['Block', declareC(5), ['Function', ['Add', 'c', 'n', 'k'], 'k']],
+            1,
+          ],
+          'n',
+        ],
+        100,
+      ],
+      '106',
+    ],
+    [
+      'two runs of the block in one call',
+      [
+        'Apply',
+        ['Function', ['Add', ['Apply', block, 'n'], ['Apply', block, 'n']], 'n'],
+        1,
+      ],
+      '12',
+    ],
+    [
+      'a write to the local after the literal is created',
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'Block',
+            [
+              'Block',
+              declareC(5),
+              ['Assign', 'g', literal],
+              ['Assign', 'c', 7],
+              ['Apply', 'g', 'n'],
+            ],
+          ],
+          'n',
+        ],
+        1,
+      ],
+      '8',
+    ],
+    [
+      'in the body of a Sum',
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'Sum',
+            [
+              'Apply',
+              [
+                'Block',
+                declareC(5),
+                ['Function', ['Add', 'c', 'k', 'i'], 'k'],
+              ],
+              'n',
+            ],
+            ['Element', 'i', ['Range', 1, 3]],
+          ],
+          'n',
+        ],
+        1,
+      ],
+      '24',
+    ],
+    [
+      'the literal calls a function that the block defines',
+      [
+        'Apply',
+        [
+          'Function',
+          [
+            'Apply',
+            [
+              'Block',
+              declareC(5),
+              ['DefineFunction', 'h', literal],
+              ['Function', ['h', 'k'], 'k'],
+            ],
+            'n',
+          ],
+          'n',
+        ],
+        1,
+      ],
+      '6',
+    ],
+  ];
+
+  test('two asynchronous evaluations at the same time read their own run', async () => {
+    const program = (x: number) => [
+      'Apply',
+      [
+        'Function',
+        [
+          'Apply',
+          [
+            'Block',
+            ['Declare', 'c', { str: 'real' }, 'n'],
+            ['Function', ['Add', 'c', 'k'], 'k'],
+          ],
+          'n',
+        ],
+        'n',
+      ],
+      x,
+    ];
+    const ce = new ComputeEngine();
+    const [a, b] = await Promise.all([
+      ce.box(program(1) as any).evaluateAsync(),
+      ce.box(program(10) as any).evaluateAsync(),
+    ]);
+    const expected = [1, 10].map((x) =>
+      ce.box(program(x) as any).evaluate().toString()
+    );
+    expect(expected).toEqual(['2', '20']);
+    expect([a.toString(), b.toString()]).toEqual(expected);
+  });
+
+  test.each(bodyCases)('%s', async (_name, program, expected) => {
+    const sync = new ComputeEngine().box(program as any).evaluate();
+    const async = await new ComputeEngine()
+      .box(program as any)
+      .evaluateAsync();
+    expect(sync.toString()).toBe(expected);
+    expect(async.toString()).toBe(expected);
+  });
+});

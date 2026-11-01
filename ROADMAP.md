@@ -164,39 +164,6 @@ it out, which needs the rules for absent values of `docs/ERROR-MODEL.md`
 (`Nothing` or `Missing`, and what each operation does with it). Not requested
 so far; a default value covers the cases of GitHub issue #490.
 
-### CE-728. A lazy `Map` view loses the binding of a named callback's symbol default
-
-**Status:** ready; defect (compiled and interpreted values differ). User
-decision 2026-10-31: option (a), the lazy view records the lexical scope in
-which it was created and calls its callback in that scope.
-
-With `f := (x, k = d) => x * k` (a parameter default that is the symbol `d`,
-CE-717) and `g := (d, xs) => Map(f, xs)`, the interpreter's `g(10, [1, 2])`
-is the lazy view `Map(f, [1, 2])`. Its elements are computed when the view is
-read, after `g` has returned, so the inserted default `d` has no binding any
-more and the elements are `d` and `2d`. The compiled function computes the
-elements inside `g` and gives `[10, 20]`; so does the interpreter when the
-view is read inside `g` (`ListFrom(Map(f, xs))` gives `[10, 20]`). A literal
-callback does not have the problem: `Map((x) => f(x), xs)` fills the default
-when the literal is canonicalized inside `g`, and the literal captures the
-`d` of `g`. Measured 2026-10-31 at `38f9b8375` with Epsil
-(`let f = (x, k = d) => x * k; let g = (d, xs) => map(f, xs); g(10, [1, 2])`).
-
-The rule that a symbol default is read "as a symbol written in the call"
-(`docs/plans/2026-10-31-parameter-default-values.md`, R4 and §11) does not say
-where the call of a callback invoked later by a lazy view is. Options:
-
-- (a) Recommended: a lazy view records the lexical scope in which it was
-  created, and calls its callback in that scope, so a symbol default reads
-  the binding of the place where `Map(f, xs)` was written. The interpreter
-  then agrees with the compiled code. Cost: the view keeps a reference to the
-  scope (and its activation values) while it lives.
-- (b) Keep the interpreter's behavior and make the compiled code agree, by
-  declining a named callback with a symbol default whose result can escape
-  as a lazy view. Cost: a decline of a reachable shape.
-- (c) Document the difference as a limit. AGENTS.md does not allow this for
-  a well-typed expression.
-
 ### CE-707. A list value is accepted for a scalar declared result when no argument is a list
 
 **Status:** decision needed; defect. GitHub issue #488.
