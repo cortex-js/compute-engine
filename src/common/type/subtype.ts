@@ -2607,6 +2607,45 @@ function signatureArity(sig: FunctionSignature): { min: number; max: number } {
   return { min: required, max: required + optional };
 }
 
+/**
+ * The declared type `t` as the check of a VALUE against it reads it: each
+ * optional parameter of a top-level signature that has a default value
+ * becomes a required parameter. `t` itself when it has no such parameter.
+ *
+ * A call of a symbol whose declared type has a default always reaches the
+ * value with that argument: the default is inserted when a call leaves it
+ * out. So a value that requires the parameter is a valid value of the
+ * declared type. With `g` declared `(number, number = 2) -> number`, the
+ * value `(x, k) => x * k` (two required parameters) is accepted, and
+ * `(x) => x` is still refused (it does not take the second argument).
+ *
+ * Only the check of a value against a declared type (an assignment, a
+ * declaration with a value) uses this reading. Subtyping, compatibility and
+ * the admission of an overload arm ignore a default, as they ignore a
+ * parameter name. Only the top level is read this way: a default nested in
+ * a parameter type is refused when the type is declared.
+ */
+export function defaultedSlotsAsRequired(t: Type): Type {
+  if (typeof t !== 'object' || t.kind !== 'signature') return t;
+  const optArgs = t.optArgs;
+  if (optArgs === undefined) return t;
+  const n = optArgs.findIndex((a) => a.default === undefined);
+  // Defaulted parameters come first among the optional parameters.
+  const defaulted = n < 0 ? optArgs.length : n;
+  if (defaulted === 0) return t;
+  const rest = optArgs.slice(defaulted);
+  const result: FunctionSignature = {
+    ...t,
+    args: [
+      ...(t.args ?? []),
+      ...optArgs.slice(0, defaulted).map(({ default: _, ...a }) => a),
+    ],
+  };
+  if (rest.length > 0) result.optArgs = rest;
+  else delete result.optArgs;
+  return result;
+}
+
 /** True when this signature carries a `where` clause (is a polytype). */
 function isPolytype(t: FunctionSignature): boolean {
   return t.typeParams !== undefined && t.typeParams.length > 0;
@@ -3482,6 +3521,11 @@ function isSubtypeRules(
     // permitted call, too low a maximum fails its LONGEST. A variadic rhs has
     // no longest call, so only a variadic lhs can satisfy it — and a `*` lhs
     // does satisfy a `+` rhs, since `[0, ∞)` covers `[1, ∞)`.
+    //
+    // A parameter with a default value (`k: number = 2`) is optional here,
+    // like any optional parameter: subtyping ignores the default. The check
+    // of a value against a declared type reads the declared type through
+    // `defaultedSlotsAsRequired()` first.
     const lhsArity = signatureArity(lhs);
     const rhsArity = signatureArity(rhs);
     if (lhsArity.min > rhsArity.min || lhsArity.max < rhsArity.max)

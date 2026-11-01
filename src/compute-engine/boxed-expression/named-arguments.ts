@@ -11,6 +11,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef, isValueDef } from './utils.js';
+import { boxParameterDefault, callSiteDefault } from './parameter-defaults.js';
 import {
   armAdmission,
   diagnoseNoMatch,
@@ -54,20 +55,23 @@ type WrittenArgument = {
   value: ExpressionInput;
   index: number;
   /** Its position among the arguments that FILL a slot, or -1 when the
-   * argument is OMITTED — a named argument whose value is `Nothing`
-   * ({@link isOmitted}). An omitted argument is written, so every check that
+   * argument is OMITTED — an argument, named or positional, whose value is
+   * `Nothing` ({@link isOmitted}). An omitted argument is written, so every check that
    * judges the call AS WRITTEN sees it, but it supplies no operand: it is
    * absent from the emitted call and from the operand list the overload
    * machinery resolves against, which is the index space this counts in. */
   fillIndex: number;
 };
 
-/** True when the written argument supplies no value: `f(x: Nothing)`.
+/** True when the written argument supplies no value: `f(x: Nothing)`, or a
+ * positional `Nothing` in a named call.
  *
  * `Nothing` is the engine's absent-value marker, and it cannot be passed
  * positionally in any case — `flatten` drops it unconditionally, which would
  * shift every later argument one slot left and bind it to the wrong
- * parameter. So the slot its name selects is simply left unfilled and the
+ * parameter. A positional `Nothing` fills no slot, and the next positional
+ * argument takes the slot. For a named `x: Nothing`, the slot its name
+ * selects is simply left unfilled and the
  * ordinary rules below apply to it: a required slot becomes `missing`, an
  * optional one declared before a supplied optional becomes an R1 hole, and a
  * trailing optional is just not supplied. */
@@ -114,11 +118,14 @@ export type NamedArgumentNormalization =
  * overload set's arm, or the whole callee when it has a single signature.
  *
  * The `permutation` maps each SOURCE slot (the position of the argument in
- * {@link fillingArguments}) to the declaration slot it fills. It is always a
- * bijection over `[0, n)`: every argument that supplies a value fills exactly
- * one slot, a required slot left unfilled is a `missing` error, and an
- * optional HOLE is rejected outright (sub-ruling R1), so the filled slots are
- * exactly `0…n-1`. */
+ * {@link fillingArguments}) to the declaration slot it fills. Every argument
+ * that supplies a value fills exactly one slot, a required slot left unfilled
+ * is a `missing` error, and an optional HOLE is rejected outright (sub-ruling
+ * R1) unless the parameter has a default value, which then fills the hole.
+ * So the permutation is a bijection over `[0, n)` except that it does not
+ * reach the slots filled by a default. An overload arm has no defaults (a
+ * default in an overloaded signature is refused when it is declared), so for
+ * an arm it is always a bijection. */
 type ArmNormalization =
   | { kind: 'ok'; ops: ExpressionInput[]; permutation: number[] }
   | { kind: 'error'; ops: ExpressionInput[] };
@@ -372,7 +379,14 @@ export function splitNamedArguments(
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     if (!isCarrier(op)) {
-      args.push({ name: undefined, value: op, index: i, fillIndex: fill++ });
+      // A positional `Nothing` is an absent operand, as `flatten` treats it:
+      // like a named `x: Nothing`, it fills no slot ({@link isOmitted}).
+      args.push({
+        name: undefined,
+        value: op,
+        index: i,
+        fillIndex: isNothing(op) ? -1 : fill++,
+      });
       continue;
     }
     const operands = carrierOperands(op);
@@ -648,7 +662,14 @@ export function normalizeNamedArguments(
    * (`multiClauseState(def)?.clauses`). Their function literals are what
    * sub-ruling R5 enforcement applies when the names determine a clause the
    * ordinary dispatch would not select ({@link normalizeAgainstArms}). */
-  clauses?: ReadonlyArray<FunctionClause>
+  clauses?: ReadonlyArray<FunctionClause>,
+  /** The boxed default operands of the optional parameters of `signature`,
+   * aligned with its `optArgs`, when the callee's definition keeps them
+   * (`parameterDefaultOperands`). An optional parameter that the named
+   * arguments skip and that has a default receives this operand. When it is
+   * not given, the default is boxed from the signature in the current
+   * scope. */
+  defaults?: ReadonlyArray<Expression | undefined>
 ): NamedArgumentNormalization {
   if (split.malformed) return { kind: 'unavailable' };
 
@@ -680,7 +701,7 @@ export function normalizeNamedArguments(
     return { kind: 'unavailable' };
 
   if (signature.kind === 'signature')
-    return normalizeAgainstSignature(ce, split, signature);
+    return normalizeAgainstSignature(ce, split, signature, defaults);
 
   const arms = overloadArms(signature);
   if (arms === undefined || arms.length === 0) return { kind: 'unavailable' };
@@ -694,7 +715,8 @@ export function normalizeNamedArguments(
 function normalizeAgainstSignature(
   ce: ComputeEngine,
   split: NamedArgumentSplit,
-  sig: FunctionSignature
+  sig: FunctionSignature,
+  defaults?: ReadonlyArray<Expression | undefined>
 ): ArmNormalization {
   const required = sig.args?.length ?? 0;
   const optional = sig.optArgs?.length ?? 0;
@@ -770,6 +792,16 @@ function normalizeAgainstSignature(
   for (let j = 0; j < split.args.length; j++) {
     const a = split.args[j];
     if (a.name !== undefined) break;
+    // A positional `Nothing` is an absent operand, as `flatten` treats it: it
+    // fills no slot, and the next positional argument takes the slot. This
+    // must happen before the named arguments take their slots and before the
+    // hole fill of step 5. Otherwise, with `(x, density = 1, factor = 2)`,
+    // `f(Nothing, factor: 5)` would become `f(Nothing, 1, 5)`, `flatten`
+    // would then remove `Nothing`, and the default of `density` would move
+    // into the required slot `x`. It has no entry in `permutation`
+    // ({@link splitNamedArguments} gives it no `fillIndex`), so the call is
+    // written again with `Nothing` at that position.
+    if (isOmitted(a)) continue;
     if (next >= slots) {
       return {
         kind: 'error',
@@ -866,6 +898,15 @@ function normalizeAgainstSignature(
   // argument one slot left — the exact failure class named arguments exist to
   // prevent.
   //
+  // A hole at an optional parameter that has a default value is not an
+  // error: the slot receives the default operand. With
+  // `(x, density: number = 1, factor: number = 2)`, `f(3, factor: 5)` is
+  // `f(3, 1, 5)`. The default is the boxed operand that the definition keeps
+  // (`defaults`; a symbol default is boxed again here, in the scope of the
+  // call, see `callSiteDefault`), or, when the caller has none for this
+  // signature, the default boxed here. A hole at an optional parameter without a default is
+  // still `argument-optional-skipped`.
+  //
   // Ahead of the unsatisfiable-`+`-tail branch below: a call that both leaves
   // a hole and fails to fill a `+` tail has two problems, and the hole is the
   // more specific one — it names the parameter the author skipped, while the
@@ -873,9 +914,19 @@ function normalizeAgainstSignature(
   //
   const last = lastFilled(filled);
   const holes: string[] = [];
-  for (let i = required; i < last; i++)
-    if (filled[i] === undefined)
-      holes.push(names[i] !== undefined ? `\`${names[i]}\`` : `${i + 1}`);
+  for (let i = required; i < last; i++) {
+    if (filled[i] !== undefined) continue;
+    const d = sig.optArgs?.[i - required]?.default;
+    if (d !== undefined) {
+      const known = defaults?.[i - required];
+      filled[i] =
+        known === undefined
+          ? boxParameterDefault(ce, d)
+          : callSiteDefault(known);
+      continue;
+    }
+    holes.push(names[i] !== undefined ? `\`${names[i]}\`` : `${i + 1}`);
+  }
 
   if (holes.length > 0) {
     const culprit = split.args.find(

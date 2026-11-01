@@ -284,6 +284,11 @@ import {
 } from '../engine-protocols.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
+  NESTED_DEFAULT_MESSAGE,
+  installParameterDefaults,
+  typeHasParameterDefault,
+} from '../boxed-expression/parameter-defaults.js';
+import {
   effectContractErrorValue,
   isEffectContractError,
   matchesDeclaredTypeAxes,
@@ -5808,6 +5813,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `isInferredTypedParameter`, `boxed-expression/inferred-annotations.ts`).
         const s = sym(t);
         const typeOp = isString(t) ? t : s !== undefined ? ce.string(s) : t;
+        // An ascription is not the top-level signature of a definition, so a
+        // default value of a parameter in the ascribed type
+        // (`(number, number = 2) -> number`) would never be used: the type
+        // operand becomes an error. A type without a `=` has no default, and
+        // is not parsed here.
+        if (isString(typeOp) && typeOp.string.includes('=')) {
+          let parsed: Type | undefined;
+          try {
+            parsed = parseType(typeOp.string, ce._typeResolver);
+          } catch {
+            parsed = undefined;
+          }
+          if (parsed !== undefined && typeHasParameterDefault(parsed))
+            return ce._fn('Typed', [
+              x.canonical,
+              ce.error(NESTED_DEFAULT_MESSAGE, typeOp.string),
+            ]);
+        }
         return ce._fn('Typed', [x.canonical, typeOp]);
       },
       // The ascribed operand is evaluated, and the value is checked against
@@ -13871,6 +13894,17 @@ function* declareSteps(
     }
 
     if (upgradesInPlace && existingValueDef) {
+      // A typed upgrade installs a declared type: check and box the default
+      // values of its parameters first, so that a refused type leaves the
+      // binding as it was (as a fresh declaration through `ce.declare` does).
+      if (hasType)
+        installParameterDefaults(
+          ce,
+          existingValueDef.value,
+          symbolName,
+          `Symbol "${symbolName}"`,
+          ce.type(type!).type
+        );
       // Checkpoint journal (funnel 5): this branch rewrites the record
       // in place — `holdUntil`, `_isConstant` and, when the declaration
       // is untyped, nothing that goes through a journaled setter. One

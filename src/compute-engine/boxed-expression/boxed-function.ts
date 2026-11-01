@@ -1015,7 +1015,16 @@ export class BoxedFunction
    * replace an operand (a one-cluster string becomes a `character` at a
    * `character` parameter, matrix inference repairs an operand). The call is
    * boxed again from `ops`, so that the new definition checks the operands
-   * as written, not the operands that the old definition replaced.
+   * as written, not the operands that the old definition replaced. `ops`
+   * is also set when the call received the default value of a parameter
+   * that it leaves out: it is then the written operands, before the
+   * defaults were inserted, so that the call boxed again receives the
+   * defaults of the new definition.
+   *
+   * `filled` is set with `ops` when the call received a default value: it
+   * is the operands after the defaults were inserted and before the check.
+   * When the operands of the call are exactly `filled`, the check replaced
+   * no operand, not even an inserted default.
    *
    * `receiver` is set for a named call `Apply(Field(r, "S"), …)` whose
    * names were matched against the INFERRED type of the receiver `r`: it is
@@ -1032,10 +1041,17 @@ export class BoxedFunction
    * `Reduce(L, f, x)`): the call is boxed again with that operator and
    * `ops`.
    *
-   * `scope` is set when `ops` holds an operand that is not bound (a
-   * callback literal as written): the call is boxed again in that lexical
-   * scope, which was the current scope when the call was boxed, so that the
-   * names in the operand have the bindings that they had then.
+   * `scope` is the lexical scope in which the call is boxed again: the
+   * scope given by the caller (when `ops` holds an operand that is not
+   * bound, a callback literal as written), else the scope that was current
+   * when the call was boxed. Every record has one, because the definition in
+   * force when the call is boxed again can have a parameter whose default
+   * value is a symbol even when the definition recorded here has none
+   * (`(x, k = 2)` replaced by `(x, k = d)`): that default is inserted when
+   * the call is boxed again, and it must read the binding of `d` at the
+   * place where the call was written, as a written `d` would. Boxed in the
+   * scope where the call is read instead, it could read a parameter of
+   * another function with the same name.
    * @internal */
   _calleeStamp:
     | {
@@ -1044,6 +1060,7 @@ export class BoxedFunction
         written:
           ReadonlyArray<{ name: string | undefined; slot: number }> | undefined;
         ops?: ReadonlyArray<Expression>;
+        filled?: ReadonlyArray<Expression>;
         receiver?: { _writeVersion: number };
         operator?: string;
         scope?: Scope;
@@ -1058,7 +1075,8 @@ export class BoxedFunction
   /** Record the definition that the name of this call holds now
    * (`_calleeStamp`). A call that has a record keeps it. `ops` are the
    * operands, in declaration order, as boxed before the check against that
-   * definition.
+   * definition and before the default values of the parameters that the
+   * call leaves out were inserted.
    *
    * A self-call in a clause body that is made canonical under the recursion
    * knot of its function (`IComputeEngine._recursionKnots`) is not
@@ -1070,13 +1088,19 @@ export class BoxedFunction
    *
    * `receiver` is the definition to record in place of the definition of
    * the name of the call (see `_calleeStamp`). `options` sets the
-   * `operator` and the `scope` of the record (see `_calleeStamp`).
+   * `operator`, the `scope` and the `filled` operands of the record (see
+   * `_calleeStamp`). When `options` gives no scope, the current lexical
+   * scope is recorded.
    * @internal */
   _stampCallee(
     written?: ReadonlyArray<{ name: string | undefined; slot: number }>,
     ops?: ReadonlyArray<Expression>,
     receiver?: { _writeVersion: number },
-    options?: { operator?: string; scope?: Scope }
+    options?: {
+      operator?: string;
+      scope?: Scope;
+      filled?: ReadonlyArray<Expression>;
+    }
   ): void {
     if (this._calleeStamp !== undefined) return;
     if (this.engine._recursionKnots.has(this._operator)) return;
@@ -1086,13 +1110,15 @@ export class BoxedFunction
     if (receiver !== undefined) this._calleeStamp.receiver = receiver;
     if (options?.operator !== undefined)
       this._calleeStamp.operator = options.operator;
-    if (options?.scope !== undefined) this._calleeStamp.scope = options.scope;
+    this._calleeStamp.scope =
+      options?.scope ?? this.engine.context.lexicalScope;
     const own = this._ops;
-    if (
-      ops !== undefined &&
-      (ops.length !== own.length || ops.some((x, i) => x !== own[i]))
-    )
+    if (ops !== undefined && !sameOperands(ops, own)) {
       this._calleeStamp.ops = ops;
+      const filled = options?.filled;
+      if (filled !== undefined && filled.length > ops.length)
+        this._calleeStamp.filled = filled;
+    }
   }
 
   /** The operands `ops` (in declaration order) written again as the call
@@ -1171,7 +1197,17 @@ export class BoxedFunction
     // tell the two calls apart: it treats a `character` and a one-cluster
     // `string` with the same content as the same value. The new call is then
     // used, because the new definition can check that operand differently.
-    if (stamp.ops === undefined && fresh.isSame(this)) {
+    // When the operands are exactly the operands after the defaults were
+    // inserted (`stamp.filled`, compared by identity), the check replaced no
+    // operand, not even an inserted default, and `isSame()` is sufficient:
+    // the new call is different when the new definition inserts other
+    // defaults.
+    if (
+      (stamp.ops === undefined ||
+        (stamp.filled !== undefined &&
+          sameOperands(stamp.filled, this._ops))) &&
+      fresh.isSame(this)
+    ) {
       // The new definition gives the same call: record it, so that the next
       // read costs one comparison again.
       stamp.half = half;
@@ -21412,4 +21448,13 @@ function withoutNames(
     delete result[n];
   }
   return result ?? sub;
+}
+
+/** Whether `a` and `b` have the same length and the same operand, by
+ * identity, at each index. */
+function sameOperands(
+  a: ReadonlyArray<Expression>,
+  b: ReadonlyArray<Expression>
+): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
 }

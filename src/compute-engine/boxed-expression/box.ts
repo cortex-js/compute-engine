@@ -131,6 +131,11 @@ import {
 } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
+import {
+  fillParameterDefaults,
+  parameterDefaultOperands,
+  signatureDefaultOperands,
+} from './parameter-defaults.js';
 import { isOperatorDef, isValueDef, withOwnHead } from './utils.js';
 import {
   isCardinalityOperand,
@@ -2854,6 +2859,38 @@ function suppliedOperandCount(xs: ReadonlyArray<Expression>): number {
   return n;
 }
 
+/**
+ * The operands of a call of an operator with a `canonical` handler, or of a
+ * lazy operator, after the default values of the parameters that the call
+ * leaves out are inserted (`fillParameterDefaults`). These operands are not
+ * flattened, so a top-level `Sequence` operand supplies each of its elements
+ * (`suppliedOperandCount`), and the defaults are appended after the written
+ * operands. With `(x, k = 2)`, `F(Sequence(3, 5))` supplies two positions and
+ * gets no default; `F(Sequence(3))` gets one.
+ *
+ * `defaults` is `undefined` for an operator whose signature has no default,
+ * and the operands are then returned as they are. For an operator with a
+ * default, a written `Nothing` operand is removed first, as `flatten` removes
+ * it on the route of an operator without a handler: otherwise it would
+ * occupy a position and keep the default out.
+ */
+function withHandlerDefaults(
+  xs: ReadonlyArray<Expression>,
+  signature: Type,
+  defaults: ReadonlyArray<Expression | undefined> | undefined
+): ReadonlyArray<Expression> {
+  if (defaults === undefined) return xs;
+  const ops = xs.some((x) => isSymbol(x, 'Nothing'))
+    ? xs.filter((x) => !isSymbol(x, 'Nothing'))
+    : xs;
+  return fillParameterDefaults(
+    ops,
+    signature,
+    defaults,
+    suppliedOperandCount(ops)
+  );
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -3264,7 +3301,16 @@ function makeCanonicalFunctionCore(
               ce,
               split,
               signature,
-              multiClauseState(def)?.clauses
+              multiClauseState(def)?.clauses,
+              // The default values that fill an optional parameter the
+              // names skip, boxed once for the definition.
+              signature === undefined
+                ? undefined
+                : signatureDefaultOperands(
+                    ce,
+                    isValueDef(def) ? def.value : def.operator,
+                    signature
+                  )
             );
       // Sub-ruling R5 enforcement: the names determined ONE clause of a
       // multi-clause callee and the ordinary call would dispatch elsewhere, so
@@ -3298,12 +3344,20 @@ function makeCanonicalFunctionCore(
         // the function the name holds when the call is evaluated
         // (`BoxedFunction._reboxedForCallee()`). A DECLARED type of a
         // variable is a contract that every assigned value satisfies, so its
-        // names do not change.
+        // names do not change. An operator declared with
+        // `inferredSignature: true` whose signature has a default is
+        // recorded too (see the record below): the assignment of a function
+        // literal replaces its names and its defaults, and a default that a
+        // hole of the call received (`f(3, factor: 5)` boxed to
+        // `f(3, 1, 5)`) is inserted again from the new definition only when
+        // the call is boxed again with its names.
         if (
           normalized.permutation !== undefined &&
           (isValueDef(def)
             ? def.value.inferredType
-            : def.operator.isUserFunctionDefinition)
+            : def.operator.isUserFunctionDefinition ||
+              (def.operator.inferredSignature &&
+                parameterDefaultOperands(ce, def.operator) !== undefined))
         )
           writtenArguments = writtenArgumentSlots(
             split,
@@ -3333,7 +3387,11 @@ function makeCanonicalFunctionCore(
     // (declared `function`, holding no literal) takes values at every
     // argument.
     const flatOps = flatten(semiCanonical(ce, calleeOps));
-    const boxedOps =
+    // The operands as written, before a default value is inserted. A call
+    // whose callee can change is boxed again from these (see `_stampCallee`
+    // below), so that the defaults of the function the name holds then are
+    // inserted.
+    const writtenOps =
       calleeType === undefined || isWildcardFunctionType(calleeType)
         ? devolveValueElements(ce, flatOps)
         : (devolveAtValuePositions(
@@ -3346,7 +3404,29 @@ function makeCanonicalFunctionCore(
     // The written arguments index the operands in declaration order, so they
     // are kept only when no operand was spliced or removed.
     const written =
-      boxedOps.length === calleeOps.length ? writtenArguments : undefined;
+      writtenOps.length === calleeOps.length ? writtenArguments : undefined;
+    // A parameter with a default value that the call leaves out receives its
+    // default operand. The defaults are read from the type of the variable:
+    // its declared type (`g: (number, number = 2) -> number`), or the type
+    // inferred from the function it holds now, whose call is boxed again
+    // when the variable is assigned another function. A variable DECLARED
+    // with the bare `function` type has no defaults here: the function it
+    // holds fills them when it is applied. A variable whose `function` type
+    // was inferred is filled from the type of the function it holds
+    // (`calleeType`), as a named call of it is. A `Spread` operand leaves
+    // the number of positions unknown until evaluation, when the call is
+    // boxed again after the splice.
+    const valueDefaults =
+      calleeType === undefined ||
+      (!def.value.inferredType &&
+        isWildcardFunctionType(def.value.type.type)) ||
+      writtenOps.some((x) => x.operator === 'Spread')
+        ? undefined
+        : signatureDefaultOperands(ce, def.value, calleeType);
+    const boxedOps =
+      valueDefaults === undefined
+        ? writtenOps
+        : fillParameterDefaults(writtenOps, calleeType!, valueDefaults);
 
     // A function-typed value definition that was INFERRED is not a user
     // constraint but a placeholder — typically the auto-declaration the
@@ -3552,10 +3632,13 @@ function makeCanonicalFunctionCore(
         // that the call is checked again against the new literal
         // (`BoxedFunction._recheckedCall()`).
         if (pinned && cleaned.some((x) => !x.isValid))
-          fn._refusedOps = boxedOps;
+          fn._refusedOps = writtenOps;
         // The call is boxed again from the operands as written, not from the
         // operands that this check replaced.
-        if (pinned) fn._stampCallee(written, boxedOps);
+        if (pinned)
+          fn._stampCallee(written, writtenOps, undefined, {
+            filled: boxedOps,
+          });
         return fn;
       }
       const fn = new BoxedFunction(ce, name, boxedOps, {
@@ -3567,7 +3650,8 @@ function makeCanonicalFunctionCore(
       // now. A later assignment can replace it with a literal that refuses
       // them, so the call records the definition it was checked against
       // (`BoxedFunction._reboxedForCallee()`).
-      if (pinned) fn._stampCallee(written, boxedOps);
+      if (pinned)
+        fn._stampCallee(written, writtenOps, undefined, { filled: boxedOps });
       return fn;
     }
 
@@ -3636,7 +3720,7 @@ function makeCanonicalFunctionCore(
       wildcardCallee ||
       (def.value.inferredType && def.value.type.matches('function'))
     )
-      fn._stampCallee(written, boxedOps);
+      fn._stampCallee(written, writtenOps, undefined, { filled: boxedOps });
     return fn;
   }
 
@@ -3675,6 +3759,7 @@ function makeCanonicalFunctionCore(
   // what a callback stamp read from the value of a variable.
   const checked: {
     ops?: ReadonlyArray<Expression>;
+    filled?: ReadonlyArray<Expression>;
     stamp?: ValueDerivedStamp;
   } = {};
   const result = applyOperatorDefinition(
@@ -3695,14 +3780,30 @@ function makeCanonicalFunctionCore(
   // the check against the old definition replaced. The names of a named
   // call are kept with the record. They index the operands in declaration
   // order, so they are kept only when no operand was spliced or removed.
+  // An operator declared with `inferredSignature: true` is not yet a user
+  // function, but the assignment of a function literal replaces it, and its
+  // defaults with it. When its signature has a default, every call of it is
+  // recorded too: after the assignment, the call is checked again against
+  // the new literal (`f(3, 4)` is an error when the literal takes one
+  // argument), and its written operands are filled from the new definition,
+  // not from the old defaults. This includes a named call that received a
+  // default at a hole (`f(3, factor: 5)` boxed to `f(3, 1, 5)`). The route
+  // of a `canonical` handler or of a lazy operator does not give the written
+  // operands, so a call of such an operator on that route is not recorded:
+  // it would be boxed again from the operands with the old defaults.
   if (
-    opDef.isUserFunctionDefinition &&
+    (opDef.isUserFunctionDefinition ||
+      (opDef.inferredSignature &&
+        checked.ops !== undefined &&
+        parameterDefaultOperands(ce, opDef) !== undefined)) &&
     result instanceof BoxedFunction &&
     result.operator === name
   )
     result._stampCallee(
       checked.ops?.length === ops.length ? writtenArguments : undefined,
-      checked.ops
+      checked.ops,
+      undefined,
+      { filled: checked.filled }
     );
   // A named call through a `Field` whose receiver has an inferred type
   // records the receiver's definition, with the names as written: after an
@@ -4003,6 +4104,7 @@ function applyOperatorDefinition(
   rawOps?: ReadonlyArray<Expression>,
   checkedOut?: {
     ops?: ReadonlyArray<Expression>;
+    filled?: ReadonlyArray<Expression>;
     stamp?: ValueDerivedStamp;
   }
 ): Expression {
@@ -4045,6 +4147,20 @@ function applyOperatorDefinition(
     // signature lists two parameters.
     if (LAZY_VALUE_OPERAND_HEADS.has(name) && !opDef.inferredSignature)
       xs = devolveValueElements(ce, xs);
+    // A parameter with a default value that the call leaves out receives its
+    // default operand, here, before the `canonical` handler and the
+    // signature check see the operands. The inserted operand is the
+    // canonical default boxed when the operator was declared, held like the
+    // written operands. A `Spread` operand leaves the number of positions
+    // unknown until evaluation; the call is boxed again then, after the
+    // splice, and filled at that time. A handler that returns `null`
+    // continues below with the operands already filled.
+    if (!xs.some((x) => x.operator === 'Spread'))
+      xs = withHandlerDefaults(
+        xs,
+        opDef.signature.type,
+        parameterDefaultOperands(ce, opDef)
+      );
     if (opDef.canonical) {
       let failure: { error: unknown } | undefined;
       try {
@@ -4281,7 +4397,19 @@ function applyOperatorDefinition(
     if (devolved !== undefined) xs.splice(0, xs.length, ...devolved);
   }
 
+  // The boxed default operands of the parameters of the operator, or
+  // `undefined` when its signature has no default value.
+  const defaults = parameterDefaultOperands(ce, opDef);
+
   if (opDef.canonical) {
+    // A parameter with a default value that the call leaves out receives its
+    // default operand before the handler runs, so the handler sees every
+    // operand (see `withHandlerDefaults`). A `Spread` operand returned
+    // above, so the number of positions is known here.
+    if (defaults !== undefined) {
+      const filled = withHandlerDefaults(xs, opDef.signature.type, defaults);
+      if (filled !== xs) xs.splice(0, xs.length, ...filled);
+    }
     let failure: { error: unknown } | undefined;
     try {
       const handlerResult = opDef.canonical(xs, { engine: ce, scope });
@@ -4430,6 +4558,17 @@ function applyOperatorDefinition(
     xs,
     opDef.associative ? name : undefined
   );
+  // The operands as written, before a default value is inserted. A call of a
+  // user function is boxed again from these when the function is assigned
+  // again (`BoxedFunction._reboxedForCallee()`), so that the written
+  // arguments are matched against the new function, and its defaults are
+  // inserted, not the defaults of the old one.
+  const writtenArgs = args;
+  // A parameter with a default value that the call leaves out receives its
+  // default operand, after `flatten` (which splices a `Sequence` and drops a
+  // written `Nothing`) and before the signature check.
+  if (defaults !== undefined)
+    args = fillParameterDefaults(args, opDef.signature.type, defaults);
 
   // Skip validation for function literals with inferred signatures.
   // These will be validated during evaluation by the lambda function,
@@ -4448,7 +4587,12 @@ function applyOperatorDefinition(
   // (`_resolvedOverload`, phase 2c).
   const resolutionOut: { resolution?: OverloadResolution } = {};
   // The operands before the check, which can replace an operand.
-  if (checkedOut !== undefined) checkedOut.ops = args;
+  if (checkedOut !== undefined) {
+    checkedOut.ops = writtenArgs;
+    // The operands after the defaults were inserted, when the call received
+    // a default.
+    if (args !== writtenArgs) checkedOut.filled = args;
+  }
   // A partly annotated literal validates its bare slots as `any`
   // (`OperatorDefinition._validationSignature`). The inferred types of those
   // slots still narrow an untyped symbol argument, as they do for a literal
@@ -4529,7 +4673,7 @@ function applyOperatorDefinition(
       // A later assignment can replace a user function. Keep the operands,
       // so that the call is checked again against the new definition
       // (`BoxedFunction._recheckedCall()`).
-      if (opDef.isUserFunctionDefinition) fn._refusedOps = args;
+      if (opDef.isUserFunctionDefinition) fn._refusedOps = writtenArgs;
       return fn;
     }
     // All valid: an operand was substituted (devolved to an unknown symbol,

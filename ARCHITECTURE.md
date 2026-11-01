@@ -231,6 +231,54 @@ not canonicalized), and **non-canonical** (not bound, usable only for pattern
 matching/serialization). The distinctions and pitfalls are documented in detail
 in [implementation conventions](#expression-creation-modes).
 
+### Default values of parameters at canonicalization
+
+When a call leaves out a parameter that has a default value
+(`(x: number, factor: number = 2) -> number`), canonicalization inserts the
+default operand, so the canonical form carries it: `Scaled(3)` is
+`["Scaled", 3, 2]`, the same expression as `Scaled(3, 2)`, and the handlers,
+the type handlers and the compiler see two operands. The operand is the default
+boxed once when the definition was declared (`parameterDefaultOperands()`). The
+fill is `fillParameterDefaults()` (`parameter-defaults.ts`): when every
+required parameter has an operand, each defaulted parameter that has no operand
+receives its default; when a required parameter is empty (`Scaled()`), nothing
+is inserted and the call reports `missing`. A present operand is never changed.
+`makeCanonicalFunction` (`box.ts`) runs it where the positional operand list is
+final, on each route:
+
+- an operator without a `canonical` handler: after named-argument normalization
+  and `flatten` (which drops a written `Nothing`), before the signature check;
+- an operator with a `canonical` handler, and a lazy operator: the operands are
+  not flattened, so a top-level `Sequence` operand counts as each of its
+  elements, and the defaults are appended after the written operands. For an
+  operator with a default only, a written `Nothing` operand is removed first;
+- a named call: an optional parameter that the names skip and that has a
+  default receives it (`f(3, factor: 5)` with
+  `(x, density: number = 1, factor: number = 2)` is `f(3, 1, 5)`), and
+  `f(k: Nothing)` leaves `k` to its default. A skipped optional parameter
+  without a default is still `argument-optional-skipped`;
+- a call with a `Spread` operand whose positions are unknown (`f(...p)`) is not
+  filled; the call boxed again at evaluation, after the splice, is;
+- a call through a variable declared with a signature that has a default
+  (`g: (number, number = 2) -> number`) is filled from the declared type. A
+  variable declared with the bare `function` type is not.
+
+A non-canonical boxing does not fill. A call of a user function (a definition
+that holds a function literal) or of a variable whose type is inferred keeps
+its operands as written: when the name holds another function at evaluation,
+the call is boxed again from them (`BoxedFunction._reboxedForCallee()`), and
+the defaults of that function are inserted. After `v(3)` was filled to
+`v(3, 2)`, assigning `(x) => x` to `v` makes the call evaluate to 3. An
+operator declared without a function literal and a variable with a declared
+type are not matched again.
+
+Limit: the fill happens only where a call names its callee. A function value
+passed to a parameter is not filled when it is called through that parameter:
+with `g` declared as above and holding `(x, k) => x * k`, `Map(g, [1])` is
+`[2]` (the call goes through the name `g`), but `((f) => f(3))(g)` is a partial
+application of the literal, and `((f) => Map(f, [1]))(g)` is a
+`callback-arity` error.
+
 ### Generic-symbol conventions at canonicalization
 
 Canonicalization applies a small set of algebraic folds to **generic**

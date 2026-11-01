@@ -45,6 +45,7 @@ import {
   refineDeclaredPlaceholders,
 } from './effects-inference.js';
 import { signatureResultType } from './callee-type-derivation.js';
+import { installParameterDefaults } from './parameter-defaults.js';
 
 import type {
   OperatorDefinition,
@@ -830,6 +831,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         throw new Error(
           `The signature of "${this.name}" was set to a function. Use "_setSignature()" to compute a signature inside the write's fact-blind bracket.`
         );
+      // An explicit signature: check and box the default values of its
+      // parameters before it is installed.
+      installParameterDefaults(
+        this.engine,
+        this,
+        this.name,
+        `Operator Definition "${this.name}"`,
+        value.type
+      );
       this._setSignature(() => value);
       // Report the write, so that values cached against the engine's cache
       // generation (the type of an application of this operator) are
@@ -2293,6 +2303,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           `Operator Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`
         );
       }
+      // Check the default values of the optional parameters and box them in
+      // the declaring scope, before the signature is installed: a default
+      // that is misplaced or does not fit its parameter refuses the whole
+      // definition.
+      installParameterDefaults(
+        this.engine,
+        this,
+        this.name,
+        `Operator Definition "${this.name}"`,
+        newSig.type
+      );
       this._setSignature(() => newSig);
       this._signatureSkeleton = undefined;
 

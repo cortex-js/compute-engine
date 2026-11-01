@@ -867,3 +867,30 @@ Decided by the user 2026-10-31:
 >   multi-clause function, and defaults on the built-in library.
 >
 > I will post here when it ships.
+
+## 11. Corrections found during the implementation
+
+Measured in step 3 (CE-717.3), 2026-10-31. Where this section and the text
+above disagree, this section is correct.
+
+1. **A symbol default inside a function with a parameter of that name**
+   (R4, §7 item 6, R8). Inside `(d) => ScaledByD(3)`, with
+   `k: number = d`, the filled call reads the parameter `d` of that
+   function, and so does the written call `ScaledByD(3, d)`: both give 30
+   when the function is applied to 10. The rule that holds is R3's: the
+   default behaves exactly as if the author had written the symbol in the
+   call. The text "with the parameter activations of other functions
+   skipped" applies to a function that is CALLED (a parameter of the
+   callee's body), not to a function whose body contains the call. So the
+   compile targets need no "shadowed by a parameter at the call site"
+   decline (R8): the completed operand is compiled as a written operand at
+   that call site, which reads the same binding.
+2. **The limit of a declared-type variable as a callback** (R5, §7 item 4c).
+   `Map` takes the function first. `Map(g, [1])` with the NAME `g` is
+   filled, because a symbol callee is called through its name. The limit is
+   a function VALUE passed as an argument: `((f) => f(3))(g)` is a partial
+   application, and `((f) => Map(f, [1]))(g)` is `callback-arity`.
+3. **A callee replaced by one that requires the parameter** (§7 item 4d,
+   last step). After `f := (x, k) => x * k`, `e.evaluate()` is a partial
+   application, not `missing` for `k`: a call of a user function with fewer
+   arguments than it requires curries (§2 item 4), as a written `f(3)` does.

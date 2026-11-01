@@ -136,6 +136,12 @@ import {
 } from './evaluation-epoch.js';
 import { cacheOff } from '../../common/cache-switches.js';
 import {
+  checkParameterDefaultsUnboxed,
+  inDeclaringScope,
+  installParameterDefaults,
+  scopeHoldingDefinition,
+} from './parameter-defaults.js';
+import {
   CYCLE_DETECTED,
   CycleDepthQuery,
   CycleQuery,
@@ -1513,12 +1519,27 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         `The type of the wildcard "${this._id}" cannot be changed`
       );
 
+    const newType = this.engine.type(t).type;
+
+    // Refuse a type whose parameter defaults are misplaced or do not fit
+    // before any state changes below (the kind gates, the assumptions), so
+    // that a refused type leaves that state as it was. These checks box no
+    // symbol; the defaults are boxed when the type is written
+    // (`_writeType()`).
+    checkParameterDefaultsUnboxed(
+      this.engine,
+      newType === 'function' || isSignatureType(newType)
+        ? `Operator Definition "${this._id}"`
+        : `Symbol "${this._id}"`,
+      newType
+    );
+
     // A type that can hold a value of a value kind (`r.type = 'residue'`,
     // a function type that returns `gf8`) lets an expression of the engine
     // hold such a value: the engine opens the gates of the kind type that
     // enable the recognition of its values, as a declaration does
     // (`engine-declarations.ts`, `residue-class.ts`).
-    noteKindTypeDeclaration(this.engine, this.engine.type(t).type);
+    noteKindTypeDeclaration(this.engine, newType);
 
     // Clear assumptions about this symbol.
     //
@@ -1557,6 +1578,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // every later read of the symbol's type fails on it (the symbol-type
         // branch below wraps for the same reason).
         const signature = this.engine.type(t);
+        // Check and box the default values of the parameters of the new
+        // signature before it is installed.
+        installParameterDefaults(
+          this.engine,
+          symbolDef.operator,
+          this._id,
+          `Operator Definition "${this._id}"`,
+          signature.type
+        );
         symbolDef.operator._setSignature(() => signature);
         // An explicit retype replaces the declaration, so a signature
         // skeleton kept from an earlier declaration must not refine it.
@@ -1577,7 +1607,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // `binding-repair`), so the event must carry a zero parity mask —
         // the callable axis selects `type-write{either side}` identically.
         const callableBefore = defIsCallableShaped(symbolDef);
-        updateDef(this.engine, this._id, symbolDef, { signature: t });
+        // The parameter defaults of the new operator definition are boxed
+        // in the scope that holds the binding of this symbol.
+        inDeclaringScope(
+          this.engine,
+          this._id,
+          scopeHoldingDefinition(this.engine, this._id, symbolDef),
+          () => updateDef(this.engine, this._id, symbolDef, { signature: t })
+        );
         this.engine._noteStateEvent({
           kind: 'type-write',
           callableBefore,
@@ -1589,7 +1626,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // We are changing a function to a symbol — callability LEAVES the
         // binding (§2b). Zero-mask `type-write` for the same parity reason
         // as the symbol→function branch above.
-        updateDef(this.engine, this._id, symbolDef, { type: t });
+        // The parameter defaults of the new value definition are boxed in
+        // the scope that holds the binding of this symbol.
+        inDeclaringScope(
+          this.engine,
+          this._id,
+          scopeHoldingDefinition(this.engine, this._id, symbolDef),
+          () => updateDef(this.engine, this._id, symbolDef, { type: t })
+        );
         this.engine._noteStateEvent({
           kind: 'type-write',
           callableBefore: true,
@@ -1597,6 +1641,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         });
       } else {
         // We are changing the type of a symbol — the bare route of §2c.
+        // An explicit type is a declaration: check and box the default
+        // values of its parameters before anything is written. A default in
+        // a position where no definition uses it is refused.
+        installParameterDefaults(
+          this.engine,
+          symbolDef.value,
+          this._id,
+          `Symbol "${this._id}"`,
+          t as Type
+        );
         const before = containsSignatureArm(symbolDef.value.type?.type);
         this.engine._noteStateEvent({
           kind: 'type-write',

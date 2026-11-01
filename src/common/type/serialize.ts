@@ -477,7 +477,7 @@ const RESERVED_DEFAULT_NAMES = new Set([
  * prints (`2`, `"a"`, `true`, `NaN`, `+oo`, `-oo`), a symbol by its name
  * (backticked when it is not a plain identifier), and `[]` or `{}`.
  */
-function parameterDefaultToString(value: ParameterDefault): string {
+export function parameterDefaultToString(value: ParameterDefault): string {
   switch (value.kind) {
     case 'value':
       return typeToString({ kind: 'value', value: value.value });

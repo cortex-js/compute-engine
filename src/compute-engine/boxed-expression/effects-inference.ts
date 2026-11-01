@@ -17,6 +17,7 @@ import {
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import {
+  defaultedSlotsAsRequired,
   isSubtype,
   provablyAdmits,
   objectLayoutOfType,
@@ -557,6 +558,13 @@ export function matchesDeclaredTypeAxes(
   /** The symbol being declared/assigned, for the D7 diagnostic. */
   symbol?: string
 ): boolean {
+  // A parameter of the declared signature with a default value is always
+  // supplied when the symbol is called (the default is inserted), so the
+  // value may require it: `(x, k) => x * k` is a value of
+  // `(number, number = 2) -> number`.
+  const required = defaultedSlotsAsRequired(declared.type);
+  if (required !== declared.type) declared = ce.type(required);
+
   // A declared type is a contract on EVERY value the symbol takes (user
   // decision P1 of `docs/plans/2026-10-21-presence-contracts-and-assertion.md`,
   // 2026-10-21): the absence symbols `Missing` and `Undefined` are refused

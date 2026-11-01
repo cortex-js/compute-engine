@@ -669,6 +669,55 @@ ignore the parameter name: `(x: number, k: number = 2) -> number` and
 `(x: number, k: number?) -> number`. A default changes what a call means, not
 which calls are admitted.
 
+Where a default is used: on the parameters of the top-level signature of an
+operator definition (`ce.declare("Scaled", { signature })`, `ce.assign`) and
+of a declared variable (`ce.declare("g", "(number, number = 2) -> number")`).
+The declaration boxes each default once, in the declaring scope, and checks
+it against the parameter type; it throws when the default does not fit:
+
+- A number, a string, a boolean, `[]` or `{}` must match the parameter type.
+  `factor: number = "a"` and `xs: number = []` are refused;
+  `xs: list<number> = []` and `opts: dictionary = {}` are accepted, because
+  the types of the two empty values, `list<never>` and `dictionary<never>`,
+  match every list and dictionary type.
+- A symbol is checked as the same symbol written as the argument of a call
+  is checked. A declared symbol whose type does not fit is refused
+  (`k: number = Integers`, `Integers` is a `set<integer>`); a symbol that is
+  not declared has the type `unknown` and is accepted at every parameter
+  type (`mode: symbol = Automatic`). When the parameter type lists literal
+  symbol types (`mode: symbol<Auto> | symbol<Manual>`), the default must be
+  one of them: `= Atuo` is refused. With `ce.strict` set to `false`, a call
+  does not check the type of its arguments, so a declared symbol whose type
+  does not fit is accepted (`k: number = Integers`), as `Integers` written
+  as the argument of a call is accepted in non-strict mode. The check of the
+  literal symbol types is still made.
+
+A declaration also throws for a default that nothing would use:
+
+- in an arm of an overloaded signature (an intersection of signatures): "a
+  default value in an overloaded signature is not supported yet";
+- on a parameter whose type mentions a type variable
+  (`(x: T, k: T = 2) -> T where T`): "a default value on a generic parameter
+  is not supported yet";
+- anywhere else in a type: in the type of a parameter
+  (`(f: (number, number = 2) -> number) -> number`), in the result type, an
+  element type (`list<(number, number = 2) -> number>`), a union arm, a record
+  field, a `Typed` annotation, or the body of `ce.declareType()`: "a default
+  value is allowed only in a top-level function signature". The parser
+  accepts these types; the check is made where the type is installed.
+
+One exception to "subtyping ignores the default": when a VALUE is checked
+against a DECLARED function type (a declaration with a value, an
+assignment), a parameter of the declared signature with a default counts as
+a required parameter. A call of the variable always reaches the value with
+that argument, because the default is inserted when the call leaves it out.
+So with `g` declared `(number, number = 2) -> number`, the assignment of
+`(x, k) => x * k` (which requires two arguments) is accepted, and the
+assignment of `(x) => x` is still refused: it does not take the second
+argument. The declared type is read this way by `defaultedSlotsAsRequired()`
+(`src/common/type/subtype.ts`) before the value check; `isSubtype()` itself
+is unchanged.
+
 ### The inferred signature of a function literal
 
 The signature of a function literal says what its body proves about every

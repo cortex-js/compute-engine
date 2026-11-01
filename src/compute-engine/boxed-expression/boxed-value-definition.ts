@@ -77,6 +77,7 @@ import {
 } from './effects-inference.js';
 import { isEffectSubset, unionEffectSets } from '../../common/type/effects.js';
 import { declaredTypeError } from './type-compatibility-error.js';
+import { installParameterDefaults } from './parameter-defaults.js';
 import {
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
@@ -498,6 +499,20 @@ export class _BoxedValueDefinition
           [`Symbol "${this.name}"`, `The type "${def.type}" is invalid `].join(
             '\n|   '
           )
+        );
+
+      // A declared function type can give its optional parameters default
+      // values (`(number, number = 2) -> number`). They are checked and boxed
+      // here, in the declaring scope; a default in any other position of a
+      // declared type is refused. An inferred type is not checked: it is
+      // derived from a value, not written by the author.
+      if (!def.inferred)
+        installParameterDefaults(
+          ce,
+          this,
+          this.name,
+          `Symbol "${this.name}"`,
+          type
         );
 
       this._type = new BoxedType(type, ce._typeResolver);

@@ -42,18 +42,43 @@ nightly run, tell the user; do not take over that investigation unless asked.
   static type `error`. Every other case is unspecified, and compiled code need
   not check for it: an error that the static type does not show
   (`If(u > 1, "ab", 1) + 1`), an input value outside its type (`"ab"` for an
-  input declared `real`, `NaN` for `real`, `7` for `real<0..5>`), an input
-  left out. The contract is in `docs/COMPILATION-MODEL.md`, "Fail closed".
-- When a rule that compiled code must follow (agreement with the interpreter
-  in the cases above) needs a hard static analysis, implement the simple, sound
-  version first: it may give no value where the interpreter has one, and that
-  case is documented with an example, but it never gives a different value. A
-  more precise version is a separate task, done when the user asks for it.
-- A reachable shape in the cases above that a compile target declines (it falls
-  back to the interpreter) or that gives a different value from the interpreter
-  is a defect, even when a corpus shows it only a few times. How often it occurs
-  sets the priority of the fix; it never closes the item. Do not resolve a
-  ROADMAP entry with "the decline stays" or "no consumer has asked".
+  input declared `real`, `NaN` for `real`, `7` for `real<0..5>`), an input left
+  out. The contract is in `docs/COMPILATION-MODEL.md`, "Fail closed". One
+  exception: in the JavaScript `bigint` compile mode, a `number` result (`NaN`
+  or `Infinity`) means that a sub-expression had no finite value, and it need
+  not equal the interpreter's value; a `bigint` or `boolean` result must. A
+  `bigint` cannot hold a non-finite value, and the one catch that returns it
+  skips every operator between the pole and the result
+  (`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`, §3.4).
+- Compiled code settles every shape at compile time and emits no run-time test
+  of a type. The shape of a node (scalar, list, tuple, string, complex, ...)
+  comes from its declared or inferred static type and from the literal structure
+  of its operands; the compiler does not follow the paths of control flow to
+  find a shape. An input typed `unknown` or `any` is refused, with its name in
+  `unsupported`. A value with no settled shape declines: an `If` whose branches
+  differ in shape, a local that is assigned values of two shapes in one scope, a
+  call whose result shape depends on a run-time value. A declared union of
+  shapes at an input or a parameter compiles with one dispatch at that binding
+  and one body per member: the host pays that dispatch, and avoids it by
+  declaring one shape or by compiling one function per shape. The host supplies
+  every input with a value of its declared type; otherwise the result is
+  undefined and can differ between targets. The rule is in
+  `docs/plans/2026-10-31-static-shape-compilation.md` (R1 to R6) until
+  `docs/COMPILATION-MODEL.md` carries it (ROADMAP CE-712.5).
+- A decline that the rule above requires is not a defect, and no analysis is
+  added to remove it: the remedy is a declaration by the host or a change to the
+  program, and the case is documented with an example. When another rule that
+  compiled code must follow needs a hard static analysis, implement the simple,
+  sound version first: it may give no value where the interpreter has one, and
+  that case is documented with an example, but it never gives a different value.
+  A more precise version is a separate task, done when the user asks for it by
+  name.
+- A reachable shape in the cases above, outside the declines that the
+  static-shape rule requires, that a compile target declines (it falls back to
+  the interpreter) or that gives a different value from the interpreter is a
+  defect, even when a corpus shows it only a few times. How often it occurs sets
+  the priority of the fix; it never closes the item. Do not resolve a ROADMAP
+  entry with "the decline stays" or "no consumer has asked".
 - Judge a design change first by correctness (compiled values equal the
   interpreter's in the cases above; an expression whose static type is `error`
   declines) and by code-generation coverage (declines removed per target). The
@@ -74,8 +99,8 @@ nightly run, tell the user; do not take over that investigation unless asked.
 - Follow BUILD.md and the shared-box specifics for completion checks; after-edit
   hooks and commit-time formatting do not replace them. Capture test exit codes
   directly rather than relying on the exit status of an output-filtering pipe.
-- The instructions exist to make the work efficient. When one asks for work
-  that looks redundant in the case at hand (a check that already ran on the same
+- The instructions exist to make the work efficient. When one asks for work that
+  looks redundant in the case at hand (a check that already ran on the same
   content, a full suite that the change cannot affect, a batch of test files
   that a later run covers), do not do it without thinking: say why it looks
   redundant and ask the user whether to do it. A sub-agent reports the question

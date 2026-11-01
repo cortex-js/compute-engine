@@ -89,6 +89,10 @@ import {
 } from './boxed-expression/ambient-chain.js';
 import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
 import {
+  NESTED_DEFAULT_MESSAGE,
+  typeHasParameterDefault,
+} from './boxed-expression/parameter-defaults.js';
+import {
   errorValue,
   isInvalidNonCollection,
   withErrorFrames,
@@ -905,6 +909,11 @@ export function canonicalFunctionLiteralArguments(
       const t = functionLiteralParameterType(normalized);
       if (t !== undefined && isPolymorphicType(t))
         return ce.error(TYPE_VARIABLE_INTRODUCTION_MESSAGE, x.toString());
+      // A parameter annotation is not the top-level signature of a
+      // definition, so a default value of a parameter in it
+      // (`Typed(f, "(number, number = 2) -> number")`) would never be used.
+      if (t !== undefined && typeHasParameterDefault(t))
+        return ce.error(NESTED_DEFAULT_MESSAGE, x.toString());
       // A parameter declared `unknown`, or a transparent alias of it, is a
       // parameter with no declaration (user decision 2026-10-30, recorded
       // with GitHub issue #488). The annotation is removed here, so every

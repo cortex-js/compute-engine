@@ -42,7 +42,7 @@ import {
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
 import { clearClauseProvenance } from './clause-identity.js';
-import { isSubtype } from '../common/type/subtype.js';
+import { defaultedSlotsAsRequired, isSubtype } from '../common/type/subtype.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import {
   recordTypeProvenance,
@@ -121,6 +121,10 @@ import {
 } from './inference-rollback.js';
 import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
 import { binderBindingOf } from './boxed-expression/binders.js';
+import {
+  assertNoParameterDefault,
+  inDeclaringScope,
+} from './boxed-expression/parameter-defaults.js';
 import { markRetiredBinding } from './boxed-expression/forward-call-reference.js';
 import { _removePendingSequence } from './sequence.js';
 import { latestDeclaredEffectsSite } from './boxed-expression/effects-provenance.js';
@@ -639,7 +643,10 @@ export function declareSymbolValue(
   // is restored only while the record still holds the placeholder value half.
   const placeholderValue = isValueDef(boxedDef) ? boxedDef.value : undefined;
   try {
-    updateDef(ce, name, boxedDef, def, scope, fresh);
+    // The parameter defaults of the declared type are boxed in `scope`.
+    inDeclaringScope(ce, name, scope, () =>
+      updateDef(ce, name, boxedDef, def, scope, fresh)
+    );
   } catch (e) {
     if (
       scope.bindings.get(name) === boxedDef &&
@@ -823,7 +830,10 @@ export function declareSymbolOperator(
   // definition is then committed and stays: the binding is restored only
   // while it still holds the placeholder value half.
   try {
-    updateDef(ce, name, boxedDef, def, scope, fresh);
+    // The parameter defaults of the declared type are boxed in `scope`.
+    inDeclaringScope(ce, name, scope, () =>
+      updateDef(ce, name, boxedDef, def, scope, fresh)
+    );
   } catch (e) {
     if (!isOperatorDef(boxedDef) && scope.bindings.get(name) === boxedDef) {
       if (fresh) scope.bindings.delete(name);
@@ -1421,6 +1431,12 @@ export function declareType(
     // aliased or nested `object{…}` layout unchecked.
     if (typeof type !== 'string')
       assertObjectLayoutIsNominalBody(alias === true, def);
+
+    // A default value of a parameter (`(number, number = 2) -> number`) is
+    // used only on the top-level signature of a definition, which boxes and
+    // checks it. A type declaration installs no definition, so nothing would
+    // use a default in its body.
+    assertNoParameterDefault(`Type "${name}"`, def);
   } catch (e) {
     rollbackTypeHalf();
     throw e;
@@ -4721,6 +4737,12 @@ function assertFunctionLiteralArity(
   declaredDisplay: string
 ): void {
   if (!isFunction(literal, 'Function')) return;
+
+  // A parameter of the declared signature with a default value is always
+  // supplied when the symbol is called (the default is inserted), so the
+  // literal must take it as a required parameter:
+  // `(number, number = 2) -> number` accepts `(x, k) => x * k`.
+  declaredType = defaultedSlotsAsRequired(declaredType);
 
   // Only a concrete declared *signature* constrains arity. The top `function`
   // type (`ce.declare('f', 'function')`, stored as the primitive string
