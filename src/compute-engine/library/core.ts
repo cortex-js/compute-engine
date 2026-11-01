@@ -62,6 +62,7 @@ import {
   addSequenceBaseCase,
   addSequenceRecurrence,
   addMultiIndexBaseCase,
+  sequenceDefinitionScope,
   addMultiIndexRecurrence,
   containsSelfReference,
   extractIndexVariable,
@@ -13275,6 +13276,28 @@ async function evaluateNAsync(
 }
 
 /**
+ * The value of a base case of the sequence `name` (`L_0 := v`,
+ * `P_{0,0} := v`), as it is stored. The sequence is stored in a scope of the
+ * chain (`sequenceDefinitionScope`), and a lazy collection of the value
+ * reads the locals of the loops and blocks between the current scope and
+ * that scope with their values now (`bindOutlivedLocalsOfLazyValue`), as a
+ * value assigned to a variable of that scope does: with
+ * `for d in [3, 6] { if d == 3 { L_0 := Map(x => x + d, R) } }`, the
+ * elements of `L_0` are `4, 5, …`, not those of the last `d`.
+ */
+function baseCaseValue(
+  ce: ComputeEngine,
+  name: string,
+  value: Expression
+): Expression {
+  return bindOutlivedLocalsOfLazyValue(
+    ce,
+    sequenceDefinitionScope(ce, name),
+    value
+  );
+}
+
+/**
  * The evaluation of `Assign(target, value)`, as a generator that yields the
  * held value operand each time it needs it evaluated (`OperandSteps`). The
  * `evaluate` and `evaluateAsync` handlers of `Assign` drive it.
@@ -13337,7 +13360,11 @@ function* assignSteps(
         ? `${seqName}_${subscript.re}`
         : undefined;
     if (joinedName !== undefined && ce.lookupDefinition(joinedName) != null) {
-      const val = yield op2;
+      // The value is prepared as on the symbol route below
+      // (`assignedValue`): a lazy collection of the value reads the locals
+      // of the loops and blocks that `joinedName` outlives with their
+      // values now.
+      const val = assignedValue(ce, yield op2, joinedName);
       // Errors surface as VALUES on this route, exactly as on the
       // regular symbol-assignment path below.
       try {
@@ -13399,7 +13426,12 @@ function* assignSteps(
       // e.g., P_{0,0} := 1
       if (indices.every((op) => isNumber(op) && Number.isInteger(op.re))) {
         const key = indices.map((op) => op.re).join(',');
-        addMultiIndexBaseCase(ce, seqName, key, yield op2);
+        addMultiIndexBaseCase(
+          ce,
+          seqName,
+          key,
+          baseCaseValue(ce, seqName, yield op2)
+        );
         return ce.Nothing;
       }
 
@@ -13447,7 +13479,12 @@ function* assignSteps(
           // Case M3: Pattern base case (no self-reference)
           // e.g., P_{n,0} := 1 or P_{n,n} := 1
           const key = indexVars.join(',');
-          addMultiIndexBaseCase(ce, seqName, key, yield op2);
+          addMultiIndexBaseCase(
+            ce,
+            seqName,
+            key,
+            baseCaseValue(ce, seqName, yield op2)
+          );
           return ce.Nothing;
         }
       }
@@ -13459,7 +13496,7 @@ function* assignSteps(
     // e.g., L_0 := 1, F_1 := 1
     if (isNumber(subscript) && Number.isInteger(subscript.re)) {
       const index = subscript.re;
-      const value = yield op2;
+      const value = baseCaseValue(ce, seqName, yield op2);
       addSequenceBaseCase(ce, seqName, index, value);
       return ce.Nothing;
     }

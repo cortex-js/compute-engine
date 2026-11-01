@@ -116,7 +116,11 @@
  *
  * A view created outside every function call (at the top level, or in a
  * `Block` of the top level) has the record `null`: it is read in the context
- * of the reader, as before this record existed.
+ * of the reader, as before this record existed. One exception: an
+ * assignment that stores such a view out of the loop iteration or the block
+ * that made it (`h = Map(f, R)` in a loop, with `h` declared outside) gives
+ * it a record of the scopes between its creation and the scope of the
+ * variable (`recordOutlivedLazyViewContexts`).
  *
  * The design is in `docs/plans/2026-10-31-parameter-default-values.md`
  * (§11, item 6).
@@ -169,6 +173,11 @@ type LazyViewRecord = {
   /** The stack that a read puts in place once the live stack cannot be
    * used, made once. */
   built: ReadonlyArray<EvalContext> | undefined;
+  /** True for a record that an assignment made for a view created outside
+   * every function call (`recordOutlivedLazyViewContexts`). Its frame can
+   * be the local scope of a node (a loop, a block), which a later
+   * assignment of the view to a variable further out outlives. */
+  outlived?: boolean;
 };
 
 /** The copy of a nested scope that a record reads, made by
@@ -201,6 +210,15 @@ export function setLazyViewNestedScopeCopier(
  */
 const RECORDS = new WeakMap<Expression, LazyViewRecord | null>();
 
+/** For a view with the record `null`, the context on top of the stack when
+ * it was created (`recordOutlivedLazyViewContexts`). A rebuild of the view
+ * that takes its record takes this context too (`shareLazyViewRecord`).
+ * The entry keeps the context, and through it the scope of the creation,
+ * alive as long as the view: the scope is not freed after its block has
+ * ended while the view can be read. A view that gets a record leaves the
+ * map (`setRecord`). */
+const CREATED_ON = new WeakMap<Expression, EvalContext>();
+
 /** The call frames that a record, a function literal made in the call, or
  * a node of the value that the call returns (`retainScope`)
  * can read after their call has ended (see the header), and the local
@@ -230,6 +248,7 @@ const CANONICALIZED_COUNT = new WeakMap<Scope, number>();
  * a view to adopt (`noteLazyViewCanonicalized`). */
 function setRecord(expr: Expression, record: LazyViewRecord | null): void {
   RECORDS.set(expr, record);
+  if (record !== null) CREATED_ON.delete(expr);
   const frame = CANONICALIZED_IN.get(expr);
   if (frame === undefined) return;
   CANONICALIZED_IN.delete(expr);
@@ -343,7 +362,10 @@ export function hasLazyViewRecord(expr: Expression): boolean {
 /** Give `to` the record of `from`, if `from` has one. */
 export function shareLazyViewRecord(from: Expression, to: Expression): void {
   const own = RECORDS.get(from);
-  if (own !== undefined && !RECORDS.has(to)) setRecord(to, own);
+  if (own === undefined || RECORDS.has(to)) return;
+  setRecord(to, own);
+  const created = own === null ? CREATED_ON.get(from) : undefined;
+  if (created !== undefined) CREATED_ON.set(to, created);
 }
 
 /**
@@ -358,26 +380,51 @@ function newRecord(
   let frameIndex = stack.length - 1;
   while (frameIndex >= 0 && stack[frameIndex].name !== 'call') frameIndex -= 1;
   if (frameIndex < 0) return null;
+  return recordAt(
+    stack,
+    frameIndex,
+    inFrame ? stack[frameIndex] : stack[stack.length - 1]
+  );
+}
+
+/** The scopes of the chain from `from` up to `to`, `to` excluded, innermost
+ * first, with their bindings now and the write version of each value
+ * binding (`LazyViewRecord['nested']`). `undefined` when the chain does not
+ * reach `to`. */
+function snapshotScopes(
+  from: Scope,
+  to: Scope
+): NonNullable<LazyViewRecord['nested']>[number][] | undefined {
+  const scopes: NonNullable<LazyViewRecord['nested']>[number][] = [];
+  let scope: Scope | null = from;
+  while (scope !== null && scope !== to) {
+    const entries: LazyViewScopeEntry[] = [];
+    const versions: (number | undefined)[] = [];
+    for (const [name, binding] of scope.bindings) {
+      const value = 'value' in binding ? binding.value : undefined;
+      entries.push([name, binding, value?.storedValue]);
+      versions.push(value?._writeVersion);
+    }
+    scopes.push({ scope, entries, versions });
+    scope = scope.parent;
+  }
+  return scope === null ? undefined : scopes;
+}
+
+/** A record whose frame is the context `stack[frameIndex]` and whose
+ * context on top of the stack at the creation is `top` (see
+ * `LazyViewRecord`). */
+function recordAt(
+  stack: ReadonlyArray<EvalContext>,
+  frameIndex: number,
+  top: EvalContext
+): LazyViewRecord {
   const frameContext = stack[frameIndex];
   const frame = frameContext.lexicalScope;
-  let top = inFrame ? frameContext : stack[stack.length - 1];
   let nested: LazyViewRecord['nested'] = undefined;
   if (top.lexicalScope !== frame) {
-    const scopes: NonNullable<LazyViewRecord['nested']>[number][] = [];
-    let scope: Scope | null = top.lexicalScope;
-    while (scope !== null && scope !== frame) {
-      const entries: LazyViewScopeEntry[] = [];
-      const versions: (number | undefined)[] = [];
-      for (const [name, binding] of scope.bindings) {
-        const value = 'value' in binding ? binding.value : undefined;
-        entries.push([name, binding, value?.storedValue]);
-        versions.push(value?._writeVersion);
-      }
-      scopes.push({ scope, entries, versions });
-      scope = scope.parent;
-    }
-    if (scope === null) top = frameContext;
-    else nested = scopes;
+    nested = snapshotScopes(top.lexicalScope, frame);
+    if (nested === undefined) top = frameContext;
   }
   // The call frames that the scope chain of `top` reaches. The chain is
   // read now: the parent link of a function body changes with each call of
@@ -425,7 +472,173 @@ export function recordLazyViewContext(
   if (result === source || !isLazyCallbackView(result)) return;
   if (RECORDS.has(result)) return;
   const own = RECORDS.get(source);
-  setRecord(result, own !== undefined ? own : newRecord(stack, false));
+  if (own !== undefined) {
+    shareLazyViewRecord(source, result);
+    return;
+  }
+  const record = newRecord(stack, false);
+  setRecord(result, record);
+  if (record === null && stack.length > 0)
+    CREATED_ON.set(result, stack[stack.length - 1]);
+}
+
+/**
+ * The value `value`, that an assignment stores in a variable of the scope
+ * `frame` or of a scope outside it, with a record of the scopes between the
+ * context of their creation and `frame` for its views that were created
+ * outside every function call, in a scope nested in `frame`: a loop
+ * iteration or a block of the top level. Called by
+ * `bindOutlivedLocalsOfLazyValue` (`function-utils.ts`) for the views that
+ * outlive these scopes.
+ *
+ * Such a view has the record `null`, and its reads ran in the context of
+ * the reader. A name that the call of its callback reads by its binding in
+ * the context, such as the symbol default `d` of a parameter
+ * `(x, k = d) => x * k` that the call fills, was then read after the loop
+ * had ended, where `d` has no value: with
+ * `let f = (x, k = d) => x * k; for d in [3, 6] { if d == 3 { h = Map(f, R) } }`,
+ * the elements of `h` were `d` and `2d`. With the record, the read uses the
+ * live stack while the scopes of the creation are unchanged, and otherwise
+ * copies of these scopes with the values of the assignment
+ * (`contextsForRead`), as for a view made in a function call: the elements
+ * are `3` and `6`. The values are those of the assignment, as for the names
+ * that the operands of the view name (`bindOutlivedLocalsOfLazyValue`).
+ *
+ * A view that has such a record already, and that is stored in a variable
+ * further out than the frame of its record, gets a record extended to
+ * `frame`: the scopes of the earlier record, with their values at the
+ * earlier assignment, and the scopes from its frame up to `frame`, with
+ * their values now. With
+ * `for d in [3, 6] { let u = []; for j in [1] { if d == 3 { u = Map(f, R) } }; if d == 3 { h = u } }`,
+ * the record of `u` has the loop body as its frame, and `h` reads `d = 3`
+ * after the loop.
+ *
+ * The view that gets a record is a new node (`rebuild`), so the view of an
+ * earlier target, or of a local of the same scope, keeps its record: a view
+ * read in its own scope reads the current values. A view that was created
+ * outside the scopes that the variable outlives (the value of a variable of
+ * `frame`, assigned again in a loop) keeps the record `null`: it is read in
+ * the context of its reader. A view that has a record of a call keeps it.
+ * The walk goes into the operands of the nodes that can hold a view
+ * (`Take(Map(f, R), 5)`) and into the values of a dictionary, not into a
+ * function literal, and rebuilds the nodes above a new view.
+ *
+ * The record is made, or extended, only while the context of the creation,
+ * or the frame of the earlier record, is on the stack above the frame of
+ * the variable. A view that leaves its block as the value of the block has
+ * lost that context, gets no record, and is read in the context of its
+ * reader: with
+ * `for d in [3, 6] { if d == 3 { h = do { let z = 0; Map(f, R) } } }`, the
+ * elements of `h` are `d` and `2d`. The scope chain of the creation cannot
+ * stand for the stack: the local scope of a block is one object for every
+ * run of the block, and an ended scope can be entered again.
+ */
+export function recordOutlivedLazyViewContexts(
+  value: Expression,
+  stack: ReadonlyArray<EvalContext>,
+  frame: Scope,
+  rebuild: (e: Expression, ops: ReadonlyArray<Expression>) => Expression,
+  skips: (e: Expression) => boolean
+): Expression {
+  let frameIndex = stack.length - 1;
+  while (frameIndex >= 0 && stack[frameIndex].lexicalScope !== frame)
+    frameIndex -= 1;
+  if (frameIndex < 0) return value;
+  const memo = new Map<Expression, Expression>();
+  const visit = (e: Expression): Expression => {
+    const hit = memo.get(e);
+    if (hit !== undefined) return hit;
+    if (isDictionary(e)) {
+      const ce = e.engine;
+      let changed = false;
+      const entries = e.keys.map((k) => {
+        const v = e.get(k)!;
+        const next = visit(v);
+        if (next !== v) changed = true;
+        return ce.function('KeyValuePair', [ce.string(k), next]);
+      });
+      const node = changed ? ce.function('Dictionary', entries) : e;
+      memo.set(e, node);
+      return node;
+    }
+    // A node with a local scope is not entered and not rebuilt: a rebuild
+    // on new operands would not keep its scope. A view in it, or a view
+    // with a local scope, gets no record and is read in the context of its
+    // reader. A node that is not a view and whose operands are not values
+    // (`Hold`, `skips`) is not entered either, as in the rewrite of
+    // `bindOutlivedLocalsOfLazyValue`.
+    if (!isFunction(e) || !canHoldLazyView(e) || e.localScope !== undefined)
+      return e;
+    if (!e.isLazyCollection && skips(e)) return e;
+    const ops = e.ops;
+    const next = ops.map(visit);
+    let node: Expression = e;
+    if (!next.every((op, i) => op === ops[i])) {
+      node = rebuild(e, next);
+      shareLazyViewRecord(e, node);
+    }
+    const record = outlivedRecordOf(e, stack, frameIndex);
+    if (record !== undefined) {
+      if (node === e) node = rebuild(e, ops);
+      setRecord(node, record);
+    }
+    memo.set(e, node);
+    return node;
+  };
+  return visit(value);
+}
+
+/** The record that the view `e`, stored in a variable of the scope of
+ * `stack[frameIndex]`, gets (`recordOutlivedLazyViewContexts`), or
+ * `undefined` when it keeps its record.
+ *
+ * `null` when `e` has a record of an earlier assignment whose frame is no
+ * longer on the stack: the view has left that frame as the value of a
+ * block (`w = do { let v = []; do { v = Map(f, R) }; v }`). Its record would
+ * read the scope chain of that frame, whose bindings are those of the
+ * reader's time (the `d` of a later loop iteration), so the stored view is
+ * read in the context of its reader instead. Also `null` when the frame of
+ * the earlier record is on the stack but its scope chain does not reach the
+ * frame of the variable. */
+function outlivedRecordOf(
+  e: Expression,
+  stack: ReadonlyArray<EvalContext>,
+  frameIndex: number
+): LazyViewRecord | null | undefined {
+  const record = RECORDS.get(e);
+  if (record === null) {
+    const created = CREATED_ON.get(e);
+    if (created === undefined || stack.lastIndexOf(created) <= frameIndex)
+      return undefined;
+    return { ...recordAt(stack, frameIndex, created), outlived: true };
+  }
+  if (record?.outlived !== true) return undefined;
+  const oldFrame = record.contexts[record.contexts.length - 1];
+  const oldIndex = stack.lastIndexOf(oldFrame);
+  if (oldIndex < 0) return null;
+  if (oldIndex <= frameIndex) return undefined;
+  const outer = snapshotScopes(
+    oldFrame.lexicalScope,
+    stack[frameIndex].lexicalScope
+  );
+  // The chain from the earlier frame does not reach the frame of the
+  // variable (on the asynchronous route, a parent link can lead to the
+  // template of an activation): the earlier record would read the scopes
+  // between live, with the values of the reader's time. The view is read in
+  // the context of its reader instead.
+  if (outer === undefined) return null;
+  recordSerial += 1;
+  return {
+    contexts: stack.slice(0, frameIndex + 1),
+    // A record whose chain did not reach its frame has the frame as `top`
+    // and no nested scopes: the scopes from that frame out are then all
+    // the nested scopes.
+    top: record.top,
+    nested: [...(record.nested ?? []), ...outer],
+    frames: record.frames,
+    built: undefined,
+    outlived: true,
+  };
 }
 
 /**

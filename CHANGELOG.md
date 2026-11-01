@@ -363,6 +363,31 @@
 
 ### Bug Fixes
 
+- **A lazy view stored out of a loop iteration at the top level reads a
+  symbol default of its callback in that iteration.** In Epsil, with
+  `let f = (x, k = d) => x * k`,
+  `for d in [3, 6] { if d == 3 { h = Map(f, Range(1, Infinity)) } }` then
+  `ListFrom(Take(h, 2))` gave `[d, 2d]`; it now gives `[3, 6]`. The view names
+  no `d`: the call `f(x)` fills `k` with the `d` of the context of the call,
+  which was the context of the reader, after the loop. The assignment now
+  records, for the view, the loop and block scopes that the variable
+  outlives, with their values at the assignment, and each read of the view
+  calls `f` in them, as for a view made in a function call. A view made
+  outside the loop (`let v = Map(f, R); for d in [3] { h = v }`) is still
+  read in the context of its reader. So is a view that leaves its block as
+  the value of the block (`h = do { let z = 0; Map(f, R) }` in the loop): its
+  elements stay `d` and `2d`.
+
+- **A lazy view assigned to a subscripted name out of a loop iteration reads
+  the values of that iteration.** With
+  `for d in [3, 6] { if d == 3 { L_0 := Map(x => x + d, R) } }`, a base case
+  of the sequence `L` (also `P_{0,0} := …`), or the same assignment to a
+  declared name `h_1` (`h_1 := …`), the elements read after the loop were
+  `7, 8`, the value of `d` after the loop. They are now `4, 5`, as for an
+  assignment to a variable. The assignment to a declared `h_1` also lists a
+  finite lazy view that reads a variable and copies the variables of a call,
+  as an assignment to `h_1` written without the subscript does.
+
 - **A lazy `Map` in the callback of a `Map`, or in the body of a function,
   now gives the values of each application under `.N()`.**
   `Map(k ↦ Map(j ↦ k + j, [10, 20]), [1, 2])` with

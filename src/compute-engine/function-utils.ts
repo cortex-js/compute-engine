@@ -69,6 +69,7 @@ import {
   isLazyCallbackView,
   isNodeScope,
   lazyViewRecordSerial,
+  recordOutlivedLazyViewContexts,
   retainScope,
   retainCallFrameOfResult,
   setLazyViewNestedScopeCopier,
@@ -4425,8 +4426,11 @@ export function snapshotRunVariables(
  * but not including, the scope that holds the binding of `name`. For a
  * store into a field of an object, `name` is the variable that names the
  * object; with `name` `undefined` (a receiver that is not a variable,
- * whose life is not known), they are all the scopes of the chain. Only the local scopes of
- * nodes are read (a loop, a block, a comprehension, a big operator:
+ * whose life is not known), they are all the scopes of the chain. With
+ * `name` a scope (the scope that stores a base case of a sequence, which
+ * can hold no binding of the name of the sequence:
+ * `sequenceDefinitionScope`), they are the scopes up to that scope. Only
+ * the local scopes of nodes are read (a loop, a block, a comprehension, a big operator:
  * `isNodeScope`). On the asynchronous route, a node runs in an activation
  * of its scope (`liveScopeOf`): the values are read from the activation,
  * and the occurrences are matched with the definitions of the scope that it
@@ -4455,6 +4459,16 @@ export function snapshotRunVariables(
  * is read in its own scope, without an assignment to an outer variable, is
  * not changed and reads the current values.
  *
+ * A name that the call of a callback reads by its binding in the context,
+ * and that no operand of the collection names, is not replaced: the symbol
+ * default `d` of a parameter of `f = (x, k = d) => x * k` in `Map(f, R)`.
+ * A view made in a function call reads it in the context of that call
+ * (`lazy-view-context.ts`). A view made outside every call, in the scopes
+ * that the variable outlives, gets a record of these scopes with their
+ * values now (`recordOutlivedLazyViewContexts`): with
+ * `for d in [3, 6] { if d == 3 { h = Map(f, R) } }`, the elements of `h`
+ * are `3` and `6`, not `d` and `2d`.
+ *
  * The lazy collections are found at the root of `value` and in the operands
  * of its other nodes, also the values of a dictionary (a `ListFrom` that
  * stays unevaluated over an infinite `TakeWhile`). A function literal is
@@ -4467,7 +4481,7 @@ export function snapshotRunVariables(
  */
 export function bindOutlivedLocalsOfLazyValue(
   ce: ComputeEngine,
-  name: string | undefined,
+  name: string | Scope | undefined,
   value: Expression
 ): Expression {
   // The locals of the scopes that the variable outlives: `key`, the
@@ -4492,18 +4506,27 @@ export function bindOutlivedLocalsOfLazyValue(
     return value;
   const scopes: Local[][] = [];
   let found = name === undefined;
+  // The scope that holds `name`, or with no `name`, the innermost scope of
+  // the chain that is not the local scope of a node: the frame of the
+  // records of the views (`recordOutlivedLazyViewContexts`).
+  let frame: Scope | undefined;
   const stack = ce._evalContextStack;
   for (let s: Scope | null = ce.context.lexicalScope; s != null; s = s.parent) {
     const live = liveScopeOf(stack, s);
     if (
-      name !== undefined &&
-      (s.bindings.has(name) || live.bindings.has(name))
+      typeof name === 'string'
+        ? s.bindings.has(name) || live.bindings.has(name)
+        : name !== undefined && (s === name || live === name)
     ) {
       found = true;
+      frame = live;
       break;
     }
     const template = scopeActivationTemplate(live) ?? live;
-    if (!isNodeScope(template)) continue;
+    if (!isNodeScope(template)) {
+      frame ??= name === undefined ? live : undefined;
+      continue;
+    }
     const locals: Local[] = [];
     for (const [local, binding] of live.bindings) {
       if (!('value' in binding)) continue;
@@ -4522,7 +4545,14 @@ export function bindOutlivedLocalsOfLazyValue(
   if (!found) return value;
   // Outermost first, each scope in the order of its declarations.
   const all = scopes.reverse().flat();
-  if (all.length === 0 || !holdsLazyCollection(value)) return value;
+  // With no local to replace, the walk still gives the views their records
+  // (`recordOutlivedLazyViewContexts`): a view made in a block that has no
+  // local can read by its binding a name of an outer scope that the
+  // variable outlives. A view whose block has ended keeps a record only
+  // when an earlier assignment gave it one whose frame is still on the
+  // stack; otherwise it is read in the context of its reader
+  // (`outlivedRecordOf`).
+  if (!holdsLazyCollection(value)) return value;
   return rewriterOf(all)(value);
 
   // The value of `l` as it is substituted: a value that holds a lazy
@@ -4610,17 +4640,7 @@ export function bindOutlivedLocalsOfLazyValue(
       } else if (isFunction(e) && !outlivedWalkSkips(e)) {
         const ops = e.ops;
         const next = ops.map(rewrite);
-        // A canonical node is rebuilt on its rewritten operands, which are
-        // canonical, without a new canonicalization: that would walk each
-        // shared operand once per path to it.
-        if (!next.every((op, i) => op === ops[i]))
-          result = withCallableBinding(e, () =>
-            e.isCanonical
-              ? ce._fn(e.operator, next)
-              : ce.function(e.operator, next, {
-                  form: e.isStructural ? 'structural' : 'raw',
-                })
-          );
+        if (!next.every((op, i) => op === ops[i])) result = rebuild(e, next);
       }
       memo.set(e, result);
       return result;
@@ -4628,9 +4648,41 @@ export function bindOutlivedLocalsOfLazyValue(
     return rewrite;
   }
 
+  // The node `e` on the operands `ops`. A canonical node is rebuilt on its
+  // rewritten operands, which are canonical, without a new
+  // canonicalization: that would walk each shared operand once per path to
+  // it.
+  function rebuild(e: Expression, ops: ReadonlyArray<Expression>): Expression {
+    return withCallableBinding(e, () =>
+      e.isCanonical
+        ? ce._fn(e.operator, [...ops])
+        : ce.function(e.operator, [...ops], {
+            form: e.isStructural ? 'structural' : 'raw',
+          })
+    );
+  }
+
+  // `e`, a stored value, with the records of its views
+  // (`recordOutlivedLazyViewContexts`).
+  function withRecords(e: Expression): Expression {
+    return frame === undefined
+      ? e
+      : recordOutlivedLazyViewContexts(
+          e,
+          stack,
+          frame,
+          rebuild,
+          (x) => isFunction(x) && outlivedWalkSkips(x)
+        );
+  }
+
   function rewriteCollection(e: Expression, locals: Local[]): Expression {
     const subs = subsOf(e, locals);
-    if (subs.length === 0) return e;
+    if (subs.length === 0) return withRecords(e);
+    // A collection that writes a local is kept with its symbols: no
+    // capture of the scope backs the write. It still gets a record of the
+    // scopes, whose copies hold the values that its reads and its writes
+    // use once the scopes have changed.
     if (
       subs.some(
         (sub) =>
@@ -4639,16 +4691,16 @@ export function bindOutlivedLocalsOfLazyValue(
           0
       )
     )
-      return e;
+      return withRecords(e);
     let result: Expression;
     try {
       result = bindingKeyedSubs(e, subs);
     } catch (error) {
-      if (error instanceof UnavoidableCapture) return e;
+      if (error instanceof UnavoidableCapture) return withRecords(e);
       throw error;
     }
     if (result !== e) carryLazyViewContexts(e, result);
-    return result;
+    return withRecords(result);
   }
 }
 

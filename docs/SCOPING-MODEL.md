@@ -29,8 +29,20 @@ holds its callback literal unevaluated, so no closure captures the scope of
 the iteration, and the scope changes before the view is read: the next
 iteration writes its index, and the end of the block disposes its locals.
 With `for d in [3, 6] { if d == 3 { h = Map(x => x + d, R) } }`, `h` reads
-`d = 3`. For a `let` local this differs from a closure, which shares the
-binding: with
+`d = 3`. A name that the call of the callback reads by its binding, and that
+the view does not name, reads the same values: with `f = (x, k = d) => x * k`,
+`h = Map(f, R)` in that loop gives `3, 6`. A view made at the top level gets a
+record of the loop and block scopes that the variable outlives
+(`recordOutlivedLazyViewContexts`, `lazy-view-context.ts`); a view made in a
+function call already reads the context of that call. The record is made
+while the context where the view was made is on the stack, and a later
+assignment further out extends it while the frame of the earlier record is
+on the stack. A view that leaves either context as the value of a block has
+no record and reads `d` in the context of its reader: with
+`h = do { let z = 0; Map(f, R) }` in that loop, the elements of `h` are `d`
+and `2d`. The rule also applies to a base case of a sequence (`L_0 := v`)
+and to a declared subscripted name (`h_1 := v`). For a `let` local this
+differs from a closure, which shares the binding: with
 `if true { let m = 1; h = Map(x => x + m, R); f = (x) => x + m; m = 5 }`,
 the elements of `h` read `m = 1` and `f(0)` gives `5`. A view that is read
 in its own scope, or that is stored in a variable of the same scope, reads
