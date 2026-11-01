@@ -8,8 +8,12 @@ import type {
 
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
 import { isValueDef } from './definition-guards.js';
-import { isImplicitVariableCandidate } from './implicit-variable-rule.js';
 import {
+  implicitVariableCandidates,
+  isImplicitVariableCandidate,
+} from './implicit-variable-rule.js';
+import {
+  freeAnonymousSlots,
   functionLiteralParameterName,
   functionLiteralParameterNames,
 } from './function-literal.js';
@@ -819,20 +823,62 @@ export function bindsStatementTargets(expr: Expression): boolean {
  * `x` is bound and `y` is free, as in the form with `Limits(x, 0, 1)`. The
  * variable of an indefinite limit (`Limits(Nothing, Nothing, Nothing)`) is
  * not bound (`indefiniteIntegralVariables`).
+ *
+ * A non-canonical `Integrate` whose integrand is neither a function literal
+ * nor a symbol, and whose limits name no variable, binds the variables that
+ * its canonical form would choose: the candidates of the integrand in sorted
+ * order (`implicitVariableCandidates()`). So `subs()` replaces the same
+ * symbols in the two forms.
  */
 export function implicitIntegralVariables(
-  expr: Expression
+  expr: Expression,
+  candidatesOf: (integrand: Expression) => string[] = (integrand) =>
+    implicitVariableCandidates(integrand)
 ): ReadonlySet<string> | undefined {
   if (!isFunction(expr, 'Integrate')) return undefined;
   const f = expr.ops[0];
-  if (f === undefined) return undefined;
-  const limits = expr.ops.slice(1);
+  if (f === undefined || expr.nops < 2) return undefined;
   const absent = (x: Expression | undefined): boolean =>
     x === undefined || isSymbol(x, 'Nothing');
+  // The index and the bounds of a limit, as `canonicalLimits()`
+  // (`library/utils.ts`) reads them. A canonical limit is
+  // `Limits(index, lower, upper)`. A non-canonical `Integrate` holds its
+  // limits as written: `Limits(0, 1)` (no index), `Limits(x)` (no bound),
+  // the `Tuple(index, lower, upper)` of the LaTeX parser (`\int_0^1 xy`
+  // parsed with `form: 'raw'`), a parenthesized tuple, or `Range(0, 1)`.
+  // `undefined` for another spelling of a limit (a flat `x, 0, 1`), which is
+  // not read here.
+  const limitParts = (
+    l: Expression
+  ):
+    | { index?: Expression; lower?: Expression; upper?: Expression }
+    | undefined => {
+    if (isFunction(l, 'Range')) return { lower: l.op1, upper: l.op2 };
+    const ops =
+      parenthesizedTupleOperands(l) ??
+      (isFunction(l) &&
+      ['Limits', 'Tuple', 'Triple', 'Pair', 'Single', 'Hold'].includes(
+        l.operator
+      )
+        ? l.ops
+        : undefined);
+    if (ops === undefined || ops.length === 0 || ops.length > 3)
+      return undefined;
+    const indexOf = (x: Expression): Expression =>
+      isFunction(x, 'Hold') && x.op1 !== undefined ? x.op1 : x;
+    const [a, b, c] = ops;
+    if (ops.length === 1) return { index: indexOf(a) };
+    if (ops.length === 3) return { index: indexOf(a), lower: b, upper: c };
+    if (isSymbol(a) || isFunction(a, 'Hold'))
+      return { index: indexOf(a), upper: b };
+    return { lower: a, upper: b };
+  };
+  const limits = expr.ops.slice(1).map(limitParts);
   const named = new Set<string>();
-  for (const l of limits)
-    if (isFunction(l, 'Limits') && isSymbol(l.op1) && !absent(l.op1))
-      named.add(l.op1.symbol);
+  for (const l of limits) {
+    const index = l?.index;
+    if (isSymbol(index) && !absent(index)) named.add(index.symbol);
+  }
   let names: string[];
   if (isFunction(f, 'Function'))
     names = f.ops
@@ -846,15 +892,44 @@ export function implicitIntegralVariables(
     if (!isImplicitVariableCandidate(f.engine, f.symbol, false))
       return undefined;
     names = [f.symbol];
+  } else if (
+    !expr.isCanonical &&
+    limits.every((l) => l !== undefined && absent(l.index)) &&
+    freeAnonymousSlots(f).size === 0
+  ) {
+    // A non-canonical `Integrate` holds its integrand as written
+    // (`Integrate(x·y, Limits(Nothing, 0, 1))`), not as a function literal.
+    // When no limit names a variable, the canonical form makes the literal
+    // from the candidates of the integrand in sorted order, one for each
+    // limit (`implicitLiteralParameters()` in `library/calculus.ts`). The
+    // same candidates are bound here, so that `subs()` and the free
+    // variables of the non-canonical form agree with those of the canonical
+    // form: `subs({x: 3})` keeps the `x` of `x·y`. A body with a free
+    // anonymous slot (`_`, read by `freeAnonymousSlots()`, the walk that the
+    // canonical form uses) keeps the slots as the parameters of its literal,
+    // and binds no symbol here. A slot that a nested literal or a `Pipe`
+    // stage binds is not free and does not change the choice.
+    //
+    // Limitation: the candidates are read from the body as written, and the
+    // canonical form reads them from the canonical body. The two differ when
+    // canonicalization removes a candidate: in `0·2·x + y`, the raw form
+    // binds `x` and the canonical form binds `y`, so `subs({y: 3})` gives
+    // the integral 3 for the raw form and 1/2 for the canonical form. No
+    // other choice from the written body is correct for both `x·y` and
+    // `0·2·x + y`: binding every candidate keeps the free `y` of `x·y` from
+    // `subs()`, and binding none is the defect that this branch removes.
+    // Reading the canonical body would need a canonicalization, which
+    // declares symbols in the current scope.
+    names = candidatesOf(f).sort();
   } else return undefined;
   let result: Set<string> | undefined;
   let position = 0;
   for (const l of limits) {
-    if (!isFunction(l, 'Limits') || !absent(l.op1)) continue;
+    if (l === undefined || !absent(l.index)) continue;
     const name = names[position];
     position += 1;
     if (name === undefined) break;
-    if (absent(l.ops[1]) && absent(l.ops[2])) continue;
+    if (absent(l.lower) && absent(l.upper)) continue;
     (result ??= new Set()).add(name);
   }
   return result;

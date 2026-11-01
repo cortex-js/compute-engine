@@ -78,7 +78,10 @@ import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
-import { isLibraryDefinition } from './implicit-variable-rule.js';
+import {
+  implicitVariableCandidatesFrom,
+  isLibraryDefinition,
+} from './implicit-variable-rule.js';
 import { isComparableKindValue, kindEqual, kindIs } from './kind-compare.js';
 
 // Lazy reference to break circular dependency:
@@ -2162,7 +2165,9 @@ function collectReferences(
   // variable are bound in the integrand (operand 0) only: in
   // `Integrate(Function(x·y, x), Limits(Nothing, 0, 1))`, `x` is bound and
   // `y` is free, as with `Limits(x, 0, 1)`.
-  const implicit = implicitIntegralVariables(expr);
+  const implicit = implicitIntegralVariables(expr, (integrand) =>
+    implicitCandidatesInWalk(integrand, memo, mode)
+  );
   // Is the index `name` in scope in operand `i`? Always, for a structurally
   // recognized index; for a clause site, from its own clause onward and in
   // the body (every operand before the first clause) — the clause ordering
@@ -2252,6 +2257,62 @@ function collectReferences(
           refFns.add(s);
     }
   }
+}
+
+/**
+ * The memos of the other mode of `getReferences`, for each memo of a walk.
+ * The candidates of the implicit variable of a non-canonical `Integrate`
+ * (`implicitIntegralVariables()`) need the integrand walked in the two
+ * modes. Each walk is given the memo that belongs to its walk of the
+ * integrand, so that a chain of nested non-canonical integrals is walked
+ * once per mode, not once per path: with new walks at each level, the cost
+ * was exponential in the depth of the chain. A `WeakMap`, so the memos of a
+ * walk are released with the memo of the walk.
+ */
+const siblingMemos = new WeakMap<
+  ReferencesMemo,
+  { unknowns: ReferencesMemo; references: ReferencesMemo }
+>();
+
+/**
+ * The candidates of the implicit variable of the integrand `integrand`
+ * (`implicitVariableCandidatesFrom()`), from walks that share the memos of
+ * the walk in mode `mode` whose memo is `memo`.
+ */
+function implicitCandidatesInWalk(
+  integrand: Expression,
+  memo: ReferencesMemo,
+  mode: ReferenceMode
+): string[] {
+  let memos = siblingMemos.get(memo);
+  if (memos === undefined) {
+    memos = {
+      unknowns: mode === 'unknowns' ? memo : new Map(),
+      references: mode === 'references' ? memo : new Map(),
+    };
+    siblingMemos.set(memo, memos);
+    // The memo of the other mode gets the same siblings, so a walk in that
+    // mode that starts from it shares them too.
+    siblingMemos.set(
+      mode === 'unknowns' ? memos.references : memos.unknowns,
+      memos
+    );
+  }
+  const unknowns = new Set<string>();
+  getReferences(integrand, unknowns, new Set(), memos.unknowns, 'unknowns');
+  // The `references` accessor: the names read and the applied functions,
+  // without the names that the expression defines.
+  const read = new Set<string>();
+  const functions = new Set<string>();
+  getReferences(integrand, read, functions, memos.references, 'references');
+  const defined = new Set<string>();
+  getDefines(integrand, defined);
+  const references = [...read, ...functions].filter((s) => !defined.has(s));
+  return implicitVariableCandidatesFrom(integrand.engine, {
+    unknowns,
+    references,
+    referencedFunctions: functions,
+  });
 }
 
 /**

@@ -701,6 +701,179 @@ describe('Limit: all three canonical paths bind the variable uniformly', () => {
       expect(ce.box(['ND', xy, 1]).unknowns).toEqual(['y']);
     });
 
+    // CE-699: a non-canonical `Integrate` holds its integrand as written,
+    // not as a function literal. It binds the variables that its canonical
+    // form chooses, so `subs()` replaces the same symbols in the two forms.
+    // Before, `subs({x: 3})` on the non-canonical form replaced `x`, and the
+    // integral of `3y` over `y` was 3/2 where the canonical form gave `y/2`.
+    describe('a non-canonical Integrate binds the variable of its canonical form', () => {
+      const xy = ['Multiply', 'x', 'y'];
+      const cases: [string, any][] = [
+        ['Limits(Nothing, 0, 1)', ['Integrate', xy, ['Limits', 'Nothing', 0, 1]]],
+        ['Limits(0, 1)', ['Integrate', xy, ['Limits', 0, 1]]],
+        ['Tuple(Nothing, 0, 1)', ['Integrate', xy, ['Tuple', 'Nothing', 0, 1]]],
+        ['Range(0, 1)', ['Integrate', xy, ['Range', 0, 1]]],
+        [
+          'two limits',
+          ['Integrate', xy, ['Limits', 0, 1], ['Limits', 0, 2]],
+        ],
+        // The variable of an indefinite integral is not bound in either form.
+        [
+          'indefinite',
+          ['Integrate', xy, ['Limits', 'Nothing', 'Nothing', 'Nothing']],
+        ],
+        // A written variable, and a function literal: unchanged.
+        ['Limits(y, 0, 1)', ['Integrate', xy, ['Limits', 'y', 0, 1]]],
+        [
+          'Function(x·y, x)',
+          ['Integrate', ['Function', xy, 'x'], ['Limits', 0, 1]],
+        ],
+      ];
+      for (const [label, json] of cases) {
+        test(label, () => {
+          const ce = new ComputeEngine();
+          const raw = ce.box(json, { form: 'raw' });
+          const canonical = ce.box(json);
+          expect(raw.isCanonical).toBe(false);
+          expect(raw.freeVariables).toEqual(canonical.freeVariables);
+          for (const v of ['x', 'y']) {
+            // The indefinite integral chooses its variable when it is boxed,
+            // so a substitution of that variable gives a different integral.
+            if (label === 'indefinite' && v === 'x') continue;
+            expect(raw.subs({ [v]: 3 }).canonical.evaluate().json).toEqual(
+              canonical.subs({ [v]: 3 }).evaluate().json
+            );
+          }
+        });
+      }
+
+      test('Limits(Nothing, 0, 1): the values', () => {
+        const ce = new ComputeEngine();
+        const raw = ce.box(['Integrate', xy, ['Limits', 'Nothing', 0, 1]], {
+          form: 'raw',
+        });
+        expect(raw.freeVariables).toEqual(['y']);
+        expect(raw.subs({ x: 3 }).canonical.evaluate().toString()).toBe(
+          '1/2 * y'
+        );
+        expect(raw.subs({ y: 3 }).canonical.evaluate().toString()).toBe('3/2');
+      });
+
+      test('the LaTeX parse with form: raw', () => {
+        const ce = new ComputeEngine();
+        const raw = ce.parse('\\int_0^1 xy', { form: 'raw' });
+        expect(raw.subs({ x: 3 }).canonical.evaluate().toString()).toBe(
+          ce.parse('\\int_0^1 xy').subs({ x: 3 }).evaluate().toString()
+        );
+      });
+
+      // A symbol with a value is a candidate, as in the canonical form: after
+      // `x := 4`, `x` is the variable of `√x`, and `subs()` keeps it.
+      test('a symbol with a value', () => {
+        const ce = new ComputeEngine();
+        ce.assign('x', 4);
+        const raw = ce.box(['Integrate', ['Sqrt', 'x'], ['Limits', 0, 1]], {
+          form: 'raw',
+        });
+        expect(raw.freeVariables).toEqual([]);
+        expect(raw.subs({ x: 9 }).canonical.evaluate().toString()).toBe('2/3');
+      });
+
+      // A slot that a nested literal or a `Pipe` stage binds is not a free
+      // slot of the integrand: the raw form binds `x`, as the canonical form
+      // does.
+      test('a slot bound inside the integrand', () => {
+        const ce = new ComputeEngine();
+        const bodies: any[] = [
+          ['Multiply', 'x', ['Apply', ['Function', ['Multiply', '_1', '_1'], '_1'], 2]],
+          ['Multiply', 'x', ['Pipe', 'ys', ['Multiply', '_', 2]]],
+        ];
+        for (const body of bodies) {
+          const json = ['Integrate', body, ['Limits', 0, 1]];
+          const raw = ce.box(json, { form: 'raw' });
+          expect(raw.freeVariables).toEqual(ce.box(json).freeVariables);
+          expect(raw.freeVariables).not.toContain('x');
+          expect(raw.subs({ x: 3 }).isSame(raw)).toBe(true);
+        }
+      });
+
+      // Limitation: the raw form reads the candidates from the integrand as
+      // written, the canonical form from the canonical integrand. When
+      // canonicalization removes a candidate (the `x` of `0·2·x`), the raw
+      // form binds `x` and the canonical form binds `y`.
+      test('a candidate that canonicalization removes (limitation)', () => {
+        const ce = new ComputeEngine();
+        const json = [
+          'Integrate',
+          ['Add', ['Multiply', 0, 2, 'x'], 'y'],
+          ['Limits', 0, 1],
+        ];
+        const raw = ce.box(json, { form: 'raw' });
+        const canonical = ce.box(json);
+        expect(raw.freeVariables).toEqual(['y']);
+        expect(canonical.freeVariables).toEqual([]);
+        expect(raw.subs({ y: 3 }).canonical.evaluate().toString()).toBe('3');
+        expect(canonical.subs({ y: 3 }).evaluate().toString()).toBe('1/2');
+      });
+
+      // The candidates of each raw integral are read with the memo of the
+      // walk: with new walks at each level, a chain of 10 nested raw
+      // integrals took about 26 s.
+      test('a chain of 20 nested raw integrals', () => {
+        const ce = new ComputeEngine();
+        let json: any = ['Multiply', 'x', 'y'];
+        for (let k = 0; k < 20; k++)
+          json = ['Integrate', ['Multiply', json, `a${k}`], ['Limits', 0, 1]];
+        const raw = ce.box(json, { form: 'raw' });
+        // Each integral binds its own `a_k`, the first candidate in sorted
+        // order. With one walk per path, the cost was exponential in the
+        // depth (about 26 s for 10 levels); the per-test timeout catches a
+        // return of that cost.
+        expect(raw.freeVariables).toEqual(['x', 'y']);
+        raw.subs({ y: 3 });
+      });
+
+      // The free slots of the integrand are read once per node and set of
+      // bound names (`freeAnonymousSlots()`): a body that shares one node at
+      // each level (`Add(d, d)`) inside a `Function` literal is walked once
+      // per node, not once per path (2^30 paths for 30 levels).
+      test('a shared subtree inside a function literal of the integrand', () => {
+        const ce = new ComputeEngine();
+        const raw = { form: 'raw' } as const;
+        const integral = (depth: number) => {
+          let d = ce.symbol('t', { canonical: false });
+          for (let k = 0; k < depth; k++) d = ce.function('Add', [d, d], raw);
+          const fn = ce.function(
+            'Function',
+            [d, ce.symbol('t', { canonical: false })],
+            raw
+          );
+          const body = ce.function(
+            'Multiply',
+            [
+              ce.symbol('x', { canonical: false }),
+              ce.function('Apply', [fn, ce.number(2)], raw),
+            ],
+            raw
+          );
+          return ce.function(
+            'Integrate',
+            [body, ce.function('Limits', [ce.number(0), ce.number(1)], raw)],
+            raw
+          );
+        };
+        const deep = integral(30);
+        expect(deep.isCanonical).toBe(false);
+        expect(deep.freeVariables).toEqual([]);
+        // `subs()` of a raw expression rebuilds a shared subtree once per
+        // path, with or without an integral, so it is read at a smaller
+        // depth.
+        const shallow = integral(8);
+        expect(shallow.subs({ x: 3 }).freeVariables).toEqual([]);
+        expect(shallow.subs({ x: 3 }).isSame(shallow)).toBe(true);
+      });
+    });
+
     // The inner integral binds `x`, so the outer one takes `y`.
     test('nested implicit integrals: ∫_0^1∫_0^1 xy is 1/4', () => {
       for (const order of ['none', 'assign, then box', 'box, then assign']) {

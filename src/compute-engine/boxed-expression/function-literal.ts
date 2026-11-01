@@ -858,10 +858,16 @@ export const ANONYMOUS_SLOT_NAMES: ReadonlySet<string> = new Set([
  */
 export function freeAnonymousSlots(expr: Expression): Set<string> {
   const result = new Set<string>();
-  // Shared subtrees are walked once. The dedup applies only outside every
-  // explicit-parameter literal: inside one, the same node can have a
-  // different set of bound names, so it is walked each time.
-  const visited = new Set<Expression>();
+  // A node contributes the same slots each time it is reached with the same
+  // bound names, so it is walked once for each set of bound names. A shared
+  // subtree inside an explicit-parameter literal (a body that is a DAG,
+  // `Add(d, d)` at each level) is then walked once, not once per path,
+  // which was exponential in its depth. Each set of bound names is one
+  // object, found by its key (the sorted names, as JSON), so that
+  // `visited` can compare the sets by identity. `undefined` is the empty
+  // set outside every literal.
+  const visited = new Map<Expression, Set<ReadonlySet<string> | undefined>>();
+  const boundSets = new Map<string, ReadonlySet<string>>();
   const pending: [Expression, ReadonlySet<string> | undefined][] = [
     [expr, undefined],
   ];
@@ -873,16 +879,19 @@ export function freeAnonymousSlots(expr: Expression): Set<string> {
       continue;
     }
     if (!isFunction(e)) continue;
-    if (bound === undefined) {
-      if (visited.has(e)) continue;
-      visited.add(e);
-    }
+    let contexts = visited.get(e);
+    if (contexts === undefined) visited.set(e, (contexts = new Set()));
+    if (contexts.has(bound)) continue;
+    contexts.add(bound);
     const op = e.operator;
     if (op === 'Function') {
       if (e.nops < 2) continue;
       const names = new Set(bound);
       for (const n of functionLiteralBoundNames(e.ops.slice(1))) names.add(n);
-      pending.push([e.ops[0], names]);
+      const key = JSON.stringify([...names].sort());
+      let shared = boundSets.get(key);
+      if (shared === undefined) boundSets.set(key, (shared = names));
+      pending.push([e.ops[0], shared]);
       continue;
     }
     if (ANONYMOUS_SLOT_NAMES.has(op) && !bound?.has(op)) result.add(op);

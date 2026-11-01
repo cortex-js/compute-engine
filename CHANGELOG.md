@@ -276,6 +276,16 @@
 
 ### Bug Fixes
 
+- **A non-canonical `Integrate` binds the variable of its canonical form**
+  (CE-699). `subs()` on a non-canonical `Integrate` whose limits name no
+  variable now keeps the variables that the canonical form binds. For example,
+  `ce.box(['Integrate', ['Multiply', 'x', 'y'], ['Limits', 0, 1]], { form: 'raw' }).subs({ x: 3 })`
+  replaced `x`, and the integral was `3/2`; now `x` stays the variable of
+  integration, and the integral is `y/2`, as for the canonical form. The free
+  variables of the two forms are the same (`["y"]`). The limit can be written
+  `Limits(Nothing, a, b)`, `Limits(a, b)`, `Range(a, b)` or the
+  `Tuple(Nothing, a, b)` of `ce.parse('\int_0^1 xy', { form: 'raw' })`.
+
 - **An integral evaluates a `Sum`, a `Product` or a `D` in its integrand
   before it integrates** (CE-616), as it already did for an inner
   `Integrate`. `\int_0^1 \frac{d}{dx}x^3\,dx` and

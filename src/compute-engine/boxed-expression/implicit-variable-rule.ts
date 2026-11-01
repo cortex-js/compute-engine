@@ -3,16 +3,22 @@
  * calculus operator whose variable is not written (`Limit(√x, a)`,
  * `D(x^3)`, `Series(sin x)`, `Integrate(√x, Limits(Nothing, 0, 1))`).
  *
- * A leaf module on purpose: `implicitVariableCandidates()` (`utils.ts`) and
+ * A leaf module on purpose: the canonical form of the calculus operators
+ * (through `implicitVariableCandidates()`, which `utils.ts` re-exports) and
  * `implicitIntegralVariables()` (`binding-sites.ts`, which cannot import
  * `utils.ts`) both read the rule here, so that the variable that the
  * canonical form chooses and the variable that the free-variable walk and
- * `subs()` treat as bound are the same.
+ * `subs()` treat as bound are the same, for a canonical and for a
+ * non-canonical `Integrate`.
  */
-import type { IComputeEngine as ComputeEngine } from '../global-types';
+import type {
+  IComputeEngine as ComputeEngine,
+  Expression,
+} from '../global-types';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isOperatorDef, isValueDef } from './definition-guards.js';
+import { ANONYMOUS_SLOT_NAMES } from './function-literal.js';
 
 /**
  * True when `def`, the definition that the name `name` resolves to, was
@@ -88,6 +94,79 @@ export function isImplicitVariableCandidate(
     def.value.type.isDisjointFrom('number') ||
     def.value.value?.type.isDisjointFrom('number') === true
   );
+}
+
+/**
+ * The symbols of `exprs` that can be the implicit variable of a calculus
+ * operator whose variable is not written (`Limit(√x, a)`, `D(x^3)`,
+ * `Series(sin x)`, `Integrate(√x, Limits(Nothing, 0, 1))`), in sorted order
+ * (code-unit order, so an uppercase letter comes before a lowercase one).
+ *
+ * The variable is a bound variable: it never takes the value assigned to a
+ * symbol of the same name. The candidates are the symbols written in the
+ * expression, with or without a value: the unknowns, and the user symbols
+ * that are read and have a value (the `references`). So the choice does not
+ * change when a symbol gets a value before or after boxing. When nothing has
+ * a value, the candidates are the unknowns.
+ *
+ * A constant (`Pi`, `ExponentialE`), a symbol of a library, a symbol that
+ * names a function, an anonymous slot (`_`, `_1`) and a symbol bound inside
+ * the expression (the index of a `Sum`) are not candidates. A symbol whose
+ * declared type, or the type of whose value, has no value in common with
+ * `number` (a list, a string, a boolean, a function value) is not a
+ * candidate either: with `L := [1, 2, 3]`, the variable of `Total(L)·t` is
+ * `t`.
+ *
+ * Limitation: the type of a symbol with no declaration is known only when
+ * it gets a value. So the two orders can still give different variables for
+ * a symbol that is not declared and gets a value that is not a number after
+ * boxing: boxed before `L := [1, 2, 3]`, `L` is a candidate of `Total(L)·t`
+ * and is the variable (the first in sorted order); boxed after, `t` is.
+ *
+ * Works on lazily-held (non-canonical) operands, as `defaultUnknown` does.
+ */
+export function implicitVariableCandidates(
+  ...exprs: ReadonlyArray<Expression>
+): string[] {
+  const candidates = new Set<string>();
+  for (const e of exprs)
+    for (const s of implicitVariableCandidatesFrom(e.engine, {
+      unknowns: e.unknowns,
+      references: e.references,
+      referencedFunctions: e.referencedFunctions,
+    }))
+      candidates.add(s);
+  return [...candidates].sort();
+}
+
+/**
+ * The candidates of `implicitVariableCandidates()` for one expression, from
+ * the results of its walks: its `unknowns`, its `references` and its
+ * `referencedFunctions`. A caller that walks the expression already (the
+ * free-variable walk, `abstract-boxed-expression.ts`) gives its own results,
+ * so that the walk of a nested integral does not start three new walks of
+ * its integrand at each level. The result is not sorted.
+ */
+export function implicitVariableCandidatesFrom(
+  engine: ComputeEngine,
+  walks: {
+    unknowns: Iterable<string>;
+    references: Iterable<string>;
+    referencedFunctions: Iterable<string>;
+  }
+): string[] {
+  const functions = new Set(walks.referencedFunctions);
+  const unknowns = new Set(walks.unknowns);
+  const candidates = new Set<string>();
+  for (const s of [...unknowns, ...walks.references]) {
+    if (ANONYMOUS_SLOT_NAMES.has(s) || functions.has(s)) continue;
+    // The rule for one symbol: operator names, constants, library
+    // symbols and symbols that cannot hold a number are excluded
+    // (`isImplicitVariableCandidate()`).
+    if (!isImplicitVariableCandidate(engine, s, unknowns.has(s))) continue;
+    candidates.add(s);
+  }
+  return [...candidates];
 }
 
 /**
