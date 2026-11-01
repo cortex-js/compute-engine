@@ -56,6 +56,29 @@ function headline(entry: DocEntry): string {
   return parts.join(' · ');
 }
 
+/** The paragraphs of a description. A library definition writes its
+ * description as an array of lines, wrapped at about 72 columns so that each
+ * code span stays whole (`library/core.ts`, the comment at `FindRoot`). A line
+ * that does not end a sentence (no `.`, `:`, `!`, `?` or `)` at its end)
+ * continues on the next line, so the two are joined with a space into one
+ * paragraph. A line that ends a sentence ends the paragraph; a definition that
+ * writes one complete sentence per element therefore keeps one paragraph per
+ * element. Before this grouping every element became a paragraph, and a
+ * wrapped description was rendered double-spaced. */
+function paragraphs(description: readonly string[]): string[] {
+  const result: string[] = [];
+  let current = '';
+  for (const line of description) {
+    current = current === '' ? line : `${current} ${line}`;
+    if (/[.:!?)]$/.test(line.trimEnd())) {
+      result.push(current);
+      current = '';
+    }
+  }
+  if (current !== '') result.push(current);
+  return result;
+}
+
 function entrySection(row: Row, page: string): string {
   const { entry } = row;
   const lines: string[] = [
@@ -63,7 +86,7 @@ function entrySection(row: Row, page: string): string {
     '',
     assertBalancedBackticks(headline(entry), entry.id, page),
   ];
-  for (const paragraph of entry.description ?? []) {
+  for (const paragraph of paragraphs(entry.description ?? [])) {
     lines.push(
       '',
       assertBalancedBackticks(mdx(paragraph, false), entry.id, page)

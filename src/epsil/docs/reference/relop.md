@@ -109,7 +109,7 @@ Negated approximately-not-equal relation.
 
 ### NotEqual
 
-`(any, any) -> boolean`
+`(any, any*) -> boolean`
 
 Inequality comparison (not equal to).
 

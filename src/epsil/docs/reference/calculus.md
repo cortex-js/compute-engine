@@ -79,17 +79,11 @@ Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced b
 
 MathJSON `JacobianMatrix` · `(any, any?) -> value`
 
-JacobianMatrix(fs, vars): the matrix of partial derivatives
+JacobianMatrix(fs, vars): the matrix of partial derivatives ∂fᵢ/∂xⱼ, one row per function and one column per variable.
 
-∂fᵢ/∂xⱼ, one row per function and one column per variable.
+`fs` is a list of expressions. A single (non-list) expression is the gradient case: the result is the flat vector [∂f/∂x₁, …, ∂f/∂xₙ].
 
-`fs` is a list of expressions. A single (non-list) expression is the
-
-gradient case: the result is the flat vector [∂f/∂x₁, …, ∂f/∂xₙ].
-
-`vars` is a list of symbols and may be omitted, in which case the
-
-free variables of `fs` are used, in lexicographic order.
+`vars` is a list of symbols and may be omitted, in which case the free variables of `fs` are used, in lexicographic order.
 
 Example: JacobianMatrix([x^2 y, x + z], [x, y, z]).
 
@@ -97,7 +91,15 @@ Example: JacobianMatrix([x^2 y, x + z], [x, y, z]).
 
 MathJSON `Limit` · `(function, point: number, direction: number?) -> number`
 
-Limit of a function
+Limit of a function.
+
+Limit(f, x, a) is the limit of f as x approaches a.
+
+Limit(f, a) does not write the variable: it is the first, in sorted order (an uppercase letter before a lowercase one), of the symbols that the expression f reads from outside: not a constant, a library name, a function, or a symbol bound inside f such as the index of a Sum. A symbol with an assigned value is a candidate too, so an assignment does not change the variable. A bare symbol f names a function: Limit(Sin, a) is the limit of sin(t) as t approaches a.
+
+The variable is bound: it never takes the value assigned to a symbol of the same name.
+
+Example: Limit(Sqrt(x), 3) is sqrt(3), also after x := 4.
 
 ### Limits
 
@@ -133,7 +135,11 @@ Numerical approximation of a definite integral.
 
 MathJSON `NLimit` · `(function, point: number, direction: number?) -> number`
 
-Numerical approximation of the limit of a function
+Numerical approximation of the limit of a function.
+
+NLimit(f, a) finds its variable with the same rule as Limit(f, a):
+
+the first of the symbols written in the expression f, in sorted order, also when it has an assigned value. A bare symbol f names a function.
 
 ### normal
 

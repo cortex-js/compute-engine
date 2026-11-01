@@ -2,7 +2,6 @@ import type { MathJsonExpression } from '../../../math-json/types.js';
 import { isValidSymbol } from '../../../math-json/symbols.js';
 import {
   operator,
-  isEmptySequence,
   missingIfEmpty,
   nops,
   operand,

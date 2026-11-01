@@ -447,9 +447,7 @@ BuiltinFunction("Sqrt")(16)
 
 MathJSON `CanonicalForm` · `(any, symbol*) -> any`
 
-Return the canonical form of an expression
-
-Can be used to sort arguments of an expression.
+Return the canonical form of an expression Can be used to sort arguments of an expression.
 
 Sorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"
 
@@ -568,9 +566,9 @@ type string is Copyable
 
 ### DeclareProtocol
 
-`(string | symbol, members: dictionary<any>?) scope -> nothing`
+`(string | symbol, members: dictionary<any>?, parents: any?) scope -> nothing`
 
-Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> ["Pair", "function"|"readonly"|"readwrite", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). Evaluates to `Nothing`.
+Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> ["Pair", "function"|"readonly"|"readwrite", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `["List", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`["Dictionary"]` when there are none). Evaluates to `Nothing`.
 
 ```epsil
 protocol Area { function area(self: Self) -> number }
@@ -692,61 +690,13 @@ evaluateAt(x => x^2, 1, 3)
 
 MathJSON `FindRoot` · `(any, any, dictionary?) -> dictionary`
 
-FindRoot(equations, params): numerically find parameter values that
+FindRoot(equations, params): numerically find parameter values that zero the residuals. `equations` is an equation (`lhs == rhs`), a bare residual expression (read as `= 0`), or a list of either. `params` is a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with box constraints), matching `FindFit`. Returns a record &#123;parameters, converged, stationary, residualNorm, iterations&#125;.
 
-zero the residuals. `equations` is an equation (`lhs == rhs`), a bare
+`converged` is true only at a root: every residual is within the engine's tolerance scaled by its own equation, `|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the Jacobian and `θ` the parameters, so a minimum of the sum of squared residuals that is not a root (`a^2 + 1 = 0`) is `converged: False`.
 
-residual expression (read as `= 0`), or a list of either. `params` is
+When the residual is above `tolerance`, the residual itself must confirm the Jacobian term: with each parameter moved by `±2 · tolerance · max(1, |θ_j|)` toward and away from the zero, the change of the residual is the change the Jacobian predicts to within half, and the residual reaches `tolerance`, changes sign, or touches 0 to within the rounding of the parameters. So a steep equation with no root (`2 - sin(10^18 a) = 0`) is not `converged` either.
 
-a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with
-
-box constraints), matching `FindFit`. Returns a record
-
-&#123;parameters, converged, stationary, residualNorm, iterations&#125;.
-
-`converged` is true only at a root: every residual is within the
-
-engine's tolerance scaled by its own equation,
-
-`|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the
-
-Jacobian and `θ` the parameters, so a minimum of the sum of squared
-
-residuals that is not a root (`a^2 + 1 = 0`) is `converged: False`.
-
-When the residual is above `tolerance`, the residual itself must
-
-confirm the Jacobian term: with each parameter moved by
-
-`±2 · tolerance · max(1, |θ_j|)` toward and away from the zero, the
-
-change of the residual is the change the Jacobian predicts to within
-
-half, and the residual reaches `tolerance`, changes sign, or touches
-
-0 to within the rounding of the parameters. So a steep equation with
-
-no root (`2 - sin(10^18 a) = 0`) is not `converged` either.
-
-`stationary` is the solver's own stop test, true at such a minimum
-
-too; a stacked system of data rows next to an equation reads it as
-
-`FindFit` reads `converged`. An optional third argument is the options
-
-dictionary of `FindFit`: `{global: {b: [lo, hi]}}` searches the
-
-named parameters (at most two) over the range for the lowest sum
-
-of squared residuals of the whole system; the constant phase
-
-coefficients of the equations (`3.22` in `cos(3.22 b + c)`) space
-
-the grid as the span of a variable does for a fit. With a kernel
-
-pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid
-
-on the workers.
+`stationary` is the solver's own stop test, true at such a minimum too; a stacked system of data rows next to an equation reads it as `FindFit` reads `converged`. An optional third argument is the options dictionary of `FindFit`: `{global: {b: [lo, hi]}}` searches the named parameters (at most two) over the range for the lowest sum of squared residuals of the whole system; the constant phase coefficients of the equations (`3.22` in `cos(3.22 b + c)`) space the grid as the span of a variable does for a fit. With a kernel pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid on the workers.
 
 ```epsil
 findRoot(x^2 - 2, [(x, 1)])
@@ -757,11 +707,18 @@ findRoot(x^2 - 2, [(x, 1)])
 
 `(expression, (function | symbol)*) -> function`
 
-A function literal
+Function(body, param1, param2, …): a function literal.
+
+A parameter is a symbol, `Typed(symbol, type)`, a rest parameter `Spread(symbol)` (last), a destructuring pattern `Tuple(…)`, or a parameter with a default value `Optional(param, default)`, where `param` is a symbol or `Typed(symbol, type)` and `default` is a number, a string, `True`, `False`, a symbol, `List()` or `Dictionary()`. The parameters with a default come after the required ones. A call that supplies the required parameters is a full call: each parameter it leaves out receives its default.
 
 ```epsil
 (x => x^2 + 1)(3)
 // ➔ 10
+```
+
+```epsil
+((x, k = 2) => x * k)(3)
+// ➔ 6
 ```
 
 ### geometricVector
@@ -812,23 +769,11 @@ Hold(1 + 2)
 
 `(any, any?) -> expression`
 
-HoldValues(body): evaluate `body` with its assigned free symbols
+HoldValues(body): evaluate `body` with its assigned free symbols shielded — each such symbol becomes a pure symbol (its declared type and in-scope assumptions apply, its assigned value does NOT) for the duration. The value-blind counterpart of evaluating `body` directly; analogous to Mathematica's `Block[{x}, …]`.
 
-shielded — each such symbol becomes a pure symbol (its declared type
+HoldValues(body, [x, y]): shield only the listed symbols (a List, Set, Tuple, or a single symbol); every other symbol resolves normally.
 
-and in-scope assumptions apply, its assigned value does NOT) for the
-
-duration. The value-blind counterpart of evaluating `body` directly;
-
-analogous to Mathematica's `Block[{x}, …]`.
-
-HoldValues(body, [x, y]): shield only the listed symbols (a List,
-
-Set, Tuple, or a single symbol); every other symbol resolves normally.
-
-Constants (`Pi`, `ExponentialE`, …) are never shielded, assumptions
-
-survive the shield, and the global values are intact afterwards.
+Constants (`Pi`, `ExponentialE`, …) are never shielded, assumptions survive the shield, and the global values are intact afterwards.
 
 ```epsil
 let x = 5
@@ -972,11 +917,7 @@ missing + 1
 
 `(any, (integer | list<number>)?) -> unknown`
 
-N(expr): numerically evaluate an expression
-
-N(expr, precision): evaluate to `precision` significant digits
-
-N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal
+N(expr): numerically evaluate an expression N(expr, precision): evaluate to `precision` significant digits N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal
 
 ```epsil
 N(pi)
@@ -999,19 +940,9 @@ MathJSON `NSolve` · `(any, any*) -> list`
 
 NSolve(equation, unknown): the solutions of an equation as floats.
 
-It is Mathematica `NSolve`: it takes the same operands as `Solve`,
+It is Mathematica `NSolve`: it takes the same operands as `Solve`, including domain specs and systems of equations, and gives the `N` of each solution of `Solve`:
 
-including domain specs and systems of equations, and gives the `N` of
-
-each solution of `Solve`:
-
-`NSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `Solve` finds no
-
-solution set, `NSolve` stays unevaluated: for a polynomial `Solve`
-
-already gives numeric roots when there is no closed form, and
-
-`FindRoot` gives one local root from a start value.
+`NSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `Solve` finds no solution set, `NSolve` stays unevaluated: for a polynomial `Solve` already gives numeric roots when there is no closed form, and `FindRoot` gives one local root from a start value.
 
 ```epsil
 nSolve(x^2 == 2, x)
@@ -1022,21 +953,13 @@ nSolve(x^2 == 2, x)
 
 `(string, any) -> nothing`
 
-NamedArgument(name, value): one named argument of a call (Epsil
-
-surface syntax: `f(rate: 0.05)`).
+NamedArgument(name, value): one named argument of a call (Epsil surface syntax: `f(rate: 0.05)`).
 
 A parse-level carrier, like `Spread`, but one that never survives:
 
-the enclosing call consumes it at canonicalization, permuting the
+the enclosing call consumes it at canonicalization, permuting the written arguments into the order its callee declares.
 
-written arguments into the order its callee declares.
-
-Reaching this definition therefore means the carrier was NOT
-
-consumed — the callee supplied no parameter names to match — which
-
-is the `argument-names-unavailable` error.
+Reaching this definition therefore means the carrier was NOT consumed — the callee supplied no parameter names to match — which is the `argument-names-unavailable` error.
 
 ```epsil
 ((x, y) => x - y)(y: 2, x: 10)
@@ -1083,6 +1006,21 @@ Numerically evaluate an expression, as the `.N()` method does (engine-internal).
 `(any, string?) -> unknown`
 
 Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. The record holds the object's stored fields at the moment it was serialized; the second operand names the nominal type the object had. Not a constructor and not an ascription — it wraps data, it does not make an object.
+
+### Optional
+
+`(any, any) -> nothing`
+
+Optional(param, default): a parameter of a function literal with a default value (Epsil surface syntax: `(x, k = 2) => x * k`).
+
+A call that leaves out the argument of the parameter receives the default. `param` is a symbol or `Typed(symbol, type)`; `default` is a number, a string, `True`, `False`, a symbol, `[]` or `{}`.
+
+A parse-level carrier, like `Spread`: only the parameter list of a `Function` literal reads it. Anywhere else it is the `unexpected-argument` error.
+
+```epsil
+((x, k = 2) => x * k)(3)
+// ➔ 6
+```
 
 ### OverParen
 
@@ -1245,9 +1183,7 @@ Random(): non-deterministic real in [0, 1)
 
 Random(Interval(a, b)): a real in [a, b) (endpoint markers ignored)
 
-Random(Range(...)): an element of the range
-
-Random(xs): an element of the finite collection `xs`
+Random(Range(...)): an element of the range Random(xs): an element of the finite collection `xs`
 
 ```epsil
 random()
@@ -1292,17 +1228,9 @@ ReleaseHold(Hold(1 + 2))
 
 MathJSON `ReplaceAll` · `(any, any+) -> any`
 
-ReplaceAll(expr, rules): apply one or more replacement rules to `expr`,
+ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, then evaluate the result (Mathematica `expr /. rules`).
 
-then evaluate the result (Mathematica `expr /. rules`).
-
-A rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `To`;
-
-in Epsil `->` builds a dictionary entry, which is not a rule). Several
-
-rules may be given as extra arguments or as a `List`/`Set` of rules;
-
-they are applied simultaneously in a single pass.
+A rule is `Rule(lhs, rhs)`, or `lhs -> rhs` in LaTeX (parsed as `To`; in Epsil `->` builds a dictionary entry, which is not a rule). Several rules may be given as extra arguments or as a `List`/`Set` of rules; they are applied simultaneously in a single pass.
 
 ```epsil
 replaceAll(x^2 + x, Rule(x, 3))
@@ -1370,11 +1298,7 @@ MathJSON `Simplify` · `(any, any?) -> expression`
 
 Simplify(expr): simplify an expression.
 
-Simplify(expr, assumptions): simplify under one or more boolean
-
-assumptions (e.g. `x > 0`), or a `List`/`And` of them. The assumptions
-
-hold only for the duration of the simplification.
+Simplify(expr, assumptions): simplify under one or more boolean assumptions (e.g. `x > 0`), or a `List`/`And` of them. The assumptions hold only for the duration of the simplification.
 
 ```epsil
 simplify(sin(x)^2 + cos(x)^2)
@@ -1390,19 +1314,11 @@ simplify(sqrt(x^2), x > 0)
 
 MathJSON `Solve` · `(any, any*) -> list`
 
-Solve(equation, unknown): the list of solutions of an equation for the
+Solve(equation, unknown): the list of solutions of an equation for the unknown. The equation may be an `Equal` expression or a bare expression (read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.
 
-unknown. The equation may be an `Equal` expression or a bare expression
+The unknown may be omitted: it defaults to the equation's single free variable, or to `x` when there are several and one of them is `x`.
 
-(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.
-
-The unknown may be omitted: it defaults to the equation's single free
-
-variable, or to `x` when there are several and one of them is `x`.
-
-Solve([eq1, eq2, …], [x, y, …]): solve a system of equations; each
-
-solution is a tuple of values in the order of the variable list, e.g.
+Solve([eq1, eq2, …], [x, y, …]): solve a system of equations; each solution is a tuple of values in the order of the variable list, e.g.
 
 Solve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].
 
@@ -1431,15 +1347,9 @@ sphere(O, r)
 
 `(any) -> unknown`
 
-Spread(t): splice the elements of the tuple `t` into the enclosing
+Spread(t): splice the elements of the tuple `t` into the enclosing argument list (Epsil surface syntax: `f(...t)`).
 
-argument list (Epsil surface syntax: `f(...t)`).
-
-A literal tuple splices at canonicalization; a symbolic argument is
-
-spliced by the enclosing call at evaluation (step 0 of the evaluate
-
-path), which re-validates the resulting arity.
+A literal tuple splices at canonicalization; a symbolic argument is spliced by the enclosing call at evaluation (step 0 of the evaluate path), which re-validates the resulting arity.
 
 ```epsil
 max(...(4, 9, 2))
@@ -1818,21 +1728,11 @@ WildcardSequence(x)
 
 MathJSON `WithRandomSeed` · `(real | string, any) -> expression`
 
-WithRandomSeed(seed, body): evaluate `body` with a random seed frame
+WithRandomSeed(seed, body): evaluate `body` with a random seed frame seeded by `seed` (a finite real or a string). The block replays identically, while repeated draws WITHIN the frame differ (the n-th draw is hash(seed, n)).
 
-seeded by `seed` (a finite real or a string). The block replays
+Scoping is dynamic: the frame is active through user-function calls, not just lexically inside `body`. Frames nest and the innermost wins.
 
-identically, while repeated draws WITHIN the frame differ (the n-th
-
-draw is hash(seed, n)).
-
-Scoping is dynamic: the frame is active through user-function calls,
-
-not just lexically inside `body`. Frames nest and the innermost wins.
-
-Counters are per-frame, so a nested frame does not perturb its
-
-parent's subsequent draws.
+Counters are per-frame, so a nested frame does not perturb its parent's subsequent draws.
 
 Outside any frame, draws are live (non-deterministic).
 

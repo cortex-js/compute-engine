@@ -1016,19 +1016,11 @@ MathJSON `Map` · `(mapping: (T) any -> U, collection<T>+) -> indexed_collection
 
 Return the collection where each element has been transformed by the mapping function.
 
-With a single collection, equivalent to `[f(x) for x in xs]`. With
+With a single collection, equivalent to `[f(x) for x in xs]`. With multiple collections, combines them element-wise (like `zipWith`): 
 
-multiple collections, combines them element-wise (like `zipWith`): 
+`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the shortest input. The mapping function is always the FIRST argument.
 
-`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the
-
-shortest input. The mapping function is always the FIRST argument.
-
-An immediate `Nothing` input bypasses the callback and remains `Nothing`
-
-at that position. With multiple sources, any `Nothing` coordinate bypasses
-
-the whole callback. Nested `Nothing` and `Missing` are passed to the callback.
+An immediate `Nothing` input bypasses the callback and remains `Nothing` at that position. With multiple sources, any `Nothing` coordinate bypasses the whole callback. Nested `Nothing` and `Missing` are passed to the callback.
 
 The view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.
 
@@ -1710,13 +1702,7 @@ symmetricDifference({1, 2, 3}, {2, 3, 4})
 
 MathJSON `Table` · `(function, integer, integer?) -> collection`
 
-An alias for `Tabulate` (the preferred name) that additionally accepts
-
-Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from
-
-1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`,
-
-and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.
+An alias for `Tabulate` (the preferred name) that additionally accepts Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from 1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.
 
 ```epsil
 table(i^2, (i, 1, 5))

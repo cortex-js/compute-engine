@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 711 functions and constants of the standard library, by category.
+The 712 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -22,7 +22,7 @@ To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 116 definitions · [full reference](/epsil/reference/core/)
+- [Core](#core) — 117 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 13 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 126 definitions · [full reference](/epsil/reference/collections/)
@@ -70,7 +70,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `conforms` | `Conforms` | `(subject: any, protocols: string+) -> boolean` | True iff the subject conforms to EVERY named protocol. |
 | — | `Declare` | `(symbol, type: (string \| symbol)?, value: any?, attributes: dictionary<any>?) scope -> any` | Declare a symbol in the current scope, optionally assigning a type and an initial value. |
 | — | `DeclareConformance` | `(target: string \| symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary<any>?) scope -> nothing` | Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. |
-| — | `DeclareProtocol` | `(string \| symbol, members: dictionary<any>?) scope -> nothing` | Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. |
+| — | `DeclareProtocol` | `(string \| symbol, members: dictionary<any>?, parents: any?) scope -> nothing` | Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. |
 | — | `DeclareSumType` | `(string \| symbol, any*) scope -> nothing` | Declare a SUM TYPE: N nominal variants plus the transparent union that names them, in one statement — the lowering of the Epsil sugar `type node = lit(num: number) \| plus(op1: node, op2: node)`. |
 | — | `DeclareType` | `(string \| symbol, type: string \| symbol \| type, attributes: dictionary<any>?) scope -> nothing` | Declare a type. |
 | — | `DefineFunction` | `(symbol, function, dictionary<any>?) scope -> nothing` | Define one clause of a (possibly multi-clause) function: `DefineFunction(f, Function(body, params…))`. |
@@ -81,7 +81,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `evaluate` | `Evaluate` | `(any) -> unknown` | Evaluate an expression. |
 | `evaluateAt` | `EvaluateAt` | `(function, lower: expression, upper: expression) -> unknown` | Evaluate a function at one point or between two bounds. |
 | `findRoot` | `FindRoot` | `(any, any, dictionary?) -> dictionary` | FindRoot(equations, params): numerically find parameter values that |
-| — | `Function` | `(expression, (function \| symbol)*) -> function` | A function literal |
+| — | `Function` | `(expression, (function \| symbol)*) -> function` | Function(body, param1, param2, …): a function literal. |
 | `geometricVector` | `GeometricVector` | `(any, any) -> expression` | Geometric vector (directed segment between two points) — opaque typed head. |
 | `graphemeClusters` | `GraphemeClusters` | `(character \| string) -> list<character>` | A collection of grapheme clusters from a string. |
 | `head` | `Head` | `(any) -> symbol` | Return the head of an expression, the name of the operator |
@@ -106,6 +106,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `numberFrom` | `NumberFrom` | `(character \| string, base: (character \| integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
 | `numericApproximation` | `NumericApproximation` | `(any) -> unknown` | Numerically evaluate an expression, as the `.N()` method does (engine-internal). |
 | — | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |
+| — | `Optional` | `(any, any) -> nothing` | Optional(param, default): a parameter of a function literal with a |
 | — | `OverParen` | `(any+) -> expression` | Over-paren accent (`\overparen{BC}`) — opaque typed head; not evaluated. |
 | `padEnd` | `PadEnd` | `(character \| string, n: integer, pad: (character \| string)?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
 | `padStart` | `PadStart` | `(character \| string, n: integer, pad: (character \| string)?) -> string` | PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
@@ -410,7 +411,7 @@ The [Relations reference](/epsil/reference/relop/) has the full description and 
 | — | `NotApprox` | `(any, any*) -> boolean` | Negated approximate-equality relation (not approximately equal). |
 | — | `NotApproxEqual` | `(any*) -> unknown` | Negated approximately-equal relation. |
 | — | `NotApproxNotEqual` | `(any, any*) -> boolean` | Negated approximately-not-equal relation. |
-| — | `NotEqual` | `(any, any) -> boolean` | Inequality comparison (not equal to). |
+| — | `NotEqual` | `(any, any*) -> boolean` | Inequality comparison (not equal to). |
 | — | `NotGreater` | `(any, any*) -> boolean` | Negated greater-than relation (not greater than). |
 | — | `NotGreaterNotEqual` | `(any, any*) -> boolean` | Neither greater than nor equal to. |
 | — | `NotLess` | `(any, any*) -> boolean` | Negated less-than relation (not less than). |
@@ -611,13 +612,13 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | `integrate` | `Integrate` | `(function, limits+) -> list<tuple> \| number \| tensor \| tuple` | Symbolic integral with optional bounds. |
 | `interpolatingFunction` | `InterpolatingFunction` | `(list<any>, number?) -> number` | Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `NDSolveFunction`). |
 | `jacobianMatrix` | `JacobianMatrix` | `(any, any?) -> value` | JacobianMatrix(fs, vars): the matrix of partial derivatives |
-| `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function |
+| `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function. |
 | — | `Limits` | `(index: symbol, lower: value, upper: value) -> tuple` | Limits of a function |
 | `nd` | `ND` | `(function, at: number) -> list<number> \| number \| tuple` | Numerical derivative evaluated at a point. |
 | `ndSolve` | `NDSolve` | `(expression, symbol, limits: symbol \| tuple, number, number?) -> list` | Numerical differential equation solver. |
 | `ndSolveFunction` | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. |
 | `nIntegrate` | `NIntegrate` | `(function, lower: number, upper: number) -> number` | Numerical approximation of a definite integral. |
-| `nLimit` | `NLimit` | `(function, point: number, direction: number?) -> number` | Numerical approximation of the limit of a function |
+| `nLimit` | `NLimit` | `(function, point: number, direction: number?) -> number` | Numerical approximation of the limit of a function. |
 | `normal` | `Normal` | `(value) -> value` | Strip Big-O remainder terms from a series, yielding the truncated polynomial. |
 | `polygonContour` | `PolygonContour` | `(vertices: list<complex>, orientation: integer?) -> expression` | Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1). |
 | `rSolve` | `RSolve` | `(expression, symbol, symbol) -> expression` | Symbolic recurrence equation solver. |
