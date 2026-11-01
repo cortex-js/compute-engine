@@ -4090,6 +4090,11 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
  * - The target of a storing operator (`Assign`, `Declare`): a name, not a
  *   read, so `Hold(Assign(b, 4))` keeps `b`.
  * - A variable with no value, and any other symbol (a global, a constant).
+ * - A symbol bound to a constant definition that is not the binding of its
+ *   name in the current scope: the library `Pi` in a result that the engine
+ *   built (`Sum(1/n², n, 1, ∞)` is `π²/6`) inside a block whose local is
+ *   named `Pi`. The evaluation of such a symbol reads its own constant, not
+ *   the local, so the stored value must keep it.
  *
  * The values of a dictionary are read like the operands of a list.
  *
@@ -4136,11 +4141,30 @@ export function snapshotRunVariables(
     if (held === undefined || held.has(name)) return undefined;
     return held;
   };
-  const current = (s: Expression & { symbol: string }): Expression =>
-    runValue(
+  const current = (s: Expression & { symbol: string }): Expression => {
+    const binding = bindingInContext(
+      ce,
       s.symbol,
-      bindingInContext(ce, s.symbol, s.valueDefinition ?? s.operatorDefinition)
-    ) ?? s;
+      s.valueDefinition ?? s.operatorDefinition
+    );
+    // An occurrence bound to a constant reads the value of its own
+    // definition, whatever binding of the same name the scope chain holds
+    // (the `isConstant` branch of `BoxedSymbol.evaluate()`). So a result
+    // that the engine built with the library `Pi`, assigned in a block that
+    // declares a local `Pi`, keeps the library constant. A binding that is an
+    // activation of the occurrence's own definition (a constant block local
+    // cloned for one run on the asynchronous route) is the same binding
+    // (`sameBindingDef()`), and its value is read as before.
+    const own = s.valueDefinition;
+    if (
+      own?.isConstant === true &&
+      binding !== undefined &&
+      'value' in binding &&
+      !sameBindingDef(binding.value, own)
+    )
+      return s;
+    return runValue(s.symbol, binding) ?? s;
+  };
   // One memo entry per node and set of shadowed names: a subexpression
   // shared by several operands is rewritten once per set.
   const memo = new Map<Expression, Map<string, Expression>>();

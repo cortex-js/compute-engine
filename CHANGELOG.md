@@ -240,6 +240,14 @@
 
 ### Bug Fixes
 
+- **In a block that declares a local named `Pi`, a result built with the
+  library π keeps its value when it is assigned** (CE-103). With `Pi` a block
+  local of value `3`, `s := Sum(1/n², n, 1, ∞); s` gave `3²/6 = 3/2`: the
+  assignment replaced each symbol that reads a block local with its value, and
+  it read the library `Pi` of `π²/6` as the local. It now gives `π²/6`, as the
+  evaluation of the same symbol does. A JSON round trip of such a result inside
+  that block still reads `"Pi"` as the local.
+
 - **The type of a call of a function with an early `Return` includes the
   value of the `Return`** (CE-737). With `x: real` and
   `g := y ↦ Block(If(y > 1, Return((y, y))), y + 1)`, `g(x)` was typed

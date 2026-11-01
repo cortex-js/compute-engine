@@ -447,3 +447,113 @@ describe('A USER BINDING OF Pi IN SPECIAL VALUES AND SOLVE', () => {
     ).toBe('[0,pi,2pi,3pi]');
   });
 });
+
+// An `Assign` in a block stores its value with each symbol that reads a local
+// of the block replaced by the value of that local. A result that the engine
+// built with the library π holds a symbol bound to the library constant, and
+// the evaluation of that symbol reads the constant, not a block local named
+// `Pi`. So the stored value keeps the library π.
+describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
+  const sum: Expression = [
+    'Sum',
+    ['Divide', 1, ['Power', 'n', 2]],
+    ['Limits', 'n', 1, 'PositiveInfinity'],
+  ];
+  const localPi: Expression[] = [
+    ['Declare', 'Pi', "'real'"],
+    ['Assign', 'Pi', 3],
+  ];
+
+  test('an assigned closed form keeps the library π', () => {
+    const ce = new ComputeEngine();
+    const value = ce
+      .box(['Block', ...localPi, ['Assign', 's', sum], 's'])
+      .evaluate();
+    expect(value.toString()).toBe('1/6 * pi^2');
+    expect(value.N().re).toBeCloseTo(Math.PI ** 2 / 6, 12);
+  });
+
+  test('a declared value keeps the library π', () => {
+    const ce = new ComputeEngine();
+    const value = ce
+      .box(['Block', ...localPi, ['Declare', 's', "'real'", sum], ['N', 's']])
+      .evaluate();
+    expect(value.re).toBeCloseTo(Math.PI ** 2 / 6, 12);
+  });
+
+  test('the stored value combines with the local Pi', () => {
+    const ce = new ComputeEngine();
+    const value = ce
+      .box(['Block', ...localPi, ['Assign', 's', sum], ['Multiply', 's', 'Pi']])
+      .evaluate();
+    expect(value.N().re).toBeCloseTo((3 * Math.PI ** 2) / 6, 12);
+  });
+
+  // Control: an occurrence of the local `Pi` is still replaced by the value
+  // that the local holds at the assignment.
+  test('the local Pi is read at the assignment', () => {
+    const ce = new ComputeEngine();
+    const value = ce
+      .box([
+        'Block',
+        ...localPi,
+        ['Assign', 's', ['Hold', 'Pi']],
+        ['Assign', 'Pi', 4],
+        's',
+      ])
+      .evaluate();
+    expect(value.toString()).toBe('Hold(3)');
+  });
+
+  test('an assigned closed form keeps the library π, asynchronously', async () => {
+    const ce = new ComputeEngine();
+    const value = await ce
+      .box(['Block', ...localPi, ['Assign', 's', sum], 's'])
+      .evaluateAsync();
+    expect(value.toString()).toBe('1/6 * pi^2');
+    expect(value.N().re).toBeCloseTo(Math.PI ** 2 / 6, 12);
+  });
+
+  test('the local Pi is read at the assignment, asynchronously', async () => {
+    const ce = new ComputeEngine();
+    const value = await ce
+      .box([
+        'Block',
+        ...localPi,
+        ['Assign', 's', ['Hold', 'Pi']],
+        ['Assign', 'Pi', 4],
+        's',
+      ])
+      .evaluateAsync();
+    expect(value.toString()).toBe('Hold(3)');
+  });
+
+  // Control: a CONSTANT block local is a constant definition too. On the
+  // asynchronous route the scope of the block is run with a copy of each
+  // binding (an activation), so the occurrence and the binding found in the
+  // scope chain are two objects that denote the same binding. Its value is
+  // still copied into the stored value.
+  const constantLocal: Expression = [
+    'Block',
+    [
+      'Declare',
+      'c',
+      "'real'",
+      5,
+      ['Dictionary', ['KeyValuePair', 'constant', 'True']],
+    ],
+    ['Assign', 's', ['Hold', 'c']],
+    's',
+  ];
+
+  test('a constant block local is read at the assignment', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(constantLocal).evaluate().toString()).toBe('Hold(5)');
+  });
+
+  test('a constant block local is read at the assignment, asynchronously', async () => {
+    const ce = new ComputeEngine();
+    const value = await ce.box(constantLocal).evaluateAsync();
+    expect(value.toString()).toBe('Hold(5)');
+  });
+});

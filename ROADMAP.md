@@ -481,6 +481,43 @@ data bound (the union-source case must never conflict), and never reach an
 with inference writes needs a new decision on the `zs` KEEP pin. Do not build
 before a consumer asks.
 
+### CE-58. A `Declare` statement at the top level, and `ce.declare()` in a pushed scope, install a writer that does not state `scope`
+
+**Status:** decision needed; defect, M.
+
+A named definition that states no effects must not write outside itself: the
+`scope` effect is opt-in (`docs/EFFECTS-MODEL.md`). A direct host call
+`ce.declare('f', { value: writer })` in the global scope is now refused. Two
+routes still install the writer:
+
+- a `Declare` statement evaluated in the global scope, for example
+  `ce.box(['Declare', 'f', {str: '() -> number'}, writer]).evaluate()`, or a
+  top-level Epsil `let f: () -> number = writer`;
+- `ce.declare()` after a host `ce.pushScope()`.
+
+Here `writer` is `() ↦ Block(c ≔ c + 1, c)` with `c` a global. The same code
+installs block-local `let` bindings, whose writer closures (a closure that
+changes a local of its enclosing literal) must stay installable. The Epsil
+static pass evaluates top-level declarations under pushed scopes, so the depth
+of the scope does not tell a top-level declaration from a block-local one; the
+engine also binds function arguments and closure captures in nested scopes
+(`function-utils.ts`).
+
+Options:
+
+- (a) Refuse a writer that does not state `scope` at the top level too. This
+  needs a mark on a declaration that the Epsil front end makes at the top level
+  (or on the binding it creates), and the engine's own nested-scope calls must
+  be marked as exempt. Cost: an Epsil program whose top-level `let` closure
+  writes a top-level variable must write `scope` in its type
+  (`let f: () scope -> number = …`).
+- (b) Keep these two routes as documented exceptions. No code change; the rule
+  of `docs/EFFECTS-MODEL.md` holds only for the host calls `ce.declare()` and
+  `ce.assign()` in the global scope.
+
+Recommended: (a), because the rule is stated for every named definition, and
+an Epsil `let` is one. If nothing is decided, (b) stays.
+
 ### CE-61. Two kinds of user-defined callee are not checked statically
 
 **Status:** proposed; capability. User decision 2026-10-17: canonicalization owns
