@@ -84,6 +84,8 @@ import {
   userFunctionLiteral,
   userFunctionParamsAreScalar,
 } from './compile-assignment-checks.js';
+import { isPolymorphicType } from '../../common/type/instantiate.js';
+import { strictLanes, typeHasComplexLeaf } from './compiler-mode.js';
 import { compileValueOperand } from './compile-statements.js';
 import {
   defaultFillingWrapper,
@@ -109,7 +111,12 @@ import {
   pointOfType,
   pointsBelowLists,
 } from './static-shape.js';
-import { CompileDeclineError, UNSETTLED_SHAPE_CODE } from './diagnostics.js';
+import {
+  CompileDeclineError,
+  LaneMismatchError,
+  localLaneMismatch,
+  UNSETTLED_SHAPE_CODE,
+} from './diagnostics.js';
 
 /**
  * The complex-ness every element of `collection` shares, or `undefined` when
@@ -381,6 +388,15 @@ export function checkingShimTests(
  * declared a non-real number type. An argument that is neither provably a
  * scalar nor a uniformly-complex collection is not a mismatch (a mixed list
  * has no one shape; its elements are handled per element).
+ *
+ * At a parameter whose type admits no number (a point or a list, often
+ * only inferred from the body: `(p) => p[1] + 1` gives `p: tuple<number>`),
+ * or that has no type, the test is `pointLaneMismatch()`: a complex value
+ * of the argument at a position that the parameter type reads as real is
+ * a mismatch. With `P: list<tuple<complex, real>>`, the call `h(P[1])`
+ * added `1` to a `{re, im}` object and gave the string "[object
+ * Object]1". The block-local route applies the same test
+ * (`localLaneMismatchAt()` in `compile-user-functions.ts`).
  */
 export function laneMismatchAt(
   engine: ComputeEngine,
@@ -392,16 +408,274 @@ export function laneMismatchAt(
   for (let i = 0; i < nParams; i++) {
     const a = args[i];
     if (a === undefined) continue;
+    const declared = userFunctionParamType(engine, h, i);
+    const point = pointLaneMismatch(a, declared);
+    if (point === true) return i;
+    if (point === false) continue;
     let complex: boolean;
     if (provablyScalarOrFramedScalar(a)) complex = core.isComplexValued(a);
     else if (userFunctionParamsAreScalar(engine, h))
       complex = hasUniformComplexScalarElements(a);
     else complex = false;
     if (!complex) continue;
-    const pt = userFunctionParamType(engine, h, i);
-    if (pt === undefined || !isNonRealNumber(pt)) return i;
+    if (declared === undefined || !isNonRealNumber(declared)) return i;
   }
   return -1;
+}
+
+/**
+ * The description of an element of the collection `coll` for a lane
+ * mismatch message: "an element of `L`", with `coll` written in LaTeX.
+ */
+export function elementOf(coll: Expression): string {
+  let source: string;
+  try {
+    source = coll.latex;
+  } catch {
+    source = coll.toString();
+  }
+  return `an element of \`${source}\``;
+}
+
+/**
+ * Throw the strict-mode `LaneMismatch` decline for a value that has no
+ * name the user wrote, such as an element of a collection or the
+ * accumulator of a fold. `value` describes it ("an element of `L`"),
+ * and `binding` names the parameter that receives it. For a block-local
+ * function (`local`), the message is the one of `localLaneMismatch()`.
+ */
+export function describedLaneMismatch(
+  boundary: string,
+  binding: string,
+  value: string,
+  local: boolean
+): never {
+  if (local) localLaneMismatch(boundary, binding, value);
+  throw new LaneMismatchError({
+    boundary,
+    binding,
+    value,
+    message:
+      `Lane mismatch at ${boundary}: ${value} reaches ${binding}, which ` +
+      `this compilation shaped real. Declare it complex, or compile with ` +
+      `\`mode: 'complex'\`.`,
+  });
+}
+
+/**
+ * Whether the parameter type `pt` has no type: `unknown` or `any`, the
+ * type that an unannotated parameter keeps when no use in the body
+ * narrows it. A transparent alias of these types (`type alias U = any`)
+ * is read through; a nominal type is not.
+ */
+function isUntypedParam(pt: Type): boolean {
+  const t = resolveTypeAlias(pt);
+  return t === 'unknown' || t === 'any';
+}
+
+/**
+ * Whether the point test of `pointLaneMismatch` applies at a parameter of
+ * type `pt`: `'non-scalar'` for a type that admits no number (a point or
+ * a list), `'wide'` for a type that admits a number and also a point or a
+ * collection (no type, or a union such as `collection<any> | value`),
+ * `undefined` otherwise. At a `'wide'` parameter only an argument that
+ * is a point or a collection is tested; a scalar argument is left to the
+ * scalar test of the caller.
+ */
+function pointTestKind(
+  pt: Type | undefined
+): 'non-scalar' | 'wide' | undefined {
+  if (pt === undefined) return undefined;
+  if (!couldMatch(pt, 'number')) return 'non-scalar';
+  if (isUntypedParam(pt)) return 'wide';
+  const r = resolveTypeAlias(pt);
+  if (
+    typeof r === 'object' &&
+    r.kind === 'union' &&
+    r.types.some((m) => !couldMatch(m, 'number'))
+  )
+    return 'wide';
+  return undefined;
+}
+
+/**
+ * The lane test of the argument `a` at a parameter of type `pt` that is
+ * not a scalar number type: `true` for a mismatch, `false` for no
+ * mismatch, `undefined` when the caller must apply its scalar test.
+ *
+ * - A parameter type that admits no number (a point or a list: `(p) =>
+ *   p[1] + 1` gives `p: tuple<number>`) is compared with the argument
+ *   position by position (`complexReachesRealPosition`). The emitted body
+ *   reads a coordinate of such a parameter in the lane of its type at that
+ *   position, so a complex value at a position typed `number` or `real`
+ *   is a mismatch: with `P: list<tuple<complex, real>>`, the call
+ *   `h(P[1])` added `1` to a `{re, im}` object and gave the string
+ *   "[object Object]1".
+ * - A parameter with no type (`unknown`), or with a union type that
+ *   admits a number and a collection, is a mismatch when the argument is a
+ *   point or a collection that holds a complex number. The body is
+ *   compiled for a real value: `g = (p) => 2p` with `g(P[1])` gave
+ *   `[null, 4]`. For any other argument the caller applies its scalar
+ *   test, which also handles a complex scalar at such a parameter.
+ */
+export function pointLaneMismatch(
+  a: Expression,
+  pt: Type | undefined
+): boolean | undefined {
+  const kind = pointTestKind(pt);
+  if (pt === undefined || kind === undefined) return undefined;
+  const nonScalar = kind === 'non-scalar';
+  if (complexReachesRealPosition(a, a.type.type, pt)) return true;
+  return nonScalar ? false : undefined;
+}
+
+/**
+ * The lane test of the elements of the collection `source`, each given to
+ * a callback parameter of type `pt`, as `pointLaneMismatch` makes it for
+ * one argument. The elements of a written list are tested one by one; the
+ * elements of any other collection are tested by its element type.
+ */
+export function elementLaneMismatch(
+  source: Expression,
+  pt: Type | undefined
+): boolean | undefined {
+  const kind = pointTestKind(pt);
+  if (pt === undefined || kind === undefined) return undefined;
+  const nonScalar = kind === 'non-scalar';
+  let found: boolean;
+  if (isFunction(source, 'List'))
+    found = source.ops.some((e) =>
+      complexReachesRealPosition(e, e.type.type, pt)
+    );
+  else {
+    const elt = collectionElementTypeOf(source);
+    found = elt !== undefined && complexReachesRealPosition(undefined, elt, pt);
+  }
+  if (found) return true;
+  return nonScalar ? false : undefined;
+}
+
+/**
+ * Whether a complex value of the argument reaches a position of the
+ * parameter type `pt` that the emitted body reads as a real number. The
+ * argument is the expression `a` when it is known, and its type `at`.
+ * `top` is set when `pt` is the type of the parameter itself, and not the
+ * type of a position inside it.
+ *
+ * The two types are compared position by position: a tuple component with
+ * the component at the same index, the element of a collection with the
+ * element (or each component) on the other side. A position of `pt` that
+ * is a number type with no non-real number type (`number`, `real`) is
+ * read as real, and it is a mismatch when the argument at that position
+ * can be complex: its type holds a non-real number type, or the compiler
+ * reads the written expression there as complex-valued (`Typed(z,
+ * 'number')` with `z` complex). A position with no type (`any` or
+ * `unknown`, at the top level or inside a type such as
+ * `indexed_collection<any>`) is read as real too: this simple test does
+ * not look at what the body does with the value. So `len = (L) =>
+ * Length(L)` (`L: collection`, with `any` elements) is a mismatch for a
+ * point with complex coordinates, although `Length` reads no coordinate:
+ * `mode: 'auto'` then compiles it in `mode: 'complex'` with the same
+ * value, and `mode: 'strict'` declines. A position with another type
+ * (`string`) is never a mismatch. At the top level, a parameter type that
+ * admits a number (see `pointTestKind`) is tested only for an argument
+ * that is a point or a collection.
+ */
+function complexReachesRealPosition(
+  a: Expression | undefined,
+  at: Type,
+  pt: Type,
+  depth = 0,
+  top = true
+): boolean {
+  // An alias that refers to itself can make the walk endless. Past this
+  // depth the comparison stops. It then reports a mismatch when the
+  // argument can hold a complex value at all, which is the safe answer:
+  // the compilation then declines in `mode: 'strict'`.
+  if (depth > 8)
+    return (
+      typeHasComplexLeaf(at) ||
+      (a !== undefined &&
+        (core.elementComplexness(a)?.some((c) => c) === true ||
+          core.isComplexValued(a)))
+    );
+  const p = resolveTypeAlias(pt);
+  // An element read (`P[1]`) has the type `missing | T`: the missing
+  // value holds no number, so only `T` is compared.
+  const t = resolveTypeAlias(stripMissingFromType(at));
+  // A union of argument types: a mismatch when one member is. The written
+  // expression `a` stays with each member.
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.some((m) =>
+      complexReachesRealPosition(a, m, p, depth + 1, top)
+    );
+  if (
+    top &&
+    couldMatch(p, 'number') &&
+    !isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isTupleType(t)
+  )
+    return false;
+  // A position with no type is read as real.
+  if (isUntypedParam(p))
+    return (
+      typeHasComplexLeaf(t) ||
+      (a !== undefined &&
+        (core.elementComplexness(a)?.some((c) => c) === true ||
+          core.isComplexValued(a)))
+    );
+  if (isSubtype(p, 'number')) {
+    if (isNonRealNumber(p)) return false;
+    if (typeHasComplexLeaf(t)) return true;
+    return a !== undefined && core.isComplexValued(a);
+  }
+  // A union of parameter types: compared as whole types.
+  if (typeof p === 'object' && p.kind === 'union')
+    return (
+      (typeHasComplexLeaf(t) ||
+        (a !== undefined &&
+          core.elementComplexness(a)?.some((c) => c) === true)) &&
+      !typeHasComplexLeaf(p)
+    );
+  // The parameter positions: `at(i)` is the type of position `i`.
+  let pAt: ((i: number) => Type | undefined) | undefined;
+  if (typeof p === 'object' && p.kind === 'tuple')
+    pAt = (i) => p.elements[i]?.type;
+  else {
+    const elt = collectionElementType(p);
+    if (elt !== undefined) pAt = () => elt;
+  }
+  if (pAt === undefined) return false;
+  // The argument positions: the operands of a written tuple or list, the
+  // components of a tuple type, or the element type of a collection.
+  if (a !== undefined && (isFunction(a, 'Tuple') || isFunction(a, 'List')))
+    return a.ops.some((e, i) => {
+      const q = pAt(i);
+      return (
+        q !== undefined &&
+        complexReachesRealPosition(e, e.type.type, q, depth + 1, false)
+      );
+    });
+  if (typeof t === 'object' && t.kind === 'tuple')
+    return t.elements.some((e, i) => {
+      const q = pAt(i);
+      return (
+        q !== undefined &&
+        complexReachesRealPosition(undefined, e.type, q, depth + 1, false)
+      );
+    });
+  const elt = collectionElementType(t);
+  if (elt === undefined) return false;
+  // Every position of a tuple parameter receives an element.
+  if (typeof p === 'object' && p.kind === 'tuple')
+    return p.elements.some((q) =>
+      complexReachesRealPosition(undefined, elt, q.type, depth + 1, false)
+    );
+  return complexReachesRealPosition(undefined, elt, pAt(0)!, depth + 1, false);
+}
+
+function isTupleType(t: Type): boolean {
+  return typeof t === 'object' && t.kind === 'tuple';
 }
 
 /**
@@ -615,6 +889,76 @@ export function combinerPlan(
   const coerceSeed = accComplex && !seedless && !seedComplex;
 
   if (isSymbol(op)) {
+    // A combiner, block-local or engine-level, whose parameter in a
+    // complex lane is not typed as a non-real number is a lane mismatch.
+    // The call of the combiner in the eta expansion below finds the same
+    // mismatch, but its arguments are the generated parameters of the
+    // expansion (`_a`, `_x`), and a message that names them does not help
+    // the user. So the test is made here, and the message names the
+    // accumulator or the elements of the collection.
+    //
+    // An element parameter that is not a scalar (a point, read with
+    // `v[1]`) is a mismatch too when an element of the collection holds a
+    // complex number at any depth and the parameter type holds none
+    // (`typeHasComplexLeaf`): the body reads the coordinates of such a
+    // parameter as real numbers. No eta expansion is made for it, so no
+    // other test sees it.
+    //
+    // The parameter types of a block-local combiner come from the type of
+    // its literal. Those of an engine-level combiner come from its
+    // definition (`userFunctionParamType`), as in `laneMismatchAt`.
+    //
+    // The test needs the target: without it (the shape analysis of
+    // `isComplexValued`), a block-local combiner is not known, and the
+    // name would resolve to an engine-level function that the local
+    // hides.
+    const local = target?.localFunctions?.get(op.symbol);
+    const isLocal = local !== undefined;
+    if (
+      target !== undefined &&
+      strictLanes() &&
+      !target.userFunctions?.lowering
+    ) {
+      let paramType: (i: number) => Type | undefined;
+      if (isLocal) {
+        const declaredType = local.type?.type;
+        const signature =
+          declaredType !== undefined && isPolymorphicType(declaredType)
+            ? groundSignature(declaredType)
+            : declaredType;
+        paramType = (i) => signatureParamType(signature, i);
+      } else paramType = (i) => userFunctionParamType(op.engine, op.symbol, i);
+      // The name of parameter `i` of the combiner, as `userParamBinding()`
+      // writes it (`compile-lanes.ts` imports this file, so it is not
+      // called here).
+      const binding = (i: number) => {
+        const name = functionLiteralParameterName(literal.ops[i + 1]);
+        return name
+          ? `the parameter \`${name}\` of \`${op.symbol}\``
+          : `parameter ${i + 1} of \`${op.symbol}\` (unnamed)`;
+      };
+      // `value` describes the value, as the generated parameter of the
+      // eta expansion has no name that the user wrote.
+      const mismatch = (i: number, value: string): never =>
+        describedLaneMismatch(
+          isLocal
+            ? 'block-local function parameter'
+            : 'user-function parameter',
+          binding(i),
+          value,
+          isLocal
+        );
+      const realAt = (i: number) => {
+        const pt = paramType(i);
+        return pt === undefined || !isNonRealNumber(pt);
+      };
+      const eltParam = paramType(1);
+      const complexPoint = elementLaneMismatch(coll, eltParam) === true;
+      if (accComplex && realAt(0))
+        mismatch(0, 'the complex accumulator of the fold');
+      if ((eltComplex && realAt(1)) || complexPoint)
+        mismatch(1, elementOf(coll));
+    }
     if (!accComplex && !eltComplex)
       return { op, accComplex, eltComplex, coerceSeed };
     const engine = op.engine;
@@ -623,6 +967,20 @@ export function combinerPlan(
       eltType !== undefined && isNonRealNumber(eltType)
         ? typeToString(eltType)
         : 'complex';
+    // An element that is not a scalar (a point of a list of points) is
+    // passed whole. Its parameter in the expansion is typed with the
+    // element type: an untyped parameter is read as a scalar, and the
+    // call of the combiner is then wrapped in the run-time broadcast,
+    // which maps over the coordinates of the point (a fold of `(a, v) =>
+    // a + v[1]` over `[(1 + i, 2), (2, 3)]` in complex mode gave
+    // `[null, null]` where the interpreter gives `3 + i`).
+    const pointElementType =
+      !eltComplex &&
+      eltType !== undefined &&
+      !isSubtype(eltType, 'number') &&
+      isSubtype(eltType, INDEXED_COLLECTION_SHAPE_TYPE)
+        ? eltType
+        : undefined;
     // The parameters of the eta expansion must not have the name of the
     // combiner: a parameter `_x` would hide a user function `_x`, and the
     // body `_x(_a, _x)` would call the parameter.
@@ -639,7 +997,12 @@ export function combinerPlan(
         : a,
       eltComplex
         ? engine.function('Typed', [x, engine.box({ str: eltTypeText })])
-        : x,
+        : pointElementType !== undefined
+          ? engine.function('Typed', [
+              x,
+              engine.box({ str: typeToString(pointElementType) }),
+            ])
+          : x,
     ]);
     return { op: eta, accComplex, eltComplex, coerceSeed };
   }

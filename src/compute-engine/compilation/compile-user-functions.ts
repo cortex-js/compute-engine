@@ -67,7 +67,10 @@ import {
   builtinCallbackArity,
   builtinOperatorDefinition,
 } from './builtin-callback.js';
-import { completedLiteralArguments } from './compile-parameter-defaults.js';
+import {
+  completedLiteralArguments,
+  literalTakesArgumentCount,
+} from './compile-parameter-defaults.js';
 import { isCompileBoundName } from './compiler-names.js';
 import {
   blockLocalFunction,
@@ -105,12 +108,17 @@ import {
   checkingShimName,
   failedCheckMarker,
   hasUniformComplexScalarElements,
+  describedLaneMismatch,
+  elementLaneMismatch,
+  elementOf,
+  pointLaneMismatch,
   jsParameterGuard,
   laneMismatchAt,
   laneRequestParamType,
   namedPointArgumentAtUntypedParameter,
 } from './compile-callbacks.js';
 import { laneMismatch, userParamBinding } from './compile-lanes.js';
+import { localLaneMismatch } from './diagnostics.js';
 import {
   checkListCoordinateTupleArgs,
   checkPointListAtMatrixUnionArgs,
@@ -134,6 +142,7 @@ import {
   multiClauseParamIsComplex,
   pointArgumentAtUntypedParameter,
   presentCheckedCode,
+  provablyScalarOrFramedScalar,
   tryInlineUserFunctionCall,
   userFunctionParamType,
 } from './compile-user-calls.js';
@@ -1013,20 +1022,76 @@ export function registryHelperName(
  * A parameter DECLARED complex is not a mismatch (the call coerces into
  * it). No-op outside the strict-shaped disciplines, or when `callback` is
  * not a unary user function.
+ *
+ * A symbol that names a unary block-local function of an enclosing
+ * statement list (`target.localFunctions`) is tested in the same way, with
+ * the parameter type of the signature of its literal. The block binds the
+ * local once, with a body compiled in the lane of that parameter type, so
+ * a parameter that is not typed as a non-real number receives a complex
+ * element as a number: `Map(g, L)` with `g = (a) => 2a` over `[1 + i, 2]`
+ * gave `[null, null]` where the interpreter gives `[2 + 2i, 4]`.
  */
 export function assertCallbackLaneMatch(
   callback: Expression | undefined,
-  source: Expression | undefined
+  source: Expression | undefined,
+  target?: CompileTarget<Expression>
 ): void {
   if (!strictLanes()) return;
   if (callback === undefined || source === undefined) return;
   if (!isSymbol(callback)) return;
+  const local = target?.localFunctions?.get(callback.symbol);
+  if (local !== undefined) {
+    if (target?.userFunctions?.lowering) return;
+    // A literal with one parameter, or one parameter and parameters with a
+    // default value, which the compiled callback fills.
+    if (!isFunction(local, 'Function') || !literalTakesArgumentCount(local, 1))
+      return;
+    const declared = local.type?.type;
+    const signature =
+      declared !== undefined && isPolymorphicType(declared)
+        ? groundSignature(declared)
+        : declared;
+    const pt = signatureParamType(signature, 0);
+    // A parameter that is not a scalar (a point, read with `p[1]`) reads
+    // each coordinate in the lane of its type at that position: an element
+    // with a complex value at a real position is a mismatch
+    // (`elementLaneMismatch`).
+    const point = elementLaneMismatch(source, pt);
+    if (point === true)
+      describedLaneMismatch(
+        'block-local function value position',
+        userParamBinding(callback.symbol, local, 0),
+        elementOf(source),
+        true
+      );
+    if (point === false) return;
+    if (!hasUniformComplexScalarElements(source)) return;
+    if (pt === undefined || !isNonRealNumber(pt))
+      localLaneMismatch(
+        'block-local function value position',
+        userParamBinding(callback.symbol, local, 0),
+        source
+      );
+    return;
+  }
   const engine = callback.engine;
   const literal = userFunctionLiteral(engine, callback.symbol);
   if (literal === undefined || literal.ops.length !== 2) return;
-  if (!hasUniformComplexScalarElements(source)) return;
   // `laneRequestParamType`, not the raw param type — see its comment.
   const pt = laneRequestParamType(engine, callback.symbol, 0);
+  // A parameter that is not a scalar is tested as for a block-local
+  // function above: `Map(h, P)` with `h = (p) => p[1] + p[2]` over
+  // `P: list<tuple<complex, real>>` gave `["[object Object]2", …]`.
+  const point = elementLaneMismatch(source, pt);
+  if (point === true)
+    describedLaneMismatch(
+      'user-function value position',
+      userParamBinding(callback.symbol, literal, 0),
+      elementOf(source),
+      false
+    );
+  if (point === false) return;
+  if (!hasUniformComplexScalarElements(source)) return;
   if (pt === undefined || !isNonRealNumber(pt))
     laneMismatch(
       'user-function value position',
@@ -2167,6 +2232,47 @@ export function checkedCallMayBeAbsent(
 }
 
 /**
+ * The first argument position at which a call with `args` of a
+ * block-local function whose signature is `signature` is a strict-mode
+ * lane mismatch, or `-1`.
+ *
+ * At a scalar parameter, the test is the one of `laneMismatchAt` for an
+ * engine-level function: the argument is a complex-valued scalar, or, when
+ * all the parameters are scalar and the call broadcasts over the argument,
+ * a collection whose elements are all complex scalars. The parameter type
+ * in `signature` must then be a non-real number type.
+ *
+ * At a parameter that is not a scalar (a point or a list, often only
+ * inferred from the body: `(p) => p[1] + 1`), or that has no type, the
+ * test is `pointLaneMismatch()`: a complex value of the argument at a
+ * position that the parameter type reads as real is a mismatch.
+ * `g((L[1], 2))` added `1` to a `{re, im}` object and gave the string
+ * "[object Object]1".
+ *
+ * A signature that is not known gives no parameter type, so a
+ * complex-shaped argument is then a mismatch.
+ */
+function localLaneMismatchAt(
+  signature: Type | undefined,
+  args: ReadonlyArray<Expression>
+): number {
+  const scalarParams = signature === undefined || paramsAreScalar(signature);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const pt = signatureParamType(signature, i);
+    const point = pointLaneMismatch(a, pt);
+    if (point === true) return i;
+    if (point === false) continue;
+    const complex = provablyScalarOrFramedScalar(a)
+      ? core.isComplexValued(a)
+      : scalarParams && hasUniformComplexScalarElements(a);
+    if (!complex) continue;
+    if (pt === undefined || !isNonRealNumber(pt)) return i;
+  }
+  return -1;
+}
+
+/**
  * If head `h` names a FUNCTION-VALUED BLOCK LOCAL of an enclosing statement
  * list (`target.localFunctions` — `const g = (k) => …` earlier in the same
  * block), compile the call site as an ordinary call of that binding.
@@ -2661,6 +2767,33 @@ export function tryCompileLocalFunctionCall(
         );
       return `(${core.compile(rewritten, target)})`;
     }
+  }
+
+  // A complex-shaped argument at a parameter of the local that is not
+  // typed as a non-real number is a lane mismatch, as for an engine-level
+  // function (`laneMismatchAt`). The block binds the local once, and the
+  // body of that binding is compiled in the lane of the parameter types of
+  // its literal: a parameter with no complex type is a real number there.
+  // Without this test, `g = (a, b) => a + b` received `{re, im}` objects
+  // and the real `+` joined them as strings: `Reduce(L, g, 0)` over
+  // `[1 + i, 2]` gave "[object Object][object Object]…" where the
+  // interpreter gives `3 + i`. In `mode: 'auto'` the mismatch makes the
+  // compilation start again in `mode: 'complex'`, where the literal
+  // compiles its parameters with no declared type in the complex lane. In
+  // `mode: 'strict'` the compilation declines.
+  // The test comes after the call written with the body of the function
+  // for a tuple argument (above). That call is made only when all the
+  // parameters of the local are scalar; it binds the tuple whole and so
+  // compiles a complex coordinate in the lane of the argument. A tuple at
+  // a parameter that is not a scalar comes here and is tested.
+  if (strictLanes() && !target.userFunctions?.lowering) {
+    const i = localLaneMismatchAt(signature, args);
+    if (i >= 0)
+      localLaneMismatch(
+        'block-local function parameter',
+        userParamBinding(h, literal, i),
+        args[i]
+      );
   }
 
   // PYTHON. The block binds the local as a Python value

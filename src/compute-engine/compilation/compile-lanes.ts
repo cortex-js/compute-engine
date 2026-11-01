@@ -39,9 +39,15 @@ import { core } from './compiler-core-hooks.js';
 import {
   _codeOverrides,
   runtimeRealGuards,
+  typeHasComplexLeaf,
   wideIsComplex,
   wideNumericType,
 } from './compiler-mode.js';
+
+// `typeHasComplexLeaf()` is defined in `compiler-mode.ts`, which
+// `compile-callbacks.ts` can import without an import cycle. It is
+// exported here too, for the modules that import it from this file.
+export { typeHasComplexLeaf };
 import { tempVar } from './compiler-naming.js';
 import {
   compileValueOperand,
@@ -950,56 +956,6 @@ export function isCollectionFold(a: Expression): boolean {
   if (!isFunction(a)) return false;
   if (a.operator === 'Sum' || a.operator === 'Product') return a.nops === 1;
   return (a.operator === 'Reduce' || a.operator === 'Scan') && a.nops >= 2;
-}
-
-/**
- * Whether a collection type has a complex-typed LEAF anywhere in its
- * element structure — a `list<complex>`, a point list whose declared
- * column type is complex (`list<tuple<number, complex>>`), a nested
- * `list<list<complex>>`. The broadcast closure is applied at the leaves,
- * so a complex leaf is what makes an element lane undecidable from the
- * type alone.
- *
- * The walk descends through tuple components, union arms and collection
- * elements, so a self-referential transparent alias
- * (`type alias json = integer | list<json>`) is met again at every level;
- * the descent guard (`unfoldAliasOnDescent`) stops the recursion when the
- * alias reaches itself, and that occurrence contributes no leaf.
- *
- * With `wide` set, a leaf of a WIDE numeric type (`wideNumericType`:
- * `number`, `unknown`, `any`) counts as a complex leaf too: such a leaf
- * admits a complex value, which the `complex` mode reads as complex.
- */
-export function typeHasComplexLeaf(
-  t: Type,
-  seen?: AliasDescent,
-  wide = false
-): boolean {
-  const unfolded = unfoldAliasOnDescent(t, seen);
-  if (unfolded === undefined) return false;
-  const r = unfolded.type;
-  seen = unfolded.seen;
-  if (isNonRealNumber(r)) return true;
-  if (wide && wideNumericType(r)) return true;
-  // A collection written by its bare name (`list`, `set`) has `any`
-  // elements, which `leafwardElementType` returns: the walk continues
-  // to them below. A bare `list` in the complex mode is then read as a
-  // `list<any>`, as the type system reads it, and not as a list of real
-  // numbers.
-  if (typeof r === 'string') {
-    const elt = leafwardElementType(r);
-    return elt !== undefined && typeHasComplexLeaf(elt, seen, wide);
-  }
-  if (r.kind === 'tuple')
-    return r.elements.some((e) => typeHasComplexLeaf(e.type, seen, wide));
-  if (r.kind === 'union')
-    return r.types.some((m) => typeHasComplexLeaf(m, seen, wide));
-  // Toward the cells (`leafwardElementType`): the element of a tensor of
-  // unknown rank contains the tensor itself, which would send the walk
-  // round for ever.
-  const elt = leafwardElementType(r);
-  if (elt === undefined) return false;
-  return typeHasComplexLeaf(elt, seen, wide);
 }
 
 /**

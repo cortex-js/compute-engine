@@ -759,6 +759,24 @@
   (`any`, `unknown`) counts as real: in `mode: 'strict'`,
   `(L) ↦ Length(L)` applied to such a point now declines.
 
+- **A block-local function that receives complex values compiles in the
+  complex lane.** In `Block(g ≔ (a, b) ↦ a + b, Reduce(L, g, 0))` with
+  `L: list<complex>`, the compiled code used the real `+` for `g` and gave
+  the string `"[object Object]…"` for `[1 + i, 2]`; the interpreter gives
+  `3 + i`. A call of a block-local function, as a `Reduce`, `Fold` or `Scan`
+  combiner, as a `Map` callback or directly, with a complex argument (or a
+  point with a complex coordinate) at a parameter that is not typed complex
+  now restarts the compilation in `mode: 'complex'`, which gives the
+  interpreter's value. With `mode: 'strict'` the compilation declines, with a
+  message that asks for a `complex` annotation on the parameter of the
+  function literal. The same applies to a function defined with
+  `ce.assign()` that receives a point with a complex coordinate: with
+  `h = (p) ↦ p[1] + 1` and `P: list<tuple<complex, real>>`, `h(P[1])` gave
+  `"[object Object]1"`; it now gives `2 + i`. The argument and the parameter
+  types are compared position by position, and a position with no type
+  (`any`, `unknown`) counts as real: in `mode: 'strict'`,
+  `(L) ↦ Length(L)` applied to such a point now declines.
+
 - **A Leibniz derivative in the integrand of an integral leaves the closing
   differential to the integral** (CE-617). `\int_0^1 \frac{d}{dx}x^3\,dx`
   parsed as the derivative of `x^3·d·x`, so the integral had no variable and

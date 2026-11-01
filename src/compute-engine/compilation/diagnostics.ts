@@ -1,4 +1,5 @@
 import type { CompileDiagnostic } from './types.js';
+import type { Expression } from '../global-types.js';
 
 /**
  * The `code` of the decline of an expression with an input (a free symbol)
@@ -224,4 +225,51 @@ export function compileSubject(subject: string): string {
   const part = /^(\w+\(\)) (.+)$/.exec(subject);
   if (part !== null) return `the ${part[2]} of \`${part[1]}\``;
   return subject;
+}
+
+/**
+ * Throw the strict-mode `LaneMismatch` decline for a complex-shaped value
+ * that reaches a parameter of a block-local function, which the
+ * compilation shaped real. `binding` names the parameter and the function
+ * (`userParamBinding()` in `compile-lanes.ts`). `value` is the argument,
+ * rendered as LaTeX, or a description of the value when the argument is a
+ * name that the compiler made (`an element of \`L\``).
+ *
+ * The body of a block-local function is compiled in the lane of the
+ * parameter types of its literal. A signature declared with `Declare` (`g:
+ * (complex, complex) -> complex`), if there is one, does not change that
+ * lane, so the message asks for an annotation of the parameter in the
+ * literal.
+ */
+export function localLaneMismatch(
+  boundary: string,
+  binding: string,
+  value: Expression | string
+): never {
+  let rendered: string;
+  let phrase: string;
+  if (typeof value === 'string') {
+    rendered = value;
+    phrase = value;
+  } else {
+    try {
+      rendered = value.latex;
+    } catch {
+      rendered = value.toString();
+    }
+    phrase = `the complex-shaped value \`${rendered}\``;
+  }
+  throw new LaneMismatchError({
+    boundary,
+    binding,
+    value: rendered,
+    message:
+      `Lane mismatch at ${boundary}: ${phrase} reaches ${binding}, ` +
+      `which this compilation shaped real. The body of a block-local ` +
+      `function is compiled in the lane of the parameter types of its ` +
+      `literal; a signature declared with \`Declare\` does not change ` +
+      `that lane. Annotate the parameter in the ` +
+      `literal with a complex type (\`(a: complex) => …\`), or compile ` +
+      `with \`mode: 'complex'\`.`,
+  });
 }

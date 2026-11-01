@@ -21,7 +21,10 @@ import {
   realOnlyResultKind,
 } from './compile-operators.js';
 import { compileBroadcastUnary } from './compile-broadcast.js';
-import { declaredScalarTupleCall } from './compile-user-functions.js';
+import {
+  assertCallbackLaneMatch,
+  declaredScalarTupleCall,
+} from './compile-user-functions.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import { compileValueOperand } from './compile-statements.js';
 import { typedTemp } from './compile-declarations.js';
@@ -260,7 +263,15 @@ export function compileExprTupleCall(
     // type is bound whole (`wholeTupleCall`).
     if (target.language === 'javascript') {
       const whole = wholeTupleCall(engine, h, args, target);
-      if (whole !== undefined) return core.compile(whole, target, prec);
+      if (whole !== undefined) {
+        // `Map(g, P)` is rewritten to `Map(_point => g(_point), P)`. A lane
+        // mismatch of the call `g(_point)` would name the generated
+        // parameter `_point`, so the callback is tested here first, and the
+        // message names an element of `P`.
+        if (h === 'Map' && args.length === 2)
+          assertCallbackLaneMatch(args[0], args[1], target);
+        return core.compile(whole, target, prec);
+      }
     }
   }
   return undefined;

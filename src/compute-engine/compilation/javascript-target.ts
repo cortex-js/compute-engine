@@ -14338,7 +14338,7 @@ function callbackArg(
   // under `auto`. Unary callbacks only: a combiner-shaped callback (an
   // accumulator prefix) is planned by `combinerPlan`.
   if (extraArgTypes.length === 0)
-    BaseCompiler.assertCallbackLaneMatch(callback, source);
+    BaseCompiler.assertCallbackLaneMatch(callback, source, target);
   // A single-uppercase built-in operator name is exempt from the shared
   // value-position refusal because an un-applied one reads as a caller
   // variable; in CALLBACK position it is applied, so the exemption would ship
