@@ -42,6 +42,56 @@ value against that annotation.
 f(x: real) = x + 1
 ```
 
+### Default values {#default-values}
+
+A parameter can have a **default value**, written `= value` after its name
+and its optional type annotation. A call that leaves the argument out gets
+the default:
+
+```epsil
+function scaled(x: number, factor: number = 2) -> number { x * factor }
+```
+
+`scaled(3)` is `6` and `scaled(3, 5)` is `15`. The same spelling works in
+every form of definition, and in an anonymous function:
+
+```epsil
+scaled(x, factor = 2) = x * factor
+```
+
+```epsil
+(x, factor: number = 2) => x * factor
+```
+
+The call is completed when it is read, so `scaled(3)` and `scaled(3, 2)` are
+the same expression, and the signature of the function shows the default:
+`(x: number, factor: number = 2) -> number`. A named argument can skip a
+parameter that has a default: with
+`function f(x, density: number = 1, factor: number = 2)`, the call
+`f(3, factor: 5)` is `f(3, 1, 5)`.
+
+A default value is one of:
+
+- a number, with an optional sign (`2`, `-1`, `0.5`, `NaN`, `-oo`);
+- a string (`"auto"`), without interpolation;
+- `true` or `false`;
+- a symbol (`Auto`, `Integers`). The symbol is inserted in the call and is
+  read as if the caller had written it, so a symbol with a value (`pi`, or a
+  `const` of the program) gives that value when the call is evaluated;
+- the empty list `[]` or the empty dictionary `{}` (in a parameter list, `{}`
+  is the empty dictionary, not the empty set).
+
+The parameters with a default come after the parameters without one. For a
+default that is computed, or a list with elements, declare a constant and use
+its name: `weights: list<number> = defaultWeights`.
+
+Any other default is the diagnostic `default-value-invalid`, and so is a
+default that names a parameter of the same list (`(x, k = x) => …`) or that
+is `Nothing`. A default is not supported yet in a function with several
+clauses (a [literal parameter](#multiple-clauses-literal-parameters) makes
+one), on a [`bind` parameter](#bound-variable-parameters-bind), or in a
+[protocol](/epsil/protocols/) requirement.
+
 ### Which form to use
 
 The three spellings differ only in ergonomics, so pick by the shape of the

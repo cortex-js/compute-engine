@@ -16,6 +16,40 @@ explicitly lambda-lifts those names and checks that they match the body.
 Generic definitions use `<...>` or a trailing `where` clause as documented;
 one declaration cannot introduce the same variables at both sites.
 
+A parameter with a default value (`k: number = 2`, `k = 2`) lowers to the
+`Function` operand `["Optional", param, default]`, where `param` is the
+symbol or the `Typed` annotation. Every parameter list accepts the spelling:
+`function f(x: number, k: number = 2) -> number { … }`, `f(x, k = 2) = …`,
+`hold f(e, k = 2) = …`, and the anonymous `(x, k = 2) => …` and
+`(x, k: number = 2) => …`. In the anonymous form the group is parsed as an
+expression before the arrow is seen, so an untyped `k = 2` arrives as
+`Equal` and is read back as a default only when its operator token is `=`
+(not `==`). The default is one of: a number literal with an optional sign, a
+string without interpolation, `true`, `false`, a symbol, `[]` (lowered to
+`["List"]`) or `{}` (lowered to `["Dictionary"]`; `{->}` is accepted too).
+The parser refuses, with `default-value-invalid`, any other expression, a
+default that names a parameter of the same list, `Nothing`, `Missing`, a
+default on a `bind` parameter, and a default in a parameter list that has a
+literal parameter (a clause of a multi-clause function). Parameters with a
+default come after the required ones; the engine checks the order, the
+type of the default, and the rules of the
+[default-values design](plans/2026-10-31-parameter-default-values.md). The
+engine completes a call at canonicalization, so `f(3)` and `f(3, 2)` are one
+expression.
+
+Limits of v1: a multi-clause function cannot have a default in any clause
+(the engine refuses the second clause, "a default value in an overloaded
+signature is not supported yet"), and a protocol requirement cannot have one
+(`engine-protocols.ts` refuses an optional member with
+`invalid-protocol-declaration`). When a definition has an effect specifier
+or a type-parameter clause, its signature marker lists a defaulted parameter
+with its type only (`k: number`): the type language admits a default only in
+a top-level signature, and the `Optional` operand carries the default.
+
+The formatter and `serializeEpsil()` print a default back after the
+parameter (`k: number = 2`, `xs = []`, `d = {}`); `{}` in that position is
+the empty dictionary.
+
 Named call arguments lower to a normalized positional call after the callee's
 parameter names are known. Unknown or ambiguous parameter names are errors;
 overload resolution cannot discard names before the mapping is complete.

@@ -491,8 +491,24 @@ export function documentBindings(
   function walkFunction(node: MathJsonExpression, outer: Scope): void {
     const scope = childScope(spanOf(node), outer);
     const ops = [...operands(node)];
-    for (let i = 1; i < ops.length; i++)
+    for (let i = 1; i < ops.length; i++) {
+      // A parameter with a default value, `["Optional", param, default]`: the
+      // parameter binds, and a symbol default is a read in the scope that
+      // encloses the function (a default never names a parameter of its own
+      // list).
+      if (operator(ops[i]) === 'Optional') {
+        bindPattern(
+          operand(ops[i], 1),
+          scope,
+          'parameter',
+          undefined,
+          scope.span[0]
+        );
+        walk(operand(ops[i], 2), outer);
+        continue;
+      }
       bindPattern(ops[i], scope, 'parameter', undefined, scope.span[0]);
+    }
     // Copied before the body is walked: a body that is not a block can
     // declare into this scope, and those names are not parameters.
     parametersOf.set(node, new Map(scope.bindings));

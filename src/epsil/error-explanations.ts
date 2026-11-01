@@ -100,7 +100,18 @@ Object-type constructors are the functions in this shape. An object type's field
 
   'argument-optional-skipped': `A named argument supplied an optional parameter while an optional parameter declared before it was left out.
 
-Arguments are matched to declared positions, and there is no way to leave a hole in the argument list — so an optional parameter can only be named when every optional parameter declared before it is also supplied (by position or by name). Supply the earlier optional too, or omit both.`,
+Arguments are matched to declared positions, and there is no way to leave a hole in the argument list — so an optional parameter can only be named when every optional parameter declared before it is also supplied (by position or by name). Supply the earlier optional too, or omit both.
+
+A parameter with a default value is never the cause: when a named argument skips it, it takes its default. With \`function f(x, density: number = 1, factor: number = 2)\`, the call \`f(3, factor: 5)\` is \`f(3, 1, 5)\`. Only an optional parameter WITHOUT a default (\`number?\` in a declared signature) leaves a hole.`,
+
+  'default-value-invalid': `A parameter's default value (the part after \`=\` in \`function f(x, k: number = 2)\` or \`(x, k = 2) => …\`) is not one the language accepts here. A default is a number (with an optional sign), a string, \`true\` or \`false\`, a symbol, the empty list \`[]\` or the empty dictionary \`{}\` — a value that the signature can store and print, as in \`(x: number, k: number = 2) -> number\`.
+
+The message gives the reason:
+- Any other expression (\`k = x + 1\`, \`xs = [1, 2]\`) has no spelling in a signature. For a computed or non-empty default, declare a constant (\`const weights = [1, 2, 3]\`) and use its name as the default: the name is read when the call is evaluated, as if the caller had written it.
+- A default that names a parameter of the same list (\`(x, k = x) => …\`) is refused: the default is read as if the CALLER had written it, where the parameter does not exist.
+- \`Nothing\` and \`Missing\` are refused: an absent argument is dropped from a call, so the default would disappear.
+- A \`bind\` parameter of a \`hold\` definition cannot have a default: it names a variable that the caller writes.
+- A default beside a literal parameter (\`function f(0, k = 2)\`) is refused: a literal parameter makes the definition a clause of a multi-clause function, and a default in a multi-clause function is not supported yet, because the clause that receives a call is not always known when the call is completed with the default. For the same reason, adding a second clause to a function with a default (or a clause with a default to a function that has several) is refused when the definition runs.`,
 
   'zero-index': `Indexing is 1-based: \`xs[1]\` is the first element of a collection and \`xs[n]\` the n-th, so the literal index 0 never names an element (it yields NaN).
 

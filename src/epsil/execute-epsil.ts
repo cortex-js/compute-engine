@@ -1621,7 +1621,8 @@ function functionLocalNames(statement: MathJsonExpression): Set<string> {
     if (p === null) return;
     const head = operator(p);
     if (head === 'Tuple') for (const el of operands(p)) leaves(el);
-    else if (head === 'Typed' || head === 'Spread') leaves(operand(p, 1));
+    else if (head === 'Typed' || head === 'Spread' || head === 'Optional')
+      leaves(operand(p, 1));
     else {
       const name = symbol(p);
       if (name) names.add(name);
@@ -2506,7 +2507,9 @@ function scanConstantShadowingParams(
   source: string
 ): void {
   if (operator(expr) === 'Function') {
-    for (const p of operands(expr).slice(1)) {
+    for (let p of operands(expr).slice(1)) {
+      // A parameter with a default value: `["Optional", param, default]`.
+      if (operator(p) === 'Optional') p = operand(p, 1) ?? p;
       const name =
         symbol(p) ?? (operator(p) === 'Typed' ? symbol(operand(p, 1)) : null);
       if (name === null || name.length <= 1) continue;

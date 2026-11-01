@@ -2650,7 +2650,7 @@ export class Parser {
     const loweredParams =
       quantifies && ascription !== null
         ? params.map((p, i) =>
-            quantified[i] === true ? (operand(p, 1) ?? p) : p
+            quantified[i] === true ? eraseParameterAnnotation(p) : p
           )
         : params;
     const ascribedBody =
@@ -4717,7 +4717,7 @@ export class Parser {
     const loweredParams =
       hasClause && !clauseFailed && ascription !== null
         ? params.map((p, i) =>
-            quantified[i] === true ? (operand(p, 1) ?? p) : p
+            quantified[i] === true ? eraseParameterAnnotation(p) : p
           )
         : params;
 
@@ -5590,7 +5590,7 @@ export class Parser {
     const loweredParams =
       where !== undefined && !clauseFailed && ascription !== null
         ? params.map((p, i) =>
-            quantified[i] === true ? (operand(p, 1) ?? p) : p
+            quantified[i] === true ? eraseParameterAnnotation(p) : p
           )
         : params;
 
@@ -5806,9 +5806,15 @@ export class Parser {
     // typed `h` as `(T, unknown) -> T where T`, so a one-argument call
     // reported a missing argument and a three-argument call an unexpected one.
     const hasRest = params.some((p) => operator(p) === 'Spread');
+    // A parameter with a default value is listed with its type only
+    // (`k: number`, not `k: number = 2`): the type language admits a default
+    // only in a top-level signature, and an ascription is not one. The
+    // literal's own `["Optional", param, default]` operand carries the
+    // default, and its signature takes it from there.
     const parts = params
       .filter((p) => operator(p) !== 'Spread')
       .map((p) => {
+        if (operator(p) === 'Optional') p = operand(p, 1) ?? p;
         if (operator(p) === 'Typed') {
           const t = operand(p, 2);
           return {
@@ -5893,6 +5899,7 @@ export class Parser {
     this.pendingBindParams = [];
 
     const params: MathJsonExpression[] = [];
+    const defaults: PendingParameterDefault[] = [];
     if (!this.check('CLOSE_PAREN')) {
       for (;;) {
         const tok = this.current;
@@ -6029,6 +6036,25 @@ export class Parser {
           quantified?.push(false);
         }
 
+        // Optional `= default` — a DEFAULT VALUE, which makes the parameter
+        // optional. The default is parsed as an ordinary expression, so that
+        // a default that is not a literal (`k = x + 1`) is consumed whole and
+        // diagnosed once; it is checked when the whole list is known, because
+        // a default may not name a parameter written after it either.
+        if (this.check('OPERATOR') && this.current.text === '=') {
+          const eq = this.advance();
+          const value = this.parseExpression(0);
+          if (value === null) {
+            this.error(['expression-expected'], eq.start, eq.end);
+            this.recoverInBracket(true);
+          } else
+            defaults.push({
+              index: params.length - 1,
+              value,
+              ...(bound ? { bound: true } : {}),
+            });
+        }
+
         if (!this.match('COMMA')) break;
         if (this.check('CLOSE_PAREN')) break; // trailing comma
       }
@@ -6039,7 +6065,79 @@ export class Parser {
     if (this.check('CLOSE_PAREN')) this.advance();
     else this.error(['closing-bracket-expected', ')'], open.start, open.end);
 
+    if (defaults.length > 0) this.applyParameterDefaults(params, defaults);
+
     return params;
+  }
+
+  /**
+   * Check the default values written in a parameter list and wrap each
+   * parameter that has a valid one as `["Optional", param, default]`, the
+   * engine's spelling of a parameter with a default value. `defaults` gives,
+   * for each default, the index of its parameter in `params` and the parsed
+   * default expression. A parameter whose default is refused stays a
+   * parameter without a default, after a `default-value-invalid` diagnostic
+   * on the default.
+   *
+   * A default is a number literal (with an optional sign), a string without
+   * interpolation, `true`, `false`, a symbol, the empty list `[]` or the
+   * empty dictionary `{}` (also spelled `{->}`). The value is checked against
+   * the parameter type when the function is defined, by the engine. Refused
+   * here:
+   * - any other expression: the type language that stores a default in a
+   *   signature has no spelling for it;
+   * - a symbol that names a parameter of the same list: a default is read
+   *   as if the caller had written it in the call, so it would not mean the
+   *   parameter;
+   * - `Nothing` and `Missing`: an absent operand is dropped from a call, so
+   *   the inserted default would disappear;
+   * - a default on a `bind` parameter of a `hold` definition: the parameter
+   *   names a variable that the caller writes;
+   * - a default in a parameter list that has a literal parameter
+   *   (`function f(0, k = 2)`): such a list is a clause of a multi-clause
+   *   function, and a default in a multi-clause function is not supported
+   *   yet, because the clause that receives a call is not always known when
+   *   the call is filled in.
+   *
+   * The design is in `docs/plans/2026-10-31-parameter-default-values.md`
+   * (R1, R7 and R9).
+   */
+  private applyParameterDefaults(
+    params: MathJsonExpression[],
+    defaults: readonly PendingParameterDefault[]
+  ): void {
+    const names = new Set<string>();
+    for (const p of params) collectParamNames(p, names);
+    const clause = params.some(isLiteralParamNode);
+    for (const { index, value, bound } of defaults) {
+      const param = params[index];
+      if (param === undefined) continue;
+      const lowered = clause
+        ? {
+            reason:
+              'a default value in an overloaded signature is not supported yet',
+          }
+        : bound
+          ? {
+              reason:
+                'a `bind` parameter of a `hold` definition cannot have a default value',
+            }
+          : lowerParameterDefault(value, names);
+      if ('reason' in lowered) {
+        const o = nodeOffsets(value);
+        this.error(
+          ['default-value-invalid', lowered.reason],
+          o ? o[0] - this.baseOffset : 0,
+          o ? o[1] - this.baseOffset : 0
+        );
+        continue;
+      }
+      params[index] = this.wrap(
+        ['Optional', param, lowered.value] as MathJsonExpression[],
+        this.localStart(param) ?? 0,
+        this.localEnd(value) ?? this.localEnd(param) ?? 0
+      );
+    }
   }
 
   /** Whether the current token begins a **literal parameter**: a number
@@ -7738,12 +7836,45 @@ export class Parser {
     // later out of canonicalization.
     const names = new Set<string>();
 
+    // A parameter with a DEFAULT VALUE. A typed one, `k: number = 2`, arrives
+    // as `["Optional", typed, default]` (see `parseBracketedList`). An untyped
+    // one, `k = 2`, arrives as the comparison `["Equal", k, 2]`: the group
+    // was parsed as an expression before the arrow showed it to be a
+    // parameter list. `==` also parses as `Equal`, so the operator token is
+    // read to tell the two apart. The parameter is returned without its
+    // default; the default is kept in `defaultOf` and checked at the end
+    // (`applyParameterDefaults`).
+    const defaultOf = new Map<MathJsonExpression, MathJsonExpression>();
+    const splitDefault = (p: MathJsonExpression): MathJsonExpression => {
+      const pops = fnOps(p);
+      if (pops === null || pops.length !== 3) return p;
+      let param: MathJsonExpression | undefined;
+      if (pops[0] === 'Optional') param = pops[1];
+      else if (pops[0] === 'Equal' && this.isParameterDefaultEqual(pops))
+        param = pops[1];
+      if (param === undefined || typeof param !== 'object' || param === null)
+        return p;
+      defaultOf.set(param, pops[2]);
+      return param;
+    };
+    const withDefaults = (
+      params: MathJsonExpression[]
+    ): MathJsonExpression[] => {
+      const pending: PendingParameterDefault[] = [];
+      params.forEach((p, index) => {
+        const value = defaultOf.get(p);
+        if (value !== undefined) pending.push({ index, value });
+      });
+      if (pending.length > 0) this.applyParameterDefaults(params, pending);
+      return params;
+    };
+
     // A `Tuple` LHS is the parameter LIST — unless the extra parentheses of
     // `((p, q)) => …` made it a single destructured parameter.
     // `isTuple` already implies `left` is an object node, which is what the
     // weak set can hold.
     if (isTuple(left) && !this.redundantlyParenthesized.has(left as object)) {
-      const listOps = fnOps(left)!.slice(1);
+      const listOps = fnOps(left)!.slice(1).map(splitDefault);
       // Seed the bound names with the PLAIN parameters before walking the
       // patterns, so a pattern leaf colliding with one is caught whichever
       // side comes first in the list. A plain parameter repeating an earlier
@@ -7787,7 +7918,7 @@ export class Parser {
         } else if (isParam(p)) params.push(p);
         else emit(p);
       }
-      return params;
+      return withDefaults(params);
     }
 
     if (isTuple(left))
@@ -7798,6 +7929,17 @@ export class Parser {
       if (isRest(left)) return [left];
       emit(left);
       return [];
+    }
+
+    // `(k = 2) => …` — a lambda whose only parameter has a default value.
+    // Only a parenthesized group is a parameter list.
+    if (
+      typeof left === 'object' &&
+      left !== null &&
+      this.redundantlyParenthesized.has(left)
+    ) {
+      const param = splitDefault(left);
+      if (param !== left && isParam(param)) return withDefaults([param]);
     }
 
     if (isParam(left)) return [left];
@@ -7870,6 +8012,17 @@ export class Parser {
     return ok;
   }
 
+  /** Whether the operands `pops` of an `Equal` node are an untyped parameter
+   * with a default value, `k = 2`: the left operand is a symbol and the
+   * operator token after it is `=`. `==` also parses as `Equal`, and is a
+   * comparison. */
+  private isParameterDefaultEqual(pops: MathJsonExpression[]): boolean {
+    if (pops[1] === undefined || symbolNameOf(pops[1]) === null) return false;
+    const end = this.localEnd(pops[1]);
+    const op = end === undefined ? undefined : this.firstTokenAtOrAfter(end);
+    return op?.type === 'OPERATOR' && op.text === '=';
+  }
+
   /** Is a `KeyValuePair`'s left operand shaped like a parameter list — a
    * `Typed` parameter (`(x: number) -> …`), a tuple of parameters
    * (`(x, y) -> …`), or a bare symbol right after a grouping `(`, a `=`, or
@@ -7889,7 +8042,12 @@ export class Parser {
    * position; the callee's signature can, so the typo `map(x -> x^2, xs)`
    * is diagnosed by the static checker instead (see
    * `ruleAtFunctionSlotDiagnostics` in `static-diagnostics.ts`), with the
-   * same `mapsto-arrow-expected` code and fixit, and is not recovered. */
+   * same `mapsto-arrow-expected` code and fixit, and is not recovered.
+   *
+   * A parameter with a default value counts as a parameter too: an element
+   * of a tuple of parameters (`(x, k = 2) -> …`, `(x, k: number = 2) -> …`),
+   * or a single one that is the whole content of a parenthesized group
+   * (`(k = 2) -> …`). An unparenthesized `a = 1 -> b` stays a pair. */
   private lambdaMistypedAsPair(left: MathJsonExpression): boolean {
     const isTypedParam = (p: MathJsonExpression): boolean => {
       const pops = fnOps(p);
@@ -7914,7 +8072,29 @@ export class Parser {
         symbolNameOf(pops[1]) !== null
       );
     };
+    // A parameter with a default value: a typed one, `k: number = 2`, is
+    // `["Optional", typed, default]`; an untyped one, `k = 2`, is the
+    // comparison `["Equal", k, 2]` written with the `=` token (see
+    // `mapstoParams`). The parameter is operand 1 of either node.
+    const withoutDefault = (p: MathJsonExpression): MathJsonExpression => {
+      const pops = fnOps(p);
+      if (pops === null || pops.length !== 3) return p;
+      if (pops[0] === 'Optional') return pops[1];
+      if (pops[0] === 'Equal' && this.isParameterDefaultEqual(pops)) {
+        return pops[1];
+      }
+      return p;
+    };
     const ops = fnOps(left);
+    // A single parameter with a default, `(k: number = 2) -> k` or
+    // `(k = 2) -> k`. An `Equal` qualifies only as the content of a
+    // parenthesized group, where it cannot be a comparison key of a pair.
+    const single = withoutDefault(left);
+    if (single !== left) {
+      if (ops?.[0] === 'Equal' && !this.parenthesizedSpans.has(left as object))
+        return false;
+      return symbolNameOf(single) !== null || isTypedParam(single);
+    }
     if (ops !== null && ops[0] === 'Typed') return isTypedParam(left);
     if (isRestParam(left)) return true;
     // An empty Tuple only ever comes from a `()` parameter list, so it
@@ -7922,6 +8102,7 @@ export class Parser {
     if (ops !== null && ops[0] === 'Tuple')
       return ops
         .slice(1)
+        .map(withoutDefault)
         .every(
           (p) => symbolNameOf(p) !== null || isTypedParam(p) || isRestParam(p)
         );
@@ -9141,6 +9322,28 @@ export class Parser {
               annotation.end
             );
             typed = true;
+            // `name: Type = default` — a typed parameter with a default
+            // value. Carried as `["Optional", typed, default]` with the
+            // default unchecked; `mapstoParams` checks it. (An untyped
+            // `name = default` parses as an ordinary `=` comparison, which
+            // `mapstoParams` reads back as a default.) The annotation moved
+            // the cursor, so the `:` test above does not hold any more.
+            if (
+              this.check('OPERATOR') &&
+              (this.current.text as string) === '='
+            ) {
+              this.advance(); // '='
+              const value = this.parseExpression(0);
+              if (value === null) {
+                this.reportUnexpected(this.current);
+                this.recoverInBracket(true);
+              } else
+                element = this.wrap(
+                  ['Optional', element, value] as MathJsonExpression[],
+                  start,
+                  this.outerEnd(value) ?? this.previousEnd()
+                );
+            }
           } else {
             // Diagnosed; the cursor is still at the malformed type. Resync to
             // the next `,` or the closer so the rest of the list parses; the
@@ -9415,12 +9618,113 @@ function fnOps(expr: MathJsonExpression): MathJsonExpression[] | null {
   return null;
 }
 
+/** A default value written in a parameter list, before it is checked: the
+ * index of its parameter, the parsed default expression, and whether the
+ * parameter is a `bind` parameter of a `hold` definition. */
+type PendingParameterDefault = {
+  index: number;
+  value: MathJsonExpression;
+  bound?: boolean;
+};
+
+/**
+ * The MathJSON default of a parameter, from the parsed default expression
+ * `node`, or the reason it is not a valid default. `names` holds the names
+ * the parameter list binds. See `applyParameterDefaults()` for the rules.
+ */
+function lowerParameterDefault(
+  node: MathJsonExpression,
+  names: ReadonlySet<string>
+): { value: MathJsonExpression } | { reason: string } {
+  const name = symbolNameOf(node);
+  if (name !== null) {
+    // Only the exact names are refused here. The parser does not know the
+    // scopes, so it cannot tell whether a lowercase `nothing` or `missing`
+    // is the library constant or a user binding of that name (`let missing
+    // = 7`, or a backticked name). After name resolution, the engine refuses
+    // the library constants as defaults (`expected-a-literal-default` on
+    // the parameter), so they are still refused, with the engine's code.
+    if (name === 'Nothing' || name === 'Missing')
+      return {
+        reason: `\`${name}\` is not a default value; leave the parameter optional instead`,
+      };
+    if (names.has(name))
+      return { reason: 'a default value cannot name a parameter' };
+    return { value: node };
+  }
+  // `NaN` has no sign: `-NaN` and `- NaN` are `NaN`.
+  const isNaN = (n: MathJsonExpression): boolean =>
+    isNumberNode(n) && /^-?NaN$/.test((n as { num: string }).num);
+  if (isNaN(node))
+    return {
+      value: { num: 'NaN', sourceOffsets: nodeOffsets(node) },
+    } as { value: MathJsonExpression };
+  if (isNumberNode(node)) return { value: node };
+  // The parser reads a minus sign written right before a number (`-2`) as
+  // part of the number literal, handled above. A default that still arrives
+  // as `Negate` of a number is folded to a signed number here, so that every
+  // spelling of a negative number gives the same default. A sign separated
+  // from its number by a space (`k = - 2`) does not reach this function: it
+  // is a parse error before the default is read.
+  const ops = fnOps(node);
+  if (ops !== null && ops[0] === 'Negate' && ops.length === 2) {
+    if (isNaN(ops[1]))
+      return {
+        value: { num: 'NaN', sourceOffsets: nodeOffsets(node) },
+      } as { value: MathJsonExpression };
+    const folded = foldSignedNumber(ops[1], true);
+    if (folded !== null)
+      return {
+        value: {
+          ...folded,
+          sourceOffsets: nodeOffsets(node),
+        } as MathJsonExpression,
+      };
+  }
+  // A plain string literal. An interpolated string is a `String` call.
+  if (isStringObject(node)) return { value: node };
+  if (ops !== null && ops.length === 1) {
+    if (ops[0] === 'List') return { value: node };
+    // `{}` is the empty SET in an expression, and `{->}` the empty
+    // dictionary. A default has no set value, so both spell the empty
+    // dictionary here, as `{}` does in a type signature.
+    if (ops[0] === 'Set' || ops[0] === 'Dictionary')
+      return {
+        value: {
+          fn: ['Dictionary'],
+          sourceOffsets: nodeOffsets(node),
+        } as MathJsonExpression,
+      };
+  }
+  return {
+    reason:
+      'a default value is a number, a string, a boolean, a symbol, `[]` or `{}`',
+  };
+}
+
+/** A parameter with its own type annotation removed: the symbol of a
+ * `["Typed", sym, type]` parameter, kept inside the `Optional` wrapper of a
+ * parameter with a default value. Used where a quantified signature carries
+ * the parameter type instead. */
+function eraseParameterAnnotation(p: MathJsonExpression): MathJsonExpression {
+  const ops = fnOps(p);
+  if (ops !== null && ops[0] === 'Optional' && ops[1] !== undefined)
+    return {
+      ...(p as object),
+      fn: ['Optional', eraseParameterAnnotation(ops[1]), ...ops.slice(2)],
+    } as MathJsonExpression;
+  return operand(p, 1) ?? p;
+}
+
 /** The bound name of a lambda parameter node: a bare symbol, or the symbol
- * inside a `["Typed", sym, type]` annotation. */
+ * inside a `["Typed", sym, type]` annotation or an `["Optional", param,
+ * default]` wrapper. */
 function paramNameOf(p: MathJsonExpression): string | null {
   const direct = symbolNameOf(p) ?? (typeof p === 'string' ? p : null);
   if (direct !== null) return direct;
   const ops = fnOps(p);
+  if (ops !== null && ops[0] === 'Optional' && ops[1] !== undefined)
+    return paramNameOf(ops[1]);
   if (ops !== null && ops[0] === 'Typed' && ops[1] !== undefined) {
     const inner = ops[1];
     return symbolNameOf(inner) ?? (typeof inner === 'string' ? inner : null);
@@ -9971,7 +10275,8 @@ function collectParamNames(p: MathJsonExpression, out: Set<string>): void {
   const args = nodeArgs(p);
   if (args === undefined) return;
   const head = symbol(args[0]);
-  if (head === 'Typed' || head === 'Spread') {
+  // The default value of an `Optional` parameter (operand 2) binds nothing.
+  if (head === 'Typed' || head === 'Spread' || head === 'Optional') {
     if (args[1] !== undefined) collectParamNames(args[1], out);
   } else if (head === 'Tuple') {
     for (let i = 1; i < args.length; i++) collectParamNames(args[i], out);

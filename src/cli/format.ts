@@ -531,6 +531,8 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `Indexing is 1-based: xs[1] is the first element (index 0 yields NaN)`;
     case 'pattern-binding-expected':
       return `A destructuring pattern binds names by position: each element must be a name, "_" to skip the position, or a nested "(…)" pattern. To match against a value, use a "match" expression`;
+    case 'default-value-invalid':
+      return `Invalid default value: ${args[0]}`;
     case 'pattern-element-annotation':
       return `A destructuring pattern position binds a name and states no type; drop the annotation (write "((p, q)) => …") or take the tuple as one named parameter and unpack it in the body`;
     case 'range-pattern-bounds':

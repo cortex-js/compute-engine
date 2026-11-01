@@ -1977,10 +1977,46 @@ export function serializeEpsil(
     params.every((p, i) => {
       if (operator(p) === 'Spread')
         return isRestParam(p) && i === params.length - 1;
+      if (operator(p) === 'Optional') return isDefaultParam(p);
       return (
         operator(p) !== 'Tuple' || serializeDestructuringPattern(p) !== null
       );
     });
+
+  /** A parameter with a DEFAULT VALUE — `["Optional", param, default]`,
+   * written `k = 2` or `k: number = 2`. It has a spelling when `param` is a
+   * name, with or without an annotation, and the default is one of the
+   * values a parameter list can spell (see {@link serializeDefaultValue}). */
+  const isDefaultParam = (p: MathJsonExpression): boolean => {
+    if (operator(p) !== 'Optional' || nops(p) !== 2) return false;
+    const param = operand(p, 1);
+    const value = operand(p, 2);
+    if (param === null || value === null) return false;
+    const name =
+      operator(param) === 'Typed' ? symbol(operand(param, 1)) : symbol(param);
+    return name !== null && serializeDefaultValue(value) !== null;
+  };
+
+  /** The source spelling of a parameter default: a number, a string,
+   * `true`/`false`, a symbol, `[]` or `{}`, or `null` for any other value. In
+   * a parameter list `{}` is the empty dictionary (in an expression it is the
+   * empty set). */
+  const serializeDefaultValue = (
+    value: MathJsonExpression
+  ): FormattingBlock | null => {
+    const head = operator(value);
+    if (head === 'List') return nops(value) === 0 ? fmt.text('[]') : null;
+    if (head === 'Dictionary') return nops(value) === 0 ? fmt.text('{}') : null;
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'dict' in value &&
+      Object.keys((value as { dict: object }).dict).length === 0
+    )
+      return fmt.text('{}');
+    if (head !== '') return null;
+    return serializeExpression(value);
+  };
 
   const serializeParam = (
     p: MathJsonExpression,
@@ -1997,6 +2033,15 @@ export function serializeEpsil(
     // is spelled from its name alone.
     if (isRestParam(p))
       return fmt.text(`...${escapeSymbol(symbol(operand(p, 1))!)}`);
+    // A parameter with a default value — `k = 2`, `k: number = 2`.
+    if (operator(p) === 'Optional') {
+      const value = serializeDefaultValue(operand(p, 2)!);
+      return fmt.line(
+        serializeParam(operand(p, 1)!, markerType, bind),
+        ' = ',
+        value ?? fmt.text('')
+      );
+    }
     const typed = operator(p) === 'Typed';
     const nameSym = typed ? symbol(operand(p, 1)) : symbol(p);
     // A BARE operand at a quantified position carries no type of its own (it
@@ -2078,7 +2123,11 @@ export function serializeEpsil(
     // but reads as a call whose argument list was spliced, while
     // `(...rest) => body` says what the literal is.
     const rest = params.some((p) => operator(p) === 'Spread');
-    if (!hasTypedParam && !hasReturn && !destructuring && !rest)
+    // A parameter with a default value takes the arrow spelling too:
+    // `(x, k = 2) => x * k` is what the author wrote, and the generic form
+    // would spell the default as a call, `Optional(k, 2)`.
+    const defaults = params.some((p) => operator(p) === 'Optional');
+    if (!hasTypedParam && !hasReturn && !destructuring && !rest && !defaults)
       return serializeGenericFunction(expr);
     // A plain return-type ascription has no anonymous-mapsto spelling; drop
     // it (the body is serialized without the ascription), as LaTeX and
@@ -3352,7 +3401,8 @@ function bindLeaves(
     return;
   }
   const head = operator(op);
-  if (head === 'Typed' || head === 'Spread') {
+  // The default value of an `Optional` parameter (operand 2) binds nothing.
+  if (head === 'Typed' || head === 'Spread' || head === 'Optional') {
     bindLeaves(operand(op, 1), names, shallow, deadline);
     return;
   }

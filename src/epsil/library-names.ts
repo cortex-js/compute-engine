@@ -30,7 +30,8 @@ import { HARD_RESERVED_WORDS } from './reserved-words.js';
  * statement forms (`let`, `type`, `protocol`, `function`, `if`/`else`,
  * `match`, the loops), the literal forms (tuples, `xs[i]`, `...xs`, whose
  * list literal `[...xs, v]` is a `ListJoin`, `x: T`,
- * `name: value` arguments, `x^2`), the nodes the parser produces for its own
+ * `name: value` arguments, `x^2`, the default value `k = 2` of a
+ * parameter), the nodes the parser produces for its own
  * use (`Delimiter`, `Sequence`, `InvisibleOperator`, `Annotated`, the LaTeX
  * islands, spacing), and the pattern nodes (`Wildcard*`, `Condition`,
  * `Alternatives`, `Rule`).
@@ -63,6 +64,7 @@ export const GRAMMAR_CONSTRUCTS: ReadonlySet<string> = new Set([
   'MatchesType',
   'MemberCall',
   'NamedArgument',
+  'Optional',
   'OverParen',
   'Pair',
   'PreDecrement',

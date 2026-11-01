@@ -198,7 +198,9 @@ function walk(
       // name (or a destructuring shape, whose names are all untyped).
       const [body, ...params] = operands(node);
       const saved = new Map(scope);
-      for (const p of params) {
+      for (let p of params) {
+        // A parameter with a default value: `["Optional", param, default]`.
+        if (operator(p) === 'Optional') p = operand(p, 1) ?? p;
         if (operator(p) === 'Typed') {
           const name = symbol(operand(p, 1));
           const type = stringValue(operand(p, 2));
