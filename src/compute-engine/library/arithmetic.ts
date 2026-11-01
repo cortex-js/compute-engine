@@ -401,6 +401,9 @@ const REAL_OR_POSITIVE_INFINITY_TYPE = parseType('real | +oo');
 // zero, without NaN otherwise.
 const EXTENDED_REAL_PRODUCT_TYPE = parseType('real | +oo | -oo');
 const EXTENDED_REAL_OR_NAN_PRODUCT_TYPE = parseType('real | +oo | -oo | nan');
+// The bases whose odd root is real or the base itself: a real number, an
+// infinity (`+oo`, `-oo` or `~oo`), or NaN. See the `Root` type handler.
+const REAL_INFINITY_OR_NAN_TYPE = parseType('real | infinity | nan');
 
 /**
  * Above this many decimal digits an exact factorial is impractical to
@@ -11800,6 +11803,36 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // answers the sharp `nan` (the `Sqrt` precedent).
         if (provablyNaNOperand(base) || provablyNaNOperand(exp))
           return undefined;
+        // An odd positive integer index over a base that can be infinite or
+        // NaN, but is otherwise real: the root of a finite real base is
+        // real (the real-root convention, `Root(−8, 3) = −2`), and each
+        // non-finite base gives itself (`Root(+∞, 3) = +∞`,
+        // `Root(−∞, 3) = −∞`, `Root(~oo, 3) = ~oo`, `Root(NaN, 3) = NaN`).
+        // So the result is `real` with each non-finite value that the base
+        // admits. With `x: real`, `Root(1/x, 3)` is then
+        // `infinity | nan | real`, not `number`, and `Solve(t^3·x = 1, t)`
+        // with `t: real` keeps this root, which a real unknown would
+        // otherwise reject. The union is built arm by arm, not with
+        // `widen()`: `widen()` joins a finite type and an infinity to
+        // `number`, so `Root(a, 3)` with `a: rational | infinity | nan`
+        // would lose the refinement. The parsed union can be a little
+        // wider than the base: `real | +oo` reads as
+        // `real | signed_infinity`, which is still sound. A base that is
+        // always finite takes the sharper cases below.
+        if (
+          !isSubtype(base.type, 'real') &&
+          isSubtype(base.type, REAL_INFINITY_OR_NAN_TYPE) &&
+          operandParityIsOdd(exp) === true &&
+          positiveSign(operandSgnOnTypes(exp)) === true
+        ) {
+          const arms = ['real'];
+          for (const v of ['+oo', '-oo', '~oo', 'nan'])
+            if (isSubtype(v, base.type)) arms.push(v);
+          return BoxedType.forResult(
+            parseType(arms.join(' | ')),
+            context.engine._typeResolver
+          );
+        }
         // Root(x, n) = x^(1/n). A non-finite base or index makes the result
         // indeterminate: Root(±∞, n) ∈ {0, ±∞, complex}, Root(x, ±∞) = x^0
         // (often 1 but 0^0/∞^0 are NaN). Widen to the top type.

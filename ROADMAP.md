@@ -1416,27 +1416,6 @@ Recommended: (c). (a) alone cannot remove the class of wrong answers; (b)
 alone loses limits that the rules can settle. If nothing is decided, the
 wrong value of the title stays.
 
-### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
-
-**Status:** ready; defect, small. Tycho row 412.
-**Witness:** corpus; Tycho row 412; `Solve(t^3 x = 1, t)` stays unevaluated (CE-137.1); CE-137.3 only skips an optimization (would be drop).
-
-A decision of 2026-09-21 says an index never reads a global inside a called
-function. The capture cases are fixed (`renameCapturedIndexes()` in
-`derivative.ts`, `solveWithRenamedUnknowns()` in `solve-domain.ts`; test
-`test/compute-engine/integrate-limit-user-function-capture.test.ts`). These
-items remain:
-
-- **CE-137.1** `Solve(t^3 x = 1, t)` with `t, x: real` stays unevaluated. The
-  `Root` type handler (`library/arithmetic.ts`) types `Root(1/x, 3)` as
-  `number`, which is wider than necessary. Cause: `1/x` has the type `number`,
-  because `1/0` is `~oo`.
-- **CE-137.3** Four integration helpers (`bindsVariableInOperand` and
-  `evaluateInnerIntegrals` in `calculus.ts`, `binds` in
-  `piecewise-integrate.ts`, `special-integrate.ts` near line 103) treat a whole
-  clause as bound when they skip the operand of an inner binder. At worst this
-  skips an optimization.
-
 ### CE-141. `simplify()` does not reduce some exact definite integrals from Rubi
 
 **Status:** ready; defect, small.

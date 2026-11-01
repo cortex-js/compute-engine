@@ -7,6 +7,12 @@
   `Block(s ≔ 0; Loop(Block(If(k > 20, Break()), s ≔ s + k), k ∈ 1..5); s)`
   gave the interval `[0, 0]`; it now gives `[15, 15]`, as `evaluate()` gives
   15. The same applies to a condition written `False`.
+- **`Solve` finds the real cube root of a quotient.** With `t` and `x`
+  declared `real`, `Solve(t^3 x = 1, t)` stayed unevaluated; it now gives
+  `[Root(1/x, 3)]`. An odd root of a base whose values are real numbers,
+  infinities or NaN now has the type `real` together with the infinities
+  and NaN of the base, not `number`: `Root(1/x, 3)` is
+  `infinity | nan | real`.
 
 ## 0.176.0 _2026-11-01_
 
