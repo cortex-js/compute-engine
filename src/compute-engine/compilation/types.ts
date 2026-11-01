@@ -607,6 +607,20 @@ export interface CompileTarget<Expr = unknown> {
    */
   character?: (str: string) => string;
 
+  /**
+   * Format a dictionary literal for the target language, or `undefined` when
+   * the target has no dictionary value. `entries` holds each key, unquoted,
+   * and the compiled code of its value, in the order of the dictionary.
+   *
+   * The emitted expression must make a new value each time it is evaluated:
+   * a parameter default `{}` is compiled to it, and a caller that changes the
+   * dictionary of one call must not change the default of the next call. The
+   * value has the run-time form that the target's host supplies for an input
+   * of type `dictionary` (a plain object in JavaScript, a `dict` in Python),
+   * and each key is an own key of that value, whatever its spelling.
+   */
+  dictionary?: (entries: [key: string, value: string][]) => string;
+
   /** Format numeric literals for the target language */
   number: (n: number) => string;
 
