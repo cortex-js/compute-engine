@@ -88,6 +88,30 @@ export function isUndeclaredParameterType(t: Readonly<Type>): boolean {
 }
 
 /**
+ * True when the interpreter binds ONE point whole at a parameter of type
+ * `t`, and the generic definition of the function reads that parameter as
+ * a scalar. This is the case when `t` declares no type
+ * (`isUndeclaredParameterType()`), and when `t` is a union with such a
+ * member. The second case is the type `collection<any> | value` that is
+ * inferred for a parameter that the body uses whole (`p ↦ Max(p) + 1`):
+ * it admits a point, and the generic definition compiles the body against
+ * its scalar member, so `Max(p)` becomes `Math.max(p)`, which gives `NaN`
+ * for the array of a point.
+ *
+ * Only one point is bound the same way. A LIST of points at the second
+ * kind of parameter is bound whole, not mapped over, so this test does not
+ * replace `isUndeclaredParameterType()` for a list argument.
+ */
+export function bindsOnePointAsUndeclared(t: Readonly<Type>): boolean {
+  if (isUndeclaredParameterType(t)) return true;
+  return (
+    typeof t !== 'string' &&
+    t.kind === 'union' &&
+    t.types.some((m) => isUndeclaredParameterType(m))
+  );
+}
+
+/**
  * True when no value can have both shapes: a scalar and a list, a point and
  * a list of points, two lists whose elements conflict, and, when `arity` is
  * true, two points of different arities. A part that is not known does not

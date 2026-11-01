@@ -452,6 +452,7 @@ import {
 } from './compile-admission.js';
 import { untypedPointListElement } from './compile-point-calls.js';
 import {
+  bindsOnePointAsUndeclared,
   isScalarShaped,
   mapRankOfType,
   noShapeDiscriminatorReason,
@@ -5669,15 +5670,17 @@ export function ensureSpecializedUserCallEmitted(
       } else t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
     } else if (
       target.language === 'javascript' &&
-      declaredIsOpen &&
       !openIndexReadTuple &&
+      bindsOnePointAsUndeclared(declared) &&
       absentPointType(a.type.type) !== undefined
     ) {
       // One point named through an alias, a union with `missing` or a
       // nominal type whose definition is one point (`absentPointType()`):
       // `npt`, a nominal type declared `missing | tuple<real, real>`, or
       // `tuple<real, real> | missing`. The interpreter binds the point
-      // whole at a parameter with no declared type, as it binds a value
+      // whole at a parameter with no declared type, or with the inferred
+      // type `collection<any> | value` (`bindsOnePointAsUndeclared()`:
+      // `p ↦ Max(p) + 1` gave `NaN`), as it binds a value
       // of `tuple<real, real>`, so the call takes the copy for one point.
       // The generic definition reads the parameter as a scalar: with
       // `f2 := t ↦ 2t`, `f2(e)` gave `NaN` for each coordinate. A point

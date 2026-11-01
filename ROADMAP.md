@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-753.
+Next free reference: CE-763.
 
 **Entry format.**
 
@@ -137,6 +137,19 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-753. A call of a function that indexes its parameter is not typed `error` for a `nan | real` argument
+
+**Status:** ready; wrong value, S.
+
+`h = (p) ↦ p[1] + 1` (assigned with `ce.assign`). With `x: real`, `h(x)` is
+typed `error` and its compilation declines, as the contract asks. With
+`L: list<real>`, `h(L[1])` is typed `integer` (the argument type is
+`nan | real`), so the compiled code runs and gives `NaN`, where the
+interpreter gives an `incompatible-type` error. With `y: 'nan | real'`, `h(y)`
+does the same, and `h3 = (p) ↦ p[2]`, `h3(y)` is typed `unknown`. The type
+of the call must be `error` when the argument type, without `nan`, does not
+admit the parameter's use. Found 2026-11-01 (multi-index `At` work).
 
 ### CE-729. Parameter default values in an overloaded signature and in a multi-clause function
 
@@ -575,6 +588,26 @@ hold other fields), so the key may exist at run time. The check catches typos,
 but it refuses programs that are correct for a record with more fields.
 
 ## Collections, absence and broadcasting
+
+### CE-754. The chained `At` type handler gives wrong types for a tuple, record or gather step
+
+**Status:** ready; defect, M.
+
+The type handler of a multi-index `At` (`library/collections.ts`, the
+chained branch) peels each index with the element type of an iteration:
+
+- `At(t, 1, 2)` with `t: tuple<list<real>, real>` is typed `list<real>`; its
+  value is 2 (the nested `At(At(t, 1), 2)` is typed `nan | real`).
+- `At(r, "a", 1)` with `r: record{a: list<real>}` is typed `list<real>`.
+- `At(L, 1, "a")` with `L: list<record{a: real}>` is typed `error`
+  (`incompatible-type`), but the read is valid.
+- `At(m, i, I)` with `m: list<list<real>>`, `i: integer`,
+  `I: list<integer>` is typed `list<nan | real>`; it gives `Missing` for a row
+  out of range, so the type must have a `missing` arm.
+
+The compiler compiles a chained access as nested reads only when the nested
+type fits the chained type, so these four decline today; they compile when
+the handler is fixed.
 
 ### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
 
@@ -3799,6 +3832,113 @@ References: do not take references for `Re(a)` far below 0 from mpmath's
 the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
+
+### CE-755. interval-js emits a folded false condition as the string `'false'`
+
+**Status:** ready; wrong value, S.
+
+`Block(s ≔ 0; Loop(Block(If(k > 20, Break()), s ≔ s + k), k ∈ 1..5); s)`:
+the interpreter and JavaScript give 15. The interval-js target emits
+`if ('false') { break }`; the string is truthy, so the loop stops at once and
+the result is the interval `[0, 0]`.
+
+### CE-756. JavaScript: a destructuring `let` whose value calls a local function that reads a pattern name
+
+**Status:** ready; wrong value, S.
+
+In a loop body, with an outer `a = 100`, in Epsil:
+
+- `function f() { a }; let (a, b) = (k, f())` gives `b = k` in the compiled
+  code; the interpreter evaluates the whole tuple first, so `f()` reads 100.
+- `function f() { a }; let (b, a) = (f(), k)` and
+  `function f(k) { (a, k) }; let (a, b) = f(k)` throw `ReferenceError` when
+  they run.
+
+The cause: `desugarPatternDeclare()` declares the leaves one by one, and a
+function defined in the same statement list reads the new local. Declining
+every value that calls a non-library function would also decline the
+supported `let (a, b) = f(k)` (9 tests). Recommended fix: decline only when
+the statement list that holds the declaration also defines a function whose
+body reads a name of the pattern. Python and the shader targets decline
+these programs today.
+
+### CE-757. Python: `Apply` of a function literal to a point that may be absent emits `None + 1`
+
+**Status:** ready; defect, S.
+
+With `P: list<tuple<real, real>>`, `Apply((p) ↦ Max(p) + 1, P[1])` compiles
+on Python with the absent branch `(lambda p: p + 1)`. When the point is
+absent, `None + 1` raises a `TypeError`; the interpreter gives `NaN`. Not run
+yet: measure it first.
+
+### CE-758. Declines of a point at a parameter with no settled point type
+
+**Status:** ready; defect, M.
+
+Each case gives a value in the interpreter, with
+`P: list<tuple<real, real>>` at `[(1, 2), (3, 4)]`:
+
+- **CE-758.1** `g3 = (p) ↦ Norm(p)`, `g3(P[1])` declines on GLSL, WGSL and
+  Python (the point may be absent); `g3(q)` with `q: tuple<real, real>`
+  compiles on GLSL and WGSL.
+- **CE-758.2** interval-js returns `success: false` for every case of
+  `test/compute-engine/compile-point-untyped-parameter.test.ts`; the cause is
+  not known.
+- **CE-758.3** `gs = (p) ↦ Sum(p)`, `gs(P[1])` declines on JavaScript
+  ("possible 'Nothing' elements require a distinct omission
+  representation"); the interpreter gives 3.
+- **CE-758.4** `gm2 = (p, x) ↦ Max(p) + x`, `gm2(P[1], L)` with
+  `L: list<real>` declines; the interpreter gives `[12, 22]`.
+- **CE-758.5** `Map(gm, LM)` with `gm = (p) ↦ Max(p) + 1` and
+  `LM: list<tuple<real, real> | missing>` declines; the interpreter gives
+  `[3, NaN]`. The fork that sends the absent value to the generic definition
+  is not safe there (`Length` of `undefined` throws).
+- **CE-758.6** `Reduce(P, ghd, (0, 0))` with a declared tuple parameter
+  declines (the run-time check of the declared type); the interpreter gives
+  `(6, 0)`.
+- **CE-758.7** `Block(g := p ↦ Max(p) + 1, Map(g, P))` declines; the
+  interpreter gives `[3, 5]`.
+- **CE-758.8** A function local to a `Block` with a rest parameter does not
+  compile on JavaScript ("`Spread`: the argument's tuple arity is not
+  statically known"): `Map(h7, P)` with `h7 := (...xs) ↦ 7` gives `[7, 7]` in
+  the interpreter.
+
+### CE-759. Python declines a destructuring `let` whose value is a tuple-valued call
+
+**Status:** ready; defect, S.
+
+`function f(k) { (k, k + 1) }; let s = 0; for k in [1, 2, 3] { let (a, b) = f(k); s = s + a * b }; s`
+gives 20 on JavaScript and declines on Python ("Could not compile a
+destructuring declaration whose value is not a literal tuple").
+`destructureViaTemp()` (`compile-declarations.ts`) accepts only JavaScript;
+the per-leaf declarations must be split for a target with a `declare` hook.
+
+### CE-760. A literal out-of-range row of a rank-3 tensor declines
+
+**Status:** ready; defect, S.
+
+With `R` a tensor of rank 3, `R[3, 1]` (and the nested `R[3][1]`) declines on
+JavaScript and Python ("first operand is not an indexed collection"), because
+the inner read is typed `missing`. The interpreter gives `Missing`.
+
+### CE-761. A function whose body ends in a loop declines also when the call's value is discarded
+
+**Status:** ready; defect, S.
+
+`f(2); 3`, where the body of `f` ends in a `Loop` with an indexing set, gave
+3 on JavaScript before 2026-11-01. Now it declines, because the admission
+walk treats every function body as used and does not look at the call
+sites. Compile the body as a statement when no call site uses its value.
+
+### CE-762. GLSL and WGSL have no `At` lowering for a multi-axis base
+
+**Status:** ready; defect, M.
+
+`At(R, 1, 2)` with `R: matrix<real^2x2>` declines on GLSL and WGSL
+("multi-axis"), although GLSL has `mat2`. `list<list<real>>` declines too
+("not a statically counted collection"); that decline may be one the
+static-shape rule requires (a shader needs a static length): check it
+first. `list<vector<real^3>>` declines with "states no element type".
 
 ### CE-751. A `number` value that holds a complex number reaches code compiled for `real`
 

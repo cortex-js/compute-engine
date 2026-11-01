@@ -87,6 +87,7 @@ import { NO_NAMES } from './compiler-tables.js';
 import { CompileDeclineError, UNSETTLED_SHAPE_CODE } from './diagnostics.js';
 import {
   isNominalWithUnsettledRank,
+  bindsOnePointAsUndeclared,
   isOpenScalarRankType,
   isScalarShaped,
   mapRankOfType,
@@ -916,7 +917,9 @@ export function isNestedRealListArg(a: Expression): boolean {
  * The 0-based position of the first argument that is a single point
  * ({@link isSinglePointArg}) bound to a parameter of `h` that has NO type
  * — `unknown` or `any`, the type an unannotated parameter keeps when no use
- * in the body narrows it — or `-1` when there is none.
+ * in the body narrows it, `value`, or a union with such a member, such as
+ * the `collection<any> | value` that a body which uses the parameter whole
+ * infers (`bindsOnePointAsUndeclared()`) — or `-1` when there is none.
  *
  * Such a call cannot go by reference. A definition is emitted once, and its
  * body's arithmetic is shaped by the parameter's STATIC type: with `P`
@@ -934,7 +937,9 @@ export function isNestedRealListArg(a: Expression): boolean {
  * emitted for a point. Neither is a parameter the body never READS —
  * `f(p, x) := g(x)` binds a point to `p` and does nothing with it, so the
  * emitted body computes the same value whatever `p` holds, and the
- * by-reference call (with its sibling broadcast) stands. A function with no
+ * by-reference call stands: the version of the function chosen from the
+ * argument types at the call binds the point whole, with no run-time
+ * broadcast over its coordinates. A function with no
  * single literal (a multi-clause function) is not examined: each clause
  * dispatches on the run-time shape of its arguments.
  */
@@ -954,7 +959,7 @@ export function pointArgumentAtUntypedParameter(
     const name = functionLiteralParameterName(literal.ops[i + 1]);
     if (!name || !mentioned.has(name)) continue;
     const pt = userFunctionParamType(engine, h, i);
-    if (pt === undefined || pt === 'unknown' || pt === 'any') return i;
+    if (pt === undefined || bindsOnePointAsUndeclared(pt)) return i;
   }
   return -1;
 }

@@ -94,6 +94,7 @@ import {
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
 import { blockLocalOf, userFunctionSignature } from './compile-absence.js';
+import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import type {
   DeclineNote,
   ReboundFunctionLocals,
@@ -104,6 +105,7 @@ import { tempVar } from './compiler-naming.js';
 import { isEmissionSkippable } from './compile-cse.js';
 import { jsComplexObjectTest } from './compiler-type-facts.js';
 import {
+  bindsOnePointAsUndeclared,
   isScalarShaped,
   isNominalWithUnsettledRank,
   isUndeclaredParameterType,
@@ -1452,8 +1454,19 @@ function userFunctionValueRefWithoutDefaults(
     // decides what the value means. Elsewhere, a value with scalar
     // parameters fed list values is a static map of it, as on JavaScript.
     if (passed === undefined || target.userFunctions?.lowering) return name;
-    if (!userFunctionParamsAreScalar(engine, h))
+    if (!userFunctionParamsAreScalar(engine, h)) {
+      const at = onePointAtUndeclaredSlot(passed, (i) =>
+        userFunctionParamType(engine, h, i)
+      );
+      if (at >= 0)
+        throw new Error(
+          `Could not compile the function value \`${h}\`: its consumer ` +
+            `passes it one point at parameter ${at + 1}, which the ` +
+            `interpreter binds whole, and the target has no definition of ` +
+            `the function for one point.`
+        );
       return absentGuardedValueRef(engine, h, name, passed);
+    }
     // The interpreter binds a point whole at a parameter with no declared
     // type, and this target has no definition compiled for one point.
     if (
@@ -1521,13 +1534,28 @@ function userFunctionValueRefWithoutDefaults(
 
   // A parameterless function has no argument that could be a collection.
   if (nParams === 0) return callee;
-  if (!userFunctionParamsAreScalar(engine, h))
+  if (!userFunctionParamsAreScalar(engine, h)) {
+    // One point that the consumer passes is bound whole, and takes the
+    // definition compiled for one point (`onePointValueRef()`). A list is
+    // bound whole too, and takes the definition for a list.
+    const pointRef = onePointValueRef(
+      engine,
+      h,
+      literal,
+      name,
+      callee,
+      target,
+      passed
+    );
     return absentGuardedValueRef(
       engine,
       h,
-      listSpecializedValueRef(engine, h, literal, target, passed) ?? callee,
+      pointRef ??
+        listSpecializedValueRef(engine, h, literal, target, passed) ??
+        callee,
       passed
     );
+  }
   // A parameter that lowers to an array or object (a tuple, a record, a
   // nominal value) must reach the body whole — see
   // `signatureParamsLowerToScalars`.
@@ -1604,6 +1632,111 @@ function absentGuardedValueRef(
       `may fail on an absent value where the interpreter runs the body ` +
       `with \`Missing\`.`
   );
+}
+
+/**
+ * The position of the first value that a consumer passes (`passed`) that
+ * is one point (not a list of points) at a parameter whose type
+ * `paramType(i)` is open (`bindsOnePointAsUndeclared()`), or -1. A
+ * parameter with no type counts as open.
+ */
+function onePointAtUndeclaredSlot(
+  passed: CallbackArguments,
+  paramType: (i: number) => Type | undefined
+): number {
+  return passed.types.findIndex(
+    (t, i) =>
+      t !== undefined &&
+      !isScalarShaped(t) &&
+      pointOfType(t) !== undefined &&
+      bindsOnePointAsUndeclared(paramType(i) ?? 'unknown')
+  );
+}
+
+/**
+ * The value of the user function `h`, emitted as `name` and called through
+ * `callee`, whose parameters are not all scalars, for a consumer that
+ * passes it one point (not a list of points) at a parameter where the
+ * interpreter binds the point whole and the generic definition reads it as
+ * a scalar (`bindsOnePointAsUndeclared()`), and a scalar at each other
+ * parameter: the definition of `h` with these parameters typed as the
+ * points. `undefined` when the consumer passes no such point, or passes a
+ * value that is not a scalar or a point.
+ *
+ * With `gm := p ↦ Max(p) + 1`, the parameter type is inferred as
+ * `collection<any> | value`, and the generic definition is
+ * `(p) => Math.max(p) + 1`. `Map(gm, P)` with `P = [(1, 2), (3, 4)]` gave
+ * `NaN` for each point, where the interpreter gives `[3, 5]`.
+ *
+ * Throws (the consumer declines) when a point may be absent, when the
+ * function is called through a wrapper, or when the definition for one
+ * point cannot be emitted. An absent value does not go to the generic
+ * definition, as it does for a function with scalar parameters
+ * (`absentArgumentFork()`): that definition is compiled for a collection,
+ * and can fail on an absent value (`absentGuardedValueRef()`).
+ */
+function onePointValueRef(
+  engine: ComputeEngine,
+  h: string,
+  literal: Expression & FunctionInterface,
+  name: string,
+  callee: string,
+  target: CompileTarget<Expression>,
+  passed: CallbackArguments | undefined
+): string | undefined {
+  if (passed === undefined) return undefined;
+  // A consumer can fill fewer parameters than the function has: the
+  // parameters that it does not fill have a default value, and keep their
+  // type. The wrapper that fills them (`userFunctionValueRef()`) calls the
+  // definition returned here.
+  const nParams = literal.ops.length - 1;
+  if (passed.types.length > nParams) return undefined;
+  const types: (Type | undefined)[] = [];
+  let absent = false;
+  for (const [i, t] of passed.types.entries()) {
+    if (t === undefined) return undefined;
+    if (isScalarShaped(t)) {
+      types.push(undefined);
+      continue;
+    }
+    const found = pointOfType(t);
+    if (found === undefined) return undefined;
+    const pt = userFunctionParamType(engine, h, i);
+    if (pt !== undefined && !bindsOnePointAsUndeclared(pt)) {
+      // A parameter whose type admits the point (`a: tuple<real, real>`,
+      // or a tuple that index reads in the body infer) keeps its type: the
+      // generic definition is compiled for a point there.
+      if (!isSubtype(found.point, pt) && !isIndexReadTuple(pt))
+        return undefined;
+      types.push(undefined);
+      continue;
+    }
+    absent ||= found.absent;
+    types.push(found.point);
+  }
+  if (types.every((t) => t === undefined)) return undefined;
+  while (types.length < nParams) types.push(undefined);
+  const fail = (why: string): Error =>
+    new Error(
+      `Could not compile the function value \`${h}\`: its consumer passes ` +
+        `it one point, which the interpreter binds whole, and ${why}`
+    );
+  if (absent)
+    throw fail(
+      `the point may be absent, and the definition for one point reads ` +
+        `its coordinates.`
+    );
+  if (callee !== name)
+    throw fail(
+      `the function is called through a wrapper that the definition for ` +
+        `one point does not have.`
+    );
+  const point = listSpecializedDefinition(engine, h, literal, target, types);
+  if (point === undefined)
+    throw fail(
+      `the definition of the function for one point could not be emitted.`
+    );
+  return point;
 }
 
 /**
@@ -1818,7 +1951,7 @@ export function namedPointArgumentAtUntypedParameter(
 ): number {
   return args.findIndex((a, i) => {
     const declared = userFunctionParamType(engine, h, i);
-    if (declared !== undefined && !isUndeclaredParameterType(declared))
+    if (declared !== undefined && !bindsOnePointAsUndeclared(declared))
       return false;
     return absentPointType(a.type.type) !== undefined;
   });
@@ -1879,7 +2012,10 @@ export function absentPointFork(
  * compiled for a scalar (`absentPointFork()`), which `scalarCallee`
  * compiles: `Apply(t ↦ 2t, Missing)` is `NaN`.
  *
- * `codes` are the compiled arguments. Throws (the `Apply` declines) when
+ * `codes` are the compiled arguments. When `wholePointAt(i)` is true, a
+ * point of a tuple type at position `i` is typed as the point too: the
+ * caller knows that the literal reads the parameter there as a scalar
+ * (`bindsOnePointAsUndeclared()`). Throws (the `Apply` declines) when
  * the typed literal is not valid, when the target is not JavaScript or
  * Python, or when a point that may be absent is beside another point or
  * an argument that is not a scalar: the definition for a scalar would
@@ -1891,7 +2027,8 @@ export function appliedLiteralNamedPointCall(
   codes: ReadonlyArray<string>,
   compile: (e: Expression) => string,
   scalarCallee: () => string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  wholePointAt?: (i: number) => boolean
 ): string | undefined {
   if (!isFunction(literal, 'Function')) return undefined;
   const params = literal.ops.slice(1);
@@ -1899,7 +2036,10 @@ export function appliedLiteralNamedPointCall(
   const found = args.map((a, i) => {
     const declared = declaredParamType(params[i]);
     if (declared !== undefined && declared !== 'unknown') return undefined;
-    return absentPointType(a.type.type);
+    const named = absentPointType(a.type.type);
+    if (named !== undefined || wholePointAt?.(i) !== true) return named;
+    const p = pointOfType(a.type.type);
+    return p === undefined ? undefined : { rank: 0, ...p };
   });
   if (found.every((x) => x === undefined)) return undefined;
   const decline = (why: string): Error =>
@@ -2730,6 +2870,23 @@ function localFunctionCallback<T>(
     return code;
   const local = target.localFunctions?.get(callback.symbol);
   if (!isFunction(local, 'Function') || local.nops < 2) return code;
+  // The local is compiled where the block defines it, for a scalar at a
+  // parameter whose type is open, and has no definition for one point.
+  // The interpreter binds a point whole there: with `g := p ↦ Max(p) + 1`,
+  // `Map(g, P)` is `[3, 5]` for `P = [(1, 2), (3, 4)]`, and the local
+  // gave `NaN` for each point. The consumer declines.
+  if (!paramsAreScalar(local.type.type)) {
+    const at = onePointAtUndeclaredSlot(passed, (i) =>
+      signatureParamType(local.type.type, i)
+    );
+    if (at >= 0)
+      throw new Error(
+        `Could not compile the callback \`${callback.symbol}\`: its ` +
+          `consumer passes it one point at parameter ${at + 1}, which the ` +
+          `interpreter binds whole, and the function local to the block is ` +
+          `compiled for a scalar there.`
+      );
+  }
   if (
     !paramsAreScalar(local.type.type) ||
     !signatureParamsLowerToScalars(local.type.type)

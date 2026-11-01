@@ -149,7 +149,12 @@ import {
 import { trySpecializedUserCall } from './compile-user-specialization.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
 import { userFunctionSignature } from './compile-absence.js';
-import { isScalarShaped, isUndeclaredParameterType } from './static-shape.js';
+import {
+  bindsOnePointAsUndeclared,
+  isScalarShaped,
+  isUndeclaredParameterType,
+  pointOfType,
+} from './static-shape.js';
 
 /**
  * Compile an expression to target language source code
@@ -1593,7 +1598,9 @@ export function tryCompileUserFunction(
     throw new Error(
       `Could not compile a call of \`${h}\`: argument ${pointAt + 1} is a ` +
         `point, and the parameter that receives it has no declared or ` +
-        `inferred type. The emitted definition treats that parameter as a ` +
+        `inferred type, or only a type that admits any value (such as the ` +
+        `inferred \`collection<any> | value\`). The emitted definition ` +
+        `treats that parameter as a ` +
         `scalar and would compute a different value than the interpreter ` +
         `does over a point, and the call could not be inlined instead. ` +
         `Declare the parameter's type (for example ` +
@@ -2263,13 +2270,17 @@ export function checkedCallMayBeAbsent(
  *
  * A signature that is not known gives no parameter type, so a
  * complex-shaped argument is then a mismatch.
+ *
+ * A position where `skip(i)` is true is not tested.
  */
 function localLaneMismatchAt(
   signature: Type | undefined,
-  args: ReadonlyArray<Expression>
+  args: ReadonlyArray<Expression>,
+  skip?: (i: number) => boolean
 ): number {
   const scalarParams = signature === undefined || paramsAreScalar(signature);
   for (let i = 0; i < args.length; i++) {
+    if (skip?.(i) === true) continue;
     const a = args[i];
     const pt = signatureParamType(signature, i);
     const point = pointLaneMismatch(a, pt);
@@ -2634,22 +2645,39 @@ export function tryCompileLocalFunctionCall(
   // the call of a function defined on the engine takes its copy for one
   // point; a point that may be absent goes to the local as it is bound
   // (`absentPointFork()`). On another target the call declines.
+  // A point of a tuple type counts too at a parameter whose type is
+  // inferred as `collection<any> | value` (`p ↦ Max(p) + 1`): the literal
+  // reads the parameter as a scalar there, and the route below for a tuple
+  // runs only when every parameter is scalar.
+  const wholePointAt = (i: number) => {
+    const inferred = signatureParamType(declared, i);
+    return (
+      inferred !== undefined &&
+      !isUndeclaredParameterType(inferred) &&
+      bindsOnePointAsUndeclared(inferred) &&
+      pointOfType(argTypes[i]) !== undefined
+    );
+  };
   const namedPointAt = args.findIndex((_a, i) => {
     const pt = annotations[i];
     if (pt !== undefined && !isUndeclaredParameterType(pt)) return false;
     // A parameter whose type the body settles (`p[1]` reads a point) is
     // compiled for that type, which receives the point.
     const inferred = signatureParamType(declared, i);
-    if (inferred !== undefined && !isUndeclaredParameterType(inferred))
+    if (inferred !== undefined && !bindsOnePointAsUndeclared(inferred))
       return false;
-    return absentPointType(argTypes[i]) !== undefined;
+    return absentPointType(argTypes[i]) !== undefined || wholePointAt(i);
   });
   if (namedPointAt >= 0) {
     const reason =
       `Could not compile \`${h}\`: argument ${namedPointAt + 1} is one ` +
-      `point named through an alias, a union with \`missing\` or a ` +
-      `nominal type, at a parameter of the block-local function with no ` +
-      `declared type. The interpreter binds the point whole, and the ` +
+      (wholePointAt(namedPointAt)
+        ? `point, at a parameter of the block-local function whose type ` +
+          `admits any value. `
+        : `point named through an alias, a union with \`missing\` or a ` +
+          `nominal type, at a parameter of the block-local function with ` +
+          `no declared type. `) +
+      `The interpreter binds the point whole, and the ` +
       `block binds the function compiled for a scalar parameter`;
     if (target.language !== 'javascript')
       throw new Error(
@@ -2677,6 +2705,28 @@ export function tryCompileLocalFunctionCall(
           `call, and its body reads \`${captured}\`, which a binding at ` +
           `the call or the function itself can change.`
       );
+    // Only the parameters that receive the points are typed in the
+    // literal compiled for one point (the positions that
+    // `appliedLiteralNamedPointCall()` types as the point). Another
+    // parameter is compiled in the lane of its own type, so a complex
+    // argument there is a lane mismatch, as on the route below
+    // (`localLaneMismatchAt()`): with `g := (p, x) ↦ Max(p) + x`,
+    // `g(q, z)` for a complex `z` gave the string "[object Object]2". In
+    // `auto` the compilation starts again in `mode: 'complex'`; in
+    // `strict` it declines. A complex point at a parameter typed as the
+    // point is compiled in the lane of the point, and is not tested.
+    if (strictLanes() && !target.userFunctions?.lowering) {
+      const typedAsPoint = (i: number) =>
+        (annotations[i] === undefined || annotations[i] === 'unknown') &&
+        (absentPointType(argTypes[i]) !== undefined || wholePointAt(i));
+      const i = localLaneMismatchAt(signature, args, typedAsPoint);
+      if (i >= 0)
+        localLaneMismatch(
+          'block-local function parameter',
+          userParamBinding(h, literal, i),
+          args[i]
+        );
+    }
     const checks = absentArgumentChecks(h, literal, args, target);
     const named = appliedLiteralNamedPointCall(
       literal,
@@ -2686,7 +2736,8 @@ export function tryCompileLocalFunctionCall(
       ),
       (e) => core.compile(e, target),
       () => target.var(h) ?? h,
-      target
+      target,
+      wholePointAt
     );
     if (named === undefined)
       throw new Error(
@@ -2831,7 +2882,7 @@ export function tryCompileLocalFunctionCall(
       const pt = annotations[i];
       if (pt !== undefined && !isUndeclaredParameterType(pt)) return false;
       const inferred = signatureParamType(declared, i);
-      if (inferred !== undefined && !isUndeclaredParameterType(inferred))
+      if (inferred !== undefined && !bindsOnePointAsUndeclared(inferred))
         return false;
       return isTupleShapedType(resolveTypeAlias(argTypes[i]));
     });

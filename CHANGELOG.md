@@ -375,6 +375,16 @@
   earlier program are not reported. The value of the program does not
   change.
 
+- **A point passed to a function with an untyped parameter gives the
+  interpreter's value.** With `P: list<tuple<real, real>>` and
+  `gm = (p) ↦ Max(p) + 1`, the compiled `gm(P[1])` gave `NaN` (shown as
+  `null`) where the interpreter gives 3; `Min(p)`, `Map(gm, P)`,
+  `Reduce(P, (a, v) ↦ a + gm(v), 0)`, a function local to a `Block`, and a
+  function with a trailing default parameter (`(p, k = 1) ↦ Max(p) + k`) gave
+  `NaN` too. The call now uses the function compiled for one point. Where
+  that is not possible (Python, GLSL, WGSL, or a point that may be missing at
+  a callback), the expression falls back to the interpreter.
+
 - **A multi-index `At` compiles.** `At(R, 1, 2)` (`R[1, 2]`) with `R` a
   matrix, a list of lists or a tensor declined on every target with "only the
   single-index form compiles"; it now compiles as `At(At(R, 1), 2)` and gives
