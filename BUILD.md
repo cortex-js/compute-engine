@@ -119,6 +119,17 @@ decision, or state why it is not a defect. Only a defect that waits for a user
 decision goes to `ROADMAP.md` as an open entry. A queued follow-up is listed in
 the report and done after the current change is staged.
 
+Before staging, the orchestrator lists each `ROADMAP.md` entry that the task
+created, and for each one states in one line why the current change does not
+fix it: the defect is in older code that the change does not touch (it is the
+next task), or a user decision blocks the fix (name the decision, and say why
+no option is clearly sound). An entry without one of these reasons blocks
+staging: fix the defect in the change first. The list goes in the report.
+
+The final report of a session also states how many `ROADMAP.md` entries the
+session added and how many it removed, and the number of `### CE-` headings
+in the file before and after the session.
+
 The orchestrator combines the results and runs, once on that combined tree,
 only the checks that no sub-agent ran on the same content: for example the
 dependency check after import changes, and, when it judges it useful, the

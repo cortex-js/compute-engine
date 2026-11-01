@@ -32,7 +32,10 @@ nightly run, tell the user; do not take over that investigation unless asked.
   review (`~/.claude/SHARED-BOX-PROTOCOL.md` §5.2). Record a defect in
   `ROADMAP.md` instead only when the fix needs a user decision; the entry then
   states the decision, with an example, and the defect is reported to the user
-  in the same turn. These are not reasons to defer a fix: the diff grows,
+  in the same turn. A fix needs a user decision only when no option is clearly
+  sound, or when the fix changes a documented contract. If you can name the
+  option you recommend, the fix does not need a decision: implement it and
+  report the alternatives. These are not reasons to defer a fix: the diff grows,
   snapshots or pinned emissions change (measure and report them instead), or a
   sub-agent reported it as "not fixed". Use permanent `CE-<n>` references,
   allocated from the next-free-reference line.
@@ -90,12 +93,32 @@ nightly run, tell the user; do not take over that investigation unless asked.
   report each choice with its alternatives so the user can reverse it. Stop to
   ask only before an action that is hard to undo or outside this repo, before
   reversing a decision the user made, or when no option is clearly sound; put
-  such questions together in one message at the end.
+  such questions together in one message at the end. This grouping does not
+  apply to a defect found during the task that the task's own code could fix:
+  report it to the user in the same turn you find it, with the option you
+  recommend.
+- `ROADMAP.md` must get shorter over time. Take only `ready` entries without
+  asking; `proposed`, `decision needed` and `design needed` entries wait for the
+  user (the states are defined in the header of `ROADMAP.md`). Do not add an
+  entry for an idea (a capability, a performance change, a design or a task):
+  put it in the report to the user, and add it as `proposed` only when the user
+  says to record it.
 - Do small follow-up work without asking, and report it: a review that the
   process still requires, a ROADMAP entry for a limitation the user decided, and
   removal of the worktrees, references and temporary files you created. Commits,
   git commands that are not on the allowed list, and actions outside the repo
-  still need the user's approval.
+  still need the user's approval, except the documentation edits in the next
+  rule.
+- When a change adds or changes public behavior (an exported API, a type string,
+  a MathJSON operator, LaTeX or Epsil syntax), check the user-facing guides and
+  references in `~/dev/cortexjs.io/docs/compute-engine/` and update the pages
+  that describe that behavior. You may edit these files directly, without asking
+  first. Run no git command in that repo, and list each edited page in the
+  report. Do not hand-edit `changelog.md` or `api.md` there: the site build
+  makes them from `CHANGELOG.md` and `src/api.md`. Do not edit
+  `~/dev/cortexjs.io/docs/epsil/`: the site build copies it from
+  `src/epsil/docs/`, so edit the page in this repo instead. Run each example
+  that a page shows against the current source before you write its result.
 - Follow BUILD.md and the shared-box specifics for completion checks; after-edit
   hooks and commit-time formatting do not replace them. Capture test exit codes
   directly rather than relying on the exit status of an output-filtering pipe.
