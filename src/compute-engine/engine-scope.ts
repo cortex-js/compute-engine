@@ -20,8 +20,11 @@ import {
   reviveBindings,
   tombstoneBinding,
 } from './boxed-expression/binding-tombstone.js';
-import { ambientChainParent } from './boxed-expression/ambient-chain.js';
-import { isRetainedCallFrame } from './boxed-expression/lazy-view-context.js';
+import {
+  ambientChainParent,
+  scopeActivationTemplate,
+} from './boxed-expression/ambient-chain.js';
+import { isRetainedScope } from './boxed-expression/lazy-view-context.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
 import { notePushedScope } from './pending-call-scopes.js';
 import {
@@ -197,20 +200,51 @@ function discardEvalContext(
   // the engine. Disposal is intentionally idempotent.
   //
   // The frame of a call is retained when a lazy callback view that resolves
-  // names in it is reachable from the value that the call returns: the view
-  // can be read after the call has returned (`isRetainedCallFrame`, marked
-  // at the end of the call by `retainCallFrameOfResult`,
-  // `boxed-expression/lazy-view-context.ts`). Its pop is not the end of the
-  // life of its definitions, so they are not disposed and not tombstoned.
+  // names in it is reachable from the value that the call returns
+  // (`retainCallFrameOfResult`), or when a closure whose scope chain reaches
+  // the frame was made during the call or is part of the value that the call
+  // returns (`retainScope`). Both are in
+  // `boxed-expression/lazy-view-context.ts`, and `isRetainedScope` reads
+  // the mark. The view or the closure can read the frame after the call has
+  // returned, so its pop is not the end of the life of its definitions:
+  // they are not disposed and not tombstoned.
   // They only stop listening to configuration changes, because the engine
   // holds each listener strongly and would keep them for its lifetime. The
   // cost: the definitions of a retained frame are never marked `disposed`
   // (the readers of that flag treat them as live), their `_writeVersion`
   // does not advance here, and the debug check of dead bindings
   // (`ce._debugBindings`) does not cover them. A call that returns no view
-  // (it read its views at once) is not retained.
+  // (it read its views at once) and makes no closure that reads its frame
+  // is not retained.
   const retained =
-    context?.name === 'call' && isRetainedCallFrame(context.lexicalScope);
+    context?.name === 'call' && isRetainedScope(context.lexicalScope);
+  // The local scope of an expression node (a block, a loop, a comprehension,
+  // a big operator) is retained when a closure has a chain that reaches it
+  // (`retainScopesReachedByLiteral`, `function-utils.ts`): the closure can
+  // read its definitions after this pop. For an activation (the copy that an
+  // asynchronous evaluation pushes), the mark is on the activation or on the
+  // scope that it copies, whichever the chain of the closure holds, so both
+  // are read (`isRetainedNodeScope`). Such a pop disposes
+  // the definitions, as before, and only does not tombstone them. The scope
+  // is made once at canonicalization and pushed at each run, so a disposed
+  // definition stays disposed when the scope is pushed again: a pop that
+  // kept the definitions alive would make the `disposed` state of the
+  // definitions depend on whether an earlier run made a closure. The cost:
+  // the debug check of dead bindings does not cover a retained node scope.
+  //
+  // A pop does not tombstone either when another context of the stack still
+  // has the same scope: a recursive call that runs the same loop pops the
+  // scope while the loop of the caller still runs in it, and the caller
+  // then reads its index. A push revives the tombstones, but the loop of
+  // the caller does not push the scope again. Only the debug check reads
+  // this, so the walk of the stack happens only when the flag is on.
+  const keepsTombstone =
+    ce._debugBindings &&
+    !isDormantPop() &&
+    context !== undefined &&
+    !retained &&
+    !isRetainedNodeScope(context.lexicalScope) &&
+    !ce._evalContextStack.some((c) => c.lexicalScope === context.lexicalScope);
   for (const binding of context?.lexicalScope.bindings.values() ?? []) {
     if (retained) {
       if (isValueDef(binding))
@@ -226,7 +260,7 @@ function discardEvalContext(
       // canonical expression keeps and pushes again on every evaluation, so
       // that pop is not the scope's death and a tombstone there would report
       // every bound variable of every canonicalized binder.
-      if (ce._debugBindings && !isDormantPop())
+      if (keepsTombstone)
         tombstoneBinding(binding.value, context?.name ?? '<unnamed>');
       binding.value.dispose();
     }
@@ -488,4 +522,13 @@ function defToString(name: string, def: BoxedDefinition): string {
   } else result = 'unknown';
 
   return result;
+}
+
+/** True when `scope`, or the scope that the activation `scope` copies, is
+ * the local scope of an expression node that a closure can read after its
+ * pop (`retainScopesReachedByLiteral`, `function-utils.ts`). */
+function isRetainedNodeScope(scope: Scope): boolean {
+  if (isRetainedScope(scope)) return true;
+  const template = scopeActivationTemplate(scope);
+  return template !== undefined && isRetainedScope(template);
 }

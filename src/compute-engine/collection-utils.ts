@@ -65,9 +65,14 @@ import {
 } from './boxed-expression/definition-guards.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
-import type { Scope } from './types-evaluation.js';
+import type { EvaluateOptions, Scope } from './types-evaluation.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import { incompleteWalkCount } from './boxed-expression/incomplete-walks.js';
+import { hasAsyncOnlyApplication } from './boxed-expression/async-only-descendants.js';
+import {
+  withErrorFrames,
+  type ErrorFrame,
+} from './boxed-expression/error-value.js';
 import {
   Expression,
   CollectionHandlers,
@@ -248,11 +253,18 @@ function countWaitsForCallback(xs: Expression): boolean {
  *
  * An empty list is a correct answer: an enumerable collection whose walk is
  * complete and yields nothing is empty.
+ *
+ * A `FlatMap` over a finite source whose finiteness is not known is listed
+ * by {@link listedFlatMapView}. When one of its inner results is infinite,
+ * the answer is `undefined`.
  */
 export function listFiniteUncountedCollection(
   xs: Expression
 ): Expression[] | undefined {
-  if (!walkCanAnswerCount(xs)) return undefined;
+  if (!walkCanAnswerCount(xs)) {
+    const listed = listedFlatMapView(xs);
+    return isFunction(listed, 'List') ? [...listed.ops] : undefined;
+  }
   const cap = xs.engine.maxCollectionSize;
   const before = incompleteWalkCount();
   const elements: Expression[] = [];
@@ -274,6 +286,183 @@ export function listFiniteUncountedCollection(
 }
 
 /**
+ * The value of the view `xs` listed by one bounded walk, when `xs` is a
+ * `FlatMap` over a finite source and its `isFiniteCollection` is not known,
+ * or `undefined` otherwise.
+ *
+ * The `isFinite` handler of `FlatMap` answers `true` only when the type of
+ * the callback result shows that each inner result is finite. The handler
+ * does not apply the callback, so `FlatMap([1, 2], x ↦ Range(1, x))`, whose
+ * callback result is typed `list<integer>`, has no known finiteness, and a
+ * consumer that needs every element (`ListFrom`, `Count`, `Sum`) declined.
+ * Such a consumer calls this function instead. The walk is the one of
+ * `evaluate({ materialization: true })` of the view, the `evaluate` handler
+ * of `FlatMap`:
+ * - the value is a `List` when every inner result is listed and the result
+ *   has at most `engine.maxCollectionSize` elements;
+ * - the value is the `out-of-range` error "a finite collection" when an
+ *   inner result is provably infinite (`x ↦ Range(1, ∞)`). The view is then
+ *   infinite, and {@link isInfiniteListing} is `true` for the value. Only
+ *   `ListFrom` answers with it; the other consumers do what they do for any
+ *   infinite collection (`Count` answers `+∞`, `Sum` stays unevaluated);
+ * - the value is another error when the evaluation of the view gives one: a
+ *   callback symbol that holds an error value (`w` holding the error of
+ *   `Ln("a")`) makes the view evaluate to that error before the walk. Every
+ *   consumer answers with that error, as for an operand whose value is an
+ *   error;
+ * - the value is `undefined` when the walk stops for another reason: too
+ *   many elements, an inner result that cannot be walked, or the
+ *   `iteration-limit-exceeded` cancellation of a `Filter` with a long run of
+ *   rejected elements. Every other exception (a deadline, an abort) is
+ *   thrown again.
+ *
+ * The callback is applied once for each element of the source. Only a
+ * consumer that reads the whole collection calls this function: a view that
+ * reads a prefix (`Take`, `First`) stays lazy and applies the callback only
+ * to the elements that it reads.
+ *
+ * `frame` names the consumer and the position of `xs` in it. It is added to
+ * the trace of an error value, as for an operand whose value is an error.
+ *
+ * The walk is synchronous. A view that holds an operator with only an
+ * `evaluateAsync` handler (`hasAsyncOnlyApplication()`, a callback included)
+ * is not listed: the answer is then `undefined`. An `evaluateAsync` handler
+ * calls {@link listedFlatMapViewAsync} instead.
+ */
+export function listedFlatMapView(
+  xs: Expression,
+  frame?: ErrorFrame
+): Expression | undefined {
+  if (!isFlatMapOverFiniteSource(xs)) return undefined;
+  if (hasAsyncOnlyApplication(xs, true)) return undefined;
+  try {
+    return listedValue(xs.evaluate({ materialization: true }), frame);
+  } catch (e) {
+    if (isIterationLimit(e)) return undefined;
+    throw e;
+  }
+}
+
+/**
+ * The asynchronous form of {@link listedFlatMapView}, for an `evaluateAsync`
+ * handler, or `undefined` when `xs` is not such a view. The view is evaluated with `evaluateAsync()` and the options of
+ * the handler (`signal`, `_effects`, `_contextStack`, `_precisionWindow`), so
+ * that the callback runs in the context of that evaluation: its effects,
+ * its deadline and its `signal`.
+ *
+ * `FlatMap` has no `evaluateAsync` handler: its walk is the synchronous one
+ * of its `evaluate` handler, which does not await a callback. A view that
+ * holds an operator with only an `evaluateAsync` handler is therefore not
+ * listed, as in {@link listedFlatMapView}. Listed, the callback
+ * `x ↦ slowRange(x)` gave the unevaluated calls as elements:
+ * `Sum(FlatMap([1, 2], x ↦ slowRange(x)))` was `slowRange(1) + slowRange(2)`.
+ */
+export function listedFlatMapViewAsync(
+  xs: Expression,
+  options: Partial<EvaluateOptions>,
+  frame?: ErrorFrame
+): Promise<Expression | undefined> | undefined {
+  // The answer is `undefined`, not a promise, when `xs` is not listed, so
+  // that the caller does not await: code after an `await` runs in a later
+  // task, and every evaluation of an operand that does not hold such a view
+  // then lost the bindings of the caller.
+  if (!isFlatMapOverFiniteSource(xs)) return undefined;
+  if (hasAsyncOnlyApplication(xs, true)) return undefined;
+  return xs
+    .evaluateAsync({
+      ...options,
+      // The registry of effects of this evaluation, named so that the
+      // nested evaluation keeps it if the spread above is ever changed.
+      _effects: options._effects,
+      numericApproximation: false,
+      materialization: true,
+    })
+    .then(
+      (value) => listedValue(value, frame),
+      (e: unknown) => {
+        if (isIterationLimit(e)) return undefined;
+        throw e;
+      }
+    );
+}
+
+/** The answer of {@link listedFlatMapView} for the materialized `value`. */
+function listedValue(
+  value: Expression,
+  frame: ErrorFrame | undefined
+): Expression | undefined {
+  if (isFunction(value, 'List')) return value;
+  if (!isFunction(value, 'Error')) return undefined;
+  if (frame === undefined) return value;
+  const framed = withErrorFrames(value, [frame]);
+  return isInfiniteListing(value) ? markInfiniteListing(framed) : framed;
+}
+
+/**
+ * The error values that the `evaluate` handler of `FlatMap` gives when an
+ * inner result is provably infinite, and the same errors with the frame of a
+ * consumer added by {@link listedFlatMapView}. The set holds the expression
+ * objects themselves: an error with the same code that comes from another
+ * evaluation is not in it, so the listing helpers tell "the view is
+ * infinite" from "the evaluation of the view is an error" without reading
+ * the text of the error.
+ */
+const INFINITE_LISTINGS = new WeakSet<Expression>();
+
+/** Record that the error value `err` proves that a `FlatMap` view is
+ * infinite (see {@link isInfiniteListing}), and return it. */
+export function markInfiniteListing(err: Expression): Expression {
+  INFINITE_LISTINGS.add(err);
+  return err;
+}
+
+/** Whether `x`, an answer of {@link listedFlatMapView}, is the error that
+ * proves that the view is infinite. */
+export function isInfiniteListing(x: Expression | undefined): boolean {
+  return x !== undefined && INFINITE_LISTINGS.has(x);
+}
+
+function isIterationLimit(e: unknown): boolean {
+  return (
+    e instanceof CancellationError && e.cause === 'iteration-limit-exceeded'
+  );
+}
+
+/**
+ * The number of elements of a finite collection with no count, found by a
+ * walk (`listFiniteUncountedCollection()`), for `Count` and `Length`. A
+ * `FlatMap` whose walk finds an infinite inner result is infinite: the
+ * answer is `Infinity`, as the count of any other infinite collection is.
+ * When the evaluation of the view is another error, the answer is that
+ * error, with `frame`. The answer is `undefined` when the walk gives no
+ * answer.
+ */
+export function uncountedCollectionCount(
+  xs: Expression,
+  frame: ErrorFrame
+): number | Expression | undefined {
+  if (!walkCanAnswerCount(xs)) {
+    const listed = listedFlatMapView(xs, frame);
+    if (listed === undefined) return undefined;
+    if (isFunction(listed, 'List')) return listed.nops;
+    return isInfiniteListing(listed) ? Infinity : listed;
+  }
+  return listFiniteUncountedCollection(xs)?.length;
+}
+
+/** Whether `xs` is a valid `FlatMap` whose finiteness is not known, over a
+ * source that is finite and can be walked: its elements can be listed by one
+ * walk of the source (see {@link listedFlatMapView}). */
+function isFlatMapOverFiniteSource(xs: Expression): boolean {
+  return (
+    isFunction(xs, 'FlatMap') &&
+    xs.isValid &&
+    xs.isFiniteCollection === undefined &&
+    isWalkableFiniteCollection(xs.op1)
+  );
+}
+
+/**
  * The emptiness of the finite collection `xs`, decided by a walk, for an
  * `IsEmpty` read when the `isEmpty` facet gives no answer (see
  * `walkCanAnswerCount()`). The walk stops at the first element: the
@@ -289,7 +478,16 @@ export function listFiniteUncountedCollection(
  * one element, and that symbol can hold an empty collection.
  */
 export function finiteUncountedIsEmpty(xs: Expression): boolean | undefined {
-  if (!walkCanAnswerCount(xs)) return undefined;
+  // A `FlatMap` over a finite source with no known finiteness is walked too:
+  // the walk stops at the first element, so an infinite inner result
+  // (`x ↦ Range(1, ∞)`) is not listed, and the view is not empty. The walk
+  // is synchronous, so a view that holds an operator with only an
+  // `evaluateAsync` handler is not walked, as in `listedFlatMapView()`.
+  if (
+    !walkCanAnswerCount(xs) &&
+    (!isFlatMapOverFiniteSource(xs) || hasAsyncOnlyApplication(xs, true))
+  )
+    return undefined;
   const before = incompleteWalkCount();
   let empty = true;
   try {

@@ -281,10 +281,24 @@ export function copyContextStack<T>(
   stack: ReadonlyArray<T>,
   ...frames: T[]
 ): T[] {
-  const copy = [...stack, ...frames];
+  return contextStackLike(stack, [...stack, ...frames]);
+}
+
+/**
+ * Make the new array `contexts` a context stack of the same asynchronous
+ * evaluation as `stack`, with the same deadline frame, and return it. A
+ * part of an evaluation that runs in other contexts than those of `stack`
+ * (the evaluation of a lazy view in the context of the function call that
+ * made it, `lazy-view-context.ts`) keeps the number and the time limit of
+ * the evaluation.
+ */
+export function contextStackLike<T>(
+  stack: ReadonlyArray<T>,
+  contexts: T[]
+): T[] {
   const evaluation = asyncEvaluations.get(stack);
-  if (evaluation !== undefined) asyncEvaluations.set(copy, evaluation);
+  if (evaluation !== undefined) asyncEvaluations.set(contexts, evaluation);
   const frame = stackDeadlineFrames.get(stack);
-  if (frame !== undefined) stackDeadlineFrames.set(copy, frame);
-  return copy;
+  if (frame !== undefined) stackDeadlineFrames.set(contexts, frame);
+  return contexts;
 }

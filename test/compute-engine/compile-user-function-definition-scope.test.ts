@@ -89,6 +89,11 @@ describe('COMPILE a user function against the scope of its definition', () => {
 
   it('declines when the definition scope was popped', () => {
     const r = both((ce) => {
+      // `G` is defined in a scope that is popped before `G(x)` is evaluated,
+      // so its body reads a binding of the popped scope. The debug check of
+      // dead bindings (`CE_DEBUG_BINDINGS`) reports every such use, so it
+      // would throw here by design. The decline is the subject of this test.
+      ce._debugBindings = false;
       ce.assign('a', 2);
       ce.declare('G', 'function');
       ce.pushScope();

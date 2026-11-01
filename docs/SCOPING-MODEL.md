@@ -22,6 +22,29 @@ lazy view. Declaring another binding with the same name does not redirect them.
 Parameters, block locals and iterator variables read the activation belonging
 to their invocation; an unrelated invocation cannot intercept the call.
 
+A lazy view that is assigned to a variable outside a loop or a block reads
+the locals of that loop or block with their values at the assignment, not
+their bindings (`bindOutlivedLocalsOfLazyValue`, `function-utils.ts`). A view
+holds its callback literal unevaluated, so no closure captures the scope of
+the iteration, and the scope changes before the view is read: the next
+iteration writes its index, and the end of the block disposes its locals.
+With `for d in [3, 6] { if d == 3 { h = Map(x => x + d, R) } }`, `h` reads
+`d = 3`. For a `let` local this differs from a closure, which shares the
+binding: with
+`if true { let m = 1; h = Map(x => x + m, R); f = (x) => x + m; m = 5 }`,
+the elements of `h` read `m = 1` and `f(0)` gives `5`. A view that is read
+in its own scope, or that is stored in a variable of the same scope, reads
+the current values. A view stored in a field of an object reads the locals
+of every loop and block of the chain with their values at the store: with
+`let o = {v: R}` and `for i in [1, 2] { o.v = Map(x => x + i, R) }`, `o.v`
+reads `i = 2`. The name of the receiver does not tell how long the object
+lives, because a variable of an inner scope can name the same object as an
+outer one: with `for i in [1, 2] { let p = o; p.v = Map(x => x + i, R) }`,
+the store through `p` also gives `o.v` the value `i = 2`, and no read of
+`o.v` after the loop reads a discarded `i`. The cost is that a view in a
+field of an object of the same block reads the locals of that block with
+their values at the store, not at the read.
+
 A call created before its function is defined is a forward reference. It
 waits for a definition in its original lexical environment, not an unrelated
 caller's environment. Adopting that declaration as a parameter makes it a
@@ -277,6 +300,15 @@ at invocation.
 `Block` is sequential: later statements observe earlier declarations and
 assignments. A consumer translating a simultaneous assignment must snapshot
 all right-hand sides before committing any left-hand side.
+
+A free symbol that a `Block` does not declare is declared in the scope of the
+`Block` when the `Block` is boxed outside a function literal: after
+`ce.box(['Block', ['Add', 'f', 1]])`, the `f` of the block and a later
+`ce.box('f')` are not `isSame`, but evaluation reads the same value (after
+`f := 5` the block gives `6`). A host can box a `Block` first and then make it
+the body of a function literal, and that declaration then becomes the binding
+of a parameter of the same name. Inside a function literal, the free symbol
+is declared in the enclosing persistent scope.
 
 ## Simplification
 

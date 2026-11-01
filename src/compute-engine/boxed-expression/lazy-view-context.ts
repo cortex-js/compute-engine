@@ -34,7 +34,7 @@
  *
  * The frame of a call is not copied: a frame that a view can read after the
  * call stays alive. At the end of each call, before its pop, the frame is
- * marked as retained (`isRetainedCallFrame`) when a view whose record names
+ * marked as retained (`isRetainedScope`) when a view whose record names
  * it is reachable from the value that the call returns
  * (`retainCallFrameOfResult`; the walk also goes into the bodies and the
  * scopes of the closures of that value and into the scopes of the records
@@ -46,7 +46,10 @@
  * no other call writes in it, so its values are those of the end of the
  * call, unless a closure that the call returned shares the frame and writes
  * in it. A call that reads its views at once (`ListFrom(Map(f, xs))`)
- * returns no view, and its frame is disposed at its pop, as any frame.
+ * returns no view, and its frame is disposed at its pop, as any frame,
+ * unless the call makes a function literal whose scope chain reaches the
+ * frame, or returns a node whose chain reads it
+ * (`retainScope`).
  *
  * The cost of a retained frame: its definitions are never marked
  * `disposed`, so the readers of that flag (`collectTypeContributions` in
@@ -54,7 +57,8 @@
  * `assume.ts`) treat them as live, their
  * `_writeVersion` does not advance at the pop, and the debug check of dead
  * bindings (`ce._debugBindings`) does not cover them. The set of retained
- * frames is weak: a frame that no record holds any more is freed. A view
+ * frames is weak: a frame that no record and no closure holds any more is
+ * freed. A view
  * that leaves a call by a way the walk does not follow (host code that keeps
  * it) does not retain the frame: a later read resolves names in disposed
  * definitions, which keep their values, so it gives the values of the call.
@@ -88,9 +92,11 @@
  * enumeration chooses between the live stack and the copies once, when it
  * starts, and keeps the stack of its start for each step: a step that runs
  * after the call has returned reads the context of the call. An evaluation
- * of a view with a record runs in that context too (`BoxedFunction.evaluate`):
- * the numeric pass of an outer call evaluates a returned view again, and
- * fills the default of a parameter of its callback by name.
+ * of a view with a record runs in that context too (`BoxedFunction.evaluate`,
+ * and `BoxedFunction.evaluateAsync` on a stack of its asynchronous
+ * evaluation, `lazyViewContextStack`): the numeric pass of an outer call
+ * evaluates a returned view again, and fills the default of a parameter of
+ * its callback by name.
  *
  * The end of a call rebuilds the value that it returns (the re-rooting of
  * the closures, `captureClosures`, and the substitution of the parameter
@@ -195,9 +201,15 @@ export function setLazyViewNestedScopeCopier(
  */
 const RECORDS = new WeakMap<Expression, LazyViewRecord | null>();
 
-/** The call frames that a record can read after their call has ended (see
- * the header). */
-const RETAINED_FRAMES = new WeakSet<Scope>();
+/** The call frames that a record, a function literal made in the call, or
+ * a node of the value that the call returns (`retainScope`)
+ * can read after their call has ended (see the header), and the local
+ * scopes of nodes (a block, a loop, a comprehension, a big operator) that a
+ * closure made in them can read after their pop (`retainScope`). */
+const RETAINED_SCOPES = new WeakSet<Scope>();
+
+/** The local scopes of expression nodes (`noteNodeScope`). */
+const NODE_SCOPES = new WeakSet<Scope>();
 
 /** The call frames that the `frames` of a record name. The end of the call
  * of any other frame does not look for views that can outlive it
@@ -225,10 +237,83 @@ function setRecord(expr: Expression, record: LazyViewRecord | null): void {
 }
 
 /** True when the pop of the call frame `scope` must keep its definitions
- * alive: a record of a lazy callback view holds the frame (see the header).
+ * alive: a record of a lazy callback view holds the frame (see the header),
+ * or a function literal made in the call, or a node of the value that the
+ * call returned, has a chain that reaches it (`retainScope`). For the
+ * local scope of a node (a block, a loop, a comprehension, a big operator),
+ * true when a closure has a chain that reaches it.
  * Read by `discardEvalContext` in `engine-scope.ts`. */
-export function isRetainedCallFrame(scope: Scope): boolean {
-  return RETAINED_FRAMES.has(scope);
+export function isRetainedScope(scope: Scope): boolean {
+  return RETAINED_SCOPES.has(scope);
+}
+
+/**
+ * Mark the call frame `frame` as retained: its pop does not dispose its
+ * definitions and does not tombstone them (`discardEvalContext`,
+ * `engine-scope.ts`). Call it when the call creates a function literal whose
+ * scope chain reaches the frame, or at the end of the call, before its pop,
+ * when the value that the call returns holds a closure (or another scoped
+ * node) whose scope chain reaches the frame.
+ *
+ * Such a closure can read the names of the frame after the call has
+ * returned, also by name and not only through a symbol of its body: the
+ * symbol default of a parameter of a function that the closure applies
+ * (`f := (x, k = d) => x * k` and `d ↦ (xs ↦ ListFrom(Map(f, xs)))`) is
+ * resolved in the context of the application of `f`, whose chain goes
+ * through the frame. The definitions of the frame are then still in use, and
+ * the debug check of dead bindings (`ce._debugBindings`) reported the read of
+ * `d` as a read of a discarded scope. Without the debug flag the value was
+ * the same, because a disposed definition keeps its value. The cost is the
+ * cost of a frame that a view retains (see the header).
+ *
+ * Two places in `function-utils.ts` call it:
+ * - the creation of a closure in the body of a running call, when its chain
+ *   reaches the frame of that call (`rerootOnCreatingFrame`, called by the
+ *   `Function` handler through `captureAtCreation`). The closure can leave
+ *   the call by a way that the end of the call does not see: an assignment
+ *   to an outer variable (`o := d ↦ Block(g := (xs ↦ ListFrom(Map(f, xs))),
+ *   0)`, then `g([1, 2])`), or a value stored in an outer collection. So
+ *   each call that makes such a closure retains its frame, also when the
+ *   closure does not leave the call (`ListFrom(Map(x ↦ x + d, xs))`): a
+ *   simple rule that is sound, at the cost above;
+ * - the end of a call, when the value that it returns holds a node whose
+ *   chain reads the frame and that was not made by an evaluation of a
+ *   function literal in the call (a held literal, a scoped node), counted by
+ *   `nodesReadingLeftCall`.
+ *
+ * The local scope of a node (a block, a loop, a comprehension, a big
+ * operator) is marked too, when a closure has a chain that reaches it
+ * (`retainScopesReachedByLiteral` in `function-utils.ts`): the closure
+ * reads an index through the binding of a symbol of its body, or a `let`
+ * local of a block by name. The pop
+ * of such a scope still disposes its definitions, as before, and only does
+ * not tombstone them (`discardEvalContext`); see there for why.
+ *
+ * A closure that leaves a call without one of these steps does not retain
+ * the frame: a function literal that host code builds around the scope of a
+ * call and keeps in its own data, or a literal that a host operator holds
+ * unevaluated and stores. A later read resolves names in disposed
+ * definitions, which keep their values, so it gives the values of the call,
+ * and the debug check of dead bindings reports it where it evaluates a
+ * symbol bound to such a definition (`assertLiveBinding`).
+ */
+export function retainScope(frame: Scope): void {
+  RETAINED_SCOPES.add(frame);
+}
+
+/** Record that `scope` is the local scope of an expression node (a block, a
+ * loop, a comprehension, a big operator, any other scoped node). The
+ * constructor of the node calls it, once, so the creation of a closure in
+ * the node finds the mark (`isNodeScope`). A scope that the host pushes
+ * (`ce.pushScope()`) and the frame of a call are not the scope of a node. */
+export function noteNodeScope(scope: Scope): void {
+  NODE_SCOPES.add(scope);
+}
+
+/** True when `scope` is the local scope of an expression node
+ * (`noteNodeScope`). */
+export function isNodeScope(scope: Scope): boolean {
+  return NODE_SCOPES.has(scope);
 }
 
 /** The number of records made so far. A call that sees the same number at
@@ -435,7 +520,7 @@ export function retainCallFrameOfResult(
   results: ReadonlyArray<Expression | undefined>,
   stack: ReadonlyArray<EvalContext>
 ): void {
-  if (!FRAMES_OF_RECORDS.has(frame) || RETAINED_FRAMES.has(frame)) return;
+  if (!FRAMES_OF_RECORDS.has(frame) || RETAINED_SCOPES.has(frame)) return;
   const below = new Set<Scope>();
   for (const context of stack) {
     if (context.lexicalScope === frame) break;
@@ -486,7 +571,7 @@ export function retainCallFrameOfResult(
     const record = RECORDS.get(expr);
     if (record) {
       if (record.frames.includes(frame)) {
-        RETAINED_FRAMES.add(frame);
+        RETAINED_SCOPES.add(frame);
         return;
       }
       visitScope(record.top.lexicalScope);
@@ -639,12 +724,12 @@ function buildContexts(
 function contextsForRead(
   ce: IComputeEngine,
   expr: Expression,
-  concrete = false
+  concrete = false,
+  stack: ReadonlyArray<EvalContext> = ce._evalContextStack
 ): ReadonlyArray<EvalContext> | undefined {
   const record = RECORDS.get(expr);
   if (record == null) return undefined;
   if (record.built !== undefined) return record.built;
-  const stack = ce._evalContextStack;
   const index = stack.lastIndexOf(record.top);
   if (index >= 0 && nestedScopesUnchanged(record)) {
     if (index === stack.length - 1 && !concrete) return undefined;
@@ -668,6 +753,27 @@ function contextsForRead(
 export function inLazyViewContext<T>(expr: Expression, fn: () => T): T {
   const ce = expr.engine as unknown as IComputeEngine;
   return inContexts(ce, contextsForRead(ce, expr), fn);
+}
+
+/**
+ * The context stack on which an asynchronous evaluation of the view `expr`
+ * runs, when the current stack of the evaluation is `stack`: a new array
+ * that holds the creation context of the view, or `undefined` when the
+ * evaluation runs on `stack` (the view has no record, or the reader is in
+ * the context on top of the stack at the creation). The choice is the one
+ * of a synchronous read (`inLazyViewContext`), made against `stack` and not
+ * against the engine's stack: an asynchronous evaluation keeps its contexts
+ * on its own array (`BoxedFunction.evaluateAsync`). The caller makes the
+ * array a stack of its evaluation (`contextStackLike`,
+ * `evaluation-epoch.ts`).
+ */
+export function lazyViewContextStack(
+  expr: Expression,
+  stack: ReadonlyArray<EvalContext>
+): EvalContext[] | undefined {
+  const ce = expr.engine as unknown as IComputeEngine;
+  const recorded = contextsForRead(ce, expr, false, stack);
+  return recorded === undefined ? undefined : [...recorded];
 }
 
 /** Run `fn` on a copy of `recorded` in place of the engine's stack, or in

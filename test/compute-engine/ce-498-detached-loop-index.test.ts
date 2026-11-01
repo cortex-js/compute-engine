@@ -31,6 +31,11 @@ describe('CE-498: a loop index read outside its Loop', () => {
 
   test('a detached Sum summand does not read a global of the same name', () => {
     const ce = new ComputeEngine();
+    // The summand is evaluated after the scope of the `Sum` was popped, so
+    // its `k` is a binding of a popped scope. The debug check of dead
+    // bindings (`CE_DEBUG_BINDINGS`) reports every such use, so it would
+    // throw here by design. The value is the subject of this test.
+    ce._debugBindings = false;
     ce.assign('k', 5);
     const sum = ce.parse('\\sum_{k=1}^{3} k^2');
     expect(sum.evaluate().json).toBe(14);

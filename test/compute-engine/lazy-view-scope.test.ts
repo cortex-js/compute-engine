@@ -20,7 +20,10 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { executeEpsil } from '../../src/epsil/execute-epsil';
+import {
+  executeEpsil,
+  executeEpsilAsync,
+} from '../../src/epsil/execute-epsil';
 
 type Json = any;
 
@@ -786,6 +789,428 @@ describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PAS
         5,
         10,
       ]);
+    }
+  });
+});
+
+// The asynchronous route keeps the context stack of an evaluation on its own
+// array, not on the engine's array. The numeric rewrite of the callback of a
+// lazy `Map` fills the default of a parameter of `f` by its name, so it must
+// run on that array: it ran on the engine's array, which does not hold the
+// frame of the call, and `evaluateAsync({ numericApproximation: true })` of
+// `g(10, [1, 2])` gave `[d, 2d]`.
+describe('LAZY VIEW CREATION CONTEXT: THE ASYNCHRONOUS NUMERIC PASS', () => {
+  const bodies: [string, Json, Json][] = [
+    ['Map(f, xs)', ['Map', 'f', 'xs'], ['List', 10, 20]],
+    [
+      'Map(x => f(x), xs)',
+      ['Map', ['Function', ['f', 'x'], 'x'], 'xs'],
+      ['List', 10, 20],
+    ],
+    [
+      'Filter(xs, x => f(x) > 15)',
+      ['Filter', 'xs', ['Function', ['Greater', ['f', 'x'], 15], 'x']],
+      ['List', 2],
+    ],
+    [
+      'Scan(xs, (a, b) => a + f(b))',
+      ['Scan', 'xs', ['Function', ['Add', 'a', ['f', 'b']], 'a', 'b']],
+      ['List', 1, 21],
+    ],
+    ['ListFrom(Map(f, xs))', ['ListFrom', ['Map', 'f', 'xs']], ['List', 10, 20]],
+  ];
+  for (const [name, body, expected] of bodies) {
+    test(`a call that returns ${name}`, async () => {
+      // A new engine for each evaluation: an evaluation keeps results (the
+      // numeric callback of a `Map`, the elements of a view) that a later
+      // evaluation on the same engine reads.
+      const call: Json = ['g', 10, ['List', 1, 2]];
+      const elements = async (
+        evaluate: (ce: ComputeEngine) => any
+      ): Promise<Json> => {
+        const ce = engine([
+          ['f', F],
+          ['g', ['Function', body, 'd', 'xs']],
+        ]);
+        const value = await evaluate(ce);
+        return ce.function('ListFrom', [value]).evaluate().json;
+      };
+      expect(await elements((ce) => ce.box(call).evaluate())).toEqual(expected);
+      expect(await elements((ce) => ce.box(call).N())).toEqual(expected);
+      expect(await elements((ce) => ce.box(call).evaluateAsync())).toEqual(
+        expected
+      );
+      expect(
+        await elements((ce) =>
+          ce.box(call).evaluateAsync({ numericApproximation: true })
+        )
+      ).toEqual(expected);
+      // A view read by `ListFrom` inside the asynchronous evaluation.
+      expect(
+        await elements((ce) =>
+          ce
+            .function('ListFrom', [ce.box(call)])
+            .evaluateAsync({ numericApproximation: true })
+        )
+      ).toEqual(expected);
+    });
+  }
+
+  test('the asynchronous numeric evaluation of a returned view reads the context of the call', async () => {
+    // As `evaluate({ numericApproximation: true })` of the view: the view
+    // that `g` returned is evaluated in the context of the call of `g`, also
+    // when the evaluation is asynchronous.
+    for (const route of ['evaluate', 'evaluateAsync'] as const) {
+      const ce = engine([
+        ['f', F],
+        ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ]);
+      const view = await ce.box(['g', 10, ['List', 1, 2]]).evaluateAsync();
+      const value =
+        route === 'evaluate'
+          ? view.evaluate({ numericApproximation: true })
+          : await view.evaluateAsync({ numericApproximation: true });
+      expect(ce.function('ListFrom', [value]).evaluate().json).toEqual([
+        'List',
+        10,
+        20,
+      ]);
+    }
+  });
+
+  test('the asynchronous numeric pass of an outer call evaluates a returned view in its own context', async () => {
+    // The asynchronous form of the test of the synchronous numeric pass
+    // above: `H` has `d = 10`, the view was made by `g` with `d = 5`.
+    const ce = engine([
+      ['f', F],
+      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['H', ['Function', ['Block', ['Assign', 'v', ['g', 5, 'xs']], 'v'], 'd', 'xs']],
+    ]);
+    for (const numericApproximation of [false, true]) {
+      const view = await ce
+        .box(['H', 10, ['List', 1, 2]])
+        .evaluateAsync({ numericApproximation });
+      expect(ce.function('ListFrom', [view]).evaluate().json).toEqual([
+        'List',
+        5,
+        10,
+      ]);
+    }
+  });
+});
+
+// A lazy view holds its operands unevaluated, also its callback literal, and
+// a symbol of these operands keeps the binding of its canonicalization. A
+// view that a loop iteration assigns to a variable of an enclosing scope is
+// read after the loop has written another value in its index, or after the
+// call that ran the loop has returned. Before, the view read the index at the
+// read: `[7, 8]` at the top level (with the debug flag, a read of a discarded
+// scope), and `[d + 1, d + 2]` in a function. Now the `Assign` replaces, in
+// the stored view, the locals of the loops and blocks that the variable
+// outlives with their values (`bindOutlivedLocalsOfLazyValue`,
+// `function-utils.ts`).
+describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION', () => {
+  /** The value of the Epsil program `source`, with and without the debug
+   * check of dead bindings. */
+  function run(source: string, debug: boolean): Json {
+    const ce = new ComputeEngine();
+    ce._debugBindings = debug;
+    const r = executeEpsil(ce, source);
+    expect(r.diagnostics).toEqual([]);
+    return r.value!.json;
+  }
+
+  async function runAsync(source: string, debug: boolean): Promise<Json> {
+    const ce = new ComputeEngine();
+    ce._debugBindings = debug;
+    const r = await executeEpsilAsync(ce, source);
+    expect(r.diagnostics).toEqual([]);
+    return r.value!.json;
+  }
+
+  const cases: [string, string, Json][] = [
+    [
+      'a loop index at the top level',
+      'let h = []; for d in [3, 6] { if d == 3 { h = Map(x => x + d, Range(1, Infinity)) } }; ListFrom(Take(h, 2))',
+      ['List', 4, 5],
+    ],
+    [
+      'a loop index in a function',
+      'let b = (n) => do { let h = []; for d in [n, 2 * n] { if d == n { h = Map(x => x + d, Range(1, Infinity)) } }; h }; ListFrom(Take(b(3), 2))',
+      ['List', 4, 5],
+    ],
+    [
+      'a let local of an if block in a function',
+      'let b = (n) => do { let h = []; for d in [n, 2 * n] { if d == n { let k = d; h = Map(x => x + k, Range(1, Infinity)) } }; h }; ListFrom(Take(b(3), 2))',
+      ['List', 4, 5],
+    ],
+    [
+      'a let local in a source operand',
+      'let h = []; for d in [3, 6] { if d == 3 { let k = d; h = Map(x => x, Range(k, Infinity)) } }; ListFrom(Take(h, 2))',
+      ['List', 3, 4],
+    ],
+    [
+      'Filter',
+      'let h = []; for d in [3, 6] { if d == 3 { h = Filter(Range(1, Infinity), x => x > d) } }; ListFrom(Take(h, 2))',
+      ['List', 4, 5],
+    ],
+    [
+      'Scan',
+      'let h = []; for d in [3, 6] { if d == 3 { h = Scan(Range(1, Infinity), (a, x) => a + x + d) } }; ListFrom(Take(h, 3))',
+      ['List', 1, 6, 12],
+    ],
+    [
+      'TakeWhile',
+      'let h = []; for d in [3, 6] { if d == 3 { h = Take(TakeWhile(Range(1, Infinity), x => x < d), 5) } }; ListFrom(h)',
+      ['List', 1, 2],
+    ],
+    [
+      'a finite source, which the assignment lists',
+      'let h = []; for d in [3, 6] { if d == 3 { h = Map(x => x + d, [1, 2]) } }; h',
+      ['List', 4, 5],
+    ],
+    [
+      'a nested loop',
+      'let h = []; for c in [1, 2] { for d in [10 * c, 20 * c] { if d == 20 { h = Map(x => x + d + c, Range(1, Infinity)) } } }; ListFrom(Take(h, 2))',
+      ['List', 23, 24],
+    ],
+    [
+      'a view per iteration in a list',
+      'let hs = []; for d in [3, 6] { hs = [...hs, Map(x => x + d, Range(1, Infinity))] }; [ListFrom(Take(hs[1], 2)), ListFrom(Take(hs[2], 2))]',
+      ['List', ['List', 4, 5], ['List', 7, 8]],
+    ],
+    [
+      'a comprehension index',
+      'let h = []; let r = [do { if i == 2 { h = Map(x => x + i, Range(1, Infinity)) }; i } for i in 1..3]; ListFrom(Take(h, 2))',
+      ['List', 3, 4],
+    ],
+    [
+      'a variable of the scope of the stored variable is read at the read',
+      'let h = []; let m = 1; for d in [3] { h = Map(x => x + m, Range(1, Infinity)) }; m = 50; ListFrom(Take(h, 2))',
+      ['List', 51, 52],
+    ],
+  ];
+
+  for (const debug of [false, true])
+    for (const [name, source, expected] of cases)
+      test(`${name}${debug ? ', with the debug check' : ''}`, () => {
+        expect(run(source, debug)).toEqual(expected);
+      });
+
+  for (const debug of [false, true])
+    test(`the asynchronous route${debug ? ', with the debug check' : ''}`, async () => {
+      for (const [, source, expected] of cases.slice(0, 4))
+        expect(await runAsync(source, debug)).toEqual(expected);
+    });
+
+  test('a view read in its own iteration reads the index of the iteration', () => {
+    for (const debug of [false, true])
+      expect(
+        run(
+          'let s = []; for d in [3, 6] { let v = Map(x => x + d, Range(1, Infinity)); s = [...s, ListFrom(Take(v, 2))] }; s',
+          debug
+        )
+      ).toEqual(['List', ['List', 4, 5], ['List', 7, 8]]);
+  });
+});
+
+// The review cases of the assignment rule above
+// (`bindOutlivedLocalsOfLazyValue`, `function-utils.ts`).
+describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
+  function run(source: string, debug: boolean): Json {
+    const ce = new ComputeEngine();
+    ce._debugBindings = debug;
+    const r = executeEpsil(ce, source);
+    expect(r.diagnostics).toEqual([]);
+    return r.value!.json;
+  }
+
+  const cases: [string, string, Json][] = [
+    [
+      'a view over a local that holds a view of the iteration',
+      'let h = []; for d in [3, 6] { if d == 3 { let v = Map(x => x + d, Range(1, Infinity)); h = Map(y => y, v) } }; ListFrom(Take(h, 2))',
+      ['List', 4, 5],
+    ],
+    [
+      'a Take of a local that holds a view of the iteration',
+      'let h = []; for d in [3, 6] { if d == 3 { let v = Map(x => x + d, Range(1, Infinity)); h = Take(v, 3) } }; h',
+      ['List', 4, 5, 6],
+    ],
+    [
+      'an inner let local that shadows an outer one',
+      'let h = []; for d in [3, 6] { let k = 100; if d > 0 { let k = d; h = Map(x => x + k, Range(1, Infinity)) } }; ListFrom(Take(h, 2))',
+      ['List', 7, 8],
+    ],
+    [
+      'a constant of the library under a local of the same name',
+      'let h = []; let v = Map(x => x + Pi, Range(1, Infinity)); if true { let Pi = 3; h = v }; ListFrom(Take(h, 1))',
+      ['List', ['Add', 1, 'Pi']],
+    ],
+    [
+      'a destructuring assignment',
+      'let a = []; let z = 1; for d in [3, 6] { if d == 3 { (a, z) := (Map(x => x + d, Range(1, Infinity)), 0) } }; ListFrom(Take(a, 2))',
+      ['List', 4, 5],
+    ],
+    [
+      'a view in a dictionary',
+      'let r = 0; for d in [3, 6] { if d == 3 { r = {"a" -> Map(x => x + d, Range(1, Infinity))} } }; ListFrom(Take(r["a"], 2))',
+      ['List', 4, 5],
+    ],
+    [
+      'a destructuring assignment is simultaneous',
+      'let h = []; for i in [1] { let d = 1; (d, h) := (2, Map(x => x + d, Range(1, Infinity))) }; ListFrom(Take(h, 2))',
+      ['List', 2, 3],
+    ],
+    [
+      'a call of the innermost of two locals that hold a function',
+      'let h = []; for i in [1] { let f = (x) => x + 100; if true { let f = (x) => x + 10; h = Map(x => f(x), Range(1, Infinity)) } }; ListFrom(Take(h, 2))',
+      ['List', 11, 12],
+    ],
+    [
+      'a held view is not a value and keeps its symbols',
+      'let h = []; for d in [3, 6] { if d == 3 { h = Hold(Map(x => x + d, Range(1, Infinity))) } }; h',
+      [
+        'Hold',
+        [
+          'Map',
+          ['Function', ['Add', 'x', 'd'], 'x'],
+          ['Range', 1, 'PositiveInfinity'],
+        ],
+      ],
+    ],
+    [
+      'a field of an object of an outer variable',
+      'type Box = object{v: any}; let o = Box(v: []); for d in [3, 6] { if d == 3 { o.v = Map(x => x + d, Range(1, Infinity)) } }; ListFrom(Take(o.v, 2))',
+      ['List', 4, 5],
+    ],
+    // A view stored in a field reads the locals of every loop and block of
+    // the chain with their values at the store, also a local of the scope
+    // of its object: the name of the receiver does not tell how long the
+    // object lives. The last store reads `total = 10`.
+    [
+      'a field reads a local of the scope of its object at the store',
+      'type Box = object{v: any}; let r = 0; if true { let total = 0; let o = Box(v: []); for i in [1, 2] { o.v = Map(x => x + total, Range(1, Infinity)); total = total + 10 }; r = ListFrom(Take(o.v, 2)) }; r',
+      ['List', 11, 12],
+    ],
+    // An alias in an inner scope names the object of `o`: the view reads
+    // the `i` of the last iteration, not a discarded one.
+    [
+      'a field stored through an alias in the loop',
+      'type Box = object{v: any}; let o = Box(v: []); for i in [1, 2] { let p = o; p.v = Map(x => x + i, Range(1, Infinity)) }; ListFrom(Take(o.v, 2))',
+      ['List', 3, 4],
+    ],
+    [
+      'a field stored through a parameter of a function of the loop',
+      'type Box = object{v: any}; let o = Box(v: []); for i in [1, 2] { function g(p: Box) { p.v = Map(x => x + i, Range(1, Infinity)) }; g(o) }; ListFrom(Take(o.v, 2))',
+      ['List', 3, 4],
+    ],
+    // The branches of an `If` are values: the `If` stays unevaluated while
+    // `c` is free, and its view is read when `c` gets a value.
+    [
+      'a view in a branch of an If with a free condition',
+      'let h = []; for i in [1, 2] { h = If(c, Map(x => x + i, Range(1, Infinity)), Range(1, Infinity)) }; c = True; ListFrom(Take(h, 2))',
+      ['List', 3, 4],
+    ],
+    [
+      'a view under a node that stays unevaluated',
+      'let r = 0; for d in [3, 6] { if d == 3 { r = ListFrom(TakeWhile(Range(1, Infinity), x => x < d)) } }; r',
+      [
+        'ListFrom',
+        [
+          'TakeWhile',
+          ['Range', 1, 'PositiveInfinity'],
+          ['Function', ['Block', ['Less', 'x', 3]], 'x'],
+        ],
+      ],
+    ],
+  ];
+
+  for (const debug of [false, true])
+    for (const [name, source, expected] of cases)
+      test(`${name}${debug ? ', with the debug check' : ''}`, () => {
+        expect(run(source, debug)).toEqual(expected);
+      });
+
+  test('a call of a local that a local of an inner block shadows with a number', () => {
+    // The inner `f` holds `5`, not a function. The view read after the
+    // blocks gives the same elements as the view read in the inner block.
+    const blocks = (read: string) =>
+      `let h = []; let r = 0; if true { let f = x => x + 1; if true { let f = 5; h = Map(x => f(x), Range(1, Infinity))${read} } }`;
+    for (const debug of [false, true])
+      expect(
+        run(`${blocks('')}; ListFrom(Take(h, 2))`, debug)
+      ).toEqual(run(`${blocks('; r = ListFrom(Take(h, 2))')}; r`, debug));
+  });
+
+  test('a value that nests tuples of a view', () => {
+    // `a1 = (a0, a0)`, ..., `a8 = (a7, a7)`. The depth is small: the
+    // evaluation of `(a0, a0)` makes a new view for each occurrence, so the
+    // value holds 2^8 views, and each one is rewritten.
+    const DEPTH = 8;
+    const lets = [
+      'let a0 = Map(x => x + d, Range(1, Infinity))',
+      ...Array.from(
+        { length: DEPTH },
+        (_, i) => `let a${i + 1} = (a${i}, a${i})`
+      ),
+    ];
+    const path = '[2]'.repeat(DEPTH);
+    for (const debug of [false, true])
+      expect(
+        run(
+          `let h = 0; for d in [3, 6] { if d == 3 { ${lets.join('; ')}; h = a${DEPTH} } }; ListFrom(Take(h${path}, 2))`,
+          debug
+        )
+      ).toEqual(['List', 4, 5]);
+  });
+
+  test('a view assigned from a block in a Sum, synchronous and asynchronous', async () => {
+    // The body of the `Sum` is a block whose local `m` holds the index. The
+    // asynchronous route runs the block in an activation of its scope. Each
+    // route has its own engine: with the debug check, `evaluateAsync()` of
+    // a `Sum` with a block body after its `evaluate()` reports a read of
+    // the discarded index `k`, also when the block assigns no view.
+    for (const [debug, routes] of [
+      [false, ['evaluate', 'evaluateAsync']],
+      [false, ['evaluateAsync']],
+      [true, ['evaluate']],
+      [true, ['evaluateAsync']],
+    ] as const) {
+      const ce = new ComputeEngine();
+      ce._debugBindings = debug;
+      ce.assign('h', ce.box(['List']));
+      const sum = ce.box([
+        'Sum',
+        [
+          'Block',
+          ['Declare', 'm', 'integer'],
+          ['Assign', 'm', 'k'],
+          [
+            'If',
+            ['Equal', 'k', 2],
+            [
+              'Assign',
+              'h',
+              [
+                'Map',
+                ['Function', ['Add', 'x', 'm'], 'x'],
+                ['Range', 1, 'PositiveInfinity'],
+              ],
+            ],
+            'Nothing',
+          ],
+          0,
+        ],
+        ['Limits', 'k', 1, 3],
+      ]);
+      const read = () =>
+        ce.box(['ListFrom', ['Take', 'h', 2]]).evaluate().json;
+      for (const route of routes) {
+        ce.assign('h', ce.box(['List']));
+        if (route === 'evaluate') sum.evaluate();
+        else await sum.evaluateAsync();
+        expect(read()).toEqual(['List', 3, 4]);
+      }
     }
   });
 });

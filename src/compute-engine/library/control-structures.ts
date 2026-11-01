@@ -6138,7 +6138,35 @@ function* comprehensionStream(
     // use for the duration of the advance makes that inner application (and
     // any inner walk of the same comprehension) save and restore them. See
     // `enterNestedBodyScopes`.
-    const nested = enterNestedBodyScopes(expr);
+    //
+    // The index scope of the comprehension is marked as in use too, as a
+    // `Loop` marks its own scope, but it is not saved: the index frame above
+    // puts back the values of each walk. A function literal that the body
+    // evaluates (a closure that an element assigns to an outer variable)
+    // then captures the scopes that are in use (`captureNestedLocals`,
+    // `function-utils.ts`): it gets a copy of the index with the value of
+    // its element, and its chain reaches the frame of the call that runs the
+    // comprehension. Without the mark, the capture stopped below the index
+    // scope: with `h = (x) => x` and
+    // `b = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]];
+    // ListFrom(c); 0 }`, the call `b(1)` then `h(1)` gave `d + 1`, not `4`.
+    // An element that is itself a function literal (`[x => x + i for i in
+    // 1..3]`) is captured in the same way when the body evaluates it. Its
+    // symbols keep the binding of the index that they got at
+    // canonicalization, so the substitution of the index values below still
+    // replaces them, and the elements are `x ↦ x + 1`, `x ↦ x + 2`, ... as
+    // before. Each such element now also costs one snapshot of the index
+    // scope and one rebuild of the literal.
+    //
+    // While the index scope is marked, two other functions of
+    // `function-utils.ts` see it as in use: `copyChainToLeaving` replaces it,
+    // in a chain that it copies at the end of a call, by a snapshot that
+    // holds the index value of the element, and `rerootingIsNoop` never
+    // treats a re-rooting through it as a no-op.
+    const nested = enterNestedBodyScopes(expr, {
+      includeRoot: true,
+      saveRoot: false,
+    });
     try {
       r = inner.next();
     } finally {

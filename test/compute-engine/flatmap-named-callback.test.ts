@@ -129,3 +129,22 @@ describe('FlatMap with a callback whose result is a tuple', () => {
     expect(show(evaluate(['Count', ['FlatMap', SOURCE, callback]]))).toBe('4');
   });
 });
+
+// An empty source gives no inner result, so the view is empty and finite
+// whatever the callback returns, also a callback whose result has no fixed
+// length (`Range(1, x)`) or is infinite (`Range(1, ∞)`).
+describe('FlatMap over an empty source', () => {
+  test.each([
+    ['open-length result', ['Function', ['Range', 1, 'x'], 'x']],
+    ['infinite result', ['Function', ['Range', 1, 'PositiveInfinity'], 'x']],
+    ['named function', 'twice'],
+  ])('%s', (_label, callback) => {
+    const view = ['FlatMap', ['List'], callback];
+    expect(ce.box(view as any).isFiniteCollection).toBe(true);
+    expect(show(evaluate(['ListFrom', view]))).toBe('["List"]');
+    expect(show(evaluate(['Count', view]))).toBe('0');
+    expect(show(evaluate(['Sum', view]))).toBe('0');
+    expect(show(evaluate(['Reduce', view, 'Add', 0]))).toBe('0');
+    expect(show(evaluate(['Max', view]))).toBe('"NaN"');
+  });
+});

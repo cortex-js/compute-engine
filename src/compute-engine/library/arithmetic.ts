@@ -505,6 +505,9 @@ import {
   resolveShapedTypeAlias,
   unionHasGenuineScalarBranch,
   isWalkableFiniteCollection,
+  listedFlatMapView,
+  listedFlatMapViewAsync,
+  isInfiniteListing,
   shapedOrPlainListType,
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
@@ -14241,6 +14244,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // hang the thread and bypass `engine._timeRemaining`. A finite
           // collection whose iterator declines (symbolic elements) would
           // silently fold to 0 — stay symbolic too.
+          // A `FlatMap` with no known finiteness over a finite source is
+          // listed first (`listedFlatMapView`): `Sum(FlatMap([1, 2], x ↦
+          // Range(1, x)))` is `4`. A view that the walk finds infinite stays
+          // unevaluated, as any infinite collection does, and another error
+          // of the evaluation of the view is the answer.
+          const listed = listedFlatMapView(first, {
+            operator: 'Sum',
+            index: 1,
+          });
+          if (isFunction(listed, 'List')) first = listed;
+          else if (listed !== undefined && !isInfiniteListing(listed))
+            return listed;
           if (first.isFiniteCollection !== true) return undefined;
           // A `Range` with exact rational bounds and step is summed with the
           // closed form of an arithmetic sequence, not walked: see
@@ -14472,6 +14487,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               _contextStack,
               _precisionWindow,
             });
+          // A `FlatMap` with no known finiteness is listed as in the sync
+          // handler, with `evaluateAsync()` and the options of this
+          // evaluation, so that its callback runs in the context of the
+          // evaluation.
+          const pendingList = listedFlatMapViewAsync(
+            first,
+            { signal, _effects: effects, _contextStack, _precisionWindow },
+            { operator: 'Sum', index: 1 }
+          );
+          if (pendingList !== undefined) {
+            const listed = await pendingList;
+            if (isFunction(listed, 'List')) first = listed;
+            else if (listed !== undefined && !isInfiniteListing(listed))
+              return listed;
+          }
           if (first.isFiniteCollection !== true) return undefined;
           // An exact `Range` has a closed form — see the sync handler.
           const closedForm = rangeSumClosedForm(
@@ -16495,7 +16525,19 @@ function evaluateMinMax(
   let sawNaN = false;
   const walk: ExtremumWalk = { inexact: false, machineLists: [] };
 
-  for (const op of ops) {
+  for (const operand of ops) {
+    // A `FlatMap` with no known finiteness over a finite source is listed
+    // first (`listedFlatMapView`): `Max(FlatMap([1, 2], x ↦ Range(1, x)))`
+    // is `2`. A view that the walk finds infinite is kept, and stays
+    // symbolic as any infinite collection does. Another error of the
+    // evaluation of the view is the answer. The operands were flattened, so
+    // the position of `operand` in the call as written is not known, and no
+    // frame is added.
+    const listed = listedFlatMapView(operand);
+    if (listed !== undefined && !isFunction(listed, 'List')) {
+      if (!isInfiniteListing(listed)) return listed;
+    }
+    const op = isFunction(listed, 'List') ? listed : operand;
     const [val, others] = processMinMaxItem(op, mode, walk);
     // An error (a dictionary operand or element) is the answer of the whole
     // extremum, as it is for `Sum`.

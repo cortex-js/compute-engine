@@ -23,6 +23,7 @@ import {
   asyncEvaluationOf,
   beginAsyncEvaluation,
   beginTopLevelEvaluation,
+  contextStackLike,
   copyContextStack,
   joinAsyncEvaluation,
   topLevelEvaluationEpoch,
@@ -463,7 +464,9 @@ import {
 import {
   eachInLazyViewContext,
   inLazyViewContext,
+  lazyViewContextStack,
   noteLazyViewCanonicalized,
+  noteNodeScope,
   recordLazyViewContext,
 } from './lazy-view-context.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
@@ -1633,6 +1636,9 @@ export class BoxedFunction
       store !== undefined && !!options?.numericStoreFloats;
     this._opsStorage = ops;
     this._localScope = options?.scope;
+    // A closure made in the node can keep the definitions of its scope
+    // (`retainScopesReachedByLiteral`, `function-utils.ts`).
+    if (options?.scope !== undefined) noteNodeScope(options.scope);
 
     this._isStructural = options?.structural ?? false;
     if (options?.canonical || this._isStructural) {
@@ -5126,6 +5132,18 @@ export class BoxedFunction
         contextStack
       ));
     else contextStack = joinAsyncEvaluation(this.engine, contextStack!);
+    // A lazy callback view made during a function call is evaluated in the
+    // context of that call, as in `evaluate()` (`lazy-view-context.ts`): the
+    // numeric pass of an outer call rewrites the callback of `Map(f, xs)`
+    // and fills the default of a parameter of `f` by its name, which must
+    // give the value of the call that made the view. The creation context
+    // is chosen against the stack of this evaluation, and the new stack
+    // stays a part of this evaluation.
+    if (this.operatorDefinition?.collection?.callsCallbackOnRead === true) {
+      const recorded = lazyViewContextStack(this, contextStack!);
+      if (recorded !== undefined)
+        contextStack = contextStackLike(contextStack!, recorded);
+    }
     const effects =
       options?._effects ??
       this.engine._evaluationEffects ??
@@ -8766,72 +8784,96 @@ export class BoxedFunction
               options,
               this.operator
             );
-        const liftError = this._liftedOperandError(bops);
-        if (liftError !== undefined) return liftError;
-        // The matrix power of a square matrix (mirrors the sync path).
-        if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
-          const matrixPower = squareMatrixPower(
-            this.engine,
-            bops,
-            options,
-            this._ops![1]
-          );
-          if (matrixPower !== undefined)
-            return matrixPower.evaluateAsync(options);
-        }
-        const mismatch = broadcastLengthMismatch(this.engine, bops);
-        if (mismatch) return mismatch;
-        // A lift can be a set only when it is evaluated (mirrors the sync
-        // path).
-        const unindexed = unindexedOperandBroadcast(def, bops);
-        if (unindexed === 'veto')
-          return this._withSameBinding(bops).evaluateAsync(options);
+        // The rest of this step runs synchronously after the `await` above,
+        // when the engine no longer has the context stack of this evaluation
+        // installed. It reads the operands in that stack: a lazy operand
+        // such as `Map(f, xs)` in the body of a function literal reads the
+        // parameter `xs` from the frame of the call. Outside that stack,
+        // `xs` had no value, so the broadcast of `1 + Map(f, xs)` read an
+        // empty view and gave `[]`, and `-Map(f, xs)` did not end. Put the
+        // registry and the context stack in place again for it.
+        return this.engine.withEvaluationContext(
+          options,
+          (): Expression | Promise<Expression> => {
+            const liftError = this._liftedOperandError(bops);
+            if (liftError !== undefined) return liftError;
+            // The matrix power of a square matrix (mirrors the sync path).
+            if (
+              this.operator === 'Power' &&
+              this._isBoundToLibraryDefinition()
+            ) {
+              const matrixPower = squareMatrixPower(
+                this.engine,
+                bops,
+                options,
+                this._ops![1]
+              );
+              if (matrixPower !== undefined)
+                return matrixPower.evaluateAsync(options);
+            }
+            const mismatch = broadcastLengthMismatch(this.engine, bops);
+            if (mismatch) return mismatch;
+            // A lift can be a set only when it is evaluated (mirrors the
+            // sync path).
+            const unindexed = unindexedOperandBroadcast(def, bops);
+            if (unindexed === 'veto')
+              return this._withSameBinding(bops).evaluateAsync(options);
 
-        // A lazy `Map` operand is read through its numeric callback under
-        // `.N()`, except by a jump operator (mirrors the sync path).
-        const cellOps =
-          numericApproximation && !JUMP_BROADCAST_OPERATORS.has(this.operator)
-            ? bops.map(
-                (op) =>
-                  (op.isLazyCollection &&
-                    lazyMapNumericApproximation(this.engine, op)) ||
-                  op
+            // A lazy `Map` operand is read through its numeric callback
+            // under `.N()`, except by a jump operator (mirrors the sync
+            // path).
+            const cellOps =
+              numericApproximation &&
+              !JUMP_BROADCAST_OPERATORS.has(this.operator)
+                ? bops.map(
+                    (op) =>
+                      (op.isLazyCollection &&
+                        lazyMapNumericApproximation(this.engine, op)) ||
+                      op
+                  )
+                : bops;
+
+            const lazy = withCallableBinding(this, () =>
+              lazyBroadcastMapIfNeeded(
+                this.engine,
+                this.operator,
+                cellOps,
+                isBroadcastableCollection,
+                numericApproximation
               )
-            : bops;
+            );
+            if (lazy) return lazy;
 
-        const lazy = withCallableBinding(this, () =>
-          lazyBroadcastMapIfNeeded(
-            this.engine,
-            this.operator,
-            cellOps,
-            isBroadcastableCollection,
-            numericApproximation
-          )
-        );
-        if (lazy) return lazy;
+            const items =
+              unindexed === 'lift'
+                ? zipLiftingUnindexed(cellOps)
+                : zip(cellOps);
+            if (!items) return this.engine._fn('List', []);
 
-        const items =
-          unindexed === 'lift' ? zipLiftingUnindexed(cellOps) : zip(cellOps);
-        if (!items) return this.engine._fn('List', []);
+            const results: Promise<Expression>[] = [];
+            while (true) {
+              const { done, value } = items.next();
+              if (done) break;
 
-        const results: Promise<Expression>[] = [];
-        while (true) {
-          const { done, value } = items.next();
-          if (done) break;
+              results.push(this._withSameBinding(value).evaluateAsync(options));
+            }
 
-          results.push(this._withSameBinding(value).evaluateAsync(options));
-        }
-
-        // Always wrap in a `List` — even a single-element broadcast — so the
-        // value matches the `list<E>` broadcast type, and a lone empty
-        // operand answers the empty list (mirrors the sync path). An absent
-        // point cell answers `Missing`, not `NaN` (mirrors the sync path).
-        return Promise.all(results).then((resolved) =>
-          markAbsentPointCells(
-            this.engine,
-            this,
-            this.engine._fn('List', resolved)
-          )
+            // Always wrap in a `List` — even a single-element broadcast — so
+            // the value matches the `list<E>` broadcast type, and a lone
+            // empty operand answers the empty list (mirrors the sync path).
+            // An absent point cell answers `Missing`, not `NaN` (mirrors the
+            // sync path). The list is built after an `await`, so in the
+            // context of this evaluation too.
+            return Promise.all(results).then((resolved) =>
+              this.engine.withEvaluationContext(options, () =>
+                markAbsentPointCells(
+                  this.engine,
+                  this,
+                  this.engine._fn('List', resolved)
+                )
+              )
+            );
+          }
         );
       }
 
@@ -8898,53 +8940,70 @@ export class BoxedFunction
           options,
           this.operator
         );
-        const liftError = this._liftedOperandError(bops);
-        if (liftError !== undefined) return liftError;
-        const mismatch = broadcastLengthMismatch(this.engine, bops);
-        if (mismatch) return mismatch;
+        // The steps below run synchronously after the `await` above, when the
+        // engine no longer has the context stack of this evaluation
+        // installed, and they read the operands in that stack: a lazy
+        // operand such as `Map(f, xs)` in the body of a function literal
+        // reads the parameter `xs` from the frame of the call. Outside that
+        // stack, `xs` had no value, and `g(Map(f, xs))` gave `[]`. Put the
+        // registry and the context stack in place again for them. The result
+        // is the answer of the step, the promises of its cells, or
+        // `undefined` when there is nothing to zip.
+        const cells = this.engine.withEvaluationContext(
+          options,
+          (): Expression | Promise<Expression>[] | undefined => {
+            const liftError = this._liftedOperandError(bops);
+            if (liftError !== undefined) return liftError;
+            const mismatch = broadcastLengthMismatch(this.engine, bops);
+            if (mismatch) return mismatch;
 
-        const lazy = withCallableBinding(this, () =>
-          lazyBroadcastMapIfNeeded(
-            this.engine,
-            this.operator,
-            bops,
-            isBroadcastableCollection,
-            numericApproximation
-          )
-        );
-        if (lazy) return lazy;
-
-        const items = zipBroadcast(bops, isBroadcastableCollection);
-        if (items) {
-          const results: Promise<Expression>[] = [];
-          while (true) {
-            const { done, value } = items.next();
-            if (done) break;
-            // `Promise.all` cannot attribute a rejection to a slot, but each
-            // promise is created in a KNOWN one: enrich per element, where the
-            // index is still in hand. The outer handler below stays as a
-            // backstop and does not double-annotate (the enrichment is
-            // idempotent).
-            const index = results.length + 1;
-            results.push(
-              this.engine
-                ._fn(this.operator, value)
-                .evaluateAsync(options)
-                .catch((e) => {
-                  throw withBroadcastThrowContext(
-                    e,
-                    this.operator,
-                    bops,
-                    index
-                  );
-                })
+            const lazy = withCallableBinding(this, () =>
+              lazyBroadcastMapIfNeeded(
+                this.engine,
+                this.operator,
+                bops,
+                isBroadcastableCollection,
+                numericApproximation
+              )
             );
+            if (lazy) return lazy;
+
+            const items = zipBroadcast(bops, isBroadcastableCollection);
+            if (!items) return undefined;
+            const results: Promise<Expression>[] = [];
+            while (true) {
+              const { done, value } = items.next();
+              if (done) break;
+              // `Promise.all` cannot attribute a rejection to a slot, but
+              // each promise is created in a KNOWN one: enrich per element,
+              // where the index is still in hand. The outer handler below
+              // stays as a backstop and does not double-annotate (the
+              // enrichment is idempotent).
+              const index = results.length + 1;
+              results.push(
+                this.engine
+                  ._fn(this.operator, value)
+                  .evaluateAsync(options)
+                  .catch((e) => {
+                    throw withBroadcastThrowContext(
+                      e,
+                      this.operator,
+                      bops,
+                      index
+                    );
+                  })
+              );
+            }
+            return results;
           }
+        );
+        if (cells !== undefined && !Array.isArray(cells)) return cells;
+        if (cells !== undefined) {
           // Element-wise context — mirrors the sync step 2b.
           // The listing of the cells evaluates synchronously after the
           // `await`, so it runs with the capability registry and the context
           // stack of this evaluation put in place again.
-          return Promise.all(results).then(
+          return Promise.all(cells).then(
             (resolved) =>
               this.engine.withEvaluationContext(options, () =>
                 this.engine._fn(
@@ -9113,8 +9172,16 @@ export class BoxedFunction
       // path's step 3b. Runs after the materialization step above, so an
       // explicit materialization still wins.
       //
+      // The new callback is canonicalized, and a parameter default that it
+      // fills (`d` of `f := (x, k = d) => x·k` in `Map(f, xs)`) is bound by
+      // name in the current scope. This step can run after an `await`, when
+      // the engine's stack is not the stack of this evaluation: the
+      // rewrite runs on the stack of this evaluation, which holds the frame
+      // of the function call in progress.
       if (numericApproximation && !def.evaluate && this.isLazyCollection) {
-        const nLazy = lazyMapNumericApproximation(this.engine, this);
+        const nLazy = this.engine.withEvaluationContext(options, () =>
+          lazyMapNumericApproximation(this.engine, this)
+        );
         if (nLazy) return nLazy;
       }
 
@@ -11657,7 +11724,7 @@ const CALLBACK_SLOTS = new WeakMap<
  * (`selectsOperands`) or inspects errors (`inspectsErrors`) has no callback
  * parameter here either: it decides itself what an error operand gives.
  */
-function callbackSlots(def: BoxedOperatorDefinition): readonly number[] {
+export function callbackSlots(def: BoxedOperatorDefinition): readonly number[] {
   const cached = CALLBACK_SLOTS.get(def);
   if (cached !== undefined && cached.version === def._writeVersion)
     return cached.slots;
@@ -18236,74 +18303,110 @@ async function declaredBroadcastAsync(
   options: Partial<EvaluateOptions> | undefined,
   canonicalOps?: ReadonlyArray<Expression>
 ): Promise<Expression | undefined> {
-  if (declaredWholeAbsence(plan, ops, canonicalOps)) return ce.Missing;
-  const setup = setupDeclaredBroadcast(
-    ce,
-    operator,
-    literal,
-    plan,
-    ops,
-    isBroadcastOperand,
-    options?.numericApproximation ?? false
-  );
-  if (!setup) return undefined;
-  if (setup.value) return setup.value;
+  // The caller awaits the evaluation of the operands first, so this runs
+  // when the engine no longer has the context stack of the evaluation
+  // installed. The setup and the rows read the operands in that stack: a
+  // lazy operand such as `Map(f, xs)` in the body of a function literal
+  // reads the parameter `xs` from the frame of the call, and outside that
+  // stack `xs` has no value. Put the registry and the context stack in
+  // place again for the steps that run before the first `await`.
+  const prepared = ce.withEvaluationContext(
+    options,
+    ():
+      | { value: Expression | undefined }
+      | {
+          mapped: Expression[];
+          results: Promise<Expression>[];
+        } => {
+      if (declaredWholeAbsence(plan, ops, canonicalOps))
+        return { value: ce.Missing };
+      const setup = setupDeclaredBroadcast(
+        ce,
+        operator,
+        literal,
+        plan,
+        ops,
+        isBroadcastOperand,
+        options?.numericApproximation ?? false
+      );
+      if (!setup) return { value: undefined };
+      if (setup.value) return { value: setup.value };
 
-  const results: Promise<Expression>[] = [];
-  while (true) {
-    const { done, value } = setup.rows.next();
-    if (done) break;
-    // As in the async step 2b: `Promise.all` cannot attribute a rejection to a
-    // slot, but each promise is created in a KNOWN one.
-    const index = results.length + 1;
-    if (hasAbsentPoint(plan, value, setup.mask)) {
-      results.push(Promise.resolve(ce.Missing));
-      continue;
-    }
-    const toCells = mapsToCells(plan, value, setup.mask, isBroadcastOperand);
-    const error = toCells
-      ? declaredElementError(ce, plan, value, setup.mask, isBroadcastOperand)
-      : undefined;
-    if (error !== undefined) {
-      results.push(Promise.resolve(error));
-      continue;
-    }
-    const cells = toCells
-      ? declaredBroadcastAsync(
-          ce,
-          operator,
-          literal,
+      const results: Promise<Expression>[] = [];
+      while (true) {
+        const { done, value } = setup.rows.next();
+        if (done) break;
+        // As in the async step 2b: `Promise.all` cannot attribute a
+        // rejection to a slot, but each promise is created in a KNOWN one.
+        const index = results.length + 1;
+        if (hasAbsentPoint(plan, value, setup.mask)) {
+          results.push(Promise.resolve(ce.Missing));
+          continue;
+        }
+        const toCells = mapsToCells(
           plan,
           value,
-          isBroadcastOperand,
-          options
-        )
-      : undefined;
-    results.push(
-      (cells !== undefined
-        ? cells.then(
-            (x) =>
-              x ??
-              declaredBroadcastElement(
+          setup.mask,
+          isBroadcastOperand
+        );
+        const error = toCells
+          ? declaredElementError(
+              ce,
+              plan,
+              value,
+              setup.mask,
+              isBroadcastOperand
+            )
+          : undefined;
+        if (error !== undefined) {
+          results.push(Promise.resolve(error));
+          continue;
+        }
+        const cells = toCells
+          ? declaredBroadcastAsync(
+              ce,
+              operator,
+              literal,
+              plan,
+              value,
+              isBroadcastOperand,
+              options
+            )
+          : undefined;
+        results.push(
+          (cells !== undefined
+            ? cells.then(
+                // The element is built after an `await`, so in the context
+                // of this evaluation too.
+                (x) =>
+                  x ??
+                  ce.withEvaluationContext(options, () =>
+                    declaredBroadcastElement(
+                      ce,
+                      literal,
+                      plan,
+                      value,
+                      setup.mask
+                    ).evaluateAsync(options)
+                  )
+              )
+            : declaredBroadcastElement(
                 ce,
                 literal,
                 plan,
                 value,
                 setup.mask
               ).evaluateAsync(options)
-          )
-        : declaredBroadcastElement(
-            ce,
-            literal,
-            plan,
-            value,
-            setup.mask
-          ).evaluateAsync(options)
-      ).catch((e) => {
-        throw withBroadcastThrowContext(e, operator, setup.mapped, index);
-      })
-    );
-  }
+          ).catch((e) => {
+            throw withBroadcastThrowContext(e, operator, setup.mapped, index);
+          })
+        );
+      }
+      return { mapped: setup.mapped, results };
+    }
+  );
+  if ('value' in prepared) return prepared.value;
+  const { mapped, results } = prepared;
   // The listing of the cells evaluates synchronously after the `await`, so
   // it runs with the capability registry and the context stack of this
   // evaluation put in place again.
@@ -18319,7 +18422,7 @@ async function declaredBroadcastAsync(
         )
       ),
     (e) => {
-      throw withBroadcastThrowContext(e, operator, setup.mapped);
+      throw withBroadcastThrowContext(e, operator, mapped);
     }
   );
 }

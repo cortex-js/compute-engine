@@ -1993,6 +1993,11 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
 
   test('a saved call: the default of a new literal reads the scope of the call', () => {
     const ce = new ComputeEngine();
+    // The host keeps `e`, boxed while the pushed scope was active, and
+    // evaluates it again after `popScope()`. The debug check of dead bindings
+    // (`CE_DEBUG_BINDINGS`) reports every use of a binding of a popped scope,
+    // so it would throw here by design. The value is the subject of this test.
+    ce._debugBindings = false;
     ce.declare('d', 'integer');
     ce.assign('d', 1);
     ce.assign('f', ce.box(defaultedLiteral(2)));

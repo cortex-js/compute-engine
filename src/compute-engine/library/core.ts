@@ -69,6 +69,7 @@ import {
 
 import {
   apply,
+  bindOutlivedLocalsOfLazyValue,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
@@ -3508,8 +3509,21 @@ function randomListType(
  * run) that the stored value still names is read when the value is stored
  * (`snapshotRunVariables`): a plain value is copied at the assignment.
  */
-function assignedValue(ce: ComputeEngine, value: Expression): Expression {
-  return snapshotRunVariables(ce, listedAssignedValue(ce, value));
+function assignedValue(
+  ce: ComputeEngine,
+  value: Expression,
+  /** The variable that stores the value. A lazy collection of the value
+   * then reads the locals of the loops and blocks that the variable
+   * outlives with their values now (`bindOutlivedLocalsOfLazyValue`).
+   * Omitted for a store in the current scope (`Declare`), or when the
+   * caller applies the rule for each target itself (a destructuring
+   * `Assign`). */
+  target?: string
+): Expression {
+  const stored = snapshotRunVariables(ce, listedAssignedValue(ce, value));
+  return target === undefined
+    ? stored
+    : bindOutlivedLocalsOfLazyValue(ce, target, stored);
 }
 
 /** `assignedValue` without the copy of the variables of the run: the lazy
@@ -3946,11 +3960,17 @@ function bindTuplePattern(
   pattern: Expression,
   v: Expression,
   bindOne: (name: string, value: Expression) => Expression | null,
-  validateOne?: (name: string, value: Expression) => Expression | null
+  validateOne?: (name: string, value: Expression) => Expression | null,
+  /** The value to store for each leaf, computed for every leaf before any
+   * leaf is validated or written, so that the assignment stays
+   * simultaneous. */
+  prepareOne?: (name: string, value: Expression) => Expression
 ): Expression | null {
   const pairs: [name: string, value: Expression][] = [];
   const err = collectTuplePattern(pattern, v, pairs);
   if (err) return err;
+  if (prepareOne)
+    for (const pair of pairs) pair[1] = prepareOne(pair[0], pair[1]);
   if (validateOne) {
     for (const [name, value] of pairs) {
       const e = validateOne(name, value);
@@ -13534,7 +13554,11 @@ function* assignSteps(
           throw e;
         }
         return null;
-      }
+      },
+      // A lazy collection of a leaf reads the locals that its target
+      // outlives with their values before any leaf is written
+      // (`bindOutlivedLocalsOfLazyValue`).
+      (name, el) => bindOutlivedLocalsOfLazyValue(ce, name, el)
     );
     return err ?? val;
   }
@@ -13602,7 +13626,21 @@ function* assignSteps(
     // (`undefined`) costs the RHS nothing and leaves the protocol route below
     // to evaluate it exactly once itself.
     const target = objectFieldStoreTarget(op1, receiver);
-    if (target !== undefined) return storeObjectField(ce, target, yield op2);
+    // A lazy collection stored in a field reads the locals of every loop
+    // and block of the chain with their values now
+    // (`bindOutlivedLocalsOfLazyValue` with no variable name). The name of
+    // the receiver does not tell how long the object lives: an alias in an
+    // inner scope (`let p = o; p.v = Map(x => x + i, R)` in a loop, or a
+    // parameter of a call) names the same object as `o` outside, and a view
+    // bound only to the scopes outside `p` would read a discarded `i` when
+    // `o.v` is read after the loop. The cost: a view in a field of an object
+    // of the same block reads the locals of that block by value.
+    if (target !== undefined)
+      return storeObjectField(
+        ce,
+        target,
+        bindOutlivedLocalsOfLazyValue(ce, undefined, yield op2)
+      );
 
     // REFUSE BEFORE EVALUATING THE VALUE where the refusal is already
     // certain. The store route has declined, so the only remaining
@@ -13641,7 +13679,7 @@ function* assignSteps(
     // property), and the false refusal it produced was DISCARDED in
     // statement position — a silent no-op write, diverging from the
     // compiled tier, which performs it.
-    const rhs = yield op2;
+    const rhs = bindOutlivedLocalsOfLazyValue(ce, undefined, yield op2);
     if (!rhs.isValid) return rhs;
     if (fieldName !== undefined && receiver !== undefined) {
       const set = protocolPropertyStore(ce, receiver, fieldName, rhs, {
@@ -13678,7 +13716,7 @@ function* assignSteps(
   const val =
     (isString(op2)
       ? narrowDeclaredCharacter(ce, declaredTypeOfSymbol(ce, symbolName), op2)
-      : undefined) ?? assignedValue(ce, yield op2);
+      : undefined) ?? assignedValue(ce, yield op2, symbolName);
   // A property write in VALUE position — `x = ProtocolProperty(P, "n",
   // p, v)`, which a hand-built expression can spell — that was REFUSED
   // (a readonly property, a non-object receiver, a missing

@@ -18,7 +18,11 @@ import {
   run,
   runAsync,
 } from '../../common/interruptible.js';
-import { withEvaluationEffects } from '../effects-registry.js';
+import {
+  runWithEvaluationEffects,
+  withEvaluationEffects,
+} from '../effects-registry.js';
+import { callbackSlots } from '../boxed-expression/boxed-function.js';
 import {
   memoDepsStillValid,
   snapshotMemoDeps,
@@ -81,6 +85,11 @@ import {
   finiteUncountedIsEmpty,
   innerCollectionCannotBeWalked,
   listFiniteUncountedCollection,
+  listedFlatMapView,
+  listedFlatMapViewAsync,
+  uncountedCollectionCount,
+  isInfiniteListing,
+  markInfiniteListing,
   viewCanListSource,
   viewOverListedSource,
   mayCarryDimensions,
@@ -3395,6 +3404,43 @@ function flatMapInnerResultTypeD(
  * its declared result ({@link callbackResultType}), and the source is then
  * not described.
  */
+/**
+ * Whether the evaluation of `x`, or of a callback in it, applies an operator
+ * that has only an `evaluateAsync` handler. `hasAsyncOnlyApplication(x)`
+ * finds the applications (`slowF(1)`) and the helpers whose bodies hold one.
+ * A symbol is checked only at a callback parameter of an operator in `x`
+ * (`Map(slowF, Range(1, 2))`, the positions that `callbackSlots()` gives),
+ * where the operator applies it. A function symbol elsewhere is data
+ * (`(1, slowF)`): it is not applied, and it is not a reason to stop.
+ */
+function appliesAsyncOnlyOperator(x: Expression): boolean {
+  if (hasAsyncOnlyApplication(x)) return true;
+  const visit = (e: Expression): boolean => {
+    if (!isFunction(e)) return false;
+    const def = e.operatorDefinition;
+    if (def !== undefined)
+      for (const i of callbackSlots(def)) {
+        const op = e.ops[i];
+        if (isSymbol(op) && hasAsyncOnlyApplication(op, true)) return true;
+      }
+    return e.ops.some(visit);
+  };
+  return visit(x);
+}
+
+/**
+ * `true` when the source of a `FlatMap` is provably empty, read from its
+ * structure only (`literalCollectionEmptiness()`), and `undefined`
+ * otherwise. An empty source gives no inner result, so the `FlatMap` is
+ * empty and finite whatever the callback returns: `Sum(FlatMap([], x ↦
+ * Range(1, x)))` is `0`. The `isEmptyCollection` facet is not read: for a
+ * lazy source (`Filter`) it applies a callback, and a facet of `FlatMap`
+ * does not apply a callback.
+ */
+function emptySource(source: Expression): true | undefined {
+  return literalCollectionEmptiness(source) === true ? true : undefined;
+}
+
 function flatMapInnerResultType(
   fn: Expression,
   source: Expression
@@ -10783,7 +10829,21 @@ const reduceEvaluate = <R>(
   // here evaluated: the evaluation of a lazy operator evaluates such a source
   // once before the handler runs (`heldEagerSources()`,
   // `boxed-expression/boxed-function.ts`).
-  const collection = source;
+  // A `FlatMap` with no known finiteness over a finite source is listed
+  // first (`listedFlatMapView`): `Reduce(FlatMap([1, 2], x ↦ Range(1, x)),
+  // Add, 0)` is `4`. A view that the walk finds infinite stays unevaluated,
+  // as for any infinite collection, and another error of the evaluation of
+  // the view is the answer. The asynchronous route lists the view before it
+  // comes here (`listedFlatMapViewAsync`, in the `evaluateAsync` handler of
+  // `Reduce`).
+  const listed =
+    route === undefined
+      ? listedFlatMapView(source, { operator: 'Reduce', index: 1 })
+      : undefined;
+  if (listed !== undefined && !isFunction(listed, 'List')) {
+    if (!isInfiniteListing(listed)) return listed;
+  }
+  const collection = isFunction(listed, 'List') ? listed : source;
   if (!collection.isFiniteCollection) return undefined;
   // A collection may report a finite count yet decline enumeration
   // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the
@@ -11867,9 +11927,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (typeof n === 'bigint') return engine.number(n);
       if (n === undefined) {
         // A finite collection with no count (`FlatMap([1, 2, 3], x ↦ [x,
-        // x])`) is walked once to count its elements.
-        const listed = listFiniteUncountedCollection(xs);
-        if (listed !== undefined) return engine.number(listed.length);
+        // x])`) is walked once to count its elements. A `FlatMap` whose walk
+        // finds an infinite inner result has length `+oo`, and an error of
+        // the evaluation of the view is the answer.
+        const walked = uncountedCollectionCount(xs, {
+          operator: 'Length',
+          index: 1,
+        });
+        if (walked === Infinity) return engine.PositiveInfinity;
+        if (typeof walked === 'number') return engine.number(walked);
+        if (walked !== undefined) return walked;
       }
       if (n === undefined || !isFinite(n))
         return xs.isEmptyCollection ? engine.Zero : undefined;
@@ -13717,9 +13784,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (n !== undefined) return engine.number(n);
         if (xs.isEmptyCollection) return engine.Zero;
         // A finite collection with no count (`FlatMap([1, 2, 3], x ↦ [x,
-        // x])`) is walked once to count its elements.
-        const listed = listFiniteUncountedCollection(xs);
-        return listed === undefined ? undefined : engine.number(listed.length);
+        // x])`) is walked once to count its elements. A `FlatMap` whose walk
+        // finds an infinite inner result counts `+∞`, and an error of the
+        // evaluation of the view is the answer.
+        const walked = uncountedCollectionCount(xs, {
+          operator: 'Count',
+          index: 1,
+        });
+        return typeof walked === 'number' ? engine.number(walked) : walked;
       }
 
       // 2-arg PREDICATE form: delegate to `Filter` and read its count, so the
@@ -14896,16 +14968,44 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     // The same fold, suspended between time slices, with the reducer
     // awaited (`asyncCallbackRoute`).
-    evaluateAsync: async (ops, options) =>
-      withExactFoldFallbackAsync(
-        options,
-        await reduceEvaluate(
-          ops,
+    // A `FlatMap` source with no known finiteness is listed here, with
+    // `evaluateAsync()` and the options of this evaluation, so that its
+    // callback runs in the context of the evaluation.
+    // The start of `reduceEvaluate` is synchronous (it reads the reducer and
+    // the types). After the `await` of the listing it runs in a later task,
+    // so it runs inside the effects, the context stack and the precision
+    // window of this evaluation (`runWithEvaluationEffects`).
+    evaluateAsync: async (ops, options) => {
+      const fold = (source: Expression) =>
+        reduceEvaluate(
+          [source, ...ops.slice(1)],
           options,
-          (fold) => runWalkAsync(fold, options),
+          (walk) => runWalkAsync(walk, options),
           asyncCallbackRoute(options)
+        );
+      const pending = listedFlatMapViewAsync(
+        ops[0],
+        awaitedOperandOptions(options),
+        { operator: 'Reduce', index: 1 }
+      );
+      if (pending === undefined)
+        return withExactFoldFallbackAsync(options, await fold(ops[0]));
+      const listed = await pending;
+      if (listed !== undefined && !isFunction(listed, 'List')) {
+        if (!isInfiniteListing(listed)) return listed;
+      }
+      const source = isFunction(listed, 'List') ? listed : ops[0];
+      return withExactFoldFallbackAsync(
+        options,
+        await runWithEvaluationEffects(
+          options.engine,
+          options.effects,
+          () => fold(source),
+          options._contextStack,
+          options._precisionWindow
         )
-      ),
+      );
+    },
   },
 
   // Mathematica `Fold[f, x, list]`: a thin variant of `Reduce` (Haskell
@@ -15808,23 +15908,66 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // splice read it as empty, or kept the symbol as one element, and
         // the list had the wrong elements.
         if (innerCollectionCannotBeWalked(mapped)) return undefined;
+        // This walk is synchronous, also under `evaluateAsync()`: `FlatMap`
+        // has no `evaluateAsync` handler. A result that holds an operator
+        // with only an `evaluateAsync` handler (`x ↦ slowRange(x)`) is not
+        // evaluated by it, so the elements are not known: the view stays
+        // lazy. Before, the unevaluated call was one element, and
+        // `FlatMap([1, 2], x ↦ slowRange(x))` listed `[slowRange(1),
+        // slowRange(2)]`.
+        // A symbol at the callback parameter of an operator in the result
+        // (`x ↦ Map(slowF, Range(1, x))`) is applied too
+        // (`appliesAsyncOnlyOperator`). A symbol in the result as data
+        // (`x ↦ (x, slowF)`) is not applied, and is one element.
+        if (appliesAsyncOnlyOperator(mapped)) return undefined;
+        // A `Filter` over a provably infinite source can be finite
+        // (`Filter(Range(1, ∞), y ↦ y < 3)`), but its walk never ends: it
+        // stops only at `maxCollectionSize` or at the iteration limit of
+        // `Filter`, and then the view stays lazy. The view stays lazy at
+        // once, so that the walk is not done on every evaluation. (A
+        // `FlatMap` over an infinite source is infinite by its `isFinite`
+        // handler, and is the error below.)
+        if (
+          isFunction(mapped, 'Filter') &&
+          mapped.op1.isFiniteCollection === false
+        )
+          return undefined;
         if (!mapped.isCollection || isString(mapped)) {
           xs.push(mapped);
         } else {
           if (mapped.isFiniteCollection === false) {
             if (materialization !== true) return undefined;
-            return withErrorFrames(
-              engine.error([
-                'out-of-range',
-                'a finite collection',
-                mapped.toString(),
-              ]),
-              [{ operator: 'FlatMap', index: 2 }]
+            // The error is recorded (`markInfiniteListing`), so that a
+            // consumer that lists the view (`listedFlatMapView`) can tell it
+            // from another error: it proves that the view is infinite.
+            return markInfiniteListing(
+              withErrorFrames(
+                engine.error([
+                  'out-of-range',
+                  'a finite collection',
+                  mapped.toString(),
+                ]),
+                [{ operator: 'FlatMap', index: 2 }]
+              )
             );
           }
-          for (const x of mapped.each()) {
-            if (xs.length >= cap) return undefined;
-            xs.push(x);
+          // The walk of an inner `Filter` with a long run of rejected
+          // elements stops with the `iteration-limit-exceeded` cancellation
+          // (`Filter(Filter(Range(1, ∞), y ↦ y > 0), y ↦ y < 0)`): the view
+          // then stays lazy, as the `Filter` itself does. The cancellation
+          // escaped to the caller of `evaluate()`.
+          try {
+            for (const x of mapped.each()) {
+              if (xs.length >= cap) return undefined;
+              xs.push(x);
+            }
+          } catch (e) {
+            if (
+              e instanceof CancellationError &&
+              e.cause === 'iteration-limit-exceeded'
+            )
+              return undefined;
+            throw e;
           }
         }
         if (xs.length > cap) return undefined;
@@ -15872,7 +16015,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const source = finitenessOfSource(expr.op1);
         if (source !== true) return source;
         const inner = flatMapInnerResultType(expr.op2, expr.op1);
-        if (inner === undefined) return undefined;
+        if (inner === undefined) return emptySource(expr.op1);
         if (provablyDisjoint(inner, 'collection')) return true;
         // A collection whose element type is `never` (`x ↦ []` returns
         // `list<never>`) holds no element: each inner result is empty.
@@ -15882,7 +16025,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `[1, 1, 2, 2]`. `staticCollectionDims` reads only list types.
         if (isTupleOrTupleUnionShapedType(inner)) return true;
         const dims = staticCollectionDims(inner);
-        return dims !== null && dims.every((d) => d >= 0) ? true : undefined;
+        if (dims !== null && dims.every((d) => d >= 0)) return true;
+        return emptySource(expr.op1);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -21734,7 +21878,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
-      for (const xs of ops) {
+      for (const [i, operand] of ops.entries()) {
+        // A `FlatMap` over a finite source with no known finiteness is
+        // listed by the walk of its materialization (`listedFlatMapView`):
+        // `ListFrom(FlatMap([1, 2], x ↦ Range(1, x)))` is `[1, 1, 2]`, and an
+        // infinite inner result is the error of that walk.
+        const listed = listedFlatMapView(operand, {
+          operator: 'ListFrom',
+          index: i + 1,
+        });
+        if (listed?.operator === 'Error') return listed;
+        const xs = listed ?? operand;
         if (!xs.isCollection) {
           // A collection-TYPED operand that is not a collection right now (a
           // valueless `list<integer>` symbol, an unevaluated eager producer)
