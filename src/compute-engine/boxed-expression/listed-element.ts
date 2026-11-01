@@ -1,8 +1,10 @@
 import type {
   Expression,
+  EvaluateOptions,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { CancellationError } from '../../common/interruptible.js';
+import { EventLoopPacer } from '../../common/cooperative-steps.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   collectionSourceOperands,
@@ -451,6 +453,198 @@ export function listedLiteralElements(
     if (result !== undefined) result.push(listed);
   }
   return result;
+}
+
+/**
+ * Splice the `Sequence` operands of a list literal into the list, and drop
+ * its `Nothing` operands.
+ *
+ * A collection operand (lazy or eager) is ONE element of the list, and stays
+ * one element: `List(Range(1, 3))` has the count 1, so materializing it gives
+ * `[[1, 2, 3]]`, not `[1, 2, 3]`. The caller materializes each element with
+ * the same options. This is also what `Tuple` and `Set` do with a collection
+ * element.
+ */
+function enlist(xs: ReadonlyArray<Expression>): Expression[] {
+  const result: Expression[] = [];
+  for (const x of xs) {
+    if (isSymbol(x, 'Nothing')) continue;
+    if (isFunction(x, 'Sequence')) result.push(...enlist([...x.ops]));
+    else result.push(x);
+  }
+  return result;
+}
+
+/**
+ * The value of the `List` literal with the operands `ops`: each element is
+ * evaluated, an element that evaluates to `Nothing` is removed, and each
+ * finite lazy element is listed (`listedLiteralElements`). Under a
+ * materialization, the `Sequence` operands are spliced first (`enlist`), and
+ * no element is listed: the materialization of each element does it.
+ *
+ * An element for which `keepsCell` is true stays as it is, and is not
+ * evaluated. The handler of `List` gives no `keepsCell`. A `List` literal
+ * that holds a failed cell gives one, so that the failed cell is not
+ * replaced by the error that its evaluation bubbles (`_frozenListValue()` in
+ * `boxed-function.ts`).
+ */
+export function evaluatedListLiteral(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions>,
+  keepsCell?: (cell: Expression) => boolean
+): Expression {
+  const { numericApproximation, materialization } = options;
+  const value = (op: Expression) =>
+    keepsCell?.(op)
+      ? op
+      : op.evaluate({ numericApproximation, materialization });
+  if (materialization) {
+    return ce._fn(
+      'List',
+      // `Nothing` is an ERASURE marker: an element that *evaluates* to
+      // `Nothing` is spliced out (`enlist` already drops syntactic ones).
+      enlist(ops)
+        .map(value)
+        .filter((op) => !isSymbol(op, 'Nothing'))
+    );
+  }
+  const elements = ops.map(value).filter((op) => !isSymbol(op, 'Nothing'));
+  // A literal is a value: each finite lazy element is listed.
+  return ce.function(
+    'List',
+    listedLiteralElements(ce, elements, numericApproximation ?? false) ??
+      elements
+  );
+}
+
+/**
+ * The async twin of `evaluatedListLiteral`. `options` holds the host
+ * capability registry, the context stack and the working precision of the
+ * evaluation, and each element is evaluated with them.
+ *
+ * Elements are awaited one at a time, in order, so an impure element's
+ * effects happen in the same order as on the sync route. An `await` gives a
+ * turn to the microtasks only, so the loop waits for a macrotask about every
+ * 8 ms (`EventLoopPacer`): a timer can then run while a large literal is
+ * evaluated, and an abort of the signal stops the loop there. An element
+ * that `keepsCell` keeps counts as a step of the loop too.
+ */
+export async function evaluatedListLiteralAsync(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions>,
+  keepsCell?: (cell: Expression) => boolean
+): Promise<Expression> {
+  const evaluated = async (
+    xs: ReadonlyArray<Expression>
+  ): Promise<Expression[]> => {
+    const result: Expression[] = [];
+    const pacer = new EventLoopPacer();
+    for (const op of xs) {
+      const value = keepsCell?.(op) ? op : await op.evaluateAsync(options);
+      if (!isSymbol(value, 'Nothing')) result.push(value);
+      if (pacer.due) {
+        await pacer.pace();
+        if (options.signal?.aborted)
+          throw new CancellationError({ cause: options.signal.reason });
+      }
+    }
+    return result;
+  };
+  if (options.materialization)
+    return ce._fn('List', await evaluated(enlist(ops)));
+  // As on the sync route, each finite lazy element is listed.
+  const elements = await evaluated(ops);
+  // The listing runs after the `await` above, and it evaluates with the
+  // synchronous `evaluate()`: the callbacks of a lazy element, and the
+  // listed element under a numeric approximation. The engine keeps the
+  // capability registry and the context stack of this evaluation in place
+  // only until the first `await`, so put them in place again.
+  return ce.withEvaluationContext(options, () =>
+    ce.function(
+      'List',
+      listedLiteralElements(
+        ce,
+        elements,
+        options.numericApproximation ?? false
+      ) ?? elements
+    )
+  );
+}
+
+/**
+ * True when the operands `ops` of a `Set` are those of a set comprehension
+ * (`Set(body, Element(v, domain))`, `Set(body, Condition(…))`, …): every
+ * form that `parseSetComprehension()` in `library/collections.ts` reads has
+ * two operands, and the second one is an `Element` or a `Condition`.
+ *
+ * This test admits more than the comprehensions: it is true also for a
+ * literal set of two elements whose second element is an `Element`
+ * expression. Such a literal is then treated as a comprehension by the
+ * callers that only need to know that the operands are certainly not those
+ * of a comprehension.
+ */
+export function mayBeSetComprehension(ops: ReadonlyArray<Expression>): boolean {
+  return (
+    ops.length === 2 &&
+    (isFunction(ops[1], 'Element') || isFunction(ops[1], 'Condition'))
+  );
+}
+
+/**
+ * The value of the `Set` literal (not a comprehension) with the operands
+ * `ops`: each element is evaluated, and each finite lazy element is listed
+ * (`listedLiteralElements`), so `{Map(f, [1, 2])}` holds the list of the
+ * results. The canonical `Set` merges the elements that are then equal.
+ *
+ * An element for which `keepsCell` is true stays as it is, and is not
+ * evaluated (see `evaluatedListLiteral`).
+ */
+export function evaluatedSetLiteral(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions>,
+  keepsCell?: (cell: Expression) => boolean
+): Expression {
+  const { numericApproximation, materialization } = options;
+  const elements = ops.map((op) =>
+    keepsCell?.(op)
+      ? op
+      : op.evaluate({ numericApproximation, materialization })
+  );
+  return ce.function(
+    'Set',
+    listedLiteralElements(ce, elements, numericApproximation ?? false) ??
+      elements
+  );
+}
+
+/**
+ * The async twin of `evaluatedSetLiteral`. The elements are awaited one at a
+ * time, in order, and the listing runs with the capability registry and the
+ * context stack of this evaluation put in place again after the `await`
+ * (see `evaluatedListLiteralAsync`).
+ */
+export async function evaluatedSetLiteralAsync(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions>,
+  keepsCell?: (cell: Expression) => boolean
+): Promise<Expression> {
+  const elements: Expression[] = [];
+  for (const op of ops)
+    elements.push(keepsCell?.(op) ? op : await op.evaluateAsync(options));
+  return ce.withEvaluationContext(options, () =>
+    ce.function(
+      'Set',
+      listedLiteralElements(
+        ce,
+        elements,
+        options.numericApproximation ?? false
+      ) ?? elements
+    )
+  );
 }
 
 /**

@@ -129,11 +129,13 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
     expect(block(src)).toBe(
       '["4",Error(ErrorCode("incompatible-type", "integer", "1.5"), 1.5)]'
     );
-    // The static check of the Epsil runner reports the call, and the
-    // program does not run.
+    // The static check of the Epsil runner reports the call, and the call
+    // does not run. The list literal holds the failed cell as it is, and its
+    // other cell is evaluated (`a` is `"4"`), as for any list literal with a
+    // failed cell.
     const { value, diagnostics } = epsilWithDiagnostics(src);
     expect(value).toBe(
-      '[a,g(Error(ErrorCode("incompatible-type", "integer", "1.5"), 1.5))]'
+      '["4",g(Error(ErrorCode("incompatible-type", "integer", "1.5"), 1.5))]'
     );
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toContain('static-type-error');

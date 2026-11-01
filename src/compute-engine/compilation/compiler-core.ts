@@ -3,6 +3,8 @@
 // the record of compiler-core-hooks.ts.
 
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
+import { nonScalarEnclosingBindings } from '../boxed-expression/enclosing-binding-result-type.js';
+import { derivativeClosedForm } from './derivative-closed-form.js';
 import type {
   Expression,
   FunctionInterface,
@@ -3365,6 +3367,44 @@ export function compileExpr(
   // shape or target. Read by the fall-through diagnostic below so the decline
   // is not reported as `Unknown operator` (Tycho item 109a).
   let declinedByCustomHandler = false;
+  // The compile handler of `D` and `Integrate` evaluates the derivative or
+  // the antiderivative in a scope of the compilation, then compiles that
+  // closed form. When a variable's enclosing binding (a parameter of a
+  // function literal, a block local, a global) holds a collection, the
+  // compiled closed form can read the variable as a scalar:
+  // `(a: list<real>) ↦ D(a^2, a)` compiled to `(a) => 2 * a`, `NaN` for a
+  // list, where the interpreter gives the list `2a`. The compilation
+  // declines then, with these exceptions, which compile correctly:
+  // - a `D` whose closed form does not hold the variable as a symbol
+  //   (`D(3a, a)` is `3`). An operator with the name of the variable is not
+  //   the variable: with `Cos: list<real>`, `D(Cos * Sin(x), Cos, x)` is
+  //   `Cos(x)`;
+  // - a `D` over a global binding when it has a closed form: the closed form
+  //   is boxed in a scope that sees the global, and its list is broadcast.
+  //   A `D` with no closed form (`D(Norm(g), g)`) goes to the numeric
+  //   stencil, which reads the variable as a number, so it declines.
+  // The lowering of a closed-form `Integrate` reads every variable as a
+  // scalar, a global too, so an `Integrate` declines for every such binding.
+  // It declines also when the antiderivative does not hold the variable
+  // (`Integrate(0, g)`): this is the simple, sound version of the check.
+  if ((h === 'D' || h === 'Integrate') && node !== undefined) {
+    const risky = nonScalarEnclosingBindings(node);
+    if (risky.length > 0) {
+      const closedForm =
+        h === 'D' ? derivativeClosedForm('D', args) : undefined;
+      for (const { name, binding } of risky) {
+        const declines =
+          closedForm === undefined ||
+          (engine.lookupDefinition(name) !== binding &&
+            closedForm.symbols.includes(name));
+        if (declines)
+          throw new Error(
+            `Could not compile \`${h}\`: its variable \`${name}\` may hold a collection ` +
+              `in the enclosing scope, and the compiled closed form reads it as a number.`
+          );
+      }
+    }
+  }
   if (!CONTROL_FLOW_HEADS.has(h) || OVERRIDABLE_CONTROL_FLOW_HEADS.has(h)) {
     // `lookupApplicable`, not `lookupDefinition`: `h` is by construction in
     // OPERATOR position, and a user value that shadows a builtin of the same

@@ -598,7 +598,14 @@ evaluates and does not stay inert. `isSame` holds for each value only to
 itself (`Indeterminate.isSame(NaN)` is `false`), and `Equal` with either on
 a side is `False`. The spellings are the MathJSON symbol
 `"Indeterminate"`, the LaTeX `\operatorname{Indeterminate}` and the Epsil
-name `Indeterminate`. A pole stays `~oo` (`5/0`, `Gamma(0)`), and an absent
+name `Indeterminate`. The float rule reads the operands of a form as they
+are when the form is evaluated, so a float that an infinity absorbed first
+is not seen: `∞ + 0.5` is the exact `∞`, and `Fract(∞ + 0.5)` and
+`0·(∞ + 0.5)` are `Indeterminate`, not `NaN`. This is accepted: both values
+mean "no value" and both have `isNaN` true, and a sound record of the
+absorption would add work to every evaluation. A consumer that must tell a
+float failure from an exact one reads `isIndeterminate` only as "no float
+was seen by the form". A pole stays `~oo` (`5/0`, `Gamma(0)`), and an absent
 operand still gives `NaN` (`Missing + 2`, `Length(Missing)`). The design
 and the list of switched producers are in
 `docs/plans/2026-09-28-indeterminate-value.md`.
@@ -866,7 +873,12 @@ first three in `_invalidValue()`,
   `Tuple`, `Set`, `Take`, …) never bubbles its operands' errors: an error
   in an element is a failure of that *cell*, not of the container, so
   `[1, err, 3]` stays a length-3 iterable list with the error in place.
-  The exception is keyed on collection-ness (the definition has a
+  The other cells of a `List` or `Set` literal are evaluated, and each failed
+  cell stays as it is: with `a := 5`, `[a, ln("b")]` is
+  `[5, ln(Error(…))]`, and `[I, err].N()` approximates the integral `I`. A
+  set comprehension with a failed cell stays as it is, and so does a set
+  literal of two elements whose second element is an `Element` or a
+  `Condition` (the shape of a comprehension). The exception is keyed on collection-ness (the definition has a
   `collection` handler block), not on laziness. To be precise about
   status: the frozen container is *preserved and iterable*, but its tree
   is still **invalid** — `isValid` is `false` for any tree containing an

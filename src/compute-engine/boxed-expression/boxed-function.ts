@@ -133,7 +133,15 @@ import {
   isNumericScalarOperandView,
   descriptorMayBeOpenCollection,
 } from './broadcast-lift-type.js';
-import { listedBroadcastCells, producesKeyed } from './listed-element.js';
+import {
+  evaluatedListLiteral,
+  evaluatedListLiteralAsync,
+  evaluatedSetLiteral,
+  evaluatedSetLiteralAsync,
+  listedBroadcastCells,
+  mayBeSetComprehension,
+  producesKeyed,
+} from './listed-element.js';
 import {
   literalMayEraseElement,
   literalWithErasureResolved,
@@ -423,6 +431,7 @@ import {
 } from './cache.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
 import { cacheOff } from '../../common/cache-switches.js';
+import { withEnclosingBindingsOfVariables } from './enclosing-binding-result-type.js';
 import {
   noteStackDependentAnswer,
   stackDependentAnswerCount,
@@ -7101,7 +7110,8 @@ export class BoxedFunction
    *   in an element is a failure of that CELL, not of the container, so the
    *   collection freezes with the error in place and stays iterable. Keyed on
    *   collection-ness (the definition's `collection` handler block), not on
-   *   laziness — see §6a.2.
+   *   laziness — see §6a.2. The other cells of a frozen `List` or `Set`
+   *   literal are evaluated by the caller (`_frozenLiteralValue()`).
    * - **Selecting operators** (`selectsOperands`): absorption is DEFERRED to
    *   after the handler, so an error in an operand the operator never chooses
    *   does not bubble — see `_defersErrorAbsorption`.
@@ -7158,6 +7168,74 @@ export class BoxedFunction
     // else bubbles.
     if (d === 'freeze' || isCollectionHead(this)) return this;
     return d;
+  }
+
+  /**
+   * The value of a `List` or `Set` literal that freezes because it holds a
+   * failed cell (`_invalidValue()` answers the literal itself), or
+   * `undefined` when the literal stays as it is.
+   *
+   * Each failed cell stays as it is: `[1, ln("a"), 3]` keeps the cell
+   * `ln(Error(…))`, and does not replace it with the error that the cell
+   * would bubble. Each valid cell is evaluated as the handler of the literal
+   * evaluates it (`evaluatedListLiteral()`, `evaluatedSetLiteral()`): with
+   * `a := 5`, `[a, Error(…)]` is `[5, Error(…)]`, a finite lazy element is
+   * listed, and `[I, Error(…)].N()` approximates the integral `I`. A failed
+   * cell that is itself a `List` or `Set` literal
+   * (`isIterableWithFailedCells()`) is evaluated too, and keeps its own
+   * failed cells.
+   *
+   * The handler of the literal is not called: it evaluates every cell, and
+   * the evaluation of a failed cell gives its error.
+   *
+   * A `Set` whose operands can be those of a comprehension
+   * (`mayBeSetComprehension()`) stays as it is: its operands are a body and
+   * a condition, not elements, and are not evaluated one at a time.
+   */
+  private _frozenLiteralValue(
+    options?: Partial<EvaluateOptions>
+  ): Expression | undefined {
+    const keepsCell = (x: Expression) =>
+      !x.isValid && !isIterableWithFailedCells(x);
+    if (this._operator === 'List')
+      return evaluatedListLiteral(
+        this.engine,
+        this._ops,
+        options ?? {},
+        keepsCell
+      );
+    if (this._operator === 'Set' && !mayBeSetComprehension(this._ops))
+      return evaluatedSetLiteral(
+        this.engine,
+        this._ops,
+        options ?? {},
+        keepsCell
+      );
+    return undefined;
+  }
+
+  /** The async twin of `_frozenLiteralValue()`. The cells are evaluated one
+   * at a time, in order, as in the async handlers of `List` and `Set`. */
+  private async _frozenLiteralValueAsync(
+    options?: Partial<EvaluateOptions>
+  ): Promise<Expression | undefined> {
+    const keepsCell = (x: Expression) =>
+      !x.isValid && !isIterableWithFailedCells(x);
+    if (this._operator === 'List')
+      return evaluatedListLiteralAsync(
+        this.engine,
+        this._ops,
+        options ?? {},
+        keepsCell
+      );
+    if (this._operator === 'Set' && !mayBeSetComprehension(this._ops))
+      return evaluatedSetLiteralAsync(
+        this.engine,
+        this._ops,
+        options ?? {},
+        keepsCell
+      );
+    return undefined;
   }
 
   /**
@@ -7504,6 +7582,10 @@ export class BoxedFunction
       if (!this._def) return this;
       if (!this.isValid) {
         const invalid = this._invalidValue();
+        if (invalid === this) {
+          const frozen = this._frozenLiteralValue(options);
+          if (frozen !== undefined) return frozen;
+        }
         if (invalid !== undefined) return invalid;
       }
 
@@ -8932,6 +9014,10 @@ export class BoxedFunction
       if (!this._def) return this;
       if (!this.isValid) {
         const invalid = this._invalidValue();
+        if (invalid === this) {
+          const frozen = await this._frozenLiteralValueAsync(options);
+          if (frozen !== undefined) return frozen;
+        }
         if (invalid !== undefined) return invalid;
       }
 
@@ -14691,6 +14777,25 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       calculatedType = guardedTypeHandlerCall(expr.engine, expr.operator, () =>
         def.type!(descriptors, typeHandlerContext(expr.engine))
       );
+      // The value of `D` and of an indefinite `Integrate` holds the
+      // variable, which then reads its enclosing binding: when that binding
+      // holds a list, so does the value. The handler sees only descriptors,
+      // so it cannot read that binding, and the type is widened here
+      // (`withEnclosingBindingsOfVariables()`).
+      if (
+        calculatedType !== undefined &&
+        (expr.operator === 'D' || expr.operator === 'Integrate')
+      ) {
+        const widened = withEnclosingBindingsOfVariables(
+          expr,
+          calculatedType.type
+        );
+        if (widened !== calculatedType.type)
+          calculatedType = BoxedType.forResult(
+            widened,
+            expr.engine._typeResolver
+          );
+      }
       // An operand typed `never` (the EMPTY type — a symbol declared with
       // an empty range, `integer<2<..<3>`) has no value, so no application
       // of it has one: the result is `never`. Applied AFTER the handler,

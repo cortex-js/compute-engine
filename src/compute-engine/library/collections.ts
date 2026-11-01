@@ -290,14 +290,14 @@ import {
   roundedToWorkingPrecision,
 } from '../boxed-expression/utils.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import {
-  EventLoopPacer,
-  runStepsSync,
-  type Steps,
-} from '../../common/cooperative-steps.js';
+import { runStepsSync, type Steps } from '../../common/cooperative-steps.js';
 import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
+  evaluatedListLiteral,
+  evaluatedListLiteralAsync,
+  evaluatedSetLiteral,
+  evaluatedSetLiteralAsync,
   hasConstantTimeCount,
   holdsAsyncOnlyOperator,
   listedElement,
@@ -11414,39 +11414,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine, numericApproximation, materialization }) => {
       // Eager materialization: materialize each element. A lazy element (a
       // `Range`, a `Map`) stays one element and becomes a nested list.
-      if (materialization) {
-        const items = enlist(ops);
-        return engine._fn(
-          'List',
-          // `Nothing` is an ERASURE marker: an element that *evaluates* to
-          // `Nothing` is spliced out (`enlist` already drops syntactic ones).
-          items
-            .map((op) => op.evaluate({ numericApproximation, materialization }))
-            .filter((op) => !isSymbol(op, 'Nothing'))
-        );
-      }
-      // A collection literal evaluates its elements (unlike lazy operators,
-      // which keep late binding). Fast path: a list whose elements are all
-      // already fully-evaluated literals is returned unchanged, avoiding an
-      // O(n) rebuild for large numeric lists.
+      //
+      // Otherwise, a collection literal evaluates its elements (unlike lazy
+      // operators, which keep late binding). Fast path: a list whose
+      // elements are all already fully-evaluated literals is returned
+      // unchanged, avoiding an O(n) rebuild for large numeric lists.
       // A lazy element (a `Range`, a `Map`) is a function expression, so it
       // never takes this fast path.
       if (
+        !materialization &&
         ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
       )
         return undefined;
-      const elements = ops
-        .map((op) => op.evaluate({ numericApproximation, materialization }))
-        .filter((op) => !isSymbol(op, 'Nothing'));
-      // A literal is a value: each finite lazy element is listed.
-      return engine.function(
-        'List',
-        listedLiteralElements(
-          engine,
-          elements,
-          numericApproximation ?? false
-        ) ?? elements
-      );
+      return evaluatedListLiteral(engine, ops, {
+        numericApproximation,
+        materialization,
+      });
     },
     // The async twin of the handler above. `List` is `lazy`, so its elements
     // reach the handler unevaluated on the async route too, and without this
@@ -11478,49 +11461,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         _contextStack,
         _precisionWindow,
       };
-      // An `await` gives a turn to the microtasks only, so the loop waits for
-      // a macrotask about every 8 ms (`EventLoopPacer`): a timer can then run
-      // while a large literal is evaluated, and an abort of the signal stops
-      // the loop there.
-      const evaluated = async (
-        xs: ReadonlyArray<Expression>
-      ): Promise<Expression[]> => {
-        const result: Expression[] = [];
-        const pacer = new EventLoopPacer();
-        for (const op of xs) {
-          const value = await op.evaluateAsync(options);
-          if (!isSymbol(value, 'Nothing')) result.push(value);
-          if (pacer.due) {
-            await pacer.pace();
-            if (signal?.aborted)
-              throw new CancellationError({ cause: signal.reason });
-          }
-        }
-        return result;
-      };
-      if (materialization)
-        return engine._fn('List', await evaluated(enlist(ops)));
       if (
+        !materialization &&
         ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
       )
         return undefined;
-      // As on the sync route, each finite lazy element is listed.
-      const elements = await evaluated(ops);
-      // The listing runs after the `await` above, and it evaluates with the
-      // synchronous `evaluate()`: the callbacks of a lazy element, and the
-      // listed element under a numeric approximation. The engine keeps the
-      // capability registry and the context stack of this evaluation in
-      // place only until the first `await`, so put them in place again.
-      return engine.withEvaluationContext(options, () =>
-        engine.function(
-          'List',
-          listedLiteralElements(
-            engine,
-            elements,
-            numericApproximation ?? false
-          ) ?? elements
-        )
-      );
+      return evaluatedListLiteralAsync(engine, ops, options);
     },
     eq: defaultCollectionEq,
     collection: basicIndexedCollectionHandlers(),
@@ -11601,14 +11547,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // element is listed (`listedLiteralElements`), so `{Map(f, [1, 2])}`
       // holds the list of the results, and the canonical `Set` merges the
       // elements that are then equal.
-      const elements = ops.map((op) =>
-        op.evaluate({ numericApproximation, materialization })
-      );
-      return ce.function(
-        'Set',
-        listedLiteralElements(ce, elements, numericApproximation ?? false) ??
-          elements
-      );
+      return evaluatedSetLiteral(ce, ops, {
+        numericApproximation,
+        materialization,
+      });
     },
     // The async twin: see `List`'s `evaluateAsync` for why a lazy literal
     // needs one. A comprehension awaits its domain, values, condition and
@@ -11647,18 +11589,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         return ce.function('Set', elements);
       }
-      const elements: Expression[] = [];
-      for (const op of ops) elements.push(await op.evaluateAsync(options));
-      // As on the sync route, each finite lazy element is listed, with the
-      // capability registry and the context stack of this evaluation put in
-      // place again after the `await` (see `List`'s `evaluateAsync`).
-      return ce.withEvaluationContext(options, () =>
-        ce.function(
-          'Set',
-          listedLiteralElements(ce, elements, numericApproximation ?? false) ??
-            elements
-        )
-      );
+      // As on the sync route, each finite lazy element is listed.
+      return evaluatedSetLiteralAsync(ce, ops, options);
     },
     eq: (a: Expression, b: Expression) => {
       // `b` may be an unevaluated set-valued expression (`Intersection(…)`,
@@ -26645,54 +26577,6 @@ function computeSliceBounds(
   if (end < 1) end = 1;
   if (end > count) end = count;
   return { start, end };
-}
-
-/**
- * Splice the `Sequence` operands of a list literal into the list, and drop
- * its `Nothing` operands.
- *
- * A collection operand (lazy or eager) is ONE element of the list, and stays
- * one element: `List(Range(1, 3))` has the count 1, so materializing it gives
- * `[[1, 2, 3]]`, not `[1, 2, 3]`. The caller materializes each element with
- * the same options. This is also what `Tuple` and `Set` do with a collection
- * element.
- *
- */
-
-function enlist(xs: ReadonlyArray<Expression>): Expression[] {
-  if (xs.length === 0) return [];
-
-  const result: Expression[] = [];
-  // let s: string | undefined = undefined;
-  for (const x of xs) {
-    if (sym(x) === 'Nothing') continue;
-
-    // if (isString(x)) {
-    //   if (s === undefined) s = '';
-    //   s += x.string;
-    //   continue;
-    // }
-
-    // if (s !== undefined) {
-    //   result.push(ce.string(s));
-    //   s = undefined;
-    // }
-
-    if (isFunction(x, 'Sequence')) {
-      result.push(...enlist([...x.ops]));
-    } else if (isString(x)) {
-      // A string is a collection (of strings), but we don't want to iterate it recursively
-      // if (s === undefined) s = '';
-      // s += x.string;
-      result.push(x);
-    } else {
-      result.push(x);
-    }
-  }
-
-  // if (s !== undefined) result.push(ce.string(s));
-
-  return result;
 }
 
 /** Is `op` an already fully-evaluated literal element for the requested
