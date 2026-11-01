@@ -305,6 +305,80 @@ describe('powers of 0, 1 and -1 to a huge integer exponent are evaluated', () =>
   });
 });
 
+// A power of the base `i` or `−i` has the value `1`, `i`, `−1` or `−i`,
+// selected by the exponent modulo 4. It is evaluated for an exact integer
+// exponent of any magnitude, and it equals the power with a small exponent
+// that has the same residue modulo 4.
+describe('powers of i and -i to a huge integer exponent are evaluated', () => {
+  test.each([
+    ['i^{10^{30}+1}', 'i^{5}', 'i'],
+    ['i^{10^{30}+2}', 'i^{6}', '-1'],
+    ['i^{10^{30}+3}', 'i^{7}', '-i'],
+    ['i^{10^{30}}', 'i^{8}', '1'],
+    ['(-i)^{10^{30}+3}', '(-i)^{7}', 'i'],
+    ['(-i)^{10^{30}+1}', '(-i)^{5}', '-i'],
+    ['i^{-(10^{30}+1)}', 'i^{-1}', '-i'],
+    ['(-i)^{-(10^{30}+1)}', '(-i)^{-1}', 'i'],
+  ])('%s', (latex, small, expected) => {
+    const p = ce.parse(latex);
+    const q = ce.parse(small);
+    expect(p.evaluate().toString()).toEqual(expected);
+    expect(p.simplify().toString()).toEqual(expected);
+    expect(p.evaluate().toString()).toEqual(q.evaluate().toString());
+    expect(p.N().toString()).toEqual(q.N().toString());
+  });
+
+  test('a bigint exponent literal is folded at canonicalization', () => {
+    const p = ce.box([
+      'Power',
+      ['Complex', 0, 1],
+      { num: '1000000000000000000000000000003' },
+    ]);
+    expect(p.toString()).toEqual('-i');
+  });
+
+  // Under `N()` an exponent at or below `2^53` keeps the other rules, and an
+  // exponent above it is read exactly. Both agree with the small exponent.
+  test.each([
+    ['i^{2^{53}}', 'i^{0}'],
+    ['i^{2^{53}+1}', 'i^{1}'],
+    ['i^{2^{53}-1}', 'i^{3}'],
+  ])('N() at 2^53: %s', (latex, small) => {
+    expect(ce.parse(latex).N().toString()).toEqual(
+      ce.parse(small).N().toString()
+    );
+  });
+
+  // The base is compared exactly: a base whose doubles `re` and `im` round to
+  // those of `i` is not `i`.
+  test('a base near i is not taken as i', () => {
+    const r = [
+      'Rational',
+      { num: '1000000000000000000000000000001' },
+      { num: '1000000000000000000000000000000' },
+    ];
+    const p = ce.box(['Power', ['Multiply', r, 'ImaginaryUnit'], 2]);
+    expect(
+      p.evaluate().isSame(ce.box(['Negate', ['Power', r, 2]]).evaluate())
+    ).toBe(true);
+    expect(p.evaluate().isSame(-1)).toBe(false);
+    // `10^{-800} + i` evaluates to an exact complex literal with a real part
+    // of `10^{-800}`, whose double is `0`.
+    const q = ce.box(['Power', ce.parse('10^{-800}+i').evaluate(), 2]);
+    expect(q.evaluate().isSame(-1)).toBe(false);
+    expect(q.evaluate().isComplex).toBe(true);
+    // The same for a base near 1.
+    const s = ce.box(['Power', r, { num: '1000000000000000000000000000000' }]);
+    expect(s.evaluate().isSame(1)).toBe(false);
+  });
+
+  // A non-integer exponent is not handled by this rule.
+  test('a non-integer exponent is not changed', () => {
+    expect(ce.parse('i^{(10^{30}+1)/2}').evaluate().operator).toEqual('Power');
+    expect(ce.parse('i^{1.0}').evaluate().isExact).toBe(false);
+  });
+});
+
 describe('small/fractional integer powers unchanged (controls)', () => {
   test('Power(2,10) → 1024', () => {
     expect(evalStr(['Power', 2, 10])).toEqual('1024');

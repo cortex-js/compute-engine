@@ -359,6 +359,12 @@
   `N()`, `(−1)^(10^30 + 1)` gave `1`, from the double of the exponent; it now
   gives `−1`. A float exponent still gives a float result.
 
+- **A power of `i` or `−i` to a large integer exponent is evaluated.**
+  `i^(10^30 + 1)` stayed unevaluated under `evaluate()` and `simplify()`; it
+  now gives `i`, from the exponent modulo 4. `(−i)^(10^30 + 3)` gives `i`. A
+  base that is only close to `i`, such as `((10^30 + 1)/10^30)·i`, is not
+  taken as `i`.
+
 - **A compiled name equal to a name of the emitted code is renamed.** The
   compiled JavaScript calls its runtime helpers through `_SYS` and uses other
   fixed names, such as `_upper` for the bound of a `Sum` loop. A parameter of

@@ -728,8 +728,8 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // integer (a pure-imaginary exponent like `i` has re = 0, which must NOT
   // fold as a^0)
   if (isNumber(a) && isNumber(b) && b.isExact && !b.isComplex) {
-    // The base `0`, `1` or `−1` has a power of one digit for an exponent of
-    // any magnitude, so the limit of 64 below does not apply to it.
+    // The base `0`, `1`, `−1`, `i` or `−i` has a power of one digit for an
+    // exponent of any magnitude, so the limit of 64 below does not apply to it.
     const unit = unitBaseIntegerPower(a, b, false, undefined);
     if (unit !== undefined) return unit;
     // `realExponentValue`, not `b.re`: the double of an exact non-integer
@@ -1010,17 +1010,19 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
 }
 
 /**
- * The power of the exact base `0`, `1` or `−1` to an exact integer exponent
- * of any magnitude, or `undefined` when this rule does not apply.
+ * The power of the exact base `0`, `1`, `−1`, `i` or `−i` to an exact integer
+ * exponent of any magnitude, or `undefined` when this rule does not apply.
  *
  * The result has one digit: `1^n = 1`, `(−1)^n` is `1` for an even `n` and
- * `−1` for an odd `n`, and `0^n = 0` for `n > 0`. The general exact power
+ * `−1` for an odd `n`, and `0^n = 0` for `n > 0`. `i^n` is `1`, `i`, `−1` or
+ * `−i` for `n mod 4` equal to `0`, `1`, `2` or `3`, also for a negative `n`
+ * (`i^{−1} = −i`), and `(−i)^n = i^{−n}`. The general exact power
  * (`exactIntegerPow()`) refuses an exponent above the safe integer range and
  * a result estimated above `MAX_EXACT_POW_DIGITS` digits. That estimate is
  * the digit count of the base times the exponent, so it also refused
  * `(−1)^{10^7}`, whose result has one digit. This rule reads the exponent
  * from its exact rational, so a `bigint` exponent (`10^{30} + 1`) keeps its
- * parity.
+ * parity and its residue modulo 4.
  *
  * The base `0` with an exponent `n ≤ 0` is not handled here: `0^0` and
  * `0^n` for `n < 0` keep the results of the other rules.
@@ -1041,8 +1043,17 @@ function unitBaseIntegerPower(
   numericApproximation: boolean,
   rawExponent: Expression | undefined
 ): Expression | undefined {
-  if (!isNumber(x) || !x.isExact || x.isComplex) return undefined;
-  const base = x.isSame(0) ? 0 : x.isSame(1) ? 1 : x.isSame(-1) ? -1 : NaN;
+  if (!isNumber(x) || !x.isExact) return undefined;
+  // The canonical forms of `i` and `−i` are the exact literals
+  // `["Complex", 0, 1]` and `["Complex", 0, -1]`. The base `i` is `1j` and
+  // the base `−i` is `-1j`. `isSame` compares the exact parts. The doubles
+  // `re` and `im` are rounded, so they would also accept the exact base
+  // `((10^{30} + 1)/10^{30})·i`, whose `im` rounds to `1`.
+  let base: number | '1j' | '-1j' = Number.NaN;
+  if (x.isComplex) {
+    if (x.isSame(x.engine.I)) base = '1j';
+    else if (x.isSame(x.engine.I.neg())) base = '-1j';
+  } else base = x.isSame(0) ? 0 : x.isSame(1) ? 1 : x.isSame(-1) ? -1 : NaN;
   if (Number.isNaN(base)) return undefined;
 
   let r: Rational | undefined;
@@ -1078,7 +1089,16 @@ function unitBaseIntegerPower(
 
   const ce = x.engine;
   let result: Expression;
-  if (base === 1) result = ce.One;
+  if (base === '1j' || base === '-1j') {
+    // `i^n` depends only on `n mod 4`: `i^0 = 1`, `i^1 = i`, `i^2 = −1` and
+    // `i^3 = −i`. The base `−i` is `i^{−1}`, so `(−i)^n = i^{−n}`. The
+    // residue is computed on a `bigint` when `n` is one, so it stays exact
+    // above `2^53`, and it is moved into `0..3` for a negative `n`.
+    const m = base === '1j' ? n : -n;
+    const k =
+      typeof m === 'bigint' ? Number(((m % 4n) + 4n) % 4n) : ((m % 4) + 4) % 4;
+    result = [ce.One, ce.I, ce.NegativeOne, ce.I.neg()][k];
+  } else if (base === 1) result = ce.One;
   else if (base === -1) {
     const even = typeof n === 'bigint' ? n % 2n === 0n : n % 2 === 0;
     result = even ? ce.One : ce.NegativeOne;
@@ -1411,9 +1431,10 @@ export function pow(
   const residue = kindArithmetic(x.engine, 'Power', [x, x.engine.expr(exp)]);
   if (residue !== undefined) return residue;
 
-  // The exact base `0`, `1` or `−1` to an integer exponent of any magnitude
-  // (`unitBaseIntegerPower()`). The general exact power below refuses a large
-  // exponent, and the double of an exponent above `2^53` has no parity.
+  // The exact base `0`, `1`, `−1`, `i` or `−i` to an integer exponent of any
+  // magnitude (`unitBaseIntegerPower()`). The general exact power below
+  // refuses a large exponent, and the double of an exponent above `2^53` has
+  // no parity.
   const unit = unitBaseIntegerPower(x, exp, numericApproximation, rawExponent);
   if (unit !== undefined) return unit;
 
