@@ -855,6 +855,27 @@ const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
   // bound as `_upper` around the body. A user name `_upper` in the body
   // would read that bound instead of its own value.
   '_upper',
+  // The lowerings of the operators that take a callback (`Map`, `Filter`,
+  // `Count`, `Find`, `Any`, `All`, `FlatMap`, the `Sum` of a `Map`, ...)
+  // bind the callback to `_f` around the code of the collection:
+  // `((_f) => (<collection>).map((_x) => _f(_x)))(<callback>)`. A user
+  // name `_f` in that code would read the callback instead of its own
+  // value.
+  '_f',
+  // The lowering of `Norm` of a point or a list of points binds the
+  // operand to `_v`, and each point to `_pt`, around the code of the order
+  // of the norm. A user name `_v` or `_pt` in that code would read the
+  // operand or the point instead of its own value.
+  '_v',
+  '_pt',
+  // A `Coalesce` of a number (`absence.numeric.coalesce`) binds the first
+  // operand to `_c` around the code of the default value. A user name `_c`
+  // in that code would read the first operand instead of its own value.
+  '_c',
+  // A `Comprehension` (`compileComprehension`) collects its values in the
+  // array `result` around the code of its term. A user name `result` in
+  // the term would read the array instead of its own value.
+  'result',
   // The reserved words of JavaScript, `eval`, `arguments`, and the globals
   // that the emitted code reads (see `JAVASCRIPT_RESERVED_IDENTIFIERS`).
   ...JAVASCRIPT_RESERVED_IDENTIFIERS,

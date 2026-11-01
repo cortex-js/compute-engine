@@ -6350,6 +6350,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // `_IA` is baked as a literal token by every interval lowering; `_SYS`
       // by the helpers it shares with the JavaScript target. The loop of a
       // `Sum` or `Product` declares `_upper` and `_lower` around its body.
+      // A `Comprehension` collects its values in the array `result` around
+      // its term. The fold of a `Sum`, `Product`, `Max` or `Min` over a
+      // range with a run-time bound (`compileIntervalDynamicRangeReduce`)
+      // binds the range to `_r` around its term.
       // The reserved words of JavaScript, `eval`, `arguments` and the
       // globals that the emitted code reads cannot name a binding either
       // (`JAVASCRIPT_RESERVED_IDENTIFIERS`). See
@@ -6359,6 +6363,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         '_SYS',
         '_upper',
         '_lower',
+        'result',
+        '_r',
         ...JAVASCRIPT_RESERVED_IDENTIFIERS,
       ]),
       // Only a function-LITERAL callee compiles here (see the `Apply` entry

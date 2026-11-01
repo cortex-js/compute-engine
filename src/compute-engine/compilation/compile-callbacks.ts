@@ -607,8 +607,15 @@ export function combinerPlan(
       eltType !== undefined && isNonRealNumber(eltType)
         ? typeToString(eltType)
         : 'complex';
-    const a = engine.symbol('_a');
-    const x = engine.symbol('_x');
+    // The parameters of the eta expansion must not have the name of the
+    // combiner: a parameter `_x` would hide a user function `_x`, and the
+    // body `_x(_a, _x)` would call the parameter.
+    let aName = '_a';
+    while (aName === op.symbol) aName = `_${aName}`;
+    let xName = '_x';
+    while (xName === op.symbol) xName = `_${xName}`;
+    const a = engine.symbol(aName);
+    const x = engine.symbol(xName);
     const eta = engine.function('Function', [
       engine.function(op.symbol, [a, x]),
       accComplex

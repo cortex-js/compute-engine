@@ -392,7 +392,13 @@
   a top-level function literal, a block local or a loop index with one of
   these names kept it and hid the emitted one: `(_SYS) ↦ _SYS!` threw a
   `TypeError`, and `(n, _upper) ↦ Sum(k·_upper, k = 1..n)` at `(3, 10)` gave
-  `18` for `60`. Such a name is now emitted under another name.
+  `18` for `60`. Such a name is now emitted under another name. The same
+  applies to the names `_f`, `_v`, `_c`, `_pt` and `result` of the
+  JavaScript target and `result` and `_r` of the interval target: a list
+  parameter `_f` in `Map(y ↦ y + 2, _f)` threw `_f.map is not a function`,
+  and `Coalesce(At(L, 5), _c)` gave `null` for the value of `_c`. In a
+  complex `Reduce`, a user function named `_a` or `_x` used as the combiner
+  no longer declines.
 
 - **A Leibniz derivative in the integrand of an integral leaves the closing
   differential to the integral** (CE-617). `\int_0^1 \frac{d}{dx}x^3\,dx`

@@ -303,3 +303,187 @@ describe('A local named like an emitted identifier in the Block body of a Loop',
     expect(value.hi).toBeCloseTo(12);
   });
 });
+
+// The lowerings below bind a fixed name around compiled user code. A user
+// name equal to that fixed name read the emitted value instead of its own.
+describe('A user name equal to a name that a lowering binds around user code', () => {
+  const list = (n: string) => ['Typed', n, "'list<integer>'"];
+
+  // `Map`, `Filter` and the other operators with a callback bind the
+  // callback to `_f` around the code of the collection.
+  test.each([
+    ['Map', ['Map', ['Function', ['Add', 'y', 2], 'y'], '_f'], [3, 4, 5]],
+    ['Filter', ['Filter', '_f', ['Function', ['Greater', 'y', 2], 'y']], [3]],
+    ['Count', ['Count', '_f', ['Function', ['Greater', 'y', 2], 'y']], 1],
+  ])('a list parameter named _f in %s', (_op, body, value) => {
+    const fn = ['Function', body, list('_f')];
+    const expected = ce
+      .box(['Apply', fn, ['List', 1, 2, 3]] as any)
+      .evaluate()
+      .toString();
+    expect(expected).toBe(JSON.stringify(value));
+    expect(compiled(fn).run!([1, 2, 3])).toEqual(value);
+  });
+
+  // `Comprehension` collects its values in the array `result` around the
+  // code of its term.
+  test('a parameter named result in a Comprehension', () => {
+    const fn = [
+      'Function',
+      ['Comprehension', ['Add', 'k', 'result'], ['Element', 'k', 'L']],
+      list('L'),
+      ['Typed', 'result', "'integer'"],
+    ];
+    const expected = ce
+      .box(['Apply', fn, ['List', 1, 2, 3], 2] as any)
+      .evaluate()
+      .toString();
+    expect(expected).toBe('[3,4,5]');
+    expect(compiled(fn).run!([1, 2, 3], 2)).toEqual([3, 4, 5]);
+  });
+
+  test('a Comprehension index named result', () => {
+    const fn = [
+      'Function',
+      ['Comprehension', ['Multiply', 'result', 2], ['Element', 'result', 'L']],
+      list('L'),
+    ];
+    expect(compiled(fn).run!([1, 2, 3])).toEqual([2, 4, 6]);
+  });
+
+  test('interval-js: a parameter named result in a Comprehension', () => {
+    const fn = [
+      'Function',
+      ['Comprehension', ['Add', 'k', 'result'], ['Element', 'k', 'L']],
+      list('L'),
+      ['Typed', 'result', "'integer'"],
+    ];
+    const r = compiled(fn, { to: 'interval-js' });
+    const v: any[] = r.run!([1, 2, 3], 2) as any;
+    expect(v.map((x) => [x.value.lo, x.value.hi])).toEqual([
+      [3, 3],
+      [4, 4],
+      [5, 5],
+    ]);
+  });
+
+  // `Norm` over a list of points binds each point to `_pt` around the code
+  // of the order of the norm.
+  test('a parameter named _pt that is the order of a Norm', () => {
+    const fn = [
+      'Function',
+      ['Norm', 'P', '_pt'],
+      ['Typed', 'P', "'list<tuple<real, real>>'"],
+      ['Typed', '_pt', "'integer'"],
+    ];
+    const expected = ce
+      .box([
+        'Apply',
+        fn,
+        ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]],
+        1,
+      ] as any)
+      .evaluate()
+      .toString();
+    expect(expected).toBe('[7,14]');
+    expect(
+      compiled(fn).run!(
+        [
+          [3, 4],
+          [6, 8],
+        ],
+        1
+      )
+    ).toEqual([7, 14]);
+  });
+
+  // `Norm` of an operand whose shape is known only at run time binds the
+  // operand to `_v` around the code of the order of the norm.
+  test('a parameter named _v that is the order of a Norm', () => {
+    const fn = [
+      'Function',
+      ['Norm', 'P', '_v'],
+      ['Typed', 'P', "'broadcastable<tuple<real, real>>'"],
+      ['Typed', '_v', "'integer'"],
+    ];
+    const expected = ce
+      .box([
+        'Apply',
+        fn,
+        ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]],
+        1,
+      ] as any)
+      .evaluate()
+      .toString();
+    expect(expected).toBe('[7,14]');
+    expect(
+      compiled(fn).run!(
+        [
+          [3, 4],
+          [6, 8],
+        ],
+        1
+      )
+    ).toEqual([7, 14]);
+  });
+
+  // A `Coalesce` of a number binds the first operand to `_c` around the
+  // code of the default value.
+  test('a parameter named _c that is the default of a Coalesce', () => {
+    const fn = [
+      'Function',
+      ['Coalesce', ['At', 'L', 5], '_c'],
+      ['Typed', 'L', "'list<real>'"],
+      ['Typed', '_c', "'real'"],
+    ];
+    expect(
+      ce.box(['Apply', fn, ['List', 1, 2], 7] as any).evaluate().re
+    ).toBe(7);
+    expect(compiled(fn).run!([1, 2], 7)).toBe(7);
+  });
+
+  // The interval target folds the term of a `Sum` over a `Range` with a
+  // run-time bound in the scope of `_r`, the name of the range.
+  test('interval-js: a parameter named _r in the term of a Sum over a Range', () => {
+    const fn = [
+      'Function',
+      [
+        'Sum',
+        ['Map', ['Function', ['Multiply', 'y', '_r'], 'y'], ['Range', 1, 'n']],
+      ],
+      ['Typed', 'n', "'integer'"],
+      ['Typed', '_r', "'integer'"],
+    ];
+    expect(ce.box(['Apply', fn, 3, 2] as any).evaluate().re).toBe(12);
+    const v: any = compiled(fn, { to: 'interval-js' }).run!(3, 2);
+    expect([v.value.lo, v.value.hi]).toEqual([12, 12]);
+  });
+});
+
+// A `Reduce` over complex values with a user function as the combiner
+// compiles the combiner as the function literal `(_a, _x) ↦ f(_a, _x)`. The
+// parameters of this literal must not have the name of the function.
+describe('A user function named like a parameter of a combiner literal', () => {
+  test.each(['_a', '_x'])('a user function named %s', (name) => {
+    const ce2 = new ComputeEngine();
+    ce2.assign(name, ce2.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
+    const fn = [
+      'Function',
+      ['Reduce', 'L', name, 0],
+      ['Typed', 'L', "'list<complex>'"],
+    ];
+    const expected = ce2
+      .box(['Apply', fn, ['List', ['Complex', 1, 1], ['Complex', 2, 0]]] as any)
+      .evaluate();
+    expect(expected.re).toBe(3);
+    expect(expected.im).toBe(1);
+    const r = compile(ce2.box(fn as any), { fallback: false })!;
+    expect(r.success).toBe(true);
+    expect(
+      r.run!([
+        { re: 1, im: 1 },
+        { re: 2, im: 0 },
+      ])
+    ).toEqual({ re: 3, im: 1 });
+  });
+});
