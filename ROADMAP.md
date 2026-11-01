@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-733.
+Next free reference: CE-739.
 
 **Entry format.**
 
@@ -121,6 +121,19 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-737. The type of a call of a function with an early `Return` ignores the value of the `Return`
+
+**Status:** ready; defect, S.
+
+With `x: real` and `g ≔ y ↦ Block(If(y > 1, Return((y, y))), y + 1)`, the type
+of `g(x)` is `number`, but `g(2)` evaluates to the point `(2, 2)`. The type of
+the call is the type of the last value of the body; the values of a `Return`
+are not joined into it. A consumer that reads the type (the compiler, the type
+of `2·g(x)`, a type check in Epsil) then treats a point as a number. The
+compilation of `g(x)` declines (the values of the body have different shapes),
+so compiled code is not affected. Fix: the result type of a function literal
+is the join of the types of its `Return` values and of its last value.
 
 ### CE-729. Parameter default values in an overloaded signature and in a multi-clause function
 
@@ -2113,6 +2126,24 @@ the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
 ## Symbolic computation
+
+### CE-738. `Integrate` of a block integrand: `evaluate()` integrates the first statement only
+
+**Status:** ready; wrong value, M.
+
+`Integrate(Block(c ≔ 2; c·x), Limits(x, 0, 1))`: `.N()` gives `1`, and
+`.evaluate()` gives `2`, the integral of the value of the first statement
+`c ≔ 2`. With a `Declare` first,
+`Integrate(Block(Declare(c, "real"); c ≔ 2; c·x), Limits(x, 0, 1))`,
+`.evaluate()` gives `Error(ErrorCode("incompatible-type", "number",
+"nothing"), Declare(c, "real"))` and `.N()` gives the integral unevaluated.
+The canonical form is correct (the integrand is a `Function` whose body is the
+whole block), but `toString()` shows only the first statement
+(`int_(0)^(1)(Declare(c, "real") dx)`), and the symbolic integration reads
+the same first statement. Expected: `1` from both. Fix: the symbolic
+integration and the serializer take the value of the block (its last
+statement), or the symbolic integration declines for a block integrand and
+leaves it to the numeric one.
 
 ### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
 
@@ -4134,6 +4165,79 @@ Each of these is now a test of the simple rule in
 all of them; it can instead compile each assignment to its own variable
 (static single assignment) where the shapes differ.
 
+### CE-733. On `interval-js`, a `Which` declines for a branch that a condition known at compile time excludes
+
+**Status:** ready; defect, S.
+
+With no declarations, `compile(Which(3 < 2, [1, 2], True, 0), { to: "interval-js" })`
+declines: "Could not compile `List`: the operator is known to the engine but
+target 'interval-javascript' has no lowering for it". The interpreter and the
+JavaScript target give `0`. The same expression with `If`,
+`If(3 < 2, [1, 2], 0)`, compiles on `interval-js` to the constant `0`, because
+the `If` emitter drops the branch that the known condition excludes. The
+interval `Which` emitter compiles every branch. Fix: drop in the interval
+`Which` emitter the clauses whose condition is known false at compile time, and
+stop at the first clause whose condition is known true, as the JavaScript
+target does.
+
+### CE-734. On `glsl` and `wgsl`, a branch that a condition known at compile time excludes is emitted
+
+**Status:** ready; defect, S.
+
+With `x: real`, `Which(3 < 2, x, True, 0)` compiles on `glsl` to
+`((false) ? (x) : ((0.0)))` and on `wgsl` to `select((0.0), x, false)`. The
+value is correct (`0`), but the emitted code keeps the excluded branch. When
+that branch has another shape, the compilation declines although the
+interpreter has a value: `Which(3 < 2, (1, 2), True, x)` declines on both
+targets with "its branches have different shapes", where the interpreter gives
+`x`. `If(False, (1, 2), 0)` declines in the same way. `If(2 < 3, x, y)`
+already compiles to `x`. Fix: in the shader emitters of `If` and `Which`, drop
+the branches whose condition is known at compile time, as the JavaScript
+target does (`droppedOperands()`), and let the check of settled shapes compare
+only the branches that are kept.
+
+### CE-735. A compiled `Loop` ended by a `Break` with a value gives `undefined` on JavaScript
+
+**Status:** ready; wrong value, S.
+
+With `x: real`, `Loop(If(x > 1, Break(3), Break(3)))` compiles to this code
+(formatted):
+
+```js
+(() => {
+  while (true) {
+    if (_.x !== undefined) {
+      if (1 < _.x) {
+        break;
+      } else {
+        break;
+      }
+    }
+  }
+})();
+```
+
+At `x = 2` the compiled code gives `undefined`, and the interpreter gives `3`.
+The emitted `break` drops the value of the `Break`. Fix: assign the value of
+the `Break` to a result variable of the loop before `break`, and return that
+variable after the loop.
+
+### CE-736. A name that a chained assignment in a loop body writes is read after the loop with a type and no value
+
+**Status:** ready; defect, S.
+
+In `Block(t ≔ 0; Loop(t ≔ (w ≔ t + i), i ∈ 1..3); w + 0)` the compiled code
+declares `w` as a local of the loop body (`let w; w = i + t; t = w`) and reads
+the input `_.w` after the loop. `freeSymbols` is `["w"]`, and the read of `w`
+after the loop has the type `number`, so the refusal of an input with no type
+does not apply. The interpreter gives the symbol `w`; the compiled code gives
+`undefined` when `w` is not supplied, and `[1, 2]` when `w = [1, 2]` is
+supplied, although the type of the read is `number`. Cause: the read of `w`
+after the loop takes the type of the local of the loop body. Fix: give the read
+the type of its own binding (no type, so the compilation declines with
+`'untyped-input'`), or decide that the inner target is a local of the block
+and assign it there in the interpreter and in the compiled code.
+
 ### CE-714. A point with a coordinate declared `real | list<real>` gives a norm per element in compiled code, an error in the interpreter
 
 **Status:** ready; wrong value, small. Found 2026-10-31 during CE-712.1.
@@ -4205,9 +4309,10 @@ run-time dispatch produced.
 Steps (plan §6; each in a worktree, with the dual review, the before/after
 corpus audit and a report of the declines per target and the `code` changes):
 
-- **CE-712.1** (done 2026-11-01, staged in the main tree, not committed;
+- **CE-712.1** (done, committed by the user 2026-11-01 as `5b60e6081`;
   record in `docs/scratch/2026-10-31-ce712-1-handoff.md`, section "Applied
-  and staged". User decision 2026-11-01: every function literal that assigns
+  and staged"; corpus: JavaScript declines 24 to 47, GLSL 49 to 48,
+  interval-js 75 to 80, code changed in 0 records that compile in both. User decision 2026-11-01: every function literal that assigns
   a name of an enclosing scope declines, except the root and a literal that
   `Apply` applies where it is written to scalar arguments (CE-720). R1 (an
   input of type `unknown` or `any` declines, its name in `unsupported`) and R3
