@@ -276,6 +276,17 @@
 
 ### Bug Fixes
 
+- **An integral evaluates a `Sum`, a `Product` or a `D` in its integrand
+  before it integrates** (CE-616), as it already did for an inner
+  `Integrate`. `\int_0^1 \frac{d}{dx}x^3\,dx` and
+  `\int_0^1 2\left(\sum_{k=1}^3 kx\right)dx` gave an unevaluated `Integrate`
+  under `evaluate()`; they are now `1` and `6`, the values that `N()` gave.
+  The index of a `Sum` stays bound, and the variable of `D` is the
+  integration variable. A sum whose value is conditional (an infinite series
+  such as `Σ_{n=0}^∞ n·x^n`), a sum whose bound reads the integration
+  variable (`∫_0^3 Σ_{k=1}^{x} … dx`, a step function), and an operator inside
+  `Hold` are not replaced.
+
 - **`Limit` at infinity of a power whose base tends to 0 and whose exponent
   is negative.** With `n < 0`, `Limit(Root(1/x, n), x, +∞)` gave
   `ComplexInfinity`; `x^{-1/n}` is real and positive, and the limit is now

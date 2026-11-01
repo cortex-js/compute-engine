@@ -1124,22 +1124,90 @@ function integrateAtSymbolicExponentZeros(
   return ce.function('Add', pieces).evaluate({ numericApproximation });
 }
 
+/** The binders, other than `Integrate`, that `evaluateInnerIntegrals`
+ * replaces by their value in an integrand. */
+const INTEGRAND_BINDERS_EVALUATED_FIRST = new Set(['Sum', 'Product', 'D']);
+
 /** `expr` with each inner `Integrate` subexpression replaced by its value,
  * when that value has no `Integrate` left. Otherwise the inner integral is
  * kept as it is. An inner integral binds its own variable, so its value can
  * be computed before the outer integral: `∫_0^1 x·(∫_{−1}^{1} x² dx) dx` is
- * `∫_0^1 (2/3)·x dx`. The operands of other binders (a `Sum`, a function
- * literal) are not searched. */
-function evaluateInnerIntegrals(expr: Expression): Expression {
+ * `∫_0^1 (2/3)·x dx`. A `Sum`, `Product` or `D` is replaced by its value in
+ * the same way (`INTEGRAND_BINDERS_EVALUATED_FIRST`). `variables` are the
+ * names of the integration variables of this integral and of the enclosing
+ * integrals. The operands of other binders (a function literal) and of a
+ * quote operator (`Hold`) are not searched. */
+function evaluateInnerIntegrals(
+  expr: Expression,
+  variables: ReadonlyArray<string>
+): Expression {
   if (!isFunction(expr)) return expr;
+  // The content of a quote operator is not evaluated: `Hold(Σ_{k=1}^3 k)`
+  // stays held, and an effect in it does not run.
+  if (expr.operatorDefinition?.holdClass === 'quote') return expr;
   if (expr.operator === 'Integrate') {
     const value = expr.evaluate();
     return value.has('Integrate') ? expr : value;
   }
+  // A held `Sum`, `Product` or `D` is evaluated as a whole, as an inner
+  // integral is: `∫_0^1 2·D(x^3, x) dx` is `∫_0^1 6x^2 dx`, and
+  // `∫_0^1 Σ_{k=1}^3 k·x dx` is `∫_0^1 6x dx`. The evaluation keeps the
+  // binders: the index of a `Sum` stays bound inside the `Sum`, and the
+  // variable of `D` is the symbol of the integrand, so the value
+  // (`3x^2`) is a function of the integration variable. When the value
+  // still has the operator (no closed form), the operator is kept. The
+  // operator is kept too when the value is conditional: an infinite series
+  // `Σ_{n=0}^∞ n·x^n` evaluates to `When(x/(1 − x)^2, |x| < 1)`, which no
+  // antiderivative rule reads, where the series rules integrate the held
+  // `Sum` term by term.
+  if (INTEGRAND_BINDERS_EVALUATED_FIRST.has(expr.operator)) {
+    // A `Sum` or `Product` with a bound that reads an integration variable
+    // is kept (the index of a `Limits` or `Element` clause is not a bound).
+    // The evaluation of such a sum floors a numeric bound, so the
+    // integrand is a step function of the variable, but its closed form
+    // reads the bound as an integer and is a smooth function:
+    // `∫_0^3 Σ_{k=1}^{x} (1/k − 1/(k+1)) dx` is 0 + 1/2 + 2/3 = 7/6, and the
+    // integral of the closed form `1 − 1/(x+1)` is 3 − ln 4.
+    // Only a free occurrence counts: in the bound `Σ_{x=1}^{2} 1`, the `x`
+    // is bound by the nested sum. `D(x, x)` has `x` free (it is the
+    // derivative at `x`), but its value is the constant 1: a pure bound
+    // that names a variable is evaluated, and its value is read and used in
+    // place of the bound. A bound with an effect is not evaluated here, and
+    // the operator is kept.
+    let held: Expression = expr;
+    if (expr.operator !== 'D') {
+      const reads = (e: Expression) =>
+        e.freeVariables.some((name) => variables.includes(name));
+      let changed = false;
+      let keep = false;
+      const clauses = expr.ops.slice(1).map((l) => {
+        const isClause = isFunction(l, 'Limits') || isFunction(l, 'Element');
+        const bounds = isClause ? l.ops.slice(1) : [l];
+        const values = bounds.map((b) => {
+          if (keep || !reads(b)) return b;
+          if (!b.isPure) {
+            keep = true;
+            return b;
+          }
+          const v = b.evaluate();
+          if (reads(v)) keep = true;
+          else changed = true;
+          return v;
+        });
+        if (!isClause || values.every((v, i) => v === bounds[i])) return l;
+        return expr.engine.function(l.operator, [l.op1, ...values]);
+      });
+      if (keep) return expr;
+      if (changed)
+        held = expr.engine.function(expr.operator, [expr.op1, ...clauses]);
+    }
+    const value = held.evaluate();
+    return value.has([expr.operator, 'When']) ? expr : value;
+  }
   let changed = false;
   const ops = expr.ops.map((op, i) => {
     if (boundVariableNamesInOperand(expr, i).length > 0) return op;
-    const value = evaluateInnerIntegrals(op);
+    const value = evaluateInnerIntegrals(op, variables);
     if (value !== op) changed = true;
     return value;
   });
@@ -2747,10 +2815,15 @@ const HELD_INTEGRAND_OPERATORS = new Set([
  * of a called function is not read), holds a binder other than `Block`
  * (`Sum`, `Product`, `D`, `Integrate`: a definition with `scoped`) or
  * another operator that holds its operands (`HELD_INTEGRAND_OPERATORS`).
- * The scalar route does not evaluate such an operator before it integrates,
- * where the evaluation of the whole integrand does: `∫_0^1 (Σ_{k=1}^3 k·x)·
- * f(x, E) dx` is `[9/2, 15/2]` only when the integrand is evaluated whole.
- * So the split declines for it.
+ * The scalar route does not evaluate the other operators (a `Limit`, a
+ * `Hold`) before it integrates, where the evaluation of the whole integrand
+ * does. It evaluates an inner `Integrate`, `Sum`, `Product` or `D`
+ * (`evaluateInnerIntegrals`), but it keeps one whose value still has the
+ * operator or is conditional (a `When`), and a `Sum` or `Product` with a
+ * bound that reads an integration variable. The evaluation of the whole
+ * integrand evaluates them in these cases too. So the split declines for
+ * all of them, and `∫_0^1 (Σ_{k=1}^3 k·x)·f(x, E) dx` is `[9/2, 15/2]` on
+ * the route that evaluates the integrand whole.
  */
 function holdsHeldOperator(e: Expression): boolean {
   if (!isFunction(e)) return false;
@@ -7389,7 +7462,12 @@ volumes
               isDefinite
                 ? [{ name: variable, lower, upper }, ...ranges]
                 : ranges,
-              () => evaluateInnerIntegrals(liftIntegrand(expr))
+              () =>
+                evaluateInnerIntegrals(liftIntegrand(expr), [
+                  variable,
+                  ...intVarNames,
+                  ...ranges.map((r) => r.name),
+                ])
             );
             // A definite integral whose integrand has `Abs(u)` or `Sign(u)`
             // with `u` linear in the variable is integrated piece by piece
