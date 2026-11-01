@@ -156,6 +156,7 @@ import {
   inferFunctionLiteralEffects,
 } from './boxed-expression/effects-inference.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
+import { readsOtherBindings } from './boxed-expression/names-read.js';
 import { isOperatorDef } from './boxed-expression/definition-guards.js';
 import { releaseKeptEagerSourceValues } from './boxed-expression/eager-source-values.js';
 import {
@@ -9192,14 +9193,52 @@ function makeLambda(
     iterationStatements: ReadonlyArray<Expression> | undefined
   ): Expression | undefined => {
     if (markerBody === undefined || options?.awaitStatements) return undefined;
-    const applied = substitutedBody(
-      markerBody,
-      args,
-      options,
-      iterationStatements
-    );
-    // As the evaluate handler of `NumericApproximation` does.
-    return applied === undefined ? undefined : bodyResultValue(applied.N());
+    // The substituted body is canonicalized and evaluated in a scope whose
+    // parent is the scope where the literal was defined, as a call frame is
+    // (and as in `applyWrittenArguments`). A function that the body calls
+    // reads the locals of that scope only through this chain: a function
+    // defined in a `Block` on the asynchronous route finds the copy of the
+    // block scope that holds the values of this evaluation in the scope
+    // chain of its caller (`capturedRunOf`). When the body was evaluated in
+    // the scope of the reader of a lazy `Map`, the function `h` read the
+    // locals of the block as free symbols:
+    // `Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), Map(k ↦ h(k) + 1, [1, 2]))`
+    // gave `[c + 2, c + 3]` with
+    // `evaluateAsync({ numericApproximation: true })`, not `[7, 8]`.
+    const callerScope = ce.context.lexicalScope;
+    const capturedScope =
+      definingScopeOf(ce, bodyFn.localScope!) ?? callerScope;
+    // A name that an argument reads (a symbol, or the function of a call
+    // such as `h(1)`) is read by name in this scope too. When the scope
+    // where the literal was defined binds such a name to another definition
+    // than the one the argument is bound to, the ordinary route applies: its
+    // call frame reads each argument in the scope of the caller. Evaluating
+    // the body in the scope of the caller instead is not sound either: for
+    // a lazy `Map` read after its `Block` returned, that is the scope of the
+    // reader, where the locals of the block are free symbols. An argument
+    // with no name (the elements of a list of numbers) costs no lookup.
+    const switchScope = capturedScope !== callerScope;
+    if (
+      switchScope &&
+      ce._inScope(capturedScope, () =>
+        args.some((arg) => readsOtherBindings(ce, arg))
+      )
+    )
+      return undefined;
+    if (switchScope)
+      ce.pushScope({ parent: capturedScope, bindings: new Map() });
+    try {
+      const applied = substitutedBody(
+        markerBody,
+        args,
+        options,
+        iterationStatements
+      );
+      // As the evaluate handler of `NumericApproximation` does.
+      return applied === undefined ? undefined : bodyResultValue(applied.N());
+    } finally {
+      if (switchScope) ce.popScope();
+    }
   };
 
   /**

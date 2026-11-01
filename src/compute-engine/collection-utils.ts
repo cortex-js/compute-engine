@@ -90,6 +90,7 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import { optionalParameterTarget } from './boxed-expression/function-literal.js';
+import { readsOtherBindings } from './boxed-expression/names-read.js';
 
 /** `list<number>`, parsed once when the module loads, so the predicates that
  * test against it do not parse the string on each call. */
@@ -4777,55 +4778,6 @@ function isGlobalBinding(ce: Expression['engine'], name: string): boolean {
   }
   if (holder === null || top === null) return false;
   return holder === top || holder.parent === top;
-}
-
-/**
- * True when the callback `fn` of a `Map` (a symbol, or a function literal)
- * reads a name that the current scope of `ce` binds to a definition that is
- * not the definition that `fn` is bound to. Such a callback is a closure: it
- * reads a variable of another scope (`Block(c := 5, Map(x ↦ x/c, …))`, read
- * after the `Block` returned), and a callback made again from MathJSON in the
- * current scope does not read that variable.
- *
- * The parameters of a function literal are not checked: they are bound by
- * the literal. A name of a scope inside the body (a local of a `Block`, the
- * index of a `Sum`, the parameter of a nested function) is bound to that
- * scope, and it makes the result `true`. The result is then `true` for a
- * callback that is not a closure, which is safe: the callback is applied as
- * it is (see `lazyMapNumericApproximation()`).
- */
-function readsOtherBindings(ce: Expression['engine'], fn: Expression): boolean {
-  const current = (name: string): unknown => {
-    const def = ce.lookupDefinition(name);
-    return isValueDef(def)
-      ? def.value
-      : isOperatorDef(def)
-        ? def.operator
-        : undefined;
-  };
-  const params = new Set<string>();
-  if (isFunction(fn, 'Function'))
-    for (const operand of fn.ops.slice(1)) {
-      // A parameter with a default value, `["Optional", p, d]`, binds the
-      // name of `p`.
-      const p = optionalParameterTarget(operand);
-      const name = sym(p) ?? (isFunction(p, 'Typed') ? sym(p.op1) : undefined);
-      if (name !== undefined) params.add(name);
-    }
-  const visit = (e: Expression): boolean => {
-    if (isSymbol(e))
-      return !params.has(e.symbol) && e.baseDefinition !== current(e.symbol);
-    if (!isFunction(e)) return false;
-    // A call is bound to the operator definition of its operator, or to the
-    // value definition of a symbol whose value is a function: `h(x)` for a
-    // local `h := z ↦ 2z` of a `Block` has no operator definition. A call
-    // that is bound to no definition is also taken as a closure: the
-    // current scope can bind its operator to another definition.
-    const def = e.baseDefinition;
-    if (def === undefined || def !== current(e.operator)) return true;
-    return e.ops.some(visit);
-  };
-  return isFunction(fn, 'Function') ? visit(fn.op1) : visit(fn);
 }
 
 /**

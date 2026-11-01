@@ -366,6 +366,136 @@ describe('a function literal that leaves a block reads its locals on both routes
     expect(elements(async)).not.toMatch(/\b[bcd]\b/);
   });
 
+  // With `numericApproximation`, the evaluation of a lazy `Map` wraps its
+  // callback in the numeric marker (`lazyMapNumericApproximation`). On the
+  // asynchronous route, this can run after an `await`, and the new callback
+  // read the locals of the block as free symbols when it was made in the
+  // global scope: `Block(Declare(c, 'real', 5), Map(k ↦ c + k, [1, 2]))`
+  // gave `[c + 1, c + 2]`. An application of a callback with the marker
+  // evaluates the body without a call frame (`applyMarkerBody`), and a
+  // function that the block defines did not find the locals of the run when
+  // the callback called it: `Map(k ↦ h(k) + 1, [1, 2])` gave
+  // `[c + 2, c + 3]`.
+  test.each(cases)('%s, with numericApproximation', async (_name, program) => {
+    const options = { numericApproximation: true };
+    const sync = new ComputeEngine().box(program as any).evaluate(options);
+    const async = await new ComputeEngine()
+      .box(program as any)
+      .evaluateAsync(options);
+    expect(elements(async)).toBe(elements(sync));
+    expect(elements(async)).not.toMatch(/\b[bcd]\b/);
+  });
+
+  test('the values with numericApproximation', async () => {
+    const options = { numericApproximation: true };
+    const defineH = [
+      'DefineFunction',
+      'h',
+      ['Function', ['Add', 'c', 'k'], 'k'],
+    ];
+    const results: string[] = [];
+    for (const program of [
+      [
+        'Block',
+        declareC(5),
+        ['Map', ['Function', ['Add', 'c', 'k'], 'k'], ['List', 1, 2]],
+      ],
+      [
+        'Block',
+        declareC(5),
+        defineH,
+        ['Map', ['Function', ['Add', ['h', 'k'], 1], 'k'], ['List', 1, 2]],
+      ],
+      ['Block', declareC(5), defineH, ['Map', 'h', ['List', 1, 2]]],
+    ]) {
+      const ce = new ComputeEngine();
+      results.push(
+        elements(ce.box(program as any).evaluate(options)),
+        elements(await ce.box(program as any).evaluateAsync()),
+        elements(await ce.box(program as any).evaluateAsync(options))
+      );
+    }
+    expect(results).toEqual([
+      '[6,7]',
+      '[6,7]',
+      '[6,7]',
+      '[7,8]',
+      '[7,8]',
+      '[7,8]',
+      '[6,7]',
+      '[6,7]',
+      '[6,7]',
+    ]);
+  });
+
+  // A literal whose body is the numeric marker evaluates its body in the
+  // scope where it was defined. When that scope binds a name that an
+  // argument reads to another definition (the global `y` for the valueless
+  // `y` of the block), the application takes the ordinary route, with a
+  // call frame, on every route. The body was evaluated in the scope of the
+  // reader of the lazy `Map` instead, and `h` read `c` as a free symbol:
+  // `evaluateAsync({ numericApproximation: true })` gave `[c + 6, 8]`.
+  test('an argument that the scope of the literal binds to another definition', async () => {
+    const options = { numericApproximation: true };
+    const program = [
+      'Block',
+      declareC(5),
+      ['Declare', 'y', { str: 'real' }],
+      ['DefineFunction', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+      ['Map', ['Function', ['Add', ['h', 'k'], 1], 'k'], ['List', 'y', 2]],
+    ];
+    const ce = new ComputeEngine();
+    ce.assign('y', 5);
+    const results = [
+      elements(ce.box(program as any).evaluate(options)),
+      elements(
+        ce
+          .box(program as any)
+          .evaluate()
+          .N()
+      ),
+      elements(await ce.box(program as any).evaluateAsync()),
+      elements(await ce.box(program as any).evaluateAsync(options)),
+    ];
+    expect(results).toEqual(Array(4).fill(results[0]));
+    expect(results[3]).not.toMatch(/\bc\b/);
+  });
+
+  // The function of a call in an argument (`h` of `h(1)`) is a name that
+  // the argument reads, as a symbol is: here the global `h` and the `h` of
+  // the block are two definitions.
+  test('a call in an argument of a literal with the numeric marker', async () => {
+    const options = { numericApproximation: true };
+    const defineH = [
+      'DefineFunction',
+      'h',
+      ['Function', ['Add', 'c', 'k'], 'k'],
+    ];
+    const results: string[] = [];
+    for (const program of [
+      ['Block', declareC(5), defineH, ['G', ['h', 1]]],
+      ['Block', declareC(5), defineH, ['Map', 'G', ['List', ['h', 1]]]],
+      [
+        'Apply',
+        ['Block', declareC(5), defineH, ['Function', ['G', ['h', 'n']], 'n']],
+        1,
+      ],
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('h', 'function');
+      ce.assign('h', ce.box(['Function', ['Multiply', 100, 'x'], 'x'] as any));
+      ce.assign(
+        'G',
+        ce.box(['Function', ['NumericApproximation', 'x'], 'x'] as any)
+      );
+      results.push(
+        elements(ce.box(program as any).evaluate(options)),
+        elements(await ce.box(program as any).evaluateAsync(options))
+      );
+    }
+    expect(results).toEqual(['6', '6', '[6]', '[6]', '6', '6']);
+  });
+
   test('the values', async () => {
     const ce = new ComputeEngine();
     const r = await ce

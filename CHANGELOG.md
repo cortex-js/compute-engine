@@ -363,19 +363,16 @@
 
 ### Bug Fixes
 
-- **The pop of a scope no longer disposes a definition that another live
-  evaluation context holds**, also when that context is on another stack (an
-  asynchronous evaluation, a lazy view), and the debug check of dead bindings
-  (`CE_DEBUG_BINDINGS`) now reports a read of the index of a `Sum` or
-  `Product` after `evaluateAsync()`, as it does after `evaluate()`. In
-  `u(u(b))` with `u := (l) => [l[i] for i in 1..n]`, and in a recursive
-  call that runs the same loop, the inner pop disposed a definition that
-  the outer evaluation still read. The values were correct, but an
-  assumption about a disposed definition is ignored. The pop of an
-  asynchronous evaluation of a `Sum` did not mark the definitions of its
-  local scope as dead, so a later read of its index was not reported. Two
-  overlapping `evaluateAsync()` calls of a node with a `const` in its body
-  no longer report a read of the constant.
+- **`evaluateAsync({ numericApproximation: true })` of a block whose lazy `Map`
+  calls a function that the block defines now reads the locals of the block.**
+  `Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), Map(k ↦ h(k) + 1, [1, 2]))`
+  gave `[c + 2, c + 3]`, and is now `[7, 8]`, as with
+  `evaluate({ numericApproximation: true })` and `evaluateAsync()`. The callback
+  with the numeric marker substitutes its arguments in its body without a call
+  frame, and it evaluated that body in the scope of the reader of the `Map`, so
+  `h` did not find the run of the block that holds `c`. The body is now
+  evaluated in a scope whose parent is the scope where the callback was
+  defined, as a call frame is.
 
 - **A function called with a block-local valueless symbol reads that local.**
   A function called in a `Block` with an argument that holds a valueless
