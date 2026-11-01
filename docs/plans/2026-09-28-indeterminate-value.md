@@ -669,7 +669,12 @@ A known limit of the float rule: it reads the operands of a form as they
 are when the form is built. A float first absorbed by an infinity is gone
 by then, so `Fract(∞ + 0.5)` and `0·(∞ + 0.5)` are `Indeterminate` although
 a float was written (`∞ + 0.5` is the exact `∞`). Both answers are pinned in
-`indeterminate.test.ts` and recorded in ROADMAP. `Quotient(5, 0)` stays
+`indeterminate.test.ts`. The limit is accepted (user decision 2026-11-01,
+former ROADMAP CE-120): a sound fix must record the absorption for each
+evaluation call, which adds work to every `evaluate()` and an options object
+to every `evaluateAsync()`, also when no float is involved (a version keyed
+by node measured +1% to +6% on ordinary evaluation and was unsound under
+recursion). The limit is stated in `docs/ERROR-MODEL.md`. `Quotient(5, 0)` stays
 inert because `Quotient` is not a library operator (it is an undefined
 function head), so there is no answer to switch.
 

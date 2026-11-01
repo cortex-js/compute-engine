@@ -87,3 +87,43 @@ describe('SUBSCRIPT OF A FUNCTION APPLICATION', () => {
     expect(new ComputeEngine().parse(latex).json).toEqual(expr.json);
   });
 });
+
+/**
+ * A subscript with several indices is written with commas. The `Sequence`
+ * serializer juxtaposes its operands with a space, and `A_{n m}` reads back
+ * as the symbol `A_nm`, `A_{\imaginaryI j}` as the symbol
+ * `A_ImaginaryUnitj`.
+ */
+describe('F39: SUBSCRIPT WITH SEVERAL INDICES', () => {
+  test.each<[string, string]>([
+    ['A_{i,j}', 'A_{\\imaginaryI, j}'],
+    ['A_{n,m}', 'A_{n, m}'],
+    ['M_{1,2}', 'M_{1, 2}'],
+    ['x_{n,m+1}', 'x_{n, m+1}'],
+    ['A_{n,m,k}', 'A_{n, m, k}'],
+  ])('%s is written %s and reads back', (input, latex) => {
+    const expr = ce.parse(input);
+    expect(expr.latex).toBe(latex);
+    expect(ce.parse(latex).isSame(expr)).toBe(true);
+  });
+
+  test('A single index is written without a comma', () => {
+    expect(ce.parse('A_{n+1}').latex).toBe('A_{n+1}');
+    expect(ce.parse('A_n').latex).toBe('A_{n}');
+  });
+
+  test('A nested Sequence index is flattened', () => {
+    const expr = ce.box([
+      'Subscript',
+      'A',
+      ['Sequence', ['Sequence', 'a', 'b'], 'c'],
+    ]);
+    expect(expr.latex).toBe('A_{a, b, c}');
+  });
+
+  test('An indexed collection with two indices is written with brackets', () => {
+    const expr = ce.box(['At', 'A', 'n', 'm']);
+    expect(expr.latex).toBe('A[n, m]');
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+});

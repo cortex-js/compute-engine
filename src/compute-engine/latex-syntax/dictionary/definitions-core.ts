@@ -3843,10 +3843,29 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             lhs,
             serializer.options.groupStyle(base, serializer.level + 1)
           );
+        // A subscript with several indices, `Subscript(A, Sequence(n, m))`,
+        // is written with commas, `A_{n, m}`. The `Sequence` serializer
+        // juxtaposes its operands with a space, and `A_{n m}` reads back as
+        // the symbol `A_nm`. A nested `Sequence` is flattened first:
+        // `Sequence(Sequence(a, b), c)` is written `A_{a, b, c}`, not
+        // `A_{a b, c}`, which reads back as a product.
+        const sub = operand(expr, 2);
+        const flatIndices = (
+          xs: Iterable<MathJsonExpression>
+        ): MathJsonExpression[] =>
+          [...xs].flatMap((x) =>
+            operator(x) === 'Sequence' ? flatIndices(operands(x)) : [x]
+          );
+        const indices =
+          operator(sub) === 'Sequence' && nops(sub) > 1
+            ? flatIndices(operands(sub))
+            : null;
         return (
           (braced ? `{${lhs}}` : lhs) +
           '_{' +
-          serializer.serialize(operand(expr, 2)) +
+          (indices
+            ? indices.map((x) => serializer.serialize(x)).join(', ')
+            : serializer.serialize(sub)) +
           '}'
         );
       }

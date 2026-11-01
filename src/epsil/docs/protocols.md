@@ -303,6 +303,13 @@ Comparable.compare("a", "b")   // ➔ "<" — just Comparable's
 Comparator.compare("a", "b")   // ➔ -1  — just Comparator's
 ```
 
+A misspelled protocol name is reported only when some protocol declares the
+member: with only `Comparator` declared, `Comparble.compare("a", "b")` is
+`protocol-unknown`. When no protocol declares the member, the name is an
+ordinary free symbol, and the call stays unevaluated, as `x.compare("a", "b")`
+does: `Comparble.compare("a", "b")` is then
+`Apply(Field(Comparble, "compare"), "a", "b")`, with no diagnostic.
+
 The qualified name is also a first-class **value** — pass it wherever a
 function is expected:
 

@@ -307,8 +307,12 @@ A free symbol that a `Block` does not declare is declared in the scope of the
 `ce.box('f')` are not `isSame`, but evaluation reads the same value (after
 `f := 5` the block gives `6`). A host can box a `Block` first and then make it
 the body of a function literal, and that declaration then becomes the binding
-of a parameter of the same name. Inside a function literal, the free symbol
-is declared in the enclosing persistent scope.
+of a parameter of the same name. A function literal behaves the same way:
+canonicalization wraps its body in a `Block`, and a free symbol that no
+statement types (a bare `f`, a tuple, an equation) is declared in the scope
+of that `Block`. So `ce.box(['Function', ['Block', 'f'], 'x'])` and a later
+`ce.box('f')` are not `isSame`, although evaluation reads the same value
+(ROADMAP CE-107).
 
 ## Simplification
 

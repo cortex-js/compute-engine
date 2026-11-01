@@ -49,6 +49,22 @@ describe('CE-122: a qualified call on a name that is not a protocol', () => {
     );
   });
 
+  // When no protocol declares the member, an undeclared receiver is an
+  // ordinary free symbol: the call stays unevaluated, with no diagnostic,
+  // as a field read on any free symbol does (`docs/plans/
+  // 2026-09-04-protocol-member-dot-call.md`, rule 4).
+  test('with no protocol that declares the member, the call stays unevaluated', () => {
+    const ce = new ComputeEngine();
+    const result = executeEpsil(ce, 'Comparable.compare("a", "b")');
+    expect(result.value?.json).toEqual([
+      'Apply',
+      ['Field', 'Comparable', "'compare'"],
+      "'a'",
+      "'b'",
+    ]);
+    expect(result.diagnostics ?? []).toEqual([]);
+  });
+
   test('a dot-call on a parameter keeps the arity error', () => {
     const ce = engine();
     const result = executeEpsil(
