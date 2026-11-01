@@ -216,6 +216,7 @@ export function markCallableFrame(frame: Scope, template: Scope): void {
  * do not make a cycle; the set of visited scopes is a guard only.
  */
 function scopeStandsFor(scope: Scope, home: Scope): boolean {
+  if (scope === home) return true;
   const visited = new Set<Scope>();
   let current: Scope | undefined = scope;
   while (current !== undefined && !visited.has(current)) {
@@ -438,10 +439,16 @@ function creationParentOf(scope: Scope): Scope | undefined {
  * real in a pushed scope `g(i)` gave `ImaginaryUnit·x`. (Tycho ledger row
  * 403, 2026-10-19.)
  *
- * When `own` is reachable from nowhere (an occurrence bound in a scope that
- * has since been popped, or an unbound one), the innermost binding by name
- * answers, foreign activation included — what the name lookup answered
- * before.
+ * A run of a `Block` removes `own` from the scope of the block and makes a
+ * new local for each `Declare` statement, so an occurrence boxed in the block
+ * is bound to a definition that no scope holds. Inside a call frame, such an
+ * occurrence reads its name in the chain of the caller that holds the block
+ * (`sweptCallerBinding` below).
+ *
+ * When `own` is reachable from nowhere otherwise (an occurrence bound in a
+ * scope that has since been popped, or an unbound one), the innermost binding
+ * by name answers, foreign activation included — what the name lookup
+ * answered before.
  */
 export function valueDefinitionInContext(
   ce: ComputeEngine,
@@ -498,8 +505,13 @@ export function bindingInContext(
           sameBindingDef('value' in found ? found.value : found.operator, own)
         )
           return found;
+        // The local of this run of the block (or of the call of the body)
+        // that the occurrence was written in: no caller reads it in its place.
+        const home = sweptHomeOf(own);
+        if (home !== undefined && scopeStandsFor(scope, home)) return found;
         return (
-          callerBinding(ce, name, own, start, staticParentOf(scope)) ?? found
+          callerBinding(ce, name, own, start, staticParentOf(scope)) ??
+          sweptHomeBinding(name, own, scope, found)
         );
       }
     }
@@ -574,6 +586,170 @@ function callerBinding(
     const found = ownBindingInChain(name, own, stack[i - 1].lexicalScope, true);
     if (found !== undefined) return found;
   }
+  return sweptCallerBinding(name, own, start, stack);
+}
+
+/**
+ * The fields of a value definition that `markSweptBinding` sets (declared on
+ * `_BoxedValueDefinition`): `_sweptHome`, the scope of the block or of the
+ * body (the template of a runtime copy of it), and `_sweptRecord`, a binding
+ * record that holds the definition. They are set on the static binding
+ * (`staticBindingOf`): the definition that an occurrence boxed in the block
+ * is bound to.
+ */
+type Swept = { _sweptHome?: Scope; _sweptRecord?: BoxedDefinition };
+
+/** The scope that `own` was removed from (`markSweptBinding`), or
+ * `undefined`. */
+function sweptHomeOf(own: BoxedBaseDefinition): Scope | undefined {
+  return (staticBindingOf(own) as Swept)._sweptHome;
+}
+
+/**
+ * Record that `def` was removed from `home` while the statements of `home`
+ * run: by the start of a run of a `Block` (`sweepCanonicalizationBindings`,
+ * `library/control-structures.ts`), or by an application of a function
+ * literal, which hides the valueless bindings of its body scope
+ * (`hideBodyScopeParams`, `function-utils.ts`). `home` is the scope of the
+ * block or of the body itself: the template scope when the run is in a
+ * runtime copy of it (an asynchronous activation, a call frame).
+ *
+ * The run then declares a new binding for each `Declare` statement, or none
+ * (a reference that canonicalization declared, which reads the enclosing
+ * scopes by name). An occurrence boxed in the block is still bound to the
+ * removed definition, so it is in no chain: `sweptCallerBinding()` reads it
+ * in the scope of the caller.
+ */
+export function markSweptBinding(def: BoxedDefinition, home: Scope): void {
+  // An occurrence that reads a value is bound to a value definition.
+  if (!('value' in def)) return;
+  const key = staticBindingOf(def.value) as Swept;
+  if (key._sweptHome === home) return;
+  key._sweptHome = home;
+  key._sweptRecord =
+    key === (def.value as Swept) ? def : { value: key as BoxedValueDefinition };
+}
+
+/**
+ * The binding that the occurrence bound to `own` reads inside a call frame,
+ * when the start of a run of a `Block` removed `own` from the scope of the
+ * block (`markSweptBinding`), or `undefined`.
+ *
+ * A run of a block makes its own bindings, so `own` is in no chain, and
+ * `ownBindingInChain()` cannot find it. In the block, the occurrence reads
+ * its name: the innermost binding of the name, which is the local that a
+ * `Declare` statement of this run made. An argument of a call made in the
+ * block holds the occurrence and is read inside the call frame, whose chain
+ * goes through the scope that defined the function, not through the block.
+ * There, the name found a binding of the defining scope: with a global
+ * `y := 5` and a global `g := x ↦ x + 0.5`, the block
+ * `Block(Declare(y, 'real'), g(y))` gave `5.5`, not `y + 0.5`.
+ *
+ * So when the scope of the block (or a runtime copy of it) is in the chain
+ * of the caller of a call frame on the stack, the occurrence reads its name
+ * from that scope up, as it does in the block. The read starts at the scope
+ * of the block, not at the innermost scope of the caller: a lazy view made
+ * in the block and read in a block nested in it reads the local of its own
+ * block, not a local of the same name that the nested block declares. When
+ * no binding of the name is left from that scope up (the run removed a
+ * reference and declared nothing in its place), the occurrence reads the
+ * removed binding, which has no value, and not a binding of the name in the
+ * chain of the call frame: a function that closes over a private `y` does
+ * not give its `y` to the `y` of the caller.
+ *
+ * When the scope of the block is in the current chain (`start`), the walk of
+ * `bindingInContext()` already reads the name there: a function defined in
+ * the block and called from a scope nested in it reads the local of the
+ * block, not a local of the nested scope.
+ */
+function sweptCallerBinding(
+  name: string,
+  own: BoxedBaseDefinition,
+  start: Scope | null,
+  stack: ComputeEngine['_evalContextStack']
+): BoxedDefinition | undefined {
+  const key = staticBindingOf(own) as Swept;
+  const home = key._sweptHome;
+  if (home === undefined || homeInChain(start, home) !== undefined)
+    return undefined;
+  for (let i = stack.length - 1; i > 0; i--) {
+    if (stack[i].name !== 'call') continue;
+    const callerScope = stack[i - 1].lexicalScope;
+    const from = homeInChain(callerScope, home);
+    if (from === undefined) continue;
+    // A shield of the name between the caller and the block intercepts the
+    // read, as it does in the caller (`markShieldDeclaration`): with
+    // `y := 3` in the block, `HoldValues(g(y), y)` gives `g(y)` evaluated
+    // with `y` and no value.
+    for (let s: Scope | null = callerScope; s && s !== from;) {
+      const found = staticBindingIn(s, name, s === callerScope);
+      if (found !== undefined && 'value' in found && isShield(found.value))
+        return found;
+      s = staticParentOf(s);
+    }
+    for (let scope: Scope | null = from; scope; scope = staticParentOf(scope)) {
+      const found = staticBindingIn(scope, name, scope === callerScope);
+      if (
+        found !== undefined &&
+        !('value' in found && isForeignBinderBinding(found.value, own))
+      )
+        return found;
+    }
+    return key._sweptRecord;
+  }
+  return undefined;
+}
+
+/**
+ * The binding that the occurrence bound to `own` reads when the walk of
+ * `bindingInContext()` found `found`, another binding of the same name, in
+ * `scope`, and no call frame changes the read (`callerBinding`).
+ *
+ * When `own` was removed from the scope of its block (`markSweptBinding`)
+ * and that scope is further up the chain than `scope`, `found` is a local of
+ * a block nested in the block of the occurrence. The occurrence was not
+ * written in that nested block: a value carries it there, such as a lazy
+ * view made in the outer block and read in the nested one. It reads its name
+ * from the scope of its own block up, as it does in that block, or the
+ * removed binding (no value) when no binding of the name is left there. With
+ * `L := Map(g, [y])` made in a block that declares `y`, a nested block that
+ * declares `y := 7` and reads `L[1]` gave `g(7)`.
+ *
+ * Otherwise `found` answers: the local of this run of the block of the
+ * occurrence, or a binding of a scope that the walk reaches when the block
+ * of the occurrence is not in the chain.
+ */
+function sweptHomeBinding(
+  name: string,
+  own: BoxedBaseDefinition,
+  scope: Scope,
+  found: BoxedDefinition
+): BoxedDefinition {
+  // A shield intercepts a read of its name whatever binding the occurrence
+  // denotes (`markShieldDeclaration`): `HoldValues(y + 1, y)` in a block
+  // where `y := 3` gives `y + 1`.
+  if ('value' in found && isShield(found.value)) return found;
+  const key = staticBindingOf(own) as Swept;
+  const home = key._sweptHome;
+  if (home === undefined || scopeStandsFor(scope, home)) return found;
+  const from = homeInChain(staticParentOf(scope), home);
+  if (from === undefined) return found;
+  for (let s: Scope | null = from; s; s = staticParentOf(s)) {
+    const binding = staticBindingIn(s, name, false);
+    if (
+      binding !== undefined &&
+      !('value' in binding && isForeignBinderBinding(binding.value, own))
+    )
+      return binding;
+  }
+  return key._sweptRecord ?? found;
+}
+
+/** The first scope of the chain that starts at `scope` that is `home`, or a
+ * runtime copy of it (`scopeStandsFor`), or `undefined`. */
+function homeInChain(scope: Scope | null, home: Scope): Scope | undefined {
+  for (; scope; scope = staticParentOf(scope))
+    if (scopeStandsFor(scope, home)) return scope;
   return undefined;
 }
 

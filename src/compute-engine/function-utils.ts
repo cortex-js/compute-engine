@@ -15,6 +15,7 @@ import {
   markActivation,
   markCallableFrame,
   markCallableHome,
+  markSweptBinding,
   rebindToBindings,
   rewriteWithBinders,
   sameBindingDef,
@@ -3587,6 +3588,14 @@ function hideBodyScopeParams(
           hiddenParamsOfBodyScope.set(bodyScope, byName);
         }
         if (!byName.has(name)) byName.set(name, binding);
+      } else {
+        // An occurrence in the body still holds the hidden binding (a local
+        // that a `Declare` statement of the body makes again in the call
+        // frame): an argument of a call made in the body reads its name in
+        // the call frame of this application (`sweptCallerBinding`,
+        // `binders.ts`). A parameter needs no record: its activation in the
+        // call frame is linked to it (`markActivation`).
+        markSweptBinding(binding, bodyScope);
       }
     }
   }

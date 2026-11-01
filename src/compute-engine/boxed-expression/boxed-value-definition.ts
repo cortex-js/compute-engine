@@ -6,6 +6,8 @@ import type {
   CollectionHandlers,
   IComputeEngine as ComputeEngine,
   TypeProvenanceEntry,
+  BoxedDefinition,
+  Scope,
 } from '../global-types.js';
 import type { FunctionInterface } from '../types-expression.js';
 import {
@@ -427,6 +429,16 @@ export class _BoxedValueDefinition
   // A runtime copy of an ordinary scoped binding. Unlike a parameter
   // activation, this binding can escape in a lazy collection's result.
   _scopeActivationOf: BoxedValueDefinition | undefined = undefined;
+
+  // When a run of a `Block` removed this binding from the scope of the block,
+  // or an application of a function literal hid it in the scope of its body:
+  // that scope, and a binding record that holds this definition
+  // (`markSweptBinding`, `binders.ts`). An occurrence bound to this
+  // definition then reads its name from that scope up. Declared here —
+  // rather than assigned on demand — so every definition keeps the same
+  // object shape.
+  _sweptHome: Scope | undefined = undefined;
+  _sweptRecord: BoxedDefinition | undefined = undefined;
 
   // True when this binding is a SHIELD: a valueless shadow declared solely to
   // hide an enclosing binding's value (`withValueShield` in `utils.ts`,
@@ -985,6 +997,8 @@ export class _BoxedValueDefinition
       _deadScope: this._deadScope,
       _activationOf: this._activationOf,
       _scopeActivationOf: this._scopeActivationOf,
+      _sweptHome: this._sweptHome,
+      _sweptRecord: this._sweptRecord,
       _isShield: this._isShield,
       _isDevolvedShadow: this._isDevolvedShadow,
       // A definition disposed inside a checkpoint window comes back alive on
@@ -1056,6 +1070,8 @@ export class _BoxedValueDefinition
     this._activationOf = s._activationOf as BoxedValueDefinition | undefined;
     this._scopeActivationOf = s._scopeActivationOf as
       BoxedValueDefinition | undefined;
+    this._sweptHome = s._sweptHome as Scope | undefined;
+    this._sweptRecord = s._sweptRecord as BoxedDefinition | undefined;
     this._isShield = s._isShield as true | undefined;
     this._isDevolvedShadow = s._isDevolvedShadow as true | undefined;
     this.disposed = s.disposed as boolean;

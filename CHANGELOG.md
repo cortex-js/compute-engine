@@ -363,6 +363,79 @@
 
 ### Bug Fixes
 
+- **A function called with a block-local valueless symbol reads that local.**
+  A function called in a `Block` with an argument that holds a valueless
+  local of the block read a binding of the same name from the scope that
+  defined the function in place of the local. With a global `y := 5` and
+  `g := x ↦ x + 0.5`, `Block(Declare(y, 'real'), g(y))` gave `5.5`, and with
+  `f := x ↦ NumericApproximation(x)`, `evaluateAsync()` of
+  `Block(Declare(y, 'real'), f(y))` or of
+  `Block(Declare(y, 'real'), Apply(f, y))` gave `5`. These now give `y + 0.5`
+  and `y`, on the synchronous and the asynchronous routes, also when the block
+  is the body of a function (`F := n ↦ Block(Declare(y, 'real'), g(y))`,
+  recursive or not), when the argument is passed on to another call, and when
+  a lazy view made in the block (`L := Map(g, [y])`) is read in a nested block
+  that declares its own `y`. A function that closes over a private `y` no
+  longer gives its value to a `y` of the caller that has no binding.
+
+- **`ArgMax(f, xs)` in the body of a function is applied to the list, not to
+  each element.** `Apply(xs ↦ 1 + ArgMax(x ↦ 2x, xs), [1, 4])` gave a list of
+  two `incompatible-type` errors, one per element, where
+  `1 + ArgMax(x ↦ 2x, [1, 4])` gives one. The domain of the optimization form
+  `ArgMax(f, domain)` (and `ArgMin(f, domain)`) gave the parameter `xs` no
+  type, and a function whose parameter has no type is applied to each element
+  of a list argument. The parameter is now typed `collection`: a set bound to
+  it keeps the optimization form (`Apply(xs ↦ ArgMax(f, xs), Set(1, 4))` stays
+  `ArgMax(f, Set(1, 4))`), and a list gives the error of the collection form.
+
+- **A lazy operator whose canonical handler gives up is canonical and
+  invalid.** A call such as `Tail(xs, 2)`, `Head(xs, Sin)` or
+  `Interval("bad", 1)`, with an operand that the handler does not accept, was
+  kept as written: not canonical, and reported valid. As an operand of a sum
+  (`1 + Tail(xs, 2)`), its evaluation printed "Assertion failed" on the
+  console. An operand left over is now `Error("unexpected-argument")`
+  (`Tail(xs, Error("unexpected-argument", "2"))`). With a valid number of
+  operands, the operands are checked against the signature, so the refused
+  operand is a typed error:
+  `Interval(Error(ErrorCode("incompatible-type", "number", "string"), "bad"), 1)`.
+  An invalid call has no `count` any more: `Interval("bad", 1)` had the count
+  `Infinity` of a valid interval. A call whose operands all pass the check
+  (`Series(1)`, which has no variable, or any call when `ce.strict` is false)
+  is canonical and inert: `evaluate()` and `N()` return it unchanged. A
+  top-level `Sequence` operand supplies its elements
+  (`Interval(Sequence(1, 2))` is `Interval(1, 2)`). A handler that throws, and
+  an operator whose signature is inferred, still keep the call as written.
+
+- **Every collection operator reads a `FlatMap` whose finiteness is known only
+  after its callback is applied.** With `v = FlatMap([1, 2], x ↦ Range(1, x))`,
+  only `ListFrom`, `Count`, `Length`, `IsEmpty`, `Sum`, `Product`, `Max`,
+  `Min` and `Reduce` listed `v`. `Mean(v)`, `Median(v)`, `Sort(v)`,
+  `Unique(v)`, `Contains(v, 2)`, `SetFrom(v)`, `MaxBy(v, k ↦ k)` and the other
+  consumers stayed unevaluated, and so did a consumer of a view over `v`:
+  `ListFrom(Reverse(v))` was not `[2, 1, 1]`. Each of them now gives its value
+  over the elements `[1, 1, 2]`, under `evaluate()` and `evaluateAsync()`.
+  The callback is applied once for each element of the source, and an
+  operator that reads a prefix (`First`, `Take`) still applies it only to the
+  elements that it reads. A `FlatMap` with an infinite inner result
+  (`x ↦ Range(1, ∞)`) stays unevaluated in these operators. Also,
+  `IsEmpty(FlatMap([1, 2], x ↦ Map(slowF, Range(1, x))))`, where `slowF` has
+  only an `evaluateAsync` handler, is now `False`: the callback of a `Map`
+  does not change the number of its elements.
+
+- **The pop of a scope no longer disposes a definition that another live
+  evaluation context holds**, also when that context is on another stack (an
+  asynchronous evaluation, a lazy view), and the debug check of dead bindings
+  (`CE_DEBUG_BINDINGS`) now reports a read of the index of a `Sum` or
+  `Product` after `evaluateAsync()`, as it does after `evaluate()`. In
+  `u(u(b))` with `u := (l) => [l[i] for i in 1..n]`, and in a recursive
+  call that runs the same loop, the inner pop disposed a definition that
+  the outer evaluation still read. The values were correct, but an
+  assumption about a disposed definition is ignored. The pop of an
+  asynchronous evaluation of a `Sum` did not mark the definitions of its
+  local scope as dead, so a later read of its index was not reported. Two
+  overlapping `evaluateAsync()` calls of a node with a `const` in its body
+  no longer report a read of the constant.
+
 - **`Sort` with a sort key or a comparator, `Iterate` and `Pipe` compile on
   `javascript`.** Before, `Sort([3, y, 2], x ↦ -x)`,
   `Take(Iterate(x ↦ x + 1, y), 3)` and `Pipe([1, y], Map(x ↦ 2x))` declined

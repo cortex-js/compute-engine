@@ -1,4 +1,7 @@
-import { markCallableHome } from '../boxed-expression/binders.js';
+import {
+  markCallableHome,
+  markSweptBinding,
+} from '../boxed-expression/binders.js';
 import { canonicalValueOperand } from '../boxed-expression/validate.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -3776,6 +3779,10 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
     // map surgery.
     journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
     scope.bindings.delete(name);
+    // An occurrence boxed in the block still holds the removed binding: an
+    // argument of a call reads it in the scope of the block
+    // (`sweptCallerBinding`, `binders.ts`).
+    markSweptBinding(def, template);
     // A binding with a value changed what the name resolves to in this
     // scope, so its removal is counted as a declaration of the scope
     // (`noteScopeDeclaration`).
