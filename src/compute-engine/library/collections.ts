@@ -45,6 +45,7 @@ import {
   checkCollectionOperand,
   canonicalValueOperand,
   isOptimumFunctionOperand,
+  inferOptimumDomain,
 } from '../boxed-expression/validate.js';
 import type { OverloadResolution } from '../boxed-expression/overload.js';
 import { arityBounds } from '../boxed-expression/overload.js';
@@ -25664,10 +25665,23 @@ function canonicalOptimumForm(
   if (!isOptimumFunctionOperand(f)) return undefined;
   // A domain symbol with no definition is kept raw: canonicalizing it would
   // declare it as a side effect, and its type is not decided yet anyway.
+  // A parameter of the function literal whose body is being canonicalized,
+  // or a local of a `Block` being canonicalized, has no definition yet
+  // either, but canonicalizing it declares it in the scope of that
+  // construct, not as a side effect elsewhere; it is not kept raw, so that
+  // `inferOptimumDomain()` below can narrow a parameter.
+  // Only a parameter of a function literal is narrowed: a `Block` local
+  // (`let S; ArgMax(f, S); S = [1, 4]`) is shadowed too, but it can be
+  // assigned a value of any type later in the block.
+  const isParameter =
+    isSymbol(domain) &&
+    !isWildcard(domain) &&
+    engine._isFunctionLiteralParameter(domain.symbol);
   if (
     isSymbol(domain) &&
     !isWildcard(domain) &&
-    engine.lookupDefinition(domain.symbol) === undefined
+    engine.lookupDefinition(domain.symbol) === undefined &&
+    !engine._isShadowedParameter(domain.symbol)
   ) {
     const fn = canonicalCallbackOperand(f);
     if (!fn) return null;
@@ -25675,15 +25689,32 @@ function canonicalOptimumForm(
   }
   const d = domain.canonical;
   const t = d.type.type;
+  // A symbol whose INFERRED type is the one this form gives it is admitted
+  // too: `inferOptimumDomain()` below narrows the parameter `xs` of
+  // `xs ↦ ArgMax(f, xs)` to `collection`, a collection that is not
+  // indexed. The call is canonicalized again when the function is applied,
+  // with the argument bound to `xs`: a set there keeps the optimization
+  // form, and a list gives the collection form, whose source slot refuses
+  // the function, as `ArgMax(f, [1, 4])` does. A symbol inferred as a
+  // number (`2n` before `ArgMax(f, n)`) or as a list is not a domain: the
+  // call is the collection form, which refuses the function.
   if (
     !d.type.matches('set<any>') &&
     t !== 'unknown' &&
     t !== 'any' &&
-    t !== 'value'
+    t !== 'value' &&
+    !(
+      isSymbol(d) &&
+      d.valueDefinition?.inferredType === true &&
+      d.type.matches('collection') &&
+      !d.type.matches('indexed_collection') &&
+      (d.value === undefined || d.value.type.matches('set<any>'))
+    )
   )
     return undefined;
   const fn = canonicalCallbackOperand(f);
   if (!fn) return null;
+  if (isParameter) inferOptimumDomain(d);
   return engine._fn(operator, [fn, d]);
 }
 

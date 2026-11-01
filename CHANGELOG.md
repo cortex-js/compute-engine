@@ -363,6 +363,34 @@
 
 ### Bug Fixes
 
+- **`ArgMax(f, xs)` in the body of a function is applied to the list, not to
+  each element.** `Apply(xs ↦ 1 + ArgMax(x ↦ 2x, xs), [1, 4])` gave a list of
+  two `incompatible-type` errors, one per element, where
+  `1 + ArgMax(x ↦ 2x, [1, 4])` gives one. The domain of the optimization form
+  `ArgMax(f, domain)` (and `ArgMin(f, domain)`) gave the parameter `xs` no
+  type, and a function whose parameter has no type is applied to each element
+  of a list argument. The parameter is now typed `collection`: a set bound to
+  it keeps the optimization form (`Apply(xs ↦ ArgMax(f, xs), Set(1, 4))` stays
+  `ArgMax(f, Set(1, 4))`), and a list gives the error of the collection form.
+
+- **A lazy operator whose canonical handler gives up is canonical and
+  invalid.** A call such as `Tail(xs, 2)`, `Head(xs, Sin)` or
+  `Interval("bad", 1)`, with an operand that the handler does not accept, was
+  kept as written: not canonical, and reported valid. As an operand of a sum
+  (`1 + Tail(xs, 2)`), its evaluation printed "Assertion failed" on the
+  console. An operand left over is now `Error("unexpected-argument")`
+  (`Tail(xs, Error("unexpected-argument", "2"))`). With a valid number of
+  operands, the operands are checked against the signature, so the refused
+  operand is a typed error:
+  `Interval(Error(ErrorCode("incompatible-type", "number", "string"), "bad"), 1)`.
+  An invalid call has no `count` any more: `Interval("bad", 1)` had the count
+  `Infinity` of a valid interval. A call whose operands all pass the check
+  (`Series(1)`, which has no variable, or any call when `ce.strict` is false)
+  is canonical and inert: `evaluate()` and `N()` return it unchanged. A
+  top-level `Sequence` operand supplies its elements
+  (`Interval(Sequence(1, 2))` is `Interval(1, 2)`). A handler that throws, and
+  an operator whose signature is inferred, still keep the call as written.
+
 - **Every collection operator reads a `FlatMap` whose finiteness is known only
   after its callback is applied.** With `v = FlatMap([1, 2], x ↦ Range(1, x))`,
   only `ListFrom`, `Count`, `Length`, `IsEmpty`, `Sum`, `Product`, `Max`,

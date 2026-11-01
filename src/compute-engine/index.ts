@@ -3551,6 +3551,11 @@ export class ComputeEngine implements IComputeEngine {
     return this._shadowFrame(name) !== undefined;
   }
 
+  /** See `IComputeEngine._isFunctionLiteralParameter`. @internal */
+  _isFunctionLiteralParameter(name: string): boolean {
+    return this._shadowFrame(name)?.functionLiteral === true;
+  }
+
   /** See `IComputeEngine._hasShadowedParameterFrame`. @internal */
   _hasShadowedParameterFrame(): boolean {
     return this._shadowedParameterStack.length > 0;

@@ -1078,6 +1078,20 @@ export class BoxedFunction
   private _hash: number | undefined;
   private _digest: string | undefined;
 
+  /** True on a call of a lazy operator whose canonical handler gave up
+   * (returned `null`) with a number of operands that its signature admits,
+   * set by the
+   * construction site (`declinedCallOperands()` in `box.ts`), valid or
+   * not. Such a call has no `count`, and it is inert: `evaluate()`,
+   * `evaluateAsync()` and `N()` return it unchanged, because its `evaluate`
+   * handler would read operand shapes that the canonical handler never
+   * builds (non-strict `Limit("s", x, 1)` read `x` as the limit point). A
+   * malformed iterator spec of `Table` (`Table(i, Set(5, 1, 3))`) stays a
+   * `Table`, as the handler leaves it. An error operand of an invalid call
+   * still reaches an enclosing operator: `1 + Interval("'bad'", 1)`
+   * evaluates to the error. @internal */
+  _declinedByHandler = false;
+
   /** The overload resolution this call was VALIDATED against, attached by
    * the construction site (`box.ts`) when the operator's signature is an
    * overload set (phase 2c of
@@ -4236,6 +4250,7 @@ export class BoxedFunction
     // value, under every option (a materialization or a numeric
     // approximation of it is itself), so it is returned without boxing.
     if (this._numericStore !== undefined) return this;
+    if (this._declinedByHandler) return this;
     // Written-out data is its own value too: see `_isLiteralData()`.
     if (this._isLiteralData(options)) return this;
     // Checkpoint quiescence (`checkpoint.ts`): an evaluation must not be open
@@ -5336,6 +5351,7 @@ export class BoxedFunction
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
     // Same as `evaluate()`: a store-backed list is its own value.
     if (this._numericStore !== undefined) return Promise.resolve(this);
+    if (this._declinedByHandler) return Promise.resolve(this);
     // Written-out data is its own value too, as in `evaluate()`
     // (`_isLiteralData()`). The options that carry the state of an
     // asynchronous evaluation (the registry, the context stack, the
@@ -6200,6 +6216,10 @@ export class BoxedFunction
 
   get count(): number | bigint | undefined {
     if (this._optedOutOfCollection) return undefined;
+    // A call whose canonical handler refused its operands has no count:
+    // `Interval("'bad'", 1)` does not take the count `Infinity` of a valid
+    // interval (`_declinedByHandler`).
+    if (this._declinedByHandler) return undefined;
     return this._memoizedFacet('count', () => {
       // A DECLARED count handler owns the answer, including its `undefined`.
       // `normalizeCount()` converts a `bigint` count that is a safe integer

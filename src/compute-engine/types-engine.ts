@@ -2516,6 +2516,10 @@ export interface IComputeEngine {
   ): Expression | undefined;
   /** True while `_pushShadowedParameters` has registered `name`. @internal */
   _isShadowedParameter(name: string): boolean;
+  /** True when the innermost construct that shadows `name` in the current
+   * scope is a function literal whose parameter is `name`, not a `Block`
+   * that declares `name` as a local. @internal */
+  _isFunctionLiteralParameter(name: string): boolean;
   /** True while any construct has pushed names with
    * `_pushShadowedParameters`, even no name: a function literal or a `Block`
    * is being canonicalized. False at the top level of a canonicalization.

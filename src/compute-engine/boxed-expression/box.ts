@@ -2867,6 +2867,78 @@ function requiredOperandCount(type: Type): number {
 }
 
 /**
+ * The largest number of operands a call of `type` may supply: the fixed and
+ * optional parameters of its signature, `Infinity` with a variadic tail; the
+ * maximum over the arms of an overload set. `Infinity` for a type that is
+ * not a signature.
+ */
+function maximumOperandCount(type: Type): number {
+  const arms = signatureArms(type);
+  if (arms === undefined) return Number.POSITIVE_INFINITY;
+  let count = 0;
+  for (const sig of arms) {
+    if (sig.variadicArg !== undefined) return Number.POSITIVE_INFINITY;
+    count = Math.max(
+      count,
+      (sig.args?.length ?? 0) + (sig.optArgs?.length ?? 0)
+    );
+  }
+  return count;
+}
+
+/**
+ * The operands of the canonical call that replaces a call of a lazy
+ * operator `name` whose canonical handler gave up (returned `null`) although
+ * the call supplies a number of operands that its signature admits. Each
+ * operand is canonicalized and checked against the type of its parameter, as
+ * the operands of an operator that is not lazy are, with the policies of the
+ * signature validation of a lazy call (`_validationSignature`, the
+ * threadable slots, the NaN and absence policies). An operand that the check
+ * refuses is a typed error, so the call is invalid: `Interval("'bad'", 1)`
+ * gives `Interval(Error(ErrorCode("incompatible-type", "number", "string"), 'bad'), 1)`.
+ * When the check refuses no operand (`Series(1)`, which needs a variable, or
+ * any call when `ce.strict` is false, which skips the type checks), the call
+ * is canonical and inert over its canonical operands.
+ *
+ * A top-level `Sequence` operand supplies each of its elements, as
+ * `suppliedOperandCount()` counts them: `Interval(Sequence(1, 2))` is checked
+ * as `Interval(1, 2)`. `undefined` for an operand list with a `Spread`
+ * operand, whose operand count is not known before evaluation: the caller
+ * then builds the call with the validation of a lazy call, which defers such
+ * a list.
+ */
+function declinedCallOperands(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  opDef: BoxedOperatorDefinition,
+  xs: ReadonlyArray<Expression>,
+  resolutionOut: { resolution?: OverloadResolution }
+): ReadonlyArray<Expression> | undefined {
+  if (xs.some((x) => x.operator === 'Spread')) return undefined;
+  const ops = xs
+    .flatMap((x) => (isFunction(x, 'Sequence') ? x.ops : [x]))
+    .map((x) => x.canonical);
+  return (
+    validateArguments(
+      ce,
+      ops,
+      opDef._validationSignature ?? opDef.signature.type,
+      false,
+      threadableGate(opDef.signature.type, opDef.broadcastable === true),
+      undefined,
+      undefined,
+      {
+        resolutionOut,
+        operatorName: name,
+        operatorDefinition: opDef,
+        nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+        refusesAbsentAt: (i) => opDef.refusesAbsentOperandAt(i),
+      }
+    ) ?? ops
+  );
+}
+
+/**
  * The number of operands a RAW operand list supplies: a top-level `Sequence`
  * operand supplies each of its elements (the operands of a lazy operator are
  * not flattened before its canonical handler runs).
@@ -4226,45 +4298,10 @@ function applyOperatorDefinition(
         );
         failure = { error: e };
       }
-      // The canonical handler gave up. A call with fewer operands than the
-      // signature requires is not something the handler can decide: it
-      // declined because an operand it reads is absent (`Filter(xs)`,
-      // `Filter(IsEven)` with no collection). Such a call falls through to
-      // the signature validation below, which marks each absent operand
-      // `Error("missing")` as it does for a head without a handler. Kept
-      // as written, the call was non-canonical, reported valid, and
-      // evaluated to itself; as the callee of `Apply` it read as a constant
-      // function, and the applied argument was dropped (GitHub issue #426).
-      if (
-        failure !== undefined ||
-        opDef.inferredSignature ||
-        suppliedOperandCount(xs) >= requiredOperandCount(opDef.signature.type)
-      ) {
-        // A collection operator whose handler refused a SOURCE operand
-        // (`Map(x => x, 5)`, `Dedup(5)`) is the operator over the error, as
-        // `Sort(5)` is: invalid and typed `error`. Kept as written, the call
-        // was valid, typed `unknown`, and evaluated to itself, so the error
-        // was lost. See `refusedCollectionSourceOperands`.
-        if (
-          failure === undefined &&
-          !opDef.inferredSignature &&
-          isCollectionSourceOperator(name)
-        ) {
-          const refused = refusedCollectionSourceOperands(
-            ce,
-            opDef.signature.type,
-            xs
-          );
-          if (refused !== undefined)
-            return withSourceOffsets(
-              new BoxedFunction(ce, name, refused, {
-                metadata,
-                canonical: true,
-                scope,
-              }),
-              metadata
-            );
-        }
+      // The canonical handler gave up. A handler that threw, or the handler
+      // of an operator with an inferred signature, keeps the call as
+      // written, not canonical.
+      if (failure !== undefined || opDef.inferredSignature) {
         result = new BoxedFunction(ce, name, xs, {
           metadata,
           canonical: false,
@@ -4274,6 +4311,51 @@ function applyOperatorDefinition(
         if (failure !== undefined)
           recordCanonicalFailure(result, failure.error);
         return result;
+      }
+      const supplied = suppliedOperandCount(xs);
+      // A call with fewer operands than the signature requires, or with
+      // more than it admits, is not something the handler can decide. It
+      // falls through to the signature validation below, as the call of a
+      // head without a handler does: the validation marks an absent operand
+      // `Error("missing")` (`Filter(xs)`, `Filter(IsEven)` with no
+      // collection) and an operand left over `Error("unexpected-argument")`
+      // (`Tail(xs, 2)`), and the call is canonical and invalid. Kept as
+      // written, the call was non-canonical and reported valid. As the
+      // callee of `Apply` it read as a constant function, and the applied
+      // argument was dropped (GitHub issue #426). As an operand of a
+      // canonical `Add` (`1 + Tail(xs, 2)`) it reached `toNumericValue()`,
+      // whose `console.assert` requires a canonical expression.
+      if (
+        supplied >= requiredOperandCount(opDef.signature.type) &&
+        supplied <= maximumOperandCount(opDef.signature.type)
+      ) {
+        // A collection operator whose handler refused a SOURCE operand
+        // (`Map(x => x, 5)`, `Dedup(5)`) is the operator over the error, as
+        // `Sort(5)` is: invalid and typed `error`. See
+        // `refusedCollectionSourceOperands`.
+        const refused = isCollectionSourceOperator(name)
+          ? refusedCollectionSourceOperands(ce, opDef.signature.type, xs)
+          : undefined;
+        // Any other call is the operator over its canonical operands checked
+        // against the signature, always canonical: a refused operand is a
+        // typed error (`Interval("'bad'", 1)`), and a call whose operands
+        // pass the check is inert (`Series(1)`). See `declinedCallOperands`.
+        // A list with a `Spread` operand continues below.
+        const resolutionOut: { resolution?: OverloadResolution } = {};
+        const declined =
+          refused ?? declinedCallOperands(ce, name, opDef, xs, resolutionOut);
+        if (declined !== undefined) {
+          const call = new BoxedFunction(ce, name, declined, {
+            metadata,
+            canonical: true,
+            scope,
+          });
+          call._resolvedOverload = resolutionOut.resolution;
+          // See `BoxedFunction._declinedByHandler`: no count, and the call
+          // is inert.
+          if (refused === undefined) call._declinedByHandler = true;
+          return withSourceOffsets(call, metadata);
+        }
       }
     }
 

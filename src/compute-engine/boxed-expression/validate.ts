@@ -890,6 +890,33 @@ export function isOptimumFunctionOperand(op: Expression): boolean {
 }
 
 /**
+ * Narrow the canonical domain operand `domain` of the optimization form
+ * `ArgMax(f, domain)` / `ArgMin(f, domain)` to `collection` when it is a
+ * symbol with a definition, no value and an `unknown` type (the parameter
+ * `xs` of `xs ↦ 1 + ArgMax(f, xs)`).
+ *
+ * The domain of the form is a set, and the collection form `ArgMax(xs, key)`
+ * reads a list there: either way the operand is a collection, never a
+ * scalar. Left `unknown`, the parameter made the function literal map over a
+ * list argument element by element (an `unknown` parameter is scalar for
+ * that rule, `literalParamsMap()` in `library/core.ts`), so
+ * `Apply(xs ↦ 1 + ArgMax(f, xs), [1, 4])` gave one error per element where
+ * `1 + ArgMax(f, [1, 4])` gives one error.
+ *
+ * The narrowing is fact-blind, as the one `inferCollectionSourceArgs` writes
+ * for a source slot. The caller (`canonicalOptimumForm()` in
+ * `library/collections.ts`) calls it only for a parameter of the function
+ * literal whose body is being canonicalized: a global symbol keeps its type
+ * (`S` boxed alone, then `ArgMax(f, S)`), and an undeclared domain
+ * (`ArgMax(x ↦ x², T)` at the top level) is not declared.
+ */
+export function inferOptimumDomain(domain: Expression): void {
+  if (!isSymbol(domain) || isWildcard(domain)) return;
+  if (domain.value !== undefined || !domain.type.isUnknown) return;
+  domain.engine._withoutFacts(() => domain._infer(() => 'collection'));
+}
+
+/**
  * The operands of a call to the lazy collection operator with the signature
  * `signature`, canonicalized, when an operand at a source slot
  * (`collectionSourceSlot`) is refused by `checkCollectionOperand`; or
