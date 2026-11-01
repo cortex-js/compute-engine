@@ -99,21 +99,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Types and type inference
 
-### CE-718. A hexadecimal or binary value type reads as the type `0`
-
-**Status:** open; wrong value, S.
-
-`ce.type("0x10")`, `ce.type("-0x10")` and `ce.type("0b10")` all give the value
-type `0`, with no error (measured 2026-10-31). The type lexer
-(`src/common/type/lexer.ts`, "Handle hex", near line 298) accepts a
-hexadecimal or binary number literal and builds a token text such as `0x10`
-(a signed one as `0-x10`), but the type parser reads the value with
-`parseFloat(token.value)` (`parseValue`, `src/common/type/parser.ts` near
-line 2736), which stops at the radix letter and returns 0. Fix: decode the
-token by its radix (with its sign), or refuse it with a parse error. A
-parameter default (CE-717) already refuses these spellings
-(`parseParameterDefault`), so the two places should agree after the fix.
-
 ### CE-729. Parameter default values in an overloaded signature and in a multi-clause function
 
 **Status:** on demand; capability, M. Spec
@@ -158,7 +143,9 @@ so far; a default value covers the cases of GitHub issue #490.
 
 ### CE-728. A lazy `Map` view loses the binding of a named callback's symbol default
 
-**Status:** decision needed; defect (compiled and interpreted values differ).
+**Status:** open; defect (compiled and interpreted values differ). User
+decision 2026-10-31: option (a), the lazy view records the lexical scope in
+which it was created and calls its callback in that scope.
 
 With `f := (x, k = d) => x * k` (a parameter default that is the symbol `d`,
 CE-717) and `g := (d, xs) => Map(f, xs)`, the interpreter's `g(10, [1, 2])`
@@ -4055,21 +4042,21 @@ At HEAD `e3ca9c1a6`, with `L: list<real>` and `L = [1, 2, 3]`:
 - `Block(p ≔ 0, Limit(u ↦ Block(p ≔ 5, u), 0), p)`: interpreter `5`,
   compiled `0`.
 
-CE-712.1 makes a function literal decline with the code `'unsettled-shape'`
-when it assigns a name of an enclosing scope, or calls a function that does,
-and its consumer calls it (`assignmentConflictIn()`,
-`compilation/compile-admission.ts`). The consumer is the nearest ancestor past
-a branch of `If` or `Which` and the last statement of a `Block`. A literal is
-not declined when `Apply` applies it where it is written to scalar arguments,
-or when its consumer holds it as a value (`Declare`, `Assign`,
-`DefineFunction`, a statement of a `Block`); a stored function that writes an
-outer name declines when its name is passed as a value (`Filter(L, g)`). The
-decline includes `Map`, `Tabulate`, `Find`, `Count`, `Any`, `All` and
-`Reduce`, where the values may agree, and a literal that the body of another
-literal returns: `Apply(Apply(Apply((y, w) ↦ (x ↦ Block(y ≔ 2, x + y)), 0),
-1), u)` gives 7 in the interpreter and at HEAD `e3ca9c1a6`, and now declines,
-because the returned literal could reach a `Filter`
-(`Filter(L, Apply(y ↦ (u ↦ Block(p ≔ 5, u > 1)), 0))` gave 5, interpreter 0).
+User decision 2026-11-01: the simple decline. CE-712.1 makes every function
+literal that assigns a name of an enclosing scope (or an element of one), or
+that a `Break` or a `Continue` leaves, decline with the code
+`'unsettled-shape'` (`assignmentConflictIn()`,
+`compilation/compile-admission.ts`): a callback, the value of a `Declare` or
+an `Assign`, a function returned by another one, and the body of a user
+function that the code calls. Only the root of the compilation and a literal
+that `Apply` applies where it is written to scalar arguments are exempt. A
+classification of stored and callback literals was tried first, and three
+review rounds each found a new way for a writer to reach a callback (behind
+an `If`, passed by name, returned by a curried literal). The decline also
+covers cases where the two agree: `Block(p ≔ 0, Declare(g, k ↦ Block(p ≔ k
++ 1, p)), [g(1), p])` gives `[2, 2]` in the interpreter, and
+`Apply(Apply(Apply((y, w) ↦ (x ↦ Block(y ≔ 2, x + y)), 0), 1), u)` gives 7
+in the interpreter and at HEAD `e3ca9c1a6`; both now run on the interpreter.
 
 Fix: compile the effect as the interpreter has it, for each operator: when it
 runs the callback (eagerly or when its result is used), and whether the write

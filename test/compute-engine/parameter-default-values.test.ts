@@ -166,14 +166,7 @@ describe('PARAMETER DEFAULT VALUES: TYPE DSL', () => {
 
 describe('PARAMETER DEFAULT VALUES: PARSE ERRORS', () => {
   test.each([
-    [
-      '(x: number, k: number = 0x10) -> number',
-      '`0x10` is not a default value',
-    ],
-    [
-      '(x: number, k: number = 0b10) -> number',
-      '`0b10` is not a default value',
-    ],
+    ['(x: number, k: number = 0x) -> number', '`0x` has no digits'],
     [
       '(x: number, k: number? = 2) -> number',
       'A parameter with a default value is optional; remove the `?`',
@@ -236,9 +229,15 @@ describe('PARAMETER DEFAULT VALUES: PARSE ERRORS', () => {
     expect(parseError(s)).toBe(message);
   });
 
-  test('a signed hexadecimal default is refused', () => {
-    expect(parseError('(x: number, k: number = -0x10) -> number')).toMatch(
-      /is not a default value/
+  test('a hexadecimal or binary default is decoded by its radix, as in a value type', () => {
+    expect(typeToString(parseType('(x: number, k: number = 0x10) -> number'))).toBe(
+      '(x: number, k: number = 16) -> number'
+    );
+    expect(typeToString(parseType('(x: number, k: number = -0x10) -> number'))).toBe(
+      '(x: number, k: number = -16) -> number'
+    );
+    expect(typeToString(parseType('(x: number, k: number = 0b10) -> number'))).toBe(
+      '(x: number, k: number = 2) -> number'
     );
   });
 

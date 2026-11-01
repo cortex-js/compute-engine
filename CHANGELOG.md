@@ -152,6 +152,32 @@
 
 ### Bug Fixes
 
+- **A hexadecimal or binary number in a type string has its value.**
+  `ce.type("0x10")`, `ce.type("-0x10")` and `ce.type("0b10")` gave the value
+  type `0`, and `integer<0x0..0xff>` gave `integer<0..0>`. Now they give `16`,
+  `-16`, `2` and `integer<0..255>`. A parameter default value such as
+  `(x: number, k: number = 0x10) -> number` is decoded the same way, instead of
+  being refused. A radix prefix with no digits (`0x`) is a parse error. In a
+  dimension, `0x2` is still the shape `0 x 2`, a zero-length axis, and the
+  length of a vector cannot be hexadecimal: `vector<0x2>` is a parse error
+  (it was `vector<2>`). A length that is not an integer (`vector<2.5>`, which
+  was truncated to `vector<2>`) or that is negative (`vector<-2>`, which was
+  read as an unknown length) is now a parse error, and so is a length larger
+  than `2^53 - 1` (`vector<1e300>`). `-1` is still accepted as an unknown
+  length, as in `list<any^-1>`.
+
+- **A lazy collection that a function returns calls its callback where it was
+  created.** With `f := (x, k = d) => x * k` and
+  `g := (d, xs) => Map(f, xs)`, the elements of `g(10, [1, 2])` were `d` and
+  `2d`: they are computed when the collection is read, after `g` has returned,
+  and the default `d` was read where the collection was read. They are now
+  `10` and `20`, as in the compiled function and as with
+  `ListFrom(Map(f, xs))` inside `g`. This applies to `Map`, `Filter`, `Scan`,
+  `TakeWhile`, `DropWhile`, `FlatMap`, `Tabulate`, `Table` and `Iterate`
+  created during a function call, also in a `Block` of its body. A lazy
+  collection created outside every function call is read as before, in the
+  context of its reader.
+
 - **The parameter of a function literal that is applied at once has the type
   of its argument in compiled code** (GitHub issue #498). With `n` declared
   `integer` and `evens` the list `Filter(Range(1, n), i ↦ Mod(i, 2) = 0)`,

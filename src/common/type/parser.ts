@@ -455,6 +455,66 @@ export class Parser {
     this.errorAtToken(this.current, message, suggestion);
   }
 
+  /** Consume the current `NUMBER_LITERAL` token and return its value.
+   *
+   * The lexer keeps the source spelling of a hexadecimal (`0x1F`) or binary
+   * (`-0b10`) literal. `parseFloat()` stops at the radix letter and returns
+   * 0, so these are decoded by their radix: `0x10` is 16, `-0x10` is -16 and
+   * `0b10` is 2. A value past 2^53 is rounded to the nearest double, as
+   * `parseFloat()` rounds a long decimal literal. A radix prefix with no
+   * digits (`0x`) is an error. */
+  private parseNumberLiteral(): number {
+    const text = this.current.value;
+    const radix = /^([+-]?)0([xXbB])([0-9a-fA-F]*)$/.exec(text);
+    if (!radix) return parseFloat(this.advance().value);
+    if (radix[3] === '')
+      return this.error(
+        `\`${text}\` has no digits`,
+        /[xX]/.test(radix[2])
+          ? 'Write hexadecimal digits after `0x`, as in `0x1F`'
+          : 'Write binary digits after `0b`, as in `0b101`'
+      );
+    this.advance();
+    const magnitude = Number(BigInt(`0${radix[2].toLowerCase()}${radix[3]}`));
+    return radix[1] === '-' ? -magnitude : magnitude;
+  }
+
+  /** Consume the current `NUMBER_LITERAL` token as the length of an axis
+   * (`vector<3>`, `matrix<integer^(2x3)>`). A length is an integer 0 or
+   * more, or `-1`: `-1` is the stored form of `?`, an unknown length, and
+   * `list<any^-1>` spells it. `2.5` and `-2` are errors, not truncated or
+   * read as unknown. In a length, `0x` is never a hexadecimal prefix (it
+   * separates a zero-length axis from the next one), so `vector<0x2>` is an
+   * error. A binary literal (`0b11`) is decoded. */
+  private parseLengthLiteral(): number {
+    const token = this.current;
+    if (/^[+-]?0[xX]/.test(token.value))
+      this.hexLengthError(token.value, token);
+    return this.checkedLength(this.parseNumberLiteral(), token.value, token);
+  }
+
+  private hexLengthError(text: string, token: Token): never {
+    return this.errorAtToken(
+      token,
+      `\`${text}\` is not a length`,
+      'In a length, `0x` is not a hexadecimal prefix: write the length as a decimal integer'
+    );
+  }
+
+  /** `size` if it is a length: a safe integer 0 or more, or `-1` (an unknown
+   * length). A length past 2^53 (`99999999999999999999`, `1e300`) is an
+   * error, because a double does not hold it exactly. `-0` is returned as
+   * `0`. */
+  private checkedLength(size: number, text: string, token: Token): number {
+    if (!Number.isSafeInteger(size) || size < -1)
+      return this.errorAtToken(
+        token,
+        `\`${text}\` is not a length`,
+        'Write a length as an integer 0 or more, or `?` for an unknown length'
+      );
+    return size + 0;
+  }
+
   errorAtToken(
     token: Token,
     message: string,
@@ -1466,17 +1526,9 @@ export class Parser {
     const token = this.current;
     switch (token.type) {
       case 'NUMBER_LITERAL':
-        // The lexer spells a hexadecimal or binary number (`0x10`, `0b10`)
-        // in a form that `parseFloat()` reads as 0, and the type parser has
-        // no conversion for them either, so they are refused instead of
-        // being read as a wrong value.
-        if (/[xXbB]/.test(token.value))
-          return this.error(
-            `\`${token.value}\` is not a default value`,
-            'Write the default value as a decimal number'
-          );
-        this.advance();
-        return { kind: 'value', value: parseFloat(token.value) };
+        // A hexadecimal or binary number (`0x10`, `0b10`) is decoded by its
+        // radix, as in a value type.
+        return { kind: 'value', value: this.parseNumberLiteral() };
       case 'STRING_LITERAL':
         this.advance();
         return { kind: 'value', value: token.value };
@@ -1743,7 +1795,7 @@ export class Parser {
     if (this.match('<')) {
       // Try to parse size first (for vector<3>)
       if (this.current.type === 'NUMBER_LITERAL') {
-        const size = parseInt(this.advance().value);
+        const size = this.parseLengthLiteral();
         dimension = this.createNode<DimensionNode>('dimension', { size });
       } else {
         // Try to parse a type
@@ -1957,8 +2009,7 @@ export class Parser {
         this.current = this.lexer.consumeToken();
         return [this.createNode<DimensionNode>('dimension', { size: 0 })];
       }
-      const tok = this.advance();
-      const size = parseInt(tok.value);
+      const size = this.parseLengthLiteral();
       return [this.createNode<DimensionNode>('dimension', { size })];
     }
 
@@ -2018,7 +2069,9 @@ export class Parser {
   }
 
   private isDimensionSegment(segment: string): boolean {
-    return /^[0-9]+$/.test(segment) || this.isTypeVariable(segment);
+    return (
+      /^[0-9]+$|^0[bB][01]+$/.test(segment) || this.isTypeVariable(segment)
+    );
   }
 
   /** The dimension nodes for the `x`-split segments of one identifier token,
@@ -2039,9 +2092,21 @@ export class Parser {
       // `0` is admitted: a zero-length axis is kept in the type
       // (`reduceListType`, `reduce.ts`), so `matrix<integer^(2x0)>` is two
       // empty rows.
+      // A numeric segment is read as a length literal is: `0b11` is 3, and a
+      // hexadecimal spelling is refused (only `0X…` reaches here, since the
+      // lowercase `x` is the separator).
+      if (/^0X/.test(segment)) this.hexLengthError(segment, token);
       if (/^[0-9]+$/.test(segment))
         return this.createNode<DimensionNode>('dimension', {
-          size: parseInt(segment),
+          size: this.checkedLength(Number(segment), segment, token),
+        });
+      if (/^0[bB][01]+$/.test(segment))
+        return this.createNode<DimensionNode>('dimension', {
+          size: this.checkedLength(
+            Number(BigInt(`0b${segment.slice(2)}`)),
+            segment,
+            token
+          ),
         });
       if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(segment))
         return this.createNode<DimensionNode>('dimension', {
@@ -2733,7 +2798,7 @@ export class Parser {
         valueType = 'string';
         break;
       case 'NUMBER_LITERAL':
-        value = parseFloat(this.advance().value);
+        value = this.parseNumberLiteral();
         valueType = 'number';
         break;
       case 'TRUE':

@@ -295,22 +295,25 @@ export class Lexer {
       value += this.advance();
     }
 
-    // Handle hex
-    if (this.match('0x') || this.match('0X')) {
-      value += 'x';
+    // Handle hex and binary. The token keeps the source spelling, with the
+    // sign first (`-0x10`, `0B11`): the parser decodes it by its radix
+    // (`parseNumberLiteral()` in `parser.ts`). The digits can be missing
+    // (`0x`): a dimension reads `0xN` as `0 x N`, and a value position
+    // refuses a literal with no digits.
+    if (this.peek() === '0' && /[xX]/.test(this.peek(1))) {
+      value += this.advance() + this.advance();
       while (!this.isEOF() && /[0-9a-fA-F]/.test(this.peek())) {
         value += this.advance();
       }
-      return '0' + value;
+      return value;
     }
 
-    // Handle binary
-    if (this.match('0b') || this.match('0B')) {
-      value += 'b';
+    if (this.peek() === '0' && /[bB]/.test(this.peek(1))) {
+      value += this.advance() + this.advance();
       while (!this.isEOF() && /[01]/.test(this.peek())) {
         value += this.advance();
       }
-      return '0' + value;
+      return value;
     }
 
     // Handle decimal
@@ -381,7 +384,12 @@ export class Lexer {
       // The character before must be part of a BOUND (a digit, `∞`/`oo`, a
       // sign, a decimal point): after the opening bracket `real<..<3>` the
       // `<` is that bracket, not a marker, and `real <..` is not adjacent.
-      /[0-9.∞o+-]/.test(this.input[this.pos - 1])
+      // A hexadecimal bound can end with a letter digit (`0xA<..`), so the
+      // whole literal before the `<` is checked for it.
+      (/[0-9.∞o+-]/.test(this.input[this.pos - 1]) ||
+        /(?<![0-9A-Za-z_])0[xX][0-9a-fA-F]+$/.test(
+          this.input.slice(0, this.pos)
+        ))
     ) {
       this.match('<..');
       return this.createToken('<..', '<..');

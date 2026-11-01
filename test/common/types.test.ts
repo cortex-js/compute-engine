@@ -2821,3 +2821,86 @@ describe('isSubtype on a union whose arms are one shared node (CE-315)', () => {
     );
   });
 });
+
+describe('Hexadecimal and binary number literals', () => {
+  // The lexer accepts `0x…` and `0b…` literals; the parser once read them
+  // with `parseFloat()`, which stops at the radix letter and gave 0.
+  it.each([
+    ['0x10', '16'],
+    ['-0x10', '-16'],
+    ['+0x10', '16'],
+    ['0X1F', '31'],
+    ['0b10', '2'],
+    ['-0B11', '-3'],
+    ['integer<0x0..0xff>', 'integer<0..255>'],
+    ['integer<-0x10..0b10>', 'integer<-16..2>'],
+    ['vector<0b11>', 'vector<3>'],
+    ['matrix<integer^(0b11x2)>', 'matrix<integer^(3x2)>'],
+    ['matrix<integer^(2x0b11)>', 'matrix<integer^(2x3)>'],
+    ['tensor<integer^(2x0b11x3)>', 'tensor<integer^(2x3x3)>'],
+    ['integer<0xA<..0x10>', 'integer<11..16>'],
+    ['integer<0xa<..0x10>', 'integer<11..16>'],
+  ])('decodes %s by its radix', (input, expected) => {
+    const serialized = typeToString(parseType(input));
+    expect(serialized).toBe(expected);
+    // The serialized type is decimal and parses to the same type.
+    expect(typeToString(parseType(serialized))).toBe(expected);
+  });
+
+  it('rounds a value past 2^53 to the nearest double, as a decimal literal is', () => {
+    expect(typeToString(parseType('0x20000000000001'))).toBe(
+      typeToString(parseType('9007199254740993'))
+    );
+  });
+
+  it('keeps `0x` in a dimension as a zero-length axis', () => {
+    expect(typeToString(parseType('matrix<integer^(0x2)>'))).toBe(
+      'matrix<integer^(0x2)>'
+    );
+  });
+
+  it.each([
+    ['0x', '`0x` has no digits'],
+    ['-0b', '`-0b` has no digits'],
+    ['0b12', 'Unexpected token after type'],
+    ['0x1g', 'Unexpected token after type'],
+  ])('refuses %s', (input, message) => {
+    expect(() => parseType(input)).toThrow(message);
+  });
+
+  it.each([
+    'vector<2.5>',
+    'vector<integer^2.5>',
+    'matrix<integer^(2.5x2)>',
+    'vector<-2>',
+    'list<integer^-2>',
+    'vector<0x2>',
+    'vector<0X10>',
+    'vector<-0x2>',
+    'matrix<integer^(2x0X2)>',
+    'vector<99999999999999999999>',
+    'vector<1e300>',
+    'matrix<integer^(2x99999999999999999999)>',
+  ])(
+    'refuses the length in %s',
+    (input) => {
+      expect(() => parseType(input)).toThrow('is not a length');
+    }
+  );
+
+  it('reads the length `-0` as `0`', () => {
+    const t = parseType('vector<-0>');
+    expect(typeof t === 'object' && t.kind === 'list' && t.dimensions).toEqual(
+      [0]
+    );
+    expect(
+      Object.is(typeof t === 'object' && t.kind === 'list' && t.dimensions?.[0], 0)
+    ).toBe(true);
+  });
+
+  it('keeps `-1`, the stored form of an unknown length', () => {
+    expect(typeToString(parseType('list<any^-1>'))).toBe(
+      typeToString(parseType('list<any^?>'))
+    );
+  });
+});
