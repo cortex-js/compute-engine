@@ -14,6 +14,7 @@ import type {
   DeclarationOrigin,
   EffectSet,
   FunctionSignature,
+  NamedElement,
   Type,
   TypeParameter,
   TypeParamsOption,
@@ -4602,16 +4603,24 @@ export function validationSignatureOf(
   // of the literal and the variadic argument of the signature (`any*`,
   // which already admits everything), so the literal then has one parameter
   // more than the signature has required arguments.
+  // A parameter with a default value (`(x, k = 2) => …`) is an optional
+  // argument of the signature, and a bare one admits any argument as a bare
+  // required parameter does.
+  const optArgs = signature.optArgs ?? [];
+  const slots = args.length + optArgs.length;
   const hasRest =
-    params.length === args.length + 1 && signature.variadicArg !== undefined;
-  if (params.length !== args.length && !hasRest) return undefined;
-  const leading = params.slice(0, args.length);
+    params.length === slots + 1 && signature.variadicArg !== undefined;
+  if (params.length !== slots && !hasRest) return undefined;
+  const leading = params.slice(0, slots);
   if (!leading.some((p) => p.type === undefined)) return undefined;
+  const relax = (a: NamedElement, i: number): NamedElement =>
+    leading[i].type === undefined ? { ...a, type: 'any' } : a;
   return {
     ...signature,
-    args: args.map((a, i) =>
-      leading[i].type === undefined ? { ...a, type: 'any' } : a
-    ),
+    args: args.map((a, i) => relax(a, i)),
+    ...(optArgs.length > 0
+      ? { optArgs: optArgs.map((a, i) => relax(a, args.length + i)) }
+      : {}),
   };
 }
 
@@ -4763,20 +4772,38 @@ function assertFunctionLiteralArity(
   // makes the literal accept its fixed count or more, so counting the
   // parameter operands would answer with a fixed arity the literal does not
   // have.
-  const { fixed: literalFixed, variadic: literalVariadic } =
-    functionLiteralArity(literal);
+  // A parameter with a default value (`(x, k = 2) => …`) may be left out,
+  // so such a literal accepts from `literalRequired` to `literalFixed`
+  // arguments.
+  const {
+    fixed: literalFixed,
+    variadic: literalVariadic,
+    required: literalRequired,
+  } = functionLiteralArity(literal);
   const literalArity = literalVariadic
     ? `${literalFixed} or more`
-    : `${literalFixed}`;
+    : literalRequired < literalFixed
+      ? `${literalRequired} to ${literalFixed}`
+      : `${literalFixed}`;
 
   /** Whether the literal is a valid implementation of `sig`: the arm and the
    * literal must accept the SAME set of call arities. A fixed-arity literal
    * therefore needs an arm with exactly one arity, and a literal with a rest
    * parameter needs a variadic arm that starts where the rest parameter does
-   * and, like the rest parameter, admits an empty tail. */
+   * and, like the rest parameter, admits an empty tail. A literal with
+   * parameters that have a default value accepts a range of arities: it is
+   * a valid implementation of a fixed-arity arm whose arity is in the range,
+   * and of an arm with optional parameters whose range is inside it, since
+   * every call that the arm admits is a call that the literal accepts. */
   const armFits = (sig: FunctionSignature): boolean => {
     const required = sig.args?.length ?? 0;
     const optional = sig.optArgs?.length ?? 0;
+    if (literalRequired < literalFixed && !literalVariadic)
+      return (
+        sig.variadicArg === undefined &&
+        required >= literalRequired &&
+        required + optional <= literalFixed
+      );
     if (optional > 0) return false;
     if (literalVariadic) {
       if (sig.variadicArg === undefined) return false;

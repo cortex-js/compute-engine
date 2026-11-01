@@ -5,6 +5,7 @@ import {
   signatureArms,
 } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { requiredParameterCount } from './function-literal.js';
 import type { Expression } from '../global-types.js';
 
 /**
@@ -41,11 +42,12 @@ type CallbackArity = { required: number; max: number };
  *
  * Three shapes are decidable:
  *
- * - a canonical function LITERAL `["Function", body, ...params]`. Every
- *   parameter of a literal is required (the grammar has no optional, default
- *   or variadic lambda parameters — a signature annotation carrying `?`/`*`
- *   is not accepted on a lambda parameter), so the count of parameters is
- *   both the minimum and the maximum. A destructuring TUPLE pattern is a
+ * - a canonical function LITERAL `["Function", body, ...params]`. The count
+ *   of parameters is the maximum. The minimum is the count of parameters
+ *   before the first parameter with a default value (`["Optional", k, 2]`,
+ *   which a call may leave out) or before a rest parameter (unbounded
+ *   maximum). A signature annotation carrying `?`/`*` is not accepted on a
+ *   lambda parameter. A destructuring TUPLE pattern is a
  *   single parameter operand and therefore counts as one, which is what the
  *   author wrote. The one exception is a NULLARY literal (`["Function", 42]`,
  *   `() => True`): applying it ignores every argument (the historical
@@ -85,7 +87,11 @@ export function callbackArity(fn: Expression): CallbackArity | undefined {
     // parameters before it are required.
     if (isFunction(fn.ops[n], 'Spread'))
       return { required: n - 1, max: Infinity };
-    return { required: n, max: n };
+    // A parameter with a default value (`(x, k = 2) => …`, an `Optional`
+    // operand) may be left out: only the parameters before the first one are
+    // required.
+    const required = requiredParameterCount(fn.ops.slice(1));
+    return { required, max: n };
   }
   // The last step of a composition takes all the arguments of the call, so
   // the composition accepts what its last step accepts.

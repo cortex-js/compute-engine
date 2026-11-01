@@ -16,6 +16,7 @@ import {
 } from '../collection-utils.js';
 import { isNumberExpression, stringValue } from '../../math-json/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { optionalParameterTarget } from './function-literal.js';
 import { mayBeMatrixPowerBase } from './matrix-operand.js';
 import { isFunctionSymbolName } from './implicit-variable-rule.js';
 
@@ -230,7 +231,10 @@ function bindsName(expr: Expression, name: string): boolean {
   if (!isFunction(expr)) return false;
   const op = expr.operator;
   if (op === 'Function') {
-    for (const param of expr.ops.slice(1)) {
+    for (const operand of expr.ops.slice(1)) {
+      // A parameter with a default value, `["Optional", param, d]`, binds
+      // the name of `param`.
+      const param = optionalParameterTarget(operand);
       const p = isFunction(param, 'Typed') ? param.op1 : param;
       if (isSymbol(p, name)) return true;
     }

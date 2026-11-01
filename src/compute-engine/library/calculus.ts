@@ -55,6 +55,7 @@ import {
 import {
   ANONYMOUS_SLOT_NAMES,
   functionLiteralParameterName,
+  functionLiteralParameterNames,
 } from '../boxed-expression/function-literal.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import {
@@ -2477,11 +2478,12 @@ function integrateListIntegrand(
       const v = sym(l.op1);
       if (v && v !== 'Nothing') names.push(v);
     }
+  // Every name a parameter binds: an annotated parameter, a parameter with
+  // a default value and a destructuring pattern are read through their
+  // wrappers.
   if (isFunction(integrand, 'Function'))
-    for (const p of integrand.ops.slice(1)) {
-      const n = sym(p);
-      if (n) names.push(n);
-    }
+    for (const p of integrand.ops.slice(1))
+      names.push(...functionLiteralParameterNames(p));
 
   return withValueShield(ce, names, () => {
     // A function literal whose body is a list because a call in it maps over
@@ -3854,11 +3856,11 @@ function shadowedCallsIn(
       if (inner.has(name) || system?.bindings.get(name) === undefined) return;
       inner = new Set([...inner, name]);
     };
+    // Every name a parameter binds, read through its wrappers (`Typed`,
+    // `Optional`, a destructuring pattern).
     if (x.operator === 'Function')
-      for (const p of x.ops.slice(1)) {
-        const name = sym(p);
-        if (name) add(name);
-      }
+      for (const p of x.ops.slice(1))
+        for (const name of functionLiteralParameterNames(p)) add(name);
     if (x.localScope !== undefined)
       for (const name of libraryNamesShadowedIn(ce, x.localScope)) add(name);
     for (const op of x.ops) scan(op, inner);

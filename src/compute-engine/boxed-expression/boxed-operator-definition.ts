@@ -85,6 +85,8 @@ import {
   functionLiteralBody,
   functionLiteralParameters,
   inferredSignatureParameterName,
+  optionalParameterTarget,
+  signatureArgumentsOfSlots,
   restParameterIndex,
   restParameterSignatureTail,
   capturedTypesWidened,
@@ -2584,22 +2586,25 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             // parameter that a self-call gives a collection to. The literal's
             // own arrow does not know the function's name, so only this
             // signature reads the self-calls.
-            ...(fixedParams.length > 0
-              ? {
-                  // Each slot keeps the name of its parameter, as in the
-                  // literal's own arrow, so that a named call to the function
-                  // can find the slot (`inferredSignatureParameterName`).
-                  args: fixedParams.map((p, i) => {
-                    const name = inferredSignatureParameterName(p);
-                    const type =
-                      inferredCollectionParameterType(p) ??
-                      selfCallTypes[i] ??
-                      wholeCollectionParameterType(p, body) ??
-                      'unknown';
-                    return name !== undefined ? { name, type } : { type };
-                  }),
-                }
-              : {}),
+            // Each slot keeps the name of its parameter, as in the
+            // literal's own arrow, so that a named call to the function can
+            // find the slot (`inferredSignatureParameterName`). A parameter
+            // with a default value (`["Optional", k, 2]`) is an optional slot
+            // that carries its default (`signatureArgumentsOfSlots`), so a
+            // call that leaves it out receives the default.
+            ...signatureArgumentsOfSlots(
+              params,
+              fixedParams.map((p, i) => {
+                const name = inferredSignatureParameterName(p);
+                const target = optionalParameterTarget(p);
+                const type =
+                  inferredCollectionParameterType(target) ??
+                  selfCallTypes[i] ??
+                  wholeCollectionParameterType(target, body) ??
+                  'unknown';
+                return name !== undefined ? { name, type } : { type };
+              })
+            ),
             ...restParameterSignatureTail(params),
             // A parameter of type `unknown` in a cell of a list literal is a
             // cell of unknown type here, not a number, as in the literal's

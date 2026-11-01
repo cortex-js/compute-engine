@@ -4,6 +4,7 @@ import {
   checkDeadline,
 } from '../../common/interruptible.js';
 import { replace } from './rules.js';
+import { optionalParameterTarget } from './function-literal.js';
 import { isPatternRule } from './rule-index.js';
 import { sameSyntactic } from './compare.js';
 import { holdMap } from './hold.js';
@@ -1717,7 +1718,11 @@ function mapShadowedOccurrences(
     (inner as Set<string>).add(name);
   };
   if (expr.operator === 'Function')
-    for (const p of expr.ops.slice(1)) if (isSymbol(p)) add(p.symbol);
+    for (const operand of expr.ops.slice(1)) {
+      // A parameter with a default value is read inside its `Optional`.
+      const p = optionalParameterTarget(operand);
+      if (isSymbol(p)) add(p.symbol);
+    }
   const local = expr.localScope;
   if (local !== undefined)
     for (const name of libraryNamesShadowedIn(ce, local)) add(name);

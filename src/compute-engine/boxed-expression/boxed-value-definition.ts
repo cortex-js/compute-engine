@@ -86,6 +86,7 @@ import {
   isDestructuringParameter,
   isRestParameter,
   noteDefinitionCapturedTypes,
+  signatureArgumentsOfSlots,
 } from './function-literal.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
@@ -1130,9 +1131,14 @@ export class _BoxedValueDefinition
         cached.skeleton = new BoxedType(
           {
             kind: 'signature',
-            args: literal.ops.slice(1).map((p) => ({
-              type: functionLiteralParameterType(p) ?? 'unknown',
-            })),
+            // A parameter with a default value is an optional slot, so a
+            // recursive call that leaves it out is not an arity error.
+            ...signatureArgumentsOfSlots(
+              literal.ops.slice(1),
+              literal.ops.slice(1).map((p) => ({
+                type: functionLiteralParameterType(p) ?? 'unknown',
+              }))
+            ),
             result: 'unknown',
           },
           this._engine._typeResolver

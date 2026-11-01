@@ -29,7 +29,14 @@ import type {
   Type,
 } from '../../common/type/types.js';
 import { hasFreeTypeVariables } from '../../common/type/instantiate.js';
-import { isSymbol } from './type-guards.js';
+import {
+  isCharacter,
+  isDictionary,
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+} from './type-guards.js';
 import { resolveTypeAlias } from '../../common/type/utils.js';
 import {
   parameterDefaultToString,
@@ -64,6 +71,30 @@ export const OVERLOADED_DEFAULT_MESSAGE =
  * variable. */
 export const GENERIC_DEFAULT_MESSAGE =
   'a default value on a generic parameter is not supported yet';
+
+/**
+ * The type operands of the full-signature markers of function literals
+ * (`["Typed", body, "(x: T, k: number = 2) -> T where T"]`). Such a
+ * signature is the top-level signature of the literal, so a default value
+ * on one of its parameters is the default of a parameter of the literal.
+ * The `Typed` operator refuses a default in any other ascription; it reads
+ * this set to accept one here. `canonicalFunctionLiteralArguments()` checks
+ * that each default matches the default of the literal's parameter and that
+ * no default is nested deeper in the signature, then adds the operand.
+ */
+const SIGNATURE_MARKER_OPERANDS = new WeakSet<Expression>();
+
+/** Record `op` as the type operand of a function literal's full-signature
+ * marker. See {@link SIGNATURE_MARKER_OPERANDS}. */
+export function markSignatureMarkerOperand(op: Expression): void {
+  SIGNATURE_MARKER_OPERANDS.add(op);
+}
+
+/** True when `op` is the type operand of a function literal's
+ * full-signature marker. See {@link SIGNATURE_MARKER_OPERANDS}. */
+export function isSignatureMarkerOperand(op: Expression): boolean {
+  return SIGNATURE_MARKER_OPERANDS.has(op);
+}
 
 /**
  * True when a parameter default occurs anywhere in `t`: on a parameter of a
@@ -217,6 +248,56 @@ export function boxParameterDefault(
   }
 }
 
+/**
+ * The {@link ParameterDefault} that the canonical default operand `op` of a
+ * function literal's parameter `["Optional", param, default]` stands for, or
+ * `undefined` when `op` is not a default value that a signature can hold.
+ *
+ * - A number that a JavaScript `number` holds exactly (a finite number,
+ *   `NaN`, `PositiveInfinity`, `NegativeInfinity`) is a value. A rational
+ *   (`["Rational", 1, 2]`), a number that a double does not hold exactly
+ *   (`1.1234567890123456789`, `1e400`), a complex number,
+ *   `ComplexInfinity` and `Indeterminate` are not.
+ * - `True` and `False` are the booleans; a string is a value.
+ * - `["List"]` and `["Dictionary"]` with no operands are the empty list and
+ *   the empty dictionary. A collection with elements is not a default value.
+ * - Any other symbol is a symbol default, except `Nothing` and `Missing`.
+ * - Any other expression is not a default value.
+ *
+ * The printed signature of the literal then parses back to the same
+ * parameter default: `typeToString` prints each of these kinds, and the type
+ * parser reads it back.
+ */
+export function literalParameterDefault(
+  op: Expression
+): ParameterDefault | undefined {
+  if (isNumber(op)) {
+    if (op.operator === 'Rational' || op.im !== 0) return undefined;
+    const value = op.re;
+    // The number is held exactly when the machine number prints as the same
+    // MathJSON: a decimal with more digits than a double holds, a bignum
+    // integer outside the double range and `Indeterminate` (a NaN that is
+    // printed by its own name) print differently.
+    const same =
+      JSON.stringify(op.engine.number(value).json) === JSON.stringify(op.json);
+    return same ? { kind: 'value', value } : undefined;
+  }
+  // A one-character string boxes as a character, a sibling of a string.
+  if (isString(op) || isCharacter(op))
+    return { kind: 'value', value: op.string };
+  if (isSymbol(op)) {
+    const name = op.symbol;
+    if (name === 'True') return { kind: 'value', value: true };
+    if (name === 'False') return { kind: 'value', value: false };
+    if (name === 'Nothing' || name === 'Missing') return undefined;
+    return { kind: 'symbol', name };
+  }
+  if (isFunction(op, 'List') && op.nops === 0) return { kind: 'empty-list' };
+  if (isDictionary(op) && op.keys.length === 0)
+    return { kind: 'empty-dictionary' };
+  return undefined;
+}
+
 /** The names a parameter type lists when it is a literal symbol type
  * (`symbol<Auto>`) or a union of them (`symbol<Auto> | symbol<Manual>`), and
  * `undefined` for any other type. */
@@ -293,6 +374,27 @@ function checkParameterDefault(
   }
   if (_admitsOperand !== undefined && !_admitsOperand(ce, boxed, param.type))
     refuse();
+}
+
+/**
+ * True when the canonical default operand `boxed` of a function literal's
+ * parameter, which stands for the default `d` (see
+ * {@link literalParameterDefault}), fits the parameter type `type`. The rules
+ * are the rules of a default in a declared signature (see
+ * {@link checkParameterDefault}): a value default must match the type; a
+ * symbol default is checked as the same symbol written as an operand at that
+ * parameter, and must be one of the symbols that a literal symbol type lists.
+ */
+export function literalParameterDefaultFits(
+  ce: ComputeEngine,
+  d: ParameterDefault,
+  boxed: Expression,
+  type: Type
+): boolean {
+  if (d.kind !== 'symbol') return boxed.type.matches(type);
+  const names = literalSymbolNames(type);
+  if (names !== undefined && !names.includes(d.name)) return false;
+  return _admitsOperand === undefined || _admitsOperand(ce, boxed, type);
 }
 
 /** For each engine, the declaration in progress that `ce.declare` runs in a

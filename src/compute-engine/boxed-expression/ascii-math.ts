@@ -770,8 +770,16 @@ const FUNCTIONS: Record<
     const unwrap = (x: Expression): Expression =>
       isFunction(x, 'Typed') ? x.op1 : x;
 
+    // A parameter with a default value (`["Optional", k, 2]`) is written
+    // `k = 2`, as in Epsil.
     const serializedArgs = () =>
-      args.map((x) => serialize(unwrap(x))).join(', ');
+      args
+        .map((x) =>
+          isFunction(x, 'Optional')
+            ? `${serialize(unwrap(x.op1))} = ${serialize(x.op2)}`
+            : serialize(unwrap(x))
+        )
+        .join(', ');
 
     if (isFunction(expr.op1, 'Block')) {
       if (expr.op1.nops === 0) return `(${serializedArgs()}) => {}`;

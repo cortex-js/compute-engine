@@ -161,7 +161,10 @@ import {
   adoptsForeignEngineObject,
   indeterminateFormAnswer,
 } from './type-guards.js';
-import { functionLiteralParameterType } from './function-literal.js';
+import {
+  functionLiteralParameterType,
+  requiredParameterCount,
+} from './function-literal.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   ownIndexClause,
@@ -2130,8 +2133,14 @@ function annotateFromDeclaredParams(
     // instead. Evaluation is unchanged either way (the arity error dominates);
     // what this buys is that a declined application carries no half-written
     // contract.
+    // A literal with parameters that have a default value accepts from its
+    // required count to its parameter count: the stamp applies when that
+    // range meets the range the slot supplies.
     const arity = isFunction(raw) ? raw.nops - 1 : 0;
-    if (arity < slot.required || arity > slot.max) continue;
+    const literalRequired = isFunction(raw)
+      ? requiredParameterCount(raw.ops.slice(1))
+      : 0;
+    if (arity < slot.required || literalRequired > slot.max) continue;
     const literal = annotateFunctionLiteralParams(ce, raw, slot.types);
     if (literal === undefined) continue;
     result ??= [...ops];
@@ -2294,9 +2303,18 @@ function annotateCallbacksFromContextualSolve(
     // dominates); what this buys is that a declined application carries no
     // half-written contract. The admissible range is `S`'s consumption arity:
     // required parameters, optionally through the optional ones.
+    // A literal with parameters that have a default value accepts from its
+    // required count to its parameter count: the stamp applies when that
+    // range meets `S`'s.
     const required = s.args?.length ?? 0;
     const arity = isFunction(raw) ? raw.nops - 1 : 0;
-    if (arity < required || arity > required + (s.optArgs?.length ?? 0))
+    const literalRequired = isFunction(raw)
+      ? requiredParameterCount(raw.ops.slice(1))
+      : 0;
+    if (
+      arity < required ||
+      literalRequired > required + (s.optArgs?.length ?? 0)
+    )
       continue;
     const paramTypes = [...(s.args ?? []), ...(s.optArgs ?? [])].map((arg) =>
       stampableParamType(arg.type)
@@ -3262,7 +3280,7 @@ function makeCanonicalFunctionCore(
     // "Named-argument calls — v1 residuals"). The callee operand itself is
     // left untouched: only the argument list is permuted, and the literal
     // canonicalizes downstream exactly as a positional call's would.
-    const literalSignature = inlineLiteralSignature(ops[0]);
+    const literalSignature = inlineLiteralSignature(ce, ops[0]);
     if (literalSignature !== undefined) {
       const split = splitNamedArguments(ops.slice(1));
       const normalized = normalizeNamedArguments(ce, split, literalSignature);

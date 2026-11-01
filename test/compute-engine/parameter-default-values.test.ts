@@ -10,6 +10,8 @@ import { widenValueTypes } from '../../src/common/type/widen-value';
 import { substituteTypeVariables } from '../../src/common/type/instantiate';
 import type { FunctionSignature, Type } from '../../src/common/type/types';
 import { parameterDefaultOperands } from '../../src/compute-engine/boxed-expression/parameter-defaults';
+import { describe as describeOperand } from '../../src/compute-engine/boxed-expression/operand-descriptor';
+import { widenUnannotatedLiteralParams } from '../../src/compute-engine/boxed-expression/validate';
 
 // Default values for optional parameters (GitHub issue #490). The design is
 // in `docs/plans/2026-10-31-parameter-default-values.md`.
@@ -1399,5 +1401,766 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF THE FILL, ROUND 3', () => {
     });
     expect(ce.box(['H', 10]).evaluate().json).toBe(10);
     expect(e.evaluate().json).toBe(10);
+  });
+});
+
+/** The function literal `(x, k = d) => body`, as MathJSON. */
+function defaultedLiteral(d: unknown, body: unknown = ['Multiply', 'x', 'k']) {
+  return ['Function', body, 'x', ['Optional', 'k', d]] as any;
+}
+
+/** The code of the error at the parameter `index` (1-based) of the boxed
+ * function literal `literal`, or `undefined` when that parameter is not an
+ * error. */
+function parameterErrorCode(literal: any, index: number): string | undefined {
+  const param = literal.ops[index];
+  if (param?.operator !== 'Error') return undefined;
+  const code = param.op1;
+  return code.operator === 'ErrorCode' ? code.op1.string : code.string;
+}
+
+describe('PARAMETER DEFAULT VALUES: FUNCTION LITERALS', () => {
+  const ce = new ComputeEngine();
+  const lit = defaultedLiteral(2);
+
+  test('a call with the required arguments is a full call, not a partial application', () => {
+    expect(ce.box(['Apply', lit, 3]).evaluate().json).toBe(6);
+    expect(ce.box(['Apply', lit, 3, 5]).evaluate().json).toBe(15);
+  });
+
+  test('the canonical form of a call of an inline literal carries the default', () => {
+    expect(ce.box(['Apply', lit, 3]).json).toEqual(['Apply', lit_json(), 3, 2]);
+    function lit_json() {
+      return ce.box(lit).json;
+    }
+  });
+
+  test('a call with fewer arguments than the required ones curries, and the residual keeps the default', () => {
+    const residual = ce.box(['Apply', lit]).evaluate();
+    expect(residual.operator).toBe('Function');
+    expect(residual.ops![2].json).toEqual(['Optional', '_2', 2]);
+    expect(ce.box(['Apply', residual.json, 3]).evaluate().json).toBe(6);
+    expect(ce.box(['Apply', residual.json, 3, 5]).evaluate().json).toBe(15);
+  });
+
+  test('the type prints the default; an untyped parameter keeps its inferred slot type', () => {
+    expect(ce.box(lit).type.toString()).toBe(
+      '(x: unknown, k: unknown = 2) -> number'
+    );
+    expect(ce.box(defaultedLiteral(2, 'k')).type.toString()).toBe(
+      '(x: unknown, k: unknown = 2) -> unknown'
+    );
+    expect(
+      ce
+        .box([
+          'Function',
+          ['Multiply', 'x', 'k'],
+          'x',
+          ['Optional', ['Typed', 'k', "'number'"], 2],
+        ])
+        .type.toString()
+    ).toBe('(x: unknown, k: number = 2) -> number');
+  });
+
+  test.each([
+    ['a number', 2],
+    ['a negative number', -1.5],
+    ['NaN', 'NaN'],
+    ['+oo', 'PositiveInfinity'],
+    ['a string', "'abc'"],
+    ['a boolean', 'True'],
+    ['a symbol', 'Auto'],
+    ['the empty list', ['List']],
+    ['the empty dictionary', ['Dictionary']],
+  ])(
+    'the printed type of a literal with %s as default parses back to the same identity key',
+    (_, d) => {
+      const t = ce.box(defaultedLiteral(d, 'k')).type.type;
+      expect(typeToIdentityKey(parseType(typeToString(t)))).toBe(
+        typeToIdentityKey(t)
+      );
+    }
+  );
+
+  test('`Typed(k, "number?")` is a diagnostic, not an untyped parameter', () => {
+    const f = ce.box([
+      'Function',
+      ['Multiply', 'x', 'k'],
+      'x',
+      ['Typed', 'k', "'number?'"],
+    ]);
+    expect(parameterErrorCode(f, 2)).toBe('invalid-parameter-annotation');
+    expect(f.ops![2].toString()).toMatch(/Optional\(k, default\)/);
+  });
+
+  test('the signature-string sugar desugars a default to an `Optional` parameter', () => {
+    const f = ce.box([
+      'Function',
+      ['Multiply', 'x', 'k'],
+      "'(x: number, k: number = 2) -> number'",
+    ]);
+    expect(f.ops![2].json).toEqual(['Optional', ['Typed', 'k', "'number'"], 2]);
+    expect(ce.box(['Apply', f.json, 3]).evaluate().json).toBe(6);
+    const g = ce.box(['Function', ['Length', 'xs'], "'(xs: list = []) -> integer'"]);
+    expect(ce.box(['Apply', g.json]).evaluate().json).toBe(0);
+    // An optional argument without a default and a variadic argument have
+    // no parameter spelling: the operand stays an error.
+    expect(
+      parameterErrorCode(
+        ce.box(['Function', 'k', "'(x: number, k: number?) -> number'"]),
+        1
+      )
+    ).toBe('expected-a-symbol');
+    expect(
+      parameterErrorCode(
+        ce.box(['Function', 'k', "'(x: number, k: number*) -> number'"]),
+        1
+      )
+    ).toBe('expected-a-symbol');
+  });
+
+  test('an empty-list default', () => {
+    expect(
+      ce
+        .box(['Apply', ['Function', ['Length', 'xs'], ['Optional', 'xs', ['List']]]])
+        .evaluate().json
+    ).toBe(0);
+  });
+
+  test('a default that does not fit the parameter type is `incompatible-type`, inline and at `ce.assign`', () => {
+    const annotated = [
+      'Function',
+      'k',
+      ['Optional', ['Typed', 'k', "'number'"], "'a'"],
+    ];
+    const inferred = defaultedLiteral("'a'");
+    expect(parameterErrorCode(ce.box(annotated), 1)).toBe('incompatible-type');
+    expect(parameterErrorCode(ce.box(inferred), 2)).toBe('incompatible-type');
+    // `ce.assign` refuses an invalid function literal, as it refuses any
+    // other.
+    const ce2 = new ComputeEngine();
+    expect(() => ce2.assign('f1', ce2.box(annotated))).toThrow(
+      /incompatible-type/
+    );
+    expect(() => ce2.assign('f2', ce2.box(inferred))).toThrow(
+      /incompatible-type/
+    );
+  });
+
+  test.each([
+    ['a default that names a parameter', ['Optional', 'k', 'x'], 2, 'expected-a-literal-default'],
+    ['`Nothing`', ['Optional', 'k', 'Nothing'], 2, 'expected-a-literal-default'],
+    ['`Missing`', ['Optional', 'k', 'Missing'], 2, 'expected-a-literal-default'],
+    ['`ComplexInfinity`', ['Optional', 'k', 'ComplexInfinity'], 2, 'expected-a-literal-default'],
+    ['a rational', ['Optional', 'k', ['Rational', 1, 2]], 2, 'expected-a-literal-default'],
+    ['a complex number', ['Optional', 'k', ['Complex', 1, 2]], 2, 'expected-a-literal-default'],
+    ['a decimal that a double does not hold', ['Optional', 'k', { num: '1.12345678901234567890123' }], 2, 'expected-a-literal-default'],
+    ['a list with elements', ['Optional', 'k', ['List', 1]], 2, 'expected-a-literal-default'],
+    ['an expression', ['Optional', 'k', ['Add', 'y', 1]], 2, 'expected-a-literal-default'],
+    ['`Optional` on a rest parameter', ['Optional', ['Spread', 'k'], 2], 2, 'expected-a-symbol'],
+    ['`Optional` on a destructuring parameter', ['Optional', ['Tuple', 'p', 'q'], 2], 2, 'expected-a-symbol'],
+    ['`Optional` with no default', ['Optional', 'k'], 2, 'missing'],
+  ])('%s is an error on the parameter', (_, param, index, code) => {
+    const f = ce.box(['Function', 'x', 'x', param] as any);
+    expect(parameterErrorCode(f, index)).toBe(code);
+  });
+
+  test('a rest parameter or a plain parameter after an `Optional` is an error on that parameter', () => {
+    expect(
+      parameterErrorCode(
+        ce.box(['Function', 'x', 'x', ['Optional', 'k', 2], ['Spread', 'r']]),
+        3
+      )
+    ).toBe('expected-a-symbol');
+    expect(
+      parameterErrorCode(
+        ce.box(['Function', 'x', ['Optional', 'k', 2], 'x']),
+        2
+      )
+    ).toBe('expected-a-symbol');
+    // A plain parameter before the `Optional` is accepted.
+    expect(parameterErrorCode(ce.box(lit), 1)).toBeUndefined();
+    expect(parameterErrorCode(ce.box(lit), 2)).toBeUndefined();
+  });
+
+  test('`Optional` outside a parameter list is `unexpected-argument`', () => {
+    const e = ce.box(['Optional', 'k', 2]);
+    expect(e.operator).toBe('Error');
+    expect(e.toString()).toMatch(/unexpected-argument/);
+  });
+
+  test('a symbol default reads the binding that the same symbol written in the call reads', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('d', 2);
+    const f = defaultedLiteral('d');
+    expect(ce2.box(['Apply', f, 3]).evaluate().json).toBe(6);
+    const inBlock = (call: unknown) =>
+      ce2
+        .box([
+          'Block',
+          ['Declare', 'd', "'integer'"],
+          ['Assign', 'd', 5],
+          call,
+        ] as any)
+        .evaluate().json;
+    expect(inBlock(['Apply', f, 3])).toBe(15);
+    expect(inBlock(['Apply', f, 3])).toBe(inBlock(['Apply', f, 3, 'd']));
+  });
+
+  test('a named argument that skips a parameter with a default gives it the default', () => {
+    const f = [
+      'Function',
+      ['Add', 'x', ['Multiply', 10, 'a'], ['Multiply', 100, 'b']],
+      'x',
+      ['Optional', 'a', 1],
+      ['Optional', 'b', 2],
+    ];
+    const e = ce.box(['Apply', f, 3, ['NamedArgument', "'b'", 5]] as any);
+    expect(e.ops!.slice(1).map((x) => x.json)).toEqual([3, 1, 5]);
+    expect(e.evaluate().json).toBe(513);
+  });
+});
+
+describe('PARAMETER DEFAULT VALUES: READERS OF A LITERAL', () => {
+  const ce = new ComputeEngine();
+  const lit = defaultedLiteral(2);
+
+  test('`Map` calls the literal with one argument, and the default fills `k`', () => {
+    expect(ce.box(['Map', lit, ['List', 1, 2]]).evaluate().toString()).toBe(
+      '[2,4]'
+    );
+  });
+
+  test('a pipe stage', () => {
+    expect(
+      ce.box(['Pipe', ['List', 1, 2], ['Map', lit]]).evaluate().toString()
+    ).toBe('[2,4]');
+  });
+
+  test('`Sort` reads the literal as a unary key', () => {
+    expect(ce.box(['Sort', ['List', 3, 1, 2], lit]).evaluate().json).toEqual([
+      'List',
+      1,
+      2,
+      3,
+    ]);
+  });
+
+  test('`Iterate` calls the literal with the previous value only', () => {
+    const f = defaultedLiteral(2, ['Add', 'x', 'k']);
+    expect(
+      ce.box(['Take', ['Iterate', f, 0], 3]).evaluate().toString()
+    ).toBe('[2,4,6]');
+  });
+
+  test('the static callback-arity check accepts the literal, and counts its parameters with a default as optional', () => {
+    expect(ce.box(['Map', lit, ['List', 1]]).isValid).toBe(true);
+    const two = [
+      'Function',
+      ['Multiply', 'x', 'j', 'k'],
+      'x',
+      'j',
+      ['Optional', 'k', 2],
+    ];
+    expect(
+      ce.box(['Map', two, ['List', 1]] as any).evaluate().toString()
+    ).toMatch(/takes 2 to 3 parameters/);
+  });
+
+  test('a symbol default is a free variable of the literal, not a parameter', () => {
+    const ce2 = new ComputeEngine();
+    const f = ce2.box(defaultedLiteral('q'));
+    expect(f.freeVariables).toEqual(['q']);
+    // Reading a symbol is not an effect: the literal is pure, as the same
+    // literal with the default 2 is.
+    expect(f.type.toString()).toBe('(x: unknown, k: unknown = q) -> number');
+  });
+
+  test('a user function assigned a literal takes its defaults', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('f', ce2.box(lit));
+    expect(operatorDefOf(ce2, 'f').signature.toString()).toBe(
+      '(x: unknown, k: unknown = 2) -> number'
+    );
+    expect(ce2.box(['f', 3]).json).toEqual(['f', 3, 2]);
+    expect(ce2.box(['f', 3]).evaluate().json).toBe(6);
+    expect(ce2.box(['f', 3, 5]).evaluate().json).toBe(15);
+  });
+
+  test('`inferredSignature: true`: the literal\'s default replaces the declared one, also for a call made before', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('F', {
+      signature: '(x: number, k: number = 2) -> number',
+      inferredSignature: true,
+    });
+    const before = ce2.box(['F', 3]);
+    expect(before.json).toEqual(['F', 3, 2]);
+    ce2.assign('F', ce2.box(defaultedLiteral(3)));
+    expect(ce2.box(['F', 3]).json).toEqual(['F', 3, 3]);
+    expect(ce2.box(['F', 3]).evaluate().json).toBe(9);
+    expect(before.evaluate().json).toBe(9);
+  });
+});
+
+describe('PARAMETER DEFAULT VALUES: LITERALS HELD BY VARIABLES', () => {
+  test('a declared default wins over the default of the literal the variable holds', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(number, number = 2) -> number');
+    ce.assign('g', ce.box(defaultedLiteral(3)));
+    expect(ce.box(['g', 3]).json).toEqual(['g', 3, 2]);
+    expect(ce.box(['g', 3]).evaluate().json).toBe(6);
+  });
+
+  test('a variable declared `function` gets the default of its literal at evaluation', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', 'function');
+    ce.assign('h', ce.box(defaultedLiteral(2)));
+    expect(ce.box(['h', 3]).json).toEqual(['h', 3]);
+    expect(ce.box(['h', 3]).evaluate().json).toBe(6);
+  });
+
+  test.each([
+    ['a user function', (ce: ComputeEngine) => ce.assign('f', ce.box(defaultedLiteral(2)))],
+    [
+      'a variable with an inferred type',
+      (ce: ComputeEngine) =>
+        ce.declare('f', { value: defaultedLiteral(2), inferred: true }),
+    ],
+  ])('%s: a call made before the callee changes is filled again', (_, define) => {
+    const ce = new ComputeEngine();
+    define(ce);
+    const e = ce.box(['f', 3]);
+    expect(e.json).toEqual(['f', 3, 2]);
+    ce.assign('f', ce.box(['Function', 'x', 'x']));
+    expect(e.evaluate().json).toBe(3);
+    ce.assign('f', ce.box(defaultedLiteral(5)));
+    expect(e.evaluate().json).toBe(15);
+    // A function that requires `k`: the written call `f(3)` is a partial
+    // application, as `f(3)` written after the assignment is.
+    ce.assign('f', ce.box(['Function', ['Multiply', 'x', 'k'], 'x', 'k']));
+    expect(e.evaluate().operator).toBe('Function');
+    expect(e.evaluate().isSame(ce.box(['f', 3]).evaluate())).toBe(true);
+  });
+});
+
+describe('PARAMETER DEFAULT VALUES: LATEX OF A LITERAL', () => {
+  const ce = new ComputeEngine();
+
+  test('a parameter with a default is written `k = 2`', () => {
+    const f = ce.box(defaultedLiteral(2));
+    expect(f.latex).toBe('(x, k=2)\\mapsto kx');
+    expect(
+      ce.box([
+        'Function',
+        'k',
+        ['Optional', ['Typed', 'k', "'number'"], 2],
+      ]).latex
+    ).toBe('(k\\colon number=2)\\mapsto k');
+    expect(f.toString()).toBe('(x, k = 2) => k * x');
+  });
+
+  test('parsing the LaTeX back does not give the literal (not supported yet)', () => {
+    // The parser reads `k = 2` in a parameter list as an equation, and the
+    // `\mapsto` after a list that holds one is not a function literal. The
+    // LaTeX parse of a default is recorded for later in the design
+    // (`docs/plans/2026-10-31-parameter-default-values.md`, section 9).
+    expect(ce.parse('(x, k=2)\\mapsto kx').json).toEqual([
+      'Sequence',
+      ['Tuple', 'x', ['Equal', 'k', 2]],
+      ['Error', "'unexpected-operator'", ['LatexString', "'\\mapsto'"]],
+    ]);
+  });
+});
+
+describe('PARAMETER DEFAULT VALUES: OTHER READERS OF THE PARAMETER LIST', () => {
+  const lit = defaultedLiteral(2);
+
+  test('a variable declared with an optional parameter accepts a literal whose parameter has a default', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(number, number?) -> number');
+    ce.assign('g', ce.box(lit));
+    expect(ce.box(['g', 3]).evaluate().json).toBe(6);
+    ce.declare('g1', '(number) -> number');
+    ce.assign('g1', ce.box(lit));
+    expect(ce.box(['g1', 3]).evaluate().json).toBe(6);
+    ce.declare('g3', '(number, number, number) -> number');
+    expect(() => ce.assign('g3', ce.box(lit))).toThrow(
+      /takes 1 to 2 parameter/
+    );
+  });
+
+  test('a recursive call that leaves out a parameter with a default', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'r',
+      ce.box([
+        'Function',
+        [
+          'If',
+          ['LessEqual', 'n', 0],
+          'acc',
+          ['r', ['Subtract', 'n', 1], ['Add', 'acc', 'n']],
+        ],
+        'n',
+        ['Optional', 'acc', 0],
+      ])
+    );
+    expect(ce.box(['r', 4]).evaluate().json).toBe(10);
+  });
+
+  test('a callback whose declared slot is stamped on a literal with a default', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'Filter',
+          ['List', 1, 2, 3],
+          ['Function', ['Greater', 'x', 'k'], 'x', ['Optional', 'k', 1]],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[2,3]');
+  });
+
+  test('`EvaluateAt` accepts a point that leaves out a parameter with a default', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['EvaluateAt', lit, 3]).evaluate().json).toBe(6);
+  });
+});
+
+describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
+  test('`.N()` reads the exact argument of a parameter with a default', () => {
+    const ce = new ComputeEngine();
+    // (25! - 1)/24! is just below 25: rounded to a machine number it is 25.
+    const q = ['Divide', ['Subtract', ['Factorial', 25], 1], ['Factorial', 24]];
+    const lit = [
+      'Function',
+      ['Floor', 'k'],
+      ['Optional', ['Typed', 'k', "'real'"], 0],
+    ];
+    expect(ce.box(['Apply', lit, q]).N().toString()).toBe('24');
+  });
+
+  test('a numeric parameter with a default accepts NaN, and Missing is read as NaN', () => {
+    const ce = new ComputeEngine();
+    const lit = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 0]];
+    expect(ce.box(['Apply', lit, 'NaN']).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['Apply', lit, 'Missing']).evaluate().toString()).toBe('NaN');
+  });
+
+  test('a bare parameter with a default imposes no constraint, as without the default', () => {
+    const ce = new ComputeEngine();
+    const withDefault = [
+      'Function',
+      ['Multiply', 'x', 'k'],
+      ['Typed', 'x', "'number'"],
+      ['Optional', 'k', 2],
+    ];
+    const without = [
+      'Function',
+      ['Multiply', 'x', 'k'],
+      ['Typed', 'x', "'number'"],
+      'k',
+    ];
+    const a = ce.box(['Apply', withDefault, 1, 'Missing']).evaluate();
+    const b = ce.box(['Apply', without, 1, 'Missing']).evaluate();
+    expect(a.toString()).toBe(b.toString());
+    expect(a.operator).not.toBe('Error');
+  });
+
+  test('the callback compatibility rule widens a bare parameter with a default', () => {
+    const ce = new ComputeEngine();
+    // The body infers `k: collection`, a guess that the compatibility rule
+    // does not enforce, whether or not the parameter has a default.
+    const lit = ce.box(defaultedLiteral(['List'], ['Length', 'k']));
+    expect(lit.type.toString()).toBe(
+      '(x: unknown, k: collection = []) -> integer | signed_infinity'
+    );
+    expect(
+      typeToString(widenUnannotatedLiteralParams(lit, lit.type.type))
+    ).toBe('(x: unknown, k: unknown = []) -> integer | signed_infinity');
+  });
+
+  test('the signature-string sugar with a default and a `where` clause', () => {
+    const ce = new ComputeEngine();
+    const g = ce.box([
+      'Function',
+      'x',
+      "'(x: T, k: number = 2) -> T where T'",
+    ] as any);
+    expect(g.isValid).toBe(true);
+    expect(g.type.toString()).toBe('(x: T, k: number = 2) -> T where T');
+    expect(ce.box(['Apply', g, 5]).evaluate().json).toBe(5);
+    // The canonical form boxes again to the same literal.
+    expect(ce.box(['Apply', g.json, 5]).evaluate().json).toBe(5);
+  });
+
+  test('the signature-string sugar with a default and effects', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box([
+      'Function',
+      ['Multiply', 'k', 3],
+      "'(k: number = 2) pure -> number'",
+    ] as any);
+    expect(f.isValid).toBe(true);
+    expect(ce.box(['Apply', f]).evaluate().json).toBe(6);
+    expect(ce.box(['Apply', f.json, 4]).evaluate().json).toBe(12);
+  });
+
+  test('a default on a quantified parameter of a literal is refused', () => {
+    const ce = new ComputeEngine();
+    const g = ce.box(['Function', 'x', "'(x: T = 0) -> T where T'"] as any);
+    expect(g.isValid).toBe(false);
+    expect(g.toString()).toMatch(
+      /a default value on a generic parameter is not supported yet/
+    );
+  });
+
+  test('a marker whose default differs from the default of the parameter is refused', () => {
+    const ce = new ComputeEngine();
+    const g = ce.box([
+      'Function',
+      ['Typed', 'x', "'(x: number, k: number = 3) -> number'"],
+      'x',
+      ['Optional', 'k', 2],
+    ] as any);
+    expect(g.isValid).toBe(false);
+  });
+
+  test('a generic literal keeps the default of a parameter that the marker lists as required', () => {
+    const ce = new ComputeEngine();
+    // The Epsil lowering of `function g<T>(x: T, k: number = 2) -> T`
+    // writes the marker without the default.
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Typed', ['Add', 'x', 'k'], "'(x: T, k: number) -> T where T'"],
+        'x',
+        ['Optional', ['Typed', 'k', "'number'"], 2],
+      ] as any)
+    );
+    expect(ce.box('g').type.toString()).toBe(
+      '(x: T, k: number = 2) -> T where T'
+    );
+    expect(ce.box(['g', 3]).evaluate().json).toBe(5);
+    expect(ce.box(['g', 3, 5]).evaluate().json).toBe(8);
+  });
+
+  test('the fresh parameters of a residual differ from the symbols of a default', () => {
+    const ce = new ComputeEngine();
+    const residual = ce
+      .box([
+        'Apply',
+        ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', '_1']],
+      ])
+      .evaluate();
+    expect(residual.operator).toBe('Function');
+    expect(residual.isValid).toBe(true);
+    expect(residual.ops![2].json).toEqual(['Optional', '_2', '_1']);
+    expect(ce.box(['Apply', residual.json, 3, 5]).evaluate().json).toBe(15);
+  });
+
+  test('a callback whose only parameter has a default is unary', () => {
+    const ce = new ComputeEngine();
+    const negate = ['Function', ['Negate', 'x'], ['Optional', 'x', 0]];
+    expect(
+      ce.box(['Sort', ['List', 1, 3, 2], negate]).evaluate().toString()
+    ).toBe('[3,2,1]');
+    const step = ['Function', ['Add', 'x', 1], ['Optional', 'x', 0]];
+    const plain = ['Function', ['Add', 'x', 1], 'x'];
+    expect(
+      ce.box(['Take', ['Iterate', step, 0], 3]).evaluate().toString()
+    ).toBe(ce.box(['Take', ['Iterate', plain, 0], 3]).evaluate().toString());
+  });
+
+  test('the operand descriptor and `def.lambda` report a parameter with a default as optional', () => {
+    const ce = new ComputeEngine();
+    const lit = ce.box(defaultedLiteral(2));
+    const s = describeOperand(lit).structureOf?.();
+    expect(s?.kind).toBe('function-literal');
+    if (s?.kind === 'function-literal')
+      expect(s.parameters).toEqual([
+        { name: 'x' },
+        { name: 'k', optional: true, default: { kind: 'value', value: 2 } },
+      ]);
+    ce.assign('h', lit);
+    const params = operatorDefOf(ce, 'h').lambda?.parameters;
+    expect(params?.map((p) => [p.name, p.optional, p.default])).toEqual([
+      ['x', undefined, undefined],
+      ['k', true, { kind: 'value', value: 2 }],
+    ]);
+  });
+
+  test('a saved call: the default of a new literal reads the scope of the call', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'integer');
+    ce.assign('d', 1);
+    ce.assign('f', ce.box(defaultedLiteral(2)));
+    ce.pushScope();
+    ce.declare('d', 'integer');
+    ce.assign('d', 5);
+    const e = ce.box(['f', 3]);
+    expect(e.evaluate().json).toBe(6);
+    ce.popScope();
+    ce.assign('f', ce.box(defaultedLiteral('d', ['Add', 'x', 'k'])));
+    // The scope of the call was popped: the inserted default `d` reads the
+    // global `d`, not the `d` of the popped scope.
+    expect(e.evaluate().json).toBe(4);
+  });
+
+  test('a saved call evaluated in its scope: the default reads the `d` of that scope', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'integer');
+    ce.assign('d', 1);
+    ce.assign('f', ce.box(defaultedLiteral(2)));
+    ce.pushScope();
+    ce.declare('d', 'integer');
+    ce.assign('d', 5);
+    const e = ce.box(['f', 3]);
+    ce.assign('f', ce.box(defaultedLiteral('d', ['Add', 'x', 'k'])));
+    expect(e.evaluate().json).toBe(8);
+    ce.popScope();
+  });
+
+  test('a marker argument named like a symbol default takes the name of the literal parameter', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'integer');
+    ce.assign('d', 4);
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Typed', ['Add', 'x', 'k'], "'(a: T, d: number) -> T where T'"],
+        'x',
+        ['Optional', ['Typed', 'k', "'number'"], 'd'],
+      ] as any)
+    );
+    expect(ce.box('g').type.toString()).toBe(
+      '(a: T, k: number = d) -> T where T'
+    );
+    expect(ce.box(['g', 3]).evaluate().json).toBe(7);
+  });
+
+  test('a marker argument named like a symbol default at a destructuring parameter has no name', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'integer');
+    ce.assign('a', 4);
+    const g = ce.box([
+      'Function',
+      ['Typed', 'k', "'(a: tuple, k: number) -> number'"],
+      ['Tuple', 'p', 'q'],
+      ['Optional', ['Typed', 'k', "'number'"], 'a'],
+    ] as any);
+    expect(g.isValid).toBe(true);
+    const text = g.type.toString();
+    expect(text).toBe('(tuple<unknown, unknown>, k: number = a) -> number');
+    expect(typeToString(parseType(text))).toBe(text);
+  });
+
+  test('a rewritten marker keeps the argument names of the marker', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Typed', ['Add', 'x', 'k'], "'(a: T, d: number) -> T where T'"],
+        'x',
+        ['Optional', ['Typed', 'k', "'number'"], 2],
+      ] as any)
+    );
+    expect(ce.box('g').type.toString()).toBe(
+      '(a: T, d: number = 2) -> T where T'
+    );
+    expect(ce.box(['g', 3]).evaluate().json).toBe(5);
+    expect(
+      ce.box(['g', 3, ['NamedArgument', { str: 'd' }, 5]] as any).evaluate()
+        .json
+    ).toBe(8);
+  });
+
+  test('a default that names a parameter of a literal with a marker gives one error', () => {
+    const ce = new ComputeEngine();
+    const g = ce.box([
+      'Function',
+      ['Typed', ['Add', 'x', 'k'], "'(a: T, d: number) -> T where T'"],
+      'x',
+      ['Optional', ['Typed', 'k', "'number'"], 'x'],
+    ] as any);
+    expect(g.isValid).toBe(false);
+    expect(g.errors.length).toBe(1);
+    expect(g.toString()).toMatch(/a default value cannot name a parameter/);
+  });
+
+  test('an argument named like a keyword of the type lexer is backticked', () => {
+    const ce = new ComputeEngine();
+    const g = ce.box([
+      'Function',
+      ['Typed', ['Add', 'x', 'true'], "'(a: T, b: number) -> T where T'"],
+      'x',
+      ['Optional', ['Typed', 'true', "'number'"], 2],
+    ] as any);
+    expect(g.type.toString()).toBe('(a: T, b: number = 2) -> T where T');
+    const sig: Type = {
+      kind: 'signature',
+      args: [{ name: 'x', type: 'number' }],
+      optArgs: [
+        { name: 'true', type: 'number', default: { kind: 'value', value: 2 } },
+      ],
+      result: 'number',
+    };
+    const text = typeToString(sig);
+    expect(text).toBe('(x: number, `true`: number = 2) -> number');
+    expect(typeToString(parseType(text))).toBe(text);
+    expect(parseType(text)).toEqual(sig);
+  });
+
+  test('the operand of a marker is not marked: the same operand in another `Typed` refuses a default', () => {
+    const ce = new ComputeEngine();
+    const s = ce.string('(x: number, k: number = 2) -> number');
+    const lit = ce.box([
+      'Function',
+      ['Typed', ['Add', 'x', 'k'], s],
+      'x',
+      ['Optional', 'k', 2],
+    ] as any);
+    expect(lit.isValid).toBe(true);
+    const other = ce.box([
+      'Typed',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+      s,
+    ] as any);
+    expect(other.isValid).toBe(false);
+    expect(other.toString()).toMatch(
+      /a default value is allowed only in a top-level function signature/
+    );
+  });
+
+  test('a marker default that differs from an empty-dictionary default is refused', () => {
+    const ce = new ComputeEngine();
+    const g = ce.box([
+      'Function',
+      ['Typed', 'x', "'(x: any, m: any = 5) -> any'"],
+      'x',
+      ['Optional', 'm', ['Dictionary']],
+    ] as any);
+    expect(g.isValid).toBe(false);
+  });
+
+  test('a generic literal keeps an empty-dictionary default that the marker lists as required', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Typed', 'x', "'(x: T, m: dictionary) -> T where T'"],
+        'x',
+        ['Optional', ['Typed', 'm', "'dictionary'"], ['Dictionary']],
+      ] as any)
+    );
+    expect(ce.box('g').type.toString()).toBe(
+      '(x: T, m: dictionary = {}) -> T where T'
+    );
+    expect(ce.box(['g', 3]).evaluate().json).toBe(3);
   });
 });

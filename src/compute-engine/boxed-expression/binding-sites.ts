@@ -644,9 +644,15 @@ export function lambdaParamSites(op: number): BindingSiteSelector {
         // A REST parameter (`(a, ...rest) => …`) is the node
         // `["Spread", symbol]`, and the name it binds is the symbol INSIDE
         // that wrapper — the same one-level unwrap a `Typed` annotation
-        // needs, so both report the path of the inner operand.
-        path:
-          isFunction(param, 'Typed') || isFunction(param, 'Spread')
+        // needs, so both report the path of the inner operand. A parameter
+        // with a default value adds one more level: the symbol of
+        // `["Optional", x, d]` is at `[op, i, 0]`, and that of
+        // `["Optional", ["Typed", x, T], d]` at `[op, i, 0, 0]`.
+        path: isFunction(param, 'Optional')
+          ? isFunction(param.op1, 'Typed')
+            ? [op, i, 0, 0]
+            : [op, i, 0]
+          : isFunction(param, 'Typed') || isFunction(param, 'Spread')
             ? [op, i, 0]
             : [op, i],
       });

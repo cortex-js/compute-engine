@@ -718,6 +718,57 @@ argument. The declared type is read this way by `defaultedSlotsAsRequired()`
 (`src/common/type/subtype.ts`) before the value check; `isSubtype()` itself
 is unchanged.
 
+#### A default on a parameter of a function literal
+
+A parameter of a function literal has a default value when it is wrapped in
+`Optional`: `["Function", ["Multiply", "x", "k"], "x", ["Optional", "k", 2]]`,
+which Epsil spells `(x, k = 2) => x * k`. The wrapped parameter is a symbol
+or `["Typed", symbol, type]`; the default is a number, a string, `True`,
+`False`, a symbol, `["List"]` or `["Dictionary"]` with no operands, the same
+values as in a signature. The default is canonicalized with the literal, in
+the scope where the literal is written. The signature-string spelling
+`["Function", body, "'(x: number, k: number = 2) -> number'"]` gives the same
+literal.
+
+- The literal's inferred signature puts a parameter with a default among the
+  optional parameters, with its default:
+  `((x, k = 2) => x * k).type` is `(x: unknown, k: unknown = 2) -> number`,
+  and `((x, k: number = 2) => x * k).type` is
+  `(x: unknown, k: number = 2) -> number`. The default does not change the
+  slot type: it is the annotation, or the type that the uses of the body
+  infer, as for a parameter without a default.
+- A call that supplies every parameter before the first parameter with a
+  default is a full call: `((x, k = 2) => x * k)(3)` is 6, and its canonical
+  form is `Apply(⟨literal⟩, 3, 2)`. A call with fewer arguments is a partial
+  application, as before; its residual keeps the default:
+  `((x, k = 2) => x * k)()` is `(_1, Optional(_2, 2)) => …`, which gives 6
+  for `3` and 15 for `(3, 5)`.
+- `ce.assign` of such a literal gives the user function the signature of the
+  literal, defaults included, so `f(3)` canonicalizes to `f(3, 2)`. With
+  `inferredSignature: true`, the defaults of the literal replace the declared
+  ones, as its types do.
+- An operator that chooses how to call a callback from its arity reads the
+  number of required parameters (`requiredArity()`,
+  `src/common/type/utils.ts`): `Sort(L, (x, k = 2) => x * k)` uses the
+  literal as a unary key, and `Iterate((x, k = 2) => x + k, 0)` calls it with
+  the previous value only.
+- A symbol default is a free variable of the literal, not a parameter, and is
+  read as the same symbol written in the call is read.
+- Errors, each on the parameter operand: a default that does not fit the
+  parameter type is `incompatible-type` (`(x, k = "a") => x * k`, where
+  `Multiply` needs a number); a default that is not one of the values above,
+  that names a parameter of the same literal, or that is `Nothing`,
+  `Missing`, `ComplexInfinity` or a rational is `expected-a-literal-default`;
+  `Optional` on a rest or destructuring parameter, and a plain or rest
+  parameter after an `Optional`, are `expected-a-symbol`; `Optional` with no
+  default is `missing`; `Optional` outside a parameter list is
+  `unexpected-argument`. `["Typed", "k", "'number?'"]` is
+  `invalid-parameter-annotation`: `number?` is not a type, and a parameter
+  of a literal is optional when it has a default.
+- The LaTeX of the literal writes the parameter `k = 2`:
+  `(x, k=2)\mapsto kx`. The LaTeX parser does not read that notation back as
+  a default yet.
+
 ### The inferred signature of a function literal
 
 The signature of a function literal says what its body proves about every

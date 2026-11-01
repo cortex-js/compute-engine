@@ -76,6 +76,7 @@ import {
   exactArgumentSources,
   inlineCallParameters,
   isStatementListScope,
+  literalArgumentsWithDefaults,
   snapshotRunVariables,
   type ApplyOptions,
 } from '../function-utils.js';
@@ -286,6 +287,7 @@ import { errorValue } from '../boxed-expression/error-value.js';
 import {
   NESTED_DEFAULT_MESSAGE,
   installParameterDefaults,
+  isSignatureMarkerOperand,
   typeHasParameterDefault,
 } from '../boxed-expression/parameter-defaults.js';
 import {
@@ -504,9 +506,11 @@ function calleeArity(
   f: Expression
 ): { min: number; max: number; slots: number } | undefined {
   if (isFunction(f, 'Function')) {
-    const { fixed, variadic } = functionLiteralArity(f);
+    // A parameter with a default value may be left out: the minimum is the
+    // number of parameters before the first one.
+    const { fixed, variadic, required } = functionLiteralArity(f);
     return {
-      min: fixed,
+      min: required,
       max: variadic ? Infinity : fixed,
       slots: fixed + (variadic ? 1 : 0),
     };
@@ -5817,8 +5821,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // default value of a parameter in the ascribed type
         // (`(number, number = 2) -> number`) would never be used: the type
         // operand becomes an error. A type without a `=` has no default, and
-        // is not parsed here.
-        if (isString(typeOp) && typeOp.string.includes('=')) {
+        // is not parsed here. The full-signature marker of a function literal
+        // is the literal's own signature: its defaults are the defaults of
+        // the literal's parameters, checked when the literal is
+        // canonicalized (`isSignatureMarkerOperand()`).
+        if (
+          isString(typeOp) &&
+          typeOp.string.includes('=') &&
+          !isSignatureMarkerOperand(typeOp)
+        ) {
           let parsed: Type | undefined;
           try {
             parsed = parseType(typeOp.string, ce._typeResolver);
@@ -6212,6 +6223,35 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Optional: {
+      description: [
+        'Optional(param, default): a parameter of a function literal with a',
+        'default value (Epsil surface syntax: `(x, k = 2) => x * k`).',
+        'A call that leaves out the argument of the parameter receives the',
+        'default. `param` is a symbol or `Typed(symbol, type)`; `default` is a',
+        'number, a string, `True`, `False`, a symbol, `[]` or `{}`.',
+        'A parse-level carrier, like `Spread`: only the parameter list of a',
+        '`Function` literal reads it. Anywhere else it is the',
+        '`unexpected-argument` error.',
+      ],
+      lazy: true,
+      signature: '(any, any) -> nothing',
+      examples: ['((x, k = 2) => x * k)(3)'],
+      // The parameter list of a `Function` literal is read by
+      // `canonicalFunctionLiteralArguments()` (`function-utils.ts`), which
+      // keeps the `Optional` wrapper without canonicalizing it through this
+      // handler. A lazy operator with no `canonical` handler would be inert
+      // and survive into a canonical expression, so this handler must stay.
+      canonical: (args, { engine: ce }) =>
+        ce.error(
+          [
+            'unexpected-argument',
+            'a default value is allowed only on a parameter of a function literal',
+          ],
+          ce._fn('Optional', [...args], { canonical: false }).toString()
+        ),
+    },
+
     Identity: {
       description: 'Return the argument unchanged',
       signature: '(T) -> T where T',
@@ -6426,7 +6466,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // from a literal one, and erasing it would make `Apply(f, g())` —
         // and therefore `g() |> f`, which `Pipe` holds — differ from
         // `f(g())`, which binds it. §3 pins `x |> f ≡ f(x)`.
-        const callArgs = args.slice(1).filter((x) => !isSymbol(x, 'Nothing'));
+        let callArgs: ReadonlyArray<Expression> = args
+          .slice(1)
+          .filter((x) => !isSymbol(x, 'Nothing'));
+        // An inline literal callee with parameters that have a default value
+        // (`((x, k = 2) => x * k)(3)`): a call that supplies the required
+        // parameters receives the default of each parameter it leaves out,
+        // so the canonical form is `Apply(⟨literal⟩, 3, 2)`, as for a call of
+        // a declared function. A `Spread` operand leaves the number of
+        // arguments unknown until it is spliced at evaluation, where the
+        // application fills the defaults (`apply()`).
+        if (
+          isFunction(args[0], 'Function') &&
+          !callArgs.some((x) => isFunction(x, 'Spread'))
+        )
+          callArgs = literalArgumentsWithDefaults(
+            args[0].ops.slice(1),
+            callArgs
+          );
         // An argument that certainly does not match a parameter the literal
         // annotates is its `incompatible-type` error, as for a call of a
         // named function assigned the same literal
@@ -8773,13 +8830,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Function: {
-      description: 'A function literal',
+      description: [
+        'Function(body, param1, param2, …): a function literal.',
+        'A parameter is a symbol, `Typed(symbol, type)`, a rest parameter',
+        '`Spread(symbol)` (last), a destructuring pattern `Tuple(…)`, or a',
+        'parameter with a default value `Optional(param, default)`, where',
+        '`param` is a symbol or `Typed(symbol, type)` and `default` is a',
+        'number, a string, `True`, `False`, a symbol, `List()` or',
+        '`Dictionary()`. The parameters with a default come after the',
+        'required ones. A call that supplies the required parameters is a',
+        'full call: each parameter it leaves out receives its default.',
+      ],
       complexity: 9876,
       lazy: true,
       // A parameter is a bare symbol or an annotated `["Typed", symbol, type]`
-      // expression, so parameters are `symbol | function`.
+      // expression (or a `Spread`, `Tuple` or `Optional` wrapper), so
+      // parameters are `symbol | function`.
       signature: '(expression, (symbol | function)*) -> function',
-      examples: ['(x => x^2 + 1)(3)'],
+      examples: ['(x => x^2 + 1)(3)', '((x, k = 2) => x * k)(3)'],
       // No `type` handler, deliberately: a `Function` literal's arrow —
       // parameters, result and effect specifier — is built by
       // `functionLiteralSignatureType`

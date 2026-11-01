@@ -84,6 +84,7 @@ import {
   isSymbol,
   sym,
 } from './boxed-expression/type-guards.js';
+import { optionalParameterTarget } from './boxed-expression/function-literal.js';
 
 /** `list<number>`, parsed once when the module loads, so the predicates that
  * test against it do not parse the string on each call. */
@@ -4499,23 +4500,37 @@ export function withApproximatedInferredParams(
   fn: Expression
 ): Expression {
   if (!isFunction(fn, 'Function')) return fn;
-  if (!fn.ops.slice(1).some(isInferredTypedParameter)) return fn;
+  // A parameter with a default value is read inside its `Optional`, which
+  // keeps its default operand.
+  if (
+    !fn.ops
+      .slice(1)
+      .some((p) => isInferredTypedParameter(optionalParameterTarget(p)))
+  )
+    return fn;
   const keepTypes = !fn.op1.isPure;
+  const approximated = (p: Expression): Expression => {
+    if (!isFunction(p) || !isInferredTypedParameter(p)) return p;
+    const t =
+      keepTypes && isString(p.op2)
+        ? numericApproximationParamType(
+            parseType(p.op2.string, ce._typeResolver)
+          )
+        : undefined;
+    if (t === undefined) return p.op1;
+    const typeOperand = ce.string(typeToString(t));
+    markInferredTypeOperand(typeOperand);
+    return ce._fn('Typed', [p.op1, typeOperand], { canonical: false });
+  };
   return ce._fn('Function', [
     fn.op1,
-    ...fn.ops.slice(1).map((p) => {
-      if (!isFunction(p) || !isInferredTypedParameter(p)) return p;
-      const t =
-        keepTypes && isString(p.op2)
-          ? numericApproximationParamType(
-              parseType(p.op2.string, ce._typeResolver)
-            )
-          : undefined;
-      if (t === undefined) return p.op1;
-      const typeOperand = ce.string(typeToString(t));
-      markInferredTypeOperand(typeOperand);
-      return ce._fn('Typed', [p.op1, typeOperand], { canonical: false });
-    }),
+    ...fn.ops.slice(1).map((p) =>
+      isFunction(p, 'Optional')
+        ? ce._fn('Optional', [approximated(p.op1), ...p.ops.slice(1)], {
+            canonical: false,
+          })
+        : approximated(p)
+    ),
   ]);
 }
 
@@ -4585,7 +4600,10 @@ function readsOtherBindings(ce: Expression['engine'], fn: Expression): boolean {
   };
   const params = new Set<string>();
   if (isFunction(fn, 'Function'))
-    for (const p of fn.ops.slice(1)) {
+    for (const operand of fn.ops.slice(1)) {
+      // A parameter with a default value, `["Optional", p, d]`, binds the
+      // name of `p`.
+      const p = optionalParameterTarget(operand);
       const name = sym(p) ?? (isFunction(p, 'Typed') ? sym(p.op1) : undefined);
       if (name !== undefined) params.add(name);
     }

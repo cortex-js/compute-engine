@@ -44,6 +44,7 @@ import {
   isDestructuringParameter,
   isScalarType,
   isWideParameterType,
+  optionalParameterTarget,
 } from './function-literal.js';
 import {
   isPointListArgumentType,
@@ -342,7 +343,11 @@ export function callResultType(
   if (
     inferred &&
     !args.some((x) => mayBroadcast(presentPart(x.type))) &&
-    literal.ops.slice(1).some((p) => isSymbol(p) && p.type.type === 'never')
+    literal.ops.slice(1).some((operand) => {
+      // A parameter with a default value is read inside its `Optional`.
+      const p = optionalParameterTarget(operand);
+      return isSymbol(p) && p.type.type === 'never';
+    })
   )
     return 'error';
   // A string or a boolean argument of a function whose signature was

@@ -78,7 +78,10 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import { noteUncachedHostEvaluation } from './boxed-expression/shared-evaluation-memo.js';
-import { functionLiteralReturnMarker } from './boxed-expression/function-literal.js';
+import {
+  functionLiteralReturnMarker,
+  optionalParameterTarget,
+} from './boxed-expression/function-literal.js';
 import {
   describeEffects,
   inferFunctionLiteralEffects,
@@ -3887,7 +3890,9 @@ function declaredImplementationSignature(
   /** Which positions the literal's own operands left UNANNOTATED — the
    * positions a marker signature is the only remaining source for. */
   const bare: boolean[] = [];
-  for (const param of fn.ops.slice(1)) {
+  for (const operand of fn.ops.slice(1)) {
+    // A parameter with a default value is read inside its `Optional`.
+    const param = optionalParameterTarget(operand);
     const text = isFunction(param, 'Typed')
       ? typeTextOf(param.ops[1])
       : undefined;
@@ -7240,20 +7245,31 @@ export function implementationLiteralAt(
   };
 
   const params: Expression[] = [];
-  for (const param of impl.ops.slice(1)) {
+  for (const operand of impl.ops.slice(1)) {
+    // A parameter with a default value is grounded inside its `Optional`,
+    // which keeps its default operand.
+    const optional = isFunction(operand, 'Optional') ? operand : undefined;
+    const param = optional?.ops[0] ?? operand;
     if (!isFunction(param, 'Typed')) {
-      params.push(param);
+      params.push(operand);
       continue;
     }
     const text = typeTextOf(param.ops[1]);
     if (text === undefined) {
-      params.push(param);
+      params.push(operand);
       continue;
     }
     const g = ground(text);
     if (g === null) return null;
+    const grounded = ce._fn('Typed', [param.ops[0], ce.string(g)], {
+      canonical: false,
+    });
     params.push(
-      ce._fn('Typed', [param.ops[0], ce.string(g)], { canonical: false })
+      optional === undefined
+        ? grounded
+        : ce._fn('Optional', [grounded, ...optional.ops.slice(1)], {
+            canonical: false,
+          })
     );
   }
 

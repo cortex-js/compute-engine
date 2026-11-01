@@ -25,7 +25,9 @@ import {
   functionLiteralBody,
   functionLiteralDeclaredSignature,
   functionLiteralParameterType,
+  optionalParameterTarget,
   restParameterSignatureTail,
+  signatureArgumentsOfSlots,
 } from './function-literal.js';
 import {
   couldMatchNonEmpty,
@@ -109,7 +111,11 @@ import {
   solveArm,
   type Threadable,
 } from './generic-instantiation.js';
-import { FunctionSignature, Type } from '../../common/type/types.js';
+import {
+  FunctionSignature,
+  NamedElement,
+  Type,
+} from '../../common/type/types.js';
 import {
   adoptTopPlaceholderSlots,
   functionLiteralParameterSlots,
@@ -1291,7 +1297,7 @@ export function devolveAtValuePositions(
           ? readTypeVariablesAsBounds(declared)
           : {
               kind: 'signature',
-              ...(slots !== undefined ? { args: slots } : {}),
+              ...signatureArgumentsOfSlots(callee.ops.slice(1), slots),
               ...restParameterSignatureTail(callee.ops.slice(1)),
               result: 'unknown',
             },
@@ -3069,10 +3075,13 @@ export function widenUnannotatedLiteralParams(fn: Expression, t: Type): Type {
   if (!isFunction(fn, 'Function')) return t;
   if (typeof t !== 'object' || t.kind !== 'signature') return t;
   const args = t.args ?? [];
-  if (args.length === 0) return t;
+  // The slots of the parameters with a default value are in `optArgs`:
+  // slot `i` of `optArgs` is the parameter at position `args.length + i`.
+  const optArgs = t.optArgs ?? [];
+  if (args.length + optArgs.length === 0) return t;
   const params = fn.ops.slice(1);
   let changed = false;
-  const widened = args.map((el, i) => {
+  const widen = (el: NamedElement, i: number): NamedElement => {
     const p = params[i];
     // Only a `Typed` wrapper is AUTHORED — the same bareness test as
     // `relaxBareParams` (`function-utils.ts`), via
@@ -3086,8 +3095,16 @@ export function widenUnannotatedLiteralParams(fn: Expression, t: Type): Type {
     if (el.type === 'unknown') return el;
     changed = true;
     return { ...el, type: 'unknown' as Type };
-  });
-  return changed ? { ...t, args: widened } : t;
+  };
+  const widened = args.map(widen);
+  const widenedOpt = optArgs.map((el, i) => widen(el, args.length + i));
+  return changed
+    ? {
+        ...t,
+        ...(t.args !== undefined ? { args: widened } : {}),
+        ...(t.optArgs !== undefined ? { optArgs: widenedOpt } : {}),
+      }
+    : t;
 }
 
 /**
@@ -6018,7 +6035,10 @@ function spellcheckSymbols(expr: Expression): Record<string, string> {
       let inner = bound;
       if (operator === 'Function') {
         const names = new Set(bound);
-        for (const param of expr.ops.slice(1)) {
+        for (const operand of expr.ops.slice(1)) {
+          // A parameter with a default value, `["Optional", param, d]`,
+          // binds the name of `param`.
+          const param = optionalParameterTarget(operand);
           const p = isFunction(param, 'Typed') ? param.op1 : param;
           if (isSymbol(p)) names.add(p.symbol);
         }

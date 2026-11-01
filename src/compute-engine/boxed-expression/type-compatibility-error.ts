@@ -579,11 +579,14 @@ export const TYPE_VARIABLE_INTRODUCTION_MESSAGE =
  * A whole-signature marker on a literal that is not well-formed (§2.3): the
  * marker is the literal's contract of record — quantified or ground — so its
  * shape is checked: a plain signature, with as many arguments as the literal
- * has parameters. (A return type that merely HAPPENS to be an arrow is spelled
- * GROUPED and is not a marker at all.)
+ * has fixed parameters, a variadic argument only for a rest parameter, and an
+ * optional argument only where the literal's parameter is `Optional` with
+ * the same default value. (A
+ * return type that merely HAPPENS to be an arrow is spelled GROUPED and is
+ * not a marker at all.)
  */
 export const INVALID_SIGNATURE_MARKER_MESSAGE =
-  'A function-literal signature marker must be a plain signature (no optional or variadic arguments) with one argument per literal parameter';
+  'A function-literal signature marker must be a plain signature with one argument per fixed literal parameter, a variadic argument only for a rest parameter, and an optional argument only for a parameter with the same default value';
 
 /**
  * §2.4 rule 4, on the E2 route — a GROUND parameter annotation sitting at a

@@ -12,6 +12,7 @@ import type {
 import type {
   EffectLabel,
   EffectSet,
+  ParameterDefault,
   Type,
   TypeString,
 } from '../common/type/types.js';
@@ -330,7 +331,12 @@ type OperatorDefinitionFlags = {
 };
 
 type LambdaDefinition = {
-  parameters: ReadonlyArray<{ name: string; type: Type | undefined }>;
+  parameters: ReadonlyArray<{
+    name: string;
+    type: Type | undefined;
+    optional?: boolean;
+    default?: ParameterDefault;
+  }>;
   body: Expression;
 };
 
@@ -388,11 +394,17 @@ type OperandStructureMirror =
        * takes no annotation, and it binds a tuple of every argument from its
        * own position onwards rather than occupying one positional slot. A
        * consumer reading arity must therefore treat the entries before it as
-       * the required count and admit any number after. */
+       * the required count and admit any number after. `optional` marks a
+       * parameter with a default value (`(x, k = 2) => x * k`), and
+       * `default` is that value: a call may leave the parameter out, and
+       * the parameter then receives its default. The parameters with a
+       * default come after the required ones. */
       parameters: ReadonlyArray<{
         name: string;
         annotated?: Type;
         rest?: boolean;
+        optional?: boolean;
+        default?: ParameterDefault;
       }>;
       body: OperandStructureMirror;
     }

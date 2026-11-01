@@ -453,20 +453,32 @@ function namedElement(el: NamedElement, precedence = 0): string {
   // A label that is not a plain identifier is backticked, for the same reason
   // a record key is: the type lexer reads only `[a-zA-Z_][a-zA-Z0-9_]*` bare,
   // so `tuple<my x: integer>` would not parse back.
-  if (el.name)
-    return `${symbolName(el.name)}: ${typeToString(el.type, precedence)}`;
+  // A label that the lexer reads as a keyword or a value token (`true`,
+  // `NaN`) is backticked too: it would not parse back as a name.
+  if (el.name) {
+    const name = KEYWORD_NAMES.has(el.name)
+      ? `\`${el.name}\``
+      : symbolName(el.name);
+    return `${name}: ${typeToString(el.type, precedence)}`;
+  }
   return typeToString(el.type, precedence);
 }
 
-const RESERVED_DEFAULT_NAMES = new Set([
+/** The names that the type lexer reads as a keyword or a value token, not
+ * as an identifier. */
+const KEYWORD_NAMES = new Set([
   'true',
   'false',
-  'True',
-  'False',
   'NaN',
   'Infinity',
   'oo',
   'Indeterminate',
+]);
+
+const RESERVED_DEFAULT_NAMES = new Set([
+  ...KEYWORD_NAMES,
+  'True',
+  'False',
   'Nothing',
   'Missing',
 ]);

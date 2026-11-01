@@ -894,3 +894,16 @@ above disagree, this section is correct.
    last step). After `f := (x, k) => x * k`, `e.evaluate()` is a partial
    application, not `missing` for `k`: a call of a user function with fewer
    arguments than it requires curries (§2 item 4), as a written `f(3)` does.
+4. **The slot type of a bare parameter with a default** (R6, measured in
+   step 4). `((x, k = 2) => x * k).type` is
+   `(x: unknown, k: unknown = 2) -> number`, not `k: number = 2`: the slot of
+   a bare parameter stays `unknown` in the inferred signature whether or not
+   it has a default, as `docs/TYPE-SYSTEM.md` ("The inferred signature of a
+   function literal") states for every bare parameter (the `x` of the same
+   example is `unknown` too). The check of the default (R4) reads the type
+   that the body infers for the parameter's binding, so
+   `(x, k = "a") => x * k` is still `incompatible-type`.
+5. **The argument order of `Map`** (§7 item 7b). `Map` takes the function
+   first: the test is `Map((x, k = 2) => x * k, [1, 2])`. `Iterate(f, 0, 3)`
+   does not stop after three steps; the test reads
+   `Take(Iterate(f, 0), 3)`.

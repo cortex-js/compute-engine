@@ -35,7 +35,9 @@ import {
   functionLiteralParameterName,
   functionLiteralParameterType,
   isRestParameter,
+  optionalParameterDefault,
 } from './function-literal.js';
+import { literalParameterDefault } from './parameter-defaults.js';
 import { declaredBinderNamesOf } from './binding-sites.js';
 import { isCapturedValuelessSymbol, isFreeSymbol } from './canonical-utils.js';
 
@@ -479,7 +481,16 @@ function structureOfExpression(
           return { name: functionLiteralParameterName(param), rest: true };
         const type = functionLiteralParameterType(param);
         const name = functionLiteralParameterName(param);
-        return type === undefined ? { name } : { name, annotated: type };
+        const entry = type === undefined ? { name } : { name, annotated: type };
+        // A parameter with a default value is reported as optional, with
+        // its default, so a consumer reading arity does not count it as
+        // required.
+        const d = optionalParameterDefault(param);
+        if (d === undefined) return entry;
+        const value = literalParameterDefault(d);
+        return value === undefined
+          ? { ...entry, optional: true }
+          : { ...entry, optional: true, default: value };
       }),
       body: bodyStructure,
     });

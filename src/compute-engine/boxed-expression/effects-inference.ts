@@ -93,8 +93,10 @@ import {
   isScalarType,
   isWideParameterType,
   mentionsQuantifiedVariable,
+  optionalParameterTarget,
   restParameterIndex,
   restParameterSignatureTail,
+  signatureArgumentsOfSlots,
 } from './function-literal.js';
 import { signatureResultType } from './callee-type-derivation.js';
 
@@ -1648,10 +1650,16 @@ export function functionLiteralParameterSlots(
     // A parameter that the body only passes to a slot of another literal
     // takes the collection type of that slot
     // (`forwardedCollectionParameterType`).
+    // A parameter with a default value is read through its `Optional`
+    // wrapper: the slot type does not depend on the default.
+    const target =
+      paramOps[i] === undefined
+        ? undefined
+        : optionalParameterTarget(paramOps[i]);
     const inferred =
-      inferredCollectionParameterType(paramOps[i]) ??
-      wholeCollectionParameterType(paramOps[i], body) ??
-      forwardedCollectionParameterType(paramOps[i], body);
+      inferredCollectionParameterType(target) ??
+      wholeCollectionParameterType(target, body) ??
+      forwardedCollectionParameterType(target, body);
     const name =
       paramOps[i] !== undefined
         ? inferredSignatureParameterName(paramOps[i])
@@ -1833,7 +1841,10 @@ export function functionLiteralSignatureType(expr: Expression): Type {
 
   return {
     kind: 'signature',
-    ...(args !== undefined ? { args } : {}),
+    // A parameter with a default value is an optional slot that carries the
+    // default: `(x, k = 2) => x * k` types `(x: unknown, k: unknown = 2) ->
+    // number`.
+    ...signatureArgumentsOfSlots(paramOps, args),
     // The rest parameter's variadic tail, so `(a, ...rest) => …` types
     // `(unknown, any*) -> R`.
     ...restParameterSignatureTail(paramOps),

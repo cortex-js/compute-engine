@@ -2,6 +2,7 @@ import type { OneOf } from '../common/one-of.js';
 import type {
   EffectLabel,
   EffectSet,
+  ParameterDefault,
   Type,
   TypeResolver,
   TypeString,
@@ -597,11 +598,17 @@ export type OperandStructure =
        * takes no annotation, and it binds a tuple of every argument from its
        * own position onwards rather than occupying one positional slot. A
        * consumer reading arity must therefore treat the entries before it as
-       * the required count and admit any number after. */
+       * the required count and admit any number after. `optional` marks a
+       * parameter with a default value (`(x, k = 2) => x * k`), and
+       * `default` is that value: a call may leave the parameter out, and
+       * the parameter then receives its default. The parameters with a
+       * default come after the required ones. */
       parameters: ReadonlyArray<{
         name: string;
         annotated?: Type;
         rest?: boolean;
+        optional?: boolean;
+        default?: ParameterDefault;
       }>;
       body: OperandStructure;
     }
@@ -3421,8 +3428,16 @@ export type OperatorDefinitionFlags = {
  */
 export type LambdaDefinition = {
   /** The declared parameters, in order. `type` is `undefined` for a bare
-   * (unannotated) parameter such as the `x` in `f(x) := x^2`. */
-  parameters: ReadonlyArray<{ name: string; type: Type | undefined }>;
+   * (unannotated) parameter such as the `x` in `f(x) := x^2`. `optional`
+   * marks a parameter with a default value, such as the `k` in
+   * `(x, k = 2) => x * k`, and `default` is that value: a call may leave
+   * the parameter out, and the parameter then receives its default. */
+  parameters: ReadonlyArray<{
+    name: string;
+    type: Type | undefined;
+    optional?: boolean;
+    default?: ParameterDefault;
+  }>;
 
   /** The body of the function as a boxed expression, ready to traverse. This
    * is the canonical (scoped `Block`) body; any return-type ascription is

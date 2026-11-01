@@ -175,7 +175,7 @@ import {
   openDepthScalarArms,
   indexElementType,
   functionResult,
-  functionArity,
+  requiredArity,
   isAtomicValueType,
   isBooleanOrBroadcastableBooleanType,
   isPointElementType,
@@ -1108,7 +1108,7 @@ function comparatorParameterError(
     : fn.type.type;
   if (typeof fnType !== 'object' || fnType.kind !== 'signature')
     return undefined;
-  if (functionArity(fnType) !== 2) return undefined;
+  if (requiredArity(fnType) !== 2) return undefined;
   if (freeTypeVariables(fnType).size > 0) return undefined;
   const elt = collectionElementType(xs.type.type);
   if (elt === undefined) return undefined;
@@ -3369,7 +3369,7 @@ function iterateArgs(
   n: number,
   acc: Expression
 ): Expression[] {
-  if (functionArity(fn.type.type) === 1) return [acc];
+  if (requiredArity(fn.type.type) === 1) return [acc];
   return [ce.number(n), acc];
 }
 
@@ -5354,7 +5354,7 @@ function iterateCallResultTypeD(
     !isUserFunctionName(engine, s.name)
   )
     return undefined;
-  const unary = functionArity(fn.type) === 1;
+  const unary = requiredArity(fn.type) === 1;
   const call = (acc: Type): Type | undefined => {
     const args = unary
       ? [describeBoundElement(acc, 0)]
@@ -25298,7 +25298,7 @@ function* sortedIndicesWalk(
   // is used as a comparator (historical behavior); a statically-unknown
   // arity (bare `function`) is also treated as a comparator, so nothing
   // existing changes meaning.
-  if (f && fn && functionArity(fn.type.type) === 1) {
+  if (f && fn && requiredArity(fn.type.type) === 1) {
     const keys = new Map<number, Expression>();
     // An ABSENT element (`Missing`, `Undefined`) sorts last whatever its key
     // (see `nanLastOrder`): it holds no value, so its key is not computed.

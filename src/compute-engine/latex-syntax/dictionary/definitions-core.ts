@@ -2001,6 +2001,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       };
       const isTyped = (x: MathJsonExpression): boolean => typeText(x) !== null;
       const serializeParam = (x: MathJsonExpression): string => {
+        // A parameter with a default value (`["Optional", k, 2]`) is written
+        // `k = 2`, with the default as its own LaTeX. The parser does not
+        // read this notation back as a default yet: `(x, k = 2) \mapsto …`
+        // parses to an `Equal` in the parameter list.
+        if (operator(x) === 'Optional')
+          return joinLatex([
+            serializeParam(operand(x, 1) ?? 'Nothing'),
+            '=',
+            serializer.serialize(operand(x, 2) ?? 'Nothing'),
+          ]);
         if (operator(x) !== 'Typed') return serializer.serialize(x);
         const name = serializer.serialize(operand(x, 1) ?? 'Nothing');
         const type = typeText(x);
@@ -2039,7 +2049,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         ]);
       }
 
-      if (args.length === 2 && !isTyped(operand(expr, 2)!)) {
+      // A single parameter is written without parentheses, unless it is
+      // annotated or has a default value.
+      if (
+        args.length === 2 &&
+        !isTyped(operand(expr, 2)!) &&
+        operator(operand(expr, 2)!) !== 'Optional'
+      ) {
         return joinLatex([
           serializer.serialize(operand(expr, 2)!),
           '\\mapsto',
@@ -7378,6 +7394,13 @@ function freeWildcardParameters(body: MathJsonExpression): string[] | null {
         // A `_` position in a destructuring pattern binds nothing.
         if (symbol(x) !== '_') bind(x, names);
       }
+      return;
+    }
+    // A parameter with a default value, `["Optional", param, d]`, binds the
+    // names of `param`.
+    if (op === 'Optional') {
+      const param = operand(p, 1);
+      if (param !== null) bind(param, names);
       return;
     }
     const name = symbol(op === 'Typed' || op === 'Spread' ? operand(p, 1) : p);

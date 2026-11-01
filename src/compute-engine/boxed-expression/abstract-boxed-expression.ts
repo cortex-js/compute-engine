@@ -56,7 +56,10 @@ import {
   isDictionary,
   isObject,
 } from './type-guards.js';
-import { functionLiteralParameterNames } from './function-literal.js';
+import {
+  functionLiteralParameterNames,
+  optionalParameterDefault,
+} from './function-literal.js';
 import { bindingInContext, withCallableBinding } from './binders.js';
 import {
   binderBoundAt,
@@ -2123,6 +2126,13 @@ function collectReferences(
     if (ops.length > 0) getReferences(ops[0], innerFree, innerRef, memo, mode);
     for (const s of innerFree) if (!params.has(s)) freeVars.add(s);
     for (const s of innerRef) if (!params.has(s)) refFns.add(s);
+    // The default operand of a parameter `["Optional", k, d]` is read where
+    // the literal is called, outside the parameters' scope: a symbol default
+    // (`d`) is a free variable of the literal, not one of its parameters.
+    for (let i = 1; i < ops.length; i++) {
+      const d = optionalParameterDefault(ops[i]);
+      if (d !== undefined) getReferences(d, freeVars, refFns, memo, mode);
+    }
     return;
   }
 

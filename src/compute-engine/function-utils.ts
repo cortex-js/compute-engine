@@ -78,6 +78,10 @@ import {
   restParameterIndex,
   restParameterSymbol,
   resolveFunctionLiteralTypes,
+  isOptionalParameter,
+  optionalParameterDefault,
+  optionalParameterTarget,
+  requiredParameterCount,
 } from './boxed-expression/function-literal.js';
 import {
   collectTuplePattern,
@@ -89,7 +93,13 @@ import {
 } from './boxed-expression/ambient-chain.js';
 import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
 import {
+  GENERIC_DEFAULT_MESSAGE,
   NESTED_DEFAULT_MESSAGE,
+  boxParameterDefault,
+  markSignatureMarkerOperand,
+  callSiteDefault,
+  literalParameterDefault,
+  literalParameterDefaultFits,
   typeHasParameterDefault,
 } from './boxed-expression/parameter-defaults.js';
 import {
@@ -155,7 +165,12 @@ import {
   isEffectSubset,
   isPureComputedEffects,
 } from '../common/type/effects.js';
-import type { FunctionSignature, Type } from '../common/type/types.js';
+import type {
+  FunctionSignature,
+  NamedElement,
+  ParameterDefault,
+  Type,
+} from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';
 import {
@@ -562,14 +577,18 @@ export function annotateFunctionLiteralParams(
   if (ops.length < 2) return undefined;
 
   let rewritten = false;
-  const params = ops.slice(1).map((written, i) => {
+  const params = ops.slice(1).map((operand, i) => {
     const t = paramTypes[i];
-    if (t === undefined) return written;
+    if (t === undefined) return operand;
+    // A parameter with a default value is annotated inside its `Optional`
+    // wrapper, and keeps its default operand.
+    const optional = isFunction(operand, 'Optional') ? operand : undefined;
+    const written = optional?.op1 ?? operand;
     // A parameter annotated `unknown` is a bare parameter, and takes the
     // type of the slot as a bare one does.
     const param = isUnknownTypedParameter(written) ? written.op1 : written;
     // Not a bare symbol: an already-annotated parameter, or an error.
-    if (!isSymbol(param)) return written;
+    if (!isSymbol(param)) return operand;
     rewritten = true;
     // The same normalized spelling `normalizeTypedParameter` produces (a
     // string type operand), so the rebuilt literal behaves exactly like the
@@ -577,7 +596,12 @@ export function annotateFunctionLiteralParams(
     // literal is printed.
     const typeOperand = ce.string(typeToString(t));
     markInferredTypeOperand(typeOperand);
-    return ce._fn('Typed', [param, typeOperand], { canonical: false });
+    const typed = ce._fn('Typed', [param, typeOperand], { canonical: false });
+    return optional === undefined
+      ? typed
+      : ce._fn('Optional', [typed, ...optional.ops.slice(1)], {
+          canonical: false,
+        });
   });
   if (!rewritten) return undefined;
 
@@ -851,8 +875,9 @@ export function canonicalFunctionLiteralArguments(
   // structural form — each named argument becomes a `["Typed", name, type]`
   // parameter and a non-`unknown` result becomes the body's return-type
   // ascription. Applied only when the single parameter operand is a string
-  // parsing to a signature type with every argument named and no
-  // optional/variadic markers (those need `makeLambda` arity support);
+  // parsing to a signature type with every argument named, no variadic
+  // marker and no optional argument without a default value (an argument
+  // with a default, `k: number = 2`, becomes an `Optional` parameter);
   // anything else falls through to the standard expected-a-symbol error —
   // except a string that IS signature-shaped and fails to parse as a type,
   // which reports the type parser's own diagnostic (see
@@ -876,7 +901,127 @@ export function canonicalFunctionLiteralArguments(
   // string (mirroring how `Declare` keeps its type operand raw), except a
   // parameter annotated `unknown` (or an alias of it), which becomes the
   // bare symbol.
+  // An annotated parameter `["Typed", symbol, type]`, checked and normalized.
+  // Used for a parameter and for the parameter inside an `Optional` wrapper.
+  const typedParameter = (x: Expression & FunctionInterface): Expression => {
+    // `Typed(k, "number?")` is the spelling of an optional parameter in a
+    // signature, not a type: the type parser refuses it, and the parameter
+    // was read as unannotated, so the `?` had no effect. A parameter of a
+    // literal is optional when it has a default value, `Optional(k, 2)`.
+    const text = isString(x.op2) ? x.op2.string.trim() : undefined;
+    if (text !== undefined && text.endsWith('?'))
+      return ce.error(
+        [
+          'invalid-parameter-annotation',
+          'write `Optional(k, default)` for an optional parameter',
+        ],
+        x.toString()
+      );
+    const normalized = normalizeTypedParameter(ce, x);
+    // A `where` clause on a PARAMETER annotation is a rank-2 spelling, and
+    // stays rejected (G6, §2.2): a type variable enters a literal only
+    // through a whole-signature clause.
+    const t = functionLiteralParameterType(normalized);
+    if (t !== undefined && isPolymorphicType(t))
+      return ce.error(TYPE_VARIABLE_INTRODUCTION_MESSAGE, x.toString());
+    // A parameter annotation is not the top-level signature of a
+    // definition, so a default value of a parameter in it
+    // (`Typed(f, "(number, number = 2) -> number")`) would never be used.
+    if (t !== undefined && typeHasParameterDefault(t))
+      return ce.error(NESTED_DEFAULT_MESSAGE, x.toString());
+    // A parameter declared `unknown`, or a transparent alias of it, is a
+    // parameter with no declaration (user decision 2026-10-30, recorded
+    // with GitHub issue #488). The annotation is removed here, so every
+    // later step sees a bare parameter: the body can narrow its type
+    // (`t[1]` makes `t` an indexed collection, so a list argument is bound
+    // whole), and a collection argument is mapped or bound whole exactly
+    // as for `t`.
+    if (isUnknownTypedParameter(normalized)) return x.op1;
+    return normalized;
+  };
+
+  // The names of every parameter of the literal, read from the operands as
+  // written. A default value may not name one of them: the default is read
+  // where the call is made, so it would not denote the parameter.
+  const writtenParameterNames = new Set<string>();
+  for (const x of ops.slice(1)) {
+    const target = isFunction(x, 'Optional') ? x.op1 : x;
+    for (const name of functionLiteralParameterNames(target))
+      writtenParameterNames.add(name);
+  }
+
+  // A parameter with a default value, `["Optional", param, default]`.
+  // `param` is a symbol or an annotated symbol: a rest parameter or a
+  // destructuring pattern cannot have a default. The default operand is
+  // canonicalized here, in the scope where the literal is written, and must
+  // be a value that a signature can hold (`literalParameterDefault()`). Its
+  // check against the parameter type happens after the body is
+  // canonicalized, when the type that the body infers for a bare parameter
+  // is known.
+  const optionalParameter = (x: Expression & FunctionInterface): Expression => {
+    // `Optional(k)` with no default would bind `k` to nothing when the
+    // argument is left out, which needs rules of its own.
+    if (x.nops < 2) return ce.error('missing', x.toString());
+    if (x.nops > 2) return ce.error('unexpected-argument', x.ops[2].toString());
+    const inner = x.op1;
+    let target: Expression;
+    if (isSymbol(inner)) target = inner;
+    else if (isFunction(inner, 'Typed') && isSymbol(inner.op1)) {
+      target = typedParameter(inner);
+      if (isFunction(target, 'Error')) return target;
+    } else return ce.error('expected-a-symbol', inner.toString());
+    // `Nothing` and `Missing` are not values a call can receive in place of
+    // an argument: a written `Nothing` is removed from a call, so the
+    // inserted default would disappear. A default that names a parameter of
+    // this literal is refused (see `writtenParameterNames`).
+    const name = sym(x.op2);
+    if (name === 'Nothing' || name === 'Missing')
+      return ce.error(
+        [
+          'expected-a-literal-default',
+          `\`${name}\` is not a default value; leave the parameter optional instead`,
+        ],
+        x.toString()
+      );
+    if (name !== undefined && writtenParameterNames.has(name))
+      return ce.error(
+        [
+          'expected-a-literal-default',
+          'a default value cannot name a parameter',
+        ],
+        x.toString()
+      );
+    const defaultOp = x.op2.canonical;
+    if (literalParameterDefault(defaultOp) === undefined)
+      return ce.error(
+        [
+          'expected-a-literal-default',
+          'a default value is a number, a string, a boolean, a symbol, `[]` or `{}`',
+        ],
+        x.toString()
+      );
+    return ce._fn('Optional', [target, defaultOp], { canonical: false });
+  };
+
+  let seenOptional = false;
   const params = ops.slice(1).map((x, i) => {
+    // The parameters with a default value come after the required ones, and
+    // a rest parameter cannot follow one: a call that leaves out an argument
+    // would otherwise not know which parameter is left out.
+    if (isFunction(x, 'Optional')) {
+      seenOptional = true;
+      return optionalParameter(x);
+    }
+    if (seenOptional)
+      return ce.error(
+        [
+          'expected-a-symbol',
+          isFunction(x, 'Spread')
+            ? 'a rest parameter cannot follow a parameter with a default value'
+            : 'a required parameter cannot follow a parameter with a default value',
+        ],
+        x.toString()
+      );
     if (isSymbol(x)) return x;
     // A REST parameter — `["Spread", symbol]`, spelled `(a, ...rest) => …` in
     // Epsil. It binds one name to a `Tuple` of every argument from its own
@@ -901,29 +1046,7 @@ export function canonicalFunctionLiteralArguments(
       if (bad !== undefined) return ce.error('expected-a-symbol', bad);
       return x;
     }
-    if (isFunction(x, 'Typed') && isSymbol(x.op1)) {
-      const normalized = normalizeTypedParameter(ce, x);
-      // A `where` clause on a PARAMETER annotation is a rank-2 spelling, and
-      // stays rejected (G6, §2.2): a type variable enters a literal only
-      // through a whole-signature clause.
-      const t = functionLiteralParameterType(normalized);
-      if (t !== undefined && isPolymorphicType(t))
-        return ce.error(TYPE_VARIABLE_INTRODUCTION_MESSAGE, x.toString());
-      // A parameter annotation is not the top-level signature of a
-      // definition, so a default value of a parameter in it
-      // (`Typed(f, "(number, number = 2) -> number")`) would never be used.
-      if (t !== undefined && typeHasParameterDefault(t))
-        return ce.error(NESTED_DEFAULT_MESSAGE, x.toString());
-      // A parameter declared `unknown`, or a transparent alias of it, is a
-      // parameter with no declaration (user decision 2026-10-30, recorded
-      // with GitHub issue #488). The annotation is removed here, so every
-      // later step sees a bare parameter: the body can narrow its type
-      // (`t[1]` makes `t` an indexed collection, so a list argument is bound
-      // whole), and a collection argument is mapped or bound whole exactly
-      // as for `t`.
-      if (isUnknownTypedParameter(normalized)) return x.op1;
-      return normalized;
-    }
+    if (isFunction(x, 'Typed') && isSymbol(x.op1)) return typedParameter(x);
     return ce.error('expected-a-symbol', x.toString());
   });
 
@@ -1185,6 +1308,27 @@ export function canonicalFunctionLiteralArguments(
       if (binding !== undefined && 'value' in binding)
         markFunctionLiteralParameter(ce, binding.value);
     }
+  // The default value of a parameter must fit the parameter type: the
+  // annotation, or, for a bare parameter, the type that the body's uses
+  // inferred (`(x, k = "a") => x * k` is refused, because `Multiply` needs a
+  // number). A default that does not fit makes the parameter the error
+  // `incompatible-type`, as an argument of the wrong type is.
+  params.forEach((param, i) => {
+    const defaultOp = optionalParameterDefault(param);
+    if (defaultOp === undefined) return;
+    const d = literalParameterDefault(defaultOp);
+    if (d === undefined) return;
+    const name = functionLiteralParameterName(param);
+    const binding = blockScope.bindings.get(name);
+    const type =
+      functionLiteralParameterType(param) ??
+      (binding !== undefined && 'value' in binding
+        ? binding.value.type.type
+        : undefined);
+    if (type === undefined) return;
+    if (!literalParameterDefaultFits(ce, d, defaultOp, type))
+      params[i] = ce.typeError(type, defaultOp.type, defaultOp);
+  });
   let literal: Expression;
   try {
     block = rebindParameters(block, params);
@@ -1711,7 +1855,16 @@ function bindParameterOperands(
     if (name === undefined || name === '_') return leaf;
     return ce._bindingSymbol(name, scope) ?? leaf;
   };
-  return params.map((param) => {
+  const bindParam = (param: Expression): Expression => {
+    // A parameter with a default value binds through the parameter inside
+    // its `Optional` wrapper; the default operand is not a parameter, and
+    // keeps the binding of the scope where the literal is written.
+    if (isFunction(param, 'Optional')) {
+      const inner = bindParam(param.op1);
+      return inner === param.op1
+        ? param
+        : ce._fn('Optional', [inner, param.op2], { canonical: false });
+    }
     // A destructuring pattern binds through its LEAVES: each is pointed at the
     // Block's own binding, the same repair the named-parameter branch below
     // makes, so `staticParameterBinding` can read a leaf's definition straight
@@ -1744,7 +1897,8 @@ function bindParameterOperands(
       return ce._fn('Spread', [bound], { canonical: false });
     if (!isFunction(param, 'Typed')) return bound;
     return ce._fn('Typed', [bound, param.op2], { canonical: false });
-  });
+  };
+  return params.map(bindParam);
 }
 
 /** Point every occurrence of this literal's parameter names at the binding the
@@ -1825,7 +1979,9 @@ function rebindParameters(
 function bodySlotSignature(
   ce: ComputeEngine,
   body: Expression | undefined
-): { sig?: FunctionSignature; error?: Expression } | undefined {
+):
+  | { sig?: FunctionSignature; operand?: Expression; error?: Expression }
+  | undefined {
   // Both marker shapes `functionLiteralReturnMarker` reads: the authoring form
   // `["Typed", body, sig]` in the body slot, and the CANONICAL form, where the
   // marker has moved INSIDE the Block and wraps its last statement. A
@@ -1852,7 +2008,7 @@ function bodySlotSignature(
     return { error: signatureStringError(ce, s, e) };
   }
   if (typeof t === 'string' || t.kind !== 'signature') return undefined;
-  return { sig: t };
+  return { sig: t, operand: op };
 }
 
 /**
@@ -1898,9 +2054,10 @@ function signatureStringError(
  * spelling (a GROUPED marker), which never reaches here.
  *
  * **Well-formedness.** The marker is the literal's contract of record, not a
- * cosmetic mirror, so its shape is checked: a plain signature (no optional or
- * variadic arguments in v1) with exactly as many arguments as the literal has
- * parameters. **Positional mapping is authoritative** — the marker's argument
+ * cosmetic mirror, so its shape is checked: a signature with exactly as many
+ * arguments as the literal has parameters, whose optional arguments are the
+ * parameters with a default value (each with the literal's default), and
+ * with a variadic argument only for a rest parameter. **Positional mapping is authoritative** — the marker's argument
  * NAMES are cosmetic, the literal's operand names stay the names of record
  * (the `docs/EFFECTS-MODEL.md` mirror rule).
  *
@@ -1942,10 +2099,29 @@ function eraseGenericParameters(
   const fixedCount = restAt < 0 ? params.length : restAt;
   const markerIsVariadic = sig.variadicArg !== undefined;
   const literalIsVariadic = restAt >= 0;
+  // An optional argument of the marker states a parameter with a default
+  // value (`(x: T, k: number = 2) -> T where T`). Each one must have a
+  // default, and the parameter of the literal at the same position must be
+  // an `Optional` parameter with the same default. A required argument of
+  // the marker matches a parameter without a default, or a parameter with
+  // a default: the Epsil lowering of `function g<T>(x: T, k: number = 2)`
+  // writes the marker `(x: T, k: number) -> T where T`, and the default is
+  // carried into the marker below. A literal default that is not a valid
+  // default value is reported by the parameter check that follows this
+  // pre-pass.
+  const optArgs = sig.optArgs ?? [];
+  const slots = [...args, ...optArgs];
+  const optionalMatches = optArgs.every((a, j) => {
+    const op = optionalParameterDefault(params[args.length + j]);
+    if (a.default === undefined || op === undefined) return false;
+    const d = markerPassDefault(op);
+    return d === undefined || sameParameterDefault(d, a.default);
+  });
   if (
-    sig.optArgs !== undefined ||
+    !optionalMatches ||
+    requiredParameterCount(params) > args.length ||
     markerIsVariadic !== literalIsVariadic ||
-    args.length !== fixedCount
+    slots.length !== fixedCount
   )
     return {
       error: ce._fn('Function', [
@@ -1954,9 +2130,112 @@ function eraseGenericParameters(
       ]),
     };
 
+  // The defaults of the marker are those of its optional arguments; a
+  // default in a deeper position (a parameter of a parameter's type) is
+  // refused as in any other signature that is not top-level.
+  if (
+    slots.some((a) => typeHasParameterDefault(a.type)) ||
+    (sig.variadicArg !== undefined &&
+      typeHasParameterDefault(sig.variadicArg.type)) ||
+    typeHasParameterDefault(sig.result) ||
+    (sig.typeParams?.some((p) => typeHasParameterDefault(p.bound)) ?? false)
+  )
+    return {
+      error: ce._fn('Function', [
+        ce.error(NESTED_DEFAULT_MESSAGE, typeToString(sig)),
+        ...params,
+      ]),
+    };
+
+  // The marker becomes the declared signature of the literal, so a
+  // parameter with a default that the marker lists as a required argument
+  // would lose its default. Such an argument becomes an optional argument
+  // with the literal's default, and the marker is written again.
+  //
+  // The new marker keeps the argument names of the marker, as a marker that
+  // already lists its defaults does, so a named call uses the same names
+  // whichever way the marker is written. One exception: a default can be a
+  // symbol, and a signature refuses a default that names one of its own
+  // arguments (`(a: T, d: number = d)` does not parse). An argument whose
+  // name is the name of a symbol default takes the name of the literal's
+  // parameter at its position (`(a: T, d: number) -> T` on the parameters
+  // `x, Optional(k, d)` becomes `(a: T, k: number = d) -> T`). When that
+  // parameter has no single name (a wildcard `_` or `_1`, or a destructuring
+  // pattern), or when its name is already the name of another argument, the
+  // argument has no name.
+  //
+  // When a default is a symbol that names a parameter of the literal
+  // (`x, Optional(k, x)`), the marker is not written again: the parameter
+  // check that follows reports that default as the only error.
+  let body = ops[0];
+  let markerOperand: Expression | undefined;
+  const required = requiredParameterCount(params);
+  const literalNames = new Set<string>();
+  for (const p of params)
+    for (const name of functionLiteralParameterNames(
+      optionalParameterTarget(p)
+    ))
+      literalNames.add(name);
+  if (required < args.length) {
+    const promoted = args.slice(required).map((a, i) => {
+      const op = optionalParameterDefault(params[required + i]);
+      const d = op === undefined ? undefined : markerPassDefault(op);
+      return d === undefined ? undefined : { ...a, default: d };
+    });
+    const symbolDefaults = new Set<string>();
+    for (const a of [...promoted, ...optArgs])
+      if (a?.default?.kind === 'symbol') symbolDefaults.add(a.default.name);
+    if (
+      promoted.every((a) => a !== undefined) &&
+      ![...symbolDefaults].some((name) => literalNames.has(name))
+    ) {
+      const keptNames = new Set<string>();
+      for (const a of [...slots, sig.variadicArg])
+        if (a?.name !== undefined && !symbolDefaults.has(a.name))
+          keptNames.add(a.name);
+      const named = (a: NamedElement, i: number): NamedElement => {
+        if (a.name === undefined || !symbolDefaults.has(a.name)) return a;
+        const name = functionLiteralParameterName(params[i]);
+        if (name === '' || /^_\d*$/.test(name) || keptNames.has(name))
+          return { type: a.type, ...(a.default ? { default: a.default } : {}) };
+        return { ...a, name };
+      };
+      const newSig: FunctionSignature = {
+        ...sig,
+        args: args.slice(0, required).map((a, i) => named(a, i)),
+        optArgs: [...promoted, ...optArgs].map((a, i) =>
+          named(a, required + i)
+        ),
+      };
+      if (sig.variadicArg !== undefined)
+        newSig.variadicArg = named(sig.variadicArg, restAt);
+      if (required === 0) delete newSig.args;
+      markerOperand = ce.string(typeToString(newSig));
+    }
+  }
+
+  // The marker is well-formed: the `Typed` operator accepts the defaults of
+  // its parameters, in both marker shapes (the canonical shape is a `Typed`
+  // statement inside the body Block, canonicalized with that Block). The
+  // operand that is marked is always a new string written into the body: an
+  // operand that the author holds could be used again in another `Typed`,
+  // which must still refuse a default.
+  if (markerOperand === undefined && marker.operand !== undefined) {
+    const text = isString(marker.operand)
+      ? marker.operand.string
+      : sym(marker.operand);
+    if (text !== undefined && text.includes('='))
+      markerOperand = ce.string(text);
+  }
+  if (markerOperand !== undefined) {
+    body = replaceSignatureMarkerOperand(ce, body, markerOperand);
+    markSignatureMarkerOperand(markerOperand);
+  }
+
   // A GROUND marker quantifies nothing: the well-formedness check above is the
   // whole pre-pass for it, and every parameter annotation stays.
-  if (!isPolymorphicType(sig)) return { ops, generic: false };
+  if (!isPolymorphicType(sig))
+    return { ops: body === ops[0] ? ops : [body, ...params], generic: false };
 
   // §2.4 rule 4 (CONTRAVARIANT): a ground annotation at a quantified position
   // must accept every instantiation the clause admits — `bound <: annotation`.
@@ -1970,13 +2249,26 @@ function eraseGenericParameters(
   let erased = false;
   let coverageError: Expression | undefined;
   const newParams = params.map((p, i) => {
+    // A parameter with a default value is read inside its `Optional`
+    // wrapper. Its default is checked against the parameter's type, and the
+    // type of a quantified position is known only at a call, so a default
+    // there is refused.
+    if (
+      coverageError === undefined &&
+      isOptionalParameter(p) &&
+      slots[i] !== undefined &&
+      mentionsQuantifiedVariable(slots[i].type, sig)
+    ) {
+      coverageError = ce.error(GENERIC_DEFAULT_MESSAGE, p.toString());
+      return p;
+    }
     if (!isFunction(p, 'Typed') || !isSymbol(p.op1)) return p;
-    if (!mentionsQuantifiedVariable(args[i].type, sig)) return p;
+    if (!mentionsQuantifiedVariable(slots[i].type, sig)) return p;
     const annotation = functionLiteralParameterType(p);
     if (
       coverageError === undefined &&
       annotation !== undefined &&
-      !isSubtype(substituteDeclaredBounds(bounded, args[i].type), annotation)
+      !isSubtype(substituteDeclaredBounds(bounded, slots[i].type), annotation)
     )
       coverageError = ce.error(
         GENERIC_ANNOTATION_COVERAGE_MESSAGE,
@@ -1987,15 +2279,71 @@ function eraseGenericParameters(
   });
   if (coverageError !== undefined)
     return { error: ce._fn('Function', [coverageError, ...params]) };
-  return erased
-    ? { ops: [ops[0], ...newParams], generic: true }
+  return erased || body !== ops[0]
+    ? { ops: [body, ...newParams], generic: true }
     : { ops, generic: true };
+}
+
+/** `body`, the body operand of a function literal with a full-signature
+ * marker, with the type operand of the marker replaced by `operand`. The
+ * marker is `["Typed", body, signature]` in the body slot, or, in the
+ * canonical shape, the `Typed` last statement of the body Block. */
+function replaceSignatureMarkerOperand(
+  ce: ComputeEngine,
+  body: Expression,
+  operand: Expression
+): Expression {
+  if (isFunction(body, 'Block')) {
+    const last = body.ops[body.nops - 1];
+    if (!isFunction(last, 'Typed')) return body;
+    return ce._fn(
+      'Block',
+      [
+        ...body.ops.slice(0, -1),
+        ce._fn('Typed', [last.op1, operand], { canonical: false }),
+      ],
+      { canonical: false }
+    );
+  }
+  if (!isFunction(body, 'Typed')) return body;
+  return ce._fn('Typed', [body.op1, operand], { canonical: false });
+}
+
+/** The default value of a literal parameter's default operand `op`, read
+ * before the parameters are canonicalized. Only the shapes that must be
+ * canonical to be read are canonicalized: a `["List"]` or a `["Dictionary"]`
+ * with no operand (a raw `["Dictionary"]` is an empty dictionary only once it
+ * is canonical), a `Negate` of a number and a `Delimiter` around a number.
+ * Every other operand is read as written. A compound operand is not a valid
+ * default, and the parameter check refuses it; to canonicalize it here
+ * would declare its symbols in the enclosing scope, also when the marker is
+ * refused. */
+function markerPassDefault(op: Expression): ParameterDefault | undefined {
+  const canonicalize =
+    ((isFunction(op, 'List') || isFunction(op, 'Dictionary')) &&
+      op.nops === 0) ||
+    (isFunction(op, 'Negate') && op.nops === 1 && isNumber(op.op1)) ||
+    (isFunction(op, 'Delimiter') && op.nops >= 1 && isNumber(op.op1));
+  return literalParameterDefault(canonicalize ? op.canonical : op);
+}
+
+/** True when two parameter default values are the same value. */
+function sameParameterDefault(
+  a: ParameterDefault,
+  b: ParameterDefault
+): boolean {
+  if (a.kind === 'value')
+    return b.kind === 'value' && Object.is(a.value, b.value);
+  if (a.kind === 'symbol') return b.kind === 'symbol' && a.name === b.name;
+  return a.kind === b.kind;
 }
 
 /** Desugar a signature-string `Function` parameter (typed-literals design
  * §3.2 sugar) into structural operands `{ ops: [body, ...params] }`, or
  * `undefined` when the string is not a fully-named, non-variadic signature
- * type, or `{ error }` when it is signature-shaped but does not parse. An
+ * type whose optional arguments all have a default value, or `{ error }`
+ * when it is signature-shaped but does not parse. An argument with a default
+ * (`k: number = 2`) becomes `["Optional", ["Typed", k, "number"], 2]`. An
  * `unknown`/`any` argument or result type stays unannotated; an explicit
  * `Typed` body ascription is kept over the signature's result type.
  *
@@ -2035,8 +2383,13 @@ function desugarSignatureString(
     }
   }
   if (typeof type === 'string' || type.kind !== 'signature') return undefined;
-  if (type.optArgs || type.variadicArg) return undefined;
-  const args = type.args ?? [];
+  // An optional argument with a default value (`k: number = 2`) desugars to
+  // a parameter with a default, `["Optional", param, default]`. An optional
+  // argument without a default (`k: number?`) and a variadic argument have
+  // no parameter spelling in a literal.
+  if (type.variadicArg) return undefined;
+  if (type.optArgs?.some((a) => a.default === undefined)) return undefined;
+  const args = [...(type.args ?? []), ...(type.optArgs ?? [])];
   if (args.some((a) => !a.name)) return undefined;
 
   const isWide = (t: Type): boolean => t === 'unknown' || t === 'any';
@@ -2055,15 +2408,21 @@ function desugarSignatureString(
   // indistinguishable from the hand-written structural spelling.
   const paramSymbol = (name: string): Expression =>
     ce.symbol(name, { canonical: false });
-  const params = args.map((a) =>
-    isWide(a.type) || (generic && mentionsQuantifiedVariable(a.type, type))
-      ? paramSymbol(a.name!)
-      : ce._fn(
-          'Typed',
-          [paramSymbol(a.name!), ce.string(typeToString(a.type))],
-          { canonical: false }
-        )
-  );
+  const params = args.map((a) => {
+    const param =
+      isWide(a.type) || (generic && mentionsQuantifiedVariable(a.type, type))
+        ? paramSymbol(a.name!)
+        : ce._fn(
+            'Typed',
+            [paramSymbol(a.name!), ce.string(typeToString(a.type))],
+            { canonical: false }
+          );
+    return a.default === undefined
+      ? param
+      : ce._fn('Optional', [param, boxParameterDefault(ce, a.default)], {
+          canonical: false,
+        });
+  });
   let newBody = body;
   if (generic) {
     // A `where` clause is the ONLY record the literal keeps of its type
@@ -2745,6 +3104,36 @@ export function apply(
 }
 
 /**
+ * The arguments `args` of a call of a function literal whose parameter
+ * operands are `params`, with the default operand of each parameter with a
+ * default value (`["Optional", k, 2]`) that the call leaves out appended.
+ *
+ * Only a full call is completed: one whose arguments cover every parameter
+ * before the first parameter with a default. A call with fewer arguments is
+ * a partial application, and is returned unchanged, as is a call that
+ * supplies every parameter. A symbol default is the symbol boxed again in
+ * the current scope, so it reads the binding that the same symbol written in
+ * the call reads (`callSiteDefault()`).
+ */
+export function literalArgumentsWithDefaults(
+  params: ReadonlyArray<Expression>,
+  args: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (
+    args.length >= params.length ||
+    args.length < requiredParameterCount(params)
+  )
+    return args;
+  const added: Expression[] = [];
+  for (let i = args.length; i < params.length; i++) {
+    const d = optionalParameterDefault(params[i]);
+    if (d === undefined) break;
+    added.push(callSiteDefault(d));
+  }
+  return added.length === 0 ? args : [...args, ...added];
+}
+
+/**
  * Evaluate a sequence of statements, handling Return/Break/Continue.
  *
  * `lastStatementOptions` is either nothing (an exact evaluation) or a
@@ -3290,6 +3679,13 @@ type ParameterBinding = {
    */
   site: Expression;
   value: Expression;
+  /**
+   * The position of the parameter in the literal's parameter list, for a
+   * plain (not destructuring) parameter. The `site` of a parameter with a
+   * default value is the node inside its `Optional` wrapper, so the
+   * position cannot be found again by searching the list for `site`.
+   */
+  index?: number;
 };
 
 /**
@@ -3313,9 +3709,11 @@ function parameterBindings(
       const name = functionLiteralParameterName(param);
       // A REST parameter's site is the symbol inside its `Spread` wrapper:
       // that node carries the binding the literal's body declares for the
-      // name, which is what `staticParameterBinding` reads off it.
-      const site = restParameterSymbol(param) ?? param;
-      if (name) leaves.push({ name, site, value: args[i] });
+      // name, which is what `staticParameterBinding` reads off it. A
+      // parameter with a default value is read inside its `Optional`
+      // wrapper.
+      const site = restParameterSymbol(param) ?? optionalParameterTarget(param);
+      if (name) leaves.push({ name, site, value: args[i], index: i });
       continue;
     }
     const pairs: [name: string, value: Expression][] = [];
@@ -3352,6 +3750,8 @@ function staticParameterBinding(
   name: string,
   bodyScope: Scope | undefined
 ): BoxedValueDefinition | undefined {
+  // A parameter with a default value is read inside its `Optional` wrapper.
+  param = optionalParameterTarget(param);
   const site =
     restParameterSymbol(param) ??
     (isFunction(param, 'Typed') ? param.op1 : param);
@@ -7708,6 +8108,16 @@ function makeLambda(
   // parameters the call must supply before the rest parameter takes over.
   const restIndex = params.findIndex((p) => isRestParameter(p));
 
+  // The number of parameters before the first parameter with a default value
+  // (`["Optional", k, 2]`). A call with at least this many arguments is a
+  // full call: `withDefaults` gives each parameter with a default that the
+  // call leaves out its default operand, before the arguments are evaluated,
+  // so the body always has every parameter bound. A call with fewer
+  // arguments is a partial application (step 3 of `invoke`).
+  const withDefaults = (
+    args: ReadonlyArray<Expression>
+  ): ReadonlyArray<Expression> => literalArgumentsWithDefaults(params, args);
+
   // A GENERIC literal has no annotated parameter to gate on — erasure removed
   // them — yet its polytype marker IS a contract, and an ANONYMOUS application
   // (`Apply(Function(…), …)`) never passes a symbol's boxed-definition seam
@@ -7748,17 +8158,29 @@ function makeLambda(
   const relaxBareParams = (t: Type): Type => {
     if (bareParamIndexes.length === 0) return t;
     if (typeof t === 'string' || t.kind !== 'signature') return t;
-    const args = t.args;
-    if (args === undefined || args.length === 0) return t;
+    // The slots of the parameters with a default value are in `optArgs`,
+    // after the required ones: slot `i` of `optArgs` is the parameter at
+    // position `args.length + i`.
+    const args = t.args ?? [];
+    const optArgs = t.optArgs ?? [];
+    if (args.length + optArgs.length === 0) return t;
     let changed = false;
-    const relaxed = args.map((arg, i) => {
+    const relax = (arg: NamedElement, i: number): NamedElement => {
       if (!bareParamIndexes.includes(i)) return arg;
       changed = true;
       return { ...arg, type: 'any' as Type };
-    });
+    };
+    const relaxed = args.map(relax);
+    const relaxedOpt = optArgs.map((arg, i) => relax(arg, args.length + i));
     // A signature rebuilt field-by-field must carry its adjuncts; the spread
     // does that (`typeParams`, `effects`).
-    return changed ? { ...t, args: relaxed } : t;
+    return changed
+      ? {
+          ...t,
+          ...(t.args !== undefined ? { args: relaxed } : {}),
+          ...(t.optArgs !== undefined ? { optArgs: relaxedOpt } : {}),
+        }
+      : t;
   };
 
   // The parameters annotated with a NUMERIC type (`x: number`, `n: integer`,
@@ -7783,8 +8205,8 @@ function makeLambda(
   // with `incompatible-type` unless the annotation has a `missing` member.
   //
   // The indexes are positions in `params`, which pair one to one with the
-  // leading arguments and with the required arguments of the literal's
-  // signature. A rest parameter takes no annotation, so it is never in the
+  // leading arguments and with the argument slots of the literal's
+  // signature (`args`, then `optArgs`). A rest parameter takes no annotation, so it is never in the
   // list, and it is the last parameter, so it does not shift the others.
   const numericParamIndexes = params.reduce<number[]>((acc, p, i) => {
     const t = functionLiteralParameterType(p);
@@ -7805,16 +8227,27 @@ function makeLambda(
   ): Type => {
     if (numericParamIndexes.length === 0) return t;
     if (typeof t === 'string' || t.kind !== 'signature') return t;
-    const args = t.args;
-    if (args === undefined || args.length === 0) return t;
+    // Slot `i` of `optArgs` (the parameters with a default value) is the
+    // parameter at position `args.length + i`.
+    const args = t.args ?? [];
+    const optArgs = t.optArgs ?? [];
+    if (args.length + optArgs.length === 0) return t;
     let changed = false;
-    const accepted = args.map((arg, i) => {
+    const accept = (arg: NamedElement, i: number): NamedElement => {
       if (!numericParamIndexes.includes(i) || values[i]?.isNaN !== true)
         return arg;
       changed = true;
       return { ...arg, type: 'any' as Type };
-    });
-    return changed ? { ...t, args: accepted } : t;
+    };
+    const accepted = args.map(accept);
+    const acceptedOpt = optArgs.map((arg, i) => accept(arg, args.length + i));
+    return changed
+      ? {
+          ...t,
+          ...(t.args !== undefined ? { args: accepted } : {}),
+          ...(t.optArgs !== undefined ? { optArgs: acceptedOpt } : {}),
+        }
+      : t;
   };
 
   // The return-type ascription operand (§4.2 marker: the last Block statement
@@ -7957,7 +8390,9 @@ function makeLambda(
     const bodySymbols = new Set(e.symbols);
     const written = new Map<string, Expression>();
     for (let i = 0; i < params.length; i++) {
-      const param = params[i];
+      // A parameter with a default value is read inside its `Optional`
+      // wrapper; its value is the default when the call left it out.
+      const param = optionalParameterTarget(params[i]);
       const value = values[i];
       if (!isSymbol(param) || !value.isPure) return undefined;
       if (value.symbols.some((s) => bodySymbols.has(s))) return undefined;
@@ -8153,6 +8588,7 @@ function makeLambda(
     options?: ApplyOptions,
     iterationStatements?: ReadonlyArray<Expression>
   ): Expression | undefined => {
+    args = withDefaults(args);
     // BOUND-VARIABLE parameters (`bindParameters`) are eliminated first, by
     // substitution: the parameter is replaced in the body by the symbol the
     // caller passed (every occurrence of the name, inner binders included —
@@ -8428,11 +8864,16 @@ function makeLambda(
       // arguments: the residual passes them next to its own parameters, so
       // with `A = (x, y) ↦ x + y`, `A(_1)` would otherwise be
       // `(_1) ↦ Apply(A, _1, _1)`, which gives `4`, not `_1 + 2`, for `2`.
+      // A name must also differ from every symbol of a default value: the
+      // residual keeps the defaults of its parameters, and a default that
+      // names one of them is refused (`(x, k = _1) => x * k` with no
+      // argument would otherwise give `(_2, Optional(_1, _1))`).
       const unappliedParams = params.slice(args.length);
       const allSymbols = new Set([
         ...body.symbols,
         ...functionLiteralBoundNames(params),
         ...evaluatedKnownArgs.flatMap((arg) => arg.symbols),
+        ...params.flatMap((p) => optionalParameterDefault(p)?.symbols ?? []),
       ]);
       const extraSymbols = unappliedParams.map((_, i) => {
         let name = `_${i + 1}`;
@@ -8454,12 +8895,23 @@ function makeLambda(
       // its fresh symbol is re-wrapped in `Spread`, so the residual still has
       // no upper arity and still binds a tuple of whatever the saturating call
       // supplies.
+      //
+      // An unapplied parameter with a default value keeps its `Optional`
+      // wrapper and its default operand in the residual: the residual of
+      // `((x, k = 2) => x * k)()` is `(_1, Optional(_2, 2)) => Apply(lit, _1,
+      // _2)`, so a call of the residual with one argument gives `k` its
+      // default.
       const extras = unappliedParams.map((param, i) => {
         if (isRestParameter(param))
           return ce._fn('Spread', [extraSymbols[i]], { canonical: false });
-        return isFunction(param, 'Typed')
-          ? ce._fn('Typed', [extraSymbols[i], param.op2], { canonical: false })
+        const target = optionalParameterTarget(param);
+        const fresh = isFunction(target, 'Typed')
+          ? ce._fn('Typed', [extraSymbols[i], target.op2], { canonical: false })
           : extraSymbols[i];
+        const d = optionalParameterDefault(param);
+        return d === undefined
+          ? fresh
+          : ce._fn('Optional', [fresh, d], { canonical: false });
       });
 
       // The residual is DEFERRED for every body (`docs/EFFECTS-MODEL.md`,
@@ -8753,8 +9205,8 @@ function makeLambda(
     const sources = options?.exactSources;
     if (sources !== undefined)
       for (const leaf of leaves) {
-        const i = params.indexOf(leaf.site);
-        if (i < 0 || i === restIndex) continue;
+        const i = leaf.index;
+        if (i === undefined || i === restIndex) continue;
         const source = sources[i];
         if (source === undefined) continue;
         const activation = freshScope.bindings.get(leaf.name);

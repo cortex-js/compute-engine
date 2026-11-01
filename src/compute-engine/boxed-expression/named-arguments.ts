@@ -1,4 +1,8 @@
-import type { FunctionSignature, Type } from '../../common/type/types.js';
+import type {
+  FunctionSignature,
+  NamedElement,
+  Type,
+} from '../../common/type/types.js';
 import { isWildcardFunctionType } from '../../common/type/utils.js';
 import { resolveTypeReference } from '../../common/type/subtype.js';
 import { osaDistance } from '../../common/fuzzy-string-match.js';
@@ -11,7 +15,11 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef, isValueDef } from './utils.js';
-import { boxParameterDefault, callSiteDefault } from './parameter-defaults.js';
+import {
+  boxParameterDefault,
+  callSiteDefault,
+  literalParameterDefault,
+} from './parameter-defaults.js';
 import {
   armAdmission,
   diagnoseNoMatch,
@@ -314,23 +322,49 @@ export function protocolMemberParts(
  * parameter, say): a parameter this function cannot name might also not be
  * one-slot-per-parameter, and a wrong guess here silently binds arguments to
  * the wrong parameters. Every parameter it does accept fills exactly one
- * required slot, which is also why the synthesized signature has no optional
- * or variadic part: a literal's parameter list has no such syntax.
+ * slot. A parameter with a default value, `["Optional", param, default]`, is
+ * an optional slot with that default (the default is boxed in the current
+ * scope to read it, as the literal's canonical form boxes it); every other
+ * parameter is a required slot. The signature has no variadic part.
  */
 export function inlineLiteralSignature(
+  ce: ComputeEngine,
   x: ExpressionInput | undefined
 ): Type | undefined {
   if (x === undefined) return undefined;
   const ops = rawOperands(x, 'Function');
   if (ops === undefined || ops.length === 0) return undefined;
-  const args: { name: string; type: Type }[] = [];
-  for (const param of ops.slice(1)) {
+  const args: NamedElement[] = [];
+  const optArgs: NamedElement[] = [];
+  for (const written of ops.slice(1)) {
+    // A parameter with a default value, `["Optional", param, default]`, is
+    // an optional slot that carries its default, so a named call that skips
+    // it gives it the default. A default that is not a value a signature
+    // can hold leaves the names unavailable; the canonical form of the
+    // literal reports that default.
+    const optional = rawOperands(written, 'Optional');
+    const param = optional !== undefined ? optional[0] : written;
     const name =
       rawSymbolName(param) ?? rawSymbolName(rawOperands(param, 'Typed')?.[0]);
     if (name === undefined) return undefined;
-    args.push({ name, type: 'unknown' });
+    if (optional === undefined) {
+      // A required parameter after a parameter with a default is an error
+      // of the literal.
+      if (optArgs.length > 0) return undefined;
+      args.push({ name, type: 'unknown' });
+      continue;
+    }
+    if (optional.length !== 2) return undefined;
+    const d = literalParameterDefault(ce.box(optional[1]));
+    if (d === undefined) return undefined;
+    optArgs.push({ name, type: 'unknown', default: d });
   }
-  return { kind: 'signature', args, result: 'unknown' };
+  return {
+    kind: 'signature',
+    args,
+    ...(optArgs.length > 0 ? { optArgs } : {}),
+    result: 'unknown',
+  };
 }
 
 /** The `[nameExpression, valueExpression]` operands of a carrier, whatever

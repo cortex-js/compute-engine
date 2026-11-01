@@ -9,6 +9,7 @@ import type {
   EffectSet,
   FunctionSignature,
   NamedElement,
+  ParameterDefault,
   Type,
   TypeReference,
 } from '../../common/type/types.js';
@@ -23,6 +24,7 @@ import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isFunction, isString, isSymbol, sym } from './type-guards.js';
 import { tuplePatternNames } from './tuple-pattern.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
+import { literalParameterDefault } from './parameter-defaults.js';
 
 /**
  * Shared accessors for the shape of a `Function` literal so that no call site
@@ -31,7 +33,9 @@ import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
  * A `Function` literal has the canonical shape
  * `["Function", body, param₁, …, paramₙ]` where:
  * - each `paramᵢ` is a bare symbol (inferred type) or `["Typed", symbol, type]`
- *   (annotated parameter);
+ *   (annotated parameter), possibly wrapped as `["Optional", param, default]`
+ *   (a parameter with a default value, see `isOptionalParameter()`); a rest
+ *   parameter `["Spread", symbol]` or a destructuring pattern `["Tuple", …]`;
  * - `body` is a scoped `Block`; a return-type ascription lives INSIDE that
  *   Block, wrapping the last statement as `["Typed", statement, type]`.
  *
@@ -127,6 +131,53 @@ export function isRestParameter(param: Expression): boolean {
 }
 
 /**
+ * True when a `Function` parameter operand is a parameter with a DEFAULT
+ * VALUE: `["Optional", param, default]`, spelled `(x, k = 2) => …` in Epsil.
+ * `param` is a symbol or `["Typed", symbol, type]`; `default` is a number, a
+ * string, `True`, `False`, a symbol, `["List"]` or `["Dictionary"]`.
+ *
+ * A call that supplies every parameter before the first such parameter is a
+ * full call: each parameter with a default that the call leaves out receives
+ * its default. The parameters with a default come after the required ones,
+ * and a rest or destructuring parameter cannot have one
+ * (`canonicalFunctionLiteralArguments()` checks both).
+ */
+export function isOptionalParameter(param: Expression): boolean {
+  return isFunction(param, 'Optional');
+}
+
+/** The parameter inside an `Optional` wrapper (a symbol or a `Typed`
+ * annotation), or `param` itself when it has no default. Every reader of a
+ * parameter's name, type or binding site reads this operand. */
+export function optionalParameterTarget(param: Expression): Expression {
+  return isFunction(param, 'Optional') && param.op1 !== undefined
+    ? param.op1
+    : param;
+}
+
+/** The default operand of a parameter `["Optional", param, default]`, or
+ * `undefined` for a parameter without a default. In a canonical literal the
+ * operand is canonical. */
+export function optionalParameterDefault(
+  param: Expression
+): Expression | undefined {
+  return isFunction(param, 'Optional') ? param.op2 : undefined;
+}
+
+/** The number of parameters that a call of a literal with the parameters
+ * `params` must supply: the parameters before the first parameter with a
+ * default, or before the rest parameter. A call with at least this many
+ * arguments is a full call; a call with fewer is a partial application. */
+export function requiredParameterCount(
+  params: ReadonlyArray<Expression>
+): number {
+  const i = params.findIndex(
+    (p) => isOptionalParameter(p) || isRestParameter(p)
+  );
+  return i < 0 ? params.length : i;
+}
+
+/**
  * The index of the REST parameter within a `Function` literal's parameter
  * list, or `-1` when the list has none.
  *
@@ -176,12 +227,16 @@ export function restParameterSignatureTail(params: ReadonlyArray<Expression>): {
 export function functionLiteralArity(expr: Expression): {
   fixed: number;
   variadic: boolean;
+  required: number;
 } {
   const params = isFunction(expr, 'Function') ? expr.ops.slice(1) : [];
   const rest = restParameterIndex(params);
+  // `required` is less than `fixed` when parameters have a default value:
+  // `(x, k = 2) => …` accepts one or two arguments.
+  const required = requiredParameterCount(params);
   return rest < 0
-    ? { fixed: params.length, variadic: false }
-    : { fixed: rest, variadic: true };
+    ? { fixed: params.length, variadic: false, required }
+    : { fixed: rest, variadic: true, required };
 }
 
 /** The symbol NODE a rest parameter binds — the operand inside its `Spread`
@@ -198,6 +253,7 @@ export function restParameterSymbol(param: Expression): Expression | undefined {
  * operand is not a symbol (matching the historical
  * `isSymbol(p) ? p.symbol : ''` idiom). */
 export function functionLiteralParameterName(param: Expression): string {
+  param = optionalParameterTarget(param);
   if (isFunction(param, 'Typed')) return sym(param.op1) ?? '';
   if (isFunction(param, 'Spread')) return sym(param.op1) ?? '';
   return sym(param) ?? '';
@@ -217,7 +273,7 @@ export function functionLiteralParameterName(param: Expression): string {
 export function inferredSignatureParameterName(
   param: Expression
 ): string | undefined {
-  const name = sym(param);
+  const name = sym(optionalParameterTarget(param));
   if (name === undefined || name === '' || /^_\d*$/.test(name))
     return undefined;
   return name;
@@ -426,6 +482,7 @@ export function functionLiteralBoundNames(
 export function functionLiteralParameterType(
   param: Expression
 ): Type | undefined {
+  param = optionalParameterTarget(param);
   if (isFunction(param, 'Typed')) return parseTypeOperand(param.op2);
   return undefined;
 }
@@ -581,15 +638,59 @@ export function isScalarType(t: Type, seen?: Set<TypeReference>): boolean {
 }
 
 /** The parameters of a `Function` literal, as `{ name, type }` records. Bare
- * parameters have `type: undefined`. */
-export function functionLiteralParameters(
-  expr: Expression
-): { name: string; type: Type | undefined }[] {
+ * parameters have `type: undefined`. A parameter with a default value
+ * (`["Optional", k, 2]`) also has `optional: true` and its `default`. */
+export function functionLiteralParameters(expr: Expression): {
+  name: string;
+  type: Type | undefined;
+  optional?: boolean;
+  default?: ParameterDefault;
+}[] {
   if (!isFunction(expr, 'Function')) return [];
-  return expr.ops.slice(1).map((p) => ({
-    name: functionLiteralParameterName(p),
-    type: functionLiteralParameterType(p),
-  }));
+  return expr.ops.slice(1).map((p) => {
+    const entry = {
+      name: functionLiteralParameterName(p),
+      type: functionLiteralParameterType(p),
+    };
+    const op = optionalParameterDefault(p);
+    if (op === undefined) return entry;
+    const d = literalParameterDefault(op);
+    return d === undefined
+      ? { ...entry, optional: true }
+      : { ...entry, optional: true, default: d };
+  });
+}
+
+/**
+ * The argument lists of the signature of a `Function` literal whose
+ * parameter operands are `params`, given `slots`, the signature slots of its
+ * FIXED parameters (the parameters before a rest parameter), in order.
+ *
+ * A required parameter's slot goes into `args`. The slot of a parameter with
+ * a default value (`["Optional", k, 2]`) goes into `optArgs`, with that
+ * default: `(x, k = 2) => x * k` has the signature
+ * `(x: unknown, k: unknown = 2) -> number`. The default does not change the
+ * slot type, which is the annotation or the type that the body's uses infer,
+ * as for a parameter without a default. Canonicalization puts the parameters
+ * with a default after the required ones and checks that each default is a
+ * value that a signature can hold (`literalParameterDefault()`).
+ */
+export function signatureArgumentsOfSlots(
+  params: ReadonlyArray<Expression>,
+  slots: ReadonlyArray<NamedElement> | undefined
+): { args?: NamedElement[]; optArgs?: NamedElement[] } {
+  if (slots === undefined || slots.length === 0) return {};
+  const required = requiredParameterCount(params);
+  if (required >= slots.length) return { args: [...slots] };
+  const optArgs = slots.slice(required).map((slot, i) => {
+    const op = optionalParameterDefault(params[required + i]);
+    const d = op === undefined ? undefined : literalParameterDefault(op);
+    return d === undefined ? slot : { ...slot, default: d };
+  });
+  return {
+    ...(required > 0 ? { args: slots.slice(0, required) } : {}),
+    optArgs,
+  };
 }
 
 /** The return-ascription MARKER node of a `Function` literal — the §4.2

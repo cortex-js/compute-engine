@@ -494,6 +494,49 @@ export function functionArity(
 }
 
 /**
+ * The number of arguments that a call of a callable type must supply, when
+ * every parameter after them has a default value: 1 for
+ * `(x: unknown, k: unknown = 2) -> number`, the type of `(x, k = 2) => x * k`.
+ * For a type with no optional parameter it is {@link functionArity}.
+ *
+ * `undefined` when the number is not a single fixed value: a bare `function`
+ * type, a variadic signature, a signature with an optional parameter without
+ * a default (a call that leaves it out does not receive a value for it), a
+ * non-callable type, or a union/intersection whose arms disagree.
+ *
+ * An operator that chooses how to call a callback from its arity (`Sort`
+ * calls a unary key with one argument and a binary comparator with two,
+ * `Iterate` calls a unary function with the previous value only) reads this
+ * number: the parameters with a default receive their default. Reading
+ * {@link functionArity}, which is `undefined` for such a signature,
+ * `Sort(L, (x, k = 2) => x * k)` would use the key as a comparator.
+ *
+ * A signature whose only parameter has a default (`(x = 0) => -x`) reads
+ * as 1, not 0: a callback that accepts at most one argument can only be
+ * called with one, so it is a unary key or a unary step, never a
+ * comparator.
+ */
+export function requiredArity(
+  type: Readonly<Type> | undefined
+): number | undefined {
+  if (type === 'function') return undefined;
+  const arms = signatureArms(type);
+  if (!arms) return undefined;
+
+  let arity: number | undefined;
+  for (const sig of arms) {
+    if (sig.variadicArg) return undefined;
+    if (sig.optArgs?.some((a) => a.default === undefined)) return undefined;
+    const required = sig.args?.length ?? 0;
+    const max = required + (sig.optArgs?.length ?? 0);
+    const n = required === 0 && max === 1 ? 1 : required;
+    if (arity === undefined) arity = n;
+    else if (arity !== n) return undefined;
+  }
+  return arity;
+}
+
+/**
  * The type an application of `type` yields, without reference to the actual
  * arguments. `undefined` when `type` is not callable.
  *

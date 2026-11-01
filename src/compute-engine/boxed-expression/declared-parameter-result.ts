@@ -13,6 +13,7 @@ import { isFunction, isSymbol } from './type-guards.js';
 import {
   functionLiteralParameterNames,
   functionLiteralParameterType,
+  signatureArgumentsOfSlots,
 } from './function-literal.js';
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
 import { withScratchScope } from '../scratch-scopes.js';
@@ -1051,7 +1052,11 @@ function unknownSkeletonOf(literal: Expression): Type {
   const params = isFunction(literal, 'Function') ? literal.ops.slice(1) : [];
   return {
     kind: 'signature',
-    args: params.map(() => ({ type: 'unknown' as Type })),
+    // A parameter with a default value is an optional slot.
+    ...signatureArgumentsOfSlots(
+      params,
+      params.map(() => ({ type: 'unknown' as Type }))
+    ),
     result: 'unknown',
   };
 }
