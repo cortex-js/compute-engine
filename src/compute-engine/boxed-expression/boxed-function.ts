@@ -12681,15 +12681,19 @@ function lambdaBroadcastType(
   // broadcast maps (a list), and it is mapped in every combination;
   // otherwise the typing does not apply. When the number of combinations
   // is more than `MAX_OPERAND_ARM_COMBINATIONS`, the answer is `any`, which
-  // holds every value.
-  const byArms = (indices: ReadonlyArray<number>): Type | undefined => {
+  // holds every value. `armsOf` gives the arms of the type of an operand
+  // (`operandArms` unless the caller gives another rule).
+  const byArms = (
+    indices: ReadonlyArray<number>,
+    armsOf: (t: Type) => ReadonlyArray<OperandArm> | undefined = operandArms
+  ): Type | undefined => {
     if (slots !== undefined || operandTypes !== undefined) return undefined;
     if (generic ? instantiateWith === undefined : derive === undefined)
       return undefined;
     const armsAt: Array<ReadonlyArray<OperandArm>> = [];
     let split = false;
     for (const i of indices) {
-      const arms = operandArms(typeAt(i));
+      const arms = armsOf(typeAt(i));
       if (arms !== undefined) {
         split = true;
         armsAt.push(arms);
@@ -12720,6 +12724,65 @@ function lambdaBroadcastType(
     if (!visit(0)) return undefined;
     return reduceType({ kind: 'union', types: results });
   };
+  // An operand whose type is a union with a tuple arm and no arm that the
+  // broadcast maps (`number | tuple<real, real>`) is not split by the typing
+  // by arms above (`operandArms`), and the numeric-tuple rule above does not
+  // read it, because its type is not a tuple. The call binds a value of
+  // each arm whole, and the body then decides the shape of the value: with
+  // `T := a ↦ 2a`, `T(y)` is `6` for `y := 3` and `(6, 8)` for
+  // `y := (3, 4)`. A union of number arms and tuple arms
+  // (`numberOrTupleArms`) is typed arm by arm (`byArms`), and the answer is
+  // `number | tuple<number, number>`. That typing reads every other operand
+  // as a value that the call binds whole, so it applies only when no other
+  // operand can be a collection that the call maps. When it does not apply,
+  // or the union has another arm with the tuple (`string | tuple<real,
+  // real>`), and the result was inferred or is a number type, the answer is
+  // `any`, as for a tuple operand above: the signature result does not
+  // describe the tuple arm. A tuple with only a `missing` arm beside it
+  // (`missing | tuple<real, real>`) is typed by the derivation from the body
+  // after this function (`wholeAbsentTupleArgumentType`), and is not read
+  // here.
+  const tupleUnionAt = (test: (t: Type) => boolean): ReadonlyArray<number> =>
+    ops.flatMap((_x, i) =>
+      bindsAtScalarSlot(i) &&
+      parameterReachesBody(literal, i) &&
+      test(typeAt(i))
+        ? [i]
+        : []
+    );
+  const numberTupleAt = tupleUnionAt((t) => numberOrTupleArms(t) !== undefined);
+  // The `any` answers below apply only when the function has a value
+  // (`literal`), as in `comboResult`: the body may then compute on the
+  // tuple. A function with no value does not evaluate, its call stays
+  // held, and the call keeps the signature result.
+  if (
+    operandTypes === undefined &&
+    literal !== undefined &&
+    (inferredResult || isSubtype(perElementResult, 'number')) &&
+    tupleUnionAt(hasUnsplitTupleArm).length > 0
+  )
+    return 'any';
+  if (numberTupleAt.length > 0 && operandTypes === undefined) {
+    const otherMayMap = ops.some(
+      (x, i) =>
+        !numberTupleAt.includes(i) &&
+        mappable(i) &&
+        (participates(i) ||
+          x.possiblyCollectionTyped ||
+          x.unknownCapture ||
+          (abstractCollectionCell(x.type) !== undefined &&
+            !x.holdsUnindexedCollection))
+    );
+    const byArm = otherMayMap
+      ? undefined
+      : byArms(numberTupleAt, numberOrTupleArms);
+    if (byArm !== undefined) return byArm;
+    if (
+      literal !== undefined &&
+      (inferredResult || isSubtype(perElementResult, 'number'))
+    )
+      return 'any';
+  }
   if (mapped.length > 0) {
     // A literal over operands whose types are unions with an arm that the
     // broadcast does not map (a `set`, a tuple, a scalar, an abstract
@@ -12748,11 +12811,89 @@ function lambdaBroadcastType(
     );
     if (loneUnionResult !== undefined) return loneUnionResult;
 
+    // A mapped operand whose cells may be tuples: the call binds each tuple
+    // cell whole to a scalar parameter, as for a tuple operand above, and
+    // the signature result does not describe the value. With
+    // `T := a ↦ 2a` and `y: number | tuple<real, real>`, `T([y, y])` is
+    // `[(6, 8), (6, 8)]` for `y := (3, 4)`, and it was typed
+    // `list<number>`. The per-element result is the union of the results
+    // over each combination of one arm of the cell type for each such
+    // operand (`mappedCellTupleArms`): when every arm is a number, the type
+    // of the body with each operand typed as its arm (`derive`), else the
+    // signature result, and the componentwise type of the body
+    // (`componentwiseTupleCallType`) or `any` when an arm is a tuple. A
+    // cell type with a tuple arm beside an arm that is neither a number nor
+    // a tuple (`string | tuple<real, real>`) has no such arms, and the
+    // answer is `any`. As for a tuple operand above, this applies only when
+    // the function has a value (`literal`), the parameter reaches its body,
+    // and the result was inferred or is a number type.
+    const oneRankMap = ops.some(
+      (_x, i) => participates(i) && slotMapsOneRank(slots, i)
+    );
+    let tupleCellResult: Type | undefined;
+    if (
+      literal !== undefined &&
+      (inferredResult || isSubtype(perElementResult, 'number'))
+    ) {
+      const cellArmsAt = ops.map((_x, i) =>
+        participates(i) &&
+        bindsAtScalarSlot(i) &&
+        parameterReachesBody(literal, i)
+          ? mappedCellTupleArms(typeAt(i), oneRankMap)
+          : undefined
+      );
+      if (cellArmsAt.some((arms) => arms === 'open')) return 'any';
+      const tupleAt = ops.flatMap((_x, i) =>
+        cellArmsAt[i] !== undefined ? [i] : []
+      );
+      if (tupleAt.length > 0) {
+        const armsAt = tupleAt.map(
+          (i) => cellArmsAt[i] as ReadonlyArray<OperandArm>
+        );
+        const count = armsAt.reduce((n, arms) => n * arms.length, 1);
+        if (count > MAX_OPERAND_ARM_COMBINATIONS) return 'any';
+        // The type of the value that the call binds to each parameter for
+        // one cell: the arm of the combination, the cell type of another
+        // mapped operand, or the operand itself when it binds whole.
+        const baseArgs: Type[] = ops.map((_x, i) =>
+          participates(i)
+            ? ((oneRankMap
+                ? collectionElementType(resolveTypeAlias(typeAt(i)))
+                : broadcastLeafType(typeAt(i))) ?? 'any')
+            : typeAt(i)
+        );
+        const results: Type[] = [];
+        const visit = (k: number, args: Type[], tuple: boolean): void => {
+          if (k === armsAt.length) {
+            results.push(
+              tuple
+                ? (componentwiseTupleCallType(literal, args) ?? 'any')
+                : ((!generic && derive !== undefined
+                    ? derive(
+                        ops.map((_x, i) => participates(i)),
+                        args
+                      )
+                    : undefined) ?? perElementResult)
+            );
+            return;
+          }
+          for (const arm of armsAt[k]) {
+            const next = [...args];
+            next[tupleAt[k]] = arm.type;
+            visit(k + 1, next, tuple || isTupleArgumentType(arm.type));
+          }
+        };
+        visit(0, baseArgs, false);
+        tupleCellResult = reduceType({ kind: 'union', types: results });
+      }
+    }
+
     // From here the lift applies: the per-element result is the body's
     // type with each mapped operand typed as its cell, when that can be
     // derived. A generic literal is not derived: its type solver bound the
     // type parameter, and `perElementResult` is that instantiation.
-    if (!generic && derive !== undefined)
+    if (tupleCellResult !== undefined) perElementResult = tupleCellResult;
+    else if (!generic && derive !== undefined)
       perElementResult =
         derive(
           ops.map((_x, i) => participates(i)),
@@ -12795,10 +12936,7 @@ function lambdaBroadcastType(
     // around the result: `m := x ↦ (x, x)` declared
     // `(broadcastable<value>) -> value` over `[[1, 2], [3, 4, 5]]` is a list
     // of two pairs of rows, a `list<value>`.
-    const oneRankCall = ops.some(
-      (_x, i) => participates(i) && slotMapsOneRank(slots, i)
-    );
-    if (oneRankCall) return broadcastResultType(perElementResult);
+    if (oneRankMap) return broadcastResultType(perElementResult);
     const shapeAwareGeneric = generic;
     if (shapeAwareGeneric) {
       const levels = genericLiftLevels(mappedTypes);
@@ -13753,6 +13891,148 @@ function operandArms(t0: Type): ReadonlyArray<OperandArm> | undefined {
     },
     ...wholeArms.map((type) => ({ type, mapped: false })),
   ];
+}
+
+/**
+ * The arms of the type `t0` of an operand of a call of a function literal,
+ * when `t0`, read through its transparent aliases, is a union of number
+ * types and tuple types (`isTupleArgumentType`), with at least one tuple
+ * arm: one arm for the union of the number arms, if there are any, and one
+ * arm for each tuple arm. The call binds a value of every such arm whole
+ * (`mapped: false`): a number at a scalar parameter, and a tuple as one
+ * value. `undefined` for another type.
+ *
+ * With `y: number | tuple<real, real>`, the arms are `number` and
+ * `tuple<real, real>`; with `tuple<real, real> | tuple<real, real, real>`,
+ * they are the two tuple types. A union with an arm that the broadcast maps
+ * (a list) has the arms of `operandArms` instead, and a union with an arm
+ * that is neither a number nor a tuple (`missing`, `string`) has no arms
+ * here (`hasUnsplitTupleArm`).
+ */
+function numberOrTupleArms(t0: Type): ReadonlyArray<OperandArm> | undefined {
+  const flat = unfoldedUnionArms(t0);
+  if (flat === undefined) return undefined;
+  const numbers: Type[] = [];
+  const tuples: Type[] = [];
+  for (const arm of flat) {
+    if (isSubtype(arm, 'number')) numbers.push(arm);
+    else if (isTupleArgumentType(arm)) tuples.push(arm);
+    else return undefined;
+  }
+  if (tuples.length === 0) return undefined;
+  const arms: OperandArm[] = tuples.map((type) => ({ type, mapped: false }));
+  if (numbers.length > 0)
+    arms.unshift({
+      type:
+        numbers.length === 1 ? numbers[0] : { kind: 'union', types: numbers },
+      mapped: false,
+    });
+  return arms;
+}
+
+/**
+ * The arms of the cell type of an operand of type `t0` that a call of a
+ * function literal maps, when a cell may be a tuple that the call binds
+ * whole to a scalar parameter. The cell is the leaf that the broadcast
+ * reaches through the lists of `t0`, or the element one rank down when the
+ * call maps one rank (`oneRank`). The broadcast does not descend into a
+ * tuple, so a tuple cell is bound whole.
+ *
+ * - A tuple cell (`isTupleArgumentType`): one arm, the tuple.
+ * - A union of number arms and tuple arms: the arms of
+ *   `numberOrTupleArms`. With `y: number | tuple<real, real>`, the cells of
+ *   `[y, y]` have the arms `number` and `tuple<real, real>`.
+ * - Another union with a tuple arm and no arm that is an indexed
+ *   collection other than a tuple or a string (`string | tuple<real,
+ *   real>`, `missing | tuple<real, real>`): `'open'`, and the caller
+ *   answers `any`. The broadcast does not descend into a tuple or a
+ *   string.
+ * - Any other cell, and a union of lists above the cell, which the
+ *   broadcast reads arm by arm: `undefined`.
+ */
+function mappedCellTupleArms(
+  t0: Type,
+  oneRank: boolean
+): ReadonlyArray<OperandArm> | 'open' | undefined {
+  let t = resolveTypeAlias(t0);
+  for (let d = 0; d < 8; d++) {
+    if (typeof t === 'object' && (t.kind === 'union' || t.kind === 'tuple'))
+      break;
+    if (isSubtype(t, 'string')) return undefined;
+    if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) break;
+    const e = collectionElementType(t);
+    if (e === undefined) return undefined;
+    t = resolveTypeAlias(e);
+    if (oneRank) break;
+  }
+  if (isTupleArgumentType(t)) return [{ type: t, mapped: false }];
+  const arms = numberOrTupleArms(t);
+  if (arms !== undefined) return arms;
+  const flat = unfoldedUnionArms(t);
+  if (
+    flat !== undefined &&
+    flat.some((arm) => isTupleArgumentType(arm)) &&
+    !flat.some(
+      (arm) =>
+        !isTupleArgumentType(arm) &&
+        !isSubtype(arm, 'string') &&
+        isSubtype(arm, INDEXED_COLLECTION_SHAPE_TYPE)
+    )
+  )
+    return 'open';
+  return undefined;
+}
+
+/**
+ * True when the type `t0` of an operand of a call of a function literal,
+ * read through its transparent aliases, is a union with a tuple arm
+ * (`isTupleArgumentType`) that no other rule types arm by arm: the union
+ * has no arm that the broadcast maps (`operandArms`), it has an arm that is
+ * neither a number nor a tuple (`numberOrTupleArms`), and it is not a tuple
+ * that may be absent as a whole (`isNumericTupleArgumentType`). With
+ * `y: string | tuple<real, real>` and `T := a ↦ 2a`, `T(y)` is `(6, 8)` for
+ * `y := (3, 4)`, which the signature result `number` does not hold.
+ */
+function hasUnsplitTupleArm(t0: Type): boolean {
+  const flat = unfoldedUnionArms(t0);
+  if (flat === undefined) return false;
+  const t: Type = { kind: 'union', types: [...flat] };
+  return (
+    flat.some((arm) => isTupleArgumentType(arm)) &&
+    operandArms(t) === undefined &&
+    numberOrTupleArms(t) === undefined &&
+    !isNumericTupleArgumentType(t)
+  );
+}
+
+/**
+ * The arms of the type `t0` when it is a union, with every transparent
+ * alias unfolded, at the top level and in each arm, and every nested union
+ * flattened: with `type pt = number | tuple<real, real>` (an alias),
+ * `boolean | pt` has the arms `boolean`, `number` and `tuple<real, real>`.
+ * A nominal reference stays folded, because a nominal type is not a
+ * subtype of its definition (`unfoldAliasOnDescent`). `undefined` when
+ * `t0` is not a union after the unfold, or when an alias reaches itself
+ * (the descent stops there, and the caller gives its answer for a type it
+ * does not split).
+ */
+function unfoldedUnionArms(t0: Type): ReadonlyArray<Type> | undefined {
+  const arms: Type[] = [];
+  let cyclic = false;
+  const visit = (t: Type, seen: AliasDescent): void => {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) {
+      cyclic = true;
+      return;
+    }
+    const u = unfolded.type;
+    if (typeof u === 'object' && u.kind === 'union')
+      for (const arm of u.types) visit(arm, unfolded.seen);
+    else arms.push(u);
+  };
+  visit(t0, undefined);
+  if (cyclic || arms.length < 2) return undefined;
+  return arms;
 }
 
 /** The indexed counterpart of an abstract collection type: `indexed_collection<E>`
