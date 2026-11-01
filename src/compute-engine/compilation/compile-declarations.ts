@@ -1052,6 +1052,43 @@ export function desugarPatternDeclare(
         `leaf value does not fit. The interpreter evaluates it instead.`
     );
   const ce = arg.engine;
+  // A name can occur at more than one position of the pattern (`(a, a)`,
+  // `(a, (b, a))`; only a MathJSON input can have this, because the Epsil
+  // parser rejects such a pattern). The interpreter evaluates the whole
+  // value first, then binds the names in depth-first pattern order, so the
+  // name gets the value at its LAST position (`bindTuplePattern`,
+  // `library/core.ts`). Each earlier position of the name becomes `_` here:
+  // its element is still evaluated (a `_` leaf keeps its element as a
+  // statement, or reads nothing from the temporary that holds the whole
+  // value), and only the last position declares the name. Without this
+  // rewrite the lowering emitted two declarations of one local in one scope
+  // (`let a = 1; let a = 2`), which is not valid JavaScript. A declaration
+  // followed by an assignment for the later positions would also be wrong:
+  // a later element can read the name (`(a, a) = (1, a + 1)`), and it must
+  // read the value from before the statement, not the one that the earlier
+  // position just bound.
+  const seen = new Set<string>();
+  const keepLastOccurrence = (pattern: Expression): Expression => {
+    if (!isFunction(pattern, 'Tuple')) return pattern;
+    // Visit the positions from the last one to the first, so the first
+    // occurrence of a name found is its last one in depth-first order.
+    const ops = [...pattern.ops];
+    let changed = false;
+    for (let i = ops.length - 1; i >= 0; i--) {
+      const p = ops[i];
+      let q = p;
+      if (isFunction(p, 'Tuple')) q = keepLastOccurrence(p);
+      else if (isSymbol(p) && p.symbol !== '_') {
+        if (seen.has(p.symbol)) q = ce.symbol('_');
+        else seen.add(p.symbol);
+      }
+      if (q !== p) {
+        ops[i] = q;
+        changed = true;
+      }
+    }
+    return changed ? ce._fn('Tuple', ops) : pattern;
+  };
   const out: Expression[] = [];
   const walk = (pattern: Expression, v: Expression | undefined): void => {
     if (!isFunction(pattern, 'Tuple'))
@@ -1099,7 +1136,7 @@ export function desugarPatternDeclare(
       out.push(ce._fn('Declare', [p, ce.string('unknown'), el]));
     }
   };
-  walk(arg.ops[0], declareValueOperand(arg.ops));
+  walk(keepLastOccurrence(arg.ops[0]), declareValueOperand(arg.ops));
   return out;
 }
 

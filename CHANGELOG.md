@@ -415,6 +415,14 @@
   complex `Reduce`, a user function named `_a` or `_x` used as the combiner
   no longer declines.
 
+- **A destructuring `Declare` whose pattern repeats a name compiles.** The
+  MathJSON `["Declare", ["Tuple", "a", "a"], "'unknown'", ["Tuple", 1, 2]]`
+  gives `a` the value at its last position, `2`, in the interpreter. The
+  JavaScript target emitted `let a = 1; let a = 2`, which is not valid
+  JavaScript, so `compile(…, { fallback: false })` threw a `SyntaxError`. It
+  now compiles on every target, and the name gets the value at its last
+  position, also in a nested pattern, a loop body or a `Sum` body.
+
 - **A Leibniz derivative in the integrand of an integral leaves the closing
   differential to the integral** (CE-617). `\int_0^1 \frac{d}{dx}x^3\,dx`
   parsed as the derivative of `x^3·d·x`, so the integral had no variable and
