@@ -613,11 +613,11 @@ describe('GENERIC SUM/PRODUCT LOOP OF A CUSTOM TARGET', () => {
       // unevaluated.
       [
         ['Sum', 'j', ['Limits', 'j', 1, ['Random', ['Range', 2, 3]]]],
-        /upper bound .* is not pure/,
+        /upper bound .* has an effect/,
       ],
       [
         ['Sum', 'j', ['Limits', 'j', ['Random', ['Range', 2, 3]], 5]],
-        /lower bound .* is not pure/,
+        /lower bound .* has an effect/,
       ],
     ] as const) {
       expect(() =>

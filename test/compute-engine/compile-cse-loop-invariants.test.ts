@@ -147,7 +147,9 @@ describe('CSE and loop-invariant hoisting in a Sum body (GPU)', () => {
     const ce = new ComputeEngine();
     const expr = heatMap(ce);
     const code = compile(expr).code;
-    const exit = code.indexOf('if (!(n <= _upper)) return 0;');
+    // The upper bound `m` has no compile-time value, so the loop steps a
+    // separate counter (`_tvN`) and the body declares the index `n`.
+    const exit = code.search(/if \(!\(_tv\d+ <= _upper\)\) return 0;/);
     expect(exit).toBeGreaterThan(0);
     expect(code.indexOf('Math.sin(')).toBeGreaterThan(exit);
     // An empty range must not evaluate what the body never reached.

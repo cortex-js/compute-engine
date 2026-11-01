@@ -99,11 +99,13 @@ test('a mixed range checks only its dynamic bound', () => {
   const { ce, js } = fixture();
   ce.declare('n', 'real');
   const upper = js(['Sum', 'x', ['Limits', 'k', ['Length', ['List', 1]], 'n']]);
+  // A loop with a bound that has no compile-time value steps a separate
+  // counter (`_tvN`), and the loop body declares the index `k` from it.
   expect(upper.code).toContain('Number.isSafeInteger(_upper)');
-  expect(upper.code).not.toContain('Number.isSafeInteger(k)');
+  expect(upper.code).not.toMatch(/Number\.isSafeInteger\(_tv\d+\)/);
   const lower = js(['Sum', 'x', ['Limits', 'k', 'n', length]]);
   expect(lower.code).not.toContain('Number.isSafeInteger(_upper)');
-  expect(lower.code).toContain('Number.isSafeInteger(k)');
+  expect(lower.code).toMatch(/Number\.isSafeInteger\(_tv\d+\)/);
   expect(upper.run!({ x: 2, n: 3 })).toBe(6);
   expect(lower.run!({ x: 2, n: 152 })).toBe(4);
   for (const n of [NaN, Infinity, -Infinity]) {

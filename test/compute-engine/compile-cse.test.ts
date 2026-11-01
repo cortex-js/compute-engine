@@ -658,7 +658,9 @@ describe('COMPILE CSE — capture', () => {
     expect(occurrences(result.code, 'const _cse')).toBe(2);
     // The inner temporary reads the LOOP index, the outer one the free symbol.
     expect(result.code).toContain('const _cse1 = Math.sin(6 * n);');
-    expect(result.code).toContain('const _cse3 = Math.sin(6 * _.n);');
+    // Its number follows the temporaries of the loop, whose count depends on
+    // the loop form (a symbolic bound adds a separate counter).
+    expect(result.code).toMatch(/const _cse\d+ = Math\.sin\(6 \* _\.n\);/);
     // …and the inner binding sits inside the emitted loop.
     expect(result.code.indexOf('while')).toBeLessThan(
       result.code.indexOf('const _cse1')

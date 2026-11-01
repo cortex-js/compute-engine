@@ -1378,10 +1378,35 @@ function compilePythonSumProduct(
     throw statementError();
   }
 
+  // Python evaluates the `range` of the first `for` clause of a generator
+  // expression in the enclosing scope, and the `range` of each later clause
+  // in the scope of the generator, where the variable of every clause is a
+  // local. So a bound of a later clause that reads a variable whose Python
+  // name is the name of the index of that clause or of a clause after it
+  // (`Sum(j + k, Limits(j, 1, 2), Limits(k, 1, k))`, where the upper bound
+  // `k` is an outer variable) would read the local of the generator before it
+  // is assigned (an `UnboundLocalError`). When a later clause has a bound that
+  // is not a number literal, the index of every later clause gets a fresh
+  // name, which no bound reads. The emitted code of a bound cannot be
+  // inspected for the name reliably (a mapping can rename a symbol), so the
+  // rule applies to every such bound.
+  const laterClauses = args.slice(2);
+  const literalBound = (e: Expression | undefined): boolean =>
+    isNumber(e) && !e.isComplex && Number.isFinite(e.re);
+  const freshLaterIndices = laterClauses.some(
+    (c) =>
+      !isFunction(c, 'Limits') ||
+      !literalBound(c.ops[1]) ||
+      !literalBound(c.ops[2])
+  );
+  let clausePosition = 0;
   const { forClauses, idxTarget } = compilePythonSumProductClauses(
     kind,
     args.slice(1),
-    target
+    target,
+    freshLaterIndices
+      ? (name) => (clausePosition++ === 0 ? name : BaseCompiler.tempVar(target))
+      : undefined
   );
   const reduce = (gen: string): string =>
     kind === 'Sum' ? `sum(${gen})` : `math.prod(${gen})`;

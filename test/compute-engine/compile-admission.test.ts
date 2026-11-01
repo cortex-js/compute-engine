@@ -2193,6 +2193,14 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
 
   // The interpreter does not change `p` for an assignment in a bound of a
   // `Sum` or a `Product`; the compiled code gave 4 and 2.
+  //
+  // The compilation declines while it generates the code of the big
+  // operator: a bound with an effect (here the `Assign`) is refused by
+  // `assertSafeBigOpBounds()` (`compile-folding.ts`), because the
+  // interpreter does not evaluate a big operator over such a bound. The
+  // admission check that also finds the assignment (R3, code
+  // `unsettled-shape`) runs only after the code was generated with no
+  // decline, so its reason is not the one reported.
   test.each(['Sum', 'Product'])('an assignment in a bound of a %s', (op) => {
     const first: MathJsonExpression = [
       'Block',
@@ -2213,7 +2221,10 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     ];
     for (const json of [first, later]) {
       expect(interpret(engine(), json, {})).toBe(0);
-      expectDecline(engine(), json, new RegExp(`inside the \`${op}\``));
+      const r = compile(engine().box(json));
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('compile-error');
+      expect(r.error).toMatch(/upper bound `[^`]*` has an effect/);
     }
   });
 

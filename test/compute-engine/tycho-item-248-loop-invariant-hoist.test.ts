@@ -92,8 +92,11 @@ describe('Tycho item 248 — loop-form Sum', () => {
     const [body] = whileBodies(code);
     expect(body).not.toContain('reduce(');
     // The binding sits behind the empty-range return, after the loop-entry
-    // guard.
-    expect(code).toMatch(/if \(!\(j <= _upper\)\) return 0; const _tv\d+ = /);
+    // guard. The upper bound has no compile-time value, so the loop steps a
+    // separate counter (`_tvN`) and the body declares the index `j`.
+    expect(code).toMatch(
+      /if \(!\(_tv\d+ <= _upper\)\) return 0; const _tv\d+ = /
+    );
     expect(run({ P })).toBe(4 * 1 + 11);
     expect(run({ P })).toBe(interpret(expr, { P }));
   });
@@ -162,7 +165,7 @@ describe('Tycho item 248 — loop-form Sum', () => {
       ['Limits', 'j', 1, 'm'],
     ]);
     const { code, run } = js(expr);
-    expect(code).toContain('if (!(j <= _upper)) return 0; const');
+    expect(code).toMatch(/if \(!\(_tv\d+ <= _upper\)\) return 0; const/);
     expect(run({ P: [], m: 0 })).toBe(0);
     expect(run({ P: [4, 6], m: 2 })).toBe(4 + 4 + 4 + 6);
   });
@@ -174,7 +177,7 @@ describe('Tycho item 248 — loop-form Sum', () => {
       ['Limits', 'j', 1, 'm'],
     ]);
     const { code, run } = js(expr);
-    expect(code).toContain('if (!(j <= _upper)) return 1; const');
+    expect(code).toMatch(/if \(!\(_tv\d+ <= _upper\)\) return 1; const/);
     expect(whileBodies(code)[0]).not.toContain('reduce(');
     expect(run({ P: [], m: 0 })).toBe(1);
     expect(run({ P: [1, 2], m: 2 })).toBe((2 + 1) * (2 + 2));
@@ -218,7 +221,9 @@ describe('Tycho item 248 — loop-form Sum', () => {
     ]);
     const { code, run } = js(expr);
     expect(code.indexOf('reduce(')).toBeGreaterThan(code.indexOf('while ('));
-    expect(code).toMatch(/if \(!\(j <= _upper\)\) \{ _js\d+ = 0; break _js\d+; \} const/);
+    expect(code).toMatch(
+      /if \(!\(_tv\d+ <= _upper\)\) \{ _js\d+ = 0; break _js\d+; \} const/
+    );
     const [outer, inner] = whileBodies(code);
     expect(outer).toContain('reduce(');
     expect(inner).not.toContain('reduce(');

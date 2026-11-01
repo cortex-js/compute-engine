@@ -17429,17 +17429,32 @@ function emitSumProduct(
   // clauses: a write to an outer index lasts for one tuple. Clauses that
   // nest (`clausesNest`) are evaluated as nested operators, so there a
   // write to an outer index lasts until the next value of that index.
-  const counter = bodyWritesIndex ? BaseCompiler.tempVar(target) : indexCode;
+  //
+  // A bound with no compile-time value is compiled as code and evaluated
+  // once, before the loop, in the scope that declares the counter. That code
+  // can read a variable whose emitted name is the emitted name of the index:
+  // an outer variable with the same name (`Sum(j, Limits(j, j, 5))`, where
+  // the lower bound is a free `j`), or a symbol that the target's `var` maps
+  // to that name. A counter with the name of the index would hide that
+  // variable: the lower bound would read the uninitialized counter (a
+  // `ReferenceError`), and the upper bound would read the lower bound. So
+  // such a loop also steps a separate counter, and only the loop body
+  // declares the index. The emitted code of a bound cannot be inspected for
+  // the name reliably, so the rule applies to every bound with no
+  // compile-time value.
+  const writtenCounter = bodyWritesIndex
+    ? BaseCompiler.tempVar(target)
+    : indexCode;
   const innerWrittenIndices: ReadonlyArray<WrittenLoopIndex> = bodyWritesIndex
-    ? [...enclosingWrittenIndices, { name: index, code: indexCode, counter }]
+    ? [
+        ...enclosingWrittenIndices,
+        { name: index, code: indexCode, counter: writtenCounter },
+      ]
     : enclosingWrittenIndices;
   const declaredIndices =
     rest.length === 0 && !clausesNest
       ? innerWrittenIndices
       : innerWrittenIndices.filter((w) => w.name === index);
-  const iterationPrelude = declaredIndices
-    .map((w) => `let ${w.code} = ${w.counter}; `)
-    .join('');
 
   // The counter stays numeric unless the body writes it. Declining on any
   // same-named assignment also conservatively covers nested binder scopes.
@@ -17500,6 +17515,21 @@ function emitSumProduct(
           .join('');
 
   const acc = BaseCompiler.tempVar(target);
+
+  // The separate counter of a loop with a bound that has no compile-time
+  // value (the bound must not read a counter with the name of the index) is
+  // named after the body and the accumulator are, so
+  // that their temporaries keep the names they have without it. Only the
+  // body declares the index, from the counter. That declaration is not in
+  // `innerWrittenIndices`: an index that the body does not write needs no
+  // declaration in the inner clauses.
+  const counter =
+    !bodyWritesIndex && (lowerNum === undefined || upperNum === undefined)
+      ? BaseCompiler.tempVar(target)
+      : writtenCounter;
+  const iterationPrelude =
+    (counter !== writtenCounter ? `let ${indexCode} = ${counter}; ` : '') +
+    declaredIndices.map((w) => `let ${w.code} = ${w.counter}; `).join('');
 
   // Iteration-budget guard (see CompileTarget.iterationBudget): a trip count
   // over the budget — including infinite or NaN bounds, for which the negated

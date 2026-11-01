@@ -1587,13 +1587,9 @@ function compileLoopBound(
     throw new Error(
       `Could not compile \`${h}\`: the ${which} bound \`${expr.toString()}\` is not a finite number, and a loop over it does not end`
     );
-  // The interpreter does not evaluate a bound that is not pure (`Random`):
-  // it leaves the big operator unevaluated (`bigopBoundValue()` in
-  // `library/utils.ts`), so the compilation declines too.
-  if (!expr.isPure)
-    throw new Error(
-      `Could not compile \`${h}\`: the ${which} bound \`${expr.toString()}\` is not pure, and the interpreter does not evaluate a big operator over such a bound`
-    );
+  // A bound with a known effect (`Random`) was refused before this call, by
+  // `assertSafeBigOpBounds()`: the interpreter leaves the big operator
+  // unevaluated for such a bound.
   const value = core.bigOpBoundConstant(expr, target);
   if (value !== undefined) return String(value);
   if (!expr.type.matches('integer'))

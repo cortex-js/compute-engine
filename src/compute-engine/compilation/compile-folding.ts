@@ -22,6 +22,7 @@ import {
   isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
+import { hasDefinedEffect } from '../boxed-expression/effects-of.js';
 import {
   functionLiteralParameterName,
   isDestructuringParameter,
@@ -2288,13 +2289,36 @@ export function emitFoldedValue(
  * second answers `undefined` for a folded value that is not a safe integer
  * (`2^{53}`, `10^{20}`), which a caller then reads as "not a constant" and
  * emits as a loop.
+ *
+ * Also refuse a bound with a known effect (`Random(Range(2, 3))`, a call
+ * of a function whose definition is not pure). The interpreter does not
+ * evaluate such a bound: it leaves the big operator unevaluated
+ * (`bigopBoundValue()` in `library/utils.ts`), so compiled code that
+ * evaluates the bound would give a value where the interpreter gives none.
+ *
+ * The test is `hasDefinedEffect()`, not `isPure`. A call whose head is a symbol
+ * of function type with no definition (`h(2)`, with `h` declared
+ * `(integer) -> integer` and supplied by the host through the `functions`
+ * option) has unknown effects at compile time, so `isPure` is false. But
+ * the interpreter evaluates that bound once `h` has a value, so this check
+ * must not refuse it. `hasDefinedEffect()` counts an effect that a definition
+ * states or implements, the stated effect `any` included
+ * (`(integer) any -> integer`), and not the unknown effects of a call whose
+ * head has no such definition. The same holds for a call of a parameter typed as a
+ * function; such a call passes this check, but the compilation of the call
+ * itself declines on the JavaScript and Python targets for another reason.
  */
 export function assertSafeBigOpBounds(
   kind: string,
   bounds: ReadonlyArray<Expression | undefined>,
   target?: CompileTarget<Expression>
 ): void {
-  for (const expr of bounds) {
+  for (const [i, expr] of bounds.entries()) {
+    // Every caller passes the lower bound, then the upper bound.
+    if (expr !== undefined && hasDefinedEffect(expr))
+      throw new Error(
+        `Could not compile \`${kind}\`: the ${i === 0 ? 'lower' : 'upper'} bound \`${expr.toString()}\` has an effect, and the interpreter does not evaluate a big operator over such a bound`
+      );
     const value = bigOpBoundValue(expr, target);
     if (value !== undefined && !Number.isSafeInteger(Math.floor(value)))
       throw new Error(

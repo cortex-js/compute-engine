@@ -1518,8 +1518,22 @@ function compileGPUSumProduct(
   // already ONE READ (a literal, a bare name, a conversion around one of
   // those) is left in place: a local would only add a line and hide which
   // name the header tests.
+  //
+  // The exception is a one read of a name equal to the name of the index.
+  // The loop condition is in the scope of the counter, so there the name
+  // reads the counter, not the outer variable that the bound reads
+  // (`Sum(j, Limits(j, 1, j))` with an outer `j` gave
+  // `for (int j = 1; j <= int(floor(j)); j++)`). The code of a one read
+  // holds exactly one name that is not a conversion or a rounding, its last
+  // identifier, so this test is exact; any other bound gets a local anyway.
+  // The lower bound needs no local: it is the initializer of the counter,
+  // and in both languages the scope of a declared name starts after its
+  // initializer.
+  const readsIndex = (code: string): boolean =>
+    /([A-Za-z_]\w*)\)*$/.exec(code.trim())?.[1] === index;
   const boundVar =
-    upperNum === undefined && !gpuBoundIsOneRead(upperStr)
+    upperNum === undefined &&
+    (!gpuBoundIsOneRead(upperStr) || readsIndex(upperStr))
       ? BaseCompiler.tempVar(target)
       : '';
   const boundDecl =

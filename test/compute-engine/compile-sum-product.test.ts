@@ -873,3 +873,248 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
     }
   });
 });
+
+describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF THE INDEX', () => {
+  // A bound is evaluated before the index is bound: in
+  // `Function(Sum(j, Limits(j, 1, j + 2)), j)` the upper bound reads the
+  // parameter `j`. The JavaScript loop declared its counter with the name of
+  // the index in the scope where it evaluated the bounds, so the upper bound
+  // read the counter (6, not 10) and the lower bound threw a
+  // `ReferenceError`. The loop now steps a separate counter, and only the
+  // loop body declares the index.
+  const I = "'integer'";
+  const fn = (op: string, body: unknown, ...limits: unknown[]): unknown => [
+    'Function',
+    [op, body, ...limits],
+    ['Typed', 'j', I],
+  ];
+  const inc = (index: string): unknown => [
+    'Block',
+    ['Assign', index, ['Add', index, 1]],
+    index,
+  ];
+  const block = (op: string, body: unknown, ...limits: unknown[]): unknown => [
+    'Block',
+    ['Declare', 'j', I],
+    ['Assign', 'j', 2],
+    [op, body, ...limits],
+  ];
+
+  const FUNCTION_CASES: [string, unknown, number][] = [
+    ['an upper bound', fn('Sum', 'j', ['Limits', 'j', 1, ['Add', 'j', 2]]), 10],
+    ['a lower bound', fn('Sum', 'j', ['Limits', 'j', 'j', 5]), 14],
+    ['both bounds', fn('Sum', 'j', ['Limits', 'j', 'j', ['Add', 'j', 2]]), 9],
+    ['a Product', fn('Product', 'j', ['Limits', 'j', 'j', 5]), 120],
+    [
+      'a body that writes the index',
+      fn('Sum', inc('j'), ['Limits', 'j', 'j', ['Add', 'j', 2]]),
+      12,
+    ],
+    [
+      'an inner clause',
+      fn('Sum', ['Add', 'k', 'j'], ['Limits', 'k', 1, 2], ['Limits', 'j', 1, 'j']),
+      12,
+    ],
+    [
+      'a complex body',
+      fn('Sum', ['Sqrt', ['Negate', 'j']], ['Limits', 'j', 'j', 4]),
+      NaN,
+    ],
+  ];
+
+  test.each(FUNCTION_CASES)('JS: %s', (_name, f, expected) => {
+    const result = compile(ce.box(f as any), { to: 'javascript' });
+    expect(result.success).toBe(true);
+    const value = result.run!(2 as never) as number | { re: number; im: number };
+    const reference = new ComputeEngine().box(['Apply', f, 2] as any).N();
+    if (typeof value === 'number') {
+      expect(reference.im).toBe(0);
+      expect(reference.re).toBe(expected);
+      expect(value).toBe(reference.re);
+    } else {
+      expect(value.re).toBeCloseTo(reference.re, 10);
+      expect(value.im).toBeCloseTo(reference.im, 10);
+      expect(value.im).toBeCloseTo(Math.SQRT2 + Math.sqrt(3) + 2, 10);
+    }
+  });
+
+  test.each([
+    ['a lower bound', block('Sum', 'j', ['Limits', 'j', 'j', 5]), 14],
+    ['an upper bound', block('Sum', 'j', ['Limits', 'j', 1, 'j']), 3],
+    [
+      'a list body',
+      block('Sum', ['Multiply', 'j', ['List', 1, 2]], ['Limits', 'j', 'j', 4]),
+      [9, 18],
+    ],
+  ] as const)('JS: a local of a Block, %s', (_name, expr, expected) => {
+    const result = compile(ce.box(expr as any), { to: 'javascript' });
+    expect(result.success).toBe(true);
+    expect(result.run!({} as never)).toEqual(expected);
+    const reference = ce.box(expr as any).evaluate();
+    expect(reference.json).toEqual(
+      typeof expected === 'number' ? expected : ['List', ...expected]
+    );
+  });
+
+  test('JS: the loop steps a counter, and the body declares the index', () => {
+    const result = compile(
+      ce.box(fn('Sum', 'j', ['Limits', 'j', 'j', 5]) as any),
+      { to: 'javascript' }
+    );
+    expect(result.code).toMatch(
+      /let (_tv\d+) = Math\.floor\(j\);.*while \(\1 <= _upper\) \{ let j = \1; /
+    );
+  });
+
+  // The upper bound is bound to a local ahead of the loop, outside the scope
+  // of the counter: in the loop condition, `j` reads the integer counter.
+  const runShader = (code: string): number =>
+    // eslint-disable-next-line no-new-func
+    new Function(
+      'const floor = Math.floor, int = Math.trunc, i32 = Math.trunc, ' +
+        'float = Number, f32 = Number;\n' +
+        code
+          .replace(/^(\s*)(?:float|int) (\w+)(;| =)/gm, '$1let $2$3')
+          .replace(/^(\s*)(?:var|let) (\w+): \w+(;| =)/gm, '$1let $2$3')
+          .replace(/for \((?:int|var) (\w+)(?:: i32)? =/g, 'for (let $1 =')
+    )();
+  test.each([
+    ['glsl', 'Sum', 'j', 3],
+    ['glsl', 'Sum', ['Add', 'j', 2], 10],
+    ['glsl', 'Product', 'j', 2],
+    ['wgsl', 'Sum', 'j', 3],
+    ['wgsl', 'Product', ['Add', 'j', 2], 24],
+  ] as const)('%s: %s, upper bound %j', (to, op, hi, v) => {
+    const expr = block(op, 'j', ['Limits', 'j', 1, hi]);
+    expect(ce.box(expr as any).evaluate().re).toBe(v);
+    const result = compile(ce.box(expr as any), { to, fallback: false });
+    expect(result.success).toBe(true);
+    const code = result.code as string;
+    expect(code).toMatch(/j <= _tv\d+;/);
+    expect(runShader(code)).toBe(v);
+  });
+
+  // In a generator expression, Python evaluates the `range` of a later
+  // `for` clause in the scope of the generator, where the variable of every
+  // clause is a local: a later clause takes a fresh index name.
+  (TEST_PYTHON === undefined ? it.skip : it)(
+    'Python: the generator and the loop form give the interpreter value',
+    () => {
+      const cases: unknown[] = [
+        block('Sum', 'j', ['Limits', 'j', 'j', 5]),
+        block('Sum', 'j', ['Limits', 'j', 1, ['Add', 'j', 2]]),
+        block('Sum', inc('j'), ['Limits', 'j', 'j', 5]),
+        block('Sum', ['Add', 'k', 'j'], ['Limits', 'k', 1, 3], ['Limits', 'j', 1, 'j']),
+        block(
+          'Product',
+          ['Add', 'k', 'j'],
+          ['Limits', 'k', 1, 2],
+          ['Limits', 'j', 'k', 'j']
+        ),
+      ];
+      const py = new PythonTarget();
+      let program = 'import math\nout = []\n';
+      cases.forEach((json, i) => {
+        const code = py.compile(ce.box(json as any)).code as string;
+        const body = code
+          .split('\n')
+          .map((l) => `    ${l}`)
+          .join('\n');
+        program += `def f${i}():\n${body}\nout.append(f${i}())\n`;
+      });
+      program += 'print(out)\n';
+      const out = JSON.parse(
+        execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
+      ) as number[];
+      expect(out).toEqual(cases.map((json) => ce.box(json as any).evaluate().re));
+    }
+  );
+});
+
+describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
+  // The interpreter does not evaluate a big operator over a bound that is
+  // not pure: `Sum(j, Limits(j, 1, Random(Range(2, 3))))` stays unevaluated
+  // (`bigopBoundValue()` in `library/utils.ts`). Each target declines it.
+  const exprs = [
+    ['Sum', 'j', ['Limits', 'j', 1, ['Random', ['Range', 2, 3]]]],
+    ['Product', 'j', ['Limits', 'j', ['Random', ['Range', 1, 2]], 3]],
+  ];
+  test.each(exprs.map((e) => [JSON.stringify(e), e]))(
+    'the interpreter keeps %s unevaluated',
+    (_name, e) => {
+      const value = ce.box(e as any).evaluate();
+      expect(value.operator).toBe((e as unknown[])[0]);
+    }
+  );
+  test.each(
+    ['javascript', 'interval-js', 'python', 'glsl', 'wgsl'].flatMap((to) =>
+      exprs.map((e) => [to, JSON.stringify(e), e] as const)
+    )
+  )('%s declines %s', (to, _name, e) => {
+    // A target declines either by throwing or with `success: false`.
+    let success = true;
+    try {
+      success = compile(ce.box(e as any), {
+        to: to as never,
+        fallback: false,
+      }).success;
+    } catch (err) {
+      expect(String(err)).toMatch(/has an effect/);
+      success = false;
+    }
+    expect(success).toBe(false);
+  });
+
+  // A call of a function with no definition at compile time has unknown
+  // effects, so `isPure` is false. The compilation does not refuse it: the
+  // interpreter evaluates the bound once the function has a value. Only a
+  // known effect is refused.
+  test('JS: a call of a declared function with no definition compiles', () => {
+    const engine = new ComputeEngine();
+    engine.declare('h', '(integer) -> integer');
+    const expr = engine.box(['Sum', 'j', ['Limits', 'j', 1, ['h', 2]]] as any);
+    expect(expr.isPure).toBe(false);
+    const result = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+      functions: { h: (x: number) => x + 1 },
+    } as never);
+    expect(result.success).toBe(true);
+    const reference = new ComputeEngine();
+    reference.declare('h', '(integer) -> integer');
+    reference.assign('h', reference.box(['Function', ['Add', 'x', 1], 'x']));
+    const expected = reference
+      .box(['Sum', 'j', ['Limits', 'j', 1, ['h', 2]]] as any)
+      .evaluate().re;
+    expect(expected).toBe(6);
+    expect(result.run!({} as never)).toBe(expected);
+  });
+
+  test('JS: a call of a function declared not pure declines', () => {
+    const engine = new ComputeEngine();
+    engine.declare('g', {
+      signature: '(integer) -> integer',
+      pure: false,
+      evaluate: ([x]) => x,
+    } as never);
+    const expr = engine.box(['Sum', 'j', ['Limits', 'j', 1, ['g', 2]]] as any);
+    expect(expr.evaluate().operator).toBe('Sum');
+    expect(() =>
+      compile(expr, { to: 'javascript', fallback: false })
+    ).toThrow(/upper bound `g\(2\)` has an effect/);
+  });
+
+  // A declared type that states the effect `any` is a contract: the call is
+  // not pure, even with a pure function value assigned, so the interpreter
+  // leaves the `Sum` unevaluated.
+  test('JS: a call of a function whose type states the effect `any` declines', () => {
+    const engine = new ComputeEngine();
+    engine.declare('h', { type: '(integer) any -> integer' });
+    engine.assign('h', engine.box(['Function', ['Add', 'x', 1], 'x']));
+    const expr = engine.box(['Sum', 'j', ['Limits', 'j', 1, ['h', 2]]] as any);
+    expect(expr.evaluate().operator).toBe('Sum');
+    expect(() =>
+      compile(expr, { to: 'javascript', fallback: false })
+    ).toThrow(/upper bound `h\(2\)` has an effect/);
+  });
+});

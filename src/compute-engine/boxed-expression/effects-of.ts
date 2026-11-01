@@ -649,6 +649,68 @@ export function isMergeable(
 }
 
 /**
+ * Does evaluating `expr` have an effect that a definition states or
+ * implements? The compilation of a `Sum`/`Product` bound asks this
+ * (`assertSafeBigOpBounds()` in `compilation/compile-folding.ts`): the
+ * interpreter does not evaluate a bound that is not pure.
+ *
+ * `expr.isPure` is not the test. A call whose head has no definition of
+ * what it does (a parameter, or a symbol declared with a function type and
+ * neither stated effects nor a value) has the effects `any` at compile time,
+ * and is not pure. But the interpreter evaluates such a bound once the
+ * function has a value, so this predicate does not count it.
+ *
+ * `isMergeable()` is not the test either: it also accepts a call of a
+ * function whose declared type STATES the effect `any`
+ * (`(integer) any -> integer`). Under that stated contract the call is not
+ * pure, so the interpreter leaves the big operator unevaluated, and this
+ * predicate counts it.
+ *
+ * Each node is examined by its own effects, and every operand is examined in
+ * turn, so `Random()` anywhere in `expr` counts. `seen` holds the answer for
+ * each node already examined: a subexpression can be shared by several
+ * nodes.
+ */
+export function hasDefinedEffect(
+  expr: Expression,
+  seen: Map<Expression, boolean> = new Map()
+): boolean {
+  if (expr.isPure) return false;
+  if (!isFunction(expr)) return true;
+  // Building a function literal has no effect: its body runs only where the
+  // literal is applied.
+  if (expr.operator === 'Function') return false;
+  const known = seen.get(expr);
+  if (known !== undefined) return known;
+  seen.set(expr, false);
+  let own: ComputedEffects;
+  if (operatorDefinitionOf(expr) !== undefined) {
+    // An operator definition states or implements its effects, `any`
+    // included (the legacy `pure: false`).
+    own = shallowApplicationEffects(expr);
+  } else {
+    // A value head: count the effects that its declared type states or that
+    // its function value implements, and the latent effects of the function
+    // values it is passed. A head with neither stated effects nor a value
+    // (an unimplemented declaration, an undeclared name, a parameter) does
+    // not count.
+    const def = expr.engine.lookupDefinition(expr.operator);
+    const head =
+      def !== undefined && 'value' in def
+        ? valueBindingEffects(def.value)
+        : NOT_CALLABLE;
+    own = head === NOT_CALLABLE || head === UNIMPLEMENTED ? undefined : head;
+    for (const op of expr.ops)
+      own = unionComputedEffects(own, latentEffectsOf(op));
+  }
+  const result =
+    !isPureComputedEffects(own) ||
+    expr.ops.some((op) => hasDefinedEffect(op, seen));
+  seen.set(expr, result);
+  return result;
+}
+
+/**
  * `ownEffects(op)` for one application (`docs/EFFECTS-MODEL.md`, "Overloads").
  *
  * For a plain signature this is just the definition's effect set. For an
