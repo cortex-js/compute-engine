@@ -3342,6 +3342,73 @@ function callbackResultType(op: Expression | undefined): Type | undefined {
   return declared === undefined ? undefined : functionResult(declared);
 }
 
+/**
+ * The type of the result of the callback `fn` of `FlatMap(source, fn)` for
+ * one element of `source`. The `type` and `isFinite` handlers of `FlatMap`
+ * read it.
+ *
+ * The declared result of the callback is used ({@link callbackResultTypeD}),
+ * except for a symbol whose declared result says nothing (none, `unknown`
+ * or `any`) or whose signature has a parameter typed `unknown`
+ * (`callbackHasUnresolvedParameterD`). Such a symbol is typed by its call
+ * on one element of the source (`callbackCallElementTypeD`, which admits a
+ * user function and the positional accessors `First`, `PointX`, …), when
+ * that call has a known type. This is the condition under which
+ * `declaredOrCallElementTypeD` types a callback of `Map` by its call.
+ *
+ * A signature inferred with the parameter `unknown` can lose the length of
+ * a list: with `f := x ↦ [x, x]` it is `(unknown) -> list<unknown>`, but the
+ * call on an integer is `vector<integer^2>`. An inline literal has no such
+ * loss, because it is canonicalized with its parameter typed by the
+ * elements.
+ *
+ * `called` is true when `type` is the type of the call. That call was typed
+ * with the element type of the source, so when that type has a `missing`
+ * arm, it also describes the call on an absent cell.
+ */
+function flatMapInnerResultTypeD(
+  fn: OperandDescriptor | undefined,
+  source: OperandDescriptor | undefined,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
+): { type: Type | undefined; called: boolean } {
+  const declared = callbackResultTypeD(fn, engine);
+  if (
+    fn === undefined ||
+    source === undefined ||
+    fn.structureOf?.()?.kind !== 'symbol'
+  )
+    return { type: declared, called: false };
+  const informative =
+    declared !== undefined && declared !== 'unknown' && declared !== 'any';
+  if (informative && !callbackHasUnresolvedParameterD(fn, engine))
+    return { type: declared, called: false };
+  const called = callbackCallElementTypeD(fn, [source], engine, derive);
+  return called === undefined
+    ? { type: declared, called: false }
+    : { type: called, called: true };
+}
+
+/**
+ * The expression form of {@link flatMapInnerResultTypeD}, for the
+ * `isFinite` handler of `FlatMap`. A callback that is not a symbol gives
+ * its declared result ({@link callbackResultType}), and the source is then
+ * not described.
+ */
+function flatMapInnerResultType(
+  fn: Expression,
+  source: Expression
+): Type | undefined {
+  if (!isSymbol(fn)) return callbackResultType(fn);
+  const ce = fn.engine;
+  return flatMapInnerResultTypeD(
+    describeOperand(fn),
+    describeOperand(source),
+    ce,
+    (head, operands) => deriveApplicationType(ce, head, operands)
+  ).type;
+}
+
 /** Build one present Zip row, preserving every source coordinate. */
 function zipElement(
   ce: ComputeEngine,
@@ -15559,6 +15626,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // - A function literal with bare parameters is typed from its body with
     //   the parameter typed by the cells (`bareMappingElementTypeD`), as for
     //   `Map`. Otherwise its own result type is used.
+    // - A symbol whose declared result says nothing, or whose signature has
+    //   a parameter typed `unknown` (`f := x ↦ [x, x]`), is typed by its
+    //   call on the cell type (`flatMapInnerResultTypeD`). With a `missing`
+    //   arm in the cell type, that call also describes an absent cell, and
+    //   no absorption is added: over `[1, Missing]`, `FlatMap(l, f)` is
+    //   `list<integer | missing>`.
     // - A declared result (`Sqrt`, `IsPrime`) says nothing about an absent
     //   cell, so the result takes the absorption that `Map` applies for such
     //   a callback (`withDeclaredCallbackAbsence`): `NaN` for a number, and a
@@ -15585,7 +15658,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         absentCells && isLiteral && source !== undefined && fn !== undefined
           ? bareMappingElementTypeD(fn, [source], engine, derive)
           : undefined;
-      const resultType = fromBody ?? callbackResultTypeD(fn, engine);
+      // With `f := x ↦ [x, x]`, whose signature is
+      // `(unknown) -> list<unknown>`, `FlatMap([1, 2], f)` is typed by the
+      // call of `f` on an integer (`flatMapInnerResultTypeD`): it is
+      // `list<integer>`, as `FlatMap([1, 2], x ↦ [x, x])` is. It was typed
+      // `list<unknown>`.
+      const inner =
+        fromBody === undefined
+          ? flatMapInnerResultTypeD(fn, source, engine, derive)
+          : undefined;
+      // The call was typed with the cells' `missing` arm, so it already
+      // says what the callback answers for an absent cell, as `fromBody`
+      // does. A cell absent only through `any` has no element type for the
+      // call, which then gives no type.
+      const calledWithAbsence =
+        inner?.called === true &&
+        element !== undefined &&
+        typeContainsMissing(element);
+      const resultType = fromBody ?? inner?.type;
       if (!resultType || resultType === 'unknown' || resultType === 'any')
         return BoxedType.forResult(
           absentCells
@@ -15603,12 +15693,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         kind: 'list',
         elements: flatMapSplicedType(resultType),
       };
-      // A result typed from the body with the absent cells
-      // (`fromBody`) already says what the callback answers for them.
-      if (!absentCells || fromBody !== undefined || fn === undefined)
+      // A result typed from the body with the absent cells (`fromBody`), or
+      // by the call on the cell type with its `missing` arm
+      // (`calledWithAbsence`), already says what the callback answers for
+      // them.
+      if (
+        !absentCells ||
+        fromBody !== undefined ||
+        calledWithAbsence ||
+        fn === undefined
+      )
         return BoxedType.forResult(result, engine._typeResolver);
-      // Any other result (a declared one, or the own type of a literal)
-      // describes the call on a present cell only. The call on an absent
+      // Any other result (a declared one, the own type of a literal, or the
+      // call of a symbol on a cell type with no `missing` arm) describes the
+      // call on a present cell only. The call on an absent
       // cell is described as for a declared callback of `Map`: `NaN` for a
       // number (`(x: integer) ↦ [x]` answers `NaN` for an absent cell, the
       // absorption of `absorbOperandAbsence`), and a `missing` arm when that
@@ -15752,8 +15850,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // infinite from a finite source. Since every finite-guarded consumer
       // (`Reduce`, `Sum`, …) enumerates on the strength of this facet, `true`
       // is claimed only when BOTH halves are provable, from the callback's
-      // declared RESULT type (contract clause 3, the same type
-      // `callbackResultType` feeds the `type:` handler):
+      // RESULT type (contract clause 3): its declared result, or for a user
+      // function its call on one element (`flatMapInnerResultType`), the
+      // type that the `type:` handler reads too:
       // - a result provably disjoint from `collection` is a SCALAR — the
       //   iterator emits it as a single element, so it cannot diverge;
       // - a collection result must pin a fixed extent statically
@@ -15772,12 +15871,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // direction is untouched by this handler's tightening).
         const source = finitenessOfSource(expr.op1);
         if (source !== true) return source;
-        const inner = callbackResultType(expr.op2);
+        const inner = flatMapInnerResultType(expr.op2, expr.op1);
         if (inner === undefined) return undefined;
         if (provablyDisjoint(inner, 'collection')) return true;
         // A collection whose element type is `never` (`x ↦ []` returns
         // `list<never>`) holds no element: each inner result is empty.
         if (collectionElementType(inner) === 'never') return true;
+        // A tuple has a fixed number of components, so each inner result
+        // of a tuple type is finite: `FlatMap([1, 2], x ↦ (x, x))` is
+        // `[1, 1, 2, 2]`. `staticCollectionDims` reads only list types.
+        if (isTupleOrTupleUnionShapedType(inner)) return true;
         const dims = staticCollectionDims(inner);
         return dims !== null && dims.every((d) => d >= 0) ? true : undefined;
       },

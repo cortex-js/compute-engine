@@ -3489,6 +3489,18 @@ function randomListType(
  * that the literal kept lazy because it is above that budget, when the
  * element reads a variable.
  *
+ * The walk visits each distinct object of the value once. A node that is one
+ * object in several operands (after `a1 := (a0, a0)`, the two operands of
+ * `a1` are one list) is walked once, so the cost is linear in the number of
+ * distinct nodes, not in the number of paths to them. A lazy collection that
+ * is one object in several operands is listed once per assignment, and its
+ * callback runs once for each element. Different objects are listed
+ * separately, also when they are structurally equal. The evaluation of the
+ * right-hand side makes a new object for each occurrence of a lazy
+ * collection: in `r := (p, p)`, with `p` a view of 3 elements that the
+ * literal keeps lazy, the two operands are two objects, and the callback
+ * runs 6 times, as for `r := (p, q)` with `q` an equal view.
+ *
  * The host function `ce.assign()` is not changed: a host that defines one
  * name from another with an expression wants the live view.
  *
@@ -3501,16 +3513,53 @@ function assignedValue(ce: ComputeEngine, value: Expression): Expression {
 }
 
 /** `assignedValue` without the copy of the variables of the run: the lazy
- * collections that read a variable listed. */
-function listedAssignedValue(ce: ComputeEngine, value: Expression): Expression {
-  if (
+ * collections that read a variable listed.
+ *
+ * `memo` maps each node already visited to its result. A value can share a
+ * node in several operands (`a1 := (a0, a0)`, `a2 := (a1, a1)`, ...): without
+ * the memo, the walk visits a shared node once for each path to it, and the
+ * cost doubles with each level of sharing. With the memo, each distinct node
+ * is visited once, so a shared lazy element is also listed once, and every
+ * operand that holds it gets the same list. */
+function listedAssignedValue(
+  ce: ComputeEngine,
+  value: Expression,
+  memo: Map<Expression, Expression> = new Map()
+): Expression {
+  // Only a node that the walk can change has a memo entry: a list or tuple
+  // literal that the walk enters, or a valid lazy collection. Every other
+  // node (a number, a symbol, a string) is returned as it is, so a large
+  // plain list does not fill the memo with its elements.
+  if (!isWalkedListOrTuple(value) && !(value.isValid && value.isLazyCollection))
+    return value;
+  const hit = memo.get(value);
+  if (hit !== undefined) return hit;
+  const result = listedAssignedValueUncached(ce, value, memo);
+  memo.set(value, result);
+  return result;
+}
+
+/** Whether `listedAssignedValue` walks the operands of `value`: a valid
+ * `List` or `Tuple` literal that is not lazy and has no numeric store. */
+function isWalkedListOrTuple(
+  value: Expression
+): value is Expression & { readonly ops: ReadonlyArray<Expression> } {
+  return (
     value.isValid &&
     (isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
     !value.isLazyCollection &&
     value._numericStore === undefined
-  ) {
+  );
+}
+
+function listedAssignedValueUncached(
+  ce: ComputeEngine,
+  value: Expression,
+  memo: Map<Expression, Expression>
+): Expression {
+  if (isWalkedListOrTuple(value)) {
     const ops = value.ops;
-    const next = ops.map((op) => listedAssignedValue(ce, op));
+    const next = ops.map((op) => listedAssignedValue(ce, op, memo));
     if (next.every((op, i) => op === ops[i])) return value;
     return ce.function(value.operator, next);
   }

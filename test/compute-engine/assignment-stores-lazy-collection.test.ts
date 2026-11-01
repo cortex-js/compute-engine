@@ -269,3 +269,95 @@ describe('a cancellation while the collection is listed', () => {
     expect(ce.box('ys').evaluate().operator).not.toBe('Map');
   });
 });
+
+// A value that shares a node in several operands: `a1 := (a0, a0)`,
+// `a2 := (a1, a1)`, ... The value at depth 40 has 41 distinct nodes and 2^40
+// paths to its leaf. `listedAssignedValue` visits each distinct node once, so
+// these evaluations take milliseconds. When it visited a shared node once for
+// each path to it, depth 22 took about 0.6 s and depth 40 did not end.
+describe('an assigned value that shares a tuple in several operands', () => {
+  const DEPTH = 40;
+
+  function sharedTuples(a0: unknown): any {
+    const statements: unknown[] = [['Assign', 'a0', a0]];
+    for (let i = 1; i <= DEPTH; i++)
+      statements.push(['Assign', `a${i}`, ['Tuple', `a${i - 1}`, `a${i - 1}`]]);
+    statements.push(`a${DEPTH}`);
+    return ['Block', ...statements];
+  }
+
+  // The leaf at the end of the path that takes the last operand at each
+  // level. The whole value is not serialized: it has 2^40 leaves.
+  function leaf(value: any): unknown {
+    for (let i = 0; i < DEPTH; i++) {
+      expect(value.operator).toBe('Tuple');
+      value = value.ops[1];
+    }
+    return value.json;
+  }
+
+  const lazyA0 = ['Map', ['Function', ['Add', 'c', 'n'], 'c'], ['List', 1, 2]];
+
+  test('at the top level', async () => {
+    const ce = new ComputeEngine();
+    ce.assign('xs', ce.box(['List', 1, 2]));
+    const expr = ce.box(sharedTuples(['Add', 'xs', 1]));
+    expect(leaf(expr.evaluate())).toEqual(['List', 2, 3]);
+    expect(leaf(await expr.evaluateAsync())).toEqual(['List', 2, 3]);
+  });
+
+  test('with a lazy collection at the top level', async () => {
+    const ce = new ComputeEngine();
+    ce.assign('n', 10);
+    const expr = ce.box(sharedTuples(lazyA0));
+    expect(leaf(expr.evaluate())).toEqual(['List', 11, 12]);
+    expect(leaf(await expr.evaluateAsync())).toEqual(['List', 11, 12]);
+  });
+
+  // The evaluation of `(p, p)` makes a new object for each occurrence of the
+  // view `p`, so the two operands are listed separately, as two equal views
+  // `(p, q)` are. A budget of 2 elements keeps the impure view of 3 elements
+  // lazy in the literal, so the assignment is what lists it.
+  test.each([
+    ['(p, p)', ['Tuple', 'p', 'p']],
+    ['(p, q)', ['Tuple', 'p', 'q']],
+  ])('an impure view above the budget, %s', (_, rhs) => {
+    const ce = new ComputeEngine();
+    ce.maxCollectionSize = 2;
+    let calls = 0;
+    ce.declare('tick', {
+      signature: '(integer) -> integer',
+      pure: false,
+      evaluate: ([x]) => {
+        calls += 1;
+        return x;
+      },
+    });
+    ce.assign('k', 10);
+    const view = [
+      'Map',
+      ['Function', ['Add', ['tick', 'c'], 'k'], 'c'],
+      ['Range', 1, 3],
+    ];
+    ce.assign('p', ce.box(view));
+    ce.assign('q', ce.box(view));
+    const value = ce.box(['Block', ['Assign', 'r', rhs], 'r']).evaluate();
+    expect(value.json).toEqual([
+      'Tuple',
+      ['List', 11, 12, 13],
+      ['List', 11, 12, 13],
+    ]);
+    expect(calls).toBe(6);
+  });
+
+  test('in the body of a function', async () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Apply',
+      ['Function', sharedTuples(lazyA0), 'n'],
+      10,
+    ]);
+    expect(leaf(expr.evaluate())).toEqual(['List', 11, 12]);
+    expect(leaf(await expr.evaluateAsync())).toEqual(['List', 11, 12]);
+  });
+});

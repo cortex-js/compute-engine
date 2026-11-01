@@ -276,6 +276,17 @@
 
 ### Bug Fixes
 
+- **`FlatMap` with a callback that names a user function gives the same
+  result as the same callback written inline.** With `f := x ↦ [x, x]`,
+  `ListFrom(FlatMap([1, 2], f))` is now `[1, 1, 2, 2]`, and `Count`, `Sum`
+  and `Length` over it are `4`, `6` and `4`. Before, they stayed unevaluated,
+  because the type of `FlatMap([1, 2], f)` came from the inferred signature
+  of `f`, `(x: unknown) -> list<unknown>`, which has no fixed length. The type
+  now comes from the call of `f` on one element of the source:
+  `FlatMap([1, 2], f)` is `list<integer>`, as for the inline callback. A
+  callback that returns a tuple also gives a finite result now:
+  `ListFrom(FlatMap([1, 2], x ↦ (x, x)))` is `[1, 1, 2, 2]`.
+
 - **A non-canonical `Integrate` binds the variable of its canonical form**
   (CE-699). `subs()` on a non-canonical `Integrate` whose limits name no
   variable now keeps the variables that the canonical form binds. For example,
@@ -1620,6 +1631,13 @@
   source text is the caller's own value and is not checked, as before.
 
 ### Performance
+
+- **An assignment whose value shares one list or tuple at several positions
+  takes linear time.** In a block `a1 := (a0, a0)`, `a2 := (a1, a1)`, …, the
+  value of `a_k` has `k + 1` distinct nodes but `2^k` paths, and the
+  assignment listed each node once per path: a depth of 22 took about 0.6 s,
+  and a depth of 40 did not finish. The assignment now lists each distinct
+  node once, and both depths take a few milliseconds.
 
 - **Compiling a callback whose body shares subexpressions takes linear
   time** (a follow-up of GitHub issue #488). A boxed expression can hold the
