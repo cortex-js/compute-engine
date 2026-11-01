@@ -376,6 +376,7 @@ import {
   reboundFunctionScope,
   reboundLocalNames,
   scalarConditionTarget,
+  writesSymbol,
 } from './compile-loops.js';
 import {
   assertExtraParamsRead,
@@ -414,9 +415,7 @@ import {
   assertLocalsAssignedBeforeRead,
   assertNoUseBeforeDeclare,
   chainedLocalDeclares,
-  checkedLocalReads,
   classifyLocalReads,
-  hideCheckedLocals,
   readsBlockLocal,
   refuseEffectContractViolations,
   _reservedDeclareNames,
@@ -3324,6 +3323,21 @@ export function compileExpr(
           `with only one bound has no value, and the interpreter keeps it ` +
           `unevaluated.`
       );
+    // A body can write an index (`Sum(Block(Assign(j, j + 1), j), Limits(j,
+    // 1, n))`). The interpreter binds the index to its next value at each
+    // iteration, whatever the body wrote. A compiled loop that steps the
+    // index itself would read the written value (a wrong sum, or a loop that
+    // does not end), and an unrolled term reads the index as a literal. So
+    // every target declines such a body, and the interpreter evaluates it.
+    for (const clause of args.slice(1)) {
+      const index = isFunction(clause) ? clause.ops[0] : undefined;
+      if (isSymbol(index) && writesSymbol(args[0], index.symbol))
+        throw new Error(
+          `Could not compile \`${h}\`: the body writes the index ` +
+            `\`${index.symbol}\`, and a compiled loop does not keep the next ` +
+            `value of the index after such a write.`
+        );
+    }
     // A clause with no bounds (`\sum_k f`) runs over 1..+∞, as in the
     // interpreter, so the targets read the bounds 1 and +∞ (and decline the
     // infinite bound by name) instead of the `Nothing` marker.
@@ -4559,11 +4573,9 @@ export function compileLoopBody(
       isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
     );
     assertLocalsAssignedBeforeRead(withDecls, bodyLocals);
-    // The reads of a local of the body that may have no value
-    // (`classifyLocalReads`): a read with no assignment on any path before
-    // it is refused, and the others are checked when the code runs, as in
-    // `compileBlock`.
-    const readClasses = classifyLocalReads(withDecls, bodyLocals, expr, target);
+    // A read of a local of the body that may have no value is refused, as
+    // in `compileBlock` (`classifyLocalReads`).
+    classifyLocalReads(withDecls, bodyLocals, expr, target);
     // A body-scoped `localFunctions`, filled in statement order below. Held
     // as its own binding because the field on `CompileTarget` is a
     // `ReadonlyMap`: the target exposes it for READS during compilation, and
@@ -4582,24 +4594,11 @@ export function compileLoopBody(
       lexicalFunctions: lexicalFunctionScope(withDecls, target, bodyRebound),
       reboundFunctions: reboundFunctionScope(withDecls, target, bodyRebound),
     };
-    let checkedFrame: ReturnType<typeof checkedLocalReads>;
-    try {
-      checkedFrame = checkedLocalReads(
-        readClasses,
-        target,
-        (name) => bodyTarget.var(name) ?? name
-      );
-    } catch (e) {
-      reserved.done();
-      throw e;
-    }
     const complexFrame = new Map<string, boolean>();
     for (const s of withDecls)
       if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
         complexFrame.set(s.ops[0].symbol, localComplexDefault());
     _pushLocalComplex(complexFrame);
-    if (checkedFrame !== undefined)
-      CompilerState._checkedLocals.push(checkedFrame);
     try {
       for (const s of withDecls) core.noteLocalComplex(s, complexFrame);
       return withCseScope(expr, -1, bodyTarget, () =>
@@ -4608,19 +4607,6 @@ export function compileLoopBody(
             // Statement-ordered, as in `compileBlock` — see the
             // `localFunctions` comment there.
             noteLocalFunction(s, bodyLocalFunctions, bodyRebound);
-            // A checked local starts with its own marker of "no value",
-            // as in `compileBlock`.
-            if (
-              checkedFrame !== undefined &&
-              isFunction(s, 'Declare') &&
-              isSymbol(s.ops[0]) &&
-              declareValueOperand(s.ops) === undefined
-            ) {
-              const name = s.ops[0].symbol;
-              const marker = checkedFrame.markers.get(name);
-              if (marker !== undefined)
-                return `const ${marker} = {}; let ${checkedFrame.spelled.get(name)} = ${marker}`;
-            }
             const code = core.compileLoopBody(s, bodyTarget);
             // A nested block is a JavaScript block statement (`{ … }`), so
             // that a `let` of it, written or implicit (a bare assignment of
@@ -4634,7 +4620,6 @@ export function compileLoopBody(
       );
     } finally {
       _popLocalComplex();
-      if (checkedFrame !== undefined) CompilerState._checkedLocals.pop();
       reserved.done();
     }
   }
@@ -4925,10 +4910,6 @@ export function withLocalShapeFrame<T>(
   }
   const savedComplex = CompilerState._localComplex;
   const savedVector = CompilerState._localVector;
-  // An isolated body is not lexically nested in the enclosing bodies, so
-  // the checks of their locals are not written in it either
-  // (`hideCheckedLocals`).
-  const savedChecked = isolate ? hideCheckedLocals() : undefined;
   if (isolate) {
     CompilerState._localComplex = [];
     CompilerState._localVector = [];
@@ -4945,7 +4926,6 @@ export function withLocalShapeFrame<T>(
   } finally {
     CompilerState._localVector = savedVector;
     CompilerState._localComplex = savedComplex;
-    if (savedChecked !== undefined) CompilerState._checkedLocals = savedChecked;
     if (!isolate) {
       CompilerState._localVector.pop();
       CompilerState._localComplex.pop();
@@ -6589,9 +6569,6 @@ export function emitFunctionLiteralDefinition(
     // promotion of the compile mode, also when the call site is the value
     // of a real ascription (see `withPromotionUnsuppressed`).
     const suppressed = liftPromotionSuppression();
-    // The definition is emitted at module level, outside the body that
-    // calls it (`hideCheckedLocals`).
-    const checkedLocals = hideCheckedLocals();
     try {
       const { params, bodyExpr, bodyTarget } = prepareUserFunctionBody(
         literal,
@@ -6915,7 +6892,6 @@ export function emitFunctionLiteralDefinition(
     } finally {
       registry.compiling.delete(name);
       restorePromotionSuppression(suppressed);
-      CompilerState._checkedLocals = checkedLocals;
     }
   }
 

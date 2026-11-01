@@ -1118,44 +1118,7 @@ export function desugarPatternDeclare(
         `leaf value does not fit. The interpreter evaluates it instead.`
     );
   const ce = arg.engine;
-  // A name can occur at more than one position of the pattern (`(a, a)`,
-  // `(a, (b, a))`; only a MathJSON input can have this, because the Epsil
-  // parser rejects such a pattern). The interpreter evaluates the whole
-  // value first, then binds the names in depth-first pattern order, so the
-  // name gets the value at its LAST position (`bindTuplePattern`,
-  // `library/core.ts`). Each earlier position of the name becomes `_` here:
-  // its element is still evaluated (a `_` leaf keeps its element as a
-  // statement, or reads nothing from the temporary that holds the whole
-  // value), and only the last position declares the name. Without this
-  // rewrite the lowering emitted two declarations of one local in one scope
-  // (`let a = 1; let a = 2`), which is not valid JavaScript. A declaration
-  // followed by an assignment for the later positions would also be wrong:
-  // a later element can read the name (`(a, a) = (1, a + 1)`), and it must
-  // read the value from before the statement, not the one that the earlier
-  // position just bound.
-  const seen = new Set<string>();
-  const keepLastOccurrence = (pattern: Expression): Expression => {
-    if (!isFunction(pattern, 'Tuple')) return pattern;
-    // Visit the positions from the last one to the first, so the first
-    // occurrence of a name found is its last one in depth-first order.
-    const ops = [...pattern.ops];
-    let changed = false;
-    for (let i = ops.length - 1; i >= 0; i--) {
-      const p = ops[i];
-      let q = p;
-      if (isFunction(p, 'Tuple')) q = keepLastOccurrence(p);
-      else if (isSymbol(p) && p.symbol !== '_') {
-        if (seen.has(p.symbol)) q = ce.symbol('_');
-        else seen.add(p.symbol);
-      }
-      if (q !== p) {
-        ops[i] = q;
-        changed = true;
-      }
-    }
-    return changed ? ce._fn('Tuple', ops) : pattern;
-  };
-  const pattern = keepLastOccurrence(arg.ops[0]);
+  const pattern = arg.ops[0];
   const value = declareValueOperand(arg.ops);
   // The interpreter evaluates the whole value before it binds any name of
   // the pattern (`bindTuplePattern`, `library/core.ts`), so an element that
@@ -1178,6 +1141,20 @@ export function desugarPatternDeclare(
     else if (isSymbol(p) && p.symbol !== '_') leafNames.push(p.symbol);
   };
   collectNames(pattern);
+  // A name can occur at more than one position of the pattern (`(a, a)`,
+  // `(a, (b, a))`). Only a MathJSON input can have this, because the Epsil
+  // parser rejects such a pattern. The interpreter gives the name the value
+  // at its last position. The per-leaf lowering would declare the name once
+  // per position in one scope (`let a = 1; let a = 2`), which is not valid
+  // JavaScript, so such a statement is not compiled: the interpreter
+  // evaluates it.
+  const repeatedName = leafNames.find((name, i) => leafNames.indexOf(name) < i);
+  if (repeatedName !== undefined)
+    throw new Error(
+      `Could not compile a destructuring declaration whose pattern has the ` +
+        `name '${repeatedName}' at more than one position. The interpreter ` +
+        `evaluates it instead.`
+    );
   const readName =
     value === undefined ? undefined : leafNames.find((name) => value.has(name));
   if (readName !== undefined)

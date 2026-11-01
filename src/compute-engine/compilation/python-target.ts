@@ -60,8 +60,6 @@ import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { tryGetConstant } from './constant-folding.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { cseSharingOff } from './compile-cse.js';
-import { writesSymbol } from './compile-loops.js';
-import { nestDependentLimits } from '../library/utils.js';
 import { operandMayBeAbsent } from './compile-absence.js';
 import {
   COINCIDENCE_BUDGET,
@@ -1638,47 +1636,12 @@ function compilePythonSumProductLoop(
     ...target,
     cse: cseSharingOff(target),
   };
-  const indexNames: string[] = [];
   const { forClauses, idxTarget } = compilePythonSumProductClauses(
     kind,
     args.slice(1),
     plain,
-    () => {
-      const fresh = BaseCompiler.tempVar(target);
-      indexNames.push(fresh);
-      return fresh;
-    }
+    () => BaseCompiler.tempVar(target)
   );
-  // A body can write an index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
-  // A Python `for` binds its variable to the next value of the range at each
-  // iteration, whatever the body wrote, as the interpreter does. With
-  // several clauses, the interpreter walks independent clauses as one
-  // cartesian product and binds every index at each tuple, so a write to an
-  // outer index lasts for one tuple: the `for` of such an index steps a
-  // separate counter, and each iteration of the innermost loop assigns the
-  // index from it. The bounds of independent clauses read no index, so they
-  // do not see the assignment. Clauses where a bound names another index are
-  // evaluated as nested operators (`nestDependentLimits`), as the nested
-  // `for` statements are, so there a write lasts until the next value of
-  // that index.
-  const clauseIndices = args
-    .slice(1)
-    .map((c) => (isFunction(c, 'Limits') ? c.ops[0] : undefined));
-  const rebinds: string[] = [];
-  if (
-    clauseIndices.length > 1 &&
-    nestDependentLimits(kind, body, args.slice(1), body.engine) === undefined
-  ) {
-    for (let i = 0; i < clauseIndices.length - 1; i++) {
-      const index = clauseIndices[i];
-      if (!isSymbol(index) || !writesSymbol(body, index.symbol)) continue;
-      const counter = BaseCompiler.tempVar(target);
-      const prefix = `for ${indexNames[i]} in `;
-      if (!forClauses[i].startsWith(prefix)) return undefined;
-      forClauses[i] = `for ${counter} in ${forClauses[i].slice(prefix.length)}`;
-      rebinds.push(`${indexNames[i]} = ${counter}`);
-    }
-  }
   // The body is compiled as the body of a function would be: a block with its
   // locals, whose last line returns its value (the `block` hook), or a single
   // line. The body has a statement sink of its own, so a `Sum` with a
@@ -1693,14 +1656,10 @@ function compilePythonSumProductLoop(
   // where a local `t` of the body would write a parameter or a local `t` of
   // the enclosing code. Each local of a block of the body is spelled with a
   // fresh name (`withFreshBlockLocals`), as the indices are.
-  // An index with a fresh name stays a variable that the body can assign,
-  // as with its own name.
-  const code = BaseCompiler.withWritableLoopIndices(indexNames, () =>
-    BaseCompiler.withFreshBlockLocals(() =>
-      BaseCompiler.compile(body, { ...idxTarget, hoist: sink })
-    )
+  const code = BaseCompiler.withFreshBlockLocals(() =>
+    BaseCompiler.compile(body, { ...idxTarget, hoist: sink })
   );
-  const lines = [...rebinds, ...sink.stmts, ...code.split('\n')];
+  const lines = [...sink.stmts, ...code.split('\n')];
   // The value of an iteration: the value the last line returns, or the
   // name that a last line which is an assignment writes (the convention of
   // the `block` hook: no Python expression starts with a token free of
@@ -1820,14 +1779,9 @@ function compilePythonStatements(
     // The checks of `compileBlock` on the order of the statements.
     BaseCompiler.assertNoUseBeforeDeclare(stmts);
     BaseCompiler.assertLocalsAssignedBeforeRead(stmts, declared);
-    // A read with no assignment on any path before it is refused here
+    // A read of a local that may have no value is refused here
     // (`classifyLocalReads`).
-    const readClasses = BaseCompiler.classifyLocalReads(
-      stmts,
-      declared,
-      scopeNode,
-      target
-    );
+    BaseCompiler.classifyLocalReads(stmts, declared, scopeNode, target);
     // Python has no block scope: the statements of the block run in the
     // scope of the enclosing function. Two things keep a local of the block
     // apart from the other variables of the function:
@@ -1843,12 +1797,8 @@ function compilePythonStatements(
     //   A `Declare` with a value emits `t = <value>`. The `declare` hook of
     //   this target emits nothing for a `Declare`, so without this
     //   assignment the value was lost and a read of `t` raised `NameError`.
-    //   A `Declare` with no value emits `t = _ce_unset('t')`
-    //   (`PYTHON_UNSET_HELPER`) when a read can find the local with no
-    //   value, for example after an assignment in one branch of an `If`
-    //   only (`BaseCompiler.needsStartValue`). The start value makes a use
-    //   of the local raise `UnboundLocalError` when that branch did not
-    //   run, instead of reading the value of a previous pass of a loop.
+    //   A `Declare` with no value emits nothing: every read of the local
+    //   comes after an assignment on every path (`classifyLocalReads`).
     const compileStatements = (
       spelled?: ReadonlyMap<string, string>
     ): string => {
@@ -1862,15 +1812,11 @@ function compilePythonStatements(
       const declareStatement = (
         s: Expression,
         ops: ReadonlyArray<Expression>,
-        name: string,
-        i: number
+        name: string
       ): string => {
         const local = bodyTarget.var(name) ?? name;
         const value = BaseCompiler.declareValueOperand(ops);
-        if (value === undefined)
-          return BaseCompiler.needsStartValue(stmts, i, readClasses)
-            ? `${local} = _ce_unset(${JSON.stringify(name)})`
-            : '';
+        if (value === undefined) return '';
         // A value that reads the declared name is refused before this
         // point (`assertLocalsAssignedBeforeRead`), so the value never reads
         // the local that this statement sets. The value may not be an
@@ -1888,9 +1834,9 @@ function compilePythonStatements(
       };
       return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
         stmts
-          .map((s, i) =>
+          .map((s) =>
             isFunction(s, 'Declare') && isSymbol(s.ops[0])
-              ? declareStatement(s, s.ops, s.ops[0].symbol, i)
+              ? declareStatement(s, s.ops, s.ops[0].symbol)
               : compilePythonStatements(s, bodyTarget)
           )
           .filter((s) => s !== '')
@@ -3335,174 +3281,6 @@ const PYTHON_ROUND_HELPER = `def _ce_round(_x, _ties):
 `;
 
 /**
- * The start value of a `Block` local that its `Declare` gives no value:
- * `_ce_unset('t')`.
- *
- * Python has no declaration, so without a start value a read of the local
- * in a loop found the value of the previous pass.
- *
- * Each use of the value raises `UnboundLocalError`: a comparison, a test of
- * truth, a conversion to a number or an array, an arithmetic operator, a
- * NumPy function, an index or an iteration. The interpreter keeps such a
- * use symbolic, which compiled code cannot represent. `None` or
- * `float('nan')` as the start value would not raise: a comparison with NaN
- * is decided, and `None` is the absent value of an input.
- *
- * A read that only passes the value on (`s ≔ t`) does not raise there: the
- * variable `s` then holds the `_ce_unset_type` object. A later operator on
- * `s` raises, and each `return` of the compiled code passes its value
- * through `_ce_checked(v)`, which raises when the value is the object, or
- * a list, a tuple, a dict or a NumPy array of `dtype=object` that holds it
- * at any depth (`pythonCheckedReturns`). So the object never leaves the
- * function in its result. A NumPy array of another `dtype` cannot hold the
- * object, so it is not walked.
- *
- * The names start with `_ce_`, so a symbol, a parameter or a function with
- * one of these names fails to compile when the code uses the helper
- * (`pythonAssertNoShadowedBuiltin`). A function named like the class would
- * otherwise replace the class at module level.
- */
-const PYTHON_UNSET_HELPER = `class _ce_unset_type:
-    __slots__ = ('_name',)
-    def __init__(self, _name):
-        self._name = _name
-    def __repr__(self):
-        return '<no value: %s>' % self._name
-    def _ce_fail(self, *_args, **_kwargs):
-        raise UnboundLocalError('read-before-declaration: "%s" is read before its first assignment' % self._name)
-    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = _ce_fail
-    __bool__ = __float__ = __int__ = __index__ = __complex__ = _ce_fail
-    __len__ = __iter__ = __getitem__ = __contains__ = __array__ = _ce_fail
-    __array_ufunc__ = __array_function__ = _ce_fail
-    __neg__ = __pos__ = __abs__ = __invert__ = __round__ = _ce_fail
-    __add__ = __radd__ = __sub__ = __rsub__ = __mul__ = __rmul__ = _ce_fail
-    __truediv__ = __rtruediv__ = __floordiv__ = __rfloordiv__ = _ce_fail
-    __mod__ = __rmod__ = __pow__ = __rpow__ = __matmul__ = __rmatmul__ = _ce_fail
-    __and__ = __rand__ = __or__ = __ror__ = __xor__ = __rxor__ = _ce_fail
-def _ce_unset(_name):
-    return _ce_unset_type(_name)
-def _ce_checked(_v):
-    if isinstance(_v, _ce_unset_type):
-        _v._ce_fail()
-    if isinstance(_v, (list, tuple)):
-        for _e in _v:
-            _ce_checked(_e)
-    elif isinstance(_v, dict):
-        for _e in _v.values():
-            _ce_checked(_e)
-    elif getattr(_v, 'dtype', None) == object and hasattr(_v, 'flat'):
-        for _e in _v.flat:
-            _ce_checked(_e)
-    return _v
-`;
-
-/**
- * Pass the value of each `return` statement of the Python code `code`
- * through `_ce_checked(…)` (`PYTHON_UNSET_HELPER`), when the code uses
- * the start value `_ce_unset(…)`: a result that is the start value of a
- * block local raises `UnboundLocalError`, as any other use of it does.
- *
- * The body of each lambda in parentheses is passed through
- * `_ce_checked(…)` too (`pythonCheckedLambdas`): a `Function` literal
- * compiles to a lambda, and `_ce_checked` returns a lambda unchanged, so a
- * lambda that returns the start value when it is called would let the
- * object out of the function.
- *
- * Called on the code before the helper definitions are put in front of
- * it, so the `return` statements of the helpers are not changed. A
- * `return` whose value does not end on its line, or that is a tuple with
- * no brackets (`return a, b`), is left as it is.
- */
-function pythonCheckedReturns(code: string): string {
-  if (!code.includes('_ce_unset(')) return code;
-  return pythonCheckedLambdas(code).replace(
-    /^(\s*)return (.+)$/gm,
-    (line, indent: string, value: string) =>
-      pythonIsOneExpression(value)
-        ? `${indent}return _ce_checked(${value})`
-        : line
-  );
-}
-
-/**
- * Pass the body of each lambda after a parenthesis of the Python code `code`,
- * `(lambda p: body)`, through `_ce_checked(…)`: `(lambda p:
- * _ce_checked(body))`. The internal lambdas of the target, which are
- * applied at once, are changed too, which keeps their values. A lambda
- * whose closing parenthesis is not found is left as it is. Characters
- * inside a string literal are skipped.
- */
-function pythonCheckedLambdas(code: string): string {
-  const start = /\(lambda(?=[\s:])/g;
-  let out = '';
-  let from = 0;
-  for (let m = start.exec(code); m !== null; m = start.exec(code)) {
-    if (m.index < from) continue;
-    // The colon that ends the parameters, and the end of the body: the
-    // parenthesis that closes the lambda, at the depth of the lambda.
-    let depth = 0;
-    let quote: string | undefined;
-    let colon = -1;
-    let close = -1;
-    for (let i = m.index + 1; i < code.length; i++) {
-      const c = code[i];
-      if (quote !== undefined) {
-        if (c === '\\') i += 1;
-        else if (c === quote) quote = undefined;
-        continue;
-      }
-      if (c === "'" || c === '"') quote = c;
-      else if (c === '(' || c === '[' || c === '{') depth += 1;
-      else if (c === ')' || c === ']' || c === '}') {
-        if (depth === 0) {
-          close = i;
-          break;
-        }
-        depth -= 1;
-      } else if (c === ':' && depth === 0 && colon < 0) colon = i;
-      // After the parameters, a comma at the depth of the lambda ends its
-      // body: `f(lambda a: a + 1, b)`.
-      else if (c === ',' && depth === 0 && colon >= 0) {
-        close = i;
-        break;
-      }
-    }
-    if (colon < 0 || close < 0) continue;
-    const body = code.slice(colon + 1, close).trim();
-    out +=
-      code.slice(from, colon + 1) +
-      ` _ce_checked(${pythonCheckedLambdas(body)})`;
-    from = close;
-    start.lastIndex = close;
-  }
-  return out + code.slice(from);
-}
-
-/**
- * True when the Python source `s` has balanced brackets and no comma
- * outside brackets. Characters inside a string literal are skipped.
- */
-function pythonIsOneExpression(s: string): boolean {
-  let depth = 0;
-  let quote: string | undefined;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (quote !== undefined) {
-      if (c === '\\') i += 1;
-      else if (c === quote) quote = undefined;
-      continue;
-    }
-    if (c === "'" || c === '"') quote = c;
-    else if (c === '(' || c === '[' || c === '{') depth += 1;
-    else if (c === ')' || c === ']' || c === '}') {
-      depth -= 1;
-      if (depth < 0) return false;
-    } else if (c === ',' && depth === 0) return false;
-  }
-  return depth === 0 && quote === undefined;
-}
-
-/**
  * The Python code that rounds `c` to an integer, with a value halfway
  * between two integers rounded with the rule `ties`. `np.round` rounds a tie
  * to even and is exact at every magnitude, so it is used for `to-even`; the
@@ -3958,7 +3736,7 @@ def _ce_ugamma(_s, _z, _reg):
  * Idempotent per emission unit; a redefinition (if two units are concatenated)
  * is harmless in Python. */
 function withPythonHelpers(code: string): string {
-  let out = pythonCheckedReturns(code);
+  let out = code;
   if (
     out.includes('_ce_cplx(') ||
     out.includes('_ce_cisreal(') ||
@@ -3972,7 +3750,6 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
   if (out.includes('_ce_round(')) out = `${PYTHON_ROUND_HELPER}\n${out}`;
-  if (out.includes('_ce_unset(')) out = `${PYTHON_UNSET_HELPER}\n${out}`;
   if (out.includes('_ce_smoothstep(') || out.includes("_ce_bcast('smoothstep'"))
     out = `${PYTHON_SMOOTHSTEP_HELPER}\n${out}`;
   if (out.includes('_ce_int_operands(') || out.includes('_ce_remainder('))
@@ -8877,8 +8654,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ].join('\n');
     }
 
-    // A result that is the start value of a block local raises.
-    body = pythonCheckedReturns(body);
     const params = parameters.map(ids.name).join(', ');
     let code = '';
 
@@ -8913,7 +8688,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
     )
       code += `${PYTHON_SMOOTHSTEP_HELPER}\n`;
     if (body.includes('_ce_round(')) code += `${PYTHON_ROUND_HELPER}\n`;
-    if (body.includes('_ce_unset(')) code += `${PYTHON_UNSET_HELPER}\n`;
     if (body.includes('_ce_int_operands(') || body.includes('_ce_remainder('))
       code += `${PYTHON_INT_OPERAND_HELPER}\n`;
     if (body.includes('_ce_pow(')) code += `${pythonPowHelper()}\n`;
@@ -9088,7 +8862,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ['_ce_ord(', 'an ordering over a collection operand'],
       ['_ce_pow(', 'a power whose base may be negative'],
       ['_ce_round(', 'Round'],
-      ['_ce_unset(', 'a block local declared with no value'],
       ['_ce_predicate(', 'a predicate whose result is not provably a boolean'],
       [
         '_ce_ugamma(',

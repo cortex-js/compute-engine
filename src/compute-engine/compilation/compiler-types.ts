@@ -561,27 +561,3 @@ export type LocalValueFrame = {
   /** The local of each emitted name. */
   bySpelling: Map<string, string>;
 };
-
-/** See `BaseCompiler.classifyLocalReads`. */
-export type LocalReadClasses = {
-  /** The locals that have a read of class 3 (assigned on some paths only),
-   * with the value definition of each one when the scope of the block has
-   * one. */
-  unproved: ReadonlyMap<string, object | undefined>;
-  /** The reads of class 1 (assigned on every path). */
-  safe: ReadonlySet<Expression>;
-};
-
-/** See `BaseCompiler.checkedLocalReads`. */
-export type CheckedLocalsFrame = {
-  /** The name of the marker object of each checked local. */
-  markers: ReadonlyMap<string, string>;
-  /** The spelling of each checked local. */
-  spelled: ReadonlyMap<string, string>;
-  /** The value definition of each checked local, when the scope of the
-   * body has one. A read is checked only when it reads this binding: a
-   * parameter or a local of another function with the same name is not. */
-  defs: ReadonlyMap<string, object>;
-  /** The reads that come after an assignment on every path. */
-  safe: ReadonlySet<Expression>;
-};

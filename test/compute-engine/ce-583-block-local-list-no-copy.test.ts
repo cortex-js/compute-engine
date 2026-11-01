@@ -27,12 +27,11 @@
  *    and in a loop body.
  *  - A local of a nested block in a loop body or a branch no longer writes
  *    an outer variable of the same name (JavaScript and Python).
- *  - On Python, a `Declare` with a value assigns the value, and a `Declare`
- *    with no value sets the start value `_ce_unset(name)`: a local of a loop
- *    body no longer keeps the value of the previous pass, and each use of
- *    the start value raises, also as the result of the function. A
- *    `Declare` or an `Assign` whose value compiles to several statements
- *    declines. The names of the helpers are protected.
+ *  - On Python, a `Declare` with a value assigns the value. A read of a
+ *    local declared with no value on a path with no assignment declines
+ *    (CE-636), so a local of a loop body no longer keeps the value of the
+ *    previous pass. A `Declare` or an `Assign` whose value compiles to
+ *    several statements declines.
  *  - On Python, a `Loop` index with the name of another variable of the
  *    function (a parameter, a local, a free symbol, a name that a `vars`
  *    entry reads) gets a fresh name, and the body can still assign it.
@@ -62,6 +61,10 @@ import { TEST_PYTHON } from './test-python';
 const wgsl = new WGSLTarget();
 const glsl = new GLSLTarget();
 const NO_FOLD = { constantFold: false };
+/** The refusal of a read of a block local on a path with no assignment
+ * (CE-636). */
+const SOME_PATHS =
+  /a statement can read the block local "\w+" when no assignment gave it a value/;
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -513,20 +516,13 @@ describe('CE-583: a nested Block in statement position on Python', () => {
       5.5,
     ],
   ];
-  // The definition of the start-value helper (`_ce_unset`) is left out of
-  // the comparison.
-  const withoutHelper = (s: string) =>
-    s.replace(
-      /^class _ce_unset_type:[\s\S]*?def _ce_checked\(_v\):\n(?: {4}.*\n)*\n*/,
-      ''
-    );
   for (const [label, json, code, def, value] of shapes) {
     test(label, () => {
       const ce = engine();
       const expr = ce.box(json as any);
-      expect(withoutHelper(python.compile(expr, NO_FOLD).code)).toBe(code);
+      expect(python.compile(expr, NO_FOLD).code).toBe(code);
       const fn = python.compileFunction(expr, 'f', ['x']);
-      expect(withoutHelper(fn).trimEnd()).toBe(def.trimEnd());
+      expect(fn.trimEnd()).toBe(def.trimEnd());
       // The interpreter gives the same value.
       ce.assign('x', 2.5);
       expect(expr.evaluate().re).toBe(value);
@@ -745,12 +741,10 @@ describe('CE-583: the order checks also run on a loop body', () => {
 describe('CE-583: a Python block local has no value from a previous pass', () => {
   // `t` is a local of the loop body: each pass has a new `t`, which has a
   // value only in the pass where `k = 1`. Python kept the value 5 of the
-  // first pass and gave 5. The `Declare` now sets the local to a start value
-  // whose use in arithmetic raises `UnboundLocalError` (`_ce_unset`). The
-  // interpreter has no number for the read in the pass where `k = 2`: its
-  // result is the symbol `t`, which compiled code cannot represent, so
-  // Python raises, and JavaScript throws `read-before-declaration` (CE-636;
-  // it gave NaN before).
+  // first pass and gave 5. The interpreter has no number for the read in
+  // the pass where `k = 2`: its result is the symbol `t`, which compiled
+  // code cannot represent. The read is on a path with no assignment, so
+  // the compilation declines on every target (CE-636).
   test('a local declared in a loop body', () => {
     const ce = new ComputeEngine();
     const D = (n: string) => ['Declare', n, "'real'"];
@@ -770,17 +764,11 @@ describe('CE-583: a Python block local has no value from a previous pass', () =>
       ],
       's',
     ] as any);
-    const js = compile(expr, { to: 'javascript', fallback: false });
-    expect(() => (js.run as () => number)()).toThrow(
-      /read-before-declaration: "t"/
+    expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(
+      SOME_PATHS
     );
-    const fn = new PythonTarget().compileFunction(expr, 'f', []);
-    expect(fn).toContain(
-      '        _tv1 = _ce_unset("t")\n        if ((k) == (1)):\n            _tv1 = 5'
-    );
-    if (TEST_PYTHON === undefined) return;
-    expect(runPythonError(fn)).toMatch(
-      /UnboundLocalError: read-before-declaration: "t"/
+    expect(() => new PythonTarget().compileFunction(expr, 'f', [])).toThrow(
+      SOME_PATHS
     );
   });
 
@@ -812,152 +800,38 @@ describe('CE-583: a Python block local has no value from a previous pass', () =>
   });
 });
 
-/** The last line of the error that `f()` of the Python code `fn` raises. */
-function runPythonError(fn: string): string {
-  try {
-    execFileSync(TEST_PYTHON!, ['-c', `${fn}\nprint(f())`], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } catch (e) {
-    const lines = String((e as { stderr?: Buffer }).stderr ?? '')
-      .trim()
-      .split('\n');
-    return lines[lines.length - 1];
-  }
-  return 'no error';
-}
-
-describe('CE-583: a Python result that is the start value raises', () => {
+describe('CE-583: a Python result that can read a local with no value declines', () => {
   // `t` has a value only when `x > 0`. The interpreter has no number for
-  // the result at x = 0. Python returned the `_ce_unset_type` object; it
-  // now raises, as at HEAD, where the read of `t` raised.
+  // the result at x = 0, and the read is on a path with no assignment, so
+  // the compilation declines (CE-636): as the result, in a copy, in a
+  // collection, and in a function literal.
   const D = (n: string) => ['Declare', n, "'real'"];
+  const ASSIGN_IF_X = ['If', ['Greater', 'x', 0], ['Assign', 't', 1], 'Nothing'];
   const cases: Array<[string, unknown]> = [
-    [
-      'the local is the result',
-      [
-        'Block',
-        D('t'),
-        ['If', ['Greater', 'x', 0], ['Assign', 't', 1], 'Nothing'],
-        't',
-      ],
-    ],
+    ['the local is the result', ['Block', D('t'), ASSIGN_IF_X, 't']],
     [
       'a copy of the local is the result',
-      [
-        'Block',
-        D('t'),
-        D('s'),
-        ['If', ['Greater', 'x', 0], ['Assign', 't', 1], 'Nothing'],
-        ['Assign', 's', 't'],
-        's',
-      ],
+      ['Block', D('t'), D('s'), ASSIGN_IF_X, ['Assign', 's', 't'], 's'],
     ],
+    ['a list', ['Block', D('t'), ASSIGN_IF_X, ['List', 't']]],
+    ['a tuple', ['Block', D('t'), ASSIGN_IF_X, ['Tuple', 't', 1]]],
+    [
+      'a nested list',
+      ['Block', D('t'), ASSIGN_IF_X, ['List', ['List', 1, 't']]],
+    ],
+    ['Function(t)', ['Block', D('t'), ASSIGN_IF_X, ['Function', 't']]],
   ];
   for (const [label, json] of cases) {
     test(label, () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
       const expr = ce.box(json as any);
-      const fn = new PythonTarget().compileFunction(expr, 'f', ['x']);
-      expect(fn).toMatch(/return _ce_checked\((t|s|_tv\d+)\)/);
-      const code = new PythonTarget().compile(expr, {}).code;
-      expect(code).toMatch(/return _ce_checked\(/);
-      if (TEST_PYTHON === undefined) return;
-      expect(runPython(fn, 'f(1)')).toBe(1);
-      const error = (() => {
-        try {
-          execFileSync(TEST_PYTHON, ['-c', `${fn}\nprint(f(0))`], {
-            stdio: ['ignore', 'pipe', 'pipe'],
-          });
-        } catch (e) {
-          return String((e as { stderr?: Buffer }).stderr ?? '');
-        }
-        return 'no error';
-      })();
-      expect(error).toMatch(/UnboundLocalError: read-before-declaration: "t"/);
+      expect(() =>
+        new PythonTarget().compileFunction(expr, 'f', ['x'])
+      ).toThrow(SOME_PATHS);
+      expect(() => new PythonTarget().compile(expr, {})).toThrow(SOME_PATHS);
     });
   }
-});
-
-describe('CE-583: a Python result that holds the start value raises', () => {
-  // The result is a collection that holds `t`, which has a value only when
-  // `x > 0`. Python returned the collection with the `_ce_unset_type`
-  // object in it; `_ce_checked` now walks the collection and raises.
-  const D = (n: string) => ['Declare', n, "'real'"];
-  const cases: Array<[string, unknown, string]> = [
-    ['a list', ['List', 't'], '[1]'],
-    ['a tuple', ['Tuple', 't', 1], '(1, 1)'],
-    ['a nested list', ['List', ['List', 1, 't']], '[[1, 1]]'],
-  ];
-  for (const [label, value, printed] of cases) {
-    test(label, () => {
-      const ce = new ComputeEngine();
-      ce.declare('x', 'real');
-      const expr = ce.box([
-        'Block',
-        D('t'),
-        ['If', ['Greater', 'x', 0], ['Assign', 't', 1], 'Nothing'],
-        value,
-      ] as any);
-      const fn = new PythonTarget().compileFunction(expr, 'f', ['x']);
-      expect(fn).toMatch(/return _ce_checked\(/);
-      if (TEST_PYTHON === undefined) return;
-      const run = (call: string): string => {
-        try {
-          return execFileSync(
-            TEST_PYTHON!,
-            ['-c', `import numpy as np\n${fn}\nprint(repr(${call}))`],
-            { stdio: ['ignore', 'pipe', 'pipe'] }
-          )
-            .toString()
-            .trim();
-        } catch (e) {
-          return String((e as { stderr?: Buffer }).stderr ?? '');
-        }
-      };
-      expect(run('f(1)')).toBe(printed);
-      expect(run('f(0)')).toMatch(
-        /UnboundLocalError: read-before-declaration: "t"/
-      );
-    });
-  }
-});
-
-describe('CE-583: a Python lambda that returns the start value raises', () => {
-  // The result is a function literal that reads `t`, which has a value only
-  // when `x > 0`. Calling the lambda returned the `_ce_unset_type` object;
-  // the body of each lambda now passes through `_ce_checked`.
-  test('Function(t)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const expr = ce.box([
-      'Block',
-      ['Declare', 't', "'real'"],
-      ['If', ['Greater', 'x', 0], ['Assign', 't', 1], 'Nothing'],
-      ['Function', 't'],
-    ] as any);
-    const fn = new PythonTarget().compileFunction(expr, 'f', ['x']);
-    expect(fn).toContain('(lambda : _ce_checked(t))');
-    if (TEST_PYTHON === undefined) return;
-    const run = (call: string): string => {
-      try {
-        return execFileSync(
-          TEST_PYTHON!,
-          ['-c', `import numpy as np\n${fn}\nprint(repr(${call}))`],
-          { stdio: ['ignore', 'pipe', 'pipe'] }
-        )
-          .toString()
-          .trim();
-      } catch (e) {
-        return String((e as { stderr?: Buffer }).stderr ?? '');
-      }
-    };
-    expect(run('f(1)()')).toBe('1');
-    expect(run('f(0)()')).toMatch(
-      /UnboundLocalError: read-before-declaration: "t"/
-    );
-  });
 });
 
 describe('CE-583: a Python Declare in a nested block', () => {
@@ -1000,9 +874,8 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
   const D = (n: string, t = "'integer'") => ['Declare', n, t];
   // Each of these programs reads a local declared with no value in a branch
   // condition, and has a value on every run. They compile and give the value
-  // of the interpreter, as before CE-583. The Python start value of a local
-  // (`_ce_unset`) does not change them. A read of a local that may have no
-  // value is tested in `ce-636-block-local-without-value.test.ts`.
+  // of the interpreter, as before CE-583. A read of a local that may have
+  // no value is tested in `ce-636-block-local-without-value.test.ts`.
   const cases: Array<[string, unknown, number, boolean]> = [
     [
       'both arms of an If assign',
@@ -1249,43 +1122,6 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
     expect(fn).toContain('for i in range(1, 3)]');
     if (TEST_PYTHON === undefined) return;
     expect(runPython(fn, 'f()')).toBe(12);
-  });
-});
-
-describe('CE-583: the names of the Python start-value helper are protected', () => {
-  const D = (n: string, t = "'integer'") => ['Declare', n, t];
-  const json = (x: string) => [
-    'Block',
-    D('n'),
-    D('y'),
-    ['Assign', 'y', 0],
-    ['If', ['Greater', x, 3], ['Assign', 'n', 1], ['Assign', 'y', 1]],
-    ['Assign', 'y', ['Add', 'y', 'n']],
-    'y',
-  ];
-
-  // A function or a parameter named like the class of the start value
-  // replaced the class (`_ce_unset_type`, formerly `_CeUnset`, which the
-  // check did not protect).
-  test('a function, a parameter or a symbol named like the helper declines', () => {
-    const ce = new ComputeEngine();
-    ce.declare('_ce_unset_type', 'real');
-    ce.declare('x', 'real');
-    const py = new PythonTarget();
-    const expr = ce.box(json('x') as any);
-    expect(() => py.compileFunction(expr, '_ce_unset_type', ['x'])).toThrow(
-      /"_ce_unset_type" is the name of a Python builtin/
-    );
-    expect(() => py.compileFunction(expr, 'g', ['_ce_unset_type'])).toThrow(
-      /"_ce_unset_type" is the name of a Python builtin/
-    );
-    expect(() => py.compileFunction(expr, '_ce_unset', ['x'])).toThrow(
-      /"_ce_unset" is the name of a Python builtin/
-    );
-    expect(() =>
-      py.compileFunction(ce.box(json('_ce_unset_type') as any), 'g', [])
-    ).toThrow(/"_ce_unset_type" is the name of a Python builtin/);
-    expect(() => py.compileFunction(expr, 'g', ['x'])).not.toThrow();
   });
 });
 

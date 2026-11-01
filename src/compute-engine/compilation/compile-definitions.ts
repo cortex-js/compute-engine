@@ -71,7 +71,6 @@ import {
   liftPromotionSuppression,
   restorePromotionSuppression,
 } from './compiler-mode.js';
-import { hideCheckedLocals } from './compile-locals.js';
 import { branchComplexCoercion } from './compile-shapes.js';
 import { isContradictedScalarFunctionBody } from './compile-conditions.js';
 
@@ -965,8 +964,6 @@ export function tryEmitMultiClauseFunction(
   // The clause helpers are shared by every call site: they compile with the
   // promotion of the compile mode (see `withPromotionUnsuppressed`).
   const suppressed = liftPromotionSuppression();
-  // The helpers are emitted at module level (`hideCheckedLocals`).
-  const checkedLocals = hideCheckedLocals();
   try {
     // One helper per clause, in declaration order. `$` cannot appear in a
     // MathJSON symbol, so `_fn_f$c1` can never collide with the emitted
@@ -1067,7 +1064,6 @@ export function tryEmitMultiClauseFunction(
   } finally {
     registry.compiling.delete(name);
     restorePromotionSuppression(suppressed);
-    CompilerState._checkedLocals = checkedLocals;
   }
   return name;
 }

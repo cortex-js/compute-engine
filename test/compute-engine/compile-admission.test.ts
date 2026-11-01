@@ -1542,10 +1542,10 @@ describe('Assigned names and the shapes of their values', () => {
   );
 
   // Only one branch assigns the local `p`, and nothing assigns it before.
-  // The compilation of the block checks the read of `p` (CE-636): JavaScript
-  // throws `read-before-declaration` where the interpreter gives that error,
-  // and a shader, which cannot throw, declines.
-  test('a local that one branch assigns is checked where it is read', () => {
+  // The interpreter gives `read-before-declaration` for the read of `p`
+  // when the branch does not run, which compiled code cannot give, so the
+  // compilation declines on every target (CE-636).
+  test('a local that one branch assigns declines where it is read', () => {
     const body: MathJsonExpression = [
       'Block',
       ['If', ['Greater', 't', 0], ['Assign', 'p', ['List', 1, 2]]],
@@ -1556,11 +1556,7 @@ describe('Assigned names and the shapes of their values', () => {
     expect(JSON.stringify(interpret(json, -1, body))).toMatch(
       /read-before-declaration/
     );
-    const r = compile(withF(body).box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 1 })).toEqual([2, 4]);
-    expect(() => r.run!({ x: -1 })).toThrow(/read-before-declaration/);
-    for (const to of ['glsl', 'wgsl']) {
+    for (const to of ['javascript', 'glsl', 'wgsl']) {
       const s = compile(withF(body).box(json), { to });
       expect(s.success).toBe(false);
       expect(s.error).toMatch(/when no assignment gave it a value/);

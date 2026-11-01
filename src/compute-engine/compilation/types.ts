@@ -1897,9 +1897,10 @@ export interface CompileTarget<Expr = unknown> {
    * because their names are in {@link reservedEmittedNames} (or hide the
    * vars object): the parameters of the enclosing function literals and
    * definitions, which `BaseCompiler.lambdaParamBinding` renames
-   * (`(Math) ↦ …` emits `(_p) => …`), and the index of an enclosing
-   * `Sum` or `Product` loop of the JavaScript target (`Math` emits
-   * `_tv1`). Each scope adds its fresh names for its own body only.
+   * (`(Math) ↦ …` emits `(_p) => …`). The renamed index of a `Sum` or
+   * `Product` loop is not in this set: a body that writes the index of its
+   * `Sum` or `Product` declines in `compileExpr`, before any loop is
+   * emitted. Each scope adds its fresh names for its own body only.
    * `assignLValue` accepts a write to a name in this set, as it accepts a
    * write to the binding under its own name. A read of another binding that
    * also resolves to a bare identifier (the `const` temporary that holds the

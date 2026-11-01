@@ -1,5 +1,38 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A destructuring `Declare` whose pattern repeats a name declines in
+  compiled code.** In 0.176.0, the MathJSON
+  `["Block", ["Declare", ["Tuple", "a", "a"], "'unknown'", ["Tuple", 1, 2]], "a"]`
+  compiled on every target and `a` got the value at its last position, `2`.
+  Now the compilation declines on every target, with a message that names
+  the repeated symbol, and the interpreter evaluates the expression (it gives
+  `2`). A nested pattern such as `(a, (b, a))` declines in the same way. Only
+  MathJSON input can contain such a pattern: the Epsil parser rejects it, and
+  LaTeX does not give a destructuring `Declare`.
+- **A compiled `Sum` or `Product` whose body writes its index declines.** In
+  0.176.0, `Sum(Block(j ≔ j + 1; j), Limits(j, 1, n))` compiled on every
+  target, and each target kept a separate loop counter to give the
+  interpreter's value (14 at `n = 4`). Now the compilation declines on every
+  target, with a message that names the index, and `compile()` falls back to
+  the interpreter, which gives the same value. The decline comes before the
+  `Sum` handler of the target, so a custom target with its own `Sum` handler
+  declines too. A body that assigns or declares another variable by name
+  still compiles. A body that holds a destructuring `Declare` also declines,
+  because the check cannot tell which names such a pattern writes.
+- **A compiled read of a `Block` local that only some paths assign
+  declines on every target.** A local that its `Declare` gives no value, and
+  that a statement reads when it may not have a value yet (after an
+  assignment in one branch of an `If`, or after an early `Return`), now makes
+  the compilation decline on JavaScript, interval JavaScript and Python, as it
+  already did on GLSL and WGSL. In 0.176.0, JavaScript checked the read at run
+  time and threw `read-before-declaration`, and Python gave the local the
+  start value `_ce_unset(name)`. An input that the caller can leave out no
+  longer counts as a path on which no branch runs: with `x: real`,
+  `Block(Declare(n), If(x > 5, n ≔ 1, n ≔ 2), n + 1)` compiles on JavaScript
+  with no check, and gives `3` at `x = 1`.
+
 ### Resolved Issues
 
 - **On the `interval-js` target, a `Break` condition in a `Loop` that is

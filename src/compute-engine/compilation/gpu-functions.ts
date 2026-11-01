@@ -4,7 +4,6 @@
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { isCallerMapped } from './cse.js';
-import { writesSymbol } from './compile-loops.js';
 import {
   clearGPUCounters,
   gpuIntegerFact,
@@ -1180,22 +1179,13 @@ function compileGPUSumProduct(
 
   if (bothConstant && lowerNum > upperNum) return identity;
 
-  // A body can write the index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
-  // The interpreter binds the index to its next value at each iteration,
-  // whatever the body wrote. An unrolled term reads the index as a literal,
-  // which a write cannot change, so such a body takes the loop form, where
-  // each iteration copies the counter to a local that the body reads and
-  // writes (`indexLocal` below).
-  const writesIndex = writesSymbol(args[0], index);
-  const canProveCounter =
-    !writesIndex && gpuCounterIsStable(args[0], index, target);
+  const canProveCounter = gpuCounterIsStable(args[0], index, target);
 
   // Unroll small constant ranges — pure inline expression
   // A clause whose terms would hold too many nodes in all is a loop
   // (`unroll-budget.ts`).
   if (
     bothConstant &&
-    !writesIndex &&
     unrollFits(
       upperNum - lowerNum + 1,
       unrolledTermSize(args[0]),
@@ -1373,36 +1363,20 @@ function compileGPUSumProduct(
   // belongs inside this loop (a nested Sum), not ahead of it.
   const bodyScope = BaseCompiler.withBoundScope(target, [index]);
   const bodyBoundVars = bodyScope.boundVars;
-  // The integer counter cannot be the target of a write of a float value,
-  // and a write must not change the next iteration. So when the body writes
-  // the index, the first statement of each iteration copies the counter to
-  // a float local, and the body reads and writes that local.
-  const floatIndex = isWGSL ? `f32(${index})` : `float(${index})`;
-  const indexLocal = writesIndex ? BaseCompiler.tempVar(target) : undefined;
   const bodySink = {
-    stmts:
-      indexLocal === undefined
-        ? ([] as string[])
-        : [
-            isWGSL
-              ? `var ${indexLocal}: f32 = ${floatIndex};`
-              : `float ${indexLocal} = ${floatIndex};`,
-          ],
+    stmts: [] as string[],
     boundVars: bodyBoundVars,
     unit: args[0],
   };
   const bodyTarget: CompileTarget<Expression> = {
     ...target,
-    var: (id) => (id === index ? (indexLocal ?? floatIndex) : target.var(id)),
+    var: (id) =>
+      id === index
+        ? isWGSL
+          ? `f32(${index})`
+          : `float(${index})`
+        : target.var(id),
     ...bodyScope,
-    ...(indexLocal !== undefined
-      ? {
-          renamedWritables: new Set([
-            ...(target.renamedWritables ?? []),
-            indexLocal,
-          ]),
-        }
-      : {}),
     hoist: bodySink,
     // With two integer bounds known here, the index is finite for certain in
     // the body, and the NaN guard proof uses it (`gpuLoopIndexFacts`).

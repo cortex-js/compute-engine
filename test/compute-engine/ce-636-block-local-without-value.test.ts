@@ -7,15 +7,18 @@
  * an undefined value.
  *
  * Each read of such a local is now put in one of three classes at compile
- * time (`classifyLocalReads` in `base-compiler.ts`):
- * 1. The local is assigned on every path before the read: no check.
+ * time (`classifyLocalReads` in `compile-locals.ts`):
+ * 1. The local is assigned on every path before the read: the read
+ *    compiles.
  * 2. The local is assigned on no path before the read: the compilation
  *    fails, on every target.
- * 3. The local is assigned on some paths only: JavaScript (and interval
- *    JavaScript) check the read when the code runs, and throw
- *    `read-before-declaration` when the local has no value. Python gives
- *    the local the start value `_ce_unset(name)`, whose use raises. GLSL
- *    and WGSL cannot raise an error, so they refuse the compilation.
+ * 3. The local is assigned on some paths only: the compilation fails, on
+ *    every target. The interpreter has no value for the read on a path
+ *    with no assignment, and compiled code would read an uninitialized
+ *    variable.
+ *
+ * An input that the caller leaves out does not make a path: the caller
+ * must supply each input with a value of its declared type.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -25,8 +28,7 @@ import { execFileSync } from 'child_process';
 import { TEST_PYTHON } from './test-python';
 
 const D = (n: string, t = "'integer'") => ['Declare', n, t];
-const CHECK = /read-before-declaration/;
-const SHADER_REFUSAL =
+const SOME_PATHS =
   /a statement can read the block local "\w+" when no assignment gave it a value/;
 const NO_PATH = /no path to that read gives "\w+" a value/;
 
@@ -82,9 +84,30 @@ function runPython(fn: string, x: number | string): string {
 
 const loopRange = (a: number, b: number) => ['Range', a, b];
 
+/** Expect that the compilation of `json` fails on each target in `to`
+ * with the refusal of a read of class 3. */
+function expectDecline(
+  json: unknown,
+  to = ['javascript', 'interval-js', 'glsl', 'wgsl', 'python']
+): void {
+  const { expr } = box(json);
+  for (const target of to) {
+    // The interval target reports the failure in its result; the other
+    // targets throw it.
+    if (target === 'interval-js') {
+      const r = compile(expr, { to: target, fallback: false });
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(SOME_PATHS);
+    } else
+      expect(() => compile(expr, { to: target, fallback: false })).toThrow(
+        SOME_PATHS
+      );
+  }
+}
+
 // The programs of class 1. Each one is assigned on every path before each
-// read: they compile on JavaScript and Python with no check, and give the
-// value of the interpreter.
+// read: they compile on JavaScript and Python, and give the value of the
+// interpreter.
 const CERTAIN: Array<[string, unknown, number, number, boolean]> = [
   // [label, program, x, value, compiles on the shader targets]
   [
@@ -185,15 +208,13 @@ const CERTAIN: Array<[string, unknown, number, number, boolean]> = [
   ],
 ];
 
-describe('CE-636: a read after an assignment on every path has no check', () => {
+describe('CE-636: a read after an assignment on every path compiles', () => {
   for (const [label, json, x, value, shaders] of CERTAIN) {
     test(label, () => {
       expect(interpret(json, x)).toBe(String(value));
       const js = runJs(json, x);
       expect(js.value).toBe(value);
-      expect(js.code).not.toMatch(CHECK);
       const fn = pythonFunction(json);
-      expect(fn).not.toContain('_ce_unset(');
       if (shaders) {
         const { expr } = box(json);
         for (const to of ['glsl', 'wgsl'])
@@ -205,10 +226,8 @@ describe('CE-636: a read after an assignment on every path has no check', () => 
   }
 });
 
-// The programs of class 3, in the form that JavaScript compiles. An `If`
-// statement with no else branch at the top level of a block declines on
-// Python (`If: wrong number of arguments`), so the Python form below has a
-// `Nothing` else branch, which JavaScript refuses.
+// The programs of class 3. `NOT_EQUAL` and `COPY` take the else branch of
+// their `If`.
 const MAIN = [
   'Block',
   ['Assign', 's', 0],
@@ -281,114 +300,39 @@ const ACCUMULATOR = [
   'm',
 ];
 
-describe('CE-636: a read after an assignment on some paths is checked', () => {
-  test('the loop example: JavaScript throws where the read finds no value', () => {
+describe('CE-636: a read after an assignment on some paths declines', () => {
+  test('the loop example: the interpreter gives 0, and every target declines', () => {
     // At x = 1, the interpreter answers 0: `n ≠ 1` is undecided in the
-    // first three passes, and the `If` runs no branch.
+    // first three passes, and the `If` runs no branch. Without the refusal,
+    // JavaScript gave 6 (`undefined != 1` is `true`).
     expect(interpret(MAIN, 1)).toBe('0');
-    const js = runJs(MAIN, 1);
-    expect(js.code).toMatch(CHECK);
-    expect(js.value).toMatch(/throws read-before-declaration: "n"/);
+    expectDecline(MAIN);
   });
 
-  test('the loop example on Python raises', () => {
-    const fn = pythonFunction(MAIN);
-    expect(fn).toContain('_ce_unset("n")');
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 1)).toMatch(
-      /raises UnboundLocalError: read-before-declaration: "n"/
-    );
-  });
-
-  test('the loop example on interval JavaScript has the check', () => {
-    const { expr } = box(MAIN);
-    const r = compile(expr, { to: 'interval-js', fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(CHECK);
-  });
-
-  const cases: Array<[string, unknown, unknown, number, number]> = [
-    // [label, JavaScript form, Python form, good x, bad x]
-    [
-      'a read of the value of the block',
-      NOT_EQUAL([]),
-      NOT_EQUAL(['Nothing']),
-      5,
-      1,
-    ],
-    ['a copy of the local', COPY([]), COPY(['Nothing']), 5, 1],
-  ];
-  for (const [label, jsForm, pyForm, good, bad] of cases) {
-    test(label, () => {
-      const ok = runJs(jsForm, good);
-      expect(ok.code).toMatch(CHECK);
-      expect(String(ok.value)).toBe(
-        interpret(jsForm, good)
-          .replace(/^"?(\w+)"?$/, '$1')
-          .toLowerCase()
-      );
-      expect(runJs(jsForm, bad).value).toMatch(
-        /throws read-before-declaration: "n"/
-      );
-      const fn = pythonFunction(pyForm);
-      expect(fn).toContain('_ce_unset("n")');
-      if (TEST_PYTHON === undefined) return;
-      expect(runPython(fn, good)).toBe(
-        String(interpret(pyForm, good).replace(/^"?(\w+)"?$/, '$1'))
-      );
-      expect(runPython(fn, bad)).toMatch(
-        /raises UnboundLocalError: read-before-declaration: "n"/
-      );
-    });
-  }
-
-  test('a function literal called after the assignment gives 10', () => {
+  test('a function literal called after the assignment', () => {
+    // The literal reads `n` when it is called, and the analysis does not
+    // follow the calls, so the read is of class 3.
     expect(interpret(FUNCTION_LATE, 1)).toBe('10');
-    const js = runJs(FUNCTION_LATE, 1);
-    expect(js.code).toMatch(CHECK);
-    expect(js.value).toBe(10);
-    const fn = pythonFunction(FUNCTION_LATE);
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 1)).toBe('10');
+    expectDecline(FUNCTION_LATE);
   });
 
-  test('a function literal called before the assignment raises', () => {
-    expect(runJs(FUNCTION_EARLY, 1).value).toMatch(
-      /throws read-before-declaration: "n"/
-    );
-    const fn = pythonFunction(FUNCTION_EARLY);
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 1)).toMatch(
-      /raises UnboundLocalError: read-before-declaration: "n"/
-    );
+  test('a first-pass accumulator', () => {
+    // The first pass assigns `m`, and the later passes read it in the
+    // other branch. The analysis does not follow the value of `i`, so the
+    // read is of class 3.
+    expect(interpret(ACCUMULATOR, 2)).toBe('10');
+    expect(interpret(ACCUMULATOR, -1)).toBe('1');
+    expectDecline(ACCUMULATOR);
   });
 
-  test('a first-pass accumulator runs and never throws', () => {
-    for (const x of [-1, 0.5, 2]) {
-      const expected = interpret(ACCUMULATOR, x);
-      expect(String(runJs(ACCUMULATOR, x).value)).toBe(expected);
-      if (TEST_PYTHON === undefined) continue;
-      expect(Number(runPython(pythonFunction(ACCUMULATOR), x))).toBe(
-        Number(expected)
-      );
-    }
-  });
-
-  test('GLSL and WGSL refuse each of these programs', () => {
-    for (const json of [
-      MAIN,
-      NOT_EQUAL([]),
-      COPY([]),
-      FUNCTION_LATE,
-      FUNCTION_EARLY,
-      ACCUMULATOR,
-    ]) {
-      const { expr } = box(json);
-      for (const to of ['glsl', 'wgsl'])
-        expect(() => compile(expr, { to, fallback: false })).toThrow(
-          SHADER_REFUSAL
-        );
-    }
+  test.each([
+    ['a read of the value of the block', NOT_EQUAL([])],
+    ['a read of the value of the block, with a Nothing else branch', NOT_EQUAL(['Nothing'])],
+    ['a copy of the local', COPY([])],
+    ['a copy of the local, with a Nothing else branch', COPY(['Nothing'])],
+    ['a function literal called before the assignment', FUNCTION_EARLY],
+  ])('%s', (_label, json) => {
+    expectDecline(json);
   });
 });
 
@@ -477,7 +421,6 @@ describe('CE-636: the analysis takes linear time', () => {
     const start = Date.now();
     const js = runJs(json, 1);
     expect(Date.now() - start).toBeLessThan(5000);
-    expect(js.code).not.toMatch(CHECK);
     expect(String(js.value)).toBe(interpret(json, 1));
   });
 
@@ -489,11 +432,8 @@ describe('CE-636: the analysis takes linear time', () => {
       ['Add', 'n', 1],
     ];
     const start = Date.now();
-    const js = runJs(json, 40);
+    expectDecline(json, ['javascript']);
     expect(Date.now() - start).toBeLessThan(5000);
-    expect(js.code).toMatch(CHECK);
-    expect(js.value).toBe(31);
-    expect(runJs(json, 0).value).toMatch(/throws read-before-declaration/);
   });
 });
 
@@ -503,9 +443,8 @@ describe('CE-636: a branch statement that can run no branch', () => {
   // not certain. Only such a condition counts (`conditionDecidability`).
 
   test('both branches assign, and the condition reads an input', () => {
-    // On JavaScript the caller can leave `x` out: `x > 5` is then undecided
-    // and no branch runs. On Python an input is a parameter, so the
-    // condition is always decided and the read has no start value.
+    // The caller must supply `x`, so `x > 5` is decided and one branch
+    // runs. The result of a call that leaves `x` out is not specified.
     const json = [
       'Block',
       D('n'),
@@ -514,19 +453,19 @@ describe('CE-636: a branch statement that can run no branch', () => {
     ];
     const { expr } = box(json);
     const js = compile(expr, { to: 'javascript', fallback: false });
-    expect(js.code).toMatch(CHECK);
     const run = js.run as (v: Record<string, unknown>) => unknown;
     expect(run({ x: 1 })).toBe(3);
-    expect(() => run({})).toThrow(/read-before-declaration: "n"/);
-    expect(pythonFunction(json)).not.toContain('_ce_unset(');
-    for (const to of ['glsl', 'wgsl'])
+    expect(run({ x: 6 })).toBe(2);
+    expect(interpret(json, 1)).toBe('3');
+    for (const to of ['interval-js', 'glsl', 'wgsl', 'python'])
       expect(compile(expr, { to, fallback: false }).success).toBe(true);
   });
 
   test('a loop pass where the condition is undecided after a pass that assigned', () => {
-    // `b` is a `boolean` input. At the pass where `i = 1` the condition is
-    // `True`; at the next passes, with no `b`, it is undecided and no branch
-    // runs. Python kept the value of the first pass.
+    // `b` is a `boolean` input. The condition `Or(i = 1, b)` is read by its
+    // value, which the analysis takes as one that can be undecided, so the
+    // read of `n` is of class 3 on the targets that can run no branch.
+    // GLSL and WGSL always run one branch.
     const json = [
       'Block',
       ['Assign', 's', 0],
@@ -551,22 +490,13 @@ describe('CE-636: a branch statement that can run no branch', () => {
     ce.declare('x', 'real');
     ce.declare('b', 'boolean');
     const expr = ce.box(json as any);
-    const js = compile(expr, { to: 'javascript', fallback: false });
-    expect(js.code).toMatch(CHECK);
-    const run = js.run as (v: Record<string, unknown>) => unknown;
-    expect(run({ b: true })).toBe(3);
-    expect(run({ b: false })).toBe(5);
-    expect(() => run({})).toThrow(/read-before-declaration: "n"/);
-    const fn = new PythonTarget().compileFunction(expr, 'f', ['x', 'b']);
-    expect(fn).toContain('_ce_unset("n")');
+    for (const to of ['javascript', 'python'])
+      expect(() => compile(expr, { to, fallback: false })).toThrow(SOME_PATHS);
+    expect(() =>
+      new PythonTarget().compileFunction(expr, 'f', ['x', 'b'])
+    ).toThrow(SOME_PATHS);
     ce.assign('b', false);
     expect(expr.evaluate().re).toBe(5);
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, '1, True')).toBe('3');
-    expect(runPython(fn, '1, False')).toBe('5');
-    expect(runPython(fn, '1, None')).toMatch(
-      /raises UnboundLocalError: read-before-declaration: "n"/
-    );
   });
 
   test('a Which whose last condition is True has no path with no branch', () => {
@@ -586,12 +516,10 @@ describe('CE-636: a branch statement that can run no branch', () => {
     ];
     expect(interpret(json, 0.25)).toBe('3');
     const js = runJs(json, 0.25);
-    expect(js.code).not.toMatch(CHECK);
     expect(js.value).toBe(3);
     const { expr } = box(json);
     const interval = compile(expr, { to: 'interval-js', fallback: false });
     expect(interval.success).toBe(true);
-    expect(interval.code).not.toMatch(CHECK);
     for (const to of ['glsl', 'wgsl'])
       expect(compile(expr, { to, fallback: false }).success).toBe(true);
     // Python has no expression form for an assignment in a `Which`, as
@@ -603,8 +531,8 @@ describe('CE-636: a Return in a block in value position', () => {
   // The value block compiles to an immediately applied function on
   // JavaScript: its `Return` gives the value of that block only, and the
   // statements after it still run. It does not end the paths of the
-  // enclosing block, so the read of `n` after it keeps its check.
-  test('the read after the block is checked', () => {
+  // enclosing block, so the read of `n` after it is of class 3.
+  test('the read after the block declines', () => {
     const json = [
       'Block',
       D('n'),
@@ -612,14 +540,7 @@ describe('CE-636: a Return in a block in value position', () => {
       ['Assign', 'tmp', ['Block', 42, ['Return', 0]]],
       'n',
     ];
-    const js = runJs(json, -1);
-    expect(js.code).toMatch(CHECK);
-    expect(js.value).toMatch(/throws read-before-declaration: "n"/);
-    const { expr } = box(json);
-    for (const to of ['glsl', 'wgsl'])
-      expect(() => compile(expr, { to, fallback: false })).toThrow(
-        SHADER_REFUSAL
-      );
+    expectDecline(json);
   });
 });
 
@@ -643,17 +564,7 @@ describe('CE-636: an index with the name of the local', () => {
       ],
       's',
     ];
-    const fn = pythonFunction(json);
-    expect(fn).toContain('_ce_unset("n")');
-    const { expr } = box(json);
-    for (const to of ['glsl', 'wgsl'])
-      expect(() => compile(expr, { to, fallback: false })).toThrow(
-        SHADER_REFUSAL
-      );
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(fn, 1)).toMatch(
-      /raises UnboundLocalError: read-before-declaration: "n"/
-    );
+    expectDecline(json);
   });
 
   test('a bound that reads the local with no assignment declines', () => {
@@ -668,10 +579,10 @@ describe('CE-636: an index with the name of the local', () => {
 });
 
 describe('CE-636: an input condition next to another binding of its name', () => {
-  // `x` in the condition is the input, which the caller can leave out, so
-  // the condition can run no branch. Another construct of the block that
-  // binds its own `x` (a `Sum` index, a local of a nested block) does not
-  // change that.
+  // `x` in the condition is the input, which the caller supplies, so one
+  // branch runs and the read of the local is of class 1. Another construct
+  // of the block that binds its own `x` (a `Sum` index, a local of a
+  // nested block) does not change that.
   const both = (cond: unknown) => [
     'If',
     cond,
@@ -716,10 +627,9 @@ describe('CE-636: an input condition next to another binding of its name', () =>
     test(label, () => {
       const { expr } = box(json);
       const js = compile(expr, { to: 'javascript', fallback: false });
-      expect(js.code).toMatch(CHECK);
       const run = js.run as (v: Record<string, unknown>) => unknown;
-      expect(() => run({})).toThrow(/read-before-declaration/);
       expect(run({ x: 1 })).toBe(value);
+      expect(interpret(json, 1)).toBe(String(value));
     });
   }
 });
@@ -750,7 +660,6 @@ describe('CE-636: an assignment in an operand that is always evaluated', () => {
   for (const [label, json, x, value] of cases) {
     test(label, () => {
       const js = runJs(json, x);
-      expect(js.code).not.toMatch(CHECK);
       expect(js.value).toBe(value);
       expect(interpret(json, x)).toBe(String(value));
       const { expr } = box(json);
@@ -809,13 +718,7 @@ describe('CE-636: an operand that a lowering can skip', () => {
       ['Assign', 's', ['Power', ['Block', ['Assign', 'y', 1], 'x'], 0]],
       'y',
     ];
-    const { expr } = box(json);
-    const js = compile(expr, { to: 'javascript', fallback: false });
-    expect(js.code).toMatch(CHECK);
-    for (const to of ['glsl', 'wgsl'])
-      expect(() => compile(expr, { to, fallback: false })).toThrow(
-        SHADER_REFUSAL
-      );
+    expectDecline(json);
   });
 });
 
@@ -828,18 +731,14 @@ describe('CE-636: a Return does not end a path', () => {
       ['If', ['Greater', 'x', 0], ['Assign', 'n', 1]],
       'n',
     ];
-    const { expr } = box(json);
-    const js = compile(expr, { to: 'javascript', fallback: false });
-    expect(js.code).toMatch(CHECK);
-    for (const to of ['glsl', 'wgsl'])
-      expect(() => compile(expr, { to, fallback: false })).toThrow();
+    expectDecline(json);
   });
 });
 
 describe('CE-636: a Return in a nested block', () => {
   // JavaScript compiles the nested block to a function of its own: its
   // `Return` leaves that function only, and the assignment after it is
-  // not made. The read after the block keeps its check.
+  // not made. The read after the block is of class 3.
   test('a nested block of the block', () => {
     const json = [
       'Block',
@@ -847,10 +746,7 @@ describe('CE-636: a Return in a nested block', () => {
       ['Block', ['If', ['Greater', 'x', 0], ['Return', 0]], ['Assign', 'y', 1]],
       'y',
     ];
-    const js = runJs(json, 1);
-    expect(js.code).toMatch(CHECK);
-    expect(js.value).toMatch(/throws read-before-declaration: "y"/);
-    expect(runJs(json, -1).value).toBe(1);
+    expectDecline(json);
   });
 
   test('a nested block of a function body', () => {
@@ -873,10 +769,9 @@ describe('CE-636: a Return in a nested block', () => {
       'x',
     ];
     expect(interpret(json, 1)).toBe('0');
-    const js = runJs(json, 1);
-    expect(js.code).toMatch(CHECK);
-    expect(js.value).toMatch(/throws read-before-declaration: "y"/);
-    expect(runJs(json, -1).value).toBe(1);
+    // Python, GLSL and WGSL refuse a function body with more than one
+    // statement first.
+    expectDecline(json, ['javascript', 'interval-js']);
   });
 });
 
@@ -892,12 +787,10 @@ describe('CE-636: an arm that never runs', () => {
     ];
     expect(interpret(json, 1)).toBe('1');
     const js = runJs(json, 1);
-    expect(js.code).not.toMatch(CHECK);
     expect(js.value).toBe(1);
     const { expr } = box(json);
     for (const to of ['glsl', 'wgsl'])
       expect(compile(expr, { to, fallback: false }).success).toBe(true);
-    expect(pythonFunction(json)).not.toContain('_ce_unset(');
   });
 });
 

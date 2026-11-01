@@ -299,9 +299,20 @@ effect:
   it gives `Nothing` when it ends with no `Return` (see "`Nothing` in a
   value position declines" below).
 
-A read of a local that may have no value is checked by the compilation of
-the block (JavaScript throws `read-before-declaration`, a shader declines),
-as the interpreter gives that error.
+A read of a block local that may have no value declines on every target.
+The compilation of the block puts each read of a local that its `Declare`
+gives no value in one of three classes: the local is assigned on every path
+before the read (the read compiles), on no path (the compilation declines),
+or on some paths only (the compilation declines too). The interpreter gives
+`read-before-declaration` for such a read, which compiled code has no form
+for. The analysis is simple and sound, so it can decline where the
+interpreter has a value. A `Return` does not end a path in this analysis,
+because some targets compile a nested block to a function of its own:
+`Block(Declare(y), If(c > 0, Return(0), y ≔ 1), y)` declines. An input that
+the caller can leave out does not make a path: with `x: real`,
+`Block(Declare(n), If(x > 5, n ≔ 1, n ≔ 2), n + 1)` compiles. The host
+avoids the decline by giving the local a value on every path before the
+read.
 
 **`Nothing` in a value position declines.** `Nothing` is the erasure marker,
 and the compiled result has no form for it. So these decline on every

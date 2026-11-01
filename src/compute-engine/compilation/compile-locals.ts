@@ -35,10 +35,8 @@ import { isEffectSubset } from '../../common/type/effects.js';
 import { declareValueOperand } from './compile-declarations.js';
 import { localShapeFrameOf } from './compile-shapes.js';
 import type {
-  CheckedLocalsFrame,
   ConditionNode,
   LocalEntry,
-  LocalReadClasses,
   LocalValueFrame,
 } from './compiler-types.js';
 import {
@@ -47,7 +45,6 @@ import {
   blockLocalOf,
   blockLocalsNamed,
   conditionDecidability,
-  isVarsObjectRead,
   localDependsOnInputs,
   operandMayBeAbsent,
 } from './compile-absence.js';
@@ -833,16 +830,17 @@ export function localNameKey(name: string): object {
  *    compiles with no check.
  * 2. The local is assigned on no path before the read. The compilation
  *    fails, with a message that names the local (`localReadWithNoWrite`).
- * 3. The local is assigned on some paths only. The read is put in the
- *    `unproved` result: each target decides how it handles it
- *    (`checkedLocalReads`).
+ * 3. The local is assigned on some paths only. The compilation fails too,
+ *    on every target (`localReadOnSomePaths`), after the walk, so that a
+ *    read of class 2 gives its own message first.
  *
  * The interpreter has no value for a read of class 2 or 3 that finds the
  * local with no value: it reports `read-before-declaration` in a function
  * body, and it keeps the read symbolic in a top-level block. Compiled code
- * cannot give that answer. Without a check, JavaScript read `undefined`
- * (`undefined != 1` is `true`), WGSL read the zero that a `var` starts
- * with, and GLSL read an undefined value.
+ * cannot give that answer. Without the refusal, JavaScript read
+ * `undefined` (`undefined != 1` is `true`), Python read the value of the
+ * previous pass of a loop, WGSL read the zero that a `var` starts with,
+ * and GLSL read an undefined value.
  *
  * The analysis follows the order of evaluation with two facts for each
  * local: it is certainly assigned (on every path), and it is possibly
@@ -868,8 +866,8 @@ export function localNameKey(name: string): object {
  *   once (each clause is a constant `Range` or a `List` or `Tuple` literal
  *   with an element) and the body has no `Break`, `Continue` or `Return`.
  *   A loop that can stop early is not analyzed further: a read after
- *   `Loop(Block(y ≔ i; If(i > 3, Break)), i ∈ 1..10)` is checked on
- *   JavaScript, although the first pass assigns `y` before the `Break`.
+ *   `Loop(Block(y ≔ i; If(i > 3, Break)), i ∈ 1..10)` is refused,
+ *   although the first pass assigns `y` before the `Break`.
  * - A read in a function literal happens when the function is called,
  *   which can be later. It is of class 1 when the local is certainly
  *   assigned where the literal is, and of class 3 otherwise, never of
@@ -887,29 +885,25 @@ export function localNameKey(name: string): object {
  * local before it. A node that several paths reach is walked once for each
  * state, so the time is linear in the size of the statements.
  *
- * A read is compared by its binding, as `checkedLocalRead` does: a symbol
- * that is bound to another definition (a parameter of a function with the
- * same name) is not a read of the local. A symbol with no binding is.
+ * A read is compared by its binding: a symbol that is bound to another
+ * definition (a parameter of a function with the same name) is not a read
+ * of the local. A symbol with no binding is.
  */
 export function classifyLocalReads(
   args: ReadonlyArray<Expression>,
   locals: ReadonlyArray<string>,
   node: Expression | undefined,
   target: CompileTarget<Expression>
-): LocalReadClasses {
-  const unproved = new Map<string, object | undefined>();
-  const safe = new Set<Expression>();
-  // The read nodes of class 3. A symbol node can be shared by several
-  // places of the statements: when one of them is of class 3, the node is
-  // checked at all of them.
-  const unsafe = new Set<Expression>();
+): void {
+  // The first local that has a read of class 3.
+  let unproved: string | undefined;
   const valueless = locals.filter((name) => {
     const decl = args.find(
       (s) => isFunction(s, 'Declare') && isSymbol(s.ops[0], name)
     );
     return isFunction(decl) && declareValueOperand(decl.ops) === undefined;
   });
-  if (valueless.length === 0) return { unproved, safe };
+  if (valueless.length === 0) return;
   const scope = node?.localScope;
   // The state of a path is two bits: MUST (the local is certainly
   // assigned) and MAY (it is possibly assigned). On a live path MUST
@@ -931,34 +925,14 @@ export function classifyLocalReads(
   // (`withConditionOperands`, `operandDecidedConjuncts`):
   // - a condition decided by construction runs one branch;
   // - a relation can be undecided only through an operand that may be
-  //   absent: a `missing` value (`operandMayBeAbsent`), or, on a target
-  //   with a vars object, an input that the caller can leave out (`_.x`,
-  //   `isInputOperand`). A `NaN` operand decides a relation;
+  //   absent: a `missing` value (`operandMayBeAbsent`). An input that the
+  //   caller leaves out does not count: the caller must supply each input
+  //   with a value of its declared type, and the result of a call that
+  //   leaves one out is not specified. A `NaN` operand decides a relation;
   // - a condition read by its value (a `boolean` input, a call) can be
   //   undecided, and so can a connective with such an operand.
   // GLSL and WGSL always run one branch. The answer does not depend on the
   // local, so it is kept for all of them.
-  // A symbol is an input when the compiled code reads it from the vars
-  // object, unless its binding is one that the compiler makes a variable
-  // of the compiled code (`compiledLocalDefinitions`): a local of a block
-  // made by a `Declare` or an assignment, an index, a parameter. Any other
-  // symbol is an input, also one with no binding (a node that the
-  // compiler made) and an undeclared symbol, which the engine declares in
-  // the scope of the block that holds it when it boxes the block.
-  let localDefs: ReadonlySet<object> | undefined;
-  // The local test comes first: `target.var` of a name that the target
-  // does not bind declares the name in the engine (JavaScript), and a
-  // compilation must not change the engine. Such a call is made only for
-  // a name that the compiled code reads as an input anyway.
-  const isInputOperand = (op: Expression): boolean => {
-    if (!isSymbol(op)) return false;
-    const def = op.valueDefinition;
-    if (def !== undefined) {
-      localDefs ??= compiledLocalDefinitions(args, locals, node);
-      if (localDefs.has(def)) return false;
-    }
-    return isVarsObjectRead(target.var(op.symbol) ?? '', target);
-  };
   // The value of a condition that is known at compile time.
   const provedCondition = (cond: Expression): boolean | undefined =>
     isSymbol(cond, 'True')
@@ -971,9 +945,7 @@ export function classifyLocalReads(
     const t = n.test;
     if (t.kind === 'value') return true;
     if (t.kind === 'connective') return t.operands.some(mayBeUndecided);
-    return t.operands.some(
-      (op) => operandMayBeAbsent(op) || isInputOperand(op)
-    );
+    return t.operands.some((op) => operandMayBeAbsent(op));
   };
   const mayRunNoBranch = (cond: Expression): boolean => {
     if (target.language === 'glsl' || target.language === 'wgsl') return false;
@@ -1140,11 +1112,9 @@ export function classifyLocalReads(
     ): number => {
       if (isSymbol(e)) {
         if (!isOurs(e)) return s;
-        if ((s & MUST) !== 0) safe.add(e);
-        else if (deferred || (s & MAY) !== 0) {
-          unsafe.add(e);
-          unproved.set(name, def);
-        } else localReadWithNoWrite(name);
+        if ((s & MUST) !== 0) return s;
+        if (deferred || (s & MAY) !== 0) unproved ??= name;
+        else localReadWithNoWrite(name);
         return s;
       }
       if (isDictionary(e)) return walkOperands([...e.values], s, deferred);
@@ -1279,7 +1249,9 @@ export function classifyLocalReads(
           // A `Return` does not end a path here. Some targets compile a
           // nested block to a function of its own, which a `Return`
           // leaves, and the statements after the block still run. A read
-          // after an early `Return` keeps its check.
+          // after an early `Return` is therefore of class 3 when the local
+          // is assigned on the other path only, and the compilation fails
+          // (`localReadOnSomePaths`).
           return walkOperands(ops, s, deferred);
         case 'Apply': {
           // A function literal applied in place runs here, after its
@@ -1318,64 +1290,7 @@ export function classifyLocalReads(
     let state = 0;
     for (const arg of args) state = walk(arg, state, false, true);
   }
-  for (const e of unsafe) safe.delete(e);
-  return { unproved, safe };
-}
-
-/**
- * The value definitions of the variables that the compiled code of the
- * statements `args` of the block `node` declares itself: the locals
- * `locals` of the block, the names that a `Declare` or an assignment of a
- * nested block makes local (a destructuring pattern too), and the index or
- * parameter names of each construct (`binderNames`). A symbol bound to
- * one of these is not an input (`classifyLocalReads`). A symbol that the
- * engine declared in the scope of a block because nothing declared it is
- * an input, and its definition is not in the set.
- */
-export function compiledLocalDefinitions(
-  args: ReadonlyArray<Expression>,
-  locals: ReadonlyArray<string>,
-  node: Expression | undefined
-): ReadonlySet<object> {
-  const defs = new Set<object>();
-  const add = (
-    scope: Expression['localScope'],
-    names: Iterable<string>
-  ): void => {
-    if (scope === undefined) return;
-    for (const name of names) {
-      const binding = scope.bindings.get(name);
-      if (binding !== undefined && 'value' in binding) defs.add(binding.value);
-    }
-  };
-  const patternNames = (t: Expression): string[] =>
-    isSymbol(t)
-      ? [t.symbol]
-      : isFunction(t, 'Tuple')
-        ? t.ops.flatMap(patternNames)
-        : [];
-  add(node?.localScope, locals);
-  const seen = new Set<Expression>();
-  const visit = (e: Expression): void => {
-    if (!isFunction(e) || seen.has(e)) return;
-    seen.add(e);
-    add(e.localScope, e.localScope?.binderNames ?? []);
-    if (e.operator === 'Block')
-      add(
-        e.localScope,
-        e.ops.flatMap((op) =>
-          (isFunction(op, 'Declare') ||
-            isFunction(op, 'Assign') ||
-            isFunction(op, 'DefineFunction')) &&
-          op.ops[0] !== undefined
-            ? patternNames(op.ops[0])
-            : []
-        )
-      );
-    for (const op of e.ops) visit(op);
-  };
-  for (const arg of args) visit(arg);
-  return defs;
+  if (unproved !== undefined) localReadOnSomePaths(unproved);
 }
 
 /**
@@ -1416,104 +1331,21 @@ export function localReadWithNoWrite(name: string): never {
 }
 
 /**
- * The frame of the locals of a statement list whose reads compile with a
- * check, from the reads of class 3 that `classifyLocalReads` found.
- *
- * On the JavaScript and the interval JavaScript targets, each such local
- * starts with a marker object of its own, and a read of class 3 throws an
- * `Error` with `read-before-declaration` and the name of the local when
- * the local still holds the marker (`checkedLocalRead`).
- *
- * Python needs no frame: a local with a read of class 3 starts with the
- * value `_ce_unset(name)`, whose use raises (`PYTHON_UNSET_HELPER` in
- * `python-target.ts`). GLSL and WGSL cannot raise an error, so a read of
- * class 3 is refused there.
- *
- * The checks are written in the code of the statement list only. While
- * the definition of another function compiles (a module-level helper,
- * `emitFunctionLiteralDefinition`), the frames are hidden
- * (`hideCheckedLocals`): the marker objects are not visible there.
+ * The failure for a read of class 3 (`classifyLocalReads`): the local
+ * `name` is assigned on some paths before the read, but not on all of
+ * them. The interpreter has no value for the read on a path with no
+ * assignment, and compiled code would read an uninitialized variable, so
+ * no target compiles it.
  */
-export function checkedLocalReads(
-  classes: LocalReadClasses,
-  target: CompileTarget<Expression>,
-  spellLocal: (name: string) => string
-): CheckedLocalsFrame | undefined {
-  if (classes.unproved.size === 0) return undefined;
-  if (target.language === 'python') return undefined;
-  if (
-    target.language !== 'javascript' &&
-    target.language !== 'interval-javascript'
-  )
-    throw new Error(
-      `Could not compile \`Block\`: a statement can read the block local ` +
-        `"${[...classes.unproved.keys()][0]}" when no assignment gave it a ` +
-        `value (the assignment is on some paths only, for example in one ` +
-        `branch of an \`If\`). The interpreter has no value for that read, ` +
-        `and target '${target.language ?? 'unknown'}' cannot raise an ` +
-        `error at run time. Give the local a value on every path before ` +
-        `the read.`
-    );
-  const markers = new Map<string, string>();
-  const spelled = new Map<string, string>();
-  const defs = new Map<string, object>();
-  for (const [name, def] of classes.unproved) {
-    markers.set(name, tempVar(target));
-    spelled.set(name, spellLocal(name));
-    if (def !== undefined) defs.set(name, def);
-  }
-  return { markers, spelled, defs, safe: classes.safe };
-}
-
-/**
- * The code of a read of the local `s`, which `resolved` spells: a check
- * that the local has a value, when `checkedLocalReads` found that the read
- * can come before every assignment of the local. Otherwise `resolved`.
- */
-export function checkedLocalRead(
-  expr: Expression,
-  s: string,
-  resolved: TargetSource
-): TargetSource {
-  const frames = CompilerState._checkedLocals;
-  for (let i = frames.length - 1; i >= 0; i--) {
-    const frame = frames[i];
-    const marker = frame.markers.get(s);
-    if (marker === undefined) continue;
-    // A read of another binding with the same name: a parameter of a
-    // function whose definition compiles while this body compiles, or a
-    // `let` of a nested block. A symbol with no binding (a node that the
-    // compiler made) is taken to read the local, as `classifyLocalReads`
-    // does.
-    const def = frame.defs.get(s);
-    if (
-      def !== undefined &&
-      (!isSymbol(expr) ||
-        (expr.valueDefinition !== undefined && expr.valueDefinition !== def))
-    )
-      continue;
-    if (frame.safe.has(expr) || resolved !== frame.spelled.get(s))
-      return resolved;
-    const message = JSON.stringify(
-      `read-before-declaration: "${s}" is read before its first assignment`
-    );
-    return `(${resolved} === ${marker} ? (() => { throw new Error(${message}); })() : ${resolved})`;
-  }
-  return resolved;
-}
-
-/**
- * Hide the frames of `checkedLocalReads` and return them, so that the
- * caller can restore them (`CompilerState._checkedLocals = saved`) when the
- * compilation of code outside the body ends. Call it before compiling a
- * definition that is not lexically nested in the body (a module-level
- * helper): the marker objects of the body are not visible there, and a
- * read of a name of the body there reads another binding.
- */
-export function hideCheckedLocals(): CheckedLocalsFrame[] {
-  const saved = CompilerState._checkedLocals;
-  CompilerState._checkedLocals = [];
-  return saved;
+export function localReadOnSomePaths(name: string): never {
+  throw new Error(
+    `Could not compile \`Block\`: a statement can read the block local ` +
+      `"${name}" when no assignment gave it a value (the assignment is on ` +
+      `some paths only, for example in one branch of an \`If\`). The ` +
+      `interpreter has no value for that read, and the compiled code ` +
+      `would read an uninitialized variable. Give the local a value on ` +
+      `every path before the read.`
+  );
 }
 
 /**
@@ -1831,33 +1663,6 @@ export function unassignedLocalRead(name: string): never {
   );
 }
 
-/**
- * True when the statement `stmts[i]` is a `Declare` with no value that
- * Python gives the start value `_ce_unset(name)` (`PYTHON_UNSET_HELPER`
- * in `python-target.ts`).
- *
- * A local gets the start value when a read of it may find it with no
- * value: a read of class 3 of `classifyLocalReads`, `classes` being the
- * result of that analysis on `stmts`. The use of the start value raises.
- * A local whose reads all come after an assignment on every path gets no
- * start value: no read can find it, and Python has no declaration to
- * write in its place. Without a start value, a read on a path with no
- * assignment found the value of the previous pass of a loop, or raised
- * `UnboundLocalError` with no name of a local.
- */
-export function needsStartValue(
-  stmts: ReadonlyArray<Expression>,
-  i: number,
-  classes: LocalReadClasses
-): boolean {
-  const s = stmts[i];
-  return (
-    isFunction(s, 'Declare') &&
-    isSymbol(s.ops[0]) &&
-    declareValueOperand(s.ops) === undefined &&
-    classes.unproved.has(s.ops[0].symbol)
-  );
-}
 /** The fresh names that `compileBlock` gave to block locals while
  * `withFreshBlockLocals` runs, which `assignLValue` accepts as the
  * spelling of a write. Cleared when the outermost call ends. */

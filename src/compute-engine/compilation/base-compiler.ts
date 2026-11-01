@@ -563,17 +563,12 @@ import {
   blockLocalValueFrame,
   chainedAmbientWrite,
   chainedLocalDeclares,
-  checkedLocalRead,
-  checkedLocalReads,
   classifyLocalReads,
-  compiledLocalDefinitions,
   freshBlockLocalName,
-  hideCheckedLocals,
   localNameKey,
   localReadWithNoWrite,
   localVarsObjectStatement,
   loopRunsOnce,
-  needsStartValue,
   nestedAssignmentsTo,
   nestedOnlyLocals,
   readsBlockLocal,
@@ -1490,19 +1485,9 @@ export class BaseCompiler {
   static readonly isInnerBinderRead = isInnerBinderRead;
   static readonly blockLocalsNamed = blockLocalsNamed;
   static readonly isUnsetLocalRead = isUnsetLocalRead;
-  static get _checkedLocals() {
-    return CompilerState._checkedLocals;
-  }
-  static set _checkedLocals(v: (typeof CompilerState)['_checkedLocals']) {
-    CompilerState._checkedLocals = v;
-  }
   static readonly classifyLocalReads = classifyLocalReads;
-  static readonly compiledLocalDefinitions = compiledLocalDefinitions;
   static readonly loopRunsOnce = loopRunsOnce;
   static readonly localReadWithNoWrite = localReadWithNoWrite;
-  static readonly checkedLocalReads = checkedLocalReads;
-  static readonly checkedLocalRead = checkedLocalRead;
-  static readonly hideCheckedLocals = hideCheckedLocals;
   static readonly nestedOnlyLocals = nestedOnlyLocals;
   static readonly nestedAssignmentsTo = nestedAssignmentsTo;
   static readonly chainedAmbientWrite = chainedAmbientWrite;
@@ -1512,7 +1497,6 @@ export class BaseCompiler {
     assertLocalsAssignedBeforeRead;
   static readonly assertNoUseBeforeDeclare = assertNoUseBeforeDeclare;
   static readonly unassignedLocalRead = unassignedLocalRead;
-  static readonly needsStartValue = needsStartValue;
   static get _freshBlockLocals() {
     return CompilerState._freshBlockLocals;
   }

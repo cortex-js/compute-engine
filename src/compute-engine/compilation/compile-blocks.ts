@@ -21,9 +21,7 @@ import {
   assertNoUseBeforeDeclare,
   blockLocalValueFrame,
   chainedLocalDeclares,
-  checkedLocalReads,
   classifyLocalReads,
-  needsStartValue,
   nestedAssignmentsTo,
   nestedOnlyLocals,
   noteReservedDeclares,
@@ -54,7 +52,7 @@ import {
 } from './compile-statements.js';
 import { core } from './compiler-core-hooks.js';
 import { compilationType } from './compiler-type-facts.js';
-import type { CheckedLocalsFrame, LocalValueFrame } from './compiler-types.js';
+import type { LocalValueFrame } from './compiler-types.js';
 import { compileOp, withCseScope } from './compile-cse.js';
 import {
   containsEarlyReturn,
@@ -272,9 +270,9 @@ export function compileBlock(
 
   assertNoUseBeforeDeclare(args);
   assertLocalsAssignedBeforeRead(args, locals);
-  // The reads of a local that may have no value (`classifyLocalReads`).
-  // A read with no assignment on any path before it is refused here.
-  const readClasses = classifyLocalReads(args, locals, node, target);
+  // A read of a local that may have no value is refused here, on every
+  // target (`classifyLocalReads`).
+  classifyLocalReads(args, locals, node, target);
 
   // A lone EMPTY block in a statement list evaluated for effect (a shader
   // loop body reaching `compileStatementList`) is an empty statement.
@@ -497,8 +495,6 @@ export function compileBlock(
   const pushedEnforced =
     enforcedLocals !== undefined && enforcedLocals.size > 0;
   if (pushedEnforced) CompilerState._enforcedTargets.push(enforcedLocals!);
-  // The locals whose reads compile with a check (`checkedLocalReads`).
-  let checkedFrame: CheckedLocalsFrame | undefined;
   // Removes the marks of `markScalarFedLiterals`.
   let unmarkFed: (() => void) | undefined;
   // Removes the marks of `markCheckedLiteralApplications`.
@@ -644,10 +640,6 @@ export function compileBlock(
       lexicalFunctions,
       reboundFunctions: reboundFunctionScope(args, target, reboundLocals),
     };
-    checkedFrame = checkedLocalReads(readClasses, target, spellLocal);
-    if (checkedFrame !== undefined)
-      CompilerState._checkedLocals.push(checkedFrame);
-
     if (target.language === 'javascript')
       recordBlockScalarLocals(args, localTarget);
     // A shader target declares each local as a variable (`var U` in
@@ -689,8 +681,6 @@ export function compileBlock(
     // targets keep the copying form.
     if (target.language === 'javascript')
       for (const local of locals) {
-        // The first update of a checked local reads it with no check.
-        if (checkedFrame?.markers.has(local) === true) continue;
         const chains = ownedLocalUpdateChains(args, local);
         if (chains === undefined) continue;
         const temp = tempVar(target);
@@ -794,35 +784,6 @@ export function compileBlock(
                   `has no statement form for a conditional with a ` +
                   `\`Return\` in a branch.`
               );
-            // A local whose read is checked starts with its own marker
-            // of "no value" (`checkedLocalReads`). Only the JavaScript
-            // targets have such locals.
-            if (
-              isFunction(arg, 'Declare') &&
-              isSymbol(arg.ops[0]) &&
-              declareValueOperand(arg.ops) === undefined
-            ) {
-              const marker = checkedFrame?.markers.get(arg.ops[0].symbol);
-              if (marker !== undefined)
-                return [
-                  `const ${marker} = {}`,
-                  `let ${spellLocal(arg.ops[0].symbol)} = ${marker}`,
-                ];
-            }
-            // A Python local declared with no value starts with the value
-            // `_ce_unset(name)`, as in `compilePythonStatements`
-            // (`needsStartValue`). Python has no declaration, so without
-            // it a read found the value of a previous pass of a loop, or
-            // raised `UnboundLocalError`.
-            if (
-              target.language === 'python' &&
-              isFunction(arg, 'Declare') &&
-              isSymbol(arg.ops[0]) &&
-              needsStartValue(stmts, i, readClasses)
-            )
-              return [
-                `${spellLocal(arg.ops[0].symbol)} = _ce_unset(${JSON.stringify(arg.ops[0].symbol)})`,
-              ];
             // For Declare, pass inferred type hint to the target hook
             if (
               isFunction(arg, 'Declare') &&
@@ -1071,7 +1032,6 @@ export function compileBlock(
     _popLocalComplex();
     CompilerState._localVector.pop();
     if (pushedEnforced) CompilerState._enforcedTargets.pop();
-    if (checkedFrame !== undefined) CompilerState._checkedLocals.pop();
     if (localValueFrame !== undefined) _localValueFrames.pop();
     unmarkFed?.();
     unmarkChecked?.();

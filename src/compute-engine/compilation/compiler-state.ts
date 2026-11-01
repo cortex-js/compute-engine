@@ -9,7 +9,6 @@ import type { Type } from '../../common/type/types.js';
 import type { KindLowering } from './kind-lowering.js';
 import type { CompileMode, CompileTarget } from './types.js';
 import type {
-  CheckedLocalsFrame,
   ElementLane,
   UnrolledIndexFrame,
   UnsafeIntegerOperand,
@@ -408,11 +407,6 @@ export class CompilerState {
    * statements are compiled, popped in the same `finally`.
    */
   static _enforcedTargets: ReadonlySet<string>[] = [];
-  /**
-   * The frames of `checkedLocalReads`, innermost last, while the statements
-   * of their blocks are compiled.
-   */
-  static _checkedLocals: CheckedLocalsFrame[] = [];
   /**
    * The target-language lvalue an `Assign` writes for the variable `name` —
    * the SAME spelling a READ of that name compiles to.

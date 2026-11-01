@@ -259,66 +259,24 @@ describe('CE-480: a loop index with literal bounds is finite', () => {
     }
   );
 
-  test.each(TARGETS)(
-    'a sum body that assigns the index compiles (%s)',
-    (to) => {
-      // Since commit e3cea713d, the GLSL and WGSL loop of a body that writes
-      // its index steps the integer counter, and each iteration copies it to
-      // a float local that the body reads and writes. The interpreter binds
-      // the index to its next value at each iteration, whatever the body
-      // wrote, and the shader gives the same value. The `j` that the body
-      // writes is a fresh local, so `theta(j)` keeps its guard: `j` is not
-      // the loop counter there.
-      const ce = engineWith(eta('300'));
-      const sum = (x: unknown) => [
-        'Sum',
-        [
-          'Block',
-          ['Assign', 'j', ['Multiply', 1e30, x]],
-          ['Min', 1, ['Multiply', x, ['theta', 'j']]],
-        ],
-        ['Limits', 'j', 1, 300],
-      ];
-      const r = compile(ce.box(sum('x') as never), {
-        to,
-        fallback: false,
-      } as never) as { success: boolean; code?: string };
-      expect(r.success).toBe(true);
-      expect(r.code).toMatch(/_gpu_min\(1\.0/);
-      // A small translation of the shader code to JavaScript: the
-      // declarations become `let`, the conversions disappear, and the
-      // helpers are JavaScript functions. `Math.min` gives NaN for a NaN
-      // operand, as `_gpu_min` does; `_fn_theta` is the interpreter's
-      // `theta`.
-      const run = (x: number): number =>
-        // eslint-disable-next-line no-new-func
-        new Function(
-          'x',
-          '_gpu_min',
-          '_fn_theta',
-          (r.code as string)
-            .replace(/^(\s*)(?:float|int) (\w+)(;| =)/gm, '$1let $2$3')
-            .replace(/^(\s*)var (\w+): \w+(;| =)/gm, '$1let $2$3')
-            .replace(/for \((?:int|var) (\w+)(?:: i32)? =/g, 'for (let $1 =')
-            .replace(/\b(?:float|f32)\(/g, '(')
-        )(
-          x,
-          (a: number, b: number) => Math.min(a, b),
-          (j: number) => ce.box(['theta', j] as never).N().re
-        );
-      // Inputs for which `1e30 x` is an integer: the interpreter refuses a
-      // value of the integer index that is not an integer (an error that
-      // the static type does not show, where the compiled value is not
-      // specified).
-      for (const x of [0.3, -2e-30, 0]) {
-        const expected = ce.box(sum(x) as never).N().re;
-        expect(Number.isFinite(expected)).toBe(true);
-        const value = run(x);
-        if (expected === 0) expect(value).toBe(0);
-        else expect(value / expected).toBeCloseTo(1, 6);
-      }
-    }
-  );
+  test.each(TARGETS)('a sum body that assigns the index declines (%s)', (to) => {
+    // The interpreter binds the index to its next value at each iteration,
+    // whatever the body wrote. A compiled loop does not, so every target
+    // declines a body that writes its index, and no shader is emitted.
+    const ce = engineWith(eta('300'));
+    const expr = ce.box([
+      'Sum',
+      [
+        'Block',
+        ['Assign', 'j', ['Multiply', 1e30, 'x']],
+        ['Min', 1, ['Multiply', 'x', ['theta', 'j']]],
+      ],
+      ['Limits', 'j', 1, 300],
+    ]);
+    expect(() => compile(expr, { to, fallback: false } as never)).toThrow(
+      'the body writes the index `j`'
+    );
+  });
 
   test.each(TARGETS)(
     'a callee that binds its parameter again keeps the helper (%s)',

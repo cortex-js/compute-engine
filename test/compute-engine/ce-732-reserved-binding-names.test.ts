@@ -421,7 +421,9 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
   // A `Match` capture reads the `const` temporary that holds the subject, so
   // a write to the capture declines, whether the capture has a reserved name
   // or not. A write accepted for the reserved name threw "Assignment to
-  // constant variable" at run time.
+  // constant variable" at run time. The `Assign` also makes the block treat
+  // the capture name as a block local that only some paths assign, and that
+  // check can run first: either reason declines.
   test.each(['Math', 'm'])(
     'a write to a `Match` capture named `%s` declines',
     (n) => {
@@ -448,8 +450,10 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
       try {
         const result = compile(ce.box(fn as never), { to: 'javascript' });
         expect(result.success).toBe(false);
-        expect(String(warn.mock.calls[0]?.[0])).toContain(
-          'not an assignable reference'
+        expect(String(warn.mock.calls[0]?.[0])).toMatch(
+          new RegExp(
+            `not an assignable reference|can read the block local "${n}" when no assignment gave it a value`
+          )
         );
       } finally {
         warn.mockRestore();
@@ -457,16 +461,15 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
     }
   );
 
-  // A `Sum` or `Product` index with a reserved name is emitted under a fresh
-  // name, and a write to it in the body compiles as a write to an index with
-  // an ordinary name does. With a symbolic bound the loop is emitted.
+  // A `Sum` or `Product` body that writes its index declines, whether the
+  // index has a reserved name or not. The interpreter gives the value.
   test.each([
     ['Sum', 'j', 10],
     ['Sum', 'Math', 10],
     ['Product', 'j', 24],
     ['Product', 'Math', 24],
   ] as const)(
-    'a `%s` body that assigns its index `%s` to itself',
+    'a `%s` body that assigns its index `%s` to itself declines',
     (op, k, v) => {
       const ce = new ComputeEngine();
       const fn = [
@@ -474,13 +477,13 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         [op, ['Block', ['Assign', k, k], k], ['Limits', k, 1, 'n']],
         ['Typed', 'n', I],
       ];
-      const result = compile(ce.box(fn as never), {
-        to: 'javascript',
-        constantFold: false,
-      } as never);
-      expect(result.success).toBe(true);
-      expect(() => assertStrictModeValid(result.code as string)).not.toThrow();
-      expect(result.run!(4 as never)).toBe(v);
+      expect(() =>
+        compile(ce.box(fn as never), {
+          to: 'javascript',
+          constantFold: false,
+          fallback: false,
+        } as never)
+      ).toThrow(`the body writes the index \`${k}\``);
       expect(interpreted(ce, fn, [4])).toBe(v);
     }
   );
@@ -622,28 +625,27 @@ describe('CE-732: a binding with a reserved name, interval-js target', () => {
     return { code: result.code as string, value: result.run!(vars as never) };
   }
 
-  // The interval `Sum` reads its index as an interval. When the body writes
-  // the index, each iteration copies the counter to a local interval, which
-  // the body reads and writes, whether the index has a reserved name or not.
-  test.each(['j', 'Math'])('a `Sum` body that assigns its index `%s`', (k) => {
-    const ce = new ComputeEngine();
-    ce.declare('n', 'integer');
-    const expr = [
-      'Sum',
-      ['Block', ['Assign', k, ['Add', k, 1]], k],
-      ['Limits', k, 1, 'n'],
-    ];
-    const result = compile(ce.box(expr as never), {
-      to: 'interval-js',
-      constantFold: false,
-      fallback: false,
-    } as never);
-    expect(result.success).toBe(true);
-    const code = result.code as string;
-    expect(() => assertStrictModeValid(code)).not.toThrow();
-    // 2 + 3 + 4 + 5, as the interpreter gives.
-    expect(result.run!({ n: 4 } as never)).toEqual(point(14));
-  });
+  // A `Sum` body that writes its index declines, whether the index has a
+  // reserved name or not.
+  test.each(['j', 'Math'])(
+    'a `Sum` body that assigns its index `%s` declines',
+    (k) => {
+      const ce = new ComputeEngine();
+      ce.declare('n', 'integer');
+      const expr = [
+        'Sum',
+        ['Block', ['Assign', k, ['Add', k, 1]], k],
+        ['Limits', k, 1, 'n'],
+      ];
+      const result = compile(ce.box(expr as never), {
+        to: 'interval-js',
+        constantFold: false,
+        fallback: false,
+      } as never);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(`the body writes the index \`${k}\``);
+    }
+  );
 
   test('a block local', () => {
     const { code, value } = run(

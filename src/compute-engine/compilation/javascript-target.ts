@@ -102,8 +102,7 @@ import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { operandMayBeAbsent } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
-import { reservedNameSpelling, writesSymbol } from './compile-loops.js';
-import { nestDependentLimits } from '../library/utils.js';
+import { reservedNameSpelling } from './compile-loops.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import {
   tryGetConstant,
@@ -17735,13 +17734,6 @@ function unrolledBigOpLane(expr: Expression): boolean | undefined {
   if (!isFunction(limits, 'Limits')) return undefined;
   const { index, lowerExpr, upperExpr } = extractLimits(limits);
   if (index === '_') return undefined;
-  // A body that writes its index is never unrolled, and the loop that
-  // `emitSumProduct` emits for it chooses its lane from the masked reading
-  // of the body, not from the literal index values. Reading the literal
-  // terms here would call the node real while the loop makes `{ re, im }`
-  // values (`1 + Sum(Block(j ≔ -j, √j), Limits(j, 1, 4))`), so the node has
-  // no lane fact of its own.
-  if (writesSymbol(expr.ops[0], index)) return undefined;
   const lowerNum = BaseCompiler.bigOpBoundConstant(lowerExpr, target);
   const upperNum = BaseCompiler.bigOpBoundConstant(upperExpr, target);
   if (
@@ -17771,21 +17763,6 @@ function unrolledBigOpLane(expr: Expression): boolean | undefined {
 
 installUnrolledBigOpLane(unrolledBigOpLane);
 
-/**
- * An index of a `Sum` or `Product` clause that the body writes. Its loop
- * steps `counter`, and each iteration declares `let <code> = <counter>;`, so
- * the next iteration starts from the next index value whatever the body
- * wrote (`emitSumProduct`).
- */
-type WrittenLoopIndex = {
-  /** The index, as the expression names it. */
-  name: string;
-  /** The emitted name of the index (a fresh name for a reserved one). */
-  code: string;
-  /** The emitted name of the counter that the loop steps. */
-  counter: string;
-};
-
 function emitSumProduct(
   kind: 'Sum' | 'Product',
   body: Expression,
@@ -17793,16 +17770,7 @@ function emitSumProduct(
   target: CompileTarget<Expression>,
   /** `false` for the nested invocation of a multi-clause node's inner
    * clauses, whose lane the whole-node reading above does not model. */
-  isRootClause = true,
-  /** The indices of the enclosing clauses that the body writes, each with
-   * its emitted name and the name of the separate counter that its loop
-   * steps (see `bodyWritesIndex` below). */
-  enclosingWrittenIndices: ReadonlyArray<WrittenLoopIndex> = [],
-  /** Whether the interpreter evaluates the clauses as nested operators,
-   * because a bound of one clause names the index of another
-   * (`nestDependentLimits`). Decided once, for all the clauses of the node. */
-  clausesNest: boolean = clauses.length > 1 &&
-    nestDependentLimits(kind, body, clauses, body.engine) !== undefined
+  isRootClause = true
 ): string {
   const statements = javascriptStatements(target);
   const expression = (
@@ -17871,37 +17839,12 @@ function emitSumProduct(
   // with a complex local `n` is complex while the term is emitted, and `n²`
   // reads `.re`/`.im` off an integer.
   const sumNode = BaseCompiler.cseParentNode();
-  const compileTerm = (
-    innerTarget: CompileTarget<Expression>,
-    writtenIndices: ReadonlyArray<WrittenLoopIndex> = enclosingWrittenIndices
-  ): string =>
+  const compileTerm = (innerTarget: CompileTarget<Expression>): string =>
     BaseCompiler.withRealLoopIndices([index], () =>
       rest.length > 0
-        ? emitSumProduct(
-            kind,
-            body,
-            rest,
-            innerTarget,
-            false,
-            writtenIndices,
-            clausesNest
-          )
+        ? emitSumProduct(kind, body, rest, innerTarget, false)
         : BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body)
     );
-
-  // A body can write the index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
-  // The interpreter binds each index to its next value at each iteration
-  // (for several clauses, at each tuple of the cartesian product), whatever
-  // the body wrote. So the loop of a written index steps a separate counter,
-  // and the innermost iteration declares the index from the counter of each
-  // written index (`WrittenLoopIndex`). An unrolled term reads the index as
-  // a literal, which a write cannot change, and the terms of an unrolled
-  // inner clause share the index of the enclosing clause: so no clause
-  // unrolls when the body writes the index of any clause.
-  const bodyWritesIndex = writesSymbol(body, index);
-  const noUnroll =
-    enclosingWrittenIndices.length > 0 ||
-    indices.some((name) => writesSymbol(body, name));
 
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
   const budget = target.iterationBudget;
@@ -17915,7 +17858,7 @@ function emitSumProduct(
   // arm never unrolls: joining array terms with the bare scalar operator
   // would string-concatenate them — it always takes the `_SYS.bcast` fold
   // loop below.
-  if (bothConstant && withinBudget && !elementwiseBody && !noUnroll) {
+  if (bothConstant && withinBudget && !elementwiseBody) {
     const termCount = upperNum - lowerNum + 1;
     // A clause whose terms would hold too many nodes in all is a loop
     // (`unroll-budget.ts`).
@@ -18085,19 +18028,17 @@ function emitSumProduct(
   }
 
   // Keep the body, accumulator and parent on the same real representation.
-  // The lane reads the index as at least the lower bound, which a write to
-  // the index does not keep (`Assign(j, -j)`).
   const loopLane =
-    isRootClause && rest.length === 0 && !bodyWritesIndex
+    isRootClause && rest.length === 0
       ? realLoopClauseLane(body, index, lowerNum, target)
       : undefined;
   const loopIsComplex = loopLane ?? bodyIsComplex;
   const compileLoopTerm = (innerTarget: CompileTarget<Expression>): string =>
     loopLane === false
       ? BaseCompiler.withLoopIndexLowerBound(index, lowerNum!, () =>
-          compileTerm(innerTarget, innerWrittenIndices)
+          compileTerm(innerTarget)
         )
-      : compileTerm(innerTarget, innerWrittenIndices);
+      : compileTerm(innerTarget);
 
   // Emit a loop (either large constant range or symbolic bounds)
   const lowerCode = compileBound(lowerExpr, lowerNum, target);
@@ -18125,28 +18066,11 @@ function emitSumProduct(
     ...target,
     var: (id) => (id === index ? indexCode : target.var(id)),
     ...BaseCompiler.withBoundScope(target, [index]),
-    // A write to an index with a fresh name writes that name, as a write to
-    // an index with its own name does (`assignLValue`).
-    ...(indexCode !== index
-      ? {
-          renamedWritables: new Set([
-            ...(target.renamedWritables ?? []),
-            indexCode,
-          ]),
-        }
-      : {}),
   };
 
-  // The loop steps `counter`. It is the index itself, unless the body
-  // writes the index: then it is a separate name, and the iteration
-  // declares the index from it (`iterationPrelude`). Each clause declares
-  // its own index; an enclosing clause does it for the bounds of the inner
-  // clauses that read it. The interpreter walks independent clauses as one
-  // cartesian product and binds every index at each tuple, so there the
-  // innermost clause also declares the written indices of the enclosing
-  // clauses: a write to an outer index lasts for one tuple. Clauses that
-  // nest (`clausesNest`) are evaluated as nested operators, so there a
-  // write to an outer index lasts until the next value of that index.
+  // The loop steps `counter`. It is the index itself, unless a bound has no
+  // compile-time value: then it is a separate name, and the iteration
+  // declares the index from it (`iterationPrelude`).
   //
   // A bound with no compile-time value is compiled as code and evaluated
   // once, before the loop, in the scope that declares the counter. That code
@@ -18156,35 +18080,18 @@ function emitSumProduct(
   // to that name. A counter with the name of the index would hide that
   // variable: the lower bound would read the uninitialized counter (a
   // `ReferenceError`), and the upper bound would read the lower bound. So
-  // such a loop also steps a separate counter, and only the loop body
-  // declares the index. The emitted code of a bound cannot be inspected for
-  // the name reliably, so the rule applies to every bound with no
-  // compile-time value.
-  const writtenCounter = bodyWritesIndex
-    ? BaseCompiler.tempVar(target)
-    : indexCode;
-  const innerWrittenIndices: ReadonlyArray<WrittenLoopIndex> = bodyWritesIndex
-    ? [
-        ...enclosingWrittenIndices,
-        { name: index, code: indexCode, counter: writtenCounter },
-      ]
-    : enclosingWrittenIndices;
-  const declaredIndices =
-    rest.length === 0 && !clausesNest
-      ? innerWrittenIndices
-      : innerWrittenIndices.filter((w) => w.name === index);
+  // such a loop steps a separate counter, and only the loop body declares
+  // the index. The emitted code of a bound cannot be inspected for the name
+  // reliably, so the rule applies to every bound with no compile-time value.
 
-  // The counter stays numeric unless the body writes it. Declining on any
-  // same-named assignment also conservatively covers nested binder scopes.
+  // The body never writes the index: a body that does is declined before
+  // this emitter runs (`compileExpr`). A node that the caller maps
+  // (`isCallerMapped`) can still be code that writes it, so such a body
+  // records no fact about the index.
   const writesCounter = (expr: Expression): boolean => {
     if (!isFunction(expr)) return false;
     const options = target.cse?.harvestOptions;
     if (options === undefined || isCallerMapped(expr, options)) return true;
-    if (
-      ['Assign', 'Declare'].includes(expr.operator) &&
-      (!isSymbol(expr.ops[0]) || expr.ops[0].symbol === index)
-    )
-      return true;
     return expr.ops.some(writesCounter);
   };
   // The counter is a safe integer at every iteration: the loop starts
@@ -18195,10 +18102,7 @@ function emitSumProduct(
     recordScalarParams(innerTarget, new Set([index]));
     recordDecidedLoopIndex(innerTarget, index);
   }
-  if (
-    !bodyWritesIndex &&
-    BaseCompiler.isEmissionSkippable([body], indices, target)
-  ) {
+  if (BaseCompiler.isEmissionSkippable([body], indices, target)) {
     // Inspect only a complete numeric spelling, optionally floored by
     // compileBound; a numeric prefix of runtime code is not a constant.
     const bound = (code: string): number =>
@@ -18207,13 +18111,8 @@ function emitSumProduct(
   }
   const { bindings: hoistedBindings, result: bodyCode } =
     rest.length === 0
-      ? BaseCompiler.hoistLoopInvariants(
-          body,
-          // A subexpression that reads an index the body writes is not
-          // invariant.
-          [index, ...innerWrittenIndices.map((w) => w.name)],
-          target,
-          () => compileLoopTerm(innerTarget)
+      ? BaseCompiler.hoistLoopInvariants(body, [index], target, () =>
+          compileLoopTerm(innerTarget)
         )
       : { bindings: [], result: compileLoopTerm(innerTarget) };
   // The bindings follow the loop-entry guard and an EMPTY-RANGE return: a
@@ -18238,16 +18137,13 @@ function emitSumProduct(
   // value (the bound must not read a counter with the name of the index) is
   // named after the body and the accumulator are, so
   // that their temporaries keep the names they have without it. Only the
-  // body declares the index, from the counter. That declaration is not in
-  // `innerWrittenIndices`: an index that the body does not write needs no
-  // declaration in the inner clauses.
+  // body declares the index, from the counter.
   const counter =
-    !bodyWritesIndex && (lowerNum === undefined || upperNum === undefined)
+    lowerNum === undefined || upperNum === undefined
       ? BaseCompiler.tempVar(target)
-      : writtenCounter;
+      : indexCode;
   const iterationPrelude =
-    (counter !== writtenCounter ? `let ${indexCode} = ${counter}; ` : '') +
-    declaredIndices.map((w) => `let ${w.code} = ${w.counter}; `).join('');
+    counter !== indexCode ? `let ${indexCode} = ${counter}; ` : '';
 
   // Iteration-budget guard (see CompileTarget.iterationBudget): a trip count
   // over the budget — including infinite or NaN bounds, for which the negated

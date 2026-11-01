@@ -56,7 +56,7 @@ describe('A Loop whose value is used declines', () => {
       'a loop whose body is a destructuring declaration',
       [
         'Loop',
-        ['Declare', ['Tuple', 'a', 'a'], "'unknown'", ['Tuple', 'k', 2]],
+        ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 'k', 2]],
         ['Element', 'k', range(1, 3)],
       ],
       ['javascript'],

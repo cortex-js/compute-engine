@@ -572,8 +572,8 @@ export function elementBinderLane(
  * Whether evaluating `expr` can write the symbol `name`: an `Assign` or a
  * `Declare` of `name`, or of a target that is not a symbol, anywhere in the
  * tree. A nested scope that binds its own `name` is counted too, which is
- * conservative. The `Sum` and `Product` emitters use it: a body that writes
- * its index must not change the value of the index at the next iteration.
+ * conservative. The compilation of `Sum` and `Product` uses it to decline a
+ * body that writes its index (`compileExpr`).
  */
 export function writesSymbol(expr: Expression, name: string): boolean {
   if (!isFunction(expr)) return false;
@@ -1748,39 +1748,22 @@ export function compileLoop(
       return target.var(id);
     },
     ...withBoundScope(target, [index]),
-    // A write to an index with a fresh name writes that name, as a write to
-    // an index with its own name does (`assignLValue`).
-    ...(indexCode !== index
-      ? {
-          renamedWritables: new Set([
-            ...(target.renamedWritables ?? []),
-            indexCode,
-          ]),
-        }
-      : {}),
   };
   const fn = compileOp(node, 0, bodyTarget, 0, args[0]);
 
   const acc = tempVar(target);
-  // A body can write the index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
-  // The interpreter binds the index to its next value at each iteration,
-  // whatever the body wrote. So the loop of such a body steps a separate
-  // counter, and each iteration declares the index from it.
-  //
   // A bound with no compile-time value is compiled as code and evaluated in
   // the scope of the loop function. That code can read a variable whose
   // emitted name is the emitted name of the index: an outer variable with
   // the same name (`Sum(j, Limits(j, j, 5))`, where the lower bound is a
   // free `j`), or a symbol that the target's `var` maps to that name. A
   // `let j` in that scope would make the bound read the uninitialized index
-  // (a `ReferenceError`). So a loop with such a bound also steps a separate
+  // (a `ReferenceError`). So a loop with such a bound steps a separate
   // counter, and the index is declared only inside the loop body. The
   // emitted code of a bound cannot be inspected for the name reliably, so
   // the rule applies to every bound with no compile-time value.
   const counter =
-    writesSymbol(args[0], index) || !lowerIsConstant || !upperIsConstant
-      ? tempVar(target)
-      : indexCode;
+    !lowerIsConstant || !upperIsConstant ? tempVar(target) : indexCode;
   const declareIndex =
     counter === indexCode ? '' : `\n  let ${indexCode} = ${counter};`;
 

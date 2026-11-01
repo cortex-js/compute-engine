@@ -23,6 +23,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const SCOPE_ERROR =
   'writes outside a function require a declared `scope` effect';
 
+/** The refusal of a compilation in which a read of a block local can come
+ * before every assignment of it (CE-636). */
+const SOME_PATHS =
+  /a statement can read the block local "\w+" when no assignment gave it a value/;
+
 function run(source: string): {
   ce: ComputeEngine;
   value: unknown;
@@ -368,21 +373,29 @@ describe('THE COMPILED ROUTES AGREE WITH THE RUN', () => {
     'k',
   ];
 
-  test.each([
-    ['a body that assigns a new name', G, 3],
-    ['a local written in a branch and read after it', IF_BRANCH, 6],
-  ])('%s, with a `t` assigned after the function', (_name, literal, value) => {
+  test('a body that assigns a new name, with a `t` assigned after the function', () => {
+    const [literal, value] = [G, 3];
     const ce = new ComputeEngine();
     const fn = ce.box(literal as never);
     ce.assign('t', 10);
     const result = compile(fn, { to: 'javascript', fallback: false } as never)!;
     expect(result.success).toBe(true);
-    // A local that a read can find with no value starts with a marker
-    // (`let t = _tv1`): see the block about `g(false)` below.
     expect(result.code).toMatch(/\blet t\b/);
     expect(result.run!(2 as never)).toBe(value);
     // The run gives the same value, and does not write the outer `t`.
     expect(ce.box(['Apply', fn, 2]).evaluate().json).toBe(value);
+    expect(ce.box('t').evaluate().json).toBe(10);
+  });
+
+  test('a local written in a branch and read after it declines', () => {
+    // At k = 0 the read of `t` comes before every assignment of it.
+    const ce = new ComputeEngine();
+    const fn = ce.box(IF_BRANCH as never);
+    ce.assign('t', 10);
+    expect(() =>
+      compile(fn, { to: 'javascript', fallback: false } as never)
+    ).toThrow(SOME_PATHS);
+    expect(ce.box(['Apply', fn, 2]).evaluate().json).toBe(6);
     expect(ce.box('t').evaluate().json).toBe(10);
   });
 
@@ -1091,6 +1104,25 @@ function interpretedRoutes(source: string): {
   return { run: run(source).value, evaluated };
 }
 
+/** The value of `source` on the run and on the program evaluated as one
+ * block, for a program whose compilation declines because a read of a
+ * local can come before every assignment of it (CE-636). */
+function declinedRoutes(source: string): {
+  run: unknown;
+  evaluated: unknown;
+} {
+  expect(() =>
+    compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
+      to: 'javascript',
+      fallback: false,
+    } as never)
+  ).toThrow(SOME_PATHS);
+  const evaluated = new ComputeEngine()
+    .box(parseEpsil(source)[0] as never)
+    .evaluate().json;
+  return { run: run(source).value, evaluated };
+}
+
 describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
   test('a name assigned in one branch of an `if`', () => {
     const source = 'function g(c) { if c { t = 1 }; t }\n[g(true), g(false)]';
@@ -1109,12 +1141,25 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
 
   test.each([
     ['a loop body', 'function g() { for i in [1, 2] { t = i }; t }\ng()', 2],
+    ['a `do` block', 'function g() { do { t = 3 }; t + 1 }\ng()', 4],
+  ])('%s: every route agrees', (_name, source, value) => {
+    expect(run(source).diagnostics).toEqual([]);
+    expect(threeRoutes(source)).toEqual({
+      run: value,
+      evaluated: value,
+      compiled: value,
+    });
+  });
+
+  // In these programs a read of `t` or `s` can come before every
+  // assignment of it, so the compilation declines (CE-636). The run and the
+  // program evaluated as one block agree.
+  test.each([
     [
       'a `while` loop body',
       'function g() { n = 0; while n < 3 { n = n + 1; t = n * 2 }; t }\ng()',
       6,
     ],
-    ['a `do` block', 'function g() { do { t = 3 }; t + 1 }\ng()', 4],
     [
       'nested `if`s',
       'function g(c, d) { if c { if d { t = 1 } else { t = 2 } }; t }\n' +
@@ -1132,14 +1177,10 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
       'function g(c) { if c { t = 5 }; t }\nlet t = 10\n[g(true), t]',
       [5, 10],
     ],
-  ])('%s: every route agrees', (_name, source, value) => {
+  ])('%s: the run and the block agree, the compilation declines', (_name, source, value) => {
     const list = Array.isArray(value) ? ['List', ...value] : value;
     expect(run(source).diagnostics).toEqual([]);
-    expect(threeRoutes(source)).toEqual({
-      run: list,
-      evaluated: list,
-      compiled: value,
-    });
+    expect(declinedRoutes(source)).toEqual({ run: list, evaluated: list });
   });
 
   test('a nested assignment is not the `scope` effect', () => {
@@ -1154,7 +1195,8 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
     // The assignments in the branch write the `let` local, so the body does
     // not own `t`, and the `t` after the `if` is a free symbol.
     // The first program reads the free `t`, which has no type: its
-    // compilation declines.
+    // compilation declines. In the second, the read of `u` can come before
+    // every assignment of it, so its compilation declines too.
     for (const [source, value, routesOf] of [
       [
         'function g(c) { if c { let t = 1; t = 2 }; t }\ng(true)',
@@ -1164,7 +1206,7 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
       [
         'function g(c) { if c { let t = 1; t = t + 1; u = t }; u }\ng(true)',
         2,
-        threeRoutes,
+        declinedRoutes,
       ],
     ] as const) {
       const routes = routesOf(source);
@@ -1176,7 +1218,7 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
   test('a function literal in a branch owns the names of its body', () => {
     const source =
       'function g(c) { if c { u = ((k) => do { t = k; t })(2) }; [u, t] }\ng(true)';
-    const routes = interpretedRoutes(source);
+    const routes = declinedRoutes(source);
     expect(routes.run).toEqual(['List', 2, 't']);
     expect(routes.evaluated).toEqual(['List', 2, 't']);
   });
@@ -1185,19 +1227,29 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
     const ce = new ComputeEngine();
     const fn = ce.box([
       'Function',
-      ['Block', ['If', 'c', ['Block', ['Assign', 't', 1]]], 't'],
+      [
+        'Block',
+        [
+          'If',
+          ['Greater', 'c', 0],
+          ['Block', ['Assign', 't', 1]],
+          ['Block', ['Assign', 't', 2]],
+        ],
+        't',
+      ],
       'c',
     ] as never);
     const result = compile(fn, { to: 'javascript', fallback: false } as never)!;
     expect(result.success).toBe(true);
-    // The declaration comes before the `if`, so the read after it sees the
-    // write in the branch.
+    // The declaration comes before the conditional, so the read after it
+    // sees the write in the branch.
     expect(result.code.indexOf('let t')).toBeGreaterThan(-1);
     expect(result.code.indexOf('let t')).toBeLessThan(
-      result.code.indexOf('if (')
+      result.code.indexOf('t = 1')
     );
-    expect(result.run!(true as never)).toBe(1);
-    expect(ce.box(['Apply', fn, 'True']).evaluate().json).toBe(1);
+    expect(result.run!(1 as never)).toBe(1);
+    expect(result.run!(-1 as never)).toBe(2);
+    expect(ce.box(['Apply', fn, 1]).evaluate().json).toBe(1);
   });
 
   test('the top level is not changed', () => {
@@ -1367,39 +1419,40 @@ describe('A CLOSURE MADE IN A NESTED BLOCK KEEPS THE LOCALS OF ITS BODY', () => 
   });
 });
 
-describe('COMPILED CODE CHECKS A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', () => {
+describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', () => {
   // A read of a function-body local that the compiler cannot prove to come
-  // after an assignment compiles with a check, which throws the
-  // `read-before-declaration` error when the local has no value
-  // (`checkedLocalReads()`, `src/compute-engine/compilation/base-compiler.ts`).
+  // after an assignment makes the compilation fail, on every target
+  // (`classifyLocalReads()`,
+  // `src/compute-engine/compilation/compile-locals.ts`). The interpreter
+  // gives the `read-before-declaration` error for that read.
   const literal = (body: unknown) =>
     new ComputeEngine().box(['Function', body, 'c'] as never);
   const BRANCH = ['Block', ['If', 'c', ['Block', ['Assign', 't', 1]]], 't'];
 
-  test('JavaScript: `g(false)` throws, `g(true)` answers', () => {
-    const result = compile(literal(BRANCH), {
-      to: 'javascript',
+  test('an assignment in one branch: JavaScript and interval-js decline', () => {
+    expect(() =>
+      compile(literal(BRANCH), {
+        to: 'javascript',
+        fallback: false,
+      } as never)
+    ).toThrow(SOME_PATHS);
+    const ia = compile(literal(BRANCH), {
+      to: 'interval-js',
       fallback: false,
     } as never)!;
-    expect(result.success).toBe(true);
-    expect(result.run!(true as never)).toBe(1);
-    expect(() => result.run!(false as never)).toThrow(
-      /read-before-declaration: "t"/
-    );
+    expect(ia.success).toBe(false);
   });
 
   test('an Epsil program', () => {
-    const compiled = (source: string) =>
-      compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
+    const g = 'function g(c) { if c { t = 1 }; t }\n';
+    expect(() =>
+      compile(new ComputeEngine().box(parseEpsil(`${g}g(true)`)[0] as never), {
         to: 'javascript',
         fallback: false,
-      } as never)!;
-    const g = 'function g(c) { if c { t = 1 }; t }\n';
-    expect(compiled(`${g}g(true)`).run!({} as never)).toBe(1);
-    expect(() => compiled(`${g}g(false)`).run!({} as never)).toThrow(
-      /read-before-declaration/
-    );
-    // The run gives the error too.
+      } as never)
+    ).toThrow(SOME_PATHS);
+    expect(run(`${g}g(true)`).value).toBe(1);
+    // The run gives the error.
     expectReadBeforeAssignment(run(`${g}g(false)`).value, 't');
   });
 
@@ -1418,15 +1471,11 @@ describe('COMPILED CODE CHECKS A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', ()
       fn.engine.box(['Apply', fn, 3] as never).evaluate().json,
       't'
     );
-    const js = compile(fn, { to: 'javascript', fallback: false } as never)!;
-    expect(() => js.run!(3 as never)).toThrow(/read-before-declaration/);
-    // The interval result of a function literal is called with its
-    // arguments (`calling: 'lambda'`). An error in the run, here the read
-    // before any assignment, gives `{ kind: 'entire' }`: the interval target
-    // answers "cannot bound" for an error, as for a call with a vars object.
+    expect(() =>
+      compile(fn, { to: 'javascript', fallback: false } as never)
+    ).toThrow(SOME_PATHS);
     const ia = compile(fn, { to: 'interval-js', fallback: false } as never)!;
-    expect(ia.calling).toBe('lambda');
-    expect(ia.run!({ lo: 3, hi: 3 } as never)).toEqual({ kind: 'entire' });
+    expect(ia.success).toBe(false);
   });
 
   test('interval-js: a read after a loop that runs', () => {
@@ -1476,36 +1525,37 @@ describe('COMPILED CODE CHECKS A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', ()
         'c',
       ],
     ],
-  ])('no check: %s', (_name, body) => {
+  ])('compiles: %s', (_name, body) => {
     const result = compile(literal(body), {
       to: 'javascript',
       fallback: false,
     } as never)!;
-    expect(result.code).not.toContain('read-before-declaration');
+    expect(result.success).toBe(true);
   });
 
-  test('a check: an assignment in each branch of a condition read by its value', () => {
+  test('declines: an assignment in each branch of a condition read by its value', () => {
     // The condition `c` selects a branch only when it is `true` or `false`.
-    // Any other value runs no branch (CE-636), so the read is checked.
-    const result = compile(
-      literal([
-        'Block',
-        [
-          'If',
-          'c',
-          ['Block', ['Assign', 't', 1]],
-          ['Block', ['Assign', 't', 2]],
-        ],
-        't',
-      ]),
-      { to: 'javascript', fallback: false } as never
-    )!;
-    expect(result.code).toContain('read-before-declaration');
-    expect(result.run!(true as never)).toBe(1);
-    expect(result.run!(false as never)).toBe(2);
-    expect(() => result.run!(3 as never)).toThrow(
-      /read-before-declaration: "t"/
+    // Any other value runs no branch, and the parameter `c` has no type, so
+    // the read of `t` can come before every assignment (CE-636).
+    const fn = literal([
+      'Block',
+      [
+        'If',
+        'c',
+        ['Block', ['Assign', 't', 1]],
+        ['Block', ['Assign', 't', 2]],
+      ],
+      't',
+    ]);
+    expect(() =>
+      compile(fn, { to: 'javascript', fallback: false } as never)
+    ).toThrow(SOME_PATHS);
+    expect(fn.engine.box(['Apply', fn, 'True'] as never).evaluate().json).toBe(
+      1
     );
+    expect(
+      fn.engine.box(['Apply', fn, 'False'] as never).evaluate().json
+    ).toBe(2);
   });
 });
 
@@ -1703,17 +1753,16 @@ describe('AN OPERAND EVALUATED FOR EACH ELEMENT OWNS ITS NAMES', () => {
   });
 });
 
-describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
+describe('A READ OF A LOCAL NEXT TO ANOTHER BINDING OF ITS NAME', () => {
   // A read of an assignment local that can come before its first
-  // assignment compiles with a check (`checkedLocalReads()`,
-  // `src/compute-engine/compilation/base-compiler.ts`).
+  // assignment makes the compilation fail (`classifyLocalReads()`,
+  // `src/compute-engine/compilation/compile-locals.ts`). A read of another
+  // binding with the same name is not a read of the local.
 
   test('a function defined in the engine with a parameter of the same name', () => {
     // The definition of `h` compiles while the body of the caller compiles.
-    // Its parameter `t` is another binding: its reads are not checked, and
-    // the marker of the caller is not visible in the definition. Before,
-    // the definition read the marker of the caller, which is not declared
-    // there: `ReferenceError: _tv1 is not defined`.
+    // Its parameter `t` is another binding than the local `t` of the
+    // caller.
     const ce = new ComputeEngine();
     ce.assign(
       'h',
@@ -1727,19 +1776,21 @@ describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
       'Function',
       [
         'Block',
-        ['If', ['Greater', 'x', 0], ['Block', ['Assign', 't', 1]]],
+        [
+          'If',
+          ['Greater', 'x', 0],
+          ['Block', ['Assign', 't', 1]],
+          ['Block', ['Assign', 't', 3]],
+        ],
         ['Add', 't', ['h', 'x']],
       ],
       'x',
     ] as never);
     expect(ce.box(['Apply', fn, 2] as never).evaluate().json).toBe(7);
-    expectReadBeforeAssignment(
-      ce.box(['Apply', fn, -1] as never).evaluate().json,
-      't'
-    );
+    expect(ce.box(['Apply', fn, -1] as never).evaluate().json).toBe(0);
     const result = compile(fn, { to: 'javascript', fallback: false } as never)!;
     expect(result.run!(2 as never)).toBe(7);
-    expect(() => result.run!(-1 as never)).toThrow(/read-before-declaration/);
+    expect(result.run!(-1 as never)).toBe(0);
   });
 
   test('the same on the interval target', () => {
@@ -1760,7 +1811,7 @@ describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
           'If',
           ['Greater', 'x', 0],
           ['Block', ['Assign', 't', 1]],
-          ['Block', ['Assign', 'w', 2]],
+          ['Block', ['Assign', 't', 2]],
         ],
         ['Add', 't', ['h', 'x']],
       ],
@@ -1771,9 +1822,7 @@ describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
       fallback: false,
     } as never) as unknown as { success: boolean; preamble: string };
     expect(result.success).toBe(true);
-    // The definition of `h` does not test its parameter `t`.
     expect(result.preamble).toContain('const _fn_h');
-    expect(result.preamble).not.toContain('read-before-declaration');
   });
 
   test('an assignment in a loop body does not prove a read in its collection', () => {
@@ -1789,19 +1838,16 @@ describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
     expect(() =>
       compiled('function g() { for k in 1..t { t = 2 }; 0 }\ng()')
     ).toThrow(/no path to that read gives "t" a value/);
-    // An earlier statement that may assign `t`: the read is checked.
+    // An earlier statement that may assign `t`: the compilation declines
+    // too.
     const g = 'function g(c) { if c { t = 3 }; for k in 1..t { t = 2 }; 0 }\n';
-    expect(compiled(`${g}g(true)`).run!({} as never)).toBe(0);
-    expect(() => compiled(`${g}g(false)`).run!({} as never)).toThrow(
-      /read-before-declaration/
-    );
+    expect(() => compiled(`${g}g(true)`)).toThrow(SOME_PATHS);
   });
 
-  test('a node read before and after an assignment is checked', () => {
+  test('a node read before and after an assignment declines', () => {
     // The body holds the node `t + 1` twice: once before the assignment
-    // `t = 5` and once after it. Before, the read after the assignment
-    // proved the node, and the read before it was not checked: the call
-    // with `c` false computed `NaN` from the marker of `t`.
+    // `t = 5` and once after it. The read after the assignment does not
+    // prove the read before it.
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
@@ -1827,11 +1873,9 @@ describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
       { scope: body.localScope }
     );
     const fn = ce._fn('Function', [block, ...literal.ops!.slice(1)]);
-    const result = compile(fn, { to: 'javascript', fallback: false } as never)!;
-    expect(result.run!(true as never)).toBe(54);
-    expect(() => result.run!(false as never)).toThrow(
-      /read-before-declaration/
-    );
+    expect(() =>
+      compile(fn, { to: 'javascript', fallback: false } as never)
+    ).toThrow(SOME_PATHS);
   });
 });
 

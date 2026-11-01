@@ -50,7 +50,6 @@ import {
 import { libraryBoundConstantHidden } from './compile-real-analysis.js';
 import { ensureUserFunctionValueRef } from './compile-callbacks.js';
 import { liftWideReference } from './compile-lanes.js';
-import { checkedLocalRead } from './compile-locals.js';
 import { tryFoldKnownSymbol } from './compile-folded-values.js';
 import { core } from './compiler-core-hooks.js';
 import {
@@ -404,7 +403,7 @@ export function compileInnerSymbol(
   if (resolved !== undefined)
     return liftWideReference(
       expr,
-      readAbsentInput(expr, checkedLocalRead(expr, s, resolved), target),
+      readAbsentInput(expr, resolved, target),
       target
     );
   // The target did not resolve the symbol (no `vars` mapping, constant, or

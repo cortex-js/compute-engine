@@ -120,7 +120,7 @@ import {
 } from './fixed-width-unroll.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { cseSharingOff } from './compile-cse.js';
-import { reservedNameSpelling, writesSymbol } from './compile-loops.js';
+import { reservedNameSpelling } from './compile-loops.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
@@ -4746,16 +4746,8 @@ function compileIntervalSumProduct(
   ): string =>
     bindings.map(([name, code]) => `const ${name} = ${code}; `).join('');
 
-  // A body can write the index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
-  // The interpreter binds the index to its next value at each iteration,
-  // whatever the body wrote. An unrolled term reads the index as a literal,
-  // which a write cannot change, so such a body takes the loop form, where
-  // each iteration copies the counter to a local that the body reads and
-  // writes (`indexLocal` below).
-  const writesIndex = writesSymbol(body, index);
-
   // Unroll when both bounds are constant and range is small
-  if (bothConstant && !writesIndex) {
+  if (bothConstant) {
     const termCount = upperNum - lowerNum + 1;
     // A clause whose terms would hold too many nodes in all is a loop
     // (`unroll-budget.ts`).
@@ -4798,11 +4790,6 @@ function compileIntervalSumProduct(
   // The emitted name of the index: a fresh name when the index has the name
   // of an identifier that the emitted code uses (`_IA`, `_SYS`).
   const indexCode = reservedNameSpelling([index], target)(index);
-  // The counter is a number, and the body reads the index as an interval.
-  // When the body writes the index, each iteration declares the interval in
-  // a local (`let <local> = _IA.point(<counter>);`), which the body reads
-  // and writes, so a write does not change the counter.
-  const indexLocal = writesIndex ? BaseCompiler.tempVar(target) : undefined;
   const { bindings, result: bodyCode } = BaseCompiler.hoistLoopInvariants(
     body,
     [index],
@@ -4811,24 +4798,10 @@ function compileIntervalSumProduct(
       compileTerm({
         ...target,
         var: (id) =>
-          id === index
-            ? (indexLocal ?? `_IA.point(${indexCode})`)
-            : target.var(id),
+          id === index ? `_IA.point(${indexCode})` : target.var(id),
         ...BaseCompiler.withBoundScope(target, [index]),
-        ...(indexLocal !== undefined
-          ? {
-              renamedWritables: new Set([
-                ...(target.renamedWritables ?? []),
-                indexLocal,
-              ]),
-            }
-          : {}),
       })
   );
-  const iterationPrelude =
-    indexLocal === undefined
-      ? ''
-      : `let ${indexLocal} = _IA.point(${indexCode}); `;
   // With SYMBOLIC bounds the bindings follow an EMPTY-RANGE exit: a range
   // that runs zero iterations never evaluated the body, so it must not
   // evaluate the body's subexpressions either (an error they raise would be
@@ -4852,10 +4825,10 @@ function compileIntervalSumProduct(
   // 2^53 − 1 a floored bound is finite, but `k++` does not change `k` there
   // and the loop would never end. The interpreter answers `out-of-range`.
   if (lowerNum === undefined || upperNum === undefined) {
-    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isSafeInteger(_upper) || !Number.isSafeInteger(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${indexCode} = _lower; ${indexCode} <= _upper; ${indexCode}++) { ${iterationPrelude}${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isSafeInteger(_upper) || !Number.isSafeInteger(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${indexCode} = _lower; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
   }
 
-  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${prelude(undefined)}for (let ${indexCode} = ${lowerCode}; ${indexCode} <= _upper; ${indexCode}++) { ${iterationPrelude}${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${prelude(undefined)}for (let ${indexCode} = ${lowerCode}; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
 }
 
 /**
