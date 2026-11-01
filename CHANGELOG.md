@@ -240,6 +240,22 @@
 
 ### Bug Fixes
 
+- **A statistics operator applied to a list literal infers the free symbols of
+  the list as numbers** (CE-663). After `Mean([p, q])`, `p` and `q` are typed
+  `number` (they were `unknown`), so a later `p ∧ q` is an error, and
+  `Mean([p, q])` compiles. This applies to `Mean`, `Median`, `Mode`,
+  `Variance`, `StandardDeviation`, `PopulationVariance`,
+  `PopulationStandardDeviation`, `Skewness`, `Kurtosis`, `Quartiles` and
+  `InterquartileRange`: their parameter is a union
+  (`collection<nothing | number> | number`, with a `distribution` arm for
+  some), and only its collection arm admits a list. A parameter with two arms
+  that admit a list, such as `matrix | vector` at `MatrixMultiply`, still
+  infers nothing. A symbol with no value is typed `number`, not
+  `nothing | number`; a symbol that holds `Nothing` keeps the type `nothing`.
+  A transparent alias of such a union
+  (`declareType('nums', 'list<number> | boolean', { alias: true })`) infers
+  the cells in the same way.
+
 - **In a block that declares a local named `Pi`, a result built with the
   library π keeps its value when it is assigned** (CE-103). With `Pi` a block
   local of value `3`, `s := Sum(1/n², n, 1, ∞); s` gave `3²/6 = 3/2`: the

@@ -2077,19 +2077,6 @@ integration and the serializer take the value of the block (its last
 statement), or the symbolic integration declines for a block integrand and
 leaves it to the numeric one.
 
-### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
-
-**Status:** ready; defect. Found 2026-10-28 by the review of CE-601 (the same
-result on HEAD `5fd069b6c` and with the CE-601 change).
-
-`lim_{x→∞} e^{√x}/x^5` is `+∞`: `e^{√x}` grows faster than every power of `x`.
-The numeric growth test in `symbolic/limit.ts` samples the expression at the
-probe points `x = 8, 30, 120`, where it is still small and decreasing (about
-`5.6·10⁻⁴`, `1.0·10⁻⁵`, `2.3·10⁻⁶`), and answers that it tends to 0. Expected:
-`+∞`, from a comparison of the growth of the logarithms (`√x` against `5 ln x`,
-as in Gruntz's algorithm), or from probes far enough out that the order of
-growth is settled before the numeric test decides.
-
 ### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
 **Status:** phases 1, 2 and 3 done 2026-10-26; the sub-items below are open;

@@ -91,6 +91,7 @@ import {
   isErrorTypedWithoutErrorValue,
 } from './error-typed-operand.js';
 import { parseType } from '../../common/type/parse.js';
+import { withoutNothing } from '../../common/type/omission.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import {
@@ -2624,10 +2625,34 @@ function elementIsBareOrGround(param: Type | undefined): boolean {
  * not infer its free symbols by itself (`narrowFreeSymbolCells()`,
  * `canonical-utils.ts`): only a parameter that requires a type of its
  * elements does.
+ *
+ * A union parameter (`collection<nothing | number> | number` at `Median`)
+ * distributes the element type of its one arm that admits a list literal,
+ * and nothing when several arms admit one. A valueless symbol cell gets the
+ * element type without its `nothing` member (`symbolCellType()`).
  */
 function distributeLiteralElementInference(op: Expression, param: Type): void {
   if (!isFunction(op, 'List') && !isFunction(op, 'Tuple')) return;
   if (typeof param === 'string') return;
+  const resolved = resolveTypeAlias(param);
+  if (typeof resolved === 'object' && resolved.kind === 'union') {
+    // A union parameter (`collection<number> | distribution | number` at
+    // `Mean`) has no element type of its own. When exactly one arm admits
+    // a list of any contents, the call is admitted through that arm, and
+    // that arm gives the element type: `Mean([p, q])` infers `p` and `q` as
+    // numbers. The test does not read the type of the literal, which reads a
+    // free symbol as a number cell: `p` and `q` can be lists, and then
+    // `[p, q]` is a matrix, not a vector. So `matrix | vector`
+    // (`MatrixMultiply`) has two arms that admit a list, and it distributes
+    // nothing. A tuple literal is tested against `tuple` in the same way,
+    // but a tuple of symbols without a type is not admitted by its type, so
+    // this pass does not run on it (see the tuple branch below), and
+    // `Mean((w1, w2))` leaves `w1` unknown.
+    const literal = op.operator === 'Tuple' ? 'tuple' : 'list';
+    const arms = resolved.types.filter((arm) => typesOverlap(literal, arm));
+    if (arms.length === 1) distributeLiteralElementInference(op, arms[0]);
+    return;
+  }
   if (op.operator === 'Tuple' && param.kind === 'tuple') {
     // Per-slot for a tuple parameter of matching arity. NOTE: this fires
     // only when the tuple literal was GENUINELY admitted; a tuple of
@@ -2640,8 +2665,10 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
     op.ops.forEach((el, i) => {
       const slot = param.elements[i].type;
       if (slot === 'unknown' || slot === 'any') return;
-      if (isSymbol(el)) el._infer(() => slot, 'narrow');
-      else distributeLiteralElementInference(el, slot);
+      if (isSymbol(el)) {
+        const cell = symbolCellType(el, slot);
+        if (cell !== 'never') el._infer(() => cell, 'narrow');
+      } else distributeLiteralElementInference(el, slot);
     });
     return;
   }
@@ -2649,8 +2676,27 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
   if (element === undefined || element === 'unknown' || element === 'any')
     return;
   for (const el of op.ops)
-    if (isSymbol(el)) el._infer(() => element, 'narrow');
-    else distributeLiteralElementInference(el, element);
+    if (isSymbol(el)) {
+      const cell = symbolCellType(el, element);
+      if (cell !== 'never') el._infer(() => cell, 'narrow');
+    } else distributeLiteralElementInference(el, element);
+}
+
+/**
+ * The type that `distributeLiteralElementInference()` writes on the symbol
+ * cell `el` for the element type `element`.
+ *
+ * A `nothing` member of the element type (`collection<nothing | number>` at
+ * `Mean`) admits a cell that is omitted, but the use of a valueless symbol
+ * there is no evidence that the symbol holds `Nothing`: `Mean([p, q])` gives
+ * `p` the type `number`, not `nothing | number`. A symbol that holds a value
+ * gets the element type unchanged: after `p := Nothing`, `Mean([p, 1])`
+ * keeps the type `nothing` of `p` (the meet of `nothing` and `number` would
+ * be `never`, a type that does not hold its value).
+ */
+function symbolCellType(el: Expression, element: Type): Type {
+  if (isSymbol(el) && el.valueDefinition?.value !== undefined) return element;
+  return withoutNothing(element);
 }
 
 /**

@@ -17,7 +17,7 @@
  *   operator requires a number. ROADMAP CE-39.6 (user decision 2026-10-25,
  *   option (a)).
  */
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, compile } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 function check(expr: Expression): { type: string; valueType: string } {
@@ -141,6 +141,60 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
     ]);
     expect(ce.box('a').type.toString()).toBe('unknown');
     expect(ce.box('c').type.toString()).toBe('unknown');
+  });
+
+  test.each([
+    'Mean',
+    'Median',
+    'Mode',
+    'Variance',
+    'StandardDeviation',
+    'PopulationVariance',
+    'PopulationStandardDeviation',
+    'Skewness',
+    'Kurtosis',
+    'Quartiles',
+    'InterquartileRange',
+  ])(
+    'a union parameter with one collection arm infers the cells (%s)',
+    (op) => {
+      // The parameter is `collection<nothing | number> | number` (with a
+      // `distribution` arm at `Mean`, `Variance` and `StandardDeviation`).
+      // Only the collection arm admits a list, so the cells are numbers. The
+      // `nothing` arm of the element type is not written on a symbol.
+      const ce = new ComputeEngine();
+      ce.box([op, ['List', 'p', 'q']]);
+      expect(ce.box('p').type.toString()).toBe('number');
+      expect(ce.box('q').type.toString()).toBe('number');
+      expect(ce.box(['And', 'p', 'q']).isValid).toBe(false);
+    }
+  );
+
+  test('a cell that holds Nothing keeps its type', () => {
+    // The `nothing` member of the element type is removed only for a
+    // valueless symbol: the meet of `nothing` and `number` is `never`.
+    const ce = new ComputeEngine();
+    ce.assign('p', ce.Nothing);
+    const expr = ce.box(['Mean', ['List', 'p', 1]]);
+    expect(ce.box('p').type.toString()).toBe('nothing');
+    expect(expr.evaluate().json).toBe(1);
+  });
+
+  test('a transparent alias of a union parameter infers the cells', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('nums', 'list<number> | boolean', { alias: true });
+    ce.declare('f', '(nums) -> number');
+    ce.box(['f', ['List', 'p', 'q']]);
+    expect(ce.box('p').type.toString()).toBe('number');
+  });
+
+  test('Mean of a list of free symbols compiles', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Mean', ['List', 'p', 'q']]);
+    const fn = compile(expr);
+    expect(fn.success).toBe(true);
+    expect(fn.run({ p: 1, q: 4 })).toBe(2.5);
+    expect(expr.subs({ p: 1, q: 4 }).evaluate().N().re).toBe(2.5);
   });
 
   test('an operator that does not require numbers does not infer', () => {
