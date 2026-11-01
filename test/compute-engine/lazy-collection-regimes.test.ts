@@ -710,15 +710,18 @@ describe('conditional-handler views participate in the memo', () => {
       expect(e.isCanonical).toBe(true);
       if (name === 'Tuple') {
         // `Tuple`'s `isLazy` handler answers `false`: an inert member of the
-        // def-level set, and correctly NOT memoized. A tuple of number
+        // def-level set, not a lazy collection view. A tuple of number
         // literals is written-out data and evaluates to ITSELF
         // (`evaluate-literal-data.test.ts`), which is not the memo, so the
         // memo question is asked of a tuple with an element to evaluate.
+        // The inert rule of the memo keeps its result, keyed on the
+        // generation, so that an operand that other operands share is
+        // evaluated once (`shared-collection-literal-evaluation.test.ts`).
         expect(e.isLazyCollection).toBe(false);
         expect(e.evaluate()).toBe(e);
         const computed = ce.box(['Tuple', 1, ['Add', 'x', 2]]);
         expect(computed.isLazyCollection).toBe(false);
-        expect(computed.evaluate()).not.toBe(computed.evaluate());
+        expect(computed.evaluate()).toBe(computed.evaluate());
         return;
       }
       expect(e.isLazyCollection).toBe(true);

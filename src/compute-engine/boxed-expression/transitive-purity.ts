@@ -81,10 +81,14 @@ export function subscriptEvaluateReads(
  * are answered with no walk. A store-backed list (`ce.list()`) holds
  * numbers only: its elements are not read, because a read of its `ops`
  * makes an expression for each element.
+ *
+ * `knownPure` names the expressions that the caller has already found
+ * transitively pure in the same state: the walk does not enter them.
  */
 export function isTransitivelyPure(
   expr: Expression,
-  visited?: Set<unknown>
+  visited?: Set<unknown>,
+  knownPure?: (e: Expression) => boolean
 ): boolean {
   if (!isFunction(expr)) {
     if (!isSymbol(expr)) return expr.isPure === true;
@@ -133,6 +137,10 @@ export function isTransitivelyPure(
       seen.add(e);
       if (e.isPure !== true) return false;
     }
+    // An expression below the root that the caller already found
+    // transitively pure in the current state (`knownPure`) is not entered:
+    // what it reads was checked by that walk.
+    if (knownPure !== undefined && e !== expr && knownPure(e)) continue;
     // A value that is not canonical (`ce.declare('u', {value: …})` with a
     // raw value) is not bound: its symbols have no definition. An
     // evaluation reads its canonical form, so that form is checked.
@@ -174,8 +182,11 @@ export function isTransitivelyPure(
     }
 
     // A store-backed list (`ce.list()`) holds numbers only, which are pure,
-    // and a read of its `ops` makes an expression for each element.
-    if (isFunction(e) && e._numericStore === undefined) {
+    // and a read of its `ops` makes an expression for each element. Other
+    // written-out data (`_isLiteralData()`: a library `List` or `Tuple` of
+    // number and string literals) holds no symbol and no call, so its
+    // elements are not read either.
+    if (isFunction(e) && e._numericStore === undefined && !e._isLiteralData()) {
       const discharges =
         operatorDef?.lazy === true ? operatorDef.discharges : undefined;
       e.ops.forEach((op, i) => {

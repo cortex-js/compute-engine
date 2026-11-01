@@ -2091,6 +2091,23 @@
 
 ### Performance
 
+- **A tuple or a list whose operands share a node evaluates that node once.**
+  With `a0 := Map(x => x + d, Range(1, 1000))`, `a1 := (a0, a0)`, `a2 :=
+  (a1, a1)`, …, each read of the last variable evaluated the shared operand
+  again for each path to it, so the time doubled with each level: about 8 s
+  at 14 levels in a loop and 30 s at 16 levels. The result also held a
+  separate copy of each path. Now the evaluation of a `Tuple` or `List`
+  serves its result until the next value write, so 20 levels take about 0.2 s
+  and the result keeps the sharing. A write to a variable that the tuple reads
+  still gives the new value. A tuple or list that reads an impure value (a
+  symbol whose value is `Random()`) is evaluated again at each read. The fix
+  is on the synchronous route of `evaluate()` only: `N()` and
+  `evaluateAsync()` are not changed. A chain where a level uses the two
+  levels below it (`a2 := (a1, a0)`) is still slow, and so is a chain over an
+  infinite view with an element memo (`Map(f, Range(1, Infinity))`): a
+  result that holds such a view is not kept, because the view keeps each
+  element that is read.
+
 - **`subs()` substitutes a node that an expression uses more than once only
   once.** On a non-canonical expression, `subs()` substituted a shared node
   again for each path from the root, so its time doubled with each level of

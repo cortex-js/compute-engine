@@ -921,6 +921,61 @@ function recordEvaluatedError(node: Expression, result: Expression): void {
     errorEvaluatedFrom.set(result, { node, stamp: ++errorRecordCount });
 }
 
+/** The `Tuple` and `List` nodes that `_keepsCollectionLiteralResult` found
+ * transitively pure, with the generation and the lexical scope of that walk.
+ * A value write or another scope can change what a symbol of the node reads,
+ * so an entry serves only the same generation and scope. */
+const PURE_COLLECTION_LITERAL = new WeakMap<
+  Expression,
+  { generation: number; scope: unknown }
+>();
+
+/** The answer of `holdsUnboundedElementMemo` for each function or
+ * dictionary node, with the generation that it was computed in: the
+ * finiteness of a view can depend on the value of a symbol (`Take(v, n)`). */
+const UNBOUNDED_ELEMENT_MEMO = new WeakMap<
+  Expression,
+  { generation: number; holds: boolean }
+>();
+
+/** Whether a node of `expr`, at any depth, is a lazy view with an element
+ * memo that is not a finite collection. A lazy view without an element memo
+ * (`Rest`, `Drop`, `Zip`, `Take`, `Cycle`) reads the elements of its
+ * collection operands, and the element cache of an operand fills through
+ * it: `Tuple(Rest(Map(f, Range(1, Infinity))), s)` holds such a view. So the
+ * walk enters the collection operands of these views; it does not enter the
+ * operands of a view with an element memo, nor a symbol, whose value the
+ * variable holds. The answer of each function or dictionary node is kept for
+ * its generation, so a node that many paths share costs one visit. */
+function holdsUnboundedElementMemo(
+  expr: Expression,
+  generation: number
+): boolean {
+  const dictionary = isDictionary(expr);
+  if (!dictionary && (!isFunction(expr) || expr._numericStore !== undefined))
+    return false;
+  if (
+    isFunction(expr) &&
+    expr.isLazyCollection &&
+    expr.operatorDefinition?.collection?.elementMemo === true
+  )
+    return expr.isFiniteCollection !== true;
+  const hit = UNBOUNDED_ELEMENT_MEMO.get(expr);
+  if (hit !== undefined && hit.generation === generation) return hit.holds;
+  let holds: boolean;
+  if (isDictionary(expr))
+    holds = expr.values.some((v) => holdsUnboundedElementMemo(v, generation));
+  else if (!isFunction(expr)) holds = false;
+  else if (expr.isLazyCollection)
+    holds = expr.ops.some(
+      (op) =>
+        op.isCollection === true && holdsUnboundedElementMemo(op, generation)
+    );
+  else holds = expr.ops.some((op) => holdsUnboundedElementMemo(op, generation));
+  UNBOUNDED_ELEMENT_MEMO.set(expr, { generation, holds });
+  return holds;
+}
+
 export class BoxedFunction
   extends _BoxedExpression
   implements FunctionInterface
@@ -4638,10 +4693,12 @@ export class BoxedFunction
    * `_memoizedLazyCollectionValue`, with the same key (generation, world
    * epoch, ambient scope, facts side, object dependencies), the same purity
    * and settled-only gates, and one store gate of its own
-   * (`_storeLazyCollectionValue`): only a SYMBOLIC result that is not a
-   * collection value is kept. A node that evaluates to a number or to a list
-   * literal stores nothing — such a value is cheap to produce again and
-   * would be retained for the node's lifetime.
+   * (`_storeLazyCollectionValue`): a SYMBOLIC result that is not a
+   * collection value is kept, and so is the result of a `Tuple` or `List`
+   * node, whose operands can share a node. Any other node that evaluates to
+   * a number or to a list literal stores nothing — such a value is cheap to
+   * produce again and would be retained for the node's lifetime. A `List`
+   * takes this rule although its definition is `lazy`.
    *
    * Why: a value that stayed symbolic — an inert `PointList` head whose
    * columns wait for a slider, an accessor read of it — was walked again on
@@ -4682,7 +4739,15 @@ export class BoxedFunction
     if (this.engine._atTransientConfiguration) return false;
     if (!this.isCanonical) return false;
     const def = this.operatorDefinition;
-    if (!def || def.lazy === true) return false;
+    // A `List` is `lazy`, but its handler evaluates each element, as the
+    // handler of a `Tuple` does: it takes the rule, so that a list whose
+    // elements share a node evaluates that node once
+    // (`_storeLazyCollectionValue`). The cost is retention: the node holds
+    // its evaluated elements until it is evaluated again or released, also
+    // the element caches of the finite lazy views among them; a result with
+    // an infinite view that has an element memo is not kept
+    // (`_keepsCollectionLiteralResult`).
+    if (!def || (def.lazy === true && this._operator !== 'List')) return false;
     if (this.isLazyCollection) return false;
     return true;
   }
@@ -4813,7 +4878,12 @@ export class BoxedFunction
    * the deepest access ever made. For a finite collection that is bounded by
    * the collection (and by `ELEMENT_MEMO_CAP`); for an INFINITE one it is
    * bounded by nothing, so such nodes are excluded from the memo entirely —
-   * see `_isMemoizableLazyCollection`.
+   * see `_isMemoizableLazyCollection`. The kept result of a `Tuple` or
+   * `List` node under the inert rule holds its evaluated elements, also the
+   * lazy views among them, until the node is evaluated again or released:
+   * a finite view keeps its bounded element cache, and a result with an
+   * infinite view that has an element memo as a direct element is not kept
+   * (`_keepsCollectionLiteralResult`).
    *
    * **Purity gate.** An impure node is never memoized: `Append(xs, Random())`
    * must re-draw on every `evaluate()`.
@@ -4961,6 +5031,86 @@ export class BoxedFunction
     return undefined;
   }
 
+  /** Whether the inert rule keeps `result`, the evaluated collection of this
+   * `Tuple` or `List` node (`_storeLazyCollectionValue`).
+   *
+   * - No node of `result`, at any depth, is a lazy view with an element memo
+   *   (`Map`, `Iterate`, …) that is not a finite collection, also below a
+   *   view without an element memo (`Rest`, `Zip`). The element
+   *   cache of such a view grows with the deepest element read and is never
+   *   released while the entry holds the view, which is why
+   *   `_isMemoizableLazyCollection` does not keep the view itself:
+   *   `List(List(Iterate(x ↦ x + 1, s), s), s)` is not kept
+   *   (`holdsUnboundedElementMemo`).
+   * - The node is transitively pure (`isTransitivelyPure`). The purity of a
+   *   symbol does not follow its value, so the key alone accepts
+   *   `List(r)` with `r` declared with the value `Random()`, and a second
+   *   evaluation would answer the first draw. Each store walks the node
+   *   with a new visited set, which reads a shared node once, and does not
+   *   enter a `Tuple` or `List` node that an earlier store found pure in the
+   *   same generation and lexical scope (`PURE_COLLECTION_LITERAL`). So
+   *   nested or chained literals cost one visit per node, not one per
+   *   level. Only the root of each walk is recorded, in a weak map, so the
+   *   record keeps no node alive. */
+  private _keepsCollectionLiteralResult(result: BoxedFunction): boolean {
+    const generation = this.engine._anyVersion;
+    if (holdsUnboundedElementMemo(result, generation)) return false;
+    const scope = this.engine.context?.lexicalScope;
+    const knownPure = (e: Expression): boolean => {
+      const entry = PURE_COLLECTION_LITERAL.get(e);
+      return (
+        entry !== undefined &&
+        entry.generation === generation &&
+        entry.scope === scope
+      );
+    };
+    if (!this.readsOnlyPureValues(knownPure)) return false;
+    // Written only after a walk that answered `true`: a walk that answers
+    // `false`, or throws, records nothing.
+    PURE_COLLECTION_LITERAL.set(this, { generation, scope });
+    return true;
+  }
+
+  /** Whether this node is pure and what it reads is pure: the purity of a
+   * node (`isPure`) does not follow the value of a symbol, nor what the body
+   * of a called function reads. The node is checked with `isPure`, which
+   * includes the effects of every operand, so the walk below does not read
+   * `isPure` of each operand again: inside a call, that read computes the
+   * effects of each node with the types of the call frame, a type cache miss
+   * for each node (`ce-689-type-cache-across-calls.test.ts`). It reads, with
+   * `isTransitivelyPure`, the value of each symbol and the body of each
+   * called function literal. It does not enter a function literal (its body
+   * runs only when it is called), written-out data, or a node in
+   * `knownPure`. */
+  private readsOnlyPureValues(knownPure: (e: Expression) => boolean): boolean {
+    if (this.isPure !== true) return false;
+    const seen = new Set<unknown>();
+    const stack: Expression[] = [...this._ops];
+    while (stack.length > 0) {
+      const e = stack.pop()!;
+      if (seen.has(e)) continue;
+      seen.add(e);
+      if (isSymbol(e)) {
+        const value = e.valueDefinition !== undefined ? e.value : undefined;
+        if (value !== undefined && !isTransitivelyPure(value, seen, knownPure))
+          return false;
+      } else if (isDictionary(e)) stack.push(...e.values);
+      else if (
+        isFunction(e) &&
+        e._numericStore === undefined &&
+        e.operator !== 'Function' &&
+        !e._isLiteralData() &&
+        !knownPure(e)
+      ) {
+        const body = e.operatorDefinition?.lambda?.body;
+        if (body !== undefined && !isTransitivelyPure(body, seen, knownPure))
+          return false;
+        stack.push(...e.ops);
+      }
+    }
+    return true;
+  }
+
   /** The memo WRITE of {@link _memoizedLazyCollectionValue} — both directions
    * — shared with its async twin. The caller has already cleared the
    * settled-only gate; `generation` is the one observed BEFORE the walk. */
@@ -4971,13 +5121,36 @@ export class BoxedFunction
     objectDeps?: ObjectDeps
   ): void {
     // The inert rule (`_isMemoizableInertEvaluation`) keeps a SYMBOLIC
-    // result only: a function node that is not a collection value. A number
-    // or a list literal is cheap to produce again and would be retained for
-    // the node's lifetime. Tested first: it is a few field reads, where the
-    // object walk below is a traversal of the result.
+    // result: a function node that is not a collection value. A number is
+    // cheap to produce again and would be retained for the node's lifetime.
+    //
+    // It also keeps the result of a `Tuple` or `List` node that is not
+    // written-out data (written-out data returns before the memo, in
+    // `evaluate()`): an operand of such a node can be a node that other
+    // operands share, as in `a1 := Tuple(a0, a0)`, `a2 := Tuple(a1, a1)`.
+    // Without the entry, each evaluation of the shared operand walked it
+    // again, once per path to it: 2^N walks at depth N (about 30 s at depth 16
+    // for a `Map` view at the bottom), and the result had a separate copy
+    // of each path. With the entry, a second evaluation in the same state
+    // returns the same value, so the work is linear and the result keeps the
+    // sharing. The entry is keyed on the generation, as every entry of this
+    // rule (`_lazyCollectionMemoKey`), so it serves no read after a value
+    // write; the value stays in the node until the node is evaluated again.
+    // Two more conditions apply to these results
+    // (`_keepsCollectionLiteralResult`). One of them refuses a result that
+    // holds an infinite view with an element memo, at any depth, so a chain
+    // over `Map(f, Range(1, Infinity))` is still evaluated once per path.
+    //
+    // Tested first: it is a few field reads, where the object walk below is
+    // a traversal of the result.
     if (
       !this.isLazyCollection &&
-      !(result instanceof BoxedFunction && result.isCollection !== true)
+      !(
+        result instanceof BoxedFunction &&
+        (result.isCollection !== true ||
+          ((this._operator === 'Tuple' || this._operator === 'List') &&
+            this._keepsCollectionLiteralResult(result)))
+      )
     ) {
       if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
       return;
@@ -5082,6 +5255,7 @@ export class BoxedFunction
       !isSameCall(result, this)
     )
       return;
+    SAME_CALL_RESULT.set(this, result);
     result._value.generation = this._value.generation;
     result._value.value = result;
     result._value.objectDeps = this._value.objectDeps;
@@ -20580,6 +20754,18 @@ function isCollectionOperand(op: Expression): boolean {
  * know that the walk missed elements.
  */
 /**
+ * For a node, the last result of its evaluation that `_primeUnchangedResult()`
+ * found to be the same call as the node (`isSameCall()`). The answer cannot
+ * change: the operands of a function node and the definitions it is bound to
+ * are fixed. A later test of a pair that holds this pair as operands then
+ * does not compare the two subtrees again. Without it, nested literals
+ * `Tuple(x + 1, Tuple(x + 2, …))` of depth D, whose results are each primed
+ * from the leaves up, compared about D²/2 pairs. The key is held weakly; the
+ * value is the result that the memo slot of the node holds already.
+ */
+const SAME_CALL_RESULT = new WeakMap<Expression, Expression>();
+
+/**
  * True when `a` and `b` are the same call: the same object, or two function
  * nodes bound to the same definitions (the operator definition, and the
  * value definition of a call to a function value) whose operands are the
@@ -20609,6 +20795,9 @@ function isSameCall(
   if (a.constructor !== b.constructor) return false;
   if (a instanceof BoxedFunction && b instanceof BoxedFunction) {
     if (same.get(a)?.has(b)) return true;
+    // An earlier test found that one node is the same call as the other.
+    if (SAME_CALL_RESULT.get(b) === a || SAME_CALL_RESULT.get(a) === b)
+      return true;
     if (a._numericStore !== undefined || b._numericStore !== undefined)
       return false;
     if (a.operatorDefinition !== b.operatorDefinition) return false;
