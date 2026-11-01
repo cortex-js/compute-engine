@@ -396,6 +396,7 @@ describe('CE-473 (c): A FUNCTION VALUE IS READ WITH ITS DECLARED PARAMETERS', ()
     'a function that reads f compiles: %s',
     (src) => {
       const ce = new ComputeEngine();
+      ce.declare('y', 'real');
       ce.declare('A', 'real');
       ce.declare('d', 'real');
       ce.declare('f', { signature: `(${ER}) -> unknown` });
@@ -430,6 +431,7 @@ describe('CE-473 (c): A FUNCTION VALUE IS READ WITH ITS DECLARED PARAMETERS', ()
     'a function that reads a recursive f compiles: %s',
     (src) => {
       const ce = new ComputeEngine();
+      ce.declare('y', 'real');
       ce.declare('f', { signature: '(real) -> unknown' });
       ce.assign(
         'f',

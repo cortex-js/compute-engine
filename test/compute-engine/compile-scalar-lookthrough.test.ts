@@ -25,8 +25,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 
-function make(): ComputeEngine {
+function make(xType = 'real'): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', xType);
+  ce.declare('y', 'real');
   ce.declare('n', 'number');
   ce.declare('q', { signature: '(unknown) -> unknown' });
   ce.assign('q', ce.parse('t \\mapsto n\\cdot t+1'));
@@ -131,7 +133,7 @@ describe('item 86 — scalar look-through for compiled comparisons/connectives',
   });
 
   test('a body over a captured collection symbol declines the look-through', () => {
-    const ce = make();
+    const ce = make('real | list<real>');
     ce.declare('h', { signature: '(unknown) -> unknown' });
     ce.assign('h', ce.box(['Function', ['Add', ['At', 'L', 't'], 1], 't']));
     const r = compileJS(ce, 'h(x)<y');
@@ -148,7 +150,7 @@ describe('item 86 — scalar look-through for compiled comparisons/connectives',
     // hits its recursion limit, the compiled artifact a catchable
     // `RangeError`. What is pinned here is that the look-through declines
     // (no scalar infix lowering), not that the call is refused.
-    const ce = make();
+    const ce = make('real | list<real>');
     ce.declare('f', { signature: '(unknown) -> unknown' });
     ce.assign('f', ce.box(['Function', ['Add', ['f', 't'], 1], 't']));
     const r = compileJS(ce, 'f(x)<y');

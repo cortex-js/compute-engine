@@ -58,6 +58,7 @@ describe('A MATRIX WITH A `Matrix` HEAD HAS THE LANE OF ITS ENTRIES', () => {
     for (const mode of MODES) {
       it(`${label}, ${mode}: ${latex} at x = 3`, () => {
         const ce = new ComputeEngine();
+        ce.declare('x', 'real');
         const result = js(ce.parse(latex), mode);
         expect(result.run({ x: 3 })).toEqual(expected);
       });
@@ -80,6 +81,7 @@ describe('A MATRIX WITH A `Matrix` HEAD HAS THE LANE OF ITS ENTRIES', () => {
     for (const mode of MODES) {
       it(`${head}, ${mode}: the Matrix and the List spelling agree`, () => {
         const ce = new ComputeEngine();
+        ce.declare('x', 'real');
         const run = (json: any): any => {
           try {
             return { value: js(ce.box(json), mode).run({ x: 3 }) };
@@ -101,6 +103,7 @@ describe('A MATRIX WITH A `Matrix` HEAD HAS THE LANE OF ITS ENTRIES', () => {
 
   it('RowReduce of a pmatrix compiles in auto', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     const expr = ce.parse(`\\operatorname{RowReduce}(${PMATRIX})`);
     expect(js(expr, 'auto').run({ x: 3 })).toEqual([
       [1, 0],

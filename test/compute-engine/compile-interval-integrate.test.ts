@@ -29,6 +29,8 @@ import type {
 } from '../../src/compute-engine/interval/types';
 
 const ce = new ComputeEngine();
+ce.declare('c', 'real');
+ce.declare('x', 'real');
 
 /** What a compiled interval runner hands back. */
 type IntervalRun = IntervalResult | Interval;

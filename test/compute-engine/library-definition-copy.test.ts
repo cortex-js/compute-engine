@@ -229,6 +229,7 @@ describe('a copy that replaces a handler shadows the library operator', () => {
 
   test('a user definition of `Sin` still shadows for D and compile()', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.box([
       'DefineFunction',
       'Sin',

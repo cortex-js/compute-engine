@@ -94,6 +94,9 @@ test('scalar shapes cross retained locals and nested shared calls', () => {
 
 test('broad functions remain usable with scalar and list arguments after compilation', () => {
   const ce = new ComputeEngine();
+  // The test passes a list for `u`: a value outside the declared type gives
+  // an undefined result, so `u` is declared as a number or a list.
+  ce.declare('u', 'real | list<real>');
   ce.declare('f', { signature: '(unknown) -> broadcastable<number>' });
   ce.assign('f', ce.box(['Function', ['Add', 't', 1], 't']));
   ce.declare('x', 'real');
@@ -110,6 +113,17 @@ test('untyped plot inputs carry scalar shader facts through a local', () => {
     signature: '(unknown, unknown) -> broadcastable<number>',
   });
   ce.assign('theta_0', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']));
+  // Plot inputs with no type are refused (ROADMAP CE-712.1), with their
+  // names in `unsupported`.
+  const untyped = compile(ce.box(localPoint(['theta_0', 'x', 'y'])), {
+    to: 'glsl',
+  });
+  expect(untyped.success).toBe(false);
+  expect(untyped.diagnostic?.code).toBe('untyped-input');
+  expect(untyped.unsupported).toEqual(expect.arrayContaining(['x', 'y']));
+  // Declared `real`, they carry the scalar facts through the local.
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   const result = compile(ce.box(localPoint(['theta_0', 'x', 'y'])), {
     to: 'glsl',
   });

@@ -183,6 +183,8 @@ describe('the voronoi-diagram row as Tycho stores it (Tycho row 467)', () => {
 describe('a call shared by two functions', () => {
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('n', 'real | signed_infinity | nan');
+    ce.declare('x', 'real | signed_infinity | nan');
     ce.parse('f(x) := \\sin(x)^2 + \\cos(3x)').evaluate();
     ce.parse('g(x) := f(x) + 1').evaluate();
     ce.parse('h(x) := 2f(x)').evaluate();
@@ -241,6 +243,7 @@ describe('a call shared by two functions', () => {
     // The body of `f` is not pure, so neither `f` nor its callers are
     // substituted: each call draws in the order the interpreter draws.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real | signed_infinity | nan');
     ce.parse('f(x) := x + \\operatorname{Random}()').evaluate();
     ce.parse('g(x) := f(x) + 1').evaluate();
     ce.parse('h(x) := 2f(x)').evaluate();

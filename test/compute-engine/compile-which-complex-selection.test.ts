@@ -23,6 +23,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real');
 
 /**
  * Interpretation, projected onto the JavaScript target's value convention: a

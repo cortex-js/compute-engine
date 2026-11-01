@@ -1134,6 +1134,7 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
   const fresh = () => {
     const { ComputeEngine } = require('../../src/compute-engine');
     const e = new ComputeEngine();
+    e.declare('t', 'real');
     e.parse('a(t) := \\sqrt{t-1}').evaluate();
     e.parse('b(x) := 2x').evaluate();
     e.parse('f(x) := x').evaluate();
@@ -2664,6 +2665,7 @@ describe('COMPILE COMPLEX - GPU selection ignores a dead complex arm (CE-230.5)'
     for (const [name, json] of cases) {
       it(`${to}: ${name} with a dead complex arm stays real`, () => {
         const engine = new ComputeEngine();
+        engine.declare('x', 'real | signed_infinity | nan');
         const result = compile(engine.box(json as never), {
           to,
           fallback: false,

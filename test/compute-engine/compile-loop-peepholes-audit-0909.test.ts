@@ -107,6 +107,7 @@ describe('a comparison against a compiled loop index', () => {
 
   test('a FREE symbol keeps the decidedness tests', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     // `x` is supplied by the caller, so it can be absent: the decidedness
     // test and the per-term exit both earn their place. A NaN `x` decides
     // `n = x` false (user decision 2026-10-20), so the decidedness test
@@ -265,6 +266,7 @@ describe('the emitted-code fold reaches a parenthesized numerator', () => {
 
   test('inside a user-function body', () => {
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     withPeriod(ce);
     ce.parse('X(s) := \\cos(\\frac{2\\pi s}{P})').evaluate();
     expect(js(ce, ce.parse('X(t)'))).toContain(

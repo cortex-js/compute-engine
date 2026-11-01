@@ -123,6 +123,8 @@ const neighbours = (x: unknown, y: unknown) => [
 /** The by-REFERENCE chain: five named functions, each calling the last. */
 function byReferenceEngine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   const def = (name: string, body: unknown) =>
     ce.box(['DefineFunction', name, ['Function', body, 'x', 'y']]).evaluate();
   def('V', neighbours('x', 'y'));

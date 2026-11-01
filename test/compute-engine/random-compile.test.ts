@@ -773,6 +773,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   // purity-gated, so a PURE operand keeps its emission byte-identical (pinned
   // in the `…pure…` tests).
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   const glsl = () => ce._getCompilationTarget('glsl')!;
   const wgsl = () => ce._getCompilationTarget('wgsl')!;
   /** GLSL/WGSL source for `json`, unframed (fragment-stage spatial noise). */
@@ -2039,6 +2040,9 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     options: any = V
   ) {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('W', 'real');
+    ce.declare('V', 'real');
     ce.declare('y', 'real');
     ce.declare('g', '(real) -> real');
     const r = compile(ce.box(json), { fallback: false, ...options })!;
@@ -2216,6 +2220,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
 
   test('interval-js runs caller code only after the pairs before it', () => {
     const ce = new ComputeEngine();
+    ce.declare('W', 'real');
     ce.declare('y', 'real');
     const r = compile(ce.box(['Less', 'y', 1, 'W']), {
       to: 'interval-js',
@@ -2269,6 +2274,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
 
   test('interval-js and Python bind the caller code of a chain', () => {
     const ce = new ComputeEngine();
+    ce.declare('W', 'real');
     const count = (code: string) => code.split('nextValue()').length - 1;
     for (const to of ['interval-js', 'python'] as const)
       for (const h of ['Less', 'Equal'])
@@ -2299,6 +2305,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     // value of each operand from before the next one is evaluated.
     const run = (json: any, y: number, w: number) => {
       const ce = new ComputeEngine();
+      ce.declare('W', 'real');
       ce.declare('y', 'real');
       const r = compile(ce.box(json), { fallback: false, ...V })!;
       const env: any = { y };
@@ -2317,6 +2324,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     // Python and interval-js read the temporary of the earlier operand.
     const ce = new ComputeEngine();
     ce.declare('y', 'real');
+    ce.declare('W', 'real');
     const code = (to: 'python' | 'interval-js', json: any) =>
       compile(ce.box(json), { to, fallback: false, vars: { W: 'nv()' } })!
         .code;
@@ -2333,6 +2341,9 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     // caller code, and it is also a read that the caller can leave out. The
     // presence tests read it; the comparison compiles and terminates.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.declare('W', 'real');
     const interp = (json: any, inputs: Record<string, number>) => {
       const subs: Record<string, number> = { ...inputs };
       if ('z' in subs) {
@@ -2402,6 +2413,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
 
   test('a chain with no caller code keeps its code', () => {
     const ce = new ComputeEngine();
+    ce.declare('W', 'real');
     ce.declare('y', 'real');
     expect(
       compile(ce.box(['Less', 1, 'y', 3]), { fallback: false })!.code

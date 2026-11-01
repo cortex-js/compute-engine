@@ -30,6 +30,7 @@ import { TEST_PYTHON } from './test-python';
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('b', 'boolean | real');
   ce.declare('x', 'real');
   ce.declare('y', 'real');
   ce.declare('z', 'complex');
@@ -139,7 +140,8 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
   });
 
   it('a condition that is not provably boolean selects nothing, without raising', () => {
-    // `b` is undeclared. The interpreter holds `When(5, 1)` unevaluated.
+    // `b` is declared `boolean | real`, so it is not provably boolean.
+    // The interpreter holds `When(5, 1)` unevaluated.
     const ce = engine();
     expect(ce.box(['When', 5, 1]).evaluate().operator).toBe('When');
     const f = js(ce, ['When', 5, 'b']);

@@ -508,6 +508,15 @@ export class CompilerState {
    */
   static _compileDepth = 0;
   /**
+   * True while `compileCseRoot()` emits a root that it checks itself for
+   * the admission rules of the compilation (every value has a settled
+   * shape, every input has a type: `unsettledShapeIn()` and
+   * `assertAdmitted()`, `compile-admission.ts`). A call of `compile()` at
+   * depth 0 inside that emission (the body of a `Function` literal root)
+   * does not run these checks again.
+   */
+  static _rootAdmission = false;
+  /**
    * Lexical frames of `Block` locals, innermost last, each mapping a local's
    * name to its inferred aggregate width. The vector analog of
    * `_localComplex`: pushed and popped by `compileBlock`, consulted by

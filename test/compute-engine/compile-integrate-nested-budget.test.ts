@@ -48,6 +48,7 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
 import * as GaussKronrodModule from '../../src/compute-engine/numerics/gauss-kronrod';
 
 const ce = new ComputeEngine();
+ce.declare('k', 'real');
 
 /** The nested budget for these tests: 2¹⁶ evaluations. A two-level nest of
  *  the tests below needs 3600, so it stays well inside this budget. */

@@ -242,6 +242,7 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
   // element, `NaN` included, in an ascending sort, a descending comparator and
   // a sort by key. Two absent cells keep their order in the input.
   const eng = new ComputeEngine();
+  eng.declare('x', 'real');
   const value = (json: any) => eng.box(json).evaluate().toString();
   const DESC = ['Function', ['Subtract', 'b', 'a'], 'a', 'b'];
   const DESC_BOOL = ['Function', ['Greater', 'a', 'b'], 'a', 'b'];

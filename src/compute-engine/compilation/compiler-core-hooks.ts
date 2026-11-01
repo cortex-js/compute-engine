@@ -18,6 +18,7 @@ import type {
   ElementLane,
   LocalEntry,
   FoldCostContext,
+  UnsettledShape,
   UserFunctionRegistry,
 } from './compiler-types.js';
 
@@ -28,6 +29,30 @@ export interface CoreHooks {
     target: CompileTarget<Expression>,
     prec?: number
   ): TargetSource;
+  /** The part of the admission check of the root of a compilation that
+   * runs before the code is generated: it gives the value with no settled
+   * shape, if any. */
+  unsettledShapeIn(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    staticTypeErrors?: boolean
+  ): UnsettledShape | undefined;
+  /** The admission check of the root of a compilation that runs after the
+   * code was generated: it throws a decline for the value with no settled
+   * shape that `unsettledShapeIn()` gave, or for an input with no type. */
+  assertAdmitted(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    unsettled: UnsettledShape | undefined
+  ): void;
+  /** The inputs with no type of `expr`, from its reference analysis
+   * (`untypedInputsOf()`, `compile-admission.ts`). */
+  untypedInputsOf(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    freeSymbols: ReadonlyArray<string>,
+    occurrences: ReadonlyMap<string, Expression>
+  ): string[];
   isComplexValued(expr: Expression): boolean;
   foldCostEstimate(
     expr: Expression,

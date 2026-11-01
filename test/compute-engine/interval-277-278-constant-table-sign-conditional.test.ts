@@ -93,7 +93,9 @@ describe('interval-js: the constant table is built once per artifact', () => {
     // so a constant of the table can reach the caller. The runner copies the
     // result on the way out; without that copy a caller's write would change
     // what every later call answers.
-    const r = compileInterval('\\begin{cases}x&x<1\\\\2\\end{cases}');
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const r = compileInterval('\\begin{cases}x&x<1\\\\2\\end{cases}', ce);
     const first = r.run({ x: { lo: 3, hi: 4 } });
     expect(boundOf(first)).toEqual({ lo: 2, hi: 2 });
     boundOf(first).lo = 999;
@@ -295,7 +297,9 @@ describe('interval-js: a conditional lowers without closures', () => {
     // `_IA.piecewise` normalized its answer; the chain has to normalize the
     // same way, or a conditional would answer a bare `{ lo, hi }` where it
     // used to answer a kinded result.
-    const r = compileInterval('\\begin{cases}2&x<1\\\\3\\end{cases}');
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const r = compileInterval('\\begin{cases}2&x<1\\\\3\\end{cases}', ce);
     expect(r.run({ x: { lo: 0, hi: 0 } })).toEqual({
       kind: 'interval',
       value: { lo: 2, hi: 2 },

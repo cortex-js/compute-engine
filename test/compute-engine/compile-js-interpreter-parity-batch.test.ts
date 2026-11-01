@@ -52,14 +52,28 @@ function parity(
   values: ReadonlyArray<unknown>
 ): Array<[unknown, unknown]> | 'declined' {
   let run: (vars: Record<string, unknown>) => unknown;
+  // A free input declared `any` is refused: the compiled code must know the
+  // shape of each input from its type. The run-time dispatch over a value
+  // that may be a list is still reachable for a parameter of the root
+  // function declared `any`, so such a `symbol` is compiled as one.
+  const type = ce.box(symbol).type.toString();
+  const root = type === 'any' || type === 'unknown';
   try {
-    const result = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-    } as never) as unknown as {
-      run: (vars: Record<string, unknown>) => unknown;
+    const result = compile(
+      root
+        ? ce.box([
+            'Function',
+            expr.json,
+            ['Typed', symbol, { str: type }],
+          ] as never)
+        : expr,
+      { to: 'javascript', fallback: false } as never
+    ) as unknown as {
+      run: (...args: unknown[]) => unknown;
     };
-    run = result.run;
+    run = root
+      ? (vars) => result.run(vars[symbol])
+      : (vars) => result.run(vars);
   } catch {
     return 'declined';
   }

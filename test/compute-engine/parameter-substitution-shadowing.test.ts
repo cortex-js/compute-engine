@@ -118,6 +118,10 @@ describe('a nested block reads the parameter', () => {
 
   test('the compiled code gives the same value', () => {
     const ce = new ComputeEngine();
+    // The outer `t`, the argument of `B`, is an input of the compiled code.
+    // An input with no type is refused, so it is declared here. The inner
+    // block declares its own `t`, which this declaration does not change.
+    ce.declare('t', 'real');
     const expr = ce.box([[B, 't'], 5] as any);
     const result = compile(expr);
     expect(result.success).toBe(true);

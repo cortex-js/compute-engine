@@ -89,12 +89,17 @@ describe('a block local assigned a vector, then a matrix', () => {
     expect(value.type.matches(e.type)).toBe(true);
   });
 
+  // The compiled code gives `L` one representation, and a vector and a
+  // matrix are different shape classes, so the compilation declines
+  // (CE-712.1, the simple rule for assignments). The interpreter fallback
+  // gives the interpreter's value.
   test('Map applies an untyped callback to the current value', () => {
     const ce = new ComputeEngine();
     const e = ce.box(block(values, ['Map', double, 'L']));
     expect(e.evaluate().toString()).toBe('[[2,4]]');
     const compiled = compile(e, { to: 'javascript' });
-    expect(compiled.success).toBe(true);
+    expect(compiled.success).toBe(false);
+    expect(compiled.diagnostic?.code).toBe('unsettled-shape');
     expect(compiled.run!({})).toEqual([[2, 4]]);
   });
 

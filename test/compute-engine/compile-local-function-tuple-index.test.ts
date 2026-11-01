@@ -17,7 +17,9 @@ function program(ce: ComputeEngine, source: string) {
 }
 
 function compiled(source: string, to: string, vars: Record<string, unknown>) {
-  const result = compile(program(new ComputeEngine(), source), {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real | list<real>');
+  const result = compile(program(ce, source), {
     to,
     fallback: false,
   } as never)!;

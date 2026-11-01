@@ -20,6 +20,8 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 
 const ce = new ComputeEngine();
+ce.declare('m', 'real');
+ce.declare('n', 'real');
 
 /** `compile()` falls back to the interpreter with a `console.warn`. */
 let warn: jest.SpyInstance;

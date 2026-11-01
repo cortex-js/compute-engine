@@ -31,6 +31,7 @@ function compiledValue(
 describe('CE-623: a compiled closed-form integral keeps a parameter named like a constant', () => {
   test('a parameter named e', () => {
     const ce = new ComputeEngine();
+    ce.declare('y', 'real');
     ce.parse(String.raw`q(y, e) := \int_0^1 e x\,dx`).evaluate();
     const call = ce.parse('q(y, 2)');
     expect(call.N().re).toBeCloseTo(1, 12);
@@ -39,6 +40,7 @@ describe('CE-623: a compiled closed-form integral keeps a parameter named like a
 
   test('a parameter named i', () => {
     const ce = new ComputeEngine();
+    ce.declare('y', 'real');
     ce.parse(String.raw`r(y, i) := \int_0^1 i x\,dx`).evaluate();
     const call = ce.parse('r(y, 2)');
     expect(call.N().re).toBeCloseTo(1, 12);
@@ -47,6 +49,7 @@ describe('CE-623: a compiled closed-form integral keeps a parameter named like a
 
   test('a parameter named pi', () => {
     const ce = new ComputeEngine();
+    ce.declare('y', 'real');
     ce.parse(String.raw`p(y, \pi) := \int_0^1 \pi x\,dx`).evaluate();
     const call = ce.parse('p(y, 2)');
     expect(call.N().re).toBeCloseTo(1, 12);

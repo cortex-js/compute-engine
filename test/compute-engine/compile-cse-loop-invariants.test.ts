@@ -104,6 +104,7 @@ describe('CSE and loop-invariant hoisting in a Sum body (GPU)', () => {
 
   it('GLSL: an index-free inner Sum runs its loop ONCE for an unrolled outer Sum', () => {
     const ce = new ComputeEngine();
+    ce.declare('m', 'real | signed_infinity | nan');
     const inner = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'm']];
     const code = glsl.compile(
       ce.box(['Sum', ['Multiply', 'i', inner], ['Limits', 'i', 1, 2]] as never)
@@ -116,6 +117,8 @@ describe('CSE and loop-invariant hoisting in a Sum body (GPU)', () => {
     // does not, so it runs once for the whole outer loop instead of once per
     // iteration. `compile-glsl-structures.test.ts` pins the opposite case.
     const ce = new ComputeEngine();
+    ce.declare('m', 'real | signed_infinity | nan');
+    ce.declare('n', 'real | signed_infinity | nan');
     const inner = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'm']];
     const code = glsl.compile(
       ce.box([

@@ -27,6 +27,7 @@ import { TEST_PYTHON } from './test-python';
 // `base-compiler.ts`).
 
 const ce = new ComputeEngine();
+ce.declare('k', 'real');
 
 const MAX = Number.MAX_SAFE_INTEGER;
 

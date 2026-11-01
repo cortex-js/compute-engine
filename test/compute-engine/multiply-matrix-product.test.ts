@@ -375,7 +375,7 @@ describe('compiled code', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'matrix<number^(2x3)>');
     // `a · a` has the static type `error`, so the static-type-error decline
-    // (`assertNoStaticTypeError()`, compile-static-type-error.ts) runs before
+    // (`throwStaticTypeError()`, compile-static-type-error.ts) runs before
     // the target's own check of the dimensions.
     expect(() =>
       compile(ce.box(['Multiply', 'a', 'a']), {

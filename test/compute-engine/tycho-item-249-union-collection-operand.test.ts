@@ -8,6 +8,12 @@
  * operators, which return wrong values behind `success: true` (`2 * [1, 2]`
  * is `NaN`, `[1, 2] + 1` is the string `"1,21"`).
  *
+ * A `Which` whose branches are a list and a number now declines with
+ * `unsettled-shape` (`docs/COMPILATION-MODEL.md`, "Fail closed"): the
+ * compiled code gives each value one shape. The tests check that decline for
+ * the `Which`, and check the run-time dispatch with the symbol `v`, declared
+ * with the same union type, `integer | vector<integer^2>`.
+ *
  * Two mechanisms:
  *
  * 1. The compile-side possibly-collection predicates
@@ -55,6 +61,21 @@ function js(expr: Expression) {
   return r as { code: string; run: (vars: Record<string, unknown>) => any };
 }
 
+/** Expect the compilation of `expr` to decline because a `Which` in it has
+ * branches of different shapes (a list and a number), so the shape of its
+ * value is known only at run time. The symbol `v`, declared with the same
+ * union type, `integer | vector<integer^2>`, takes the run-time dispatch that
+ * the `Which` took before this decline. */
+function expectUnsettled(expr: Expression): void {
+  const r = compile(expr, { to: 'javascript' });
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+}
+
+/** The values of `c` and `v` for the list branch (`c` true) or for the
+ * scalar branch. */
+const branch = (c: boolean) => ({ c, v: c ? [1, 2] : -1 });
+
 /** A boxed result as the plain JS value the compiled runner answers: a
  * `List` as an array (recursively), `True`/`False` as booleans, a number as a
  * number. */
@@ -85,19 +106,20 @@ describe('Tycho item 249 — Sum/Product over a scalar-or-collection union', () 
   it('the Which shape types a union and takes the guarded reduce', () => {
     const expr = ce.box(['Sum', w]);
     expect(expr.op1.type.toString()).toBe('integer | vector<integer^2>');
-    const { code, run } = js(expr);
-    expect(code).toContain('Array.isArray(_c) ? _c.reduce(');
-    expect(run({ c: true })).toBe(3);
-    expect(run({ c: false })).toBe(-1);
+    expectUnsettled(expr);
     expect(interpret(expr, true)).toBe(3);
     expect(interpret(expr, false)).toBe(-1);
+    const { code, run } = js(ce.box(['Sum', 'v']));
+    expect(code).toContain('Array.isArray(_c) ? _c.reduce(');
+    expect(run(branch(true))).toBe(3);
+    expect(run(branch(false))).toBe(-1);
   });
 
   it('Product takes the same guarded reduce', () => {
-    const expr = ce.box(['Product', w]);
-    const { run } = js(expr);
-    expect(run({ c: true })).toBe(2);
-    expect(run({ c: false })).toBe(-1);
+    expectUnsettled(ce.box(['Product', w]));
+    const { run } = js(ce.box(['Product', 'v']));
+    expect(run(branch(true))).toBe(2);
+    expect(run(branch(false))).toBe(-1);
   });
 
   it('a declared union symbol reduces the same way', () => {
@@ -108,10 +130,9 @@ describe('Tycho item 249 — Sum/Product over a scalar-or-collection union', () 
   });
 
   it('the witness: `.total` of a helper returning a list or a scalar', () => {
+    // The body of `h` is a `Which` whose branches are a list and a number.
     const expr = ce.box(['Sum', ['h', 'x']]);
-    const { run } = js(expr);
-    expect(run({ x: 2 })).toBe(3);
-    expect(run({ x: -1 })).toBe(-1);
+    expectUnsettled(expr);
     expect(interpret(expr, true)).toBe(3);
     expect(interpret(expr, false)).toBe(-1);
   });
@@ -134,11 +155,15 @@ describe('Tycho item 249 — arithmetic and comparison over the union', () => {
     ['Power', ['Power', w, 2], [1, 4], 1],
     ['Less', ['Less', w, 1.5], [true, false], true],
   ])('%s broadcasts on the run-time shape', (_head, body, onList, onScalar) => {
-    const expr = ce.box(body as any);
+    expectUnsettled(ce.box(body as any));
+    // The same operation over `v`, of the same union type as the `Which`.
+    const expr = ce.box(
+      JSON.parse(JSON.stringify(body).split(JSON.stringify(w)).join('"v"'))
+    );
     const { code, run } = js(expr);
     expect(code).toContain('_SYS.bcast(');
-    expect(run({ c: true })).toEqual(onList);
-    expect(run({ c: false })).toEqual(onScalar);
+    expect(run(branch(true))).toEqual(onList);
+    expect(run(branch(false))).toEqual(onScalar);
   });
 
   it('matches the interpreter on both branches', () => {
@@ -152,9 +177,11 @@ describe('Tycho item 249 — arithmetic and comparison over the union', () => {
         want.forEach((w, i) => expectClose((got as unknown[])[i], w));
       } else expect(got as number).toBeCloseTo(want as number, 12);
     };
+    expectUnsettled(ce.box(['Multiply', 2, w]));
+    expectUnsettled(ce.box(['Add', w, 1]));
     for (const body of [
-      ['Multiply', 2, w],
-      ['Add', w, 1],
+      ['Multiply', 2, 'v'],
+      ['Add', 'v', 1],
       ['Multiply', 2, 'u'],
       ['Sin', 'v'],
     ]) {
@@ -171,12 +198,16 @@ describe('Tycho item 249 — arithmetic and comparison over the union', () => {
   it('an indexed Sum whose body is the union takes the element-wise fold', () => {
     // Before: the body typed `number`, the scalar arm unrolled `a + b + c`
     // over arrays, and the result was the string `"2,42,42,4"`.
+    // The `Which` declines; `v` has the same union type.
     const expr = ce.box(['Sum', ['Multiply', 2, w], ['Limits', 'k', 1, 3]]);
-    const { run } = js(expr);
-    expect(run({ c: true })).toEqual([6, 12]);
-    expect(run({ c: false })).toBe(-6);
+    expectUnsettled(expr);
     expect(interpret(expr, true)).toEqual([6, 12]);
     expect(interpret(expr, false)).toBe(-6);
+    const { run } = js(
+      ce.box(['Sum', ['Multiply', 2, 'v'], ['Limits', 'k', 1, 3]])
+    );
+    expect(run(branch(true))).toEqual([6, 12]);
+    expect(run(branch(false))).toBe(-6);
   });
 });
 

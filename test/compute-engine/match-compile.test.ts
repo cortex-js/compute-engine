@@ -22,9 +22,12 @@ import type { MathJsonExpression } from '../../src/math-json/types';
  */
 
 const ce = new ComputeEngine();
+ce.declare('xs', 'real | list<real> | list<list<real>>');
 
 describe('COMPILE Match — JavaScript tier 0/1', () => {
   it('compiles constant + or-alternative + pin-of-Pi to chained ternaries', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     const expr: MathJsonExpression = [
       'Match',
       'x',
@@ -44,6 +47,8 @@ describe('COMPILE Match — JavaScript tier 0/1', () => {
   });
 
   it('matches the interpreter for numeric bodies (incl. capture)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     const cases: MathJsonExpression[] = [
       ['MatchCase', 0, 100],
       ['MatchCase', 1, 200],
@@ -407,12 +412,14 @@ describe('COMPILE Match — rest captures and guarded bindings', () => {
     // The interpreter binds `...t` to a `Sequence` that splices into the
     // list holding it; the compiled rest is an array, spread by the list
     // and tuple emitters (`CompileTarget.sequenceVars`). Before that,
-    // `[h, ...t] => [t]` compiled to a list holding the tail.
+    // `[h, ...t] => [t]` compiled to a list holding the tail. The case `_`
+    // gives an empty list: cases of different shapes (a list and a number)
+    // decline (rule R3, CE-712.1).
     const tail: MathJsonExpression = [
       'Match',
       'xs',
       ['MatchCase', ['List', '_h', '___t'], ['List', 't']],
-      ['MatchCase', '_', 0],
+      ['MatchCase', '_', ['List']],
     ];
     const r = compile(ce.box(tail), { fallback: false });
     expect(r.success).toBe(true);
@@ -430,7 +437,7 @@ describe('COMPILE Match — rest captures and guarded bindings', () => {
       'Match',
       'xs',
       ['MatchCase', ['List', '_h', '___t', '_l'], ['List', 0, 't', 'l']],
-      ['MatchCase', '_', 0],
+      ['MatchCase', '_', ['List']],
     ];
     const m = compile(ce.box(middle), { fallback: false });
     expect(m.success).toBe(true);
@@ -452,16 +459,20 @@ describe('COMPILE Match — rest captures and guarded bindings', () => {
 });
 
 describe('COMPILE Match — rest captures in guards, nested shapes, and shadowing', () => {
+  // `fallback` is the value of the case `_`. It must have the shape of
+  // `body`: the cases of a `Match` whose values have different shapes (a
+  // list and a number) decline (rule R3, CE-712.1).
   const tail = (
     body: MathJsonExpression,
-    guard?: MathJsonExpression
+    guard?: MathJsonExpression,
+    fallback: MathJsonExpression = 0
   ): MathJsonExpression => [
     'Match',
     'xs',
     guard === undefined
       ? ['MatchCase', ['List', '_h', '___t'], body]
       : ['MatchCase', ['List', '_h', '___t'], guard, body],
-    ['MatchCase', '_', 0],
+    ['MatchCase', '_', fallback],
   ];
 
   it('a guard sees the rest as a sequence too', () => {
@@ -479,7 +490,7 @@ describe('COMPILE Match — rest captures in guards, nested shapes, and shadowin
       'Match',
       'xs',
       ['MatchCase', ['List', ['List', '_h', '___t']], ['List', 't']],
-      ['MatchCase', '_', 0],
+      ['MatchCase', '_', ['List']],
     ];
     const r = compile(ce.box(expr), { fallback: false });
     expect(r.success).toBe(true);
@@ -490,7 +501,13 @@ describe('COMPILE Match — rest captures in guards, nested shapes, and shadowin
     // The lambda parameter `t` resolves elsewhere than the rest accessor, so
     // `[t]` inside it is a one-element list, as the interpreter has it.
     const r = compile(
-      ce.box(tail(['Map', ['Function', ['List', 't'], 't'], ['List', 9]])),
+      ce.box(
+        tail(
+          ['Map', ['Function', ['List', 't'], 't'], ['List', 9]],
+          undefined,
+          ['List']
+        )
+      ),
       { fallback: false }
     );
     expect(r.success).toBe(true);

@@ -27,6 +27,7 @@ import { harvestCse } from '../../src/compute-engine/compilation/cse';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real');
 ce.precision = 'machine';
 
 function run(json: any, vars: Record<string, unknown> = {}): unknown {

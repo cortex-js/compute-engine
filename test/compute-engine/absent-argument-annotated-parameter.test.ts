@@ -673,6 +673,7 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
 
   test('a function literal applied directly checks its argument', () => {
     const ce = new ComputeEngine();
+    ce.declare('v', 'real');
     const expr = ce.box([
       'Apply',
       [

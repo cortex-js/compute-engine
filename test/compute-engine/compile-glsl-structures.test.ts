@@ -5,6 +5,11 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const glsl = new GLSLTarget();
 
+// The shared engine's inputs are declared: compilation refuses an input with
+// no type.
+for (const s of ['x', 'y', 'm', 'n'])
+  ce.declare(s, 'real | signed_infinity | nan');
+
 /**
  * Compile-time constant folding is off for the emissions this suite pins.
  * A subtree with no free variables is normally evaluated at compile time and
@@ -819,10 +824,24 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
     expect(code).toContain('return p;');
   });
 
-  it('a Declare with a 3-tuple initial value is declared vec3', () => {
+  // The declared type `number` and the 3-tuple value have different shape
+  // classes. The declared type of a local settles its shape, so the
+  // compilation declines (CE-712.1, the simple rule for assignments). With
+  // no stated type, the local is declared vec3.
+  it('a Declare that states `number` with a 3-tuple value declines', () => {
     const expr = ce.box([
       'Block',
       ['Declare', 'p', 'number', ['Tuple', 't', ['Square', 't'], 1]],
+      'p',
+    ]);
+    expect(() => glsl.compile(expr)).toThrow(/different shapes/);
+  });
+
+  it('a Declare with a 3-tuple initial value is declared vec3', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 't', ['Square', 't'], 1]],
       'p',
     ]);
     const code = glsl.compile(expr).code;

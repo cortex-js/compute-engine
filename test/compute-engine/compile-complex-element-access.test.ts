@@ -33,6 +33,7 @@ const T = { t: 0.3 };
  */
 function withFn(name: string, body: unknown): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('t', 'real');
   ce.box(['Assign', name, ['Function', body, 't']] as any).evaluate();
   return ce;
 }

@@ -32,6 +32,7 @@ import { TEST_PYTHON } from './test-python';
 let ce: ComputeEngine;
 beforeEach(() => {
   ce = new ComputeEngine();
+  ce.declare('x', 'real | list<real>');
 });
 
 /** Box an Epsil program in a fresh engine, without evaluating it. */
@@ -82,6 +83,7 @@ describe('COMPILE a block-local function definition', () => {
   });
 
   it('emits the CALL when the argument is not constant', () => {
+    ce.declare('n', 'real | list<real>');
     const { compiled, code } = both(
       'const g = (k) => Sum(Take(Map( _ => _^2, 1..oo), k))\ng(n)',
       { vars: { n: 3 } }
@@ -125,6 +127,7 @@ describe('COMPILE a block-local function definition', () => {
   });
 
   it('BROADCASTS over a collection argument, as the interpreter does', () => {
+    ce.declare('xs', 'list<real>');
     // A scalar callee applied to a list maps element-wise (`_SYS.bcastFn`),
     // the same dispatch an engine-level user function gets. The argument is a
     // run-time input, so this exercises the emitted dispatch rather than the
@@ -499,6 +502,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   });
 
   it('BROADCASTS over a collection argument', () => {
+    ce.declare('xs', 'list<real>');
     const r = compareJson(
       [
         'Block',
@@ -579,6 +583,13 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   ];
 
   it('a reassignment INSIDE a branch is read at run time', () => {
+    // This test passes only numbers for `x`. With `x` declared
+    // `real | list<real>` (as in `beforeEach`), the `If` could select
+    // element by element, and an assignment in its branch declines. So the
+    // test uses its own engine, with `x` declared `real`.
+    ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('xs', 'list<real>');
     for (const x of [3, -3])
       expect(compareJson(inBranch, { x })).toMatchObject({
         compiled: x > 0 ? 3 * x : 2 * x,
@@ -836,6 +847,7 @@ describe('COMPILE a REASSIGNED `let`-bound lambda', () => {
   });
 
   it('a reassignment inside an `if` is read at run time', () => {
+    ce.declare('n', 'real');
     const src = 'let h = (k) => k + 1\nif n > 0 { h := (k) => k + 10 }\nh(1)';
     for (const n of [1, -1]) {
       const { compiled } = both(src, { vars: { n } });

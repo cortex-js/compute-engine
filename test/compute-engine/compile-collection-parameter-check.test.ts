@@ -13,8 +13,21 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
+/** The compiled function `(v) ↦ body`, whose parameter `v` is declared
+ * `any`, called with `value`. A free input declared `any` is refused (the
+ * compiled code must know the shape of each input from its type); the
+ * run-time test of the argument is still reachable for a parameter of the
+ * root function declared `any`. */
+function runWithAnyV(ce: ComputeEngine, body: unknown, value: unknown) {
+  const result = compile(
+    ce.box(['Function', body, ['Typed', 'v', { str: 'any' }]] as never),
+    { to: 'javascript', fallback: false }
+  );
+  return (result.run as unknown as (v: unknown) => unknown)(value);
+}
+
 /** The interpreter's value with `v` bound by a `let`, and the compiled
- * value with `v` a free input declared `any`. */
+ * value with `v` a parameter, declared `any`, of the root function. */
 function both(fn: string, literal: string, value: unknown) {
   const ce1 = new ComputeEngine();
   const [a1] = parseEpsil(`${fn}\nlet v = ${literal}\nf(v)`, {
@@ -29,11 +42,7 @@ function both(fn: string, literal: string, value: unknown) {
   const [a2] = parseEpsil(`${fn}\nf(v)`, {
     parseLatex: (l: string) => ce2.parse(l).json,
   });
-  const result = compile(ce2.box(a2 as never), {
-    to: 'javascript',
-    fallback: false,
-  });
-  return { interpreted, compiled: result.run!({ v: value } as never) };
+  return { interpreted, compiled: runWithAnyV(ce2, a2, value) };
 }
 
 describe('COMPILE a run-time check of a collection parameter', () => {
@@ -92,9 +101,8 @@ describe('COMPILE a run-time check of a collection parameter', () => {
     ce.assign('g', ce.box(['Function', ['At', 'p', 1], 'p']));
     ce.declare('v', 'any');
     const expr = ce.box(['g', 'v']);
-    const result = compile(expr, { to: 'javascript', fallback: false });
-    expect(result.run!({ v: 5 } as never)).toBeNaN();
-    expect(result.run!({ v: [3, 4] } as never)).toBe(3);
+    expect(runWithAnyV(ce, ['g', 'v'], 5)).toBeNaN();
+    expect(runWithAnyV(ce, ['g', 'v'], [3, 4])).toBe(3);
     ce.assign('v', 5);
     expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
   });
@@ -111,12 +119,7 @@ describe('COMPILE a run-time check of an annotated literal applied directly', ()
     ce1.assign('v', ce1.box(json as never));
     const interpreted = expr.evaluate().toString();
     const ce2 = new ComputeEngine();
-    ce2.declare('v', 'any');
-    const result = compile(ce2.box(['Apply', fn, 'v'] as never), {
-      to: 'javascript',
-      fallback: false,
-    });
-    return { interpreted, compiled: result.run!({ v: value } as never) };
+    return { interpreted, compiled: runWithAnyV(ce2, ['Apply', fn, 'v'], value) };
   }
   const K = ['Function', ['Add', 'k', 1], ['Typed', 'k', "'integer'"]];
   const P = [
@@ -155,6 +158,8 @@ describe('COMPILE a run-time check of an annotated literal applied directly', ()
     // emitted call. A second, discarded compile allocated the temporaries of
     // the literal again: the accumulator of the sum was `_tv4`, not `_tv1`.
     const ce = new ComputeEngine();
+    ce.declare('n', 'real');
+    ce.declare('x', 'real');
     const result = compile(
       ce.box([
         'Apply',

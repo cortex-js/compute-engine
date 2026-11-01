@@ -85,6 +85,49 @@ function sameValue(a: unknown, b: unknown): boolean {
  * other variables are `c = True`, `z = 0` and `a = 0`, unless `c` is given. */
 type Run = readonly [unknown, unknown, boolean?];
 
+/** The compiled function of `json`, called with the values of the
+ * parameters `names` (by default `x`, `c` and `z`; `c` is `true` and `z` is
+ * `0` when the call leaves them out).
+ *
+ * A compiled input whose type is `any` (`x`, `z`) is refused: the compiled
+ * code must know the shape of each input from its type. The run-time test of
+ * a value that may be a list is still reachable for a parameter of the root
+ * function declared `any`. So `json` is compiled as the body of the function
+ * `(x, c, z) ↦ json`, whose parameters have the types that `ce` declares
+ * for the symbols. The symbol `a`, when `json` reads it, stays a free input
+ * with no type. */
+function compiledFunction(
+  ce: ComputeEngine,
+  json: unknown,
+  names: string[] = ['x', 'c', 'z']
+): (vars: Record<string, unknown>) => unknown {
+  const typed = (name: string): unknown => [
+    'Typed',
+    name,
+    { str: ce.box(name).type.toString() },
+  ];
+  const result = compile(
+    ce.box(['Function', json, ...names.map(typed)] as never),
+    { to: 'javascript', fallback: false } as never
+  );
+  const run = result.run as unknown as (...args: unknown[]) => unknown;
+  const defaults: Record<string, unknown> = { c: true, z: 0 };
+  return (vars) => run(...names.map((n) => vars[n] ?? defaults[n]));
+}
+
+/** Expect the compilation of `json` to be refused because the inputs
+ * `names` have no type. */
+function expectUntypedRefusal(
+  ce: ComputeEngine,
+  json: unknown,
+  names: string[]
+): void {
+  const r = compile(ce.box(json as any), { to: 'javascript' } as never);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('untyped-input');
+  for (const name of names) expect(r.unsupported).toContain(name);
+}
+
 /** For each run, the compiled value, the interpreted value, and whether
  * they agree. Throws when the expression does not compile. */
 function compiledAndInterpreted(
@@ -93,16 +136,13 @@ function compiledAndInterpreted(
   runs: ReadonlyArray<Run>
 ): { compiled: unknown; interpreted: unknown; ok: boolean }[] {
   const expr = ce.box(json as any);
-  const run = compile(expr, {
-    to: 'javascript',
-    fallback: false,
-  } as never).run!;
+  const run = compiledFunction(ce, json);
   return runs.map(([js, mathJson, c = true]) => {
     ce.assign('x', ce.box(mathJson as any));
     ce.assign('c', c);
     ce.assign('z', 0);
     ce.assign('a', 0);
-    const compiled = run({ x: js, c, z: 0, a: 0 } as never);
+    const compiled = run({ x: js, c, z: 0 });
     const interpreted = toJS(expr.N());
     return { compiled, interpreted, ok: sameValue(compiled, interpreted) };
   });
@@ -179,6 +219,9 @@ const X_VALUES: ReadonlyArray<Run> = [
 describe('CE-360: compiled operators over an element that may be a list', () => {
   for (const signature of SIGNATURES) {
     test.each(CASES)(`${signature}: %s`, (name, json) => {
+      // The input `a` has no type, so the compilation is refused.
+      if (name.endsWith('a undeclared'))
+        return expectUntypedRefusal(rowEngine(signature), json, ['a']);
       expectAgreement(
         compiledAndInterpreted(rowEngine(signature), json, X_VALUES)
       );
@@ -188,12 +231,9 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
   test('the reported case: g(x)[1] + 1 at x = [1, 2] is [2, 3]', () => {
     const ce = rowEngine('(unknown) -> list<unknown>');
     expect(ce.box(ELEMENT as any).type.toString()).toBe('missing | unknown');
-    const run = compile(ce.box(['Add', ELEMENT, 1]), {
-      to: 'javascript',
-      fallback: false,
-    } as never).run!;
-    expect(run({ x: [1, 2] } as never)).toEqual([2, 3]);
-    expect(run({ x: 3 } as never)).toBe(4);
+    const run = compiledFunction(ce, ['Add', ELEMENT, 1]);
+    expect(run({ x: [1, 2] })).toEqual([2, 3]);
+    expect(run({ x: 3 })).toBe(4);
   });
 
   test('a cell function of the element is typed as a possible list', () => {
@@ -236,15 +276,16 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
   test('a parameter declared any stays scalar code for a number', () => {
     // The value is checked at run time (ROADMAP CE-366, user decision
     // 2026-10-25): a value that is not an array takes the scalar code, and
-    // an array takes the broadcast.
+    // an array takes the broadcast. A free input declared `any` is refused,
+    // so `z` is a parameter of the root function.
     const ce = rowEngine('(unknown) -> list');
-    const code = compile(ce.box(['Add', 'z', 1]), {
-      to: 'javascript',
-      fallback: false,
-    } as never).code!;
+    const code = compile(
+      ce.box(['Function', ['Add', 'z', 1], ['Typed', 'z', { str: 'any' }]]),
+      { to: 'javascript', fallback: false } as never
+    ).code!;
     expect(
       code.startsWith(
-        '(!(Array.isArray(_.z) || ArrayBuffer.isView(_.z)) ? _.z + 1 : '
+        '(z) => (!(Array.isArray(z) || ArrayBuffer.isView(z)) ? z + 1 : '
       )
     ).toBe(true);
   });
@@ -257,16 +298,14 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
     ce.declare('h', '(value) -> number');
     ce.box(['h', 'w']);
     expect(ce.box('w').type.toString()).toBe('value');
-    for (const json of [
-      ['Add', 'k', 1],
-      ['Add', 'w', 1],
-    ]) {
-      const code = compile(ce.box(json as any), {
-        to: 'javascript',
-        fallback: false,
-      } as never).code;
-      expect(code).not.toMatch(/_SYS\.bcast/);
-    }
+    const code = compile(ce.box(['Add', 'w', 1]), {
+      to: 'javascript',
+      fallback: false,
+    } as never).code;
+    expect(code).not.toMatch(/_SYS\.bcast/);
+    // The compiled code reads the value of `k`, `g(x)[1]`, so it reads the
+    // input `x`, declared `any`: the compilation is refused.
+    expectUntypedRefusal(ce, ['Add', 'k', 1], ['x']);
   });
 });
 
@@ -275,7 +314,14 @@ describe('CE-360: a number x keeps compiling to the interpreted value', () => {
     for (const xType of ['real', 'number']) {
       test.each([...CASES, ['Block local', BLOCK_LOCAL]])(
         `${signature}, x: ${xType}: %s`,
-        (_name, json) => {
+        (name, json) => {
+          // The input `a` has no type, so the compilation is refused.
+          if (name.endsWith('a undeclared'))
+            return expectUntypedRefusal(
+              rowEngine(signature, xType),
+              json,
+              ['a']
+            );
           expectAgreement(
             compiledAndInterpreted(rowEngine(signature, xType), json, [
               [3, 3],
@@ -297,17 +343,15 @@ describe('CE-368: the absence marker of an element follows its value', () => {
   // (a numeric slot) and makes the result absent for an absent operand.
   test('g(x)[5] + 1 is NaN at x = 3 and Missing at x = [] on both routes', () => {
     const ce = rowEngine('(unknown) -> list<unknown>');
-    const expr = ce.box(['Add', ['At', ['g', 'x'], 5], 1]);
-    const run = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-    } as never).run!;
+    const json = ['Add', ['At', ['g', 'x'], 5], 1];
+    const expr = ce.box(json as any);
+    const run = compiledFunction(ce, json, ['x']);
     ce.assign('x', ce.number(3));
     expect(expr.evaluate().toString()).toBe('NaN');
-    expect(run({ x: 3 } as never)).toBeNaN();
+    expect(run({ x: 3 })).toBeNaN();
     ce.assign('x', ce.box(['List']));
     expect(expr.evaluate().toString()).toBe('"Missing"');
-    expect(run({ x: [] } as never)).toBeUndefined();
+    expect(run({ x: [] })).toBeUndefined();
   });
 
   test('a decisive operand of a connective wins over an absent one', () => {
@@ -319,18 +363,16 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     // the compiled connectives.
     const ce = rowEngine('(unknown) -> list<unknown>');
     ce.declare('b', 'boolean');
-    const expr = ce.box(['And', ['Less', ['At', ['g', 'x'], 5], 1], 'b']);
-    const run = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-    } as never).run!;
+    const json = ['And', ['Less', ['At', ['g', 'x'], 5], 1], 'b'];
+    const expr = ce.box(json as any);
+    const run = compiledFunction(ce, json, ['x', 'b']);
     ce.assign('x', ce.box(['List']));
     ce.assign('b', ce.False);
     expect(expr.evaluate().toString()).toBe('"False"');
-    expect(run({ x: [], b: false } as never)).toBe(false);
+    expect(run({ x: [], b: false })).toBe(false);
     ce.assign('b', ce.True);
     expect(expr.evaluate().toString()).toBe('"Missing"');
-    expect(run({ x: [], b: true } as never)).toBeNaN();
+    expect(run({ x: [], b: true })).toBeNaN();
   });
 
   test('an absent operand beside a rotation view is a NaN cell', () => {
@@ -340,15 +382,13 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     // an array, to the broadcast, which reads it as a collection.
     const ce = rowEngine('(unknown) -> list<unknown>');
     ce.declare('xs', 'list<number>');
-    const expr = ce.box(['Add', ['At', ['g', 'x'], 5], ['RotateLeft', 'xs']]);
-    const run = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-    } as never).run!;
+    const json = ['Add', ['At', ['g', 'x'], 5], ['RotateLeft', 'xs']];
+    const expr = ce.box(json as any);
+    const run = compiledFunction(ce, json, ['x', 'xs']);
     ce.assign('x', ce.box(['List']));
     ce.assign('xs', ce.box(['List', 1, 2]));
     expect(expr.evaluate().toString()).toBe('[NaN,NaN]');
-    expect(run({ x: [], xs: [1, 2] } as never)).toEqual([NaN, NaN]);
+    expect(run({ x: [], xs: [1, 2] })).toEqual([NaN, NaN]);
   });
 });
 

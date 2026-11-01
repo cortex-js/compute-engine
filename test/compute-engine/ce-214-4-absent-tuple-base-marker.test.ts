@@ -48,13 +48,36 @@ function interpreted(ce: ComputeEngine, json: unknown): unknown {
   return convert(v);
 }
 
+/** The compiled value of `json` for the values `vars` of its inputs.
+ *
+ * A free input declared `any` is refused: the compiled code must know the
+ * shape of each input from its type. When an input of `vars` is declared
+ * `any`, `json` is compiled as the body of the function whose parameters are
+ * the names of `vars`, with their declared types, and the function is called
+ * with the values. The run-time reads of a value whose shape the type does
+ * not settle are still reachable for a parameter of the root function
+ * declared `any`. */
 function compiled(ce: ComputeEngine, json: unknown, vars: object): unknown {
-  const r = compile(ce.box(json as never), {
-    to: 'javascript',
-    fallback: false,
-  } as never);
+  const names = Object.keys(vars);
+  const types = names.map((n) => ce.box(n).type.toString());
+  if (!types.includes('any')) {
+    const r = compile(ce.box(json as never), {
+      to: 'javascript',
+      fallback: false,
+    } as never);
+    expect(r.success).toBe(true);
+    return r.run!(vars as never);
+  }
+  const fn = ce.box([
+    'Function',
+    json,
+    ...names.map((n, i) => ['Typed', n, { str: types[i] }]),
+  ] as never);
+  const r = compile(fn, { to: 'javascript', fallback: false } as never);
   expect(r.success).toBe(true);
-  return r.run!(vars as never);
+  return (r.run as unknown as (...args: unknown[]) => unknown)(
+    ...Object.values(vars)
+  );
 }
 
 /** The JavaScript value of `v` as MathJSON: the inner arrays of a list of

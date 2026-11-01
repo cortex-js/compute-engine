@@ -413,6 +413,7 @@ describe('looped Sum/Product: iteration stops at the first NaN', () => {
   /** The five-element list of the unroll cases above. */
   function pureEngine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('m', 'real');
     ce.assign('K', ce.box(['List', 10, 20, 30, 40, 50]));
     return ce;
   }
@@ -457,6 +458,7 @@ describe('looped Sum/Product: iteration stops at the first NaN', () => {
 
   it('a loop over a caller function keeps every iteration', () => {
     const ce = new ComputeEngine();
+    ce.declare('m', 'real');
     ce.declare('slow', '(number) -> number');
     const r = compile(ce.parse('\\sum_{n=0}^{m} \\mathrm{slow}(x-n)'), {
       to: 'javascript',

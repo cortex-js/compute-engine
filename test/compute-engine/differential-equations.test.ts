@@ -1,6 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
+// The solver compiles its right-hand side with the state of the system as
+// inputs; compilation refuses an input with no type.
+engine.declare('ndsolveystate', 'real');
+engine.declare('ndsolveystate0', 'real');
+engine.declare('ndsolvezstate1', 'real');
+
 function dsolve(equation: unknown, dependent = 'y', independent = 'x') {
   return engine.expr(['DSolve', equation, dependent, independent]).evaluate();
 }
@@ -2107,6 +2113,7 @@ describe('NDSolveFunction (interpolating-function result surface)', () => {
       await import('../../src/compute-engine/compilation/compile-expression');
     engine.pushScope();
     try {
+      engine.declare('t', 'real');
       engine.assign('ndsfC', solveExp());
       const applied = engine.parse('\\operatorname{ndsfC}(t)').evaluate();
       const compiled = compile(applied, {

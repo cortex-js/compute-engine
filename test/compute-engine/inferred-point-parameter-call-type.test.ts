@@ -99,14 +99,19 @@ describe('A call at a parameter whose point type was inferred', () => {
       'S',
       ce.box(['Function', which(0, ['List', 'x', ['Multiply', 2, 'x']]), 'x'])
     );
+    // The body of `S` is a `Which` whose branches are a number and a list,
+    // so the shape of its value is known only at run time, and the
+    // compilation declines.
     const ok = compile(ce.box(['d', ['S', 'x'], ['List', 1, 1]]), {
       to: 'interval-js',
-      fallback: false,
     });
-    expect(ok.success).toBe(true);
+    expect(ok.success).toBe(false);
+    expect(ok.diagnostic?.code).toBe('unsettled-shape');
 
-    // A matrix arm is not a list of numbers: the call still declines, and
-    // the message says that the parameter type was inferred.
+    // A matrix arm is not a list of numbers: the call still declines. The
+    // branches of the `Which` (a number and a matrix) also have different
+    // shapes, but the shape check runs after the code is generated, so the
+    // more specific reason of the call is the one that the result reports.
     ce.assign(
       'T',
       ce.box([
@@ -117,10 +122,11 @@ describe('A call at a parameter whose point type was inferred', () => {
     );
     const no = compile(ce.box(['d', ['T', 'x'], ['List', 1, 1]]), {
       to: 'interval-js',
-      fallback: false,
-    }) as { success: boolean; error?: string };
+    });
     expect(no.success).toBe(false);
-    expect(no.error).toMatch(/at a parameter inferred as the point/);
+    expect(no.error).toMatch(
+      /argument 1 has the type `integer \| matrix<2x2>`, which admits a collection that is not a list of points/
+    );
   });
 });
 

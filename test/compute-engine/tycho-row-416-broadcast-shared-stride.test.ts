@@ -164,19 +164,19 @@ describe('several outputs per cell', () => {
     ]);
   });
 
-  test('a tuple of undeclared symbols (elements typed `unknown`) has a stride', () => {
+  test('a tuple of undeclared symbols (elements typed `unknown`) is refused', () => {
     // A separate engine, so that no use of `x` or `y` elsewhere in this file
-    // narrows their type away from `unknown`.
+    // narrows their type away from `unknown`. An input with no type is
+    // refused at compile time (ROADMAP CE-712.1), so there is no kernel and
+    // no stride. Before, the tuple compiled with a stride of 2.
     const ce2 = new ComputeEngine();
     const e = ce2.parse('(x, y)');
     expect(e.type.toString()).toBe('tuple<unknown, unknown>');
     const r = compile(e);
-    expect(r.broadcastOutputs).toBe(2);
-    const out = r.broadcast!({
-      x: new Float64Array([1, 2]),
-      y: new Float64Array([3, 4]),
-    });
-    expect(list(out)).toEqual([1, 3, 2, 4]);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.unsupported).toEqual(expect.arrayContaining(['x', 'y']));
+    expect('broadcastOutputs' in r).toBe(false);
     // An element that cannot be a number gives one value per cell.
     const s = compile(ce2.box(['Tuple', 'x', { str: 'a' }]));
     expect('broadcastOutputs' in s).toBe(false);

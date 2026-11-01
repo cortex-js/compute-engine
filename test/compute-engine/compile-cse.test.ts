@@ -20,6 +20,7 @@ const glsl = new GLSLTarget();
 // `None` test (ROADMAP CE-460); a DECLARED `number` is read as is. So the
 // inputs are declared.
 for (const s of ['u', '_cse1']) ce.declare(s, 'number');
+for (const s of ['m', 'n']) ce.declare(s, 'real | signed_infinity | nan');
 
 /** The design's motivating probe: `sin(6u)` three times in one expression. */
 const PROBE_LATEX = '\\sin(6u)^2 + \\frac{\\sin(6u)}{2+\\sin(6u)}';
@@ -732,9 +733,8 @@ describe('COMPILE CSE — capture', () => {
     // One binding clause, whose right-hand side reads the ENCLOSING `n` (the
     // generator's `for n in range(...)` has its own scope in Python).
     expect(occurrences(code, 'for _cse')).toBe(1);
-    expect(code).toContain(
-      "for _cse1 in [np.sin(6 * (float('nan') if n is None else n))]"
-    );
+    // `n` is declared, so it is read with no `None` test.
+    expect(code).toContain('for _cse1 in [np.sin(6 * n)]');
     const genexp = code.slice(code.indexOf('sum('), code.indexOf(') + _cse1'));
     expect(genexp).not.toContain('_cse');
   });
@@ -855,7 +855,10 @@ describe('COMPILE CSE — statement regions', () => {
 
   it('does not hoist a candidate past a conditional `Return`', () => {
     // The candidate lives only in the statement AFTER the early exit. Its
-    // binding must stay in that statement's own region.
+    // binding must stay in that statement's own region. The loop is the
+    // last statement: a `Return` inside a loop that has code after it
+    // declines, because the compiled loop is a function of its own and the
+    // `Return` would end only the loop.
     const expr = ce.box([
       'Block',
       ['Assign', 'acc', 0],
@@ -868,7 +871,6 @@ describe('COMPILE CSE — statement regions', () => {
         ],
         ['Element', 'i', ['Range', 1, 3]],
       ],
-      'acc',
     ]);
     const result = compile(expr, { fallback: false });
 

@@ -31,6 +31,7 @@ const INTEGRAL = [
 
 function intervalRun(expr: any, vars: object = X): unknown {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   const c = compile(ce.box(expr), { to: 'interval-js' } as never);
   expect(c.success).toBe(true);
   return c.run!(vars as never);

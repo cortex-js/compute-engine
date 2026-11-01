@@ -24,6 +24,7 @@ const ce = new ComputeEngine();
 // INFERRED `number` type is read through a `None` test (ROADMAP CE-460); a
 // DECLARED `number` is read as is. So the symbols are declared.
 for (const s of ['ﬁ', 'fi', '𝑥', 'x', '_uFB01_']) ce.declare(s, 'number');
+ce.declare('n', 'real');
 const py = new PythonTarget();
 const fi = { sym: 'ﬁ' };
 const sum = ce.box(['Add', fi, 'fi']);

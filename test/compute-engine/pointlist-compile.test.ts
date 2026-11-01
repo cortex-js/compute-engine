@@ -177,6 +177,8 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
     // well-formed value. For a numeric run-time binding the guard is the
     // identity, so the two spellings still run the same.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     const plBody =
       '\\operatorname{PointX}(\\operatorname{PointList}(x,y))^2 + \\operatorname{PointY}(\\operatorname{PointList}(x,y))^2 - 4';
     const tpBody =
@@ -241,14 +243,29 @@ describe('PointList compile — scalar-slot type coverage', () => {
   // `_SYS.pointSlot` guard, which is the identity on a scalar and is what
   // keeps a list-valued binding from being spliced into the point.
   it('javascript: an `unknown`-typed component compiles, guarded', () => {
+    // A free input of type `unknown` is refused: the compiled code must know
+    // the shape of each input from its type. A parameter of the root
+    // function of type `unknown` is still a scalar slot, guarded.
     const ce = new ComputeEngine(); // x, y undeclared → unknown
     const js = new JavaScriptTarget();
-    const pl = js.compile(ce.box(['PointList', 'x', 'y']));
-    const tp = js.compile(ce.box(['Tuple', 'x', 'y']));
+    expect(() => js.compile(ce.box(['PointList', 'x', 'y']))).toThrow(
+      /the inputs `x`, `y` have no type/
+    );
+    const root = (body: unknown) =>
+      js.compile(
+        ce.box([
+          'Function',
+          body,
+          ['Typed', 'x', { str: 'unknown' }],
+          ['Typed', 'y', { str: 'unknown' }],
+        ] as any)
+      );
+    const pl = root(['PointList', 'x', 'y']);
+    const tp = root(['Tuple', 'x', 'y']);
     expect(pl.success).toBe(true);
-    expect(tp.code).toBe('[_.x, _.y]');
-    expect(pl.code).toBe('[_SYS.pointSlot(_.x), _SYS.pointSlot(_.y)]');
-    expect((pl.run as (s: any) => unknown)({ x: 3, y: 4 })).toEqual([3, 4]);
+    expect(tp.code).toBe('(x, y) => [x, y]');
+    expect(pl.code).toBe('(x, y) => [_SYS.pointSlot(x), _SYS.pointSlot(y)]');
+    expect((pl.run as (x: any, y: any) => unknown)(3, 4)).toEqual([3, 4]);
   });
 
   it('javascript: a `value`-typed component compiles, guarded; the provably numeric one is not', () => {
@@ -285,6 +302,22 @@ describe('PointList compile — scalar-slot type coverage', () => {
 describe('PointList compile — the all-scalar opaque-slot guard', () => {
   const js = new JavaScriptTarget();
 
+  // A free input of type `unknown` is refused: the compiled code must know
+  // the shape of each input from its type. The guard of an opaque slot is
+  // still reachable for a parameter of the root function of type `unknown`,
+  // so these tests compile `(a, b) ↦ PointList(a, b)`, whose parameters have
+  // the types that `opaqueEngine()` declares.
+  function opaquePoint(ce: ComputeEngine, a: string, b: string) {
+    return js.compile(
+      ce.box([
+        'Function',
+        ['PointList', a, b],
+        ['Typed', a, { str: ce.box(a).type.toString() }],
+        ['Typed', b, { str: ce.box(b).type.toString() }],
+      ] as any)
+    );
+  }
+
   function opaqueEngine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('u', 'unknown');
@@ -294,41 +327,58 @@ describe('PointList compile — the all-scalar opaque-slot guard', () => {
   }
 
   it('scalar bindings produce an ordinary point', () => {
-    const r = js.compile(opaqueEngine().box(['PointList', 'u', 'v']));
+    const ce = opaqueEngine();
+    expect(() => js.compile(ce.box(['PointList', 'u', 'v']))).toThrow(
+      /have no type/
+    );
+    const r = opaquePoint(ce, 'u', 'v');
     expect(r.success).toBe(true);
-    expect((r.run as (s: any) => unknown)({ u: 1, v: 2 })).toEqual([1, 2]);
+    expect((r.run as (u: any, v: any) => unknown)(1, 2)).toEqual([1, 2]);
   });
 
   it('an opaque component holding a LIST yields NaN, not a spliced array', () => {
-    const r = js.compile(opaqueEngine().box(['PointList', 'u', 'v']));
-    const pt = (r.run as (s: any) => unknown[])({ u: 1, v: [10, 20] });
+    const r = opaquePoint(opaqueEngine(), 'u', 'v');
+    const run = r.run as (u: any, v: any) => unknown[];
+    const pt = run(1, [10, 20]);
     expect(pt).toHaveLength(2);
     expect(pt[0]).toBe(1);
     expect(Number.isNaN(pt[1])).toBe(true);
-    const pt2 = (r.run as (s: any) => unknown[])({ u: [10, 20], v: 3 });
+    const pt2 = run([10, 20], 3);
     expect(Number.isNaN(pt2[0])).toBe(true);
     expect(pt2[1]).toBe(3);
   });
 
   it('a provably numeric component beside an opaque one is left unguarded', () => {
-    const r = js.compile(opaqueEngine().box(['PointList', 'k', 'v']));
-    expect(r.code).toBe('[_.k, _SYS.pointSlot(_.v)]');
-    const pt = (r.run as (s: any) => unknown[])({ k: 1, v: [10, 20] });
+    const r = opaquePoint(opaqueEngine(), 'k', 'v');
+    expect(r.code).toBe('(k, v) => [k, _SYS.pointSlot(v)]');
+    const pt = (r.run as (k: any, v: any) => unknown[])(1, [10, 20]);
     expect(pt[0]).toBe(1);
     expect(Number.isNaN(pt[1])).toBe(true);
   });
 
   it('the shader and Python targets keep the plain point — they have no run-time list value to guard against', () => {
+    // A free input of type `unknown` is refused on every target. The shader
+    // targets compile no function literal, so the plain point is checked on
+    // Python only, with `u` and `v` parameters of the root function.
     const ce = opaqueEngine();
-    expect(new GLSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code).toBe(
-      'vec2(u, v)'
-    );
-    expect(new WGSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code).toBe(
-      'vec2f(u, v)'
-    );
+    for (const target of [
+      new GLSLTarget(),
+      new WGSLTarget(),
+      new PythonTarget(),
+    ])
+      expect(() => target.compile(ce.box(['PointList', 'u', 'v']))).toThrow(
+        /have no type/
+      );
     expect(
-      new PythonTarget().compile(ce.box(['PointList', 'u', 'v'])).code
-    ).toBe('(u, v)');
+      new PythonTarget().compile(
+        ce.box([
+          'Function',
+          ['PointList', 'u', 'v'],
+          ['Typed', 'u', { str: 'unknown' }],
+          ['Typed', 'v', { str: 'unknown' }],
+        ] as any)
+      ).code
+    ).toBe('(lambda u, v: (u, v))');
   });
 });
 

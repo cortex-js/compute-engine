@@ -87,6 +87,7 @@ describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed', () => {
   });
 
   it('leaves a caller-supplied `vars` function in that position alone', () => {
+    ce.declare('f', '(number) -> number');
     // A `vars` key is the caller's external-input contract and always wins:
     // the symbol never reaches the user-function route, and the emitted code
     // splices the caller's own source.

@@ -235,6 +235,11 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
 });
 
 describe('compiled equality on NaN and on infinities — Python target', () => {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
+  ce.declare('z', 'real');
+
   test('the scalar emission is the exact test', () => {
     expect(python.compile(ce.box(['Equal', 'x', 3])).code).toBe(
       '((x) == (3))'

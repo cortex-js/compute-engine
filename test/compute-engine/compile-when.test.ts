@@ -3,6 +3,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'number');
 const glsl = new GLSLTarget();
 
 describe('COMPILE When', () => {

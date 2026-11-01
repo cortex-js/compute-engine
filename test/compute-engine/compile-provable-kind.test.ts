@@ -19,6 +19,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   provableApplicationKind,
   provableTopLevelKind,
@@ -38,6 +39,7 @@ const U3 = '(unknown, unknown, unknown) -> unknown';
  */
 function heatMap(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('z', 'real');
   ce.declare('t_0', 'real');
   ce.assign('t_0', 2.855);
   ce.declare('s_eed', 'real');
@@ -287,6 +289,8 @@ describe('a literal in a reduction body keeps the compiled row scalar', () => {
    */
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     ce.declare('M', 'integer');
     ce.assign('M', 3);
     ce.declare('h', {
@@ -300,17 +304,30 @@ describe('a literal in a reduction body keeps the compiled row scalar', () => {
     return ce;
   }
 
-  // `x` has no type, so the compiled call `f(x)` maps `f` over a list value
-  // of `x` (`_SYS.bcastFn`), as the interpreter does. The comparison then
-  // tests the result of the call at run time: a number takes the straight
-  // comparison, and a list takes the broadcast, so `f([0.3, 2]) < 5` is
-  // `[false, false]`, the interpreter's value.
+  // A parameter `x` declared `any` can hold a list, so the compiled call
+  // `f(x)` maps `f` over a list value of `x` (`_SYS.bcastFn`), as the
+  // interpreter does. The comparison then tests the result of the call at
+  // run time: a number takes the straight comparison, and a list takes the
+  // broadcast, so `f([0.3, 2]) < 5` is `[false, false]`, the interpreter's
+  // value. (An INPUT `x` with no type is refused, ROADMAP CE-712.1, so the
+  // test is read on a parameter of the root function.)
   test('the comparison is straight for a number, and broadcast for a list', () => {
     const ce = engine();
-    const r = compileJS(ce, 'f(x) < y');
-    expect(r.code).toMatch(/\? \(_tv\d+ < _\.y\) :/);
-    expect(r.run({ x: 0.3, y: 5 })).toBe(false);
-    expect(r.run({ x: [0.3, 2], y: 5 })).toEqual([false, false]);
+    const r = compile(
+      ce.box([
+        'Function',
+        ce.parse('f(x) < y').json,
+        ['Typed', 'x', "'any'"],
+        ['Typed', 'y', "'real'"],
+      ] as never),
+      { to: 'javascript' } as never
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.bcastFn(_fn_f, x)');
+    expect(r.code).toMatch(/: \(\(_tv\d+\) < \(y\)\)/);
+    const run = r.run as unknown as (x: unknown, y: unknown) => unknown;
+    expect(run(0.3, 5)).toBe(false);
+    expect(run([0.3, 2], 5)).toEqual([false, false]);
   });
 
   test('the compiled row agrees with the interpreter', () => {
@@ -323,6 +340,7 @@ describe('a literal in a reduction body keeps the compiled row scalar', () => {
 describe('kind analysis — the shapes that must decline', () => {
   test('a list argument is not scalar, so the call keeps its broadcast', () => {
     const ce = new ComputeEngine();
+    ce.declare('y', 'real');
     ce.declare('L', 'list<number>');
     ce.declare('d_00', {
       type: U2,
@@ -343,6 +361,7 @@ describe('kind analysis — the shapes that must decline', () => {
     // A point is a JavaScript array at run time, so the compile gates must
     // keep treating it as a collection.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real | list<real>');
     ce.declare('q', { type: U1, value: ce.parse('(x)\\mapsto (x, 1)') });
     expect(kindOf(ce, 'q(x)')).toEqual({ point: 2 });
     expect(isProvablyScalarApplication(ce.parse('q(x)'), new Set(), argIsScalar)).toBe(
@@ -398,6 +417,7 @@ describe('a symbol whose value the target inlines is not a sequence', () => {
     // component was emitted as `...2.41` and the kernel threw
     // "2.41 is not iterable".
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.declare('s', 'real');
     ce.assign('s', 2.41);
     const r = compileJS(ce, '\\operatorname{Norm}((x, 1, s))');

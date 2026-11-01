@@ -196,12 +196,19 @@ describe('a body that builds a collection keeps its element-wise lowering', () =
     ).toBe('(6, 18)');
   });
 
-  test('an INFERRED-type argument keeps its guard and broadcasts', () => {
+  test('an argument declared as a union of shapes broadcasts', () => {
+    // An input with no type is refused (ROADMAP CE-712.1), so `y` is
+    // declared as a number or a list. Each call maps over a list value of
+    // `y` through `_SYS.bcastFn`; there is no other shape test of the
+    // nested call's result.
     const ce = new ComputeEngine();
+    ce.declare('y', 'real | list<real>');
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 's'], 's']));
     ce.assign('f', ce.box(['Function', ['Add', 'x', 1], 'x']));
     const r = build(ce, ['f', ['g', 'y']]);
-    expect(r.code).toContain('Array.isArray');
+    expect(r.code).toBe('_SYS.bcastFn(_fn_f, _SYS.bcastFn(_fn_g, _.y))');
+    expect(r.run({ y: 3 })).toBe(7);
+    expect(ce.box(['f', ['g', 3]]).evaluate().toString()).toBe('7');
     expect(r.run({ y: [1, 2] })).toEqual([3, 5]);
     expect(
       ce
@@ -228,6 +235,7 @@ describe('a symbol a body CAPTURES carries its own evidence', () => {
   function captured(declareY: boolean): ComputeEngine {
     const ce = new ComputeEngine();
     if (declareY) ce.declare('y', 'number');
+    else ce.declare('y', 'real | list<real>');
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 's'], 's'] as any));
     ce.assign('f', ce.box(['Function', ['g', 'y'], 't'] as any));
     return ce;
@@ -295,6 +303,7 @@ describe('a symbol a body CAPTURES carries its own evidence', () => {
 describe('the runtime broadcast takes the callee itself', () => {
   test('no argument to coerce: `_SYS.bcastFn(_fn_g, …)`, not an eta-expansion', () => {
     const ce = new ComputeEngine();
+    ce.declare('y', 'real | list<real>');
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 's'], 's']));
     const r = build(ce, ['g', 'y']);
     expect(r.code).toBe('_SYS.bcastFn(_fn_g, _.y)');
@@ -332,9 +341,12 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
    * signature is written after the assignment because assigning an
    * unannotated literal re-infers the signature from the body. */
   function nested(
-    typing: 'none' | 'signature' | 'annotation' | 'inferred-signature'
+    typing: 'none' | 'signature' | 'annotation' | 'inferred-signature',
+    declareU = true
   ) {
     const ce = new ComputeEngine();
+    if (declareU && (typing === 'none' || typing === 'inferred-signature'))
+      ce.declare('u', 'real | list<real>');
     ce.assign('r_e', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any));
     const body = ['Add', ['r_e', 'x', 'y'], 1];
     if (typing === 'signature') {
@@ -465,7 +477,7 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
   });
 
   test('a declared-number caller symbol keeps the direct top-level call', () => {
-    const ce = nested('inferred-signature');
+    const ce = nested('inferred-signature', false);
     ce.declare('u', 'number');
     const r = build(ce, ['q', 'u', 2]);
     // `ce.declare('u', 'number')` is the caller's input contract, so the top

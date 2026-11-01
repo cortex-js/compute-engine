@@ -311,6 +311,9 @@ describe('a binder that captures nothing is kept', () => {
 
 describe('the interpreter and the compiled code agree', () => {
   test('F(x)(y) at x = 2, y = 3', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     const expr = ce.box([[F, 'x'], 'y'] as any);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
@@ -320,6 +323,9 @@ describe('the interpreter and the compiled code agree', () => {
   });
 
   test('G(x)(y) at x = 2, y = 3', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     const expr = ce.box([[G, 'x'], 'y'] as any);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);

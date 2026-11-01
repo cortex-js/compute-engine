@@ -97,9 +97,20 @@ describe('an absent value that a symbol declared any holds is NaN in arithmetic'
     ce.declare('p', 'any');
     ce.declare('q', 'any');
     const expr = ce.box(json as any);
-    // Compiled, with `p` absent.
-    const run = compile(expr).run!;
-    expect(run({ p: undefined, q: 2 })).toBeNaN();
+    // Compiled, with `p` absent. An input declared `any` is refused
+    // (ROADMAP CE-712.1), so the expression is compiled as the body of a
+    // function whose parameters `p` and `q` are declared `any`.
+    const compiled = compile(
+      ce.box([
+        'Function',
+        json,
+        ['Typed', 'p', { str: 'any' }],
+        ['Typed', 'q', { str: 'any' }],
+      ] as any)
+    );
+    expect(compiled.success).toBe(true);
+    const run = compiled.run as unknown as (p: unknown, q: unknown) => unknown;
+    expect(run(undefined, 2)).toBeNaN();
     // `subs`.
     const substituted = expr
       .subs({ p: ce.box('Missing'), q: ce.box(2) })

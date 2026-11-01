@@ -27,6 +27,7 @@ import {
 } from '../../src/compute-engine/numerics/numeric';
 
 const ce = new ComputeEngine();
+ce.declare('m', 'real');
 
 type IntervalRun = {
   success: boolean;

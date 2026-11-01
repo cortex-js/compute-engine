@@ -113,6 +113,7 @@ describe('CE-614: an integral keeps the binding of the function it calls', () =>
     // body of `c`, whose call of `n` must read the outer `n`.
     function engine(cKind: 'value' | 'operator', nKind: 'value' | 'operator') {
       const ce = new ComputeEngine();
+      ce.declare('x', 'real');
       if (nKind === 'operator') ce.parse('n(t) := t^2').evaluate();
       else {
         ce.declare('n', 'function');

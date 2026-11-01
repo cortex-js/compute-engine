@@ -261,6 +261,7 @@ describe('A custom operator that sets the flag', () => {
 
 describe('Compiled Distance and Norm of a restricted operand', () => {
   const ce = new ComputeEngine();
+  ce.declare('t', 'real');
   function run(json: unknown, t: number): unknown {
     const r = compile(ce.box(json as never), { to: 'javascript' } as never);
     expect(r.success).toBe(true);
@@ -596,6 +597,7 @@ describe('A search for a restricted value', () => {
 
   test('compiled to JavaScript', () => {
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     const run = (json: unknown, t: number): unknown => {
       const r = compile(ce.box(json as never), { to: 'javascript' } as never);
       expect(r.success).toBe(true);

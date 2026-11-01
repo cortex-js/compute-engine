@@ -21,7 +21,7 @@ or whose static type is `error`, declines on every target: `"ab" + u` and,
 with `ADD = (x, y) ↦ x + y`, `ADD("ab", u)` both decline. The result of the
 decline has the token `ErrorCode` in `unsupported`, which a host reads to tell
 an error in the expression from an operator that has no lowering
-(`assertNoStaticTypeError()`, `compilation/compile-static-type-error.ts`; the
+(`throwStaticTypeError()`, `compilation/compile-static-type-error.ts`; the
 token is added by `buildInterpreterFallback()`,
 `compilation/compile-references.ts`); its diagnostic has the code
 `'static-type-error'` and the kind `'correctness'`. The check walks into every
@@ -60,6 +60,193 @@ Every other case is unspecified: the compiled code can give any value,
   target computes with the value; a GPU target can use the range (it can
   drop `|x|` for `x` in `real<0..5>`).
 - An input left out (see `docs/ERROR-MODEL.md`, "An unsupplied variable").
+
+**An input with no type declines.** The compiled code reads each input (a
+free symbol of the code, as `freeSymbols` lists it) in one shape, and the
+shape comes from the type of the input. An input whose static type is
+`unknown` or `any`, because nothing declares it and nothing infers a type for
+it, declines on every target: with `M` undeclared, `If(M < 3, M, 0)`
+declines, where the code read `M` as a number and gave `0` for `M = [1, 5]`
+(the interpreter gives `[1, 0]`). The `unsupported` list of the result has
+the name of each such input (`["M"]`), and the diagnostic has the code
+`'untyped-input'` and the kind `'correctness'`. A host declares the input
+(`ce.declare("M", "real")`). A declared union of shapes
+(`real | list<real>`) is a type, and is not refused. A parameter of a
+function literal, of a user function or of the root function is not an input
+and is not refused: `t ↦ 2t` compiles, and a list passed to its untyped
+parameter is a value outside the type that the body implies (`2t` reads a
+number), so the result is unspecified. A transparent alias of `unknown` or
+`any` (`ce.declareType("U", "unknown", { alias: true })`) is that type, so
+an input declared `U` declines. A local of a function body is not an input,
+also when only a nested block (a loop body, a branch) assigns it. A name
+that only a nested statement of a block outside a function body assigns (a
+branch of an `If`) is an input: with `b` undeclared,
+`Block(If(a < 1, b ≔ 1); b)` declines, because the compiled code reads the
+input `b` at `a = 2`, where the interpreter has no value for `b`. The variable of an indefinite
+integral (`\int x^2 dx`) is an input, with the type of its declaration
+outside the integral. A name that the code assigns and that no scope of the
+expression binds is an input, also when the code only writes it: with `u`
+undeclared, `u ≔ If(x < 0, u, 0)` declines. An assignment to a local of the
+same name (a loop index, a local of a nested block) does not write the
+input. A value that the code assigns to an input must have the shape of the
+type of the input, declared or inferred, or the compilation declines with
+the code `'unsettled-shape'`: inference reads the type from a read of the
+name, and does not see the values that the code assigns. With `x: real` and
+`p` undeclared, `Block(If(x > 0, p ≔ [1, 2], p ≔ [3, 4]), 2p)` declines: the
+read `2p` gave `p` the type `number`, and the code gave `null` where the
+interpreter gives `[2, 4]`. An input that the code assigns values of the
+shape of its type compiles: `Block(Loop(acc ≔ acc + i, i ∈ 1..5), acc)`. The
+check runs after the code was generated: when the expression also declines
+for another reason (an operator with no lowering, a value with no settled
+shape, a timeout), that reason is the `error` and the diagnostic, and
+`unsupported` also has the names of the inputs with no type. In both cases
+the compilation declines. The check is `assertAdmitted()`
+(`compilation/compile-admission.ts`).
+
+**A value with no settled shape declines.** The compiled code gives each
+value one shape, which its static type settles. An `If`, a `Which` or a
+`Match` whose branches have conflicting shapes (a number and a list, a point
+and a list of points) declines on every target: `If(x > 0, [1, 2], 3) + 1`
+declines, also when the conditional is in the
+body of a user function that the code calls. The `unsupported` list has the
+conditional as `toString()` writes it, and the diagnostic has the code
+`'unsettled-shape'` and the kind `'capability'`. The values that a function
+body or the root can give (the value of each `Return` that belongs to it,
+also through a `Loop`, and its last value), and the values of the `Break`
+statements of a `Loop`, are compared in the same way, and a `Return` of a
+nested function literal belongs to that literal: with `M: list<real>`,
+`At(Apply(a ↦ Block(If(Length(a) > 1, Return(First(a))), Reverse(a)), M), 1)`
+declines, because the body gives a number or a list. This simple version
+compares only the branches whose type settles a shape: a branch of type
+`unknown`, `any`, `broadcastable<T>` or a union of shapes (the result of a
+user-function call that the code tests at run time) is not compared, and a
+conditional over a collection condition, which selects element by element,
+is not checked when its branches change nothing. When a branch of such a
+conditional assigns a name or has a `Return`, a `Break` or a `Continue`, it
+declines with the code `'unsettled-shape'`: the compiled code cannot run a
+branch for some elements only. With `L: list<real>`,
+`Block(p ≔ 0; If(L > 0, p ≔ 5); 2p)` declines. A condition of type `any`
+can be a list, and the interpreter then selects element by element: with
+`M: list<any>`, `Block(p ≔ 0; If(M[1], p ≔ 5); 2p)` declines. A condition
+of type `unknown` (an untyped parameter of a function literal) is read as a
+boolean, so the branches of its conditional are compared as alternatives.
+On the targets that are not shaders, a conditional whose
+value the code discards is not checked: a statement of a `Block` that is not
+its last one, the body of a `Loop`, and a branch of such a conditional. An
+`Assign` has the type of its value, and
+`Block(p ≔ (0, 0); n ≔ 0; If(x > 0, p ≔ (1, 2), n ≔ 3); n)` compiles.
+
+The compiled code gives each variable one representation, which its type
+selects. So, in one scope, the values that the code assigns to a name, and
+the type of the name (declared, or inferred from its uses), must have one
+shape class: a number, a complex number, a string, a list, a point or a
+matrix. The length of a list is not part of its shape, so a local assigned
+`[1, 2]` and then `[1, 2, 3]` compiles. Otherwise the compilation declines
+with the code `'unsettled-shape'`. With `x: real`,
+`Block(p ≔ 0; If(x > 0, p ≔ [1, 2]); 2p)` declines, and so does
+`Block(p ≔ 0; p ≔ [1, 2]; p)`, although the interpreter gives `[1, 2]`: the
+order of the assignments and the paths of the code are not examined. A
+declared type settles the shape of a local: `Block(Declare(p, "real");
+p ≔ (x, 2); p)` declines. A type that a `Declare` states and that admits
+several shapes (`real | list<real>`, `broadcastable<number>`) is not
+checked, as a declared union of an input is not refused. The parameter of a
+function literal has the type of the parameter (and, for a literal that
+`Apply` applies where it is written, the type of each scalar argument), so
+`p ↦ Block(Loop(p ≔ [i, i], i ∈ [1, 2, 3]); 2p)` declines. A name is a new
+variable only where it is certainly one: a parameter of a function literal,
+a name that a `Declare` of a `Block` declares (in that block), and the index
+of a clause. Every other occurrence of a name is the same variable, so two
+locals of the same name with no `Declare`, in two function bodies, are
+compared as one. This is the simple, sound version of the rule (ROADMAP
+CE-724 lists what a precise version would accept).
+
+Some assignments decline with the code `'unsettled-shape'` whatever their
+shapes, because the interpreter and the compiled code do not agree on their
+effect:
+
+- In the body and in the clauses of a `Comprehension` (except the source of
+  its first clause), in the clauses of a `Sum` or a `Product`, and in the
+  integrand and the bounds of an `Integrate`, an assignment of a name of an
+  enclosing scope, a `Return`, a `Break` or a `Continue`. The interpreter
+  evaluates the body of a `Comprehension` in a scope of its own, so
+  `Block(p ≔ 0; Comprehension(Block(p ≔ 5, i), i ∈ [1]); p)` is `0`; the
+  compiled code of the integrand of an `Integrate` is a function of its own,
+  where the interpreter changes the outer name. A name that the part binds
+  (a name that a `Block` of the part declares, a parameter or a loop index of
+  the part) is not a name of an enclosing scope. A local that a block of the
+  part assigns with no `Declare` counts as one (ROADMAP CE-721). A `Return`, a
+  `Break` or a `Continue` in the body of a `Sum` or a `Product` declines too:
+  the compiled body is an expression, not a loop body (CE-721).
+- In a function literal, an assignment of a name of an enclosing scope (or
+  of an element of one), or a `Break` or a `Continue` that leaves it. In a
+  callback (`Filter`, `Map`, `Tabulate`, `Limit`, …) the two do not agree:
+  for `Filter` the interpreter does not run the callback when the result is
+  not used, and for `Limit` the compiled code does not change the outer name
+  (CE-720). A function can reach a callback operator in many ways (stored
+  and passed by name, behind an `If`, returned by another function), so
+  every such literal declines: a callback, the value of a `Declare` or an
+  `Assign`, a function returned by another one, and the body of a user
+  function that the code calls. Two are exempt: the root of the
+  compilation, and a function that `Apply` applies where it is written,
+  whose body runs once as inline code. That one still declines when a
+  `Break` or a `Continue` leaves it, or when an argument is not known to be
+  a scalar (it can then map over the argument and run its body zero or more
+  times) and it assigns a name of an enclosing scope. A local of a function
+  or of a block (a name that it declares or assigns first, with a binding
+  of its own) is not a name of an enclosing scope: two user functions that
+  each assign a local `t` compile.
+- In a function literal, an assignment of the index of a `Loop`, a `Sum`, a
+  `Product`, a `Comprehension` or an `Integrate` that encloses the literal
+  (CE-723).
+- In a branch of an `If` or a `Which` whose condition is or can be a
+  collection, an assignment, a `Return`, a `Break` or a `Continue` (CE-722).
+- A `Return` inside a `Loop`, unless that loop is the only loop around it and
+  is the last statement of the function (or of the root): the compiled loop is
+  a function of its own, so the `Return` ends only the loop, and the code
+  after the loop would still run (CE-719).
+
+A read of a local that may have no value is checked by the compilation of
+the block (JavaScript throws `read-before-declaration`, a shader declines),
+as the interpreter gives that error.
+
+On the shader targets, a conditional whose value the code discards (with
+branches of different shapes) declines too, because its shader code is a
+conditional expression (`c ? a : b`) whose branches must have the same
+type. Points of different sizes (`If(x > 0, (1, 2), (3, 4, 5))`)
+conflict only on the shader targets, where they are a `vec2` and a `vec3`;
+on the other targets a point of any size is one array, and the union of the
+two tuple types compiles. A written `NaN` is a number, so a `NaN` branch
+beside a point or a list declines: `If(c, (x, y), NaN)` is a point when `c`
+is true and the number `NaN` when `c` is false. A branch that a condition
+known when the code is generated excludes is not compared: a condition that
+is `True` or `False`, or whose static type is the literal `True` or `False`
+(`2 < 3`), selects its branch, so `Which(2 < 3, [1, 2], True, 0)` compiles
+to the list. On the shader targets, only the branches that the shader code
+keeps are compared, as every branch in the shader must have the same type:
+an `If` whose condition has a literal static type keeps one branch
+(`If(2 < 3, (1, 2), 0)` compiles to `vec2(1.0, 2.0)`), but an `If` whose
+condition is the symbol `True` or `False` keeps both, and a `Which` keeps
+every value up to its first `True` clause, so `If(False, (1, 2), 0)` and
+`Which(2 < 3, (1, 2), True, 0)` decline there. A conditional inside a
+branch that the code drops is not checked, because the code never evaluates
+it: `If(2 < 3, 0, If(x > 0, [1, 2], 3))` compiles to `0` on every target.
+In the same way, a name that occurs only in a dropped branch is not an
+input: with `z` undeclared, `If(2 < 3, 0, z)` compiles, also when `vars`
+maps `z`. A name that occurs anywhere in the code that is kept, also where a
+binder binds it, stays an input: the check cannot always tell a bound name
+from a read of the outer input (the variable of an indefinite integral), so
+`If(2 < 3, 0, x) + Integrate(x^2, Limits(x, Nothing, Nothing))` with `x`
+undeclared declines, and so does
+`List(If(2 < 3, 0, z), Sum(z, Limits(z, 1, 3)))`, although the `z` of the
+sum is its index. On the shader
+targets, `If(True, 0, z)` keeps both branches, so it reads `z` and `z` is
+refused there. A sub-expression of static type `error` declines also in a
+dropped branch. The conditional is found before the code is generated
+(`unsettledShapeIn()`), and the decline is thrown after the code was
+generated with no other decline (`assertAdmitted()`), so a more specific
+reason of the target stays the reason: `If(x > 0, [1, 2], 3) + 1` on `glsl`
+declines because a shader array has no arithmetic. Design:
+`docs/plans/2026-10-31-static-shape-compilation.md`, rules R1 and R3.
 
 A typed array for a `list` input and a string for a bare
 `indexed_collection` input are values of their types and keep the
@@ -486,6 +673,19 @@ The interpreter fallback (`success: false`, with `fallback` not `false`)
 gives the same shapes: a number is the `interval` result of a point, and an
 absent value is `empty`.
 
+A root whose value is a function (a `Function` literal, a block whose value
+is one, a symbol whose value is one, a partial application) is never given
+as a function value. The result has `calling: 'lambda'`, as a root
+`Function` literal has on the JavaScript target: `run` takes the arguments
+of the function, each converted as a variable of a vars object is (a number
+is a point interval), and gives one of the shapes above. `x ↦ 2x` with
+`run(3)` gives `{ kind: 'interval', value: { lo: 6, hi: 6 } }`, and with
+`run({ lo: 1, hi: 2 })` the enclosure `[2, 4]`. There is no vars object, so
+such a root declines when it reads a free symbol (`x ↦ a·x`), and the
+result has no `broadcast()`. Before 2026-10-31 `run` gave the compiled
+JavaScript function over enclosures, which a caller could not call with
+numbers (ROADMAP CE-726).
+
 A conditional whose condition is undecided over the cell gives the hull of
 its arms. When one arm is `empty` — the missing default of a `Which`, or an
 arm with no value, such as an `At` out of range — the other arm is present
@@ -866,9 +1066,9 @@ canonical form already holds the default (`f(3)` is `f(3, 2)`). The compiler
 fills the other calls. In each case the default is compiled as the operand
 that a call written at that place would read: a value default is the target's
 spelling of the value, a symbol default is a read of the symbol when the call
-is made, and `[]` or `{}` is a new value at each call (an empty dictionary
-does not compile on the JavaScript target, so a `{}` default declines there,
-as a written `{}` does).
+is made, and `[]` or `{}` is a new value at each call (`({})` in JavaScript,
+`{}` in Python; the interval-js, GLSL and WGSL targets have no dictionary
+value, so a `{}` default declines there, as a written `{}` does).
 
 - JavaScript, a function literal compiled as a value (a `Map` callback, a
   block-local function, the root of `compile()`): the emitted function fills
@@ -1171,6 +1371,38 @@ Implicit Map compilation obeys the engine-wide `jit` gate. Exact-mode Map
 compilation requires an explicit proof that native-number execution preserves
 the requested exact result. Structural or ABI failures are cached at the
 appropriate expression-instance boundary.
+
+### Dictionary literals
+
+A dictionary literal compiles on the `javascript` and `python` targets, with
+each value compiled: `{a -> x + 1}` is `({"a": _.x + 1})` in JavaScript and
+`{"a": x + 1}` in Python. Each evaluation makes a new object, which has the
+run-time form of a `dictionary` input (a plain object, a `dict`). A key is a
+string literal; the JavaScript literal writes the key `__proto__` as the
+computed key `["__proto__"]: v`, because the plain form `"__proto__": v` sets
+the prototype of the object instead of making an own key. The shape of each
+value comes from its static type: a value whose type is `unknown` or `any`
+declines (a call of a block-local function has the result type of its
+literal; an untyped input is refused by the admission of the inputs, which
+names it in `unsupported`). A value whose type can be `Nothing` declines:
+the interpreter leaves out such an entry, and the literal would keep the
+key. Each value compiles as a value operand (`compileValueOperand()`), so an
+assignment in a value declines on Python, as in any other operand. The
+values are not operands of the node, so the shared-subexpression pass does
+not enter them, but it records each assignment in them: a subexpression is
+not shared across a write in a value (`recordDictionaryAssignments()` in
+`cse.ts`). The interval-js, GLSL and WGSL targets have no dictionary value,
+and a dictionary declines on them with that reason
+(`CompileTarget.dictionary`, `_compileInner()` in `compiler-core.ts`).
+
+On the JavaScript target, a result whose static type holds a dictionary or a
+record at some depth is returned under `normalizeKeyedRunResult()`, not
+`normalizeRunResult()`: an object of such a result with the keys `re` and
+`im` is a dictionary, not a complex number, so it is returned as it is. In
+a value whose type holds both a record and a complex number, a complex
+cell with a zero imaginary part is then returned as `{re, im: 0}`, not as a
+number. A `dictionary` or `record` input or parameter has no real or complex
+entry rule (`isKeyedEntryType()` in `javascript-target.ts`).
 
 ### GPU `At`
 

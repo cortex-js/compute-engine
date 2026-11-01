@@ -252,9 +252,20 @@ describe('an unrolled Sum leaves no literal arithmetic', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('(x, y) \\mapsto x^2 + y'));
     const expr = ce.parse('\\sum_{i=1}^{3} f(0.1 i, s)');
-    const r = compile(expr, { to: 'javascript', fallback: false });
-    expect(r.run!({ s: 2 })).toBeCloseTo(6.14, 12);
-    const list = r.run!({ s: [1, 2, 3] }) as number[];
+    // An INPUT `s` with no type is refused (ROADMAP CE-712.1). A parameter
+    // `s` of the root function declared `any` compiles, with the run-time
+    // test of its value.
+    const refused = compile(expr, { to: 'javascript' });
+    expect(refused.success).toBe(false);
+    expect(refused.diagnostic?.code).toBe('untyped-input');
+    expect(refused.unsupported).toContain('s');
+    const r = compile(
+      ce.box(['Function', expr.json, ['Typed', 's', "'any'"]] as never),
+      { to: 'javascript', fallback: false }
+    );
+    const run = r.run as unknown as (s: unknown) => unknown;
+    expect(run(2)).toBeCloseTo(6.14, 12);
+    const list = run([1, 2, 3]) as number[];
     expect(list).toHaveLength(3);
     [3.14, 6.14, 9.14].forEach((v, i) => expect(list[i]).toBeCloseTo(v, 12));
     expect(
@@ -272,6 +283,7 @@ describe('the emitted fold declines where it must', () => {
     // real identifier. The folder reads an identifier it does not know and
     // stops — the arithmetic around it has to stay.
     const ce = new ComputeEngine();
+    ce.declare('n', 'real');
     const expr = ce.parse('\\sum_{i=1}^{n}(0.025(i-0.5))');
     expect(
       source(compile(expr, { to: 'javascript', fallback: false }))

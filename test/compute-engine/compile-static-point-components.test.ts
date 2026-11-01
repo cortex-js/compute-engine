@@ -48,20 +48,22 @@ function withPointFunction(ce: ComputeEngine): void {
 
 describe('point arithmetic fans out by the width of the tuple type', () => {
   test('a point-returning call plus a literal point', () => {
-    const ce = newEngine();
+    const ce = newEngine({ x: 'real', y: 'real' });
     withPointFunction(ce);
     const { code, run } = compiled(ce, 'S(x,y)+(0,0)');
-    // The call's result is read component by component behind a shape test:
-    // the declared width constrains what the engine assigns, not what a
-    // caller supplies, so the `_SYS.bcast` dispatch stays as the else branch.
-    expect(code).toMatch(
-      /\(\(_tv\d+, _tv\d+\) => Array\.isArray\(_tv\d+\) && _tv\d+\.length === 2 && !Array\.isArray\(_tv\d+\[0\]\) \? \[\(_tv\d+\[0\] \+ _tv\d+\[0\]\), \(_tv\d+\[1\] \+ _tv\d+\[1\]\)\] : _SYS\.bcast\(/
+    // The call's result is read component by component. Its static type
+    // `tuple<real, real>` is the shape of the value (the compiler assumes
+    // that every value holds its static type, ROADMAP CE-712.1), so there is
+    // no shape test and no `_SYS.bcast` fallback.
+    expect(code).toContain(
+      '((_tv3) => [(_tv3[0] + 0), (_tv3[1] + 0)])(_fn_S(_.x, _.y))'
     );
+    expect(code).not.toContain('_SYS.bcast(');
     expect(run({ x: 0.3, y: 0.7 })).toEqual([-0.3, -0.7]);
   });
 
   test('scalar times point, point over scalar, negated point', () => {
-    const ce = newEngine();
+    const ce = newEngine({ x: 'real', y: 'real' });
     withPointFunction(ce);
     for (const [latex, expected] of [
       ['2S(x,y)', [-0.6, -1.4]],
@@ -71,7 +73,9 @@ describe('point arithmetic fans out by the width of the tuple type', () => {
       ['S(x,y)+(1,0)+(2,2)', [2.7, 1.3]],
     ] as const) {
       const { code, run } = compiled(ce, latex);
-      expect(code).toContain('.length === 2 &&');
+      // Component by component, with no shape test of the call's result.
+      expect(code).toMatch(/\[\(.*_tv\d+\[0\].*\), \(.*_tv\d+\[1\].*\)\]/);
+      expect(code).not.toContain('_SYS.bcast(');
       const out = run({ x: 0.3, y: 0.7 }) as number[];
       out.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 12));
     }
@@ -148,12 +152,13 @@ describe('the inner product of two static-width points is written out', () => {
   });
 
   test('a point-returning call against a literal point', () => {
-    const ce = newEngine();
+    const ce = newEngine({ x: 'real', y: 'real' });
     withPointFunction(ce);
     const { code, run } = compiled(ce, '\\operatorname{Dot}(S(x,y),(1,2))');
     expect(code).not.toContain('_SYS.bcast(');
-    expect(code).toMatch(
-      /\.length === 2 && !Array\.isArray\(_tv\d+\[0\]\) \? \(_tv\d+\[0\] \* _tv\d+\[0\]/
+    // Written out, with no shape test of the call's result.
+    expect(code).toContain(
+      '((_tv1) => (_tv1[0] * 1 + _tv1[1] * 2))(_fn_S(_.x, _.y))'
     );
     expect(run({ x: 0.3, y: 0.7 })).toBeCloseTo(-1.7, 12);
   });
@@ -183,12 +188,10 @@ describe('the inner product of two static-width points is written out', () => {
   });
 
   test('shapes that keep the run-time dispatch', () => {
-    // Components of open type (an undeclared `x` may hold a list), a width
-    // of five or more, and a complex component are not written out. The
+    // An input with no type is refused (ROADMAP CE-712.1); a width of five
+    // or more and a complex component are not written out. The
     // run-time dispatch is the real-only `_SYS.matmul` when the entries are
-    // real: the elements of a literal are read one by one, and an undeclared
-    // scalar is a real number in the default mode, so `(x, y)` is real; a
-    // `vector<real^5>` is real by its type. A `vector<5>` (whose entries are
+    // real: a `vector<real^5>` is real by its type. A `vector<5>` (whose entries are
     // `number`) is read as real in the default mode too. The runner does not
     // read the entries of a list input (user decision of 2026-10-13: the
     // compiled `run()` requires inputs of the shape the compiled code reads;
@@ -201,9 +204,10 @@ describe('the inner product of two static-width points is written out', () => {
       A: 'vector<real^5>',
       B: 'vector<real^5>',
     });
-    expect(compiled(ce, '\\operatorname{Dot}((x,y),(1,2))').code).toBe(
-      '_SYS.matmul([_.x, _.y], [1, 2])'
-    );
+    const untyped = compile(ce.parse('\\operatorname{Dot}((x,y),(1,2))'));
+    expect(untyped.success).toBe(false);
+    expect(untyped.diagnostic?.code).toBe('untyped-input');
+    expect(untyped.unsupported).toEqual(expect.arrayContaining(['x', 'y']));
     const vw = compiled(ce, '\\operatorname{Dot}(V, W)');
     expect(vw.code).toBe('_SYS.matmul(_.V, _.W)');
     expect(vw.run({ V: [1, 2, 3, 4, 5], W: [1, 1, 1, 1, 2] })).toBe(20);

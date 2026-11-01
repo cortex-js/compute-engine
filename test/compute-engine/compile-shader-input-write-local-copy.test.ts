@@ -66,6 +66,7 @@ function interpreted(src: any): number {
 
 function compiled(src: any, to: 'glsl' | 'wgsl', options: any = {}): any {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real | signed_infinity | nan');
   ce.declare('u', 'real');
   return compile(ce.box(src), { to, fallback: false, ...options }) as any;
 }

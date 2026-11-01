@@ -517,7 +517,13 @@ describe('PARTIAL APPLICATION — javascript, the cases that declined before', (
     expect(js(['Apply', ['Apply', D, 2], 'u']).run!({ u: 0 })).toBeNaN();
   });
 
-  test('a partial application whose result writes a parameter compiles', () => {
+  // The inner literal is returned by the outer one, and the admission
+  // check cannot tell whether its caller passes it to a callback operator
+  // (`Filter`), where its write of `y` would not agree with the
+  // interpreter. So a returned literal that writes a name of an enclosing
+  // scope declines (CE-712.1, ROADMAP CE-720), although the interpreter and
+  // the compiled code both give 7 here. The interpreter fallback gives 7.
+  test('a partial application whose result writes a parameter declines', () => {
     // (y, w) ↦ (x ↦ Block(Block(y := 2, y + x))): before, the curried call
     // `W(0)` stayed unevaluated (the substitution refused to replace the
     // target of an assignment, ROADMAP CE-698). Now `W(0)` is the deferred
@@ -542,10 +548,10 @@ describe('PARTIAL APPLICATION — javascript, the cases that declined before', (
     expect(evaluated(json, 5)).toBe(7);
     const r = compile(engine().box(json), {
       to: 'javascript',
-      fallback: false,
       constantFold: false,
     });
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
     expect(r.run!({ u: 5 })).toBe(7);
   });
 

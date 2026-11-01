@@ -20,6 +20,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 describe('list-valued function applications keep their signature under numeric use (item 121)', () => {
   test('a prior parse of the free parameter name does not widen the callee signature', () => {
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     ce.parse('a(t)\\coloneq\\left[\\cos t,\\sin t\\right]').evaluate();
     // Creates a global inferred `t` — the poison that forced the binder
     // rewrite of B's body.
@@ -52,6 +53,7 @@ describe('list-valued function applications keep their signature under numeric u
     // compile ran BEFORE the second definition, so the second definition's
     // binder rewrite used to re-validate the body and corrupt `a`.
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     ce.parse('a(t)\\coloneq\\left[\\cos t,\\sin t\\right]').evaluate();
     ce.parse('h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)').evaluate();
     ce.parse(
@@ -133,6 +135,7 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
 
   test('numerically-accumulable bodies are NOT declined', () => {
     const ce = new ComputeEngine();
+    ce.declare('q', 'real');
     // Wide/unknown types stay admitted — the decline needs positive evidence.
     const wide = jsCompile(ce, ce.parse('\\sum_{i=0}^{2}q', { strict: false }));
     expect(wide?.success).toBe(true);
@@ -194,6 +197,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
   // inferred `vector<2>`.
   const setup = (hBody: any) => {
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     for (const id of ['h', 'a', 'A'])
       ce.declare(id, { signature: '(unknown) -> unknown' });
     ce.assign('h', ce.box(['Function', ['Block', hBody], 'i']));
@@ -277,6 +281,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
     // the same open head and the same nested-call argument keeps the bare
     // scalar accumulation (no `_SYS.bcast` fold), and answers a number.
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     for (const id of ['h', 'g', 'G'])
       ce.declare(id, { signature: '(unknown) -> unknown' });
     ce.assign('h', ce.box(['Function', ['Block', 'i'], 'i']));

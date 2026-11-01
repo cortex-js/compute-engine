@@ -286,6 +286,8 @@ describe('a coordinate of a constructed point is the component', () => {
     // A component whose type does not prove it is a number may hold an array
     // at run time; `_SYS.pointSlot` answers `NaN` for one.
     const open = new ComputeEngine();
+    open.declare('p', 'real');
+    open.declare('q', 'real | list<real>');
     const r = compile(open.box(['PointY', ['PointList', 'p', 'q']]), {
       fallback: false,
     });

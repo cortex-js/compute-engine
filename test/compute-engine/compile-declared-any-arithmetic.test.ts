@@ -42,20 +42,35 @@ function toMathJson(v: unknown): unknown {
   return Array.isArray(v) ? ['List', ...v.map(toMathJson)] : v;
 }
 
+/** The function literal of `body` whose parameters `names` are declared
+ * `any`. An INPUT declared `any` is refused (ROADMAP CE-712.1); a parameter
+ * of the root function declared `any` compiles, with the run-time check of
+ * its value that these tests read. */
+function anyFunction(ce: ComputeEngine, body: unknown, names = ['p', 'q']) {
+  return ce.box([
+    'Function',
+    body,
+    ...names.map((n) => ['Typed', n, { str: 'any' }]),
+  ] as any);
+}
+
 /** The compiled result and the interpreted result of `expr` for the values
- * `p` and `q`, each in a fresh engine where `p` and `q` are declared
- * `any`. */
+ * `p` and `q`. The compiled route compiles `expr` as the body of a
+ * function whose parameters `p` and `q` are declared `any`, and calls it
+ * with `p` and `q`. The interpreted route evaluates `expr` in a fresh
+ * engine where `p` and `q` are declared `any` and hold the values. */
 function bothRoutes(
   expr: unknown,
   p: unknown,
   q: unknown
 ): { code: string; compiled: unknown; evaluated: Value } {
   const ce = new ComputeEngine();
-  ce.declare('p', 'any');
-  ce.declare('q', 'any');
-  const result = compile(ce.box(expr as any));
+  const result = compile(anyFunction(ce, expr));
   expect(result.success).toBe(true);
-  const compiled = result.run!({ p, q } as any);
+  const compiled = (result.run as unknown as (...args: unknown[]) => unknown)(
+    p,
+    q
+  );
 
   const ce2 = new ComputeEngine();
   ce2.declare('p', 'any');
@@ -117,10 +132,10 @@ describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
   test('the sum of two lists is not a string', () => {
     const { code, compiled } = bothRoutes(['Add', 'p', 'q'], [1, 2], [3, 4]);
     expect(code).toBe(
-      '(!(Array.isArray(_.p) || ArrayBuffer.isView(_.p)) && ' +
-        '!(Array.isArray(_.q) || ArrayBuffer.isView(_.q)) ? _.p + _.q : ' +
+      '(p, q) => (!(Array.isArray(p) || ArrayBuffer.isView(p)) && ' +
+        '!(Array.isArray(q) || ArrayBuffer.isView(q)) ? p + q : ' +
         '((_tv1, _tv2) => _SYS.bcastScalarAbsent([1, 1], (_tv3, _tv4) => (_tv3 + _tv4), _tv1, _tv2))' +
-        '(_SYS.plainList(_.p), _SYS.plainList(_.q)))'
+        '(_SYS.plainList(p), _SYS.plainList(q)))'
     );
     expect(compiled).toEqual([4, 6]);
   });
@@ -131,7 +146,7 @@ describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
       2,
       3
     );
-    expect(code.match(/Array\.isArray\(_\.p\)/g)?.length).toBe(1);
+    expect(code.match(/Array\.isArray\(p\)/g)?.length).toBe(1);
   });
 
   test('two matrices take the entry-wise product, as a bare list does', () => {
@@ -197,16 +212,16 @@ describe('CE-366: the run-time check and the shared subexpressions', () => {
 describe('CE-366: the run-time check reads each input once', () => {
   // A `vars` mapping can be any source. The check evaluated it once in the
   // test and once more in the branch, so the value it tested was not the
-  // value it used.
-  test('a read with a side effect is evaluated once', () => {
+  // value it used. An input declared `any` is now refused (ROADMAP
+  // CE-712.1), so the interpreter reads the source once.
+  test('an input declared any mapped through vars is refused', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'any');
     const expr = ce.box(['Add', 'p', 1]);
     const result = compile(expr, { vars: { p: '_.values.shift()' } });
-    expect(result.success).toBe(true);
-    const run = result.run as unknown as (vars: unknown) => unknown;
-    expect(run({ values: [[1, 2], [3, 4]] })).toEqual([2, 3]);
-    expect(run({ values: [5, 7] })).toBe(6);
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('untyped-input');
+    expect(result.unsupported).toContain('p');
     ce.assign('p', ce.box(['List', 1, 2]));
     expect(toValue(expr.evaluate())).toEqual([2, 3]);
   });
@@ -228,13 +243,10 @@ describe('CE-366: a numeric typed array is a list', () => {
       const q = [3, 4];
       const { evaluated } = bothRoutes(expr, p, q);
       const ce = new ComputeEngine();
-      ce.declare('p', 'any');
-      ce.declare('q', 'any');
-      const result = compile(ce.box(expr as any));
-      const compiled = result.run!({
-        p: Float64Array.from(p),
-        q: Float64Array.from(q),
-      } as any);
+      const result = compile(anyFunction(ce, expr));
+      const compiled = (
+        result.run as unknown as (...args: unknown[]) => unknown
+      )(Float64Array.from(p), Float64Array.from(q));
       expectClose(compiled, evaluated);
     });
   }
@@ -246,11 +258,15 @@ describe('CE-366: a shared expression is walked once', () => {
   // position, and at depth 40 it did not end.
   test('a tower of depth 40 compiles quickly', () => {
     const ce = new ComputeEngine();
-    ce.declare('p', 'any');
     let t: Expression = ce.symbol('p');
     for (let i = 0; i < 40; i++) t = ce.function('Beta', [t, t]);
     const start = Date.now();
-    const result = compile(ce.function('Add', [t, 1]));
+    const result = compile(
+      ce.function('Function', [
+        ce.function('Add', [t, 1]),
+        ce.box(['Typed', 'p', { str: 'any' }]),
+      ])
+    );
     expect(result.success).toBe(true);
     expect(Date.now() - start).toBeLessThan(5000);
   });
@@ -327,13 +343,22 @@ describe('CE-214.2: the coordinate of a number', () => {
     return ce;
   }
 
+  // The compiled route compiles the expression as the body of a function
+  // whose parameter `x` is declared `any`: an input declared `any` is
+  // refused (ROADMAP CE-712.1).
+  const run = (ce: ComputeEngine, body: unknown) => {
+    const result = compile(anyFunction(ce, body, ['x']));
+    expect(result.success).toBe(true);
+    return result.run as unknown as (x: unknown) => unknown;
+  };
+
   for (const head of ['PointX', 'PointY', 'PointZ']) {
     test(`${head}(g(x)[1]) with a number x throws a RangeError`, () => {
       const ce = setup();
-      const e = ce.box([head, ['At', ['g', 'x'], 1]]);
-      const result = compile(e);
-      expect(result.success).toBe(true);
-      expect(() => result.run!({ x: 3 })).toThrow(RangeError);
+      const json = [head, ['At', ['g', 'x'], 1]];
+      const e = ce.box(json as any);
+      const compiled = run(ce, json);
+      expect(() => compiled(3)).toThrow(RangeError);
       ce.assign('x', 3);
       expect(e.evaluate().json).toMatchObject(['Error', expect.anything(), 3, expect.anything()]);
     });
@@ -341,25 +366,37 @@ describe('CE-214.2: the coordinate of a number', () => {
 
   test('a point and a list of points are unchanged', () => {
     const ce = setup();
-    const e = ce.box(['PointX', ['At', ['g', 'x'], 1]]);
-    const result = compile(e);
-    expect(result.run!({ x: [1, 2] })).toBe(1);
+    const json = ['PointX', ['At', ['g', 'x'], 1]];
+    const e = ce.box(json as any);
+    const compiled = run(ce, json);
+    expect(compiled([1, 2])).toBe(1);
     expect(
-      result.run!({
-        x: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
+      compiled([
+        [1, 2],
+        [3, 4],
+      ])
     ).toEqual([1, 2]);
     ce.assign('x', ce.box(['List', 1, 2]));
     expect(e.evaluate().json).toBe(1);
   });
 
-  test('an absent operand is still absent, not an error', () => {
+  // An input declared `any` is refused (ROADMAP CE-712.1); the
+  // interpreter fallback reads the absent operand.
+  test('an input declared any is refused', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'any');
     const result = compile(ce.box(['PointX', 'x']));
-    expect(result.run!({ x: undefined })).toBeUndefined();
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('untyped-input');
+    expect(result.unsupported).toContain('x');
+  });
+
+  test('an absent parameter declared any is still absent, not an error', () => {
+    const ce = new ComputeEngine();
+    const result = compile(anyFunction(ce, ['PointX', 'x'], ['x']));
+    expect(result.success).toBe(true);
+    expect(
+      (result.run as unknown as (x: unknown) => unknown)(undefined)
+    ).toBeUndefined();
   });
 });

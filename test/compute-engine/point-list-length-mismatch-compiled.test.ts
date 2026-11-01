@@ -65,8 +65,21 @@ describe('restricted point-list arithmetic with an untyped variable', () => {
     expect(expr.type.toString()).toBe('missing | tuple<unknown, unknown>');
   });
 
-  test('compiles to JavaScript and answers the point', () => {
+  // An input with no type is refused at compile time (ROADMAP CE-712.1).
+  // The compiled tests below declare `t` as `real` in a second engine.
+  test('the untyped variable is refused at compile time', () => {
     const r = compile(expr, { to: 'javascript' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.unsupported).toContain('t');
+  });
+
+  const ceReal = new ComputeEngine();
+  ceReal.declare('t', 'real');
+  const exprReal = ceReal.box(expr.json as never);
+
+  test('compiles to JavaScript and answers the point', () => {
+    const r = compile(exprReal, { to: 'javascript' });
     expect(r.success).toBe(true);
     expect(r.run!({ t: 2 } as never)).toEqual([4, 3]);
   });
@@ -77,7 +90,7 @@ describe('restricted point-list arithmetic with an untyped variable', () => {
   // `NaN` coordinates pinned here before; see
   // `compile-absent-point-spelling.test.ts`).
   test('the absent case gives the absent point', () => {
-    const r = compile(expr, { to: 'javascript' });
+    const r = compile(exprReal, { to: 'javascript' });
     expect(r.success).toBe(true);
     expect(r.run!({ t: 0 } as never)).toBeUndefined();
   });

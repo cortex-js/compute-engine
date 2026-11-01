@@ -923,6 +923,8 @@ describe('a variable with no declared type', () => {
   // (user decision 2026-10-30). A comparison over an operand of type
   // `unknown` compiles to the scalar comparison, so it takes the same test.
   const ce = new ComputeEngine();
+  ce.declare('u', 'real');
+  ce.declare('v', 'real');
   const js = (json: unknown) =>
     compile(ce.box(json as never), { fallback: false });
 
@@ -1117,6 +1119,11 @@ describe('block locals matched by definition', () => {
   };
 
   test('a nested binder with the name of a free variable does not hide it', () => {
+    const qEngine = (): ComputeEngine => {
+      const ce = fresh();
+      ce.declare('q', 'real');
+      return ce;
+    };
     const local = ['Assign', 'p', ['Add', 'n', 1]];
     const read = ['Less', 'p', 'm'];
     noValue(
@@ -1148,7 +1155,8 @@ describe('block locals matched by definition', () => {
         ],
         read,
       ],
-      { m: 5 }
+      { m: 5 },
+      qEngine()
     );
   });
 
@@ -1541,13 +1549,24 @@ describe('block locals matched by definition', () => {
       ],
       'c',
     ];
-    const lost = both(later, { x: -1 });
-    expect(lost.interpreted).toBe(9);
-    expect(lost.compiled).toBeNaN();
-    expect(both(later, { x: -1, n: 0 })).toEqual({
-      compiled: 9,
-      interpreted: 9,
-    });
+    // Only the branches of an `If` assign `b` there, so `b` is an input:
+    // it is declared, as compilation refuses an input with no type, and
+    // the compiled code is given a value for it. The interpreter is not
+    // given one, because a substitution would replace the target of the
+    // assignments.
+    const freshB = (): ComputeEngine => {
+      const ce = fresh();
+      ce.declare('b', 'real');
+      return ce;
+    };
+    const runLater = (vars: Record<string, number>): unknown =>
+      compile(freshB().box(later as never), { fallback: false }).run!(
+        vars as never
+      );
+    expect(both(later, { x: -1 }, freshB()).interpreted).toBe(9);
+    expect(runLater({ x: -1, b: 0 })).toBeNaN();
+    expect(both(later, { x: -1, n: 0 }, freshB()).interpreted).toBe(9);
+    expect(runLater({ x: -1, n: 0, b: 0 })).toBe(9);
     // A function literal whose run result has a type that could hold a
     // function (here `unknown`) declines: the function could escape the
     // run. The interpreter then evaluates it.
@@ -1729,8 +1748,11 @@ describe('block locals matched by definition', () => {
 
   test('a block that needs no marker is emitted as before', () => {
     // Every input of the block is a read of the comparison itself, so a
-    // failed test is a failed read: no marker object, no `try`.
+    // failed test is a failed read: no marker object, no `try`. Only the
+    // branches of an `If` assign `b`, so `b` is an input, and it is
+    // declared, as compilation refuses an input with no type.
     const ce = fresh();
+    ce.declare('b', 'real');
     for (const json of [
       [
         'Block',
@@ -1764,7 +1786,11 @@ describe('block locals matched by definition', () => {
       'b',
     ];
     expect(both(json, {})).toEqual({ compiled: 1, interpreted: 1 });
-    // The read of `a` after the `If` has no value.
+    // The read of `a` after the `If` has no value. No scope of this block
+    // binds `b`, so the block writes `b` outside it: `b` is an input, and
+    // it is declared, as compilation refuses an input with no type.
+    const withB = fresh();
+    withB.declare('b', 'real');
     const after = [
       'Block',
       ['Assign', 'a', 0],
@@ -1776,7 +1802,7 @@ describe('block locals matched by definition', () => {
       ],
       ['Less', 'a', 1],
     ];
-    noValue(after, {});
+    noValue(after, {}, withB);
   });
 
   test('a variable outside the block that the block assigns', () => {

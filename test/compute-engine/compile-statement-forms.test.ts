@@ -49,6 +49,7 @@ function interpreted(src: any, inputs: Record<string, number>): number {
 function shader(src: any, to: 'glsl' | 'wgsl', options: any = {}): any {
   const ce = new ComputeEngine();
   ce.declare('x', 'real');
+  ce.declare('n', 'real | signed_infinity | nan');
   ce.declare('u', 'real');
   return compile(ce.box(src), { to, fallback: false, ...options }) as any;
 }
@@ -646,6 +647,19 @@ function indentPython(code: string): string {
     .join('\n');
 }
 
+function engineWithNT(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('n', 'real');
+  ce.declare('t', 'real');
+  return ce;
+}
+
+function engineWithS(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('s', 'real');
+  return ce;
+}
+
 describe('PYTHON: THE LOOP FORM KEEPS THE SCOPE OF THE BODY', () => {
   const py = new PythonTarget();
   // The local `t` of the body is not the parameter `t`: the interpreter
@@ -661,7 +675,7 @@ describe('PYTHON: THE LOOP FORM KEEPS THE SCOPE OF THE BODY', () => {
   ];
 
   test('a local of the body has a fresh name', () => {
-    const code = py.compileFunction(new ComputeEngine().box(shadow), 'f', [
+    const code = py.compileFunction(engineWithNT().box(shadow), 'f', [
       't',
       'n',
     ]);
@@ -728,7 +742,7 @@ describe('PYTHON: A ROOT ASSIGNMENT OF A SUM WITH A STATEMENT BODY', () => {
   ];
 
   test('the assignment is a statement, not a return', () => {
-    const code = py.compile(new ComputeEngine().box(['Assign', 's', sum])).code;
+    const code = py.compile(engineWithS().box(['Assign', 's', sum])).code;
     expect(code).not.toMatch(/return/);
     expect(code.split('\n').pop()).toMatch(/^\w+ = _tv\d+$/);
   });
@@ -780,6 +794,7 @@ describe('WGSL: AN ASSIGNMENT IN A CONDITION', () => {
     // has no definition: the type report read it as `unknown`, and the copy
     // was `float _tv1 = flag;`.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real | signed_infinity | nan');
     ce.declare('flag', 'boolean');
     const r = compile(
       ce.box([

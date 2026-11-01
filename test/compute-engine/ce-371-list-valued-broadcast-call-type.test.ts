@@ -222,7 +222,7 @@ describe('CE-371: compiled consequences', () => {
     // a row. That case is not read here.
     expect(
       compiledAndInterpreted(
-        engine('any'),
+        engine('real | list<real>'),
         ['Power', ['At', ['h', 'x'], 1], 2],
         [3, [1, 2]]
       )

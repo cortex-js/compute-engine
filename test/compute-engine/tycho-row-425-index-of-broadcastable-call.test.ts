@@ -115,6 +115,28 @@ function spell(v: unknown): string {
   return JSON.stringify(v);
 }
 
+/** The compiled function `(symbol) ↦ expr`, whose parameter has the type
+ * that `ce` declares for `symbol`, called with one value.
+ *
+ * A free input declared `any` is refused: the compiled code must know the
+ * shape of each input from its type. The run-time test of a value that may
+ * be a list is still reachable for a parameter of the root function declared
+ * `any`, so `expr` is compiled as the body of such a function. */
+function compileRoot(
+  ce: ComputeEngine,
+  expr: Expression,
+  symbol: string
+): (value: unknown) => unknown {
+  const fn = ce.box([
+    'Function',
+    expr.json,
+    ['Typed', symbol, { str: ce.box(symbol).type.toString() }],
+  ] as never);
+  const run = compile(fn, { to: 'javascript', fallback: false } as never)
+    .run as unknown as (value: unknown) => unknown;
+  return (value) => run(value);
+}
+
 /** For each value of `x` (a JavaScript value and its MathJSON spelling):
  * the interpreted value, and the compiled value spelled the same way, or
  * `throws` when the compiled code throws. `declined` when the expression
@@ -124,9 +146,9 @@ function compiledAndInterpreted(
   expr: Expression,
   values: ReadonlyArray<readonly [unknown, unknown]>
 ): [string, string][] | 'declined' {
-  let run: ((vars: never) => unknown) | undefined;
+  let run: ((value: unknown) => unknown) | undefined;
   try {
-    run = compile(expr, { to: 'javascript', fallback: false } as never).run;
+    run = compileRoot(ce, expr, 'x');
   } catch {
     return 'declined';
   }
@@ -135,7 +157,7 @@ function compiledAndInterpreted(
     const interpreted = expr.evaluate().toString().replace(/"/g, '');
     let compiled: string;
     try {
-      compiled = spell(run!({ x: js } as never));
+      compiled = spell(run!(js));
     } catch {
       compiled = 'throws';
     }
@@ -582,9 +604,9 @@ function compiledVsInterpreted(
   symbol: string,
   values: ReadonlyArray<readonly [unknown, unknown]>
 ): [string, string][] | 'declined' {
-  let run: ((vars: never) => unknown) | undefined;
+  let run: ((value: unknown) => unknown) | undefined;
   try {
-    run = compile(expr, { to: 'javascript', fallback: false } as never).run;
+    run = compileRoot(ce, expr, symbol);
   } catch {
     return 'declined';
   }
@@ -593,7 +615,7 @@ function compiledVsInterpreted(
     const interpreted = expr.evaluate().toString().replace(/"/g, '');
     let compiled: string;
     try {
-      compiled = spell(run!({ [symbol]: js } as never));
+      compiled = spell(run!(js));
     } catch {
       compiled = 'throws';
     }

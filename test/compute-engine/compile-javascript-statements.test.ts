@@ -6,6 +6,7 @@ import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler
 
 function fixture() {
   const ce = new ComputeEngine();
+  ce.declare('n', 'real');
   const js = (json: any, options = {}) => {
     const r = compile(ce.box(json), {
       to: 'javascript',

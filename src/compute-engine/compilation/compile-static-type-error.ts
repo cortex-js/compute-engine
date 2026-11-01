@@ -22,12 +22,15 @@ import {
   userFunctionLiteral,
 } from './compile-assignment-checks.js';
 
-/** The `code` of the diagnostic of `assertNoStaticTypeError()`. */
+/** The `code` of the diagnostic of `throwStaticTypeError()`. */
 export const STATIC_TYPE_ERROR_CODE = 'static-type-error';
 
 /**
- * The innermost sub-expression of static type `error` that the compiled code
- * of `root` evaluates, or `undefined` when there is none.
+ * The innermost sub-expression for which `test` is true, among the nodes
+ * that the compiled code of `root` evaluates, or `undefined` when there is
+ * none. The decline of a sub-expression of static type `error` and the
+ * decline of a value with no settled shape (`unsettledShapeIn()`,
+ * `compile-admission.ts`) use this walk.
  *
  * The walk goes into every operand: the bodies of function literals, both
  * branches of an `If` or a `Which`, the statements of a `Block`, the values
@@ -43,14 +46,15 @@ export const STATIC_TYPE_ERROR_CODE = 'static-type-error';
  * mapped through `vars`, a function or operator that the caller replaces, a
  * block-local function of the compilation, a name the compiler binds
  * itself). A name that a statement of a `Block` assigns is bound after that
- * statement. A bound name is not followed to a global definition, but every
- * node, a bound symbol and a call of a bound name included, still declines
- * when its own static type is `error`. This is the simple, sound version:
- * type inference can read that type from the global definition of the name,
- * so the check cannot tell an error of the bound function or symbol from an
- * error that the global one would give, and it declines in both cases. With
- * a global `G` whose body has the type `error`, `G() + u` with `G` replaced
- * through `functions` declines, although the caller's `G` gives a value.
+ * statement. A bound name is not followed to a global definition, but
+ * `test` is still called on every node, a bound symbol and a call of a
+ * bound name included. For the static type `error`, this is the simple,
+ * sound version: type inference can read that type from the global
+ * definition of the name, so the check cannot tell an error of the bound
+ * function or symbol from an error that the global one would give, and it
+ * declines in both cases. With a global `G` whose body has the type
+ * `error`, `G() + u` with `G` replaced through `functions` declines,
+ * although the caller's `G` gives a value.
  *
  * The walk also goes into the stored value of a symbol that it reaches,
  * because the compiler inlines that value where the symbol is read.
@@ -58,13 +62,43 @@ export const STATIC_TYPE_ERROR_CODE = 'static-type-error';
  * The walk does not go into a `Hold`: its operand is data, which the
  * compiled code does not run.
  *
+ * It calls `test` on each symbol, on each node that is not a function
+ * expression, and on each function expression after its operands. It does
+ * not call `test` on a dictionary.
+ *
+ * When `dropped` is given, it gives for a node the indices of the operands
+ * that the generated code drops (a branch of an `If` whose condition is
+ * known at compile time). The walk still goes into a dropped operand, but
+ * `test` receives `false` as its second argument for each node in it, and
+ * for each node of a user-function body or of a stored value that the walk
+ * reaches only from dropped operands. `test` receives `true` for every
+ * other node. A node visited first in a dropped operand and then in code
+ * that is kept is visited again.
+ *
+ * When `onRoot` is given, the walk calls it on each user-function body and
+ * each stored value that it reaches, before it walks that node, with the
+ * same second argument as `test`. It calls it also when the node was
+ * already visited, for example as an operand of `root`, and the walk does
+ * not visit it again.
+ *
+ * The third argument of `test` is true for a symbol whose name is free
+ * where it occurs, and for a function expression whose operator name is
+ * free there: no binder around the node and no statement before it in a
+ * `Block` binds the name, and the target and the compiler do not bind it
+ * (the bound names above). In `Sum(z, Limits(z, 1, 3))` each `z` is bound.
+ * It is false for every other node.
+ *
  * The types are cached on each node, so the cost is about one visit of each
  * node for each set of bound names around it, and of each body reached. A
- * node that several branches share (a DAG) is visited once for each set.
+ * node that several branches share (a DAG) is visited once for each set,
+ * and at most twice more when it is also in a dropped operand.
  */
-export function staticTypeErrorIn(
+export function compiledNodeWhere(
   root: Expression,
-  target?: CompileTarget<Expression>
+  target: CompileTarget<Expression> | undefined,
+  test: (node: Expression, kept: boolean, free: boolean) => boolean,
+  dropped?: (node: Expression) => ReadonlySet<number> | undefined,
+  onRoot?: (node: Expression, kept: boolean) => void
 ): Expression | undefined {
   const engine = root.engine;
   const skipped = (name: string): boolean =>
@@ -83,19 +117,24 @@ export function staticTypeErrorIn(
     }
     return key;
   };
+  // The names reached, each as `K:name` when it was reached from code that
+  // is kept, and as `D:name` when it was reached from a dropped operand. A
+  // name reached from kept code is not walked again for a dropped operand.
   const reached = new Set<string>();
-  const pending: Expression[] = [];
-  const reach = (name: string): void => {
-    if (reached.has(name) || skipped(name)) return;
-    reached.add(name);
+  const pending: { node: Expression; kept: boolean }[] = [];
+  const reach = (name: string, kept: boolean): void => {
+    if (reached.has(`K:${name}`) || skipped(name)) return;
+    if (!kept && reached.has(`D:${name}`)) return;
+    reached.add(`${kept ? 'K' : 'D'}:${name}`);
     const literal = userFunctionLiteral(engine, name);
     if (literal !== undefined) {
-      pending.push(literal);
+      pending.push({ node: literal, kept });
       return;
     }
     const clauses = multiClauseState(engine.lookupDefinition(name))?.clauses;
     if (clauses !== undefined) {
-      for (const clause of clauses) pending.push(clause.literal);
+      for (const clause of clauses)
+        pending.push({ node: clause.literal, kept });
       return;
     }
     // The stored value of a symbol: the compiler inlines it where the symbol
@@ -104,45 +143,54 @@ export function staticTypeErrorIn(
     // `List(ADD("ab", u))`, the expression `s` declines. The `reached` set
     // stops a value that mentions its own symbol.
     const value = engine._getSymbolValue(name);
-    if (value !== undefined) pending.push(value);
+    if (value !== undefined) pending.push({ node: value, kept });
   };
 
   // The nodes visited, each with the keys of the sets of bound names it was
-  // visited with. A visit that finds a node of type `error` ends the walk,
-  // so every recorded visit found none.
+  // visited with, as `K:key` for a visit in code that is kept and as `D:key`
+  // for a visit in a dropped operand. A visit that finds a node for which
+  // `test` is true ends the walk, so every recorded visit found none. A
+  // visit in a dropped operand is not needed after a visit in kept code
+  // with the same bound names.
   const seen = new WeakMap<Expression, Set<string>>();
   const isBound = (name: string, bound: ReadonlySet<string>): boolean =>
     bound.has(name) || skipped(name);
 
   const walk = (
     node: Expression,
-    bound: ReadonlySet<string>
+    bound: ReadonlySet<string>,
+    kept: boolean
   ): Expression | undefined => {
     const key = boundKey(bound);
     const contexts = seen.get(node);
-    if (contexts?.has(key)) return undefined;
-    if (contexts) contexts.add(key);
-    else seen.set(node, new Set([key]));
+    if (contexts?.has(`K:${key}`)) return undefined;
+    if (!kept && contexts?.has(`D:${key}`)) return undefined;
+    const visit = `${kept ? 'K' : 'D'}:${key}`;
+    if (contexts) contexts.add(visit);
+    else seen.set(node, new Set([visit]));
 
     // A symbol: a bound one is not followed to its global definition, but
     // its own type is still checked, because it comes from the binding of
     // the symbol itself (an input mapped through `vars` and declared
     // `error` declines).
     if (isSymbol(node)) {
-      if (!isBound(node.symbol, bound)) reach(node.symbol);
-      return node.type.type === 'error' ? node : undefined;
+      const free = !isBound(node.symbol, bound);
+      if (free) reach(node.symbol, kept);
+      return test(node, kept, free) ? node : undefined;
     }
     if (isDictionary(node)) {
       for (const value of node.values) {
-        const found = walk(value, bound);
+        const found = walk(value, bound, kept);
         if (found !== undefined) return found;
       }
       return undefined;
     }
-    if (!isFunction(node)) return node.type.type === 'error' ? node : undefined;
+    if (!isFunction(node)) return test(node, kept, false) ? node : undefined;
     if (node.operator === 'Hold') return undefined;
 
-    if (!isBound(node.operator, bound)) reach(node.operator);
+    const free = !isBound(node.operator, bound);
+    if (free) reach(node.operator, kept);
+    const droppedOps = kept ? dropped?.(node) : undefined;
 
     // The operands, innermost first.
     const binders = declaredBinders(node, 'post');
@@ -163,14 +211,16 @@ export function staticTypeErrorIn(
       const names = boundVariableNamesInOperand(node, i, binders);
       const inner = names.length === 0 ? bound : new Set([...bound, ...names]);
       const own = ownIndexClauseAt(node, i, binders);
+      const keptArg = kept && droppedOps?.has(i) !== true;
       let found: Expression | undefined;
       if (own !== undefined && isFunction(arg)) {
         for (let j = 0; j < arg.ops.length && found === undefined; j++)
           found = walk(
             arg.ops[j],
-            clauseOperandShadow(bound, inner, own, j) ?? inner
+            clauseOperandShadow(bound, inner, own, j) ?? inner,
+            keptArg
           );
-      } else found = walk(arg, inner);
+      } else found = walk(arg, inner, keptArg);
       if (found !== undefined) return found;
       const assigned = locals[i];
       if (assigned !== undefined && assigned.length > 0)
@@ -184,14 +234,16 @@ export function staticTypeErrorIn(
     // List(ADD("ab", u)))` declines, as it must; with a global `G` whose
     // body has the type `error`, `G()` declines also when the caller
     // replaces `G` (a documented over-decline).
-    return node.type.type === 'error' ? node : undefined;
+    return test(node, kept, free) ? node : undefined;
   };
 
   const initial: ReadonlySet<string> = new Set(target?.boundVars ?? []);
-  const found = walk(root, initial);
+  const found = walk(root, initial, true);
   if (found !== undefined) return found;
   while (pending.length > 0) {
-    const body = walk(pending.pop()!, new Set());
+    const { node, kept } = pending.pop()!;
+    onRoot?.(node, kept);
+    const body = walk(node, new Set(), kept);
     if (body !== undefined) return body;
   }
   return undefined;
@@ -232,8 +284,11 @@ function blockLocals(block: Expression): string[][] {
 }
 
 /**
- * Decline the compilation of `root` when a sub-expression that the compiled
- * code evaluates has the static type `error` (`staticTypeErrorIn()`).
+ * Decline the compilation because `node`, a sub-expression that the compiled
+ * code evaluates, has the static type `error`. `unsettledShapeIn()`
+ * (`compile-admission.ts`) finds such a node in the walk of the expression
+ * that it shares with the check of settled shapes, and calls this function
+ * at once.
  *
  * The contract of compiled code (`docs/COMPILATION-MODEL.md`, "Fail
  * closed") requires this decline. The interpreter gives an error for such a
@@ -248,12 +303,7 @@ function blockLocals(block: Expression): string[][] {
  * interpreter fallback puts `ErrorCode` in `unsupported` for this decline,
  * as for an invalid expression (`buildInterpreterFallback()`).
  */
-export function assertNoStaticTypeError(
-  root: Expression,
-  target: CompileTarget<Expression>
-): void {
-  const node = staticTypeErrorIn(root, target);
-  if (node === undefined) return;
+export function throwStaticTypeError(node: Expression): never {
   const value = node.toString();
   throw new CompileDeclineError({
     code: STATIC_TYPE_ERROR_CODE,
@@ -263,4 +313,24 @@ export function assertNoStaticTypeError(
       `'error': "${value}". The interpreter gives an error for it.`,
     value,
   });
+}
+
+/**
+ * Decline the compilation of `root` when a sub-expression that the compiled
+ * code evaluates has the static type `error` (`throwStaticTypeError()`).
+ * This is only the check of static type `error`, without the check of
+ * settled shapes that `unsettledShapeIn()` does in the same walk. The
+ * JavaScript target calls it in `mode: 'bigint'` before the lane analysis,
+ * so that this decline comes first in every compile mode.
+ */
+export function assertNoStaticTypeError(
+  root: Expression,
+  target: CompileTarget<Expression>
+): void {
+  const error = compiledNodeWhere(
+    root,
+    target,
+    (node) => node.type.type === 'error'
+  );
+  if (error !== undefined) throwStaticTypeError(error);
 }

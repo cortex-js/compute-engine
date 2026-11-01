@@ -726,6 +726,7 @@ describe('GPU USER FUNCTIONS — a nested definition is scoped to the ROOT, not 
    */
   function engineWithNestedG(param: string): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('u', 'real | signed_infinity | nan');
     ce.assign('z', 10);
     ce.assign('g', ce.parse('w \\mapsto w + z'));
     ce.assign('f', ce.expr(['Function', ['Add', ['g', 1], param], param]));
@@ -830,6 +831,7 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
 
   it('a real-tuple return still lowers to `vec2`', () => {
     const ce = new ComputeEngine();
+    ce.declare('p', 'real | signed_infinity | nan');
     ce.assign('f', ce.expr(['Function', ['Tuple', 1, 2], 'b']));
     expect(glsl.compile(ce.parse('f(p)')).preamble).toContain(
       'vec2 _fn_f(float b)'
@@ -857,6 +859,7 @@ describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', (
 
   it('GLSL: term 1 is finished off BEFORE term 2 starts', () => {
     const ce = new ComputeEngine();
+    ce.declare('m', 'real | signed_infinity | nan');
     const code = glsl.compile(twoTermUnroll(ce)).code;
     // Two hoisted loops, one per term.
     expect(code.match(/for \(int j =/g)?.length).toBe(2);
@@ -876,6 +879,7 @@ describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', (
 
   it('WGSL: the same ordering', () => {
     const ce = new ComputeEngine();
+    ce.declare('m', 'real | signed_infinity | nan');
     const code = wgsl.compile(twoTermUnroll(ce)).code;
     expect(code.match(/for \(var j:/g)?.length).toBe(2);
     const term1 = code.search(/^var _\w+: f32 = 1\.0 \* _\w+;$/m);
@@ -911,6 +915,7 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
 
   it('a loop-form Sum inside a case BODY runs inside its case (CE-274)', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real | signed_infinity | nan');
     // The statement form of `If`/`Which`: the loop runs in the branch of
     // its case, only when the case is selected.
     const code = glsl.compile(

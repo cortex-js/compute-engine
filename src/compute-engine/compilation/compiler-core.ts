@@ -292,6 +292,7 @@ import type {
   DeclineNote,
   ElementLane,
   FoldCostContext,
+  UnsettledShape,
   UserFunctionRegistry,
 } from './compiler-types.js';
 import {
@@ -432,6 +433,11 @@ import {
   parameterTypesKey,
 } from './compile-callbacks.js';
 import { identifierPattern } from './compile-folded-values.js';
+import {
+  assertAdmitted,
+  unsettledShapeIn,
+  untypedInputsOf,
+} from './compile-admission.js';
 import { assertNoStaticTypeError } from './compile-static-type-error.js';
 
 export function compile(
@@ -440,6 +446,31 @@ export function compile(
   prec = 0
 ): TargetSource {
   if (expr === undefined) return '';
+  if (CompilerState._compileDepth !== 0 || CompilerState._rootAdmission)
+    return compileExpression(expr, target, prec);
+  // The outermost compilation declines, on every target, when a value has
+  // no settled shape or when an input has no type (`assertAdmitted()`).
+  // The decline is thrown after the code was generated with no decline, so
+  // that an expression that also declines for another, more specific
+  // reason reports that reason; the interpreter fallback then adds the
+  // names of the inputs with no type to `unsupported`. In both cases the
+  // compilation declines. A root that a target spells without this call is
+  // checked in `compileCseRoot()`, and a call at depth 0 inside the emission
+  // of such a root does not check again (`CompilerState._rootAdmission`).
+  const admission: { unsettled?: UnsettledShape } = {};
+  const code = compileExpression(expr, target, prec, admission);
+  assertAdmitted(expr, target, admission.unsettled);
+  return code;
+}
+
+function compileExpression(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  prec: number,
+  /** Given by the outermost call only: it receives the value with no
+   * settled shape that `unsettledShapeIn()` finds. */
+  admission?: { unsettled?: UnsettledShape }
+): TargetSource {
   // Check before folding/inlining can replace a captured call by its body.
   if (CompilerState._compileDepth === 0) {
     assertCapturedCallableBindings(expr, target);
@@ -464,7 +495,22 @@ export function compile(
   // compiled code would compute a value. The walk covers the whole
   // expression and the user-function bodies it reaches, so it runs once, at
   // the compilation boundary.
-  if (CompilerState._compileDepth === 0) assertNoStaticTypeError(expr, target);
+  if (CompilerState._compileDepth === 0) {
+    // Every value that the expression produces must have a settled shape,
+    // on every target. The value with no settled shape is found here, and
+    // `compile()` declines for it after the code was generated. A root
+    // that a target spells without this call is checked in
+    // `compileCseRoot()`. The check shares its walk with the check of a
+    // sub-expression of static type `error` (`throwStaticTypeError()`),
+    // which declines here, at once. Inside the emission of a root that
+    // `compileCseRoot()` checks itself, only the check of a sub-expression
+    // of static type `error` runs here.
+    if (CompilerState._rootAdmission) assertNoStaticTypeError(expr, target);
+    else {
+      const unsettled = unsettledShapeIn(expr, target, true);
+      if (admission !== undefined) admission.unsettled = unsettled;
+    }
+  }
   // First-class type values do not compile — a reified type expression has
   // no runtime representation on any target, and the type-algebra
   // operators consult the engine's type registry, which compiled code does
@@ -2461,6 +2507,24 @@ export function bigOpBoundConstant(
   return Math.floor(re);
 }
 
+/**
+ * The static type of the value `value` of a dictionary literal. The engine
+ * types a call of a block-local function `unknown`; such a call has the
+ * result type of the function's literal when the literal has a signature.
+ */
+function dictionaryValueType(
+  value: Expression,
+  target: CompileTarget<Expression>
+): Type {
+  const t = value.type.type;
+  if ((t !== 'unknown' && t !== 'any') || !isFunction(value)) return t;
+  const literal = blockLocalFunction(value.operator, target);
+  if (!literal) return t;
+  const signature = resolveTypeAlias(literal.type.type);
+  if (typeof signature !== 'object' || signature.kind !== 'signature') return t;
+  return signature.result;
+}
+
 export function _compileInner(
   expr: Expression,
   target: CompileTarget<Expression>,
@@ -2664,6 +2728,48 @@ export function _compileInner(
           `grapheme cluster, which this target cannot segment or order). The interpreter evaluates it instead.`
       );
     return target.character(expr.string);
+  }
+
+  // Is it a dictionary? Each value compiles as a value operand, so a
+  // statement (an assignment on Python, a multi-statement block) declines or
+  // lowers as in any other operand, and the target spells the literal,
+  // which makes a new value at each evaluation. The shape of a value comes
+  // from its static type, as for any other node: a value whose type is
+  // `unknown` or `any` has no settled shape, and the compilation declines.
+  // A call of a block-local function, which the engine types `unknown`, has
+  // the result type of the function's literal. A free symbol is left to the
+  // admission of the inputs, which names it in `unsupported`.
+  if (isDictionary(expr)) {
+    if (target.dictionary === undefined)
+      throw new Error(
+        `Could not compile the dictionary "${expr.toString()}" to target ` +
+          `'${target.language ?? '?'}': the target has no dictionary ` +
+          `value. The interpreter evaluates it instead.`
+      );
+    const entries: [string, string][] = expr.entries.map(([key, value]) => {
+      const typed = localCallWithResultType(value, target) ?? value;
+      const t = resolveTypeAlias(dictionaryValueType(typed, target));
+      const untyped = t === 'unknown' || t === 'any';
+      if (untyped && isSymbol(typed))
+        return [key, compileValueOperand(typed, target, 0)];
+      if (untyped)
+        throw new Error(
+          `Could not compile the dictionary "${expr.toString()}": the ` +
+            `value of the key "${key}" has the type \`${t}\`, which gives ` +
+            `it no shape in compiled code. Declare the type of the value.`
+        );
+      // The interpreter leaves out an entry whose value is `Nothing`, and
+      // the compiled literal would keep the key, with no value.
+      if (provablyAdmits('nothing', t))
+        throw new Error(
+          `Could not compile the dictionary "${expr.toString()}": the ` +
+            `value of the key "${key}" can be \`Nothing\`, and the ` +
+            `interpreter then leaves out the entry, which the compiled ` +
+            `literal does not do.`
+        );
+      return [key, compileValueOperand(typed, target, 0)];
+    });
+    return target.dictionary(entries);
   }
 
   // It must be a function expression...
@@ -6036,6 +6142,9 @@ export function compileWithCse(
 // Install the hubs (see compiler-core-hooks.ts).
 const hubs: CoreHooks = {
   compile,
+  unsettledShapeIn,
+  assertAdmitted,
+  untypedInputsOf,
   isComplexValued,
   foldCostEstimate,
   linearAlgebraOperandLane,

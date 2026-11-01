@@ -23,6 +23,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+ce.declare('t', 'real');
+ce.declare('x', 'real');
 
 const RELATIONS = [
   'Less',

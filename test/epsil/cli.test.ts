@@ -1091,8 +1091,23 @@ describe('Epsil CLI --compile', () => {
   });
 
   // A tuple and a list are both arrays in the compiled code, so when the
-  // static type admits both, the value cannot be printed faithfully.
+  // static type admits both, the value cannot be printed faithfully. With a
+  // condition known when the code is generated (`True`), only one branch is
+  // selected, and the compiled program reaches the printer.
   test('an array that may be a tuple or a list is an error value', async () => {
+    const { io, stderr } = makeIo();
+    expect(
+      await main(['--compile', '-e', 'if True { (1, 2) } else { [3, 4] }'], io)
+    ).toBe(1);
+    expect(stderr()).toContain(
+      'does not say whether it is a tuple or a list'
+    );
+  });
+
+  // The compiler does not replace `b` by its value, so the condition is
+  // decided at run time, and the branches (a tuple and a list) have
+  // different shapes: the compilation declines.
+  test('a conditional whose branches have different shapes declines', async () => {
     const { io, stderr } = makeIo();
     expect(
       await main(
@@ -1100,9 +1115,7 @@ describe('Epsil CLI --compile', () => {
         io
       )
     ).toBe(1);
-    expect(stderr()).toContain(
-      'does not say whether it is a tuple or a list'
-    );
+    expect(stderr()).toContain('its branches have different shapes');
   });
 
   test('boxes strings, booleans, complex numbers and colors', async () => {
@@ -1155,7 +1168,7 @@ describe('Epsil CLI --compile', () => {
     // so only `z` is an input the generated code reads.
     const { io, stderr } = makeIo();
     expect(await main(['--compile', '-e', 'f(x) = x + 1\nf(z)'], io)).toBe(1);
-    expect(stderr()).toContain('`z` has no value');
+    expect(stderr()).toContain('the input `z` has no type');
     expect(stderr()).not.toContain('`f`');
   });
 

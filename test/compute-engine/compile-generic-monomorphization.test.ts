@@ -27,6 +27,7 @@ function fresh(): ComputeEngine {
 /** `f: ⟨signature⟩` declared, then assigned the doubling literal. */
 function doubler(signature: string, name = 'gd'): ComputeEngine {
   const ce = fresh();
+  ce.declare('y', 'real | list<real>');
   ce.declare(name, signature);
   ce.assign(name, ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
   return ce;
@@ -496,6 +497,7 @@ describe('G3 lift — route parity', () => {
  * only place the block-local call route can read it from. */
 function localDoubler(signature: string, arg: any) {
   const ce = fresh();
+  ce.declare('y', 'real | list<real>');
   return ce.box([
     'Block',
     [

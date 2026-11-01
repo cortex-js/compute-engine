@@ -824,6 +824,12 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
   ce.parse('h(x) := x^3 + \\sin x').evaluate();
   ce.parse("f := t \\mapsto h'(t)").evaluate();
   ce.declare('L', 'list<real>');
+  // The inputs are declared: an input with no type declines (ROADMAP
+  // CE-712.1).
+  // The type admits the non-finite values that an input with no type
+  // could hold, so the shader code is the code of an untyped input.
+  for (const name of ['t', 'x', 'y', 'a', 'b', 'c', 'd', 'e', 'n'])
+    ce.declare(name, 'real | signed_infinity | nan');
 
   /** The value of an emitted expression in `x`, read as JavaScript. */
   const run = (code: string, x: number): number =>
@@ -1049,6 +1055,11 @@ describe('GLSL - NORM OF A POINT WITH A LIST COMPONENT', () => {
   // its norm is one number per element. It compiles as the explicit
   // `√(Σ cᵢ²)`, the same code as the norm written by hand.
   const ceN = new ComputeEngine();
+  // The inputs are declared: an input with no type declines (ROADMAP
+  // CE-712.1).
+  ceN.declare('x', 'real');
+  ceN.declare('y', 'real');
+  ceN.declare('z', 'real');
   ceN.declare('L', 'list<real>');
   const code = (latex: string) => {
     const r = glsl.compile(ceN.parse(latex), { fallback: false });
@@ -1113,6 +1124,11 @@ describe('GLSL - NORM OF A POINT WITH A LIST COMPONENT', () => {
 describe('GLSL - SQUARE OF A VECTOR', () => {
   const ce = new ComputeEngine();
   ce.declare('V', 'list<real^2>');
+  // The inputs are declared: an input with no type declines (ROADMAP
+  // CE-712.1). The type admits the non-finite values that an input with no
+  // type could hold, so the shader code is the code of an untyped input.
+  for (const name of ['x', 'y', 'z'])
+    ce.declare(name, 'real | signed_infinity | nan');
   const square = (arg: unknown) =>
     ce.function('Square', [ce.box(arg as never)], { form: 'structural' });
 

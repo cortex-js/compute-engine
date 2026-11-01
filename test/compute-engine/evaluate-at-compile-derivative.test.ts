@@ -7,6 +7,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // and its compiled form, are the ones of its value.
 
 const ce = new ComputeEngine();
+ce.declare('a', 'real');
+ce.declare('b', 'real');
 
 type Json = Parameters<typeof ce.box>[0];
 
@@ -124,6 +126,8 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
   // `evaluate()`. The call with the point was compiled, and failed.
   test('a named callee that takes no argument', () => {
     const engine = new ComputeEngine();
+    engine.declare('a', 'real');
+    engine.declare('b', 'real');
     engine.declare('g', {
       signature: '() -> integer',
       evaluate: () => engine.number(42),

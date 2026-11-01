@@ -14,6 +14,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('t', 'real | signed_infinity | nan');
   ce.declare('h', { signature: '(unknown) -> unknown' });
   ce.assign('h', ce.parse('s \\mapsto s + \\imaginaryI'));
   ce.declare('g', { signature: '(unknown) -> unknown' });
@@ -188,6 +189,8 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
   // objects as strings (`"[object Object][object Object]…"`).
   function shadowEngine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real | signed_infinity | nan');
+    ce.declare('n', 'real | signed_infinity | nan');
     ce.assign('k', ce.parse('\\imaginaryI'));
     ce.declare('h', { signature: '(unknown) -> unknown' });
     ce.assign('h', ce.parse('s \\mapsto s + k'));
@@ -333,6 +336,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
   // is the global).
   function pointEngine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real | signed_infinity | nan');
     ce.assign('k', ce.parse('\\imaginaryI'));
     ce.declare('p', { signature: '(unknown) -> unknown' });
     ce.assign('p', ce.parse('P \\mapsto P.x + k'));
@@ -596,6 +600,10 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
       const ce = new ComputeEngine();
       ce.assign('r', ce.parse(BODY));
       expect(ce.box('r').type.toString()).toBe('(n: unknown) -> number');
+      // An input with no type is refused (ROADMAP CE-712.1): the inputs are
+      // declared, the function `r` is not.
+      ce.declare('n', 'integer');
+      ce.declare('x', 'real');
       const result = compile(ce.parse('r(n) + x'), {
         to: 'javascript',
         mode,

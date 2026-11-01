@@ -14,6 +14,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const ce = new ComputeEngine();
+ce.declare('n', 'real');
 
 /** Central difference of `f` at `x` — an independent numeric reference. */
 function finiteDiff(latex: string, x: number): number {
@@ -208,6 +209,8 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
 
   for (const unit of ['rad', 'deg'] as const) {
     const ce2 = new ComputeEngine();
+    ce2.declare('x', 'real');
+    ce2.declare('n', 'real');
     ce2.angularUnit = unit;
     ce2.declare('h', 'function');
     ce2.assign('h', ce2.parse('(u, w) \\mapsto u^2 \\sin(w)'));
@@ -286,6 +289,8 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
       // the measure used for a function of one argument. The javascript
       // target has no numerical derivative of a function of two arguments.
       const ceBig = new ComputeEngine();
+      ceBig.declare('x', 'real');
+      ceBig.declare('y', 'real');
       ceBig.declare('H', 'function');
       ceBig.assign(
         'H',

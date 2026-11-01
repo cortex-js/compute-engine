@@ -17,6 +17,7 @@ function both(
   x = 1
 ): { interpreted: string; compiled: unknown; error?: string } {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   setup(ce);
   const expr = ce.parse(latex);
   const interpreted = expr.subs({ x }).evaluate().toString();
@@ -129,6 +130,7 @@ describe('COMPILE a user function against the scope of its definition', () => {
     // The emitted code calls the caller's `G`, so the engine body of `G`,
     // which reads the outer `a`, is never read.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.assign('a', 2);
     ce.declare('G', 'function');
     ce.assign('G', ce.parse('x \\mapsto x + a'));

@@ -68,6 +68,7 @@ describe('Ruling A: a folded symbol value reads the global, not the parameter', 
     // than as itself and stays inline. It must still resolve `t` where it
     // was written — the emitted body reads `_.t`, not its parameter.
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     ce.assign('a', ce.parse('t'));
     ce.assign('g', ce.parse('t \\mapsto t + a'));
     expect(ce.box(['g', 2]).evaluate().toString()).toBe('t + 2');

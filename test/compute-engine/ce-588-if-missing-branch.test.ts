@@ -32,10 +32,22 @@ import { TEST_PYTHON } from './test-python';
  *   numbers.
  * - JavaScript: no change. The values already agreed with the interpreter.
  *
- * A written `NaN` is a number in the interpreter, and stays `NaN` on
- * JavaScript and Python. On the shader targets it takes the shape of the
- * other value, as `Missing` does.
+ * A written `NaN` is a number in the interpreter. Beside a point, the value
+ * of the selection is a point for one value of `c` and the number `NaN` for
+ * the other, so the shape of its value is known only at run time: the
+ * compilation declines with `unsettled-shape` on every target
+ * (`docs/COMPILATION-MODEL.md`, "Fail closed"). Before, the written `NaN`
+ * stayed `NaN` on JavaScript and Python and took the shape of the other
+ * value on the shader targets.
  */
+
+/** Expect the compilation of `json` on `to` to decline because the shape of
+ * its value is known only at run time. */
+function expectUnsettled(json: unknown, to: string): void {
+  const r = compile(engine().box(json as never), { to } as never);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+}
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -167,6 +179,7 @@ describe('CE-588 — javascript', () => {
   };
 
   it.each(CASES)('$label', ({ json, shape, presentWhen, nan }) => {
+    if (nan) return expectUnsettled(json, 'javascript');
     const ce = engine();
     const r = compile(ce.box(json as never), {
       to: 'javascript',
@@ -256,7 +269,8 @@ describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
     expect([Number.isNaN(p.x), Number.isNaN(p.y)]).toEqual([true, true]);
   };
 
-  it.each(CASES)('$label', ({ json, presentWhen }) => {
+  it.each(CASES)('$label', ({ json, presentWhen, nan }) => {
+    if (nan) return expectUnsettled(json, to);
     const { code, f } = shader(json);
     expectOnlyVectorNaN(code);
     expect(f(presentWhen)).toEqual({ x: X, y: Y });
@@ -451,8 +465,8 @@ describe('CE-588 — python', () => {
 
   const run = TEST_PYTHON === undefined ? it.skip : it;
   run('the compiled code agrees with the interpreter', () => {
-    // `None` for an absent point or list; `nan` for an absent complex value
-    // and for a written `NaN`. The value of `c` that is not a boolean (`1`)
+    // `None` for an absent point or list; `nan` for an absent complex value.
+    // A written `NaN` beside a point declines. The value of `c` that is not a boolean (`1`)
     // selects no value: the interpreter has none there either.
     const expected = (k: Case, c: 'True' | 'False' | '1'): string => {
       const present = c === (k.presentWhen ? 'True' : 'False');
@@ -468,6 +482,10 @@ describe('CE-588 — python', () => {
     // when `c` is not `True` whatever `d` is: with `d` false no clause is
     // selected, and that absence is `None` too.
     for (const k of CASES) {
+      if (k.nan) {
+        expectUnsettled(k.json, 'python');
+        continue;
+      }
       const code = py(k.json);
       for (const c of ['True', 'False', '1'] as const)
         for (const d of ['True', 'False']) {
@@ -501,7 +519,8 @@ describe('CE-588 — interval-js', () => {
   // A boolean input of this target is the verdict `'true'` or `'false'`.
   it.each(CASES.filter((k) => k.shape !== 'complex'))(
     '$label',
-    ({ json, presentWhen }) => {
+    ({ json, presentWhen, nan }) => {
+      if (nan) return expectUnsettled(json, 'interval-js');
       const f = run(json);
       const verdict = (b: boolean) => (b ? 'true' : 'false');
       // `d` decides only `Which(c, (x, y), d, Missing)`, whose value is

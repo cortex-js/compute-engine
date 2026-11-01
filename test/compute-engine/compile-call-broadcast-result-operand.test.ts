@@ -20,8 +20,13 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 
 type Json = any;
 
-function engine(): ComputeEngine {
+function engine(types: Record<string, string> = {}): ComputeEngine {
   const ce = new ComputeEngine();
+  for (const [name, type] of Object.entries({
+    u: 'real | list<real>',
+    ...types,
+  }))
+    ce.declare(name, type);
   ce.declare('q', 'function');
   ce.assign('q', ce.box(['Function', ['Multiply', 2, 't'], 't']));
   ce.declare('p', 'function');
@@ -31,18 +36,53 @@ function engine(): ComputeEngine {
 }
 
 /** The compiled value at `vars`, with no fallback to the interpreter. */
-function run(json: Json, vars: Record<string, unknown>): unknown {
-  const result = compile(engine().box(json), {
+function run(
+  json: Json,
+  vars: Record<string, unknown>,
+  types: Record<string, string> = {}
+): unknown {
+  const result = compile(engine(types).box(json), {
     to: 'javascript',
     fallback: false,
   } as any) as any;
   return result.run(vars);
 }
 
-function code(json: Json): string {
+function code(json: Json, types: Record<string, string> = {}): string {
   return (
-    compile(engine().box(json), { to: 'javascript', fallback: false } as any) as any
+    compile(engine(types).box(json), { to: 'javascript', fallback: false } as any) as any
   ).code;
+}
+
+/**
+ * The compiled function `(params) => json`, whose parameters have no type.
+ * An input with no type is refused, but a parameter with no type is not: the
+ * code then reads the result of the call `q(u)` with the run-time test of
+ * a value that can be a list (`callResultGuard`, `compile-expr-handlers.ts`).
+ */
+function compileFn(json: Json, params: string[]): any {
+  return compile(engine().box(['Function', json, ...params]), {
+    to: 'javascript',
+    fallback: false,
+  } as any) as any;
+}
+
+/** The value that the interpreter gives for `json`, where each name of
+ * `values` has no declared type and holds its value. */
+function interpretUntyped(json: Json, values: Record<string, unknown>): unknown {
+  const ce = new ComputeEngine();
+  ce.declare('q', 'function');
+  ce.assign('q', ce.box(['Function', ['Multiply', 2, 't'], 't']));
+  const box = (v: unknown): Json =>
+    Array.isArray(v) ? ['List', ...v.map(box)] : v;
+  for (const [name, v] of Object.entries(values)) ce.assign(name, ce.box(box(v)));
+  const plain = (v: any): unknown => {
+    if (v.operator === 'List') return v.ops.map(plain);
+    if (v.symbol === 'True') return true;
+    if (v.symbol === 'False') return false;
+    return v.re;
+  };
+  return plain(ce.box(json).N());
 }
 
 /** The interpreter's value, as plain numbers or booleans. */
@@ -131,12 +171,17 @@ describe('an operator over a call that maps over a list argument', () => {
   test('1 + q(u) broadcasts the sum when the call gives a list', () => {
     // The call is evaluated once, into a temporary. A number takes the
     // scalar `+`, so a scalar evaluation does not pay the closure call of
-    // `_SYS.bcast` (`callResultGuard`, `compile-expr-handlers.ts`).
-    expect(code(['Add', 1, ['q', 'u']])).toBe(
-      '((_tv1) => ((Array.isArray(_tv1) || _tv1 === undefined) ? ' +
-        '_SYS.bcast((_tv2, _tv3) => (_tv2 + _tv3), _tv1, 1) : _tv1 + 1))' +
-        '(_SYS.bcastFn(_fn_q, _.u))'
+    // `_SYS.bcast` (`callResultGuard`, `compile-expr-handlers.ts`). The
+    // parameter `u` has no type.
+    const result = compileFn(['Add', 1, ['q', 'u']], ['u']);
+    const text = String(result.code).replace(/\s+/g, ' ');
+    expect(text).toContain('const _js1 = _SYS.bcastFn(_fn_q, u);');
+    expect(text).toContain(
+      'return ((Array.isArray(_tv1) || _tv1 === undefined) ? ' +
+        '_SYS.bcast((_tv2, _tv3) => (_tv2 + _tv3), _tv1, 1) : _tv1 + 1);'
     );
+    expect(result.run([1, 2, 3])).toEqual([3, 5, 7]);
+    expect(result.run(2)).toBe(5);
   });
 
   // The local `t` holds a value built from shared subtrees: 30 levels of
@@ -191,23 +236,41 @@ describe('an operator over a call that maps over a list argument', () => {
     // false, so the call must not be evaluated before the `And`: the call
     // (and its run-time test, on the comparison) comes after the test of the
     // first operand.
-    for (const first of ['False', 'b']) {
-      const json = ['Not', ['And', first, ['Greater', ['q', 'u'], 0]]];
-      const text = code(json);
-      expect(text.indexOf('=== false ? false')).toBeGreaterThanOrEqual(0);
-      expect(text.indexOf('=== false ? false')).toBeLessThan(
-        text.indexOf('_fn_q')
-      );
-      expect(run(json, { b: false, u: 2 })).toBe(true);
-    }
-    expect(run(['Not', ['And', 'b', ['Greater', ['q', 'u'], 0]]], { b: true, u: 2 })).toBe(false);
+    // The parameters `b` and `u` have no type.
+    const json = ['Not', ['And', 'b', ['Greater', ['q', 'u'], 0]]];
+    const text = String(compileFn(json, ['b', 'u']).code);
+    expect(text.indexOf('=== false ? false')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('=== false ? false')).toBeLessThan(
+      text.indexOf('_SYS.bcastFn(_fn_q')
+    );
+    expect(compileFn(json, ['b', 'u']).run(false, 2)).toBe(true);
+    // With the first operand `False`, the code maps the `And` over its
+    // operands (`_SYS.bcastPlain`), which evaluates the call first. The
+    // call is pure, so the value is the interpreter's.
+    expect(
+      compileFn(['Not', ['And', 'False', ['Greater', ['q', 'u'], 0]]], ['u']).run(
+        2
+      )
+    ).toBe(true);
+    expect(
+      compileFn(['Not', ['And', 'b', ['Greater', ['q', 'u'], 0]]], ['b', 'u']).run(
+        true,
+        2
+      )
+    ).toBe(false);
   });
 
   test('a call in a chain of comparisons: y < 0 < q(u) at y = 1', () => {
-    // The chain stops at the first pair that is false, in the interpreter.
+    // The parameters `y` and `u` have no type. The chain maps over the list
+    // that the call gives, as the interpreter does when `u` has no type,
+    // and the code has no run-time test of the call.
     const json = ['Less', 'y', 0, ['q', 'u']];
-    expect(code(json)).not.toContain('Array.isArray');
-    for (const u of [[1, 2, 3], 2]) expect(run(json, { y: 1, u })).toBe(false);
+    const result = compileFn(json, ['y', 'u']);
+    expect(String(result.code)).not.toContain('Array.isArray');
+    for (const u of [[1, 2, 3], 2])
+      expect(result.run(1, u)).toEqual(interpretUntyped(json, { y: 1, u }));
+    expect(result.run(1, [1, 2, 3])).toEqual([false, false, false]);
+    expect(result.run(1, 2)).toBe(false);
   });
 
   test('Random() / q(u) keeps the order of the operands', () => {
@@ -236,29 +299,31 @@ describe('an operator over a call that maps over a list argument', () => {
   test('a complex-valued function: 1 + h(u) with h := t ↦ t + i', () => {
     // The complex element lane reads the result of the call by its shape at
     // run time (`_SYS.sadd`). Before, this declined, also for a `u` declared
-    // `list<number>`.
+    // `list<number>`. With no declaration, `u` is a parameter with no type:
+    // an input with no type is refused.
     for (const declared of [undefined, 'list<number>']) {
       const ce = new ComputeEngine();
       ce.declare('h', 'function');
       ce.assign('h', ce.parse('t\\mapsto t+i'));
       if (declared !== undefined) ce.declare('u', declared);
-      const result = compile(ce.box(['Add', 1, ['h', 'u']]), {
-        to: 'javascript',
-        fallback: false,
-      } as any) as any;
-      expect(result.run({ u: [1, 2] })).toEqual([
+      const json = ['Add', 1, ['h', 'u']];
+      const result = compile(
+        ce.box(declared === undefined ? ['Function', json, 'u'] : json),
+        { to: 'javascript', fallback: false } as any
+      ) as any;
+      const call = (u: unknown): unknown =>
+        declared === undefined ? result.run(u) : result.run({ u });
+      expect(call([1, 2])).toEqual([
         { re: 2, im: 1 },
         { re: 3, im: 1 },
       ]);
-      if (declared === undefined)
-        expect(result.run({ u: 3 })).toEqual({ re: 4, im: 1 });
+      if (declared === undefined) expect(call(3)).toEqual({ re: 4, im: 1 });
     }
   });
 
   test('an input declared a number keeps the scalar code', () => {
     // A list for `u` breaks the host's input contract here.
-    const ce = engine();
-    ce.declare('u', 'number');
+    const ce = engine({ u: 'number' });
     const result = compile(ce.box(['Add', 1, ['q', 'u']]), {
       to: 'javascript',
       fallback: false,

@@ -377,8 +377,10 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
     expect(lhopital.code).toBe('_.t + (1)');
     // A limit with a free symbol in the point stays a runtime call, with
     // the free symbol read from the vars record.
+    const freeEngine = new ComputeEngine();
+    freeEngine.declare('a', 'real');
     const free = compile(
-      new ComputeEngine().parse('\\lim_{x\\to a}\\frac{\\sin x}{x}+t')
+      freeEngine.parse('\\lim_{x\\to a}\\frac{\\sin x}{x}+t')
     );
     expect(free.code).toContain('_SYS.limit');
     expect(free.code).toContain('_.a');

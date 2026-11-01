@@ -240,28 +240,45 @@ const scalarBranch = (code: string | undefined, read: string): string => {
   return rest.slice(0, rest.indexOf(' : ((_tv'));
 };
 
+/** The code of the compiled function `(names) ↦ json`, whose parameters
+ * have the types that `ce` declares, with the parameter list `(names) => `
+ * removed. A free input declared `any` is refused (the compiled code must
+ * know the shape of each input from its type); the run-time test of a value
+ * that may be a list is still reachable for a parameter of the root function
+ * declared `any`. */
+function rootCode(ce: ComputeEngine, json: unknown, names: string[]): string {
+  const code = compile(
+    ce.box([
+      'Function',
+      json,
+      ...names.map((n) => ['Typed', n, { str: ce.box(n).type.toString() }]),
+    ] as never),
+    { to: 'javascript' }
+  ).code!;
+  const prefix = `(${names.join(', ')}) => `;
+  expect(code.startsWith(prefix)).toBe(true);
+  return code.slice(prefix.length);
+}
+
 describe('compiled code reads the symbol as a scalar', () => {
   test('no broadcast wrapper over a symbol declared `any` or library arithmetic over it', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('a', 'any');
     expect(
-      scalarBranch(
-        compile(ce2.box(['Abs', 'a']), { to: 'javascript' }).code,
-        '_.a'
-      )
-    ).toBe('_SYS.absAny(_.a)');
+      compile(ce2.box(['Abs', 'a']), { to: 'javascript' }).diagnostic?.code
+    ).toBe('untyped-input');
+    expect(scalarBranch(rootCode(ce2, ['Abs', 'a'], ['a']), 'a')).toBe(
+      '_SYS.absAny(a)'
+    );
+    expect(
+      scalarBranch(rootCode(ce2, ce2.parse('2a + 1').json, ['a']), 'a')
+    ).toBe('2 * a + 1');
     expect(
       scalarBranch(
-        compile(ce2.parse('2a + 1'), { to: 'javascript' }).code,
-        '_.a'
+        rootCode(ce2, ce2.parse('\\sin(2a + 1)').json, ['a']),
+        'a'
       )
-    ).toBe('2 * _.a + 1');
-    expect(
-      scalarBranch(
-        compile(ce2.parse('\\sin(2a + 1)'), { to: 'javascript' }).code,
-        '_.a'
-      )
-    ).toBe('Math.sin(2 * _.a + 1)');
+    ).toBe('Math.sin(2 * a + 1)');
   });
 
   test('the scalar reading reaches the arms of a selection', () => {
@@ -269,12 +286,11 @@ describe('compiled code reads the symbol as a scalar', () => {
     ce2.declare('a', 'any');
     ce2.declare('d', 'number');
     ce2.declare('z', 'number');
-    const code = compile(
-      ce2.box(['Add', ['If', ['Less', 'd', 0], 'a', 5], 'z']),
-      {
-        to: 'javascript',
-      }
-    ).code;
-    expect(scalarBranch(code, '_.a')).not.toContain('_SYS.bcast');
+    const code = rootCode(
+      ce2,
+      ['Add', ['If', ['Less', 'd', 0], 'a', 5], 'z'],
+      ['a', 'd', 'z']
+    );
+    expect(scalarBranch(code, 'a')).not.toContain('_SYS.bcast');
   });
 });

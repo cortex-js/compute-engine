@@ -28,17 +28,55 @@ const POINT = 'tuple<number, number>';
 
 type Json = unknown;
 
+/** The compiled value of `latex` for the values `vars` of its inputs.
+ *
+ * A free input of type `unknown` or `any` is refused: the compiled code must
+ * know the shape of each input from its type. When an input of `vars` has
+ * such a type, `latex` is compiled as the body of the function whose
+ * parameters are the names of `vars`, with their types, and the function is
+ * called with the values. The run-time test of an argument whose shape the
+ * type does not settle is still reachable for such a parameter of the root
+ * function. */
 function compiled(
   ce: ComputeEngine,
   latex: string,
   vars: Record<string, unknown> = {}
 ): unknown {
-  const r = compile(ce.parse(latex), { fallback: false } as never) as {
+  const r = compileRoot(ce, latex, Object.keys(vars));
+  expect(r.success).toBe(true);
+  return r.root
+    ? (r.run as (...args: unknown[]) => unknown)(...Object.values(vars))
+    : r.run!(vars);
+}
+
+/** The compilation of `latex`; as the body of the function of the
+ * parameters `names` when one of them has the type `unknown` or `any`
+ * (`root` is then true). */
+function compileRoot(
+  ce: ComputeEngine,
+  latex: string,
+  names: string[]
+): {
+  success: boolean;
+  code: string;
+  root: boolean;
+  run?: (v: Record<string, unknown>) => unknown;
+} {
+  const types = names.map((n) => ce.box(n).type.toString());
+  const root = types.some((t) => t === 'unknown' || t === 'any');
+  const expr = root
+    ? ce.box([
+        'Function',
+        ce.parse(latex).json,
+        ...names.map((n, i) => ['Typed', n, { str: types[i] }]),
+      ] as never)
+    : ce.parse(latex);
+  const r = compile(expr, { fallback: false } as never) as {
     success: boolean;
+    code: string;
     run?: (v: Record<string, unknown>) => unknown;
   };
-  expect(r.success).toBe(true);
-  return r.run!(vars);
+  return { ...r, success: r.success, code: r.code, run: r.run, root };
 }
 
 function declines(ce: ComputeEngine, latex: string): void {
@@ -468,23 +506,20 @@ describe('CE-414.2: AN unknown SLOT BESIDE A POINT PARAMETER', () => {
   test('an argument of unknown type is tested at run time when compiled', () => {
     // The interpreter maps the call when the value is a list and binds the
     // value whole otherwise; the compiled call does the same with
-    // `_SYS.bcastFn`, as for a one-parameter function.
+    // `_SYS.bcastFn`, as for a one-parameter function. A free input of type
+    // `unknown` is refused, so `x` is a parameter of the root function.
     const ce = engine();
-    const r = compile(ce.parse('f((1,2), x)'), {
-      fallback: false,
-    } as never) as {
-      success: boolean;
-      code: string;
-      run: (v: Record<string, unknown>) => unknown;
-    };
+    const r = compileRoot(ce, 'f((1,2), x)', ['x']);
+    expect(r.root).toBe(true);
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.bcastFn(');
-    expect(r.run({ x: [0, 1, 2] })).toEqual([
+    const run = r.run as unknown as (x: unknown) => unknown;
+    expect(run([0, 1, 2])).toEqual([
       [1, 2],
       [2, 2],
       [3, 2],
     ]);
-    expect(r.run({ x: 5 })).toEqual([6, 2]);
+    expect(run(5)).toEqual([6, 2]);
     ce.assign('x', ce.box(['List', 0, 1, 2]));
     expect(ce.parse('f((1,2), x)').evaluate().toString()).toBe(
       '[(1, 2),(2, 2),(3, 2)]'
@@ -965,7 +1000,9 @@ describe('review round 3 (compiler)', () => {
   // `f(Ps, t)` with `t` free and typed `unknown`, at an `unknown` slot
   // beside a list of points. The interpreter pairs `t` with the points when
   // its value is a list (ROADMAP CE-414.2) and passes it whole otherwise.
-  // The compiled call tests the value at run time. Before, it declined.
+  // The compiled call tests the value at run time. Before, it declined. A
+  // free input of type `unknown` is refused, so `t` is a parameter, of type
+  // `unknown`, of the root function (`compiled()`).
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('Ps', `list<${POINT}>`);

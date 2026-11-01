@@ -62,6 +62,7 @@ function engineWith(
   declaration?: string
 ): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('n', 'real | signed_infinity | nan');
   ce.declare('x', 'real');
   ce.declare('y', 'real');
   if (declaration !== undefined) ce.declare(name, declaration);

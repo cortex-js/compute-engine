@@ -870,7 +870,11 @@ describe('CE-580 the width of a Block local', () => {
     );
   });
 
-  it('a local declared `real` that holds a point', () => {
+  // The declared type `real` and the assigned list have different shape
+  // classes. The declared type of a local settles its shape, so the
+  // compilation declines on both targets (CE-712.1, the simple rule for
+  // assignments).
+  it('a local declared `real` that is assigned a point declines', () => {
     const json = [
       'Block',
       ['Declare', 'p', "'real'"],
@@ -878,12 +882,8 @@ describe('CE-580 the width of a Block local', () => {
       ['Assign', 'q', ['Add', 'p', 1]],
       'q',
     ];
-    expect(code(glsl, json)).toBe(
-      'vec2 q;\nvec2 p;\np = vec2(x, 2.0);\nq = p + 1.0;\nreturn q;'
-    );
-    expect(code(wgsl, json)).toBe(
-      'var q: vec2f;\nvar p: vec2f;\np = vec2f(x, 2.0);\nq = p + 1.0;\nreturn q;'
-    );
+    expect(() => code(glsl, json)).toThrow(/different shapes/);
+    expect(() => code(wgsl, json)).toThrow(/different shapes/);
   });
 });
 

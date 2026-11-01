@@ -191,6 +191,7 @@ type string is Describable {
 type integer is Describable {
   function describe(self: Self) -> string { "an integer" }
 }`);
+    ce.declare('x', 'string | integer | boolean');
     const result = compile(ce.box(['describe', 'x'] as any));
     expect(result.success).toBe(true);
     expect(result.unsupported).toEqual([]);
@@ -211,6 +212,7 @@ type real is Describable {
 type integer is Describable {
   function describe(self: Self) -> string { "int" }
 }`);
+    ce.declare('x', 'real');
     const result = compile(ce.box(['describe', 'x'] as any));
     expect(result.success).toBe(true);
     // integer (registered SECOND) must be tested first — it is the more
@@ -377,6 +379,7 @@ type leaf is Nested {
 type node is Nested {
   function depth(self: Self) -> number { 1 + depth(self.child) }
 }`);
+    ce.declare('x', 'tree');
     const result = compile(ce.box(['depth', 'x'] as any));
     expect(result.success).toBe(true);
     // leaf is nullary and node wraps a tree: representations collide with

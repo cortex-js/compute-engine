@@ -1531,6 +1531,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       ['GCD', ['x', 2]],
     ])('%s over a REAL operand still compiles', (h, args) => {
       const engine = new ComputeEngine();
+      engine.declare('x', 'real');
       const r = compile(engine.box([h, ...args] as any), { fallback: false });
       expect(r.success).toBe(true);
     });
@@ -1841,6 +1842,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // SYNTACTIC list, but it types `vector<2>`, so the At handler's
     // `isIndexedCollectionOperand` gate passes and `_SYS.at` is emitted.
     const e = new ComputeEngine();
+    e.declare('x', 'real');
     e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
     const r = compile(e.parse('a(x)[1]'), { fallback: false })!;
     expect(r.success).toBe(true);
@@ -3640,6 +3642,7 @@ describe('COMPILE user-defined function calls', () => {
 
   it('compiles recursion with a runtime (non-literal) depth argument', () => {
     const e = new ComputeEngine();
+    e.declare('m', 'real');
     e.parse(
       '\\mathrm{fact}(n) \\coloneq \\mathrm{If}(n \\le 1, 1, n \\cdot \\mathrm{fact}(n-1))'
     ).evaluate();
@@ -3651,6 +3654,7 @@ describe('COMPILE user-defined function calls', () => {
 
   it('recursive compiled result matches the interpreter digit-for-digit', () => {
     const e = new ComputeEngine();
+    e.declare('w', 'real');
     e.parse(
       'Q(n, z) \\coloneq \\mathrm{If}(n \\le 0, z, Q(n-1, z)^2 + 0.3)'
     ).evaluate();
@@ -3738,8 +3742,9 @@ describe('COMPILE user-defined function calls', () => {
   // `_SYS.bcast` — mirroring the interpreter rather than gating on a
   // compile-time "is this operand provably a collection?" test.
   describe('broadcast over a collection argument', () => {
-    const setup = () => {
+    const setup = (uType = 'real') => {
       const e = new ComputeEngine();
+      e.declare('u', uType);
       e.box(['Assign', 'n', 4]).evaluate();
       e.box([
         'Assign',
@@ -3784,7 +3789,10 @@ describe('COMPILE user-defined function calls', () => {
     });
 
     it('broadcasts a list bound at run time through vars', () => {
-      const e = setup();
+      // A value outside the declared type of an input gives an undefined
+      // result (a list for `u: real`), so `u` is declared as the union of
+      // the two shapes that the test passes.
+      const e = setup('real | list<real>');
       const r = compile(e.box(['q', 'u']));
       expect(r.success).toBe(true);
       expect(r.run!({ u: 2 } as any)).toBe(9);
@@ -4739,9 +4747,15 @@ describe('COMPILE built-in operator name as a callback', () => {
 
   it('leaves a NON-built-in free symbol alone', () => {
     // The fail-closed refusal is scoped to a system-provenance operator name:
-    // a plain unknown symbol in callback position keeps its previous
-    // free-variable read.
+    // a plain symbol in callback position keeps its free-variable read. An
+    // input with no type is refused (ROADMAP CE-712.1), so `zork` is
+    // declared as a function.
+    const untyped = compile(new ComputeEngine().box(['Map', 'zork', XS]));
+    expect(untyped.success).toBe(false);
+    expect(untyped.diagnostic?.code).toBe('untyped-input');
+    expect(untyped.unsupported).toContain('zork');
     const e = new ComputeEngine();
+    e.declare('zork', '(real) -> real');
     const r = compile(e.box(['Map', 'zork', XS]), { fallback: false })!;
     expect(r.code).toContain('_.zork');
   });
@@ -4904,6 +4918,7 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
 
   it('JS: a multi-statement multi-clause body runs correctly', () => {
     const e = new ComputeEngine();
+    e.declare('y', 'real');
     const p = (n: string, t: string): MathJsonExpression => [
       'Typed',
       n,
@@ -5268,7 +5283,11 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
   });
 
   it('JS: the UNDECLARED (broadcast-wrapper) route runs to 3√10 too', () => {
-    const r = compile(engineWithA(false).box(['a', 'u']));
+    // The function `a` has no signature; its input `u` is declared, since an
+    // input with no type is refused (ROADMAP CE-712.1).
+    const e = engineWithA(false);
+    e.declare('u', 'number');
+    const r = compile(e.box(['a', 'u']));
     expect(r?.success).toBe(true);
     expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
   });

@@ -9,6 +9,8 @@ for (const [language, makeTarget] of [
   describe(`${language} folded bounds and integer indices`, () => {
     function fixture(size = 153) {
       const ce = new ComputeEngine();
+      ce.declare('n', 'real | signed_infinity | nan');
+      ce.declare('x', 'real | signed_infinity | nan');
       ce.declare('A', 'vector<153>');
       ce.declare('flag', 'boolean');
       ce.assign(

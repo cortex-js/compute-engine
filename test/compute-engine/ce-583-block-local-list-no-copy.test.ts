@@ -1198,6 +1198,7 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
   // `UnboundLocalError`, and a read after the loop gave the last index.
   test('a loop over the name of a free symbol', () => {
     const ce = new ComputeEngine();
+    ce.declare('y', 'real');
     const after = ce.box([
       'Block',
       D('s'),
@@ -1268,6 +1269,8 @@ describe('CE-583: the names of the Python start-value helper are protected', () 
   // check did not protect).
   test('a function, a parameter or a symbol named like the helper declines', () => {
     const ce = new ComputeEngine();
+    ce.declare('_ce_unset_type', 'real');
+    ce.declare('x', 'real');
     const py = new PythonTarget();
     const expr = ce.box(json('x') as any);
     expect(() => py.compileFunction(expr, '_ce_unset_type', ['x'])).toThrow(

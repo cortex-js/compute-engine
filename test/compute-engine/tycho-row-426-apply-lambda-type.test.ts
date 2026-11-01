@@ -388,36 +388,26 @@ describe('row 426 review: statements the body walk cannot type in order', () => 
     expect(fits).toBe(true);
   });
 
-  test('the compiled code of an early Return gives no value where the interpreter refuses', () => {
+  test('the compiled code of an early Return declines where the interpreter refuses', () => {
     // `First(M)` is returned, so `At(…, 1)` reads a number: the interpreter
     // answers `incompatible-type`. Typed `list<real>`, the compiled code
     // returned `null`. The compiled code gives `a` the type of its argument
-    // `M`, `list<real>`, and its run-time check of `At` now throws.
+    // `M`, `list<real>`, so the body gives a number (the early `Return`) or
+    // a list (its last value): the value has no settled shape, and the
+    // compilation declines (`docs/COMPILATION-MODEL.md`, rule R3). The same
+    // holds when the parameter is written `a: list<real>`.
     const ce = rowEngine();
-    const json: Json = [
-      'At',
-      [
-        'Apply',
-        F(
-          [
-            'Block',
-            ['If', longer, ['Return', ['First', 'a']]],
-            ['Reverse', 'a'],
-          ],
-          'a'
-        ),
-        'M',
-      ],
-      1,
+    const body: Json = [
+      'Block',
+      ['If', longer, ['Return', ['First', 'a']]],
+      ['Reverse', 'a'],
     ];
-    const r = compile(ce.box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(() => r.run!({ M: [1, 2, 3] })).toThrow(
-      'At: the collection is not a list at run time'
-    );
-    // With one element there is no early Return, and the value is
-    // `Reverse([5])[1]`, as in the interpreter.
-    expect(r.run!({ M: [5] })).toBe(5);
+    for (const param of ['a', typed('a', 'list<real>')]) {
+      const json: Json = ['At', ['Apply', F(body, param), 'M'], 1];
+      const r = compile(ce.box(json));
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('unsettled-shape');
+    }
   });
 });
 

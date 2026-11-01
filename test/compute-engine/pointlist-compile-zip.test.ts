@@ -186,11 +186,28 @@ describe('PointList zip — every component is evaluated exactly once, in order 
 describe('PointList zip — the opaque-slot guard (D1)', () => {
   const js = new JavaScriptTarget();
 
+  // A free input of type `unknown` is refused: the compiled code must know
+  // the shape of each input from its type. The guard of an opaque slot is
+  // still reachable for a parameter of the root function of type `unknown`,
+  // so these tests compile `(u, n) ↦ PointList(u, n)`.
+  const opaque = (ce: ComputeEngine) =>
+    js.compile(
+      ce.box([
+        'Function',
+        ['PointList', 'u', 'n'],
+        ['Typed', 'u', { str: 'unknown' }],
+        ['Typed', 'n', { str: 'list<number>' }],
+      ])
+    );
+
   it('an `unknown` slot holding a number produces ordinary points', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'u', 'n']));
+    expect(() => js.compile(ce.box(['PointList', 'u', 'n']))).toThrow(
+      /the input `u` has no type/
+    );
+    const r = opaque(ce);
     expect(r.success).toBe(true);
-    expect((r.run as (s: any) => unknown)({ u: 5, n: [1, 2] })).toEqual([
+    expect((r.run as (u: any, n: any) => unknown)(5, [1, 2])).toEqual([
       [5, 1],
       [5, 2],
     ]);
@@ -201,8 +218,8 @@ describe('PointList zip — the opaque-slot guard (D1)', () => {
     // source; the compiled form cannot know to, and a NaN is a self-describing
     // absence where a spliced array would be silently-wrong output.
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'u', 'n']));
-    const out = (r.run as (s: any) => number[][])({ u: [9, 9], n: [1, 2] });
+    const r = opaque(ce);
+    const out = (r.run as (u: any, n: any) => number[][])([9, 9], [1, 2]);
     expect(out).toHaveLength(2);
     for (const pt of out) {
       expect(pt).toHaveLength(2);
@@ -846,10 +863,14 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
     slot: unknown;
     glslRejects?: RegExp;
     refused?: boolean;
+    untyped?: boolean;
   }[] = [
     { type: 'set<number>', scalar: false, slot: undefined, refused: true },
     { type: 'dictionary', scalar: false, slot: undefined, refused: true },
-    { type: 'unknown', scalar: true, slot: 7 }, // the load-bearing plot case
+    // A component of type `unknown` is an input with no type: the
+    // compilation is refused on both routes, because the compiled code must
+    // know the shape of each input from its type.
+    { type: 'unknown', scalar: true, slot: 7, untyped: true },
     // On the JS route a string component is a SLOT (strings are broadcast-
     // atomic, so it is never a source). The GLSL route rejects it instead:
     // the shader targets have no text type, so a text-typed symbol fails
@@ -868,10 +889,14 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
 
   it.each(table)(
     'JS zip (a source is present): a `$type` component is scalar=$scalar',
-    ({ type, scalar, slot, refused }) => {
+    ({ type, scalar, slot, refused, untyped }) => {
       const ce = splitEngine(type);
       const build = () =>
         new JavaScriptTarget().compile(ce.box(['PointList', 'n', 'c']));
+      if (untyped) {
+        expect(build).toThrow(/the input `c` has no type/);
+        return;
+      }
       if (refused) {
         expect(build).toThrow(/Could not compile invalid expression/);
         return;
@@ -895,10 +920,14 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
 
   it.each(table)(
     'library route (no source): a `$type` component is scalar=$scalar',
-    ({ type, scalar, glslRejects, refused }) => {
+    ({ type, scalar, glslRejects, refused, untyped }) => {
       const ce = splitEngine(type);
       const glsl = new GLSLTarget();
       const build = () => glsl.compile(ce.box(['PointList', 'x', 'c']));
+      if (untyped) {
+        expect(build).toThrow(/the input `c` has no type/);
+        return;
+      }
       if (refused) {
         expect(build).toThrow(/Could not compile invalid expression/);
         return;
@@ -1095,28 +1124,31 @@ describe('PointList zip — constructed source widths', () => {
   it.each([0.5, 10])(
     'evaluates components once in order with budget %s',
     (iterationBudget) => {
+      // The third component is the slot `w`, declared `real`: an input
+      // with no type, such as `u`, is refused.
       const ce = zipEngine();
       ce.declare('q', 'real');
+      ce.declare('w', 'real');
       const r = compile(
-        ce.expr(['PointList', ['List', 'k', 2, 3], ['List', 'q', 20], 'u']),
+        ce.expr(['PointList', ['List', 'k', 2, 3], ['List', 'q', 20], 'w']),
         {
           fallback: false,
           iterationBudget,
           vars: {
             k: '(_.log.push("k"), _.k)',
             q: '(_.log.push("q"), _.q)',
-            u: '(_.log.push("u"), _.u)',
+            w: '(_.log.push("w"), _.w)',
           },
         }
       );
       const log: string[] = [];
-      expect(r.run!({ k: 1, q: 10, u: 7, log })).toEqual(
+      expect(r.run!({ k: 1, q: 10, w: 7, log })).toEqual(
         [
           [1, 10, 7],
           [2, 20, 7],
         ].slice(0, Math.floor(iterationBudget))
       );
-      expect(log).toEqual(['k', 'q', 'u']);
+      expect(log).toEqual(['k', 'q', 'w']);
     }
   );
   it('reads source lengths after a later operand mutates an alias', () => {

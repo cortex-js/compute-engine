@@ -22,6 +22,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   ce.pushScope();
   ce.declare('L', { type: 'list<number>' });
   ce.assign('L', ce.parse('\\left[1,2\\right]'));
@@ -206,8 +208,27 @@ describe('PointList with a broadcastable component', () => {
   });
 
   test('the all-scalar emission of free plot variables is unchanged', () => {
+    // An input with no type is refused (ROADMAP CE-712.1). Parameters of the
+    // root function declared `any` keep the run-time slot test, which
+    // answers NaN for a list coordinate.
+    const open = compile(
+      new ComputeEngine().box([
+        'Function',
+        ['PointList', 'x', 'y'],
+        ['Typed', 'x', "'any'"],
+        ['Typed', 'y', "'any'"],
+      ] as never),
+      { to: 'javascript' }
+    );
+    expect(open.code).toBe(
+      '(x, y) => [_SYS.pointSlot(x), _SYS.pointSlot(y)]'
+    );
+    const run = open.run as unknown as (x: unknown, y: unknown) => unknown;
+    expect(run(1, 2)).toEqual([1, 2]);
+    // The inputs `x` and `y` declared `real` are read as they are.
     const ce = engine();
     const r = compile(ce.parse('\\operatorname{PointList}(x, y)'), { to: 'javascript' });
-    expect(r.code).toBe('[_SYS.pointSlot(_.x), _SYS.pointSlot(_.y)]');
+    expect(r.code).toBe('[_.x, _.y]');
+    expect(r.run!({ x: 1, y: 2 })).toEqual([1, 2]);
   });
 });

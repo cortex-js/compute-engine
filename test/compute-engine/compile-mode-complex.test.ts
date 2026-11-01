@@ -68,6 +68,7 @@ describe('complex mode — result convention (design §5) and the lift at use', 
 
   it('a boolean result is never coerced', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     expect(compile(ce.parse('x < 3'), CX).run!({ x: 1 })).toBe(true);
     expect(compile(ce.parse('x < 3'), CX).run!({ x: 5 })).toBe(false);
   });
@@ -76,6 +77,7 @@ describe('complex mode — result convention (design §5) and the lift at use', 
 describe('complex mode — one emission per user function, lift at use (design §3)', () => {
   function engineWith(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('a', 'number');
     ce.declare('z', 'complex');
     ce.declare('L', 'list<complex>');
     ce.assign('b', ce.parse('x \\mapsto 2x'));
@@ -85,15 +87,26 @@ describe('complex mode — one emission per user function, lift at use (design �
 
   it('b(a), b(z), b(√a): the same `_fn_b`, no `$z` specialization', () => {
     const ce = engineWith();
-    // `a` is `unknown` (possibly a collection), so the call takes the runtime
-    // broadcast dispatch — with the lifted argument and the ONE `_fn_b`,
-    // which the dispatch takes as its function value: with no argument to
-    // coerce inside it, a closure would only eta-expand `_fn_b`.
-    const ba = compile(ce.parse('b(a)'), CX);
+    // A parameter `a` declared `any` (possibly a collection) takes the
+    // runtime broadcast dispatch — with the lifted argument and the ONE
+    // `_fn_b`, which the dispatch takes as its function value: with no
+    // argument to coerce inside it, a closure would only eta-expand `_fn_b`.
+    // (An INPUT `a` with no type is refused, ROADMAP CE-712.1, so the
+    // dispatch is read on a parameter of the root function.)
+    const ba = compile(
+      ce.box(['Function', ['b', 'a'], ['Typed', 'a', "'any'"]]),
+      CX
+    );
     expect(ba.code).toContain('_SYS.bcastFn(_fn_b,');
-    expect(ba.code).toContain('_SYS.cplx(_.a)');
+    expect(ba.code).toContain('_SYS.cplx(a)');
     expect(ba.code).not.toContain('$z');
-    expect(ba.run!({ a: -2 })).toBe(-4);
+    const runA = ba.run as unknown as (a: unknown) => unknown;
+    expect(runA(-2)).toBe(-4);
+    expect(runA([1, -2])).toEqual([2, -4]);
+    // The input `a` declared `number` is a scalar: the call is direct.
+    const baNumber = compile(ce.parse('b(a)'), CX);
+    expect(baNumber.code).toBe('_fn_b(_SYS.cplx(_.a))');
+    expect(baNumber.run!({ a: -2 })).toBe(-4);
     // The call's RESULT is not wrapped: `b`'s declared result `number` is
     // wide (since the finite-by-default flip `complex` sits below that
     // name), and the lift-at-use rule (`liftWideResult`) wraps a wide value
@@ -108,11 +121,7 @@ describe('complex mode — one emission per user function, lift at use (design �
     expect(bz.code).toBe('_fn_b(_.z)');
     expect(bz.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
     const bs = compile(ce.parse('b(\\sqrt{a})'), CX);
-    expect(bs.code).toBe(
-      '((_tv3) => Array.isArray(_tv3) ? ' +
-        '_SYS.bcastFn(_fn_b, _tv3) : _fn_b(_tv3))' +
-        '(_SYS.csqrt(_SYS.cplx(_.a)))'
-    );
+    expect(bs.code).toBe('_fn_b(_SYS.csqrt(_SYS.cplx(_.a)))');
     expect(bs.run!({ a: -2 })).toEqual({ re: 0, im: 2 * Math.SQRT2 });
   });
 
@@ -208,6 +217,8 @@ describe('complex mode — one emission per user function, lift at use (design �
     // types `integer`; its arms are lifted to `{re, im}` but a parent
     // reading the TYPE consumed the object as a number.
     const ce = new ComputeEngine();
+    ce.declare('d', 'real');
+    ce.declare('a', 'number');
     ce.declare('z', 'complex');
     const w = compile(
       ce.box(['Add', ['Which', ['Less', 'd', 0], 'a', 'True', 5], 'z']),
@@ -295,9 +306,12 @@ describe('complex mode — one emission per user function, lift at use (design �
 
 describe('complex mode — D2/D6 runtime rules', () => {
   const ce = new ComputeEngine();
+  ce.declare('y', 'real');
   ce.declare('z', 'complex');
 
   it('a < 3 over a wide operand: true/false for reals, false for a complex value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'number');
     const r = compile(ce.parse('a < 3'), CX);
     expect(r.code).toContain('_SYS.cisreal');
     expect(r.run!({ a: 1 })).toBe(true);

@@ -89,6 +89,7 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
 
   test.each(rows)('%s: f(t)[1] compiles and runs', (_label, setup) => {
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     setup(ce);
     const r = compile(ce.parse('f(t)[1]', { strict: false }))!;
     expect(r.success).toBe(true);
@@ -97,6 +98,7 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
 
   test.each(rows)('%s: f(t)[k] with a SYMBOLIC index', (_label, setup) => {
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     setup(ce);
     const r = compile(ce.parse('f(t)[k]', { strict: false }))!;
     expect(r.success).toBe(true);
@@ -125,6 +127,7 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
 
   test('a SYMBOLIC collection argument reaches the refined parameter', () => {
     const ce = new ComputeEngine();
+    ce.declare('v', 'list<real>');
     ce.declare('g', { signature: '(unknown) -> unknown' });
     ce.parse('g(p) \\coloneq p[1] + p[2]', { strict: false }).evaluate();
     const r = compile(ce.parse('g(v)', { strict: false }))!;
@@ -162,6 +165,7 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
     // default mode `auto` promotes the unknown-sign radical, so the compiled
     // value is the interpreter's.
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     ce.parse(Z_DEF, { strict: false }).evaluate();
     const r = compile(ce.parse(Z_CHAIN, { strict: false }))!;
     expect(r.success).toBe(true);
@@ -229,6 +233,7 @@ describe('promotion in mode: complex (ruled 2026-08-15, now the default)', () =>
     // Promotion is the default since the compile-mode migration (step 4,
     // 2026-08-16); the non-promoting discipline is `mode: 'strict'`.
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     ce.parse(Z_DEF, { strict: false }).evaluate();
     const strict = compile(ce.parse(Z_CHAIN, { strict: false }), {
       mode: 'strict',
@@ -244,6 +249,7 @@ describe('promotion in mode: complex (ruled 2026-08-15, now the default)', () =>
     // — `z(t)` types the wide `number`, which says nothing about complexness
     // on its own. See `userCallLane` in `base-compiler.ts`.
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     ce.parse(Z_DEF, { strict: false }).evaluate();
     const r = compile(ce.parse(Z_CHAIN, { strict: false }), {
       mode: 'complex',
@@ -362,6 +368,7 @@ describe('promotion in mode: complex (ruled 2026-08-15, now the default)', () =>
     // result type is `unknown` — would hand that verdict to the plain number
     // pulled out of it. Before the guard this returned `{re: null}`.
     const ce = new ComputeEngine();
+    ce.declare('t', 'real');
     ce.parse('g(t) \\coloneq [\\sqrt{t-1}, 1]', { strict: false }).evaluate();
     const r = compile(ce.parse('g(t)[2] + 1', { strict: false }), {
       mode: 'complex',

@@ -66,6 +66,7 @@ import {
 import { EXPENSIVE_PREFIX_HEADS, NO_NAMES } from './compiler-tables.js';
 import { core } from './compiler-core-hooks.js';
 import { compileValueOperand } from './compile-statements.js';
+import { CompilerState } from './compiler-state.js';
 import {
   _codeAliases,
   _codeOverrides,
@@ -1081,18 +1082,39 @@ export function compileCseRoot(
    * BODY region (the root region holds only the `Function` node itself). */
   fn?: () => TargetSource
 ): TargetSource {
+  // A root that `fn` spells itself (a collection root, the body of a
+  // `Function` literal) can be compiled without a call of `compile()` on
+  // the root at depth 0, which is where the admission checks of the
+  // compilation run: every value has a settled shape, and every input has
+  // a type. They decline after the code was generated with no other
+  // decline, so that a more specific reason stays the reason. They run
+  // here for such a root. Without `fn`, the call of `compile()` below runs
+  // them. While `fn` runs, `CompilerState._rootAdmission` is true, so a
+  // call of `compile()` at depth 0 in `fn` (on the body of a `Function`
+  // literal root) does not run them a second time.
+  const admit =
+    fn !== undefined &&
+    expr !== undefined &&
+    CompilerState._compileDepth === 0 &&
+    !CompilerState._rootAdmission;
+  const unsettled = admit ? core.unsettledShapeIn(expr, target) : undefined;
   // The root is a tail position: a `Return` there gives its value
   // (`tailValueFor`).
   const root = expr === undefined ? expr : tailValueFor(expr, target);
   const emit = fn ?? (() => core.compile(root, target, prec));
   const session = target.cse;
-  if (
-    session === undefined ||
-    !session.enabled ||
-    session.harvest === undefined
-  )
-    return emit();
-  return withCseRegion(target, cseHarvestOf(target)!.root, emit);
+  let code: TargetSource;
+  if (admit) CompilerState._rootAdmission = true;
+  try {
+    code =
+      session === undefined || !session.enabled || session.harvest === undefined
+        ? emit()
+        : withCseRegion(target, cseHarvestOf(target)!.root, emit);
+  } finally {
+    if (admit) CompilerState._rootAdmission = false;
+  }
+  if (admit) core.assertAdmitted(expr, target, unsettled);
+  return code;
 }
 
 /**

@@ -538,6 +538,7 @@ describe('a recursive signature derived again', () => {
   // `Block` evaluation below check the conditions.
   function engineWithCallee(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('n', 'real');
     ce.declare('R', 'function');
     ce.declare('S', 'function');
     ce.assign('S', ce.box(['Function', ['Multiply', 2, 'k'], 'k']));
@@ -584,12 +585,17 @@ describe('a recursive signature derived again', () => {
       /list<unknown>/
     );
     expect(ce.box(['R', 2]).evaluate().toString()).toBe('[[0]]');
+    // The branches of `If(i <= 0, 0, S(R(i - 1)))` have different shapes:
+    // `R(0)` is the number 0, `R(1)` is the list `[0]`. The shape of the
+    // value is known only at run time, so the compilation declines
+    // (ROADMAP CE-712.1, `unsettled-shape`).
+    expect(ce.box(['R', 0]).evaluate().toString()).toBe('0');
+    expect(ce.box(['R', 1]).evaluate().toString()).toBe('[0]');
     const result = compile(ce.box(['R', 'n']), {
       to: 'javascript',
-      fallback: false,
-    } as any) as { success: boolean; run: (v: object) => unknown };
-    expect(result.success).toBe(true);
-    expect(result.run({ n: 2 })).toEqual([[0]]);
+    } as any) as any;
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('a write to a data symbol that the body reads widens the signature', () => {

@@ -184,9 +184,14 @@ describe('A USE DOES NOT REWRITE A SIGNATURE DERIVED FROM A BODY', () => {
       .subs({ x: 2 })
       .N();
     expect(ce.box('g').type.toString()).toBe(before);
+    // A free input with no type is refused, so `x` is a parameter, declared
+    // `any`, of the root function.
     const det = ce.parse('\\operatorname{Determinant}(g(x)) + 1');
-    const result = compile(det, { to: 'javascript', fallback: false } as any);
-    expect(result.run({ x: 2 })).toBe(5);
+    const result = compile(
+      ce.box(['Function', det.json, ['Typed', 'x', { str: 'any' }]]),
+      { to: 'javascript', fallback: false } as any
+    );
+    expect(result.run(2)).toBe(5);
   });
 
   test('a result the body leaves unknown is refined by a use', () => {
@@ -327,26 +332,30 @@ describe('A COMPILED CALL OF A FUNCTION THAT RETURNS A LIST', () => {
         ['At', ['g', 'x'], 1],
         ['At', ['g', 'x'], 2],
       ]);
-      const run = () =>
-        compile(expr, { to: 'javascript', mode, fallback: false } as any);
       // The signature of `g` says `list<unknown>`, so the engine types
-      // `g(x)[1]` as unknown when `x` is a free input. The compiler reads
-      // an untyped free input as a number, as the emitted code does, so
-      // `g(x)[1]` is a number on every lane (ROADMAP CE-377, landed
-      // 2026-10-23; the complex lane declined before).
-      expect(run().run({ x: 3 })).toBe(5);
+      // `g(x)[1]` as unknown. A free input with no type is refused, so `x`
+      // is a parameter, declared `any`, of the root function, and the call
+      // compiles on every lane (ROADMAP CE-377; the complex lane declined
+      // before).
+      const run = () =>
+        compile(
+          ce.box(['Function', expr.json, ['Typed', 'x', { str: 'any' }]]),
+          { to: 'javascript', mode, fallback: false } as any
+        );
+      expect(run().run(3)).toBe(5);
     });
 
     test(`${mode}: Determinant(m(x)) + 1, m := t ↦ [[t, 1], [2, 3]]`, () => {
       const ce = new ComputeEngine();
       ce.assign('m', ce.parse('t \\mapsto [[t, 1], [2, 3]]'));
+      // `x` is a parameter, declared `any`, of the root function: a free
+      // input with no type is refused.
       const expr = ce.box(['Add', ['Determinant', ['m', 'x']], 1]);
-      const result = compile(expr, {
-        to: 'javascript',
-        mode,
-        fallback: false,
-      } as any);
-      expect(result.run({ x: 3 })).toBe(8);
+      const result = compile(
+        ce.box(['Function', expr.json, ['Typed', 'x', { str: 'any' }]]),
+        { to: 'javascript', mode, fallback: false } as any
+      );
+      expect(result.run(3)).toBe(8);
     });
   }
 });

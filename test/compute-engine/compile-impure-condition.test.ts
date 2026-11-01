@@ -15,6 +15,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  */
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real');
 
 type Compiled = { code: string; run: (vars?: object) => unknown };
 
@@ -152,6 +153,8 @@ describe('an impure branch condition is lowered three-valued', () => {
   });
 
   test('a GPU target keeps its own selection', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real | signed_infinity | nan');
     // GLSL takes its `If` entry before the decidedness analysis, and a draw
     // there is the shader's own stream — unchanged by this ruling.
     const r = compile(ce.box(['If', ['Greater', ['Random'], 'x'], 1, -1]), {

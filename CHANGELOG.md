@@ -131,6 +131,94 @@
 
 ### Behavior Changes
 
+- **A compiled expression declines when an input has no type, and the
+  result names the input.** An input (a free symbol of the compiled code)
+  whose type is `unknown` or `any` now declines on every target, and
+  `unsupported` holds its name. With `M` not declared,
+  `compile(If(M < 3, M, 0))` emitted code that read `M` as a number:
+  `run({ M: [1, 5] })` gave `0`,
+  where the interpreter gives `[1, 0]`. Now the compilation declines with
+  `unsupported: ["M"]` and the diagnostic code `'untyped-input'`, and the
+  interpreter fallback gives `[1, 0]`. Declare the input
+  (`ce.declare("M", "real")`), or declare a union such as `real | list<real>`
+  when the host can pass both shapes: a union is not refused. A parameter of
+  a function is not an input: `t ↦ 2t` still compiles, and a list passed to
+  its untyped parameter gives an unspecified result. An input declared `any`
+  that the JavaScript target tested at run time for a list now declines too.
+  When the expression also declines for another reason, that reason stays
+  the error and the diagnostic, and `unsupported` also holds the names of the
+  inputs with no type. A name that the code only writes, outside every scope
+  of the expression, is an input too. A transparent alias of `unknown` or
+  `any` is that type. A name that only a branch of an `If` in a block
+  assigns is an input, outside a function body: with `b` undeclared,
+  `Block(If(a < 1, b ≔ 1); b)` declines. The variable of an indefinite integral
+  (`\int x^2 dx`) takes the type of its declaration outside the integral. A
+  value that the code assigns to an input must have the shape of the type of
+  the input, declared or inferred: with `x: real` and `p` undeclared,
+  `Block(If(x > 0, p ≔ [1, 2], p ≔ [3, 4]), 2p)` gave `null` where the
+  interpreter gives `[2, 4]`, because the read `2p` gave `p` the inferred
+  type `number`. It now declines with the code `'unsettled-shape'`.
+
+- **A compiled conditional whose branches have different shapes declines.**
+  An `If`, a `Which` or a `Match` whose branches have conflicting shapes (a
+  number and a list, a point and a list of points) declines on every target,
+  and two points of different sizes decline on `glsl` and `wgsl`,
+  with the code `'unsettled-shape'`, and `unsupported` holds the conditional
+  as `toString()` writes it. `If(x > 0, [1, 2], 3) + 1` compiled on
+  `javascript` with a test of the shape at run time. `If(x > 0, [1, 2], 3)`
+  gave `((0.0 < x) ? (vec2(1.0, 2.0)) : (3.0))` on `glsl`, which is not valid
+  GLSL, and `If(x > 0, [x, 2], 3)` on `interval-js` took the hull of a list
+  and an interval when the condition was not decided. The check also applies
+  to a conditional in the body of a user function that the code calls. The
+  values that a function body can give (each `Return` value and its last
+  value) and the `Break` values of a `Loop` are compared in the same way:
+  with `M: list<real>`,
+  `At(Apply(a ↦ Block(If(Length(a) > 1, Return(First(a))), Reverse(a)), M), 1)`,
+  whose compiled code threw at run time when the early `Return` gave a
+  number, now declines. A
+  branch whose type has no single shape (`unknown`, a union, the result of a
+  call that is tested at run time) is not compared, and a conditional over a
+  list condition, which selects element by element, still compiles when its
+  branches assign no name and have no `Return`, `Break` or `Continue`. A branch
+  that a condition known at compile time excludes is not compared either:
+  `Which(2 < 3, [1, 2], True, 0)` compiles to `[1, 2]`, and
+  `If(False, [1, 2], 0)` to `0`. On `glsl` and `wgsl`, the branches that the
+  shader code keeps are compared: `If(2 < 3, (1, 2), 0)` still compiles to
+  `vec2(1.0, 2.0)`, but `If(False, (1, 2), 0)`, which gave the invalid
+  `((false) ? (vec2(1.0, 2.0)) : (0.0))`, declines. A branch that the code
+  drops is not checked: `If(2 < 3, 0, If(x > 0, [1, 2], 3))` compiles to
+  `0`, and with `z` undeclared, `If(2 < 3, 0, z)` compiles too, because the
+  code does not read `z`. A name that also occurs in the code that is kept
+  stays an input, also where a binder binds it there:
+  `List(If(2 < 3, 0, z), Sum(z, Limits(z, 1, 3)))` declines. On the targets
+  that are not shaders, a conditional whose value the code discards (a
+  statement of a block that is not its last one, a loop body) is not
+  checked: `Block(p ≔ (0, 0); n ≔ 0; If(x > 0, p ≔ (1, 2), n ≔ 3); n)`
+  compiles. A written `NaN` is a number, so `If(c, (x, y), NaN)` declines:
+  its value is a point or a number. When the target declines for a more
+  specific reason, that reason stays the error.
+
+- **A compiled name that gets values of different shapes declines.** In one
+  scope, the values that the code assigns to a name, and the type of the
+  name, must now have one shape class: a number, a complex number, a string,
+  a list, a point or a matrix. Otherwise the compilation declines with the
+  code `'unsettled-shape'` on every target. With `x: real`,
+  `t ↦ Block(If(x > 0, p ≔ [1, 2], p ≔ 3), 2p)` compiled to code that read
+  `p` in one shape. The rule does not examine the order of the assignments:
+  `Block(p ≔ 0; p ≔ [1, 2]; p)`, where the interpreter gives `[1, 2]`, also
+  declines, and the interpreter fallback gives `[1, 2]`. The length of a list
+  is not part of its shape: `[1, 2]` and then `[1, 2, 3]` compile. A declared
+  type settles the shape of a local, so
+  `Block(Declare(p, "real"); p ≔ (x, 2); p)` declines on every target, where
+  `glsl` declared `p` a
+  `vec2`. A parameter of a function literal has the type of the parameter:
+  at `p = 2`, `p ↦ Block(Loop(p ≔ [i, i], i ∈ [1, 2, 3]); 2p)` gave `null`
+  where the interpreter gives `[6, 6]`, and now declines. A type that a
+  `Declare` states and that admits several shapes
+  (`real | list<real>`, `broadcastable<number>`) is not checked. A name that
+  a `Declare` of a nested block declares is another variable; two locals of
+  the same name with no `Declare` are compared as one.
+
 - **MCP clients cannot remove or extend the server's deadline, and a public
   listener must be authenticated.** With a nonzero server `--time-limit`, a
   tool argument of `timeLimit: 0` now uses that server limit instead of
@@ -151,6 +239,126 @@
   call; `F.floor(x)` calls the member.
 
 ### Bug Fixes
+
+- **A compiled element-wise `If` whose branch assigns a name declines.** With
+  `L: list<real>`, `Block(p ≔ 0; If(L > 0, p ≔ 5); 2p)` compiled on
+  `javascript` to code that ran the branch when the list `L > 0` had any
+  element: for `L = [-1, -2]` it gave `10`, where the interpreter gives `0`.
+  With `M: list<any>`, `Block(p ≔ 0; If(M[1], p ≔ 5); 2p)` gave `0` for
+  `M = [[True, False]]`, where the interpreter gives `10`. An `If` or a
+  `Which` whose condition is or can be a collection, and whose branch assigns
+  a name or has a `Return`, a `Break` or a `Continue`, now declines with the
+  code `'unsettled-shape'` on every target. An `Equal` or a `NotEqual`
+  condition compares whole values, and is not such a condition. An
+  element-wise conditional whose branches change nothing compiles as before.
+
+- **A compiled `Comprehension`, `Sum`, `Product` or `Integrate` with an
+  assignment where the interpreter does not change the outer name
+  declines.** `Block(p ≔ 0; Comprehension(Block(p ≔ 5, i), i ∈ [1]); p)`
+  compiled to code that gave `5`, where the interpreter gives `0`. An
+  assignment of a name of an enclosing scope, a `Return`, a `Break` or a
+  `Continue` in the body or a clause of a `Comprehension` (except the source
+  of its first clause), in a clause of a `Sum` or a `Product`, or in the
+  integrand or a bound of an `Integrate` now declines with the code
+  `'unsettled-shape'`. A `Return`, a `Break` or a `Continue` in the body of a
+  `Sum` or a `Product`, which gave JavaScript code with a syntax error
+  (`Illegal break statement`), declines too. A local that a block of such a
+  part assigns with no `Declare` counts as a name of an enclosing scope:
+  `Comprehension(Block(q ≔ 2i, q + 3), i ∈ [1, 2, 3])`, which compiled to
+  `[5, 7, 9]`, now declines; with `Declare(q, "real")` in the block it
+  compiles.
+
+- **A compiled function that assigns a name of an enclosing scope
+  declines.** `Block(p ≔ 0; Filter(L, u ↦ Block(p ≔ 5, u > 1)); p)` compiled
+  to code that gave `5`, where the interpreter, which does not run the
+  callback when the result is not used, gives `0`. For `Limit` the compiled
+  code gave `0` where the interpreter gives `5`. Because a function can reach
+  such an operator in many ways (stored and passed by name, behind an `If`,
+  returned by another function), every function literal that assigns a name
+  of an enclosing scope (or an element of one), or that a `Break` or a
+  `Continue` leaves, now declines with the code `'unsettled-shape'`: a
+  callback, the value of a `Declare` or an `Assign`, a function returned by
+  another one, and the body of a user function that the code calls. This
+  includes cases where the two agreed: a stored function `g` that writes `p`
+  and that the code only calls as `g(1)`, and the curried
+  `Apply(Apply(Apply((y, w) ↦ (x ↦ Block(y ≔ 2, x + y)), 0), 1), u)`, which
+  the interpreter fallback now computes. The root of the compilation, and a
+  function that `Apply` applies where it is written to scalar arguments,
+  still compile.
+
+- **A compiled function literal that assigns the index of an enclosing loop
+  declines.**
+  `Block(n ≔ 0; Loop(Block(Apply(u ↦ k ≔ 5, 0), n ≔ n + 1), k ∈ 1..3); n)`
+  gave `1` where the interpreter gives `3`. It now declines
+  with the code `'unsettled-shape'`. A direct assignment of the index in a
+  loop body is handled as before.
+
+- **A compiled `Return` inside a `Loop` that has code after it declines.**
+  With `L = [1, 2, 3]`,
+  `p ↦ Block(q ≔ 0; Loop(If(i > 1, Block(q ≔ 7, Return(5))), i ∈ L); 100 + q)`
+  gave `107` where the interpreter gives `5`: the compiled loop is a
+  function of its own, so the `Return` ended only the loop. It now declines
+  with the code `'unsettled-shape'`, also in the root and in a stored
+  function. A `Return` inside a loop that is the last statement of the
+  function, where the value of the loop is the value of the function,
+  compiles as before.
+
+- **A local that only a loop body assigns is not reported as an input.** In
+  a function declared with the `scope` effect whose loop body assigns
+  `p ≔ (t, 2t)`, a compilation of a call of the function reported `p` in
+  `freeSymbols`, with the type `unknown`, although the generated code
+  declares `p` as a local of the function body. The same is true for a name
+  that only a branch or a nested block of a function body assigns.
+
+- **A local of a function in a case of a `Match` is not reported as an
+  input.** With `x: real` and `L: list<real>`, the compilation of
+  `Match(x, 1 -> Map(L, v ↦ Block(q ≔ 2v, q)), _ -> L)` reported `q` in
+  `freeSymbols`, with the type `unknown`, although `q` is a local of the
+  function. The reference analysis now reads the canonical form of each case
+  body, made in the same scope as the compiled code makes it, and reports
+  only `x` and `L`.
+
+- **`freeSymbols` does not list the variable of an outer integral that the
+  bound of an inner integral reads.**
+  `Integrate(e^(y^2), Limits(x, 0, 1), Limits(y, 0, x))` reported `x` as an
+  input, although the compiled code binds it.
+
+- **A function-valued expression compiled for `interval-js` can be called.**
+  `compile(x ↦ 2x, { to: 'interval-js' })` reported `success: true`, but
+  `run(3)` gave the compiled JavaScript function over enclosures, which a
+  caller cannot call with numbers and which is not an interval value. Now a
+  root whose value is a function (a `Function` literal, a block whose value
+  is one, a symbol whose value is one, a partial application) has
+  `calling: 'lambda'`, as on the JavaScript target: `run(3)` gives
+  `{ kind: 'interval', value: { lo: 6, hi: 6 } }`, and each argument can be
+  a number, an `Interval` or a boolean. Such a result has no `broadcast()`.
+  A function-valued root that reads a free symbol (`x ↦ a·x`) declines with
+  the reason, because there is no vars object to read the symbol from. The
+  standalone runtime (`createIntervalRuntime().load()`) calls a stored result
+  with `calling: 'lambda'` with the same arguments, and its batch evaluators
+  refuse such a result.
+
+- **A dictionary compiles on the JavaScript and Python targets.**
+  `compile(ce.box(["Dictionary"]), { to: "javascript" })` failed with "Could
+  not compile expression: `{->}`", and so did every dictionary with entries.
+  Thus a function literal with the parameter default `{}`, such as
+  `(m: dictionary<integer> = {}) => m`, did not compile, while a default `[]`
+  did. Now a dictionary compiles to an object literal in JavaScript
+  (`{a -> x + 1}` is `({"a": _.x + 1})`) and to a `dict` display in Python
+  (`{"a": x + 1}`), with each value compiled. The result has the form of a
+  `dictionary` input: a plain object or a `dict`. A key `__proto__` is an own
+  key of the object (the JavaScript literal writes it as the computed key
+  `["__proto__"]`), not its prototype. Each evaluation makes a new object, so
+  a call that changes the default dictionary does not change the default of
+  the next call. A value whose type is `unknown`, and a value that can be
+  `Nothing` (the interpreter leaves out its entry), do not compile; an
+  untyped input in a value is refused by name, as elsewhere. A dictionary
+  does not compile on the interval-js, GLSL and WGSL targets, which have no
+  dictionary value; the error message gives the reason. A dictionary result
+  with the keys `re` and `im` is returned as it is: `{re -> x, im -> 0}` gave
+  the number `x`. A `dictionary` input with these keys, such as
+  `{ re: 1, im: 0 }`, is accepted: it was refused as a complex number given
+  for a real input.
 
 - **A hexadecimal or binary number in a type string has its value.**
   `ce.type("0x10")`, `ce.type("-0x10")` and `ce.type("0b10")` gave the value

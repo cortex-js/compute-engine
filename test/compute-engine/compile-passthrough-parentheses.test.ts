@@ -32,6 +32,9 @@ const python = new PythonTarget();
 function makeEngine(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('n', 'integer');
+  ce.declare('P', 'real');
+  ce.declare('Q', 'real');
+  ce.declare('R', 'real');
   ce.declare('u', 'real');
   // `Abs` passes its operand through only when the operand is provably
   // non-negative, which is what this assumption establishes.

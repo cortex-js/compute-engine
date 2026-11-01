@@ -174,6 +174,7 @@ describe('A symbolic integration attempt that timed out', () => {
 
     test('an equal value is not searched again, another value is', () => {
       const ce = new ComputeEngine();
+      ce.declare('x', 'real');
       const held = { type: 'real', value: 2.5, holdUntil: 'N' } as const;
       expect(searches(ce, held)).toBe(1);
       expect(searches(ce, held)).toBe(0);

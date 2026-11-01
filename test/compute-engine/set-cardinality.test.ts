@@ -733,20 +733,31 @@ describe('COMPILED Abs OF AN OPERAND THAT CAN HOLD A SET OR A STRING', () => {
   ce2.declare('S', 'set<integer>');
 
   test('an operand of type any is tested at run time', () => {
-    const f = compile(ce2.box(['Abs', 'z']), { to: 'javascript' });
+    // An INPUT declared `any` is refused at compile time (ROADMAP
+    // CE-712.1); a parameter of the root function declared `any` compiles,
+    // with the run-time test of its value.
+    const refused = compile(ce2.box(['Abs', 'z']), { to: 'javascript' });
+    expect(refused.success).toBe(false);
+    expect(refused.diagnostic?.code).toBe('untyped-input');
+    expect(refused.unsupported).toContain('z');
+    const f = compile(
+      ce2.box(['Function', ['Abs', 'z'], ['Typed', 'z', "'any'"]]),
+      { to: 'javascript' }
+    );
     expect(f.success).toBe(true);
     // A value that is not an array takes `_SYS.absAny`; an array takes the
     // broadcast, as in the interpreter (ROADMAP CE-366, user decision
     // 2026-10-25; a list threw before).
-    expect(f.code).toBe(
-      '(!(Array.isArray(_.z) || ArrayBuffer.isView(_.z)) ? _SYS.absAny(_.z) : ' +
+    expect(f.code).toContain(
+      '(!(Array.isArray(z) || ArrayBuffer.isView(z)) ? _SYS.absAny(z) : ' +
         '((_tv1) => _SYS.bcastScalarAbsent([1], (_tv2) => _SYS.absAny(_tv2), _tv1))' +
-        '(_SYS.plainList(_.z)))'
+        '(_SYS.plainList(z)))'
     );
-    expect(f.run!({ z: -3 })).toBe(3);
-    expect(() => f.run!({ z: 'abc' })).toThrow(/a string/);
-    expect(() => f.run!({ z: new Set([1, 2]) })).toThrow(/a set/);
-    expect(f.run!({ z: [-1, 2] })).toEqual([1, 2]);
+    const run = f.run as unknown as (z: unknown) => unknown;
+    expect(run(-3)).toBe(3);
+    expect(() => run('abc')).toThrow(/a string/);
+    expect(() => run(new Set([1, 2]))).toThrow(/a set/);
+    expect(run([-1, 2])).toEqual([1, 2]);
   });
 
   test('an operand of numeric type keeps Math.abs', () => {

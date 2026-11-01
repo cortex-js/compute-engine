@@ -11,6 +11,29 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const js = (ce: ComputeEngine, json: unknown, options: object = {}) =>
   compile(ce.box(json as never), { to: 'javascript', ...options } as never)!;
 
+// The compiled function of `json` with the input `x` of type `type`, called
+// with the value of `x`. An INPUT declared `any` is refused at compile time
+// (ROADMAP CE-712.1), so for `any` the expression is compiled as the body of
+// a function literal whose parameter `x` is declared `any`: that parameter
+// keeps the run-time test of its value that these tests read.
+function compiled(
+  type: string,
+  json: unknown
+): { success: boolean; run: (input: unknown) => unknown } {
+  const ce = new ComputeEngine();
+  if (type === 'any') {
+    const result = compile(
+      ce.box(['Function', json, ['Typed', 'x', "'any'"]] as never),
+      { to: 'javascript' } as never
+    )!;
+    const run = result.run as unknown as (input: unknown) => unknown;
+    return { success: result.success, run: (input) => run(input) };
+  }
+  ce.declare('x', type as never);
+  const result = js(ce, json);
+  return { success: result.success, run: (input) => result.run!({ x: input }) };
+}
+
 // The interpreter's value of `json` with `x` assigned `value`, as a string.
 function interpreted(type: string, json: unknown, value: unknown): string {
   const ce = new ComputeEngine();
@@ -55,31 +78,36 @@ describe('COMPILED SUM AND PRODUCT OVER A SYMBOL DECLARED `any` OR `value`', () 
   for (const type of ['any', 'value']) {
     SHAPES.forEach((shape, k) => {
       test(`${JSON.stringify(shape)} with \`x: ${type}\` compiles to the interpreter's values`, () => {
-        const ce = new ComputeEngine();
-        ce.declare('x', type as never);
-        const result = js(ce, shape);
+        const result = compiled(type, shape);
         expect(result.success).toBe(true);
         for (const row of ROWS) {
           const [value, input] = row;
           const expected = row[2 + k];
           // The table holds the interpreter's values.
           expect(interpreted(type, shape, value)).toBe(asString(expected));
-          expect(result.run!({ x: input })).toEqual(expected);
+          expect(result.run(input)).toEqual(expected);
         }
       });
     });
 
     test(`a numeric typed array for \`x: ${type}\` is summed as a list`, () => {
-      const ce = new ComputeEngine();
-      ce.declare('x', type as never);
-      expect(js(ce, ['Sum', 'x']).run!({ x: new Float64Array([1, 2, 3]) })).toBe(
+      expect(compiled(type, ['Sum', 'x']).run(new Float64Array([1, 2, 3]))).toBe(
         6
       );
       expect(
-        js(ce, ['Product', 'x']).run!({ x: new Float64Array([2, 3, 4]) })
+        compiled(type, ['Product', 'x']).run(new Float64Array([2, 3, 4]))
       ).toBe(24);
     });
   }
+
+  test('an INPUT declared `any` is refused at compile time', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'any');
+    const result = js(ce, ['Sum', 'x']);
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('untyped-input');
+    expect(result.unsupported).toContain('x');
+  });
 
   test('a symbol declared `expression` still declines', () => {
     const ce = new ComputeEngine();

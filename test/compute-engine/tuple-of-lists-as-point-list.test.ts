@@ -400,7 +400,7 @@ describe('Arithmetic over a MathJSON Tuple with a list coordinate fails closed',
           fallback: false,
         } as any)
       // The expression has the static type `error`, so the static-type-error
-      // decline (`assertNoStaticTypeError()`, compile-static-type-error.ts)
+      // decline (`throwStaticTypeError()`, compile-static-type-error.ts)
       // runs before the check that names a tuple with a list coordinate.
     ).toThrow(/type 'error'/);
   });
@@ -499,7 +499,7 @@ describe('A function applied to each coordinate of a MathJSON Tuple with a list 
           fallback: false,
         } as any)
       // The expression has the static type `error`, so the static-type-error
-      // decline (`assertNoStaticTypeError()`, compile-static-type-error.ts)
+      // decline (`throwStaticTypeError()`, compile-static-type-error.ts)
       // runs before the check that names a tuple with a list coordinate.
     ).toThrow(/type 'error'/);
   });
@@ -891,7 +891,7 @@ describe('Sqrt and Root over a MathJSON Tuple with a list coordinate fail closed
           fallback: false,
         } as any)
       // The expression has the static type `error`, so the static-type-error
-      // decline (`assertNoStaticTypeError()`, compile-static-type-error.ts)
+      // decline (`throwStaticTypeError()`, compile-static-type-error.ts)
       // runs before the check that names a tuple with a list coordinate.
     ).toThrow(/type 'error'/);
   });

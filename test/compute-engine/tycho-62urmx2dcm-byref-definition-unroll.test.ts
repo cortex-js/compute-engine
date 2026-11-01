@@ -701,6 +701,8 @@ describe('BY-REFERENCE DEFINITION UNROLL — the angular unit', () => {
     // The helper knows the point width and must preserve the angular unit.
     const withUnit = (unit: 'deg' | 'rad') => {
       const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      ce.declare('y', 'real');
       ce.angularUnit = unit;
       ce.parse(String.raw`f(P) := \sin(P.x) + P.y`).evaluate();
       const viaCall: any = compile(ce.parse(String.raw`f((x,y))`), {

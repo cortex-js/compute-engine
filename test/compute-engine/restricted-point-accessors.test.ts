@@ -243,6 +243,7 @@ describe('Dot of a restricted list of points of the wrong width', () => {
 
 describe('Compiled accessors of a restricted point', () => {
   const ce = new ComputeEngine();
+  ce.declare('t', 'real');
   function run(json: unknown, t: number): unknown {
     const r = compile(ce.box(json as never), { to: 'javascript' } as never);
     expect(r.success).toBe(true);

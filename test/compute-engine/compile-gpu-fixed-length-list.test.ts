@@ -428,6 +428,7 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   // `2x + 1` where the interpreter computes `2(x + 1)`.
   test('a compound component cannot be reassociated by its context', () => {
     const ce = new ComputeEngine();
+    ce.declare('y', 'real | signed_infinity | nan');
     expect(
       glsl.compile(
         ce.box(['Multiply', ['Sum', ['Tuple', ['Add', 'x', 1]]], 2]),

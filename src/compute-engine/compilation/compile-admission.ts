@@ -1,0 +1,2122 @@
+// The admission rules of a compilation: every input has a type, and every
+// value that the program produces has a settled shape.
+//
+// Design: rules R1 and R3 of `docs/plans/2026-10-31-static-shape-compilation.md`
+// (user decision 2026-10-31, option (A)).
+
+import type { Expression, Scope } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
+import {
+  isDictionary,
+  isFunction,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
+import { isSubtype, listElementType } from '../../common/type/subtype.js';
+import {
+  resolveTypeAlias,
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
+} from '../../common/type/utils.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
+import type { CompileTarget } from './types.js';
+import type { UnsettledShape } from './compiler-types.js';
+import {
+  CompileDeclineError,
+  isCompileDeclineError,
+  UNSETTLED_SHAPE_CODE,
+  UNTYPED_INPUT_CODE,
+} from './diagnostics.js';
+import { isCompileBoundName } from './compiler-names.js';
+import {
+  analyzeReferences,
+  freeSymbolOccurrence,
+  isNamesTarget,
+} from './compile-references.js';
+import {
+  complexDiscipline,
+  declareTypeOperand,
+  declareValueOperand,
+  declaredTypeSource,
+} from './compile-declarations.js';
+import { parseType } from '../../common/type/parse.js';
+import {
+  buildCaseClosure,
+  getMatchPlan,
+} from '../boxed-expression/match-dispatch.js';
+import {
+  booleanClaim,
+  mayBeCollectionCondition,
+} from './compile-conditions.js';
+import {
+  compiledNodeWhere,
+  throwStaticTypeError,
+} from './compile-static-type-error.js';
+
+/**
+ * The inputs of the compiled code of `expr` whose static type is `unknown`
+ * or `any` (`untypedInputsOf()`), from the reference analysis of `expr`
+ * (`inputsOf()`, which gives the same free symbols as
+ * `CompilationResult.freeSymbols`).
+ */
+export function untypedInputs(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): string[] {
+  const { freeSymbols, occurrences } = inputsOf(expr, target);
+  return untypedInputsOf(expr, target, freeSymbols, occurrences);
+}
+
+/**
+ * The reference analysis of `expr` for `target` (`analyzeReferences()`):
+ * the free symbols, their occurrences, and the `Assign` nodes that write
+ * each free symbol (`assignedInputs`).
+ *
+ * If the analysis throws, the compilation declines with the code
+ * `'untyped-input'` and no `value`: the types of the inputs are not known,
+ * so the check cannot pass. A cancellation of the caller is thrown again.
+ */
+function inputsOf(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): {
+  freeSymbols: string[];
+  occurrences: Map<string, Expression>;
+  assignedInputs: Map<string, Expression[]>;
+} {
+  try {
+    const occurrences = new Map<string, Expression>();
+    const assignedInputs = new Map<string, Expression[]>();
+    const { freeSymbols } = analyzeReferences(
+      expr,
+      target,
+      target.varsKeys,
+      occurrences,
+      assignedInputs
+    );
+    return { freeSymbols, occurrences, assignedInputs };
+  } catch (e) {
+    throwIfCallerCancellation(e, expr.engine._deadlineFrame);
+    if (isCompileDeclineError(e)) throw e;
+    throw new CompileDeclineError({
+      code: UNTYPED_INPUT_CODE,
+      kind: 'correctness',
+      message:
+        'Could not compile: the analysis of the inputs failed, so the ' +
+        `types of the inputs are not known (${
+          e instanceof Error ? e.message : String(e)
+        }).`,
+    });
+  }
+}
+
+/**
+ * The inputs of the compiled code of `expr` whose static type is `unknown`
+ * or `any`: nothing declares them and nothing infers a type for them.
+ * `freeSymbols` and `occurrences` are the result of the reference analysis
+ * of `expr` for `target` (`analyzeReferences()`). The decline of the
+ * compilation (`untypedInputs()`) and the interpreter fallback
+ * (`buildInterpreterFallback()`) use this function, so they name the same
+ * inputs.
+ *
+ * The inputs are the free symbols as the generated code sees them: a
+ * symbol with no value, after the values of the symbols that the code
+ * folds and the bodies of the user functions that it calls, and a symbol
+ * mapped through `vars`. A parameter of a function literal, of a user
+ * function or of the root function is bound, not an input, whatever its
+ * type: `x ↦ x` and `f(t)`, with `f` declared `(unknown) -> unknown` and `t`
+ * declared `real`, are not refused. A name that the target or the compiler
+ * binds (`target.boundVars`, `isCompileBoundName()`) is not an input either.
+ * A name that the compiled code assigns and that no enclosing scope of the
+ * expression binds is an input when nothing declares it: with `u`
+ * undeclared, `u ≔ u + 1` reads `u` before it writes it. The values that
+ * the code assigns to an input are compared with the type of the input by
+ * another check (`assignedInputConflict()`).
+ *
+ * The type of each input is the type that `CompilationResult.freeSymbolTypes`
+ * reports for it (`freeSymbolOccurrence()`). A transparent alias of
+ * `unknown` or `any` (`ce.declareType("U", "unknown", { alias: true })`) is
+ * that type (`isUntypedType()`). A union of shapes (`number | list<number>`)
+ * is a type, so an input declared with one is not in the list.
+ *
+ * A name that occurs only in branches that the code for the target drops
+ * (`droppedOperandsOf()`) is not in the list, because the code does not
+ * read it: with `z` undeclared, `If(2 < 3, 0, z)` compiles to `0`, also
+ * when `vars` maps `z`. A name that occurs anywhere in the code that is
+ * kept stays in the list, also where a binder binds it there. This is the
+ * simple, sound version: the walk can see a name as bound where the code
+ * reads the outer input (the variable of an indefinite integral, which
+ * the reference analysis reports free), so
+ * `If(2 < 3, 0, x) + Integrate(x^2, Limits(x, Nothing, Nothing))` with `x`
+ * undeclared is refused. It also refuses
+ * `List(If(2 < 3, 0, z), Sum(z, Limits(z, 1, 3)))`, where the `z` of the sum
+ * is its index and the code does not read the input `z`. The names come
+ * from the walk of the admission checks (`compiledNodeWhere()`); a name
+ * that this walk does not find at all stays in the list. On a
+ * shader target, an `If` whose condition is the symbol `True` emits both
+ * branches, so `If(True, 0, z)` reads `z` there and `z` stays in the list.
+ */
+export function untypedInputsOf(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  freeSymbols: ReadonlyArray<string>,
+  occurrences: ReadonlyMap<string, Expression>
+): string[] {
+  const ce = expr.engine;
+  // The walk of the code runs only when a name needs it: most inputs have
+  // a type.
+  let read: ReturnType<typeof namesReadIn> | undefined;
+  const names = (): ReturnType<typeof namesReadIn> =>
+    (read ??= namesReadIn(expr, target));
+  const untyped = freeSymbols.filter((name) => {
+    if (target.boundVars?.has(name) || isCompileBoundName(name)) return false;
+    const symbol = freeSymbolOccurrence(name, occurrences) ?? ce.symbol(name);
+    return isUntypedType(symbol.type.type);
+  });
+  if (untyped.length === 0) return [];
+  const { kept, dropped } = names();
+  return untyped.filter((name) => kept.has(name) || !dropped.has(name));
+}
+
+/**
+ * True when `t` is `unknown` or `any`, after the transparent aliases that
+ * name it are unfolded (`resolveTypeAlias()`, which stops at a cycle of
+ * aliases). A nominal type is a type of its own, and is not unfolded.
+ */
+function isUntypedType(t: Readonly<Type>): boolean {
+  const r = resolveTypeAlias(t);
+  return r === 'unknown' || r === 'any';
+}
+
+/**
+ * The names of the symbols and of the operators that the walk of the
+ * admission checks (`compiledNodeWhere()`) finds in `expr`, bound or free:
+ * `kept` in the code that the target keeps, `dropped` in the branches that
+ * it drops (`droppedOperandsOf()`). `assignments` holds the `Assign` nodes
+ * of the code that is kept.
+ */
+function namesReadIn(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): { kept: Set<string>; dropped: Set<string>; assignments: Set<Expression> } {
+  const kept = new Set<string>();
+  const dropped = new Set<string>();
+  const assignments = new Set<Expression>();
+  compiledNodeWhere(
+    expr,
+    target,
+    (node, isKept) => {
+      const name = isSymbol(node)
+        ? node.symbol
+        : isFunction(node)
+          ? node.operator
+          : undefined;
+      if (name !== undefined) (isKept ? kept : dropped).add(name);
+      if (isKept && isFunction(node, 'Assign')) assignments.add(node);
+      return false;
+    },
+    (node) => droppedOperandsOf(node, target)
+  );
+  return { kept, dropped, assignments };
+}
+
+/**
+ * The first `Assign` of the code that is kept whose value has a shape that
+ * conflicts with the type of the input it writes (the shape classes of
+ * `assignedTypesConflict()`: a number, a complex number, a string, a list,
+ * a point, a matrix), or
+ * `undefined` when there is none. `analysis` is the reference analysis of
+ * `expr` (`inputsOf()`), which lists, for each input, the `Assign` nodes
+ * that write the input and not a local of the same name.
+ *
+ * The compiled code reads an input in the shape of its type, the declared
+ * type or the type that inference gives. Inference reads the type from a
+ * read of the name, not from the values that the code assigns to it: with
+ * `x: real` and `p` undeclared, in
+ * `Block(If(x > 0, p ≔ [1, 2], p ≔ [3, 4]), 2p)` the read `2p` gives `p`
+ * the type `number`, and the compiled code read the list as a number
+ * (`null` where the interpreter gives `[2, 4]`). With `p` declared `real`,
+ * the value `[1, 2]` is not a value of the type of `p`. Both decline. A
+ * value whose type settles no shape, and an input whose type settles none
+ * (a union of shapes), are not compared.
+ */
+function assignedInputConflict(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  analysis: ReturnType<typeof inputsOf>
+): Expression | undefined {
+  const ce = expr.engine;
+  const arity = isShaderTarget(target);
+  let kept: Set<Expression> | undefined;
+  for (const [name, assigns] of analysis.assignedInputs) {
+    if (target.boundVars?.has(name) || isCompileBoundName(name)) continue;
+    const symbol =
+      freeSymbolOccurrence(name, analysis.occurrences) ?? ce.symbol(name);
+    const declared = symbol.type.type;
+    if (shapeOfType(declared) === undefined) continue;
+    // The compiled code reads an input of type `number` as a real number
+    // (its lowered type is `number`), so a complex value assigned to it is a
+    // value of another representation: with `q: number`,
+    // `Block(If(x > 0, q ≔ 2i), q + 1)` gave `"[object Object]1"`. In the
+    // `complex` compile mode such an input is lifted to a complex number.
+    const r = resolveTypeForCompilation(declared);
+    const inputType: Readonly<Type> =
+      isSubtype(r, 'number') && !isSubtype(r, 'complex') && !complexMode(target)
+        ? 'real'
+        : declared;
+    for (const assign of assigns) {
+      const assigned = assignedTypesOf(assign).get(name);
+      if (assigned === undefined) continue;
+      // An input declared real keeps a plain number in the `complex` mode
+      // too: only a wider type is lifted.
+      if (
+        !assignedTypesConflict(
+          [inputType, assigned],
+          arity,
+          complexMode(target) && !isSubtype(r, 'real')
+        )
+      )
+        continue;
+      kept ??= namesReadIn(expr, target).assignments;
+      if (kept.has(assign)) return assign;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Decline the compilation when an input has the static type `unknown` or
+ * `any` (`untypedInputs()`): `names` are the names of these inputs.
+ *
+ * The compiled code reads each input in one shape, a number, a list or a
+ * point, and the shape comes from the input's type. With no type, the shape
+ * is not known, and the compiled value can differ from the interpreter's:
+ * with `M` undeclared, `If(M < 3, M, 0)` read `M` as a number, and gave `0`
+ * for `M = [1, 5]` where the interpreter gives `[1, 0]`. The host declares
+ * the input (`ce.declare("M", "real")`, or a union such as
+ * `real | list<real>` when it can pass both shapes).
+ *
+ * This applies on every target. The diagnostic has the code
+ * `'untyped-input'` and the kind `'correctness'`. Its `value` is the names
+ * of the inputs, separated by commas, for display. The interpreter fallback
+ * puts each name in `unsupported` (`buildInterpreterFallback()`): the
+ * names of `value`, and those that `untypedInputsOf()` finds (also when
+ * another reason declines first).
+ */
+function throwUntypedInputs(names: ReadonlyArray<string>): never {
+  const list = names.map((name) => `\`${name}\``).join(', ');
+  throw new CompileDeclineError({
+    code: UNTYPED_INPUT_CODE,
+    kind: 'correctness',
+    message:
+      `Could not compile: the input${names.length > 1 ? 's' : ''} ${list} ` +
+      `${names.length > 1 ? 'have' : 'has'} no type (\`unknown\` or ` +
+      `\`any\`). Declare the type of each input, for example with ` +
+      `\`ce.declare("${names[0]}", "real")\`.`,
+    value: names.join(','),
+  });
+}
+
+/**
+ * The shape of the values of a type, as the compiled code represents them:
+ * a scalar (a number or a boolean), a tuple (a point) of `arity` elements,
+ * or a list whose elements have the shape `element`. An `arity` or an
+ * `element` that is `undefined` is not known.
+ */
+type ValueShape =
+  | { kind: 'scalar' }
+  | { kind: 'tuple'; arity?: number }
+  | { kind: 'list'; element?: ValueShape };
+
+/**
+ * The shape of the values of `t`, or `undefined` when `t` does not settle
+ * one: `unknown`, `any`, a string, a record, a function, or a union whose
+ * members have different shapes (`real | list<real>`, `broadcastable<real>`).
+ */
+function shapeOfType(t: Readonly<Type>, depth = 0): ValueShape | undefined {
+  if (depth > 16) return undefined;
+  const r = resolveTypeForCompilation(t);
+  if (r === 'unknown' || r === 'any' || r === 'never' || r === 'error')
+    return undefined;
+  if (typeof r !== 'string' && r.kind === 'union') {
+    const shapes = r.types.map((m) => shapeOfType(m, depth + 1));
+    const first = shapes[0];
+    if (first === undefined) return undefined;
+    for (const s of shapes)
+      if (s === undefined || shapesConflict(first, s)) return undefined;
+    return first;
+  }
+  if (isSubtype(r, 'number') || isSubtype(r, 'boolean'))
+    return { kind: 'scalar' };
+  if (typeof r !== 'string' && r.kind === 'tuple')
+    return { kind: 'tuple', arity: r.elements.length };
+  if (typeof r !== 'string' && r.kind === 'list')
+    return {
+      kind: 'list',
+      element: shapeOfType(listElementType(r), depth + 1),
+    };
+  if (isSubtype(r, 'tuple')) return { kind: 'tuple' };
+  if (isSubtype(r, 'list')) return { kind: 'list' };
+  return undefined;
+}
+
+/**
+ * True when no value can have both shapes: a scalar and a list, a point and
+ * a list of points, two lists whose elements conflict, and, when `arity` is
+ * true, two points of different arities. A part that is not known does not
+ * conflict.
+ */
+function shapesConflict(a: ValueShape, b: ValueShape, arity = true): boolean {
+  if (a.kind !== b.kind) return true;
+  if (a.kind === 'tuple' && b.kind === 'tuple')
+    return (
+      arity &&
+      a.arity !== undefined &&
+      b.arity !== undefined &&
+      a.arity !== b.arity
+    );
+  if (a.kind === 'list' && b.kind === 'list')
+    return (
+      a.element !== undefined &&
+      b.element !== undefined &&
+      shapesConflict(a.element, b.element, arity)
+    );
+  return false;
+}
+
+/**
+ * The value of a condition when it is known at compile time: the symbol
+ * `True` or `False`, or a pure condition whose static type is the literal
+ * value `True` or `False`, as the type of `2 < 3` is (`booleanClaim()`,
+ * the test that the code generation uses to skip a branch). `undefined`
+ * when the condition is decided at run time.
+ */
+function knownCondition(cond: Expression): boolean | undefined {
+  if (isSymbol(cond, 'True')) return true;
+  if (isSymbol(cond, 'False')) return false;
+  return booleanClaim(cond);
+}
+
+/**
+ * The indices of the operands of an `If(cond, a, b)` or of a
+ * `Which(c1, v1, c2, v2, ...)` that the generated code drops, from the
+ * operands `ops`. A dropped operand is never evaluated, so its shape does
+ * not matter, and the code does not read the inputs in it.
+ *
+ * On the targets that are not shaders, a branch whose condition is known to
+ * be `False` (`knownCondition()`) is dropped, and the clauses after a
+ * condition known to be `True` (their conditions and their values) are
+ * dropped.
+ *
+ * On the shader targets (GLSL, WGSL), every branch that the shader code has
+ * must have the same type, also a branch that is never taken, or the shader
+ * is not valid. The operands dropped are those that the shader lowering
+ * does not emit:
+ * - an `If` whose condition has a static type that is the literal value
+ *   `True` or `False` (`booleanClaim()`, as for `2 < 3`) emits only the
+ *   selected branch. An `If` whose condition is the symbol `True` or
+ *   `False` emits both branches: `If(False, (1, 2), 0)` gives
+ *   `((false) ? (vec2(1.0, 2.0)) : (0.0))` on GLSL.
+ * - a `Which` emits every clause up to the first clause whose condition is
+ *   the symbol `True`, and no clause after it. A condition whose static
+ *   type is a literal value does not drop its clause:
+ *   `Which(2 < 3, (1, 2), True, 0)` gives
+ *   `((true) ? (vec2(1.0, 2.0)) : ((0.0)))` on GLSL.
+ *
+ * A condition that is not known keeps its branch, because the choice is
+ * made at run time. A condition is never dropped when the clause before it
+ * is kept: the condition of a branch known to be `False` is not emitted,
+ * but its static type is a literal value, so it reads no input.
+ */
+function droppedOperands(
+  operator: 'If' | 'Which',
+  ops: ReadonlyArray<Expression>,
+  shader: boolean
+): Set<number> {
+  const dropped = new Set<number>();
+  if (operator === 'If') {
+    const known = shader ? booleanClaim(ops[0]) : knownCondition(ops[0]);
+    if (known === true) dropped.add(2);
+    else if (known === false) dropped.add(1);
+    return dropped;
+  }
+  for (let i = 0; i + 1 < ops.length; i += 2) {
+    const known = shader
+      ? isSymbol(ops[i], 'True') || undefined
+      : knownCondition(ops[i]);
+    if (known === false) dropped.add(i + 1);
+    if (known === true) {
+      for (let j = i + 2; j < ops.length; j++) dropped.add(j);
+      break;
+    }
+  }
+  return dropped;
+}
+
+/**
+ * True when the condition `c` of an `If` or of a `Which` has a scalar type
+ * (a boolean). A conditional whose condition has another type selects
+ * element by element over a collection condition: it is not a choice
+ * between its branches.
+ *
+ * When `unknownIsScalar` is true (the walk of `assignmentConflictIn()`,
+ * and the comparison of the branches of `hasConflictingBranches()` and
+ * `endValuesOf()`, where it can only add comparisons), two more conditions
+ * count as a scalar:
+ * - a condition of type `unknown`: the type gives no information about the
+ *   value (an untyped parameter of a function literal, for example), and
+ *   the code for the condition reads such a value as a scalar;
+ * - a condition whose type has no single shape but cannot hold a
+ *   collection, such as `number | missing`: no value of that type selects
+ *   element by element, so the conditional is a choice between its
+ *   branches.
+ *   A union with a tuple member (`boolean | tuple<boolean, boolean>`) is
+ *   such a type: a tuple selects as one value.
+ * A condition whose type can hold a collection (`list<boolean>`, `any`, a
+ * union with a list member) or whose type is a tuple does not count: the
+ * walk declines such a conditional when a branch changes the state.
+ */
+function hasScalarCondition(
+  c: Expression | undefined,
+  unknownIsScalar = false
+): boolean {
+  if (c === undefined) return false;
+  const shape = shapeOfType(c.type.type);
+  if (shape?.kind === 'scalar') return true;
+  if (!unknownIsScalar) return false;
+  const r = resolveTypeForCompilation(c.type.type);
+  if (r === 'unknown') return true;
+  return (
+    shape === undefined &&
+    !c.type.matches('collection<any>') &&
+    !mayBeCollectionCondition(c.type.type) &&
+    !isSubtype('list<any>', r)
+  );
+}
+
+/**
+ * The indices of the operands of `node` that the generated code for
+ * `target` drops (`droppedOperands()`), or `undefined` when it drops none:
+ * `node` is not an `If` or a `Which`, or it has a condition whose type is
+ * not a scalar (`hasScalarCondition()`). The walk of the admission checks
+ * (`unsettledShapeIn()`, `untypedInputs()`) does not apply them to the
+ * nodes in a dropped operand: on JavaScript, the code of
+ * `If(2 < 3, 0, If(x > 0, [1, 2], 3))` is `0`.
+ */
+function droppedOperandsOf(
+  node: Expression,
+  target: CompileTarget<Expression>
+): ReadonlySet<number> | undefined {
+  if (!isFunction(node)) return undefined;
+  const shader = isShaderTarget(target);
+  // A function of the target for `Which` (a caller override through the
+  // `functions` option, or a function of the target itself) receives every
+  // operand (`compileExprWhich()`, `compile-conditionals.ts`), so none is
+  // dropped: with `functions: { Which: 'myWhich' }`,
+  // `Which(True, 0, True, M)` compiles to `myWhich(true, 0, true, _.M)`. An
+  // `If` with no else branch that is not a statement is compiled as a
+  // `Which`: `If(False, M)` gives `myWhich(false, _.M)`. For an `If`, a
+  // condition whose type is a literal value (`booleanClaim()`) drops its
+  // branch before the function is used (`compileExprIf()`), and a function
+  // given as a string then receives every operand: with
+  // `functions: { If: 'myIf' }`, `If(True, 0, M)` compiles to
+  // `myIf(true, 0, _.M)`. A function given as a JavaScript function
+  // compiles the operands that it chooses (the `If` of `interval-js` drops
+  // a branch whose condition is `True` or `False`), so the rules below
+  // apply to it.
+  const ifFn = target.functions?.('If');
+  const whichFn = target.functions?.('Which');
+  let dropped: Set<number> | undefined;
+  if (node.operator === 'If' && node.nops === 2 && whichFn) return undefined;
+  if (node.operator === 'If' && hasScalarCondition(node.ops[0]))
+    dropped = droppedOperands(
+      'If',
+      node.ops,
+      shader || typeof ifFn === 'string'
+    );
+  else if (
+    node.operator === 'Which' &&
+    !whichFn &&
+    node.ops.every((c, i) => i % 2 === 1 || hasScalarCondition(c))
+  )
+    dropped = droppedOperands('Which', node.ops, shader);
+  return dropped !== undefined && dropped.size > 0 ? dropped : undefined;
+}
+
+/** True on the shader targets, GLSL and WGSL. */
+function isShaderTarget(target: CompileTarget<Expression>): boolean {
+  return target.language === 'glsl' || target.language === 'wgsl';
+}
+
+/**
+ * The branches of a conditional node, whose value is the value of the node:
+ * the two branches of an `If`, the values of a `Which`, the bodies of the
+ * cases of a `Match`. `undefined` for another node, and for an `If` or a
+ * `Which` with a condition whose type is not a scalar
+ * (`hasScalarCondition()`): the shape of the value of such a conditional
+ * is the shape of the condition, or it is not known.
+ *
+ * Of an `If` or a `Which`, only the branches that the generated code keeps
+ * are returned (`droppedOperands()`, where `shader` selects the rule of the
+ * GLSL and WGSL targets): on JavaScript, `Which(2 < 3, [1, 2], True, 0)`
+ * has one branch, the list. `unknownIsScalar` is as in
+ * `hasScalarCondition()`.
+ */
+function conditionalBranches(
+  node: Expression,
+  shader: boolean,
+  unknownIsScalar = false
+): Expression[] | undefined {
+  if (!isFunction(node)) return undefined;
+  const kept = (operator: 'If' | 'Which', first: number): Expression[] => {
+    const dropped = droppedOperands(operator, node.ops, shader);
+    const branches: Expression[] = [];
+    for (let i = first; i < node.ops.length; i += operator === 'If' ? 1 : 2)
+      if (!dropped.has(i)) branches.push(node.ops[i]);
+    return branches;
+  };
+  if (node.operator === 'If')
+    return hasScalarCondition(node.ops[0], unknownIsScalar)
+      ? kept('If', 1)
+      : undefined;
+  if (node.operator === 'Which')
+    return node.ops.every(
+      (c, i) => i % 2 === 1 || hasScalarCondition(c, unknownIsScalar)
+    )
+      ? kept('Which', 1)
+      : undefined;
+  if (node.operator === 'Match')
+    return node.ops
+      .slice(1)
+      .filter((c) => isFunction(c, 'MatchCase') && c.ops.length >= 2)
+      .map((c) => (c as Expression & { ops: Expression[] }).ops.at(-1)!);
+  return undefined;
+}
+
+/**
+ * True when `node` is a conditional (`If`, `Which`, `Match`) with two
+ * branches whose static types settle shapes that conflict
+ * (`shapesConflict()`), such as `If(x > 0, [1, 2], 3)` (a list and a scalar)
+ * or `If(x > 0, (1, 2), [(1, 2), (3, 4)])` (a point and a list of points).
+ *
+ * A branch whose type settles no shape (`unknown`, `any`, a union of shapes,
+ * `broadcastable<T>`) is not compared: the shape of such a value is decided
+ * at run time by the dispatch that compiles it today (the test of the
+ * result of a user-function call, the broadcast of an operand). A branch
+ * with no value (`Nothing`, the missing `else` of an `If`) is not compared
+ * either.
+ *
+ * Two points of different arities (`If(x > 0, (1, 2), (3, 4, 5))`, of type
+ * `tuple<integer, integer> | tuple<integer, integer, integer>`) conflict
+ * only when `arity` is true. The shader targets set it: a point is a
+ * `vec2`, a `vec3` or a `vec4` there, and the two branches of a conditional
+ * must have the same type. On the other targets a point of any arity is
+ * one array, and the consumers of the value read its arity at run time
+ * (`Norm`, `PointX`, an element-wise sum), so the union is a type that
+ * compiles.
+ */
+function hasConflictingBranches(node: Expression, arity: boolean): boolean {
+  // `arity` is true on the shader targets, and only there.
+  const branches = conditionalBranches(node, arity, true);
+  if (branches === undefined || branches.length < 2) return false;
+  return haveConflictingShapes(branches, arity);
+}
+
+/**
+ * The values that `e` can give when its evaluation ends at its end, and not
+ * at a `Return`: the last value of a `Block`, each branch that the code for
+ * the target keeps of a conditional with a scalar condition
+ * (`conditionalBranches()`), and each value that a `Break` of a `Loop`
+ * gives (`breakValuesOf()`). A `Return`, a `Break` and a `Continue` give no
+ * value here: they leave `e`. A `Loop` that ends with no `Break` gives
+ * `Nothing`, which is not compared. For another node, the value is `e`.
+ *
+ * The cases of a `Match` are held raw, and the type of a raw expression is
+ * not known. When `matchCases` is given, a `Match` gives the values of its
+ * canonical case bodies (`matchCasePartsOf()`, with the innermost local
+ * scope of the engine around the `Match`, from `scope` and the nodes that
+ * the walk goes through); otherwise its raw bodies, which are not compared.
+ */
+function endValuesOf(
+  e: Expression,
+  target: CompileTarget<Expression>,
+  matchCases = false,
+  scope?: Scope
+): Expression[] {
+  // A node that several branches share (a DAG, as in
+  // `If(c, e, e)` where both branches are the same object) is visited once,
+  // and each value is listed once: without this, a chain of `n` such
+  // conditionals gives 2^n values.
+  const values = new Set<Expression>();
+  const seen = new Set<Expression>();
+  const shader = isShaderTarget(target);
+  const visit = (
+    e: Expression,
+    depth: number,
+    around: Scope | undefined
+  ): void => {
+    if (seen.has(e)) return;
+    seen.add(e);
+    if (depth > 64 || !isFunction(e)) {
+      values.add(e);
+      return;
+    }
+    const h = e.operator;
+    if (h === 'Return' || h === 'Break' || h === 'Continue') return;
+    if (matchCases && h === 'Match') {
+      for (const b of matchCasePartsOf(e, around, true))
+        visit(b, depth + 1, caseScopeOf(b, around));
+      return;
+    }
+    const inner = e.localScope ?? around;
+    if (h === 'Block') {
+      if (e.nops > 0) visit(e.ops[e.nops - 1], depth + 1, inner);
+      return;
+    }
+    if (h === 'Loop') {
+      for (const v of breakValuesOf(e, target)) visit(v, depth + 1, inner);
+      return;
+    }
+    const branches = conditionalBranches(e, shader, true);
+    if (branches === undefined) values.add(e);
+    else for (const b of branches) visit(b, depth + 1, inner);
+  };
+  visit(e, 0, scope);
+  return [...values];
+}
+
+/**
+ * The operands of the control statements `heads` in `body`, in the code
+ * that the target keeps: an operand that the target drops
+ * (`droppedOperandsOf()`) is not read, and neither is a nested function
+ * literal (its `Return` statements belong to it) or a `Hold`. When
+ * `inLoops` is false, the walk does not go into a nested `Loop` either.
+ * A statement with no operand gives no value, and is not listed.
+ */
+function controlValuesIn(
+  body: Expression,
+  target: CompileTarget<Expression>,
+  head: 'Return' | 'Break',
+  inLoops: boolean
+): Expression[] {
+  const values: Expression[] = [];
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): void => {
+    if (!isFunction(e) || seen.has(e)) return;
+    seen.add(e);
+    const h = e.operator;
+    if (h === 'Function' || h === 'Hold') return;
+    if (h === head) {
+      if (e.nops > 0) values.push(e.ops[0]);
+      return;
+    }
+    if (h === 'Loop' && !inLoops) return;
+    const dropped = droppedOperandsOf(e, target);
+    if (dropped === undefined) codeOperandsOf(e).forEach(visit);
+    else
+      e.ops.forEach((op, i) => {
+        if (!dropped.has(i)) visit(op);
+      });
+  };
+  visit(body);
+  return values;
+}
+
+/**
+ * The values that the `Break` statements of the `Loop` `loop` give: each
+ * becomes the value of the loop. A `Break` of a nested loop belongs to
+ * that loop, and a `Break` in a nested function literal to that literal.
+ */
+function breakValuesOf(
+  loop: Expression,
+  target: CompileTarget<Expression>
+): Expression[] {
+  if (!isFunction(loop, 'Loop') || loop.nops === 0) return [];
+  return controlValuesIn(loop.ops[0], target, 'Break', false);
+}
+
+/**
+ * The values that a unit of code can give, where `body` is its code: the
+ * body of a function literal, or the root of the compilation. These are
+ * the value of each `Return` that belongs to the unit, and the values of
+ * the body when its evaluation ends at its end (`endValuesOf()`).
+ *
+ * A `Return` belongs to the innermost function literal around it, or to
+ * the root when there is none. The interpreter takes it out of every
+ * `Block` and every `Loop` between it and that literal: in
+ * `a ↦ Block(Loop(If(a > 1, Return(3)), Element(k, 1..3)), [1, 2])`, the
+ * literal gives `3` or `[1, 2]`.
+ */
+function unitValuesOf(
+  body: Expression,
+  target: CompileTarget<Expression>
+): Expression[] {
+  return [
+    ...new Set([
+      ...controlValuesIn(body, target, 'Return', true).flatMap((v) =>
+        endValuesOf(v, target)
+      ),
+      ...endValuesOf(body, target),
+    ]),
+  ];
+}
+
+/**
+ * True when two of `values` have static types that settle shapes that
+ * conflict (`shapesConflict()`, with `arity` as in
+ * `hasConflictingBranches()`). A value whose type settles no shape is not
+ * compared. Each distinct shape is compared once, so the cost depends on the
+ * number of distinct shapes, not on the number of values.
+ */
+function haveConflictingShapes(
+  values: ReadonlyArray<Expression>,
+  arity: boolean
+): boolean {
+  if (values.length < 2) return false;
+  return haveConflictingTypes(
+    values.map((v) => v.type.type),
+    arity
+  );
+}
+
+/**
+ * True when two of the types `types` settle shapes that conflict
+ * (`shapesConflict()`), as `haveConflictingShapes()` tests the types of its
+ * values. A type that settles no shape is not compared.
+ */
+function haveConflictingTypes(
+  types: ReadonlyArray<Readonly<Type>>,
+  arity: boolean
+): boolean {
+  if (types.length < 2) return false;
+  const shapes: ValueShape[] = [];
+  const keys = new Set<string>();
+  for (const t of types) {
+    const s = shapeOfType(t);
+    if (s === undefined) continue;
+    const key = JSON.stringify(s);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    if (shapes.some((other) => shapesConflict(other, s, arity))) return true;
+    shapes.push(s);
+  }
+  return false;
+}
+
+/**
+ * True when `node` is a function literal or a `Loop` whose values have
+ * conflicting shapes (`haveConflictingShapes()`): the values of the body of
+ * the literal (`unitValuesOf()`), or the values that the `Break`
+ * statements of the loop give (`breakValuesOf()`). With `M: list<real>`,
+ * the body of `(a: list<real>) ↦ Block(If(Length(a) > 1, Return(First(a))),
+ * Reverse(a))` gives a number or a list.
+ */
+function hasConflictingValues(
+  node: Expression,
+  target: CompileTarget<Expression>,
+  arity: boolean
+): boolean {
+  if (isFunction(node, 'Function') && node.nops > 0)
+    return haveConflictingShapes(unitValuesOf(node.ops[0], target), arity);
+  if (isFunction(node, 'Loop'))
+    return haveConflictingShapes(
+      [
+        ...new Set(
+          breakValuesOf(node, target).flatMap((v) => endValuesOf(v, target))
+        ),
+      ],
+      arity
+    );
+  return false;
+}
+
+/**
+ * How the parent `node` uses the value of its operand at index `i`:
+ * - `'statement'`: the value is discarded. This is a statement of a `Block`
+ *   that is not its last one, and the body of a `Loop`.
+ * - `'end'`: the value is the value of `node`, so it is used when the value
+ *   of `node` is used. This is the last statement of a `Block`, a branch of
+ *   an `If` or a `Which` with scalar conditions (`hasScalarCondition()`),
+ *   a case of a `Match` and the body of a `MatchCase`. This is the rule of
+ *   `endValuesOf()`.
+ * - `'value'`: the value is used, for every other operand.
+ */
+function operandUse(
+  node: Expression,
+  i: number
+): 'statement' | 'end' | 'value' {
+  if (!isFunction(node)) return 'value';
+  const h = node.operator;
+  const last = i === node.nops - 1;
+  if (h === 'Block') return last ? 'end' : 'statement';
+  if (h === 'Loop') return i === 0 ? 'statement' : 'value';
+  if (h === 'If')
+    return i > 0 && hasScalarCondition(node.ops[0]) ? 'end' : 'value';
+  if (h === 'Which')
+    return i % 2 === 1 &&
+      node.ops.every((c, j) => j % 2 === 1 || hasScalarCondition(c))
+      ? 'end'
+      : 'value';
+  if (h === 'Match') return i > 0 ? 'end' : 'value';
+  if (h === 'MatchCase') return last ? 'end' : 'value';
+  return 'value';
+}
+
+/**
+ * The names that the `Assign` or the `Declare` `node` writes, each with the
+ * static type of the value that it writes, or `undefined` when that type is
+ * not known. A destructuring `Tuple` target gives each leaf the type of the
+ * element at its position, when the type of the value is a tuple of the
+ * same length; otherwise the leaves have no known type. The placeholder `_`
+ * is not a name, and is not listed. Another target (`At(L, i)`) writes no
+ * name. A `Declare` with no value writes its names with no known type.
+ */
+function assignedTypesOf(
+  node: Expression
+): Map<string, Readonly<Type> | undefined> {
+  const result = new Map<string, Readonly<Type> | undefined>();
+  if (!isFunction(node) || node.nops === 0) return result;
+  const record = (t: Expression, type: Readonly<Type> | undefined): void => {
+    if (isSymbol(t)) {
+      if (t.symbol !== '_') result.set(t.symbol, type);
+    } else if (isFunction(t, 'Tuple')) {
+      const r =
+        type === undefined ? undefined : resolveTypeForCompilation(type);
+      const elements =
+        r !== undefined &&
+        typeof r !== 'string' &&
+        r.kind === 'tuple' &&
+        r.elements.length === t.nops
+          ? r.elements
+          : undefined;
+      t.ops.forEach((leaf, i) => record(leaf, elements?.[i].type));
+    }
+  };
+  if (node.operator === 'Assign' && node.nops >= 2)
+    record(node.ops[0], node.ops[1].type.type);
+  else if (node.operator === 'Declare')
+    record(node.ops[0], declareValueOperand(node.ops)?.type.type);
+  return result;
+}
+
+/**
+ * The type that the `Declare` `node` states for its name, or `undefined`
+ * when it states none, states `unknown`, or states a type that does not
+ * parse.
+ */
+function statedTypeOf(node: Expression): Readonly<Type> | undefined {
+  if (!isFunction(node, 'Declare')) return undefined;
+  const spec = declareTypeOperand(node.ops);
+  const source = spec === undefined ? undefined : declaredTypeSource(spec);
+  if (source === undefined || source === 'unknown') return undefined;
+  try {
+    return parseType(source, node.engine._typeResolver);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True when the compilation uses the `complex` compile mode: the option
+ * `mode: 'complex'` of the target, or the discipline of that mode in force
+ * (`complexDiscipline()`, also for the retry of the `auto` mode). Every
+ * value that is not typed real is then lifted to a complex number where it
+ * is used, so a real and a complex value have one representation.
+ */
+function complexMode(target: CompileTarget<Expression>): boolean {
+  return target.mode === 'complex' || complexDiscipline();
+}
+
+/**
+ * True when no compiled value can have the types of all of `types`: two of
+ * them settle shapes that conflict (`haveConflictingTypes()`, with `arity`
+ * as in `hasConflictingBranches()`), or one is a string and another is not,
+ * or one is real (or boolean) and another is complex and not real.
+ *
+ * The compiled code gives a name one representation, which the type of the
+ * name selects: a number, a complex number (an object with a real and an
+ * imaginary part in JavaScript), a string, an array for a list, an array for
+ * a point, an array of arrays for a matrix. These are the shape classes of
+ * the rule of `assignmentConflictIn()`. The length of a list is not part of
+ * its shape: `[1, 2]` and `[1, 2, 3]` do not conflict. A type that settles
+ * no shape (`unknown`, `any`, a union of shapes, `number`, which admits both
+ * a real and a complex value) is not compared on the axis it does not settle.
+ */
+function assignedTypesConflict(
+  types: ReadonlyArray<Readonly<Type>>,
+  arity: boolean,
+  /** True in the `complex` compile mode (`complexMode()`). */
+  complex: boolean
+): boolean {
+  if (haveConflictingTypes(types, arity)) return true;
+  const classes = new Set<'string' | 'real' | 'complex' | 'other'>();
+  for (const t of types) {
+    const r = resolveTypeForCompilation(t);
+    if (r === 'unknown' || r === 'any' || r === 'never' || r === 'error')
+      continue;
+    if (isSubtype(r, 'string')) classes.add('string');
+    else if (isSubtype(r, 'real') || isSubtype(r, 'boolean'))
+      classes.add('real');
+    else if (isSubtype(r, 'complex')) classes.add('complex');
+    else if (shapeOfType(r) !== undefined) classes.add('other');
+  }
+  // In the `complex` compile mode, every value that is not typed real is
+  // lifted to a complex number where it is used (`complexMode()`), so
+  // a real and a complex value have one representation there.
+  return (
+    (classes.has('string') && classes.size > 1) ||
+    (classes.has('real') && classes.has('complex') && !complex)
+  );
+}
+
+// The local scope of the function literal that binds the captures of
+// each canonical case part with captures (`matchCasePartsOf()`).
+const caseScopes = new WeakMap<Expression, Scope>();
+
+/**
+ * The innermost local scope of the engine for the code of `part`, a part of
+ * a `Match` case from `matchCasePartsOf()` or a node in it: the scope of the
+ * function literal that binds the captures of the part, the `localScope`
+ * of the part, or `around`.
+ */
+function caseScopeOf(
+  part: Expression,
+  around: Scope | undefined
+): Scope | undefined {
+  return caseScopes.get(part) ?? part.localScope ?? around;
+}
+
+/**
+ * The guard and the body of each case of the `Match` `node`, in the
+ * canonical form that the compiled code evaluates. The operands of a
+ * `MatchCase` are held raw, and the type of a raw expression is not known,
+ * so a check that reads types must read the canonical form. As
+ * `compileMatchGuard()` and `compileMatchBody()` (`compile-match.ts`) do, a
+ * part with no capture is made canonical in `scope`, the local scope around
+ * the `Match`, and a part with captures is the body of a function literal
+ * whose parameters are the captures (`buildCaseClosure()`). A part that
+ * cannot be made canonical is returned raw.
+ *
+ * The scope that binds the names of a part (`caseScopeOf()`) is the local
+ * scope of that function literal for a part with captures: a nested
+ * `Match` in the part must be made canonical there, where the captures are
+ * bound, or its canonical form would declare the captures in an outer scope
+ * of the engine.
+ */
+function matchCasePartsOf(
+  node: Expression,
+  scope: Scope | undefined,
+  /** When true, only the bodies, not the guards. */
+  bodiesOnly = false
+): Expression[] {
+  if (!isFunction(node, 'Match')) return [];
+  const ce = node.engine;
+  const inScope = <T>(f: () => T): T =>
+    scope === undefined ? f() : ce._inScope(scope, f);
+  const canonical = (e: Expression, names: string[]): Expression => {
+    try {
+      if (names.length === 0) return inScope(() => e.canonical);
+      const closure = inScope(() => buildCaseClosure(ce, e, names));
+      if (!isFunction(closure, 'Function')) return e;
+      const body = closure.ops[0];
+      const bound = closure.localScope ?? body.localScope;
+      if (bound !== undefined) caseScopes.set(body, bound);
+      return body;
+    } catch {
+      return e;
+    }
+  };
+  const parts: Expression[] = [];
+  for (const segment of getMatchPlan(ce, node.ops).segments)
+    for (const c of segment.cases) {
+      if (!bodiesOnly && c.hasGuard && c.guard !== undefined)
+        parts.push(canonical(c.guard, c.captureNames));
+      parts.push(canonical(c.body, c.captureNames));
+    }
+  return parts;
+}
+
+/**
+ * The operands of `e` that the walks of this file read as code: for a
+ * `Declare`, its name and its value (`declareValueOperand()`, also when the
+ * value is in the dictionary of its attributes, which is not a function
+ * node); for another node, its operands, where a dictionary operand stands
+ * for its values. With `Declare(f, {value: p ↦ …})`, the body of the literal
+ * is then searched as the body of a stored function.
+ */
+function codeOperandsOf(e: Expression): Expression[] {
+  if (!isFunction(e)) return [];
+  if (e.operator === 'Declare') {
+    const value = declareValueOperand(e.ops);
+    return value === undefined ? [e.ops[0]] : [e.ops[0], value];
+  }
+  return e.ops.flatMap((op) => (isDictionary(op) ? [...op.values] : [op]));
+}
+
+/**
+ * For each `Match` node in `bodies`, the innermost local scope of the
+ * engine around it (the `localScope` of the nearest enclosing node that
+ * has one), or `undefined` when no node around it has one. The walk does
+ * not enter a `Hold`.
+ */
+function localScopesOf(
+  bodies: ReadonlyArray<Expression>
+): Map<Expression, Scope | undefined> {
+  const result = new Map<Expression, Scope | undefined>();
+  const seen = new Set<Expression>();
+  const stack: [Expression, Scope | undefined][] = bodies.map((b) => [
+    b,
+    undefined,
+  ]);
+  while (stack.length > 0) {
+    const [e, outer] = stack.pop()!;
+    if (!isFunction(e) || seen.has(e)) continue;
+    seen.add(e);
+    if (e.operator === 'Hold') continue;
+    if (e.operator === 'Match') result.set(e, outer);
+    const scope = e.localScope ?? outer;
+    for (const op of codeOperandsOf(e)) stack.push([op, scope]);
+  }
+  return result;
+}
+
+/**
+ * The names that the target of the `Assign` or the `Declare` `node` writes,
+ * each with the static type of its symbol: the declared type of the name,
+ * or the type that inference gives it. A name whose symbol is not known (a
+ * leaf of a destructuring `Tuple` that is not a symbol) is not listed.
+ */
+function targetTypesOf(node: Expression): Map<string, Readonly<Type>> {
+  const result = new Map<string, Readonly<Type>>();
+  if (!isFunction(node) || node.nops === 0) return result;
+  if (node.operator !== 'Assign' && node.operator !== 'Declare') return result;
+  const record = (t: Expression): void => {
+    if (isSymbol(t)) {
+      if (t.symbol !== '_') result.set(t.symbol, t.type.type);
+    } else if (isFunction(t, 'Tuple')) t.ops.forEach(record);
+  };
+  record(node.ops[0]);
+  return result;
+}
+
+/**
+ * The first assignment in `bodies` that gives a name a value whose shape
+ * class conflicts with another value or with the type of the same name in
+ * the same scope (`assignedTypesConflict()`), or another part of `bodies`
+ * whose effects the compiled code does not reproduce, as an
+ * `UnsettledShape`; `undefined` when there is none. `bodies` are the root
+ * of the compilation and the user-function bodies and stored values that
+ * the compiled code reaches.
+ *
+ * The compiled code gives each variable one representation, which its type
+ * selects. So, for each variable, the walk collects these types: the type
+ * of each value that an `Assign` or a `Declare` gives it, the type of its
+ * symbol (declared, or inferred from its uses), the type that a `Declare`
+ * states for it, and for a parameter of a function literal the type of the
+ * parameter (and, for a literal that `Apply` applies where it is written,
+ * the type of each scalar argument). When two of these types conflict, the
+ * compilation declines with the reason `'assignments'`, and the diagnostic
+ * names the `Assign` (or the `Declare`, or the function literal) that adds
+ * the type that conflicts. With `x: real`, the body of
+ * `t ↦ Block(If(x > 0, p ≔ [1, 2], p ≔ 3), 2p)` declines, and so does
+ * `Block(p ≔ 0, p ≔ [1, 2], p)`, also when the interpreter has a value:
+ * the order of the assignments and the paths of the code are not examined.
+ * `Block(p ≔ [1, 2], p ≔ [1, 2, 3], p)` compiles: the length of a list is
+ * not part of its shape. A value whose type settles no shape is not
+ * compared. A variable whose `Declare` states a type that admits several
+ * shapes (a union such as `real | list<real>`, or `broadcastable<number>`)
+ * is not checked: the declaration asks for both shapes, as a declared union
+ * does for an input (rule R1), and the compiled code tests the shape of the
+ * value where it reads it.
+ *
+ * The variables are identified by name, and a name is a new variable only
+ * where it is certainly one: a parameter of a function literal, a name that
+ * a `Declare` statement of a `Block` declares (in that block), and the index
+ * of a clause of a `Loop`, a `Sum`, a `Product`, a `Comprehension` or an
+ * `Integrate`. Every other occurrence of a name, in any of `bodies`, is the
+ * same variable: a local that a block or a function body creates by its
+ * first assignment, and a local of the same name elsewhere, are compared as
+ * one variable. This can decline where the interpreter has a value (two
+ * functions that each use a local `p` of a different shape); it never
+ * accepts two shapes for one variable.
+ *
+ * The same walk declines for the effects that the compiled code does not
+ * reproduce. These declines do not depend on the shapes, and each is the
+ * simple, sound version of its rule:
+ * - `'index-assignment'`: an `Assign`, in a function literal, of the index
+ *   of a `Loop`, a `Sum`, a `Product`, a `Comprehension` or an `Integrate`
+ *   that encloses the literal. With
+ *   `Block(n ≔ 0, Loop(Block(Apply(u ↦ k ≔ 5, 0), n ≔ n + 1), Element(k, 1..3)), n)`
+ *   the interpreter gives 3 and the compiled code gave 1. An assignment of
+ *   the index directly in the body is left to the code generation of each
+ *   target, which declines it or compiles it to a new variable.
+ * - `'elementwise'`: an `If` or a `Which` whose condition is or can be a
+ *   collection (`hasScalarCondition()` with `unknownIsScalar`; an `Equal`
+ *   or a `NotEqual`, which compares whole values, is not such a condition)
+ *   and whose branch assigns a name or has a `Return`, a `Break` or a
+ *   `Continue` (`changesState()`). The interpreter selects element by
+ *   element, and the compiled code cannot run a branch for some elements
+ *   only.
+ * - `'scoped-assignment'`, for a `Comprehension`, a `Sum`, a `Product` or an
+ *   `Integrate` with a part where an assignment does not have the same
+ *   effect in the interpreter and in the compiled code (`scopedPartsOf()`)
+ *   and that has an effect outside itself (`writesOuterName()`; for an
+ *   `Integrate`, any assignment, `changesState()`), and for a `Sum` or a
+ *   `Product` whose body has a `Return`, or a `Break` or a `Continue` that
+ *   no `Loop` of the body encloses.
+ * - `'scoped-assignment'`, for a function literal that has an effect
+ *   outside itself (`writesOuterName()`: it assigns a name of an enclosing
+ *   scope or an element of one, or a `Break` or a `Continue` leaves it).
+ *   For a callback, the interpreter and the compiled code do not agree on
+ *   such an effect: with `Block(p ≔ 0, Filter(L, u ↦ Block(p ≔ 5, u > 1)),
+ *   p)`, the interpreter gives 0 (it does not run the callback when the
+ *   result is not used) and the compiled code gave 5. The check cannot see
+ *   every path by which a function reaches a callback operator (a stored
+ *   function passed by name, behind an `If`, returned by another literal),
+ *   so it declines for every such literal: a callback, the value of a
+ *   `Declare` or an `Assign`, a literal returned by another one, and the
+ *   body of a user function that the code calls (a root of `bodies` after
+ *   the first). Two literals are exempt: the root of the compilation, which
+ *   the host calls, and a literal that `Apply` applies where it is written,
+ *   whose body runs once as inline code. That one declines only when a
+ *   `Break` or a `Continue` leaves it, or when an argument is not known to
+ *   be a scalar (the literal can then map over the argument and run its
+ *   body zero or more times) and it assigns a name of an enclosing scope.
+ *   User decision 2026-11-01 (the simple decline), ROADMAP CE-720.
+ *
+ * `writesOuterName()` tells a local from an outer name by the bindings of
+ * the local scopes (`ownLocalNames()`): two user functions that each assign
+ * a local `t` do not write an outer name.
+ *
+ * A `Hold` and an operand that the target drops (`droppedOperandsOf()`) are
+ * not walked. The walk uses a stack, not recursion, so the depth of the
+ * code does not matter.
+ *
+ * Design: the simple rule for assignments of R3 in
+ * `docs/plans/2026-10-31-static-shape-compilation.md` (CE-712.1).
+ */
+function assignmentConflictIn(
+  bodies: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): UnsettledShape | undefined {
+  const shader = isShaderTarget(target);
+  // A scope maps each name that it binds to the key of its variable. A name
+  // with no entry is the variable `*:<name>`.
+  type Env = ReadonlyMap<string, string>;
+  const keyOf = (env: Env, name: string): string =>
+    env.get(name) ?? `*:${name}`;
+  let nextScope = 0;
+  const indexKeys = new Set<string>();
+  // For each scope, the keys of the clause indices that are bound outside
+  // the innermost function literal around it.
+  const crossedIndices = new WeakMap<Env, ReadonlySet<string>>();
+  const bind = (
+    env: Env,
+    names: Iterable<string>,
+    kind: 'names' | 'indices' | 'function' = 'names'
+  ): Env => {
+    const id = nextScope++;
+    const next = new Map(env);
+    for (const name of names) {
+      const key = `${id}:${name}`;
+      next.set(name, key);
+      if (kind === 'indices') indexKeys.add(key);
+    }
+    const crossed = crossedIndices.get(env);
+    if (kind === 'function')
+      crossedIndices.set(
+        next,
+        new Set([...env.values()].filter((k) => indexKeys.has(k)))
+      );
+    else if (crossed !== undefined) crossedIndices.set(next, crossed);
+    return next;
+  };
+
+  // The variables whose `Declare` states a type that admits values of
+  // several shapes (a union, `broadcastable<number>`).
+  const declaredUnions = new Set<string>();
+  // The types of each variable, in the order of the walk, each with the
+  // node that gives it.
+  const variables = new Map<
+    string,
+    { type: Readonly<Type>; node: Expression }[]
+  >();
+  const add = (
+    key: string,
+    type: Readonly<Type> | undefined,
+    node: Expression
+  ): void => {
+    if (type === undefined) return;
+    const entries = variables.get(key);
+    if (entries === undefined) variables.set(key, [{ type, node }]);
+    else entries.push({ type, node });
+  };
+
+  const writesOuter = (part: Expression, writes?: Expression[]): boolean =>
+    writesOuterName(part, true, writes);
+
+  // The roots of `bodies` after the first one: the bodies of the user
+  // functions that the compiled code calls, and the values that it inlines.
+  const reached = new Set(bodies.slice(1));
+
+  // Each entry: a node, the scope of names around it, its parent, and the
+  // innermost local scope of the engine around it (to make the parts of a
+  // `Match` canonical).
+  type Entry = [Expression, Env, Expression | undefined, Scope | undefined];
+  const stack: Entry[] = bodies.map((b) => [
+    b,
+    new Map(),
+    undefined,
+    undefined,
+  ]);
+  // A node can be shared by several parents (a DAG): it is walked once for
+  // each scope and each parent that reach it.
+  const seen = new Map<Expression, [Env, Expression | undefined][]>();
+  while (stack.length > 0) {
+    const [node, outer, parent, outerScope] = stack.pop()!;
+    if (!isFunction(node)) continue;
+    const scope = node.localScope ?? outerScope;
+    const visits = seen.get(node);
+    if (visits?.some(([env, p]) => env === outer && p === parent)) continue;
+    if (visits === undefined) seen.set(node, [[outer, parent]]);
+    else visits.push([outer, parent]);
+    const h = node.operator;
+    if (h === 'Hold') continue;
+    let env = outer;
+
+    if (h === 'Function') {
+      const params = parametersOf(node);
+      env = bind(outer, params.keys(), 'function');
+      for (const [name, type] of params) add(keyOf(env, name), type, node);
+      if (isFunction(parent, 'Apply') && parent.ops[0] === node) {
+        // Applied where it is written: the body runs once, as inline code,
+        // unless an argument is not known to be a scalar (the literal can
+        // then map over it and run its body zero or more times).
+        const args = parent.ops.slice(1);
+        const scalar = args.map((a) => isSubtype(a.type.type, 'scalar'));
+        if (
+          writesOuterName(node, false) ||
+          (scalar.some((x) => !x) && writesOuter(node))
+        )
+          return { node: parent, reason: 'scoped-assignment' };
+        node.ops.slice(1).forEach((p, k) => {
+          const name = parameterName(p);
+          if (name !== undefined && scalar[k] === true)
+            add(keyOf(env, name), args[k].type.type, parent);
+        });
+      } else if (
+        (parent !== undefined || reached.has(node)) &&
+        writesOuter(node)
+      )
+        // Every other function literal that assigns a name of an enclosing
+        // scope declines: a callback, a stored function, a returned
+        // function, and the body of a user function that the code calls
+        // (user decision 2026-11-01, ROADMAP CE-720).
+        return { node: parent ?? node, reason: 'scoped-assignment' };
+    } else if (h === 'Block') {
+      const declared: string[] = [];
+      for (const stmt of node.ops)
+        if (isFunction(stmt, 'Declare'))
+          declared.push(...assignedTypesOf(stmt).keys());
+      if (declared.length > 0) env = bind(outer, declared);
+    } else if (CLAUSE_OPERATORS.has(h)) {
+      const indices: string[] = [];
+      for (const clause of node.ops.slice(1))
+        indices.push(...clauseIndexNames(clause));
+      if (indices.length > 0) env = bind(outer, indices, 'indices');
+      if (
+        h !== 'Loop' &&
+        (scopedPartsOf(node).some((part) =>
+          h === 'Integrate' ? changesState(part) : writesOuter(part)
+        ) ||
+          // The compiled code of the body of a `Sum` or a `Product` is an
+          // expression, not the body of a loop: a `Break` or a `Continue`
+          // in it cannot leave the loop of the sum, or an enclosing `Loop`,
+          // and a `Return` in it cannot end the enclosing function.
+          ((h === 'Sum' || h === 'Product') &&
+            node.nops > 0 &&
+            writesOuterName(node.ops[0], false)))
+      )
+        return { node, reason: 'scoped-assignment' };
+    } else if (h === 'If' || h === 'Which') {
+      const isCondition = (i: number): boolean =>
+        h === 'If' ? i === 0 : i % 2 === 0;
+      // An `Equal` or a `NotEqual` compares its operands as whole values in
+      // the interpreter and in the compiled code (`_SYS.eq`), also when its
+      // static type is `list<boolean>` because an operand is a union with a
+      // list member: it does not select element by element.
+      // Test: `collection-equality-absent.test.ts`, "an operand that is only
+      // POSSIBLY a collection is read the same way".
+      const elementwise = node.ops.some(
+        (c, i) =>
+          isCondition(i) &&
+          !isFunction(c, 'Equal') &&
+          !isFunction(c, 'NotEqual') &&
+          !hasScalarCondition(c, true)
+      );
+      if (
+        elementwise &&
+        node.ops.some((op, i) => !isCondition(i) && changesState(op))
+      )
+        return { node, reason: 'elementwise' };
+    } else if (h === 'Assign' || h === 'Declare') {
+      const values = assignedTypesOf(node);
+      const symbols = targetTypesOf(node);
+      const stated = h === 'Declare' ? statedTypeOf(node) : undefined;
+      const statesUnion =
+        stated !== undefined &&
+        (() => {
+          const r = resolveTypeForCompilation(stated);
+          return (
+            typeof r !== 'string' &&
+            (r.kind === 'union' || r.kind === 'broadcastable') &&
+            shapeOfType(r) === undefined
+          );
+        })();
+      for (const [name, type] of values) {
+        const key = keyOf(env, name);
+        if (statesUnion) declaredUnions.add(key);
+        if (h === 'Assign' && crossedIndices.get(env)?.has(key) === true)
+          return { node, reason: 'index-assignment' };
+        add(key, stated, node);
+        add(key, symbols.get(name), node);
+        add(key, type, node);
+      }
+    }
+
+    // The parts that the compiled code evaluates: of a `Declare`, its value
+    // (`declareValueOperand()`, also when it is in the dictionary of its
+    // attributes); of a `Match`, the subject and the guard and the body of
+    // each case, in canonical form (`matchCasePartsOf()`); of another node,
+    // the operands that the target keeps.
+    // Each part with its position in the operands of `node`, or -1.
+    let parts: ReadonlyArray<[Expression, number]>;
+    if (h === 'Declare') {
+      const value = declareValueOperand(node.ops);
+      parts = value === undefined ? [] : [[value, -1]];
+    } else if (h === 'Match')
+      parts = [node.ops[0], ...matchCasePartsOf(node, scope)].map((p) => [
+        p,
+        -1,
+      ]);
+    else {
+      const dropped = droppedOperandsOf(node, target);
+      parts = node.ops
+        .map((op, i): [Expression, number] => [op, i])
+        .filter(([, i]) => dropped?.has(i) !== true);
+    }
+    for (const [part] of parts)
+      stack.push([part, env, node, caseScopeOf(part, scope)]);
+  }
+
+  for (const [key, entries] of variables) {
+    if (declaredUnions.has(key)) continue;
+    const types: Readonly<Type>[] = [];
+    for (const { type, node } of entries) {
+      types.push(type);
+      if (
+        types.length > 1 &&
+        assignedTypesConflict(types, shader, complexMode(target))
+      )
+        return { node, reason: 'assignments' };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The parts of `node`, a `Comprehension`, a `Sum`, a `Product` or an
+ * `Integrate`, where an assignment does not have the same effect in the
+ * interpreter and in the compiled JavaScript. In the interpreter, an
+ * assignment in the body or in a clause of a `Comprehension` (other than
+ * the source of its first clause) and in a clause of a `Sum` or a
+ * `Product` does not change the name outside the node, but the compiled
+ * code changes it: with `Block(p ≔ 0, Comprehension(Block(p ≔ 5, i),
+ * Element(i, [1])), p)` the interpreter gives 0 and the compiled code 5. An
+ * assignment in the body or in a clause of an `Integrate` changes the name
+ * in the interpreter, but not in the compiled code, which evaluates the
+ * integrand in a function of its own. The admission walk declines when one
+ * of these parts has an effect outside itself (`writesOuterName()`). The
+ * body of a `Sum` or a `Product` and the source of the first clause of a
+ * `Comprehension` are not returned: an assignment there has the same
+ * effect in both.
+ */
+function scopedPartsOf(node: Expression): Expression[] {
+  if (!isFunction(node) || node.nops === 0) return [];
+  const h = node.operator;
+  const parts: Expression[] = [];
+  if (h === 'Comprehension' || h === 'Integrate') parts.push(node.ops[0]);
+  for (const [k, clause] of node.ops.slice(1).entries()) {
+    if (!isFunction(clause)) {
+      parts.push(clause);
+      continue;
+    }
+    for (const [j, part] of clause.ops.entries()) {
+      if (j === 0 && isSymbol(part)) continue;
+      if (
+        h === 'Comprehension' &&
+        k === 0 &&
+        j === 1 &&
+        clause.operator === 'Element'
+      )
+        continue;
+      parts.push(part);
+    }
+  }
+  return parts;
+}
+
+/**
+ * True when `node`, or a node in it, assigns a name (`Assign`, `Declare`)
+ * or leaves its parent (`Return`, `Break`, `Continue`). A `Hold` is not
+ * searched. The search uses a stack, not recursion, so the depth of
+ * `node` does not matter.
+ */
+function changesState(node: Expression): boolean {
+  const stack: Expression[] = [node];
+  const seen = new Set<Expression>();
+  while (stack.length > 0) {
+    const e = stack.pop()!;
+    if (!isFunction(e) || seen.has(e)) continue;
+    seen.add(e);
+    const h = e.operator;
+    if (h === 'Hold') continue;
+    if (
+      h === 'Assign' ||
+      h === 'Declare' ||
+      h === 'Return' ||
+      h === 'Break' ||
+      h === 'Continue'
+    )
+      return true;
+    for (const op of codeOperandsOf(e)) stack.push(op);
+  }
+  return false;
+}
+
+/**
+ * The name of the parameter `p` of a function literal: a symbol, or the
+ * symbol of a `Typed` parameter (`Typed(u, "real")`, as in
+ * `(u: real) ↦ 2u`). `undefined` for another parameter.
+ */
+function parameterName(p: Expression): string | undefined {
+  if (isSymbol(p)) return p.symbol;
+  if (isFunction(p, 'Typed') && isSymbol(p.ops[0])) return p.ops[0].symbol;
+  return undefined;
+}
+
+/**
+ * The names of the parameters of the function literal `fn`, each with its
+ * type: the type of the symbol (a type that the body infers for it), or
+ * for a `Typed` parameter the type of the parameter in the signature of
+ * `fn`.
+ */
+function parametersOf(fn: Expression): Map<string, Readonly<Type>> {
+  const result = new Map<string, Readonly<Type>>();
+  if (!isFunction(fn, 'Function')) return result;
+  const sig = fn.type.type;
+  const args =
+    typeof sig === 'object' && sig.kind === 'signature'
+      ? [...(sig.args ?? []), ...(sig.optArgs ?? [])]
+      : [];
+  fn.ops.slice(1).forEach((p, k) => {
+    const name = parameterName(p);
+    if (name === undefined) return;
+    result.set(name, isSymbol(p) ? p.type.type : (args[k]?.type ?? 'unknown'));
+  });
+  return result;
+}
+
+/**
+ * The operators whose clauses (`Element(i, …)`, `Limits(i, …)`, the
+ * operands after the first one) bind their index in the body and in the
+ * clauses.
+ */
+const CLAUSE_OPERATORS = new Set([
+  'Loop',
+  'Sum',
+  'Product',
+  'Comprehension',
+  'Integrate',
+]);
+
+/**
+ * The names that the clause `clause` (`Element(i, …)`, `Limits(i, …)`) of
+ * a `Loop`, a `Sum`, a `Product`, a `Comprehension` or an `Integrate`
+ * binds: its index, or each name of a destructuring index
+ * (`Element(Tuple(k, j), pairs)` binds `k` and `j`; the placeholder `_`
+ * binds nothing).
+ */
+function clauseIndexNames(clause: Expression): string[] {
+  if (!isFunction(clause) || clause.nops === 0) return [];
+  const names: string[] = [];
+  const leaves = (t: Expression): void => {
+    if (isSymbol(t)) {
+      if (t.symbol !== '_') names.push(t.symbol);
+    } else if (isFunction(t, 'Tuple')) t.ops.forEach(leaves);
+  };
+  leaves(clause.ops[0]);
+  return names;
+}
+
+/**
+ * The names of `scope` whose binding is its own: the names that the code of
+ * the scope declares or assigns first. A name whose binding is the binding
+ * of the same name in the nearest enclosing scope that has one is not
+ * listed: it is the outer variable. With
+ * `function g(k) { t = k + 1; t }` followed by `let t = 0`, the body of `g`
+ * has a binding of its own for `t` (it shadows the outer `t`), so `t` is a
+ * local of `g`.
+ */
+function ownLocalNames(scope: Scope | undefined): string[] {
+  if (scope === undefined) return [];
+  const result: string[] = [];
+  for (const [name, binding] of scope.bindings) {
+    // `parent` is `null` or missing at the outermost scope.
+    let s = scope.parent ?? undefined;
+    while (s !== undefined && !s.bindings.has(name)) s = s.parent ?? undefined;
+    if (s === undefined || s.bindings.get(name) !== binding) result.push(name);
+  }
+  return result;
+}
+
+/**
+ * True when `part` has an effect outside itself:
+ * - it assigns (`Assign`, `Declare`) a name that is free in `part`. A name
+ *   is bound only where `part` binds it: a parameter of a function literal
+ *   of `part`, a name that a `Declare` statement of a `Block` of `part`
+ *   declares (in that block), the index of a clause of a `Loop`, a `Sum`,
+ *   a `Product`, a `Comprehension` or an `Integrate` of `part`, and a
+ *   local of a `Block` of `part` or of the body of a function literal of
+ *   `part`: a name of its local scope whose binding is its own, not the
+ *   binding of the same name in an enclosing scope (`ownLocalNames()`). A
+ *   body that assigns a name of an enclosing scope does not get a binding
+ *   of its own for it, so that write counts. An `Assign` whose target is
+ *   not a name or a tuple of names (an element of a list) counts as an
+ *   assignment of a free name.
+ * - it has a `Return` that no function literal of `part` encloses (`part`
+ *   counts as such a literal when it is one).
+ * - it has a `Break` or a `Continue` that no `Loop` of `part` encloses.
+ *
+ * When `assignments` is false, only the `Return`, `Break` and `Continue`
+ * statements are searched. When `writes` is given, an assignment of a free
+ * name (an `Assign` or a `Declare` whose target is a name or a tuple of
+ * names) is added to `writes` and does not make the result true: the
+ * result is then true only for the other effects.
+ *
+ * With `Comprehension(Block(Declare(q, 'real'), q ≔ 2i, q), Element(i,
+ * [1, 2, 3]))`, the body declares `q`, so the body has no effect outside
+ * itself. A `Hold` is not searched. The search uses a stack, not
+ * recursion, so the depth of `part` does not matter.
+ */
+function writesOuterName(
+  part: Expression,
+  assignments = true,
+  writes?: Expression[]
+): boolean {
+  type Context = {
+    readonly bound: ReadonlySet<string>;
+    readonly inFunction: boolean;
+    readonly inLoop: boolean;
+  };
+  const stack: [Expression, Context][] = [
+    [part, { bound: new Set(), inFunction: false, inLoop: false }],
+  ];
+  // A node can be shared by several parents (a DAG): it is searched once
+  // for each context that reaches it.
+  const seen = new Map<Expression, Set<Context>>();
+  while (stack.length > 0) {
+    const [e, outer] = stack.pop()!;
+    if (!isFunction(e)) continue;
+    let contexts = seen.get(e);
+    if (contexts?.has(outer)) continue;
+    if (contexts === undefined) seen.set(e, (contexts = new Set()));
+    contexts.add(outer);
+    const h = e.operator;
+    if (h === 'Hold') continue;
+    const names: string[] = [];
+    if (h === 'Function') {
+      names.push(...parametersOf(e).keys());
+      if (e.nops > 0 && isFunction(e.ops[0]))
+        names.push(...ownLocalNames(e.ops[0].localScope));
+    } else if (h === 'Block') {
+      for (const stmt of e.ops)
+        if (isFunction(stmt, 'Declare'))
+          names.push(...assignedTypesOf(stmt).keys());
+      names.push(...ownLocalNames(e.localScope));
+    } else if (CLAUSE_OPERATORS.has(h))
+      for (const clause of e.ops.slice(1))
+        names.push(...clauseIndexNames(clause));
+    const ctx: Context =
+      names.length > 0 || h === 'Function' || h === 'Loop'
+        ? {
+            bound:
+              names.length > 0
+                ? new Set([...outer.bound, ...names])
+                : outer.bound,
+            inFunction: outer.inFunction || h === 'Function',
+            inLoop: outer.inLoop || h === 'Loop',
+          }
+        : outer;
+    if (h === 'Return' && !ctx.inFunction) return true;
+    if ((h === 'Break' || h === 'Continue') && !ctx.inLoop) return true;
+    const assigns = assignments && (h === 'Assign' || h === 'Declare');
+    if (assigns && h === 'Assign' && e.nops > 0 && !isNamesTarget(e.ops[0]))
+      return true;
+    if (assigns)
+      for (const name of assignedTypesOf(e).keys())
+        if (!ctx.bound.has(name)) {
+          if (writes === undefined) return true;
+          writes.push(e);
+          break;
+        }
+    for (const op of codeOperandsOf(e)) stack.push([op, ctx]);
+  }
+  return false;
+}
+
+/**
+ * The first `Return` in `body` (the root of the compilation, or a
+ * user-function body or a stored value that the compiled code reaches)
+ * that a `Loop` encloses and that the compiled code does not handle as the
+ * interpreter does, or `undefined` when there is none. The compiled code
+ * of a `Loop` is a function of its own (in JavaScript, a closure that is
+ * called where the loop is), so a `Return` in its body ends only the loop:
+ * the code after the loop still runs. With `L: list<real>`, the body of
+ * `p ↦ Block(q ≔ 0, Loop(If(i > 1, Block(q ≔ 7, Return(5))), Element(i,
+ * L)), 100 + q)` gives 5 in the interpreter and 107 in the compiled code.
+ *
+ * A `Return` is accepted when the only `Loop` between it and the function
+ * literal (or the root) that it ends is in tail position: the body of the
+ * function, or the last statement of a `Block` in tail position. The
+ * value of the loop is then the value of the function, as in the
+ * interpreter. A `Return` in a nested `Loop` is not accepted.
+ *
+ * The search does not enter a `Hold` or the operands that the target drops
+ * (`droppedOperandsOf()`). It uses a stack, not recursion, so the depth of
+ * `body` does not matter.
+ */
+function returnInLoopIn(
+  body: Expression,
+  target: CompileTarget<Expression>
+): Expression | undefined {
+  // `loops`: the number of `Loop` nodes between the node and the function
+  // that a `Return` ends, up to 2. `tail`: the node is in tail position in
+  // that function. `tailLoop`: the one loop around the node is in tail
+  // position.
+  type Context = { loops: number; tail: boolean; tailLoop: boolean };
+  const stack: [Expression, Context][] = [
+    [body, { loops: 0, tail: true, tailLoop: false }],
+  ];
+  const seen = new Map<Expression, Set<string>>();
+  while (stack.length > 0) {
+    const [e, ctx] = stack.pop()!;
+    if (!isFunction(e)) continue;
+    const key = `${ctx.loops}:${ctx.tail}:${ctx.tailLoop}`;
+    let keys = seen.get(e);
+    if (keys?.has(key)) continue;
+    if (keys === undefined) seen.set(e, (keys = new Set()));
+    keys.add(key);
+    const h = e.operator;
+    if (h === 'Hold') continue;
+    if (h === 'Return' && ctx.loops > 0 && !(ctx.loops === 1 && ctx.tailLoop))
+      return e;
+    const dropped = droppedOperandsOf(e, target);
+    // The value of a `Declare` can be in the dictionary of its attributes
+    // (`codeOperandsOf()`).
+    (h === 'Declare' ? codeOperandsOf(e) : e.ops).forEach((op, i) => {
+      if (dropped?.has(i) === true) return;
+      let next: Context;
+      if (h === 'Function')
+        next =
+          i === 0
+            ? { loops: 0, tail: true, tailLoop: false }
+            : { ...ctx, tail: false };
+      else if (h === 'Loop')
+        next = {
+          loops: Math.min(ctx.loops + 1, 2),
+          tail: false,
+          tailLoop: ctx.loops === 0 && ctx.tail,
+        };
+      else if (h === 'Block')
+        next = { ...ctx, tail: ctx.tail && i === e.nops - 1 };
+      else next = { ...ctx, tail: false };
+      stack.push([op, next]);
+    });
+  }
+  return undefined;
+}
+
+/**
+ * The innermost value of `root` that has no settled shape, or `undefined`
+ * when there is none: a conditional whose branches have conflicting shapes
+ * (`hasConflictingBranches()`), or a function literal, a `Loop` or the root
+ * whose values have conflicting shapes (`hasConflictingValues()`,
+ * `unitValuesOf()`). `assertAdmitted()` declines for it.
+ *
+ * The compiled code gives each value one shape, which the static type
+ * settles. When the branches of a conditional have different shapes, the
+ * shape of its value is known only at run time, and its consumers would
+ * have to test it: `If(x > 0, [1, 2], 3) + 1` is a list or a number. On a
+ * shader target the branches must have the same type, so the code would
+ * not be valid. This is the simple, sound version of the rule: it can
+ * decline where the interpreter has a value, and the compiled code never
+ * gives a different value.
+ *
+ * On the targets that are not shaders, a conditional, a function literal or
+ * a `Loop` whose value the code discards is not checked
+ * (`operandUse()`): a statement of a `Block` that is not its last one, the
+ * body of a `Loop`, and a branch of such a conditional. With `x: real`,
+ * `Block(If(x > 0, p ≔ (1, 2), n ≔ 3), x)` compiles: an `Assign` has the
+ * type of its value, so the branches have different shapes, but the value
+ * of the `If` is not read. A node that is also used as a value somewhere,
+ * or that the walk reaches as the root of a body (a user-function body, a
+ * stored value), is checked. On a shader target every conditional is
+ * checked: the shader code of a conditional in a statement position is a
+ * conditional expression too (`c ? a : b`), and its two branches must have
+ * the same type.
+ *
+ * The values that the code assigns to one variable, and its type, must have
+ * one shape class too (`assignmentConflictIn()`): with `x: real`, the body
+ * of `t ↦ Block(If(x > 0, p ≔ [1, 2], p ≔ 3), 2p)` declines, and so does
+ * `Block(p ≔ 0, p ≔ [1, 2], p)`. The diagnostic names an `Assign`.
+ *
+ * The walk that finds such a conditional is the one of the decline of a
+ * sub-expression of static type `error` (`compiledNodeWhere()`): it goes
+ * into every operand and into the bodies of the user functions that the
+ * code calls, so a call of `f`, with `f(x) = If(x > 0, [x, x], x)`, has no
+ * settled shape. A conditional in a branch that the code for the target
+ * drops (`droppedOperandsOf()`) is not checked, because the code never
+ * evaluates it: `If(2 < 3, 0, If(x > 0, [1, 2], 3))` compiles to `0`. A
+ * sub-expression of static type `error` in a dropped branch still
+ * declines.
+ *
+ * It runs before the code is generated, on every target.
+ *
+ * Design: rule R3 of `docs/plans/2026-10-31-static-shape-compilation.md`.
+ */
+export function unsettledShapeIn(
+  root: Expression,
+  target: CompileTarget<Expression>,
+  /** When true, a sub-expression of static type `error` declines here, as
+   * `throwStaticTypeError()` declines it: the two checks then share one
+   * walk of the expression and of the values it reaches. */
+  staticTypeErrors = false
+): UnsettledShape | undefined {
+  const arity = isShaderTarget(target);
+  // The candidates, innermost first (the walk calls the test of a node
+  // after the tests of its operands).
+  const candidates: UnsettledShape[] = [];
+  // For each operand of a node of the code that is kept: whether some node
+  // uses its value (`'value'`), the parents whose value it is (`'end'`),
+  // and whether it is an operand at all. A node that is never an operand
+  // is the root of a walk, and its value is used.
+  const recorded = new Set<Expression>();
+  const usedAsValue = new Set<Expression>();
+  const isOperand = new Set<Expression>();
+  const endParents = new Map<Expression, Expression[]>();
+  // The user-function bodies and stored values that the walk reaches from
+  // the code that is kept: each is the root of a body, whose value is used,
+  // also when the same node is a discarded statement elsewhere.
+  const roots = new Set<Expression>();
+  // The `Match` nodes of the code that is kept.
+  const matches: Expression[] = [];
+  const error = compiledNodeWhere(
+    root,
+    target,
+    (node, kept) => {
+      if (staticTypeErrors && node.type.type === 'error') return true;
+      if (!kept) return false;
+      // A `Match` in the raw case body of another one is not canonical: it
+      // is reached through the canonical parts of the outer one, in the
+      // scope that binds its names. Made canonical here, it would be made in
+      // the wrong scope, which declares its free names in the engine.
+      if (
+        isFunction(node, 'Match') &&
+        node.isCanonical &&
+        !matches.includes(node)
+      )
+        matches.push(node);
+      if (!arity && isFunction(node) && !recorded.has(node)) {
+        recorded.add(node);
+        const dropped = droppedOperandsOf(node, target);
+        node.ops.forEach((op, i) => {
+          if (dropped?.has(i) === true) return;
+          isOperand.add(op);
+          const use = operandUse(node, i);
+          if (use === 'value') usedAsValue.add(op);
+          else if (use === 'end') {
+            const parents = endParents.get(op);
+            if (parents === undefined) endParents.set(op, [node]);
+            else parents.push(node);
+          }
+        });
+      }
+      if (candidates.every((c) => c.node !== node)) {
+        if (hasConflictingBranches(node, arity))
+          candidates.push({ node, reason: 'branches' });
+        else if (hasConflictingValues(node, target, arity))
+          candidates.push({ node, reason: 'values' });
+      }
+      // The walk goes on, to find a sub-expression of type `error` anywhere,
+      // and to record how each operand is used.
+      return false;
+    },
+    (node) => droppedOperandsOf(node, target),
+    (node, kept) => {
+      if (kept) roots.add(node);
+    }
+  );
+  if (error !== undefined) throwStaticTypeError(error);
+
+  // Whether the value of `node` is used: some node uses it as a value, it
+  // is the root of a walk (`root`, or a body or a stored value that the
+  // walk reached), or it is the value of a node whose value is used. A node
+  // on the stack of the search counts as not used, which ends a cycle.
+  const used = new Map<Expression, boolean>();
+  const isUsed = (node: Expression): boolean => {
+    const known = used.get(node);
+    if (known !== undefined) return known;
+    used.set(node, false);
+    const result =
+      usedAsValue.has(node) ||
+      roots.has(node) ||
+      !isOperand.has(node) ||
+      (endParents.get(node) ?? []).some(isUsed);
+    used.set(node, result);
+    return result;
+  };
+  const unsettled = candidates.find((c) => arity || isUsed(c.node));
+  if (unsettled !== undefined) return unsettled;
+
+  // The cases of a `Match` are held raw, and the type of a raw expression
+  // is not known, so the walk above compares no branch of a `Match` and
+  // checks nothing in its cases. Here the bodies are compared in the
+  // canonical form that the compiled code evaluates (`matchCasePartsOf()`),
+  // made in the local scope around the `Match`, and each guard and each
+  // body is checked for a conditional, a function literal or a `Loop` with
+  // values of different shapes (with no exception for a value that the
+  // code discards), and for a nested `Match` in the same way: with
+  // `x: real`, `Match(x, MatchCase(1, [1, 2]), MatchCase(_, 3))` declines.
+  // This check does not follow the calls of user functions: the walk above
+  // reached their bodies, and a recursive function would loop.
+  if (matches.length > 0) {
+    const scopes = localScopesOf([root, ...roots]);
+    const pending: [Expression, Scope | undefined, boolean][] = matches.map(
+      (m) => [m, scopes.get(m), arity || isUsed(m)]
+    );
+    const done = new Set<Expression>();
+    while (pending.length > 0) {
+      const [m, scope, used] = pending.pop()!;
+      if (done.has(m)) continue;
+      done.add(m);
+      const bodies = matchCasePartsOf(m, scope, true);
+      if (
+        used &&
+        haveConflictingShapes(
+          [
+            ...new Set(
+              bodies.flatMap((b) =>
+                endValuesOf(b, target, true, caseScopeOf(b, scope))
+              )
+            ),
+          ],
+          arity
+        )
+      )
+        return { node: m, reason: 'branches' };
+      // Each node with the innermost local scope around it.
+      const stack: [Expression, Scope | undefined][] = matchCasePartsOf(
+        m,
+        scope
+      ).map((part) => [part, caseScopeOf(part, scope)]);
+      const seen = new Set<Expression>();
+      while (stack.length > 0) {
+        const [e, around] = stack.pop()!;
+        if (!isFunction(e) || seen.has(e) || e.operator === 'Hold') continue;
+        seen.add(e);
+        if (e.operator === 'Match') {
+          pending.push([e, around, true]);
+          continue;
+        }
+        const inner = e.localScope ?? around;
+        if (hasConflictingBranches(e, arity))
+          return { node: e, reason: 'branches' };
+        if (hasConflictingValues(e, target, arity))
+          return { node: e, reason: 'values' };
+        const dropped = droppedOperandsOf(e, target);
+        if (dropped === undefined)
+          for (const op of codeOperandsOf(e)) stack.push([op, inner]);
+        else
+          e.ops.forEach((op, i) => {
+            if (!dropped.has(i)) stack.push([op, inner]);
+          });
+      }
+    }
+  }
+
+  for (const body of [root, ...roots]) {
+    const loopReturn = returnInLoopIn(body, target);
+    if (loopReturn !== undefined)
+      return { node: loopReturn, reason: 'return-in-loop' };
+  }
+  const conflict = assignmentConflictIn([root, ...roots], target);
+  if (conflict !== undefined) return conflict;
+
+  // The root is a unit of code too: a `Return` that no function literal
+  // encloses ends the compiled code with its value. The walk checks a root
+  // that is a function literal.
+  if (
+    !isFunction(root, 'Function') &&
+    haveConflictingShapes(unitValuesOf(root, target), arity)
+  )
+    return { node: root, reason: 'values' };
+  return undefined;
+}
+
+/**
+ * Decline the compilation of `root`, after its code was generated with no
+ * decline, when it does not satisfy the admission rules:
+ * - `unsettled`, the value with no settled shape that `unsettledShapeIn()`
+ *   found before the code was generated, declines first. The diagnostic
+ *   has the code `'unsettled-shape'` and the kind `'capability'`; its
+ *   `value` is the conditional, the function literal, the `Loop` or the
+ *   root, as `toString()` writes it.
+ * - an input with no type (`untypedInputs()`) declines next. The
+ *   diagnostic has the code `'untyped-input'` and the kind
+ *   `'correctness'`; its `value` is the names, separated by commas.
+ * - an `Assign` whose value has a shape that conflicts with the type of the
+ *   input it writes (`assignedInputConflict()`) declines last, with the
+ *   code `'unsettled-shape'`; its `value` is the `Assign`.
+ *
+ * These checks run after the code was generated so that a more specific
+ * reason to decline stays the reason that the result reports: a lowering
+ * that the target does not have, an operand that the target cannot read
+ * (a comparison of vectors on a shader). The interpreter fallback adds the
+ * names of the inputs with no type to `unsupported` also when another
+ * reason is the main one (`buildInterpreterFallback()`). In every case the
+ * compilation declines.
+ *
+ * Design: rules R1 and R3 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`.
+ */
+export function assertAdmitted(
+  root: Expression,
+  target: CompileTarget<Expression>,
+  unsettled: UnsettledShape | undefined
+): void {
+  if (unsettled !== undefined) throwUnsettledShape(unsettled);
+  const analysis = inputsOf(root, target);
+  const names = untypedInputsOf(
+    root,
+    target,
+    analysis.freeSymbols,
+    analysis.occurrences
+  );
+  if (names.length > 0) throwUntypedInputs(names);
+  const conflict = assignedInputConflict(root, target, analysis);
+  if (conflict !== undefined)
+    throwUnsettledShape({ node: conflict, reason: 'assignments' });
+}
+
+/**
+ * Decline the compilation for the value with no settled shape `unsettled`.
+ * The diagnostic has the code `'unsettled-shape'` and the kind
+ * `'capability'`; its `value` is the node, as `toString()` writes it.
+ */
+function throwUnsettledShape(unsettled: UnsettledShape): never {
+  const value = unsettled.node.toString();
+  if (unsettled.reason === 'index-assignment')
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": a function literal assigns the index ` +
+        `of an enclosing \`Loop\`, \`Sum\`, \`Product\`, \`Comprehension\` ` +
+        `or \`Integrate\`, which is not compiled. The interpreter and the ` +
+        `compiled code do not agree on the iterations that follow such an ` +
+        `assignment.`,
+      value,
+    });
+  if (unsettled.reason === 'scoped-assignment') {
+    const op = unsettled.node.operator;
+    if (!['Comprehension', 'Sum', 'Product', 'Integrate'].includes(op)) {
+      // The node is the parent of the literal: the operator that receives
+      // it, or a node that holds it (a stored, returned or user function).
+      const holder = [
+        'Function',
+        'Assign',
+        'Declare',
+        'DefineFunction',
+        'Block',
+      ].includes(op);
+      const what = holder
+        ? 'a function (stored, returned, or a user function that the code ' +
+          'calls)'
+        : `the function passed to \`${op}\``;
+      throw new CompileDeclineError({
+        code: UNSETTLED_SHAPE_CODE,
+        kind: 'capability',
+        message:
+          `Could not compile "${value}": ${what} assigns a name of an ` +
+          `enclosing scope, or has a \`Break\` or a \`Continue\` that leaves ` +
+          `it, which is not compiled. A function can reach an operator that ` +
+          `calls it, such as \`Filter\`, where the interpreter and the ` +
+          `compiled code do not agree on whether such an assignment changes ` +
+          `the name outside the function.`,
+        value,
+      });
+    }
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": an assignment, a \`Return\`, a ` +
+        `\`Break\` or a \`Continue\` inside the \`${op}\` (in its body or ` +
+        `in its clauses) is not compiled. The interpreter and the compiled ` +
+        `code do not agree on whether such an assignment changes the name ` +
+        `outside the \`${op}\`.`,
+      value,
+    });
+  }
+  if (unsettled.reason === 'return-in-loop')
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": a \`Return\` inside a \`Loop\` is ` +
+        `not compiled, unless that loop is the last statement of the ` +
+        `function. The compiled loop is a function of its own, so the ` +
+        `\`Return\` would end only the loop, and the code after the loop ` +
+        `would still run.`,
+      value,
+    });
+  if (unsettled.reason === 'elementwise')
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": its condition is or can be a ` +
+        `collection, so it selects a branch for each element (element-wise ` +
+        `selection), and a branch assigns a name or has a \`Return\`, ` +
+        `a \`Break\` or a \`Continue\`. The compiled code cannot run a ` +
+        `branch for some ` +
+        `elements only.`,
+      value,
+    });
+  const parts =
+    unsettled.reason === 'values'
+      ? 'the values that it can give (the value of a `Return` or of a ' +
+        '`Break`, and its last value) have'
+      : unsettled.reason === 'assignments'
+        ? 'the name that it assigns gets values or types (an assigned ' +
+          'value, its declared or inferred type) that have'
+        : 'its branches have';
+  throw new CompileDeclineError({
+    code: UNSETTLED_SHAPE_CODE,
+    kind: 'capability',
+    message:
+      `Could not compile "${value}": ${parts} different shapes ` +
+      `(for example a number and a list), so the shape of its value is ` +
+      `known only at run time.`,
+    value,
+  });
+}

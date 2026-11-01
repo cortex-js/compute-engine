@@ -11,6 +11,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 let ce: ComputeEngine;
 beforeEach(() => {
   ce = new ComputeEngine();
+  ce.declare('x', 'real');
   ce.declare('g', 'function');
   ce.assign('g', ce.parse('x \\mapsto x + 1'));
 });

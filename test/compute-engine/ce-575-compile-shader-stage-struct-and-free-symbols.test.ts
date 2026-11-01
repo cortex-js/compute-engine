@@ -11,6 +11,7 @@ const wgsl = new WGSLTarget();
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real | signed_infinity | nan');
   ce.declare('k', 'real');
   ce.assign('a', 5);
   ce.parse('h(t) := t^2 + 1').evaluate();

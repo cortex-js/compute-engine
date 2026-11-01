@@ -16,8 +16,9 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 // `RowReduce` has no complex value in the interpreter, so it still fails
 // closed.
 
-function engine(): ComputeEngine {
+function engine(xType = 'real'): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', xType);
   ce.declare('v', 'list<complex>');
   ce.declare('q', { signature: '(unknown) -> unknown' });
   ce.assign('q', ce.parse('s \\mapsto [s, \\imaginaryI]'));
@@ -138,7 +139,7 @@ describe('NORM OF A LIST WITH A COMPLEX ENTRY', () => {
   for (const to of ['glsl', 'wgsl'] as const) {
     const vec = to === 'glsl' ? 'vec2' : 'vec2f';
     it(`${to} computes the norm of the moduli, parse route: Norm([x, i])`, () => {
-      const ce = engine();
+      const ce = engine('real | signed_infinity | nan');
       const result = compile(
         ce.parse('\\operatorname{Norm}([x, \\imaginaryI])'),
         {
@@ -150,7 +151,7 @@ describe('NORM OF A LIST WITH A COMPLEX ENTRY', () => {
       expect(result.code).toBe(`length(${vec}(x, length(${vec}(0.0, 1.0))))`);
     });
     it(`${to} computes the norm of the moduli, box route: Norm([x, i])`, () => {
-      const ce = engine();
+      const ce = engine('real | signed_infinity | nan');
       const result = compile(ce.box(['Norm', ['List', 'x', 'ImaginaryUnit']]), {
         to,
         fallback: false,

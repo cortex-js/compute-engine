@@ -1018,6 +1018,7 @@ describe('PYTHON TARGET', () => {
       // compiled `IsMissing` agrees with the interpreter's `Missing` in
       // every domain and `When`, `If` and `Which` answer alike.
       const e = new ComputeEngine();
+      e.declare('x', 'real');
       e.declare('c', 'boolean');
       // Unknown arm type: numeric until proven otherwise. A value of `c`
       // that is not a boolean selects nothing (ROADMAP CE-569).
@@ -1545,6 +1546,9 @@ describe('PYTHON TARGET', () => {
   // (builtin `sum` / `math.prod`), so they compose everywhere. The engine's
   // inclusive upper bound maps to Python's exclusive `range` upper (`b + 1`).
   describe('Sum / Product → generator expressions', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'real');
+
     it('numeric-bound Sum via compileFunction', () => {
       const expr = ce.parse('\\sum_{k=0}^{3} k^2');
       // This test pins the generator-expression lowering; without the opt-out
@@ -1978,7 +1982,7 @@ describe('PYTHON TARGET', () => {
     it('an If whose branches are assignments compiles to an `if:`/`else:` block', () => {
       const fn = (rel: string, type?: string): string => {
         const scoped = new ComputeEngine();
-        if (type !== undefined) scoped.declare('x', type);
+        scoped.declare('x', type ?? 'real');
         const expr = scoped.box([
           'Block',
           ['Declare', 'r', { str: 'unknown' }, 0],

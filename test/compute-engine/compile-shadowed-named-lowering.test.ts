@@ -24,6 +24,7 @@ function engineWithCopy(
   patch: Record<string, unknown> = {}
 ): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   const def = ce.lookupDefinition(name) as any;
   ce.declare(name, { ...def.operator, ...patch });
   return ce;

@@ -20,6 +20,13 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const ce = new ComputeEngine();
 
 const P = ['PointList', 't', 1];
+
+/** A fresh engine with `t` declared real, for the tests that build their own. */
+function engineWithT(): ComputeEngine {
+  const e = new ComputeEngine();
+  e.declare('t', 'real');
+  return e;
+}
 /** `P` shown only when `1 < t`. */
 const gated = (v: unknown = P) => ['When', v, ['Less', 1, 't']];
 
@@ -237,7 +244,7 @@ describe('A point with an undecided component type beside a list', () => {
    * already inferred `t` to be a number from its other uses, which would
    * type `PointList(t, 1)` as a numeric point. */
   function compiledValue(json: unknown, t: unknown): unknown {
-    const r = compile(new ComputeEngine().box(json as never), {
+    const r = compile(engineWithT().box(json as never), {
       to: 'javascript',
     });
     expect(r.success).toBe(true);
@@ -321,7 +328,7 @@ describe('A point with an undecided component type beside a list', () => {
 
   test('the parsed product is a list of points', () => {
     const r = compile(
-      new ComputeEngine().parse('[1,2,3]\\cdot\\operatorname{PointList}(t,1)'),
+      engineWithT().parse('[1,2,3]\\cdot\\operatorname{PointList}(t,1)'),
       { to: 'javascript' }
     );
     expect(r.success).toBe(true);
@@ -334,9 +341,23 @@ describe('A point with an undecided component type beside a list', () => {
 
   // A LIST held by the free `t` is not spliced into the point on JavaScript:
   // `_SYS.pointSlot` answers NaN for that coordinate. The result is then a
-  // list of points with a NaN coordinate, never a plausible number.
+  // list of points with a NaN coordinate, never a plausible number (the
+  // interpreter answers an `incompatible-dimensions` error). A list for an
+  // input `t` declared `real` gives an undefined result, and an input with
+  // no type is refused (ROADMAP CE-712.1), so `t` is a parameter of the root
+  // function declared `any`.
   test('a list held by the free component is NaN at that coordinate', () => {
-    expect(compiledValue(['Multiply', ['List', 1, 2, 3], P], [1, 2])).toEqual([
+    const r = compile(
+      new ComputeEngine().box([
+        'Function',
+        ['Multiply', ['List', 1, 2, 3], P],
+        ['Typed', 't', "'any'"],
+      ] as never),
+      { to: 'javascript' }
+    );
+    expect(r.success).toBe(true);
+    const run = r.run as unknown as (t: unknown) => unknown;
+    expect(run([1, 2])).toEqual([
       [NaN, 1],
       [NaN, 2],
       [NaN, 3],
@@ -345,6 +366,7 @@ describe('A point with an undecided component type beside a list', () => {
 
   test('a sum with a point-or-list-of-points operand keeps the point whole', () => {
     const ce2 = new ComputeEngine();
+    ce2.declare('t', 'real');
     ce2.declare('W', 'list<tuple<number, number>> | tuple<number, number>');
     const r = compile(ce2.box(['Add', 'W', P] as never), {
       to: 'javascript',
@@ -367,7 +389,7 @@ describe('A point with an undecided component type beside a list', () => {
 
   test('the interval target answers a list of points too', () => {
     const r = compile(
-      new ComputeEngine().box(['Multiply', ['List', 1, 2, 3], P] as never),
+      engineWithT().box(['Multiply', ['List', 1, 2, 3], P] as never),
       { to: 'interval-js' } as never
     );
     expect(r.success).toBe(true);
@@ -577,6 +599,7 @@ describe('The norm of a point with a restricted list component', () => {
   // restricted list of points, and folded a restricted list into one vector
   // of a single norm. Every value is checked against the interpreter.
   const ceR = new ComputeEngine();
+  ceR.declare('t', 'real');
   ceR.declare('L', 'list<real>');
   ceR.declare('y', 'real');
   const pointList = [

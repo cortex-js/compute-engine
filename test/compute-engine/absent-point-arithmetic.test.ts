@@ -827,6 +827,7 @@ describe('a compiled out-of-range read agrees with the interpreter', () => {
   // numeric collection. `Third((1, 2))` only agreed because it folds to a
   // constant: a variable cell keeps the read in the compiled code.
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   const run = (json: any, vars: Record<string, unknown> = {}): unknown => {
     const r = compile(ce.box(json), { fallback: false });
     expect(r.success).toBe(true);

@@ -19,6 +19,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 function compiled(source: string) {
   const ce = new ComputeEngine();
+  ce.declare('m', 'real');
+  ce.declare('x', 'real');
   const [ast] = parseEpsil(source);
   resolveLibraryNames(ast as never, source, ce);
   return compile(ce.box(ast as never), { to: 'javascript', fallback: false });

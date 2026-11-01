@@ -10,6 +10,8 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 // A fresh engine: these declarations must not leak into (or inherit from) the
 // shared test engine.
 const ce = new ComputeEngine();
+ce.declare('c', 'boolean');
+ce.declare('x', 'real | signed_infinity | nan');
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 

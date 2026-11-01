@@ -191,12 +191,14 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
         const det = ce.parse('\\operatorname{Determinant}(g(x)) + 1');
         // The signature of `g` says `(unknown) -> list<list<unknown>>` (its
         // parameter has no use that narrows it), so with a free `x` the
-        // engine types the entries of `g(x)` as unknown. The compiler reads
-        // an untyped free input as a number, as the emitted code does, so
-        // `Trace(g(x))` is a scalar on every lane (ROADMAP CE-377, landed
-        // 2026-10-23; the complex lane declined before).
-        expectValue(js(trace, mode).run({ x: 2 }), trace.subs({ x: 2 }).N());
-        expectValue(js(det, mode).run({ x: 2 }), det.subs({ x: 2 }).N());
+        // engine types the entries of `g(x)` as unknown. A free input with
+        // no type is refused, so `x` is a parameter, declared `any`, of the
+        // root function, and `Trace(g(x))` compiles on every lane (ROADMAP
+        // CE-377; the complex lane declined before).
+        const root = (e: any) =>
+          ce.box(['Function', e.json, ['Typed', 'x', { str: 'any' }]]);
+        expectValue(js(root(trace), mode).run(2), trace.subs({ x: 2 }).N());
+        expectValue(js(root(det), mode).run(2), det.subs({ x: 2 }).N());
       });
 });
 

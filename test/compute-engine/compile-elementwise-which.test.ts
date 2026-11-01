@@ -22,6 +22,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real');
 
 /** Interpretation, projected the way a real (JavaScript) target represents it. */
 function interpreted(expr: Expression): unknown {

@@ -41,6 +41,7 @@ function withDefs(defs: string, expr: any): any {
 /** Run `defs`, then box the Epsil block `src` in the same engine. */
 function withDefsBlock(defs: string, src: string): any {
   const ce = new ComputeEngine();
+  ce.declare('_', 'real');
   executeEpsil(ce, defs);
   const [ast] = parseEpsil(src);
   return ce.box(strip(ast));

@@ -28,6 +28,8 @@ const res = (x: { lo: number; hi: number }) => ({ kind: 'interval', value: x });
 
 describe('IsMissing and Coalesce on the interval target', () => {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   const restricted = compile(ce.parse('\\operatorname{IsMissing}(x\\{x>0\\})'), {
     to: 'interval-js',
   });
@@ -72,6 +74,7 @@ describe('IsMissing and Coalesce on the interval target', () => {
 
 describe('the discharge primitives across the value model (review findings)', () => {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
 
   test('a verdict is a present value: Coalesce over a relation passes it through', () => {
     const fn = compile(ce.parse('\\operatorname{Coalesce}(x < 0, 7)'), {
@@ -157,6 +160,8 @@ describe('the discharge primitives across the value model (review findings)', ()
 
 describe('a restriction over a list value', () => {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   ce.declare('U', 'list<number> | number');
   const fn = compile(ce.parse('U \\left\\{y > 0\\right\\}'), {
     to: 'interval-js',
@@ -192,6 +197,8 @@ describe('a restriction over a relation', () => {
   // undecided the relation holds at most where it held. The JavaScript
   // target reads the same way (its absent condition is falsy).
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   const expr = ce.box([
     'When',
     ['LessEqual', 'y', ['Sin', 'x']],
@@ -216,6 +223,8 @@ describe('a restriction over a relation', () => {
 
 describe('a conditional with list-valued arms', () => {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   ce.declare('A', 'list<number>');
   ce.declare('B', 'list<number>');
   const fn = compile(

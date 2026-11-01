@@ -53,7 +53,10 @@ describe('scalar facts through retained helper locals', () => {
     expect(r.run!({ x: 3 })).toEqual([7, 9]);
   });
 
-  test('reassignment keeps facts valid for earlier statements', () => {
+  // `q` is a list, then a number: the compiled code gives a local one
+  // representation, so the compilation declines (CE-712.1, the simple rule
+  // for assignments). The interpreter fallback gives [11, 7] at x = 4.
+  test('a reassignment of a local to another shape declines', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     define(ce, 'f', [
@@ -66,8 +69,10 @@ describe('scalar facts through retained helper locals', () => {
       ['Add', 'q', 'v'],
     ]);
     const r = compile(ce.box(['f', 'x']));
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 4 })).toEqual([11, 7]);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    ce.assign('x', 4);
+    expect(ce.box(['f', 'x']).evaluate().json).toEqual(['List', 11, 7]);
   });
 
   test('conditional writes retain generic code', () => {

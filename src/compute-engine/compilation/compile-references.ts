@@ -1,7 +1,7 @@
 // Reference analysis of a compilation unit, free symbol types, reports, and
 // the interpreter fallback.
 
-import type { Expression, FunctionInterface } from '../global-types.js';
+import type { Expression, FunctionInterface, Scope } from '../global-types.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { isTupleShapedType } from '../collection-utils.js';
@@ -21,6 +21,7 @@ import {
   isCharacter,
   isFunction,
   isAbsentSymbol,
+  isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import {
@@ -29,9 +30,13 @@ import {
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import { STATIC_TYPE_ERROR_CODE } from './compile-static-type-error.js';
+import { UNSETTLED_SHAPE_CODE, UNTYPED_INPUT_CODE } from './diagnostics.js';
 import { protocolOfSymbol } from '../engine-protocols.js';
 import { planProtocolDispatch } from './protocol-dispatch.js';
-import { matchPatternReferences } from '../boxed-expression/match-dispatch.js';
+import {
+  buildCaseClosure,
+  matchPatternReferences,
+} from '../boxed-expression/match-dispatch.js';
 import type {
   CompileDiagnostic,
   CompileTarget,
@@ -82,6 +87,7 @@ import { declareValueOperand } from './compile-declarations.js';
 import { core } from './compiler-core-hooks.js';
 import { CompilerState } from './compiler-state.js';
 import { implicitIntegrationVariable } from '../boxed-expression/integration-variables.js';
+import { assignmentLocalsOf } from '../assignment-locals.js';
 
 /**
  * Analyze — without compiling, and never throwing — which external references
@@ -110,12 +116,21 @@ import { implicitIntegrationVariable } from '../boxed-expression/integration-var
  * not inside a folded symbol value or a user-function body. A bound
  * occurrence of the same name (the index `q` of `Sum(q, Limits(q, 1, n))`
  * beside a free `q`) is a different variable, with its own type.
+ *
+ * When `assignedInputs` is given, the walk records in it, for each free
+ * symbol that an `Assign` writes, the `Assign` nodes that write it: the
+ * target is the name, or a destructuring `Tuple` whose leaf is the name
+ * (`_` is not a name). An `Assign` whose target the walk finds bound (a
+ * local of a `Block`, an index, a parameter) writes that binding, and is
+ * not recorded: in `Loop(x ≔ 2x, Element(x, 1..3))` the target is the
+ * index `x`, not an input `x`.
  */
 export function analyzeReferences(
   expr: Expression,
   target: CompileTarget<Expression>,
   varsKeys?: ReadonlySet<string>,
-  occurrences?: Map<string, Expression>
+  occurrences?: Map<string, Expression>,
+  assignedInputs?: Map<string, Expression[]>
 ): { freeSymbols: string[]; unsupported: string[] } {
   const engine = expr.engine;
   const free = new Set<string>();
@@ -142,8 +157,20 @@ export function analyzeReferences(
     }
     return names;
   };
+  // The `Assign` whose target the walk visits now, when the target is a
+  // name or a `Tuple` of names (`assignedInputs`).
+  let writing: Expression | undefined;
   const addFree = (e: Expression & { symbol: string }): void => {
+    // The placeholder `_` of a destructuring target (`(a, _) ≔ v`) is not
+    // a name: the statement writes nothing there, and the code does not
+    // read an input `_`.
+    if (writing !== undefined && e.symbol === '_') return;
     free.add(e.symbol);
+    if (writing !== undefined && assignedInputs !== undefined) {
+      const list = assignedInputs.get(e.symbol);
+      if (list === undefined) assignedInputs.set(e.symbol, [writing]);
+      else if (!list.includes(writing)) list.push(writing);
+    }
     if (occurrences === undefined || indirectDepth !== 0) return;
     const recorded = occurrences.get(e.symbol);
     if (
@@ -317,7 +344,44 @@ export function analyzeReferences(
     }
   };
 
+  // The local scopes of the nodes that the walk is inside, innermost last.
+  // A raw `Match` case body is canonicalized in the innermost one, as the
+  // compiled code does (`inCompiledScope()` in `compile-match.ts`).
+  const scopes: Scope[] = [];
   const visit = (e: Expression, bound: ReadonlySet<string>): void => {
+    const scope = isFunction(e) ? e.localScope : undefined;
+    if (scope === undefined) return visitNode(e, bound);
+    scopes.push(scope);
+    try {
+      visitNode(e, bound);
+    } finally {
+      scopes.pop();
+    }
+  };
+  // The canonical form of a raw `Match` case body or guard, made as the
+  // compiled code makes it (`compileMatchBody()` in `compile-match.ts`):
+  // in the innermost local scope, and, when the case captures names, as
+  // the body of a function literal whose parameters are the captures. A
+  // name that the body assigns is then a local of the scope of that body,
+  // as in the compiled code and in the interpreter. In the raw body it
+  // was an input: in `Match(x, 1 -> Map(L, v ↦ Block(q ≔ 2v, q)), …)`,
+  // `q` was reported as a free symbol with the type `unknown`.
+  const canonicalCasePart = (
+    part: Expression,
+    captures: readonly string[]
+  ): Expression => {
+    const inner = scopes[scopes.length - 1];
+    const inScope = <T>(f: () => T): T =>
+      inner === undefined ? f() : engine._inScope(inner, f);
+    try {
+      if (captures.length === 0) return inScope(() => part.canonical);
+      const closure = inScope(() => buildCaseClosure(engine, part, captures));
+      return isFunction(closure, 'Function') ? closure.ops[0] : part;
+    } catch {
+      return part;
+    }
+  };
+  const visitNode = (e: Expression, bound: ReadonlySet<string>): void => {
     // Symbols are not memoized: a symbol is cheap to visit, and every
     // repeated symbol visit hangs off a repeated function node, which is.
     if (isFunction(e) && alreadyVisited(e, bound)) return;
@@ -430,6 +494,13 @@ export function analyzeReferences(
       if (isAbsentSymbol(e)) return;
       // No mapping, no value, not a constant: a genuinely free symbol.
       addFree(e);
+      return;
+    }
+
+    // The values of a dictionary literal are not operands (`ops`), but the
+    // compiled literal reads each of them, so their names are read too.
+    if (isDictionary(e)) {
+      for (const value of e.values) visit(value, bound);
       return;
     }
 
@@ -784,9 +855,13 @@ export function analyzeReferences(
       // targets as locals of the body (`chainedLocalDeclares`).
       const indices: string[] = h === 'Loop' ? chainedLocals(ops[0]) : [];
       const limitExprs: Array<[Expression, ReadonlySet<string>]> = [];
-      // The names that the clauses of a `Comprehension` bind before the
-      // clause being read: a later clause reads an earlier index
-      // (`[(i, j) for i in 1..3 for j in 1..i]`).
+      // The names that the clauses of a `Comprehension` or an `Integrate`
+      // bind before the clause being read: a later clause reads an earlier
+      // index (`[(i, j) for i in 1..3 for j in 1..i]`). The compiled code of
+      // an integral with several limits nests the integral of a later limit
+      // inside the integral of an earlier one, so the bound `x` of
+      // `Integrate(e^(y^2), Limits(x, 0, 1), Limits(y, 0, x))` is the
+      // variable of the first limit, not an input.
       let earlier: ReadonlySet<string> = bound;
       for (const clause of ops.slice(1)) {
         // An indefinite integral (`Limits(x, Nothing, Nothing)`) is
@@ -801,8 +876,20 @@ export function analyzeReferences(
           clause.ops.slice(1).every((b) => isSymbol(b, 'Nothing'))
         ) {
           const variable = clause.ops[0];
-          if (isSymbol(variable) && !bound.has(variable.symbol))
-            addFree(variable);
+          if (isSymbol(variable) && !bound.has(variable.symbol)) {
+            // The variable in the `Limits` is bound in the scope of the
+            // integral, and its type is `unknown`. The input that the
+            // compiled code reads (`_.x`) is the symbol of that name outside
+            // the integral, so its declaration gives the type of the input:
+            // with `x` declared `real`, the input `x` of `\int x^2 dx` is
+            // `real`. When no definition of the name is in scope, the
+            // variable stays the occurrence, and its type is `unknown`.
+            const outer =
+              engine.lookupDefinition(variable.symbol) !== undefined
+                ? engine.symbol(variable.symbol)
+                : undefined;
+            addFree(isSymbol(outer) ? outer : variable);
+          }
           continue;
         }
         if (isFunction(clause)) {
@@ -828,7 +915,8 @@ export function analyzeReferences(
             if (typeof implicit === 'string') names.push(implicit);
           }
           indices.push(...names);
-          const outer = h === 'Comprehension' ? earlier : bound;
+          const outer =
+            h === 'Comprehension' || h === 'Integrate' ? earlier : bound;
           const own = names.length === 0 ? outer : union(outer, names);
           // The operands of an `Element` clause after its collection are
           // its conditions, which read the index of the clause
@@ -841,7 +929,7 @@ export function analyzeReferences(
               clause.operator === 'Element' && i >= 1 ? own : outer,
             ]);
           });
-          if (h === 'Comprehension') earlier = own;
+          if (h === 'Comprehension' || h === 'Integrate') earlier = own;
         } else {
           limitExprs.push([clause, bound]);
         }
@@ -897,6 +985,16 @@ export function analyzeReferences(
           // symbol: `Block(v ≔ 2; v·x)` reported `v` and `x`.
           locals.push(stmt.ops[0].symbol);
         }
+      // A name that only an assignment in a nested block assigns (a loop
+      // body, a branch of an `if`) is a local of a function body when the
+      // canonical form recorded it as an assignment local of the body's
+      // scope (`assignmentLocalsOf()`). The generated code declares it at
+      // the level of the body (`withImplicitLocalDeclares`). It was
+      // reported as a free symbol: in a function declared with the `scope`
+      // effect whose loop body assigns `p ≔ (t, 2t)`, `p` was an input.
+      if (e.localScope !== undefined)
+        for (const name of assignmentLocalsOf(e.localScope) ?? [])
+          if (e.localScope.bindings.has(name)) locals.push(name);
       const inner = locals.length ? union(bound, locals) : bound;
       // Typed block locals extend the declared-type frame (the mirror of
       // the `compileBlock` / `loopBodyTempTarget` merge), so a protocol
@@ -924,18 +1022,39 @@ export function analyzeReferences(
         // (evaluated in the enclosing scope at match time).
         const { captures, pinExprs } = matchPatternReferences(pattern);
         const inner = captures.length ? union(bound, captures) : bound;
-        if (guard !== undefined) visit(guard, inner);
-        visit(body, inner);
+        if (guard !== undefined)
+          visit(canonicalCasePart(guard, captures), inner);
+        visit(canonicalCasePart(body, captures), inner);
         for (const pin of pinExprs) visit(pin, bound);
       }
       return;
     }
 
-    for (const op of ops) visit(op, bound);
+    ops.forEach((op, i) => {
+      if (i === 0 && h === 'Assign' && isNamesTarget(op)) {
+        const saved = writing;
+        writing = e;
+        try {
+          visit(op, bound);
+        } finally {
+          writing = saved;
+        }
+      } else visit(op, bound);
+    });
   };
 
   visit(expr, new Set());
   return { freeSymbols: [...free], unsupported: [...unsupported] };
+}
+
+/**
+ * True when `t`, the target of an `Assign`, is a name or a `Tuple` of
+ * names: the statement writes these names. Another target (`At(L, i)`)
+ * reads its operands.
+ */
+export function isNamesTarget(t: Expression): boolean {
+  if (isSymbol(t)) return true;
+  return isFunction(t, 'Tuple') && t.ops.every(isNamesTarget);
 }
 
 /**
@@ -1010,26 +1129,9 @@ export function freeSymbolTypes(
   const ce = expr.engine;
   const result: Record<string, FreeSymbolType> = {};
   for (const name of names) {
-    // The target of an assignment is not bound to a definition (it has no
-    // `valueDefinition`, and its type is `unknown`). When it is the only
-    // occurrence of an input (`If(c, u ≔ 1, …)` writes `u` and does not
-    // read it), the report reads the definition in scope instead: it was
-    // `unknown`, and a shader declared the local copy of a boolean input
-    // as a `float`.
-    const found = occurrences.get(name);
-    const occurrence =
-      found !== undefined && isSymbol(found) && !found.valueDefinition
-        ? undefined
-        : found;
+    const occurrence = freeSymbolOccurrence(name, occurrences);
     const symbol = occurrence ?? ce.symbol(name);
-    let valueDef: { inferredType: boolean } | undefined;
-    if (occurrence !== undefined && isSymbol(occurrence))
-      valueDef = occurrence.valueDefinition;
-    else {
-      const def = ce.lookupDefinition(name);
-      valueDef = isValueDef(def) ? def.value : undefined;
-    }
-    const declared = valueDef !== undefined && !valueDef.inferredType;
+    const declared = isDeclaredFreeSymbol(expr, name, occurrences);
     let lowered: string | undefined;
     try {
       // A symbol of a kind type is read as the representation that the
@@ -1058,6 +1160,54 @@ export function freeSymbolTypes(
     });
   }
   return result;
+}
+
+/**
+ * True when the type of the free symbol `name` of `expr` is declared, and
+ * not inferred: this is the provenance `'declared'` that
+ * `freeSymbolTypes()` reports. `occurrences` is the map of occurrences that
+ * `analyzeReferences()` recorded. The provenance is read from the
+ * definition that the occurrence is bound to (`freeSymbolOccurrence()`),
+ * or from the definition of `name` in scope when there is no occurrence.
+ */
+function isDeclaredFreeSymbol(
+  expr: Expression,
+  name: string,
+  occurrences: ReadonlyMap<string, Expression>
+): boolean {
+  const occurrence = freeSymbolOccurrence(name, occurrences);
+  let valueDef: { inferredType: boolean } | undefined;
+  if (occurrence !== undefined && isSymbol(occurrence))
+    valueDef = occurrence.valueDefinition;
+  else {
+    const def = expr.engine.lookupDefinition(name);
+    valueDef = isValueDef(def) ? def.value : undefined;
+  }
+  return valueDef !== undefined && !valueDef.inferredType;
+}
+
+/**
+ * The occurrence of the free symbol `name` that its type is read from, from
+ * the occurrences that `analyzeReferences()` recorded, or `undefined` when
+ * the type is read from the definition of `name` in scope
+ * (`ce.symbol(name)`). `freeSymbolTypes()` and the check of the inputs with
+ * no type (`untypedInputs()`, `compile-admission.ts`) read the same type.
+ *
+ * The target of an assignment is not bound to a definition (it has no
+ * `valueDefinition`, and its type is `unknown`). When it is the only
+ * occurrence of an input (`If(c, u ≔ 1, …)` writes `u` and does not read
+ * it), the type is read from the definition in scope instead: it was
+ * `unknown`, and a shader declared the local copy of a boolean input as a
+ * `float`.
+ */
+export function freeSymbolOccurrence(
+  name: string,
+  occurrences: ReadonlyMap<string, Expression>
+): Expression | undefined {
+  const found = occurrences.get(name);
+  return found !== undefined && isSymbol(found) && !found.valueDefinition
+    ? undefined
+    : found;
 }
 
 /**
@@ -1526,7 +1676,7 @@ export function buildInterpreterFallback<T extends string>(
     throwIfCallerCancellation(e, ce._deadlineFrame);
   }
   // The decline of an invalid expression, and the decline of a
-  // sub-expression of static type `error` (`assertNoStaticTypeError()`,
+  // sub-expression of static type `error` (`throwStaticTypeError()`,
   // code `'static-type-error'`), report `ErrorCode` in `unsupported` on every
   // target. A host reads this token to tell a decline for an error in the
   // expression from a decline for a missing lowering. The reference analysis
@@ -1559,6 +1709,50 @@ export function buildInterpreterFallback<T extends string>(
       return {};
     }
   };
+
+  // Every decline names in `unsupported` the inputs whose static type is
+  // `unknown` or `any`. The decline for such an input
+  // (`assertAdmitted()`, code `'untyped-input'`) runs only when nothing
+  // else declines. When the expression declines for another reason, that
+  // reason stays the `error` and the `diagnostic`, and the inputs are named
+  // too: a host still learns which inputs to declare. In both cases the
+  // names come from the same function as the decline (`untypedInputsOf()`,
+  // `compile-admission.ts`), applied to the reference analysis above. Like
+  // the analysis, it never breaks the fallback. The decline of a value with
+  // no settled shape (`assertAdmitted()`, code `'unsettled-shape'`) also
+  // names the node, as `toString()` writes it.
+  const named: string[] = [];
+  if (
+    diagnostic.value !== undefined &&
+    diagnostic.code === UNSETTLED_SHAPE_CODE
+  )
+    named.push(diagnostic.value);
+  // The target of the fallback is made without the options of the caller
+  // (its `functions`), so it can see a name as dropped where the target of
+  // the compilation reads it: with `functions: { Which: 'myWhich' }`,
+  // `Which(True, 0, True, M)` declines for `M`. The names of the decline
+  // itself are always listed.
+  if (diagnostic.value !== undefined && diagnostic.code === UNTYPED_INPUT_CODE)
+    named.push(...diagnostic.value.split(','));
+  if (compileTarget) {
+    try {
+      named.push(
+        ...core.untypedInputsOf(
+          expr,
+          compileTarget,
+          refs.freeSymbols,
+          occurrences
+        )
+      );
+    } catch (e) {
+      throwIfCallerCancellation(e, ce._deadlineFrame);
+    }
+  }
+  const added = [...new Set(named)].filter(
+    (n) => !refs.unsupported.includes(n)
+  );
+  if (added.length > 0)
+    refs = { ...refs, unsupported: [...refs.unsupported, ...added] };
 
   // A function literal (lambda) uses the positional `lambda` calling
   // convention — `run(a, b, ...)`. The fallback must mirror that by applying

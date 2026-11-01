@@ -153,6 +153,7 @@ describe('code generation for document samples', () => {
 
   test('counter arguments avoid broadcast guards while free inputs keep them', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real | list<real>');
     ce.assign('f', ce.expr(['Function', ['Add', 't', 1], 't']));
     const loop = compile(
       ce.expr(['Sum', ['f', 'k'], ['Limits', 'k', 1, 153]]),

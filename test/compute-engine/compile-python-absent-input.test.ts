@@ -5,6 +5,7 @@ import { TEST_PYTHON } from './test-python';
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Compiled Python reads an absent input as `NaN` in arithmetic (ROADMAP
@@ -42,7 +43,15 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
   it('reads a `number | missing` input as NaN in arithmetic', () => {
     expect(src(['Add', 'p', 1])).toBe("(float('nan') if p is None else p) + 1");
     expect(src(['Sin', 'p'])).toBe("np.sin((float('nan') if p is None else p))");
-    expect(src(['Add', 'a', 1])).toBe("(float('nan') if a is None else a) + 1");
+  });
+
+  it('refuses an input declared `any`', () => {
+    // An input with no type (`unknown` or `any`) is refused at compile time
+    // (ROADMAP CE-712.1), with its name in `unsupported`.
+    const r = compile(ce.box(['Add', 'a', 1] as never), { to: 'python' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.unsupported).toContain('a');
   });
 
   it('leaves an input that cannot be absent unchanged', () => {

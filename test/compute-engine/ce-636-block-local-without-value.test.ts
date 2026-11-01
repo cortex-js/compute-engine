@@ -762,7 +762,9 @@ describe('CE-636: an assignment in an operand that is always evaluated', () => {
 
 describe('CE-636: an undeclared input in a condition', () => {
   // The engine declares an undeclared symbol in the scope of the block
-  // that holds it. It is still an input, which the caller can leave out.
+  // that holds it. It is still an input, and it has no type, so the
+  // compilation is refused: the compiled code must know the shape of each
+  // input from its type. The interpreter evaluates the block.
   const IF = (c: unknown) => ['If', c, ['Assign', 'y', 1], ['Assign', 'y', 2]];
   const cases: Array<[string, unknown]> = [
     ['in the block', ['Block', D('y'), IF(['Less', 'z', 0]), 'y']],
@@ -788,12 +790,11 @@ describe('CE-636: an undeclared input in a condition', () => {
   for (const [label, json] of cases) {
     test(label, () => {
       const ce = new ComputeEngine();
-      const expr = ce.box(json as any);
-      const js = compile(expr, { to: 'javascript', fallback: false });
-      expect(js.code).toMatch(CHECK);
-      const run = js.run as (v: Record<string, unknown>) => unknown;
-      expect(() => run({})).toThrow(/read-before-declaration: "y"/);
-      expect(run({ z: -1 })).toBe(1);
+      const refused = compile(ce.box(json as any), { to: 'javascript' });
+      expect(refused.success).toBe(false);
+      expect(refused.diagnostic?.code).toBe('untyped-input');
+      expect(refused.unsupported).toContain('z');
+      expect(refused.run!({ z: -1 })).toBe(1);
     });
   }
 });

@@ -84,6 +84,47 @@ export type EnclosingDefinition = {
 export type DeclineNote = { reason?: string };
 
 /**
+ * A value with no settled shape that `unsettledShapeIn()`
+ * (`compile-admission.ts`) found: `node`, and the `reason`. The reason is
+ * `'branches'` when the branches of a conditional have conflicting shapes,
+ * `'values'` when the values that a function literal, a `Loop` or the
+ * root of the compilation can give have conflicting shapes,
+ * `'assignments'` when the values and the types of one variable (in one
+ * scope) have conflicting shape classes, or when a value that the code
+ * assigns to an input conflicts with the type of the input (`node` is then
+ * the `Assign`, the `Declare` or the function literal that adds the
+ * conflicting type), `'index-assignment'` when an `Assign` in a function
+ * literal writes the index of a `Loop`, `Sum`, `Product`, `Comprehension`
+ * or `Integrate` that encloses the literal (`node` is then the `Assign`),
+ * `'elementwise'` when an `If` or a `Which` whose condition is or can be a collection (it selects element by
+ * element) has a branch that assigns a name or has a `Return`, a `Break` or
+ * a `Continue` (`node` is then the conditional), `'scoped-assignment'` when
+ * a `Comprehension`, a `Sum`, a `Product` or an `Integrate` has, in a part
+ * where the interpreter and the compiled code do not agree on whether an
+ * assignment changes the name outside the node, a part that assigns a name
+ * or has a `Return`, a `Break` or a `Continue` (`node` is then that node),
+ * or when a function literal that is called or applied by its parent
+ * assigns a name of an enclosing scope (`node` is then its consumer, past
+ * the branches of an `If` or a `Which` and the last statement of a
+ * `Block`, or the node that passes the name of such a function as a value,
+ * as `Filter(L, g)`), and
+ * `'return-in-loop'` when a `Return` is inside a `Loop` whose compiled code
+ * would end only the loop (`node` is then the `Return`).
+ * `assertAdmitted()` reads the reason to write the message of the decline.
+ */
+export type UnsettledShape = {
+  node: Expression;
+  reason:
+    | 'branches'
+    | 'values'
+    | 'assignments'
+    | 'index-assignment'
+    | 'elementwise'
+    | 'scoped-assignment'
+    | 'return-in-loop';
+};
+
+/**
  * A run-time check that an argument of a user function is present
  * (`BaseCompiler.absentArgumentChecks`): the message of the `TypeError` the
  * check throws, or `undefined` when an absent value is replaced by `NaN`

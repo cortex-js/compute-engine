@@ -32,6 +32,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  */
 function towerEngine(depth: number): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   ce.assign('f0', ce.box('x'));
   for (let k = 1; k <= depth; k++)
     ce.assign(

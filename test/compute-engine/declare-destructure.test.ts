@@ -680,6 +680,7 @@ describe('Assign with a Tuple pattern: compilation', () => {
     );
   const boxed = (src: string) => {
     const ce = new ComputeEngine();
+    ce.declare('_', 'real');
     const [ast] = parseEpsil(src);
     return ce.box(strip(ast));
   };

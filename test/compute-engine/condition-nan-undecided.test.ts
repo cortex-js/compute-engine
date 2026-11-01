@@ -28,6 +28,9 @@ import { TEST_PYTHON } from './test-python';
  */
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real');
+ce.declare('y', 'real');
+ce.declare('c', 'real');
 
 /** The compiled JavaScript value of `expr` at `vars`. */
 function compiled(expr: any, vars: object): unknown {
@@ -631,6 +634,7 @@ describe('the absence guard of a compiled branch comparison', () => {
 
   test('interval-js: a default-less Which that selects no clause is maybe', () => {
     const e = new ComputeEngine();
+    e.declare('x', 'real');
     const X = { x: { lo: 0, hi: 1 } };
     const run = (expr: any): unknown =>
       compile(e.box(expr), { to: 'interval-js' } as never).run!(X as never);
@@ -653,6 +657,7 @@ describe('the absence guard of a compiled branch comparison', () => {
       e.box(['Greater', ['When', 1, ['Greater', 'x', 5]], 0]).evaluate().symbol
     ).toBe('False');
     const f = new ComputeEngine();
+    f.declare('x', 'real');
     expect(
       compile(f.box(['Greater', ['When', 1, ['Greater', 'x', 5]], 0]), {
         to: 'interval-js',
@@ -904,6 +909,8 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
   });
 
   test('a logarithm with a complex base keeps its root', () => {
+    // A fresh engine: the shared one declares `x` for the compiled tests.
+    const ce = new ComputeEngine();
     // `(1 + i)² = 2i`: the base is not real, so `0 < 1 + i` is not a
     // condition of the root (only `b ≠ 0` and `b ≠ 1` are).
     const roots = ce.parse('\\log_{1+i}(x) = 2').solve('x');

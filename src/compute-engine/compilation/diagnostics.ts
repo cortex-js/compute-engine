@@ -1,6 +1,31 @@
 import type { CompileDiagnostic } from './types.js';
 
 /**
+ * The `code` of the decline of an expression with an input (a free symbol)
+ * whose static type is `unknown` or `any` (`assertAdmitted()`,
+ * `compile-admission.ts`). The interpreter fallback puts the name of each
+ * such input in `unsupported`.
+ */
+export const UNTYPED_INPUT_CODE = 'untyped-input';
+
+/**
+ * The `code` of the decline of a value with no settled shape
+ * (`assertAdmitted()`, `compile-admission.ts`): an `If`, a `Which` or a
+ * `Match` whose branches have different shapes, or a function literal, a
+ * `Loop` or the root of the compilation whose values (the value of each
+ * `Return` or `Break`, and the last value) have different shapes, or a name
+ * that gets values of different shape classes in one scope. The same code
+ * is used for an effect that the compiled code does not reproduce as the
+ * interpreter does: an assignment in a callback, in a `Comprehension` or an
+ * `Integrate`, in a branch of an element-wise conditional, an assignment
+ * of an enclosing loop index in a function literal, and a `Return` inside
+ * a `Loop` (`UnsettledShape.reason`, `compiler-types.ts`, lists them). The
+ * interpreter fallback puts the node, as `toString()` writes it, in
+ * `unsupported`.
+ */
+export const UNSETTLED_SHAPE_CODE = 'unsettled-shape';
+
+/**
  * A compile DECLINE carrying a structured `CompileDiagnostic` (see
  * `CompilationResult.diagnostic`). Thrown by the compiler where a plain
  * `Error` would lose the decline's `code`/`kind`; the target's `compile()`

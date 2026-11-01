@@ -22,6 +22,10 @@ import { engine as ce } from '../utils';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { explicitBroadcastPointNorm } from '../../src/compute-engine/compilation/base-compiler';
 
+ce.declare('x', 'real | signed_infinity | nan');
+ce.declare('y', 'real | signed_infinity | nan');
+ce.declare('z', 'real | signed_infinity | nan');
+
 describe('Item 72 — Comprehension operand-position round trip', () => {
   test('definition row round-trips (Equal)', () => {
     const src = 'H=[k^2\\operatorname{for}k=[1...4]]';

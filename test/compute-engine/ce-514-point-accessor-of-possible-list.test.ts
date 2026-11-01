@@ -161,6 +161,8 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
 
   test('a free plot variable keeps the scalar slot', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     const r = compile(ce.parse('\\mathrm{PointList}(x, y)'), {
       fallback: false,
     });

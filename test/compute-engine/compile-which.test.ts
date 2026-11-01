@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real');
 
 describe('COMPILE Which', () => {
   describe('JavaScript target', () => {

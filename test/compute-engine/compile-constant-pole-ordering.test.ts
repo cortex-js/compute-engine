@@ -26,6 +26,7 @@ const interp = (ce: ComputeEngine, latex: string, x: number): string =>
 
 describe('CE-211: an ordering comparison with a constant pole', () => {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   ce.assign('a', ce.parse('1/0'));
   const cases = [
     'x < 1/0',

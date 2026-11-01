@@ -46,6 +46,7 @@ function towerEngine(
   base: string | number = 'x'
 ): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   ce.assign('f0', ce.box(base));
   for (let k = 1; k <= depth; k++)
     ce.assign(
@@ -154,6 +155,7 @@ describe('COMPILE: folded symbol values are bound once', () => {
 
   it('a leaf value stays inline', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.assign('a', ce.box('x'));
     const js = ce._getCompilationTarget('javascript')!;
     expect(js.compile(ce.parse('a + a')).code).toBe('_.x + _.x');

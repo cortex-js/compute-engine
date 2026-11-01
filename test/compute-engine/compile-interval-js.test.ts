@@ -7,6 +7,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real');
 
 /** The whole emitted artifact: the constant table and the definitions the
  *  preamble carries, then the expression that reads them. Every constant
@@ -1382,6 +1383,7 @@ describe('INTERVAL JS - fails closed on regularized gamma/beta (no kernel)', () 
 // ``Unknown operator `List` `` the clause list used to produce.
 describe('INTERVAL JS - element-wise selection declines cleanly', () => {
   const ceSel = new ComputeEngine();
+  ceSel.declare('x', 'real');
   ceSel.declare('BL', 'list<boolean>');
 
   test('Which with a literal boolean-list condition declines', () => {
@@ -1431,11 +1433,19 @@ describe('INTERVAL JS - element-wise selection declines cleanly', () => {
     // Only PROVABLE collection-ness declines: a condition whose collection-ness
     // is not statically visible must keep compiling (scalar curve/implicit
     // plotting rides this target).
+    // A free input of type `unknown` is refused: the compiled code must know
+    // the shape of each input from its type. A condition over a real input
+    // is not provably a collection either, and compiles.
     const ceWide = new ComputeEngine();
     ceWide.declare('u', 'unknown');
-    const fn = compile(ceWide.box(['Which', ['Less', 'u', 3], 1, 'True', 0]), {
-      to: 'interval-js',
-    });
+    const json = ['Which', ['Less', 'u', 3], 1, 'True', 0] as const;
+    const refused = compile(ceWide.box(json as never), { to: 'interval-js' });
+    expect(refused.success).toBe(false);
+    expect(refused.diagnostic?.code).toBe('untyped-input');
+    expect(refused.unsupported).toContain('u');
+    const ceReal = new ComputeEngine();
+    ceReal.declare('u', 'real');
+    const fn = compile(ceReal.box(json as never), { to: 'interval-js' });
     expect(fn.success).toBe(true);
     expect(fn.code).toContain("=== 'true' ?");
     expect(fn.code).toContain('_IA.hull(');
@@ -1744,20 +1754,15 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     // the point where its condition holds, the number where it fails, and no
     // one value (the absence marker, which the runner answers as `empty`)
     // where the condition is undecided.
+    // Its branches have different shapes (a point and a number), so the
+    // compilation declines: the shape of its value is known only at run
+    // time. The fallback gives the interpreter's value.
     const fw = compile(
       cePt.box(['Which', ['Less', 'a', 1], ['Tuple', 'a', 'b'], 'True', 0]),
       { to: 'interval-js' }
     );
-    expect(fw.success).toBe(true);
-    expect(fw.run!({ a: { lo: 0, hi: 0 }, b: 2 })).toEqual([
-      { kind: 'interval', value: { lo: 0, hi: 0 } },
-      { kind: 'interval', value: { lo: 2, hi: 2 } },
-    ]);
-    expect(fw.run!({ a: { lo: 5, hi: 5 }, b: 2 })).toEqual({
-      kind: 'interval',
-      value: { lo: 0, hi: 0 },
-    });
-    expect(fw.run!({ a: { lo: 0, hi: 5 }, b: 2 })).toEqual({ kind: 'empty' });
+    expect(fw.success).toBe(false);
+    expect(fw.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('a point with a broadcasting component is a list of points', () => {
@@ -1934,6 +1939,9 @@ describe('INTERVAL JS - COLLECTIONS: kernels fail closed, roots and fallbacks ar
   });
 
   test('an If with a collection-valued arm declines', () => {
+    // A list and a number: the branches have different shapes. The shape
+    // check runs after the code is generated, so the more specific reason,
+    // the kernel check, is the one that the result reports.
     const fn = compile(ceC.box(['If', ['Less', 'x', 0], 'Lc', 1]), {
       to: 'interval-js',
     });
@@ -2146,6 +2154,7 @@ describe('INTERVAL JS - NORM OF A POINT WITH A LIST COMPONENT', () => {
   // as the explicit `√(Σ cᵢ²)` when the lists have one known length, and as a
   // run-time zip of the points otherwise.
   const ceN = new ComputeEngine();
+  ceN.declare('y', 'real');
   ceN.declare('L', 'list<real>');
 
   const samples = [
@@ -2262,6 +2271,8 @@ describe('INTERVAL JS - APPLIED DERIVATIVE OF A FUNCTION OF TWO ARGUMENTS', () =
   // `Apply(Derivative(F, k₁, k₂), a, b)` compiles from the closed form of the
   // derivative, which the `Derivative` evaluate handler computes.
   const ceD = new ComputeEngine();
+  ceD.declare('x', 'real');
+  ceD.declare('y', 'real');
   ceD.declare('h', 'function');
   ceD.assign('h', ceD.parse('(u, w) \\mapsto u^2 \\sin(w)'));
 

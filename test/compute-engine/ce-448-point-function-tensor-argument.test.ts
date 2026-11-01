@@ -338,27 +338,35 @@ describe('CE-448: a compiled call that maps one level only fails closed', () => 
         's',
       ])
     );
-    const r = compile(ce.box(['h', 'L', 'u']), {
-      fallback: false,
-    } as any) as any;
+    // A free input of type `unknown` is refused, so `L` and `u` are
+    // parameters of the root function, with their declared types.
+    const r = compile(
+      ce.box([
+        'Function',
+        ['h', 'L', 'u'],
+        ['Typed', 'L', { str: `list<${POINT}>` }],
+        ['Typed', 'u', { str: 'unknown' }],
+      ]),
+      { fallback: false } as any
+    ) as any;
     expect(r.success).toBe(true);
     expect(
-      r.run({
-        L: [
+      r.run(
+        [
           [1, 2],
           [3, 4],
         ],
-        u: [10, 20],
-      })
+        [10, 20]
+      )
     ).toEqual([11, 23]);
     expect(
-      r.run({
-        L: [
+      r.run(
+        [
           [1, 2],
           [3, 4],
         ],
-        u: 5,
-      })
+        5
+      )
     ).toEqual([6, 8]);
   });
 

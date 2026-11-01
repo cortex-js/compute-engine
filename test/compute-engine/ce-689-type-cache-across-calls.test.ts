@@ -404,6 +404,8 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     // body of `p` is typed so while `d00` is compiled. After a call, it is
     // typed again, and its type is the derived one.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     const U1 = '(unknown) -> unknown';
     const U2 = '(unknown, unknown) -> unknown';
     ce.declare('t_0', 'real');

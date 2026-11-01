@@ -264,6 +264,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
 /** An engine with `f := x ↦ sin x` declared. */
 function fEngine(unit: 'rad' | 'deg'): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   ce.angularUnit = unit;
   ce.parse('f \\coloneq x \\mapsto \\sin x').evaluate();
   return ce;
@@ -329,6 +330,7 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
 
   test('deg: cos and the chain rule agree on both routes', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.angularUnit = 'deg';
     const js = ce._getCompilationTarget('javascript')!;
     const k = Math.PI / 180;

@@ -302,6 +302,7 @@ describe('the compact spelling under the hoist exceptions', () => {
 
   test('a user function reading a constant list sees the table', () => {
     const ceF = new ComputeEngine();
+    ceF.declare('k', 'real');
     ceF.assign(
       'f',
       ceF.box(['Function', ['At', ['List', 10, 20, 30], 'n'], 'n'])

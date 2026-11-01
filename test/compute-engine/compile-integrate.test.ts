@@ -914,6 +914,8 @@ describe('COMPILE Integrate — engine hygiene', () => {
   ])('%s', (_form, latex) => {
     test.each(['parse', 'box'])('%s route', (route) => {
       const local = new ComputeEngine();
+      // The input `x` of the indefinite integral needs a type.
+      local.declare('x', 'real');
       const expr =
         route === 'parse'
           ? local.parse(latex)
@@ -963,7 +965,10 @@ describe('COMPILE Integrate — indefinite with no closed form fails closed', ()
   ])(
     'an indefinite integral WITH a closed form still compiles: %s',
     (latex, args, expected) => {
-      const r = compile(ce.parse(latex));
+      // The input `x` of the indefinite integral needs a type.
+      const local = new ComputeEngine();
+      local.declare('x', 'real');
+      const r = compile(local.parse(latex));
       expect(r.success).toBe(true);
       expect(r.run(args as Record<string, number>) as number).toBeCloseTo(
         expected as number,

@@ -31,6 +31,7 @@ function attachWhichHandler(
 describe('Which compile handler (Tycho item 180)', () => {
   test('the handler fires and its code is used', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     let fired = 0;
     attachWhichHandler(ce, (args, c) => {
       fired++;
@@ -54,6 +55,7 @@ describe('Which compile handler (Tycho item 180)', () => {
 
   test('a declining handler falls back to the stock lowering', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     let fired = 0;
     attachWhichHandler(ce, () => {
       fired++;

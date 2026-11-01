@@ -79,15 +79,40 @@ describe('COMPILED CODE AND AN INPUT DECLARED `expression`', () => {
     expect(result.run!({})).toBe(6);
   });
 
-  test.each([['any'], ['value']])(
-    'a symbol declared %s compiles with a run-time test',
-    (type) => {
-      const ce = new ComputeEngine();
-      ce.declare('x', type);
-      const result = js(ce, ['Multiply', 2, 'x']);
-      expect(result.success).toBe(true);
-      expect(result.run!({ x: [1, 2] })).toEqual([2, 4]);
-      expect(result.run!({ x: 3 })).toBe(6);
-    }
-  );
+  test('a symbol declared value compiles with a run-time test', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'value');
+    const result = js(ce, ['Multiply', 2, 'x']);
+    expect(result.success).toBe(true);
+    expect(result.run!({ x: [1, 2] })).toEqual([2, 4]);
+    expect(result.run!({ x: 3 })).toBe(6);
+  });
+
+  // An INPUT declared `any` is refused at compile time (ROADMAP CE-712.1).
+  // A parameter of the root function declared `any` compiles, with the
+  // run-time test of its value.
+  test('an input declared any is refused', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'any');
+    const result = js(ce, ['Multiply', 2, 'x']);
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('untyped-input');
+    expect(result.unsupported).toContain('x');
+  });
+
+  test('a parameter declared any compiles with a run-time test', () => {
+    const ce = new ComputeEngine();
+    const result = compile(
+      ce.box([
+        'Function',
+        ['Multiply', 2, 'x'],
+        ['Typed', 'x', "'any'"],
+      ] as never),
+      { to: 'javascript' } as never
+    )!;
+    expect(result.success).toBe(true);
+    const run = result.run as unknown as (x: unknown) => unknown;
+    expect(run([1, 2])).toEqual([2, 4]);
+    expect(run(3)).toBe(6);
+  });
 });

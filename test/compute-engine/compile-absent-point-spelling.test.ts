@@ -26,6 +26,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+ce.declare('c', 'real');
+ce.declare('d', 'real');
 
 // Using an unregistered target deterministically forces the fallback.
 const FORCE = { to: 'no-such-target' };

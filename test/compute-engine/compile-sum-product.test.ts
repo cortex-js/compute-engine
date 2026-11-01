@@ -6,6 +6,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+ce.declare('m', 'real');
+ce.declare('n', 'real');
 
 /**
  * Extract the numeric interval {lo, hi} from an IntervalResult.

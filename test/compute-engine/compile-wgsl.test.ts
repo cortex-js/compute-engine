@@ -507,9 +507,7 @@ describe('WGSL COMPILATION', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = wgsl.compile(expr, NO_FOLD).code;
-      expect(code).toBe(
-        '((sin(1.0)) + (sin(2.0)) + (sin(3.0)))'
-      );
+      expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
     });
 
     it('should unroll Product with small constant bounds', () => {
@@ -1069,6 +1067,12 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
   ce.parse('h(x) := x^3 + \\sin x').evaluate();
   ce.parse("f := t \\mapsto h'(t)").evaluate();
   ce.declare('L', 'list<real>');
+  // The inputs are declared: an input with no type declines (ROADMAP
+  // CE-712.1).
+  // The type admits the non-finite values that an input with no type
+  // could hold, so the shader code is the code of an untyped input.
+  for (const name of ['t', 'x', 'y', 'a', 'b', 'c', 'd', 'e', 'n'])
+    ce.declare(name, 'real | signed_infinity | nan');
 
   it('compiles the prime of a library function from its closed form', () => {
     expect(wgsl.compile(ce.parse("\\sin'(t)")).code).toBe('_gpu_cos(t)');
@@ -1227,6 +1231,11 @@ describe('WGSL - NORM OF A POINT WITH A LIST COMPONENT', () => {
   // its norm is one number per element. It compiles as the explicit
   // `√(Σ cᵢ²)`, the same code as the norm written by hand.
   const ceN = new ComputeEngine();
+  // The inputs are declared: an input with no type declines (ROADMAP
+  // CE-712.1).
+  ceN.declare('x', 'real');
+  ceN.declare('y', 'real');
+  ceN.declare('z', 'real');
   const code = (latex: string) => {
     const r = wgsl.compile(ceN.parse(latex), { fallback: false });
     expect(r.success).toBe(true);
@@ -1283,6 +1292,11 @@ describe('WGSL - NORM OF A POINT WITH A LIST COMPONENT', () => {
 describe('WGSL - SQUARE OF A VECTOR', () => {
   const ce = new ComputeEngine();
   ce.declare('V', 'list<real^2>');
+  // The inputs are declared: an input with no type declines (ROADMAP
+  // CE-712.1). The type admits the non-finite values that an input with no
+  // type could hold, so the shader code is the code of an untyped input.
+  for (const name of ['x', 'y', 'z'])
+    ce.declare(name, 'real | signed_infinity | nan');
   const square = (arg: unknown) =>
     ce.function('Square', [ce.box(arg as never)], { form: 'structural' });
 

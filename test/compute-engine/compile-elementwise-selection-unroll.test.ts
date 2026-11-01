@@ -447,11 +447,11 @@ describe('A point arm of the run-time selection is lifted whole', () => {
       'True',
       0,
     ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.wholeArm(');
-    expect(r.run!({ L: [1, 2, 3], x: 1 })).toEqual([[1, 2], 0, 0]);
-    expect(r.run!({ L: [1, 2, 3], x: -1 })).toEqual([5, 0, 0]);
+    // The nested `If` has a point and a number as branches, so the shape of
+    // its value is known only at run time, and the compilation declines.
+    const r = compile(expr);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('a point symbol arm under a run-time list condition', () => {

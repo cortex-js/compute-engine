@@ -583,6 +583,7 @@ describe('the bound of a clause is outside the scope of its index', () => {
   // `y' = y` on `[0, x]` with `x := 1`: the solution at 0.5 is `e^0.5`.
   test('the interval of NDSolveFunction', () => {
     const ce = new ComputeEngine();
+    ce.declare('ndsolveystate', 'real');
     ce.assign('x', 1);
     const f = ce
       .expr([

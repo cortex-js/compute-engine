@@ -23,8 +23,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 type Value = unknown;
 
-const compileProgram = (source: string, to = 'javascript') =>
-  compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
+const compileProgram = (source: string, to = 'javascript') => {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('xs', 'list<real>');
+  return compile(ce.box(parseEpsil(source)[0] as never), {
     to,
     fallback: false,
   } as never) as unknown as {
@@ -32,6 +35,7 @@ const compileProgram = (source: string, to = 'javascript') =>
     code: string;
     run: (vars?: Record<string, Value>) => Value;
   };
+};
 
 function interpret(source: string): { value: Value; errors: number } {
   const { value } = executeEpsil(new ComputeEngine(), source);
@@ -103,13 +107,22 @@ describe.each([
   test('a local with an assigned value that is not an integer is tested', () => {
     for (const source of [
       head + 'let n = 3\nn = 1.5\ng(n)',
-      head + 'let n = 3\nfunction w() scope { n = 1.5 }\nw()\ng(n)',
       head + 'let n = 3\nfor k in 1..2 { n = n + 0.5 }\ng(n)',
       head + 'let n = x\ng(n)',
     ]) {
       const c = compileProgram(source);
       expect(c.code).toContain('Number.isInteger');
     }
+    // A function that the code calls and that assigns a name outside it
+    // declines, whatever its effects (the `unsettled-shape` decline of a
+    // function that writes a name of an enclosing scope).
+    expect(() =>
+      compileProgram(
+        head + 'let n = 3\nfunction w() scope { n = 1.5 }\nw()\ng(n)'
+      )
+    ).toThrow(
+      /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/
+    );
     expect(interpret(head + 'let n = 3\nn = 1.5\ng(n)').errors).toBe(1);
     expect(js(head + 'let n = 3\nn = 1.5\ng(n)')).toBeNaN();
   });

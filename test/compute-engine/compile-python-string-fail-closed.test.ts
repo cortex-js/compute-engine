@@ -61,6 +61,7 @@ const python = new PythonTarget();
 
 beforeEach(() => {
   ce = new ComputeEngine();
+  ce.declare('v', 'real');
 });
 
 /** The emitted code for `expr` — `compileFunction` throws when a gate fires.
@@ -163,12 +164,14 @@ describe('Python: a UNION arm that is a collection disqualifies the scalar ==', 
 
   test('the union gate does NOT narrow the settled bare-`unknown` admission', () => {
     // Ruling (a), 2026-08-08 — only POSITIVE union evidence disqualifies.
+    // A bare-`unknown` input is now refused at compile time (ROADMAP
+    // CE-712.1), also as a declared parameter of `compileFunction()`.
     ce.declare('anyq', 'unknown');
-    expect(
+    expect(() =>
       python.compileFunction(ce.box(['Equal', 'anyq', { str: 'a' }]), 'f', [
         'anyq',
       ])
-    ).toContain('(anyq) == ("a")');
+    ).toThrow(/the input `anyq` has no type/);
     ce.declare('sbq', 'string | boolean');
     expect(
       python.compileFunction(ce.box(['Equal', 'sbq', { str: 'a' }]), 'f', [
@@ -437,25 +440,23 @@ describe('Python: ORDERINGS decline only the MIXED string case', () => {
   });
 });
 
-describe('Python: unknown-typed comparisons compile unchanged', () => {
-  test('Equal(u, 1) keeps the scalar exact form', () => {
+describe('Python: unknown-typed comparisons are refused', () => {
+  // An input typed `unknown` has no shape, so it is refused at compile time
+  // (ROADMAP CE-712.1), also as a declared parameter of `compileFunction()`.
+  // Before, `Equal(u, 1)` compiled to `((u) == (1))` and `Less(u, 1)` to
+  // `u < 1`.
+  test('Equal(u, 1) is refused', () => {
     ce.declare('u', 'unknown');
-    expect(python.compileFunction(ce.box(['Equal', 'u', 1]), 'f', ['u']))
-      .toMatchInlineSnapshot(`
-      "def f(u):
-          return ((u) == (1))
-      "
-    `);
+    expect(() =>
+      python.compileFunction(ce.box(['Equal', 'u', 1]), 'f', ['u'])
+    ).toThrow(/the input `u` has no type/);
   });
 
-  test('Less(u, 1) keeps the infix form', () => {
+  test('Less(u, 1) is refused', () => {
     ce.declare('u', 'unknown');
-    expect(python.compileFunction(ce.box(['Less', 'u', 1]), 'f', ['u']))
-      .toMatchInlineSnapshot(`
-      "def f(u):
-          return u < 1
-      "
-    `);
+    expect(() =>
+      python.compileFunction(ce.box(['Less', 'u', 1]), 'f', ['u'])
+    ).toThrow(/the input `u` has no type/);
   });
 });
 

@@ -39,6 +39,8 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
   for (const type of DECLARATIONS) {
     test(`g((x, y)) with P: ${type} compiles to the norm`, () => {
       const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      ce.declare('y', 'real');
       declareG(ce, type);
       expect(ce.parse('g\\left(\\left(5,1\\right)\\right)').N().re).toBeCloseTo(
         Math.SQRT2,
@@ -75,6 +77,8 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     // operand, or the generic flat broadcast zips the point LIST against the
     // points' components.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     ce.declare('g', {
       signature:
         '(list<tuple<number, number>> | tuple<number, number>) -> number',
@@ -142,6 +146,8 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       'tuple<broadcastable<number>, broadcastable<number>>',
     ]) {
       const ce = new ComputeEngine();
+      ce.declare('x', 'real | list<real>');
+      ce.declare('y', 'real | list<real>');
       ce.declare('k', { signature: `(${type}) -> number` });
       ce.assign(
         'k',
@@ -169,6 +175,12 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     // list coordinate; the interpreter reads `([1, 2], 3) − (4, 0)` as two
     // points and answers `[|(−3, 3)|, |(−2, 3)|]`. `_SYS.norm` on the nested
     // array flattened it to one number (4.69) behind `success: true`.
+    //
+    // `x` and `y` are not declared, so their static type is `unknown` and
+    // the compiled code cannot know whether each one is a number or a list.
+    // The compilation refuses such an input, on every target, and names it
+    // in `unsupported` (rule R1 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`).
     for (const type of [
       'unknown',
       'tuple<broadcastable<number>, broadcastable<number>>',
@@ -182,12 +194,9 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       const r = compile(ce.parse('k\\left(\\left(x,y\\right)\\right)'), {
         to: 'javascript',
       });
-      expect(r.success).toBe(true);
-      expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
-      expect(r.run!({ x: [1, 2], y: 3 })).toEqual([
-        expect.closeTo(Math.hypot(3, 3), 12),
-        expect.closeTo(Math.hypot(2, 3), 12),
-      ]);
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('untyped-input');
+      expect(r.unsupported).toContain('x');
       // On the interpreter, the LaTeX `(x, y)` with `x` a list is the list
       // of points `PointList(x, y)` (user decision 2026-09-24), so the call
       // answers one norm per point: bound whole under `unknown`, mapped over
@@ -249,6 +258,8 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     // the interpreter rejects it and the compiled call rebuilds the point at
     // `tuple<number, number>`.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     ce.declare('k', {
       signature:
         '(list<tuple<number, number>> | tuple<number, number>) -> number',
@@ -273,6 +284,8 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     // dispatch on the run-time shape — reading `[3, −4]` as a point would
     // answer the norm 5 where `evaluate()` answers `[3, 4]`.
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     ce.declare('h', {
       signature: '(list<number> | tuple<number, number>) -> number',
     });
@@ -332,6 +345,8 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
 
   test('the D-264 shape: min over seven discs is a disc union, not axis bands', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     // f(P) = min([ |P − (4, 0) − 2(H(i+.2), H(i+.4))| − .9 H(i+.6) for i = 1..7 ])
     // with H a smooth hash; the region f((x,y)) ≤ 0 is a union of discs. At a
     // point inside the first disc and off both axes through its centre, the

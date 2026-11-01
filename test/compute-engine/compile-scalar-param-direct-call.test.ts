@@ -35,8 +35,9 @@ function build(ce: ComputeEngine, expr: unknown): any {
 
 /** The three-macro chain `f(x) := g(x) + 1`, `g(x) := 2·h(x)`,
  * `h(x) := x²`, with UNANNOTATED parameters. */
-function macroChain(): ComputeEngine {
+function macroChain(xType = 'real'): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', xType);
   const def = (name: string, body: unknown) =>
     ce.box(['DefineFunction', name, ['Function', body, 'x']] as any).evaluate();
   def('h', ['Power', 'x', 2]);
@@ -56,7 +57,7 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
   });
 
   test('a list handed to the OUTER function still broadcasts through the chain', () => {
-    const ce = macroChain();
+    const ce = macroChain('real | list<real>');
     const r = build(ce, ['f', 'x']);
     // `x` is a free symbol at the root here, so the ROOT call is what
     // broadcasts; each body then sees one element at a time.
@@ -80,6 +81,7 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
 
   test('scalar arithmetic over a parameter is a scalar argument too', () => {
     const ce = new ComputeEngine();
+    ce.declare('u', 'real | list<real>');
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     ce.assign(
       'f',
@@ -94,27 +96,33 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
 
   test('every clause of a MULTI-CLAUSE definition gets the same treatment', () => {
     const ce = new ComputeEngine();
+    // The test passes a number and a list for `u`. An input with no type is
+    // refused (ROADMAP CE-712.1), and an input declared
+    // `real | list<real>` declines on this call (`f` is a broadcastable
+    // head over a possibly list-valued operand), so `u` is a parameter of
+    // the root function declared `any`, which keeps the run-time dispatch.
     executeEpsil(
       ce,
       `function h(x) { x * x }\n` +
         `function f(x) { h(x) + 1 }\n` +
         `function f(x, y) { h(x) + h(y) }`
     );
-    const r = build(ce, ['f', 'u']);
-    expect(r.preamble).toContain('const _fn_f$c1 = (x) => _fn_h(x) + 1;');
-    expect(r.preamble).toContain(
+    const r = build(ce, ['Function', ['f', 'u'], ['Typed', 'u', "'any'"]]);
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('const _fn_f$c1 = (x) => _fn_h(x) + 1;');
+    expect(r.code).toContain(
       'const _fn_f$c2 = (x, y) => _fn_h(x) + _fn_h(y);'
     );
-    expect(r.preamble).not.toContain('_SYS.bcastFn(_fn_h');
+    expect(r.code).not.toContain('_SYS.bcastFn(_fn_h');
     // The dispatcher, and both clauses, answer what the interpreter answers.
-    expect(r.run({ u: 3 })).toBe(10);
+    expect(r.run(3)).toBe(10);
     expect(
       ce
         .box(['f', 3] as any)
         .evaluate()
         .toString()
     ).toBe('10');
-    expect(r.run({ u: [1, 2] })).toEqual([2, 5]);
+    expect(r.run([1, 2])).toEqual([2, 5]);
     expect(
       ce
         .box(['f', ['List', 1, 2]] as any)

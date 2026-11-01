@@ -169,6 +169,8 @@ describe('Re, Im, Abs and Arg of a small power of x + ib build no object (CE-331
 
 describe('a block-local function that is only called has no broadcast wrapper (CE-338)', () => {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   ce.declare('LL', 'list<list<real>>');
   ce.declare('V', 'list<real>');
   const literal = ['Function', ['Multiply', 2, 'k'], 'k'];

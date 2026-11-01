@@ -532,6 +532,8 @@ describe('GPU code supplied by the caller runs once, in order', () => {
   // which is not caller code: it compiles as a symbol with no `vars` entry
   // does.
   const cev = new ComputeEngine();
+  cev.declare('b', 'real | signed_infinity | nan');
+  cev.declare('n', 'real | signed_infinity | nan');
   cev.declare('V', 'list<real^3>');
   cev.declare('c', 'boolean');
   cev.declare('x', 'real');

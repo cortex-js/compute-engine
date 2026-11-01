@@ -31,6 +31,7 @@ import {
 } from '../../src/compute-engine/compilation/constant-folding';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real | signed_infinity | nan');
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 

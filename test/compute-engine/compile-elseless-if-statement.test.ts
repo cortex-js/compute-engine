@@ -228,6 +228,7 @@ describe('an else-less If as a block statement', () => {
     // `TypeError` instead of a propagated NaN. Before this `Which` and the
     // else-less `If` emitted `undefined` for an unknown arm while `When`
     // emitted `NaN`.
+    ce.declare('x', 'real');
     ce.declare('c', 'boolean');
     const js = (e: unknown) => compile(ce.box(e as any), { fallback: false });
     expect(js(['Which', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);

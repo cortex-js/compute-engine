@@ -40,6 +40,8 @@ import { IntervalArithmetic } from '../../src/compute-engine/interval/index';
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   ce.declare('V', 'list<number>');
   ce.declare('W', 'list<number>');
   ce.declare('n', 'integer');
@@ -228,7 +230,13 @@ describe('Interval target — collection values across a user-function boundary'
       x: pt(0.3),
       y: pt(0.7),
     });
-    expect(code).toBe('_IA.bcast((_tv1) => _IA.sin(_tv1), _fn_H(_.x, _.y))');
+    // `x` and `y` are declared `real`, so the call `H(x, y)` is a list of
+    // two numbers at compile time, and the kernel applies to each element
+    // of the inlined body. With `x` and `y` untyped, the call was
+    // `_fn_H(_.x, _.y)` under a run-time broadcast (`_IA.bcast`).
+    expect(code).toBe(
+      '[_IA.sin(_IA.add(_.x, _.y)), _IA.sin(_IA.sub(_.x, _.y))]'
+    );
     expectEncloses(out, [Math.sin(1), Math.sin(-0.4)]);
   });
 
@@ -720,6 +728,8 @@ describe('Interval target — a coordinate accessor over a list of points', () =
   ];
   function pointEngine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     ce.declare('PL', 'list<tuple<number, number>>');
     ce.declare('c', 'tuple<number, number> | list<tuple<number, number>>');
     ce.declare('R', 'list<list<number>>');
@@ -1017,10 +1027,11 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_IA.component(_fn_U(_.x, _.y), 1)');
-    expect(r.preamble).toContain(
-      'const _fn_U = (x, y) => [_IA.sub(_IA.square(x), _IA.square(y)), _IA.mul(_IA.scale(_k1, x), y)]'
-    );
+    // `x` and `y` are declared `real`, so the call is one point at compile
+    // time, and the accessor reads its second coordinate from the inlined
+    // body. With `x` and `y` untyped, the code was
+    // `_IA.component(_fn_U(_.x, _.y), 1)`.
+    expect(r.code).toBe('_IA.mul(_IA.scale(_k1, _.x), _.y)');
     expect(bands(r.run!({ x: pt(2), y: pt(3) }))).toEqual([12, 12]);
     ce.declare('L', 'list<number>');
     const mapped = compile(ce.box(['PointY', ['U', 'L', 1]]), {
@@ -1258,6 +1269,8 @@ describe('Interval target — a PointList of list-typed symbols', () => {
 describe('Interval target — point arithmetic', () => {
   function pointEngine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     ce.declare('P', 'tuple<number, number>');
     ce.declare('Q', 'tuple<number, number>');
     ce.declare('s', 'number');
@@ -1644,6 +1657,16 @@ describe('Interval target — a selection among list values', () => {
     expect(r.success).toBe(true);
     return { code: r.code, preamble: r.preamble, out: bands(r.run!(vars)) };
   }
+  /** A selection whose branches have different shapes (a number and a
+   * list) declines with the code `unsettled-shape`. */
+  function expectUnsettled(ce: ComputeEngine, expr: any) {
+    const r = compile(
+      typeof expr === 'string' ? ce.parse(expr) : ce.box(expr),
+      { to: 'interval-js', fallback: false }
+    );
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+  }
 
   test('a helper whose case arms are lists returns the selected list', () => {
     const ce = selectionEngine();
@@ -1686,32 +1709,15 @@ describe('Interval target — a selection among list values', () => {
 
   test('a number in one arm and a list in the other', () => {
     const ce = selectionEngine();
-    expect(run(ce, ['S', 'x'], { x: pt(3) }).out).toEqual([0, 0]);
-    expect(run(ce, ['S', 'x'], { x: pt(-3) }).out).toEqual([
-      [-3, -3],
-      [-6, -6],
-    ]);
-    // Undecided across the two domains: no one value encloses both.
-    const straddle = compile(ce.box(['S', 'x']), {
-      to: 'interval-js',
-      fallback: false,
-    }).run!({ x: { lo: -1, hi: 1 } });
-    expect(straddle).toEqual({ kind: 'empty' });
-    // The dot product over the list arm is the interpreter's value; over the
-    // number arm the interpreter answers an error (`0[1]` is not a value),
-    // and this target answers the absence marker for the indexing of a
-    // scalar — no value either way.
+    // `S(3)` is the number 0 and `S(-3)` is the list `[-3, -6]`: the shape
+    // of the value is known only at run time, so the call declines
+    // (ROADMAP CE-712.1, `unsettled-shape`), alone and under a dot product.
+    expect(ce.box(['S', 3]).evaluate().json).toEqual(0);
+    expect(ce.box(['S', -3]).evaluate().json).toEqual(['List', -3, -6]);
+    expectUnsettled(ce, ['S', 'x']);
     expect(ce.parse('d(S(-3), [1, 1])').N().re).toBe(-9);
-    expectEncloses(
-      run(ce, ['d', ['S', 'x'], ['List', 1, 1]], { x: pt(-3) }).out,
-      -9
-    );
     expect(ce.parse('d(S(3), [1, 1])').N().operator).toBe('Error');
-    const scalarArm = compile(ce.box(['d', ['S', 'x'], ['List', 1, 1]]), {
-      to: 'interval-js',
-      fallback: false,
-    }).run!({ x: pt(3) });
-    expect(scalarArm).toEqual({ kind: 'empty' });
+    expectUnsettled(ce, ['d', ['S', 'x'], ['List', 1, 1]]);
   });
 
   test('the selection at the root, and under a kernel', () => {
@@ -1730,21 +1736,18 @@ describe('Interval target — a selection among list values', () => {
       [3, 3],
       [1, 1],
     ]);
-    // A kernel over the selection broadcasts over whichever arm is taken:
-    // the type `integer | vector<2>` is a number or a list of numbers.
-    const plus = run(ce, ['Add', which(ce, ['List', 'x', 1], 1), 1], {
-      x: pt(3),
-    });
-    expect(plus.code).toBe(
-      "_IA.bcast((_tv1) => _IA.add(_tv1, _k1), ((_tv2 = _IA.less(_k2, _.x)) === 'true' ? _IA.res([_.x, _k1]) : _tv2 === 'false' ? _IA.res(_k1) : _IA.hull([_.x, _k1], _k1)))"
-    );
-    expect(plus.out).toEqual([
-      [4, 4],
-      [2, 2],
-    ]);
-    expect(
-      run(ce, ['Add', which(ce, ['List', 'x', 1], 1), 1], { x: pt(-3) }).out
-    ).toEqual([2, 2]);
+    // A selection between a list and a number (the type
+    // `integer | vector<2>`) has no settled shape: for `x = 3` the sum is
+    // `[4, 2]`, for `x = -3` it is `2`. It declines (ROADMAP CE-712.1,
+    // `unsettled-shape`).
+    const plus = ['Add', which(ce, ['List', 'x', 1], 1), 1];
+    ce.assign('x', 3);
+    expect(ce.box(plus as any).evaluate().json).toEqual(['List', 4, 2]);
+    ce.assign('x', -3);
+    expect(ce.box(plus as any).evaluate().json).toEqual(2);
+    expectUnsettled(ce, plus);
+    // A kernel over a selection between two lists broadcasts over the arm
+    // that is taken.
     expect(
       run(ce, ['Add', which(ce, ['List', 'x', 1], 'A'), 1], {
         x: pt(-3),

@@ -82,6 +82,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 let ce: ComputeEngine;
 beforeEach(() => {
   ce = new ComputeEngine();
+  ce.declare('xq', 'real');
 });
 
 /** Assert the expression declines to compile, and that the interpreter — which
@@ -1457,23 +1458,36 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
     // Ruling (a), 2026-08-08: a top-typed participant stays admitted (the
     // run-time-array residual is accepted, as on the numeric fast path). Only
     // POSITIVE union evidence disqualifies.
+    // An INPUT typed `unknown` is refused at compile time (ROADMAP
+    // CE-712.1); a parameter of the root function typed `unknown` is
+    // admitted.
     ce.declare('anyq', 'unknown');
-    const r = compile(ce.box(['Equal', 'anyq', { str: 'a' }]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    // An unsupplied variable gives no value, whatever its declared type
-    // (user decision 2026-10-30), so `anyq` is tested too.
-    expect(r.code).toMatchInlineSnapshot(
-      `"((_.anyq !== undefined) ? ((_SYS.eqt(_.anyq, "a"))) : undefined)"`
+    const refused = compile(ce.box(['Equal', 'anyq', { str: 'a' }]));
+    expect(refused.success).toBe(false);
+    expect(refused.diagnostic?.code).toBe('untyped-input');
+    expect(refused.unsupported).toContain('anyq');
+    const r = compile(
+      ce.box([
+        'Function',
+        ['Equal', 'anyq', { str: 'a' }],
+        ['Typed', 'anyq', "'unknown'"],
+      ]),
+      { fallback: false }
     );
+    expect(r.success).toBe(true);
+    expect(r.code).toMatchInlineSnapshot(
+      `"(anyq) => (_SYS.eqt(anyq, "a"))"`
+    );
+    const run = r.run as unknown as (q: unknown) => unknown;
+    expect(run('a')).toBe(true);
+    expect(run('b')).toBe(false);
     // …and a union with NO collection arm is admitted as well.
     ce.declare('sbq', 'string | boolean');
     const r2 = compile(ce.box(['Equal', 'sbq', { str: 'a' }]), {
       fallback: false,
     });
     expect(r2.success).toBe(true);
-    // A declared `sbq` is tested for a value, as `anyq` above is.
+    // A declared input `sbq` is tested for a value.
     expect(r2.code).toMatchInlineSnapshot(
       `"((_.sbq !== undefined) ? ((_SYS.eqt(_.sbq, "a"))) : undefined)"`
     );
@@ -1481,12 +1495,18 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
     // strict identity, so an admitted possibly-text participant holding a
     // NUMBER is not stringified into a false match. (The interpreter answers
     // `False` for `Equal(1, "1")`.)
-    expect((r.run as any)({ anyq: 1 })).toBe(false);
+    expect(run(1)).toBe(false);
     expect(
       (
-        compile(ce.box(['Equal', 'anyq', { str: '1' }]), { fallback: false })
-          .run as any
-      )({ anyq: 1 })
+        compile(
+          ce.box([
+            'Function',
+            ['Equal', 'anyq', { str: '1' }],
+            ['Typed', 'anyq', "'unknown'"],
+          ]),
+          { fallback: false }
+        ).run as any
+      )(1)
     ).toBe(false);
   });
 });

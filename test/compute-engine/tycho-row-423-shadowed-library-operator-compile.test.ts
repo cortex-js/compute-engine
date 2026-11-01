@@ -115,6 +115,7 @@ describe.each(DECLARATIONS)('a user Gamma (%s)', (_, define) => {
 
   test("Tycho's definition, (x - 1)!, on both targets", () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     define(ce, 'x\\mapsto (x-1)!');
     const expr = ce.parse('\\Gamma(x)+1');
     const js = compiled(expr, 'javascript');
@@ -134,6 +135,7 @@ describe.each(DECLARATIONS)('a user Gamma (%s)', (_, define) => {
 describe('composed and recursive uses', () => {
   function engine(body: string): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.declare('Gamma', 'function');
     ce.assign('Gamma', ce.parse(body));
     return ce;
@@ -306,6 +308,7 @@ describe('the parts of the compiler that read a head by its name', () => {
   /** An engine with the user functions `defs` (name, body in LaTeX). */
   function engine(defs: [string, string][]): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     for (const [name, body] of defs) {
       ce.declare(name, 'function');
       ce.assign(name, ce.parse(body));
@@ -454,6 +457,7 @@ describe('the parts of the compiler that read a head by its name', () => {
 describe('a head that the compiler lowers by name', () => {
   test('a user Sqrt compiles as a call of the user function', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.declare('Sqrt', 'function');
     ce.assign('Sqrt', ce.parse('x\\mapsto x+100'));
     const expr = ce.box(['Add', ['Sqrt', 'x'], 1]);
@@ -475,6 +479,7 @@ describe('the rename of the shadowing calls', () => {
   /** An engine with a user `Gamma := x ↦ x + 100`. */
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
     ce.declare('Gamma', 'function');
     ce.assign('Gamma', ce.parse('x\\mapsto x+100'));
     return ce;

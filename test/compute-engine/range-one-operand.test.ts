@@ -14,6 +14,7 @@ import { integerRangeElements } from '../../src/compute-engine/boxed-expression/
 // (ROADMAP CE-497).
 
 const ce = new ComputeEngine();
+ce.declare('n', 'real');
 
 function elementsOf(expr: any): number[] {
   return [...expr.each()].map((x) => x.re);

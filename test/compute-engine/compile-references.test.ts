@@ -104,6 +104,8 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
   describe('user-defined function as a higher-order operand', () => {
     it('Map(userFn, list) references the shared local and runs', () => {
       const ce = new ComputeEngine();
+      ce.declare('a', 'real');
+      ce.declare('b', 'real');
       ce.parse('h(x) := x^2').evaluate();
       const r = ce
         ._getCompilationTarget('javascript')!
@@ -118,6 +120,9 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
 
     it('Filter(list, userFn) references the shared local and runs', () => {
       const ce = new ComputeEngine();
+      ce.declare('a', 'real');
+      ce.declare('b', 'real');
+      ce.declare('c', 'real');
       ce.parse('p(x) := x > 2').evaluate();
       const r = ce
         ._getCompilationTarget('javascript')!
@@ -128,6 +133,8 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
 
     it("surfaces a free symbol referenced only in the operand function's body", () => {
       const ce = new ComputeEngine();
+      ce.declare('a', 'real');
+      ce.declare('b', 'real');
       ce.parse('q(x) := x + k').evaluate();
       const r = ce
         ._getCompilationTarget('javascript')!
@@ -166,6 +173,8 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     // always wins, even when its key collides with a user-function name.
     it('a `vars` mapping wins over a same-named user function', () => {
       const ce = new ComputeEngine();
+      ce.declare('a', 'real');
+      ce.declare('b', 'real');
       ce.parse('h(x) := x^2').evaluate();
       const r = ce
         ._getCompilationTarget('javascript')!
@@ -332,6 +341,8 @@ describe('the reference analysis probes a caller compile handler without compili
   // handler a placeholder compiler.
   test('the handler sees the real operand code exactly once per node', () => {
     const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
     // `Which` is a head the analysis probes on the JavaScript target (`At`
     // is not: the target maps it, so its handler is consulted by the compile
     // path alone).
@@ -509,6 +520,7 @@ describe('COMPILE reference analysis of a declaration', () => {
   // was listed as free.
   it('does not list a function the block defines as a free symbol', () => {
     const ce = new ComputeEngine();
+    ce.declare('z', 'real');
     const expr = ce.box([
       'Block',
       ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], 'x']],

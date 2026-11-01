@@ -34,6 +34,7 @@ afterAll(() => warn.mockRestore());
 
 function ce(): ComputeEngine {
   const engine = new ComputeEngine();
+  engine.declare('x', 'real');
   engine.precision = 'machine';
   return engine;
 }

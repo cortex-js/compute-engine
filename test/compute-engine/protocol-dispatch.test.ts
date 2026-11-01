@@ -1181,6 +1181,8 @@ describe('compilation', () => {
 type string is Comparable {
   function compare(self: Self, other: Self) -> string { "proto" }
 }`);
+    ce.declare('x', 'string | integer');
+    ce.declare('y', 'string | integer');
     const result = compile(ce.box(['compare', 'x', 'y'] as any));
     expect(result.success).toBe(true);
     expect(result.unsupported).not.toContain('compare');

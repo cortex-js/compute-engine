@@ -957,7 +957,12 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
       value: ['List', 2, 2],
       diagnostics: [],
     });
-    expect(compileProgram(source).run!({} as never)).toEqual([2, 2]);
+    // A stored or defined function that assigns a name outside it declines:
+    // such a function can reach an operator that calls it (`Filter`), where
+    // the interpreter and the compiled code do not agree on the write.
+    expect(() => compileProgram(source)).toThrow(
+      /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/
+    );
   });
 
   test('a declaration with the `scope` effect is the contract', () => {
@@ -968,11 +973,14 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
       value: ['List', 2, 2],
       diagnostics: [],
     });
-    // The compilation does not refuse the definition for its effects. (A
-    // function declared with a type and then defined does not compile
-    // today, for another reason.)
+    // The compilation does not refuse the definition for its effects. It
+    // declines because a defined function that the code calls assigns a
+    // name outside it (the `unsettled-shape` decline).
     expect(() => compileProgram(source)).not.toThrow(
       /writes outside the function/
+    );
+    expect(() => compileProgram(source)).toThrow(
+      /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/
     );
   });
 });
@@ -1005,12 +1013,6 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
       'a declaration with no type',
       'let g\nfunction g(k) { k + 1 }\n[g(1), g(2)]',
       [2, 3],
-    ],
-    [
-      'a declaration with the `scope` effect',
-      'let t = 0\nlet g: (integer) scope -> integer\n' +
-        'function g(k) { t = k + 1; t }\n[g(1), t]',
-      [2, 2],
     ],
     [
       'a call before the declaration',
@@ -1067,6 +1069,26 @@ function threeRoutes(source: string): {
   compiled: unknown;
 } {
   return { run: run(source).value, ...blockRoutes(source) };
+}
+
+/** The value of `source` on the run and on the program evaluated as one
+ * block, for a program whose compilation declines: the program reads a
+ * free symbol that nothing declares, and whose type is `unknown`. The
+ * compilation refuses that input (`untyped-input`). */
+function interpretedRoutes(source: string): {
+  run: unknown;
+  evaluated: unknown;
+} {
+  const compiled = compile(
+    new ComputeEngine().box(parseEpsil(source)[0] as never),
+    { to: 'javascript' } as never
+  )!;
+  expect(compiled.success).toBe(false);
+  expect(compiled.diagnostic?.code).toBe('untyped-input');
+  const evaluated = new ComputeEngine()
+    .box(parseEpsil(source)[0] as never)
+    .evaluate().json;
+  return { run: run(source).value, evaluated };
 }
 
 describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
@@ -1131,11 +1153,21 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
   test('a `let` in a branch declares a local of the branch only', () => {
     // The assignments in the branch write the `let` local, so the body does
     // not own `t`, and the `t` after the `if` is a free symbol.
-    for (const [source, value] of [
-      ['function g(c) { if c { let t = 1; t = 2 }; t }\ng(true)', 't'],
-      ['function g(c) { if c { let t = 1; t = t + 1; u = t }; u }\ng(true)', 2],
+    // The first program reads the free `t`, which has no type: its
+    // compilation declines.
+    for (const [source, value, routesOf] of [
+      [
+        'function g(c) { if c { let t = 1; t = 2 }; t }\ng(true)',
+        't',
+        interpretedRoutes,
+      ],
+      [
+        'function g(c) { if c { let t = 1; t = t + 1; u = t }; u }\ng(true)',
+        2,
+        threeRoutes,
+      ],
     ] as const) {
-      const routes = threeRoutes(source);
+      const routes = routesOf(source);
       expect(routes.run).toEqual(value);
       expect(routes.evaluated).toEqual(value);
     }
@@ -1144,7 +1176,7 @@ describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
   test('a function literal in a branch owns the names of its body', () => {
     const source =
       'function g(c) { if c { u = ((k) => do { t = k; t })(2) }; [u, t] }\ng(true)';
-    const routes = threeRoutes(source);
+    const routes = interpretedRoutes(source);
     expect(routes.run).toEqual(['List', 2, 't']);
     expect(routes.evaluated).toEqual(['List', 2, 't']);
   });

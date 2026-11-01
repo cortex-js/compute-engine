@@ -18,6 +18,7 @@ const TARGETS = ['javascript', 'interval-js', 'glsl', 'wgsl', 'python'];
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('t', 'real');
   ce.parse('a := (x, y, z) \\mapsto x + y + z').evaluate();
   // `r(x, ...q)`: one fixed parameter, then a rest parameter.
   ce.assign(

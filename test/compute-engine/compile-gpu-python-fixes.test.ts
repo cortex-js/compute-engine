@@ -21,6 +21,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('w', 'real | signed_infinity | nan');
   ce.declare('z', 'complex');
   ce.declare('t', 'real');
   ce.declare('x', 'real');
@@ -130,9 +131,12 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
   });
 
   test('a real value that is not a scalar beside a complex one fails closed', () => {
+    // A point beside a number: the branches have different shapes. The shape
+    // check runs after the code is generated, so the more specific reason of
+    // the GPU selection is the one that the error reports.
     const ce = engine();
     expect(() => run(ce, 'glsl', ['If', T_POS, 'z', ['Tuple', 1, 2]])).toThrow(
-      /Could not compile `If`: the value `\(1, 2\)` is not a scalar/
+      /the value `\(1, 2\)` is not a scalar, and another value of the selection is complex/
     );
   });
 });

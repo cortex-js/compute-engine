@@ -5,6 +5,7 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
 
 function fixture(size = 153) {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
   ce.assign(
     'P',
     ce.box(['List', ...Array.from({ length: size }, (_, i) => i)])
@@ -95,7 +96,8 @@ test.each(['Sum', 'Product'])('%s recognizes an empty folded range', (op) => {
 });
 
 test('a mixed range checks only its dynamic bound', () => {
-  const { js } = fixture();
+  const { ce, js } = fixture();
+  ce.declare('n', 'real');
   const upper = js(['Sum', 'x', ['Limits', 'k', ['Length', ['List', 1]], 'n']]);
   expect(upper.code).toContain('Number.isSafeInteger(_upper)');
   expect(upper.code).not.toContain('Number.isSafeInteger(k)');
