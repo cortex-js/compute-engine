@@ -860,7 +860,9 @@ describe('COMPILE CSE — statement regions', () => {
     // binding must stay in that statement's own region. The loop is the
     // last statement: a `Return` inside a loop that has code after it
     // declines, because the compiled loop is a function of its own and the
-    // `Return` would end only the loop.
+    // `Return` would end only the loop. The loop has no indexing set and
+    // ends with a `Return`: a loop with an indexing set and a `Return`
+    // declines, because it gives `Nothing` when it ends with no `Return`.
     const expr = ce.box([
       'Block',
       ['Assign', 'acc', 0],
@@ -870,8 +872,8 @@ describe('COMPILE CSE — statement regions', () => {
           'Block',
           ['If', ['Less', 'u', 0], ['Return', 0]],
           ['Assign', 'acc', probe3('u')],
+          ['Return', 'acc'],
         ],
-        ['Element', 'i', ['Range', 1, 3]],
       ],
     ]);
     const result = compile(expr, { fallback: false });

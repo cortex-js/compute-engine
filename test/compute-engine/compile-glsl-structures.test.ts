@@ -92,10 +92,15 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 
   describe('Loop', () => {
     it('should compile Loop as for-loop without IIFE', () => {
+      // The loop is a statement: a loop whose value is used declines.
       const expr = ce.expr([
-        'Loop',
-        ['Assign', 'acc', ['Add', 'acc', 'i']],
-        ['Element', 'i', ['Range', 1, 5]],
+        'Block',
+        [
+          'Loop',
+          ['Assign', 'acc', ['Add', 'acc', 'i']],
+          ['Element', 'i', ['Range', 1, 5]],
+        ],
+        'acc',
       ]);
       const code = glsl.compile(expr).code;
       expect(code).toContain('for (int i = 1; i <= 5; i++)');

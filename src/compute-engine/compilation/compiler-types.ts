@@ -107,9 +107,11 @@ export type DeclineNote = { reason?: string };
  * assigns a name of an enclosing scope (`node` is then its consumer, past
  * the branches of an `If` or a `Which` and the last statement of a
  * `Block`, or the node that passes the name of such a function as a value,
- * as `Filter(L, g)`), and
+ * as `Filter(L, g)`),
  * `'return-in-loop'` when a `Return` is inside a `Loop` whose compiled code
- * would end only the loop (`node` is then the `Return`).
+ * would end only the loop (`node` is then the `Return`), and `'loop-value'`
+ * when the value of a `Loop` is used and the compiled code cannot give it
+ * (`node` is then the `Loop`).
  * `assertAdmitted()` reads the reason to write the message of the decline.
  */
 export type UnsettledShape = {
@@ -121,7 +123,8 @@ export type UnsettledShape = {
     | 'index-assignment'
     | 'elementwise'
     | 'scoped-assignment'
-    | 'return-in-loop';
+    | 'return-in-loop'
+    | 'loop-value';
 };
 
 /**

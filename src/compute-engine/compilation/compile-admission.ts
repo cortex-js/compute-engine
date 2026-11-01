@@ -1022,7 +1022,9 @@ function matchCasePartsOf(
   node: Expression,
   scope: Scope | undefined,
   /** When true, only the bodies, not the guards. */
-  bodiesOnly = false
+  bodiesOnly = false,
+  /** When given, each guard that is returned is also added to it. */
+  guards?: Set<Expression>
 ): Expression[] {
   if (!isFunction(node, 'Match')) return [];
   const ce = node.engine;
@@ -1044,8 +1046,11 @@ function matchCasePartsOf(
   const parts: Expression[] = [];
   for (const segment of getMatchPlan(ce, node.ops).segments)
     for (const c of segment.cases) {
-      if (!bodiesOnly && c.hasGuard && c.guard !== undefined)
-        parts.push(canonical(c.guard, c.captureNames));
+      if (!bodiesOnly && c.hasGuard && c.guard !== undefined) {
+        const guard = canonical(c.guard, c.captureNames);
+        guards?.add(guard);
+        parts.push(guard);
+      }
       parts.push(canonical(c.body, c.captureNames));
     }
   return parts;
@@ -1726,7 +1731,11 @@ function writesOuterName(
  * literal (or the root) that it ends is in tail position: the body of the
  * function, or the last statement of a `Block` in tail position. The
  * value of the loop is then the value of the function, as in the
- * interpreter. A `Return` in a nested `Loop` is not accepted.
+ * interpreter, for a loop with no indexing set. A tail loop with an indexing
+ * set passes this check, but `isUnrepresentableLoopValue()` declines it when
+ * its value is used: it gives `Nothing` when no `Return` runs, and the
+ * compiled code has no form for `Nothing`. A `Return` in a nested `Loop` is
+ * not accepted.
  *
  * The search does not enter a `Hold` or the operands that the target drops
  * (`droppedOperandsOf()`). It uses a stack, not recursion, so the depth of
@@ -1787,6 +1796,55 @@ function returnInLoopIn(
     });
   }
   return undefined;
+}
+
+/**
+ * True when `body`, the body of a `Loop`, has a `Break` of this loop in the
+ * code that the target keeps. A nested `Loop` or a function literal owns
+ * the `Break` inside it. The search does not enter a `Hold` or the operands
+ * that the target drops (`droppedOperandsOf()`), as the other walks of this
+ * file: `If(False, Break(2), 0)` has no `Break`. It uses a stack, not
+ * recursion.
+ */
+function hasKeptBreak(
+  body: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  const stack: Expression[] = [body];
+  const seen = new Set<Expression>();
+  while (stack.length > 0) {
+    const e = stack.pop()!;
+    if (!isFunction(e) || seen.has(e)) continue;
+    seen.add(e);
+    const h = e.operator;
+    if (h === 'Break') return true;
+    if (h === 'Function' || h === 'Hold' || h === 'Loop') continue;
+    const dropped = droppedOperandsOf(e, target);
+    if (dropped === undefined) stack.push(...codeOperandsOf(e));
+    else stack.push(...e.ops.filter((_, i) => !dropped.has(i)));
+  }
+  return false;
+}
+
+/**
+ * True when the value of the `Loop` `loop` is used and the compiled code
+ * cannot give it. The value of a loop is the value of the `Break` that ends
+ * it, or `Nothing` when it ends at the end of its indexing sets or with a
+ * `Break` with no value. `Nothing` is the erasure marker, which has no
+ * compiled representation, and the compiled loop does not carry the value
+ * of a `Break` either. Only a loop with no indexing set and no `Break` of
+ * its own is accepted: it ends only through a `Return` or never ends. A
+ * loop with an indexing set declines also when it has a `Return` and is the
+ * last statement of its function: when no `Return` runs, the loop ends at
+ * the end of its indexing sets and the interpreter gives `Nothing`, where
+ * the compiled function gave `undefined` (JavaScript) or `None` (Python).
+ */
+function isUnrepresentableLoopValue(
+  loop: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isFunction(loop, 'Loop') || loop.nops === 0) return false;
+  return loop.nops > 1 || hasKeptBreak(loop.ops[0], target);
 }
 
 /**
@@ -1863,6 +1921,8 @@ export function unsettledShapeIn(
   const roots = new Set<Expression>();
   // The `Match` nodes of the code that is kept.
   const matches: Expression[] = [];
+  // The `Loop` nodes of the code that is kept.
+  const loops: Expression[] = [];
   const error = compiledNodeWhere(
     root,
     target,
@@ -1879,7 +1939,11 @@ export function unsettledShapeIn(
         !matches.includes(node)
       )
         matches.push(node);
-      if (!arity && isFunction(node) && !recorded.has(node)) {
+      if (isFunction(node, 'Loop') && !loops.includes(node)) loops.push(node);
+      // The use of each operand is recorded on every target: the check of
+      // a `Loop` whose value is used (below) reads it on a shader target
+      // too.
+      if (isFunction(node) && !recorded.has(node)) {
         recorded.add(node);
         const dropped = droppedOperandsOf(node, target);
         node.ops.forEach((op, i) => {
@@ -1942,14 +2006,18 @@ export function unsettledShapeIn(
   // `x: real`, `Match(x, MatchCase(1, [1, 2]), MatchCase(_, 3))` declines.
   // This check does not follow the calls of user functions: the walk above
   // reached their bodies, and a recursive function would loop.
+  // The `Loop` nodes in the case parts of a `Match` whose value is used.
+  // The walk above does not reach them: the cases are held raw.
+  const caseLoops: Expression[] = [];
   if (matches.length > 0) {
     const scopes = localScopesOf([root, ...roots]);
-    const pending: [Expression, Scope | undefined, boolean][] = matches.map(
-      (m) => [m, scopes.get(m), arity || isUsed(m)]
-    );
+    // Each `Match` with its scope, whether its branches are compared, and
+    // whether its value is used (for the check of a `Loop` in a case).
+    const pending: [Expression, Scope | undefined, boolean, boolean][] =
+      matches.map((m) => [m, scopes.get(m), arity || isUsed(m), isUsed(m)]);
     const done = new Set<Expression>();
     while (pending.length > 0) {
-      const [m, scope, used] = pending.pop()!;
+      const [m, scope, used, valueUsed] = pending.pop()!;
       if (done.has(m)) continue;
       done.add(m);
       const bodies = matchCasePartsOf(m, scope, true);
@@ -1967,18 +2035,25 @@ export function unsettledShapeIn(
         )
       )
         return { node: m, reason: 'branches' };
-      // Each node with the innermost local scope around it.
-      const stack: [Expression, Scope | undefined][] = matchCasePartsOf(
-        m,
-        scope
-      ).map((part) => [part, caseScopeOf(part, scope)]);
+      // Each node with the innermost local scope around it, and whether its
+      // value is used (`operandUse()`): a guard is used, and a case body is
+      // used when the value of the `Match` is.
+      const guards = new Set<Expression>();
+      const parts = matchCasePartsOf(m, scope, false, guards);
+      const stack: [Expression, Scope | undefined, boolean][] = parts.map(
+        (part) => [
+          part,
+          caseScopeOf(part, scope),
+          valueUsed || guards.has(part),
+        ]
+      );
       const seen = new Set<Expression>();
       while (stack.length > 0) {
-        const [e, around] = stack.pop()!;
+        const [e, around, partUsed] = stack.pop()!;
         if (!isFunction(e) || seen.has(e) || e.operator === 'Hold') continue;
         seen.add(e);
         if (e.operator === 'Match') {
-          pending.push([e, around, true]);
+          pending.push([e, around, true, partUsed]);
           continue;
         }
         const inner = e.localScope ?? around;
@@ -1986,12 +2061,19 @@ export function unsettledShapeIn(
           return { node: e, reason: 'branches' };
         if (hasConflictingValues(e, target, arity))
           return { node: e, reason: 'values' };
+        if (partUsed && isFunction(e, 'Loop')) caseLoops.push(e);
+        const useOf = (op: Expression): boolean => {
+          const i = e.ops.indexOf(op);
+          const use = i < 0 ? 'value' : operandUse(e, i);
+          return use === 'value' || (use === 'end' && partUsed);
+        };
         const dropped = droppedOperandsOf(e, target);
         if (dropped === undefined)
-          for (const op of codeOperandsOf(e)) stack.push([op, inner]);
+          for (const op of codeOperandsOf(e))
+            stack.push([op, inner, useOf(op)]);
         else
           e.ops.forEach((op, i) => {
-            if (!dropped.has(i)) stack.push([op, inner]);
+            if (!dropped.has(i)) stack.push([op, inner, useOf(op)]);
           });
       }
     }
@@ -2017,6 +2099,21 @@ export function unsettledShapeIn(
     haveConflictingShapes(unitValuesOf(root, target), arity)
   )
     return { node: root, reason: 'values' };
+
+  // A `Loop` whose value is used declines, on every target, unless the
+  // compiled code gives its value (`isUnrepresentableLoopValue()`): the
+  // JavaScript code of `Loop(k, Element(k, 1..3))` gave `undefined` where
+  // the interpreter gives `Nothing`, and with `x: real` the code of
+  // `Loop(If(k > x, Break(10k)), Element(k, 1..5))` gave `undefined` where
+  // the interpreter gives `30` for `x = 2`. A loop that is a statement (a
+  // statement of a `Block` that is not its last one, or the body of a
+  // loop) has no used value, and compiles. This check runs last, so that a
+  // more specific reason (a `Return` in a loop with code after it, a
+  // `Break` in a `Sum`) stays the reason.
+  const loopValue =
+    loops.find((l) => isUsed(l) && isUnrepresentableLoopValue(l, target)) ??
+    caseLoops.find((l) => isUnrepresentableLoopValue(l, target));
+  if (loopValue !== undefined) return { node: loopValue, reason: 'loop-value' };
   return undefined;
 }
 
@@ -2125,6 +2222,19 @@ function throwUnsettledShape(unsettled: UnsettledShape): never {
       value,
     });
   }
+  if (unsettled.reason === 'loop-value')
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": the value of this \`Loop\` is used. ` +
+        `A loop that ends with no \`Break\`, or with a \`Break\` with no ` +
+        `value, evaluates to \`Nothing\`, the erasure marker, which has no ` +
+        `compiled representation, and the compiled loop does not carry the ` +
+        `value of a \`Break\`. Use the loop as a statement, and end the ` +
+        `block with the value it should have.`,
+      value,
+    });
   if (unsettled.reason === 'return-in-loop')
     throw new CompileDeclineError({
       code: UNSETTLED_SHAPE_CODE,
@@ -2132,7 +2242,8 @@ function throwUnsettledShape(unsettled: UnsettledShape): never {
       message:
         `Could not compile "${value}": a \`Return\` inside a \`Loop\` is ` +
         `not compiled, unless that loop is the last statement of the ` +
-        `function. The compiled loop is a function of its own, so the ` +
+        `function and has no indexing set. The compiled loop is a ` +
+        `function of its own, so the ` +
         `\`Return\` would end only the loop, and the code after the loop ` +
         `would still run.`,
       value,

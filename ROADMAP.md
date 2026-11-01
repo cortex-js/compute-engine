@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-750.
+Next free reference: CE-753.
 
 **Entry format.**
 
@@ -31,6 +31,7 @@ Next free reference: CE-750.
 ### CE-<n>. <What is wrong, or what to do>
 
 **Status:** <state>; <kind>[, <size>].[ <decision>.][ <links>.]
+**Witness:** <strength>; <the program, what it gives, what it should give>.
 
 <The input, what happens today, what should happen, the cause and the
 proposed fix.>
@@ -61,10 +62,25 @@ proposed fix.>
 - `<size>` is an estimate: `S` (one function or file and its tests), `M`
   (several files in one part of the engine), or `L` (several parts of the
   engine, or a plan document first).
-- An agent adds an entry only for a defect that waits for a user decision
-  (`decision needed`), or for an item that the user asked to record. A defect
-  with a clear fix is fixed, not recorded (`AGENTS.md`, "Fix every defect").
-  An idea for a capability, a performance change, a design or a task goes in
+- `<strength>` says how the defect was reached:
+  - `corpus`: a Tycho document or ledger row, a GitHub issue, a benchmark, or
+    a program a host sent;
+  - `plausible`: a program of one or two lines that a user would write, with
+    the inputs declared as a host declares them;
+  - `crafted`: a program built to reach the case, where a type, a target and
+    a construct are chosen together.
+
+  A defect entry has a `corpus` or `plausible` witness. A `crafted` witness
+  of a compiled-code difference goes to the known-limitations list of
+  `docs/COMPILATION-MODEL.md` ("Caveats of compiled code"), not here, and a
+  difference that those caveats allow is recorded nowhere. A `crafted`
+  witness of an interpreter defect is an entry only when the user says to
+  record it. An entry written before 2026-11-01 may have no witness line: the
+  triage of that date adds one or deletes the entry.
+- An agent adds an entry for a defect in older code that its task found and
+  did not fix (`AGENTS.md`, "Fix every defect"), with the witness line, and
+  for an item that the user asked to record. A defect that the task's change
+  introduces is fixed, not recorded. An idea for a capability, a performance change, a design or a task goes in
   the agent's report to the user, and becomes a `proposed` entry only when the
   user says to record it.
 - Record a user decision with its date. Link the plan document, the GitHub issue
@@ -1016,6 +1032,33 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
+### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
+
+**Status:** decision needed; defect, small. Found 2026-11-01 while fixing a
+caller-binding defect (a function called with a block-local valueless `y`
+read the global `y`; that part is fixed).
+
+With a global `y := 5` and `f := x ↦ NumericApproximation(x)`,
+`Block(Declare(y, 'real'), Map(f, [y]))` gives `[5]`: the block returns a lazy
+view, and its elements are read after the block's scope is popped. A binding
+from a popped scope reads its name in the current scope (the rule written in
+the `bindingInContext` comment, `boxed-expression/binders.ts`), which is the
+global `y`. The same holds without a function: `Block(Declare(y, 'real'), [y])`
+gives `[y]`, and evaluating that result again gives `[5]`;
+`Map(x ↦ x + 0.5, [y])` gives `[5.5]`. Expected: the local `y`, which has no
+value (`[y]`, `[y + 0.5]`).
+
+Question: what does a binding of a block that has ended read?
+
+- (a) Recommended: a binding that a block run removed reads as its own
+  valueless definition once the block's scope is no longer live:
+  `Map(f, [y])` gives `[y]`, and evaluating `[y]` again stays `[y]`. This
+  changes the written rule for a popped scope.
+- (b) A block that returns a lazy view holding a valueless local reads its
+  elements before the block ends. Narrower, but `[y]` evaluated again still
+  gives `[5]`.
+- (c) No change: these cases keep reading the global value.
+
 ### CE-739. An assignment, `Return`, `Break` or `Continue` inside a conditional whose condition is a collection has no defined meaning
 
 **Status:** design needed; design, medium. Filed 2026-11-01 from CE-722 (user
@@ -1524,6 +1567,44 @@ affected. If nothing is decided, the behavior stays and is not documented.
 - **CE-105.3** The frames of `3 - Ln(w)` (with `let w: any = "s"`) are
   `Negate argument 1, Add argument 1`, with no `Ln` frame, while `Ln(w) * 2` has
   one. Find why the `Ln` call adds no frame there.
+
+### CE-107. `isSame` is false between a boxed and a parsed `D` of the same function literal
+
+**Status:** decision needed; defect, small. Tycho row 394.
+
+`isSame` is `false` between `D(x ↦ f, x)` boxed from MathJSON and the same
+derivative parsed from `\frac{\mathrm{d}f}{\mathrm{d}x}`, although their `.json`
+is the same (`["D", ["Function", ["Block", "f"], "x"], "x"]`). Values do not
+differ. Cause: canonicalization wraps a function body in a `Block`, and a free
+`f` that no statement types gets a placeholder declaration in that `Block`'s
+scope, while the parse route and a later `ce.box('f')` bind the global `f`
+(`docs/SCOPING-MODEL.md`, end of the scoping section).
+
+Two fixes were tried (worktree `/tmp/wt-compute-engine-fb-ce107`, patch
+`CE-107-v2.patch`, three review rounds):
+
+- Declaring the free name outside the literal broke 12 tests in 9 files
+  (effects provenance, rollback frames, re-derivation of `g(t) := 2a(t)`
+  when `a` is defined later, `CountIf` callbacks that must not declare `q`).
+- Keeping the placeholder and making `isSame` compare it as the outer binding
+  works, but a host-built literal (`ce.function('Function', [block, x])`)
+  whose `Block` holds such a placeholder must then be boxed again from its
+  MathJSON, so that marking it does not change other expressions that share
+  the `Block`. That rebox reads every name in the current scope: with `y := 7`
+  declared in a pushed scope, `['Block', ['Tuple', 'f', 'y', 'x']]` boxed
+  there, the scope popped, and the literal built and applied to 3, HEAD gives
+  `(f, 7, 3)` and the fix gives `(f, y, 3)`.
+
+Question: is the `isSame` fix worth that value change for a host-built
+literal, or more work?
+
+- (a) Recommended: no change; the behavior is documented in
+  `docs/SCOPING-MODEL.md`. `isSame` stays `false`; values are right.
+- (b) Take the v2 fix with the documented value change for the host-built
+  case (the existing nested-assignment rebox route already has the same
+  limit).
+- (c) v2 with a copy of the body that keeps its existing bindings in new
+  scopes instead of a rebox from MathJSON (a new copy function; more work).
 
 ### CE-108. Operators treat a symbol that holds or is declared an error in different ways
 
@@ -3718,6 +3799,35 @@ References: do not take references for `Re(a)` far below 0 from mpmath's
 the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
+
+### CE-751. A `number` value that holds a complex number reaches code compiled for `real`
+
+**Status:** ready; wrong value, M. User decision 2026-11-01: option (a).
+
+- `Map(g, L)` with `L: list<number>` at `[1+i, 2]` gives `[null, null]` on
+  JavaScript (block-local and engine-level `g`).
+- `hr = (p: tuple<real, real>) ↦ p[1] + p[2]`, `hr(L[1])` with
+  `L: list<tuple<number, real>>` at `[(1+i, 2)]` gives the string
+  `"[object Object]2"` in every mode; the interpreter gives `3 + i`.
+
+`number` is a union of the real and the complex shapes. The compiler
+compiles the element or the parameter for `real`, and does not detect the
+complex value. The static-shape rule (`docs/plans/2026-10-31-static-shape-compilation.md`)
+says that a declared union of shapes compiles with one dispatch at its
+binding, but it does not say whether `number` counts as such a union.
+
+Question: what must the compiled code do with a `number` that reaches code
+compiled for `real`?
+
+- (a) Compile the value in the complex lane, as commit `c4e0a3bdb` does for a
+  complex value at a real parameter. Correct values; every `number` element
+  pays for complex arithmetic, also when all values are real.
+- (b) Decline when a `number` reaches code compiled for `real`. The
+  interpreter computes the value; the host declares `real` to compile.
+
+Recommendation: (a). With no decision, both examples keep their wrong
+values. Found 2026-11-01 (handoff
+`docs/scratch/2026-11-01-ce715-next-tasks-followups-handoff.md`, item 2).
 
 ### CE-725. `Sort` with a callback, `Iterate` and `Pipe` decline on the JavaScript target
 

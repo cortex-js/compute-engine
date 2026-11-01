@@ -35,6 +35,20 @@ const loop = (range: unknown[]) => [
   ['Element', 'j', ['Range', ...range]],
 ];
 
+/**
+ * The same loop as a statement of a block whose value is `s`. A loop whose
+ * value is used does not compile (its value is `Nothing`), so the tests of
+ * the generated loop code put it in a statement position. The body writes
+ * `s`, so the loop is not removed as dead code.
+ */
+const statementLoop = (range: unknown[]) => [
+  'Block',
+  ['Declare', 's', "'real'"],
+  ['Assign', 's', 0],
+  ['Loop', ['Assign', 's', ['Add', 's', 'j']], ['Element', 'j', ['Range', ...range]]],
+  's',
+];
+
 const BOUNDS_MESSAGE =
   'DECLINED: Could not compile `Loop` on this target: the bounds of the `Range` must be numbers known at compile time (a number literal, or a symbol with a value)';
 
@@ -58,15 +72,19 @@ describe('a Loop over a Range on a shader target', () => {
   test.each(['glsl', 'wgsl'] as const)(
     '%s compiles a bound that is a symbol with a value',
     (to) => {
-      expect(shader(loop([1, 'N']), to)).toContain('j <= 4; j++');
+      expect(shader(statementLoop([1, 'N']), to)).toContain('j <= 4; j++');
     }
   );
 
   test.each(['glsl', 'wgsl'] as const)(
     '%s advances the counter by the step of the Range',
     (to) => {
-      expect(shader(loop([1, 10, 3]), to)).toContain('j <= 10; j += 3');
-      expect(shader(loop([10, 1, -3]), to)).toContain('j >= 1; j += -3');
+      expect(shader(statementLoop([1, 10, 3]), to)).toContain(
+        'j <= 10; j += 3'
+      );
+      expect(shader(statementLoop([10, 1, -3]), to)).toContain(
+        'j >= 1; j += -3'
+      );
     }
   );
 

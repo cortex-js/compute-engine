@@ -1711,10 +1711,12 @@ describe('PYTHON TARGET', () => {
       );
     });
 
-    it('Loop as the final statement of a Block appends `return None`', () => {
+    it('Loop as the final statement of a Block declines', () => {
       // The block hook must NOT return-prefix a `for`/`while` statement (that
-      // would be `return for …:` — a SyntaxError). Instead the Block evaluates
-      // to None (the Loop's Nothing value).
+      // would be `return for …:` — a SyntaxError). The value of the Block is
+      // the value of the Loop, `Nothing`, which has no compiled
+      // representation, so the compilation declines. (It emitted
+      // `return None` before.)
       const expr = ce.box([
         'Block',
         ['Assign', 'acc', 0],
@@ -1724,15 +1726,9 @@ describe('PYTHON TARGET', () => {
           ['Element', 'i', ['Range', 1, 5]],
         ],
       ]);
-      const code = python.compileFunction(expr, 'g', []);
-      expect(code).toBe(
-        'def g():\n' +
-          '    acc = 0\n' +
-          '    for i in range(1, 6):\n' +
-          '        acc = acc + i\n' +
-          '    return None\n'
+      expect(() => python.compileFunction(expr, 'g', [])).toThrow(
+        /`Nothing`/
       );
-      expect(code).not.toMatch(/return for/);
     });
 
     it('expression-position Loop fails closed', () => {
@@ -1745,9 +1741,9 @@ describe('PYTHON TARGET', () => {
 
     it('a Loop body cannot be a compileLambda body', () => {
       const loop = ce.box([
-        'Loop',
-        ['Assign', 'acc', 'i'],
-        ['Element', 'i', ['Range', 1, 5]],
+        'Block',
+        ['Loop', ['Assign', 'acc', 'i'], ['Element', 'i', ['Range', 1, 5]]],
+        'acc',
       ]);
       expect(() => python.compileLambda(loop, [])).toThrow(/lambda/);
     });
@@ -1796,19 +1792,24 @@ describe('PYTHON TARGET', () => {
     });
 
     it('If/else with Continue in one branch', () => {
+      // The loop is a statement: a loop whose value is used declines.
       const loop = (rel: string, k: number) =>
         ce.box([
-          'Loop',
+          'Block',
           [
-            'Block',
+            'Loop',
             [
-              'If',
-              [rel, 'k', k],
-              ['Continue'],
-              ['Assign', 's', ['Add', 's', 'k']],
+              'Block',
+              [
+                'If',
+                [rel, 'k', k],
+                ['Continue'],
+                ['Assign', 's', ['Add', 's', 'k']],
+              ],
             ],
+            ['Element', 'k', ['Range', 1, 5]],
           ],
-          ['Element', 'k', ['Range', 1, 5]],
+          's',
         ]);
       // A relation with a NaN operand is decided (user decisions 2026-10-20
       // and 2026-10-23), so neither relation takes a decidedness test. The
@@ -1820,7 +1821,8 @@ describe('PYTHON TARGET', () => {
           '        if ((k) != (2)):\n' +
           '            continue\n' +
           '        else:\n' +
-          '            s = k + s\n'
+          '            s = k + s\n' +
+          '    return s\n'
       );
       expect(python.compileFunction(loop('Greater', 2), 'g', ['s'])).toBe(
         'def g(s):\n' +
@@ -1828,7 +1830,8 @@ describe('PYTHON TARGET', () => {
           '        if 2 < k:\n' +
           '            continue\n' +
           '        else:\n' +
-          '            s = k + s\n'
+          '            s = k + s\n' +
+          '    return s\n'
       );
     });
 
@@ -1883,11 +1886,19 @@ describe('PYTHON TARGET', () => {
           ).toBe(false);
         }
         // Against another control-flow arm, a statement block, not a
-        // conditional expression, and the same for both spellings.
-        const expected = python.compile(arms(bare, ['Continue'])).code;
-        expect(python.compile(arms(wrapped, ['Continue'])).code).toBe(
-          expected
-        );
+        // conditional expression, and the same for both spellings. A loop
+        // whose value is used declines, so the selection that holds the loop
+        // is a statement of a block.
+        const select = (arm: any) =>
+          bare === loop
+            ? ce.box([
+                'Block',
+                ['If', ['Greater', 'x', 0], arm, ['Continue']],
+                'x',
+              ] as any)
+            : arms(arm, ['Continue']);
+        const expected = python.compile(select(bare)).code;
+        expect(python.compile(select(wrapped)).code).toBe(expected);
         // The loop arm assigns the input `x`, so the code reads and writes a
         // local copy of `x`. (The `x == x` decidedness test that preceded the
         // selection is gone since the user decision of 2026-10-20.)
@@ -1908,14 +1919,19 @@ describe('PYTHON TARGET', () => {
     });
 
     it('a Block-wrapped Break in a loop body matches the unwrapped form', () => {
+      // The loop is a statement: a loop whose value is used declines.
       const body = (then: any) =>
         ce.box([
-          'Loop',
+          'Block',
           [
-            'Block',
-            ['If', ['GreaterEqual', 'k', 5], then],
-            ['Assign', 'k', ['Add', 'k', 1]],
+            'Loop',
+            [
+              'Block',
+              ['If', ['GreaterEqual', 'k', 5], then],
+              ['Assign', 'k', ['Add', 'k', 1]],
+            ],
           ],
+          'k',
         ] as any);
       const expected = python.compileFunction(body(['Break']), 'f', ['k']);
       // No `k == k` test since the user decision of 2026-10-20.
@@ -1924,7 +1940,8 @@ describe('PYTHON TARGET', () => {
           '    while True:\n' +
           '        if 5 <= k:\n' +
           '            break\n' +
-          '        k = k + 1\n'
+          '        k = k + 1\n' +
+          '    return k\n'
       );
       expect(
         python.compileFunction(body(['Block', ['Break']]), 'f', ['k'])
@@ -1932,21 +1949,27 @@ describe('PYTHON TARGET', () => {
     });
 
     it('nested Loop inside a Loop body', () => {
+      // The outer loop is a statement: a loop whose value is used declines.
       const expr = ce.box([
-        'Loop',
+        'Block',
         [
           'Loop',
-          ['Assign', 's', ['Add', 's', ['Multiply', 'a', 'b']]],
-          ['Element', 'b', ['Range', 1, 3]],
+          [
+            'Loop',
+            ['Assign', 's', ['Add', 's', ['Multiply', 'a', 'b']]],
+            ['Element', 'b', ['Range', 1, 3]],
+          ],
+          ['Element', 'a', ['Range', 1, 3]],
         ],
-        ['Element', 'a', ['Range', 1, 3]],
+        's',
       ]);
       const code = python.compileFunction(expr, 'h', ['s']);
       expect(code).toBe(
         'def h(s):\n' +
           '    for a in range(1, 4):\n' +
           '        for b in range(1, 4):\n' +
-          '            s = a * b + s\n'
+          '            s = a * b + s\n' +
+          '    return s\n'
       );
     });
 

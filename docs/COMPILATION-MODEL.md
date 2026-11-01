@@ -2,21 +2,83 @@
 
 **Status:** normative internal reference for implemented compilation behavior.
 
+## Caveats of compiled code
+
+Compiled code is a fast numeric approximation of the interpreter, not a
+second implementation of it. A host that needs the interpreter's exact
+result calls the interpreter. The host accepts the differences listed here
+when it compiles. A difference that this list does not name is a defect.
+
+**Allowed differences.**
+
+- The precision of the target: `f32` arithmetic on `glsl` and `wgsl`, a
+  different order of summation, a different library routine for `Sin`,
+  `Exp` or `Gamma`.
+- A value where the interpreter gives no number. Where `evaluate()` gives
+  `Missing`, `Nothing`, `Indeterminate`, an unevaluated form or an error,
+  the compiled code can give `NaN`, `0`, `±Infinity`, `undefined` or
+  `null`, can throw, or can decline. With `q: real | missing` and `q`
+  absent, `Sqrt(q)` can give `0` on `javascript` where the interpreter
+  gives `NaN`.
+- A value for an input that holds a value outside its declared type, for an
+  input left out, or for an error that the static type does not show.
+  "Fail closed" below lists these cases; they were never specified.
+
+**Not allowed.** For a program with inputs of their declared types, a finite
+number that differs from the interpreter's by more than the precision of the
+target, or a result of another shape (a number for a list, a list of another
+length, a real for a complex). A `Sum` that skips a term, or `[1, 2] + 1`
+that gives `3`, is a defect on every target.
+
+**A decline is always allowed.** A target that cannot give the value within
+these caveats declines, and the host gets the interpreter (with fallback) or
+the diagnostic. A decline is the preferred fix for a case that would need a
+handler of its own: it costs the host speed on that expression and nothing
+else. "The decline stays" is a valid resolution of a reported difference,
+recorded with its witness in the known-limitations list below or in
+`ROADMAP.md`.
+
+**Witness.** A reported difference names the program that shows it and the
+strength of that witness:
+
+- `corpus`: a Tycho document or ledger row, a GitHub issue, a benchmark, or
+  a program a host sent;
+- `plausible`: a program of one or two lines that a user would write, with
+  the inputs declared as a host declares them;
+- `crafted`: a program built to reach the case, where a type union, a
+  target and a construct are chosen together.
+
+A `crafted` witness of an allowed difference is not a defect and is not
+recorded. A `crafted` witness of a wrong finite value or shape is one line
+in the known-limitations list below, not a `ROADMAP.md` entry: it is fixed,
+by a decline or a handler, when a stronger witness appears. A `corpus` or
+`plausible` witness of a wrong finite value or shape is a defect: fixed at
+once, or a `ROADMAP.md` entry.
+
+### Known limitations
+
+One line each: the target, the program, the compiled value, the
+interpreter's value. A line is removed when the case declines or is fixed.
+
+- (none recorded yet)
+
 ## Fail closed
 
 Compilation is an optional acceleration route. A target emits code only when
-it can preserve the interpreter's value, effects, evaluation count, and error
-contract. Unsupported heads, representations, guards, or numeric lanes decline
-with a structured diagnostic. They never emit plausible but different code.
+it can give the interpreter's value within the caveats above, with the
+interpreter's effects and evaluation count. Unsupported heads,
+representations, guards, or numeric lanes decline with a structured
+diagnostic. They never emit code that gives a wrong finite value or a wrong
+shape for a program with inputs of their declared types.
 
 With fallback enabled, a decline returns an interpreted runner. With fallback
 disabled, the decline is visible to the caller. Runtime exceptions from
 successfully compiled user code are not silently reinterpreted.
 
-**What is guaranteed.** The compiled value equals the interpreter's value
-for a well-typed expression whose inputs are supplied and hold values of
-their declared types (or, for an input with no declaration, the type that
-the engine infers). An expression that has a sub-expression that is invalid,
+**What is guaranteed.** For a well-typed expression whose inputs are
+supplied and hold values of their declared types (or, for an input with no
+declaration, the type that the engine infers), the compiled value is the
+interpreter's value within the caveats above. An expression that has a sub-expression that is invalid,
 or whose static type is `error`, declines on every target: `"ab" + u` and,
 with `ADD = (x, y) ↦ x + y`, `ADD("ab", u)` both decline. The result of the
 decline has the token `ErrorCode` in `unsupported`, which a host reads to tell
@@ -216,14 +278,47 @@ effect:
   (CE-723).
 - In a branch of an `If` or a `Which` whose condition is or can be a
   collection, an assignment, a `Return`, a `Break` or a `Continue` (CE-722).
-- A `Return` inside a `Loop`, unless that loop is the only loop around it and
-  is the last statement of the function (or of the root): the compiled loop is
-  a function of its own, so the `Return` ends only the loop, and the code
-  after the loop would still run (CE-719).
+- A `Return` inside a `Loop`, unless that loop is the only loop around it, is
+  the last statement of the function (or of the root), and has no indexing
+  set: the compiled loop is a function of its own, so the `Return` ends only
+  the loop, and the code after the loop would still run (CE-719). A loop
+  with an indexing set declines also when it is the last statement, because
+  it gives `Nothing` when it ends with no `Return` (see "`Nothing` in a
+  value position declines" below).
 
 A read of a local that may have no value is checked by the compilation of
 the block (JavaScript throws `read-before-declaration`, a shader declines),
 as the interpreter gives that error.
+
+**`Nothing` in a value position declines.** `Nothing` is the erasure marker,
+and the compiled result has no form for it. So these decline on every
+target where their value is used (the root, the last statement of a block
+whose value is used, the body of a function, an operand): an empty block, a
+block whose last statement is a declaration with no value
+(`Block(Declare(t, "integer"))`), and a `Loop`. The value of a loop is
+`Nothing` when it ends at the end of its indexing sets or with a `Break`
+with no value, and the compiled loop does not carry the value of a
+`Break(v)`, so every loop whose value is used declines:
+`Loop(k + x, k ∈ 1..3)` declines, where the JavaScript code gave
+`undefined`. Put the loop in a statement position and end the block with
+its value: `Block(s ≔ 0; Loop(s ≔ s + k, k ∈ 1..3); s)` compiles. Only a
+loop with no indexing set and no `Break` of its own compiles where its value
+is used: it ends only through a `Return` or never ends, so its value is the
+value of the `Return`. A loop with an indexing set declines also when it has
+a `Return` and is the body of its function, or the last statement of a block
+in tail position. For example, with `x: real`, the search loop
+`((p) ↦ Loop(If(k > p, Return(k)), k ∈ 1..5))(x)` gives `3` for `x = 2` and
+`Nothing` for `x = 9`, where no `Return` runs; the compiled function gave
+`undefined` (JavaScript) or `None` (Python) for `x = 9`, so the loop
+declines. To compile a search loop, put the loop in a statement position,
+store the value that it finds in a local, and end the block with that local:
+`Block(r ≔ 0; Loop(If(k > x, Block(r ≔ k, Break())), k ∈ 1..5); r)` compiles
+on JavaScript and Python, and gives `3` for `x = 2` and `0` for `x = 9`, as
+the interpreter does for this block. No compiled form gives `Nothing` when
+no value is found: the initial value of the local (here `0`) takes its
+place, and `r ≔ Nothing` declines. A loop in a case of a `Match` whose value
+is used is checked in the same way. The loop check is `unsettledShapeIn()`
+(`compilation/compile-admission.ts`).
 
 On the shader targets, a conditional whose value the code discards (with
 branches of different shapes) declines too, because its shader code is a

@@ -2760,22 +2760,24 @@ describe('Assignments in a function literal (R3)', () => {
       expect(d.code).toBe('unsettled-shape');
       expect(d.error).toMatch(/a `Return` inside a `Loop` is not compiled/);
     }
-    // The loop is the last statement of the function: its value is the
-    // value of the function, as in the interpreter.
-    expectCompiled(
-      [
-        'Apply',
-        fn(
-          B(
-            ['Assign', 'q', 0],
-            loop(['If', ['Greater', 'i', 1], ['Return', 5]])
-          ),
-          'p'
-        ),
-        1,
-      ],
-      5
-    );
+    // The loop is the last statement of the function, but it has an
+    // indexing set: when no `Return` runs, the loop ends at the end of its
+    // indexing set and the interpreter gives `Nothing`, which has no
+    // compiled representation. The loop declines, and the fallback gives
+    // the value of the interpreter.
+    const tail: MathJsonExpression = [
+      'Apply',
+      fn(
+        B(['Assign', 'q', 0], loop(['If', ['Greater', 'i', 1], ['Return', 5]])),
+        'p'
+      ),
+      1,
+    ];
+    expect(interpret(tail)).toBe(5);
+    const d = declined(tail);
+    expect(d.code).toBe('unsettled-shape');
+    expect(d.error).toMatch(/the value of this `Loop` is used/);
+    expect(compile(engine().box(tail)).run!()).toBe(5);
   });
 
   // The Python target emits the loop inline, as a `for` statement in the

@@ -565,10 +565,15 @@ describe('WGSL COMPILATION', () => {
 
   describe('Loop', () => {
     it('should compile Loop as for-loop without IIFE', () => {
+      // The loop is a statement: a loop whose value is used declines.
       const expr = ce.expr([
-        'Loop',
-        ['Assign', 'acc', ['Add', 'acc', 'i']],
-        ['Element', 'i', ['Range', 1, 5]],
+        'Block',
+        [
+          'Loop',
+          ['Assign', 'acc', ['Add', 'acc', 'i']],
+          ['Element', 'i', ['Range', 1, 5]],
+        ],
+        'acc',
       ]);
       const code = wgsl.compile(expr).code;
       expect(code).toContain('for (var i: i32 = 1; i <= 5; i++)');

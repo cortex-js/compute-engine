@@ -87,10 +87,17 @@ describe('COMPILE Loop', () => {
   });
 
   test('code generation: simple loop', () => {
+    // The loop is a statement: a loop whose value is used declines. Its
+    // body writes a local, so the loop is not removed as dead code.
     const expr = ce.expr([
-      'Loop',
-      ['Square', 'i'],
-      ['Element', 'i', ['Range', 0, 9]],
+      'Block',
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        ['Assign', 's', ['Add', 's', ['Square', 'i']]],
+        ['Element', 'i', ['Range', 0, 9]],
+      ],
+      's',
     ]);
     const result = compile(expr);
     expect(result.success).toBe(true);
@@ -100,10 +107,21 @@ describe('COMPILE Loop', () => {
 
 describe('COMPILE Break / Continue', () => {
   test('Break appears in loop code', () => {
+    // The loop is a statement: a loop whose value is used declines. Its
+    // body writes a local, so the loop is not removed as dead code.
     const expr = ce.expr([
-      'Loop',
-      ['If', ['Greater', 'i', 3], ['Break'], 'Nothing'],
-      ['Element', 'i', ['Range', 1, 10]],
+      'Block',
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['If', ['Greater', 'i', 3], ['Break'], 'Nothing'],
+          ['Assign', 's', ['Add', 's', 'i']],
+        ],
+        ['Element', 'i', ['Range', 1, 10]],
+      ],
+      's',
     ]);
     const result = compile(expr);
     expect(result.success).toBe(true);
@@ -111,10 +129,21 @@ describe('COMPILE Break / Continue', () => {
   });
 
   test('Continue appears in loop code', () => {
+    // The loop is a statement: a loop whose value is used declines. Its
+    // body writes a local, so the loop is not removed as dead code.
     const expr = ce.expr([
-      'Loop',
-      ['If', ['Greater', 'i', 3], ['Continue'], 'Nothing'],
-      ['Element', 'i', ['Range', 1, 10]],
+      'Block',
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['If', ['Greater', 'i', 3], ['Continue'], 'Nothing'],
+          ['Assign', 's', ['Add', 's', 'i']],
+        ],
+        ['Element', 'i', ['Range', 1, 10]],
+      ],
+      's',
     ]);
     const result = compile(expr);
     expect(result.success).toBe(true);
@@ -228,15 +257,22 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
   test('JS: Loop with single Element (body is plain expression) runs for effect', () => {
     // A `Loop` is imperative / for effect: the body value is discarded. Single
     // integer-ascending step-1 Range → counted for-loop, no result array.
-    const expr = ce.expr([
+    const loop = [
       'Loop',
-      ['Multiply', 'i', 2],
+      ['Assign', 's', ['Add', 's', ['Multiply', 'i', 2]]],
       ['Element', 'i', ['Range', 1, 3]],
-    ]);
-    const result = compile(expr);
+    ];
+    // The value of the loop is `Nothing`, which has no compiled
+    // representation: the loop declines where its value is used.
+    expect(() => compile(ce.expr(loop as any), { fallback: false })).toThrow(
+      /`Nothing`/
+    );
+    // The imperative loop runs but doesn't collect.
+    const result = compile(
+      ce.expr(['Block', ['Assign', 's', 0], loop, 's'] as any)
+    );
     expect(result.success).toBe(true);
-    // The imperative loop runs but doesn't collect; run() returns undefined.
-    expect(result.run!()).toBeUndefined();
+    expect(result.run!()).toBe(12);
     expect(result.code).not.toContain('result.push');
     expect(result.code).toContain('for (let i = 1; i <= 3; i++)');
   });
@@ -403,10 +439,17 @@ describe('COMPILE Loop / single-Element Range routing', () => {
 
   test('Integer-ascending step-1 Range still uses legacy for-loop', () => {
     // Performance / readability: simple ranges should NOT pay for an array.
+    // The loop is a statement: a loop whose value is used declines. Its
+    // body writes a local, so the loop is not removed as dead code.
     const expr = ce.expr([
-      'Loop',
-      ['Square', 'i'],
-      ['Element', 'i', ['Range', 0, 9]],
+      'Block',
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        ['Assign', 's', ['Add', 's', ['Square', 'i']]],
+        ['Element', 'i', ['Range', 0, 9]],
+      ],
+      's',
     ]);
     const result = compile(expr);
     expect(result.success).toBe(true);
