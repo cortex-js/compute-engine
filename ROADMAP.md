@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-740.
+Next free reference: CE-741.
 
 **Entry format.**
 
@@ -3904,6 +3904,31 @@ last statement of the function still compiles.
 Fix: compile such a loop so that a `Return` in it ends the function: a
 sentinel value that the code after the loop call tests, or an inline loop
 where the target allows it.
+
+### CE-740. A `Which` with a `compile` handler that returns no code declines for an untyped dropped operand
+
+**Status:** proposed; defect (decline), S. The more precise version of a
+sound decline (`AGENTS.md`): it waits until the user asks for it.
+
+With `M` undeclared and a `compile` handler on the definition of `Which` that
+returns no code (`undefined`, `null` or an empty string),
+`Which(True, 0, True, M)` declines with `'untyped-input'` for `M`. The stock
+lowering, which runs when the handler returns no code, drops the clauses
+after the first `True` condition and reads only `0`, so the expression has a
+settled shape and the interpreter gives `0`. Cause: `droppedOperandsOf()`
+(`compilation/compile-admission.ts`) keeps every operand of a `Which` whose
+definition has a `compile` handler, because that handler receives every
+operand and its code can read any of them. The admission does not call the
+handler: it can have effects (the tests count its calls), and its code
+depends on the compilation of the operands. The result is a decline, never a
+wrong value.
+
+Fix: let the admission drop the operands by the stock rules, and move the
+check of the dropped operands to the emission. When the handler's compile
+callback receives an operand that the admission dropped and that reads an
+input with no type, the compilation declines there with `'untyped-input'`.
+Skipping the operands after a literal `True` in the admission alone is not
+sound: a handler that returns code can read them.
 
 ### CE-720. A callback that assigns a name of an enclosing scope is not compiled
 

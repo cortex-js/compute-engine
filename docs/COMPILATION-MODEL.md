@@ -84,7 +84,14 @@ the name of each such input (`["M"]`), and the diagnostic has the code
 function literal, of a user function or of the root function is not an input
 and is not refused: `t ↦ 2t` compiles, and a list passed to its untyped
 parameter is a value outside the type that the body implies (`2t` reads a
-number), so the result is unspecified. A transparent alias of `unknown` or
+number), so the result is unspecified. The parameter names passed to
+`compileFunction(expr, name, params)` are inputs, not the parameters of a
+root `Function` literal: the host chooses them and passes their values, so
+their types come from the engine's declarations, and a name whose type is
+`unknown` or `any` declines with `'untyped-input'`. With `i` declared `any`,
+`compileFunction(At(b, i), "f", ["b", "i"])` declines. A host that wants an
+untyped parameter compiles a root `Function` with a `Typed` parameter
+instead. A transparent alias of `unknown` or
 `any` (`ce.declareType("U", "unknown", { alias: true })`) is that type, so
 an input declared `U` declines. A local of a function body is not an input,
 also when only a nested block (a loop body, a branch) assigns it. A name
