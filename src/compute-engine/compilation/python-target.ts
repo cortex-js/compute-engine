@@ -1752,7 +1752,10 @@ function indentPythonStatements(code: string): string {
  *   expression-If's `(then) if (cond) else (else)`), recursing into each branch
  *   so nested control flow composes. An empty branch becomes `pass`.
  * - `Block` → its statements newline-joined (no trailing `return` — a loop /
- *   branch body is for effect).
+ *   branch body is for effect). A destructuring declare or assign of the
+ *   block lowers to per-leaf statements.
+ * - A bare destructuring `Declare` → compiled as a `Block` of that one
+ *   statement, so it lowers to per-leaf declares.
  * - `Loop` → a nested statement loop (via `compilePythonLoop`).
  * - anything else → `BaseCompiler.compile` (an expression evaluated for effect,
  *   or an `Assign`).
@@ -1783,20 +1786,32 @@ function compilePythonStatements(
   // region); each branch is a statement list again (design §5.1(c)).
   if (h === 'If') return compilePythonIfStatement(expr.ops, target, expr);
 
-  if (h === 'Block') {
+  // A destructuring declare that is the whole loop body
+  // (`Loop(Declare((a, b), "unknown", (k, 2)), …)`) is a statement list of
+  // one statement: it compiles as a `Block` of that statement, so that its
+  // per-leaf declares get the fresh names and the assignments below. It has
+  // no scope of its own (`scopeNode` is `undefined`). Without this branch
+  // the declare reached the value-position `Declare` handler, which fails
+  // closed.
+  const isPatternDeclare = h === 'Declare' && isFunction(expr.ops[0], 'Tuple');
+  if (h === 'Block' || isPatternDeclare) {
+    const ops = isPatternDeclare ? [expr] : expr.ops;
+    const scopeNode = isPatternDeclare ? undefined : expr;
     // As in `BaseCompiler.compileLoopBody`: a statement list is where a
-    // destructuring assign (`(a, b) := (b, a + b)`) lowers to temporaries +
-    // writes. Its value is discarded here, which is what makes the rewrite
-    // safe (see `desugarPatternAssign`).
+    // destructuring declare (`let (a, x) = (2, 3)`) lowers to per-leaf
+    // declares, and a destructuring assign (`(a, b) := (b, a + b)`) lowers
+    // to temporaries + writes. Every statement is in statement position, the
+    // last one included: its value is discarded here, which is what makes
+    // the rewrite safe (see `desugarPatternAssign`).
     // A bare assignment of a name that nothing outside the block binds
     // makes a local of the block, as in `compileBlock`
     // (`withImplicitLocalDeclares`).
     const stmts = BaseCompiler.withImplicitLocalDeclares(
-      expr.ops.flatMap(
-        (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
-      ),
+      ops
+        .flatMap((s) => BaseCompiler.desugarPatternDeclare(s, target) ?? [s])
+        .flatMap((s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]),
       target,
-      expr
+      scopeNode
     );
     const declared = stmts.flatMap((s) =>
       isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
@@ -1809,7 +1824,7 @@ function compilePythonStatements(
     const readClasses = BaseCompiler.classifyLocalReads(
       stmts,
       declared,
-      expr,
+      scopeNode,
       target
     );
     // Python has no block scope: the statements of the block run in the
@@ -4826,6 +4841,22 @@ function pyCouldBeIndexedCollectionOperand(e: Expression): boolean {
   return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE);
 }
 
+/**
+ * True when the type of `e` is a `broadcastable<T>`, or a union with such an
+ * arm. A value of that type is one `T` or a collection of `T` at run time,
+ * and `couldBeCollectionParticipant` does not report it, because a
+ * `broadcastable<T>` is not a subtype of `collection`.
+ */
+function pyMayBeBroadcastable(e: Expression): boolean {
+  const walk = (t: Type): boolean => {
+    const r = resolveTypeForCompilation(t);
+    if (typeof r === 'string') return false;
+    if (r.kind === 'broadcastable') return true;
+    return r.kind === 'union' && r.types.some(walk);
+  };
+  return walk(e.type.type);
+}
+
 function pyIsNumericIndexOperand(e: Expression): boolean {
   return isSubtype(resolveTypeForCompilation(e.type.type), 'number');
 }
@@ -7276,7 +7307,20 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const index = args[1];
     if (base == null || index == null || args.length !== 2)
       throw new Error(
-        `Could not compile \`At\`: only the single-index form compiles.`
+        `Could not compile \`At\`: this lowering reads one index. The ` +
+          `compiler rewrites a chained access \`At(x, i, j)\` to the nested ` +
+          `access \`At(At(x, i), j)\` before it calls this lowering.`
+      );
+    // An index that is, or may be, a collection selects several elements: a
+    // list of integers is a gather and a list of booleans is a mask. The
+    // emitted read below compares the index with integers, which raises a
+    // `TypeError` for a Python list.
+    if (couldBeCollectionParticipant(index) || pyMayBeBroadcastable(index))
+      throw new Error(
+        `Could not compile \`At\`: the index (type ` +
+          `\`${index.type.toString()}\`) is or may be a collection (a gather ` +
+          `or a mask), and the Python target lowers only a scalar index. ` +
+          `The interpreter evaluates it.`
       );
     // A base that may be one string at run time (`string | list<string>`,
     // `broadcastable<string>`) is admitted below through its string arm, and

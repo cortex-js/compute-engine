@@ -2152,17 +2152,15 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toBe(true);
   });
 
-  it('At with a nested/multi-index access fails closed', () => {
+  it('At with a multi-index access compiles as the nested access', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
     const m = e.box(['List', ['List', 1, 2], ['List', 3, 4]]);
-    expect(() =>
-      // The matrix and indexes are all constant, so constant folding would
-      // evaluate the access at compile time and never reach the lowering.
-      js.compile(e.box(['At', m, 1, 2]), {
-        constantFold: false,
-      })
-    ).toThrow(/Could not compile/);
+    // The matrix and indexes are all constant, so constant folding would
+    // evaluate the access at compile time and never reach the lowering.
+    const r = js.compile(e.box(['At', m, 1, 2]), { constantFold: false });
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(2);
   });
 
   // Tycho item 19.4: a fail-closed compile error must be reportable via the

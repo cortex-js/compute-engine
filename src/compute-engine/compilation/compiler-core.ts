@@ -3000,6 +3000,46 @@ export function _compileInner(
             `expression symbolic.`
         );
     }
+    // A chained access `At(x, i₁, i₂, …)` is the nested access
+    // `At(At(x, i₁), i₂, …)`: the `evaluate` handler of `At`
+    // (`library/collections.ts`) reads the indices one at a time, and each
+    // index applies to the value that the index before it selected. An
+    // absent intermediate value gives the absence marker, as an access into
+    // an absent value does. The target lowerings of `At` compile only the
+    // single-index form, so the chain is rewritten here, once for every
+    // target, and the recursion rewrites the remaining indices.
+    // The parent of the chained access chose its own lowering from the type
+    // of the chained node, so the rewrite applies only when the type of the
+    // nested access is a subtype of that type. The type that the `At` type
+    // handler gives a chained read through a tuple, a record or a
+    // dictionary can differ from the type of its value (`At(t, 1, 2)` with
+    // `t: tuple<list<real>, real>` is typed `list<real>`, and its value is a
+    // real number), and such a read declines. Every type matches `unknown`
+    // and `any`, so a chained type `unknown` or `any` is no evidence: the
+    // read declines unless the nested type is `unknown` or `any` too.
+    if (expr.operator === 'At' && expr.nops > 2) {
+      const nested = expr.engine.function('At', [
+        expr.engine.function('At', [expr.ops[0], expr.ops[1]]),
+        ...expr.ops.slice(2),
+      ]);
+      const isTop = (t: Type) => t === 'unknown' || t === 'any';
+      if (
+        !nested.type.matches(expr.type) ||
+        (isTop(expr.type.type) && !isTop(nested.type.type))
+      )
+        throw new Error(
+          `Could not compile \`At\`: the chained access \`${expr.toString()}\` ` +
+            `has the type \`${expr.type.toString()}\`, and the nested access ` +
+            `that the compiler reads it as has the type ` +
+            `\`${nested.type.toString()}\`. ` +
+            (isTop(expr.type.type)
+              ? `The first type gives no shape, and the second one does. `
+              : `The second type is not a subtype of the first one. `) +
+            `The parent of the access chose its lowering from the first ` +
+            `type, so the compiled value could have a different shape.`
+        );
+      return core.compile(nested, target, prec);
+    }
     // An index into the value of a call of a block-local function
     // (`At(f(x), 1)` with `const f = (u) => (u + 1, 2)`). The engine types
     // such a call `unknown`, so the `At` lowerings, which read the static

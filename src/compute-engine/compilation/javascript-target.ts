@@ -5357,8 +5357,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // place and the gathered length is the number of indices, not the number
   // of hits; a non-integer entry in a collection index makes the interpreter
   // decline, projected as a scalar NaN for the whole result. Only the
-  // single-index form over an indexed collection compiles; nested/multi-index
-  // access and non-collection operands fail closed.
+  // single-index form over an indexed collection compiles here: the compiler
+  // rewrites a chained access `At(x, i, j)` to the nested access
+  // `At(At(x, i), j)` before it calls this handler (`compiler-core.ts`).
+  // Non-collection operands fail closed.
   At: (args, compile, target) => {
     const coll = args[0];
     const index = args[1];
@@ -5371,8 +5373,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `At`: missing argument');
     if (args.length !== 2)
       throw new Error(
-        `Could not compile \`At\`: only the single-index form compiles; multi-index (nested) ` +
-          `access is not supported.`
+        `Could not compile \`At\`: this lowering reads one index. The ` +
+          `compiler rewrites a chained access \`At(x, i, j)\` to the nested ` +
+          `access \`At(At(x, i), j)\` before it calls this lowering.`
       );
     // A STRING base is indexed by GRAPHEME CLUSTER, so it is segmented first
     // and `_SYS.at` then applies the ordinary 1-based / negative-from-the-end

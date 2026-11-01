@@ -532,10 +532,13 @@ describe('At — every declining shape names its OWN cause', () => {
       /base is a dictionary .* shader has no keyed lookup/,
     ],
     ['string key', ['At', 'v', { str: 'a' }], /index is a string key/],
+    // The compiler reads a chained access `At(x, 1, 2)` as the nested access
+    // `At(At(x, 1), 2)`, so the cause is the one of the inner access: a row
+    // of the base is not one component of a shader vector.
     [
       'multi-index',
       ['At', ['List', ['List', 1, 2], ['List', 3, 4]], 1, 2],
-      /a multi-index access \(2 indices\)/,
+      /element 1 of the base is itself an aggregate \(type `vector<integer\^2>`\)/,
     ],
     ['vector<1> base', ['At', 'v1', 1], /base has 1 element/],
     [

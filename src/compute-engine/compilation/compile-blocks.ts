@@ -95,8 +95,9 @@ import { _localValueFrames } from './compile-absence.js';
  * compiled for a value it is wrapped/returned (`return <stmt>`, or the
  * target's `block` hook), which inside a loop returns from the enclosing
  * function on the first iteration. Compiled for effect it is just another
- * statement. It is also the position where a destructuring assign lowers,
- * since no statement's value is anyone's.
+ * statement. It is also the position where a destructuring assign or a
+ * destructuring declare lowers, since no statement's value is anyone's. A
+ * bare destructuring declare compiles as a block of that one statement.
  *
  * Used by targets whose loop bodies route through `compileExpr` (the shader
  * targets). The JavaScript and Python targets have their own statement
@@ -108,6 +109,13 @@ export function compileStatementList(
 ): TargetSource {
   if (isFunction(expr, 'Block'))
     return compileBlock(expr.ops, target, expr, false);
+  // A lone destructuring declare (`Loop(Declare((a, b), "unknown", (k, 2)),
+  // …)`) is a statement list of one statement. It compiles as a block of
+  // that statement, which desugars it into per-leaf declares and declares
+  // each local in the loop body. Without this step it reached the
+  // value-position `Declare` handler, which fails closed.
+  if (isFunction(expr, 'Declare') && isFunction(expr.ops[0], 'Tuple'))
+    return compileBlock([expr], target, undefined, false);
   // A lone assignment whose value is another assignment is two statements
   // (`splitChainedAssignments`): `t = u = s;` is not valid WGSL.
   const split = splitChainedAssignments([expr]);

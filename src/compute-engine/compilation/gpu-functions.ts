@@ -548,8 +548,10 @@ function compileGPUAt(
   if (args.length < 2) decline('it has no index operand');
   if (args.length > 2)
     decline(
-      `a multi-index access (${args.length - 1} indices) walks a nested ` +
-        `collection, and only a one-dimensional base has a shader value shape`
+      `this lowering reads one index, and it was given ` +
+        `${args.length - 1}. The compiler rewrites a chained access ` +
+        `\`At(x, i, j)\` to the nested access \`At(At(x, i), j)\` before it ` +
+        `calls this lowering`
     );
 
   const base = args[0];

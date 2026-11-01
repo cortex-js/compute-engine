@@ -349,6 +349,37 @@
 
 ### Bug Fixes
 
+- **In Epsil, an unknown call that is not in the result of a statement gets
+  its did-you-mean warning.** `for i in range(1, 3) { i }` gave `Nothing` and
+  no diagnostic: the loop ran zero times over the inert call `range(1, 3)`,
+  and the `unknown-function` warning ("did you mean `Range`") was found only
+  in the result of a statement. The canonical form of each statement is now
+  scanned too, so a call in the source of a loop, a condition, a function
+  body or a branch that is not taken is reported, once for each name. A name
+  that the program binds (a parameter, a local function, a `let` of a
+  function in a later statement) and a function bound by the host or by an
+  earlier program are not reported. The value of the program does not
+  change.
+
+- **A multi-index `At` compiles.** `At(R, 1, 2)` (`R[1, 2]`) with `R` a
+  matrix, a list of lists or a tensor declined on every target with "only the
+  single-index form compiles"; it now compiles as `At(At(R, 1), 2)` and gives
+  the interpreter's value, also as a function argument (`h(R[1, 1])`). A
+  chained access whose static type does not match the nested reads (a tuple
+  or record base) still falls back to the interpreter. On Python, an index
+  that is a list (a gather or a mask) now falls back to the interpreter;
+  before, `At(R, [2, 1])` compiled and raised a `TypeError` when it ran.
+
+- **A destructuring `let` as a loop body compiles on Python, GLSL and WGSL.**
+  `Loop(Declare((a, b), "unknown", (k, 2)), Element(k, Range(1, 3)))` compiled
+  on JavaScript and declined on the other targets with "destructuring
+  declaration in value position"; Python also declined a destructuring `let`
+  in every loop body. A destructuring `let` whose value reads a name that the
+  pattern declares, such as `let (a, b) = (k, a)`, now falls back to the
+  interpreter on every target: the compiled code read the new `a`, so
+  JavaScript gave 6 where the interpreter gives 300 for
+  `a = 100; s = 0; for k in 1..3 { let (a, b) = (k, a); s = s + b }; s`.
+
 - **Compiled `Sum`/`Product`: a bound that reads a variable with the name of the
   index, and a bound with a known effect.** In JavaScript,
   `Function(Sum(j, Limits(j, 1, j + 2)), j)` applied to 2 gave 6 instead of 10:

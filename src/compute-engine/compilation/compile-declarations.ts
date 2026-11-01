@@ -1155,6 +1155,40 @@ export function desugarPatternDeclare(
     }
     return changed ? ce._fn('Tuple', ops) : pattern;
   };
+  const pattern = keepLastOccurrence(arg.ops[0]);
+  const value = declareValueOperand(arg.ops);
+  // The interpreter evaluates the whole value before it binds any name of
+  // the pattern (`bindTuplePattern`, `library/core.ts`), so an element that
+  // reads a name of the pattern reads the binding from before the
+  // statement. The compiled form cannot give that read: the local that the
+  // statement declares has the same name in the same scope, so the read
+  // finds the new local. The per-leaf form read the value just bound
+  // (`let a = 100; let (a, b) = (k, a)` gave `b = k`, not 100), and a form
+  // that first evaluates each element into a temporary reads the new local
+  // before its declaration (a JavaScript `ReferenceError`, and a refusal of
+  // the block checks on the other targets). Such a statement is not
+  // compiled: the interpreter evaluates it. A name read only inside a
+  // function that an element calls is not seen here.
+  // The check is syntactic: a value that uses the name only as a bound
+  // variable of an inner function or `Sum` also declines
+  // (`let (i, s) = (3, Sum(i^2, (i, 1, 10)))`).
+  const leafNames: string[] = [];
+  const collectNames = (p: Expression): void => {
+    if (isFunction(p, 'Tuple')) p.ops.forEach(collectNames);
+    else if (isSymbol(p) && p.symbol !== '_') leafNames.push(p.symbol);
+  };
+  collectNames(pattern);
+  const readName =
+    value === undefined ? undefined : leafNames.find((name) => value.has(name));
+  if (readName !== undefined)
+    throw new Error(
+      `Could not compile a destructuring declaration whose value reads ` +
+        `'${readName}', a name that the pattern declares. The interpreter ` +
+        `evaluates the whole value before it binds a name, so the value ` +
+        `reads the binding from before the declaration; the compiled ` +
+        `declaration of '${readName}' hides that binding. The interpreter ` +
+        `evaluates it instead.`
+    );
   const out: Expression[] = [];
   const walk = (pattern: Expression, v: Expression | undefined): void => {
     if (!isFunction(pattern, 'Tuple'))
@@ -1202,7 +1236,7 @@ export function desugarPatternDeclare(
       out.push(ce._fn('Declare', [p, ce.string('unknown'), el]));
     }
   };
-  walk(keepLastOccurrence(arg.ops[0]), declareValueOperand(arg.ops));
+  walk(pattern, value);
   return out;
 }
 
