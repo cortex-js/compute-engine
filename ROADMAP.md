@@ -3843,32 +3843,17 @@ values) cover a callback with a default inside `Map` only; `Sort`, `Iterate`
 and `Pipe` with such a callback are tested interpreted only
 (`test/compute-engine/compile-parameter-defaults.test.ts`).
 
-### CE-715. A `bigint` compile mode on the JavaScript target: exact integers past 2^53
+### CE-715. The `bigint` compile mode: the shapes it declines
 
-**Status:** ready; capability, large. Spec approved by the user 2026-10-31
-(trade-offs T1-T7), revision 3 after two dual review rounds:
-`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`. GitHub issue #503; the
-reply is deferred until the mode is implemented.
-
-With `n: integer`, `Binom(2n, n) − Binom(2n, n+1)` compiled to JavaScript
-computes with doubles and is rounded past `2^53`; `Mod(2^60 + 1, 10)` throws a
-`RangeError`. The interpreter gives the exact value. The issue's author
-subclasses `JavaScriptTarget` to emit `BigInt` code and asks for four hooks.
-Proposed: a compile mode `'bigint'` next to `'strict'`, `'complex'` and `'auto'`
-on the `javascript` target only. A node whose type is a subtype of
-`integer | nan | infinity | signed_infinity` and whose head is on an allow-list
-computes as a `bigint`; a rational-typed subtree compiles only under a rounding
-head or an integer promise (an `integer` ascription or parameter) as a rounded
-or checked exact division; a real or complex operand, or a head not on the
-list, declines with its own diagnostic code. The result is `bigint | number`: a
-`bigint` for every integer value, a `number` only for a non-finite value (`n!`
-at `n < 0` is `Infinity`), caught once in the emitted code; a `number` result
-has no defined relation to the interpreter's value (user decision
-2026-10-31). Inputs accept a `bigint` or a safe-integer
-`number`. `broadcast()` refuses in the mode. No auto-escalation in the first
-version. The spec names the files, the steps and the tests. The sub-items below
-are the shapes the first version declines, with a priority by how often each
-occurs (AGENTS.md: a decline is a defect).
+**Status:** ready; capability. The mode `compile(expr, { mode: 'bigint' })`
+on the `javascript` target computes integer values as JavaScript `bigint`
+values (`docs/COMPILATION-MODEL.md`, "Compile modes"; spec
+`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`). The sub-items below
+are the shapes that the mode declines (the expression then runs on the
+interpreter), with a priority by how often each occurs (AGENTS.md: a decline
+is a defect). Example: with `n: integer`, `DigitSum(n)` declines with the
+diagnostic code `bigint-lane`. The reply to GitHub issue #503 is deferred by
+the user.
 
 - **CE-715.2** (medium) A rational `Range`/`Sum`/`Product` bound (`Sum(i, i = 1..n/2)`
   is `3` at `n = 5`).
