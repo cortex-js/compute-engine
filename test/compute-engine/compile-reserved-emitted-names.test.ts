@@ -67,6 +67,54 @@ describe('A parameter named _SYS', () => {
     ]);
     expect(r.run!(3)).toBe(6);
   });
+
+  // A nested function literal and a user function also emit such a
+  // parameter under a generated name. A write to the parameter in their
+  // body writes that name; it does not decline as a write to a reference
+  // that cannot be assigned.
+  test.each(['_SYS', '_upper'])(
+    'a nested literal that writes its parameter named %s',
+    (n) => {
+      const fn = [
+        'Function',
+        [
+          'Apply',
+          [
+            'Function',
+            ['Block', ['Assign', n, ['Add', n, 1]], ['Factorial', n]],
+            ['Typed', n, "'integer'"],
+          ],
+          'x',
+        ],
+        ['Typed', 'x', "'integer'"],
+      ];
+      const expected = ce.box(['Apply', fn, 2] as any).evaluate().re;
+      expect(expected).toBe(6);
+      expect(compiled(fn).run!(2)).toBe(expected);
+    }
+  );
+
+  test.each(['_SYS', '_upper'])(
+    'a user function that writes its parameter named %s',
+    (n) => {
+      const ce2 = new ComputeEngine();
+      ce2.declare('g', 'function');
+      ce2.assign(
+        'g',
+        ce2.box([
+          'Function',
+          ['Block', ['Assign', n, ['Add', n, 1]], ['Factorial', n]],
+          ['Typed', n, "'integer'"],
+        ] as any)
+      );
+      const fn = ['Function', ['g', 'x'], ['Typed', 'x', "'integer'"]];
+      const expected = ce2.box(['Apply', fn, 2] as any).evaluate().re;
+      expect(expected).toBe(6);
+      const r = compile(ce2.box(fn as any), { fallback: false })!;
+      expect(r.success).toBe(true);
+      expect(r.run!(2)).toBe(expected);
+    }
+  );
 });
 
 describe('Other user names equal to an emitted identifier', () => {
