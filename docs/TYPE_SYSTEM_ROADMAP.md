@@ -2083,7 +2083,12 @@ produces the ordinary runtime error value when no implementation applies.
 **Name resolution.** A bare (unqualified) call resolves through this pipeline:
 
 1. A lexically visible user definition of the name shadows all protocol
-   members — the user's function matches the bare name.
+   members — the user's function matches the bare name. A library function
+   does not: a protocol function member shadows the Epsil lowercase spelling
+   of a library function (`floor` for `Floor`) from its `protocol` statement
+   onward, in the same batch as in a later one, and the library function
+   stays reachable by its capitalized name (user decision 2026-10-31,
+   CE-716).
 2. Otherwise, if the name belongs to exactly one protocol, it resolves
    there.
 3. Otherwise (the name is in several protocols), candidates are filtered by

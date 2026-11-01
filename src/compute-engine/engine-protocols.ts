@@ -4834,7 +4834,15 @@ function parseRequirement(
  *   gets one installed/refreshed;
  * - a member name bound to anything else — a user definition or a builtin — is
  *   LEFT ALONE (Appendix A pipeline step 1: the user shadow wins for bare
- *   calls; the qualified form still reaches the protocol);
+ *   calls; the qualified form still reaches the protocol). A library FUNCTION
+ *   is usually bound only under its capitalized name (`Floor`), not under its
+ *   Epsil lowercase spelling (`floor`), so a member named `floor` gets a
+ *   dispatcher. A lowercase library binding such as the constant `e` shadows
+ *   a member of that name like any builtin, so that member gets no
+ *   dispatcher. For a member that gets a dispatcher, the
+ *   Epsil resolution pass does not rewrite a bare `floor(…)` written after
+ *   the `protocol` statement to `Floor`, so that the call reaches the
+ *   dispatcher (`resolveLibraryNames()` in `src/epsil/resolve-library-names.ts`);
  * - a dispatcher whose member name no longer exists in any protocol (a
  *   replacement that removed or renamed the member) is removed.
  *

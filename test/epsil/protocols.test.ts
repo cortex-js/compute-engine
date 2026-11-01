@@ -1589,3 +1589,121 @@ describe('EPSIL CONDITIONAL CONFORMANCE (phase 5)', () => {
     ).toEqual([['type-annotation-error', 'Unknown type "Bogus"']]);
   });
 });
+
+describe('a protocol function member named like a library function', () => {
+  // The Epsil spelling `floor` of the library `Floor` is not an engine
+  // binding: the resolution pass rewrites a free `floor` to `Floor` before
+  // the program runs. A protocol function member of the program shadows
+  // that spelling from its `protocol` statement onward, as a user `function`
+  // does, so the bare call reaches the protocol's dispatcher in the same
+  // program as in a later one. The library stays reachable as `Floor`.
+  const DECLARATIONS = [
+    'protocol F { function floor(self: Self) -> integer }',
+    'type Money = tuple<cents: integer>',
+    'type Money is F { function floor(self: Money) -> integer { self.cents } }',
+  ].join('\n');
+
+  test('the bare call reaches the member in the program that declares it', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(ce, `${DECLARATIONS}\nfloor(Money(3))`);
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('3');
+  });
+
+  test('the capitalized library name still calls the library function', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `${DECLARATIONS}\nfloor(Money(3))\nFloor(2.5)`
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('2');
+  });
+
+  test('the bare call reaches the member in a later program', () => {
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, DECLARATIONS).diagnostics).toEqual([]);
+    const r = executeEpsil(ce, 'floor(Money(3))');
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('3');
+  });
+
+  test('a user function of the same name wins over the member for the bare call', () => {
+    const userFloor = 'function floor(x: integer) -> integer { x + 100 }';
+    const bare = executeEpsil(
+      new ComputeEngine(),
+      `${userFloor}\n${DECLARATIONS}\nfloor(3)`
+    );
+    expect(bare.diagnostics).toEqual([]);
+    expect(bare.value.toString()).toBe('103');
+    const qualified = executeEpsil(
+      new ComputeEngine(),
+      `${userFloor}\n${DECLARATIONS}\nF.floor(Money(3))`
+    );
+    expect(qualified.diagnostics).toEqual([]);
+    expect(qualified.value.toString()).toBe('3');
+  });
+
+  test('a bare call before the protocol statement calls the library function', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      `let a = floor(2.5)\n${DECLARATIONS}\na`
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('2');
+  });
+
+  test('a property member does not shadow the library spelling', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'protocol P { readonly floor: integer }\nfloor(2.5)'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('2');
+  });
+
+  test('a bare call in a function written after the declarations reaches the member', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      `${DECLARATIONS}\nfunction g(m: Money) -> integer { floor(m) }\ng(Money(3))`
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('3');
+  });
+
+  test('a refused protocol statement still shadows the spelling for the rest of its batch', () => {
+    // The resolution pass runs before any statement does, so it cannot know
+    // that the engine refuses the second `protocol P`. That statement
+    // installs no dispatcher, and the later `floor(2.5)` stays a call of the
+    // unknown function `floor`; the batch reports the redefinition.
+    const ce = new ComputeEngine();
+    const source =
+      'protocol P {}\nprotocol P { function floor(self: Self) -> integer }\nfloor(2.5)';
+    expect(runCodes(ce, source)).toEqual([
+      'protocol-redefinition',
+      'runtime-error',
+    ]);
+    const r = executeEpsil(new ComputeEngine(), source);
+    expect(r.value.json).toEqual(['floor', 2.5]);
+  });
+
+  test('a member named like a library binder does not bind the arguments of its call', () => {
+    // The library `Solve` binds a variable operand that also occurs in
+    // another operand. The member `solve` binds nothing, so both `pi` stay
+    // free and resolve to `Pi`, in the same batch as in a later one.
+    const declarations = [
+      'protocol S { function solve(self: Self, x: real) -> real }',
+      'type Money = tuple<cents: integer>',
+      'type Money is S { function solve(self: Money, x: real) -> real { x } }',
+    ].join('\n');
+    const call = 'solve(Money(round(pi)), pi)';
+    const same = executeEpsil(new ComputeEngine(), `${declarations}\n${call}`);
+    expect(same.diagnostics).toEqual([]);
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, declarations).diagnostics).toEqual([]);
+    const later = executeEpsil(ce, call);
+    expect(later.diagnostics).toEqual([]);
+    expect(later.value.json).toEqual('Pi');
+    expect(same.value.json).toEqual(later.value.json);
+  });
+});

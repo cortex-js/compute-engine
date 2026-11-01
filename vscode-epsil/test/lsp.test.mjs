@@ -135,6 +135,79 @@ await scenario('hover', undefined, async (c) => {
   );
 });
 
+// ── Hover: a protocol function member named like a library function ─────
+// A free `floor` after the `protocol` statement calls the protocol's
+// dispatcher, not the library `Floor`, so its hover and rename name the
+// member. A `floor` before the statement is still the library function.
+await scenario('protocol member hover', undefined, async (c) => {
+  await c.open(
+    URI,
+    [
+      'floor(2.5)',
+      'protocol F { function floor(self: Self) -> integer }',
+      'type Money = tuple<cents: integer>',
+      'type Money is F { function floor(self: Money) -> integer { self.cents } }',
+      'floor(Money(3))',
+    ].join('\n')
+  );
+
+  const member = await c.hover(URI, 4, 2);
+  check(
+    'a bare call after the protocol shows the protocol member',
+    member?.contents.value.includes('protocol `F`') === true &&
+      member.contents.value.includes('function floor(self: Self) -> integer') &&
+      !member.contents.value.includes('Floor'),
+    JSON.stringify(member)
+  );
+
+  const library = await c.hover(URI, 0, 2);
+  check(
+    'a bare call before the protocol shows the library function',
+    library?.contents.value.includes('Floor') === true,
+    JSON.stringify(library)
+  );
+
+  const rename = await c.requestRaw('textDocument/prepareRename', {
+    textDocument: { uri: URI },
+    position: { line: 4, character: 2 },
+  });
+  check(
+    'a bare call of a protocol member cannot be renamed',
+    rename.error?.message.includes('protocol `F`') === true,
+    JSON.stringify(rename)
+  );
+
+  // The engine defines `e` under that exact spelling, so the member does not
+  // shadow it: a bare `e` stays the library constant when the program runs.
+  const E_URI = 'file:///tmp/lsp-test-protocol-e.epsil';
+  await c.open(E_URI, 'protocol F { function e(self: Self) -> real }\ne');
+  const constant = await c.hover(E_URI, 1, 0);
+  check(
+    'a bare name that the engine defines shows the library constant',
+    constant?.contents.value.includes("Euler's number") === true &&
+      !constant.contents.value.includes('protocol `F`'),
+    JSON.stringify(constant)
+  );
+
+  // Two unrelated protocols can declare a member of the same name.
+  const TWO_URI = 'file:///tmp/lsp-test-protocol-two.epsil';
+  await c.open(
+    TWO_URI,
+    [
+      'protocol F { function floor(self: Self) -> integer }',
+      'protocol G { function floor(self: Self) -> integer }',
+      'floor(2.5)',
+    ].join('\n')
+  );
+  const both = await c.hover(TWO_URI, 2, 2);
+  check(
+    'a bare call after two protocols that declare the member names both',
+    both?.contents.value.includes('protocol `F`') === true &&
+      both.contents.value.includes('protocol `G`'),
+    JSON.stringify(both)
+  );
+});
+
 // ── Diagnostics: signature notes ────────────────────────────────────────
 await scenario('signature notes', undefined, async (c) => {
   const diagnostics = await c.open(URI, 'let a = Ln()\na');

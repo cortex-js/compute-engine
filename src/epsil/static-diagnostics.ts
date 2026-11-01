@@ -71,7 +71,11 @@ import {
 } from '../compute-engine/boxed-expression/type-guards.js';
 
 import type { ParsingDiagnostic } from './diagnostics.js';
-import { documentBindings, type BindingGroup } from './occurrences.js';
+import {
+  documentBindings,
+  protocolFunctionMembers,
+  type BindingGroup,
+} from './occurrences.js';
 import { binderSitesOf } from './resolve-library-names.js';
 import { serializeEpsil } from './serialize-epsil.js';
 import { definitionSites } from './definition-sites.js';
@@ -1538,8 +1542,13 @@ function absenceMarkerBindingDiagnostics(
   source: string
 ): ParsingDiagnostic[] {
   const found: ParsingDiagnostic[] = [];
+  // The protocol function members of the program: a call of a member that
+  // shadows a library binder (`solve`) binds no variable, the same rule
+  // `resolveLibraryNames()` applies, so the two passes read one program the
+  // same way.
+  const members = protocolFunctionMembers(ast);
   const groups = documentBindings(ast, source, {
-    binderSites: (node) => binderSitesOf(ce, node, source),
+    binderSites: (node) => binderSitesOf(ce, node, source, members),
   });
   for (const group of groups) {
     if (group.kind === 'free' || !ABSENCE_MARKER_NAMES.has(group.name))
@@ -2329,8 +2338,11 @@ function constantWritesOf(
   statements: MathJsonExpression[]
 ): ConstantWrites {
   const byName = new Map<string, BindingGroup[]>();
+  // Same rule as in `absenceMarkerBindingDiagnostics()`: a protocol member
+  // that shadows a library binder binds nothing.
+  const members = protocolFunctionMembers(ast);
   for (const group of documentBindings(ast, source, {
-    binderSites: (node) => binderSitesOf(ce, node, source),
+    binderSites: (node) => binderSitesOf(ce, node, source, members),
   })) {
     const named = byName.get(group.name);
     if (named === undefined) byName.set(group.name, [group]);

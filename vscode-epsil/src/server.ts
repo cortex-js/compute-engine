@@ -50,9 +50,12 @@ import {
   documentBindings,
   isNameVisibleAt,
   occurrenceAt,
+  protocolFunctionMembers,
   unresolvedLabels,
   type BindingGroup,
   type Occurrence,
+  type ProtocolFunctionMember,
+  type ProtocolMemberDeclaration,
 } from '../../src/epsil/occurrences.js';
 import { ERROR_EXPLANATIONS } from '../../src/epsil/error-explanations.js';
 import { HARD_RESERVED_WORDS } from '../../src/epsil/reserved-words.js';
@@ -201,7 +204,8 @@ connection.onHover(({ textDocument, position }) => {
           word.name,
           text,
           binding?.group,
-          effectsFor(textDocument.uri, document.version)
+          effectsFor(textDocument.uri, document.version),
+          word.start
         );
   const sections = diagnosticHovers(
     textDocument.uri,
@@ -612,6 +616,7 @@ let hoverCache: {
   parse?: { ast: MathJsonExpression | null; errors: number };
   sites?: Map<number, DefinitionSite>;
   bindings?: BindingGroup[];
+  protocolMembers?: Map<string, ProtocolFunctionMember>;
   latexReferences?: { names: Set<string>; complete: boolean };
 } = { text: '' };
 
@@ -716,15 +721,58 @@ function identifierAt(
  * The document is consulted FIRST because a program's own declaration shadows
  * a library name of the same spelling; showing the library's `Length` for a
  * file that declares its own would describe something the reader is not
- * looking at.
+ * looking at. A free name at `start` that a protocol function member of the
+ * document shadows (see `protocolMemberAt()`) shows that member, for the
+ * same reason.
  */
 function describeSymbol(
   name: string,
   text: string,
   group?: BindingGroup,
-  effects?: Map<number, EffectSummary>
+  effects?: Map<number, EffectSummary>,
+  start?: number
 ): string | undefined {
-  return declarationHover(group, text, effects) ?? libraryHover(name);
+  const declared = declarationHover(group, text, effects);
+  if (declared !== undefined) return declared;
+  if (group?.kind === 'free' && start !== undefined) {
+    const members = protocolMemberAt(text, name, start);
+    if (members !== undefined)
+      return members
+        .flatMap((member) => [
+          `Function member of the protocol \`${member.protocol}\`:`,
+          codeBlock(clip(`function ${name}${member.signature}`)),
+        ])
+        .join('\n\n');
+  }
+  return libraryHover(name);
+}
+
+/**
+ * The declarations of the function member named `name` by the top-level
+ * `protocol` statements of the document that end at or before `offset`, or
+ * `undefined` when there is none. The library-name resolution pass
+ * (`resolveLibraryNames()`) does not rewrite a free occurrence of `name` at
+ * or after the first such statement to the library function, so the
+ * occurrence calls the protocol's dispatcher instead. A name that the engine
+ * defines under that exact spelling (the constant `e`) is not a member here:
+ * the resolution pass leaves it alone and it keeps the engine's meaning.
+ */
+function protocolMemberAt(
+  text: string,
+  name: string,
+  offset: number
+): ProtocolMemberDeclaration[] | undefined {
+  const cache = cacheFor(text);
+  if (cache.protocolMembers === undefined) {
+    const { ast } = parseOf(text);
+    cache.protocolMembers =
+      ast === null ? new Map() : protocolFunctionMembers(ast);
+  }
+  const member = cache.protocolMembers.get(name);
+  if (member === undefined || offset < member.from) return undefined;
+  hoverEngine ??= new ComputeEngine();
+  if (hoverEngine.lookupDefinition(name) !== undefined) return undefined;
+  return member.declarations.filter((d) => offset >= d.from);
 }
 
 /** The effect summaries of the last check of `uri`, keyed by the offset of
@@ -1080,6 +1128,14 @@ function renameRefusal(group: BindingGroup, text: string): string | undefined {
       );
   }
   if (group.kind === 'free') {
+    // A free use of a protocol function member names the member, whose
+    // declaration and implementations rename does not track, as it does not
+    // track a qualified `P.member`.
+    for (const o of group.occurrences) {
+      const member = protocolMemberAt(text, group.name, o.start)?.[0];
+      if (member !== undefined)
+        return `Cannot rename \`${group.name}\`: it names a function member of the protocol \`${member.protocol}\`, which rename does not track.`;
+    }
     // An undeclared name CAN be renamed (all its free uses rename together),
     // but a library builtin cannot — its definition is not in this file.
     hoverEngine ??= new ComputeEngine();
@@ -1246,6 +1302,16 @@ connection.onRenameRequest(
     // to the library's meaning (`x` → `Pi` turns `x + 1` into π + 1). A BOUND
     // group is safe: its binder shadows the library inside its scope.
     if (at.group.kind === 'free') {
+      // Renaming a FREE name to a protocol function member rebinds each use
+      // after the `protocol` statement to the member's dispatcher.
+      for (const o of at.group.occurrences) {
+        const member = protocolMemberAt(at.text, cooked, o.start)?.[0];
+        if (member !== undefined)
+          throw new ResponseError(
+            LSPErrorCodes.RequestFailed,
+            `\`${cooked}\` is a function member of the protocol \`${member.protocol}\`; renaming \`${at.group.name}\` to it would change what the program means.`
+          );
+      }
       hoverEngine ??= new ComputeEngine();
       if (describeName(hoverEngine, cooked) !== undefined)
         throw new ResponseError(

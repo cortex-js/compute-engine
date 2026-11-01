@@ -107,6 +107,16 @@
   whose value has no leading or trailing whitespace; requests must send its
   value as a Bearer token.
 
+- **In Epsil, a protocol function member shadows the library function of the
+  same lowercase name in the program that declares it.** After `protocol F {
+  function floor(self: Self) -> integer }` and a conformance of `Money` that
+  implements `floor`, a bare `floor(Money(3))` in the same program was the
+  library `Floor` and gave a static `incompatible-type` error; in a later
+  program it gave `3`. It now gives `3` in both. The library function stays
+  reachable by its capitalized name: `Floor(2.5)` gives `2`. A `function
+  floor` or `let floor` of the program still wins over the member for a bare
+  call; `F.floor(x)` calls the member.
+
 ### Bug Fixes
 
 - **The parameter of a function literal that is applied at once has the type

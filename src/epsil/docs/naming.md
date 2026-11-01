@@ -77,7 +77,10 @@ resolve by **scope**, not by case.
 
 A user binding shadows a library name for the rest of its scope, whichever
 spelling the library name has: a `let`, a `const`, a parameter, a loop
-variable, a `match` pattern, or a `function` definition.
+variable, a `match` pattern, or a `function` definition. A function member
+of a `protocol` shadows a library name the same way, from the `protocol`
+statement onward; the library function stays reachable by its capitalized
+name (`Floor(x)`).
 
 ```epsil
 let sum = 0

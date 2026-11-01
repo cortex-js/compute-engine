@@ -7,7 +7,12 @@ import type { Type } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
 
 import { canonicalLibraryName } from './library-names.js';
-import { documentBindings, type BinderSite } from './occurrences.js';
+import {
+  documentBindings,
+  protocolFunctionMembers,
+  type BinderSite,
+  type ProtocolFunctionMember,
+} from './occurrences.js';
 
 //
 // The resolution pass: give the Epsil spellings of the standard library
@@ -29,6 +34,16 @@ import { documentBindings, type BinderSite } from './occurrences.js';
 //
 // Two forms are never rewritten: a verbatim spelling (`` `sin` ``), which
 // names the raw symbol, and a name that spells nothing in the library.
+//
+// A FUNCTION member of a protocol that the program declares shadows the
+// spelling too, from the end of the `protocol` statement onward, as a user
+// `function` of that name does: in `protocol F { function floor(self: Self)
+// -> integer }` followed by `floor(m)`, the call keeps the name `floor` and
+// reaches the protocol's dispatcher, which the `protocol` statement installs
+// when it runs. The library function stays reachable by its capitalized
+// name (`Floor(x)`). A later batch sees the installed dispatcher as an
+// engine binding, so the two cases agree (user decision 2026-10-31, ROADMAP
+// CE-716).
 //
 // The rewrite is done in place, node by node, and keeps every node's
 // `sourceOffsets`, so the diagnostics of the later phases still point at
@@ -204,20 +219,35 @@ const VARIABLE_GROUP_HEADS = new Set([
  * was written verbatim (`` `integrate`(…) ``), which names the raw symbol
  * and borrows nothing from the library. A callee that is not a library
  * operator binds nothing; so does a recovered parse the engine cannot box.
+ * When `members` (the result of `protocolFunctionMembers()` for the
+ * program) is given, a callee that the engine does not define and that is a
+ * protocol function member declared by a statement that ends at or before
+ * the call is the member's dispatcher, not the library operator: it binds
+ * nothing (`solve(Money(1), pi)` after `protocol S { function solve(…) }`
+ * keeps `pi` free). This is the offset rule `resolveLibraryNames()` uses.
  */
 export function binderSitesOf(
   ce: ComputeEngine,
   node: MathJsonExpression,
-  source: string
+  source: string,
+  members?: ReadonlyMap<string, ProtocolFunctionMember>
 ): readonly BinderSite[] | undefined {
   const head = operator(node);
   if (head === '') return undefined;
   const offsets = (node as { sourceOffsets?: [number, number] }).sourceOffsets;
   const verbatim = offsets !== undefined && source[offsets[0]] === '`';
+  const defined = ce.lookupDefinition(head) !== undefined;
+  const memberFrom = members?.get(head)?.from;
+  if (
+    !verbatim &&
+    !defined &&
+    memberFrom !== undefined &&
+    offsets !== undefined &&
+    offsets[0] >= memberFrom
+  )
+    return undefined;
   const name =
-    verbatim || ce.lookupDefinition(head) !== undefined
-      ? head
-      : (canonicalLibraryName(head) ?? head);
+    verbatim || defined ? head : (canonicalLibraryName(head) ?? head);
   const def = ce.lookupDefinition(name);
   if (def === undefined || !('operator' in def)) return undefined;
 
@@ -294,8 +324,9 @@ export function resolveLibraryNames(
   source: string,
   ce: ComputeEngine
 ): MathJsonExpression {
+  const members = protocolFunctionMembers(ast);
   const groups = documentBindings(ast, source, {
-    binderSites: (node) => binderSitesOf(ce, node, source),
+    binderSites: (node) => binderSitesOf(ce, node, source, members),
   });
 
   // The occurrences to rewrite, keyed by the start offset AND the name of the
@@ -312,9 +343,13 @@ export function resolveLibraryNames(
     // host declaration, a lowercase library value such as `e` or a unit —
     // shadows the spelling.
     if (ce.lookupDefinition(group.name) !== undefined) continue;
+    const memberFrom = members.get(group.name)?.from;
     for (const occurrence of group.occurrences) {
       // The verbatim form names the raw symbol.
       if (source[occurrence.start] === '`') continue;
+      // A protocol function member of this program declared above the
+      // occurrence shadows the spelling.
+      if (memberFrom !== undefined && occurrence.start >= memberFrom) continue;
       targets.set(keyOf(occurrence.start, group.name), canonical);
     }
   }

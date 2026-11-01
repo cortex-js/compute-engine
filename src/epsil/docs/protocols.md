@@ -270,11 +270,28 @@ flowchart TD
 
 ### When the bare name is taken, qualify
 
-Two situations take the bare name away. A lexically visible definition of
-the same name **shadows** protocol members — your `size` wins over any
-protocol's. And two protocols can both declare a member that applies to the
-same receiver, making the bare call ambiguous. Both have the same escape
-hatch: qualify the member with the protocol's name.
+A library function does not take the bare name. A protocol function member
+shadows the lowercase spelling of a library function of the same name, as a
+user `function` does: after the `protocol` statement, a bare `floor(m)`
+calls the protocol member. The library function stays reachable by its
+capitalized name, `Floor(x)`.
+
+```epsil-live
+protocol Rounded { function floor(self: Self) -> integer }
+type Money = tuple<cents: integer>
+type Money is Rounded { function floor(self: Money) -> integer { self.cents } }
+
+(floor(Money(3)), Floor(2.5))
+// ➔ (3, 2)
+```
+
+Two situations take the bare name away. A definition of your own of the
+same name (a `function`, a `let`, a parameter) that is lexically visible
+**shadows** protocol members — your `size` wins over any protocol's, and
+your `function floor` wins over `Rounded.floor`. And two protocols can both
+declare a member that applies to the same receiver, making the bare call
+ambiguous. Both have the same escape hatch: qualify the member with the
+protocol's name (`Rounded.floor(m)`).
 
 ```epsil
 compare("a", "b")

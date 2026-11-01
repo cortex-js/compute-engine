@@ -1216,6 +1216,84 @@ export function documentBindings(
   return groups;
 }
 
+/** One declaration of a function member by a top-level `protocol` statement. */
+export type ProtocolMemberDeclaration = {
+  /** The end offset of the `protocol` statement that declares the member. */
+  from: number;
+  /** The name of the protocol that declares the member. */
+  protocol: string;
+  /** The signature text of the member, as written: `(self: Self) -> integer`. */
+  signature: string;
+};
+
+/** A function member name declared by one or more top-level `protocol`
+ * statements. Unrelated protocols can declare a member of the same name. */
+export type ProtocolFunctionMember = {
+  /** The source offset where the member starts to shadow a library
+   * spelling: the end of the first `protocol` statement that declares it. */
+  from: number;
+  /** Each protocol that declares the member, in source order (so `from` is
+   * the offset of the first one). A protocol is listed once. */
+  declarations: ProtocolMemberDeclaration[];
+};
+
+/**
+ * The FUNCTION member names of the `protocol` statements at the top level of
+ * `ast`, each mapped to the `protocol` statements that declare it. A
+ * `protocol` statement is valid only at the top level (protocols are
+ * engine-global), so a nested one installs nothing and is not read.
+ *
+ * The library-name resolution pass (`resolveLibraryNames()`) reads this map
+ * over the whole program before any statement is evaluated, so it cannot know
+ * whether the engine accepts a `protocol` statement. A statement that the
+ * engine refuses when it runs (for example a redefinition of a protocol of
+ * the same batch, an unknown parent protocol, or a member that conflicts with
+ * an inherited one) installs no dispatcher, but it still shadows the library
+ * spelling of its member names for the rest of its batch: a later
+ * `floor(2.5)` then calls the unknown function `floor` instead of `Floor`.
+ * The program already reports the refusal of the `protocol` statement as an
+ * error.
+ *
+ * The parser writes a member as `KeyValuePair(name, Pair("function",
+ * "⟨signature⟩"))` in the `Dictionary` operand of `DeclareProtocol`.
+ */
+export function protocolFunctionMembers(
+  ast: MathJsonExpression
+): Map<string, ProtocolFunctionMember> {
+  const members = new Map<string, ProtocolFunctionMember>();
+  const statements = operator(ast) === 'Block' ? operands(ast) : [ast];
+  for (const statement of statements) {
+    if (operator(statement) !== 'DeclareProtocol') continue;
+    const end = (statement as { sourceOffsets?: [number, number] })
+      .sourceOffsets?.[1];
+    if (end === undefined) continue;
+    const protocol = symbol(operand(statement, 1) ?? 'Nothing') ?? '';
+    for (const member of operands(operand(statement, 2) ?? 'Nothing')) {
+      if (operator(member) !== 'KeyValuePair') continue;
+      const name = symbol(operand(member, 1) ?? 'Nothing');
+      const kind = operand(member, 2);
+      if (
+        name === null ||
+        kind === null ||
+        operator(kind) !== 'Pair' ||
+        stringValue(operand(kind, 1) ?? 'Nothing') !== 'function'
+      )
+        continue;
+      const declaration = {
+        from: end,
+        protocol,
+        signature: stringValue(operand(kind, 2) ?? 'Nothing') ?? '',
+      };
+      const known = members.get(name);
+      if (known === undefined)
+        members.set(name, { from: end, declarations: [declaration] });
+      else if (!known.declarations.some((d) => d.protocol === protocol))
+        known.declarations.push(declaration);
+    }
+  }
+  return members;
+}
+
 /**
  * The group owning the occurrence at `offset`, with the occurrence itself.
  * Half-open like the spans, plus the boundary position just past the name —
