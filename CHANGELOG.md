@@ -363,6 +363,19 @@
 
 ### Bug Fixes
 
+- **The derivative of a function literal no longer reads the value of a
+  variable that has the name of its parameter, and its application to a list
+  is typed as a list.** With a global `a := [1, 2]`, `Derivative(a ↦ a^2)`
+  gave the constant function `a ↦ [2, 4]`, and is now `a ↦ 2a`. In the same
+  way, `((a: list<real>) ↦ Apply(Derivative(a ↦ a^2), a))([1, 2])` gave
+  `[[2, 4], [2, 4]]` with the type `number`, and is now `[2, 4]` with the type
+  `vector<2>`; a partial derivative such as `Derivative((a, b) ↦ a^2 b, 1, 0)`
+  is fixed too. The application of a derivative maps over a list argument:
+  `Apply(Derivative(x ↦ x^2), [1, 2])` and `Apply(Derivative(Sin), [1, 2])`
+  were typed `number`, and are now typed as a list with the depth of the
+  argument. A tuple argument, whose shape the body decides, gives the type
+  `any`.
+
 - **A lazy view stored out of a loop iteration at the top level reads a
   symbol default of its callback in that iteration.** In Epsil, with
   `let f = (x, k = d) => x * k`,
