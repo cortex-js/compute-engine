@@ -336,3 +336,298 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
     });
   });
 });
+
+/**
+ * A custom target that has no `Sum` or `Product` of its own gets the generic
+ * counted loop (`compileLoop`). A bound with no compile-time value is compiled
+ * as an expression of the target and evaluated at run time; it is never
+ * replaced with a default number.
+ */
+describe('GENERIC SUM/PRODUCT LOOP OF A CUSTOM TARGET', () => {
+  const loopTarget: CompileTarget = {
+    language: 'custom',
+    operators: (op) =>
+      (
+        ({
+          Add: ['+', 11],
+          Subtract: ['-', 11],
+          Multiply: ['*', 12],
+        }) as Record<string, [string, number]>
+      )[op],
+    functions: () => undefined,
+    var: (id) => id,
+    string: (str) => JSON.stringify(str),
+    number: (n) => n.toString(),
+    indent: 0,
+    ws: () => ' ',
+    preamble: '',
+  };
+
+  function loopEngine() {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const engine = new ComputeEngine();
+    engine.declare('n', 'integer');
+    engine.declare('m', 'integer');
+    engine.declare('x', 'real');
+    return engine;
+  }
+
+  /**
+   * Compile `json` with the custom target, run it with the values of
+   * `inputs`, and evaluate it with the interpreter for the same values.
+   */
+  function runLoop(json: any, inputs: Record<string, number>, declare = {}) {
+    const engine = loopEngine();
+    for (const [name, type] of Object.entries(declare))
+      engine.declare(name, type);
+    const result = compile(engine.box(json), {
+      target: loopTarget,
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    const names = Object.keys(inputs);
+    const fn = new Function(...names, `return ${result.code};`);
+    const expected = engine.box(json).subs(inputs).evaluate().re;
+    return { value: fn(...names.map((k) => inputs[k])), expected };
+  }
+
+  it('compiles a symbolic upper bound', () => {
+    for (const n of [0, 1, 4, 20]) {
+      const { value, expected } = runLoop(
+        ['Sum', 'j', ['Limits', 'j', 1, 'n']],
+        { n }
+      );
+      expect(value).toBe(expected);
+    }
+    expect(runLoop(['Sum', 'j', ['Limits', 'j', 1, 'n']], { n: 4 }).value).toBe(
+      10
+    );
+  });
+
+  it('compiles a symbolic lower bound', () => {
+    const { value, expected } = runLoop(
+      ['Sum', 'j', ['Limits', 'j', 'm', 'n']],
+      { n: 4, m: 2 }
+    );
+    expect(value).toBe(9);
+    expect(value).toBe(expected);
+  });
+
+  it('compiles an expression bound', () => {
+    const sum = runLoop(
+      ['Sum', 'j', ['Limits', 'j', ['Add', 'm', 1], ['Multiply', 2, 'n']]],
+      { n: 4, m: 2 }
+    );
+    expect(sum.value).toBe(33);
+    expect(sum.value).toBe(sum.expected);
+    const product = runLoop(
+      ['Product', 'j', ['Limits', 'j', 1, ['Add', 'n', 1]]],
+      { n: 4 }
+    );
+    expect(product.value).toBe(120);
+    expect(product.value).toBe(product.expected);
+  });
+
+  it('compiles a symbolic bound with a body that writes its index', () => {
+    // Each iteration binds `j` to the next value of the counter, whatever the
+    // body wrote: 11 + 12 + 13 for n = 3.
+    const { value, expected } = runLoop(
+      [
+        'Sum',
+        ['Block', ['Assign', 'j', ['Add', 'j', 10]], 'j'],
+        ['Limits', 'j', 1, 'n'],
+      ],
+      { n: 3 }
+    );
+    expect(value).toBe(36);
+    expect(value).toBe(expected);
+  });
+
+  it('reads an outer variable with the name of the index in a bound', () => {
+    // The bound `j` is a free variable, not the index: 2 + 3 + 4 + 5.
+    const lower = runLoop(
+      ['Sum', 'j', ['Limits', 'j', 'j', 5]],
+      { j: 2 },
+      { j: 'integer' }
+    );
+    expect(lower.value).toBe(14);
+    expect(lower.value).toBe(lower.expected);
+    // 1 + 2 + 3 + 4 for an upper bound j + 2 with j = 2.
+    const upper = runLoop(
+      ['Sum', 'j', ['Limits', 'j', 1, ['Add', 'j', 2]]],
+      { j: 2 },
+      { j: 'integer' }
+    );
+    expect(upper.value).toBe(10);
+    expect(upper.value).toBe(upper.expected);
+  });
+
+  it('compiles a big operator with no indexing set', () => {
+    // A scalar operand is its own sum and product.
+    for (const op of ['Sum', 'Product']) {
+      const { value, expected } = runLoop([op, 'x'], { x: 2.5 });
+      expect(value).toBe(2.5);
+      expect(value).toBe(expected);
+    }
+    // A list of numbers is reduced.
+    const engine = loopEngine();
+    engine.declare('L', 'list<integer>');
+    const result = compile(engine.box(['Sum', 'L']), {
+      target: loopTarget,
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    const value = new Function('L', `return ${result.code};`)([1, 2, 3]);
+    engine.assign('L', engine.box(['List', 1, 2, 3]));
+    expect(value).toBe(6);
+    expect(value).toBe(engine.box(['Sum', 'L']).evaluate().re);
+  });
+
+  it('keeps the precedence of a scalar operand with no indexing set', () => {
+    // `2 * Sum(x + 1)` is `2 * (x + 1)`, not `2 * x + 1`.
+    for (const op of ['Sum', 'Product']) {
+      const { value, expected } = runLoop(
+        ['Multiply', 2, [op, ['Add', 'x', 1]]],
+        { x: 2.5 }
+      );
+      expect(value).toBe(7);
+      expect(value).toBe(expected);
+    }
+  });
+
+  it('folds a list with no indexing set only when its elements are real', () => {
+    const engine = loopEngine();
+    engine.declare('C', 'list<complex>');
+    expect(() =>
+      compile(engine.box(['Sum', 'C']), { target: loopTarget, fallback: false })
+    ).toThrow(/elements have the type `complex`/);
+    engine.declare('R', 'list<real>');
+    const result = compile(engine.box(['Sum', 'R']), {
+      target: loopTarget,
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    const value = new Function('R', `return ${result.code};`)([1.5, 2]);
+    engine.assign('R', engine.box(['List', 1.5, 2]));
+    expect(value).toBe(3.5);
+    expect(value).toBe(engine.box(['Sum', 'R']).evaluate().re);
+  });
+
+  it('reads the global `Number` with an index named `Number`', () => {
+    // The safe-integer test of the symbolic bound runs before the index
+    // `Number` is declared.
+    const { value, expected } = runLoop(
+      ['Sum', 'Number', ['Limits', 'Number', 1, 'n']],
+      { n: 4 }
+    );
+    expect(value).toBe(10);
+    expect(value).toBe(expected);
+  });
+
+  it('reads a bound that the target maps to the name of the index', () => {
+    // The target emits the input `n` as `j`, the name of the index. The bound
+    // is evaluated before the index is declared, inside the loop body.
+    const mapped: CompileTarget = {
+      ...loopTarget,
+      var: (id) => (id === 'n' ? 'j' : id),
+    };
+    for (const [json, expected] of [
+      [['Sum', 'j', ['Limits', 'j', 1, 'n']], 10],
+      [['Sum', 'j', ['Limits', 'j', 'n', 5]], 9],
+    ] as const) {
+      const engine = loopEngine();
+      const result = compile(engine.box(json), {
+        target: mapped,
+        fallback: false,
+      });
+      expect(result.success).toBe(true);
+      const value = new Function('j', `return ${result.code};`)(4);
+      expect(value).toBe(expected);
+      expect(value).toBe(engine.box(json).subs({ n: 4 }).evaluate().re);
+    }
+  });
+
+  it('gives an index named like a JavaScript global a fresh name', () => {
+    // Declared as `let Number`, the outer index would hide the global
+    // `Number` for the inner loop's `Number.isSafeInteger` test.
+    const nested = runLoop(
+      ['Sum', ['Sum', 'k', ['Limits', 'k', 1, 'n']], ['Limits', 'Number', 1, 3]],
+      { n: 2 }
+    );
+    expect(nested.value).toBe(9);
+    expect(nested.value).toBe(nested.expected);
+    // Constant bounds: the index `Math` is a loop variable, not the global.
+    const constant = runLoop(
+      ['Sum', ['Multiply', 'Math', 'x'], ['Limits', 'Math', 1, 3]],
+      { x: 0.5 }
+    );
+    expect(constant.value).toBe(3);
+    expect(constant.value).toBe(constant.expected);
+    // An outer index `Math` around an inner loop with a run-time bound.
+    const outerMath = runLoop(
+      [
+        'Sum',
+        ['Multiply', 'Math', ['Sum', 'k', ['Limits', 'k', 1, 'n']]],
+        ['Limits', 'Math', 1, 3],
+      ],
+      { n: 2 }
+    );
+    expect(outerMath.value).toBe(18);
+    expect(outerMath.value).toBe(outerMath.expected);
+  });
+
+  it('declines a big operator with no indexing set over a nested list', () => {
+    // The interpreter adds the rows element-wise ([[0, 1], [2, 3]] gives
+    // [2, 4]); the scalar reduction would not.
+    const engine = loopEngine();
+    engine.declare('M', 'list<list<integer>>');
+    expect(() =>
+      compile(engine.box(['Sum', 'M']), { target: loopTarget, fallback: false })
+    ).toThrow(/list<list<integer>>/);
+  });
+
+  it('answers NaN for a run-time bound that is not a safe integer', () => {
+    // Above 2^53 − 1 the counter does not advance; the loop must not hang.
+    // The JavaScript target's loop answers NaN for the same bounds.
+    const big = 2 ** 53;
+    expect(
+      runLoop(['Sum', 'j', ['Limits', 'j', 'n', 'n']], { n: big }).value
+    ).toBeNaN();
+    expect(
+      runLoop(['Sum', 'j', ['Limits', 'j', 1, 'n']], { n: big }).value
+    ).toBeNaN();
+    // The early return leaves only the loop function, so the enclosing
+    // expression gives NaN too.
+    expect(
+      runLoop(['Add', 1, ['Sum', 'j', ['Limits', 'j', 1, 'n']]], { n: big })
+        .value
+    ).toBeNaN();
+  });
+
+  it('declines a bound it cannot compile as a loop bound', () => {
+    const engine = loopEngine();
+    for (const [json, reason] of [
+      [['Sum', 'j', ['Limits', 'j', 1, 'x']], /type `real`/],
+      [['Sum', 'j', ['Limits', 'j', 1, 'PositiveInfinity']], /not a finite/],
+      // The interpreter leaves a big operator over an impure bound
+      // unevaluated.
+      [
+        ['Sum', 'j', ['Limits', 'j', 1, ['Random', ['Range', 2, 3]]]],
+        /upper bound .* is not pure/,
+      ],
+      [
+        ['Sum', 'j', ['Limits', 'j', ['Random', ['Range', 2, 3]], 5]],
+        /lower bound .* is not pure/,
+      ],
+    ] as const) {
+      expect(() =>
+        compile(engine.box(json), { target: loopTarget, fallback: false })
+      ).toThrow(reason);
+    }
+    for (const limits of [
+      ['Limits', 'j', 1, ['Random', ['Range', 2, 3]]],
+      ['Limits', 'j', ['Random', ['Range', 2, 3]], 5],
+    ])
+      expect(engine.box(['Sum', 'j', limits]).evaluate().operator).toBe('Sum');
+  });
+});

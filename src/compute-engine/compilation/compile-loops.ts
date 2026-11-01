@@ -16,7 +16,8 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
-import { normalizeIndexingSet } from '../library/utils.js';
+import { assertSafeBigOpBounds } from './compile-folding.js';
+import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import {
   isSymbol,
   isNumber,
@@ -1556,6 +1557,53 @@ export function scalarConditionTarget(
 }
 
 /**
+ * The code of one bound of the counted loop that `compileLoop` emits.
+ *
+ * A bound with a compile-time value is emitted as that value, floored, as the
+ * interpreter floors it. Any other bound is compiled as an expression of the
+ * target and evaluated when the loop starts. This generic lowering has no
+ * floor operation of its own, so such a bound must have the static type
+ * `integer`, which also makes it finite. The compilation declines, with the
+ * bound named, for a bound that is missing, that is not finite (`+∞`, `NaN`,
+ * the open bound of `Σ_{k=1}^{∞}`), or that is not typed `integer`: a loop
+ * cannot run over such a bound, and no default bound is substituted.
+ */
+function compileLoopBound(
+  h: string,
+  expr: Expression | undefined,
+  which: 'lower' | 'upper',
+  target: CompileTarget<Expression>
+): string {
+  if (expr === undefined || isSymbol(expr, 'Nothing'))
+    throw new Error(
+      `Could not compile \`${h}\`: the ${which} bound is missing`
+    );
+  if (
+    expr.isInfinity === true ||
+    expr.isNaN === true ||
+    expr.type.matches('infinity') ||
+    expr.type.matches('nan')
+  )
+    throw new Error(
+      `Could not compile \`${h}\`: the ${which} bound \`${expr.toString()}\` is not a finite number, and a loop over it does not end`
+    );
+  // The interpreter does not evaluate a bound that is not pure (`Random`):
+  // it leaves the big operator unevaluated (`bigopBoundValue()` in
+  // `library/utils.ts`), so the compilation declines too.
+  if (!expr.isPure)
+    throw new Error(
+      `Could not compile \`${h}\`: the ${which} bound \`${expr.toString()}\` is not pure, and the interpreter does not evaluate a big operator over such a bound`
+    );
+  const value = core.bigOpBoundConstant(expr, target);
+  if (value !== undefined) return String(value);
+  if (!expr.type.matches('integer'))
+    throw new Error(
+      `Could not compile \`${h}\`: the ${which} bound \`${expr.toString()}\` has the type \`${expr.type.toString()}\`, and this target compiles a bound with no compile-time value only when its type is \`integer\``
+    );
+  return core.compile(expr, target);
+}
+
+/**
  * Compile loop constructs (Sum/Product)
  */
 export function compileLoop(
@@ -1576,12 +1624,32 @@ export function compileLoop(
       `Could not compile \`${h}\`: multi-index (${args.length - 1} indexing sets) is not supported by this target`
     );
 
-  const {
-    index,
-    lower,
-    upper,
-    isFinite: _isFinite,
-  } = normalizeIndexingSet(args[1]);
+  // The bounds are read from the `Limits` clause as expressions. A bound with
+  // a compile-time value is emitted as that value; any other bound is
+  // compiled as code (`n`, `n + 1`, `2n`) and evaluated once, before the
+  // loop. The bounds are never read with `normalizeIndexingSet`: that
+  // function gives a default (1 for the lower bound, 1 + 10000 for the upper
+  // bound) for a bound with no numeric value, so `Σ_{j=1}^{n} j` looped up to
+  // 10001 for every `n`.
+  const clause = args[1];
+  let index: string | undefined = undefined;
+  let lower = '';
+  let upper = '';
+  let lowerIsConstant = true;
+  let upperIsConstant = true;
+  if (clause !== undefined) {
+    if (!isFunction(clause, 'Limits') || !isSymbol(clause.ops[0]))
+      throw new Error(
+        `Could not compile \`${h}\`: this target lowers only a \`Limits\` indexing set with a symbol index to a counted loop (got \`${clause.toString()}\`)`
+      );
+    index = clause.ops[0].symbol;
+    const [lowerExpr, upperExpr] = [clause.ops[1], clause.ops[2]];
+    assertSafeBigOpBounds(h, [lowerExpr, upperExpr], target);
+    lower = compileLoopBound(h, lowerExpr, 'lower', target);
+    upper = compileLoopBound(h, upperExpr, 'upper', target);
+    lowerIsConstant = core.bigOpBoundConstant(lowerExpr, target) !== undefined;
+    upperIsConstant = core.bigOpBoundConstant(upperExpr, target) !== undefined;
+  }
   const isSum = h === 'Sum';
   const op = isSum ? '+' : '*';
   // Analyze the body with the index masked, exactly as `isComplexValued`
@@ -1594,6 +1662,33 @@ export function compileLoop(
   );
 
   if (!index) {
+    // No indexing set. The interpreter answers the operand itself for a
+    // scalar number (`Sum(x)` is `x`), and the reduction of the elements for
+    // a list of numbers. Any other operand (a nested list, a matrix, a
+    // string, an operand typed `unknown`) declines: the reduction below
+    // folds each element with the scalar operator, which is not the
+    // interpreter's value for an element that is not a number.
+    //
+    // The scalar operand is put in parentheses: the caller can embed the
+    // code of the `Sum` in an operator of higher precedence
+    // (`2 * Sum(x + 1)`), and the operand is compiled at precedence 0.
+    const bodyType = args[0].type;
+    if (bodyType.matches('number')) return `(${core.compile(args[0], target)})`;
+    if (!bodyType.matches('list<number>'))
+      throw new Error(
+        `Could not compile \`${h}\` with no indexing set: the operand has the type \`${bodyType.toString()}\`, and this target compiles only a number or a list of numbers`
+      );
+    // The real fold below adds or multiplies the elements with the scalar
+    // operator, which is correct only for real elements. A list whose
+    // elements can be complex (`list<number>`, `list<complex>`) takes the
+    // complex fold when the list is known to be complex-valued, and declines
+    // otherwise.
+    if (!bodyIsComplex && !bodyType.matches('list<real>')) {
+      const element = collectionElementType(bodyType.type);
+      throw new Error(
+        `Could not compile \`${h}\` with no indexing set: the elements have the type \`${element === undefined ? bodyType.toString() : typeToString(element)}\`, and this target folds a list with no indexing set only when its elements are real or the list is known to be complex-valued`
+      );
+    }
     // Loop over a collection
     const indexVar = tempVar(target);
     const acc = tempVar(target);
@@ -1620,13 +1715,32 @@ export function compileLoop(
   // The body is the binder's own bindable region (§5.1(a)), pushed under the
   // target that binds the index — so a temporary lands INSIDE the loop and
   // is recomputed per iteration, never hoisted out of it.
+  //
+  // An index whose name is a JavaScript global or a reserved word (`Number`,
+  // `Math`) is emitted with a fresh name. Declared under its own name, it
+  // would hide the global for all the code in its scope: the
+  // `Number.isSafeInteger` test of a nested loop's run-time bound, or a
+  // `Math.sin` call in the body.
+  const indexCode = JAVASCRIPT_RESERVED_IDENTIFIERS.has(index)
+    ? tempVar(target)
+    : index;
   const bodyTarget: CompileTarget<Expression> = {
     ...target,
     var: (id) => {
-      if (id === index) return index;
+      if (id === index) return indexCode;
       return target.var(id);
     },
     ...withBoundScope(target, [index]),
+    // A write to an index with a fresh name writes that name, as a write to
+    // an index with its own name does (`assignLValue`).
+    ...(indexCode !== index
+      ? {
+          renamedWritables: new Set([
+            ...(target.renamedWritables ?? []),
+            indexCode,
+          ]),
+        }
+      : {}),
   };
   const fn = compileOp(node, 0, bodyTarget, 0, args[0]);
 
@@ -1635,19 +1749,56 @@ export function compileLoop(
   // The interpreter binds the index to its next value at each iteration,
   // whatever the body wrote. So the loop of such a body steps a separate
   // counter, and each iteration declares the index from it.
-  const counter = writesSymbol(args[0], index) ? tempVar(target) : index;
+  //
+  // A bound with no compile-time value is compiled as code and evaluated in
+  // the scope of the loop function. That code can read a variable whose
+  // emitted name is the emitted name of the index: an outer variable with
+  // the same name (`Sum(j, Limits(j, j, 5))`, where the lower bound is a
+  // free `j`), or a symbol that the target's `var` maps to that name. A
+  // `let j` in that scope would make the bound read the uninitialized index
+  // (a `ReferenceError`). So a loop with such a bound also steps a separate
+  // counter, and the index is declared only inside the loop body. The
+  // emitted code of a bound cannot be inspected for the name reliably, so
+  // the rule applies to every bound with no compile-time value.
+  const counter =
+    writesSymbol(args[0], index) || !lowerIsConstant || !upperIsConstant
+      ? tempVar(target)
+      : indexCode;
   const declareIndex =
-    counter === index ? '' : `\n  let ${index} = ${counter};`;
+    counter === indexCode ? '' : `\n  let ${indexCode} = ${counter};`;
+
+  // A symbolic upper bound is evaluated once, before the loop, not once per
+  // iteration in the loop test.
+  let boundDecls = '';
+  if (!upperIsConstant) {
+    const upperVar = tempVar(target);
+    boundDecls += `const ${upperVar} = ${upper};\n`;
+    upper = upperVar;
+  }
 
   // Iteration-budget guard (see CompileTarget.iterationBudget): a trip
   // count over the budget — including infinite or NaN bounds, for which
   // the negated comparison also fails — evaluates to NaN instead of
   // running the loop.
+  //
+  // A bound with no compile-time value is tested at loop entry: a value that
+  // is not a safe integer answers NaN, as the JavaScript target's loop does.
+  // Above 2^53 − 1, `counter++` does not change the counter, so the loop
+  // would never end, and the budget guard does not catch it (the span of
+  // `Limits(j, n, n)` is 0). The interpreter answers `out-of-range` for such
+  // a range.
   const budget = target.iterationBudget;
+  const unsafeBounds = [
+    ...(lowerIsConstant ? [] : [counter]),
+    ...(upperIsConstant ? [] : [upper]),
+  ];
   const guardNaN = (nan: string): string =>
-    budget !== undefined
+    (unsafeBounds.length > 0
+      ? `\n  if (${unsafeBounds.map((b) => `!Number.isSafeInteger(${b})`).join(' || ')}) return ${nan};`
+      : '') +
+    (budget !== undefined
       ? `\n  if (!((${upper}) - ${counter} < ${budget})) return ${nan};`
-      : '';
+      : '');
 
   if (bodyIsComplex) {
     const val = tempVar(target);
@@ -1655,7 +1806,7 @@ export function compileLoop(
     if (isSum) {
       return `(() => {
 let ${acc} = { re: 0, im: 0 };
-let ${counter} = ${lower};${guard}
+${boundDecls}let ${counter} = ${lower};${guard}
 while (${counter} <= ${upper}) {${declareIndex}
   const ${val} = ${fn};
   ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im };
@@ -1667,7 +1818,7 @@ return ${acc};
     // Product
     return `(() => {
 let ${acc} = { re: 1, im: 0 };
-let ${counter} = ${lower};${guard}
+${boundDecls}let ${counter} = ${lower};${guard}
 while (${counter} <= ${upper}) {${declareIndex}
   const ${val} = ${fn};
   ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re };
@@ -1679,7 +1830,7 @@ return ${acc};
 
   return `(() => {
 let ${acc} = ${isSum ? '0' : '1'};
-let ${counter} = ${lower};${guardNaN('NaN')}
+${boundDecls}let ${counter} = ${lower};${guardNaN('NaN')}
 while (${counter} <= ${upper}) {${declareIndex}
   ${acc} ${op}= ${fn};
   ${counter}++;

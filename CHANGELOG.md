@@ -349,6 +349,25 @@
 
 ### Bug Fixes
 
+- **The generic `Sum`/`Product` loop of a custom compile target reads a
+  symbolic bound.** A custom target with no `Sum` or `Product` of its own (for
+  example one whose `functions` is `() => undefined`) replaced a bound with no
+  numeric value by a default: `Sum(j, Limits(j, 1, n))` with `n` an `integer`
+  compiled to `while (j <= 10001)`, so the compiled value for `n = 4` was
+  `50015001` instead of `10`. A bound is now compiled as an expression (`n`,
+  `m + 1`, `2n`) and evaluated once, before the loop. A bound that names an
+  outer variable with the name of the index (`Sum(j, Limits(j, j, 5))`) reads
+  that variable; before, the compiled code threw a `ReferenceError`. A run-time
+  bound that is not a safe integer answers `NaN`, as the JavaScript target
+  does, instead of a loop that does not end. The compilation now declines,
+  with a reason, for a bound that has no compile-time value and is not typed
+  `integer`, an infinite bound, a bound that is not pure (`Random(…)`, which
+  the interpreter leaves unevaluated), and an indexing set other than `Limits`
+  (`Element(j, L)`). With no indexing set, `Sum(x)` of a number `x` compiles to
+  `x`, and `Sum(L)` of a list of real numbers compiles to a reduction (before,
+  the compilation threw a `TypeError`); any other operand, such as a nested
+  list or a list of complex numbers, declines.
+
 - **Python compilation: the name of an operator or a function used as a value
   declines.** The interpreter gives the symbol itself, and Python code has no
   form for a symbol value. `Head(List(1))` and `Head(Dictionary())` compiled to
