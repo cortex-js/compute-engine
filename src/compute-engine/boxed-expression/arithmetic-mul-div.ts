@@ -91,7 +91,7 @@ import {
   isOutsideNormalDoubleRange,
   SMALL_INTEGER,
 } from '../numerics/numeric.js';
-import { bigint } from '../numerics/bigint.js';
+import { bigint, integerDigitCount } from '../numerics/bigint.js';
 
 import {
   hasCollectionShape,
@@ -128,14 +128,6 @@ const PRODUCT_OPERAND_TYPE = parseType(
 // pathological (and can overflow `bigint`); `.N()` still yields the float /
 // overflow-to-infinity.
 const MAX_EXACT_POW_DIGITS = 1_000_000;
-
-/** (Rough upper bound on) the decimal digit count of an integer value. */
-function integerDigitCount(v: bigint | number): number {
-  if (typeof v === 'bigint') return (v < 0n ? -v : v).toString().length;
-  if (!Number.isFinite(v)) return Infinity;
-  const a = Math.abs(v);
-  return a < 1 ? 1 : Math.floor(Math.log10(a)) + 1;
-}
 
 /**
  * Would materializing `base^exp` (an exact base with a rational exponent)

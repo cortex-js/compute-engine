@@ -43,8 +43,8 @@ import {
   bigGamma,
   bigBinomialLogForm,
   binomial as machineBinomial,
-  gammaln,
   estimatedFactorialDigits,
+  estimatedBinomialDigits,
 } from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
@@ -81,16 +81,6 @@ const SYMBOLIC_EXPANSION_CAP = 20n;
 
 /** log10(φ): F(n) has ≈ n·log10(φ) decimal digits (φ = golden ratio). */
 const LOG10_PHI = Math.log10((1 + Math.sqrt(5)) / 2);
-
-/** Rough estimate of the decimal digit count of Binomial(n, k), via lgamma. */
-function estimatedBinomialDigits(n: bigint, k: bigint): number {
-  const nf = Number(n);
-  const kf = Number(k);
-  if (!Number.isFinite(nf) || !Number.isFinite(kf)) return Infinity;
-  const logC =
-    (gammaln(nf + 1) - gammaln(kf + 1) - gammaln(nf - kf + 1)) / Math.LN10;
-  return Number.isFinite(logC) ? logC : Infinity;
-}
 
 /**
  * Rough estimate of the decimal digit count of the Bell number B(n), via the

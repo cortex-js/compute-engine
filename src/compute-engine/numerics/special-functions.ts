@@ -161,6 +161,58 @@ export function estimatedFactorialDigits(n: number): number {
   return Number.isFinite(digits) ? digits : Infinity;
 }
 
+/**
+ * The estimated count of decimal digits of `Binomial(n, k)`, for
+ * `0 ≤ k ≤ n − k`. The interpreter (`binomialBigint` in
+ * `library/combinatorics.ts`) and the `bigint` compile mode (`bbinomial` in
+ * `compilation/bigint-runtime.ts`) both use this function, so that they make
+ * the same decision at their size limit.
+ *
+ * For `n < 2^21` the estimate is `lnΓ(n+1) − lnΓ(k+1) − lnΓ(n−k+1)`. The
+ * terms are less than about `3·10^7`, so the subtraction loses almost no
+ * precision.
+ *
+ * For a larger `n`, the subtraction `lnΓ(n+1) − lnΓ(n−k+1)` of two nearly
+ * equal values loses precision. When `n > 2^53` and `k` is small, it loses
+ * all of it: for `n = 10^100` and `k = 30000` the two terms are equal in
+ * double precision and the estimate is about 0, but the result has about
+ * 2,878,713 digits. In this range the function uses the Stirling series in
+ * a form with no subtraction of nearly equal values. With `m = n − k`:
+ * `lnΓ(n+1) − lnΓ(m+1) ≈ (m + 1/2)·(−ln(1 − k/n)) + k·ln(n) − k`, where
+ * `ln(1 − k/n)` is computed by `Math.log1p`. The error of this form is less
+ * than `1/(12m)`, and `m ≥ n/2 ≥ 2^20`.
+ *
+ * When `n` is beyond the double range (about `1.8·10^308`) and `k` is not,
+ * the function uses the bound `Binomial(n, k) ≤ n^k / k!`, with `ln(n)`
+ * computed from the decimal digits of `n`. The bound is an upper bound, and
+ * it is larger than the true value by a factor of at most `exp(k²/n)`, which
+ * is 1 in double precision in this range: `Binomial(10^400, 1)` estimates
+ * 401 digits. A value of `k` beyond the double range estimates `Infinity`.
+ */
+export function estimatedBinomialDigits(n: bigint, k: bigint): number {
+  const nf = Number(n);
+  const kf = Number(k);
+  if (!Number.isFinite(kf)) return Infinity;
+  if (!Number.isFinite(nf)) {
+    // `ln(n)` from the count of decimal digits of `n` and its first 15
+    // digits, which a double holds exactly.
+    const s = n.toString();
+    const lnN =
+      (s.length - 15 + Math.log10(Number(s.slice(0, 15)))) * Math.LN10;
+    const digits = (kf * lnN - gammaln(kf + 1)) / Math.LN10;
+    return Number.isFinite(digits) ? digits : Infinity;
+  }
+  const lnC =
+    nf < 2 ** 21
+      ? gammaln(nf + 1) - gammaln(kf + 1) - gammaln(nf - kf + 1)
+      : (nf - kf + 0.5) * -Math.log1p(-kf / nf) +
+        kf * Math.log(nf) -
+        kf -
+        gammaln(kf + 1);
+  const digits = lnC / Math.LN10;
+  return Number.isFinite(digits) ? digits : Infinity;
+}
+
 const GAMMA_OVERFLOW_THRESHOLD = 171.6243769563027;
 
 function gammaLanczos(z: number): number {

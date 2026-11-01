@@ -24,9 +24,10 @@
  */
 
 import {
+  estimatedBinomialDigits,
   estimatedFactorialDigits,
-  gammaln,
 } from '../numerics/special-functions.js';
+import { integerDigitCount } from '../numerics/bigint.js';
 import { isPrimeBigint } from '../numerics/primes.js';
 
 /**
@@ -170,27 +171,13 @@ export function bpow(a: bigint, e: bigint): bigint {
       `The power ${String(a)}^${String(e)} is not an integer`
     );
   // The estimate is the estimate of the interpreter (`integerDigitCount` in
-  // `boxed-expression/arithmetic-power.ts`): the count of decimal digits of
-  // `|a|` times `e`. It is larger than the true size of `a^e`, and the
-  // helper must throw for each power that the interpreter leaves
-  // unevaluated: `9^1000001` has 954,244 digits, but the estimate is
-  // 1,000,001. An estimate of `Infinity` or `NaN` also throws.
-  //
-  // The interpreter counts the digits of a base held as a JavaScript number
-  // with `Math.floor(Math.log10(|a|)) + 1`. The rounding of `Math.log10`
-  // makes this count one too large for a few bases just below a power of
-  // ten (`999999999999999` gives 16, not 15), so the interpreter leaves
-  // `999999999999999^66000` unevaluated. The helper takes the larger of the
-  // exact count and that count for a safe-integer base, so it throws in
-  // each case where the interpreter stays symbolic.
-  const magnitude = abs(a);
-  let baseDigits = magnitude.toString().length;
-  if (magnitude <= BigInt(Number.MAX_SAFE_INTEGER))
-    baseDigits = Math.max(
-      baseDigits,
-      Math.floor(Math.log10(Number(magnitude))) + 1
-    );
-  const digits = baseDigits * Number(e);
+  // `numerics/bigint.ts`, which `boxed-expression/arithmetic-power.ts`
+  // uses): the count of decimal digits of `|a|` times `e`. It is larger
+  // than the true size of `a^e`, and the helper must throw for each power
+  // that the interpreter leaves unevaluated: `9^1000001` has 954,244
+  // digits, but the estimate is 1,000,001. An estimate of `Infinity` or
+  // `NaN` also throws.
+  const digits = integerDigitCount(a) * Number(e);
   if (!(digits <= MAX_EXACT_DIGITS))
     throw sizeLimitError(`Power(${String(a)}, ${String(e)})`, digits);
   return a ** e;
@@ -341,45 +328,6 @@ export function bfactorial2(n: bigint): bigint {
   if (!(digits <= MAX_EXACT_DIGITS))
     throw sizeLimitError(`Factorial2(${String(n)})`, digits);
   return product(n % 2n === 0n ? 2n : 1n, n, 2n);
-}
-
-/**
- * The estimated count of decimal digits of `Binomial(n, k)`, for
- * `1 ≤ k ≤ n − k`.
- *
- * For `n ≤ 2^53` it is the estimate of the interpreter
- * (`estimatedBinomialDigits` in `library/combinatorics.ts`), by the
- * logarithm of the gamma function, so that the helper and the interpreter
- * make the same decision at the size limit. In this range the subtraction
- * `lnΓ(n+1) − lnΓ(n−k+1)` loses at most about 64 in the natural logarithm
- * (28 decimal digits), which is not important at a limit of 1,000,000
- * digits.
- *
- * For a larger `n` that subtraction loses all its digits: for
- * `n = 10^100` and `k = 10^10` the two terms are equal in double
- * precision, the estimate is about 0, and the multiplication loop starts
- * with 10^10 steps. The helper then uses the Stirling series in a form with
- * no subtraction of nearly equal values. With `m = n − k`:
- * `lnΓ(n+1) − lnΓ(m+1) ≈ (m + 1/2)·(−ln(1 − k/n)) + k·ln(n) − k`,
- * where `ln(1 − k/n)` is computed by `Math.log1p`. The error of this form
- * is less than `1/(12m)`, and `m ≥ n/2`. In this range the estimate of the
- * interpreter has an error of about `n·ln(n)·10^−16` in the natural
- * logarithm, so near the limit the two can make a different decision; the
- * estimate of the helper is the accurate one.
- */
-function estimatedBinomialDigits(n: bigint, k: bigint): number {
-  const nf = Number(n);
-  const kf = Number(k);
-  if (!Number.isFinite(nf) || !Number.isFinite(kf)) return Infinity;
-  const lnC =
-    n <= 2n ** 53n
-      ? gammaln(nf + 1) - gammaln(kf + 1) - gammaln(nf - kf + 1)
-      : (nf - kf + 0.5) * -Math.log1p(-kf / nf) +
-        kf * Math.log(nf) -
-        kf -
-        gammaln(kf + 1);
-  const logC = lnC / Math.LN10;
-  return Number.isFinite(logC) ? logC : Infinity;
 }
 
 /**

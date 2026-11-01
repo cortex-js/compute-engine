@@ -3,7 +3,10 @@ import { parseType } from '../../common/type/parse.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, NumberLiteralInterface } from '../global-types.js';
 import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
-import { bigintMaximalPerfectPower } from '../numerics/bigint.js';
+import {
+  bigintMaximalPerfectPower,
+  integerDigitCount,
+} from '../numerics/bigint.js';
 import { reduceRationalRoot } from '../numerics/rationals.js';
 import type { Rational } from '../numerics/types.js';
 import {
@@ -885,14 +888,6 @@ export function canonicalRoot(
 // pathological to build and to serialize, and `.N()` still yields the float /
 // overflow-to-infinity. `Power(2, 1e15)` (≈ 3·10^14 digits) is well past this.
 const MAX_EXACT_POW_DIGITS = 1_000_000;
-
-/** (Rough upper bound on) the decimal digit count of an integer value. */
-function integerDigitCount(v: bigint | number): number {
-  if (typeof v === 'bigint') return (v < 0n ? -v : v).toString().length;
-  if (!Number.isFinite(v)) return Infinity;
-  const a = Math.abs(v);
-  return a < 1 ? 1 : Math.floor(Math.log10(a)) + 1;
-}
 
 /** The base-10 logarithm of `|v|` for an integer `v`, `-Infinity` for `0`.
  * A bigint beyond the double range is read through its decimal digits, so

@@ -187,6 +187,60 @@ describe('WP-2.11 / EX-14: combinatorics magnitude guards', () => {
     expect(r.operator).toBe('Subfactorial');
   });
 
+  // Layer 2: Binomial(10^100, 30000) has about 2,878,713 digits. The
+  // estimate `lnΓ(n+1) − lnΓ(k+1) − lnΓ(n−k+1)` gave about 0 for this case,
+  // because `lnΓ(n+1)` and `lnΓ(n−k+1)` are equal in double precision, and
+  // the multiplication loop built the whole integer (about 26 seconds). The
+  // estimate (`estimatedBinomialDigits` in `numerics/special-functions.ts`)
+  // now has no subtraction of nearly equal values for a large `n`.
+  // Outcome: stays symbolic (inert).
+  it('Binomial(10^100, 30000) stays symbolic at once', () => {
+    const start = Date.now();
+    const r = ce
+      .box(['Binomial', { num: '1' + '0'.repeat(100) }, 30_000])
+      .evaluate();
+    expect(r.operator).toBe('Binomial');
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  // Binomial(10^300, 3368) has 999,981 digits, under the limit: it
+  // computes. Binomial(10^300, 3369) has about 1,000,277 digits, over the
+  // limit: it stays symbolic.
+  it('Binomial(10^300, k) computes just under the size limit, not over it', () => {
+    const n = { num: '1' + '0'.repeat(300) };
+    const under = ce.box(['Binomial', n, 3368]).evaluate();
+    expect(under.operator).toBe('Integer');
+    const nv = under.numericValue;
+    expect(typeof nv === 'object' && nv.isExact).toBe(true);
+    if (typeof nv === 'object')
+      expect(nv.asExact!.rational[0].toString().length).toBe(999_981);
+    expect(ce.box(['Binomial', n, 3369]).evaluate().operator).toBe('Binomial');
+  });
+
+});
+
+describe('The size limit of an exact power counts the digits of the base exactly', () => {
+  // `999999999999999` has 15 digits. The count `Math.floor(Math.log10(a)) +
+  // 1` gave 16 (a rounding of `Math.log10`), so a power with less than
+  // 1,000,000 digits stayed symbolic.
+  it.each([
+    [66_000, 990_000],
+    [66_666, 999_990],
+  ])('Power(999999999999999, %s) computes (%s digits)', (e, digits) => {
+    const r = ce.box(['Power', 999_999_999_999_999, e]).evaluate();
+    expect(r.operator).toBe('Integer');
+    const nv = r.numericValue;
+    if (typeof nv !== 'object') throw new Error('not an exact integer');
+    const v = nv.asExact!.rational[0];
+    expect(v).toBe(999_999_999_999_999n ** BigInt(e));
+    expect(v.toString().length).toBe(digits);
+  });
+
+  // 15 × 66,667 = 1,000,005 digits, over the limit.
+  it('Power(999999999999999, 66667) stays symbolic', () => {
+    const r = ce.box(['Power', 999_999_999_999_999, 66_667]).evaluate();
+    expect(r.operator).toBe('Power');
+  });
 });
 
 describe('WP-2.18 / P0-19 residual: DigitSum and siblings (library/number-theory.ts)', () => {

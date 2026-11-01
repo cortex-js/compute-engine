@@ -827,31 +827,51 @@ describe('the size estimates of Power and Binomial (§3.9)', () => {
     expect(String(v).length).toBe(301030);
   });
 
+  // The count of digits of the base is exact: `999999999999999` has 15
+  // digits, so its power to 66,666 (999,990 digits) computes in both, and
+  // its power to 66,667 (1,000,005 digits) computes in neither.
+  it('n^k0 at 999999999999999, 66666 computes and equals evaluate()', () => {
+    const v = agrees(['Power', 'n', 'k0'], {
+      n: 999_999_999_999_999n,
+      k0: 66_666n,
+    });
+    expect(String(v).length).toBe(999_990);
+  });
+
   it.each([
     [9n, 1_000_001n],
     [2n, 1_000_001n],
     [2n, 3_000_000n],
-    // The interpreter counts 16 digits for this base (the rounding of
-    // `Math.log10`), so it stays unevaluated although the true size is
-    // 990,000 digits.
-    [999_999_999_999_999n, 66_000n],
+    [999_999_999_999_999n, 66_667n],
   ])('n^k0 at %s, %s throws a RangeError, and evaluate() stays unevaluated', (n, k0) => {
     expect(() => run(['Power', 'n', 'k0'], { n, k0 })).toThrow(RangeError);
     const r = ce.box(['Power', 'n', 'k0']).subs({ n: ce.number(n), k0: ce.number(k0) }).evaluate();
     expect(r.operator).toBe('Power');
   });
 
-  // For n > 2^53 the estimate of the interpreter loses all its digits by
-  // cancellation; the helper uses a form with no cancellation.
+  // The helper and the interpreter use the same estimate
+  // (`estimatedBinomialDigits` in `numerics/special-functions.ts`). For
+  // `n > 2^53` the estimate has no subtraction of nearly equal values, so
+  // a large result is found before the multiplication loop starts.
   it('Binomial(n, m) at 10^100, 10^10 throws a RangeError at once', () => {
     const start = Date.now();
     expect(() => run(['Binomial', 'n', 'm'], { n: 10n ** 100n, m: 10n ** 10n })).toThrow(RangeError);
     expect(Date.now() - start).toBeLessThan(1000);
   });
 
+  // `Binomial(10^300, 3369)` has about 1,000,277 digits.
+  it('Binomial(n, m) at 10^300, 3369 throws a RangeError, and evaluate() stays unevaluated', () => {
+    const n = 10n ** 300n;
+    expect(() => run(['Binomial', 'n', 'm'], { n, m: 3369n })).toThrow(RangeError);
+    const r = ce.box(['Binomial', 'n', 'm']).subs({ n: ce.number(n), m: ce.number(3369) }).evaluate();
+    expect(r.operator).toBe('Binomial');
+  });
+
   it.each([
     [20_000n, 10_000n],
     [10n ** 20n, 1_000n],
+    // `n` is beyond the double range; the result has about 800 digits.
+    [10n ** 400n, 2n],
   ])('Binomial(n, m) at %s, %s computes and equals evaluate()', (n, m) => {
     agrees(['Binomial', 'n', 'm'], { n, m });
   });

@@ -76,6 +76,28 @@ export function bigint(
 }
 
 /**
+ * The count of decimal digits of the integer part of `|v|`, and `1` for a
+ * value of absolute value less than 1. A non-finite number counts
+ * `Infinity`.
+ *
+ * The count is exact, also for a number: every finite double of absolute
+ * value 1 or more has an integer part that `BigInt` converts exactly. A
+ * count from `Math.floor(Math.log10(|v|)) + 1` is not exact: the rounding
+ * of `Math.log10` gives 16 for `999999999999999`, which has 15 digits.
+ *
+ * The size limit of an exact power uses this count, in the interpreter
+ * (`boxed-expression/arithmetic-power.ts` and `arithmetic-mul-div.ts`) and
+ * in the `bigint` compile mode (`bpow` in
+ * `compilation/bigint-runtime.ts`), so that they make the same decision.
+ */
+export function integerDigitCount(v: bigint | number): number {
+  if (typeof v === 'bigint') return (v < 0n ? -v : v).toString().length;
+  if (!Number.isFinite(v)) return Infinity;
+  const a = Math.abs(v);
+  return a < 1 ? 1 : BigInt(Math.trunc(a)).toString().length;
+}
+
+/**
  * Exact integer n-th root of a non-negative bigint: the integer `r` with
  * `r^n = v`, or `null` when `v` is not a perfect n-th power.
  *
