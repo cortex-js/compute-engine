@@ -107,7 +107,11 @@ describe('bigint mode: compilations on javascript', () => {
   it('an accepted expression compiles to bigint code', () => {
     const r = compile(ce.parse('n + 1'), { mode: 'bigint' });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('(_.n + 1n)');
+    // The wrapper of the entry converts a \`number\` input and catches a
+    // pole (step 4, §3.4 and §3.5).
+    expect(r.code).toBe(
+      "(() => { const _tv1 = typeof _.n === 'number' ? _SYS.toBigint(_.n) : _.n; try { return (_tv1 + 1n); } catch (_tv2) { if (_tv2 instanceof _SYS.NonFiniteValue) return _tv2.value; throw _tv2; } })()"
+    );
   });
 
   it('an expression that the lane analysis rejects declines with its reason', () => {
@@ -195,7 +199,9 @@ describe('bigint mode: custom targets', () => {
     const target = { ...jsTarget() } as CompileTarget<Expression>;
     const r = compile(ce.parse('n + 1'), { target, mode: 'bigint' });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('(n + 1n)');
+    expect(r.code).toBe(
+      "(() => { const _tv1 = typeof n === 'number' ? _SYS.toBigint(n) : n; try { return (_tv1 + 1n); } catch (_tv2) { if (_tv2 instanceof _SYS.NonFiniteValue) return _tv2.value; throw _tv2; } })()"
+    );
   });
 
   // A per-call `operators` or `functions` option replaces the emission of a
@@ -306,7 +312,9 @@ describe('bigint mode: custom targets', () => {
       mode: 'bigint',
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('(n + 1n)');
+    expect(r.code).toBe(
+      "(() => { const _tv1 = typeof n === 'number' ? _SYS.toBigint(n) : n; try { return (_tv1 + 1n); } catch (_tv2) { if (_tv2 instanceof _SYS.NonFiniteValue) return _tv2.value; throw _tv2; } })()"
+    );
   });
 });
 

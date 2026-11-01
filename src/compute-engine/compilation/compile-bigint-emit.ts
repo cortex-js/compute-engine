@@ -26,10 +26,14 @@
  * `docs/plans/2026-10-31-ce715-bigint-compile-mode.md` (§3.1.1, §3.2, §3.3,
  * §3.6, §3.7); the section of the spec follows a rule as a footnote.
  *
- * Not in this module: the conversion of a `number` input to a `bigint`,
- * the catch of a `NonFiniteValue` at the compiled entry, and the folding of
- * a constant subtree by the double mode. A constant subtree is written from
- * the exact value of `evaluate()`.
+ * The code of the root is written in a wrapper (`entryWrapper`): it
+ * converts each integer input that the host gives as a `number` to a
+ * `bigint`, and it catches the `NonFiniteValue` of a pole and returns its
+ * `number` (§3.4, §3.5). The wrapper is part of the emitted code, so every
+ * runner has it.
+ *
+ * Not in this module: the folding of a constant subtree by the double
+ * mode. A constant subtree is written from the exact value of `evaluate()`.
  */
 
 import type { Expression, FunctionInterface } from '../global-types.js';
@@ -75,8 +79,10 @@ export function emitBigintLane(
   const start = top?.bindings.length ?? 0;
   const code = emitter.value(expr);
   const bindings = top?.bindings.splice(start) ?? [];
-  return emitter.withDefinitions(
-    bindings.length === 0 ? code : target.cseBind!(bindings, code)
+  return emitter.entryWrapper(
+    emitter.withDefinitions(
+      bindings.length === 0 ? code : target.cseBind!(bindings, code)
+    )
   );
 }
 
@@ -94,11 +100,51 @@ class BigintEmitter {
   /** The JavaScript names of the user functions whose definition is being
    * written, by the name of the function. */
   private readonly inProgress = new Map<string, string>();
+  /** The JavaScript names of the converted integer inputs, by the code that
+   * reads the input (`_.n`, or a parameter of the `Function` literal at the
+   * root). */
+  private readonly lifted = new Map<string, string>();
 
   constructor(
     private readonly target: CompileTarget<Expression>,
     private readonly analysis: BigintLaneAnalysis
   ) {}
+
+  /**
+   * `code` in the wrapper of the compiled entry (§3.4, §3.5):
+   * - Each integer input is read one time, before the code, into a local.
+   *   A `number` is converted with `_SYS.toBigint(x)`, and a `bigint` is
+   *   kept. The conversion goes through the runtime object `_SYS`, as every
+   *   helper call does, and not through the global `BigInt`, which a
+   *   parameter named `BigInt` would shadow.
+   *   The conversion is in the code, so it applies in every runner and also
+   *   when the entry checks are off. A `number` that is not an integer then
+   *   makes the conversion throw a `RangeError`. A `list<integer>` input is not
+   *   converted here: the entry check converts its cells when it is on.
+   * - One `try`/`catch` around the code catches the `NonFiniteValue` that a
+   *   helper throws at a pole, and returns its `number` (`Infinity` or
+   *   `NaN`). Any other error is thrown again.
+   *
+   * The definitions of the user functions are in `code`, so they have no
+   * catch of their own: a pole in a user function ends the whole
+   * computation. When `code` is the body of the `Function` literal at the
+   * root, the closure that the host receives has the same wrapper.
+   *
+   * Code that reads no integer input and calls no helper (`_SYS`) has no
+   * wrapper: only a helper throws a `NonFiniteValue`. Thus the code of a
+   * folded constant is its literal (`7n`).
+   */
+  entryWrapper(code: string): string {
+    if (this.lifted.size === 0 && !code.includes('_SYS.')) return code;
+    const lifts = [...this.lifted]
+      .map(
+        ([read, id]) =>
+          `const ${id} = typeof ${read} === 'number' ? _SYS.toBigint(${read}) : ${read}; `
+      )
+      .join('');
+    const e = tempVar(this.target);
+    return `(() => { ${lifts}try { return ${code}; } catch (${e}) { if (${e} instanceof _SYS.NonFiniteValue) return ${e}.value; throw ${e}; } })()`;
+  }
 
   /** `code` with the definitions of the user functions it calls. */
   withDefinitions(code: string): string {
@@ -247,8 +293,18 @@ class BigintEmitter {
     // The read of an input is the read of the double mode: it has no
     // arithmetic, and it records the input for the entry checks
     // (`varsObjectRefs`) and reads a `vars` entry or a parameter of the
-    // `Function` literal at the root.
-    if (record.lowering === 'input') return core.compile(node, this.target);
+    // `Function` literal at the root. An integer input is read from the
+    // local that the wrapper of the entry converts (`entryWrapper`).
+    if (record.lowering === 'input') {
+      const read = core.compile(node, this.target);
+      if (record.input !== 'integer') return read;
+      let id = this.lifted.get(read);
+      if (id === undefined) {
+        id = tempVar(this.target);
+        this.lifted.set(read, id);
+      }
+      return id;
+    }
     const id = this.lookup(name);
     if (id === undefined)
       throw this.decline(node, 'this local name is not bound in the code');
@@ -362,7 +418,7 @@ class BigintEmitter {
         return `${this.value(node.op2)}.map(${this.callback(record, node.op1)})`;
       case 'Length':
       case 'Count':
-        return `BigInt(${this.value(node.op1)}.length)`;
+        return `_SYS.toBigint(${this.value(node.op1)}.length)`;
       case 'At':
         return `_SYS.bat(${this.value(node.op1)}, ${this.value(node.op2)})`;
       case 'First':

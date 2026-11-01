@@ -97,6 +97,19 @@ export function bigintLane(t: Type): boolean {
   return t !== 'never' && isSubtype(t, LANE_TYPE);
 }
 
+/**
+ * The kind of an input of the mode whose type is `t`, for the entry check
+ * (§3.5): `integer` for a scalar on the lane, `integer-list` for a list of
+ * integers, and `undefined` for any other type. These are the two kinds of
+ * input that the analysis accepts (`BigintLaneRecord.input`).
+ */
+export function bigintInputLane(
+  t: Type
+): 'integer' | 'integer-list' | undefined {
+  if (bigintLane(t)) return 'integer';
+  return isListOfIntegers(t) ? 'integer-list' : undefined;
+}
+
 /** Whether the lane type `t` has a non-finite member (`nan`, `infinity`
  * or `signed_infinity`). */
 function hasNonFiniteMember(t: Type): boolean {

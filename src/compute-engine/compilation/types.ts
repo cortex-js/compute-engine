@@ -2937,6 +2937,9 @@ export interface CompiledColor {
  * engine compiles more than arithmetic:
  *
  * - `number` — the ordinary case; a pole or an undefined result is `NaN`.
+ * - `bigint` — in `mode: 'bigint'` only, every integer value. A `number`
+ *   result of that mode (`NaN` or `Infinity`) means that a sub-expression
+ *   had no finite value.
  * - {@link ComplexResult} — a complex-valued expression, `{ re, im }` with
  *   `im !== 0` (a value whose imaginary part is exactly zero comes back as a
  *   plain `number`).
@@ -2974,6 +2977,7 @@ export interface CompiledColor {
  */
 export type CompiledValue =
   | number
+  | bigint
   | ComplexResult
   | CompiledColor
   | boolean
@@ -3042,7 +3046,7 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? IntervalInput
-  : number | boolean | string | ComplexResult | RunnerListInput;
+  : number | bigint | boolean | string | ComplexResult | RunnerListInput;
 
 /**
  * A list argument of a compiled runner: an array of numbers, of booleans,
@@ -3052,10 +3056,13 @@ export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
  * `run({ B: [true, false] })` for `B: list<boolean>`). A typed array
  * (`Float64Array`) is refused at run time, with a message. The entries are
  * not checked at run time: an entry of the wrong type computes as it would
- * in plain JavaScript.
+ * in plain JavaScript. The one exception is a `list<integer>` input of
+ * `mode: 'bigint'`: with the entry checks on, its `number` entries are
+ * converted to `bigint` values, and an entry that is not an integer is
+ * refused.
  */
 export type RunnerListInput = ReadonlyArray<
-  number | boolean | string | ComplexResult | RunnerListInput
+  number | bigint | boolean | string | ComplexResult | RunnerListInput
 >;
 
 /**
@@ -3139,6 +3146,19 @@ export type StoredEntryPlan = {
    * gives `noValue` before any of its code runs (`entryNoValue` in
    * `javascript-runtime.ts`). */
   required?: { names: string[]; noValue: 'NaN' | 'undefined' };
+  /** `mode: 'bigint'`: the integer inputs. Each accepts a `bigint`, and a
+   * `number` that is a safe integer, which the compiled code converts with
+   * `BigInt(x)`; any other value is refused with a `TypeError`. */
+  bigints?: (string | number)[];
+  /** `mode: 'bigint'`: the `list<integer>` inputs (also in `lists`). The
+   * check converts each `number` cell that is a safe integer to a `bigint`
+   * in a copy, and refuses a cell that is neither such a `number` nor a
+   * `bigint`. */
+  bigintLists?: (string | number)[];
+  /** `mode: 'bigint'`: the integer parameters (also in `bigints`) that have
+   * a default value (`args` plans only). A call that leaves out one of them
+   * does not check it: the compiled code fills the default value. */
+  bigintDefaults?: number[];
 };
 
 /**

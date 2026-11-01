@@ -4549,6 +4549,10 @@ export const SYS_HELPERS = {
   // `bigint` values and throw a `NonFiniteValue` at a pole
   // (`bigint-runtime.ts`). Only the code of the bigint emitter calls them.
   ...BIGINT_HELPERS,
+  // `mode: 'bigint'`: the conversion of a `number` to a `bigint`. The
+  // emitted code calls it through `_SYS`, as it calls every helper, and not
+  // as the global `BigInt`, which a parameter named `BigInt` shadows.
+  toBigint: (x: number): bigint => BigInt(x),
   // The marker object that a comparison of a block local throws when the
   // test of the inputs of its block fails where the interpreter may decide
   // the comparison: the compiled result catches it at its top and gives no
@@ -7502,6 +7506,17 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  *   `When(x, 1)` unevaluated (see
  *   `test/compute-engine/ce-569-when-defects.test.ts`).
  *
+ * In `mode: 'bigint'` an integer input (`bigints`) accepts a `bigint` and a
+ * `number` that is a safe integer, which the emitted code converts with
+ * `BigInt(x)`. Any other value THROWS a `TypeError` that names the binding
+ * (`checkBigintEntry`). A `list<integer>` input (`bigintLists`) is the one
+ * exception to the rule below that the entries of a list are never read:
+ * the check converts each `number` cell to a `bigint` in a copy, and
+ * refuses a cell that is neither a safe integer nor a `bigint`
+ * (`liftBigintList`). The emitted code does not convert the cells of a
+ * list, so with the entry checks off the host gives `bigint` cells.
+ * (`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`, §3.5.)
+ *
  * One `typeof` (and, for a list binding, one brand check) per checked
  * binding per call, and never a read of the entries of a collection: the
  * work at the boundary is constant per binding, however long a list input
@@ -7528,6 +7543,11 @@ export type EntryPlan =
        * indexes, and the value of a run that has no value for one of them
        * (`checkEntry`, `entryNoValue`). */
       required?: { names: string[]; noValue: 'NaN' | 'undefined' };
+      /** `mode: 'bigint'`: the integer inputs (`checkBigintEntry`). */
+      bigints?: string[];
+      /** `mode: 'bigint'`: the `list<integer>` inputs, also in `lists`
+       * (`liftBigintList`). */
+      bigintLists?: string[];
     }
   | {
       kind: 'args';
@@ -7538,6 +7558,15 @@ export type EntryPlan =
       kinds?: Map<number, KindEntry>;
       scalars?: number[];
       texts?: number[];
+      bigints?: number[];
+      bigintLists?: number[];
+      /** `mode: 'bigint'`: the integer parameters (also in `bigints`) that
+       * have a default value. The check skips such a parameter when the call
+       * leaves it out. `run()` fills the default value before the check,
+       * and the code that `load()` makes fills it in the emitted function,
+       * after the check. The default value is a `bigint`, so both give the
+       * same result. */
+      bigintDefaults?: number[];
     };
 
 /**
@@ -7593,6 +7622,65 @@ function entryCheckError(binding: string): TypeError {
   return new TypeError(
     `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
   );
+}
+
+/** The text of a value in the error of an entry check of `mode: 'bigint'`. */
+function bigintEntryValueText(x: unknown): string {
+  if (typeof x === 'number') return `the number ${String(x)}`;
+  if (typeof x === 'string') return `the string ${JSON.stringify(x)}`;
+  if (x === undefined) return 'no value';
+  if (x === null) return 'null';
+  if (Array.isArray(x)) return 'an array';
+  return `a value of type ${typeof x}`;
+}
+
+/**
+ * Throw when `x`, the value of the integer input `binding` of
+ * `mode: 'bigint'`, is neither a `bigint` nor a `number` that is a safe
+ * integer. The emitted code converts a safe-integer `number` with
+ * `BigInt(x)`. A `number` that is not a safe integer does not identify one
+ * integer, and any other value has no integer value.
+ */
+function checkBigintEntry(binding: string, x: unknown): void {
+  if (typeof x === 'bigint') return;
+  if (typeof x === 'number' && Number.isSafeInteger(x)) return;
+  throw new TypeError(
+    `${binding} was compiled in mode 'bigint' as an integer, and received ${bigintEntryValueText(x)}. Pass a bigint, or a number that is a safe integer.`
+  );
+}
+
+/**
+ * The value `x` of the `list<integer>` input `binding` of `mode: 'bigint'`,
+ * with each `number` cell converted to a `bigint`. The array of the caller
+ * is not changed: a copy is made when a cell is converted, and `x` is
+ * returned when no cell is a `number`. A nested array is converted in the
+ * same way. A cell that is neither a `bigint` nor a safe-integer `number`
+ * throws a `TypeError`, which names the cell by its index path from the
+ * outer array (`element 2, 2` for the cell `x[1][1]`): `path` is the path of
+ * `x` in the outer array, and is empty for the outer array. A value that is
+ * not an array is returned as it is: the other checks of a list binding
+ * apply to it.
+ */
+function liftBigintList(binding: string, x: unknown, path = ''): unknown {
+  if (!Array.isArray(x)) return x;
+  let out: unknown[] | undefined;
+  for (let i = 0; i < x.length; i++) {
+    const cell: unknown = x[i];
+    let y: unknown = cell;
+    if (typeof cell === 'number' && Number.isSafeInteger(cell))
+      y = BigInt(cell);
+    else if (Array.isArray(cell))
+      y = liftBigintList(binding, cell, `${path}${i + 1}, `);
+    else if (typeof cell !== 'bigint')
+      throw new TypeError(
+        `${binding} was compiled in mode 'bigint' as a list of integers, and its element ${path}${i + 1} is ${bigintEntryValueText(cell)}. Pass bigints, or numbers that are safe integers.`
+      );
+    if (y !== cell) {
+      out ??= x.slice();
+      out[i] = y;
+    }
+  }
+  return out ?? x;
 }
 
 /**
@@ -7764,6 +7852,18 @@ export function checkEntry(
         if (typeof x !== 'string' && x !== undefined)
           throwNonStringAtText(`"${id}"`, x);
       }
+    // `mode: 'bigint'`: the integer inputs, and the cells of the
+    // `list<integer>` inputs, which are converted in a copy.
+    if (plan.bigints !== undefined)
+      for (const id of plan.bigints) checkBigintEntry(`"${id}"`, v[id]);
+    if (plan.bigintLists !== undefined)
+      for (const id of plan.bigintLists) {
+        const x = v[id];
+        const y = liftBigintList(`"${id}"`, x);
+        if (y === x) continue;
+        lifted ??= { ...v };
+        lifted[id] = y;
+      }
     // A list-declared binding is read as it is: one `typeof` refuses a
     // string, one brand check refuses a typed array, and nothing else is
     // read or converted (see the plan's description above). A scalar passes
@@ -7826,6 +7926,23 @@ export function checkEntry(
       const x = argumentsList[i];
       if (typeof x !== 'string' && x !== undefined)
         throwNonStringAtText(`argument ${i + 1}`, x);
+    }
+  // The `mode: 'bigint'` rules of the free-symbol route above.
+  if (plan.bigints !== undefined)
+    for (const i of plan.bigints) {
+      // An argument that the call leaves out (not an explicit `undefined`)
+      // for a parameter with a default value gets the default value.
+      if (i >= argumentsList.length && plan.bigintDefaults?.includes(i))
+        continue;
+      checkBigintEntry(`argument ${i + 1}`, argumentsList[i]);
+    }
+  if (plan.bigintLists !== undefined)
+    for (const i of plan.bigintLists) {
+      const x = argumentsList[i];
+      const y = liftBigintList(`argument ${i + 1}`, x);
+      if (y === x) continue;
+      lifted ??= [...argumentsList];
+      lifted[i] = y;
     }
   for (const i of plan.lists) {
     const x = argumentsList[i];
@@ -7902,6 +8019,17 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
           },
         }
       : {}),
+    ...(plan.bigints !== undefined && plan.bigints.length > 0
+      ? { bigints: [...plan.bigints] }
+      : {}),
+    ...(plan.bigintLists !== undefined && plan.bigintLists.length > 0
+      ? { bigintLists: [...plan.bigintLists] }
+      : {}),
+    ...(plan.kind === 'args' &&
+    plan.bigintDefaults !== undefined &&
+    plan.bigintDefaults.length > 0
+      ? { bigintDefaults: [...plan.bigintDefaults] }
+      : {}),
   };
 }
 
@@ -7937,6 +8065,14 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
           },
         }
       : {}),
+    // A plan stored without the fields checks no input of `mode: 'bigint'`.
+    ...(stored.bigints !== undefined ? { bigints: [...stored.bigints] } : {}),
+    ...(stored.bigintLists !== undefined
+      ? { bigintLists: [...stored.bigintLists] }
+      : {}),
+    ...(stored.bigintDefaults !== undefined
+      ? { bigintDefaults: [...stored.bigintDefaults] }
+      : {}),
   } as EntryPlan;
 }
 
@@ -7970,6 +8106,8 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
  */
 export function normalizeRunResult(r: unknown): unknown {
   if (typeof r === 'number' || typeof r === 'boolean') return r;
+  // A result of `mode: 'bigint'` is returned as it is.
+  if (typeof r === 'bigint') return r;
   if (Array.isArray(r)) return normalizeSharedArray(r);
   if (
     typeof r === 'object' &&
@@ -8010,6 +8148,8 @@ function normalizeSharedArray(r: unknown[]): unknown[] {
   for (let i = 0; i < n; i++) {
     const x = r[i];
     if (typeof x === 'number' || typeof x === 'boolean') continue;
+    // A cell of a list result of `mode: 'bigint'` needs no change.
+    if (typeof x === 'bigint') continue;
     const y = normalizeRunResult(x);
     if (y === x) continue;
     out ??= r.slice();
@@ -8521,6 +8661,24 @@ export function kindBroadcastError(kinds: Iterable<string>): Error {
 }
 
 /**
+ * The error of a batch run (`broadcast()`, `broadcastAsync()` and the batch
+ * loaders of stored code) of code compiled in `mode: 'bigint'`. The code
+ * takes and returns JavaScript `bigint` values, and the batch runner reads
+ * each input column as numbers and writes each result into a
+ * `Float64Array`, which cannot hold a `bigint`. So the batch is refused
+ * before any cell runs, and before any task goes to a worker.
+ * (`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`, §3.5; a batch
+ * form with a `bigint` output is CE-715.5.)
+ */
+export function bigintBroadcastError(): Error {
+  return new Error(
+    `Code compiled in mode 'bigint' cannot be broadcast: it takes and ` +
+      `returns bigint values, and the batch runner reads and writes ` +
+      `numbers only. Call \`run()\` for each value.`
+  );
+}
+
+/**
  * Throw for stored code compiled with the compile contract of a value kind
  * (`valueKinds`). The run-time checks of a kind are functions of the host
  * that compiled the code (`ArithmeticCompile`), and stored code does not
@@ -8564,6 +8722,9 @@ function storedExpressionRunner(
   outputs: number | undefined;
   batch: BroadcastBatchBody | undefined;
 } {
+  // `loadBroadcastAsync()` calls `loadBroadcastSlice()`, and thus this
+  // function, before it gives any task to a worker.
+  if (stored.mode === 'bigint') throw bigintBroadcastError();
   if (stored.calling === 'lambda')
     throw new Error(
       'The stored code is a lambda (positional arguments): it has no broadcast'

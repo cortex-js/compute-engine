@@ -15,9 +15,11 @@ import type { Expression } from '../../src/compute-engine/global-types';
  *
  * Each compiled value is compared with the value of `evaluate()` of the
  * interpreter for the same inputs. The inputs are passed as `bigint`
- * values: the conversion of a `number` input and the catch of a pole at the
- * compiled entry are step 4, so a pole is seen here as the thrown
- * `NonFiniteValue`.
+ * values. A pole in the compiled code gives the `number` of the
+ * `NonFiniteValue` that its helper throws, which the wrapper of the compiled
+ * entry catches (step 4, §3.4). The boundary itself (the conversion of a
+ * `number` input, the entry checks, the batch routes) is tested in
+ * `compile-bigint-boundary.test.ts`.
  */
 
 const ce = new ComputeEngine();
@@ -104,7 +106,15 @@ function agrees(json: Json, inputs: Inputs = {}): Value {
   return expected;
 }
 
-/** The compiled code throws a `NonFiniteValue` that carries `value`. */
+/** The compiled code gives the `number` `value` (`NaN` or `Infinity`):
+ * a helper threw a `NonFiniteValue`, and the entry caught it (§3.4). */
+function noValue(fn: () => unknown, value: number): void {
+  const result = fn();
+  expect(typeof result).toBe('number');
+  expect(result).toBe(value);
+}
+
+/** The helper throws a `NonFiniteValue` that carries `value`. */
 function pole(fn: () => unknown, value: number): void {
   let caught: unknown;
   try {
@@ -248,7 +258,7 @@ describe('the parent-lowered shapes of §3.2', () => {
   );
 
   it('Sqrt of a negative operand is a pole carrying NaN', () => {
-    pole(() => run(['Floor', ['Sqrt', 'n']], { n: -4n }), NaN);
+    noValue(() => run(['Floor', ['Sqrt', 'n']], { n: -4n }), NaN);
   });
 
   it('a quotient under Typed is a checked exact division', () => {
@@ -355,8 +365,8 @@ describe('collections (§3.1.1 (b) and (c))', () => {
 
   it('At(L, n) out of range is a pole carrying NaN', () => {
     for (const n of [0n, 9n, -9n])
-      pole(() => run(['At', 'L', 'n'], { L, n }), NaN);
-    pole(() => run(['First', 'L'], { L: [] }), NaN);
+      noValue(() => run(['At', 'L', 'n'], { L, n }), NaN);
+    noValue(() => run(['First', 'L'], { L: [] }), NaN);
   });
 
   it('First and Last', () => {
@@ -548,7 +558,7 @@ describe('user functions (§3.1.2)', () => {
     agrees(['half', 'n'], { n: TWO_53 + 1n });
     expect(run(['quo', 'n', 'm'], { n: 8n, m: 2n })).toBe(4n);
     expect(() => run(['quo', 'n', 'm'], { n: 7n, m: 2n })).toThrow(RangeError);
-    pole(() => run(['quo', 'n', 'm'], { n: 7n, m: 0n }), Infinity);
+    noValue(() => run(['quo', 'n', 'm'], { n: 7n, m: 0n }), Infinity);
   });
 
   it('a recursive function', () => {
@@ -621,7 +631,7 @@ describe('constants', () => {
   });
 });
 
-describe('poles (§3.4): the thrown NonFiniteValue', () => {
+describe('poles (§3.4): the number result', () => {
   it.each([
     ['n! at n = −1', ['Factorial', 'n'], { n: -1n }, Infinity],
     ['−|n!| at n = −1', ['Negate', ['Abs', ['Factorial', 'n']]], { n: -1n }, Infinity],
@@ -636,7 +646,7 @@ describe('poles (§3.4): the thrown NonFiniteValue', () => {
       Infinity,
     ],
   ] as const)('%s', (_, json, inputs, value) => {
-    pole(() => run(json as Json, inputs as Inputs), value);
+    noValue(() => run(json as Json, inputs as Inputs), value);
   });
 });
 

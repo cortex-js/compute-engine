@@ -17,6 +17,7 @@ import {
   type RuntimeSource,
   type SysHelpers,
   kindBroadcastError,
+  bigintBroadcastError,
 } from './javascript-runtime.js';
 import type {
   Expression,
@@ -82,6 +83,7 @@ import {
   functionLiteralBoundNames,
   functionLiteralParameterName,
   functionLiteralParameterType,
+  optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
 import {
   provableApplicationKind,
@@ -571,6 +573,7 @@ import {
 } from './bigint-mode-registry.js';
 import {
   bigintCseExclusion,
+  bigintInputLane,
   bigintLaneAnalysisFor,
   requireBigintLane,
   setPreparedBigintLane,
@@ -624,7 +627,7 @@ import type {
  * This is `DefaultRunnerVars<'javascript'>` in `types.ts`.
  */
 type JavaScriptRunnerVars =
-  number | boolean | string | ComplexResult | RunnerListInput;
+  number | bigint | boolean | string | ComplexResult | RunnerListInput;
 
 /**
  * The state of the compilation of a `broadcast()` batch body
@@ -11861,10 +11864,24 @@ function lambdaEntryPlan(
   const kinds = new Map<number, KindEntry>();
   const scalars: number[] = [];
   const texts: number[] = [];
+  const bigints: number[] = [];
+  const bigintLists: number[] = [];
+  const bigintDefaults: number[] = [];
   literalParams.forEach((p, i) => {
     // The shared accessor reads a user-declared type name too (with the
     // engine's type resolver), not only a built-in type.
     const t = functionLiteralParameterType(p);
+    // In `mode: 'bigint'` an integer parameter has the check of the mode
+    // only (`checkBigintEntry`), and a `list<integer>` parameter has the
+    // conversion of its cells too (`liftBigintList`).
+    const lane =
+      mode === 'bigint' && t !== undefined ? bigintInputLane(t) : undefined;
+    if (lane === 'integer') {
+      bigints.push(i);
+      if (optionalParameterDefault(p) !== undefined) bigintDefaults.push(i);
+      return;
+    }
+    if (lane === 'integer-list') bigintLists.push(i);
     // A parameter of a value kind type is checked by the kind's `entry`
     // (`kindEntryCheck`), and by no numeric or collection rule.
     const kind =
@@ -11919,6 +11936,9 @@ function lambdaEntryPlan(
     ...(kinds.size > 0 ? { kinds } : {}),
     ...(scalars.length > 0 ? { scalars } : {}),
     ...(texts.length > 0 ? { texts } : {}),
+    ...(bigints.length > 0 ? { bigints } : {}),
+    ...(bigintLists.length > 0 ? { bigintLists } : {}),
+    ...(bigintDefaults.length > 0 ? { bigintDefaults } : {}),
   };
 }
 
@@ -11947,12 +11967,26 @@ function varsEntryPlan(
   const scalars: string[] = [];
   const texts: string[] = [];
   const booleans: string[] = [];
+  const bigints: string[] = [];
+  const bigintLists: string[] = [];
   for (const id of refs) {
     const sym = engine.symbol(id);
     // A symbol whose declared type proves an array is classed as a list
     // instead of as a number: the real/complex rules read the value as a
     // scalar, which an array is not.
     const declared = sym.type?.type;
+    // In `mode: 'bigint'` an integer input has the check of the mode only
+    // (`checkBigintEntry`), and a `list<integer>` input has the conversion
+    // of its cells too (`liftBigintList`).
+    const lane =
+      mode === 'bigint' && declared !== undefined
+        ? bigintInputLane(declared)
+        : undefined;
+    if (lane === 'integer') {
+      bigints.push(id);
+      continue;
+    }
+    if (lane === 'integer-list') bigintLists.push(id);
     // A symbol of a value kind type is checked by the kind's `entry`
     // (`kindEntryCheck`), and by no numeric or collection rule.
     const kind =
@@ -12020,6 +12054,8 @@ function varsEntryPlan(
     ...(scalars.length > 0 ? { scalars } : {}),
     ...(texts.length > 0 ? { texts } : {}),
     ...(booleans.length > 0 ? { booleans } : {}),
+    ...(bigints.length > 0 ? { bigints } : {}),
+    ...(bigintLists.length > 0 ? { bigintLists } : {}),
   };
 }
 
@@ -12461,7 +12497,10 @@ function compileToTarget(
   const candidates = target.batchReads?.candidates;
   let batch: StoredBatchBody | undefined;
   let batchRunner: BroadcastBatchBody | undefined;
+  // In `mode: 'bigint'` every batch is refused (`bigintBroadcastError()`),
+  // so no batch body is compiled.
   if (
+    mode !== 'bigint' &&
     batchBody !== undefined &&
     candidates !== undefined &&
     candidates.size > 0 &&
@@ -12515,6 +12554,7 @@ function compileToTarget(
     // `run()` call does (see the constructor of `ComputeEngineFunction`).
     broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {
       if (kinds !== undefined) throw kindBroadcastError(kinds.kinds);
+      if (mode === 'bigint') throw bigintBroadcastError();
       const previous = setReconstructionDigits(reconstructionDigits);
       try {
         return broadcastNumbers(
@@ -12548,6 +12588,7 @@ function compileToTarget(
     iterationLimit: () => engine.iterationLimit,
     slice: (inputs, options, out, slice) => {
       if (kinds !== undefined) throw kindBroadcastError(kinds.kinds);
+      if (mode === 'bigint') throw bigintBroadcastError();
       const previous = setReconstructionDigits(reconstructionDigits);
       try {
         return broadcastNumbersSlice(
@@ -12567,15 +12608,20 @@ function compileToTarget(
     workers: () => engine.workers,
   };
   // A batch of code that reads or makes a value of a kind is refused before
-  // it reaches the pool or a slice (see `kindBroadcastError()`).
+  // it reaches the pool or a slice (see `kindBroadcastError()`), and so is a
+  // batch of code compiled in `mode: 'bigint'` (`bigintBroadcastError()`).
   result.broadcastAsync =
     kinds !== undefined
       ? () => Promise.reject(kindBroadcastError(kinds.kinds))
-      : makeBroadcastAsync(asyncSpec);
+      : mode === 'bigint'
+        ? () => Promise.reject(bigintBroadcastError())
+        : makeBroadcastAsync(asyncSpec);
   result.shippable = asyncSpec.shippable;
   // `broadcastAsync` of such code rejects, so it never uses the pool.
   result.willUsePool =
-    kinds !== undefined ? () => false : makeWillUsePool(asyncSpec);
+    kinds !== undefined || mode === 'bigint'
+      ? () => false
+      : makeWillUsePool(asyncSpec);
   return result;
 }
 
