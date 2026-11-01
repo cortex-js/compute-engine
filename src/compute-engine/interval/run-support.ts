@@ -144,3 +144,42 @@ export function freshIntervalValue(value: unknown): unknown {
     copy.value = copy.value.map(freshIntervalValue);
   return copy;
 }
+
+/**
+ * Run the code of a result whose value is a function (`calling: 'lambda'`)
+ * on the arguments `args`, and give the value of that function.
+ *
+ * The code of such a result is an expression whose value is a JavaScript
+ * function over enclosures, for example `((x) => _IA.scale(_k1, x))`. `raw`
+ * runs that code with an empty vars object: the compilation declines a
+ * function-valued root that reads a free symbol, so the code reads nothing
+ * from the vars object. Each argument is converted as a variable of a vars
+ * object is converted (`processInput`: a number is a point interval), and the
+ * result is copied as the result of an expression is copied
+ * (`freshIntervalValue`). An error other than a `ReferenceError` gives
+ * `{ kind: 'entire' }`, the same rule as for a call with a vars object.
+ *
+ * The compilation accepts only the roots whose code gives a function, and
+ * declines a function whose value is a function. If the code still gives a
+ * value that is not a function, or the function gives a function, the
+ * result is `{ kind: 'entire' }` ("cannot bound"): `freshIntervalValue`
+ * passes a function, or an interval result that holds one, through, and
+ * that is not an `IntervalValue`.
+ */
+export function runIntervalLambda(
+  raw: (vars: unknown) => unknown,
+  args: readonly unknown[]
+): unknown {
+  try {
+    const fn = raw(Object.create(null));
+    if (typeof fn !== 'function') return { kind: 'entire' };
+    const value = (fn as (...a: unknown[]) => unknown)(
+      ...args.map(processInput)
+    );
+    if (typeof value === 'function') return { kind: 'entire' };
+    return freshIntervalValue(value);
+  } catch (e) {
+    if (e instanceof ReferenceError) throw e;
+    return { kind: 'entire' };
+  }
+}

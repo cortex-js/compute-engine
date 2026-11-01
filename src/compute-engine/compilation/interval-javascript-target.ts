@@ -43,10 +43,12 @@ import {
   isNumber,
   isFunction,
   isString,
+  isCharacter,
 } from '../boxed-expression/type-guards.js';
 import {
   collectionElementType,
   kindArmNames,
+  resolveTypeAlias,
   stripMissingFromType,
   withoutKindArms,
 } from '../../common/type/utils.js';
@@ -105,6 +107,7 @@ import {
   tupleElementType,
 } from './javascript-target.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { compiledNodeWhere } from './compile-static-type-error.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
@@ -146,6 +149,7 @@ import {
   isRecord,
   hasIntervalBounds,
   processInput,
+  runIntervalLambda,
 } from '../interval/run-support.js';
 import {
   broadcastIntervals,
@@ -6563,14 +6567,23 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     console.warn(
       `Compilation fallback for "${expr.operator}" (target: interval-js): ${error}`
     );
-    const base = BaseCompiler.buildInterpreterFallback(
-      expr,
-      error,
-      'interval-js',
-      this.createTarget(),
-      options.vars ? new Set(Object.keys(options.vars)) : undefined,
-      diagnostic
-    );
+    const fallbackOf = (e: Expression) =>
+      BaseCompiler.buildInterpreterFallback(
+        e,
+        error,
+        'interval-js',
+        this.createTarget(),
+        options.vars ? new Set(Object.keys(options.vars)) : undefined,
+        diagnostic
+      );
+    // A function-valued root that is not a `Function` literal (a block, a
+    // symbol, an `If`) has the `calling: 'lambda'` convention too, as on the
+    // compiled route (`functionValuedRoot`). The generic fallback gives that
+    // convention to a `Function` literal only
+    // (`buildIntervalLambdaFallback`).
+    if (functionValuedRoot(expr) && !isFunction(expr, 'Function'))
+      return this.buildIntervalLambdaFallback(expr, fallbackOf(expr));
+    const base = fallbackOf(expr);
     // `run` is guaranteed present for an executable target (interval-js).
     // Through `unknown`: the fallback's `run` is typed with the interval
     // target's own result union, which does not overlap the plain
@@ -6585,6 +6598,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // the input. The interpreter still runs, so that the effects of the
     // expression (an `Assign`) happen once per call, as on every route.
     const isBoolean = expr.type.matches('boolean');
+    // A function literal whose value is a function (`x ↦ (y ↦ x + y)`): the
+    // value has no interval reading, and the answer is `entire`, as from
+    // the runner of a compiled function (`runIntervalLambda`).
+    const givesFunction = functionResultType(expr);
     // The free variables declared `boolean`. The compiled code of this
     // target reads such a variable as the string `'true'`, `'false'` or
     // `'maybe'`, and the interpreter reads a boolean: the strings are
@@ -6597,10 +6614,102 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       const { args: read, maybe } = booleanFallbackInputs(args, booleanNames);
       const wide = maybe || read.some(hasWideIntervalInput);
       const value = interpreterRun(...read.map(collapseIntervalInput));
+      if (givesFunction) return { kind: 'entire' };
       if (wide && isBoolean) return 'maybe';
       return toIntervalValue(value, wide);
     };
     return { ...base, run };
+  }
+
+  /**
+   * The interpreter fallback of a function-valued root that is not a
+   * `Function` literal (`buildIntervalFallback`), from the generic fallback
+   * `base` of the root, whose report it keeps.
+   *
+   * `run` takes the arguments of the function and evaluates
+   * `Apply(expr, …)`. Each argument is boxed with the type of its parameter
+   * in the signature of `expr` (a fixed, optional or variadic parameter): an
+   * `Interval` is collapsed to its midpoint, as a variable of a vars object
+   * is; an array is a tuple for a `tuple` parameter, else a list. For a
+   * parameter of a boolean type (`BaseCompiler.isBooleanBindingType`), the
+   * strings `'true'` and `'false'` are booleans, and `'maybe'` is
+   * `Undefined` and makes the call wide, as for a boolean variable. The
+   * value is wrapped by `toIntervalValue`, as on the other fallback; a
+   * function value is `entire`.
+   */
+  private buildIntervalLambdaFallback(
+    expr: Expression,
+    base: CompilationResult<'interval-js', IntervalValue>
+  ): CompilationResult<'interval-js', IntervalValue> {
+    const ce = expr.engine;
+    const t = expr.type.type;
+    const signature =
+      typeof t !== 'string' && t.kind === 'signature' ? t : undefined;
+    const fixed = signature?.args ?? [];
+    const optional = signature?.optArgs ?? [];
+    const paramType = (i: number): Type | undefined =>
+      (i < fixed.length
+        ? fixed[i]
+        : (optional[i - fixed.length] ?? signature?.variadicArg)
+      )?.type;
+    const isBoolean =
+      signature !== undefined &&
+      signature.result !== 'never' &&
+      isSubtype(signature.result, 'boolean');
+    const givesFunction = functionResultType(expr);
+    const box = (v: unknown, written: Type | undefined): Expression => {
+      if (typeof v === 'boolean') return v ? ce.True : ce.False;
+      if (typeof v === 'number') return ce.number(v);
+      if (typeof v === 'string') return ce.string(v);
+      if (Array.isArray(v)) {
+        // A type alias is read as the type it names.
+        const type =
+          written === undefined ? undefined : resolveTypeAlias(written);
+        if (typeof type !== 'string' && type?.kind === 'tuple')
+          return ce.function(
+            'Tuple',
+            v.map((x, i) => box(x, type.elements[i]?.type))
+          );
+        const elements =
+          typeof type !== 'string' &&
+          (type?.kind === 'list' || type?.kind === 'indexed_collection')
+            ? type.elements
+            : undefined;
+        return ce.function(
+          'List',
+          v.map((x) => box(x, elements))
+        );
+      }
+      return ce.symbol('Undefined');
+    };
+    const run: CompiledRunner<IntervalValue, IntervalInput> = (
+      ...args: unknown[]
+    ): IntervalValue => {
+      let maybe = false;
+      const boxed = args.map((a, i) => {
+        const type = paramType(i);
+        if (
+          typeof a === 'string' &&
+          type !== undefined &&
+          BaseCompiler.isBooleanBindingType(type)
+        ) {
+          if (a === 'true') return ce.True;
+          if (a === 'false') return ce.False;
+          if (a === 'maybe') {
+            maybe = true;
+            return ce.symbol('Undefined');
+          }
+        }
+        return box(collapseIntervalInput(a), type);
+      });
+      const wide = maybe || args.some(hasWideIntervalInput);
+      const value = ce.function('Apply', [expr, ...boxed]).evaluate();
+      if (givesFunction || isFunction(value, 'Function'))
+        return { kind: 'entire' };
+      if (wide && isBoolean) return 'maybe';
+      return toIntervalValue(interpretedIntervalValue(value), wide);
+    };
+    return { ...base, calling: 'lambda', run };
   }
 
   private compileOrThrow(
@@ -6827,6 +6936,22 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // one (see `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
 
+    // A function-valued `If` or `When` at the root is replaced by the
+    // function it selects, when its condition is decided at compile time
+    // (`selectedFunctionRoot`). The branch that is not selected is not
+    // compiled, so the root is kept when it is invalid or has a
+    // sub-expression of static type `error`, in a branch that is not
+    // selected too (`(x, y) ↦ x + y` applied to `"ab"`): the core compiler
+    // then declines the root for it, as for any other root.
+    const selected = selectedFunctionRoot(expr, overridesHead, target);
+    if (
+      selected !== expr &&
+      expr.isValid &&
+      compiledNodeWhere(expr, target, (node) => node.type.type === 'error') ===
+        undefined
+    )
+      expr = selected;
+
     // A helper whose value is a LIST has no by-reference call on this target
     // (its definition would have to return a list). Substituting the body at
     // the call site exposes the list to the unroll, which writes it out:
@@ -6889,6 +7014,177 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
 }
 
 /**
+ * True when the value of the root `expr` is a function: a `Function` literal,
+ * a block whose last statement is one, a symbol whose value is one. Its
+ * static type is a function type.
+ *
+ * The compiled code of such a root is an expression whose value is a
+ * JavaScript function over enclosures. A `run()` that gave that function
+ * would give a function that a caller cannot call with numbers, and a value
+ * that is not an `IntervalValue`. So the result is called with the arguments
+ * of the function instead (`calling: 'lambda'`, `runIntervalLambda`).
+ */
+function functionValuedRoot(expr: Expression): boolean {
+  if (isFunction(expr, 'Function')) return true;
+  const t = expr.type.type;
+  return t !== 'never' && isSubtype(t, 'function');
+}
+
+/**
+ * The function that a function-valued `If` or `When` at the root selects,
+ * when its condition is decided at compile time; otherwise `expr`.
+ *
+ * The interval lowering of these heads does not give a function: an `If`
+ * takes the hull of its arms and `When` wraps its value as an interval
+ * result (`_IA.restrict`). A function-valued root reads no free symbol
+ * (`compileToIntervalTarget` declines one), so its condition is a constant,
+ * and the interpreter selects the same function on every call. The
+ * condition is evaluated here, and the selected function is the root:
+ * `If(1 > 0, x ↦ 2x, x ↦ 3x)` is `x ↦ 2x`. A nested `If` or `When` is
+ * selected in the same way. A symbol with a value in the condition is read
+ * with that value, as elsewhere in a compilation.
+ *
+ * The root is kept, and compiles or declines as before, when a condition
+ * reads a symbol with no value, has an effect (a random draw), or does not
+ * evaluate to `True` or `False`, and when the head or a head in the
+ * condition is mapped through the `functions` option (`overridesHead`).
+ * A `When` is function-valued only when its condition is the literal
+ * `True` (otherwise its type also holds `missing`), so it is selected only
+ * then.
+ */
+function selectedFunctionRoot(
+  expr: Expression,
+  overridesHead: ((name: string) => boolean) | undefined,
+  target: CompileTarget<Expression>
+): Expression {
+  // A head that the caller maps through `functions` runs the caller's code,
+  // which the interpreter does not run. The walk is the compiler's
+  // (`compiledNodeWhere`), so it also reaches the bodies of the user
+  // functions that the condition calls.
+  const overridden = (e: Expression): boolean =>
+    overridesHead !== undefined &&
+    compiledNodeWhere(
+      e,
+      target,
+      (n) =>
+        (isSymbol(n) && overridesHead(n.symbol)) ||
+        (isFunction(n) && overridesHead(n.operator))
+    ) !== undefined;
+  let root = expr;
+  while (functionValuedRoot(root)) {
+    const head = root.operator;
+    if (head !== 'If' && head !== 'When') break;
+    if (!isFunction(root) || overridesHead?.(head)) break;
+    const condition = head === 'If' ? root.ops[0] : root.ops[1];
+    if (
+      condition === undefined ||
+      condition.unknowns.length > 0 ||
+      !condition.isPure ||
+      overridden(condition)
+    )
+      break;
+    const decided = condition.evaluate();
+    const value = isSymbol(decided, 'True')
+      ? true
+      : isSymbol(decided, 'False')
+        ? false
+        : undefined;
+    if (value === undefined) break;
+    const next =
+      head === 'If'
+        ? value
+          ? root.ops[1]
+          : root.ops[2]
+        : value
+          ? root.ops[0]
+          : undefined;
+    if (next === undefined) break;
+    root = next;
+  }
+  return root;
+}
+
+/**
+ * True when `expr` is a function whose value is a function: the result type
+ * of its signature, or the type of the body of a `Function` literal, is a
+ * function type (`x ↦ (y ↦ x + y)`).
+ */
+function functionResultType(expr: Expression): boolean {
+  const t = expr.type.type;
+  const result =
+    typeof t !== 'string' && t.kind === 'signature'
+      ? t.result
+      : isFunction(expr, 'Function')
+        ? expr.ops[0].type.type
+        : undefined;
+  return (
+    result !== undefined && result !== 'never' && isSubtype(result, 'function')
+  );
+}
+
+/**
+ * The plain value of an interpreted result, as `toIntervalValue` reads it: a
+ * boolean, an array for a collection (not a string), a string for a string
+ * or a character, `{ re, im }` for a complex value, and for any other value
+ * its numeric value (`NaN` when it has none, which `toIntervalValue` reads as
+ * absent).
+ */
+function interpretedIntervalValue(e: Expression): unknown {
+  if (isSymbol(e, 'True')) return true;
+  if (isSymbol(e, 'False')) return false;
+  // A character is text too (`isString` is false for it).
+  if (isString(e) || isCharacter(e)) return e.string;
+  if (e.isCollection) return [...e.each()].map(interpretedIntervalValue);
+  const n = e.N();
+  if (isSymbol(n, 'True')) return true;
+  if (isSymbol(n, 'False')) return false;
+  // A complex value is `{ re, im }`, as the generic fallback gives it
+  // (`buildInterpreterFallback`); `toIntervalValue` reads it as `entire`.
+  // `im` is NaN for a value with no numeric value, which stays `NaN`.
+  const im = n.im;
+  if (im !== 0 && !Number.isNaN(im)) return { re: n.re, im };
+  return n.re;
+}
+
+/**
+ * Throw when the function-valued root `expr` (`functionValuedRoot`) is not
+ * one that the `calling: 'lambda'` result can call.
+ *
+ * - The code must give a JavaScript function: that is so for a `Function`
+ *   literal, a symbol whose value is a function, and a block whose last
+ *   statement is one of these. Another root, such as `When(x ↦ 2x, True)`,
+ *   can give an interval result that holds the function
+ *   (`_IA.restrict` wraps its value), which is not an `IntervalValue`.
+ * - The function must not give a function (`x ↦ (y ↦ x + y)`): the inner
+ *   function takes enclosures, and the runner converts only the arguments
+ *   of the outer one.
+ */
+function assertCallableFunctionRoot(expr: Expression): void {
+  let root = expr;
+  while (isFunction(root, 'Block') && root.nops > 0)
+    root = root.ops[root.nops - 1];
+  if (!isFunction(root, 'Function') && !isSymbol(root))
+    throw new Error(
+      `Could not compile the function-valued \`${root.operator}\` for the interval target: a function value is compiled only as a function literal, a symbol whose value is a function, or a block whose value is one of these.`
+    );
+  const t = expr.type.type;
+  const result =
+    typeof t !== 'string' && t.kind === 'signature'
+      ? t.result
+      : isFunction(root, 'Function')
+        ? root.ops[0].type.type
+        : undefined;
+  if (
+    result !== undefined &&
+    result !== 'never' &&
+    isSubtype(result, 'function')
+  )
+    throw new Error(
+      'Could not compile a function whose value is a function for the interval target: the compiled function converts only its own arguments, and the function it gives would take enclosures.'
+    );
+}
+
+/**
  * Compile expression to interval JavaScript executable.
  */
 function compileToIntervalTarget(
@@ -6899,6 +7195,7 @@ function compileToIntervalTarget(
   // conditionals, whatever an earlier compilation against the same naming
   // context left behind (see `resetIntervalConditionals`).
   resetIntervalConditionals(target);
+  const lambda = functionValuedRoot(expr);
   let js: string;
   try {
     // A literal single point at the ROOT is the one collection-shaped value
@@ -6983,6 +7280,20 @@ function compileToIntervalTarget(
     // The compilation tells which block-local function bodies were spelled
     // as collections, so this check runs after it.
     assertSpelledLocalCallsConsumed(expr);
+    // After the compilation, so that a decline of the core compiler (a
+    // sub-expression of static type `error`) comes first.
+    if (lambda) assertCallableFunctionRoot(expr);
+    // A function-valued root is called with its arguments only (see
+    // `functionValuedRoot` above), so there is no vars object to read a free
+    // symbol from. The JavaScript target declines a `Function` literal with
+    // a free symbol for the same reason.
+    const dangling = target.varsObjectRefs;
+    if (lambda && dangling !== undefined && dangling.size > 0)
+      throw new Error(
+        `Could not compile a function-valued expression that reads the free ${
+          dangling.size === 1 ? 'symbol' : 'symbols'
+        } ${[...dangling].map((s) => `"${s}"`).join(', ')}: the compiled function takes only its arguments, so there is no value to bind them to. Assign a value, or pass one via \`vars\`.`
+      );
   } catch (e) {
     // A cancellation that is not a timeout (an abort, an iteration or
     // recursion limit), or a timeout of an expired enclosing span, belongs
@@ -7076,6 +7387,27 @@ function compileToIntervalTarget(
     declarations,
     kindEntries
   );
+  // A function-valued root gives a function of its arguments, as the
+  // JavaScript target gives for a root `Function` literal: `run(3)` of
+  // `x ↦ 2x` is the interval result of `6`. Each argument is a number, an
+  // `Interval` or a boolean, converted as a variable of a vars object is.
+  // There is no vars object, so there is no `broadcast()`.
+  if (lambda) {
+    const run = (...args: unknown[]): unknown =>
+      runIntervalLambda(fn.rawCall, args);
+    return {
+      target: 'interval-js',
+      success: true,
+      runtimeVersion: INTERVAL_RUNTIME_VERSION,
+      code: body,
+      ...(preamble ? { preamble } : {}),
+      ...(declarations ? { preambleOnce: declarations } : {}),
+      ...(declarations && perCall ? { preamblePerCall: perCall } : {}),
+      calling: 'lambda',
+      ...(kinds !== undefined ? { valueKinds: [...kinds.kinds] } : {}),
+      run: run as unknown as CompiledRunner<IntervalValue, IntervalInput>,
+    };
+  }
   // The variables declared `boolean`: for them an empty array is an empty
   // column of `broadcast()`.
   const booleans = declaredBooleanNames(expr);

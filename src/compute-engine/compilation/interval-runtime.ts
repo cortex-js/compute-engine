@@ -20,7 +20,11 @@ import {
   IntervalArithmetic,
   INTERVAL_RUNTIME_VERSION,
 } from '../interval/index.js';
-import { processInput, freshIntervalValue } from '../interval/run-support.js';
+import {
+  processInput,
+  freshIntervalValue,
+  runIntervalLambda,
+} from '../interval/run-support.js';
 import {
   broadcastIntervals,
   broadcastIntervalsSlice,
@@ -50,6 +54,10 @@ export interface StoredIntervalJavaScript {
   /** The free variables that the code reads as lists
    * (`CompilationResult.listInputs`): the shared inputs of a batch. */
   listInputs?: string[];
+  /** `'lambda'` when the value of the code is a function, called with its
+   * arguments (`CompilationResult.calling`). Absent or `'expression'`: the
+   * code is called with a vars object. */
+  calling?: 'expression' | 'lambda';
 }
 
 export interface IntervalRuntime {
@@ -61,13 +69,18 @@ export interface IntervalRuntime {
    * gives the `IntervalValue` that the result's own `run()` gives: inputs are
    * converted the same way, the answer is copied so that it shares nothing
    * with the hoisted constants, and an error inside the code answers
-   * `{ kind: 'entire' }`.
+   * `{ kind: 'entire' }`. For a result with `calling: 'lambda'` (a
+   * function-valued expression), it takes the arguments of the function
+   * instead, each converted as a variable of a vars object is.
    */
-  load: (stored: StoredIntervalJavaScript) => (vars: unknown) => IntervalValue;
+  load: (
+    stored: StoredIntervalJavaScript
+  ) => (...args: unknown[]) => IntervalValue;
   /**
    * Rebuild the function of a stored result as a batch evaluator: the
    * `broadcast()` of the result (`compilation/broadcast.ts`), with the same
-   * inputs, layouts and `lo, hi, kind` output.
+   * inputs, layouts and `lo, hi, kind` output. A result with
+   * `calling: 'lambda'` has no vars object and no `broadcast()`: it throws.
    */
   loadBroadcast: (
     stored: StoredIntervalJavaScript
@@ -144,11 +157,24 @@ function storedNames(b: unknown): string[] | undefined {
     : undefined;
 }
 
+/** Throw for a stored result whose value is a function: its code is called
+ * with the arguments of the function, and a batch has a vars object per
+ * cell. */
+function refuseLambdaBatch(stored: StoredIntervalJavaScript): void {
+  if (stored.calling === 'lambda')
+    throw new Error(
+      "The stored interval code is a function called with its arguments (`calling: 'lambda'`): it has no batch evaluator. Load it with `load()` and call it."
+    );
+}
+
 export function createIntervalRuntime(): IntervalRuntime {
   return {
     runtimeVersion: INTERVAL_RUNTIME_VERSION,
     load: (stored) => {
       const raw = rawCallOf(stored);
+      if (stored.calling === 'lambda')
+        return (...args: unknown[]): IntervalValue =>
+          runIntervalLambda(raw, args) as IntervalValue;
       return (vars: unknown): IntervalValue => {
         try {
           return freshIntervalValue(raw(processInput(vars))) as IntervalValue;
@@ -171,6 +197,7 @@ export function createIntervalRuntime(): IntervalRuntime {
     // inputs of a batch. A kernel worker is also given the shared names in
     // the `shared` option of each task.
     loadBroadcast: (stored) => {
+      refuseLambdaBatch(stored);
       const raw = rawCallOf(stored);
       const booleans = storedBooleanInputs(stored);
       const lists = storedSharedLists(stored);
@@ -178,6 +205,7 @@ export function createIntervalRuntime(): IntervalRuntime {
         broadcastIntervals(raw, inputs, options, booleans, lists);
     },
     loadBroadcastSlice: (stored) => {
+      refuseLambdaBatch(stored);
       const raw = rawCallOf(stored);
       const booleans = storedBooleanInputs(stored);
       const lists = storedSharedLists(stored);

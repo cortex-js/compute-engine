@@ -682,7 +682,29 @@ is a point interval), and gives one of the shapes above. `x ↦ 2x` with
 `run(3)` gives `{ kind: 'interval', value: { lo: 6, hi: 6 } }`, and with
 `run({ lo: 1, hi: 2 })` the enclosure `[2, 4]`. There is no vars object, so
 such a root declines when it reads a free symbol (`x ↦ a·x`), and the
-result has no `broadcast()`. Before 2026-10-31 `run` gave the compiled
+result has no `broadcast()`. The root must be a literal, a symbol or a block
+whose value is one of these: the interval lowering of an `If` takes the hull
+of its arms and `When` wraps its value as an interval result, so neither
+gives a function. A function-valued `If` or `When` at the root reads no free
+symbol, so its condition is a constant: it is evaluated at compile time, and
+the function it selects is the root (`If(1 > 0, x ↦ 2x, x ↦ 3x)` is
+`x ↦ 2x`; a nested `If` is selected in the same way). The root declines when
+the condition is not decided: it has an effect (`If(Random() > 2, x ↦ 2x,
+x ↦ 3x)`, where the interpreter draws on each call), it does not evaluate to
+`True` or `False`, or it is the `False` condition of a `When` (the
+interpreter gives no function). No selection is made, and the root declines,
+when the `functions` option maps the `If` head or a head in the condition,
+since the caller's code runs on the compiled route only. The branch that is
+not selected is still checked: when it is invalid or has a sub-expression of
+static type `error`, the root declines for it. An `If` that is the last
+statement of a block is not selected, since its condition can read a local
+of the block, and declines. A function whose value is a function
+(`x ↦ (y ↦ x + y)`) declines too: the runner converts the arguments of the
+outer function only. The interpreter fallback of a declined function-valued
+root has `calling: 'lambda'` as well: it evaluates `Apply(expr, …)` with
+each argument boxed by the type of its parameter (an array for a `tuple`
+parameter is a point; `'true'` and `'false'` are booleans for a boolean
+parameter only), and a function value gives `{ kind: 'entire' }`. Before 2026-10-31 `run` gave the compiled
 JavaScript function over enclosures, which a caller could not call with
 numbers (ROADMAP CE-726).
 

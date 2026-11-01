@@ -332,10 +332,20 @@
   `calling: 'lambda'`, as on the JavaScript target: `run(3)` gives
   `{ kind: 'interval', value: { lo: 6, hi: 6 } }`, and each argument can be
   a number, an `Interval` or a boolean. Such a result has no `broadcast()`.
-  A function-valued root that reads a free symbol (`x ↦ a·x`) declines with
-  the reason, because there is no vars object to read the symbol from. The
-  standalone runtime (`createIntervalRuntime().load()`) calls a stored result
-  with `calling: 'lambda'` with the same arguments, and its batch evaluators
+  A function-valued root declines with the reason when it reads a free symbol
+  (`x ↦ a·x`), because there is no vars object to read the symbol from; when
+  its value is a function (`x ↦ (y ↦ x + y)`), because the inner function
+  would take enclosures. A function-valued `If` or `When` whose condition is
+  decided at compile time is compiled as the function it selects:
+  `If(1 > 0, x ↦ 2x, x ↦ 3x)` gives `6` for `run(3)`. Such a root declines
+  when its condition is not decided (`Random() > 2`), because the interval
+  lowering of `If` and `When` does not give a function, and when the
+  `functions` option maps the `If` head or a head in its condition. The
+  interpreter fallback of such a root also has `calling: 'lambda'`: it applies
+  the expression to the arguments, each boxed with the type of its parameter,
+  and a function value gives `{ kind: 'entire' }`. The standalone runtime
+  (`createIntervalRuntime().load()`) calls a stored result with
+  `calling: 'lambda'` with the same arguments, and its batch evaluators
   refuse such a result.
 
 - **A dictionary compiles on the JavaScript and Python targets.**

@@ -3768,8 +3768,8 @@ export type CompilationResult<
 
   /**
    * Evaluate the compiled function at many points in one call. Present on a
-   * `javascript` result called with a vars object (`calling: 'expression'`)
-   * and on an `interval-js` result. `inputs` maps each free variable to a
+   * `javascript` or `interval-js` result called with a vars object
+   * (`calling: 'expression'`). `inputs` maps each free variable to a
    * `Float64Array` (one value per cell; a `lo, hi` pair per cell for
    * `interval-js`) or to one number for every cell, and a list input to a
    * shared input, bound once for the batch (`interval-js`: a plain array of
