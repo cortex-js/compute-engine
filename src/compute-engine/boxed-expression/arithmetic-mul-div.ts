@@ -1418,6 +1418,16 @@ export class Product {
 
   asRationalExpression(): Expression {
     const [numerator, denominator] = this.asNumeratorDenominator();
+    // A product with no denominator is its numerator. `canonicalDivide`
+    // removes a divisor of `1` only when both operands are valid, and keeps
+    // `Divide(numerator, 1)` when the numerator holds an `Error`. That
+    // `Divide` is not an operation of the product: its evaluation added a
+    // `Divide` frame to the trace of the error, so the cell of
+    // `3·[Error("missing"), 2]` was the error with the frames `Multiply`
+    // and `Divide`, where `3·Error("missing")` has only the `Multiply` frame.
+    // A valid numerator still goes through `canonicalDivide`, which folds a
+    // bare absent numerator (`Missing / 1`) to `NaN`.
+    if (!numerator.isValid && isLiteral(denominator, 1)) return numerator;
     return canonicalDivide(numerator, denominator);
   }
 }
@@ -3080,8 +3090,8 @@ function hasDistributableSum(x: Expression): boolean {
  * changes a product that has a power, a root or a square root of a sum: the
  * product of two such factors can be the sum itself, which the next step of
  * the fold distributes over (`2·√(x+1)·√(x+1)` is `2x + 2`). And it keeps an
- * invalid factor as the result (`Error·1` is the `Error`), where
- * `asRationalExpression()` divides it by `1`. Without such a factor, each
+ * invalid factor as the result (`Error·1` is the `Error`), with the trace of
+ * the error unchanged. Without such a factor, each
  * step of the fold is `new Product(…).asExpression()`, the product of the
  * factors that a caller can build once.
  */
@@ -4158,8 +4168,16 @@ function mulTensors(
   // made from several factors is not a value (`0.5·π` is not yet a float),
   // and is evaluated as before.
   let valueScalar: Expression | undefined;
+  // On the `.N()` route, a cell product that holds an `Error` (a failed cell
+  // of the tensor) is evaluated, so that the error bubbles out of the
+  // product with its `Multiply` frame, as on the exact route:
+  // `(3·[Error("missing"), 2]).N()` is `[Error("missing"), 6]`, not
+  // `[3·Error("missing"), 6]`. A valid cell product is already a float.
   const multiplyCell = numericApproximation
-    ? multiply
+    ? (...xs: ReadonlyArray<Expression>) => {
+        const product = multiply(...xs);
+        return product.isValid ? product : product.N();
+      }
     : (...xs: ReadonlyArray<Expression>) =>
         evaluateCellProduct(
           multiply(...xs),
@@ -4435,7 +4453,7 @@ function mulTensors(
         // is `[1.57…, 1]`), as for a scalar-scaled tensor.
         elements.push(
           numericApproximation
-            ? multiply(a, b)
+            ? multiplyCell(a, b)
             : evaluateCellProduct(multiply(a, b), [a, b])
         );
       }

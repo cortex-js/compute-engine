@@ -1196,15 +1196,6 @@ index is renamed first: `Sum(k + k_1, Limits(k_1, 1, 3))`, which is `3k + 6`.
 Nine internal callers check for this capture and decline today; each check is
 removed in its own step, with a test.
 
-### CE-671. The error of a product with an absent cell has a `Divide` frame
-
-**Status:** ready; defect. Found 2026-10-30 while fixing CE-618.
-
-With `I = ∫_0^1 x^x dx`, `(y·[Error("missing"), I]).evaluate()` gives an error
-whose trace has a `Divide` frame, which does not belong in a product, while
-`.N()` gives `y·Error("missing")`. Expected: the two routes give the same
-result, with a trace of the operations that ran.
-
 ### CE-660. The interpreter runs a `Loop` over a list with no value zero times
 
 **Status:** proposed; design. User decision 2026-10-30: the result should
@@ -2218,6 +2209,55 @@ Types"), `docs/TYPE-SYSTEM.md` and `docs/COMPILATION-MODEL.md`.
   edits the "no caller uses it today" comment on `mint` in
   `src/compute-engine/index.ts` that phase 1 rewrote: a trivial merge conflict
   to expect.
+
+### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
+
+**Status:** decision needed; defect, M.
+
+`lim_{x→∞} e^{√x}/x^5` is `+∞`, and `lim x^5/e^{√x}` is 0; today they give 0
+and `+∞`. The growth comparison of `symbolic/limit.ts` ranks `e^g` above every
+power of `x` only when it proves `g → +∞`; `tendsToInfinity` has no rule for
+`Sqrt` or `Root`, so the comparison falls back to samples at `x = 8, 30, 120`,
+where `e^{√x}/x^5` still decreases (`numericGrowthCompare()`), and the
+fallback answers 0.
+
+A fix is written in the worktree `/tmp/wt-compute-engine-fb-ce613` (patch in
+the session's scratch directory, not committed): `Sqrt`/`Root` in
+`tendsToInfinity`, and `exponentialLevel()`, which ranks `b^g` above every
+power when `g` grows like a positive power of `x`, or like `(ln x)^p` with an
+exact degree `p > 1` (`logPowerDegree()`, exact `bigint` fractions). Three
+review rounds each found a new wrong limit in the fix of the round before, all
+of the same kind: when the rules cannot rank `e^g`, the sampled fallback gives
+a definite answer that is wrong.
+
+- Round 1: `e^{(ln(x+1))^2}/x^9` gave 0 (expected `+∞`).
+- Round 2: a degree computed in doubles:
+  `g = (((ln(x+1))^{11/10})^{11/10})^{100/121}` has exact degree 1, and
+  `e^g/x^9` gave `+∞` (expected 0).
+- Round 3: a float exponent is not read as a degree, so
+  `e^{(ln(x+1))^{1.5}}/x^9` gives 0 (expected `+∞`).
+
+Two more wrong limits of the same kind exist at HEAD: `e^{ln(x)·ln(x+1)}/x^9`
+gives 0 (expected `+∞`; `tendsToInfinity` reads a product only from samples),
+and two exponentials of the top growth level, such as `e^{√x}` against
+`x·e^{(ln x)^2}`, are compared only by the samples.
+
+Options:
+
+- (a) Keep the structural analysis and read a float exponent as its exact
+  binary value (`1.5` is `3/2`), then review once more. Each new form of `g`
+  that the rules do not know still goes to the sampled fallback, which can
+  answer wrongly.
+- (b) Make the sampled fallback sound: when the rules cannot rank two terms,
+  the limit is not decided from the samples at `x = 8, 30, 120`; it stays
+  unevaluated (or the probes move out until the order of growth is settled,
+  as in Gruntz's algorithm). Cost: some limits that the samples now get right
+  stay unevaluated; the snapshot count is not measured.
+- (c) Both: (a) for the known forms, and (b) for every other form.
+
+Recommended: (c). (a) alone cannot remove the class of wrong answers; (b)
+alone loses limits that the rules can settle. If nothing is decided, the
+wrong value of the title stays.
 
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 

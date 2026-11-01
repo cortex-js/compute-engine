@@ -276,6 +276,14 @@
 
 ### Bug Fixes
 
+- **The product of a scalar and a list with a failed cell gives the same
+  result on every route** (CE-671). The failed cell is the error with one
+  `Multiply` frame, as `3·Error("missing")` is: `3·[Error("missing"), 2]`
+  evaluates to `[Error("missing"), 6]`. Before, `evaluate()` added a `Divide`
+  frame to the trace of the error, and `.N()` kept the cell as the
+  unevaluated product `3·Error("missing")`. The same holds for a scalar times
+  a matrix and for the element-wise product of two vectors.
+
 - **With `evaluateAsync()`, a lazy collection that leaves a `Block` reads the
   locals of the block, as with `evaluate()`.** The function literal of the
   collection read a local as a free symbol after the block ended:
