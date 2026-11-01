@@ -342,6 +342,7 @@ import {
   typeFact,
 } from '../boxed-expression/operand-descriptor.js';
 import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 import {
   evaluateProtocolProperty,
   immutableValueAssignmentError,
@@ -11680,9 +11681,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (bucket === undefined) byHash.set(y.hash, [y]);
         else bucket.push(y);
       }
-      return a.ops.every(
-        (x) => byHash.get(x.hash)?.some((y) => x.isSame(y)) === true
-      );
+      // Two elements with the same tree are one value only when neither has
+      // a known effect: two occurrences of a call of a function declared with
+      // the `random` effect are two independent draws, so the equality of the
+      // two sets is undecided (`isMergeable()`).
+      let undecided = false;
+      for (const x of a.ops) {
+        const y = byHash.get(x.hash)?.find((y) => x.isSame(y));
+        if (y === undefined) return false;
+        if (!isMergeable(x) || !isMergeable(y)) undecided = true;
+      }
+      return undecided ? undefined : true;
     },
     collection: {
       ...SET_BASE_HANDLERS,
@@ -23267,9 +23276,20 @@ function canonicalSet(
   // kept that have its hash: the cost is linear in the number of elements
   // when their hashes are distinct, where a comparison with every element
   // kept was quadratic (20,000 elements took about 3 s).
+  // Two occurrences of a term with a known effect (`Random()`, a call of a
+  // function declared with the `random` effect) are two draws, not one
+  // value, so both are kept (`isMergeable()`): merging them would change how
+  // many times the program draws. Such an element is kept without entering
+  // the buckets, so a long run of the same draw does not make each later
+  // element scan a long bucket. `isMergeable()` answers at once for a pure
+  // element.
   const set: Expression[] = [];
   const kept = new Map<number, Expression[]>();
   for (const op of ops) {
+    if (!isMergeable(op)) {
+      set.push(op);
+      continue;
+    }
     const h = op.hash;
     const bucket = kept.get(h);
     if (bucket === undefined) kept.set(h, [op]);
@@ -23470,7 +23490,8 @@ function enumerateSetComprehension(
 
   // Substitute each domain value into the body and evaluate. A set has no
   // duplicate elements: equal substituted bodies collapse, e.g.
-  // `{k mod 2 : k ∈ 1..4}` has two elements, `{0, 1}`.
+  // `{k mod 2 : k ∈ 1..4}` has two elements, `{0, 1}`. Two draws (bodies
+  // that are not `isMergeable()`, see `pushDistinct()`) are both kept.
   const isIdentity = isSymbol(body) && body.symbol === variable;
   const elements: Expression[] = [];
   const kept = new Map<number, Expression[]>();
@@ -23481,7 +23502,7 @@ function enumerateSetComprehension(
     const x = isIdentity
       ? value.evaluate(options)
       : body.subs({ [variable]: value }).evaluate(options);
-    pushDistinct(elements, kept, x);
+    pushDistinct(elements, kept, x, isMergeable);
   }
   return elements;
 }
@@ -23626,7 +23647,7 @@ async function enumerateSetComprehensionAsync(
     const x = isIdentity
       ? value
       : await body.subs({ [variable]: value }).evaluateAsync(options);
-    pushDistinct(elements, kept, x);
+    pushDistinct(elements, kept, x, isMergeable);
   }
   return elements;
 }

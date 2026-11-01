@@ -6814,12 +6814,25 @@ export function collectionSourceOperands(
  * belongs to the same loop as `elements`. Two `isSame` expressions always
  * have the same hash, so `x` is compared only with the kept elements that
  * have its hash, not with every kept element (CE-316).
+ *
+ * `isMergeable` is the predicate `isMergeable()` of
+ * `boxed-expression/effects-of.ts`, passed in because that module imports
+ * this one. An element that is not mergeable (`Random()`, a call of a
+ * function declared with the `random` effect) is a draw: two occurrences of
+ * it are two draws, not one value, so it is always appended, and it is not
+ * put in `kept`, so a long run of the same draw does not make each later
+ * element scan a long bucket.
  */
 export function pushDistinct(
   elements: Expression[],
   kept: Map<number, Expression[]>,
-  x: Expression
+  x: Expression,
+  isMergeable: (x: Expression) => boolean
 ): boolean {
+  if (!isMergeable(x)) {
+    elements.push(x);
+    return true;
+  }
   const bucket = kept.get(x.hash);
   if (bucket === undefined) kept.set(x.hash, [x]);
   else if (bucket.some((e) => e.isSame(x))) return false;

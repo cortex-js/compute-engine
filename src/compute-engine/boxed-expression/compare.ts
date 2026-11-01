@@ -42,6 +42,7 @@ import {
   orderAnswer,
 } from './kind-compare.js';
 import { engineHasKindValues } from './value-kinds.js';
+import { isMergeable } from './effects-of.js';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
@@ -711,8 +712,17 @@ function eqImpl(
     // representation unification). The NaN scan is a cheap property walk —
     // far cheaper than discarding the `isSame` result and re-walking with
     // per-element tolerant `eq()` for every identical large list.
+    //
+    // Two occurrences of a term with a known effect (a call of a function
+    // declared with the `random` effect) are two independent draws, not one
+    // value, so the structural match does not decide their equality: the
+    // comparison is undecided (`isMergeable()`). Both operands are asked:
+    // `isSame()` compares operator names, not definitions, so the two trees
+    // can name one function that only one of them knows to draw. A NaN leaf
+    // decides first, since `NaN` is unequal to every value, a draw included.
     if (a.isSame(b)) {
       if (a.isCollection && b.isCollection && containsNaNLeaf(a)) return false;
+      if (!isMergeable(a) || !isMergeable(b)) return undefined;
       return true;
     }
 
@@ -760,9 +770,18 @@ function eqImpl(
         return true;
       }
       // Unordered (set-like): equal counts + one-way membership
+      // Whether `b` is mergeable, read once, at the first match.
+      let bMergeable: boolean | undefined;
       for (const xa of a.each()) {
         const inB = b.contains(xa);
         if (inB !== true) return inB;
+        // `contains()` matches the trees: an element of `b` with the same
+        // tree as a draw `xa` is another draw, not the same value. The
+        // matched element of `b` is not returned, so `b` is checked whole:
+        // the two trees can name one function that only `b` knows to draw.
+        if (!isMergeable(xa)) return undefined;
+        bMergeable ??= isMergeable(b);
+        if (!bMergeable) return undefined;
       }
       return true;
     }
@@ -820,7 +839,7 @@ function eqImpl(
     // symbolic proof, structural equality after expand+simplify.
     a = _expand(a).simplify();
     b = _expand(b).simplify();
-    if (same(a, b)) return true;
+    if (same(a, b) && isMergeable(a) && isMergeable(b)) return true;
     return undefined;
   }
 

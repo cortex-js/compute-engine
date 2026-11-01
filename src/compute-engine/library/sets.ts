@@ -83,6 +83,7 @@ import {
   cantorEnumerateRationals,
 } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 import { firstFailedElementError } from '../boxed-expression/error-value.js';
 
 function typeIntersection(a: Type, b: Type): Type {
@@ -1589,9 +1590,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         isFunction(col)
           ? kleeneOr(col.ops.map((op) => op.contains(x)))
           : undefined,
+      // A draw (an element that is not `isMergeable()`) is counted even
+      // when an earlier operand holds the same tree: the two are two draws,
+      // as in the evaluated union.
       count: (col) =>
-        countMatchingUnion(col, (elem, seen) =>
-          seen.every((e) => !e.contains(elem))
+        countMatchingUnion(
+          col,
+          (elem, seen) =>
+            !isMergeable(elem) || seen.every((e) => !e.contains(elem))
         ),
       // A union is empty iff every operand is empty (Kleene AND).
       isEmpty: (col) =>
@@ -1823,11 +1829,19 @@ function union(
 
   // Keep only unique elements. Two `isSame` elements always have the same
   // hash, so an element is compared only with the elements already kept that
-  // have its hash.
+  // have its hash. Two elements with a known effect (`Random()`, a call of a
+  // function declared with the `random` effect) are two draws, not one
+  // value, so both are kept (`isMergeable()`). Such an element is kept
+  // without entering the buckets, so a long run of the same draw does not
+  // make each later element scan a long bucket.
   const elements: Expression[] = [];
   const kept = new Map<number, Expression[]>();
   for (const op of xs) {
     for (const elem of op.each()) {
+      if (!isMergeable(elem)) {
+        elements.push(elem);
+        continue;
+      }
       const bucket = kept.get(elem.hash);
       if (bucket === undefined) kept.set(elem.hash, [elem]);
       else if (bucket.some((e) => e.isSame(elem))) continue;
@@ -1841,7 +1855,8 @@ function union(
 }
 
 /**
- * The literal set of `elements`, which hold no two `isSame` elements, stored
+ * The literal set of `elements`, which hold no two `isSame` elements except
+ * draws (two elements that are not `isMergeable()`, each kept), stored
  * in the canonical order as the canonical `Set` handler stores them
  * (`sortSetElements`). The operands of `Union`, `Intersection`, `SetMinus`
  * and `SymmetricDifference` can be lists, and their results are built from
@@ -1926,10 +1941,16 @@ function intersection(
   }
 
   // Preserve set semantics of the result: dedup (the walked operand may be a
-  // list with repeated elements).
+  // list with repeated elements). Two draws (elements that are not
+  // `isMergeable()`) are both kept. The membership test above is still
+  // structural: it finds a draw of the walked operand in another operand
+  // that holds the same tree, as `Element` does (`docs/ERROR-MODEL.md`,
+  // "Search is structural"), so `Intersection(List(r(t), r(t)),
+  // Set(r(t), 2))` keeps both draws of the list.
   const unique: Expression[] = [];
   const keptUnique = new Map<number, Expression[]>();
-  for (const elem of elements) pushDistinct(unique, keptUnique, elem);
+  for (const elem of elements)
+    pushDistinct(unique, keptUnique, elem, isMergeable);
 
   if (unique.length === 0) return ce.symbol('EmptySet');
   return literalSet(ce, unique);
@@ -2374,7 +2395,8 @@ function symmetricDifference(
     else bucket.push(e);
   }
   for (const elem of b.each())
-    if (a.contains(elem) !== true) pushDistinct(elements, kept, elem);
+    if (a.contains(elem) !== true)
+      pushDistinct(elements, kept, elem, isMergeable);
 
   if (elements.length === 0) return ce.symbol('EmptySet');
   return literalSet(ce, elements);
@@ -2520,7 +2542,13 @@ function* unionIterator(
     // the first time only.
     const isNew = firstOccurrence(op);
     for (const elem of op.each()) {
-      if (seen.every((e) => !e.contains(elem)) && isNew(elem)) {
+      // A draw (an element that is not `isMergeable()`) is yielded even when
+      // an earlier operand holds the same tree: the two are two draws, as in
+      // the evaluated union.
+      if (
+        (!isMergeable(elem) || seen.every((e) => !e.contains(elem))) &&
+        isNew(elem)
+      ) {
         yield elem;
       }
     }
@@ -2669,12 +2697,15 @@ function notExcluded(
  * and nothing is kept. A list operand (`Intersection` accepts one) can. The
  * elements are grouped by their hash, so that the test is linear. Call the
  * test only for the elements that the walk keeps, so that only those are
- * stored.
+ * stored. A draw (an element that is not `isMergeable()`, such as a call of a
+ * function declared with the `random` effect) is always new and is not
+ * stored: two occurrences of it are two draws, not one value.
  */
 function firstOccurrence(op: Expression): (elem: Expression) => boolean {
   if (op.type.matches('set<any>') || op.operator === 'Range') return () => true;
   const seen = new Map<number, Expression[]>();
   return (elem) => {
+    if (!isMergeable(elem)) return true;
     const bucket = seen.get(elem.hash);
     if (bucket?.some((x) => x.isSame(elem))) return false;
     if (bucket) bucket.push(elem);
