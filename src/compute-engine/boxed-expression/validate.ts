@@ -137,6 +137,7 @@ import {
 } from '../inference-rollback.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
+import { isWildcard } from './pattern-utils.js';
 import { isScratchBinding } from '../scratch-scopes.js';
 import { isTensorValue } from './tensor-view.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -852,6 +853,43 @@ function absentTupleSlotsMatchSource(op: Expression, type: Type): boolean {
 }
 
 /**
+ * True when `op`, the first operand of a call to `ArgMax` or `ArgMin`, is
+ * a function, so that the call is the optimization form `ArgMax(f, domain)`
+ * and not the collection form `ArgMax(xs, key)`. The canonical handler
+ * (`canonicalOptimumForm()` in `library/collections.ts`) and the
+ * evaluation (`heldEagerSources()` in `boxed-function.ts`) use this same
+ * test, so they choose the same form.
+ *
+ * - A function literal is a function.
+ * - A symbol is a function when the current scope defines it as an operator,
+ *   or as a value whose DECLARED type is a function type. A type inferred
+ *   from an assigned value is not read: `h` declared `unknown` and then
+ *   assigned `Sin` can be assigned a list later, and a canonical form must
+ *   not depend on the current value. An undeclared symbol or a wildcard is
+ *   not a function, and the symbol is not declared by this test.
+ * - Any other call is a function when its canonical type is a function type
+ *   (`Derivative(Sin)`, a composition). The raw operand of a lazy operator
+ *   is typed `unknown`, so the call is canonicalized first. A call has no
+ *   name to declare, so this has no side effect.
+ */
+export function isOptimumFunctionOperand(op: Expression): boolean {
+  if (isFunction(op, 'Function')) return true;
+  if (isSymbol(op)) {
+    if (isWildcard(op)) return false;
+    const def = op.engine.lookupDefinition(op.symbol);
+    if (def === undefined) return false;
+    if (isOperatorDef(def)) return true;
+    return (
+      isValueDef(def) &&
+      def.value.inferredType !== true &&
+      def.value.type.matches('function')
+    );
+  }
+  if (!isFunction(op)) return false;
+  return op.canonical.type.matches('function');
+}
+
+/**
  * The operands of a call to the lazy collection operator with the signature
  * `signature`, canonicalized, when an operand at a source slot
  * (`collectionSourceSlot`) is refused by `checkCollectionOperand`; or
@@ -880,12 +918,23 @@ export function refusedCollectionSourceOperands(
     if (isSymbol(x) && !ce.lookupDefinition(x.symbol)) return x;
     const operand = x.canonical;
     const kind = collectionSourceSlot(signature, i);
-    // A function at a source slot is most likely a call with its operands
-    // in the wrong order (`Map([1, 2], Sin)`, where the mapping comes
-    // first). That is not a refusal of the source: the handler of `Map`
-    // reports the order when the first operand is a collection, and
-    // otherwise the call is kept as written.
-    if (kind === undefined || operand.type.matches('function')) return operand;
+    // A function at a source slot is refused like any other operand that is
+    // not a collection, as the eager `Sort(x ↦ x, xs)` is. This covers a
+    // collection-first operator with its operands in the wrong order
+    // (`Filter(x ↦ x > 0, xs)`) and a callback-first operator with its
+    // operands in the wrong order (`Fold(xs, 0, (a, x) ↦ a + x)`). Kept as
+    // written, the call was not canonical:
+    // as an operand of a canonical `Add` it reached `toNumericValue()`,
+    // which requires a canonical expression, and in the body of a function
+    // it was broadcast over the elements of the list bound to `xs`.
+    //
+    // A function is never a collection, so the refusal does not depend on
+    // the operand at the callback slot: `Map(Sin, Cos)` refuses `Cos`
+    // too, whatever `Sin` is and whenever a symbol there is declared. When
+    // the first operand of `Map` is a collection (`Map([1, 4], f)`), the
+    // handler of `Map` reports the wrong order at the callback slot itself,
+    // and the boxing does not reach this check.
+    if (kind === undefined) return operand;
     // A canonical form must not depend on the value assigned to a symbol:
     // the symbol can be reassigned to a collection before the call is
     // evaluated. Thus the refusal reads a type that is not derived from a

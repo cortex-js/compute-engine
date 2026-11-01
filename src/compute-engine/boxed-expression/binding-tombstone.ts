@@ -105,6 +105,12 @@ export function reviveBindings(bindings: Iterable<unknown>): void {
   }
 }
 
+/** Whether `def` carries the tombstone of a discarded scope
+ * ({@link tombstoneBinding}). */
+export function isTombstoned(def: object): boolean {
+  return (def as Tombstoned)._deadStack !== undefined;
+}
+
 /**
  * Throw if `def` is a binding of a scope that has been discarded — the
  * "assertion with a stack" that replaces a silent stale read.

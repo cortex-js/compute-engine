@@ -238,6 +238,15 @@ function discardEvalContext(
   // then reads its index. A push revives the tombstones, but the loop of
   // the caller does not push the scope again. Only the debug check reads
   // this, so the walk of the stack happens only when the flag is on.
+  //
+  // For the same reason, a definition that the scope of another context of
+  // the stack holds under the same name is not tombstoned. Two scope
+  // objects can hold one definition: the lazy comprehension that each call
+  // of `u := (l) => [l[i] for i in 1..n]` returns is a new node with a new
+  // local scope, and each of these scopes holds the definition of `i` of
+  // the comprehension in the body of `u`. A walk of the result of `u(u(b))`
+  // runs in the scope of the outer result and evaluates the inner result,
+  // whose pop must not tombstone the `i` that the outer walk still reads.
   const keepsTombstone =
     ce._debugBindings &&
     !isDormantPop() &&
@@ -245,7 +254,7 @@ function discardEvalContext(
     !retained &&
     !isRetainedNodeScope(context.lexicalScope) &&
     !ce._evalContextStack.some((c) => c.lexicalScope === context.lexicalScope);
-  for (const binding of context?.lexicalScope.bindings.values() ?? []) {
+  for (const [name, binding] of context?.lexicalScope.bindings ?? []) {
     if (retained) {
       if (isValueDef(binding))
         (
@@ -260,7 +269,17 @@ function discardEvalContext(
       // canonical expression keeps and pushes again on every evaluation, so
       // that pop is not the scope's death and a tombstone there would report
       // every bound variable of every canonicalized binder.
-      if (keepsTombstone)
+      if (
+        keepsTombstone &&
+        !ce._evalContextStack.some((c) => {
+          const held = c.lexicalScope.bindings.get(name);
+          return (
+            held !== undefined &&
+            isValueDef(held) &&
+            held.value === binding.value
+          );
+        })
+      )
         tombstoneBinding(binding.value, context?.name ?? '<unnamed>');
       binding.value.dispose();
     }

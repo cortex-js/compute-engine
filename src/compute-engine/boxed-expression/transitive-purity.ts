@@ -137,9 +137,9 @@ export function isTransitivelyPure(
     // raw value) is not bound: its symbols have no definition. An
     // evaluation reads its canonical form, so that form is checked.
     if ((isSymbol(e) || isFunction(e)) && !e.isCanonical && !e.isStructural) {
-      // A canonical form that is not canonical either (`Map(t, x ↦ 2x)`,
-      // whose operands are in the wrong order, stays a raw tree) is a new
-      // object at each read of `.canonical`, so the walk would never end.
+      // A canonical form that is not canonical either (a call whose
+      // `canonical` handler declines stays a raw tree) is a new object at
+      // each read of `.canonical`, so the walk would never end.
       // Its evaluation is not known: it is read as impure.
       const canonical = e.canonical;
       if (!canonical.isCanonical && !canonical.isStructural) return false;

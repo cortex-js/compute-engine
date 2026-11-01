@@ -328,6 +328,36 @@ function rebindEscapingBinderResult(
 }
 
 /**
+ * The value of an `Integrate` node, `expression`, re-bound on the way out of
+ * its frame (`rebindEscapingBinderResult`, with the variables of its
+ * indefinite limits).
+ *
+ * The evaluate handler of `Integrate` calls it on every value that can hold
+ * an occurrence of an integration variable. Such a value can come from
+ * another `Integrate` that the handler makes and evaluates while its own
+ * frame is on top (the integrand with the values of the parameters of a
+ * call, with renamed variables, or with inlined user functions). The scope
+ * of that integral is a child of the scope of this one, so its value is
+ * re-bound to the variable of THIS integral, which is discarded when the
+ * handler returns: the value must be re-bound once more. With
+ * `g(f) := ∫ f dx`, the `x` of the value `x²/2` of `g(x)` was not the
+ * global `x`.
+ */
+function rebindIntegralResult(
+  ce: ComputeEngine,
+  value: Expression,
+  expression: Expression | undefined,
+  numericApproximation: boolean | undefined
+): Expression {
+  return rebindEscapingBinderResult(
+    ce,
+    value,
+    [...((expression && indefiniteIntegralVariables(expression)) ?? [])],
+    numericApproximation
+  );
+}
+
+/**
  * The names of the parameters of the running function call that `operand`
  * reads, whose value holds a symbol with the name of one of `variables` but
  * does not vary with that variable (`parameterValueVariesWith`). Call it
@@ -6627,9 +6657,14 @@ volumes
               : l
           );
           if (named.some((l, i) => l !== limits[i]))
-            return ce
-              .function('Integrate', [ops[0], ...named])
-              .evaluate({ numericApproximation });
+            return rebindIntegralResult(
+              ce,
+              ce
+                .function('Integrate', [ops[0], ...named])
+                .evaluate({ numericApproximation }),
+              expression,
+              numericApproximation
+            );
         }
 
         // A parameter of the running function call that holds an expression
@@ -6687,10 +6722,15 @@ volumes
           if (withValues !== lifted) {
             substitutedIntegrands.push(withValues);
             try {
-              return withOperandBindings(ce, withValues, replaced, () =>
-                ce
-                  .function('Integrate', [withValues, ...ops.slice(1)])
-                  .evaluate({ numericApproximation })
+              return rebindIntegralResult(
+                ce,
+                withOperandBindings(ce, withValues, replaced, () =>
+                  ce
+                    .function('Integrate', [withValues, ...ops.slice(1)])
+                    .evaluate({ numericApproximation })
+                ),
+                expression,
+                numericApproximation
               );
             } finally {
               substitutedIntegrands.pop();
@@ -6841,7 +6881,17 @@ volumes
               )
                 value = value.subs({ [fresh]: ce.symbol(name) });
             }
-            return value;
+            // `ce.symbol(name)` above is made while the frame of this
+            // integral is on top, so it is bound to the variable of this
+            // integral, and so is a fresh name that the value keeps (`k_1`).
+            // Else `∫ g(k) dk` with `g := a ↦ a·k·x` and `k := 2` gives an
+            // `x·k²` whose `k` is not the global `k`.
+            return rebindIntegralResult(
+              ce,
+              value,
+              expression,
+              numericApproximation
+            );
           }
         }
 
@@ -6930,7 +6980,13 @@ volumes
           ops.slice(1),
           numericApproximation ?? false
         );
-        if (perElement !== undefined) return perElement;
+        if (perElement !== undefined)
+          return rebindIntegralResult(
+            ce,
+            perElement,
+            expression,
+            numericApproximation
+          );
 
         // The integration variable(s) are bound by `Integrate`: a same-named
         // global assignment (`x := 5`) must not substitute into the
@@ -7005,9 +7061,12 @@ volumes
                 )
               : undefined;
           if (inlined === undefined) return undefined;
-          return ce
-            .function('Integrate', [inlined, ...ops.slice(1)])
-            .evaluate();
+          return rebindIntegralResult(
+            ce,
+            ce.function('Integrate', [inlined, ...ops.slice(1)]).evaluate(),
+            expression,
+            numericApproximation
+          );
         }
 
         // Use the exact residue result for both `evaluate()` and `.N()`, after
@@ -8224,10 +8283,10 @@ volumes
         // leaves the frame still referencing the dying binding and compares
         // unequal to the same expression written in the ambient scope — the
         // repair `Series` needed for exactly the same reason (stage 1).
-        return rebindEscapingBinderResult(
+        return rebindIntegralResult(
           ce,
           result,
-          [...((expression && indefiniteIntegralVariables(expression)) ?? [])],
+          expression,
           numericApproximation
         );
       },

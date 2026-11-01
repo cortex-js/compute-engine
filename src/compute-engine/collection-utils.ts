@@ -68,7 +68,7 @@ import { Type } from '../common/type/types.js';
 import type { EvaluateOptions, Scope } from './types-evaluation.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import { incompleteWalkCount } from './boxed-expression/incomplete-walks.js';
-import { hasAsyncOnlyApplication } from './boxed-expression/async-only-descendants.js';
+import { appliesAsyncOnlyOperator } from './boxed-expression/async-only-descendants.js';
 import {
   withErrorFrames,
   type ErrorFrame,
@@ -324,9 +324,14 @@ export function listFiniteUncountedCollection(
  * `frame` names the consumer and the position of `xs` in it. It is added to
  * the trace of an error value, as for an operand whose value is an error.
  *
- * The walk is synchronous. A view that holds an operator with only an
- * `evaluateAsync` handler (`hasAsyncOnlyApplication()`, a callback included)
- * is not listed: the answer is then `undefined`. An `evaluateAsync` handler
+ * The walk is synchronous. A view whose evaluation applies an operator with
+ * only an `evaluateAsync` handler is not listed: the answer is then
+ * `undefined` (`appliesAsyncOnlyOperator()`, which examines the source and
+ * the callback). The callback is then not applied. A function symbol counts
+ * as applied at every position except one known to hold data, such as an
+ * element of a `List` in the callback result: there it is not applied, and
+ * the view is listed:
+ * `Count(FlatMap([1, 2], x ↦ [x, slowF]))` is `4`. An `evaluateAsync` handler
  * calls {@link listedFlatMapViewAsync} instead.
  */
 export function listedFlatMapView(
@@ -334,7 +339,7 @@ export function listedFlatMapView(
   frame?: ErrorFrame
 ): Expression | undefined {
   if (!isFlatMapOverFiniteSource(xs)) return undefined;
-  if (hasAsyncOnlyApplication(xs, true)) return undefined;
+  if (appliesAsyncOnlyOperator(xs)) return undefined;
   try {
     return listedValue(xs.evaluate({ materialization: true }), frame);
   } catch (e) {
@@ -351,9 +356,9 @@ export function listedFlatMapView(
  * its deadline and its `signal`.
  *
  * `FlatMap` has no `evaluateAsync` handler: its walk is the synchronous one
- * of its `evaluate` handler, which does not await a callback. A view that
- * holds an operator with only an `evaluateAsync` handler is therefore not
- * listed, as in {@link listedFlatMapView}. Listed, the callback
+ * of its `evaluate` handler, which does not await a callback. A view whose
+ * walk applies an operator with only an `evaluateAsync` handler is therefore
+ * not listed, as in {@link listedFlatMapView}. Listed, the callback
  * `x ↦ slowRange(x)` gave the unevaluated calls as elements:
  * `Sum(FlatMap([1, 2], x ↦ slowRange(x)))` was `slowRange(1) + slowRange(2)`.
  */
@@ -367,7 +372,7 @@ export function listedFlatMapViewAsync(
   // task, and every evaluation of an operand that does not hold such a view
   // then lost the bindings of the caller.
   if (!isFlatMapOverFiniteSource(xs)) return undefined;
-  if (hasAsyncOnlyApplication(xs, true)) return undefined;
+  if (appliesAsyncOnlyOperator(xs)) return undefined;
   return xs
     .evaluateAsync({
       ...options,
@@ -481,11 +486,13 @@ export function finiteUncountedIsEmpty(xs: Expression): boolean | undefined {
   // A `FlatMap` over a finite source with no known finiteness is walked too:
   // the walk stops at the first element, so an infinite inner result
   // (`x ↦ Range(1, ∞)`) is not listed, and the view is not empty. The walk
-  // is synchronous, so a view that holds an operator with only an
-  // `evaluateAsync` handler is not walked, as in `listedFlatMapView()`.
+  // is synchronous, so a view whose walk applies an operator with only an
+  // `evaluateAsync` handler is not walked, as in `listedFlatMapView()`. A
+  // function symbol that the callback gives as data (`x ↦ [x, slowF]`) is
+  // not applied, and the view is walked.
   if (
     !walkCanAnswerCount(xs) &&
-    (!isFlatMapOverFiniteSource(xs) || hasAsyncOnlyApplication(xs, true))
+    (!isFlatMapOverFiniteSource(xs) || appliesAsyncOnlyOperator(xs))
   )
     return undefined;
   const before = incompleteWalkCount();

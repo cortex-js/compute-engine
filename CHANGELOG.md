@@ -349,6 +349,90 @@
 
 ### Bug Fixes
 
+- **Compiled `Sum`/`Product`: a bound that reads a variable with the name of the
+  index, and a bound with a known effect.** In JavaScript,
+  `Function(Sum(j, Limits(j, 1, j + 2)), j)` applied to 2 gave 6 instead of 10:
+  the upper bound read the loop counter, not the parameter `j`. A lower bound
+  `j` (`Sum(j, Limits(j, j, 5))` with an outer `j`) threw
+  `Cannot access 'j' before initialization`. The loop now steps a separate
+  counter when a bound has no compile-time value, and only the loop body
+  declares the index. In GLSL and WGSL, the loop condition read the integer
+  counter for an upper bound `j` (`for (int j = 1; j <= int(floor(j)); j++)`):
+  such a bound is now evaluated into a local before the loop. In Python, a bound
+  of a later clause that reads an outer variable with the name of an index
+  (`Sum(j + k, Limits(j, 1, 2), Limits(k, 1, k))`) raised an `UnboundLocalError`
+  in the generator expression: the later clauses now get fresh index names. On
+  every target, a `Sum` or `Product` with a bound that has a known effect
+  (`Sum(j, Limits(j, 1, Random(Range(2, 3))))`, a call of a function declared
+  not pure) now declines, as the interpreter leaves it unevaluated; before, the
+  JavaScript and GLSL code evaluated the bound. A call of a function that is
+  declared with a type, has no definition and is supplied by the host (the
+  `functions` option) still compiles: the interpreter evaluates that bound
+  once the function has a value.
+
+- **An indefinite integral computed through a second integral uses the
+  variable of the enclosing scope.** With `g(f) := \int f\,dx`, the result
+  `1/2 * x^2` of `g(x)` held an `x` of the scope of the integral, which was
+  discarded when the integral returned. That `x` was not the global `x`: the
+  result was not `isSame` to `1/2 * x^2` written directly, and after `x := 3`
+  it did not evaluate to `9/2`. Now it does both. The same applies when the
+  integrand calls a user function that reads a symbol with the name of the
+  variable (`\int g(k)\,dk` with `g(a) := a k x` gives `x * k^2`, or
+  `1/2 * k * x * "k_1"^2` when `k` has no value), when it calls a user
+  function named like a library function, and when the integrand is a list or
+  a tuple (`\int [x, x^2]\,dx` gives `[9/2, 9]` after `x := 3`).
+
+- **The debug check of dead bindings (`CE_DEBUG_BINDINGS`) reports no live
+  read.** It reported a read of a discarded scope in two correct cases: the
+  index of a `Sum` or `Product` evaluated with `evaluateAsync()` after an
+  `evaluate()`, and the index of a lazy comprehension that a function call
+  returned, read through another call of the same function (`u(u(b))` with
+  `u := (l) => [l[i] for i in 1..n]`). The values were correct; only the
+  check threw.
+
+- **`Count`, `Length`, `ListFrom`, `Sum` and the other consumers that read a
+  whole `FlatMap` list it when its callback gives an asynchronous-only
+  function as data.** An asynchronous-only function has only an
+  `evaluateAsync` handler. With `slowF` such a function,
+  `Count(FlatMap([1, 2], x ↦ [x, slowF]))` stayed unevaluated under
+  `evaluate()` and `evaluateAsync()`, although the view is
+  `[1, slowF, 2, slowF]`. The count is now `4`, and `IsEmpty` is `False`. The
+  symbol `slowF` is an element and is not applied. The same applies to a
+  named user function `f(x) := [x, slowF]` given as the callback. A symbol
+  counts as data only at a position known to hold data: an element of a
+  `List`, `Tuple` or `Set`, a value of a dictionary, a branch of an `If` or
+  the last statement of a `Block`, each in the result of the callback. At any
+  other position an operator can apply it, and a view whose walk can apply
+  such a function stays unevaluated, because the walk of `FlatMap` is
+  synchronous: `x ↦ slowRange(x)`, `x ↦ Map(slowF, Range(1, x))`,
+  `x ↦ Sort([x, 3, 1], slowLess)`, `x ↦ Tabulate(slowF, x)`, or a source
+  `Map(slowF, Set(1, 2))`.
+
+- **A collection-first callback operator with a function as its collection
+  operand is a type error.** `Filter`, `Reduce`, `Scan`, `TakeWhile`,
+  `DropWhile`, `FlatMap`, `MaxBy` and the other operators that take the
+  collection first now refuse a function at the collection position, as
+  `Sort` does: `Filter(x ↦ x > 0, [1, 4])` is
+  `Filter(Error(ErrorCode("incompatible-type", "collection", "(x: unknown) -> boolean"), x ↦ x > 0), [1, 4])`,
+  canonical, invalid and typed `error`. Before, the call was kept as written
+  and was not canonical. As an operand of a sum, its evaluation printed
+  "Assertion failed" messages on the console (`Apply(xs ↦ 1 + Filter(x ↦ x > 0, xs), [1, 4])`),
+  and in the body of a function it was applied to each element of the list
+  instead of to the list. A callback-first operator with a function at its
+  collection position is refused the same way, whatever its callback
+  position holds: `Fold(xs, 0, (a, x) ↦ a + x)`, `Map(t, f)` with `t`
+  undeclared, and `Map(Sin, Cos)`. A function is never a collection. `Map`
+  keeps its own report of the wrong order (`Map([1, 4], f)`). The
+  optimization form `ArgMax(f, domain)` and `ArgMin(f, domain)` now accepts
+  any function, not only a function literal (an operator such as `Sin`,
+  a symbol declared with a function type, or a call whose value is a
+  function, such as `Derivative(Sin)`), with a set or an undeclared domain.
+  `ArgMax(Sin, RealNumbers)`, `ArgMax(g, D)` with `g: (real) -> real` and
+  `D: set<real>`, and `ArgMax(g, RealNumbers)` with a variable `g` declared
+  `function` that holds `Sin` are valid and stay unevaluated, as
+  `ArgMax(x ↦ sin(x), RealNumbers)` does. An undeclared domain symbol is
+  not declared by the call.
+
 - **The generic `Sum`/`Product` loop of a custom compile target reads a
   symbolic bound.** A custom target with no `Sum` or `Product` of its own (for
   example one whose `functions` is `() => undefined`) replaced a bound with no
@@ -437,15 +521,6 @@
   parses back as the symbol `A_ImaginaryUnitj`. The indices of
   `Subscript(A, Sequence(n, m))` are now written `A_{n, m}`, which parses back
   as the same expression. A subscript with one index is not changed.
-
-- **A free symbol in a `Block` body of a function literal is declared in the
-  scope that encloses the literal** (CE-107), as a free symbol of any other
-  body already was. Before, a statement that gave the symbol no type (a bare
-  `f`, a tuple, an equation) declared it in the scope of the `Block`, so
-  `ce.box(["D", ["Function", ["Block", "f"], "x"], "x"])` and a later
-  `ce.parse("\\frac{\\mathrm{d}f}{\\mathrm{d}x}")` had the same MathJSON but
-  were not `isSame`, and a later `ce.box("f")` was a different symbol. Values
-  do not change.
 
 - **`subs()` and `freeVariables` read the index of a raw `Sum`, `Product`,
   `Integrate` or `NDSolveFunction` as the canonical form does.** With
@@ -759,24 +834,6 @@
   JavaScript, so `compile(…, { fallback: false })` threw a `SyntaxError`. It
   now compiles on every target, and the name gets the value at its last
   position, also in a nested pattern, a loop body or a `Sum` body.
-
-- **A block-local function that receives complex values compiles in the
-  complex lane.** In `Block(g ≔ (a, b) ↦ a + b, Reduce(L, g, 0))` with
-  `L: list<complex>`, the compiled code used the real `+` for `g` and gave
-  the string `"[object Object]…"` for `[1 + i, 2]`; the interpreter gives
-  `3 + i`. A call of a block-local function, as a `Reduce`, `Fold` or `Scan`
-  combiner, as a `Map` callback or directly, with a complex argument (or a
-  point with a complex coordinate) at a parameter that is not typed complex
-  now restarts the compilation in `mode: 'complex'`, which gives the
-  interpreter's value. With `mode: 'strict'` the compilation declines, with a
-  message that asks for a `complex` annotation on the parameter of the
-  function literal. The same applies to a function defined with
-  `ce.assign()` that receives a point with a complex coordinate: with
-  `h = (p) ↦ p[1] + 1` and `P: list<tuple<complex, real>>`, `h(P[1])` gave
-  `"[object Object]1"`; it now gives `2 + i`. The argument and the parameter
-  types are compared position by position, and a position with no type
-  (`any`, `unknown`) counts as real: in `mode: 'strict'`,
-  `(L) ↦ Length(L)` applied to such a point now declines.
 
 - **A block-local function that receives complex values compiles in the
   complex lane.** In `Block(g ≔ (a, b) ↦ a + b, Reduce(L, g, 0))` with

@@ -85,6 +85,11 @@ describe('CE-603: each level of a Map chain is applied once per element', () => 
     // The handler answers `q(x)` with an `x` declared in a scope of its
     // own, and `2` for that `x`. The result must be evaluated again.
     const ce = new ComputeEngine();
+    // The handler returns an `x` of a scope that it popped itself, and the
+    // result is evaluated after that pop. The debug check of dead bindings
+    // (`CE_DEBUG_BINDINGS`) reports every such use, so it would throw here by
+    // design. The value is the subject of this test.
+    ce._debugBindings = false;
     ce.declare('x', 'real');
     const outer = ce.symbol('x');
     const outerDef = outer.valueDefinition;

@@ -38,9 +38,15 @@ describe('MAP WITH ITS ARGUMENTS REVERSED', () => {
     expect(expr.toString()).toBe(error('list<integer>', 'Q'));
   });
 
-  test('an undeclared symbol is not declared and stays unevaluated', () => {
+  // A function is never a collection, so the function at the collection
+  // position is refused whatever the first operand is. The undeclared symbol
+  // at the mapping position is read without being declared.
+  test('an undeclared symbol is not declared, and the function is refused', () => {
     const expr = ce.box(['Map', 'R', norm as any]);
-    expect(expr.toString()).toBe('Map(R, (u) => ||u||)');
+    expect(expr.isValid).toBe(false);
+    expect(expr.toString()).toBe(
+      'Map(R, Error(ErrorCode("incompatible-type", "collection", "(u: unknown) -> nan | real | signed_infinity"), (u) => ||u||))'
+    );
     expect(ce.lookupDefinition('R')).toBeUndefined();
   });
 

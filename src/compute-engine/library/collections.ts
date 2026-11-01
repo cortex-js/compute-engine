@@ -1,7 +1,10 @@
 import { cacheOff } from '../../common/cache-switches.js';
 import { registerProvedAbsentDomain } from '../boxed-expression/proved-absent-domain.js';
 import { beginStoreGuard } from '../boxed-expression/store-guard.js';
-import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
+import {
+  appliesAsyncOnlyOperator,
+  hasAsyncOnlyApplication,
+} from '../boxed-expression/async-only-descendants.js';
 import { callableBindingInContext } from '../boxed-expression/binders.js';
 import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
@@ -22,7 +25,6 @@ import {
   runWithEvaluationEffects,
   withEvaluationEffects,
 } from '../effects-registry.js';
-import { callbackSlots } from '../boxed-expression/boxed-function.js';
 import {
   memoDepsStillValid,
   snapshotMemoDeps,
@@ -42,6 +44,7 @@ import {
   absentMarkerIsNumeric,
   checkCollectionOperand,
   canonicalValueOperand,
+  isOptimumFunctionOperand,
 } from '../boxed-expression/validate.js';
 import type { OverloadResolution } from '../boxed-expression/overload.js';
 import { arityBounds } from '../boxed-expression/overload.js';
@@ -3404,30 +3407,6 @@ function flatMapInnerResultTypeD(
  * its declared result ({@link callbackResultType}), and the source is then
  * not described.
  */
-/**
- * Whether the evaluation of `x`, or of a callback in it, applies an operator
- * that has only an `evaluateAsync` handler. `hasAsyncOnlyApplication(x)`
- * finds the applications (`slowF(1)`) and the helpers whose bodies hold one.
- * A symbol is checked only at a callback parameter of an operator in `x`
- * (`Map(slowF, Range(1, 2))`, the positions that `callbackSlots()` gives),
- * where the operator applies it. A function symbol elsewhere is data
- * (`(1, slowF)`): it is not applied, and it is not a reason to stop.
- */
-function appliesAsyncOnlyOperator(x: Expression): boolean {
-  if (hasAsyncOnlyApplication(x)) return true;
-  const visit = (e: Expression): boolean => {
-    if (!isFunction(e)) return false;
-    const def = e.operatorDefinition;
-    if (def !== undefined)
-      for (const i of callbackSlots(def)) {
-        const op = e.ops[i];
-        if (isSymbol(op) && hasAsyncOnlyApplication(op, true)) return true;
-      }
-    return e.ops.some(visit);
-  };
-  return visit(x);
-}
-
 /**
  * `true` when the source of a `FlatMap` is provably empty, read from its
  * structure only (`literalCollectionEmptiness()`), and `undefined`
@@ -25739,8 +25718,8 @@ function compareKeys(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
 
 /**
  * Canonicalize the Wolfram/Fungrim optimization form `ArgMax(f, domain)` /
- * `ArgMin(f, domain)`: first operand a function literal, second a domain (a
- * set, not an indexed collection). The engine keeps it inert, but the
+ * `ArgMin(f, domain)`: first operand a function, second a domain (a set, not
+ * an indexed collection, or an operand whose type is not decided yet). The engine keeps it inert, but the
  * function operand must go through `canonicalFunctionLiteral` so it gets the
  * canonical (Block-wrapped) body that the identities library's stored rule
  * patterns match. Returns `undefined` when `ops` is not the optimization form
@@ -25753,9 +25732,34 @@ function canonicalOptimumForm(
 ): Expression | null | undefined {
   if (ops.length !== 2) return undefined;
   const [f, domain] = ops;
-  if (!isFunction(f, 'Function')) return undefined;
+  // The function operand is a function literal or any other function
+  // (`Sin`, a symbol `g` declared with a function type, `Derivative(Sin)`),
+  // so that `ArgMax(Sin, RealNumbers)` and `ArgMax(x ↦ sin(x), RealNumbers)`
+  // are the same form. The evaluation reads the form with the same test
+  // (`isOptimumFunctionOperand()`). The domain is a set, or an operand whose
+  // type is not decided yet (an undeclared `S`). Otherwise the call is read
+  // as the collection form, whose source slot refuses a function.
+  if (!isOptimumFunctionOperand(f)) return undefined;
+  // A domain symbol with no definition is kept raw: canonicalizing it would
+  // declare it as a side effect, and its type is not decided yet anyway.
+  if (
+    isSymbol(domain) &&
+    !isWildcard(domain) &&
+    engine.lookupDefinition(domain.symbol) === undefined
+  ) {
+    const fn = canonicalCallbackOperand(f);
+    if (!fn) return null;
+    return engine._fn(operator, [fn, domain]);
+  }
   const d = domain.canonical;
-  if (!d.type.matches('set<any>')) return undefined;
+  const t = d.type.type;
+  if (
+    !d.type.matches('set<any>') &&
+    t !== 'unknown' &&
+    t !== 'any' &&
+    t !== 'value'
+  )
+    return undefined;
   const fn = canonicalCallbackOperand(f);
   if (!fn) return null;
   return engine._fn(operator, [fn, d]);

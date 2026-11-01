@@ -3,40 +3,52 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // `isTransitivelyPure()` reads the canonical form of a value that is not
-// canonical. The canonical form of `Map(t, x ↦ 2x)` (the arguments in the
-// wrong order, `t` with no value) is not canonical either, and `.canonical`
+// canonical. When that canonical form is not canonical either, `.canonical`
 // gives a new object at each read, so the walk never ended: the read of `r`
-// after `r = Map(t, (x) => x * 2)` did not return. Such a value is now read
-// as impure (not memoized), and the read gives what the same expression
-// written in place gives.
+// after `r = …` did not return. Such a value is now read as impure (not
+// memoized), and the read gives what the same expression written in place
+// gives.
+//
+// The library operators no longer give such a value: a call whose
+// collection operand is a function (`Map(t, x ↦ 2x)`, `Map(Sin, Cos)`) is a
+// canonical type error. The example is an operator whose `canonical` handler
+// returns `null` for every call: the boxing then keeps the call as written
+// (`box.ts`, the call with its required operands after a declined handler),
+// and its canonical form is that same raw call again.
 //
 
+function engineWithDecliningOperator(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('Raw', { signature: '(any) -> any', canonical: () => null });
+  return ce;
+}
+
 describe('A STORED VALUE WHOSE CANONICAL FORM IS NOT CANONICAL', () => {
+  test('the example is not canonical, and neither is its canonical form', () => {
+    const ce = engineWithDecliningOperator();
+    const value = ce.box(['Raw', 1]);
+    expect(value.isCanonical).toBe(false);
+    expect(value.canonical.isCanonical).toBe(false);
+  });
+
   test('the read returns, as the expression written in place does', () => {
     const start = Date.now();
     const held = executeEpsil(
-      new ComputeEngine(),
-      'r = Map(t, (x) => x * 2)\nLength(r)'
+      engineWithDecliningOperator(),
+      'r = Raw(1)\nLength(r)'
     ).value.json;
     const inPlace = executeEpsil(
-      new ComputeEngine(),
-      'Length(Map(t, (x) => x * 2))'
+      engineWithDecliningOperator(),
+      'Length(Raw(1))'
     ).value.json;
     expect(held).toEqual(inPlace);
-    expect(held).toEqual([
-      'Length',
-      ['Map', 't', ['Function', ['Multiply', 'x', 2], 'x']],
-    ]);
+    expect(held).toEqual(['Length', ['Raw', 1]]);
     expect(Date.now() - start).toBeLessThan(4000);
   }, 5000);
 
   test('the engine route', () => {
-    const ce = new ComputeEngine();
-    ce.box([
-      'Assign',
-      'r',
-      ['Map', 't', ['Function', ['Multiply', 'x', 2], 'x']],
-    ]).evaluate();
-    expect(ce.box('r').evaluate().operator).toBe('Map');
+    const ce = engineWithDecliningOperator();
+    ce.box(['Assign', 'r', ['Raw', 1]]).evaluate();
+    expect(ce.box('r').evaluate().operator).toBe('Raw');
   }, 5000);
 });
