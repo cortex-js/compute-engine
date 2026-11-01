@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **On the `interval-js` target, a `Break` condition in a `Loop` that is
+  always false no longer stops the loop.** With `k ∈ 1..5`,
+  `Block(s ≔ 0; Loop(Block(If(k > 20, Break()), s ≔ s + k), k ∈ 1..5); s)`
+  gave the interval `[0, 0]`; it now gives `[15, 15]`, as `evaluate()` gives
+  15. The same applies to a condition written `False`.
+
 ## 0.176.0 _2026-11-01_
 
 ### New Features

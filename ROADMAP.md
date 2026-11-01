@@ -2113,16 +2113,6 @@ reproduction above is the record.
 
 ## Compilation
 
-### CE-755. interval-js emits a folded false condition as the string `'false'`
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; interval-js emits `if ('false')`; a sum loop with a Break condition gives `[0, 0]`, interpreter 15.
-
-`Block(s ≔ 0; Loop(Block(If(k > 20, Break()), s ≔ s + k), k ∈ 1..5); s)`:
-the interpreter and JavaScript give 15. The interval-js target emits
-`if ('false') { break }`; the string is truthy, so the loop stops at once and
-the result is the interval `[0, 0]`.
-
 ### CE-751. A `number` value that holds a complex number reaches code compiled for `real`
 
 **Status:** ready; wrong value, M. User decision 2026-11-01: option (a).
@@ -2460,6 +2450,13 @@ the loop never stops early. Expected: the condition of a statement `If` on
 `interval-js` goes through the interval comparison, and the compiler refuses the
 loop when the comparison is not certain over the whole input interval, because a
 loop cannot take both paths.
+
+A library constant in the condition has the same cause:
+`Block(s ≔ 0; Loop(Block(If(k > Pi, Break()), s ≔ s + k), k ∈ 1..5); s)`
+gives the point interval 15 on `interval-js`; the interpreter gives 6. The
+constant is hoisted as an interval object (`if (_k2 < k) { break }`), and the
+JavaScript comparison of that object with `k` is always false. `ExponentialE`
+gives the same result.
 
 ### CE-652. JavaScript, GLSL, WGSL: a `Sum`/`Product` bound that names the loop index reads the new index
 
