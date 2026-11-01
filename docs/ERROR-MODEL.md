@@ -600,12 +600,19 @@ a side is `False`. The spellings are the MathJSON symbol
 `"Indeterminate"`, the LaTeX `\operatorname{Indeterminate}` and the Epsil
 name `Indeterminate`. The float rule reads the operands of a form as they
 are when the form is evaluated, so a float that an infinity absorbed first
-is not seen: `∞ + 0.5` is the exact `∞`, and `Fract(∞ + 0.5)` and
-`0·(∞ + 0.5)` are `Indeterminate`, not `NaN`. This is accepted: both values
+is not seen: `∞ + 0.5`, `2.5^∞` and `2.5·∞` are the exact `∞` (an
+infinity is exact, and no float infinity exists), so `Fract(∞ + 0.5)`,
+`0·(∞ + 0.5)`, `Fract(2.5^∞)` and `Fract(2.5·∞)` are `Indeterminate`, not
+`NaN`. A finite result keeps the float: `2.5/∞`, `0.5^∞` and `∞^{-2.5}` are
+the float `0`. This is accepted: both values
 mean "no value" and both have `isNaN` true, and a sound record of the
 absorption would add work to every evaluation. A consumer that must tell a
 float failure from an exact one reads `isIndeterminate` only as "no float
-was seen by the form". A pole stays `~oo` (`5/0`, `Gamma(0)`), and an absent
+was seen by the form". Under `.N()`, a base raised to `±∞` is compared with
+1 after it is rounded to the working precision, so a base closer to 1 than
+that precision can show is read as `1`: at `ce.precision = 21`, with
+`x := (10^{100} + 1)/10^{100}`, `x^∞` evaluates to `+∞` but its `.N()` is
+`NaN`. A pole stays `~oo` (`5/0`, `Gamma(0)`), and an absent
 operand still gives `NaN` (`Missing + 2`, `Length(Missing)`). The design
 and the list of switched producers are in
 `docs/plans/2026-09-28-indeterminate-value.md`.

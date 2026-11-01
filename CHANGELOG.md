@@ -154,6 +154,11 @@
 
 ### Behavior Changes
 
+- **A power of a float and an infinity whose value is 0 is now the float
+  `0`**, as `2.5/∞` already was. For example, `0.5^∞` was the exact `0` and
+  is now `0.0`, and `∞^{-2.5}` was `0` and is now `0.0`. With exact operands
+  the result stays the exact `0`: `(1/2)^∞` and `3^{-∞}` are `0`.
+
 - **A compiled `Loop` whose value is used falls back to the interpreter.** The
   value of a loop is `Nothing`, or the value of a `Break(v)`, and compiled
   code has no form for either. Before, `compile()` of
@@ -362,6 +367,20 @@
   call; `F.floor(x)` calls the member.
 
 ### Bug Fixes
+
+- **A variable raised to an infinity is no longer folded with a value it may
+  not have.** With `z` declared `real`, `z^∞` was `0`, and `z^∞` with `z`
+  replaced by `2` stayed `0`; it now stays `z^∞` and gives `+∞` for `z = 2`.
+  With `x := 0.5`, `x^∞` was folded to `0` when it was boxed and stayed `0`
+  after `x := 2.5`; it now evaluates to `0.0`, then to `+∞`. A float base
+  computed during evaluation, such as `(z + 0.5)^∞` with `z = 2`, now gives
+  `+∞` instead of `NaN`.
+
+- **A number base near 1 raised to an infinity gives its limit.** The base is
+  compared with 1 by its exact value. `1.00000000001^∞` and
+  `1.000000000000000000001^∞` were `0` and are now `+∞`;
+  `0.99999999999^{-∞}` was `0` and is now `+∞`. Under `N()`,
+  `(1 + 10^{-30})^∞` was `NaN` and is now `+∞`.
 
 - **The derivative of a function literal no longer reads the value of a
   variable that has the name of its parameter, and its application to a list

@@ -160,7 +160,8 @@ function complexBaseAtInfiniteExponent(
     // The literal itself is finite — the caller handles infinite operands
     // — so a non-finite double read means an exact component OVERFLOWED
     // the double range: the modulus is far above 1.
-    if (a.isFinite === true) return expPositive ? ce.ComplexInfinity : ce.Zero;
+    if (a.isFinite === true)
+      return expPositive ? ce.ComplexInfinity : zeroOfInfiniteFold(ce, a);
     return undefined;
   }
   const m2 = a.re * a.re + a.im * a.im;
@@ -178,8 +179,10 @@ function complexBaseAtInfiniteExponent(
   } else if (Math.abs(m2 - 1) < 1e-12) {
     return ce.NaN;
   }
-  if (m2 > 1) return expPositive ? ce.ComplexInfinity : ce.Zero;
-  if (m2 < 1) return expPositive ? ce.Zero : ce.ComplexInfinity;
+  if (m2 > 1)
+    return expPositive ? ce.ComplexInfinity : zeroOfInfiniteFold(ce, a);
+  if (m2 < 1)
+    return expPositive ? zeroOfInfiniteFold(ce, a) : ce.ComplexInfinity;
   // Unreachable: every m2 === 1 case was answered by an arm above.
   return undefined;
 }
@@ -204,6 +207,70 @@ function isExactLiteral(x: Expression, n: number): boolean {
 function isExactInteger(x: Expression): boolean {
   if (x.isInteger !== true) return false;
   return !isNumber(x) || x.isExact;
+}
+
+/**
+ * The `0` that a fold of `a^b` with an infinite base or exponent answers
+ * (`0.5^∞`, `2.5^{-∞}`, `∞^{-2.5}`, `(0.5 + 0.5i)^∞`): the float `0` when an
+ * operand in `ops` is a float, and the exact `0` otherwise (`(1/2)^∞`,
+ * `3^{-∞}`). A float operand
+ * makes a numeric result a float, as `Divide(2.5, ∞)` is the float `0`. The
+ * infinities are exact, so only the finite operand can be a float.
+ */
+/**
+ * True if the value of `a` cannot change: a number literal, a constant
+ * symbol (`Pi`, `ExponentialE`, a symbol declared constant) or the negation
+ * of one. A canonical form can fold on the value of such an expression. A
+ * variable (`x`, also one with a value or with assumptions) can be assigned
+ * again, so a fold on its value belongs to `evaluate()`.
+ */
+function hasFixedValue(a: Expression): boolean {
+  if (isNumber(a)) return true;
+  if (isSymbol(a)) return a.isConstant;
+  if (isFunction(a, 'Negate')) return hasFixedValue(a.op1);
+  return false;
+}
+
+/**
+ * The order of the real value of `a` against `n` (`-1`, `0` or `1`), or
+ * `undefined` when it is not known. A number literal is compared by its
+ * exact numeric value, with no tolerance: `0.99999999999` is less than 1, and
+ * a float with more digits than a double (`1.000000000000000000001`) is
+ * greater than 1. Another expression (a constant such as `Pi`) is compared
+ * with `isGreater()` and `isLess()`.
+ */
+function compareWithUnit(a: Expression, n: -1 | 0 | 1): -1 | 0 | 1 | undefined {
+  if (isNumber(a)) {
+    const v = a.numericValue;
+    if (typeof v === 'number') {
+      if (Number.isNaN(v)) return undefined;
+      return v < n ? -1 : v > n ? 1 : 0;
+    }
+    if (v.isComplex || v.isNaN) return undefined;
+    if (v.gt(n) === true) return 1;
+    if (v.lt(n) === true) return -1;
+    return v.eq(n) ? 0 : undefined;
+  }
+  if (a.isGreater(n) === true) return 1;
+  if (a.isLess(n) === true) return -1;
+  return undefined;
+}
+
+/** True if `exp` is `+∞` or `−∞` (not `~oo`), as a double or a literal. */
+function isSignedInfiniteExponent(exp: number | Expression): boolean {
+  if (typeof exp === 'number') return exp === Infinity || exp === -Infinity;
+  return (
+    isNumber(exp) &&
+    exp.isInfinity === true &&
+    (exp.isPositive === true || exp.isNegative === true)
+  );
+}
+
+function zeroOfInfiniteFold(
+  ce: Expression['engine'],
+  ...ops: Expression[]
+): Expression {
+  return hasFloatOperand(ops) ? asFloat(ce.Zero) : ce.Zero;
 }
 
 function isSqrt(expr: Expression): boolean {
@@ -447,7 +514,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
     if (b.isInfinity) {
       // 0^∞ = 0 (because for all complex numbers z near 0, z^∞ -> 0).
-      if (b.isPositive) return ce.Zero; // 0^∞ = 0
+      if (b.isPositive) return zeroOfInfiniteFold(ce, a, b); // 0^∞ = 0
       // 0^-∞ = ~∞
       if (b.isNegative) return ce.ComplexInfinity;
       // A `~oo` exponent is off-carrier for `Power` (ruled 2026-09-01: no
@@ -564,6 +631,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (a.isSame(-1) || a.isSame(1))
         return indeterminateFormAnswer(ce, [a, b]);
 
+      // The folds below read the value of the base. A canonical form must
+      // not depend on a value that can change, so a base that is not a
+      // number literal or a constant (`x` with `x := 0.5`) stays unfolded,
+      // and `evaluate()` folds it with the value of that moment.
+      if (!hasFixedValue(a)) return unchanged();
+
       // An infinite base: (+∞)^∞ = +∞, because the DIRECTION is known —
       // nⁿ grows through +∞ (10¹⁰, 100¹⁰⁰ = 10²⁰⁰, 1000¹⁰⁰⁰ overflows the
       // double range), never changing sign. (-∞)^∞ and (~∞)^∞ keep the
@@ -577,11 +650,17 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (isNumber(a) && a.isNaN) return nanOperandAnswer(ce, [a, b]);
 
       //↓numeric-expr. bases included: e.g. '{2+3}^oo'
+      // A comparison that is not known (`undefined`) does not fold: the
+      // base is then not known to be in the interval of the fold.
       if (a.isExtendedReal) {
-        if (a.isGreater(1)) return ce.PositiveInfinity;
-        if (a.isLess(-1)) return ce.ComplexInfinity;
-        // Must be '-1 < a < 1', excluding zero
-        return ce.Zero;
+        const vsOne = compareWithUnit(a, 1);
+        if (vsOne === 1) return ce.PositiveInfinity;
+        const vsMinusOne = compareWithUnit(a, -1);
+        if (vsMinusOne === -1) return ce.ComplexInfinity;
+        // '-1 < a < 1', excluding zero
+        if (vsMinusOne === 1 && vsOne === -1)
+          return zeroOfInfiniteFold(ce, a, b);
+        return unchanged();
       }
 
       // A non-real literal base is decided by its modulus (ruled
@@ -608,15 +687,29 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // (-1)^-∞ = Indeterminate, and the float `1.0^-∞` is `NaN`, as for +∞.
       if (a.isSame(-1) || a.isSame(1))
         return indeterminateFormAnswer(ce, [a, b]);
+
+      // As for +∞: the folds below read the value of the base, so a base
+      // that is not a number literal or a constant stays unfolded.
+      if (!hasFixedValue(a)) return unchanged();
+
       //Same result for all infinity types...
       if (a.isInfinity) return ce.Zero;
 
       if (isNumber(a) && a.isNaN) return nanOperandAnswer(ce, [a, b]);
 
+      // A comparison that is not known (`undefined`) does not fold.
       if (a.isExtendedReal) {
-        if (a.isGreater(0)) return a.isLess(1) ? ce.PositiveInfinity : ce.Zero;
-        // Must be < 0
-        return a.isGreater(-1) ? ce.ComplexInfinity : ce.Zero;
+        const vsZero = compareWithUnit(a, 0);
+        if (vsZero === 1) {
+          const vsOne = compareWithUnit(a, 1);
+          if (vsOne === -1) return ce.PositiveInfinity;
+          if (vsOne === 1) return zeroOfInfiniteFold(ce, a, b);
+        } else if (vsZero === -1) {
+          const vsMinusOne = compareWithUnit(a, -1);
+          if (vsMinusOne === 1) return ce.ComplexInfinity;
+          if (vsMinusOne === -1) return zeroOfInfiniteFold(ce, a, b);
+        }
+        return unchanged();
       }
       // Non-real literal base: the mirror of the +∞ arm above —
       // a^(−∞) = (1/a)^∞, so |a| > 1 gives 0 and |a| < 1 gives `~oo`.
@@ -640,7 +733,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // Special handling for NegativeInfinity with integer/rational exponents
     if (a.isNegative) {
       // (-inf)^n for negative exponents -> 0
-      if (b.isNegative === true) return ce.Zero;
+      if (b.isNegative === true) return zeroOfInfiniteFold(ce, a, b);
 
       // (-inf)^n for positive integer n
       if (b.isInteger === true) {
@@ -676,7 +769,8 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // PositiveInfinity^b for real b
     if (a.isPositive) {
       if (b.isPositive === true) return ce.PositiveInfinity; // +inf^positive -> +inf
-      if (b.isNegative === true) return ce.Zero; // +inf^negative -> 0
+      // +inf^negative -> 0
+      if (b.isNegative === true) return zeroOfInfiniteFold(ce, a, b);
     }
 
     // If the exponent is pure imaginary, the result is NaN
@@ -688,7 +782,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // symbol must not be folded into a canonical form.
     if (isNumber(b) && b.type.matches('complex') && !isNaN(b.re)) {
       if (b.re > 0) return ce.ComplexInfinity;
-      if (b.re < 0) return ce.Zero;
+      if (b.re < 0) return zeroOfInfiniteFold(ce, a, b);
     }
   }
 
@@ -1439,9 +1533,14 @@ export function pow(
   if (unit !== undefined) return unit;
 
   //
-  // If a numeric approximation is requested, we try to evaluate the expression
+  // If a numeric approximation is requested, we try to evaluate the expression.
+  // A signed infinite exponent is not: the value is a limit, which the folds
+  // of `canonicalPower()` below give (`0.5^∞` is the float `0`, `2.5^∞` is
+  // `+∞`), and the numeric kernels compute `exp(∞·ln x)`, which is `NaN`. A
+  // base that is a variable reaches this point with its value when the power
+  // is evaluated (`x^∞` with `x := 0.5`).
   //
-  if (numericApproximation) {
+  if (numericApproximation && !isSignedInfiniteExponent(exp)) {
     // 0^0 is indeterminate → NaN, matching the exact canonical fold
     // (`canonicalPower` returns NaN for a literal 0^0). Under `.N()` a
     // value-bound-symbol base/exponent (x=0, y=0) is pre-numericized to

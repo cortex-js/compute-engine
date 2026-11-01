@@ -493,10 +493,11 @@ describe('CANONICAL FORMS', () => {
         canonForms = 0
         canonical  = 0
       `);
+      // A float base gives the float `0`, as `0.3/∞` does.
       expect(checkPower('0.3^\\infty')).toMatchInlineSnapshot(`
         box        = ["Power", 0.3, "PositiveInfinity"]
-        canonForms = 0
-        canonical  = 0
+        canonForms = {num: "0.0"}
+        canonical  = {num: "0.0"}
       `);
       expect(checkPower('1^\\infty')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "PositiveInfinity"]

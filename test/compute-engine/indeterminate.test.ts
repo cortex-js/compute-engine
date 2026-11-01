@@ -1528,6 +1528,17 @@ describe('INDETERMINATE — the producers: review round', () => {
         ['Add', 'PositiveInfinity', { num: '0.5' }],
       ]).toString()
     ).toBe('Indeterminate');
+    // `2.5^∞` and `2.5·∞` are the exact `∞` when they are built: an
+    // infinity is exact, and no float infinity exists.
+    expect(
+      box(['Fract', ['Power', { num: '2.5' }, 'PositiveInfinity']]).toString()
+    ).toBe('Indeterminate');
+    expect(
+      box([
+        'Fract',
+        ['Multiply', { num: '2.5' }, 'PositiveInfinity'],
+      ]).toString()
+    ).toBe('Indeterminate');
   });
 });
 
