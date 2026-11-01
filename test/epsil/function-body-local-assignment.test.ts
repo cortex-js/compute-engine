@@ -1420,9 +1420,13 @@ describe('COMPILED CODE CHECKS A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', ()
     );
     const js = compile(fn, { to: 'javascript', fallback: false } as never)!;
     expect(() => js.run!(3 as never)).toThrow(/read-before-declaration/);
+    // The interval result of a function literal is called with its
+    // arguments (`calling: 'lambda'`). An error in the run, here the read
+    // before any assignment, gives `{ kind: 'entire' }`: the interval target
+    // answers "cannot bound" for an error, as for a call with a vars object.
     const ia = compile(fn, { to: 'interval-js', fallback: false } as never)!;
-    const iaFn = (ia.run as unknown as () => (x: unknown) => unknown)();
-    expect(() => iaFn({ lo: 3, hi: 3 })).toThrow(/read-before-declaration/);
+    expect(ia.calling).toBe('lambda');
+    expect(ia.run!({ lo: 3, hi: 3 } as never)).toEqual({ kind: 'entire' });
   });
 
   test('interval-js: a read after a loop that runs', () => {
@@ -1436,8 +1440,8 @@ describe('COMPILED CODE CHECKS A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', ()
       't',
     ]);
     const ia = compile(fn, { to: 'interval-js', fallback: false } as never)!;
-    const iaFn = (ia.run as unknown as () => (x: unknown) => unknown)();
-    expect(iaFn({ lo: 3, hi: 3 })).toEqual({
+    expect(ia.calling).toBe('lambda');
+    expect(ia.run!({ lo: 3, hi: 3 } as never)).toEqual({
       kind: 'interval',
       value: { lo: 9, hi: 9 },
     });
