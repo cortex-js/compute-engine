@@ -24,6 +24,7 @@ import {
   functionResult,
   isNonRealNumber,
   resolveTypeAlias,
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import {
@@ -71,6 +72,7 @@ import {
   collectionAtExpressionParameter,
   expressionParameterDecline,
   expressionParameterReadAt,
+  isNominalAtomicArg,
   paramElementTypeIsOpen,
   admitsAbsentAtMappedLevel,
   provablyScalarOrFramedScalar,
@@ -154,6 +156,36 @@ export function hasUniformComplexScalarElements(a: Expression): boolean {
   if (isNonRealNumber(elt)) return true;
   if (!isSubtype(elt, 'number')) return false;
   return uniformElementComplexness(a) === true;
+}
+
+/**
+ * Are the scalars that a call with scalar parameters reaches in the
+ * collection `a` complex? The call maps over every list level of its
+ * argument (`_SYS.mapFn`), so for `list<list<complex>>` it hands the body
+ * one complex number per call, although the elements of the outer list are
+ * lists. `type` is the static type of `a` at the call site
+ * (`staticTypeOf()`), which can be more precise than the type of `a`.
+ * The element type is read at each depth of nesting until it is a number
+ * type: a non-real number type (`complex`) answers `true`, and a real one
+ * answers `false`. Failing that, the identifiable elements of a collection
+ * of numbers answer (`hasUniformComplexScalarElements`, e.g. the literal
+ * `[w, 2w]`). A type with no known element type answers `false`. The depth
+ * is bounded, so a type alias that refers to itself cannot make the walk
+ * loop.
+ */
+function hasComplexBroadcastLeaves(a: Expression, type: Type): boolean {
+  if (hasUniformComplexScalarElements(a)) return true;
+  let t: Type | undefined = collectionElementType(
+    resolveTypeForCompilation(type)
+  );
+  if (t === 'any' || t === 'unknown') return false;
+  for (let depth = 0; depth < 32 && t !== undefined; depth++) {
+    if (isNonRealNumber(t)) return true;
+    if (isSubtype(t, 'number')) return false;
+    t = collectionElementType(t);
+    if (t === 'any' || t === 'unknown') return false;
+  }
+  return false;
 }
 
 /**
@@ -383,10 +415,10 @@ export function checkingShimTests(
  * The first argument position at which a call of the single-literal user
  * function `h` (literal `literal`) with `args` is a strict-mode lane
  * mismatch, or `-1`: the argument is complex-shaped — a complex-valued
- * SCALAR (`provablyScalarOrFramedScalar`), or, to scalar parameters that
- * the call broadcasts over, a collection whose elements are all complex
- * scalars (`hasUniformComplexScalarElements`: the runtime broadcast hands
- * the body one complex element per call) — and the parameter is NOT
+ * SCALAR, or, to scalar parameters that the call maps over, a collection
+ * whose scalar leaves, at any depth of nesting, are all complex
+ * (`hasComplexBroadcastLeaves`: the static map hands the body one complex
+ * leaf per call) — and the parameter is NOT
  * declared a non-real number type. An argument that is neither provably a
  * scalar nor a uniformly-complex collection is not a mismatch (a mixed list
  * has no one shape; its elements are handled per element).
@@ -415,25 +447,150 @@ export function laneMismatchAt(
   h: string,
   literal: Expression & FunctionInterface,
   args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
   inlined = false
 ): number {
-  const nParams = literal.ops.length - 1;
+  return complexShapedArgumentMismatchAt(
+    args,
+    target,
+    literal.ops.length - 1,
+    userFunctionParamsAreScalar(engine, h),
+    (i) => {
+      const pt = userFunctionParamType(engine, h, i);
+      return pt !== undefined && isNonRealNumber(pt);
+    },
+    inlined
+      ? undefined
+      : (i, a) => pointLaneMismatch(a, userFunctionParamType(engine, h, i))
+  );
+}
+
+/**
+ * The first argument position at which an `Apply` of the function literal
+ * `literal` to `args` is a strict-mode lane mismatch, or `-1`. This is the
+ * rule of `laneMismatchAt` for a literal that is applied in place:
+ * `complexParam[i]` tells whether the lowering of the literal puts
+ * parameter `i` in the complex lane. When it does not, the body of the
+ * literal is compiled in the real lane, and a complex-shaped argument
+ * (a `{ re, im }` object) would reach a body that reads it as a number:
+ * `Apply(x ↦ 2x, √y)` with `y = -4` would give `NaN`, where the
+ * interpreter gives `4i`.
+ *
+ * An argument that is a collection is complex-shaped only
+ * when every parameter of the literal is a scalar (the emitted call then
+ * maps over the collection, at every depth of nesting, and hands the body
+ * one scalar at a time) and every such scalar is complex.
+ *
+ * `paramType[i]` is the declared type of parameter `i` (its annotation, or
+ * else the declared signature of the literal), or `undefined` when it has
+ * none. A parameter declared with a type that is not a scalar number type
+ * gets the position-by-position test of `pointLaneMismatch()`, as for a
+ * named function: with `P: tuple<complex, real>`, the literal
+ * `(p: tuple<number, real>) ↦ p[1] + 1` reads `p[1]` in the real lane, and
+ * `Apply` of it to `P` gave the string "[object Object]1", where the
+ * interpreter gives `2 + i`. A parameter declared
+ * `tuple<complex, real>` takes the same `P` with no mismatch.
+ */
+export function appliedLiteralLaneMismatchAt(
+  literal: Expression & FunctionInterface,
+  args: ReadonlyArray<Expression>,
+  complexParam: ReadonlyArray<boolean>,
+  paramType: ReadonlyArray<Type | undefined>,
+  target: CompileTarget<Expression>
+): number {
+  return complexShapedArgumentMismatchAt(
+    args,
+    target,
+    literal.ops.length - 1,
+    paramsAreScalar(literal.type.type),
+    (i) => complexParam[i] === true,
+    (i, a) => pointLaneMismatch(a, paramType[i])
+  );
+}
+
+/**
+ * The first position `i` (below `nParams`) at which argument `args[i]` is
+ * complex-shaped and parameter `i` is not in the complex lane
+ * (`paramIsComplex(i)` is false), or `-1`. An argument is complex-shaped
+ * when it is a scalar that can be complex-valued, or, when every parameter
+ * is a scalar (`scalarParams`), a collection whose scalar leaves are all
+ * complex (`hasComplexBroadcastLeaves`: the static map of the call hands
+ * the body one complex leaf per call). Any other argument is not a
+ * mismatch: a mixed list has no one shape, and its elements are handled one
+ * at a time.
+ *
+ * A point (`isTuple()`) and a value of a nominal type
+ * (`isNominalAtomicArg()`) are passed whole, as the emitted call passes
+ * them (`callArgumentMapRank()` is 0 for them), and are not read as a
+ * collection that the call maps over. A point is complex-shaped when one
+ * of its coordinates can be complex (`pointMayHoldComplex()`): no lane of
+ * a parameter holds such a point, since the real lane reads its
+ * coordinates as real numbers and the complex lane holds one `{ re, im }`
+ * value. With `y: real`, `Apply(t ↦ 2t, (y + i, 1))` is such a case. A
+ * parameter that binds a collection whole (`scalarParams` is false) is
+ * compiled for the type of its value, and is not checked here.
+ *
+ * The shape of an argument is read from its static type at the call site
+ * (`staticTypeOf()`), the type that selects the form of the emitted call
+ * (`callArgumentMapRank()`), and a symbol that a frame records as a scalar
+ * is a scalar (`provablyScalarOrFramedScalar()`). The type of the argument
+ * alone is not enough: with `g: (real) -> any` assigned
+ * `u ↦ Block(w ≔ u + i, w)`, the call `g(y)` has the type `any`, but the
+ * variant of `g` for a real argument gives a number, so the call is
+ * emitted as a direct call and its `{ re, im }` value reaches the body.
+ *
+ * The named-function rule (`laneMismatchAt`) and the function-literal
+ * rule (`appliedLiteralLaneMismatchAt`) both use this function, so that
+ * they decide in the same way.
+ *
+ * `positionTest`, when given, runs first for each argument: `true` is a
+ * mismatch, `false` is no mismatch, and `undefined` leaves the argument
+ * to the tests above. Both rules pass the position-by-position test of a
+ * parameter that is not a scalar number type (`pointLaneMismatch()`).
+ */
+function complexShapedArgumentMismatchAt(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  nParams: number,
+  scalarParams: boolean,
+  paramIsComplex: (i: number) => boolean,
+  positionTest?: (i: number, a: Expression) => boolean | undefined
+): number {
   for (let i = 0; i < nParams; i++) {
     const a = args[i];
     if (a === undefined) continue;
-    const declared = userFunctionParamType(engine, h, i);
-    const point = inlined ? undefined : pointLaneMismatch(a, declared);
-    if (point === true) return i;
-    if (point === false) continue;
+    const position = positionTest?.(i, a);
+    if (position === true) return i;
+    if (position === false) continue;
+    const type = core.staticTypeOf(a, target);
     let complex: boolean;
-    if (provablyScalarOrFramedScalar(a)) complex = core.isComplexValued(a);
-    else if (userFunctionParamsAreScalar(engine, h))
-      complex = hasUniformComplexScalarElements(a);
+    if (isTuple(a)) {
+      if (scalarParams && pointMayHoldComplex(a, type)) return i;
+      continue;
+    }
+    if (isNominalAtomicArg(a)) complex = false;
+    else if (provablyScalarOrFramedScalar(a) || isScalarShaped(type))
+      complex = core.isComplexValued(a);
+    else if (scalarParams) complex = hasComplexBroadcastLeaves(a, type);
     else complex = false;
-    if (!complex) continue;
-    if (declared === undefined || !isNonRealNumber(declared)) return i;
+    if (complex && !paramIsComplex(i)) return i;
   }
   return -1;
+}
+
+/**
+ * Can a coordinate of the point `a` be complex? For a point written out
+ * (`Tuple` or `PointList`), each coordinate is read on its own lane
+ * (`isComplexValued`). For any other point, a coordinate type that is a
+ * non-real number type (`complex`) answers `true`. `type` is the static
+ * type of `a` at the call site (`staticTypeOf()`).
+ */
+function pointMayHoldComplex(a: Expression, type: Type): boolean {
+  if (isFunction(a, 'Tuple') || isFunction(a, 'PointList'))
+    return a.ops.some((c) => core.isComplexValued(c));
+  const t = resolveTypeForCompilation(type);
+  if (typeof t !== 'object' || t.kind !== 'tuple') return false;
+  return t.elements.some((e) => isNonRealNumber(e.type));
 }
 
 /**

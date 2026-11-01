@@ -5310,14 +5310,15 @@ export const SYS_HELPERS = {
     return v;
   },
   // --- Lazy infinite-collection streams ---------------------------------
-  // A STATICALLY infinite collection (`Range(1, ∞)` and the Map/Filter/Drop/
-  // Rest pipeline over it) has no array representation, so it compiles to a
-  // lazy iterator instead, materialized by a bounding consumer
-  // (`takeIter`/`takeWhileIter`). These helpers are emitted ONLY by
-  // `emitLazyStream` — the eager collection lowering never produces or
-  // consumes them, and an infinite pipeline that never reaches `Take`/
-  // `TakeWhile` fails closed at compile time (see the `Range` handler and
-  // `collArg`). Only the two non-scanning helpers live here; the four
+  // A STATICALLY infinite collection (`Range(1, ∞)`, `Iterate`, and the
+  // Map/Filter/Drop/Rest pipeline over one) has no array representation, so
+  // it compiles to a lazy iterator instead, materialized by a bounding
+  // consumer (`takeIter`/`takeWhileIter`) or read at one position
+  // (`nthIter`, for `First` and `At`). These helpers are emitted ONLY by
+  // `emitLazyStream` and those consumers — the eager collection lowering
+  // never produces or consumes them, and an infinite pipeline that never
+  // reaches such a consumer fails closed at compile time (see the `Range`
+  // handler and `collArg`). Only the non-scanning helpers live here; the four
   // SCANNING helpers (`filterIter`/`dropIter`/`takeIter`/`takeWhileIter`)
   // need the owning engine's iteration limit, so they are bound per compiled
   // artifact by `makeLazyStreamHelpers(ce)` below, like the random helpers.
@@ -5329,6 +5330,27 @@ export const SYS_HELPERS = {
     f: (x: unknown) => unknown
   ): Generator<unknown> {
     for (const x of it) yield f(x);
+  },
+  // `Iterate(f, initial)`: element `k` is `f(k, element(k - 1))` when
+  // `indexed`, else `f(element(k - 1))`, with `element(0)` the initial value,
+  // which is not itself an element.
+  iterateIter: function* (
+    f: (...args: unknown[]) => unknown,
+    initial: unknown,
+    indexed: boolean
+  ): Generator<unknown> {
+    let acc = initial;
+    for (let k = 1; ; k++) {
+      acc = indexed ? f(k, acc) : f(acc);
+      yield acc;
+    }
+  },
+  // The element at the 1-based position `k` of a stream, for a constant
+  // positive integer `k` (`First` and `At` over an infinite collection).
+  nthIter: (it: Iterable<unknown>, k: number): unknown => {
+    let i = 0;
+    for (const x of it) if (++i === k) return x;
+    return undefined;
   },
   // NOTE: the random helpers (`drawNextRandomNumber`, `withRandomSeed`, the
   // `domain*` descriptor builders, `randomPick`/`randomChoice`/

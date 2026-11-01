@@ -639,6 +639,31 @@ describe('COMPILED PARAMETER DEFAULTS: ARGUMENT COUNT AND DEFINITIONS', () => {
   });
 });
 
+describe('COMPILED PARAMETER DEFAULTS: SORT, ITERATE AND PIPE', () => {
+  const ce = new ComputeEngine();
+  ce.declare('y', 'real');
+
+  test('`Sort` reads a literal with a default as a unary key', () => {
+    // `k` is not supplied: the key is `-x`, and the sort is descending.
+    const sort = ['Sort', ['List', 3, 'y', 2], defaulted(-1)];
+    expect(interpretedValues(ce, sort, { y: 5 })).toEqual([5, 3, 2]);
+    expect(run(ce, sort, 'javascript', { y: 5 }).value).toEqual([5, 3, 2]);
+    expect(run(ce, sort, 'javascript', { y: 0 }).value).toEqual([3, 2, 0]);
+  });
+
+  test('`Iterate` calls a literal with a default with the previous value only', () => {
+    const take = ['Take', ['Iterate', defaulted(2, ['Add', 'x', 'k']), 'y'], 3];
+    expect(interpretedValues(ce, take, { y: 1 })).toEqual([3, 5, 7]);
+    expect(run(ce, take, 'javascript', { y: 1 }).value).toEqual([3, 5, 7]);
+  });
+
+  test('a `Pipe` stage with a callback with a default', () => {
+    const pipe = ['Pipe', ['List', 1, 'y'], ['Map', defaulted(2)]];
+    expect(interpretedValues(ce, pipe, { y: 5 })).toEqual([2, 10]);
+    expect(run(ce, pipe, 'javascript', { y: 5 }).value).toEqual([2, 10]);
+  });
+});
+
 /** The JSON value that the Python program `lines` prints (`json` is
  * imported). */
 function runPython(python: string, lines: string[]): unknown {

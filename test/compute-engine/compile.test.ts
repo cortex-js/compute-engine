@@ -3511,19 +3511,24 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ]);
   });
 
-  it('a custom Sort comparator fails closed', () => {
+  it('a custom Sort comparator compiles and agrees with the interpreter', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
-    expect(() =>
-      js.compile(
-        e.box(['Sort', 'd', ['Function', ['Subtract', 'b', 'a'], 'a', 'b']]),
-        // `constantFold: false`: `d` is an assigned literal list, so the
-        // whole `Sort` is a constant subtree that compile-time folding would
-        // otherwise evaluate and emit as a literal, never reaching the
-        // custom-comparator refusal under test.
-        { constantFold: false }
-      )
-    ).toThrow(/Could not compile/);
+    const expr = e.box([
+      'Sort',
+      'd',
+      ['Function', ['Subtract', 'b', 'a'], 'a', 'b'],
+    ]);
+    const fn = js.compile(
+      expr,
+      // `constantFold: false`: `d` is an assigned literal list, so the
+      // whole `Sort` is a constant subtree that compile-time folding would
+      // otherwise evaluate and emit as a literal, never reaching the
+      // comparator lowering under test.
+      { constantFold: false }
+    );
+    expect(expr.evaluate().toString()).toBe('[30,20,10]');
+    expect(fn.run!({})).toEqual([30, 20, 10]);
   });
 
   it('a non-indexed / non-collection operand fails closed', () => {

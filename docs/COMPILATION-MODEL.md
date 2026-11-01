@@ -1519,15 +1519,48 @@ form) for a number, `undefined` for a point or a string. A value that may be
 either a list or a point at run time declines.
 
 An infinite collection compiles on the JavaScript target only under a
-bounding consumer, `Take` or `TakeWhile`. A `Range` with an infinite literal
-end, and a `Map`, `Filter`, `Drop` or `Rest` pipeline over one, lowers to lazy
-iterators (`_SYS.rangeIter`, `_SYS.mapIter`, …) under that consumer; every
-other consumer declines with "bound it with `Take` or `TakeWhile`". A finite
+bounding consumer: `Take`, `TakeWhile`, or `First` and `At` with a constant
+positive integer index. A `Range` with an infinite literal end and a `Map`,
+`Filter`, `Drop` or `Rest` pipeline over one, and an `Iterate` with a
+`Drop` or `Rest` pipeline over it, lower to lazy iterators
+(`_SYS.rangeIter`, `_SYS.iterateIter`, `_SYS.mapIter`, …) under that
+consumer; every other consumer declines with "bound it with `Take` or
+`TakeWhile`". A `Map` or a `Filter` over an `Iterate` declines: the check
+of the omitted elements of the stage reads the type of the `Iterate`, a
+`list` with no element type. `At` with another index declines: the
+interpreter answers `Missing` for an `Iterate` and `NaN` for a `Range`
+there. An `Iterate` compiles only for a sequence of real numbers with an
+initial value: the initial value and the result of the function must be real
+numbers that cannot be absent, so that the accumulator has one shape at every
+step. The function must be pure: the interpreter computes the elements before
+a position again for each read, so the effects of a function that is not pure
+would run more often there than in the compiled stream. A finite
 collection keeps its eager array lowering. `DropWhile` over an infinite source
 declines, because the interpreter leaves it unevaluated. In
 `javascript-target.ts`, `isLazyStream` decides which operands take the lazy
 lowering and `emitLazyStream` writes it, so the two must accept exactly the
 same shapes.
+
+`Sort` with an ordering function compiles on the JavaScript target
+(`compileJSSortWithCallback`). As in the interpreter, a function whose type
+says it takes one argument is a sort key, and any other function is a
+comparator. A sort key compiles when its result is a real number; a comparator
+compiles when its result is a boolean or a number, and its elements are real
+numbers or values that cannot be numbers. A result that can compile to a
+complex value (`x ↦ √x`) declines. The compiled sort orders the positions of
+the elements with `Array.prototype.sort`, as the interpreter does, so the two
+routes ask the same comparisons in the same order.
+
+`Pipe(x, stage)` compiles on the JavaScript and Python targets as the
+expression that it evaluates (`pipeApplication`): a call that is missing one
+argument receives `x` in the slot that the interpreter selects
+(`Pipe(xs, Map(f))` is `Map(f, xs)`), a function literal with one parameter is
+applied to `x`, and the name of an operator is called with `x`. A call with
+its own slots is lifted to a function literal whose parameters are the slots
+(`Pipe(L, Take(_, 2))` is `Apply(_1 ↦ Take(_1, 2), L)`). Any other stage
+declines, and so does a call stage whose piped value is itself a `Pipe` when
+the static type of the inner pipe does not settle the slot: the interpreter
+selects the slot from the type of the value of the inner pipe.
 
 Two analyses decide whether an operand can be an array at run time on the
 JavaScript target, and they are separate code. The comparison and connective

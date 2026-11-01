@@ -188,14 +188,39 @@ describe('SORT AND ORDERING PUT NaN LAST ON EVERY ROUTE', () => {
     expect(r.toString()).toBe('[2,1,0,0]');
   });
 
-  test('a function operand still fails closed on the JavaScript route', () => {
+  test('a function operand of `Ordering` still fails closed on the JavaScript route', () => {
     const js = new JavaScriptTarget();
-    for (const op of ['Sort', 'Ordering'])
-      expect(() =>
-        js.compile(ce.box([op, 'xs', ['Function', ['Negate', 'x'], 'x']]), {
+    expect(() =>
+      js.compile(
+        ce.box(['Ordering', 'xs', ['Function', ['Negate', 'x'], 'x']]),
+        {
           constantFold: false,
-        })
-      ).toThrow(/Could not compile/);
+        }
+      )
+    ).toThrow(/Could not compile/);
+  });
+
+  test('a compiled `Sort` with a key or a comparator puts NaN last', () => {
+    const xs = [3, NaN, 1, 2, NaN];
+    const negate = ['Function', ['Negate', 'x'], 'x'];
+    const descending = ['Function', ['Subtract', 'b', 'a'], 'a', 'b'];
+    for (const fn of [negate, descending]) {
+      const r = compile(ce.box(['Sort', 'xs', fn]), { fallback: false })!;
+      expect(r.success).toBe(true);
+      expect(r.run!({ xs })).toEqual([3, 2, 1, NaN, NaN]);
+      expect(interpret(['Sort', ['List', ...xs.map(toMathJson)], fn])).toEqual([
+        3,
+        2,
+        1,
+        NaN,
+        NaN,
+      ]);
+    }
+    // A key that is NaN for a non-NaN element puts that element last.
+    const nanKey = ['Function', ['If', ['Equal', 'x', 0], 'NaN', 0], 'x'];
+    const r = compile(ce.box(['Sort', 'xs', nanKey]), { fallback: false })!;
+    expect(r.success).toBe(true);
+    expect(r.run!({ xs: [0, 2, 1, 0] })).toEqual([2, 1, 0, 0]);
   });
 });
 

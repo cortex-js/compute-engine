@@ -83,8 +83,14 @@ import {
   functionLiteralBoundNames,
   functionLiteralParameterName,
   functionLiteralParameterType,
+  freeAnonymousSlots,
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
+import {
+  canonicalFunctionLiteral,
+  canonicalWithFreshPlaceholders,
+} from '../function-utils.js';
+import { ascribeDeclaredParameterTypes } from '../engine-declarations.js';
 import {
   provableApplicationKind,
   provableTopLevelKind,
@@ -116,6 +122,8 @@ import {
   isNonRealNumber,
   isPointElementType,
   resolveTypeAlias,
+  requiredArity,
+  signatureArms,
   // The compiled lanes read the open form of a broadcast over an operand
   // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
@@ -595,7 +603,8 @@ import {
   isShippableCode,
   type BroadcastAsyncSpec,
 } from '../kernel-pool.js';
-import { literalParamsMap } from '../library/core.js';
+import { literalParamsMap, pipeStageAsCall } from '../library/core.js';
+import { freeTypeVariables } from '../../common/type/instantiate.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
@@ -5127,7 +5136,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // sequence only the base letter, where the interpreter yields the whole
   // grapheme cluster (`docs/STRING_ROADMAP.md`,
   // decision D13).
-  First: (args, compile) => compileNthElement(args[0], 0, compile),
+  // An infinite collection that compiles as a lazy stream (`isLazyStream`)
+  // is read through the stream: its first element is computed, and no other.
+  First: (args, compile, target) =>
+    isLazyStream(args[0])
+      ? lazyStreamElement(args[0]!, 1, compile, target)
+      : compileNthElement(args[0], 0, compile),
   Floor: (args, compile, target) => {
     if (args.length > 1 && args[1] !== null)
       return jsRoundToStep('floorStep', args[0], args[1], compile);
@@ -5377,6 +5391,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `compiler rewrites a chained access \`At(x, i, j)\` to the nested ` +
           `access \`At(At(x, i), j)\` before it calls this lowering.`
       );
+    // An infinite collection that compiles as a lazy stream (`isLazyStream`)
+    // is read through the stream, at a constant positive integer index only.
+    // Another index has no element in the interpreter, which answers
+    // `Missing` for an `Iterate` and `NaN` for a `Range`; the compiled code
+    // does not reproduce that difference.
+    if (isLazyStream(coll)) {
+      const k = literalReal(index);
+      if (k === undefined || k < 1 || !Number.isInteger(k))
+        throw new Error(
+          `Could not compile \`At\`: an infinite collection is read at a constant positive ` +
+            `integer index only, and \`${index.toString()}\` is not one.`
+        );
+      return lazyStreamElement(coll, k, compile, target);
+    }
     // A STRING base is indexed by GRAPHEME CLUSTER, so it is segmented first
     // and `_SYS.at` then applies the ordinary 1-based / negative-from-the-end
     // convention to the cluster array — which is exactly what the interpreter's
@@ -5955,17 +5983,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   // Reverse and (ascending, numeric) Sort — copy first so the source array is
-  // not mutated. A custom `Sort` comparator is not lowered (fails closed).
+  // not mutated. A `Sort` with a sort key or a comparator is lowered by
+  // `compileJSSortWithCallback`.
   Reverse: (args, compile) =>
     joinIfString(
       args[0],
       `(${elementsArg('Reverse', args[0], compile)}).slice().reverse()`
     ),
-  Sort: (args, compile) => {
+  Sort: (args, compile, target) => {
     const coll = elementsArg('Sort', args[0], compile);
-    if (args.length > 1)
+    if (args.length > 2)
       throw new Error(
-        `Could not compile \`Sort\`: a custom comparator is not supported; only the default ascending numeric sort is.`
+        `Could not compile \`Sort\`: expected a collection and at most one ordering function.`
+      );
+    if (args[1] !== undefined)
+      return joinIfString(
+        args[0],
+        compileJSSortWithCallback(args[0]!, args[1], coll, compile, target)
       );
     // A STRING source sorts its CHARACTERS, which are ordered by code-point
     // sequence, not numerically: the numeric comparator below would answer NaN
@@ -7410,6 +7444,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       (v) => `(${coll}).includes(${v})`
     );
   },
+  // `Pipe(x, stage)` compiles as the expression it evaluates
+  // (`pipeApplication`).
+  Pipe: (args, compile) => compile(pipeApplication(args)),
   Identity: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Identity`: missing argument');
@@ -7497,6 +7534,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (mismatch !== undefined)
         throw new Error(`Could not compile \`Apply\`: ${mismatch}`);
+      // A point with a coordinate that can be complex, at a literal with
+      // scalar parameters, is passed whole to the arrow
+      // (`callArgumentMapRank()` is 0 for a point), and the arrow reads the
+      // parameter as one number: with `y: real`, `Apply(t ↦ 2t, (y + i,
+      // 1))` gave `{re: NaN, im: NaN}`, where the interpreter gives
+      // `(2y + 2i, 2)`. A call of a named function inlines its body for such
+      // a point (`complexCoordinateArgumentAt()` in
+      // `tryCompileUserFunction`); the literal has no such route, so the
+      // application declines.
+      if (
+        paramsAreScalar(args[0].type.type) &&
+        BaseCompiler.complexCoordinateArgumentAt(
+          args[0].engine,
+          args.slice(1),
+          target
+        ) >= 0
+      )
+        throw new Error(
+          'Could not compile `Apply`: an argument is a point with a ' +
+            'coordinate that can be complex, which the compiled function ' +
+            'literal would read as one number.'
+        );
     }
     // A function literal with an annotated parameter checks an argument that
     // may be absent, as a call of a named function does
@@ -8511,6 +8570,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (eConst === undefined)
       return `_SYS.pow(${compile(base)}, ${compile(exp)})`;
     return `Math.pow(${compile(base)}, ${compile(exp)})`;
+  },
+  // `Iterate` is an infinite sequence. It compiles only as a lazy stream
+  // under a consumer that bounds it (`emitIterateStream`, reached through
+  // `emitLazyStream`, which never routes through this handler). Reached
+  // here, it is not bounded, and it fails closed.
+  Iterate: () => {
+    throw new Error(
+      `Could not compile \`Iterate\`: an infinite sequence compiles only under a consumer ` +
+        `that bounds it (\`Take\`, \`TakeWhile\`, \`First\`, or \`At\` with a constant index).`
+    );
   },
   Range: (args, compile) => {
     if (args.length === 0) return '[]';
@@ -13323,9 +13392,10 @@ function infiniteRangeStep(expr: Expression): number | undefined {
 
 /**
  * Whether an operand compiles as a LAZY infinite stream: a statically
- * infinite `Range`, or a `Map`/`Filter`/`Drop`/`Rest` pipeline over one.
- * This predicate and `emitLazyStream` must cover exactly the same shapes —
- * a bounding consumer (`Take`/`TakeWhile`) uses the predicate to decide
+ * infinite `Range`, an `Iterate`, or a `Map`/`Filter`/`Drop`/`Rest` pipeline
+ * over one. This predicate and `emitLazyStream` must cover exactly the same
+ * shapes — a bounding consumer (`Take`/`TakeWhile`, and `First`/`At` with a
+ * constant index) uses the predicate to decide
  * whether to lower its operand via `emitLazyStream` instead of `collArg`.
  *
  * `DropWhile` is deliberately absent: over an infinite source the
@@ -13356,6 +13426,9 @@ function isLazyStream(expr: Expression | undefined): boolean {
       isLazyStream(expr.ops[0])
     );
   if (op === 'Rest') return expr.nops === 1 && isLazyStream(expr.ops[0]);
+  // `Iterate` is always infinite. A shape that `emitLazyStream` cannot lower
+  // throws there, with the reason, when a bounding consumer reaches it.
+  if (op === 'Iterate') return true;
   return false;
 }
 
@@ -13412,9 +13485,216 @@ function emitLazyStream(
     return `_SYS.dropIter(${emitLazyStream(source, compile, target)}, ${compileRealOperand(expr.ops[1], compile)})`;
   if (op === 'Rest')
     return `_SYS.dropIter(${emitLazyStream(source, compile, target)}, 1)`;
+  if (op === 'Iterate') return emitIterateStream(expr, compile, target);
   throw new Error(
     `Could not compile \`${op}\`: not a lazily-compilable infinite collection`
   );
+}
+
+/**
+ * The element at the 1-based position `k` (a positive integer) of a lazy
+ * stream (see `isLazyStream`), for `First` and `At`. An infinite `Range`,
+ * and a `Map` over one, give the element directly, `start + (k - 1) × step`
+ * (mapped), so that `At(Range(y, ∞), 10^9)` does not step through 10^9
+ * elements. Any other stream is read by `_SYS.nthIter`, which pulls `k`
+ * elements.
+ */
+function lazyStreamElement(
+  expr: Expression,
+  k: number,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const rangeElement = (range: Expression): string | undefined => {
+    const step = infiniteRangeStep(range);
+    if (step === undefined || !isFunction(range)) return undefined;
+    return `(${compile(range.ops[0])} + ${(k - 1) * step})`;
+  };
+  const direct = rangeElement(expr);
+  if (direct !== undefined) return direct;
+  if (isFunction(expr, 'Map') && expr.nops === 2) {
+    const element = rangeElement(expr.ops[1]);
+    if (element !== undefined) {
+      BaseCompiler.assertCollectionOmissionSupported(
+        'Map',
+        expr.ops,
+        expr,
+        target
+      );
+      return `(${fnArg('Map', expr.ops[0], expr.ops[1], compile)})(${element})`;
+    }
+  }
+  return `_SYS.nthIter(${emitLazyStream(expr, compile, target)}, ${k})`;
+}
+
+/**
+ * The type of the elements of the lazy stream `source`, when its static
+ * type does not give one, or `undefined`. The type of an `Iterate` call is
+ * a `list` with no element type, so a callback that a stream stage or a
+ * bounding consumer applies to its elements (`TakeWhile(Iterate(x ↦ 2x,
+ * y), x ↦ x < 100)`) would receive values with no settled shape and
+ * decline. Each element of `Iterate(fn, initial)` is a result of `fn`: the
+ * initial value is not itself an element (`_SYS.iterateIter`), so the
+ * elements have the result type of `fn` (`iterateTypes().element`). So
+ * with a real `y`, `TakeWhile(Iterate(x ↦ (Floor(x) + 1 :: integer), y),
+ * (n: integer) ↦ n < 4)` compiles: its elements are integers, although the
+ * initial value is real. A `Filter`, `Drop` or `Rest` stage keeps the
+ * elements of its source.
+ */
+function lazyStreamElementType(
+  source: Expression | undefined
+): Type | undefined {
+  if (!isFunction(source)) return undefined;
+  const op = source.operator;
+  if (op === 'Filter' || op === 'Drop' || op === 'Rest')
+    return lazyStreamElementType(source.ops[0]);
+  if (op !== 'Iterate' || source.nops !== 2) return undefined;
+  return iterateTypes(source.ops[0], source.ops[1])?.element;
+}
+
+/**
+ * The type with which `Iterate` compiles a value of type `t`: `t` when it
+ * is a real type, `real` when it is a wide number type that is not a
+ * complex type (`number`), and `undefined` for every other type (a
+ * complex type, a type that is not a number, `never`). A wide type is read
+ * as `real` because `emitIterateStream` declines a sequence whose values
+ * can be complex (it tests the function with `mayHoldComplexElement`), so
+ * a compiled sequence holds a real number at every step.
+ */
+function iterateRealLaneType(t: Type | undefined): Type | undefined {
+  if (t === undefined || t === 'never' || !isSubtype(t, 'number'))
+    return undefined;
+  if (isSubtype(t, 'real')) return t;
+  if (isSubtype(t, 'complex')) return undefined;
+  return 'real';
+}
+
+/**
+ * The types of `Iterate(fn, initial)`, or `undefined` when the initial
+ * value or the result of `fn` is not a real number type
+ * (`iterateRealLaneType()`):
+ *
+ * - `accumulator`, the value that `fn` receives: the initial value or an
+ *   earlier result, so the widening of the two types;
+ * - `element`, a value of the sequence: a result of `fn` only, because the
+ *   initial value is not itself an element (`_SYS.iterateIter`).
+ */
+function iterateTypes(
+  fn: Expression,
+  initial: Expression
+): { accumulator: Type; element: Type } | undefined {
+  const initialType = iterateRealLaneType(
+    resolveTypeForCompilation(initial.type.type)
+  );
+  const result = iterateRealLaneType(
+    functionResult(resolveTypeForCompilation(fn.type.type))
+  );
+  if (initialType === undefined || result === undefined) return undefined;
+  return { accumulator: widen(initialType, result), element: result };
+}
+
+/**
+ * Lower `Iterate(fn, initial)` to the lazy stream `_SYS.iterateIter`. Element
+ * `k` is `fn(k, element(k - 1))`, with `element(0)` the initial value, or
+ * `fn(element(k - 1))` when the type of `fn` says it takes exactly one
+ * argument (a parameter with a default value does not count). This is the
+ * rule of the interpreter (`iterateArgs` in `library/collections.ts`).
+ *
+ * Only a sequence of numbers compiles: the initial value must be a number
+ * that is not complex, and the result of `fn` must be a number that is not
+ * complex and cannot be absent. The value of the accumulator then has one
+ * shape at every step. A sequence of lists or tuples, a function whose result
+ * type is unknown or can be `Missing`, and a call with no initial value
+ * (where the interpreter passes `Nothing`, which compiled code cannot hold)
+ * decline.
+ *
+ * As for the other stream stages, the callback is compiled without the
+ * loop-invariant hoist (see `emitLazyStream`).
+ */
+function emitIterateStream(
+  expr: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (!isFunction(expr, 'Iterate'))
+    throw new Error('Could not compile `Iterate`: expected an `Iterate` call');
+  const [fn, initial] = expr.ops;
+  if (expr.nops !== 2 || fn === undefined || initial === undefined)
+    throw new Error(
+      `Could not compile \`Iterate\`: without an initial value, the first call of the ` +
+        `function receives \`Nothing\`, which compiled code cannot represent.`
+    );
+  const initialType = resolveTypeForCompilation(initial.type.type);
+  const scalar = (t: Type | undefined): t is Type =>
+    iterateRealLaneType(t) !== undefined;
+  if (!scalar(initialType) || BaseCompiler.isComplexValued(initial))
+    throw new Error(
+      `Could not compile \`Iterate\`: the initial value has type \`${typeToString(initialType)}\`; ` +
+        `only a sequence of real numbers compiles.`
+    );
+  const result = functionResult(resolveTypeForCompilation(fn.type.type));
+  if (!scalar(result))
+    throw new Error(
+      `Could not compile \`Iterate\`: the function returns a value of type ` +
+        `\`${result === undefined ? 'unknown' : typeToString(result)}\`, which is not provably a ` +
+        `real number; only a sequence of real numbers compiles.`
+    );
+  // The interpreter reads an `Iterate` by position, and computes the
+  // elements before that position again for each read, so a function with
+  // an effect runs more often there than in the compiled stream: with a
+  // counter `c`, `Take(Iterate(x ↦ Block(c ≔ c + 1, c), 0), 3)` is
+  // `[1, 3, 6]` in the interpreter and would be `[1, 2, 3]` here.
+  // The purity of the `Iterate` call includes that of the body of its
+  // function; a function literal is itself a pure value.
+  if (expr.isPure !== true)
+    throw new Error(
+      `Could not compile \`Iterate\`: the function is not pure. The interpreter computes ` +
+        `the elements before a position again for each read, so its effects run more often ` +
+        `there than in compiled code.`
+    );
+  // The type of the accumulator: the initial value, or a result of the
+  // function (`iterateTypes()`). An annotation of the parameter
+  // (`(x: integer) ↦ x + 1`) is checked against it.
+  const accType: Type = iterateTypes(fn, initial)?.accumulator ?? 'real';
+  const indexed = requiredArity(fn.type.type) !== 1;
+  // A result of type `number` can still compile to a complex value
+  // (`x ↦ √x`), a `{re, im}` object even when its imaginary part is zero.
+  // The function is called as `Map` calls it over a list of a placeholder
+  // that has the type of the accumulator and no value, so that the test
+  // covers every step and not only the first one: with the initial value
+  // `0.5`, `x ↦ Arcsin(x) + 1` is real at the first step and complex at
+  // the second. The accumulator is never complex (both a complex initial
+  // value and a complex result are refused), so a `number` accumulator is
+  // read as `real` (`iterateRealLaneType()`).
+  const ce = expr.engine;
+  let complex: boolean;
+  ce.pushScope();
+  try {
+    ce.declare('_ce_iterate_accumulator', accType);
+    const acc = ce.function('List', [ce.symbol('_ce_iterate_accumulator')]);
+    const probe = indexed
+      ? ce.function('Map', [fn, ce.function('List', [ce.One]), acc])
+      : ce.function('Map', [fn, acc]);
+    complex = BaseCompiler.mayHoldComplexElement(probe);
+  } finally {
+    ce.popScope();
+  }
+  if (complex)
+    throw new Error(
+      `Could not compile \`Iterate\`: the function may return a complex value; only a ` +
+        `sequence of real numbers compiles.`
+    );
+  const argTypes: Type[] = indexed ? ['integer', accType] : [accType];
+  BaseCompiler.assertCallbackAnnotations('Iterate', fn, argTypes, target);
+  BaseCompiler.assertBuiltinCallbackUsable('Iterate', fn);
+  const step = BaseCompiler.withCheckedCallback(
+    'Iterate',
+    fn,
+    argTypes,
+    target,
+    () => compile(fn)
+  );
+  return `_SYS.iterateIter(${step}, ${compile(initial)}, ${indexed})`;
 }
 
 /**
@@ -13478,15 +13758,15 @@ function collArg(
         `characters. The interpreter evaluates it instead.`
     );
   // An infinite pipeline cannot materialize to an array; only `Take`/
-  // `TakeWhile` bound one (they lower it via `emitLazyStream` before ever
-  // reaching this funnel). Everything else fails closed here — at compile
+  // `TakeWhile`, and `First`/`At` with a constant index, bound one (they
+  // lower it via `emitLazyStream` before ever reaching this funnel). Everything else fails closed here — at compile
   // time, with the bounding fix named — instead of emitting
   // `Array.from({length: Infinity})` and throwing a RangeError at run time.
   if (isLazyStream(arg))
     throw new Error(
       `Could not compile \`${kind}\`: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
-        `is an infinite collection — bound it with \`Take\` or \`TakeWhile\` ` +
-        `to compile.`
+        `is an infinite collection — bound it with \`Take\` or \`TakeWhile\`, or read ` +
+        `one element with \`First\` or \`At\`, to compile.`
     );
   return compile(arg);
 }
@@ -13731,6 +14011,440 @@ function assertNumericSortElements(kind: string, arg: Expression): boolean {
       `are not provably numbers; the compiled sort orders numbers only, ` +
       `and the interpreter leaves a sort of booleans, tuples or symbols ` +
       `unevaluated.`
+  );
+}
+
+/**
+ * The result type of the comparator `fn` of a `Sort`, a function literal
+ * with two parameters, when each parameter has the type `elt` of a present
+ * element of the source. The literal is typed again with that signature
+ * (`ascribeDeclaredParameterTypes()`, which leaves an annotated parameter as
+ * it is). `undefined` when `fn` is not such a literal or the result type is
+ * not known.
+ */
+function presentComparatorResult(fn: Expression, elt: Type): Type | undefined {
+  if (!isFunction(fn, 'Function') || fn.nops !== 3) return undefined;
+  if (elt === 'never' || elt === 'unknown' || elt === 'any') return undefined;
+  const typed = ascribeDeclaredParameterTypes(
+    fn.engine,
+    fn,
+    {
+      kind: 'signature',
+      args: [{ type: elt }, { type: elt }],
+      result: 'unknown',
+    },
+    { includeScalar: true }
+  );
+  if (!isFunction(typed, 'Function') || !typed.isValid) return undefined;
+  const result = functionResult(resolveTypeForCompilation(typed.type.type));
+  return result === 'unknown' || result === 'any' ? undefined : result;
+}
+
+/**
+ * The expression that `Pipe(x, stage)` evaluates, for a compile target to
+ * compile in place of the pipe. The rewrite follows the evaluate handler of
+ * `Pipe` (`pipeStep` in `library/core.ts`) for three kinds of stage:
+ *
+ * - A call that is missing one argument (`Map(f)`, `Take(2)`) gets the piped
+ *   value in the slot that the interpreter selects (`pipeStageAsCall`):
+ *   `Pipe(xs, Map(f))` is `Map(f, xs)`.
+ * - A function literal with one parameter (the canonical form of a pipe makes
+ *   one of the shorthand `_^2`) is applied to the piped value:
+ *   `Pipe(xs, x ↦ 2x)` is `Apply(x ↦ 2x, xs)`, which maps over a list as the
+ *   interpreter does.
+ * - The name of an operator (a library operator or a function of the user)
+ *   is called with the piped value: `Pipe(16, Sqrt)` is `Sqrt(16)`.
+ * - A call with its own slots is lifted to a function literal whose
+ *   parameters are the slots, and a literal with one parameter is applied to
+ *   the piped value: `Pipe(L, Take(_, 2))` is `Apply(_1 ↦ Take(_1, 2), L)`.
+ *   The reference analysis binds these slots in the stage
+ *   (`analyzeReferences()`), so the check of the inputs at compile entry
+ *   does not read them as inputs.
+ *
+ * Every other stage throws, and the compilation declines: `Pipe(y, _1 + _2)`
+ * lifts to a literal with two parameters, and the interpreter gives a
+ * partial application. The piped value `Nothing`, which the interpreter
+ * removes from the call, declines too, and so does a piped value that is
+ * itself a `Pipe` when the stage is a call and the static type of the inner
+ * pipe does not settle the slot (`chainedTopicSlotIsSettled`).
+ */
+export function pipeApplication(
+  args: ReadonlyArray<Expression | null | undefined>
+): Expression {
+  const [held, stage] = args;
+  if (held == null || stage == null || args.length !== 2)
+    throw new Error('Could not compile `Pipe`: expected a value and a stage');
+  // `Pipe` holds its operands; the evaluate handler binds the piped value
+  // with `.canonical` and does not evaluate it first.
+  const topic = held.canonical;
+  if (isSymbol(topic, 'Nothing'))
+    throw new Error(
+      'Could not compile `Pipe`: a piped `Nothing` is removed from the call of the stage, ' +
+        'which compiled code does not do.'
+    );
+  const ce = topic.engine;
+  if (isFunction(stage, 'Function')) {
+    if (stage.isCanonical && stage.nops === 2)
+      return pipeAppliedLiteral(stage, topic);
+  } else if (isSymbol(stage)) {
+    const def = ce.lookupDefinition(stage.symbol);
+    if (def !== undefined && 'operator' in def)
+      return ce.function(stage.symbol, [topic]);
+  } else if (isFunction(stage) && freeAnonymousSlots(stage).size > 0) {
+    // A stage with its own slots (`Take(_, 2)`) is canonicalized with fresh
+    // placeholders and lifted to a function literal whose parameters are
+    // its slots, as the interpreter does (`pipeStep` in `library/core.ts`).
+    // The pipe supplies one value, so only a literal with one parameter is
+    // applied here.
+    const lifted = canonicalFunctionLiteral(
+      canonicalWithFreshPlaceholders(stage)
+    );
+    if (isFunction(lifted, 'Function') && lifted.nops === 2)
+      return pipeAppliedLiteral(lifted, topic);
+  } else if (isFunction(stage)) {
+    const completed = pipeStageAsCall(ce, topic, stage);
+    if (completed?.topicAt !== undefined) {
+      if (!isFunction(topic, 'Pipe')) return completed.call;
+      if (
+        completed.written !== undefined &&
+        chainedTopicSlotIsSettled(topic, stage, completed.topicAt)
+      ) {
+        const chained = pipeChainedCall(
+          topic,
+          completed.written,
+          completed.topicAt
+        );
+        if (chained !== undefined) return chained;
+      }
+    }
+  }
+  throw new Error(
+    `Could not compile \`Pipe\`: the stage \`${stage.toString()}\` is not a call missing one ` +
+      `argument, a function literal with one parameter, or the name of an operator.`
+  );
+}
+
+/**
+ * `Apply(literal, topic)`, with the pass that the compilation runs once over
+ * every `Apply` of the expression before it compiles it
+ * (`rewritePartialApplications()`). That pass gives a bare parameter the
+ * type of its collection argument, and the body of the literal is compiled
+ * with that type: in `Pipe(L, x ↦ Max(x))` with `L: list<real>`, the `Max`
+ * of the body reduces the list. The `Apply` here is built while the pipe is
+ * compiled, after that pass, so it runs the pass itself.
+ */
+function pipeAppliedLiteral(
+  literal: Expression,
+  topic: Expression
+): Expression {
+  // A chained topic (`Pipe(Pipe(y, _ + 1), _ * 2)`) is lowered first, so
+  // that the `Apply` lowering reads the expression it evaluates: its proof
+  // that the argument is a scalar does not read through a `Pipe`, and the
+  // applied literal then got a run-time `Array.isArray` dispatch.
+  const arg = isFunction(topic, 'Pipe') ? pipeApplication(topic.ops) : topic;
+  return rewritePartialApplications(
+    literal.engine.function('Apply', [literal, arg])
+  );
+}
+
+/**
+ * The call `written` of a pipe stage, whose operand at `at` is `topic`, an
+ * inner `Pipe`, as an expression that evaluates `topic` exactly once before
+ * the call. The interpreter evaluates an inner pipe before it applies the
+ * outer stage (the evaluate handler of `Pipe` in `library/core.ts`). The
+ * operand of the call itself can be held or dropped: `When(x, False)` never
+ * reads `x`, and in `Pipe(Pipe(Assign(c, c + 1), Abs), When(False))` the
+ * assignment then did not run in the compiled code. So the call is the body
+ * of a literal whose one parameter, typed with the static type of `topic`,
+ * takes the place of `topic`, and the literal is applied to `topic` with
+ * `ApplyWhole`, which binds its argument whole and evaluates it first.
+ * `undefined` when the literal cannot be built.
+ */
+function pipeChainedCall(
+  topic: Expression,
+  written: Expression,
+  at: number
+): Expression | undefined {
+  if (!isFunction(written)) return undefined;
+  const ce = topic.engine;
+  const param = (): Expression => ce.symbol('_1', { canonical: false });
+  const ops = [...written.ops];
+  ops[at] = param();
+  const literal = canonicalWithFreshPlaceholders(
+    ce._fn(
+      'Function',
+      [ce._fn(written.operator, ops, { canonical: false }), param()],
+      { canonical: false }
+    )
+  );
+  if (!isFunction(literal, 'Function') || literal.nops !== 2) return undefined;
+  const typed = ascribeDeclaredParameterTypes(
+    ce,
+    literal,
+    {
+      kind: 'signature',
+      args: [{ type: topic.type.type }],
+      result: 'unknown',
+    },
+    { includeScalar: true }
+  );
+  if (!isFunction(typed, 'Function') || !typed.isValid) return undefined;
+  return rewritePartialApplications(ce.function('ApplyWhole', [typed, topic]));
+}
+
+/**
+ * Whether the slot `at` that `pipeStageAsCall` selects for the piped value
+ * `topic`, itself a `Pipe`, is the slot that the interpreter selects. The
+ * interpreter selects it from the type of the VALUE of the inner pipe, which
+ * is a subtype of the static type `T` of `topic`. Among the slots where the
+ * piped value and the written arguments fit, the LAST one wins
+ * (`implicitTopicSlot` in `library/core.ts`). A narrower value still fits
+ * slot `at`, but it can fit a later slot that `T` does not fit. So the slot
+ * is settled only when `T` is known (not `unknown` or `any`) and no other
+ * slot of any signature arm of the stage's operator can admit a value of
+ * type `T`: `Pipe(Pipe(L, Sort), Take(2))` puts the list in the first slot
+ * of `Take`, because its second slot, an integer, admits no list. An
+ * earlier slot is checked too: the interpreter takes the first arm where the
+ * value fits, so the slot of an earlier arm can win over `at`, at a lower
+ * position. Any doubt declines.
+ */
+function chainedTopicSlotIsSettled(
+  topic: Expression,
+  stage: Expression,
+  at: number
+): boolean {
+  const t = resolveTypeForCompilation(topic.type.type);
+  if (t === 'unknown' || t === 'any' || freeTypeVariables(t).size > 0)
+    return false;
+  if (!isFunction(stage)) return false;
+  const def = topic.engine.lookupDefinition(stage.operator);
+  if (def === undefined || !('operator' in def)) return false;
+  const arms = signatureArms(def.operator.signature.type);
+  if (arms === undefined) return false;
+  const n = stage.nops;
+  for (const arm of arms) {
+    const params = [
+      ...(arm.args ?? []).map((p) => p.type),
+      ...(arm.optArgs ?? []).map((p) => p.type),
+      ...(arm.variadicArg !== undefined ? [arm.variadicArg.type] : []),
+    ];
+    const last = Math.min(params.length - 1, n);
+    for (let j = 0; j <= last; j++) {
+      if (j === at) continue;
+      const p = params[j];
+      // A slot of a function type admits only a function, whatever its
+      // type variables: the callback slot of `Map`, `(T) -> U`, admits no
+      // list.
+      if (signatureArms(p) !== undefined) {
+        if (couldMatch(t, 'function')) return false;
+        continue;
+      }
+      if (freeTypeVariables(p).size > 0 || couldMatch(t, p)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The compiled `Sort(xs, fn)` with an ordering function, given `coll`, the
+ * compiled array of the elements of `xs`. The interpreter reads the arity of
+ * `fn` as a choice between two modes (`sortedIndicesWalk` in
+ * `library/collections.ts`), and so does this lowering:
+ *
+ * - When the type of `fn` says it takes exactly one argument (a parameter
+ *   with a default value does not count: `(x, k = 2) ↦ …` is unary), `fn` is
+ *   a sort KEY. The key of each element is computed once, in the order of the
+ *   elements, and the elements are sorted in ascending order of their keys.
+ *   The keys are compared as the default order compares numbers: a `NaN` key
+ *   sorts after every other key, and an absent key (`Missing`) after a `NaN`
+ *   key. An absent ELEMENT sorts last whatever its key, and its key is not
+ *   computed.
+ * - Otherwise `fn` is a COMPARATOR, called with two elements. A `True` result
+ *   puts the first element first and `False` puts it last. A number result
+ *   puts it first when negative, is a tie when zero or `NaN`, and puts it
+ *   last otherwise (an absent result included). Before the comparator is
+ *   called, an absent element goes after the other one, and a `NaN` element
+ *   goes after a real number: the comparator is not called for these pairs.
+ *
+ * The order is that of `Array.prototype.sort` over the positions of the
+ * elements, the algorithm that the interpreter runs on its synchronous
+ * route. The two routes ask the same comparisons in the same order, so a
+ * comparator that is not a consistent order gives the same result on both.
+ * The sort is stable: a tie keeps the order of the input.
+ *
+ * Each mode compiles only where the compile-time types settle how its values
+ * are compared, with no run-time type test:
+ *
+ * - The result of a sort key must be a real number. The interpreter leaves a
+ *   sort by a key that is not a number unevaluated (`compareKeys`), and a
+ *   complex key has no order.
+ * - The result of a comparator must be a boolean or a number, not a union of
+ *   both, and not of an unknown type.
+ * - For a comparator, an element must be a number that is not complex, or a
+ *   value that cannot be a number: only for the first kind does the `NaN`
+ *   rule apply, and a run-time test cannot tell the two apart.
+ */
+function compileJSSortWithCallback(
+  source: Expression,
+  fn: Expression,
+  coll: string,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const declared = isProvablyStringOperand(source)
+    ? 'string'
+    : collectionElementType(source.type.type);
+  // An element that may be absent (`undefined` at run time) sorts last.
+  const absentElements =
+    declared !== undefined && typeContainsMissing(declared);
+  const elt = absentElements ? stripMissingFromType(declared) : declared;
+  const absentFirst = (a: string, b: string, rest: string): string =>
+    absentElements
+      ? `${a} === undefined ? (${b} === undefined ? 0 : 1) : ${b} === undefined ? -1 : ${rest}`
+      : rest;
+  const positions = `Array.from({ length: _l.length }, (_, _i) => _i)`;
+  const key = requiredArity(fn.type.type) === 1;
+  // The result type of `fn` called with elements of the source, as `Map`
+  // over the source (over two copies of it, for a comparator) types it. The
+  // signature of a literal alone does not know its parameter types:
+  // `x ↦ At(x, 2)` over a list of pairs of real numbers returns `unknown`
+  // by its signature, and `real` called with a pair.
+  const mapped = collectionElementType(
+    resolveTypeForCompilation(
+      source.engine.function('Map', key ? [fn, source] : [fn, source, source])
+        .type.type
+    )
+  );
+  let result =
+    mapped !== undefined && mapped !== 'unknown' && mapped !== 'any'
+      ? mapped
+      : functionResult(resolveTypeForCompilation(fn.type.type));
+
+  if (key) {
+    const keyType =
+      result !== undefined && typeContainsMissing(result)
+        ? stripMissingFromType(result)
+        : result;
+    if (
+      keyType === undefined ||
+      keyType === 'never' ||
+      !isSubtype(keyType, 'number') ||
+      (isSubtype(keyType, 'complex') && !isSubtype(keyType, 'real'))
+    )
+      throw new Error(
+        `Could not compile \`Sort\`: the sort key returns a value of type ` +
+          `\`${result === undefined ? 'unknown' : typeToString(result)}\`, which is not provably a ` +
+          `real number; the compiled sort orders real keys only.`
+      );
+    // A key whose type is `number` can still compile to a complex value
+    // (`x ↦ √x` over real elements), which the comparator of the keys
+    // cannot order.
+    if (
+      BaseCompiler.mayHoldComplexElement(
+        source.engine.function('Map', [fn, source])
+      )
+    )
+      throw new Error(
+        `Could not compile \`Sort\`: the sort key may return a complex value, which has no order.`
+      );
+    // An absent key sorts after every other key, as an absent element does.
+    const keyCmp =
+      result !== undefined && typeContainsMissing(result)
+        ? ABSENT_LAST_COMPARATOR
+        : NAN_LAST_COMPARATOR;
+    const key = fnArg('Sort', fn, source, compile, [], target);
+    const keyOf = absentElements
+      ? `(_x) => _x === undefined ? undefined : _f(_x)`
+      : `(_x) => _f(_x)`;
+    return (
+      `((_f, _l, _c) => { const _k = _l.map(${keyOf}); ` +
+      `return ${positions}.sort((_a, _b) => ${absentFirst('_l[_a]', '_l[_b]', '_c(_k[_a], _k[_b])')})` +
+      `.map((_i) => _l[_i]); })(${key}, ${coll}, ${keyCmp})`
+    );
+  }
+
+  // A comparator. It is never called with an absent element, so its result
+  // is typed with each parameter of the type of a present element: over two
+  // copies of a source of type `list<real | missing>`, `Map` types
+  // `(a, b) ↦ a > b` as `boolean | missing`, from the calls with `Missing`.
+  if (absentElements && elt !== undefined)
+    result = presentComparatorResult(fn, elt) ?? result;
+  let verdict: string;
+  if (
+    result !== undefined &&
+    result !== 'never' &&
+    isSubtype(result, 'boolean')
+  )
+    verdict = `_r === true ? -1 : 1`;
+  else if (
+    result !== undefined &&
+    result !== 'never' &&
+    isSubtype(stripMissingFromType(result), 'number')
+  )
+    verdict = `_r !== _r ? 0 : _r < 0 ? -1 : _r === 0 ? 0 : 1`;
+  else
+    throw new Error(
+      `Could not compile \`Sort\`: the comparator returns a value of type ` +
+        `\`${result === undefined ? 'unknown' : typeToString(result)}\`, which is not provably a ` +
+        `boolean or a number.`
+    );
+  let nanLast = false;
+  if (elt !== undefined && elt !== 'never' && isSubtype(elt, 'number')) {
+    if (isSubtype(elt, 'complex') && !isSubtype(elt, 'real'))
+      throw new Error(
+        `Could not compile \`Sort\`: an element is a complex value, which the compiled ` +
+          `comparator does not receive.`
+      );
+    nanLast = true;
+  } else if (
+    elt === undefined ||
+    (elt !== 'never' && couldMatch(elt, 'number'))
+  )
+    throw new Error(
+      `Could not compile \`Sort\`: the elements (type \`${declared === undefined ? 'unknown' : typeToString(declared)}\`) ` +
+        `may be numbers or other values; the interpreter puts a NaN element last ` +
+        `only beside a real number, which the compiled sort cannot decide.`
+    );
+  if (
+    isFunction(source, 'List') &&
+    source.ops.some((x) => BaseCompiler.isComplexValued(x))
+  )
+    throw new Error(
+      `Could not compile \`Sort\`: an element is a complex value, which the compiled ` +
+        `comparator does not receive.`
+    );
+  // A result that compiles to a complex value is a `{re, im}` object even
+  // when its imaginary part is zero (`(a, b) ↦ √a - √b`), and the verdict
+  // above would read it as "greater" where the interpreter reads the sign of
+  // a real number. The comparator is called with two elements, as `Map`
+  // over two copies of the source calls it.
+  if (
+    BaseCompiler.mayHoldComplexElement(
+      source.engine.function('Map', [fn, source, source])
+    )
+  )
+    throw new Error(
+      `Could not compile \`Sort\`: the comparator may return a complex value, which the ` +
+        `compiled comparator cannot read as an order.`
+    );
+  const cmp = fnArg(
+    'Sort',
+    fn,
+    source,
+    compile,
+    [BaseCompiler.collectionElementTypeOf(source)],
+    target
+  );
+  const absentStep = absentElements
+    ? `if (_a === undefined) return _b === undefined ? 0 : 1; if (_b === undefined) return -1; `
+    : '';
+  const nanStep = nanLast
+    ? `if (_a !== _a) return _b !== _b ? 0 : 1; if (_b !== _b) return -1; `
+    : '';
+  return (
+    `((_f, _l) => ${positions}.sort((_i, _j) => { const _a = _l[_i]; const _b = _l[_j]; ` +
+    `${absentStep}${nanStep}const _r = _f(_a, _b); return ${verdict}; })` +
+    `.map((_i) => _l[_i]))(${cmp}, ${coll})`
   );
 }
 
@@ -14332,7 +15046,8 @@ function callbackArg(
 ): string {
   const argTypes = [
     ...extraArgTypes,
-    BaseCompiler.collectionElementTypeOf(source),
+    BaseCompiler.collectionElementTypeOf(source) ??
+      lazyStreamElementType(source),
   ];
   BaseCompiler.assertCallbackAnnotations(kind, callback, argTypes, target);
   // STRICT shapes: a bare user-function symbol with a WIDE parameter over

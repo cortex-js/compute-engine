@@ -3969,27 +3969,6 @@ Recommendation: (a). With no decision, both examples keep their wrong
 values. Found 2026-11-01 (handoff
 `docs/scratch/2026-11-01-ce715-next-tasks-followups-handoff.md`, item 2).
 
-### CE-725. `Sort` with a callback, `Iterate` and `Pipe` decline on the JavaScript target
-
-**Status:** ready; defect, M.
-
-Measured 2026-10-31 at `a4d2de2d5` with `compile(ce.box(expr), { to:
-'javascript' })`; each is a reachable shape that falls back to the
-interpreter:
-
-- **CE-725.1** `Sort(["List", 3, "y", 2], (x) => -x)` (a key callback; a
-  comparator too): "a custom comparator is not supported; only the default
-  order".
-- **CE-725.2** `Take(Iterate((x) => x + 1, y), 3)`: "the operator is known to
-  the engine but target 'javascript' has no lowering for it" (`Iterate`).
-- **CE-725.3** `Pipe(["List", 1, "y"], Map((x) => 2x))`: the same message for
-  `Pipe`.
-
-Because of these declines, the compiled tests of CE-717 (parameter default
-values) cover a callback with a default inside `Map` only; `Sort`, `Iterate`
-and `Pipe` with such a callback are tested interpreted only
-(`test/compute-engine/compile-parameter-defaults.test.ts`).
-
 ### CE-715. The `bigint` compile mode: the shapes it declines
 
 **Status:** ready; capability. The mode `compile(expr, { mode: 'bigint' })`

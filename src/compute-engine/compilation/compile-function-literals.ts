@@ -42,7 +42,10 @@ import {
   compileDefinitionBody,
   lambdaParamBinding,
 } from './compile-definitions.js';
+import { strictLanes } from './compiler-mode.js';
+import { laneMismatch } from './compile-lanes.js';
 import {
+  appliedLiteralLaneMismatchAt,
   callbackArgumentRanks,
   callbackArgumentsOf,
   checkedLiteralApplications,
@@ -110,10 +113,14 @@ export function checkedAppliedLiteralCompile<T>(
     const unmark = markCheckedLiteralApplications([literal]);
     const wasFull = fullyAppliedLiterals.has(literal);
     if (full) fullyAppliedLiterals.add(literal);
+    const outerArgs = appliedLiteralArguments.get(literal);
+    appliedLiteralArguments.set(literal, args);
     try {
       return compile(e);
     } finally {
       if (!wasFull) fullyAppliedLiterals.delete(literal);
+      if (outerArgs === undefined) appliedLiteralArguments.delete(literal);
+      else appliedLiteralArguments.set(literal, outerArgs);
       unmark();
     }
   };
@@ -126,6 +133,18 @@ export function checkedAppliedLiteralCompile<T>(
  * value, which no call of it reads.
  */
 const fullyAppliedLiterals = new WeakSet<Expression>();
+
+/**
+ * The arguments of the application whose callee is the `Function` literal
+ * being compiled (`checkedAppliedLiteralCompile`). The lowering of the
+ * literal reads them to check, in strict mode, that no complex-shaped
+ * argument reaches a parameter that it compiles in the real lane
+ * (`appliedLiteralLaneMismatchAt`).
+ */
+const appliedLiteralArguments = new WeakMap<
+  Expression,
+  ReadonlyArray<Expression>
+>();
 
 /**
  * A `Function` literal. A case of `compileExpr`: it returns the code, or
@@ -393,10 +412,12 @@ export function compileExprFunctionLiteral(
         ? undefined
         : groundSignature(functionLiteralDeclaredSignature(literal));
     const annotated = ops.slice(1).map(declaredParamType);
-    const complexParam = annotated.map((own, i) => {
-      const pt = own ?? signatureParamType(ground, i);
-      return pt !== undefined && isNonRealNumber(pt);
-    });
+    const declaredType = annotated.map(
+      (own, i) => own ?? signatureParamType(ground, i)
+    );
+    const complexParam = declaredType.map(
+      (pt) => pt !== undefined && isNonRealNumber(pt)
+    );
 
     // A consumer that knows every value this literal will receive is a
     // run-time scalar has said so (`withScalarFedLiteral`). The literal then
@@ -528,6 +549,39 @@ export function compileExprFunctionLiteral(
             complexParam[i] ? LOCAL_SCALAR : LOCAL_UNSHAPED
           );
         });
+    }
+
+    // An `Apply` of this literal in strict mode (and in the first attempt of
+    // `auto`): a complex-shaped argument at a parameter that `complexParam`
+    // puts in the real lane is a `LaneMismatch` decline, as for a call of a
+    // named function (`laneMismatchAt`). The body is not compiled again for
+    // the lanes of each call: `auto` compiles the whole expression again
+    // under `'complex'`, and `strict` declines. Without this check, the
+    // `{ re, im }` object of `Apply(x ↦ 2x, √y)` reached a body that
+    // multiplies it as a number, and the result was `NaN`.
+    const appliedArgs =
+      node === undefined ? undefined : appliedLiteralArguments.get(node);
+    if (
+      appliedArgs !== undefined &&
+      strictLanes() &&
+      target.language === 'javascript' &&
+      isFunction(literal, 'Function')
+    ) {
+      const i = appliedLiteralLaneMismatchAt(
+        literal,
+        appliedArgs,
+        complexParam,
+        declaredType,
+        target
+      );
+      if (i >= 0)
+        laneMismatch(
+          'applied function-literal parameter',
+          params[i] === '_'
+            ? `parameter ${i + 1} of the function literal`
+            : `the parameter \`${params[i]}\` of the function literal`,
+          appliedArgs[i]
+        );
     }
 
     // The body is a bindable region of its own (§5.1(a)); pushed under the

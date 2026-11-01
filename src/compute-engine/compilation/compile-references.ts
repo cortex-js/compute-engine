@@ -25,6 +25,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import {
+  freeAnonymousSlots,
   functionLiteralBoundNames,
   functionLiteralParameters,
 } from '../boxed-expression/function-literal.js';
@@ -846,6 +847,21 @@ export function analyzeReferences(
       // leaves analysed as free ambient symbols.
       const params = functionLiteralBoundNames(ops.slice(1));
       visit(ops[0], params.length ? union(bound, params) : bound);
+      return;
+    }
+    if (h === 'Pipe' && ops.length === 2 && isFunction(ops[1])) {
+      // A stage that is a call with its own slots (`Pipe(L, Take(_, 2))`)
+      // is lifted to a function literal whose parameters are those slots
+      // (`pipeApplication()`), so the slots are bound in the stage, as the
+      // parameters of a `Function` literal are bound in its body. A slot of
+      // a nested function literal is not a slot of the stage
+      // (`freeAnonymousSlots()`). A `Function` stage binds its own
+      // parameters when it is visited.
+      visit(ops[0], bound);
+      const stage = ops[1];
+      const slots =
+        stage.operator === 'Function' ? [] : [...freeAnonymousSlots(stage)];
+      visit(stage, slots.length ? union(bound, slots) : bound);
       return;
     }
     if (

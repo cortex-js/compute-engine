@@ -363,6 +363,58 @@
 
 ### Bug Fixes
 
+- **`Sort` with a sort key or a comparator, `Iterate` and `Pipe` compile on
+  `javascript`.** Before, `Sort([3, y, 2], x ↦ -x)`,
+  `Take(Iterate(x ↦ x + 1, y), 3)` and `Pipe([1, y], Map(x ↦ 2x))` declined
+  and ran in the interpreter. Each now compiles and gives the interpreter's
+  value: for `y = 5`, `[5, 3, 2]`, `[6, 7, 8]` and `[2, 10]`.
+  - As in the interpreter, a function that takes one argument is a sort key,
+    and any other function is a comparator, which returns a boolean or a
+    number. The sort is stable, and `NaN` and `Missing` sort last. A key whose
+    result is not a real number, and a comparator whose result is neither a
+    boolean nor a number, decline.
+  - `Iterate` compiles under `Take`, `TakeWhile`, and under `First` and `At`
+    with a constant positive index, also through a `Drop` or a `Rest`. A
+    `Map` or a `Filter` over an `Iterate` still declines. Only a sequence
+    of real numbers with an initial value compiles, and only when the function
+    is pure: the interpreter computes the elements before a position again
+    for each read, so the effects of a function that is not pure would run
+    more often there than in compiled code. `First` and `At` with a constant
+    positive index now compile over the other infinite collections too
+    (`First(Map(f, 1..∞))`).
+  - `Pipe` compiles as the expression it evaluates, on `javascript` and
+    `python`: a call missing one argument receives the piped value
+    (`Pipe(xs, Take(2))` is `Take(xs, 2)`), a function literal is applied to
+    it, and the name of an operator is called with it.
+  - An applied function literal that receives a value that can be complex at
+    a parameter that it compiles as a real number is a lane mismatch. In the
+    mode `auto`, the expression is compiled again in the mode `complex`. With
+    `y: real`, `Apply(x ↦ 2x, √y)` gave `NaN` at `y = −4` under `auto`, and
+    now gives `4i`, as the interpreter does. In the mode `strict`, a complex
+    argument (`z: complex`) declines, and `√y` stays a real number (`NaN` for
+    a negative `y`), as for a call of a named function. A point with a
+    coordinate that can be complex, given to a literal with scalar
+    parameters (`Apply(t ↦ 2t, (y + i, 1))`), declines in every mode: the
+    compiled literal would read the point as one number. A call of a named
+    function with such a point (`dbl((y + i, 1))` with `dbl := t ↦ 2t`)
+    compiles, and gives the interpreter's value `(2y + 2i, 2)` under `auto`.
+    A literal parameter declared with a type now gets the same check of each
+    position as a parameter of a named function: with
+    `P: tuple<complex, real>`, `Apply((p: tuple<number, real>) ↦ p[1] + 1, P)`
+    gave the string `"[object Object]1"`, and now gives `2 + i` under
+    `auto`; `strict` declines. The check compares types, not the positions
+    that the body reads, so `strict` also declines
+    `Apply((p: tuple<number, real>, a) ↦ p[2] + a, P, y)`, which reads only
+    the real coordinate; `auto` gives the interpreter's value.
+  - The same check applies to a call of a named function with scalar
+    parameters whose argument is a list of lists of complex numbers. With
+    `f := (x: number) ↦ 2x` and `W: list<list<complex>>`, `f(W)` gave `NaN`
+    for each element, and so did `Apply(t ↦ 2t, W)`; both now give the
+    interpreter's value under `auto`, and `strict` declines. The check also reads the type of the argument at the call site:
+    with `g: (real) -> any` assigned `u ↦ Block(w ≔ u + i, w)`, the call
+    `g(y)` has the type `any`, and `Apply(t ↦ 2t, g(y))` and `h(g(y))`
+    with `h := t ↦ 2t` gave `NaN` under `auto`, and now give `2y + 2i`.
+
 - **In Epsil, an unknown call that is not in the result of a statement gets
   its did-you-mean warning.** `for i in range(1, 3) { i }` gave `Nothing` and
   no diagnostic: the loop ran zero times over the inert call `range(1, 3)`,

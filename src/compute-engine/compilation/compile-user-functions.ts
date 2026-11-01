@@ -1353,7 +1353,7 @@ export function tryCompileUserFunction(
       // inlined below, or declines there with its own reason. The
       // position-by-position test of a point does not apply to it.
       const inlined = complexCoordinateArgumentAt(engine, args, target) >= 0;
-      const i = laneMismatchAt(engine, h, literal, args, inlined);
+      const i = laneMismatchAt(engine, h, literal, args, target, inlined);
       if (i >= 0)
         laneMismatch(
           'user-function parameter',

@@ -138,6 +138,7 @@ import {
   predicateResultCheck,
   stringRefusedEntryType,
   countMayBeNaN,
+  pipeApplication,
 } from './javascript-target.js';
 import { isOpenScalarRankType, pythonShapeDispatch } from './static-shape.js';
 
@@ -7390,6 +7391,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return pyTakeDropSlice('Drop', coll, args[1], compile);
   },
   Reverse: (args, compile) => `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
+  // `Pipe(x, stage)` compiles as the expression it evaluates
+  // (`pipeApplication`).
+  Pipe: (args, compile) => compile(pipeApplication(args)),
   Sort: (args, compile) => {
     if (args.length > 1)
       throw new Error(
