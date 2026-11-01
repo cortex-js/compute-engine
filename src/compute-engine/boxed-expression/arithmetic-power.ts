@@ -728,6 +728,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // integer (a pure-imaginary exponent like `i` has re = 0, which must NOT
   // fold as a^0)
   if (isNumber(a) && isNumber(b) && b.isExact && !b.isComplex) {
+    // The base `0`, `1` or `−1` has a power of one digit for an exponent of
+    // any magnitude, so the limit of 64 below does not apply to it.
+    const unit = unitBaseIntegerPower(a, b, false, undefined);
+    if (unit !== undefined) return unit;
     // `realExponentValue`, not `b.re`: the double of an exact non-integer
     // rational can be an integer (`(10^{400}+1)/10^{400}` projects to `1`).
     const e = realExponentValue(b);
@@ -1003,6 +1007,87 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
   // Radical base: `ExactNumericValue.pow` is exact here, and the guard above
   // bounds the exponent so the internal computation can't explode.
   return ce.number(exact.pow(e));
+}
+
+/**
+ * The power of the exact base `0`, `1` or `−1` to an exact integer exponent
+ * of any magnitude, or `undefined` when this rule does not apply.
+ *
+ * The result has one digit: `1^n = 1`, `(−1)^n` is `1` for an even `n` and
+ * `−1` for an odd `n`, and `0^n = 0` for `n > 0`. The general exact power
+ * (`exactIntegerPow()`) refuses an exponent above the safe integer range and
+ * a result estimated above `MAX_EXACT_POW_DIGITS` digits. That estimate is
+ * the digit count of the base times the exponent, so it also refused
+ * `(−1)^{10^7}`, whose result has one digit. This rule reads the exponent
+ * from its exact rational, so a `bigint` exponent (`10^{30} + 1`) keeps its
+ * parity.
+ *
+ * The base `0` with an exponent `n ≤ 0` is not handled here: `0^0` and
+ * `0^n` for `n < 0` keep the results of the other rules.
+ *
+ * Under a numeric approximation, `exp` is the numericized exponent. Its
+ * double has no parity above `2^53`, so the exact rational is read from the
+ * raw exponent first (`rawRational()`). The result is then numericized.
+ *
+ * The rule applies only to an exact exponent: the raw exponent, or the value
+ * of its symbol, is an exact number. A float exponent (`(−1)^{3.0}`) gives a
+ * float result through the other rules, as a float operand of a numeric
+ * operation does (`docs/ERROR-MODEL.md`), and the double of a float above
+ * `2^53` has no parity.
+ */
+function unitBaseIntegerPower(
+  x: Expression,
+  exp: number | Expression,
+  numericApproximation: boolean,
+  rawExponent: Expression | undefined
+): Expression | undefined {
+  if (!isNumber(x) || !x.isExact || x.isComplex) return undefined;
+  const base = x.isSame(0) ? 0 : x.isSame(1) ? 1 : x.isSame(-1) ? -1 : NaN;
+  if (Number.isNaN(base)) return undefined;
+
+  let r: Rational | undefined;
+  if (numericApproximation) {
+    // Under a numeric approximation the other rules compute the power from
+    // the double of the exponent. That double has the parity of the exact
+    // exponent when its magnitude is less than `2^53`: then this rule does
+    // not apply, and the exponent is not read again.
+    const d =
+      typeof exp === 'number' ? exp : isNumber(exp) ? exp.re : Number.NaN;
+    if (Number.isFinite(d) && Math.abs(d) < 2 ** 53) return undefined;
+    // Above `2^53` the parity is read from the raw exponent before
+    // numericization, or from the value of its symbol, which must be an exact
+    // number. A raw exponent that is an expression (`10^{30} + 1`, which
+    // canonicalization keeps as an `Add`) is evaluated exactly, but only
+    // when it is pure: the exponent was already evaluated once to make
+    // `exp`, and a side effect or a random value must not run twice.
+    if (rawExponent === undefined) return undefined;
+    let raw = isSymbol(rawExponent) ? rawExponent.value : rawExponent;
+    if (raw !== undefined && !isNumber(raw))
+      raw = raw.isPure ? raw.evaluate() : undefined;
+    if (raw === undefined || !isNumber(raw) || !raw.isExact) return undefined;
+    r = asRational(raw);
+  }
+  if (r === undefined) {
+    if (typeof exp === 'number') {
+      if (Number.isSafeInteger(exp)) r = [exp, 1];
+    } else if (isNumber(exp) && exp.isExact && !exp.isComplex)
+      r = asRational(exp);
+  }
+  if (r === undefined || Number(r[1]) !== 1) return undefined;
+  const n = r[0];
+
+  const ce = x.engine;
+  let result: Expression;
+  if (base === 1) result = ce.One;
+  else if (base === -1) {
+    const even = typeof n === 'bigint' ? n % 2n === 0n : n % 2 === 0;
+    result = even ? ce.One : ce.NegativeOne;
+  } else {
+    // The base `0`: only a positive exponent is handled here.
+    if (!(n > 0)) return undefined;
+    result = ce.Zero;
+  }
+  return numericApproximation ? result.N() : result;
 }
 
 /**
@@ -1325,6 +1410,12 @@ export function pow(
   // above, which applies to a class as to any base.
   const residue = kindArithmetic(x.engine, 'Power', [x, x.engine.expr(exp)]);
   if (residue !== undefined) return residue;
+
+  // The exact base `0`, `1` or `−1` to an integer exponent of any magnitude
+  // (`unitBaseIntegerPower()`). The general exact power below refuses a large
+  // exponent, and the double of an exponent above `2^53` has no parity.
+  const unit = unitBaseIntegerPower(x, exp, numericApproximation, rawExponent);
+  if (unit !== undefined) return unit;
 
   //
   // If a numeric approximation is requested, we try to evaluate the expression

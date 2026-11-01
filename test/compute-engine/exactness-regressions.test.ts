@@ -206,6 +206,105 @@ describe('huge integer powers stay symbolic; .json never throws (EX-15)', () => 
   });
 });
 
+// The size limit of an exact power refuses a result with too many digits. A
+// power of the base `0`, `1` or `−1` has one digit, so it is evaluated for an
+// exact integer exponent of any magnitude, a `bigint` exponent too. The
+// `bigint` compile mode computes the same values.
+describe('powers of 0, 1 and -1 to a huge integer exponent are evaluated', () => {
+  const big = (s: string) => ({ num: s });
+  test.each([
+    [-1, 10_000_000, '1'],
+    [-1, 10_000_001, '-1'],
+    [-1, -10_000_001, '-1'],
+    [-1, big('1000000000000000000000000000000'), '1'],
+    [-1, big('1000000000000000000000000000001'), '-1'],
+    [1, 10_000_000, '1'],
+    [0, 10_000_000, '0'],
+  ] as const)('(%p)^%p', (base, exponent, expected) => {
+    const p = ce.box(['Power', base, exponent as any]);
+    expect(p.evaluate().toString()).toEqual(expected);
+    expect(p.N().toString()).toEqual(expected);
+  });
+
+  test('the base 0 to a zero or a negative exponent is not changed', () => {
+    expect(ce.box(['Power', 0, 0]).evaluate().toString()).toEqual(
+      'Indeterminate'
+    );
+    expect(ce.box(['Power', 0, -10_000_000]).evaluate().toString()).toEqual(
+      '~oo'
+    );
+  });
+
+  test('a symbol exponent assigned a huge value', () => {
+    const e = ce.box(['Power', -1, 'k_pow1']);
+    ce.assign('k_pow1', ce.box(10_000_001));
+    expect(e.evaluate().toString()).toEqual('-1');
+    // Above 2^53 the double of the exponent has no parity: the exact value
+    // of the symbol decides it under `N()` too.
+    ce.assign('k_pow1', ce.parse('10^{30}+1'));
+    expect(e.evaluate().toString()).toEqual('-1');
+    expect(e.N().toString()).toEqual('-1');
+    ce.forget('k_pow1');
+  });
+
+  // An exponent that canonicalization keeps as an expression (`10^{30} + 1`
+  // is an `Add`) gives the same parity under `N()` as under `evaluate()`.
+  test.each([
+    ['(-1)^{10^{30}+1}', '-1'],
+    ['(-1)^{2^{60}+1}', '-1'],
+    ['(-1)^{-(10^{30}+1)}', '-1'],
+    ['(-1)^{10^{30}+2}', '1'],
+  ])('an expression exponent above 2^53: %s', (latex, expected) => {
+    const p = ce.parse(latex);
+    expect(p.evaluate().toString()).toEqual(expected);
+    expect(p.N().toString()).toEqual(expected);
+  });
+
+  test('a symbol exponent assigned an expression above 2^53', () => {
+    ce.assign('k_pow2', ce.parse('10^{30}+1', { canonical: false }));
+    const e = ce.box(['Power', -1, 'k_pow2']);
+    expect(e.evaluate().toString()).toEqual('-1');
+    expect(e.N().toString()).toEqual('-1');
+    ce.forget('k_pow2');
+  });
+
+  // Under `N()` the exponent is evaluated once: a side effect of the exponent
+  // runs once, and the value agrees with `evaluate()`.
+  test('an exponent with a side effect is evaluated once under N()', () => {
+    ce.assign('c_pow3', 0);
+    const p = ce.box([
+      'Power',
+      -1,
+      ['Block', ['Assign', 'c_pow3', ['Add', 'c_pow3', 1]], 'c_pow3'],
+    ]);
+    expect(p.N().toString()).toEqual('-1');
+    expect(ce.box('c_pow3').evaluate().toString()).toEqual('1');
+    ce.forget('c_pow3');
+  });
+
+  // A float exponent gives a float result, as before: the rule applies to an
+  // exact exponent only.
+  test.each([
+    ['(-1)^{3.0}'],
+    ['(-1)^{1.0\\times10^{30}}'],
+  ])('a float exponent gives an inexact result: %s', (latex) => {
+    const p = ce.parse(latex);
+    expect(p.evaluate().isExact).toBe(false);
+    expect(p.N().isExact).toBe(false);
+  });
+
+  // The sum from 1 to 1000003 takes about 20 seconds in the interpreter, so
+  // a range of 3 terms above the limit of the general exact power is used.
+  test('an alternating Sum over huge exponents', () => {
+    const s = ce.box([
+      'Sum',
+      ['Power', -1, 'k'],
+      ['Limits', 'k', 10_000_000, 10_000_002],
+    ]);
+    expect(s.evaluate().toString()).toEqual('1');
+  });
+});
+
 describe('small/fractional integer powers unchanged (controls)', () => {
   test('Power(2,10) → 1024', () => {
     expect(evalStr(['Power', 2, 10])).toEqual('1024');
