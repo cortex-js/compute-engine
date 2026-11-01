@@ -363,49 +363,19 @@
 
 ### Bug Fixes
 
-- **`ArgMax(f, xs)` in the body of a function is applied to the list, not to
-  each element.** `Apply(xs ↦ 1 + ArgMax(x ↦ 2x, xs), [1, 4])` gave a list of
-  two `incompatible-type` errors, one per element, where
-  `1 + ArgMax(x ↦ 2x, [1, 4])` gives one. The domain of the optimization form
-  `ArgMax(f, domain)` (and `ArgMin(f, domain)`) gave the parameter `xs` no
-  type, and a function whose parameter has no type is applied to each element
-  of a list argument. The parameter is now typed `collection`: a set bound to
-  it keeps the optimization form (`Apply(xs ↦ ArgMax(f, xs), Set(1, 4))` stays
-  `ArgMax(f, Set(1, 4))`), and a list gives the error of the collection form.
-
-- **A lazy operator whose canonical handler gives up is canonical and
-  invalid.** A call such as `Tail(xs, 2)`, `Head(xs, Sin)` or
-  `Interval("bad", 1)`, with an operand that the handler does not accept, was
-  kept as written: not canonical, and reported valid. As an operand of a sum
-  (`1 + Tail(xs, 2)`), its evaluation printed "Assertion failed" on the
-  console. An operand left over is now `Error("unexpected-argument")`
-  (`Tail(xs, Error("unexpected-argument", "2"))`). With a valid number of
-  operands, the operands are checked against the signature, so the refused
-  operand is a typed error:
-  `Interval(Error(ErrorCode("incompatible-type", "number", "string"), "bad"), 1)`.
-  An invalid call has no `count` any more: `Interval("bad", 1)` had the count
-  `Infinity` of a valid interval. A call whose operands all pass the check
-  (`Series(1)`, which has no variable, or any call when `ce.strict` is false)
-  is canonical and inert: `evaluate()` and `N()` return it unchanged. A
-  top-level `Sequence` operand supplies its elements
-  (`Interval(Sequence(1, 2))` is `Interval(1, 2)`). A handler that throws, and
-  an operator whose signature is inferred, still keep the call as written.
-
-- **Every collection operator reads a `FlatMap` whose finiteness is known only
-  after its callback is applied.** With `v = FlatMap([1, 2], x ↦ Range(1, x))`,
-  only `ListFrom`, `Count`, `Length`, `IsEmpty`, `Sum`, `Product`, `Max`,
-  `Min` and `Reduce` listed `v`. `Mean(v)`, `Median(v)`, `Sort(v)`,
-  `Unique(v)`, `Contains(v, 2)`, `SetFrom(v)`, `MaxBy(v, k ↦ k)` and the other
-  consumers stayed unevaluated, and so did a consumer of a view over `v`:
-  `ListFrom(Reverse(v))` was not `[2, 1, 1]`. Each of them now gives its value
-  over the elements `[1, 1, 2]`, under `evaluate()` and `evaluateAsync()`.
-  The callback is applied once for each element of the source, and an
-  operator that reads a prefix (`First`, `Take`) still applies it only to the
-  elements that it reads. A `FlatMap` with an infinite inner result
-  (`x ↦ Range(1, ∞)`) stays unevaluated in these operators. Also,
-  `IsEmpty(FlatMap([1, 2], x ↦ Map(slowF, Range(1, x))))`, where `slowF` has
-  only an `evaluateAsync` handler, is now `False`: the callback of a `Map`
-  does not change the number of its elements.
+- **A lazy `Map` in the callback of a `Map`, or in the body of a function,
+  now gives the values of each application under `.N()`.**
+  `Map(k ↦ Map(j ↦ k + j, [10, 20]), [1, 2])` with
+  `evaluate({ numericApproximation: true })`, `.N()` or `evaluate().N()` gave
+  `[[11, 21], [11, 21]]`, and is now `[[11, 21], [12, 22]]`, as `evaluate()`
+  and `evaluateAsync()` give. Also
+  `Block(c := 5, g(k) := Map(j ↦ c + k + j, [10]), Map(k ↦ g(k), [1, 2]))`
+  gave `[[16], [16]]`, and is now `[[16], [17]]`; and with
+  `f(h) := Map(j ↦ h(j), [10])`, `[f(x ↦ x + 1), f(x ↦ 2x)]` gave
+  `[[11], [h(10)]]`, and is now `[[11], [20]]`. The numeric form of the inner
+  `Map` was kept after the first application and read again in the later
+  ones; it is now kept only when the `Map` reads no name, and calls no
+  function, of a frame or of a block.
 
 - **`evaluateAsync({ numericApproximation: true })` of a block whose lazy `Map`
   calls a function that the block defines now reads the locals of the block.**

@@ -93,7 +93,11 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import { optionalParameterTarget } from './boxed-expression/function-literal.js';
-import { readsOtherBindings } from './boxed-expression/names-read.js';
+import {
+  callbackParameterNames,
+  readsOtherBindings,
+  someNameRead,
+} from './boxed-expression/names-read.js';
 
 /** `list<number>`, parsed once when the module loads, so the predicates that
  * test against it do not parse the string on each call. */
@@ -5062,9 +5066,41 @@ export function lazyMapNumericApproximation(
   const rewrapped = ce.function('Map', [wrappedFn, ...expr.ops.slice(1)]);
   if (!isFunction(rewrapped, 'Map') || !rewrapped.op1.isValid) return undefined;
   // A rewrap around the literal a symbol holds NOW is valid for this frame
-  // only (see the memo note in the JSDoc).
-  if (boundLiteral === undefined) lazyMapNRewraps.set(expr, rewrapped);
+  // only (see the memo note in the JSDoc). So is a rewrap of a `Map` that
+  // reads a name bound in a scope other than the global scope: a `Map` in
+  // the body of a callback or of a function is one expression for every
+  // application, and the rewrap made in the first application read the
+  // values of that application in all later ones.
+  // `Map(k ↦ Map(j ↦ k + j, [10, 20]), [1, 2])` under `.N()` gave
+  // `[[11, 21], [11, 21]]`, not `[[11, 21], [12, 22]]`.
+  if (boundLiteral === undefined && readsOnlyGlobalBindings(ce, expr))
+    lazyMapNRewraps.set(expr, rewrapped);
   return rewrapped;
+}
+
+/**
+ * True when each name that the `Map` expression `expr` reads (a symbol, or
+ * the function of a call, such as `h` in `Map(j ↦ h(j), xs)` for a
+ * parameter `h` of a function), other than a parameter of its callback, is
+ * bound in the global scope, or in no scope of the current chain. The value
+ * that such a name gives does not depend on the frame where `expr` is
+ * evaluated. A name of a scope inside the callback (the index of a `Sum`, a
+ * local of a `Block`) can make the result `false`, which is safe: the
+ * rewrap of `expr` is then not kept.
+ */
+function readsOnlyGlobalBindings(
+  ce: Expression['engine'],
+  expr: Expression
+): boolean {
+  if (!isFunction(expr)) return false;
+  const params = callbackParameterNames(expr.op1);
+  return !someNameRead(
+    expr,
+    (name) =>
+      !params.has(name) &&
+      ce.lookupDefinition(name) !== undefined &&
+      !isGlobalBinding(ce, name)
+  );
 }
 
 /**
