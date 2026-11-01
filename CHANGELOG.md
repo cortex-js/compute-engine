@@ -154,6 +154,20 @@
 
 ### Behavior Changes
 
+- **A compiled `Loop` whose value is used falls back to the interpreter.** The
+  value of a loop is `Nothing`, or the value of a `Break(v)`, and compiled
+  code has no form for either. Before, `compile()` of
+  `\keyword{for} i \keyword{from} 1 \keyword{to} 10 \keyword{do} i^2` gave a
+  function whose `run()` returned `undefined` (JavaScript) or `None`
+  (Python), and a loop left with `Break(30)` also returned `undefined`. Now
+  such a loop does not compile (`success: false`, diagnostic code
+  `unsettled-shape`) on every target. This includes a search loop that ends
+  with a `Return`, such as `(x) ↦ Loop(If(k > x, Return(k)), k ∈ 1..5)`,
+  which gives `Nothing` when no `Return` runs. A loop used as a statement
+  still compiles: `s ≔ 0; \keyword{for} i … \keyword{do} s ≔ s + i^2; s`
+  gives 385. A loop with no indexing set and no `Break`, which ends only
+  through a `Return`, also still compiles.
+
 - **Two calls of a function declared with the `random` effect are two
   independent draws** (CE-606). For example with `r` declared
   `(number) random -> number`, an equality comparison no longer reads `r(t)`
@@ -545,6 +559,58 @@
   the results of `Union`, `Intersection` and `SymmetricDifference`, also when
   an unevaluated `Union` is counted or walked. Pure elements are still
   deduplicated.
+
+- **A call of a function literal over an operand whose type is a union with
+  a tuple arm and no list arm has a type that holds its value** (CE-546).
+  With `T := a ↦ 2a`, `T(y)` for `y := (3, 4)` is `(6, 8)`, and these calls
+  were typed `number`. Now `y: number | tuple<real, real>` gives
+  `number | tuple<number, number>`, the union of the results of the arms;
+  `y: tuple<real, real> | tuple<real, real, real>` gives
+  `tuple<number, number, number> | tuple<number, number>`; and
+  `y: string | tuple<real, real>`, `boolean | tuple<real, real>` and
+  `number | missing | tuple<real, real>` give `any`. A call with one of these
+  unions and a second operand that can be a list that the call maps gives
+  `any`. A transparent alias of such a union is typed the same way.
+
+- **A call of a function that maps a list whose elements may be tuples has a
+  type that holds its value.** The call binds each tuple element whole, and
+  the body decides the shape of the result. With `T := a ↦ 2a` and `y`
+  declared `number | tuple<real, real>`, `T([y, y])` was typed `list<number>`,
+  but for `y := (3, 4)` its value is `[(6, 8), (6, 8)]`; it is now typed
+  `list<number | tuple<number, number>>`. `T([(1, 2), (3, 4)])` was typed
+  `vector<2>` and is now `list<tuple<number, number>>`. When an element type
+  has a tuple beside another kind of value, or the body does not compute the
+  tuple component by component (`a ↦ |a|`), the result is typed `any` or
+  `list<any>`.
+
+- **The type of `D` and of an indefinite `Integrate` holds the values that the
+  enclosing binding of a variable gives them** (CE-139). The value of
+  `D(a^2, a)` is `2a`, and outside the derivative `a` reads the binding that
+  encloses it. When that binding holds a list, the value is a list, but the
+  type was `number`: `(a: list<real>) ↦ D(a^2, a)` was typed
+  `(a: list<real>) -> number`, and applied to `[1, 2]` it gave `[2, 4]`. It is
+  now typed `(a: list<real>) -> list<number> | number` (the number is for a
+  closed form without the variable: `D(3a, a)` is `3`). A global or a block
+  local of a list type gives the same type. When the binding can hold a value
+  that is not a tensor of numbers, or the derivative is not a number
+  (`D([a^2, a^3], a)` gives a nested list), the type is `any`. A binding of
+  type `real` or `unknown` keeps the type `number`. Compiled JavaScript
+  evaluated the closed form with the variable read as a number (`NaN` for a
+  list); the compilation now declines for a `D` whose closed form holds a
+  variable with a list binding that is a parameter or a block local, and for
+  an `Integrate` whose variable has a list binding. A `D` over a global list
+  is still compiled, as a broadcast.
+
+- **A list or a set that holds a failed cell evaluates its other cells**
+  (CE-670). Before, the literal was kept as it was, so with
+  `I = ∫_0^1 x^x dx`, `(y·[I, "a"]).N()` gave `[y·I, Error(…)]` with the
+  integral not computed, and `[a, Error(…)]` stayed `[a, Error(…)]` after
+  `a := 5`. Now `(y·[I, "a"]).N()` gives `[0.78343…·y, Error(…)]`,
+  `[a, Error(…)]` evaluates to `[5, Error(…)]`, `{5, a, Error(…)}` to
+  `{5, Error(…)}`, and a finite `Map` cell becomes a list, as in a literal
+  with no failed cell. The failed cell stays as it is: `[a, ln("b")]`
+  evaluates to `[5, ln(Error(…))]`. A set comprehension with a failed cell
+  stays as it is.
 
 - **A subscript with several indices is serialized with its commas.**
   `ce.parse('A_{n,m}').latex` was `A_{n m}`, which parses back as the symbol

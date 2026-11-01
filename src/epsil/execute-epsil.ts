@@ -496,6 +496,12 @@ function* executeEpsilSteps(
   // name per program run, not per occurrence.
   const reportedUnknowns = new Set<string>();
 
+  // The names that the program can bind, for the scan of the canonical form
+  // of each statement below (`scanUnknownFunctions` with `bound`). `undefined`
+  // when the walk failed (a tree too deep to walk): that scan is then skipped,
+  // because without these names it would report a call of a local function.
+  const programNames = collectNonHeadSymbols(statements);
+
   // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05), the top level's runtime
   // tier: a `let`/`const` of a name an earlier top-level `let`/`const` of
   // THIS program declared evaluates to the `variable-redeclaration` error
@@ -837,6 +843,27 @@ function* executeEpsilSteps(
         source
       )
     );
+    // An unknown call that does not reach the result is not in the walk
+    // above: the source of a loop (`for i in rnage(1, 3) { … }` runs zero
+    // times and gives `Nothing`), a condition, a function body, a branch that
+    // was not taken. The canonical form of the statement holds every call of
+    // the statement, so it is walked too. `reportedUnknowns` keeps one
+    // report for each name, so a call in the result and in the canonical
+    // form is reported once.
+    if (boxedStmt !== undefined && programNames !== undefined) {
+      const canonical = boxedStmt;
+      walkValue(walkFailure, () =>
+        scanUnknownFunctions(
+          ce,
+          canonical.json,
+          reportedUnknowns,
+          diagnostics,
+          stmt,
+          source,
+          programNames
+        )
+      );
+    }
     reportWalkFailure(ce, walkFailure, stmt, source, defSites, diagnostics);
   }
 
@@ -2328,6 +2355,23 @@ function bindsACallable(ce: ComputeEngine, name: string): boolean {
   return def.value.type.matches('function');
 }
 
+/**
+ * Does `name` have a callable value definition that is not only the shell
+ * that boxing a call makes?
+ *
+ * Boxing `rnage(1, 3)` declares `rnage` as a value of type `function`, with an
+ * inferred type and no value, so `bindsACallable()` answers `true` for every
+ * unknown head once its statement is boxed. A binding with a value
+ * (`let f = (y) => y + 1`) or with a declared type (a host's
+ * `ce.declare('f', 'function')`) is not such a shell.
+ */
+function bindsACallableNotShell(ce: ComputeEngine, name: string): boolean {
+  if (!bindsACallable(ce, name)) return false;
+  const def = ce.lookupDefinition(name);
+  if (def === undefined || !isValueDef(def)) return true;
+  return !(def.value.inferredType && def.value.value === undefined);
+}
+
 /** `bound` extended with every symbol appearing in a function literal's
  * PARAMETER operands (everything after the body). */
 function withBoundParameters(
@@ -2547,6 +2591,16 @@ function scanConstantShadowingParams(
  *
  * Two names get a dedicated diagnostic instead of the did-you-mean path: a
  * print-like name, and a name that is a DECLARED TYPE (`type-not-callable`).
+ *
+ * With `bound`, `expr` is the CANONICAL form of the statement, not its
+ * result. That form holds calls of functions that the program binds as values
+ * (`let f = (y) => y + 1; f(2)`), of parameters (`function g(h) { h(1) }`)
+ * and of local functions of a body, which have no operator definition at the
+ * top level. A head is then skipped when its name is in `bound` (every name
+ * that the program writes in a position other than the head of a call, see
+ * `collectNonHeadSymbols()`) or when its definition is a callable value
+ * (`bindsACallableNotShell()`, for a binding of an earlier program or of the
+ * host).
  */
 function scanUnknownFunctions(
   ce: ComputeEngine,
@@ -2554,12 +2608,18 @@ function scanUnknownFunctions(
   reported: Set<string>,
   diagnostics: ParsingDiagnostic[],
   stmt: MathJsonExpression,
-  source: string
+  source: string,
+  bound?: ReadonlySet<string>
 ): void {
   const head = operator(expr);
   if (head === '') return; // Not a function application (number/symbol/string).
 
-  if (!reported.has(head) && ce.operatorInfo(head) === undefined) {
+  if (
+    !reported.has(head) &&
+    ce.operatorInfo(head) === undefined &&
+    (bound === undefined ||
+      (!bound.has(head) && !bindsACallableNotShell(ce, head)))
+  ) {
     reported.add(head);
     if (ce._typeResolver.resolve(head) !== undefined) {
       // A DECLARED TYPE name in call position: `type alias pt = tuple<…>`
@@ -2609,7 +2669,52 @@ function scanUnknownFunctions(
   }
 
   for (const op of operands(expr))
-    scanUnknownFunctions(ce, op, reported, diagnostics, stmt, source);
+    scanUnknownFunctions(ce, op, reported, diagnostics, stmt, source, bound);
+}
+
+/**
+ * Every symbol that `statements` write in a position other than the head of
+ * a function application: a name declared or assigned (`let f = …`, `f = …`),
+ * a parameter, a loop variable, a name read as a value. A name that the
+ * program binds as a function is written this way at its binding, so the set
+ * holds it; a capture of a `match` pattern adds its bare name. The set holds
+ * more names than the program binds; that only
+ * makes the scan of the canonical form report fewer calls, which is the safe
+ * direction for an advisory warning.
+ *
+ * Returns `undefined` when the walk fails (a tree nested too deeply for a
+ * recursive walk).
+ */
+function collectNonHeadSymbols(
+  statements: readonly MathJsonExpression[]
+): ReadonlySet<string> | undefined {
+  const names = new Set<string>();
+  // A capture of a `match` pattern is a wildcard symbol (`_n`, `__rest`,
+  // `___rest`) or the head of an application (`_f(x)`), and the case body
+  // reads it by its bare name (`n`, `rest`, `f`), with the leading
+  // underscores removed (`collectCaptures()` in `match-dispatch.ts`). The
+  // bare name is added too.
+  const add = (name: string): void => {
+    names.add(name);
+    const bare = name.replace(/^_+/, '');
+    if (bare.length > 0) names.add(bare);
+  };
+  const collect = (e: MathJsonExpression): void => {
+    const name = symbol(e);
+    if (name !== null && name !== undefined) {
+      add(name);
+      return;
+    }
+    const head = operator(e);
+    if (head.startsWith('_')) add(head);
+    for (const op of operands(e)) collect(op);
+  };
+  try {
+    for (const stmt of statements) collect(stmt);
+  } catch {
+    return undefined;
+  }
+  return names;
 }
 
 /**
