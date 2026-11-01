@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-739.
+Next free reference: CE-740.
 
 **Entry format.**
 
@@ -121,19 +121,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
-
-### CE-737. The type of a call of a function with an early `Return` ignores the value of the `Return`
-
-**Status:** ready; defect, S.
-
-With `x: real` and `g ≔ y ↦ Block(If(y > 1, Return((y, y))), y + 1)`, the type
-of `g(x)` is `number`, but `g(2)` evaluates to the point `(2, 2)`. The type of
-the call is the type of the last value of the body; the values of a `Return`
-are not joined into it. A consumer that reads the type (the compiler, the type
-of `2·g(x)`, a type check in Epsil) then treats a point as a number. The
-compilation of `g(x)` declines (the values of the body have different shapes),
-so compiled code is not affected. Fix: the result type of a function literal
-is the join of the types of its `Return` values and of its last value.
 
 ### CE-729. Parameter default values in an overloaded signature and in a multi-clause function
 
@@ -507,25 +494,6 @@ data bound (the union-source case must never conflict), and never reach an
 `_infer` write (no symbol narrowing, so the `zs` pin holds). Full contribution
 with inference writes needs a new decision on the `zs` KEEP pin. Do not build
 before a consumer asks.
-
-### CE-58. `ce.declare()` with a value does not apply the default `!scope` effect limit
-
-**Status:** ready; defect.
-
-`ce.declare('f', { type: '(...) -> ...', value: writerLiteral })` is the third
-caller of `assertDeclaredEffects`. It installs a proven escaping writer without
-the scope limit that the two declare-then-assign reconciliation routes apply.
-
-It has no requirement because the same code serves block-local `let` bindings:
-their writer closures (a closure that changes a local of its enclosing literal)
-must stay installable. No discriminator between global and local is available at
-that point: the Epsil static pass also evaluates top-level declares under pushed
-scopes, so the context depth does not separate the two. The installed arrow
-still carries the inferred `scope` label, so the effect stays visible. What is
-missing is the refusal. Checked 2026-10-24: block-local `let` declarations reach
-`declareFn` through the `Declare` operator (`declareSteps`, `library/core.ts`),
-which calls the public `ce.declare()`, so only a direct host call can be told
-apart, and that does not cover a top-level Epsil `let`.
 
 ### CE-61. Two kinds of user-defined callee are not checked statically
 
@@ -1097,6 +1065,35 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
+### CE-739. An assignment, `Return`, `Break` or `Continue` inside a conditional whose condition is a collection has no defined meaning
+
+**Status:** design needed; design, medium. Filed 2026-11-01 from CE-722 (user
+decision 2026-11-01: the compiler declines this shape; the meaning in the
+interpreter is this entry).
+
+An `If` or a `Which` whose condition is a list selects element by element: with
+`L: list<real>`, `If(L > 0, 1, -1)` gives a list. When a branch is an action
+rather than a value, the result is not defined, and the interpreter's results
+do not follow one rule. Measured at `e3ca9c1a6`: with `L = [-1, -2]`,
+`Block(p ≔ 0, If(L > 0, p ≔ 5), 2p)` gives `0`; with `M: list<any>` and
+`M = [[True, False]]`, `Block(p ≔ 0, If(M[1], p ≔ 5), 2p)` gives `10`, so the
+assignment ran when one element of the condition was true. A `Return`, `Break`
+or `Continue` in such a branch has the same problem: it is one action, not a
+per-element value.
+
+Candidate rules, to choose in a short design document:
+
+- The branch runs when any element of the condition is true (the result of
+  `M[1]` above); `p` is then a number. The compiler can emit this.
+- The condition of a branch that has an action must be a boolean; a collection
+  there is an error at canonicalization or evaluation. The compiler then
+  declines it as an invalid expression, which it does today.
+- The assignment is done element by element and `p` becomes a list. This
+  changes the type of `p` and is the hardest to compile.
+
+Until this is decided the compiler declines the shape (CE-722) and the
+interpreter's current results stand.
+
 ### CE-709. `Solve` with a float over a real domain lists only exact roots, and can claim no solution
 
 **Status:** decision needed; wrong value.
@@ -1533,18 +1530,6 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
   unevaluated, while compiled code gives `[]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
-
-### CE-103. A result built with the library π serializes as `Pi` in a scope that rebinds `Pi`
-
-**Status:** ready; defect, small.
-
-A declaration of `Pi` is refused in the global scope only, so that a function
-parameter, a `Sum` index or a block local can still be named `Pi`. In such a
-nested scope, a result that the engine builds with the library π
-(`Sum(1/n², n, 1, ∞)` → `π²/6`) still serializes as `Pi` and changes value when
-it is boxed again inside that scope. A result that leaves the scope is boxed
-with the library constant again, so the problem is limited to a JSON round trip
-inside the scope.
 
 ### CE-105. Error frames do not name the canonical operand or the declared call
 
@@ -3851,17 +3836,6 @@ values) cover a callback with a default inside `Map` only; `Sort`, `Iterate`
 and `Pipe` with such a callback are tested interpreted only
 (`test/compute-engine/compile-parameter-defaults.test.ts`).
 
-### CE-726. A function literal compiled at the root for `interval-js` cannot be called
-
-**Status:** ready; defect, S.
-
-`compile(ce.box(["Function", ["Multiply", 2, "x"], "x"]), { to:
-'interval-js' })` reports `success: true`, but `run(3)` returns `undefined`
-(measured 2026-10-31 at `a4d2de2d5`). On the JavaScript target the same
-literal returns a callable function. Either the interval target returns a
-callable (an interval-valued function of its arguments) or it declines with
-a reason.
-
 ### CE-715. A `bigint` compile mode on the JavaScript target: exact integers past 2^53
 
 **Status:** ready; capability, large. Spec approved by the user 2026-10-31
@@ -3995,8 +3969,9 @@ operator, then narrow the decline to the cases that still differ.
 
 ### CE-722. A conditional that selects element by element and whose branch assigns a name is not compiled
 
-**Status:** ready; decline (was a wrong value), medium. Found 2026-10-31 during
-CE-712.1.
+**Status:** ready; documentation, small. User decision 2026-11-01: option (a),
+the decline is the rule. Found 2026-10-31 during CE-712.1. The meaning of the
+expression in the interpreter is a separate question, CE-739.
 
 With `L: list<real>` and `L = [-1, -2]`,
 `Block(p ≔ 0, If(L > 0, p ≔ 5), 2p)` gives `0` in the interpreter. At HEAD
@@ -4008,10 +3983,14 @@ gives `10`. CE-712.1 makes an `If` or a `Which` whose condition is or can be a
 collection, and whose branch assigns a name or has a `Return`, a `Break` or a
 `Continue`, decline with the code `'unsettled-shape'` on every target.
 
-Fix: a decision is needed first: what the value of `p` is after an
-element-wise selection whose branches assign it (the interpreter's current
-result is the reference). Then compile that value, or keep the decline as
-the documented rule.
+Decision 2026-11-01: the compiler keeps the decline. The value of `p` after
+an element-wise selection whose branch assigns it has a shape that depends on
+the run-time selection, so the static-shape rule (CE-712, R3) declines it
+whatever the interpreter does. Remaining work: `docs/COMPILATION-MODEL.md`
+gets this example in the list of declines that the static-shape rule requires
+(with CE-712.5). If CE-739 later defines the meaning so that `p` has one
+shape (for example, the branch runs when any element of the condition is
+true, and `p` is a number), the compiler can emit that, as a new entry.
 
 ### CE-723. A function literal applied in a loop body that assigns the loop index is not compiled
 
