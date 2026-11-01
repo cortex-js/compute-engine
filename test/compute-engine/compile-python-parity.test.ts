@@ -2314,3 +2314,131 @@ describeMaybe(
     });
   }
 );
+
+/**
+ * The name of an operator or a function used as a VALUE on the Python
+ * target: a bare symbol, or a `Head` that canonicalization folds to the
+ * symbol of the operator (`Head(List(1))` is the symbol `List`). The
+ * interpreter gives the symbol. Python code has no form for a symbol value,
+ * and the target makes a function value only for the callback operand of a
+ * higher-order operator, which that operator's own lowering compiles. So the
+ * compilation declines. The target used to emit the bare name (`List`, which
+ * raises a `NameError` when the code runs) or the JavaScript lambda
+ * `(a,b) => a + b` (a Python syntax error) behind `success: true`.
+ */
+describe('PYTHON — the name of an operator or a function used as a value', () => {
+  const python = new PythonTarget();
+
+  it.each<[string, any, string]>([
+    ['Head of an empty Dictionary', ['Head', ['Dictionary']], 'Dictionary'],
+    ['Head of a List', ['Head', ['List', 1]], 'List'],
+    ['Head of a String', ['Head', { str: 'abc' }], 'String'],
+    ['Head of a Sqrt', ['Head', ['Sqrt', 'x']], 'Sqrt'],
+    ['Head of a Multiply', ['Head', ['Multiply', 'x', 'y']], 'Multiply'],
+    ['the symbol Add', 'Add', 'Add'],
+    ['the symbol Sqrt', 'Sqrt', 'Sqrt'],
+    [
+      'a symbol in a branch of an If',
+      ['If', ['Greater', 'x', 0], ['Head', ['List', 1]], 1],
+      'List',
+    ],
+  ])('%s declines', (_label, json, name) => {
+    const expr = ce.box(json);
+    // The interpreter's value is the symbol.
+    if (typeof json !== 'string' && json[0] === 'Head')
+      expect(isSymbol(expr.evaluate(), name)).toBe(true);
+    expect(() => python.compile(expr)).toThrow(
+      new RegExp(`Could not compile \`${name}\` on target 'python'`)
+    );
+  });
+
+  it('the name of a user function declines', () => {
+    const e = new ComputeEngine();
+    e.parse('g(t) := t + 1').evaluate();
+    expect(() => python.compile(e.box('g'))).toThrow(
+      /Could not compile `g` on target 'python'/
+    );
+  });
+
+  it('a parameter spelled like an operator is an input', () => {
+    // `compileFunction` reads a parameter as a name of the Python function,
+    // also when the engine knows the name as an operator.
+    expect(python.compileFunction(ce.box('Sqrt'), 'fn', ['Sqrt'])).toContain(
+      'return Sqrt'
+    );
+  });
+
+  it('a parameter spelled like an operator of the operator table is an input', () => {
+    // `Add` has an entry in the operator table of the target, which the
+    // refusal reads first; a parameter is resolved before it.
+    expect(python.compileFunction(ce.box('Add'), 'fn', ['Add'])).toContain(
+      'return Add'
+    );
+  });
+
+  it.each(['Add', 'Multiply', 'Divide'])(
+    'a `vars` key spelled `%s` is an input',
+    (name) => {
+      const result = python.compile(ce.box(name), {
+        vars: { [name]: 'p' },
+        fallback: false,
+      });
+      expect(result.success).toBe(true);
+      expect(result.code).toBe('p');
+    }
+  );
+});
+
+describeMaybe(
+  'PYTHON EXECUTION PARITY — an operator name as a callback operand (venv)',
+  () => {
+    const python = new PythonTarget();
+
+    // The callback operand of a higher-order operator is compiled by the
+    // operator's own lowering, so the refusal above does not reach it.
+    it('Reduce with the symbol Add matches the interpreter', () => {
+      const e = new ComputeEngine();
+      e.declare('v', 'list<real>');
+      const code = python.compileFunction(e.box(['Reduce', 'v', 'Add']), 'fn', [
+        'v',
+      ]);
+      const src =
+        'import numpy as np\n\n' +
+        `${code}\n` +
+        'print(float(fn([1.5, 2, 4])))\n';
+      const file = path.join(os.tmpdir(), `ce-py-opname-${process.pid}.py`);
+      fs.writeFileSync(file, src);
+      let out = '';
+      try {
+        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      e.assign('v', e.box(['List', 1.5, 2, 4]));
+      const expected = e.box(['Reduce', 'v', 'Add']).evaluate().re;
+      expect(expected).toBe(7.5);
+      expect(Number(out.trim())).toBe(expected);
+    });
+
+    it('a parameter and a `vars` key spelled `Add` run as inputs', () => {
+      const fnCode = python.compileFunction(ce.box('Add'), 'fn', ['Add']);
+      const varsCode = python.compile(ce.box('Add'), {
+        vars: { Add: 'p' },
+        fallback: false,
+      }).code;
+      const src =
+        `${fnCode}\n` +
+        'p = 2.5\n' +
+        `print(fn(1.5), ${varsCode})\n`;
+      const file = path.join(os.tmpdir(), `ce-py-opinput-${process.pid}.py`);
+      fs.writeFileSync(file, src);
+      let out = '';
+      try {
+        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      expect(out.trim()).toBe('1.5 2.5');
+    });
+  }
+);
