@@ -31,6 +31,7 @@ export type TokenType =
   | ','
   | ':'
   | '?'
+  | '='
   | '*'
   | '+'
   | '.'
@@ -533,6 +534,15 @@ export class Lexer {
       case '?':
         this.advance();
         return this.createToken('?', '?');
+      case '=':
+        // The `=` that introduces the default value of a function parameter,
+        // `(x: number, k: number = 2) -> number`. A `=` followed by `=` or
+        // `>` is not this token: it stays an unexpected character, so in
+        // tolerant (prefix) mode `==` and `=>` still end the type, as every
+        // `=` did before this token existed.
+        if (this.peek(1) === '=' || this.peek(1) === '>') break;
+        this.advance();
+        return this.createToken('=', '=');
       case '*':
         this.advance();
         return this.createToken('*', '*');

@@ -1,4 +1,4 @@
-import type { EffectSet } from './types.js';
+import type { EffectSet, ParameterDefault } from './types.js';
 
 export interface ASTNode {
   kind: string;
@@ -17,6 +17,9 @@ export interface ArgumentNode extends ASTNode {
   kind: 'argument';
   element: NamedElementNode;
   modifier?: 'optional' | 'variadic_zero' | 'variadic_one';
+  /** The default value written after the argument type (`k: number = 2`).
+   * An argument with a default always has the `optional` modifier. */
+  default?: ParameterDefault;
 }
 
 export interface FunctionSignatureNode extends ASTNode {

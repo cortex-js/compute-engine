@@ -205,6 +205,11 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
     for (const argNode of node.arguments) {
       const element = this.buildNamedElement(argNode.element);
+      // A parameter with a default value is always optional (the parser sets
+      // the `optional` modifier), so it lands in `optArgs` below. The default
+      // is frozen: a type is immutable.
+      if (argNode.default !== undefined)
+        element.default = Object.freeze({ ...argNode.default });
 
       switch (argNode.modifier) {
         case 'optional':

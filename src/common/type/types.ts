@@ -268,9 +268,32 @@ export function isIndeterminateValue(
   );
 }
 
+/**
+ * The default value of an optional function parameter, written after the
+ * parameter type in a signature: `(x: number, factor: number = 2) -> number`.
+ *
+ * - `value`: a number that a JavaScript `number` holds (a finite number,
+ *   `NaN`, `+oo` or `-oo`), a string, or a boolean.
+ * - `symbol`: a symbol, stored by name. The symbol itself is the default;
+ *   it is not evaluated when the signature is parsed.
+ * - `empty-list` and `empty-dictionary`: `[]` and `{}`.
+ *
+ * A default is part of the type: the serializer prints it, so two signatures
+ * that differ only by a default have different identity keys. Subtyping and
+ * matching ignore it, as they ignore the parameter name.
+ */
+export type ParameterDefault =
+  | { kind: 'value'; value: number | string | boolean }
+  | { kind: 'symbol'; name: string }
+  | { kind: 'empty-list' }
+  | { kind: 'empty-dictionary' };
+
 export type NamedElement = {
   name?: string;
   type: Type;
+  /** The default value of an optional parameter of a function signature.
+   * Only an element of `optArgs` has one. See {@link ParameterDefault}. */
+  default?: ParameterDefault;
 };
 
 /**
@@ -895,6 +918,14 @@ export type Type =
  *            | <name> "..." <type>
  *
  * <optional_argument> ::= <argument> "?"
+ *            | <argument> "=" <default_value>
+ *
+ * <default_value> ::= <value> | <identifier> | "[" "]" | "{" "}"
+ *
+ * (An argument with a default value is optional; it is not combined with
+ * `?`. The arguments with a default come before the optional arguments
+ * without one. A default is not allowed on a rest argument, nor in a tuple
+ * type. See {@link ParameterDefault}.)
  *
  * <optional_arguments> ::= <optional_argument> ("," <optional_argument>)*
  *

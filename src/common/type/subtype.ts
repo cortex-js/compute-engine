@@ -589,7 +589,8 @@ function cycleNodeStructure(t: Exclude<Type, string>): string {
   const types = (ts: ReadonlyArray<Type> | undefined) =>
     ts === undefined ? '-' : `[${ts.map(cycleTypeKey).join(',')}]`;
   const named = (e: NamedElement) =>
-    `${JSON.stringify(e.name ?? null)}:${cycleTypeKey(e.type)}`;
+    `${JSON.stringify(e.name ?? null)}:${cycleTypeKey(e.type)}` +
+    (e.default === undefined ? '' : `=${cycleDataKey(e.default)}`);
   const namedList = (es: ReadonlyArray<NamedElement> | undefined) =>
     es === undefined ? '-' : `[${es.map(named).join(',')}]`;
   const fieldMap = (m: Readonly<Record<string, Type>>) => {

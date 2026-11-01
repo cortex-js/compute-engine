@@ -1,8 +1,13 @@
 # Compute Engine — Roadmap
 
 This file lists the work that remains: open defects, performance problems,
-missing capabilities, design questions and tasks. When an item is done, remove
-it. `CHANGELOG.md` and the git history keep the record of finished work.
+missing capabilities, design questions and tasks. It records FUTURE work only.
+Work in progress has no entry: the session that does it holds the state, in
+the plan document or the handoff file, and `CHANGELOG.md` and the git history
+keep the record of finished work. Work that another record tracks, a GitHub
+issue or a Tycho ledger row, gets no entry that repeats it; an entry exists
+only for the part of that work this file adds (a decision, a design, the
+steps), and it links the other record.
 
 ## How to use this file
 
@@ -18,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-717.
+Next free reference: CE-719.
 
 **Entry format.**
 
@@ -33,8 +38,10 @@ proposed fix.>
 - **CE-<n>.1** <A sub-item that can be fixed alone.>
 ```
 
-- `<state>` is `open`, `in progress`, `decision needed`, `design needed`,
-  `on demand` (do it when a user asks for it) or `deprioritized`.
+- `<state>` is `open`, `decision needed`, `design needed`, `on demand` (do it
+  when a user asks for it) or `deprioritized`. There is no `in progress`: the
+  session that starts an item removes the entry (see "Started and finished
+  work").
 - `<kind>` is `defect`, `wrong value` (a defect that gives a wrong result with
   no error), `performance`, `capability`, `design`, `task` or `documentation`.
 - Record a user decision with its date. Link the plan document, the GitHub issue
@@ -56,9 +63,15 @@ the row. Delete the entry when the fix is released; Tycho deletes the row when
 the fix verifies. How to answer a row is described in the "Instructions for the
 CE team" section of that file.
 
-**Finished work.** When an entry is done, delete it. When a sub-item is done,
-delete its bullet and keep the numbers of the other sub-items. When part of an
-entry is done, change its text to say only what remains.
+**Started and finished work.** An entry is removed when its work starts, not
+when it ends: the session that does the work keeps the entry's content where
+it needs it (the plan document, the task brief, the handoff file), and the
+commit and `CHANGELOG.md` record the result. When the work stops before it is
+done, the session writes the entry again, with the same reference, saying only
+what remains. When a sub-item starts, delete its bullet and keep the numbers of
+the other sub-items. An entry that waits for a decision or a design stays
+until the decision is made or the design is written; then the work starts and
+the entry goes.
 
 **Related documents.** `docs/epsil/ROADMAP.md` (Epsil language and tools),
 `docs/TYPE_SYSTEM_ROADMAP.md` and `docs/INFERENCE_ROADMAP.md` (type system),
@@ -85,6 +98,59 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-718. A hexadecimal or binary value type reads as the type `0`
+
+**Status:** open; wrong value, S.
+
+`ce.type("0x10")`, `ce.type("-0x10")` and `ce.type("0b10")` all give the value
+type `0`, with no error (measured 2026-10-31). The type lexer
+(`src/common/type/lexer.ts`, "Handle hex", near line 298) accepts a
+hexadecimal or binary number literal and builds a token text such as `0x10`
+(a signed one as `0-x10`), but the type parser reads the value with
+`parseFloat(token.value)` (`parseValue`, `src/common/type/parser.ts` near
+line 2736), which stops at the radix letter and returns 0. Fix: decode the
+token by its radix (with its sign), or refuse it with a parse error. A
+parameter default (CE-717) already refuses these spellings
+(`parseParameterDefault`), so the two places should agree after the fix.
+
+### CE-717. A default value for an optional parameter
+
+**Status:** open; capability, L. Spec
+`docs/plans/2026-10-31-parameter-default-values.md` (revision 5, two dual
+reviews; the user's decisions of 2026-10-31 are in its §8). GitHub issue #490.
+
+An optional parameter has no default: `Scaled(3)` with
+`(x: number, factor: number?) -> number` reaches the handler with one operand,
+so every handler re-implements "if the operand is missing, use 2";
+`factor: number = 2` in a signature fails to parse (`=` is not a token of the
+type DSL); and a function literal with `["Typed", "f", "'number?'"]` curries
+instead of calling, because `number?` is not a type and the `?` is ignored
+without a diagnostic (the parameter is typed `unknown` and loses its name).
+
+The spec: `name: type = default` in the signature marks an optional parameter
+with a default (a number, a string, a boolean, a symbol, `[]` or `{}`), stored
+on the parameter in the parsed `Type` beside its name; canonicalization inserts
+the default, so `Scaled(3)` and `Scaled(3, 2)` are one expression; a function
+literal spells it `["Optional", param, default]` (Epsil `(x, k = 2) => …`), and
+a call with the required arguments is a full call. Out of the first version:
+overload arms and multi-clause functions, library operators, `Optional` without
+a default, LaTeX parsing of `k = 2`.
+
+- **CE-717.1** Type DSL: `=` token, parse, build, serialize, grammar docs (spec
+  §6 step 1).
+- **CE-717.2** Definitions: box and check each default, refuse the unsupported
+  positions, subtype exception for a declared type (step 2).
+- **CE-717.3** The fill at canonicalization on each route of `box.ts`, and the
+  re-fill at evaluation for callees that can change (step 3).
+- **CE-717.4** Function literals: the `Optional` carrier, saturation and the
+  residual in `apply`, the parameter-list readers census, the LaTeX serializer
+  (step 4).
+- **CE-717.5** Epsil syntax, formatter, diagnostics (step 5).
+- **CE-717.6** Compilation: JavaScript and Python defaults, call-site completion
+  for GLSL/WGSL/interval, arity checks (step 6).
+- **CE-717.7** CHANGELOG, the v2 entries for overloads and library defaults, the
+  reply on the issue (step 7).
 
 ### CE-707. A list value is accepted for a scalar declared result when no argument is a list
 
@@ -364,8 +430,11 @@ type lattice onto the protocol system.
   satisfies a member with no Epsil source (`ProtocolHostHandler`); dispatch keys
   on the TYPE of the receiver, so an untagged `["List", 1, 2]` dispatches; and
   `where T is Iterable` is a working constraint slot.
-- **What it cannot do, by effort:** protocol refinement (`Indexable` requires
-  `Iterable`): there is no `requires` field. Parameterized protocols
+- **What it cannot do, by effort:** protocol extension (`Indexable extends
+  `Iterable`) is available since commit `fc5d21302` (CE-713, 2026-10-31):
+  when CE-51 adopts it, the sentence "`Indexable` alone grants no membership"
+  of Appendix A is removed (spec `docs/plans/2026-10-31-protocol-refinement.md`
+  §4). Parameterized protocols
   (`Iterable<T>`): `assertV1MemberShape` bans generic members, and conditional
   conformance gets element MATCHING but not element OUTPUT in the result type of
   a member. A dynamic-tier compiled guard that can see element types (the
@@ -391,66 +460,6 @@ that the double checks disappear.
 - **CE-51.1** Write the requirement-table design document that item 6(h) asks
   for. The member table above is its input.
 - **CE-51.2** Point the 69 capability checks at conformance.
-
-### CE-713. Protocol extension: a protocol that extends other protocols
-
-**Status:** approved 2026-10-31, implementation in progress (session
-compute-engine-37); capability, medium. Spec:
-`docs/plans/2026-10-31-protocol-refinement.md` (§8 records the decisions,
-all as recommended). User decision 2026-10-31: the spelling is
-`protocol A extends B, C { … }`. Issue #491 (follows #362). Prerequisite of
-CE-51 (`Indexable` extends `Iterable`).
-
-A protocol hierarchy (`FloorRing` extends `LinearOrder`, `Ring` and
-`FloorOrder`, which extend `PartialOrder`) has no spelling. A user declares
-every ancestor by hand for each type, and the engine does not know that a
-`FloorRing` conformance implies `PartialOrder`. The reporter measured one
-`declareProtocolImplementation` at about 100 µs, so a type at depth 8 costs
-about 860 µs instead of about 100.
-
-Design: an `extends` list on the protocol (`ce.declareProtocol(name, members,
-{ extends: [...] })`, Epsil `protocol LinearOrder extends PartialOrder { … }`).
-A conformance to an extending protocol registers an ordinary edge on every
-protocol of its closure that the type does not conform to yet, so
-`conformsTo`, dispatch, the `where T is P` constraint and the compiled
-planner do not change. The block of the conformance is split by the
-declaring protocol; an uncovered ancestor is `protocol-implementation-missing`.
-A member name is declared by one protocol per closure, and the closure of a
-protocol only grows under replacement (v1).
-
-### CE-716. A protocol member named like a library function dispatches in a later batch but not in the same batch
-
-**Status:** open, decision needed; defect, small. Found 2026-10-31 while
-testing CE-713; older code, not caused by it.
-
-```epsil
-protocol F { function floor(self: Self) -> integer }
-type Money = tuple<cents: integer>
-type Money is F { function floor(self: Money) -> integer { self.cents } }
-floor(Money(3))
-```
-
-In one batch, the call is a static `incompatible-type` error: `floor` is the
-library `Floor`, which expects a real. With the three declarations in one
-batch and the call in a later batch, the call returns `3`: the bare name
-reaches the protocol member. A member named `flr` returns `3` in both cases.
-
-The documented rule (`engine-protocols.ts`, `installDispatcher`, and Appendix
-A of `docs/TYPE_SYSTEM_ROADMAP.md`, pipeline step 1) is that a builtin keeps
-the bare name and only the qualified form `F.floor(x)` reaches the protocol.
-The same-batch behavior follows that rule; the later-batch behavior does not.
-The cause to trace: the Epsil lowercase name `floor` is resolved against the
-bindings that exist when the call is parsed, so the dispatcher installed by
-the first batch captures it in the second.
-
-Decision: (a) the documented rule holds in every batch, so the later batch
-must also give the static error (the user writes `F.floor(x)`); or (b) a
-protocol member declared by the user shadows a library function of the same
-lowercase name in every batch, so the same batch must also return `3`, and
-the documented rule changes to "a USER definition shadows; a library name is
-shadowed by a protocol member". Option (a) keeps library names stable; option
-(b) is what a Mathlib-style hierarchy (`floor`, `min`, `max`, `abs` as
-members) needs, and it is what issue #491's reporter does.
 
 ### CE-55. A user-declared lazy operator with an arrow-typed callback slot admits every callback
 

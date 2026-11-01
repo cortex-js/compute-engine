@@ -1,6 +1,11 @@
 import { effectSetToString } from './effects.js';
 import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
-import type { NamedElement, NumericPrimitiveType, Type } from './types.js';
+import type {
+  NamedElement,
+  NumericPrimitiveType,
+  ParameterDefault,
+  Type,
+} from './types.js';
 import { cellTypeCanHoldANumber, NUMERIC_TYPES_SET } from './primitive.js';
 
 // Binding tightness, ascending. A node is parenthesized when the context it is
@@ -370,7 +375,13 @@ export function typeToString(type: Type, precedence = 0): string {
         : '';
       const optArgs = type.optArgs
         ? type.optArgs
-            .map((arg) => namedElement(arg, ARGUMENT_MODIFIER_PRECEDENCE) + '?')
+            .map((arg) =>
+              // No type contains a `=`, so the argument type before a
+              // default needs no parentheses.
+              arg.default !== undefined
+                ? `${namedElement(arg)} = ${parameterDefaultToString(arg.default)}`
+                : namedElement(arg, ARGUMENT_MODIFIER_PRECEDENCE) + '?'
+            )
             .join(', ')
         : '';
       const varArg = type.variadicArg
@@ -445,6 +456,42 @@ function namedElement(el: NamedElement, precedence = 0): string {
   if (el.name)
     return `${symbolName(el.name)}: ${typeToString(el.type, precedence)}`;
   return typeToString(el.type, precedence);
+}
+
+const RESERVED_DEFAULT_NAMES = new Set([
+  'true',
+  'false',
+  'True',
+  'False',
+  'NaN',
+  'Infinity',
+  'oo',
+  'Indeterminate',
+  'Nothing',
+  'Missing',
+]);
+
+/**
+ * The spelling of the default value of a function parameter, as the type
+ * parser reads it back: a number, a string or a boolean as its value type
+ * prints (`2`, `"a"`, `true`, `NaN`, `+oo`, `-oo`), a symbol by its name
+ * (backticked when it is not a plain identifier), and `[]` or `{}`.
+ */
+function parameterDefaultToString(value: ParameterDefault): string {
+  switch (value.kind) {
+    case 'value':
+      return typeToString({ kind: 'value', value: value.value });
+    case 'symbol':
+      // A name that the type lexer reads as a keyword or a value token, or
+      // that `parseParameterDefault()` reads as a boolean (`True`), is
+      // backticked so that it parses back as the same symbol.
+      if (RESERVED_DEFAULT_NAMES.has(value.name)) return `\`${value.name}\``;
+      return symbolName(value.name);
+    case 'empty-list':
+      return '[]';
+    case 'empty-dictionary':
+      return '{}';
+  }
 }
 
 function symbolName(name: string): string {

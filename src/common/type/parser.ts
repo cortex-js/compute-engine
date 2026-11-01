@@ -37,6 +37,7 @@ import {
   INDETERMINATE_VALUE,
   EffectLabel,
   EffectSet,
+  ParameterDefault,
   TypeParameter,
   TypeResolver,
 } from './types.js';
@@ -203,7 +204,16 @@ function normalizedTypeName(value: string): string {
 (* Note: The parser enforces a semantic rule: required arguments must come before optional and variadic arguments. *)
 <argument_list> ::= <argument_specifier> ( "," <argument_specifier> )*
 
-<argument_specifier> ::= <named_element> ( "?" | "*" | "+" )?
+<argument_specifier> ::= <named_element> ( "?" | "*" | "+" | "=" <default_value> )?
+
+(* A default value makes the argument optional; it is not combined with
+   `?`, and a variadic argument cannot have one. The arguments with a default
+   come before the optional arguments without one, and a default cannot name
+   a parameter of the same signature. An identifier is a SYMBOL name here,
+   not a type name; `True` and `False` are the booleans. `Nothing`,
+   `Missing`, `Indeterminate` and `~oo` are refused. A `=` is allowed only in
+   the argument list of a function signature, not in a tuple type. *)
+<default_value> ::= <value> | <identifier> | <verbatim_string> | "[" "]" | "{" "}"
 
 <named_element> ::= ( <name> ":" )? <type>
 
@@ -816,8 +826,11 @@ export class Parser {
    *
    * The scan runs on a fresh, TOLERANT lexer over the remaining input: the
    * first character that cannot begin a type token ends the scan (the same
-   * rule that ends a prefix parse), so `= 5` and other trailing (non-type)
-   * source bound the search for free. The scan additionally stops at a depth-0
+   * rule that ends a prefix parse), so trailing (non-type) source bounds the
+   * search for free. `=` is a type token (it introduces a parameter default
+   * inside the parentheses of a signature), so a depth-0 `=`, as in the
+   * `= 5` of an Epsil `let x: T = 5`, ends the scan through an explicit
+   * `case '='`. The scan additionally stops at a depth-0
    * `,` (inside a single type, commas only occur bracketed — a depth-0 comma
    * means the type already ended) and when the bracket depth goes negative
    * (the closing delimiter of the surrounding construct).
@@ -854,6 +867,13 @@ export class Parser {
           if (depth < 0) return null;
           break;
         case ',':
+          if (depth === 0) return null;
+          break;
+        case '=':
+          // A `=` is part of a type only inside the parentheses of a
+          // signature, where it introduces a parameter default. At depth 0 it
+          // belongs to the surrounding source (the `=` of an Epsil `let x: T
+          // = …`), so the type has already ended.
           if (depth === 0) return null;
           break;
         case 'IDENTIFIER':
@@ -1028,6 +1048,8 @@ export class Parser {
       // Try function signature first with lookahead
       const signature = this.parseFunctionSignature();
       if (signature) return signature;
+
+      this.rejectDefaultInParenthesizedType();
 
       // Fall back to grouped type or parenthesized tuple. A parenthesized
       // type may carry its own trailing `where` clause — the per-arm
@@ -1322,7 +1344,14 @@ export class Parser {
     // variadic. Any other order would be silently re-ordered into that model —
     // `(collection+, mapping: function)` would mean `(mapping, ...collection)`
     // — so it is a parse error rather than a reinterpretation.
+    //
+    // Among the optional arguments, the ones with a default value come first.
+    // A call that leaves out trailing arguments gets the defaults by
+    // position: with `(x, a: number?, b: number = 2)`, the call `f(1)` would
+    // put the default of `b` in the slot of `a`.
     let sawOptional = false;
+    let sawDefault = false;
+    let sawOptionalWithoutDefault = false;
     let sawVariadic = false;
     for (let i = 0; i < args.length; i++) {
       const modifier = args[i].modifier;
@@ -1336,12 +1365,42 @@ export class Parser {
         sawVariadic = true;
       } else if (modifier === 'optional') {
         sawOptional = true;
+        if (args[i].default !== undefined) {
+          sawDefault = true;
+          if (sawOptionalWithoutDefault)
+            this.errorAtToken(
+              argTokens[i],
+              'A parameter with a default value cannot follow an optional parameter without one'
+            );
+        } else sawOptionalWithoutDefault = true;
+      } else if (sawDefault) {
+        this.errorAtToken(
+          argTokens[i],
+          'A required parameter cannot follow a parameter with a default value'
+        );
       } else if (sawOptional) {
         this.errorAtToken(
           argTokens[i],
           'A required argument cannot follow an optional argument'
         );
       }
+    }
+
+    // A default value cannot name a parameter of the same signature, such as
+    // `x` in `(x: number, k: number = x)`. The engine reads a symbol default
+    // as if the caller had written it, where the parameters of the function
+    // are not in scope, while a native JavaScript default would read the
+    // parameter: the two readings would differ.
+    const parameterNames = new Set(
+      args.map((arg) => arg.element.name).filter((name) => name !== undefined)
+    );
+    for (let i = 0; i < args.length; i++) {
+      const value = args[i].default;
+      if (value?.kind === 'symbol' && parameterNames.has(value.name))
+        this.errorAtToken(
+          argTokens[i],
+          `A default value cannot name a parameter: \`${value.name}\``
+        );
     }
 
     return this.createNode<FunctionSignatureNode>('function_signature', {
@@ -1365,7 +1424,166 @@ export class Parser {
       modifier = 'variadic_one';
     }
 
-    return this.createNode<ArgumentNode>('argument', { element, modifier });
+    if (this.current.type !== '=')
+      return this.createNode<ArgumentNode>('argument', { element, modifier });
+
+    // A default value: `k: number = 2`. The argument is then optional, so a
+    // `?` beside the default would say the same thing twice, and a rest
+    // argument cannot have one.
+    if (modifier === 'optional')
+      this.error(
+        'A parameter with a default value is optional; remove the `?`',
+        'For example `(x: number, k: number = 2) -> number`'
+      );
+    if (modifier !== undefined)
+      this.error('A variadic parameter cannot have a default value');
+    this.advance(); // consume '='
+    return this.createNode<ArgumentNode>('argument', {
+      element,
+      modifier: 'optional',
+      default: this.parseParameterDefault(),
+    });
+  }
+
+  /**
+   * The default value after the `=` of a function parameter:
+   *
+   * - a number (`2`, `-1`, `NaN`, `+oo`, `-oo`), a string, `true` or `false`;
+   * - an identifier or a backticked name, read as a SYMBOL, not as a type
+   *   name. `True` and `False` are read as the booleans `true` and `false`,
+   *   so the two spellings have one identity key;
+   * - `[]` or `{}`, the empty list and the empty dictionary.
+   *
+   * Refused: `Nothing` and `Missing` (the canonical form drops a `Nothing`
+   * operand, so an inserted default would disappear), and `Indeterminate` and
+   * `~oo`, which a JavaScript `number` cannot hold apart from `NaN` and the
+   * signed infinities. A list or a dictionary with contents is not spelled:
+   * the type grammar has no expressions. A default that names a parameter of
+   * the same signature is refused by `parseFunctionSignature()`, which knows
+   * every parameter name.
+   */
+  private parseParameterDefault(): ParameterDefault {
+    const token = this.current;
+    switch (token.type) {
+      case 'NUMBER_LITERAL':
+        // The lexer spells a hexadecimal or binary number (`0x10`, `0b10`)
+        // in a form that `parseFloat()` reads as 0, and the type parser has
+        // no conversion for them either, so they are refused instead of
+        // being read as a wrong value.
+        if (/[xXbB]/.test(token.value))
+          return this.error(
+            `\`${token.value}\` is not a default value`,
+            'Write the default value as a decimal number'
+          );
+        this.advance();
+        return { kind: 'value', value: parseFloat(token.value) };
+      case 'STRING_LITERAL':
+        this.advance();
+        return { kind: 'value', value: token.value };
+      case 'TRUE':
+        this.advance();
+        return { kind: 'value', value: true };
+      case 'FALSE':
+        this.advance();
+        return { kind: 'value', value: false };
+      case 'NAN':
+        this.advance();
+        return { kind: 'value', value: NaN };
+      case 'INFINITY':
+      case 'PLUS_INFINITY':
+        this.advance();
+        return { kind: 'value', value: Infinity };
+      case 'MINUS_INFINITY':
+        this.advance();
+        return { kind: 'value', value: -Infinity };
+      case 'INDETERMINATE':
+      case 'COMPLEX_INFINITY':
+        return this.error(
+          `\`${token.value}\` is not a default value`,
+          'A default value is a number, a string, a boolean, a symbol, `[]` or `{}`'
+        );
+      case 'IDENTIFIER':
+      case 'VERBATIM_STRING': {
+        const name = token.value;
+        if (name === 'Nothing' || name === 'Missing')
+          this.error(
+            `\`${name}\` is not a default value; leave the parameter optional instead`,
+            'For example `(x: number, k: number?) -> number`'
+          );
+        this.advance();
+        if (token.type === 'IDENTIFIER' && name === 'True')
+          return { kind: 'value', value: true };
+        if (token.type === 'IDENTIFIER' && name === 'False')
+          return { kind: 'value', value: false };
+        return { kind: 'symbol', name };
+      }
+      case '[':
+        this.advance();
+        if (!this.match(']'))
+          this.error(
+            'The only list default value is the empty list `[]`',
+            'For another list, declare a constant symbol and use its name as the default'
+          );
+        return { kind: 'empty-list' };
+      case '{':
+        this.advance();
+        if (!this.match('}'))
+          this.error(
+            'The only dictionary default value is the empty dictionary `{}`',
+            'For another dictionary, declare a constant symbol and use its name as the default'
+          );
+        return { kind: 'empty-dictionary' };
+      default:
+        return this.error(
+          'Expected a default value',
+          'A default value is a number, a string, a boolean, a symbol, `[]` or `{}`'
+        );
+    }
+  }
+
+  /**
+   * At a `(` that does not start a function signature: refuse a `=` directly
+   * inside the parentheses. Without this scan, `(x: number, k: number = 2)`
+   * (a signature without its arrow) would fail on the parameter name with a
+   * message that does not mention the default.
+   */
+  private rejectDefaultInParenthesizedType(): void {
+    const savedLexerState = this.lexer.saveState();
+    const savedCurrent = this.current;
+    let found: Token | undefined;
+    this.advance(); // consume '('
+    let depth = 1;
+    while (depth > 0 && (this.current as Token).type !== 'EOF') {
+      const token = this.current as Token;
+      if (token.type === '(') depth++;
+      else if (token.type === ')') depth--;
+      else if (token.type === '=' && depth === 1) {
+        found = token;
+        break;
+      }
+      this.advance();
+    }
+    this.lexer.restoreState(savedLexerState);
+    this.current = savedCurrent;
+    if (found)
+      this.errorAtToken(
+        found,
+        'A default value is allowed only in the argument list of a function signature',
+        'For example `(x: number, k: number = 2) -> number`'
+      );
+  }
+
+  /**
+   * A `=` after an element that is not an argument of a function signature
+   * (a tuple element, a parenthesized type): a default value is allowed only
+   * in the argument list of a signature, `(x: number, k: number = 2) -> …`.
+   */
+  private rejectDefaultOutsideSignature(): void {
+    if (this.current.type === '=')
+      this.error(
+        'A default value is allowed only in the argument list of a function signature',
+        'For example `(x: number, k: number = 2) -> number`'
+      );
   }
 
   private parseNamedElement(): NamedElementNode | undefined {
@@ -1878,6 +2096,7 @@ export class Parser {
         if (!firstElement) {
           this.error('Expected tuple element');
         }
+        this.rejectDefaultOutsideSignature();
         elements.push(firstElement);
 
         const expectNamedElements = firstElement.name !== undefined;
@@ -1888,6 +2107,7 @@ export class Parser {
           if (!element) {
             this.error('Expected tuple element');
           }
+          this.rejectDefaultOutsideSignature();
 
           // Validate naming consistency
           if (expectNamedElements && !element.name) {

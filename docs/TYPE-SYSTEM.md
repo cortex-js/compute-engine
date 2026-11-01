@@ -628,6 +628,47 @@ solutions. An inline lambda may be rebuilt with contextual parameter types at
 the application site; that inference is per application, not stored on the
 shared literal.
 
+### Default values of optional parameters
+
+A parameter of a function signature can have a default value, written after
+its type: `(x: number, factor: number = 2) -> number`. The parameter name is
+optional, as for any parameter: `(number, number = 2) -> number`.
+
+- A parameter with a default is optional. It is not also marked with `?`:
+  `number? = 2` is a parse error.
+- Order: the required parameters, then the parameters with a default, then
+  the optional parameters without a default. A parameter with a default
+  after an optional parameter without one is a parse error, and so is a
+  required parameter after a parameter with a default. The reason is that
+  the defaults are filled by position: with `(x, a: number?, b: number = 2)`,
+  a call with one argument would put the default of `b` in the slot of `a`.
+- A variadic parameter cannot have a default, and a signature with a
+  default cannot have a variadic parameter (optional and variadic
+  parameters do not mix).
+- A default is allowed only in the argument list of a function signature. In
+  a tuple type (`tuple<x: number, k: number = 2>`, or `(number, number = 2)`
+  with no arrow) it is a parse error.
+- The values: a number that a JavaScript `number` holds (`2`, `-1`, `1.5`,
+  `NaN`, `+oo`, `-oo`), a string (`"abc"`), `true` or `false`, a symbol
+  (`Integers`, or a backticked name), the empty list `[]` and the empty
+  dictionary `{}`. An identifier in default position is a symbol name, not a
+  type name. `True` and `False` are read as the booleans `true` and `false`,
+  so `flag: boolean = True` prints as `flag: boolean = true`.
+- Refused values: `Nothing` and `Missing` (leave the parameter optional
+  instead), `Indeterminate` and `~oo`, a list or a dictionary with contents,
+  and a symbol that names a parameter of the same signature
+  (`(x: number, k: number = x)`). For a list with contents, declare a
+  constant symbol and use its name as the default.
+
+The default is part of the type: it is stored on the parameter
+(`NamedElement.default`, a `ParameterDefault`), and the serializer prints it,
+so `typeToString` and `typeToIdentityKey` tell apart two signatures that
+differ only by a default. Subtyping and matching ignore the default, as they
+ignore the parameter name: `(x: number, k: number = 2) -> number` and
+`(x: number, k: number = 3) -> number` match each other, and both match
+`(x: number, k: number?) -> number`. A default changes what a call means, not
+which calls are admitted.
+
 ### The inferred signature of a function literal
 
 The signature of a function literal says what its body proves about every
