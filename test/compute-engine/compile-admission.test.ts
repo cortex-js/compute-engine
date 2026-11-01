@@ -1122,6 +1122,30 @@ describe('The admission checks of round 1 of the review', () => {
     expect(found?.node.isSame(conflict)).toBe(true);
   });
 
+  // Each dictionary holds the dictionary below it under two keys, so the
+  // expression is a DAG of 31 dictionaries whose tree has 2^30 leaves. The
+  // walks that search the values of a dictionary read each one once. The
+  // test asserts no time: a walk that followed each path of the tree would
+  // not end before the Jest timeout of the test, and the test would fail.
+  test('a shared DAG of dictionaries is checked in linear time', () => {
+    const ce = engine();
+    const target = new JavaScriptTarget().createTarget({
+      cse: { enabled: false, instances: [], harvestOptions: {} },
+    });
+    const kv = (k: string, v: ReturnType<typeof ce.box>) =>
+      ce.function('KeyValuePair', [ce.box({ str: k }), v]);
+    let d = ce.function('Dictionary', [kv('a', ce.box('i'))]);
+    for (let n = 0; n < 30; n++)
+      d = ce.function('Dictionary', [kv('a', d), kv('b', d)]);
+    const json = ce.function('Block', [
+      ce.box(['Assign', 'p', 0]),
+      ce.function('Loop', [d, ce.box(['Element', 'i', ['List', 1]])]),
+      ce.function('Comprehension', [d, ce.box(['Element', 'i', ['List', 1]])]),
+      ce.symbol('p'),
+    ]);
+    expect(unsettledShapeIn(json, target)).toBeUndefined();
+  });
+
   // The check of the inputs fails closed: when the reference analysis
   // throws, the compilation declines.
   test('an analysis that throws declines', () => {
@@ -1563,8 +1587,10 @@ describe('Assigned names and the shapes of their values', () => {
     }
   );
 
-  // Assignments in a sequence are not compared: the compiled code handles
-  // the value of each one.
+  // The assignments of a local are compared also when they are in a
+  // sequence. Here `t`, the parameter of `f`, has no type, so the elements
+  // of `[t, 2]` have no settled shape, and the two values of `q` do not
+  // conflict.
   test('a local assigned a list, then a list of lists, compiles', () => {
     const body: MathJsonExpression = [
       'Block',
@@ -1577,6 +1603,24 @@ describe('Assigned names and the shapes of their values', () => {
     expect(r.success).toBe(true);
     expect(r.run!({ x: 1 })).toEqual([[1, 2]]);
     expect(interpret(json, 1, body)).toEqual(['List', ['List', 1, 2]]);
+  });
+
+  // With the parameter `t` typed `real`, `[t, 2]` is a list of numbers and
+  // `[[t, 2]]` is a list of lists: the values of `q` conflict, and the
+  // compilation declines.
+  test('a local assigned a list of numbers, then a list of lists, declines', () => {
+    const body: MathJsonExpression = [
+      'Block',
+      ['Assign', 'q', ['List', 't', 2]],
+      ['Assign', 'q', ['List', ['List', 't', 2]]],
+      'q',
+    ];
+    const ce = engine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.box(['Function', body, ['Typed', 't', "'real'"]]));
+    const r = compile(ce.box(['f', 'x']));
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
   // The `p` that the nested block declares is another variable: its
@@ -2074,6 +2118,33 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     ];
     expect(interpret(engine(), json, {})).toBe(0);
     expectDecline(engine(), json, /inside the `Comprehension`/);
+  });
+
+  // The admission walks search the values of a dictionary, also of a nested
+  // dictionary. The interpreter gives 0; the compiled code built the
+  // dictionary and gave 5.
+  test('an assignment in a dictionary in the body of a Comprehension', () => {
+    const write: MathJsonExpression = ['Assign', 'p', 5];
+    for (const body of [
+      ['Dictionary', ['KeyValuePair', "'a'", write]],
+      [
+        'Dictionary',
+        [
+          'KeyValuePair',
+          "'a'",
+          ['Dictionary', ['KeyValuePair', "'b'", write]],
+        ],
+      ],
+    ] as MathJsonExpression[]) {
+      const json: MathJsonExpression = [
+        'Block',
+        ['Assign', 'p', 0],
+        ['Comprehension', body, ['Element', 'i', ['List', 1]]],
+        'p',
+      ];
+      expect(interpret(engine(), json, {})).toBe(0);
+      expectDecline(engine(), json, /inside the `Comprehension`/);
+    }
   });
 
   // A false guard ends the pass before the source of the second clause.
@@ -2696,6 +2767,26 @@ describe('Assignments in a function literal (R3)', () => {
     );
   });
 
+  // The Python target emits the loop inline, as a `for` statement in the
+  // compiled function: the `return` in it ends that function, as the
+  // `Return` ends it in the interpreter. The case compiles there.
+  test('a Return inside a Loop that has code after it compiles on Python', () => {
+    const json = B(
+      ['Assign', 'q', 0],
+      [
+        'Loop',
+        ['If', ['Greater', 'i', 1], B(['Assign', 'q', 7], ['Return', 5])],
+        ['Element', 'i', 'L'],
+      ],
+      ['Add', 100, 'q']
+    );
+    const r = compile(engine().box(json), { to: 'python', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toMatch(/^for i in L:\n/m);
+    expect(r.code).toMatch(/^ {8}return 5$/m);
+    expect(r.code).toMatch(/^return q \+ 100$/m);
+  });
+
   // The compiled code of the body of a `Sum` or a `Product` is an
   // expression: a `Break` in it was a JavaScript syntax error.
   test.each(['Sum', 'Product'])('a Break in the body of a %s', (op) => {
@@ -3260,6 +3351,50 @@ describe('The admission checks of round 3 of the review of the simple rule (R3)'
     });
     expect(r.success).toBe(false);
     expect(r.unsupported).toContain('M');
+  });
+
+  // A `compile` handler of the definition of `Which` receives every operand
+  // too: this one emits the last operand, so the code reads `M`, which has
+  // no type, and `M` is refused.
+  test('an operand of a Which with a compile handler is not dropped', () => {
+    const ce = engine();
+    const def = ce.lookupDefinition('Which');
+    if (def && 'operator' in def)
+      (def.operator as any).compile = (
+        args: ReadonlyArray<unknown>,
+        c: (expr: unknown) => string
+      ) => `(${c(args[args.length - 1])})`;
+    const r = compile(ce.box(['Which', 'True', 0, 'True', 'M']));
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.unsupported).toContain('M');
+  });
+
+  // A handler that returns no code lets the stock lowering compile the
+  // `Which`, which reads only `0`. The admission does not call the handler,
+  // so it keeps every operand: `M`, which has no type, is refused. This is
+  // a decline, not a wrong value.
+  test('an operand of a Which with a compile handler that returns no code is checked', () => {
+    const ce = engine();
+    const def = ce.lookupDefinition('Which');
+    let calls = 0;
+    if (def && 'operator' in def)
+      (def.operator as any).compile = () => {
+        calls += 1;
+        return undefined;
+      };
+    const json: MathJsonExpression = ['Which', 'True', 0, 'True', 'M'];
+    const r = compile(ce.box(json));
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.unsupported).toContain('M');
+    expect(calls).toBeGreaterThan(0);
+    // With an input that has a type, the stock lowering compiles it.
+    const typed = compile(ce.box(['Which', 'True', 0, 'True', 'x']), {
+      fallback: false,
+    });
+    expect(typed.success).toBe(true);
+    expect(typed.run!({ x: 3 })).toBe(0);
   });
 });
 

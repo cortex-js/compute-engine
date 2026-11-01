@@ -316,8 +316,11 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  *   `'unsupported-mode'`, `'bigint-lane'` (in `mode: 'bigint'`, a node that
  *   is not on the integer lane; it is not a lane mismatch, so it never
  *   starts the `auto` retry), `'static-type-error'` (a sub-expression of
- *   static type `error`), `'compile-error'` (the generic fail-closed
- *   decline), ….
+ *   static type `error`), `'untyped-input'` (an input whose static type is
+ *   `unknown` or `any`, so its shape is not known; the kind is
+ *   `'correctness'`), `'unsettled-shape'` (a value that has no single shape
+ *   at compile time, for example an `If` whose branches differ in shape),
+ *   `'compile-error'` (the generic fail-closed decline), ….
  * - `kind` — see `CompileDiagnosticKind`.
  * - `message` — the human-readable reason (same text as `error`).
  * - `boundary` — for a lane mismatch, the binding boundary that refused
@@ -3556,6 +3559,12 @@ export type CompilationResult<
    * **declaratively** — it is populated on the engine-level `compile()` result
    * (including its `success: false` fallback) and on successful direct-target
    * compiles (where it is `[]`).
+   *
+   * On a decline, the interpreter fallback also adds to this list the names
+   * of the inputs whose static type is `unknown` or `any` (diagnostic code
+   * `'untyped-input'`), also when another reason declines first, so that the
+   * host learns which inputs to declare. For the code `'unsettled-shape'`, it
+   * adds the node that has no settled shape, as `toString()` writes it.
    */
   unsupported?: string[];
 

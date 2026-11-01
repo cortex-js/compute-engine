@@ -497,7 +497,13 @@ describeMaybe('PYTHON EXECUTION PARITY (venv)', () => {
     for (const c of CASES) {
       // Function names are prefixed so they never collide with a Python keyword.
       const fnName = `fn_${c.name}`;
+      // A free input typed `unknown` or `any` declines, and the inputs of
+      // the cases are finite real numbers: each parameter is declared
+      // `real` in a scope used only to compile the case.
+      ce.pushScope();
+      for (const p of c.params) ce.declare(p, 'real');
       const fn = python.compileFunction(ce.box(c.expr), fnName, c.params);
+      ce.popScope();
       src += `${fn}\n`;
 
       for (const inp of c.inputs) {
@@ -1666,6 +1672,9 @@ describeMaybe('PYTHON EXECUTION PARITY — statement If and rank-3 Norm (venv)',
       'r',
     ];
     const scoped = new ComputeEngine();
+    // A free input typed `unknown` declines. `nan` is in the type because
+    // the code is also run with `x = NaN`.
+    scoped.declare('x', 'real | nan');
     const fn = python.compileFunction(scoped.box(BLOCK as any), 'fn_stmt_if', [
       'x',
     ]);
@@ -2267,7 +2276,7 @@ describeMaybe(
           [['If', 'bool', 1, 2], { bool: 'boolean' }, 'bool'],
           [
             ['Norm', 'x', 'isinstance'],
-            { x: 'list<real>', isinstance: 'any' },
+            { x: 'list<real>', isinstance: 'real | string' },
             'isinstance',
           ],
           [['Add', ['Length', 'x'], 'len'], { x: 'list<real>', len: 'real' }, 'len'],

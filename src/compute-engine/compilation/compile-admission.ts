@@ -236,7 +236,10 @@ function namesReadIn(
  * (`null` where the interpreter gives `[2, 4]`). With `p` declared `real`,
  * the value `[1, 2]` is not a value of the type of `p`. Both decline. A
  * value whose type settles no shape, and an input whose type settles none
- * (a union of shapes), are not compared.
+ * (a union of shapes, a string), are not compared. An input declared
+ * `string` is not compared: the interpreter refuses a value of another
+ * type for it (with `s: string`, `s ≔ 3` gives an `incompatible-type`
+ * error), so the case is outside the contract of the compiled code.
  */
 function assignedInputConflict(
   expr: Expression,
@@ -522,8 +525,25 @@ function droppedOperandsOf(
   // compiles the operands that it chooses (the `If` of `interval-js` drops
   // a branch whose condition is `True` or `False`), so the rules below
   // apply to it.
+  //
+  // A `compile` handler of the definition of `Which` runs before the stock
+  // lowering, and it receives every operand too: the code that it returns
+  // can read any of them. With a handler that emits its last operand,
+  // `Which(True, 0, True, M)` reads `M`. No operand of such a `Which` is
+  // dropped. A handler can also return no code (`undefined`, `null` or an
+  // empty string), and the stock lowering then drops the clauses after a
+  // `True` condition. The admission does not call the handler to find out
+  // which case applies: the handler can have effects, and the code that it
+  // returns depends on the compilation of the operands. So the operands are
+  // kept also for such a handler, and an operand that the code then does
+  // not read is still checked: with a handler that returns no code,
+  // `Which(True, 0, True, M)` declines because `M` has no type, although
+  // the code reads only `0`. The result is a decline, never a wrong value.
   const ifFn = target.functions?.('If');
-  const whichFn = target.functions?.('Which');
+  const whichFn =
+    target.functions?.('Which') ??
+    (node.operator === 'Which' &&
+      typeof node.operatorDefinition?.compile === 'function');
   let dropped: Set<number> | undefined;
   if (node.operator === 'If' && node.nops === 2 && whichFn) return undefined;
   if (node.operator === 'If' && hasScalarCondition(node.ops[0]))
@@ -700,8 +720,14 @@ function controlValuesIn(
   const values: Expression[] = [];
   const seen = new Set<Expression>();
   const visit = (e: Expression): void => {
-    if (!isFunction(e) || seen.has(e)) return;
+    if ((!isFunction(e) && !isDictionary(e)) || seen.has(e)) return;
     seen.add(e);
+    // The values of a dictionary are code, also in a nested dictionary. A
+    // dictionary can be shared by several parents: it is read once.
+    if (isDictionary(e)) {
+      [...e.values].forEach(visit);
+      return;
+    }
     const h = e.operator;
     if (h === 'Function' || h === 'Hold') return;
     if (h === head) {
@@ -1272,12 +1298,19 @@ function assignmentConflictIn(
   const seen = new Map<Expression, [Env, Expression | undefined][]>();
   while (stack.length > 0) {
     const [node, outer, parent, outerScope] = stack.pop()!;
-    if (!isFunction(node)) continue;
-    const scope = node.localScope ?? outerScope;
+    if (!isFunction(node) && !isDictionary(node)) continue;
     const visits = seen.get(node);
     if (visits?.some(([env, p]) => env === outer && p === parent)) continue;
     if (visits === undefined) seen.set(node, [[outer, parent]]);
     else visits.push([outer, parent]);
+    // The compiled code evaluates the values of a dictionary: walk them in
+    // the scope of the dictionary, also in a nested dictionary.
+    if (isDictionary(node)) {
+      for (const v of node.values) stack.push([v, outer, parent, outerScope]);
+      continue;
+    }
+    if (!isFunction(node)) continue;
+    const scope = node.localScope ?? outerScope;
     const h = node.operator;
     if (h === 'Hold') continue;
     let env = outer;
@@ -1475,8 +1508,14 @@ function changesState(node: Expression): boolean {
   const seen = new Set<Expression>();
   while (stack.length > 0) {
     const e = stack.pop()!;
-    if (!isFunction(e) || seen.has(e)) continue;
+    if ((!isFunction(e) && !isDictionary(e)) || seen.has(e)) continue;
     seen.add(e);
+    // The values of a dictionary are code: search them, also in a nested
+    // dictionary.
+    if (isDictionary(e)) {
+      stack.push(...e.values);
+      continue;
+    }
     const h = e.operator;
     if (h === 'Hold') continue;
     if (
@@ -1625,11 +1664,19 @@ function writesOuterName(
   const seen = new Map<Expression, Set<Context>>();
   while (stack.length > 0) {
     const [e, outer] = stack.pop()!;
-    if (!isFunction(e)) continue;
+    // The values of a dictionary are code: search them, also in a nested
+    // dictionary. With `Comprehension({a -> (p ≔ 5)}, Element(i, [1]))`,
+    // the compiled code builds the dictionary and assigns `p`.
+    if (!isFunction(e) && !isDictionary(e)) continue;
     let contexts = seen.get(e);
     if (contexts?.has(outer)) continue;
     if (contexts === undefined) seen.set(e, (contexts = new Set()));
     contexts.add(outer);
+    if (isDictionary(e)) {
+      for (const v of e.values) stack.push([v, outer]);
+      continue;
+    }
+    if (!isFunction(e)) continue;
     const h = e.operator;
     if (h === 'Hold') continue;
     const names: string[] = [];
@@ -1709,12 +1756,18 @@ function returnInLoopIn(
   const seen = new Map<Expression, Set<string>>();
   while (stack.length > 0) {
     const [e, ctx] = stack.pop()!;
-    if (!isFunction(e)) continue;
+    if (!isFunction(e) && !isDictionary(e)) continue;
     const key = `${ctx.loops}:${ctx.tail}:${ctx.tailLoop}`;
     let keys = seen.get(e);
     if (keys?.has(key)) continue;
     if (keys === undefined) seen.set(e, (keys = new Set()));
     keys.add(key);
+    // The values of a dictionary are code, not in tail position.
+    if (isDictionary(e)) {
+      for (const v of e.values) stack.push([v, { ...ctx, tail: false }]);
+      continue;
+    }
+    if (!isFunction(e)) continue;
     const h = e.operator;
     if (h === 'Hold') continue;
     if (h === 'Return' && ctx.loops > 0 && !(ctx.loops === 1 && ctx.tailLoop))
@@ -1953,7 +2006,11 @@ export function unsettledShapeIn(
     }
   }
 
-  for (const body of [root, ...roots]) {
+  // The Python target emits a `Loop` inline, as a `for` or a `while`
+  // statement in the function that contains it: a `Return` in the loop
+  // ends that function, as in the interpreter. The other targets need the
+  // check (`returnInLoopIn()`).
+  for (const body of target.language === 'python' ? [] : [root, ...roots]) {
     const loopReturn = returnInLoopIn(body, target);
     if (loopReturn !== undefined)
       return { node: loopReturn, reason: 'return-in-loop' };

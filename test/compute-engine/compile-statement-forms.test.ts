@@ -686,8 +686,10 @@ describe('PYTHON: THE LOOP FORM KEEPS THE SCOPE OF THE BODY', () => {
   (TEST_PYTHON === undefined ? it.skip : it)(
     'the parameter, a global and a local of the enclosing block keep their values',
     () => {
-      const ce = new ComputeEngine();
-      const f = py.compileFunction(ce.box(shadow), 'f', ['t', 'n']);
+      const f = py.compileFunction(engineWithNT().box(shadow), 'f', [
+        't',
+        'n',
+      ]);
       // `t` is a global of the host, read by `compile()`.
       const e2 = new ComputeEngine();
       e2.declare('t', 'real');
@@ -750,9 +752,7 @@ describe('PYTHON: A ROOT ASSIGNMENT OF A SUM WITH A STATEMENT BODY', () => {
   (TEST_PYTHON === undefined ? it.skip : it)(
     'the code runs, and a block that reads the assigned name returns it',
     () => {
-      const root = py.compile(
-        new ComputeEngine().box(['Assign', 's', sum])
-      ).code;
+      const root = py.compile(engineWithS().box(['Assign', 's', sum])).code;
       const block = py.compile(
         new ComputeEngine().box(['Block', ['Assign', 's', sum], 's'])
       ).code;

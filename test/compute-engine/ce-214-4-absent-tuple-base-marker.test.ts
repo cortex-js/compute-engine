@@ -322,7 +322,9 @@ describePython('CE-214.4: Python, a base typed by one tuple', () => {
   test('a symbol typed `any` in an index does not change the marker', () => {
     // `i: any` is an index, not the collection: the interpreter keeps the
     // declared type of `b` and answers `Missing` (`None`). The compiled
-    // code gave `nan`.
+    // code gave `nan`. A free input declared `any` is refused, so, as in the
+    // JavaScript test above, each read is compiled as the body of a root
+    // function whose parameters `b` and `i` have the declared types.
     const lines: string[] = ['import numpy as np', 'import math'];
     const expected: string[] = [];
     const reads: unknown[] = [
@@ -333,11 +335,16 @@ describePython('CE-214.4: Python, a base typed by one tuple', () => {
       const ce = new ComputeEngine();
       ce.declare('b', 'list<list<any> | tuple<number, number>>');
       ce.declare('i', 'any');
+      const fn = ce.box([
+        'Function',
+        json,
+        ['Typed', 'b', { str: 'list<list<any> | tuple<number, number>>' }],
+        ['Typed', 'i', { str: 'any' }],
+      ] as never);
+      const r = compile(fn, { to: 'python', fallback: false } as never);
+      expect(r.success).toBe(true);
       lines.push(
-        new PythonTarget().compileFunction(ce.box(json as never), `f${k}`, [
-          'b',
-          'i',
-        ]),
+        `f${k} = ${r.code}`,
         `_r = f${k}([], 1)`,
         `print('nan' if isinstance(_r, float) and math.isnan(_r) else repr(_r))`
       );
