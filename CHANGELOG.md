@@ -35,18 +35,41 @@
   `invalid-parameter-annotation`. (#490, requested by
   [enumeratio](https://github.com/enumeratio))
 
-- **A `bigint` compile mode on the JavaScript target (in progress).** The
-  compile option `mode: 'bigint'` is accepted by the `javascript` target, and
-  the exported types change: `CompileMode` is now
-  `'strict' | 'complex' | 'auto' | 'bigint'`, and the `mode` of a compilation
-  result and of stored JavaScript can be `'bigint'`. A custom target with an
-  exhaustive `switch` on `CompileMode` must add the new case. Only the built-in
-  `javascript` target offers the mode: on any other target, also a custom
-  target that lists `'bigint'` in its `supportedModes`, a request for the mode
-  declines with `unsupported-mode`. In this release every compilation in the
-  mode declines with the new diagnostic code `bigint-lane` and runs on the
-  interpreter, as every decline does. The mode will compute integer-typed
-  expressions with exact JavaScript `BigInt` values past `2^53`. (#503)
+- **A `bigint` compile mode on the JavaScript target computes integers
+  exactly past `2^53`.** `compile(expr, { mode: 'bigint' })` computes every
+  integer value as a JavaScript `bigint`. With `n: integer`, the Catalan form
+  `Binomial(2n, n) − Binomial(2n, n + 1)` at `n = 40n` gives
+  `2622127042276492108820n`, and `Mod(n, 10)` at `n = 2^60 + 1` gives `7n`;
+  in the default mode the first is rounded and the second throws a
+  `RangeError`. The mode compiles integer arithmetic, `Abs`, `Min`, `Max`,
+  `Sign`, `Mod`, `Remainder`, `GCD`, `LCM`, `Factorial`, `Factorial2`,
+  `Binomial`, `Fibonacci`, `Sum`, `Product`, `Fold`, `Reduce`, `Range`,
+  `Map`, `At`, `Take`, `Drop`, `Length`, `If`, `Which`, the comparisons,
+  `IsPrime` and user functions with integer parameters. `Floor`, `Ceil`,
+  `Round` and `Truncate` of a quotient (`Floor(n/3)`, `Floor(n(n + 1)/2)`,
+  `Floor(2^(−n))`) or of `Sqrt(n)` are exact. Any other expression declines
+  with the new diagnostic code `bigint-lane` and runs on the interpreter:
+  `DigitSum(n)`, `String(n)`, `n/2` outside a rounding function, a `real`
+  input, a constant such as `π`. An input is a `bigint` or a safe-integer
+  `number`. The result is a `bigint` for an integer, a `boolean`, or a
+  `number` (`NaN` or `Infinity`) when a sub-expression has no finite value:
+  `n!` at `n = −1n` gives `Infinity`. A `number` result has no defined
+  relation to the value of `evaluate()`. A result with more than 1,000,000
+  decimal digits from `Power`, `Factorial`, `Factorial2`, `Binomial` or
+  `Fibonacci` throws a `RangeError` (`Fibonacci(n)` at `n = 10n ** 9n`),
+  where the interpreter leaves the expression unevaluated. `broadcast()`,
+  `broadcastAsync()` and the batch loaders of `createJavaScriptRuntime()`
+  refuse code compiled in the mode. The mode is never selected by `'auto'`.
+  The `compile` tool of the MCP server accepts `mode: "bigint"`. The exported
+  types change: `CompileMode` is now `'strict' | 'complex' | 'auto' |
+  'bigint'`, the `mode` of a compilation result and of stored JavaScript can
+  be `'bigint'`, and `CompiledValue` and the variable values of the runners
+  admit `bigint`. A custom target with an exhaustive `switch` on
+  `CompileMode` must add the new case. Only the built-in `javascript` target
+  offers the mode: on any other target, also a custom target that lists
+  `'bigint'` in its `supportedModes`, a request for the mode declines with
+  `unsupported-mode`. (#503, requested by
+  [enumeratio](https://github.com/enumeratio))
 
 - **A protocol can extend other protocols.** In Epsil, `protocol FloorOrder
   extends PartialOrder { function floor(self: Self) -> integer }`; the parents
@@ -252,6 +275,28 @@
   call; `F.floor(x)` calls the member.
 
 ### Bug Fixes
+
+- **An exact integer power or binomial near the 1,000,000-digit limit is
+  computed.** The interpreter leaves an exact `Power` or `Binomial` with more
+  than 1,000,000 decimal digits unevaluated, and two estimates of the number
+  of digits were wrong. `Power(999999999999999, 66000)` (990,000 digits)
+  stayed unevaluated; it now gives the integer.
+  `Binomial(10^100, 30000)` built an integer of about 2.9 million digits; it
+  now stays unevaluated at once.
+
+- **A power of `0`, `1` or `−1` to a large integer exponent is evaluated.**
+  `(−1)^(10^7)` stayed unevaluated, because the size limit of an exact power
+  multiplies the digits of the base by the exponent; it now gives `1`. Under
+  `N()`, `(−1)^(10^30 + 1)` gave `1`, from the double of the exponent; it now
+  gives `−1`. A float exponent still gives a float result.
+
+- **A compiled name equal to a name of the emitted code is renamed.** The
+  compiled JavaScript calls its runtime helpers through `_SYS` and uses other
+  fixed names, such as `_upper` for the bound of a `Sum` loop. A parameter of
+  a top-level function literal, a block local or a loop index with one of
+  these names kept it and hid the emitted one: `(_SYS) ↦ _SYS!` threw a
+  `TypeError`, and `(n, _upper) ↦ Sum(k·_upper, k = 1..n)` at `(3, 10)` gave
+  `18` for `60`. Such a name is now emitted under another name.
 
 - **A Leibniz derivative in the integrand of an integral leaves the closing
   differential to the integral** (CE-617). `\int_0^1 \frac{d}{dx}x^3\,dx`

@@ -534,7 +534,7 @@ describe('PYTHON TARGET', () => {
 
     it('a real-only head over a promoted radical LIST takes the element-wise runtime rule', () => {
       // The element-wise form of the D2/D6 runtime rule
-      // (`docs/COMPILATION-MODEL.md`, "Complex modes"): the promoted roots
+      // (`docs/COMPILATION-MODEL.md`, "Compile modes"): the promoted roots
       // are projected element-wise (`_ce_creal_elems`: an exactly-real root
       // as its real part, a complex one as `nan`) and the real lowering runs
       // over the projection. Same rule for an ordering; `strict` keeps the

@@ -244,7 +244,7 @@ describe('a complex-valued CONDITION and arithmetic over a complex arm', () => {
     // for each comparison with a complex root (user decision of 2026-10-21;
     // before, it left each comparison symbolic), and selects the `True` arm
     // for every element. The compiled ordering takes the D2/D6 runtime rule
-    // element-wise (`docs/COMPILATION-MODEL.md`, "Complex modes"): the roots
+    // element-wise (`docs/COMPILATION-MODEL.md`, "Compile modes"): the roots
     // are projected onto the real lane, a complex root projects to NaN, and
     // `NaN < 10` is `false` — so every element selects the `True` arm. Before
     // the element-wise rule, this form broadcast a raw `<` over the `{re, im}`

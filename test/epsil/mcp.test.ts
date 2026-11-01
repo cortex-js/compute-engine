@@ -568,6 +568,34 @@ describe('MCP server compile tool', () => {
     expect(result.unsupported).toEqual(['SinIntegral']);
   });
 
+  // The `bigint` mode is offered on `javascript` only. The result holds the
+  // generated code as a string, so a `bigint` value is never serialized.
+  test('compiles in the bigint mode on javascript only', async () => {
+    const [js, python] = await runServer([
+      callTool(1, 'compile', {
+        source: 'n! + 2^{70}',
+        format: 'latex',
+        mode: 'bigint',
+        declarations: { n: 'integer' },
+      }),
+      callTool(2, 'compile', {
+        source: 'n! + 1',
+        format: 'latex',
+        to: 'python',
+        mode: 'bigint',
+        declarations: { n: 'integer' },
+      }),
+    ]);
+    const result = payload(js);
+    expect(result.ok).toBe(true);
+    expect(result.mode).toBe('bigint');
+    expect(result.code).toContain('_SYS.bfactorial');
+    expect(result.code).toContain('1180591620717411303424n');
+    const declined = payload(python);
+    expect(declined.ok).toBe(false);
+    expect(declined.diagnostic.code).toBe('unsupported-mode');
+  });
+
   // `freeSymbolTypes` lists the inputs the code reads, including those read
   // by the initial value of a local binding.
   test('reports the free symbols of a program with a local binding', async () => {

@@ -1344,7 +1344,7 @@ class LaneAnalyzer {
     if (node.nops !== 2)
       this.fail(
         node,
-        'a chained comparison is not on the list of heads of the bigint mode (CE-715.3)'
+        'a chained comparison is not on the list of heads of the bigint mode (CE-715.8)'
       );
     const record = this.blank('boolean', 'none', 'boolean');
     let constantOperand = -1;
@@ -1452,7 +1452,7 @@ class LaneAnalyzer {
     if (node.nops !== 1)
       this.fail(
         node,
-        'a block of statements is not on the list of heads of the bigint mode (CE-715.3)'
+        'a block of statements is not on the list of heads of the bigint mode (CE-715.8)'
       );
     const info = this.analyze(node.op1, ctx);
     return this.set(node, { ...info });

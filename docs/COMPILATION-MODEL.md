@@ -61,6 +61,15 @@ Every other case is unspecified: the compiled code can give any value,
   drop `|x|` for `x` in `real<0..5>`).
 - An input left out (see `docs/ERROR-MODEL.md`, "An unsupplied variable").
 
+**One exception: a `number` result of the `bigint` mode.** In the `bigint`
+compile mode of the JavaScript target, a `bigint` or a `boolean` result is
+the value of `evaluate()`. A `number` result (`NaN` or `Infinity`) means
+that a sub-expression had no finite value, and it need not equal the value
+of `evaluate()`: with `n: integer`, `n! > 5` at `n = −1` gives `Infinity`,
+and the interpreter gives `False`. A `bigint` cannot hold a non-finite
+value, and the one catch that returns the `number` skips every operator
+between the pole and the result. See "Compile modes", "The `bigint` mode".
+
 **An input with no type declines.** The compiled code reads each input (a
 free symbol of the code, as `freeSymbols` lists it) in one shape, and the
 shape comes from the type of the input. An input whose static type is
@@ -488,6 +497,16 @@ other arithmetic. `Mod` by the literal `1` is not checked, because the
 remainder by `1` of every double beyond the range is `0`, which is also the
 exact answer.
 
+The `bigint` mode of the JavaScript target (`compile(expr, { mode:
+'bigint' })`, "Compile modes") is exact beyond this range. It computes every
+integer value of an integer-typed expression as a `bigint`, so `Mod(n, 10)`
+at `n = 2^60 + 1` gives `7n`, and `Mod`, `Remainder`, `GCD` and `LCM` do not
+throw. It has a size limit: `Power`, `Factorial`, `Factorial2`, `Binomial`
+and `Fibonacci` throw a `RangeError` when their result would have more than
+1,000,000 decimal digits, where the interpreter leaves the expression
+unevaluated. Both mean that there is no value, but the host receives a
+different answer from each.
+
 Constant folding follows the same rule. A constant subtree is folded with the
 interpreter's `.N()`, which rounds each operand to the working precision
 first, so an integer operation then reads a rounded operand as exact:
@@ -826,7 +845,16 @@ On GLSL the proof assumes an absolute error of at most 2⁻⁶ on [-π/2, π/2]
 (user decision 2026-10-31). On a driver with a larger error, a quotient by
 `cos(u)²` that this rule proves finite can be `±∞` or NaN.
 
-## Complex modes
+## Compile modes
+
+The `mode` option selects how the compiled code computes numeric values:
+`strict`, `complex`, `auto` or `bigint`. The `javascript` target offers the
+four modes, `python` offers the first three, and `interval-js`, `glsl` and
+`wgsl` offer `strict` only. A request for a mode that the target does not
+offer declines with the code `'unsupported-mode'`. The default is `auto`
+when the target offers it, else `strict`. The first three modes select how
+the code handles complex values (below). The `bigint` mode selects how it
+computes integers ("The `bigint` mode", at the end of this section).
 
 `strict` preserves real-lane assumptions and declines on an incompatible
 complex boundary. `complex` compiles wide numeric bindings through complex
@@ -1034,6 +1062,233 @@ own value boundary.
 
 The remaining quiet-machine performance measurement is tracked in
 `plans/2026-08-16-compile-complex-mode.md`.
+
+### The `bigint` mode
+
+**What it is for.** In the other modes every number is a double, so an
+integer past `2^53 − 1` is rounded, and `Mod`, `Remainder`, `GCD` and `LCM`
+throw for such an operand ("Integer operations beyond the safe integer
+range"). The `bigint` mode computes every integer value as a JavaScript
+`bigint`, so a counting function (a binomial sum, a ballot number, the
+unranking of a Dyck path) is exact at any size. With `n: integer`, the
+Catalan form `Binomial(2n, n) − Binomial(2n, n + 1)` at `n = 40n` gives
+`2622127042276492108820n`, and `Mod(n, 10)` at `n = 2^60 + 1` gives `7n`
+(GitHub issue #503).
+
+**How to request it.** `compile(expr, { mode: 'bigint' })`. Only the
+built-in `javascript` target offers it. A custom target that lists
+`'bigint'` in its `supportedModes` still declines with
+`'unsupported-mode'`. The `auto` mode never selects `bigint`, and a request
+for `bigint` compiles once, with no retry in another mode. The result
+reports `mode: 'bigint'` and `promoted: false`. Inside the compiler the mode
+is the `strict` discipline with a second setting, the integer lane
+(`'bigint'` in place of `'double'`).
+
+**Which nodes compile.** Every numeric node is on the integer lane (its
+value at run time is a `bigint`), or the compilation declines. A node is on
+the lane when two conditions are true:
+
+- Its type is a subtype of `integer | nan | infinity | signed_infinity`: each
+  finite value is an integer. For some heads the engine gives a wider type
+  than the value that the operands permit, and the mode uses a narrower
+  type, for this mode only: `Abs(n!)` is `integer<0..> | infinity`,
+  `Mod(n, m)` is `integer | nan`, `n^k` with `k: integer<0..>` is `integer`,
+  `Length(L)` is `integer<0..>`, and a sum, a product, `Min`, `Max`, `If`,
+  `Which`, `Fold`, `Reduce`, `Sum`, `Product` or a user call whose operands
+  are all on the lane is `integer` plus the non-finite members of the
+  operands (`f(n) + 1` with `f := x ↦ x!`).
+- Its head is on the list of the mode, or it is an integer literal, an input
+  of a subtype of `integer`, or a call of a user function. The list:
+  `Add`, `Subtract`, `Negate`, `Multiply`; `Power` with an exponent of type
+  `integer<0..>`, and `(−1)^k` for any `k` on the lane; `Abs`, `Min`, `Max`,
+  `Sign`; `Mod`, `Remainder`, `GCD`, `LCM`; `Factorial`, `Binomial`,
+  `Fibonacci`, and `Factorial2` of an operand of type `integer<0..>`;
+  `Floor`, `Ceil`, `Round`, `Truncate` (see below); `Sum` and `Product`;
+  `Fold` and `Reduce` over a `Range` or a `list<integer>`; `Range`, `List`,
+  `Map`; `If` with an else branch and `Which` with a final `True` clause;
+  `Typed(…, T)` with `T` a subtype of `integer`; `Length`, `Count`,
+  `Boole`; `At`, `First`, `Last`, `Take`, `Drop` and `ReplaceAt` with an
+  index or a count on the lane. Many heads of type `integer` are not on the
+  list, because their lowering gives a double (`DigitSum`,
+  `IntegerDigits`, `RandomInteger`, `IndexOf`).
+
+A boolean node is not on the lane. It compiles when it is a comparison
+(`Less`, `Greater`, `LessEqual`, `GreaterEqual`, `Equal`, `NotEqual`) of two
+operands on the lane, `IsPrime` of an operand on the lane, or `And`, `Or`,
+`Not` of such nodes. A comparison with a rational constant is exact: `n < p/q`
+is computed as `q·n < p` with `bigint` values. So `n ≥ (3·2^53 + 1)/2` at
+`n = 3·2^52` is `false`, as in the interpreter, where a comparison with the
+double of the constant gives `true`. `Equal(n, 1/3)` is `false` and
+`NotEqual(n, 1/3)` is `true` for every `n`.
+
+**A quotient under a rounding function or an integer promise.** A node of
+type `rational` has no `bigint` value. Four shapes of such a node compile,
+when their operands are on the lane and their parent requires an integer:
+`p/q · t` (canonicalization writes `n(n + 1)/2` as
+`Multiply(Rational(1, 2), n, n + 1)`), `a/b`, `a^e` with an exponent that
+can be negative (`2^(−n)`), and `Sqrt(t)` (under a rounding function only).
+The parent sets the lowering:
+
+- Under `Floor`, `Ceil`, `Round` or `Truncate`, the quotient is rounded
+  exactly: `Floor(n/3)`, `Ceil(n/2)`, `Floor(2^(−n))` (`0n` at `n = 3`).
+  `Round` rounds a half away from zero (`Round(5/2)` is `3`, `Round(−5/2)`
+  is `−3`), as the interpreter does. `Floor(Sqrt(n))` is the integer square
+  root, and `Ceil` and `Round` of `Sqrt(n)` are exact too, also past `2^53`.
+- Under an integer promise, the division is checked: a remainder that is not
+  zero throws a `RangeError` that names the operands (`The quotient 7 / 2 is
+  not an integer, but its value was promised to be an integer`). An integer
+  promise is `Typed(…, T)` with `T` a subtype of `integer`, the body of a
+  user function declared `-> integer`, and an argument at a parameter that
+  the signature of the head declares `integer` (`Fibonacci(n/2)`). The
+  interpreter gives a type error there. `Mod`, `Binomial`, `GCD`, `Range`
+  and the limits of a `Sum` are not integer promises: `Mod(n/2, 7)` is `3/2`
+  at `n = 3` in the interpreter, and it declines.
+
+Such a quotient is computed for its parent only, so common-subexpression
+elimination does not share it: `Floor(n/2) + Ceil(n/2)` at `n = 7` is `7n`.
+
+**Loops.** `Sum`, `Product`, `Range` and `Fold` over a range with bounds on
+the lane count with a `bigint` index, so `Sum(Mod(k, 7), k = 1..n)` at
+`n = 10^6` is exact. These sums compile: `Sum(k!, k = 0..n)`,
+`Sum(Floor(n/k), k = 1..n)`, and the derangement sum
+`Sum((−1)^k·Binomial(n, k)·(n − k)!, k = 0..n)`. A rational bound
+(`Sum(i, i = 1..n/2)`) declines.
+
+**User functions.** A parameter of a subtype of `integer` is on the lane,
+and a parameter of type `number`, `real` or `complex` is not. A call whose
+argument is on the lane at a parameter that is not, or the reverse, declines:
+with `h: (number) -> number`, `h(n)` declines. A function literal with no
+parameter types takes the lane of its argument. A recursive function
+compiles with the parameter lanes of its signature.
+
+**What declines.** The compilation declines with the diagnostic code
+`'bigint-lane'`, of kind `'capability'`, whose message names the node and
+its type, and the expression runs on the interpreter, as every decline does.
+This code is not `'lane-mismatch'`, so the `auto` retry does not start.
+Examples, with `n`, `m: integer` and `x: real`:
+
+| Expression                                                | Reason of the decline                                          |
+| --------------------------------------------------------- | -------------------------------------------------------------- |
+| `n + x`                                                    | an input that is not of a subtype of `integer`                 |
+| `n(n + 1)/2`, `2^n`, `Binomial(2n, n)/(n + 1)`             | a type that is not an integer type, with no rounding parent    |
+| `Sqrt(n)`                                                  | the same; `Floor(Sqrt(n))` compiles                            |
+| `Mod(n/2, 7)`                                              | `Mod` is not an integer promise                                |
+| `n^m`                                                      | the exponent is not of type `integer<0..>`                     |
+| `Factorial2(n)`                                            | the operand is not of type `integer<0..>` (`(−5)!! = 1/3`)     |
+| `DigitSum(n)`, `IsEven(n)`                                 | a head that is not on the list                                 |
+| `String(n)`                                                | the interpreter writes a large integer in exponent form (`"1e+30"`) |
+| `n + 10π`                                                  | a real constant has no exact `bigint` value                    |
+| `h(n)` with `h: (number) -> number`                        | the argument and the parameter are on different lanes          |
+| `Piecewise(…)`, `If` with no else, `0 < n < m`, a `Block` of more than one statement | not on the list in this version              |
+| `Sum(i, i = 1..n/2)`                                       | a rational bound                                               |
+
+An input whose type admits a non-finite value (`integer | infinity`)
+declines too.
+
+**Inputs.** An integer input (a free symbol or a parameter of a subtype of
+`integer`) takes a `bigint`, or a `number` that is a safe integer. The
+emitted code converts a `number` to a `bigint`, so the conversion is done in
+every runner, also with `entryChecks: false`. With the entry checks on (the
+default), a `number` that is not a safe integer (`1.5`, `2^60`), and a value
+that is neither a `number` nor a `bigint`, throw a `TypeError` that names
+the input: `"n" was compiled in mode 'bigint' as an integer, and received
+the number 1.5`. With the checks off, a `number` that is not an integer
+throws the `RangeError` of `BigInt()`, and another value outside the type
+gives an unspecified result. A `list<integer>` input (also nested) is an
+array of `bigint`. With the entry checks on, its `number` cells are
+converted in a copy, and a cell that is not an integer throws a `TypeError`
+that names the cell; with the checks off, the host must give `bigint` cells.
+A function literal at the root returns a function that converts and checks
+its arguments in the same way.
+
+**Results.** A result on the lane is a `bigint` for every finite integer,
+also a small one, and a list result is an array of `bigint`. A boolean
+result is a `boolean`. A result is a `number`, `NaN` or `Infinity`, when a
+sub-expression had no finite value (a pole): a helper at a pole throws an
+internal error that carries the `number`, and one catch around the compiled
+entry (and around a function returned to the host) returns it. `Infinity` is
+the value for a `~oo` of the interpreter (`(−1)!`, a zero divisor with a
+dividend that is not zero, `0` to a negative power), and `NaN` for an
+`Indeterminate` (`Mod(n, 0)`, `0/0`, `0^0`, the square root of a negative
+number, an index out of range). A recursive function has no catch of its
+own: the catch of the entry gets the error. A pole in one cell of a list
+makes the whole result a `number`.
+
+A `number` result has no defined relation to the value of `evaluate()`.
+This is the exception to the rule of "Fail closed". The compiler does not
+test where a pole can occur: the throw ends the whole computation, so no
+operator receives a non-finite value and no finite result is computed from
+one, but the operators between the pole and the result do not change the
+`number`. Examples at `n = −1`, `m = 0`:
+
+| Expression                   | `evaluate()`                | Compiled                   |
+| ---------------------------- | --------------------------- | -------------------------- |
+| `n!`                         | `~oo`                       | `Infinity`                 |
+| `−\|n!\|`                    | `−oo`                       | `Infinity`                 |
+| `n! > 5`                     | `False`                     | `Infinity` (not a boolean) |
+| `g(n!)`, `g := x ↦ 1`        | `1`                         | `Infinity`                 |
+| `Mod(n, m)`                  | `Indeterminate`             | `NaN`                      |
+| `Mod(n!, 7)`                 | `incompatible-type` error   | `Infinity`                 |
+| `Map(Range(−1, 1), k ↦ k!)`  | `[~oo, 1, 1]`               | `Infinity` (the whole list) |
+| `If(n < 0, 0, n!)`           | `0`                         | `0n`                       |
+
+A host that needs the value at such an input evaluates the expression with
+the interpreter.
+
+The compiled `Map` builds every element, and the interpreter's `Map` is
+lazy. So with `hf: (integer) -> integer := x ↦ x/2`,
+`Length(Map(hf, L))` at `L = [1, 2]` is `2` in the interpreter, and the
+compiled code throws the `RangeError` of the checked division at `hf(1)`.
+
+**Two `RangeError` cases.** A checked division with a remainder under an
+integer promise, and the size limit (below), throw a `RangeError` to the
+caller. When an expression holds a pole and one of these, the one that the
+code computes first decides whether the result is a `number` or a
+`RangeError`: `n! + Fibonacci(m)` at `n = −1`, `m = 10^9` throws the
+`RangeError`, because the canonical order puts `Fibonacci(m)` first. Common-subexpression
+elimination computes a shared subexpression before the other code, so the
+`cse` option can change which of the two the host receives. It never changes
+a `bigint` or a `boolean` result. A `bigint` division by `0n` never throws
+its native `RangeError`: every helper tests its divisor.
+
+**The size limit.** `Power`, a quotient `a^e` under a rounding function,
+`Factorial`, `Factorial2`, `Binomial` and `Fibonacci` estimate the number
+of decimal digits of their result before they compute it. Past 1,000,000
+digits, the limit of the interpreter, they throw a `RangeError` that names
+the operation: `Fibonacci(n)` at `n = 10n ** 9n` throws at once. The
+interpreter leaves such an expression unevaluated. Both mean "no value", but
+the host receives a `RangeError` from the compiled code and an unevaluated
+expression from the interpreter. A power of `0`, `1` or `−1` has no limit.
+The loops and the `*` operator have no limit: `Product(k, k = 1..n)`
+computes `n!` with no limit, as a loop of the other modes runs with no
+limit. A host that compiles expressions it does not trust limits its
+inputs.
+
+**Constant folding.** A constant subtree on the lane is folded to a
+`bigint` literal from the exact value of `evaluate()`:
+`Mod(2^60 + 1, 10)` compiles to `7n`, and no rounding occurs. A constant
+whose value is a finite number that is not an integer declines outside a
+rounding function or an integer promise (`n + 1/2`), and so does a
+constant that the interpreter leaves unevaluated (`Fibonacci(10^9)`). A
+constant whose value is not finite (`(−1)!`, `0^(−1)`, `Mod(5, 0)`, or a
+symbol whose value is `~oo`) is a pole: the code throws it only where the
+node is evaluated, so `If(n > 0, n, (−1)!)` is `3n` at `n = 3` and
+`Infinity` at `n = −2`. A constant pole is not shared by
+common-subexpression elimination.
+
+**The batch runners refuse the mode.** `broadcast()` and `broadcastAsync()`
+call the code for each element and write `Float64Array` outputs, which
+cannot hold a `bigint`. In the `bigint` mode they throw `Code compiled in
+mode 'bigint' cannot be broadcast`. The stored JavaScript records the mode
+(the `mode` field), and the batch loaders `loadBroadcast`,
+`loadBroadcastSlice` and `loadBroadcastAsync` of
+`createJavaScriptRuntime()` refuse it before they start a worker. The code
+that `load()` rebuilds gives the same values as `run()`, because the
+conversion of the inputs and the catch are in the emitted code.
+
+The Python target does not offer the mode: a Python integer is exact at
+any size already. Design and the deferred shapes (ROADMAP CE-715.2 to
+CE-715.8): `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`.
 
 ## User functions and dispatch
 

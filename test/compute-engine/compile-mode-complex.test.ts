@@ -496,7 +496,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
   });
 
   // The ELEMENT-WISE form of the runtime rule (`docs/COMPILATION-MODEL.md`,
-  // "Complex modes"): a real-only head over an ARRAY operand whose elements
+  // "Compile modes"): a real-only head over an ARRAY operand whose elements
   // may be complex projects each operand element-wise — an exactly-real
   // element as its real part, every other element as NaN — and runs its real
   // lowering over the projections. Before it, such an operand fell back to

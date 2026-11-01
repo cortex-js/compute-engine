@@ -64,14 +64,17 @@ export type CompiledFunctionEntry =
  *   `2^53 − 1` stays exact. A node that is not on the integer lane declines
  *   with `code: 'bigint-lane'`. No promotion and no escalation: a requested
  *   `'bigint'` compiles once, and the result reports `mode: 'bigint'`. The
- *   rules are in `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`. Until
- *   the lane analysis is implemented, every compilation in this mode
- *   declines with `code: 'bigint-lane'`.
+ *   compiled code returns a `bigint` for every finite integer value, a
+ *   `boolean` for a boolean value, and a `number` (`NaN` or `Infinity`)
+ *   when a sub-expression had no finite value; that `number` has no defined
+ *   relation to the value of `evaluate()`. The rules are in
+ *   `docs/COMPILATION-MODEL.md`, "Compile modes", and in
+ *   `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`.
  *
- * `'strict'`, `'complex'` and `'auto'` are implemented, and `'auto'` is the
- * default of the `javascript` and `python` targets: an unknown-sign radical
- * promotes with no opt-in, a lane mismatch declines, and that decline redoes
- * the compilation once under `'complex'`. Which discipline the returned code
+ * `'auto'` is the default of the `javascript` and `python` targets: an
+ * unknown-sign radical promotes with no opt-in, a lane mismatch declines,
+ * and that decline redoes the compilation once under `'complex'`. `'bigint'`
+ * is used only when it is requested. Which discipline the returned code
  * was compiled under is reported on the result (`CompilationResult.mode`,
  * never `'auto'`).
  *
@@ -2625,6 +2628,15 @@ export interface CompilationOptions<Expr = unknown> {
    * is a `capability` decline (`success: false`, `diagnostic.code ===
    * 'unsupported-mode'`), never a silent coercion.
    *
+   * `'bigint'` computes every integer value as a JavaScript `bigint`, so a
+   * counting function stays exact past `2^53 − 1`. `'auto'` never selects
+   * it: a host requests it. A node that is not on the integer lane declines
+   * with `diagnostic.code === 'bigint-lane'`. The inputs are `bigint` values
+   * or safe-integer numbers; the result is a `bigint`, a `boolean`, or a
+   * `number` (`NaN`, `Infinity`) that has no defined relation to the value
+   * of `evaluate()`. `broadcast()` and `broadcastAsync()` refuse the mode.
+   * See `docs/COMPILATION-MODEL.md`, "Compile modes".
+   *
    * The result reports what was used: `CompilationResult.mode` is the
    * discipline the returned code was compiled under, `promoted` whether an
    * unknown-sign radical was lowered through a complex kernel, and
@@ -2672,6 +2684,17 @@ export interface CompilationOptions<Expr = unknown> {
    * One `typeof` per checked binding per call — which is one READ of each
    * checked free symbol on the vars object, whether or not the compiled code
    * would read it on that call (a getter-backed vars object sees the read).
+   *
+   * In the `'bigint'` mode the check also applies to each integer input
+   * (a binding or a parameter typed a subtype of `integer`): a `number`
+   * that is not a safe integer, and a value that is neither a `number` nor
+   * a `bigint`, throw a `TypeError` that names the input. It converts the
+   * `number` cells of a `list<integer>` input (also nested) to `bigint`, in
+   * a copy, and refuses a cell that is not an integer. The conversion of a
+   * scalar `number` input to `bigint` is in the emitted code, so it is done
+   * also when the check is off. With `entryChecks: false` a `list<integer>`
+   * input must hold `bigint` cells: its `number` cells are not converted,
+   * and the result is then unspecified.
    *
    * `false` is for ENGINE-INITIATED (implicit) compilations — the auto-
    * compiled `Map` drains, the numeric kernels, the compiled `Reduce` fast

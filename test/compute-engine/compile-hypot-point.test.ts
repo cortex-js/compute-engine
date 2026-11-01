@@ -319,7 +319,7 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     // with a complex element LANE the real-only lowering runs over the
     // element-wise real projection
     // (a real element keeps its value, any other becomes NaN — the Tycho
-    // item 251 design, `docs/COMPILATION-MODEL.md` "Complex modes"), so a
+    // item 251 design, `docs/COMPILATION-MODEL.md` "Compile modes"), so a
     // mixed list compiles and the complex cell answers NaN. A list whose
     // every element is provably non-real still declines at compile time.
     const mixed: Expression = ce.box([
