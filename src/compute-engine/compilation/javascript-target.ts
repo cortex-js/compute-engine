@@ -98,6 +98,7 @@ import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { operandMayBeAbsent } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { reservedNameSpelling } from './compile-loops.js';
+import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import {
   tryGetConstant,
   negativeBaseRealPow,
@@ -854,6 +855,9 @@ const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
   // bound as `_upper` around the body. A user name `_upper` in the body
   // would read that bound instead of its own value.
   '_upper',
+  // The reserved words of JavaScript, `eval`, `arguments`, and the globals
+  // that the emitted code reads (see `JAVASCRIPT_RESERVED_IDENTIFIERS`).
+  ...JAVASCRIPT_RESERVED_IDENTIFIERS,
 ]);
 
 /**
@@ -12296,6 +12300,7 @@ function compileToTarget(
     const lambdaTarget: CompileTarget<Expression> = {
       ...target,
       var: binding.varOf,
+      renamedWritables: binding.renamedWritables,
       ...lambdaScope,
       ...(textParams.size > 0 ? { omittableParams: textParams } : {}),
       declaredVarTypes: {
@@ -17212,6 +17217,16 @@ function emitSumProduct(
     ...target,
     var: (id) => (id === index ? indexCode : target.var(id)),
     ...BaseCompiler.withBoundScope(target, [index]),
+    // A write to an index with a fresh name writes that name, as a write to
+    // an index with its own name does (`assignLValue`).
+    ...(indexCode !== index
+      ? {
+          renamedWritables: new Set([
+            ...(target.renamedWritables ?? []),
+            indexCode,
+          ]),
+        }
+      : {}),
   };
 
   // The counter stays numeric unless the body writes it. Declining on any
@@ -17566,9 +17581,14 @@ function compileIntegrate(
     quadratureInitialPanels: panels,
   };
 
+  // An integration variable with the name of an identifier that the emitted
+  // code uses (`_SYS`, a JavaScript reserved word, a global such as `Math`)
+  // gets a fresh name: `(arguments) => …` is a syntax error in strict-mode
+  // code, and a parameter `Math` hides `Math.sin`.
+  const spell = reservedNameSpelling(lambdaVars, target);
   const scoped = (names: string[]): CompileTarget<Expression> => ({
     ...sized,
-    var: (id) => (names.includes(id) ? id : target.var(id)),
+    var: (id) => (names.includes(id) ? spell(id) : target.var(id)),
     ...BaseCompiler.withBoundScope(target, names),
   });
 
@@ -17639,7 +17659,7 @@ function compileIntegrate(
         bodyTarget,
         () => BaseCompiler.compile(logSpace, bodyTarget)
       );
-      const plainAlternative = `(${innermost}) => (${hoisted.result})`;
+      const plainAlternative = `(${spell(innermost)}) => (${hoisted.result})`;
       const name = BaseCompiler.tempVar(target);
       logSpaceLambda = {
         name,
@@ -17653,7 +17673,7 @@ function compileIntegrate(
               )
             : plainAlternative,
       };
-      code = `_SYS.finiteOr(${f}, ${name}, ${innermost})`;
+      code = `_SYS.finiteOr(${f}, ${name}, ${spell(innermost)})`;
     } catch (e) {
       // A head that does not lower: the integrand is used as it is.
       throwIfCallerCancellation(e, bodyExpr.engine._deadlineFrame);
@@ -17669,7 +17689,7 @@ function compileIntegrate(
     // scope; the bindings mention no integration variable, so an outer
     // sample recomputes them once, which is what the unhoisted body did per
     // inner sample.
-    const plain = `(${lambdaVars[d]}) => (${code})`;
+    const plain = `(${spell(lambdaVars[d])}) => (${code})`;
     const lambda =
       d === limits.length - 1 && bindings.length > 0
         ? firstCallBoundLambda(plain, 1, bindings, target)

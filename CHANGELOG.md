@@ -392,13 +392,14 @@
   made the compilation fall back to the interpreter, and one named after a
   global that the compiled code reads (`Math`, `undefined`) gave a wrong
   result or threw ("Math.sin is not a function"). Now such a binding is
-  emitted under another name on the `javascript` and `interval-js` targets:
-  the example above compiles to `($arguments) => 2 * $arguments`. This
-  applies to function parameters, block locals and the locals of a loop body,
-  `Sum`, `Product`, `Loop` and `Comprehension` indexes, and integration
-  variables. A body that assigns such a parameter or local also compiles. A
-  free symbol keeps its name, because the compiled code reads it as
-  `_.arguments`.
+  emitted under a fresh name on the `javascript` and `interval-js` targets,
+  as a binding named `_SYS` is: the example above compiles to
+  `(_p) => 2 * _p`. This applies to function parameters, block locals and the
+  locals of a loop body, `Sum`, `Product`, `Loop` and `Comprehension`
+  indexes, and integration variables. A body that assigns such a parameter
+  also compiles, in a nested function literal and in an engine-defined
+  function too. A free symbol keeps its name, because the compiled code reads
+  it as `_.arguments`.
 
 - **A function-valued expression compiled for `interval-js` can be called.**
   `compile(x ↦ 2x, { to: 'interval-js' })` reported `success: true`, but

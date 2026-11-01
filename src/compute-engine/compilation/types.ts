@@ -1836,22 +1836,49 @@ export interface CompileTarget<Expr = unknown> {
   omittableParams?: ReadonlySet<string>;
 
   /**
-   * Identifiers this target bakes into emitted code as LITERAL tokens — the
-   * runtime helper namespaces (`_SYS` on JavaScript, `_IA` on the interval
-   * target). A function parameter spelled like one shadows it for that
-   * function's whole body: a parameter named `_SYS` turned every `_SYS.…`
-   * lowering inside the body into `TypeError: _SYS.rangeIter is not a
-   * function` at run time, for a program the interpreter evaluates fine.
+   * Identifiers that the emitted code must not use as the name of a binding
+   * (a function parameter, a block local, a loop index, an integration
+   * variable). A binding with one of these names is emitted under a fresh
+   * name. Two groups:
+   *
+   * - The identifiers this target bakes into emitted code as LITERAL tokens:
+   *   the runtime helper namespaces (`_SYS` on JavaScript, `_IA` on the
+   *   interval target) and other fixed names (`_upper`, the bound of a
+   *   `Sum` loop). A binding spelled like one shadows it for its whole
+   *   scope: a parameter named `_SYS` turned every `_SYS.…` lowering inside
+   *   the body into `TypeError: _SYS.rangeIter is not a function` at run
+   *   time, for a program the interpreter evaluates fine.
+   * - On the JavaScript targets, the reserved words of JavaScript, `eval`,
+   *   `arguments` and the globals that the emitted code reads (`Math`,
+   *   `Number`, ...), from `JAVASCRIPT_RESERVED_IDENTIFIERS`. A binding with
+   *   such a name is a syntax error in strict-mode code, or it hides a global
+   *   that a lowering reads (`Math.sin`).
    *
    * Distinct from {@link varsObjectName}, which is renamed only when the body
    * actually reads the vars object — `_` is the ordinary spelling of an
    * implicit parameter, so renaming it unconditionally would rewrite every
    * `_ ↦ …` literal in every artifact. These names are renamed
-   * unconditionally instead: no source spells a parameter this way, so the
-   * rename costs nothing and does not have to predict which helpers the body
-   * will emit.
+   * unconditionally instead: a binding with one of them is always wrong in
+   * the emitted code, whatever the body emits, so the rename does not have
+   * to predict which helpers or globals the body reads.
    */
   reservedEmittedNames?: ReadonlySet<string>;
+
+  /**
+   * The fresh names of the mutable bindings in scope that were renamed
+   * because their names are in {@link reservedEmittedNames} (or hide the
+   * vars object): the parameters of the enclosing function literals and
+   * definitions, which `BaseCompiler.lambdaParamBinding` renames
+   * (`(Math) ↦ …` emits `(_p) => …`), and the index of an enclosing
+   * `Sum` or `Product` loop of the JavaScript target (`Math` emits
+   * `_tv1`). Each scope adds its fresh names for its own body only.
+   * `assignLValue` accepts a write to a name in this set, as it accepts a
+   * write to the binding under its own name. A read of another binding that
+   * also resolves to a bare identifier (the `const` temporary that holds the
+   * subject of a `Match`, which a capture reads) is not in this set, and a
+   * write to it declines.
+   */
+  renamedWritables?: ReadonlySet<string>;
 
   /**
    * Set by a target whose `Apply` lowering compiles ONLY a function-LITERAL

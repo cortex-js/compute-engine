@@ -3822,20 +3822,6 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-732. A function-literal parameter named `arguments` gives JavaScript `code` that strict mode refuses
-
-**Status:** ready; defect, S.
-
-`compile(ce.box(["Function", ["Multiply", 2, "arguments"], ["Typed", "arguments", "'real'"]]), { to: 'javascript' })`
-succeeds and `run(3)` is 6, but its `code` string is
-`(arguments) => 2 * arguments`, which is a syntax error in strict-mode code
-("Unexpected eval or arguments in strict mode"; measured 2026-10-31 with
-`new Function('"use strict"; return (' + code + ')')`). A host that evaluates
-`code` in a module (always strict) fails. `eval` as a parameter name has the
-same problem. Fix: rename a parameter whose name JavaScript reserves in a
-function scope everywhere it is emitted, as the target already renames
-other reserved identifiers.
-
 ### CE-725. `Sort` with a callback, `Iterate` and `Pipe` decline on the JavaScript target
 
 **Status:** ready; defect, M.

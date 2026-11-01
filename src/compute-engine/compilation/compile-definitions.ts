@@ -302,22 +302,30 @@ export function lambdaParamBinding(
   params: ReadonlyArray<string>,
   body: Expression | undefined,
   target: CompileTarget<Expression>
-): { emitted: string[]; varOf: (id: string) => TargetSource | undefined } {
+): {
+  emitted: string[];
+  varOf: (id: string) => TargetSource | undefined;
+  renamedWritables: ReadonlySet<string> | undefined;
+} {
   const keep = {
     emitted: [...params],
     varOf: (id: string) => (params.includes(id) ? id : target.var(id)),
+    renamedWritables: target.renamedWritables,
   };
 
   // Which of this literal's parameters shadow something the target bakes
   // into the emitted source. Two sources, with DIFFERENT rename conditions:
   const shadowing = new Set<string>();
 
-  // (1) A runtime helper namespace (`_SYS`, `_IA` —
-  //     `CompileTarget.reservedEmittedNames`). Renamed UNCONDITIONALLY: no
-  //     source spells a parameter this way, so the rename costs nothing and
-  //     does not have to predict which helpers the body will emit. Left
-  //     alone, a parameter named `_SYS` turned every `_SYS.…` lowering
-  //     inside its body into `TypeError: _SYS.rangeIter is not a function`.
+  // (1) A name in `CompileTarget.reservedEmittedNames`: a runtime helper
+  //     namespace (`_SYS`, `_IA`), a JavaScript reserved word, `eval`,
+  //     `arguments`, or a global that the emitted code reads (`Math`).
+  //     Renamed UNCONDITIONALLY: such a parameter is a syntax error in
+  //     strict-mode code (`(arguments) => …`), or it hides an identifier
+  //     that a lowering reads, and the rename does not have to predict which
+  //     ones the body will emit. Left alone, a parameter named `_SYS` turned
+  //     every `_SYS.…` lowering inside its body into
+  //     `TypeError: _SYS.rangeIter is not a function`.
   for (const p of params)
     if (target.reservedEmittedNames?.has(p)) shadowing.add(p);
 
@@ -357,6 +365,11 @@ export function lambdaParamBinding(
     emitted: params.map((p) => renamed.get(p) ?? p),
     varOf: (id) =>
       params.includes(id) ? (renamed.get(id) ?? id) : target.var(id),
+    // A write to a renamed parameter writes its fresh name (`assignLValue`).
+    renamedWritables: new Set([
+      ...(target.renamedWritables ?? []),
+      ...allocated,
+    ]),
   };
 }
 
@@ -732,11 +745,19 @@ export function prepareUserFunctionBody(
   // computed NaN — while the inline route had been fixed. Note the fallback
   // name above is `_` itself, so a parameter that yields no name defaults
   // INTO the colliding spelling rather than merely being allowed to use it.
+  //
+  // The names of the body join the collision inventory first. The body of a
+  // definition is not part of the expression that the compilation started
+  // from, so its names are not there yet, and a fresh parameter name (`_p`)
+  // must not be a name of the body: `g(Math) := (_p := 1; Math + _p)`
+  // renamed `Math` to `_p`, the local `_p` then hid it, and `g(y)` gave 2.
+  mergeUsedNames(target, collectUsedNames(bodyExpr));
   const binding = lambdaParamBinding(declared, bodyExpr, root);
   const params = binding.emitted;
   const bodyTarget: CompileTarget<Expression> = {
     ...root,
     var: binding.varOf,
+    renamedWritables: binding.renamedWritables,
     // The literal's OWN parameter names — what the body expression binds,
     // whatever they are emitted as.
     ...withBoundScope(root, declared),
@@ -748,7 +769,6 @@ export function prepareUserFunctionBody(
     // leak in), replacing whatever the spread copied from `root`.
     declaredVarTypes: literalDeclaredParamTypes(literal),
   };
-  mergeUsedNames(target, collectUsedNames(bodyExpr));
   bodyTarget.checkDefinitionBody?.(bodyExpr, bodyTarget, true);
   return { params, bodyExpr, bodyTarget };
 }

@@ -2073,6 +2073,12 @@ export function assignLValue(
   if (_freshLocalNames.has(resolved)) return resolved;
   // A loop index spelled with a fresh name (`withWritableLoopIndices`).
   if (_writableLoopIndices.has(resolved)) return resolved;
+  // A function parameter with a name that the target must not emit as a
+  // binding (`CompileTarget.reservedEmittedNames`: `_SYS`, a JavaScript
+  // reserved word, a global that the emitted code reads) is emitted under a
+  // fresh name, and its reads and writes use that name
+  // (`CompileTarget.renamedWritables`).
+  if (target.renamedWritables?.has(resolved) === true) return resolved;
   // A vars-object member access naming this very symbol (`_.s`) is the only
   // other assignable form the built-in targets produce. Matched by string
   // surgery, not a regexp built from `name` (a symbol may hold regexp

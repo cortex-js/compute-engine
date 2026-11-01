@@ -218,6 +218,7 @@ export function compileExprFunctionLiteral(
     const lambdaTarget: CompileTarget<Expression> = {
       ...target,
       var: binding.varOf,
+      renamedWritables: binding.renamedWritables,
       ...lambdaScope,
       declaredVarTypes,
     };

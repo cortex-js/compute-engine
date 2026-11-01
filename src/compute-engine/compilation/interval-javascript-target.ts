@@ -121,6 +121,7 @@ import {
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { cseSharingOff } from './compile-cse.js';
 import { reservedNameSpelling } from './compile-loops.js';
+import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
 import type {
@@ -5022,9 +5023,13 @@ function compileIntervalIntegrate(
   // The lambda variable arrives as a bare `Interval` (`{lo, hi}`), which every
   // `_IA.*` operation accepts, so it compiles to its own name rather than to a
   // `vars`-object lookup or a `_IA.point(…)` wrapper.
+  // An integration variable with the name of an identifier that the emitted
+  // code uses (`_IA`, a JavaScript reserved word, a global such as `Math`)
+  // gets a fresh name.
+  const spell = reservedNameSpelling(lambdaVars, target);
   const scoped = (names: string[]): CompileTarget<Expression> => ({
     ...sized,
-    var: (id) => (names.includes(id) ? id : target.var(id)),
+    var: (id) => (names.includes(id) ? spell(id) : target.var(id)),
     ...BaseCompiler.withBoundScope(target, names),
   });
 
@@ -5062,7 +5067,7 @@ function compileIntervalIntegrate(
     // The innermost lambda carries the invariant bindings, declared next to
     // it and assigned on its first call: an empty range asks for no piece,
     // and the unhoisted integrand then evaluated nothing.
-    let f = `(${lambdaVars[d]}) => (${code})`;
+    let f = `(${spell(lambdaVars[d])}) => (${code})`;
     if (d === limits.length - 1 && bindings.length > 0) {
       const flag = BaseCompiler.tempVar(target);
       const held = BaseCompiler.tempVar(target);
@@ -6345,8 +6350,17 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // `_IA` is baked as a literal token by every interval lowering; `_SYS`
       // by the helpers it shares with the JavaScript target. The loop of a
       // `Sum` or `Product` declares `_upper` and `_lower` around its body.
-      // See `CompileTarget.reservedEmittedNames`.
-      reservedEmittedNames: new Set(['_IA', '_SYS', '_upper', '_lower']),
+      // The reserved words of JavaScript, `eval`, `arguments` and the
+      // globals that the emitted code reads cannot name a binding either
+      // (`JAVASCRIPT_RESERVED_IDENTIFIERS`). See
+      // `CompileTarget.reservedEmittedNames`.
+      reservedEmittedNames: new Set([
+        '_IA',
+        '_SYS',
+        '_upper',
+        '_lower',
+        ...JAVASCRIPT_RESERVED_IDENTIFIERS,
+      ]),
       // Only a function-LITERAL callee compiles here (see the `Apply` entry
       // of the function table below, and `CompileTarget`): the reference
       // analysis must stop at such an application rather than walk into a
