@@ -343,7 +343,9 @@ describe('the entry point has no engine in it', () => {
       /^src\/big-decimal\/[\w-]+\.ts$/,
       // `broadcast.ts` is the batch loop of `loadBroadcast()`: it imports
       // types only.
-      /^src\/compute-engine\/compilation\/(javascript-runtime|jet-helpers|broadcast)\.ts$/,
+      // `bigint-runtime.ts` holds the helpers of `mode: 'bigint'`: its value
+      // imports are numerics only.
+      /^src\/compute-engine\/compilation\/(javascript-runtime|jet-helpers|broadcast|bigint-runtime)\.ts$/,
       // The kernel pool of `loadBroadcastAsync()` and `createKernelPool()`
       // (ROADMAP CE-436). Its value imports are `broadcast.ts`, the two
       // runtime version strings (a module with no imports, so that the

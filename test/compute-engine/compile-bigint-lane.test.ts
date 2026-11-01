@@ -753,9 +753,6 @@ describe('the CSE exclusion (§3.2)', () => {
 });
 
 describe('the analysis in a compilation', () => {
-  const INTERIM =
-    "Could not compile in mode 'bigint': the bigint emission is not implemented yet.";
-
   it.each([
     ['n!', ['Factorial', 'n']],
     ['Floor(n/2) + Ceil(n/2)', ['Add', ['Floor', ['Divide', 'n', 2]], ['Ceil', ['Divide', 'n', 2]]]],
@@ -764,11 +761,10 @@ describe('the analysis in a compilation', () => {
     ['f(n) + 1', ['Add', ['f', 'n'], 1]],
     ['n! > 5', ['Greater', ['Factorial', 'n'], 5]],
     ['Sum(k!, k = 0..n)', ['Sum', ['Factorial', 'k'], ['Limits', 'k', 0, 'n']]],
-  ] as const)('%s is accepted, and declines with the interim message', (_, json) => {
+  ] as const)('%s is accepted, and compiles', (_, json) => {
     const r = compile(ce.box(json as Json), { mode: 'bigint' });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic!.code).toBe('bigint-lane');
-    expect(r.diagnostic!.message).toBe(INTERIM);
+    expect(r.success).toBe(true);
+    expect(r.mode).toBe('bigint');
   });
 
   it('a rejected expression declines with the reason of its node', () => {
@@ -788,7 +784,7 @@ describe('the analysis in a compilation', () => {
       ce.box(['Function', ['Factorial', 'k'], ['Typed', 'k', "'integer'"]]),
       { mode: 'bigint' }
     );
-    expect(accepted.diagnostic!.message).toBe(INTERIM);
+    expect(accepted.success).toBe(true);
     const rejected = compile(
       ce.box(['Function', ['Sqrt', 'k'], ['Typed', 'k', "'integer'"]]),
       { mode: 'bigint' }

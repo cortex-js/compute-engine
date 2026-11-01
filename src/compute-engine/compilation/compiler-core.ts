@@ -77,10 +77,8 @@ import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
 import { CompileDeclineError } from './diagnostics.js';
-import {
-  bigintEmissionNotImplemented,
-  bigintLaneAnalysisFor,
-} from './compile-bigint-lane.js';
+import { bigintLaneAnalysisFor } from './compile-bigint-lane.js';
+import { emitBigintLane } from './compile-bigint-emit.js';
 import { isColorValued } from './color-space-fact.js';
 import { candidateAt } from './cse.js';
 import {
@@ -929,19 +927,21 @@ export function compile(
     // here with `code: 'bigint-lane'`. The JavaScript target analyzes the
     // expression before its CSE harvest, and that analysis is used again
     // here; a target passed directly to `compile()` gets its analysis here.
-    // The bigint emission is not implemented yet, so an expression that the
-    // analysis accepts declines too: the code that the emitters would give
-    // computes with doubles, and a caller that requested `'bigint'` must not
-    // receive it. The declines are inside the `try`, so the `finally` below
-    // restores the latches. (CE-715, step 3 of
-    // `docs/plans/2026-10-31-ce715-bigint-compile-mode.md` replaces the
-    // second decline with the emission.)
+    // An accepted expression is written by the bigint emitter
+    // (`compile-bigint-emit.ts`), not by the emitters below: their code
+    // computes with doubles. The decline is inside the `try`, so the
+    // `finally` below restores the latches.
     if (
       CompilerState._compileDepth === 1 &&
       CompilerState._integerLane === 'bigint'
     ) {
-      bigintLaneAnalysisFor(expr, target);
-      throw bigintEmissionNotImplemented(expr);
+      const code = emitBigintLane(
+        expr,
+        target,
+        bigintLaneAnalysisFor(expr, target)
+      );
+      emitted = true;
+      return code;
     }
     // Compile-time constant folding, attempted top-down at every function
     // node so the largest constant subtree folds: a pure subtree with no

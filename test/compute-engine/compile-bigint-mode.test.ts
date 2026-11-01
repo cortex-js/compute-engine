@@ -27,19 +27,15 @@ import { createJavaScriptRuntime } from '../../src/runtime';
  *   (`BaseCompiler.mode` is `'strict'`, `strictLanes` is `true`,
  *   `complexDiscipline` is `false`) and the integer lane `'bigint'`
  *   (`BaseCompiler.integerLane`).
- * - The bigint emission (step 3) is not implemented, so every compilation
- *   in the mode declines with `code: 'bigint-lane'`, a `capability` decline
- *   that never starts the `auto` retry: an expression that the lane
- *   analysis (step 2, `compile-bigint-lane.test.ts`) rejects declines with
- *   its reason, and an expression that it accepts declines because the
- *   emission is not implemented yet.
+ * - An expression that the lane analysis (step 2,
+ *   `compile-bigint-lane.test.ts`) rejects declines with `code:
+ *   'bigint-lane'`, a `capability` decline that never starts the `auto`
+ *   retry. An expression that it accepts compiles to `bigint` code (step 3,
+ *   `compile-bigint-emission.test.ts`).
  */
 
 const ce = new ComputeEngine();
 ce.declare('n', 'integer');
-
-const INTERIM_MESSAGE =
-  "Could not compile in mode 'bigint': the bigint emission is not implemented yet.";
 
 describe('bigint mode: targets other than javascript', () => {
   it.each(['interval-js', 'glsl', 'wgsl', 'python'] as const)(
@@ -56,22 +52,35 @@ describe('bigint mode: targets other than javascript', () => {
   );
 });
 
-describe('bigint mode: the interim decline on javascript', () => {
+describe('bigint mode: compilations on javascript', () => {
   it.each([
-    ['an integer literal', ce.box(5)],
-    ['a symbol', ce.parse('n')],
-    ['an integer expression', ce.parse('\\binom{2n}{n} + n!')],
-    [
-      'a function literal',
-      ce.box(['Function', ['Factorial', 'k'], ['Typed', 'k', "'integer'"]]),
-    ],
-  ])('%s declines with bigint-lane and falls back', (_, expr) => {
+    ['an integer literal', ce.box(5), 5n],
+    ['a symbol', ce.parse('n'), 3n],
+    ['an integer expression', ce.parse('\\binom{2n}{n} + n!'), 26n],
+  ])('%s compiles and reports the mode', (_, expr, expected) => {
     const r = compile(expr, { mode: 'bigint' });
+    expect(r.success).toBe(true);
+    expect(r.mode).toBe('bigint');
+    expect(r.promoted).toBe(false);
+    expect(r.run!({ n: 3n } as never)).toBe(expected);
+  });
+
+  it('a function literal compiles', () => {
+    const r = compile(
+      ce.box(['Function', ['Factorial', 'k'], ['Typed', 'k', "'integer'"]]),
+      { mode: 'bigint' }
+    );
+    expect(r.success).toBe(true);
+    expect(r.mode).toBe('bigint');
+    expect((r.run as unknown as (k: bigint) => bigint)(4n)).toBe(24n);
+  });
+
+  it('a decline falls back to the interpreter and reports the neutral mode', () => {
+    const r = compile(ce.parse('\\sqrt{n}'), { mode: 'bigint' });
     expect(r.success).toBe(false);
     expect(r.diagnostic!.code).toBe('bigint-lane');
     expect(r.diagnostic!.kind).toBe('capability');
     expect(r.diagnostic!.message).toMatch(/mode 'bigint'/);
-    expect(r.diagnostic!.message).toMatch(/not implemented yet/);
     // A decline reports the neutral mode: no code was emitted.
     expect(r.mode).toBe('strict');
     expect(r.promoted).toBe(false);
@@ -82,7 +91,7 @@ describe('bigint mode: the interim decline on javascript', () => {
   it('with fallback: false the decline is a thrown CompileDeclineError', () => {
     let caught: unknown;
     try {
-      compile(ce.parse('n + 1'), { mode: 'bigint', fallback: false });
+      compile(ce.parse('\\sqrt{n}'), { mode: 'bigint', fallback: false });
     } catch (e) {
       caught = e;
     }
@@ -95,20 +104,18 @@ describe('bigint mode: the interim decline on javascript', () => {
     expect(BaseCompiler.integerLane).toBe('double');
   });
 
-  it('the decline carries the node and says the emission is not implemented', () => {
+  it('an accepted expression compiles to bigint code', () => {
     const r = compile(ce.parse('n + 1'), { mode: 'bigint' });
-    expect(r.diagnostic!.value).toBe('n + 1');
-    // The interim message does not say that the node is off the integer
-    // lane: `n + 1` is an integer expression.
-    expect(r.diagnostic!.message).toBe(INTERIM_MESSAGE);
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('(_.n + 1n)');
   });
 
   it('an expression that the lane analysis rejects declines with its reason', () => {
     const r = compile(ce.parse('\\sqrt{n}'), { mode: 'bigint' });
     expect(r.success).toBe(false);
     expect(r.diagnostic!.code).toBe('bigint-lane');
+    expect(r.diagnostic!.value).toBe('sqrt(n)');
     expect(r.diagnostic!.message).toMatch(/is not on the integer lane/);
-    expect(r.diagnostic!.message).not.toMatch(/not implemented yet/);
   });
 
   // The JavaScript target compiles an operator symbol (`Divide`) to
@@ -184,11 +191,11 @@ describe('bigint mode: custom targets', () => {
     }
   );
 
-  it("a plain spread of the built-in target declines 'bigint' with bigint-lane", () => {
+  it("a plain spread of the built-in target compiles 'bigint'", () => {
     const target = { ...jsTarget() } as CompileTarget<Expression>;
     const r = compile(ce.parse('n + 1'), { target, mode: 'bigint' });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic!.code).toBe('bigint-lane');
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('(n + 1n)');
   });
 
   // A per-call `operators` or `functions` option replaces the emission of a
@@ -219,9 +226,9 @@ describe('bigint mode: custom targets', () => {
       mode: 'bigint',
       operators: { Multiply: ['*', 12] },
     });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic!.code).toBe('bigint-lane');
-    expect(r.diagnostic!.message).toBe(INTERIM_MESSAGE);
+    expect(r.success).toBe(true);
+    expect(r.mode).toBe('bigint');
+    expect(r.run!({ n: 2n } as never)).toBe(3n);
   });
 
   // A `vars` entry that names a user function is given as a `functions`
@@ -244,8 +251,8 @@ describe('bigint mode: custom targets', () => {
       mode: 'bigint',
       vars: { g: '_.g' },
     });
-    expect(other.diagnostic!.code).toBe('bigint-lane');
-    expect(other.diagnostic!.message).toBe(INTERIM_MESSAGE);
+    expect(other.success).toBe(true);
+    expect(other.mode).toBe('bigint');
   });
 
   // A custom compilation target registered on the engine builds its own
@@ -293,22 +300,23 @@ describe('bigint mode: custom targets', () => {
     expect(BaseCompiler.integerLane).toBe('double');
   });
 
-  it("the built-in javascript target passed directly with mode 'bigint' declines with bigint-lane", () => {
+  it("the built-in javascript target passed directly with mode 'bigint' compiles", () => {
     const r = compile(ce.parse('n + 1'), {
       target: jsTarget(),
       mode: 'bigint',
     });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic!.code).toBe('bigint-lane');
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('(n + 1n)');
   });
 });
 
 describe('bigint mode: the latches during and after a compilation', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  // The latches are observed from inside the compilation: the interim
-  // decline calls `bigintLaneError` after the latches are written, and the
-  // spy reads them there.
+  // The latches are observed from inside the compilation: the bigint
+  // emitter declines the constant `Fibonacci(10^9)`, which the interpreter
+  // leaves unevaluated, with `bigintLaneError` after the latches are
+  // written, and the spy reads them there.
   it('is the strict discipline plus the bigint integer lane', () => {
     const original = diagnostics.bigintLaneError;
     const seen: Array<Record<string, unknown>> = [];
@@ -322,7 +330,9 @@ describe('bigint mode: the latches during and after a compilation', () => {
       });
       return original(p);
     });
-    const r = compile(ce.parse('n + 1'), { mode: 'bigint' });
+    const r = compile(ce.box(['Fibonacci', ['Power', 10, 9]]), {
+      mode: 'bigint',
+    });
     expect(r.success).toBe(false);
     expect(seen).toEqual([
       {
@@ -435,5 +445,13 @@ describe('the stored artifact records the mode', () => {
   it("the stored field admits 'bigint'", () => {
     const stored: StoredJavaScript = { code: '1n', mode: 'bigint' };
     expect(stored.mode).toBe('bigint');
+  });
+
+  it('code compiled in the bigint mode runs the same after load()', () => {
+    const r = compile(ce.parse('\\binom{2n}{n} + n!'), { mode: 'bigint' });
+    const stored: StoredJavaScript = JSON.parse(JSON.stringify(r));
+    expect(stored.mode).toBe('bigint');
+    const f = createJavaScriptRuntime().load(stored);
+    expect(f({ n: 30n } as never)).toBe(r.run!({ n: 30n } as never));
   });
 });

@@ -183,6 +183,7 @@ import {
 } from '../../common/interruptible.js';
 import { CapabilityDeniedError } from '../effects-registry.js';
 import { JET_HELPERS } from './jet-helpers.js';
+import { BIGINT_HELPERS } from './bigint-runtime.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
@@ -4544,6 +4545,10 @@ function iterationCount(
 
 export const SYS_HELPERS = {
   ...JET_HELPERS,
+  // The helpers of `mode: 'bigint'`, which compute with JavaScript
+  // `bigint` values and throw a `NonFiniteValue` at a pole
+  // (`bigint-runtime.ts`). Only the code of the bigint emitter calls them.
+  ...BIGINT_HELPERS,
   // The marker object that a comparison of a block local throws when the
   // test of the inputs of its block fails where the interpreter may decide
   // the comparison: the compiled result catches it at its top and gives no

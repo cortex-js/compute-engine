@@ -361,7 +361,10 @@ under an integer promise (§3.2), and the size limit of §3.9, throw a
 beyond what the mode computes, not a pole. When a body holds both a pole and
 one of these (`n! + Binomial(10^9, …)`), whichever is evaluated first
 decides whether the result is a `number` or a `RangeError`; both mean "no
-value". The native `RangeError` of a BigInt division by `0n` never reaches
+value". Common-subexpression elimination changes the order of evaluation (a
+shared subexpression is computed before the root code), so the `cse` option
+can change which of the two the host receives; it never changes a `bigint`
+or `boolean` result. The native `RangeError` of a BigInt division by `0n` never reaches
 the caller: every helper tests its divisor (§3.6).
 
 **A `Map` callback runs on every element.** The interpreter's `Map` is a
@@ -436,7 +439,7 @@ interpreter values below were measured on 2026-10-31; each row is a test.
 | exact division    | remainder `≠ 0`              | type error         | throws `RangeError` (§3.2)     |
 | `bfloorMod(a, b)` | `b = 0`                      | `Indeterminate`    | carries `NaN`                  |
 |                   | `−7, 3`                      | `2`                | `2n` (sign of the divisor)     |
-| `bremainder`      | `b = 0` / `−7, 3`            | `Indeterminate` / `−1` | carries `NaN` / `−1n` (sign of the dividend) |
+| `bremainder`      | `b = 0` / `−7, 3` / `25, 15` / `7, 2` | `Indeterminate` / `−1` / `−5` / `−1` | carries `NaN` / `−1n` / `−5n` / `−1n`: `a − b·q`, with `q` the quotient `a/b` rounded to the nearest integer and a tie rounded toward +∞, as the interpreter does (measured 2026-10-31; the first text of this row said "sign of the dividend", which gives `10` for `25, 15`) |
 | `bpow(a, e)`      | `0, 0`                       | `Indeterminate`    | carries `NaN`                  |
 |                   | `−2, 3`                      | `−8`               | `−8n`                          |
 |                   | `1, 10^7` / `−1, 10^7`       | `1` / `−1`         | `1n` / `−1n` (no size limit for `\|a\| ≤ 1`) |

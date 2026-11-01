@@ -340,25 +340,6 @@ export function bigintLaneAnalysisFor(
 }
 
 /**
- * The decline of an expression that the lane analysis accepted: the
- * emission of `bigint` code is not implemented yet, and the emitters of
- * the double mode must not run for a caller that requested `'bigint'`.
- * (CE-715: step 3 of `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`
- * removes this decline.)
- */
-export function bigintEmissionNotImplemented(
-  expr: Expression
-): CompileDeclineError {
-  return bigintLaneError({
-    node: expr.toString(),
-    type: expr.type.toString(),
-    reason: 'the bigint emission is not implemented yet',
-    message:
-      "Could not compile in mode 'bigint': the bigint emission is not implemented yet.",
-  });
-}
-
-/**
  * The CSE exclusion of the mode (§3.2), as a predicate for
  * `CseHarvestOptions.notACandidate`: a parent-lowered subtree is not a
  * candidate, because its lowering depends on its parent
@@ -2034,7 +2015,9 @@ function isInexactDecimalInteger(node: Expression): boolean {
  * `undefined` for a value that is not an exact rational (a double that is
  * not an integer, an inexact big decimal, a radical, a complex or
  * non-finite value). */
-function exactRational(node: Expression): { p: bigint; q: bigint } | undefined {
+export function exactRational(
+  node: Expression
+): { p: bigint; q: bigint } | undefined {
   if (!isNumber(node)) return undefined;
   const v = node.numericValue;
   if (typeof v === 'number')

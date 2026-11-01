@@ -564,14 +564,13 @@ import {
 } from './fixed-width-unroll.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
-import { compileDiagnosticOf } from './diagnostics.js';
+import { bigintLaneError, compileDiagnosticOf } from './diagnostics.js';
 import {
   offersBigintMode,
   registerBuiltInBigintTarget,
 } from './bigint-mode-registry.js';
 import {
   bigintCseExclusion,
-  bigintEmissionNotImplemented,
   bigintLaneAnalysisFor,
   requireBigintLane,
   setPreparedBigintLane,
@@ -11674,6 +11673,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     BaseCompiler.openCseSession(expr, target, {
       notACandidate:
         bigintLane === undefined ? undefined : bigintCseExclusion(bigintLane),
+      // The bigint emitter (`compile-bigint-emit.ts`) reads the session in
+      // the region instance of the root only (`BigintEmitter.shared`).
       enabled: options.cse,
       isOverriddenOperator: (name) =>
         Object.prototype.hasOwnProperty.call(namedFunctions, name) ||
@@ -12326,12 +12327,15 @@ function compileToTarget(
   // core compiler, so the lane analysis and the decline of the core
   // compiler (`compile` in `compiler-core.ts`) never run for it, and
   // `Divide` called with `5n, 2n` gives `2n`. The lane analysis declines an
-  // operator symbol (its type is a function type). The bigint emission is
-  // not implemented yet, so a symbol it accepted declines too. (CE-715,
-  // step 3 of `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`.)
+  // operator symbol (its type is a function type); the decline after it is
+  // for an operator symbol that the analysis would accept.
   if (mode === 'bigint' && isSymbol(expr) && target.operators?.(expr.symbol)) {
     bigintLaneAnalysisFor(expr, target);
-    throw bigintEmissionNotImplemented(expr);
+    throw bigintLaneError({
+      node: expr.toString(),
+      type: expr.type.toString(),
+      reason: 'an operator symbol is a function value, not a value of the mode',
+    });
   }
 
   if (isSymbol(expr)) {
