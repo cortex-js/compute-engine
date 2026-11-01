@@ -67,8 +67,10 @@ import {
   bindsStatementTargets,
   declaredBinders,
   implicitIntegralVariables,
-  indefiniteIntegralVariables,
+  flatBoundIndexAt,
+  integralPointVariables,
   ownIndexClauseAt,
+  rawClauseOrdering,
   scopeForRebuild,
   type DeclaredBinders,
 } from './binding-sites.js';
@@ -1920,12 +1922,12 @@ function isReferencedFunctionHead(expr: Expression): boolean {
 function bindingSiteNames(
   expr: Expression & { ops: ReadonlyArray<Expression> }
 ): DeclaredBinders | undefined {
-  // An UNBOUND node (no operator definition — `canonical: false`) consults
-  // no selector: only the canonical `Limits`/`Element` spellings are
-  // recognized for it, by the structural fallback in the caller (pinned by
-  // `expression-properties.test.ts`, "a node with no definition falls back
-  // to the spelling heuristic"). `declaredBinders` would find the definition
-  // by name and read a `Tuple` spelling the unbound tree does not carry.
+  // This function returns the sites of a BOUND node only. For a node with
+  // no operator definition (`canonical: false`), the caller reads the sites
+  // of a `Sum`, `Product`, `Integrate` or `NDSolveFunction` with
+  // `rawClauseOrdering()`, which finds the selector by the operator name;
+  // only a node of another operator with no definition (a quantifier) falls
+  // back to recognizing an inner `Limits`/`Element` spelling.
   if (expr.operatorDefinition === undefined) return undefined;
   const binders = declaredBinders(expr, 'post');
   return binders === undefined || binders.clauseLocal.size === 0
@@ -2145,22 +2147,30 @@ function collectReferences(
   //   - index variables — Sum/Product/Integrate: the operator definition's
   //     binding-site selectors answer this, on a canonical tree AND on a raw
   //     or structural one (they read the raw operand spellings: a bare symbol,
-  //     `Tuple`, `Element`, `Limits`, held or not). Only when the node
-  //     declares no indexing-set site (no definition, or a non-index binder)
-  //     do we fall back to recognizing an inner `Limits`/`Element` here, and
-  //     only for an operator whose definition, found by name, declares
-  //     binding sites (`bindsClauseSymbols`): `x ∈ ℤ ∧ x > 0` binds nothing.
+  //     `Tuple`, `Element`, `Limits`, held or not). A raw node of these
+  //     operators, which has no definition, reads the same selectors through
+  //     `rawClauseOrdering()`. Only a node of another operator that declares
+  //     no indexing-set site (a quantifier with no definition, or a
+  //     non-index binder) falls back to recognizing an inner
+  //     `Limits`/`Element` here, and only for an operator whose definition,
+  //     found by name, declares binding sites (`bindsClauseSymbols`):
+  //     `x ∈ ℤ ∧ x > 0` binds nothing.
   //   - local variables — Block: inner `Assign`/`Declare` introduce locals.
   //     `Block` is `scoped: true` with no binding sites, so this stays a
   //     structural recognition, and it applies to a `Block` only
   //     (`bindsStatementTargets`): the `z` of `If(z > 0, Assign(z, 5), 0)` is
   //     free.
   // The variable of an INDEFINITE integral is not bound: the value of the
-  // integral is a function of it (`indefiniteIntegralVariables`).
-  const sites = bindingSiteNames(expr);
+  // integral is a function of it (`integralPointVariables`).
+  // A raw `Sum`, `Product` or `Integrate` has no operator definition: its
+  // sites are read by the selector of the definition that its name has
+  // (`rawClauseOrdering()`, `binding-sites.ts`), so that the raw form has the
+  // same free variables as the canonical form: the `x` of the upper bound of
+  // `Sum(x + 1, Limits(x, 1, x + 1))` is free.
+  const sites = bindingSiteNames(expr) ?? rawClauseOrdering(expr);
   const siteVars = sites?.clauseLocal;
   const indexVars = new Set<string>(siteVars);
-  const indefinite = indefiniteIntegralVariables(expr);
+  const indefinite = integralPointVariables(expr);
   // The variables of the definite limits of an `Integrate` that name no
   // variable are bound in the integrand (operand 0) only: in
   // `Integrate(Function(x·y, x), Limits(Nothing, 0, 1))`, `x` is bound and
@@ -2172,9 +2182,16 @@ function collectReferences(
   // recognized index; for a clause site, from its own clause onward and in
   // the body (every operand before the first clause) — the clause ordering
   // `bindBindingSites` canonicalized against (`binderBoundAt`).
+  // A bound of a clause in the flat spelling (`Sum(k, k, 1, k)`) is outside
+  // the scope of the index of that clause (`flatBoundIndexAt()`).
+  const flatOwner =
+    sites === undefined
+      ? undefined
+      : expr.ops.map((_, i) => flatBoundIndexAt(expr, i, sites));
   const boundIn = (name: string, i: number): boolean =>
     !indefinite?.has(name) &&
-    (sites === undefined || binderBoundAt(sites, name, i));
+    (sites === undefined ||
+      (binderBoundAt(sites, name, i) && flatOwner?.[i] !== name));
   const clauseSymbols = siteVars === undefined && bindsClauseSymbols(expr);
   const statementTargets = bindsStatementTargets(expr);
   const localVars = new Set<string>();

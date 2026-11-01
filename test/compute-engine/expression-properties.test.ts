@@ -476,15 +476,16 @@ describe('FREE_VARIABLES (structural tier)', () => {
     expect(f.freeVariables).toEqual(['b']);
   });
 
-  it('a node with no definition falls back to the spelling heuristic', () => {
-    // `canonical: false` leaves the node unbound (no operator definition), so
-    // there are no binding sites to consult: only the canonical
-    // `Limits`/`Element` spellings are recognized, and `Tuple` is not.
+  it('a node with no definition reads the sites of its operator name', () => {
+    // `canonical: false` leaves the node unbound (no operator definition).
+    // The binding sites of a raw `Sum` are read by the selector of the
+    // definition that the name `Sum` has (`rawClauseOrdering()`), which
+    // reads the `Tuple` spelling too: `n` is bound, as in the canonical form.
     const raw = engine.box(['Sum', body, ['Tuple', 'n', 1, 10]], {
       canonical: false,
     });
     expect(raw.operatorDefinition).toBeUndefined();
-    expect(raw.freeVariables).toEqual(['n']);
+    expect(raw.freeVariables).toEqual([]);
 
     const rawLimits = engine.box(['Sum', body, ['Limits', 'n', 1, 10]], {
       canonical: false,

@@ -238,7 +238,9 @@ import {
   bindsClauseSymbols,
   bindsStatementTargets,
   implicitIntegralVariables,
-  indefiniteIntegralVariables,
+  flatBoundIndexAt,
+  integralPointVariables,
+  rawClauseOrdering,
   type DeclaredBinders,
 } from './binding-sites.js';
 import {
@@ -712,6 +714,52 @@ let _transientStructural: Map<Expression, Expression> | undefined = undefined;
  */
 let _transientCanonical:
   Map<Expression, { scope: Scope; result: Expression }> | undefined = undefined;
+
+/**
+ * The results that the CURRENT top-level `subs()` call of a function
+ * expression made, by input node. `undefined` when no `subs()` call is in
+ * progress.
+ *
+ * `subs()` rebuilds a node from the results of `subs()` on its operands. A
+ * node that is an operand more than once (`Add(e, e)`, with `e` built the
+ * same way at each level) was substituted once for each path from the root,
+ * so the time grew as 2^depth: a raw tree of depth 18 took about 0.5 s, and
+ * each extra level doubled it. With this map, each node is substituted once
+ * for each context in which the call meets it.
+ *
+ * A result is given again only when the context is the same, because the
+ * result depends on it:
+ * - the substitution object. A binder (a `Function` literal, a `Sum`, a
+ *   `Block`...) removes the names that it binds from the substitution with
+ *   `withoutNames()`, which makes a new object, so a node below a binder
+ *   that shadows a key has a different substitution object from the same
+ *   node outside the binder;
+ * - the requested form (the `canonical` option, as the caller gave it);
+ * - the lexical scope that is current when the call starts, which binds the
+ *   names of a canonical result.
+ *
+ * The outermost call creates the map and drops it before it returns, also
+ * when it throws, so the map keeps no expression after that call, as the map
+ * of `canonical` reads does ({@link _transientCanonical}).
+ *
+ * A `subs()` call made while another one runs (by a canonical handler of a
+ * rebuilt node, for example) uses the same map. So the substitution object
+ * is compared by identity: code that calls `subs()` must not change a
+ * substitution object while a `subs()` call that uses it runs, and the code
+ * of the library makes a new object for each call. The map also keeps the
+ * results of these nested calls until the outermost call returns.
+ */
+let _transientSubs:
+  | Map<
+      Expression,
+      {
+        sub: Substitution;
+        canonical: CanonicalOptions | undefined;
+        scope: Scope;
+        result: Expression;
+      }[]
+    >
+  | undefined = undefined;
 
 /** `CE_EFFECTS_PARANOID`: the effects-cache canary of the state-event
  * design's §6 (step 3) — on every served hit, `_effectsOf` recomputes the
@@ -2756,7 +2804,32 @@ export class BoxedFunction
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
-    return this._withParseScope(() => this._subsInParseScope(sub, options));
+    // A node met again in the same call and the same context is given the
+    // result it got the first time (see `_transientSubs`).
+    const canonical = options?.canonical;
+    const scope = this.engine.context.lexicalScope;
+    const owner = _transientSubs === undefined;
+    if (owner) _transientSubs = new Map();
+    else {
+      const hit = _transientSubs!
+        .get(this)
+        ?.find(
+          (x) => x.sub === sub && x.canonical === canonical && x.scope === scope
+        );
+      if (hit !== undefined) return hit.result;
+    }
+    try {
+      const result = this._withParseScope(() =>
+        this._subsInParseScope(sub, options)
+      );
+      const entries = _transientSubs!.get(this);
+      const entry = { sub, canonical, scope, result };
+      if (entries === undefined) _transientSubs!.set(this, [entry]);
+      else entries.push(entry);
+      return result;
+    } finally {
+      if (owner) _transientSubs = undefined;
+    }
   }
 
   private _subsInParseScope(
@@ -21389,10 +21462,13 @@ function withProvedAbsentDomains(
  *   `clauseLocal` sites of `declaredBinders(expr, 'post')`, `binding-sites.ts`:
  *   the index of a `Sum`, `Product`, `Comprehension` or `Loop`, the variable of
  *   a definite `Integrate`) binds each index from its own clause onward and
- *   in the body;
+ *   in the body. A raw `Sum`, `Product`, `Integrate` or `NDSolveFunction`
+ *   has no operator definition: its sites are read by the selector of the
+ *   definition that its name has (`rawClauseOrdering()`, `binding-sites.ts`),
+ *   with the same rule;
  * - any other node of an operator whose definition, found by name, declares
- *   binding sites (`bindsClauseSymbols()`, `binding-sites.ts`: a raw `Sum`,
- *   or a quantifier `ForAll(p, Element(x, S))`) binds the symbol of each
+ *   binding sites (`bindsClauseSymbols()`, `binding-sites.ts`: a raw
+ *   quantifier `ForAll(p, Element(x, S))`) binds the symbol of each
  *   `Limits` or `Element` operand, in every operand. The `x` of
  *   `x ∈ ℤ ∧ x > 0`, of `If(x ∈ ℤ, x + 1, 0)` or of `Boole(x ∈ ℤ)` is free;
  * - a `Block` binds the target of each `Assign`, `Declare` and
@@ -21400,7 +21476,7 @@ function withProvedAbsentDomains(
  *   The `z` of `If(z > 0, Assign(z, 5), 0)` is free.
  *
  * The variable of an INDEFINITE integral (`Integrate(a·x, x)`) is not bound
- * (`indefiniteIntegralVariables()`): the value of the integral is a function
+ * (`integralPointVariables()`): the value of the integral is a function
  * of it, `a·x²/2`, as for `D` below.
  *
  * When the node has index variables, a `Function` literal operand (the
@@ -21451,10 +21527,14 @@ function subsBinderView(expr: Expression):
     expr.operatorDefinition === undefined
       ? undefined
       : declaredBinders(expr, 'post');
+  // A raw `Sum`, `Product` or `Integrate` has no operator definition: its
+  // sites are read by the selector of the definition that its name has, so
+  // that the bounds of a clause read the enclosing binding of the index, as
+  // in the canonical form (`rawClauseOrdering()`).
   const sites =
     declared !== undefined && declared.clauseLocal.size > 0
       ? declared
-      : undefined;
+      : rawClauseOrdering(expr);
   const indexVars = new Set<string>(sites?.clauseLocal);
   const localVars = new Set<string>();
   const clauseSymbols = sites === undefined && bindsClauseSymbols(expr);
@@ -21474,7 +21554,7 @@ function subsBinderView(expr: Expression):
     )
       localVars.add(op.op1.symbol);
   }
-  const indefinite = indefiniteIntegralVariables(expr);
+  const indefinite = integralPointVariables(expr);
   // The variables of the definite limits of an `Integrate` that name no
   // variable are bound in the integrand (operand 0) only, as the
   // free-variable walk reads them (`implicitIntegralVariables()`): with
@@ -21498,7 +21578,9 @@ function subsBinderView(expr: Expression):
           localVars.has(n) ||
           (i === 0 && implicit.has(n)) ||
           (indexVars.has(n) &&
-            (sites === undefined || binderBoundAt(sites, n, i)))
+            (sites === undefined ||
+              (binderBoundAt(sites, n, i) &&
+                flatBoundIndexAt(expr, i, sites) !== n)))
       ),
     readsFunctionBody,
   };
@@ -21509,7 +21591,7 @@ function subsBinderView(expr: Expression):
  * `expr` is computed, when `expr` is a node whose value is a function of its
  * variables: the variables of `D(f, x, …)`, the expansion variable of
  * `Series(f, x, …)` and the variables of an indefinite `Integrate`
- * (`indefiniteIntegralVariables()`). Each entry has the name, the symbol to
+ * (`integralPointVariables()`). Each entry has the name, the symbol to
  * use as the parameter of the function literal, and the replacement boxed
  * with `box`. `undefined` when there is none.
  *
@@ -21538,10 +21620,14 @@ function pointEntries(
   else if (expr.operator === 'Series') {
     if (expr.ops[1] !== undefined) candidates.push(expr.ops[1]);
   } else if (expr.operator === 'Integrate') {
-    const indefinite = indefiniteIntegralVariables(expr);
+    const indefinite = integralPointVariables(expr);
     if (indefinite === undefined) return undefined;
+    // The variable of a clause is its first symbol, in any spelling of the
+    // clause (`x`, `Limits(x, Nothing, Nothing)`, `Tuple(Hold(x))`).
+    const firstSymbol = (x: Expression | undefined): Expression | undefined =>
+      isSymbol(x) ? x : isFunction(x) ? firstSymbol(x.ops[0]) : undefined;
     for (const op of expr.ops.slice(1)) {
-      const v = isFunction(op, 'Limits') ? op.op1 : op;
+      const v = firstSymbol(op);
       if (isSymbol(v) && indefinite.has(v.symbol)) candidates.push(v);
     }
   } else return undefined;

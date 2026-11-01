@@ -983,9 +983,35 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // skip the write, which would replace the definition's `BoxedType`
         // with a fresh object (defeating caches keyed on its identity, such
         // as the R-D5 display projection) and bump `_writeVersion` on every
-        // use of an already-inferred symbol. `narrow`/`widen` are
-        // reference-preserving when nothing changes, so `===` is the test.
+        // use of an already-inferred symbol. `narrow`/`widen` often return
+        // the recorded type object when nothing changes, so `===` is the
+        // first test. They do not always: `widen` of a recorded `list<real>`
+        // and an equal new `list<real>` object returns the new object.
+        //
+        // The second test compares the types by structure, when both are
+        // objects: a type built as an object (not a primitive type or a
+        // parsed type string, which are interned) is a new object at each
+        // call, so a repeated write of the
+        // same type would otherwise send a new state event each time. A
+        // widening event advances the `any` cache axis at once, even inside a
+        // running cached computation (`axisMaskOf`), so each repeated event
+        // would make the computations in progress run again. The types are
+        // equal when they print the same and each is a subtype of the other;
+        // the subtype test guards against two types that print the same but
+        // are not the same type. Such a write sends no state event, but it
+        // is otherwise made as any other write (the rollback record, the
+        // type write, the observers): a later inference depends on it.
+        // Skipping the whole write made a parameter `p` read as
+        // `p[1] + p[2]` and passed to a function of a
+        // `tuple<number, number>` parameter typed `indexed_collection<number>`
+        // (`parameter-index-read-inference.test.ts`).
         if (inferred.type === def.value.type.type) return true;
+        const equalType =
+          typeof inferred.type === 'object' &&
+          typeof def.value.type.type === 'object' &&
+          inferred.toString() === def.value.type.toString() &&
+          isSubtype(inferred.type, def.value.type.type) &&
+          isSubtype(def.value.type.type, inferred.type);
         // Rollback journal (family 1): snapshot the coupled type/value
         // slots BEFORE the write — the post-write channel below carries
         // only from/to types and cannot capture them. Restore is verbatim
@@ -1036,17 +1062,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // narrowing leaves the derived-signature memos merely loose; any
         // other write can leave them wrong, so it must advance the
         // definition version they key on (`noteStateEvent`).
-        this.engine._noteStateEvent({
-          kind: 'inference',
-          valueType: true,
-          widening:
-            inferenceMode !== 'narrow' ||
-            !isSubtype(inferred.type, previousType.type),
-          // A binding under a scratch scope (`scratch-scopes.ts`) dies with
-          // the computation that declared it: its inference advances no
-          // version that a cache outliving that computation keys on.
-          ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
-        });
+        if (!equalType)
+          this.engine._noteStateEvent({
+            kind: 'inference',
+            valueType: true,
+            widening:
+              inferenceMode !== 'narrow' ||
+              !isSubtype(inferred.type, previousType.type),
+            // A binding under a scratch scope (`scratch-scopes.ts`) dies with
+            // the computation that declared it: its inference advances no
+            // version that a cache outliving that computation keys on.
+            ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
+          });
         // Single emission point for the write's passive observers: the
         // provenance history, the fresh-inference set (unknown → concrete
         // during a boxing, for the fresh-matrix-inference repair), and the

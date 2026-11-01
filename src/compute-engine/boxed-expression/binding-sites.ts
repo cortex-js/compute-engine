@@ -1047,6 +1047,27 @@ function heldIndefiniteIntegralVariables(
 }
 
 /**
+ * The variables of the indefinite integrals of the `Integrate` node `expr`,
+ * in any form: `indefiniteIntegralVariables()` for a canonical node, whose
+ * clauses are `Limits` clauses, and `heldIndefiniteIntegralVariables()` for
+ * a structural or raw node, whose clauses can have any spelling that the
+ * canonical form accepts (`Integrate(x, Tuple(x))`, `Integrate(x, Hold(x))`).
+ * `undefined` when `expr` is not an `Integrate` or has no such variable.
+ *
+ * The free-variable walk and `subs()` read the indefinite variables with
+ * this function, so that the variable of an indefinite clause is free in
+ * every form, as it is in the canonical form.
+ */
+export function integralPointVariables(
+  expr: Expression
+): ReadonlySet<string> | undefined {
+  if (!isFunction(expr, 'Integrate')) return undefined;
+  return expr.isCanonical
+    ? indefiniteIntegralVariables(expr)
+    : heldIndefiniteIntegralVariables(expr);
+}
+
+/**
  * The variables of `expr` that its value is a function of, although `expr`
  * declares them as binding sites: each symbol operand after the function of
  * a `D` and the expansion variable (second operand) of a `Series`, both also
@@ -1068,10 +1089,7 @@ export function pointVariableNames(
   expr: Expression
 ): ReadonlySet<string> | undefined {
   if (!isFunction(expr)) return undefined;
-  if (expr.operator === 'Integrate')
-    return expr.isCanonical
-      ? indefiniteIntegralVariables(expr)
-      : heldIndefiniteIntegralVariables(expr);
+  if (expr.operator === 'Integrate') return integralPointVariables(expr);
   let variables: readonly Expression[];
   if (expr.operator === 'D') variables = expr.ops.slice(1);
   else if (expr.operator === 'Series')
@@ -1136,6 +1154,15 @@ const ELEMENT_COLLECTION = (j: number): boolean => j === 1;
  * index and the operands of the clause that are outside its scope.
  * Otherwise `undefined`: the index is in scope in its whole clause.
  *
+ * A clause of a node that is not canonical can have another range-shaped
+ * spelling (`Tuple`, `Triple`, `Pair`, `Single`, `Set`), and its index can
+ * be held (`Tuple(Hold(k), 1, k)`). The canonical form reads such a clause
+ * as a `Limits` clause, so its operands after the index are bounds, outside
+ * the scope of the index too: in `Sum(k, Tuple(k, 1, k))`, the upper bound
+ * `k` is the enclosing `k`, as in `Sum(k, Limits(k, 1, k))`. The flat
+ * spelling, whose bounds are operands of the binder, is handled by
+ * `flatBoundIndexAt()`.
+ *
  * The canonical form binds such an operand to the enclosing symbol
  * (`withOwnBoundsUnbound()`, `box.ts`), and every walk that tracks the names
  * a binder shadows must read the same scope (`clauseOperandShadow()`).
@@ -1147,17 +1174,55 @@ export function ownIndexClause(
   visibleFrom: ReadonlyMap<string, number>
 ): OwnIndexClause | undefined {
   if (!OWN_INDEX_OUTSIDE_BINDERS.has(binder)) return undefined;
-  if (!isFunction(clause) || !isSymbol(clause.op1)) return undefined;
+  if (!isFunction(clause)) return undefined;
+  const index = isFunction(clause.op1, 'Hold') ? clause.op1.op1 : clause.op1;
+  if (!isSymbol(index)) return undefined;
   const outside =
-    clause.operator === 'Limits'
-      ? LIMITS_BOUNDS
-      : clause.operator === 'Element'
-        ? ELEMENT_COLLECTION
+    clause.operator === 'Element'
+      ? ELEMENT_COLLECTION
+      : INDEXING_SET_OPERATORS.has(clause.operator)
+        ? LIMITS_BOUNDS
         : undefined;
   if (outside === undefined) return undefined;
-  const name = clause.op1.symbol;
+  const name = index.symbol;
   if (visibleFrom.get(name) !== operandIndex) return undefined;
   return { name, outside };
+}
+
+/**
+ * The binding sites of a node of an operator of `OWN_INDEX_OUTSIDE_BINDERS`
+ * that has no operator definition (a raw `Sum`, `Product`, `Integrate` or
+ * `NDSolveFunction`), read by the selector of the definition that the NAME of
+ * the operator has, in the `'pre'` phase (`declaredBinders()`). `undefined`
+ * for a node that has an operator definition (a canonical or structural
+ * node: its own sites apply), for a node of any other operator, and when the
+ * sites name no clause-local index.
+ *
+ * The `'pre'` selector reads every spelling of a clause of the raw tree
+ * (`Limits`, `Element`, `Tuple`, a bare symbol, `Hold`) at the operand
+ * positions of the canonical form: only the operands after the body are
+ * clauses, so an `Element` body (`Sum(x ∈ [y], Limits(y, 1, 3))`) is not
+ * read as a clause, and the bare variable of `NDSolveFunction` is not a
+ * clause. The free-variable walk and `subs()` then read the raw node with
+ * the scopes of the canonical form: an index is bound from its own clause
+ * onward and in the body, and the bounds of a `Limits` clause (the
+ * collection of an `Element` clause) read the enclosing binding of the index
+ * (`ownIndexClause()`). In the raw `Sum(x + 1, Limits(x, 1, x + 1))`, the
+ * `x` of the upper bound is free, as in the canonical form.
+ */
+export function rawClauseOrdering(
+  expr: Expression
+): DeclaredBinders | undefined {
+  if (
+    !isFunction(expr) ||
+    expr.operatorDefinition !== undefined ||
+    !OWN_INDEX_OUTSIDE_BINDERS.has(expr.operator)
+  )
+    return undefined;
+  const binders = declaredBinders(expr, 'pre');
+  return binders === undefined || binders.clauseLocal.size === 0
+    ? undefined
+    : binders;
 }
 
 /**
@@ -1178,6 +1243,51 @@ export function ownIndexClauseAt(
     operandIndex,
     binders.visibleFrom
   );
+}
+
+/**
+ * When operand `operandIndex` of the binder `expr`, a node of an operator of
+ * `OWN_INDEX_OUTSIDE_BINDERS`, is a bound of a clause in the flat spelling
+ * (`Sum(k, k, 1, n)`, whose clause is the index `k` followed by its bounds
+ * `1` and `n`), the name of the index of that clause. Otherwise `undefined`.
+ * `binders` is the clause ordering of `expr`.
+ *
+ * The canonical form reads the flat clause as `Limits(k, 1, n)`, whose
+ * bounds are outside the scope of the index (`ownIndexClause()`). A bound of
+ * the flat clause is an operand of the binder, so the walks that track the
+ * names a binder shadows remove the name from the names bound in that
+ * operand: in `Sum(k, k, 1, k)`, the upper bound `k` is the enclosing `k`.
+ * The span of the clause is that of `flatLimitsSpan()`, which the canonical
+ * form reads too.
+ *
+ * Only the operators whose canonical form reads a flat clause are in
+ * `FLAT_CLAUSE_BINDERS`. `NDSolveFunction` is not: it reads operand 2 alone
+ * as its limits and operand 3 as its initial value, so in
+ * `NDSolveFunction(x, y, x, x + 1)` the `x` of the initial value is not a
+ * bound of a flat clause.
+ */
+const FLAT_CLAUSE_BINDERS: ReadonlySet<string> = new Set([
+  'Sum',
+  'Product',
+  'Integrate',
+]);
+
+export function flatBoundIndexAt(
+  expr: Expression,
+  operandIndex: number,
+  binders: DeclaredBinders | undefined
+): string | undefined {
+  if (binders === undefined || !isFunction(expr)) return undefined;
+  if (!FLAT_CLAUSE_BINDERS.has(expr.operator)) return undefined;
+  const ops = expr.ops;
+  for (let i = binders.firstClause; i < operandIndex && i < ops.length; i++) {
+    const op = ops[i];
+    if (!isSymbol(op) || binders.visibleFrom.get(op.symbol) !== i) continue;
+    const span = flatLimitsSpan(ops, i);
+    if (operandIndex < i + span) return op.symbol;
+    i += span - 1;
+  }
+  return undefined;
 }
 
 /**

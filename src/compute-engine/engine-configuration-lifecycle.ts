@@ -321,11 +321,74 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       // computed. Advancing their cache axis here would invalidate that
       // computation recursively. Signature inference is not self-triggered and
       // can safely advance all axes.
-      if (e.valueType) return { any: false, semantic: false, world: false };
-      // A value-type inference on a SCRATCH binding takes the branch above:
-      // its `any` advance is the deferred `inference-settled` event. Any
-      // other SCRATCH inference advances `any` at once, and not `semantic` or
-      // `world` (see "Scratch events" above).
+      //
+      // The recursion comes from the in-flight window of `cachedValue`
+      // (`boxed-expression/cache.ts`): a cell being computed is stamped with
+      // the generation it was read at, and a re-entrant read with the same
+      // generation is served from the cell. After an advance, a re-entrant
+      // read has a new generation, so it computes the cell again. When each
+      // of these computations sends the same inference again, the recursion
+      // does not end.
+      //
+      // One exception: a WIDENING value-type inference advances `any` at
+      // once, on a scratch binding or on any other binding. Work that runs
+      // inside a cached computation (for example the boxing of a function
+      // body by a signature derivation, which a `_type` read can reach) would
+      // otherwise see the advance only after the outermost computation
+      // returns. A type cached before the widening (`x + 1` typed `integer`)
+      // would then be served again after `x` became `real`: a type too
+      // narrow, which is wrong, not only loose.
+      //
+      // The recomputation that this advance causes is bounded:
+      // - The `widen` and `replace` writes, and a `narrow` write whose result
+      //   is not a subtype of the previous type (which also sends the
+      //   widening flag), are made when an expression is canonicalized (the
+      //   block evidence sites, the repair of a juxtaposition head, the
+      //   validation of a function literal, the inference cause of a
+      //   narrowing), not by a type handler, so computing a type again does
+      //   not make them again. The undo of a rollback frame runs once. This
+      //   is the bound. Canonicalization can itself run inside a cached
+      //   computation (a type handler that reads a canonical form), but a
+      //   second canonicalization of the same expression makes the same
+      //   write again, and `_infer` (`boxed-symbol.ts`) sends no event for a
+      //   write of a type equal to the recorded type: the same object, or a
+      //   type built as an object that prints the same and is a subtype of
+      //   the recorded type both ways.
+      // - A recursive body does not start a second derivation of the same
+      //   signature: while one runs, `_derivingSignature` (in both
+      //   definition classes) serves the re-entrant read with the stored
+      //   signature.
+      // - The outer computations on the stack store their results under the
+      //   generation they were read at, which is then past, so each is
+      //   computed again at its next read, as after a deferred advance.
+      //
+      // These bounds do not depend on where the binding lives: a binding
+      // outside a scratch scope is also read by expressions outside the
+      // computation, but those reads only see a newer generation and compute
+      // their type once more.
+      //
+      // A narrowing keeps the deferred advance because it can only leave a
+      // cached type wider than it could be, never wrong. Narrowings are made
+      // at canonicalization too: over 143 test files about inference,
+      // assumptions, typing, caches, blocks and loops, and the Epsil tests
+      // (measured 2026-11-01), the value-type inferences made while a cached
+      // computation was running were all narrowings made by a
+      // canonicalization that a computation reached (`checkNumericArgs`,
+      // the binding of a loop index); none was made by a type handler. Over
+      // the same files, an immediate advance for every value-type inference,
+      // narrowings included, did not bring back the recursion described
+      // above, but it changed inferred types: in
+      // `parameter-index-read-inference.test.ts`, a symbol read by index
+      // and passed to a call was typed `indexed_collection<number>`, not
+      // `tuple<number, number>`.
+      if (e.valueType)
+        return e.widening
+          ? { any: true, semantic: false, world: false }
+          : { any: false, semantic: false, world: false };
+      // A value-type inference on a SCRATCH binding that is not a widening
+      // takes the branch above: its `any` advance is the deferred
+      // `inference-settled` event. Any other SCRATCH inference advances `any`
+      // at once, and not `semantic` or `world` (see "Scratch events" above).
       if (e.scratch) return { any: true, semantic: false, world: false };
       if (e.symbolSignature) return { any: true, semantic: true, world: true };
       return { any: true, semantic: true, world: true };
@@ -486,15 +549,20 @@ export class EngineConfigurationLifecycle {
   noteStateEvent(e: StateEvent): void {
     // A value-type inference changes the type of a symbol that expressions
     // built earlier have cached types from (`l = List(x)` keeps `vector<1>`
-    // after a use narrows `x` to `real`). It cannot advance the `any` axis
-    // where it happens: it happens while a `_type` or `_sgn` is computed, and
-    // the advance would make that computation stale at once. So the advance
-    // runs when no cached computation is running (`runWhenIdle`).
+    // after a use narrows `x` to `real`). A NARROWING does not advance the
+    // `any` axis where it happens: it can happen while a `_type` or `_sgn` is
+    // computed (a canonicalization that the computation reaches), and a late
+    // advance can only leave a cached type wider than it could be. So the
+    // advance runs when no cached computation is running (`runWhenIdle`).
     //
     // This holds for a SCRATCH binding too (`scratch-scopes.ts`): the
     // computation that owns the scratch scope may have cached a type while
     // the binding had the previous type, and `inference-settled` advances
     // only `any`, which no cache that outlives the computation keys on.
+    //
+    // A WIDENING, of a scratch binding or of any other binding, is the one
+    // exception: it advances `any` where it happens, as well as here (the
+    // `inference` case of `axisMaskOf` says why that is safe).
     if (e.kind === 'inference' && e.valueType && !this._inferencePending) {
       // One advance covers every inference made before it runs.
       this._inferencePending = true;

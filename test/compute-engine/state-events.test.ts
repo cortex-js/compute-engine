@@ -177,9 +177,13 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
     // value branch zero-mask (§2b).
     ['inference (default)', { kind: 'inference' }, mask(true, true, true)],
     // R5 (amended): symbolSignature advances `any` (twin-consistent);
-    // valueType MUST stay zero-mask — value-branch inference fires DURING
-    // type computation, and advancing the axis it reads is self-invalidating
-    // (measured: stack overflow + inference drift). Load-bearing row.
+    // a valueType narrowing stays zero-mask: its advance is deferred to the
+    // end of the outermost cached computation. A late narrowing can only
+    // leave a cached type wider than it could be, never wrong. Narrowings are
+    // made by a canonicalization, which a cached computation can reach.
+    // Advancing at once on every narrowing caused a stack overflow when this
+    // row was written (2026-08-11); on 2026-11-01 it caused no overflow but
+    // changed inferred types in `parameter-index-read-inference.test.ts`.
     [
       'inference (symbol signature)',
       { kind: 'inference', symbolSignature: true },
@@ -189,6 +193,27 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
       'inference (value type)',
       { kind: 'inference', valueType: true },
       mask(false, false, false),
+    ],
+    // A WIDENING value-type inference advances `any` at once, on a scratch
+    // binding (a temporary symbol of a signature derivation) and on any
+    // other binding. The inference can run inside a cached `_type` read, so
+    // a deferred advance would come after the outermost computation returns,
+    // and a type cached before the widening would be served again, narrower
+    // than the binding.
+    [
+      'inference (value type, widening)',
+      { kind: 'inference', valueType: true, widening: true },
+      mask(true, false, false),
+    ],
+    [
+      'inference (value type, scratch)',
+      { kind: 'inference', valueType: true, scratch: true },
+      mask(false, false, false),
+    ],
+    [
+      'inference (value type, scratch, widening)',
+      { kind: 'inference', valueType: true, scratch: true, widening: true },
+      mask(true, false, false),
     ],
     // inference-settled: the deferred half of a value-type inference. The
     // lifecycle sends it when no cached computation is running

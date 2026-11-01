@@ -645,20 +645,19 @@ describe('SUBS ON A RAW OR STRUCTURAL BINDER', () => {
         ['Sum', ['Multiply', 'j', 'k'], ['Limits', 'k', 1, 'k']],
       ];
       const result = subs(json, { j: 2, k: 5 }, form);
-      // A raw node has no operator definition, so the free-variable walk
-      // reads its `Limits` clause by its spelling, with the index bound in the
-      // whole clause: the upper bound `k` is not free there, and `subs()`
-      // follows the walk. A structural node is bound to the definition of
-      // `Sum`, whose bounds read the enclosing `k`.
-      const bound = form === 'raw' ? 'k' : 5;
+      // The bounds of the `Limits` clause read the enclosing `k`, in the two
+      // forms. A raw node has no operator definition: its clause ordering
+      // is read from its `Limits` operands (`rawClauseOrdering()`), so the
+      // upper bound `k` is free and `subs()` replaces it, as for the
+      // structural node, which is bound to the definition of `Sum`.
       expect(result.json).toEqual([
         'Add',
         5,
-        ['Sum', ['Multiply', 2, 'k'], ['Limits', 'k', 1, bound]],
+        ['Sum', ['Multiply', 2, 'k'], ['Limits', 'k', 1, 5]],
       ]);
       expect(
         ce.box(json[2] as Json, { form }).freeVariables.includes('k')
-      ).toBe(form !== 'raw');
+      ).toBe(true);
     });
 
     test(`${form}: a Function parameter and a Block local are kept`, () => {
