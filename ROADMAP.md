@@ -6687,18 +6687,64 @@ With `g(t) := 1/t`, `\oint_{|z|=2} g(z)\,dz` stays
 `\oint_{|z|=2} \frac{1}{z}\,dz` gives `2iπ`. Both should give `2iπ`: the contour
 integral does not write in the body of a user function, as `Integrate` does.
 
-### CE-638. `g \mapsto \int_0^1 g(x)\,dx` reads `g(x)` as a product
+### CE-638. An untyped parameter followed by parentheses is read as a product: `g \mapsto \int_0^1 g(x)\,dx`
 
-**Status:** ready; defect. Found 2026-10-30 while reviewing CE-626 (also on
-0.174.0).
+**Status:** decision needed; defect, M.
 
-On the parse route, with no global `g`, the integrand of
-`g \mapsto \int_0^1 g(x)\,dx` is `Multiply(g, x)`: the parameter `g` of the
-function literal is not read as a function in a call position, so applying the
-literal to `t \mapsto t^2` does not give 1/3. The same happens to a parameter of
-a definition: `h(p, a) := p(a)` reads `p(a)` as `p·a`, so `h(g, 0.5)` gives
-`0.5·g`. Check first whether the documented reading of a juxtaposition with an
-unknown head covers a parameter.
+In a function literal or a definition, the parser reads `p(a)` as a product
+when `p` is a parameter with no type: `headHasNoTypeInformation()`
+(`boxed-expression/invisible-operator.ts`) returns false for a parameter of
+the literal being read. The CHANGELOG entry of commit `4ac8db89c` documents
+this ("The product reading remains for a head that is a value: … a parameter
+of the function literal being read (`(x, N) \mapsto x(N+1)`)"), and
+`test/compute-engine/juxtaposition-application.test.ts` expects
+`(x, N) \mapsto x(N+1)` applied to (2, 3) to give 8. Examples at
+`d597ba836`:
+
+- `(g \mapsto \int_0^1 g(x)\,dx)(t \mapsto t^2)` gives an `incompatible-type`
+  error, and `.N()` gives NaN; with `(g\colon \mathrm{function})` it gives
+  0.3333.
+- `h(p, a) := p(a)` is `Multiply(a, p)`, so `h(t \mapsto t^2, 0.5)` gives the
+  product `0.5·(t ↦ t²)`.
+- The reading of a `\mapsto` parameter depends on an outer declaration of the
+  same name: after `ce.declare('g', 'function')`, `g \mapsto g(x)` reads
+  `["g", "x"]`; without it, `Multiply(g, x)`. The parser registers an
+  unannotated parameter as `'function'` when the outer scope resolves the name
+  to a function (`definitions-core.ts`, near the comment "An unannotated
+  callable parameter keeps the existing call spelling"), and
+  `test/compute-engine/application-policy.test.ts` ("untyped value parameters
+  keep multiplication while callable parameters stay local", commit
+  `7afa85494`) expects `(f, x) \mapsto f(x)`, with an outer `f` assigned a
+  function, applied to `(t ↦ t, 3)` to give 3. A definition
+  (`parseFunctionDefinitionBody()`) always reads the parameter as a value, so
+  `\mapsto` and `:=` disagree. The fix for option (a) is one change in
+  `definitions-core.ts`: register every unannotated `\mapsto` parameter as
+  `'value'`; the policy test then gives `Multiply(3, t ↦ t)`.
+
+Options (each removes the dependence on the outer declaration, except
+"nothing decided"):
+
+- (a) Keep the rule: an unannotated parameter is always a value (the change
+  above; the policy test must then annotate `f`). A higher-order
+  literal needs `(g\colon \mathrm{function})`. A definition has no such form
+  today: `h(p\colon \mathrm{function}, a) := p(a)` gives
+  `Error('expected-a-symbol')` for the parameter. Add a sentence to the LaTeX
+  guide.
+- (b) Read an untyped parameter as an undeclared head: `p(…)` is an application
+  unless the argument contains `p` (as `q(2q)` stays a product).
+  `(x, N) \mapsto x(N+1)` then applies `x`, and (2, 3) no longer gives 8. This
+  reverses the CHANGELOG statement and the test above; the number of other
+  changed tests and snapshots is not measured.
+- (c) Option (a), and typed parameters in a definition
+  (`h(p\colon \mathrm{function}, a) := p(a)`), as `\mapsto` already allows.
+
+Recommended: (b). Commit `4ac8db89c` chose the application reading for an
+undeclared head because a wrong call stays visible and a wrong product is
+silent; the same reason applies to an untyped parameter, and it makes the
+`\mapsto` reading with an outer function (the policy test) the rule for every
+case. (c) is the choice that keeps the documented rule. If nothing is
+decided, the higher-order case gives NaN or a product with no warning, and the
+reading of a `\mapsto` parameter keeps depending on an outer declaration.
 
 ### CE-639. A local function assigned inside an integrand gives an `incompatible-type` error
 
@@ -6736,19 +6782,6 @@ Not checked on 0.174.0.
 `evaluate()` (`.N()` gives 0.5), and
 `∫_0^1 Total(Map(t \mapsto t^2, [x, x]))\,dx` stays unevaluated under both
 `evaluate()` and `.N()` (the value is 2/3).
-
-### CE-616. A definite integral does not evaluate a `Sum`, `Product` or `D` held in its integrand
-
-**Status:** ready; defect. Found 2026-10-28 while fixing CE-604.
-
-`∫_0^1 2·Σ_{k=1}^3 k·x dx` and `∫_0^1 2·D(x^3, x) dx` stay unevaluated
-`Integrate` (they are 6 and 2): the scalar route of `Integrate` does not
-evaluate a held operator in the integrand before it integrates. With
-`f(t, a) := t^2 + a`, `∫_0^1 (Σ_{k=1}^3 k·x)·f(x, 1) dx` stays unevaluated too.
-Since CE-604, the list route sends an integrand that calls a user function
-through the scalar route for each element, so `∫_0^1 (Σ_{k=1}^3 k·x)·f(x, E) dx`
-with `E = [1, 2]` now gives two unevaluated integrals where it gave
-`[9/2, 15/2]` before. `.N()` gives the right values on both routes.
 
 ### CE-625. A limit of a call that passes a function as an argument leaves a parameter name in the result
 

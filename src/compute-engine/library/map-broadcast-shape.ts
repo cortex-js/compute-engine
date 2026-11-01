@@ -7,6 +7,7 @@ import type {
 import type { Type } from '../../common/type/types.js';
 
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import { functionLiteralDefiningScope } from '../function-utils.js';
 import { functionLiteralParameterType } from '../boxed-expression/function-literal.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { withoutNothing } from '../../common/type/omission.js';
@@ -96,6 +97,36 @@ export interface LoweredLevel {
    * {@link hasAnnotatedParams}, and revalidate those keys on a new mutation
    * generation. The flag reports the provenance of an admitted level. */
   typeSensitive?: boolean;
+}
+
+/**
+ * `true` when `e`, or an application in its operands, calls a function that
+ * the user defined (`DefineFunction`, `h(k) = …`) outside the global scope.
+ *
+ * Such a function reads its free symbols in the scope where it was defined.
+ * When that scope is a block that ran on the asynchronous route, its locals
+ * are in a copy of the scope (an activation), and after the block ends a
+ * call finds that copy only through the scope chain of the caller
+ * (`definingScopeOf`, `function-utils.ts`). So the drain evaluates the
+ * application inside the closure chain, as for a closed-over operand. In the
+ * ambient scope,
+ * `Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), Map(k ↦ h(k), [1, 2]))`
+ * gave `[c + 1, c + 2]` with `evaluateAsync()`, and `Map(k ↦ k + h(1), [1, 2])`
+ * in the same block gave `[c + 2, c + 3]`. The test does not depend on
+ * whether an asynchronous evaluation ran before: a function defined in any
+ * scope other than the global scope is included.
+ */
+function callsLocalUserFunction(ce: ComputeEngine, e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  const literal = (
+    e.operatorDefinition as { _lambdaLiteral?: Expression } | undefined
+  )?._lambdaLiteral;
+  const scope = functionLiteralDefiningScope(literal);
+  if (scope !== undefined) {
+    const globalScope = ce._evalContextStack[1]?.lexicalScope;
+    if (scope !== globalScope && scope !== globalScope?.parent) return true;
+  }
+  return e.ops.some((x) => callsLocalUserFunction(ce, x));
 }
 
 /**
@@ -339,6 +370,8 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
   // correctness one. A head with NO definition may pass — an unknown operator
   // cannot write scope and evaluates identically on both paths.
   if (isImpureHead(expr.engine, body)) return undefined;
+
+  if (callsLocalUserFunction(expr.engine, body)) needsClosureScope = true;
 
   const slots: Slot[] = [];
   for (const o of body.ops) {

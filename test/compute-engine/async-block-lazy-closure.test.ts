@@ -151,6 +151,99 @@ const cases: [string, unknown][] = [
     ],
   ],
   [
+    'a function literal that calls a function that the block defines, as the value of the block',
+    [
+      'Apply',
+      [
+        'Block',
+        declareC(5),
+        ['DefineFunction', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        ['Function', ['h', 'k'], 'k'],
+      ],
+      1,
+    ],
+  ],
+  [
+    'a function literal of a nested block that calls a function of the outer block',
+    [
+      'Apply',
+      [
+        'Block',
+        declareC(5),
+        ['DefineFunction', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        [
+          'Block',
+          ['Declare', 'd', { str: 'real' }, 10],
+          ['Function', ['Add', 'd', ['h', 'k']], 'k'],
+        ],
+      ],
+      1,
+    ],
+  ],
+  [
+    'a function literal that calls a function that calls a function that the block defines',
+    [
+      'Apply',
+      [
+        'Block',
+        declareC(5),
+        ['DefineFunction', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        ['DefineFunction', 'h2', ['Function', ['h', 'k'], 'k']],
+        ['Function', ['h2', 'k'], 'k'],
+      ],
+      1,
+    ],
+  ],
+  [
+    'Map of a literal that calls a function that the block defines',
+    [
+      'Block',
+      declareC(5),
+      ['DefineFunction', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+      ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
+    ],
+  ],
+  [
+    'Map of a literal that adds 1 to a call of a function that the block defines',
+    [
+      'Block',
+      declareC(5),
+      ['DefineFunction', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+      ['Map', ['Function', ['Add', ['h', 'k'], 1], 'k'], ['List', 1, 2]],
+    ],
+  ],
+  [
+    'Map of a literal that adds a call of a function that the block defines, with a constant argument',
+    [
+      'Block',
+      declareC(5),
+      ['DefineFunction', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+      ['Map', ['Function', ['Add', 'k', ['h', 1]], 'k'], ['List', 1, 2]],
+    ],
+  ],
+  [
+    'Map of a literal that calls a recursive function that the block defines',
+    [
+      'Block',
+      declareC(5),
+      [
+        'DefineFunction',
+        'h',
+        [
+          'Function',
+          [
+            'If',
+            ['Greater', 'k', 0],
+            ['Add', 1, ['h', ['Subtract', 'k', 1]]],
+            'c',
+          ],
+          'k',
+        ],
+      ],
+      ['Map', ['Function', ['h', ['h', 'k']], 'k'], ['List', 1, 2]],
+    ],
+  ],
+  [
     'a function literal as the value of the block',
     ['Apply', ['Block', declareC(5), ['Function', ['Add', 'c', 'k'], 'k']], 1],
   ],
@@ -295,6 +388,53 @@ describe('a function literal that leaves a block reads its locals on both routes
       ] as any)
       .evaluateAsync();
     expect(n.toString()).toBe('[16,17]');
+    const defineH = [
+      'DefineFunction',
+      'h',
+      ['Function', ['Add', 'c', 'k'], 'k'],
+    ];
+    const applied = await ce
+      .box([
+        'Apply',
+        ['Block', declareC(5), defineH, ['Function', ['h', 'k'], 'k']],
+        1,
+      ] as any)
+      .evaluateAsync();
+    expect(applied.toString()).toBe('6');
+    const mapped = await ce
+      .box([
+        'Block',
+        declareC(5),
+        defineH,
+        ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
+      ] as any)
+      .evaluateAsync();
+    expect(elements(mapped)).toBe('[6,7]');
+  });
+
+  test('a synchronous evaluation gives the same value before and after an asynchronous one', async () => {
+    const ce = new ComputeEngine();
+    const defineH = [
+      'DefineFunction',
+      'h',
+      ['Function', ['Add', 'c', 'k'], 'k'],
+    ];
+    for (const program of [
+      ['Apply', ['Block', declareC(5), defineH, ['Function', ['h', 'k'], 'k']], 1],
+      [
+        'Block',
+        declareC(5),
+        defineH,
+        ['Map', ['Function', ['Add', 'k', ['h', 1]], 'k'], ['List', 1, 2]],
+      ],
+    ]) {
+      const expr = ce.box(program as any);
+      const before = elements(expr.evaluate());
+      const async = elements(await expr.evaluateAsync());
+      const after = elements(expr.evaluate());
+      expect([before, async, after]).toEqual([before, before, before]);
+      expect(before).not.toMatch(/\bc\b/);
+    }
   });
 
   test('two asynchronous evaluations of one block keep separate locals after both end', async () => {

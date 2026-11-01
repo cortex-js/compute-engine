@@ -3909,6 +3909,19 @@ export function resolveEscapingLambda(
  */
 const BLOCK_RUN_CAPTURES = new WeakMap<Scope, Scope>();
 
+/**
+ * For each scope that `closeOverBlockRun` makes, the scope of the block whose
+ * run it holds (the template). The key is the map of bindings of the scope:
+ * when the end of a call re-roots a literal again, the copy of the scope
+ * shares that map (`rerootCapturedLocals`), so the copy is found too.
+ * `capturedRunOf` reads it.
+ */
+const BLOCK_RUN_TEMPLATES = new WeakMap<Map<string, unknown>, Scope>();
+
+/** The templates of `BLOCK_RUN_TEMPLATES`: a call of a function defined in
+ * another scope does not walk the chain of the caller. */
+const TEMPLATES_WITH_BLOCK_RUNS = new WeakSet<Scope>();
+
 function closeOverBlockRun(
   ce: ComputeEngine,
   fn: Expression,
@@ -3932,6 +3945,8 @@ function closeOverBlockRun(
         // with the activation (`snapshotRunVariables`).
         if (isStatementListScope(scope)) STATEMENT_LIST_SCOPES.add(run);
         BLOCK_RUN_CAPTURES.set(scope, run);
+        BLOCK_RUN_TEMPLATES.set(run.bindings, template);
+        TEMPLATES_WITH_BLOCK_RUNS.add(template);
       }
       // `s` is the scope that the chain reaches: the template, or the
       // activation itself.
@@ -7375,13 +7390,69 @@ function exitAppliedBodyScope(bodyScope: Scope): void {
  * frame of the callee.
  */
 function definingScopeOf(ce: ComputeEngine, bodyScope: Scope): Scope | null {
-  const entry = appliedBodyScopes.get(bodyScope);
-  const scope = entry !== undefined ? entry.definingScope : bodyScope.parent;
+  const scope = staticDefiningScopeOf(bodyScope);
   // When the defining scope is the local scope of a scoped node that an
   // asynchronous evaluation is running, the frame chains to the activation
   // of that scope, which holds the values of the current iteration
   // (`liveScopeOf`).
-  return scope ? liveScopeOf(ce._evalContextStack, scope) : scope;
+  if (!scope) return scope;
+  const live = liveScopeOf(ce._evalContextStack, scope);
+  if (live !== scope || !TEMPLATES_WITH_BLOCK_RUNS.has(scope)) return live;
+  return capturedRunOf(ce, scope) ?? scope;
+}
+
+/** The scope where the function literal whose body scope is `bodyScope` was
+ * defined, also while the literal is applied (see `definingScopeOf`, which
+ * also gives the activation or the run of that scope). */
+function staticDefiningScopeOf(bodyScope: Scope): Scope | null {
+  const entry = appliedBodyScopes.get(bodyScope);
+  return entry !== undefined ? entry.definingScope : bodyScope.parent;
+}
+
+/**
+ * The scope where the function literal `literal` was defined, or
+ * `undefined` when `literal` is not a function literal with a scoped body.
+ * While the literal is applied, the parent of its body scope is the frame of
+ * that application, not this scope.
+ */
+export function functionLiteralDefiningScope(
+  literal: Expression | undefined
+): Scope | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  const body = literal.op1;
+  if (!isFunction(body) || !body.localScope) return undefined;
+  return staticDefiningScopeOf(body.localScope) ?? undefined;
+}
+
+/**
+ * The scope that holds the locals of a run of the block whose scope is
+ * `template`, found in the scope chain of the caller, or `undefined`.
+ *
+ * On the asynchronous route a block runs in an activation of its scope
+ * (`asyncScopeActivation()` in `boxed-function.ts`), and a function that the
+ * block defines with `DefineFunction` keeps the template as its defining
+ * scope. After the block ends, the activation is no longer on the context
+ * stack, so `liveScopeOf` gives the template, which does not hold the values
+ * of the run. A function literal that leaves the block is re-rooted on a
+ * copy of the activation (`closeOverBlockRun`), so when that literal calls
+ * the function, the copy is in the chain of the caller, and it holds the
+ * values that the function must read:
+ * `Apply(Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), k ↦ h(k)), 1)`
+ * gave `c + 1` with `evaluateAsync()` and `6` with `evaluate()`.
+ *
+ * The caller is lexically inside that run of the block, because only a
+ * closure of the run has the copy in its chain. The first scope of the chain
+ * that is the template, or such a copy of a run of it (`BLOCK_RUN_TEMPLATES`),
+ * is used. Only these copies are matched, and only the asynchronous route
+ * makes them, so a synchronous evaluation of the block does not depend on an
+ * earlier asynchronous one.
+ */
+function capturedRunOf(ce: ComputeEngine, template: Scope): Scope | undefined {
+  for (let s: Scope | null = ce.context.lexicalScope; s != null; s = s.parent) {
+    if (s === template) return undefined;
+    if (BLOCK_RUN_TEMPLATES.get(s.bindings) === template) return s;
+  }
+  return undefined;
 }
 
 /**

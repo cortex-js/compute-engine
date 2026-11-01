@@ -276,6 +276,15 @@
 
 ### Bug Fixes
 
+- **With `evaluateAsync()`, a function literal that leaves a `Block` and
+  calls a function that the block defines reads the locals of the block.**
+  `Apply(Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), k ↦ h(k)), 1)`
+  gave `c + 1` with `evaluateAsync()` and `6` with `evaluate()`, and
+  `Map(k ↦ h(k), [1, 2])` or `Map(k ↦ k + h(1), [1, 2])` as the value of the
+  same block kept `c` free. Both routes now give the value of `evaluate()`.
+  Under `.N()`, a `Map` whose callback calls a function defined in a block
+  now evaluates its elements exactly first.
+
 - **`Limit` at infinity: a root with a negative degree and a radicand that
   decays.** The growth ranking gave every root with a constant negative
   degree the rank of a bounded term, whatever the radicand. With `n < 0`,
