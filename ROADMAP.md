@@ -236,20 +236,6 @@ Options:
 If nothing is decided, the calls above keep a type that does not hold their
 value.
 
-### CE-663. `Mean([p, q])` does not infer `p` and `q` as numbers
-
-**Status:** ready; defect, S. GitHub issue #485 (closed); the list-literal part
-was fixed in `cca0280f4` and `3bb738928`.
-
-An operator that requires a numeric vector or matrix infers the cells of a
-literal operand as numbers: `Determinant([[a, b], [c, d]])` infers the four
-symbols (user decision 2026-10-30, option (c)). `Mean` requires numbers, but
-`Mean([p, q])` leaves `p` and `q` unknown: its parameter is a union
-(`collection<nothing | number> | distribution | number`), and
-`distributeLiteralElementInference()` (`boxed-expression/validate.ts`) infers
-nothing for a union parameter. Fix: for a union, infer the cells from the
-only arm that a list literal can match.
-
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
 **Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row 468.
@@ -1120,24 +1106,6 @@ enumerated). Options:
 
 If nothing is decided, (b) stays in force but is not documented.
 
-### CE-699. The implicit variable of `Integrate`, `D` and `Series`: two cases still depend on the order of boxing and assignment
-
-**Status:** ready; defect, S.
-
-The implicit variable of an operator whose variable is not written is chosen
-when the expression is boxed, by `isImplicitVariableCandidate()`
-(`boxed-expression/implicit-variable-rule.ts`). A symbol whose declared type,
-or the type of its value, has no value in common with `number` is not a
-candidate. Two cases remain:
-
-- **CE-699.1** A symbol with no declaration that receives a value that is not
-  a number after boxing is still the variable, because its type was unknown
-  when the expression was boxed. Boxed after the assignment, it is not a
-  candidate.
-- **CE-699.2** `subs()` on a non-canonical `Integrate` replaces the implicit
-  variable. On the canonical form the variable is bound, and `subs()` does
-  not replace it.
-
 ### CE-698. A saturated result that reads a written parameter outside every closure stays unevaluated
 
 **Status:** proposed; capability. The simple, sound version is in place: the
@@ -1530,6 +1498,35 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
   unevaluated, while compiled code gives `[]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
+
+### CE-103. A result built with the library π serializes as `Pi` in a scope that rebinds `Pi`
+
+**Status:** decision needed; defect, S.
+
+A declaration of `Pi` is refused in the global scope only, so that a function
+parameter, a `Sum` index or a block local can still be named `Pi`. In such a
+nested scope, a result that the engine builds with the library π serializes as
+`Pi`, and boxing its JSON again inside that scope reads the local. Example: in
+a block with `Declare(Pi, real)` and `Assign(Pi, 3)`, `r` is the value of
+`Sum(1/n², n, 1, ∞)` (`π²/6`, N = 1.6449); `ce.box(r.json)` inside the block
+gives `3²/6 = 1.5`. Outside the block it gives 1.6449 again. Evaluation inside
+the block is correct: `s := Sum(…); s` gives `π²/6` (the assignment snapshot,
+`snapshotRunVariables()` in `function-utils.ts`, no longer reads the library
+constant as the local).
+
+Options:
+
+- (a) Serialize such a symbol with a spelling that a local cannot capture.
+  MathJSON has none today: this adds one to the documented serialization
+  rules, and every consumer must read it.
+- (b) Each site that builds a result with π keeps it symbolic when `Pi` is
+  shadowed, as the trigonometric sites do (`holdsShadowedPi()`). Many sites
+  change, and a value is lost where one exists.
+- (c) Document that a JSON round trip inside a scope that rebinds `Pi` reads
+  the local. No code change.
+
+Recommended: (c). Only an explicit `.json` round trip inside the scope is
+affected. If nothing is decided, the behavior stays and is not documented.
 
 ### CE-105. Error frames do not name the canonical operand or the declared call
 
@@ -3896,14 +3893,15 @@ gives `5` in the interpreter. At HEAD `e3ca9c1a6` the compiled JavaScript gave
 `107`: the compiled loop is a function of its own (a closure called where the
 loop is), so the `Return` ended only the loop and `100 + q` still ran. CE-712.1
 makes it decline with the code `'unsettled-shape'` (`returnInLoopIn()`,
-`compilation/compile-admission.ts`), on every target, also in the root and in
-a stored function. A `Return` in a loop that is the last statement of the
-function still compiles.
+`compilation/compile-admission.ts`), also in the root and in a stored
+function, on every target except Python. The Python target emits the loop
+inline, as a `for` statement in the compiled function, so the `return` ends
+that function and the case compiles there. A `Return` in a loop that is the
+last statement of the function still compiles.
 
 Fix: compile such a loop so that a `Return` in it ends the function: a
 sentinel value that the code after the loop call tests, or an inline loop
-where the target allows it. The decline on the Python target, where the loop
-may be emitted inline, is not verified to be needed; check it first.
+where the target allows it.
 
 ### CE-720. A callback that assigns a name of an enclosing scope is not compiled
 
@@ -6716,17 +6714,6 @@ Since CE-604, the list route sends an integrand that calls a user function
 through the scalar route for each element, so `∫_0^1 (Σ_{k=1}^3 k·x)·f(x, E) dx`
 with `E = [1, 2]` now gives two unevaluated integrals where it gave
 `[9/2, 15/2]` before. `.N()` gives the right values on both routes.
-
-### CE-617. The LaTeX `\frac{d}{dx}` inside an integral takes the closing `dx` as `d·x`
-
-**Status:** ready; defect. Found 2026-10-28 while fixing CE-604.
-
-`\int_0^1 \frac{d}{dx}x^3 \cdot E\,dx` parses to
-`["Integrate", ["Function", ["Block", ["D", ["Multiply", "E", "d", "x", ["Power", "x", 3]], "x"]], "d", "x"], ["Limits", "Nothing", 0, 1]]`:
-the derivative reads the integral's `dx` as the product `d·x`, so the integral
-has no variable (`Nothing`), and `evaluate()` with `E = [1, 2]` gives
-`[2x^3, 4x^3]`, which still holds `x` after a definite integral. The MathJSON
-route (`["Integrate", ["D", ["Power", "x", 3], "x"], …]`) gives `[1, 2]`.
 
 ### CE-625. A limit of a call that passes a function as an argument leaves a parameter name in the result
 

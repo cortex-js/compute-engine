@@ -37,6 +37,7 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   inferredCollectionParameterType,
+  joinEarlyReturnTypes,
   namedLiteralSignatureType,
   selfCallCollectionParameterTypes,
   wholeCollectionParameterType,
@@ -2573,6 +2574,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             body,
             boxedFn
           );
+          const slots = fixedParams.map((p, i) => {
+            const name = inferredSignatureParameterName(p);
+            const target = optionalParameterTarget(p);
+            const type: Type =
+              inferredCollectionParameterType(target) ??
+              selfCallTypes[i] ??
+              wholeCollectionParameterType(target, body) ??
+              'unknown';
+            return name !== undefined ? { name, type } : { type };
+          });
           const signature: Type = {
             kind: 'signature',
             // A parameter slot is `unknown` unless the body's uses inferred a
@@ -2592,25 +2603,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             // with a default value (`["Optional", k, 2]`) is an optional slot
             // that carries its default (`signatureArgumentsOfSlots`), so a
             // call that leaves it out receives the default.
-            ...signatureArgumentsOfSlots(
-              params,
-              fixedParams.map((p, i) => {
-                const name = inferredSignatureParameterName(p);
-                const target = optionalParameterTarget(p);
-                const type =
-                  inferredCollectionParameterType(target) ??
-                  selfCallTypes[i] ??
-                  wholeCollectionParameterType(target, body) ??
-                  'unknown';
-                return name !== undefined ? { name, type } : { type };
-              })
-            ),
+            ...signatureArgumentsOfSlots(params, slots),
             ...restParameterSignatureTail(params),
             // A parameter of type `unknown` in a cell of a list literal is a
             // cell of unknown type here, not a number, as in the literal's
             // own arrow: `f(x) := [x]` has the result `list`
-            // (`signatureResultType`).
-            result: signatureResultType(body, params, body.type.type),
+            // (`signatureResultType`). A `Return` before the last statement
+            // is joined into the result, as in the literal's own arrow
+            // (`joinEarlyReturnTypes`): `g(y) := Block(If(y > 1,
+            // Return((y, y))), y + 1)` returns a pair for `y = 2`, so its
+            // result is `number | tuple<number, number>`, not `number`.
+            result: joinEarlyReturnTypes(
+              body,
+              slots,
+              signatureResultType(body, params, body.type.type)
+            ),
           };
           return new BoxedType(signature, this.engine._typeResolver);
         });

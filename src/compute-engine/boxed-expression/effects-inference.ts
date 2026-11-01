@@ -1767,44 +1767,8 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   )
     bodyType = stripNumericRanges(bodyType);
 
-  // A `Return` before the last statement gives the function its operand's
-  // value, not the last statement's, so the result is the join of the two:
-  // `x ↦ Block(If(x > 1, Return((x, x))), x^2)` gives a pair for `x = 1.5`,
-  // and was typed `(unknown) -> number`. A returned value is widened by the
-  // rule above for the body (a finite numeric type is `number` when a
-  // parameter can bind a non-finite value). An `unknown` side stays
-  // `unknown`: the join would drop it. A `Return` with no operand gives
-  // `Nothing`, and the join absorbs `nothing` too, so that arm is added to
-  // the union after the join: `x ↦ Block(If(x > 1, Return()), 2x)` is
-  // `(unknown) -> nothing | number`.
-  if (ascribedReturn === undefined) {
-    const returned = earlyReturnTypes(derivedBodyExpr).map((t) =>
-      args !== undefined &&
-      isSubtype(t, 'complex') &&
-      args.some(
-        (a) =>
-          !provablyDisjoint(a.type, 'infinity') ||
-          !provablyDisjoint(a.type, 'nan')
-      )
-        ? ('number' as Type)
-        : stripNumericRanges(t)
-    );
-    // The `nothing` arm is kept whether it comes from a `Return()` or from
-    // the body itself, a fallthrough to an empty `Block()`:
-    // `(c: boolean) ↦ Block(If(c, Return(1)), Block())` is
-    // `-> integer | nothing`.
-    if (returned.length > 0) {
-      const all = [bodyType, ...returned];
-      const values = all.filter((t) => t !== 'nothing');
-      if (values.includes('unknown')) bodyType = 'unknown';
-      else {
-        const joined: Type = values.length === 0 ? 'nothing' : widenAll(values);
-        bodyType = all.some((t) => provablyAdmits('nothing', t))
-          ? reduceType({ kind: 'union', types: [joined, 'nothing'] })
-          : joined;
-      }
-    }
-  }
+  if (ascribedReturn === undefined)
+    bodyType = joinEarlyReturnTypes(derivedBodyExpr, args, bodyType);
 
   // The effect specifier slot. An INFERRED empty set is written as an empty
   // slot, i.e. nothing at all — the author's `pure` spelling is a statement,
@@ -1851,6 +1815,62 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     ...(effects !== undefined ? { effects } : {}),
     result: bodyType,
   };
+}
+
+/**
+ * The result type of a function whose body is `body`, whose positional
+ * parameter slots are `args` and whose last value has the type `lastType`.
+ *
+ * A `Return` before the last statement gives the function its operand's
+ * value, not the last statement's, so the result is the join of the two:
+ * `x ↦ Block(If(x > 1, Return((x, x))), x^2)` gives a pair for `x = 1.5`,
+ * and is typed `(unknown) -> number | tuple<number, number>`, not
+ * `(unknown) -> number`. A returned value is widened by the rule for the
+ * body of a function literal (`functionLiteralSignatureType()`): a finite
+ * numeric type is `number` when a parameter can bind a non-finite value.
+ * An `unknown` side stays `unknown`: the join would drop it. A `Return` with
+ * no operand gives `Nothing`, and the join absorbs `nothing` too, so that
+ * arm is added to the union after the join:
+ * `x ↦ Block(If(x > 1, Return()), 2x)` is `(unknown) -> nothing | number`.
+ *
+ * Returns `lastType` when the body has no `Return`. Both the type of a
+ * function literal and the signature that is derived when a literal becomes
+ * an operator definition (`f(y) := …`, `boxed-operator-definition.ts`) read
+ * this, so both include the types of the early `Return` values. The two
+ * results can still differ in precision, not in soundness: each caller
+ * widens the type of the last value and builds the parameter slots in its
+ * own way (the literal widens a finite numeric last value to `number` when
+ * a slot can bind a non-finite value; the derived signature does not), and
+ * `args` decides the widening of the returned values here.
+ */
+export function joinEarlyReturnTypes(
+  body: Expression,
+  args: { type: Type }[] | undefined,
+  lastType: Type
+): Type {
+  const returned = earlyReturnTypes(body).map((t) =>
+    args !== undefined &&
+    isSubtype(t, 'complex') &&
+    args.some(
+      (a) =>
+        !provablyDisjoint(a.type, 'infinity') ||
+        !provablyDisjoint(a.type, 'nan')
+    )
+      ? ('number' as Type)
+      : stripNumericRanges(t)
+  );
+  if (returned.length === 0) return lastType;
+  // The `nothing` arm is kept whether it comes from a `Return()` or from
+  // the body itself, a fallthrough to an empty `Block()`:
+  // `(c: boolean) ↦ Block(If(c, Return(1)), Block())` is
+  // `-> integer | nothing`.
+  const all = [lastType, ...returned];
+  const values = all.filter((t) => t !== 'nothing');
+  if (values.includes('unknown')) return 'unknown';
+  const joined: Type = values.length === 0 ? 'nothing' : widenAll(values);
+  return all.some((t) => provablyAdmits('nothing', t))
+    ? reduceType({ kind: 'union', types: [joined, 'nothing'] })
+    : joined;
 }
 
 /**

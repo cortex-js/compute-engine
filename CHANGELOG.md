@@ -240,6 +240,15 @@
 
 ### Bug Fixes
 
+- **The type of a call of a function with an early `Return` includes the
+  value of the `Return`** (CE-737). With `x: real` and
+  `g := y ↦ Block(If(y > 1, Return((y, y))), y + 1)`, `g(x)` was typed
+  `number`, although `g(2)` is the point `(2, 2)`, so `2·g(x)` was typed as a
+  number too. `g(x)` is now typed `number | tuple<number, number>`. The
+  signature that is derived when a function literal is assigned to a name now
+  joins the types of its early `Return` values, as the type of the literal
+  already did.
+
 - **A compiled element-wise `If` whose branch assigns a name declines.** With
   `L: list<real>`, `Block(p ≔ 0; If(L > 0, p ≔ 5); 2p)` compiled on
   `javascript` to code that ran the branch when the list `L > 0` had any
@@ -323,6 +332,23 @@
   `Integrate(e^(y^2), Limits(x, 0, 1), Limits(y, 0, x))` reported `x` as an
   input, although the compiled code binds it.
 
+- **Compiled JavaScript is valid in strict-mode code when a binding has a
+  reserved name.** `compile()` of `["Function", ["Multiply", 2, "arguments"],
+  ["Typed", "arguments", "'real'"]]` gave the `code` string
+  `(arguments) => 2 * arguments`, which is a syntax error in strict-mode code,
+  so a host that evaluated `code` in a module failed. A parameter, a block
+  local or a loop index named with a reserved word (`if`, `class`, `let`)
+  made the compilation fall back to the interpreter, and one named after a
+  global that the compiled code reads (`Math`, `undefined`) gave a wrong
+  result or threw ("Math.sin is not a function"). Now such a binding is
+  emitted under another name on the `javascript` and `interval-js` targets:
+  the example above compiles to `($arguments) => 2 * $arguments`. This
+  applies to function parameters, block locals and the locals of a loop body,
+  `Sum`, `Product`, `Loop` and `Comprehension` indexes, and integration
+  variables. A body that assigns such a parameter or local also compiles. A
+  free symbol keeps its name, because the compiled code reads it as
+  `_.arguments`.
+
 - **A function-valued expression compiled for `interval-js` can be called.**
   `compile(x ↦ 2x, { to: 'interval-js' })` reported `success: true`, but
   `run(3)` gave the compiled JavaScript function over enclosures, which a
@@ -391,10 +417,13 @@
   and the default `d` was read where the collection was read. They are now
   `10` and `20`, as in the compiled function and as with
   `ListFrom(Map(f, xs))` inside `g`. This applies to `Map`, `Filter`, `Scan`,
-  `TakeWhile`, `DropWhile`, `FlatMap`, `Tabulate`, `Table` and `Iterate`
-  created during a function call, also in a `Block` of its body. A lazy
-  collection created outside every function call is read as before, in the
-  context of its reader.
+  `TakeWhile`, `DropWhile`, `FlatMap`, `Tabulate` (and `Table`, which
+  evaluates to `Tabulate`), `Iterate` and `Fill` created during a function
+  call, also in a `Block`, an `If` branch or a loop of its body, and also
+  when the collection is in a list or a dictionary that the function
+  returns, in another lazy collection (`Dedup(Map(f, xs))`), or in a
+  variable that a returned function reads. A lazy collection created outside
+  every function call is read as before, in the context of its reader.
 
 - **The parameter of a function literal that is applied at once has the type
   of its argument in compiled code** (GitHub issue #498). With `n` declared
