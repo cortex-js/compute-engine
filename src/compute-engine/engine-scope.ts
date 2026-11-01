@@ -21,6 +21,7 @@ import {
   tombstoneBinding,
 } from './boxed-expression/binding-tombstone.js';
 import { ambientChainParent } from './boxed-expression/ambient-chain.js';
+import { isRetainedCallFrame } from './boxed-expression/lazy-view-context.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
 import { notePushedScope } from './pending-call-scopes.js';
 import {
@@ -194,7 +195,30 @@ function discardEvalContext(
   // events. Release those subscriptions as soon as the scope is discarded,
   // rather than retaining otherwise-dead local constants for the lifetime of
   // the engine. Disposal is intentionally idempotent.
+  //
+  // The frame of a call is retained when a lazy callback view that resolves
+  // names in it is reachable from the value that the call returns: the view
+  // can be read after the call has returned (`isRetainedCallFrame`, marked
+  // at the end of the call by `retainCallFrameOfResult`,
+  // `boxed-expression/lazy-view-context.ts`). Its pop is not the end of the
+  // life of its definitions, so they are not disposed and not tombstoned.
+  // They only stop listening to configuration changes, because the engine
+  // holds each listener strongly and would keep them for its lifetime. The
+  // cost: the definitions of a retained frame are never marked `disposed`
+  // (the readers of that flag treat them as live), their `_writeVersion`
+  // does not advance here, and the debug check of dead bindings
+  // (`ce._debugBindings`) does not cover them. A call that returns no view
+  // (it read its views at once) is not retained.
+  const retained =
+    context?.name === 'call' && isRetainedCallFrame(context.lexicalScope);
   for (const binding of context?.lexicalScope.bindings.values() ?? []) {
+    if (retained) {
+      if (isValueDef(binding))
+        (
+          binding.value as { _releaseConfigurationChange?: () => boolean }
+        )._releaseConfigurationChange?.();
+      continue;
+    }
     if (isValueDef(binding)) {
       // Debug invariant (§3 of the binder-mechanism design): stamp BEFORE
       // disposing, so a later use of this binding reports where its scope died.

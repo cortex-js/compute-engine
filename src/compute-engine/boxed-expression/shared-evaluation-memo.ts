@@ -439,6 +439,11 @@ export function withHostCollectionHandlers<T extends object>(
         : (...args: unknown[]) => run(() => call.apply(handlers, args));
   }
   if (source.elementMemo !== undefined) result.elementMemo = source.elementMemo;
+  // The flags that are not functions are copied as they are. Without
+  // `callsCallbackOnRead`, a view of a host operator would not keep the
+  // context of the call that created it (`lazy-view-context.ts`).
+  if (source.callsCallbackOnRead !== undefined)
+    result.callsCallbackOnRead = source.callsCallbackOnRead;
   return result as T;
 }
 

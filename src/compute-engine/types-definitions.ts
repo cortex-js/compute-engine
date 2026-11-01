@@ -1826,6 +1826,24 @@ export interface BaseCollectionHandlers {
   elementMemo?: boolean;
 
   /**
+   * Set on a lazy operator that calls a function operand when its elements
+   * are read, not when it is evaluated (`Map`, `Filter`, `Tabulate`, `Fill`,
+   * …). An instance created during a function call keeps the evaluation
+   * context of that call, and each read of the instance runs in it, so that
+   * a name that the callback reads by its binding in the context (the symbol
+   * default `d` of a parameter `(x, k = d) => x * k`) has the value it had in
+   * the call, also when the instance is read after the call has returned
+   * (`boxed-expression/lazy-view-context.ts`).
+   *
+   * Leave it off an operator that calls its function operand when it is
+   * evaluated (`Reduce`, `Sort`), and off an operator with no function
+   * operand.
+   *
+   * Default: `false`
+   */
+  callsCallbackOnRead?: boolean;
+
+  /**
    * Return `true` if the target expression is in the collection,
    * `false` otherwise.
    *

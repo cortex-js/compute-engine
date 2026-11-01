@@ -14300,6 +14300,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return unknown ? undefined : true;
       },
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       elementMemo: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -14471,6 +14472,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       // A filtered dictionary is a dictionary (`keyedViewElementType`).
       elttype: keyedViewElementType,
       elementMemo: true,
@@ -15006,6 +15008,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       elementMemo: true,
       count: (expr) => (isFunction(expr) ? expr.op1.count : undefined),
       isEmpty: (expr) =>
@@ -15248,6 +15251,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       elementMemo: true,
       // Length is unknown without enumeration. For a finite source we can count
       // the taken prefix (bounded); an infinite source stays unknown.
@@ -15435,6 +15439,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       elementMemo: true,
       // For a finite source we can count the retained suffix (bounded); an
       // infinite/unknown source stays unknown.
@@ -15732,6 +15737,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       elementMemo: true,
       count: (expr) =>
         isFunction(expr) && expr.op1.isEmptyCollection === true ? 0 : undefined,
@@ -20208,6 +20214,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: (expr) => tabulateCount(expr) !== undefined,
       isLazy: () => true,
+      callsCallbackOnRead: true,
       elementMemo: true,
       count: (expr) => tabulateCount(expr),
       isEmpty: (expr) => {
@@ -21236,6 +21243,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       elementMemo: true,
       count: () => Infinity,
       iterator: (expr) => {
@@ -21528,6 +21536,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEnumerable: (expr) =>
         isFunction(expr) && isFunction(expr.op2) && fillDims(expr.op2) !== null,
       isLazy: (_expr) => true,
+      callsCallbackOnRead: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (!isFunction(expr.op2)) return undefined;

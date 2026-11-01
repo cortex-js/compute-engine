@@ -60,6 +60,20 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import {
+  adoptLazyView,
+  canHoldLazyView,
+  canonicalizedLazyViewsIn,
+  carryLazyViewContexts,
+  hasLazyViewRecord,
+  isLazyCallbackView,
+  lazyViewRecordSerial,
+  retainCallFrameOfResult,
+  setLazyViewNestedScopeCopier,
+  shareLazyViewRecord,
+  wasCanonicalizedIn,
+  type LazyViewScopeEntry,
+} from './boxed-expression/lazy-view-context.js';
+import {
   functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
@@ -7733,20 +7747,36 @@ export function captureNestedLocals(
  * A new scope with the parent `parent` that holds the bindings that the
  * nested scope `source` has now, made for a closure (see
  * `captureNestedLocals` for which bindings are kept, and how).
+ *
+ * With `recorded`, the copy is made for the record of a lazy callback view
+ * (`boxed-expression/lazy-view-context.ts`), from the bindings and values
+ * that the record kept when the view was created (`LazyViewScopeEntry`).
+ * Each value binding that is kept then gets a clone of its definition, with
+ * its declared type and flags, that holds the value at the creation: the
+ * next iteration of a loop writes another value in an index, and the pop of
+ * a block disposes its locals, while the view is read later. No definition
+ * is declared, so the copy emits no `declare` event.
  */
 function snapshotNestedScope(
   ce: ComputeEngine,
   source: Scope,
-  parent: Scope | null
+  parent: Scope | null,
+  recorded?: ReadonlyArray<LazyViewScopeEntry>
 ): Scope {
   const captured: Scope = { parent, bindings: new Map() };
-  for (const [name, binding] of source.bindings) {
+  const entries: Iterable<readonly [string, BoxedDefinition, unknown?]> =
+    recorded ?? source.bindings;
+  for (const [name, binding, valueThen] of entries) {
     if (!('value' in binding)) {
       captured.bindings.set(name, binding);
       continue;
     }
-    const value = binding.value.storedValue;
-    if (source.binderNames?.has(name)) {
+    const isIndex = source.binderNames?.has(name) === true;
+    const value =
+      recorded !== undefined
+        ? (valueThen as Expression | undefined)
+        : binding.value.storedValue;
+    if (isIndex && recorded === undefined) {
       ce.declare(
         name,
         value === undefined
@@ -7757,12 +7787,18 @@ function snapshotNestedScope(
       continue;
     }
     if (
+      !isIndex &&
       value === undefined &&
       (binding as { _declaredByStatement?: boolean })._declaredByStatement !==
         true
     )
       continue;
-    captured.bindings.set(name, binding);
+    captured.bindings.set(
+      name,
+      recorded === undefined
+        ? binding
+        : { ...binding, value: cloneDefinitionWithValue(binding.value, value) }
+    );
   }
   CLOSURE_LOCALS_SCOPES.add(captured);
   // A call in the closure keeps the binding of its callee by lexical
@@ -7777,6 +7813,171 @@ function snapshotNestedScope(
   // block scope that it copies.
   markCallableFrame(captured, source);
   return captured;
+}
+
+/**
+ * A clone of the value definition `def` that holds `value`, with the other
+ * properties of `def` (its declared type, whether its type was inferred,
+ * whether it is a constant). The clone is not declared in any scope and
+ * listens to no configuration change, so making it emits no event.
+ */
+function cloneDefinitionWithValue(
+  def: BoxedValueDefinition,
+  value: Expression | undefined
+): BoxedValueDefinition {
+  const clone = (
+    def as BoxedValueDefinition & {
+      _cloneForActivation(): BoxedValueDefinition;
+    }
+  )._cloneForActivation() as BoxedValueDefinition & {
+    _value: Expression | undefined | null;
+    _defValue: unknown;
+  };
+  clone._value = value;
+  if (value === undefined) clone._defValue = undefined;
+  return clone;
+}
+
+setLazyViewNestedScopeCopier((ce, source, parent, entries) =>
+  snapshotNestedScope(ce as ComputeEngine, source, parent, entries)
+);
+
+/**
+ * For the body of each function literal, the lazy callback views of the body
+ * that a lazy operator of the body holds (see `heldLazyViewsOf`), or `null`
+ * when it has none. Computed once per body.
+ */
+const HELD_LAZY_VIEWS = new WeakMap<
+  Expression,
+  ReadonlySet<Expression> | null
+>();
+
+/** Whether the operands of `expr` stay as they are written when `expr` is
+ * evaluated: an operator with lazy operands, or a lazy collection that keeps
+ * its source. */
+function holdsItsOperands(expr: Expression): boolean {
+  const def = expr.operatorDefinition;
+  return def?.lazy === true || def?.collection?.isLazy !== undefined;
+}
+
+/**
+ * The lazy callback views of the function body `body` that are an operand
+ * of an operator of the body that holds its operands (`Dedup(Map(f, xs))`,
+ * `Take(Map(f, xs), 2)`), or `null` when there is none. Such a view is not
+ * evaluated when the body is, so it has no record (see
+ * `adoptHeldLazyViews`). The walk does not go into a function literal (its
+ * body is evaluated, and adopts its views, when it is applied) and goes
+ * into the values of a dictionary.
+ */
+function heldLazyViewsOf(body: Expression): ReadonlySet<Expression> | null {
+  const known = HELD_LAZY_VIEWS.get(body);
+  if (known !== undefined) return known;
+  let held: Set<Expression> | null = null;
+  const seen = new Set<Expression>();
+  const visit = (expr: Expression): void => {
+    if (seen.has(expr)) return;
+    seen.add(expr);
+    if (isDictionary(expr)) {
+      for (const key of expr.keys) visit(expr.get(key)!);
+      return;
+    }
+    if (!isFunction(expr) || !canHoldLazyView(expr)) return;
+    const holds = holdsItsOperands(expr);
+    for (const op of expr.ops) {
+      if (holds && isLazyCallbackView(op)) (held ??= new Set()).add(op);
+      visit(op);
+    }
+  };
+  visit(body);
+  HELD_LAZY_VIEWS.set(body, held);
+  return held;
+}
+
+/**
+ * The value `result` that a call of the function whose body is `body`
+ * returns, where each view of the call that was never evaluated and has no
+ * record is replaced by a new node that has a record of this call
+ * (`adoptLazyView`, `boxed-expression/lazy-view-context.ts`), on the context
+ * stack `stack` of the call, whose frame is `frame`. Such a view is read
+ * later, and was written in this call: it calls its callback in the context
+ * of this call, as an evaluated view does. The views of the call are:
+ *
+ * - a held view of the body (`heldLazyViewsOf`). A new node is needed
+ *   because the held node is a node of the function body, which every call
+ *   of the function shares;
+ * - a view canonicalized during this call (`wasCanonicalizedIn`), such as
+ *   the `Map` of `ReleaseHold(Hold(Dedup(Map(f, xs))))`, which is not a
+ *   node of the body.
+ *
+ * The nodes above a replaced node are rebuilt on their own scope, and keep
+ * their own record. A view that the call did not make (the value of a
+ * symbol that the body reads, made at the top level or in another call) is
+ * kept.
+ *
+ * A body with no held view, in a call where each view that it canonicalized
+ * has a record (the result of an evaluation, such as the view that the
+ * evaluation of `Map(f, xs)` returns, gets one at once), costs two lookups.
+ * Otherwise the walk goes into the operands of each node of `result` that
+ * can hold a view (`canHoldLazyView`) and into the values of a dictionary,
+ * once per node, and allocates only for a node that changes.
+ */
+function adoptHeldLazyViews(
+  ce: ComputeEngine,
+  result: Expression,
+  body: Expression,
+  stack: ReadonlyArray<ComputeEngine['_evalContextStack'][number]>,
+  frame: Scope
+): Expression {
+  const held = heldLazyViewsOf(body);
+  const canonicalized = canonicalizedLazyViewsIn(frame);
+  if (held === null && !canonicalized) return result;
+  const memo = new Map<Expression, Expression>();
+  const visit = (expr: Expression): Expression => {
+    const known = memo.get(expr);
+    if (known !== undefined) return known;
+    let next = expr;
+    if (isDictionary(expr)) {
+      const keys = expr.keys;
+      let values: Expression[] | undefined;
+      keys.forEach((key, i) => {
+        const value = expr.get(key)!;
+        const v = visit(value);
+        if (v !== value && values === undefined)
+          values = keys.slice(0, i).map((k) => expr.get(k)!);
+        values?.push(v);
+      });
+      if (values !== undefined)
+        next = ce.function(
+          'Dictionary',
+          keys.map((key, i) =>
+            ce._fn('KeyValuePair', [ce.string(key), values![i]])
+          )
+        );
+    } else if (isFunction(expr) && canHoldLazyView(expr)) {
+      let ops: Expression[] | undefined;
+      expr.ops.forEach((op, i) => {
+        const v = visit(op);
+        if (v !== op && ops === undefined) ops = expr.ops.slice(0, i);
+        ops?.push(v);
+      });
+      const adopt =
+        (held?.has(expr) === true ||
+          (canonicalized &&
+            isLazyCallbackView(expr) &&
+            wasCanonicalizedIn(expr, frame))) &&
+        !hasLazyViewRecord(expr);
+      if (ops !== undefined || adopt) {
+        next = ce._fn(expr.operator, ops ?? [...expr.ops], {
+          scope: expr.localScope,
+        });
+        shareLazyViewRecord(expr, next);
+        if (adopt) adoptLazyView(next, stack);
+      }
+    }
+    memo.set(expr, next);
+    return next;
+  };
+  return visit(result);
 }
 
 /**
@@ -8255,6 +8456,9 @@ function makeLambda(
       // Named 'call': a function-application activation frame. The debugger's
       // statement hook uses this to delimit stack frames (one per
       // activation — nested unnamed Block/loop contexts group into it).
+      // The views that this call makes are counted: when none was made, the
+      // end of the call does not walk the rebuilds of its result.
+      const viewSerial = lazyViewRecordSerial();
       ce.pushScope(freshScope, 'call');
       ACTIVE_FRAMES.add(freshScope);
       let result: Expression;
@@ -8271,9 +8475,25 @@ function makeLambda(
           )
         );
         result = resolveEscapingLambda(ce, result);
+        // A held view of the body gets a record of this call, before the
+        // rebuild below, which carries it.
+        result = adoptHeldLazyViews(
+          ce,
+          result,
+          nullaryBody,
+          ce._evalContextStack,
+          freshScope
+        );
+        const uncaptured = result;
         result = captureClosures(ce, result, freshScope, bodyScope);
+        // The rebuild keeps the creation context of each lazy callback view.
+        if (lazyViewRecordSerial() !== viewSerial)
+          carryLazyViewContexts(uncaptured, result);
         if (options?.numericApproximation)
           result = result.evaluate({ numericApproximation: true });
+        // The frame stays alive after its pop when a view of the result
+        // reads it (`retainCallFrameOfResult`).
+        retainCallFrameOfResult(freshScope, [result], ce._evalContextStack);
       } finally {
         ce.popScope();
         ACTIVE_FRAMES.delete(freshScope);
@@ -8880,15 +9100,25 @@ function makeLambda(
         ...functionLiteralBoundNames(params),
         ...declaredLocalNames(bodyFn),
       ]));
-    const argValue = (a: Expression): Expression =>
-      options?.holdArguments
-        ? inlineFrameLocals(ce, a.canonical, capturedScope)
-        : bindLazyArgumentLocals(
-            ce,
-            a.evaluate(),
-            capturedScope,
-            calleeNameSet
-          );
+    //
+    // The rewrite of an argument makes new nodes for a lazy callback view
+    // that it changes. Each new view takes the record of the view it replaces
+    // (`carryLazyViewContexts`): a view that the caller made reads its
+    // callback in the context of the caller, also when the callee returns it
+    // or puts it in a closure that it returns.
+    const argValue = (a: Expression): Expression => {
+      if (options?.holdArguments)
+        return inlineFrameLocals(ce, a.canonical, capturedScope);
+      const value = a.evaluate();
+      const bound = bindLazyArgumentLocals(
+        ce,
+        value,
+        capturedScope,
+        calleeNameSet
+      );
+      if (bound !== value) carryLazyViewContexts(value, bound);
+      return bound;
+    };
     //
     // 1/ If there are more arguments than expected, exit
     //
@@ -9467,6 +9697,9 @@ function makeLambda(
     // Named 'call': a function-application activation frame. The debugger's
     // statement hook uses this to delimit stack frames (one per
     // activation — nested unnamed Block/loop contexts group into it).
+    // The views that this call makes are counted: when none was made, the
+    // end of the call does not walk the rebuilds of its result.
+    const viewSerial = lazyViewRecordSerial();
     ce.pushScope(freshScope, 'call');
     // The scope holds the values of the parameters: its pop must advance the
     // cache version (see `_bindsValues`).
@@ -9510,6 +9743,20 @@ function makeLambda(
       // The nodes that the capture keeps belong to other calls; the
       // substitution below leaves them alone (`bindingKeyedSubs`).
       const keptNodes = new Set<Expression>();
+      // A held view of the body gets a record of this call, before the
+      // rebuilds below, which carry it.
+      result = adoptHeldLazyViews(
+        ce,
+        result,
+        body,
+        ce._evalContextStack,
+        freshScope
+      );
+      // The rebuilds of the result below keep the creation context of each
+      // lazy callback view (`carryLazyViewContexts`). They are walked only
+      // when a view was made during the call.
+      const viewsMade = lazyViewRecordSerial() !== viewSerial;
+      const uncaptured = result;
       result = captureClosures(
         ce,
         result,
@@ -9518,6 +9765,7 @@ function makeLambda(
         undefined,
         keptNodes
       );
+      if (viewsMade) carryLazyViewContexts(uncaptured, result);
 
       // Substitute each parameter's VALUE into a partially-symbolic result that
       // still references the parameter symbol. A body that cannot fully evaluate
@@ -9573,7 +9821,11 @@ function makeLambda(
             hasReferencedName(value, leaf.name),
           ]);
         }
-        if (subs.length > 0) result = bindingKeyedSubs(result, subs, keptNodes);
+        if (subs.length > 0) {
+          const unsubstituted = result;
+          result = bindingKeyedSubs(result, subs, keptNodes);
+          if (viewsMade) carryLazyViewContexts(unsubstituted, result);
+        }
       }
 
       // Honor a numeric-approximation request (`N(f(2))`) by approximating
@@ -9608,6 +9860,14 @@ function makeLambda(
           numericApproximation: true,
         });
       }
+      // The frame stays alive after its pop when a view of the value that
+      // the call returns, or of the exact value that the memo keeps, reads
+      // it (`retainCallFrameOfResult`).
+      retainCallFrameOfResult(
+        freshScope,
+        [result, exactResult],
+        ce._evalContextStack
+      );
     };
     const cleanup = (): void => {
       ce.popScope();

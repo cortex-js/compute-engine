@@ -99,6 +99,9 @@ interface BaseCollectionHandlers {
   /** Opt-in to per-instance element memoization (mirror of the flag in
    * `types-definitions.ts`, where it is documented). */
   elementMemo?: boolean;
+  /** Set on a lazy operator that calls a function operand when it is read
+   * (mirror of the flag in `types-definitions.ts`, where it is documented). */
+  callsCallbackOnRead?: boolean;
   contains?: (
     collection: Expression,
     target: Expression

@@ -309,6 +309,11 @@ identity key.
   capture: the engine has no mechanism that binds a data symbol to one
   declaration for good, and a default is not the place to add one. This is
   R3's "as if the author had written the symbol in the call".
+- The call of a callback that a lazy view (`Map(f, xs)`) makes when it is
+  read takes place in the context where the view was created, not where it
+  is read: a symbol default of `f` reads the binding of the place where
+  `Map(f, xs)` was written, also after the function that created the view
+  has returned (§11 item 6).
 
 ### R5. The fill at canonicalization
 
@@ -909,3 +914,73 @@ above disagree, this section is correct.
    first: the test is `Map((x, k = 2) => x * k, [1, 2])`. `Iterate(f, 0, 3)`
    does not stop after three steps; the test reads
    `Take(Iterate(f, 0), 3)`.
+6. **Where a lazy view calls its callback** (R4, ROADMAP CE-728, user
+   decision 2026-10-31, option (a)). A lazy collection view calls its
+   callback when the view is read, which can be after the function that
+   created the view has returned. With `f := (x, k = d) => x * k` and
+   `g := (d, xs) => Map(f, xs)`, the call `f(x)` that the view makes is
+   filled with `d`, and the elements of `g(10, [1, 2])` were `d` and `2d`:
+   `d` was read in the context of the reader. The call of a callback by a
+   lazy view now takes place in the context where the view was created. The
+   operators of such views set the flag `callsCallbackOnRead` of their
+   collection handlers: `Map`, `Filter`, `Scan`, `TakeWhile`, `DropWhile`,
+   `FlatMap`, `Tabulate` (`Table` evaluates to it), `Iterate` and `Fill`.
+   An operator of the host can set the flag too. The evaluation that
+   creates such a view during a function call records the context stack up
+   to the frame of the call and, when the view is made in a scope of the
+   body between the current scope and the frame (a `Block`, an `If` branch,
+   a loop body), the bindings of these nested scopes, their values and
+   their write versions at that time, and the call frames on the stack that
+   the scope chain of the creation reaches. No scope is copied and no
+   definition is made, so a view that the call reads at once costs little.
+   The frame of the call is not copied. At the end of each call, before its
+   pop, the frame is marked as retained when a view whose record names it is
+   reachable from the returned value (through operands, dictionary values,
+   symbol values, the bodies and the scopes of the closures of the value
+   and the scopes of the records met). The pop of a retained frame does not dispose or
+   tombstone its definitions (`discardEvalContext`, `engine-scope.ts`), so a
+   read after the call has returned resolves the names of the frame to live
+   definitions with their declared types. The cost: these definitions are
+   never marked `disposed`, their write version does not advance at the
+   pop, and the debug check of dead bindings does not cover them. A call
+   that reads its views at once returns no view and is not retained. Each
+   call has a new frame that no other call writes in, so its values are
+   those of the end of the call, unless a closure that the call returned
+   shares the frame and writes in it. The nested scopes belong to the body,
+   which every call shares: a view reads them with their values at its
+   creation. A read uses the live stack while the context of the creation is
+   on the stack, each nested scope has its parent of the creation (a
+   recursive call of the same function changes the parent of its body
+   scope), and each nested binding is the same and was not written since;
+   otherwise it uses copies of the nested scopes, made once per view and
+   chained onto the frame, in which each value binding is a clone of its
+   definition that holds the recorded value. An enumeration makes this
+   choice once, when it starts, and keeps the stack of its start for each
+   step, also for a step after the call has returned. A view that is never evaluated has no
+   record: a view of the body that is an operand of a lazy operator of the
+   body (`Dedup(Map(f, xs))`, `Take(Map(f, xs), 2)`), or a view
+   canonicalized during the call (`ReleaseHold(Hold(Dedup(Map(f, xs))))`).
+   The end of the call gives such a view of its result a record on a new
+   node, since a held node of the body is shared by every call of the
+   function. The set of held views is computed once per function body, and
+   a body with none, in a call where each view that it canonicalized got a
+   record (the result of an evaluation gets one at once), costs two lookups
+   at each call end. A view that the call did not make (the value of a
+   variable made at the top level) is not adopted, and keeps reading in the
+   context of its reader.
+   Each read of the view (its
+   elements, an element by index, its count and its other collection facets)
+   runs in the recorded context, and so does an evaluation of the view
+   again (the numeric pass of an outer call). So a symbol default reads the
+   binding of the place where `Map(f, xs)` was written: `[10, 20]`, the
+   value of the
+   compiled function and of `ListFrom(Map(f, xs))` inside `g`. A view
+   created outside every function call records nothing and is read in the
+   context of its reader, as before. The end of a call, which rebuilds its
+   result (closure re-rooting, the substitution of the parameter values),
+   and the rewrite of an argument that reads locals of the caller keep the
+   record, also in the body of a function literal; a rebuild by the host (`subs()`, `ce.function()` with
+   new operands, a serialization parsed again) makes a new view with no
+   record. Mechanism:
+   `src/compute-engine/boxed-expression/lazy-view-context.ts`; tests:
+   `test/compute-engine/lazy-view-scope.test.ts`.

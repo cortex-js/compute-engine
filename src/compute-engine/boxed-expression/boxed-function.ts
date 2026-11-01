@@ -460,6 +460,12 @@ import {
   lookupApplicable,
   withCallerCapturedCheck,
 } from '../function-utils.js';
+import {
+  eachInLazyViewContext,
+  inLazyViewContext,
+  noteLazyViewCanonicalized,
+  recordLazyViewContext,
+} from './lazy-view-context.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   absentScalarMarker,
@@ -1638,6 +1644,14 @@ export class BoxedFunction
       const bound = this._def;
       if (bound && 'operator' in bound && bound.operator.arithmetic)
         noteKindHeadValue(ce, bound.operator);
+      // A lazy callback view made during a function call is a node of that
+      // call: the end of the call can adopt it (`lazy-view-context.ts`).
+      if (
+        bound &&
+        'operator' in bound &&
+        bound.operator.collection?.callsCallbackOnRead === true
+      )
+        noteLazyViewCanonicalized(this, ce._evalContextStack);
     } else {
       // `null` is "not bound" — as documented on `_def`, and as distinct from
       // the `undefined` `_bind()` leaves when it finds no definition. Only
@@ -4223,22 +4237,35 @@ export class BoxedFunction
       // definition to an operator definition. It comes after the start of a
       // new top-level evaluation above, so that a result of an earlier
       // top-level evaluation resolves its head again.
-      const sticky = isStickyUnresolvedCall(this);
-      const canonical = sticky ? undefined : this._canonicalToEvaluate();
-      const result = sticky
-        ? evaluatedUnresolvedCall(
-            this,
-            this.ops.map((x) => x.evaluate(operandOptions(options)))
-          )
-        : canonical
-          ? delegateEvaluation(engine, () => canonical.evaluate(options))
-          : // An application of a host operator that does not state its
-            // purity is never kept (`_isUncachedHostOperator`).
-            !uncachedHost &&
-              (this._isMemoizableLazyCollection(options, true) ||
-                this._isMemoizableInertEvaluation(options))
-            ? this._memoizedLazyCollectionValue(options, takeProbeGuard())
-            : this._computeValue(options)();
+      const evaluateHere = (): Expression => {
+        const sticky = isStickyUnresolvedCall(this);
+        const canonical = sticky ? undefined : this._canonicalToEvaluate();
+        return sticky
+          ? evaluatedUnresolvedCall(
+              this,
+              this.ops.map((x) => x.evaluate(operandOptions(options)))
+            )
+          : canonical
+            ? delegateEvaluation(engine, () => canonical.evaluate(options))
+            : // An application of a host operator that does not state its
+              // purity is never kept (`_isUncachedHostOperator`).
+              !uncachedHost &&
+                (this._isMemoizableLazyCollection(options, true) ||
+                  this._isMemoizableInertEvaluation(options))
+              ? this._memoizedLazyCollectionValue(options, takeProbeGuard())
+              : this._computeValue(options)();
+      };
+      // A lazy callback view made during a function call is evaluated again
+      // in the context of that call, as it is read there
+      // (`lazy-view-context.ts`): the numeric pass of an outer call rewrites
+      // the callback of `Map(f, xs)` and fills the default of a parameter of
+      // `f` by its name, which must give the value of the call that made the
+      // view, not the value of the outer call. The result takes the record of
+      // this node (`recordLazyViewContext` below).
+      const result =
+        this.operatorDefinition?.collection?.callsCallbackOnRead === true
+          ? inLazyViewContext(this, evaluateHere)
+          : evaluateHere();
       // An evaluation whose result is a value takes back the incomplete
       // walks that it recorded: a read in it that met an inner collection
       // that it cannot walk stayed unevaluated, which is a correct result,
@@ -4248,6 +4275,12 @@ export class BoxedFunction
         takeBackIncompleteWalks(walksBefore);
       recordEvaluatedError(this, result);
       const value = numeric ? indeterminateAsNaN(result) : result;
+      // A lazy callback view created by this evaluation records the context
+      // of the function call in progress, so that its callback is called
+      // there when the view is read later (`lazy-view-context.ts`). Before
+      // the memo store below, so that a memo hit returns a view that has its
+      // record.
+      recordLazyViewContext(this, value, engine._evalContextStack);
       // A result is kept only when it is final: no read in the evaluation
       // stayed incomplete (the walks it recorded were taken back above), the
       // store guard allows it (`store-guard.ts`: no host code ran, no answer
@@ -5122,6 +5155,12 @@ export class BoxedFunction
       noteUncachedHostEvaluation(this.engine);
     this.engine._inFlightAsyncEvaluations += 1;
     evaluation.pending += 1;
+    // The stack of this evaluation, read now: when the promise settles, the
+    // engine's stack can belong to another evaluation that runs at the same
+    // time. It holds the frame of the function call that this evaluation is
+    // part of (see `recordLazyViewContext` below).
+    const contextStackAtStart =
+      options._contextStack ?? this.engine._evalContextStack;
     let promise: Promise<Expression>;
     try {
       // The driver runs synchronously up to its first `await`, and that
@@ -5150,9 +5189,12 @@ export class BoxedFunction
     return promise
       .then((result) => {
         recordEvaluatedError(this, result);
-        return options?.numericApproximation
+        const value = options?.numericApproximation
           ? indeterminateAsNaN(result)
           : result;
+        // As in `evaluate()`, on the stack of this evaluation.
+        recordLazyViewContext(this, value, contextStackAtStart);
+        return value;
       })
       .finally(() => {
         this.engine._inFlightAsyncEvaluations -= 1;
@@ -5707,7 +5749,9 @@ export class BoxedFunction
     // a list type as one element). The answer is then not known (see
     // `unlessWalkMissedElements()`).
     return unlessWalkMissedElements(() =>
-      this.baseDefinition?.collection?.contains?.(this, rhs)
+      inLazyViewContext(this, () =>
+        this.baseDefinition?.collection?.contains?.(this, rhs)
+      )
     );
   }
 
@@ -5879,7 +5923,8 @@ export class BoxedFunction
       // to a `number`, so a `bigint` reaches readers only for a count that a
       // `number` cannot hold exactly.
       const handler = this.operatorDefinition?.collection?.count;
-      if (handler !== undefined) return normalizeCount(handler(this));
+      if (handler !== undefined)
+        return normalizeCount(inLazyViewContext(this, () => handler(this)));
       // An EAGER producer with no collection handlers may still know its own
       // length without evaluating (`Sort` preserves its source's, `Chunk`
       // answers `k`) — the `count` twin of `canEnumerate`. It owns the answer,
@@ -6084,7 +6129,9 @@ export class BoxedFunction
     if (!this.isCollection) return undefined;
     const handler = this.operatorDefinition?.collection?.isEmpty;
     if (handler === undefined) return undefined;
-    return this._memoizedFacet('isEmpty', () => handler(this));
+    return this._memoizedFacet('isEmpty', () =>
+      inLazyViewContext(this, () => handler(this))
+    );
   }
 
   get isFiniteCollection(): boolean | undefined {
@@ -6096,7 +6143,9 @@ export class BoxedFunction
     if (this._operator !== 'Error' && this._isLiteralData()) return true;
     const handler = this.operatorDefinition?.collection?.isFinite;
     if (handler === undefined) return undefined;
-    return this._memoizedFacet('isFinite', () => handler(this));
+    return this._memoizedFacet('isFinite', () =>
+      inLazyViewContext(this, () => handler(this))
+    );
   }
 
   get isEnumerableCollection(): boolean | undefined {
@@ -6175,7 +6224,17 @@ export class BoxedFunction
     return typeCouldBeCollection(this.type.type) ? undefined : false;
   }
 
+  /** A lazy callback view is read in the context where it was created
+   * (`lazy-view-context.ts`); any other node is read where it is read. The
+   * flag of the operator is tested first: it is a field read, and most nodes
+   * are not such views. */
   each(): Generator<Expression> {
+    if (this.operatorDefinition?.collection?.callsCallbackOnRead !== true)
+      return this._eachInReadingContext();
+    return eachInLazyViewContext(this, () => this._eachInReadingContext());
+  }
+
+  private _eachInReadingContext(): Generator<Expression> {
     // An operator that opted out of being a collection for THIS instance has
     // inert handlers: enumerate nothing rather than iterate a scalar.
     if (this._optedOutOfCollection) return (function* () {})();
@@ -6302,7 +6361,16 @@ export class BoxedFunction
     return source as Generator<Expression>;
   }
 
+  /** A lazy callback view is read in the context where it was created
+   * (`lazy-view-context.ts`); any other node is read where it is read. The
+   * flag of the operator is tested first, as in `each()`. */
   at(index: number): Expression | undefined {
+    if (this.operatorDefinition?.collection?.callsCallbackOnRead !== true)
+      return this._atInReadingContext(index);
+    return inLazyViewContext(this, () => this._atInReadingContext(index));
+  }
+
+  private _atInReadingContext(index: number): Expression | undefined {
     if (this._optedOutOfCollection) return undefined;
     const handler = this.operatorDefinition?.collection?.at;
     if (!handler) {
@@ -6573,7 +6641,9 @@ export class BoxedFunction
     // A missing handler means "cannot say", not "no" — a hard `false` here
     // would be a claim, and callers (`Subset`, `SubsetEqual`, …) rely on
     // `undefined` to stay unevaluated instead of answering wrongly.
-    return this.operatorDefinition?.collection?.subsetOf?.(this, rhs, strict);
+    return inLazyViewContext(this, () =>
+      this.operatorDefinition?.collection?.subsetOf?.(this, rhs, strict)
+    );
   }
 
   /** Splice `Spread` operands (`f(...p)`) into the operand list.

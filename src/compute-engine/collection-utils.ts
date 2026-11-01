@@ -5595,6 +5595,8 @@ export function defaultCollectionHandlers(
   if (def.isEnumerable) result.isEnumerable = def.isEnumerable;
   if (def.isLazy) result.isLazy = def.isLazy;
   if (def.elementMemo) result.elementMemo = def.elementMemo;
+  if (def.callsCallbackOnRead)
+    result.callsCallbackOnRead = def.callsCallbackOnRead;
   if (def.eltsgn) result.eltsgn = def.eltsgn;
   if (def.elttype) result.elttype = def.elttype;
   if (def.countOf) result.countOf = def.countOf;
