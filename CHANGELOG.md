@@ -32,6 +32,17 @@
   longer counts as a path on which no branch runs: with `x: real`,
   `Block(Declare(n), If(x > 5, n ≔ 1, n ≔ 2), n + 1)` compiles on JavaScript
   with no check, and gives `3` at `x = 1`.
+- **Compiled `Take` and `Drop` test every run-time count for `NaN`, and
+  compiled Python raises for a `NaN` count.** In 0.176.0 the compiler tested
+  a count only when its type showed it could be `NaN`. Now compiled
+  JavaScript tests every count that is not a compile-time number and gives
+  `undefined` for a `NaN` count, as before; an operator that reads the slice
+  still has no value (`Length(Take(xs, k))` is `NaN`). Compiled Python no
+  longer tests the count: a `NaN` count raises `ValueError`, as before
+  0.176.0 (it gave `None`). The interpreter has no value for a `NaN` count.
+- **On GLSL and WGSL, `First`, `Second`, `Third` and `Last` of `Missing` or
+  `Undefined` decline.** In 0.176.0 they compiled to the shader `NaN`. The
+  interpreter gives `Missing`, and a decline falls back to it.
 
 ### Resolved Issues
 

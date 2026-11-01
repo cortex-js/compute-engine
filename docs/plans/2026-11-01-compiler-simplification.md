@@ -124,8 +124,39 @@ The recommended order puts the small removals first:
 | 12 | −21 | 0 | 0 | applied, 2026-11-01 |
 | 11 | −199 | 0 | 0 | applied, 2026-11-01 |
 | 9 | −514 | 0 | 0 | applied, 2026-11-01 |
+| 10 | — | — | — | dropped, 2026-11-01: see below |
+| 13 | −37 | 0 | 0 | applied, 2026-11-01 |
+| 7 | — | — | — | dropped, 2026-11-01: see below |
+| 8 | −81 | 0 | 0 | applied, 2026-11-01: only `bcastScalarAbsent` and the GPU positional read of an absent operand (now a decline); the rest gave wrong values in review and stays |
 
 The line counts per candidate are those of each worktree diff. The three
 together, with the comment fixes of the reviews, remove 731 source lines net
 (143 added, 874 removed) and 576 test lines net. They were measured again
 together on the corpus: 0 new declines, 0 changed values.
+
+**Candidate 10 is dropped.** The fill by argument count is not only for a
+`Missing` result. With `L: list<real | missing>` holding `[Missing]`,
+`Map((k: real | missing = 2) => Coalesce(k, 0), L)` gives `[0]` in the
+interpreter. A native JavaScript default would give `[2]`: a wrong finite
+value for an input of its declared type (found by the Codex review). A
+decline in its place would catch every untyped parameter with a default,
+because the type `unknown` admits `missing`, so the code stays.
+
+**Candidate 7 is dropped.** The three-valued result of a comparison with an
+absent operand is read by `IsMissing`, `Coalesce`, the connectives and every
+branch. With `w: real | missing` holding `Missing`,
+`If(IsMissing(w > 0), 1, 0)` gives 1 in the interpreter and would give 0;
+with `L: list<real | missing>` holding `[Missing]`, `Not(Equal(L, 1))` would
+give `[true]`, so an element-wise `If` takes an arm where the interpreter
+takes none; on `interval-js`, a branch over a comparison with an absent value
+would take an arm (found by both reviews). These are wrong finite values for
+inputs that hold values of their declared types.
+
+**What candidates 7, 8 and 10 show.** Code that keeps a `Missing` that a
+declared `T | missing` type admits is usually read later by a consumer that
+discharges absence (`IsMissing`, `Coalesce`, a branch, a default), and its
+removal gives a wrong finite value. A removal is safe for an input that the
+caller leaves out, which is unspecified, and for a value outside its declared
+type. Candidates 1 to 4 and 6 must be split along this line before they
+start: the part for an input left out goes, the part for a declared
+`| missing` value stays.

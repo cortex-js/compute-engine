@@ -2210,7 +2210,6 @@ export {
   unionAdmitsIndexedCollection,
   isGatedIndexedCollection,
   shapeOperandRefusal,
-  countMayBeNaN,
   exactRationalDivisor,
   isDeclaredTopOperand,
   isDeclaredTopListOperand,

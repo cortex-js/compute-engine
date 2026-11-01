@@ -82,7 +82,7 @@ import {
   wholeTupleCall,
 } from './compile-assignment-checks.js';
 import { assignedNamesIn, registryLocalName } from './compile-cse.js';
-import { countMayBeNaN, gatedCollectionArms } from './compiler-type-facts.js';
+import { gatedCollectionArms } from './compiler-type-facts.js';
 import {
   ABSENCE_DISCHARGING_HEADS,
   CONTROL_FLOW_HEADS,
@@ -507,7 +507,7 @@ export function absentCollectionOperandGuard(
   // `undefined.length`, `undefined.flat()` throw), where the interpreter
   // has no value. For it, only an operand that is absent at run time
   // although its type has no `missing` arm (`mayBeAbsentCollection`:
-  // `Take(xs, k)` with `k` unsupplied) is guarded.
+  // `Take(xs, k)` with a `NaN` count) is guarded.
   // Not an operator that discharges an absent value (`Coalesce`,
   // `IsMissing`, `AssertPresent`) or a lazy one (`If`, `Which`, `When`):
   // they read the operand themselves (`ABSENCE_DISCHARGING_HEADS`).
@@ -2158,13 +2158,19 @@ export function mayBeAbsentCollectionNode(
 ): boolean {
   if (checkedCallMayBeAbsent(engine, a, target)) return true;
   if (target.language !== 'javascript' || !isFunction(a)) return false;
-  // A `Take` or `Drop` over an infinite source compiles to a lazy stream,
-  // not to the slice, and cannot be bound as an array.
+  // A `Take` or `Drop` whose count is not a compile-time number gives
+  // `undefined` for a `NaN` count (`takeDropSlice`, `javascript-target.ts`),
+  // with no analysis of the count. A compile-time number is a finite real
+  // number literal, the rule of `tryGetConstant` (`constant-folding.ts`,
+  // which this module cannot import without an import cycle). A `Take` or
+  // `Drop` over an infinite source compiles to a lazy stream, not to the
+  // slice, and cannot be bound as an array.
+  const count = a.ops[1];
   if (
     (a.operator === 'Take' || a.operator === 'Drop') &&
     a.nops === 2 &&
     a.ops[0].isFiniteCollection !== false &&
-    countMayBeNaN(a.ops[1], target)
+    !(isNumber(count) && !count.isComplex && Number.isFinite(count.re))
   )
     return true;
   const result = stripMissingFromType(resolveTypeForCompilation(a.type.type));

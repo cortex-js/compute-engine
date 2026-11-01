@@ -398,12 +398,8 @@ export function compileGPUBroadcastUnary(
  * array of `vec2` as one vector, and `p.z` reads a component that a `vec2`
  * does not have, so the shader is not valid. An operand that `At` cannot
  * index (a list of unknown length, a matrix) declines with the reason of
- * `At`.
- *
- * An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
- * the target. Every component of an absent value is NaN, so each element of
- * it is that NaN (`gpuSwizzle`). `At` declines an absent base, so this case
- * does not go to `At`.
+ * `At`. An operand that is always absent (`Missing`, `Undefined`) goes to
+ * `At` too, which declines an absent base.
  */
 function compileGPUPositional(
   head: 'First' | 'Second' | 'Third' | 'Last',
@@ -411,12 +407,6 @@ function compileGPUPositional(
   compile: (e: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  if (
-    isSymbol(arg, 'Missing') ||
-    isSymbol(arg, 'Undefined') ||
-    gpuType(arg) === 'missing'
-  )
-    return gpuSwizzle(compile(arg), 'x');
   const index = { First: 1, Second: 2, Third: 3, Last: -1 }[head];
   // An operand that can be absent, of type `missing | tuple<real, real>`
   // (`At(P, k)` with `P` a list of points and `k` an integer input). `At`

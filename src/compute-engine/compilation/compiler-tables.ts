@@ -685,9 +685,9 @@ export const ELEMENTWISE_WIDTH_OPERATORS: ReadonlySet<string> = new Set([
  * test it first (`absentCollectionOperandGuard`):
  * - a checked call whose failed check gives `undefined`
  *   (`checkedCallMayBeAbsent`);
- * - a `Take` or a `Drop` whose count can be `NaN` or have no value at run
- *   time (`countMayBeNaN`): the slice then gives `undefined`, as the
- *   interpreter has no value;
+ * - a `Take` or a `Drop` whose count is not a compile-time number: the
+ *   slice gives `undefined` for a `NaN` count, as the interpreter has no
+ *   value;
  * - an application that `absentCollectionOperandGuard` itself guards and
  *   whose result is a collection: an absent operand at a position where
  *   the operator propagates absence makes the application the absent

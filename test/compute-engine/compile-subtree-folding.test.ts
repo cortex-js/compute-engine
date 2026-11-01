@@ -767,7 +767,7 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
 
   it('chooses the slice at run time for a non-constant count', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']));
-    // A count that can be NaN has no value for NaN, as in the interpreter,
+    // A run-time count can be NaN, which has no value in the interpreter,
     // so the slice tests it first.
     expect(r.code).toBe(
       '((_a, _n) => Number.isNaN(_n) ? undefined : _n < 0 ? _a.slice(_n) : _a.slice(0, _n))(_lit_1, Math.round(_.n))'
@@ -812,9 +812,8 @@ describe('COMPILE Python counts - rounding parity', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']), {
       to: 'python',
     });
-    // A count that can be NaN gives `None` for NaN before `int()`.
     expect(r.code).toBe(
-      '(lambda _l, _c: None if _c != _c else (lambda _n: _l[_n:] if _n < 0 else _l[:_n])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))([1, 2, 3, 4], n)'
+      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])([1, 2, 3, 4], int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
     );
   });
 

@@ -914,39 +914,6 @@ export function isGatedPointList(a: Expression): boolean {
 }
 
 /**
- * Whether a `Take`/`Drop` count can be `NaN` (or have no value) at run time.
- * It cannot when it is a number literal other than `NaN` (a literal `±∞` is
- * not a constant to `tryGetConstant` and takes the run-time branch, but it
- * is never `NaN`), or when it is typed `integer` and reads no symbol.
- *
- * The type `integer` alone is not a proof. A variable the caller leaves
- * out of the vars object reads as `undefined`, and `Math.round(undefined)`
- * is `NaN`; and a user function with one clause accepts `NaN` at a
- * parameter typed `integer` (`docs/ERROR-MODEL.md`, "A user function
- * accepts `NaN` at a numeric parameter — RULED 2026-09-30"). So `Take(xs,
- * k)` with `k: integer` unsupplied must give no value, as in the
- * interpreter, and not `[]`.
- *
- * An integer count whose every symbol is an index of an enclosing binder
- * that the compiler controls (`BaseCompiler.isCompiledIndex`: a loop index
- * with literal bounds, the index of an unrolled `Sum` term) is proven too:
- * `Sum(Length(Take(xs, i)), (i, 1, 3))` takes no test at each term.
- */
-export function countMayBeNaN(
-  count: Expression,
-  target?: CompileTarget<Expression>
-): boolean {
-  if (isNumber(count) && !count.isComplex && !Number.isNaN(count.re))
-    return false;
-  if (
-    isSubtype(count.type.type, 'integer') &&
-    count.symbols.every((s) => isCompiledIndex(s, target))
-  )
-    return false;
-  return true;
-}
-
-/**
  * The present arms of a gated indexed collection (see
  * `isGatedIndexedCollection`), alias-resolved, or `undefined` when `a` is
  * not one.

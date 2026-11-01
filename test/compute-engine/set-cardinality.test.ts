@@ -750,7 +750,7 @@ describe('COMPILED Abs OF AN OPERAND THAT CAN HOLD A SET OR A STRING', () => {
     // 2026-10-25; a list threw before).
     expect(f.code).toContain(
       '(!(Array.isArray(z) || ArrayBuffer.isView(z)) ? _SYS.absAny(z) : ' +
-        '((_tv1) => _SYS.bcastScalarAbsent([1], (_tv2) => _SYS.absAny(_tv2), _tv1))' +
+        '((_tv1) => _SYS.bcast((_tv2) => _SYS.absAny(_tv2), _tv1))' +
         '(_SYS.plainList(z)))'
     );
     const run = f.run as unknown as (z: unknown) => unknown;

@@ -74,6 +74,18 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`, `python`: dependent `Sum` clauses with an outer `k = 3`,
   `Sum(j + k, Limits(j, 1, k), Limits(k, 1, k))`, give 36; the interpreter
   gives 24.
+- `javascript`, `w: real`, `y: real` at `w = y = 0`: `Take(Range(1, ∞), w/y)`
+  and `Take(Drop(Range(1, ∞), w/y), 3)` give `[]` (a lazy stream with a `NaN`
+  count); the interpreter leaves them unevaluated.
+- `javascript`, `c: boolean`, `xs: list<real>`, `w: real`, `y: real` at
+  `c = true`, `w = y = 0`: `Unique(If(c, Take(xs, w/y), xs))` gives `[]` (the
+  `If` hides the slice with no value from the guard of `Unique`); the
+  interpreter leaves it unevaluated.
+- `javascript`: with `L := [(1, 2, 3), (4, 5, 6)]` and
+  `V := p ↦ PointX(p) < 1`, `Boole(IsMissing(V(At(L, 5))))` gives 0 (the
+  constant folding of the compiler reads the absent point as a number); the
+  interpreter gives 1. With `G := (p, s) ↦ s·PointX(p)`,
+  `Boole(IsMissing(G(At(L, 5), 2) < 1))` gives 0; the interpreter gives 1.
 
 ## Fail closed
 

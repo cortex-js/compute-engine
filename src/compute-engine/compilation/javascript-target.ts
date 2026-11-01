@@ -561,9 +561,7 @@ import {
   isDeclaredTopListOperand,
   isDeclaredTopOperand,
   type LoopInvariantBinding,
-  countMayBeNaN,
 } from './base-compiler.js';
-export { countMayBeNaN } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
@@ -5969,15 +5967,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.takeIter(${emitLazyStream(args[0]!, compile, target)}, ${compileRealOperand(args[1], compile)})`;
     }
     const coll = elementsArg('Take', args[0], compile);
-    return takeDropSlice('Take', coll, args[1], compile, target, (code) =>
+    return takeDropSlice('Take', coll, args[1], compile, (code) =>
       joinIfString(args[0], code)
     );
   },
-  Drop: (args, compile, target) => {
+  Drop: (args, compile) => {
     const coll = elementsArg('Drop', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Drop`: missing count');
-    return takeDropSlice('Drop', coll, args[1], compile, target, (code) =>
+    return takeDropSlice('Drop', coll, args[1], compile, (code) =>
       joinIfString(args[0], code)
     );
   },
@@ -13319,10 +13317,14 @@ function isNegativeConstantCount(count: Expression): boolean {
  * `tryGetConstant` and takes the run-time branch.
  *
  * A `NaN` count has no value in the interpreter: `Take([1, 2, 3], NaN)`
- * stays unevaluated. The run-time branch then gives `undefined`, the value
- * compiled code has for a list with no value (a bare slice answered `[]`
- * for `Take` and the whole array for `Drop`). A count that cannot be `NaN`
- * (`countMayBeNaN`) keeps the emission with no test.
+ * stays unevaluated. A bare slice would give `[]` for `Take` and the whole
+ * array for `Drop` (`NaN < 0` is false), a list where the interpreter has
+ * none. So every run-time count is tested, with no static analysis of the
+ * count, and a `NaN` count gives `undefined`, the value compiled code has
+ * for a list with no value. A consumer that reads the slice as an array
+ * tests it first (`mayBeAbsentCollection`, `compile-user-functions.ts`,
+ * which marks such a slice by the same rule), so `Length(Take(xs, k))`
+ * and `Unique(Take(xs, k))` also have no value for a `NaN` `k`.
  *
  * `finish` turns the sliced array into the result (`joinIfString` joins
  * the clusters of a string source back into a string). It is applied to
@@ -13334,7 +13336,6 @@ function takeDropSlice(
   coll: string,
   count: Expression,
   compile: (expr: Expression) => string,
-  target: CompileTarget<Expression> | undefined,
   finish: (code: string) => string = (code) => code
 ): string {
   const n = tryGetConstant(count);
@@ -13351,9 +13352,7 @@ function takeDropSlice(
       ? '_n < 0 ? _a.slice(_n) : _a.slice(0, _n)'
       : '_n < 0 ? _a.slice(0, _n) : _a.slice(_n)'
   );
-  const body = !countMayBeNaN(count, target)
-    ? slice
-    : `Number.isNaN(_n) ? undefined : ${slice}`;
+  const body = `Number.isNaN(_n) ? undefined : ${slice}`;
   return `((_a, _n) => ${body})(${coll}, ${sliceCount(count, compile)})`;
 }
 

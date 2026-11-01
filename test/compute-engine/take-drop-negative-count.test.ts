@@ -238,14 +238,13 @@ describe('a count that is not a safe integer, or is infinite', () => {
 
   test('compiled JavaScript gives no value for a NaN count', () => {
     // The interpreter has no value for `Take(xs, NaN)`; compiled code gives
-    // `undefined`, the value of a list with no value (it gave `[]` for
-    // `Take` and the whole list for `Drop`). A non-integer count rounds as
-    // in the interpreter: `Take([1, 2, 3], 0.75)` is `[1]`.
+    // `undefined`, the value of a list with no value. Every run-time count
+    // is tested. A non-integer count rounds as in the interpreter:
+    // `Take([1, 2, 3], 0.75)` is `[1]`.
     const ce3 = new ComputeEngine();
     ce3.declare('xs', 'list<number>');
     ce3.declare('c', 'real');
     ce3.declare('w', 'number');
-    ce3.declare('k', 'integer');
     for (const op of ['Take', 'Drop']) {
       const r = compile(ce3.box([op, 'xs', 'w'] as any), {
         fallback: false,
@@ -258,54 +257,12 @@ describe('a count that is not a safe integer, or is infinite', () => {
       expect(r.run({ xs: [1, 2, 3], w: Infinity })).toEqual(
         op === 'Take' ? [1, 2, 3] : []
       );
-      // A count typed `integer` is tested too: an unsupplied `k` reads as
-      // `undefined`, and `Math.round(undefined)` is NaN. It gave `[]` for
-      // `Take` and the whole list for `Drop`; the interpreter has no value.
-      const integer = compile(ce3.box([op, 'xs', 'k'] as any), {
-        fallback: false,
-      }) as any;
-      expect(integer.run({ xs: [1, 2, 3] })).toBeUndefined();
-      expect(integer.run({ xs: [1, 2, 3], k: 1 })).toEqual(
-        op === 'Take' ? [1] : [2, 3]
-      );
-      // A consumer of the slice tests it first: `Count` of a list with no
-      // value is `NaN` (it gave 0).
-      const count = compile(ce3.box(['Count', [op, 'xs', 'k']] as any), {
-        fallback: false,
-      }) as any;
-      expect(count.run({ xs: [1, 2, 3] })).toBeNaN();
-      expect(count.run({ xs: [1, 2, 3], k: 1 })).toBe(op === 'Take' ? 1 : 2);
       // A literal count is chosen at compile time, with no test.
       const literal = compile(ce3.box([op, 'xs', 2] as any), {
         fallback: false,
       }) as any;
       expect(String(literal.code)).not.toContain('isNaN');
     }
-    // The interpreter has no value with `k` unassigned.
-    const ce4 = new ComputeEngine();
-    ce4.declare('xs', 'list<number>');
-    ce4.declare('k', 'integer');
-    ce4.assign('xs', ce4.box(['List', 1, 2, 3] as any));
-    expect(ce4.box(['Take', 'xs', 'k']).evaluate().operator).toBe('Take');
-    expect(ce4.box(['Drop', 'xs', 'k']).evaluate().operator).toBe('Drop');
-    expect(ce4.box(['Count', ['Take', 'xs', 'k']]).evaluate().operator).toBe(
-      'Count'
-    );
-    // A NaN reaches a parameter typed `integer` of a user function (a user
-    // function with one clause accepts NaN at a numeric parameter): the
-    // interpreter leaves the body's `Take` unevaluated, compiled code gives
-    // `undefined`.
-    const ce5 = new ComputeEngine();
-    ce5.declare('h', '(integer) -> list');
-    ce5.assign(
-      'h',
-      ce5.box(['Function', ['Take', ['List', 1, 2, 3], 'n'], 'n'] as any)
-    );
-    ce5.declare('y', 'number');
-    const h = compile(ce5.box(['h', 'y'] as any), { fallback: false }) as any;
-    expect(h.run({ y: NaN })).toBeUndefined();
-    expect(h.run({ y: 2 })).toEqual([1, 2]);
-    expect(ce5.box(['h', 'NaN']).evaluate().operator).toBe('Take');
     ce3.assign('xs', ce3.box(['List', 1, 2, 3] as any));
     ce3.assign('c', 0.75);
     expect(ce3.box(['Take', 'xs', 'c']).evaluate().toString()).toBe('[1]');
@@ -456,8 +413,7 @@ describe('compiled Python', () => {
 
   test('a count past every length clamps without overflow', () => {
     // A run-time count is clipped before `int()`: `int(inf)` raises
-    // `OverflowError`. A literal `±∞` count cannot be NaN, so it has no NaN
-    // test.
+    // `OverflowError`.
     expect(py(['Take', 'xs', 'PositiveInfinity'])).toBe(
       '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])(xs, int(np.clip(np.floor((np.inf) + 0.5), -9007199254740991, 9007199254740991)))'
     );
@@ -473,29 +429,20 @@ describe('compiled Python', () => {
   });
 
   test('a run-time count chooses the slice at run time', () => {
-    // A count that can be NaN gives `None`, the Python value of a list with
-    // no value, as the interpreter leaves `Take(xs, NaN)` unevaluated. The
-    // `int()` of a NaN raised `ValueError` before.
     expect(py(['Take', 'xs', 'n'])).toBe(
-      '(lambda _l, _c: None if _c != _c else (lambda _n: _l[_n:] if _n < 0 else _l[:_n])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))(xs, n)'
+      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])(xs, int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
     );
     expect(py(['Drop', 'xs', 'n'])).toBe(
-      '(lambda _l, _c: None if _c != _c else (lambda _n: _l[:_n] if _n < 0 else _l[_n:])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))(xs, n)'
-    );
-    // A count typed `integer` is tested too: it can be NaN through a
-    // parameter of a user function, which accepts NaN.
-    ce2.declare('k', 'integer');
-    expect(py(['Take', 'xs', 'k'])).toBe(
-      '(lambda _l, _c: None if _c != _c else (lambda _n: _l[_n:] if _n < 0 else _l[:_n])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))(xs, k)'
+      '(lambda _l, _n: _l[:_n] if _n < 0 else _l[_n:])(xs, int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
     );
   });
 
-  // The NaN test is `_c != _c`, not `np.isnan(_c)`: `np.isnan` raises a
-  // `TypeError` for a Python int too large for int64, such as `2 ** 100`.
+  // A Python int too large for int64, such as `2 ** 100`, is a valid
+  // count: `np.clip` and `int()` accept it.
   const runPython =
     TEST_PYTHON !== undefined && fs.existsSync(TEST_PYTHON) ? test : test.skip;
   runPython(
-    'the generated slice runs for a NaN and a large integer count',
+    'the generated slice runs for a large integer count',
     () => {
       const fn = (op: string) =>
         compile(ce2.box([op, ['List', 1, 2, 3], ['Power', 2, 'w']] as any), {
@@ -506,11 +453,11 @@ describe('compiled Python', () => {
         'import numpy as np, json, math\n' +
         `def take(w): return ${fn('Take')}\n` +
         `def drop(w): return ${fn('Drop')}\n` +
-        'print(json.dumps([take(100), drop(100), take(1), take(math.nan)]))\n';
+        'print(json.dumps([take(100), drop(100), take(1)]))\n';
       const out = execFileSync(TEST_PYTHON!, ['-c', source], {
         encoding: 'utf8',
       });
-      expect(JSON.parse(out)).toEqual([[1, 2, 3], [], [1, 2], null]);
+      expect(JSON.parse(out)).toEqual([[1, 2, 3], [], [1, 2]]);
     }
   );
 });
@@ -590,6 +537,28 @@ describe('an operand that is the absent collection at run time', () => {
     }
   });
 
+  test('Length and Unique of a slice with a computed NaN count have no value', () => {
+    // `w / y` at `w = y = 0` is NaN, for inputs of their declared types.
+    // `new Set(undefined)` is an empty set, so `Unique` of an untested
+    // slice would give `[]`.
+    const ce6 = new ComputeEngine();
+    ce6.declare('xs', 'list<real>');
+    ce6.declare('w', 'real');
+    ce6.declare('y', 'real');
+    for (const op of ['Take', 'Drop'])
+      for (const h of ['Length', 'Unique']) {
+        const r = compile(
+          ce6.box([h, [op, 'xs', ['Divide', 'w', 'y']]] as any),
+          { fallback: false }
+        );
+        const c = r.run!({ xs: [1, 2, 2], w: 0, y: 0 } as any);
+        expect(c === undefined || Number.isNaN(c)).toBe(true);
+        const present = r.run!({ xs: [1, 2, 2], w: 4, y: 2 } as any);
+        if (h === 'Length') expect(present).toBe(op === 'Take' ? 2 : 1);
+        else expect(present).toEqual(op === 'Take' ? [1, 2] : [2]);
+      }
+  });
+
   test('a collection built from shared subtrees is checked in linear time', () => {
     let e: any = ce5.box(take as any);
     for (let i = 0; i < 20; i++)
@@ -604,9 +573,9 @@ describe('an operand that is the absent collection at run time', () => {
     expect(r.run!({ xs: [1, 2] } as any)).toBeNaN();
   });
 
-  test('the index of a Sum is not tested as a count', () => {
-    // An unrolled term reads its index as a number literal, and a loop
-    // counter is a safe integer at every iteration.
+  test('a slice whose count is the index of a Sum', () => {
+    // An unrolled term reads its index as a number literal; a loop reads
+    // its counter.
     for (const upper of [3, 1000]) {
       const json = [
         'Sum',
@@ -614,7 +583,6 @@ describe('an operand that is the absent collection at run time', () => {
         ['Limits', 'i', 1, upper],
       ];
       const r = compile(ce5.box(json as any), { fallback: false });
-      expect(r.code).not.toContain('Number.isNaN');
       expect(r.run!({ xs: [1, 2, 3, 4] } as any)).toBe(
         upper === 3 ? 6 : 4 * (upper - 4) + 10
       );

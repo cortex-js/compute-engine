@@ -135,7 +135,6 @@ import {
   PREDICATE_RESULT_MODES,
   predicateResultCheck,
   stringRefusedEntryType,
-  countMayBeNaN,
   pipeApplication,
 } from './javascript-target.js';
 import { isOpenScalarRankType, pythonShapeDispatch } from './static-shape.js';
@@ -617,12 +616,11 @@ function pyRoundedCount(
  * written as a slice bound (`xs[:Infinity]` and `xs[:1e+21]` are not valid
  * Python). A runtime count is clipped to ±(2^53 − 1) before `int()`, because
  * `int()` of an infinite float raises `OverflowError`; no sequence is that
- * long, so the clip does not change the slice. A `NaN` count has no value in
- * the interpreter (`Take([1, 2, 3], NaN)` stays unevaluated), so the
- * run-time branch gives `None`, the Python value of a list with no value,
- * before `int()` (which raises `ValueError` for `NaN`). A count that cannot
- * be `NaN` (`countMayBeNaN`, `javascript-target.ts`) keeps the emission
- * with no test.
+ * long, so the clip does not change the slice. A `NaN` count is not clipped
+ * (`np.clip` keeps it), so `int()` raises `ValueError` for it. The
+ * interpreter has no value for a `NaN` count (`Take([1, 2, 3], NaN)` stays
+ * unevaluated), and compiled code can throw where the interpreter has no
+ * value, so the count is not tested.
  */
 function pyTakeDropSlice(
   op: 'Take' | 'Drop',
@@ -643,12 +641,6 @@ function pyTakeDropSlice(
       ? '_l[_n:] if _n < 0 else _l[:_n]'
       : '_l[:_n] if _n < 0 else _l[_n:]';
   const limit = Number.MAX_SAFE_INTEGER;
-  if (countMayBeNaN(count))
-    return (
-      `(lambda _l, _c: None if _c != _c else (lambda _n: ${body})` +
-      `(int(np.clip(np.floor(_c + 0.5), -${limit}, ${limit}))))` +
-      `(${coll}, ${compile(count)})`
-    );
   const rounded = `int(np.clip(np.floor((${compile(count)}) + 0.5), -${limit}, ${limit}))`;
   return `(lambda _l, _n: ${body})(${coll}, ${rounded})`;
 }

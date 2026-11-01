@@ -134,7 +134,7 @@ describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
     expect(code).toBe(
       '(p, q) => (!(Array.isArray(p) || ArrayBuffer.isView(p)) && ' +
         '!(Array.isArray(q) || ArrayBuffer.isView(q)) ? p + q : ' +
-        '((_tv1, _tv2) => _SYS.bcastScalarAbsent([1, 1], (_tv3, _tv4) => (_tv3 + _tv4), _tv1, _tv2))' +
+        '((_tv1, _tv2) => _SYS.bcast((_tv3, _tv4) => (_tv3 + _tv4), _tv1, _tv2))' +
         '(_SYS.plainList(p), _SYS.plainList(q)))'
     );
     expect(compiled).toEqual([4, 6]);

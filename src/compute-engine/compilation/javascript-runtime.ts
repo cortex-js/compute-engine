@@ -1875,13 +1875,14 @@ function oneDatumOk<T>(
 /**
  * Element-wise broadcast of a scalar function `f` over its arguments (the
  * runtime side of the compile target's list broadcasting — see
- * `tryCompileBroadcast` and `bcast` below). Any array argument makes
- * the result an array; a length MISMATCH among the array arguments projects to
- * NaN (the real-target rendering of the interpreter's
- * `incompatible-dimensions` — no truncation to the shortest), a scalar
- * argument is reused for every element, and nested arrays recurse. When no
- * argument is an array, `f` is applied directly. `f` therefore only ever sees
- * scalar (or complex) operands.
+ * `tryCompileBroadcast`, and `bcastWith` below, which does the work). Any
+ * array argument makes the result an array; a length MISMATCH among the
+ * array arguments projects to NaN (the real-target rendering of the
+ * interpreter's `incompatible-dimensions` — no truncation to the
+ * shortest), a scalar argument is reused for every element, and nested
+ * arrays recurse. When no argument is an array, `f` is applied directly.
+ * `f` therefore only ever sees scalar (or complex) operands. An absent
+ * operand beside scalars only makes the result absent (see the body).
  */
 function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
@@ -1924,29 +1925,6 @@ function bcastPlain(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: unknown[]
 ): BcastValue {
-  return bcastWith(f, args);
-}
-
-/**
- * `bcast` for an operation whose type is not provably a number, over operands
- * whose type states nothing (`any` or `unknown`; `flags[j]` is 1 for such an
- * operand). The interpreter answers the marker of the operation's codomain
- * for an absent operand, `Missing` here, but only when no operand is a
- * collection: beside a collection the absence lands in each cell, as `NaN`
- * (ROADMAP CE-229). So when a flagged operand is `undefined` (the spelling of
- * `Missing`) and no operand is an array, the result is `undefined`; otherwise
- * the rules of `bcast` apply unchanged.
- */
-function bcastScalarAbsent(
-  flags: ReadonlyArray<number>,
-  f: (...xs: BcastValue[]) => BcastValue,
-  ...args: unknown[]
-): BcastValue | undefined {
-  if (
-    args.some((a, j) => flags[j] === 1 && a === undefined) &&
-    !args.some((a) => Array.isArray(a))
-  )
-    return undefined;
   return bcastWith(f, args);
 }
 
@@ -4623,7 +4601,6 @@ export const SYS_HELPERS = {
   bcast,
   bcastPlain,
   bcastAbsent,
-  bcastScalarAbsent,
   mapFn,
   bcastColor,
   // `At` with a scalar index over elements that may be numbers or lists: the
