@@ -40,6 +40,7 @@ import {
   parseQuotientRingFraction,
   serializeListDomain,
 } from './definitions-sets.js';
+import { withoutFunctionArgumentStop } from './definitions-trigonometry.js';
 import {
   endsTabularCell,
   endsWithSuperscript,
@@ -1629,8 +1630,15 @@ const MAX_NESTED_DERIVATIVE_ORDER = 100;
  * itself a parenthesized derivative would double that at every level. An
  * unclosed parenthesis (`\frac{d}{dx}(x`) fails to parse as a primary and
  * reports the same missing-operand and unexpected-delimiter errors as before.
+ *
+ * The operand also stops at the differential of an enclosing integral (see
+ * `derivativeOperandCondition()`), so in `\int_0^1 \frac{d}{dx}x^3\,dx` the
+ * operand is `x^3` and the closing `dx` stays the variable of the integral.
  */
-export function parseDerivativeOperand(parser: Parser): MathJsonExpression {
+export function parseDerivativeOperand(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression {
   parser.skipSpace();
   const start = parser.index;
   // The opening parenthesis can be written `(` or `\lparen`, after a sizing
@@ -1645,12 +1653,44 @@ export function parseDerivativeOperand(parser: Parser): MathJsonExpression {
     missingIfEmpty(
       parser.parseExpression({
         minPrec: fenced ? POSTFIX_PRECEDENCE : DERIVATIVE_OPERAND_PRECEDENCE,
+        condition: derivativeOperandCondition(until),
       })
     )
   );
 }
 
-function parseFraction(parser: Parser): MathJsonExpression | null {
+/**
+ * The stop condition of the operand of a Leibniz derivative, from the
+ * terminator `until` of the expression that contains the derivative.
+ *
+ * The operand stops where the enclosing expression stops. In an integrand
+ * that is the differential, so in `\int_0^1 \frac{d}{dx}x^3\,dx` the operand
+ * is `x^3` and the closing `dx` stays the variable of the integral. Without
+ * it, the operand would read `x^3\,dx` as the product `x^3·d·x`, and the
+ * integral would have no variable. In `\text{if} x>0 \text{then}
+ * \frac{d}{dx}x^2 \text{else} 0` it is the `else` keyword.
+ *
+ * One stop does not apply: the argument of a function name written without
+ * parentheses stops before another function name (`\cos a \sin b` is a
+ * product), but a derivative in that argument keeps its operand: in
+ * `\sin \frac{d}{dx}\cos x`, and in `sin \frac{d}{dx} cos x` with
+ * `strict: false`, the operand is the cosine. The condition is evaluated with
+ * that stop turned off (`withoutFunctionArgumentStop()`); the stops that the
+ * argument condition forwards from its own enclosing expression still
+ * apply.
+ */
+export function derivativeOperandCondition(
+  until: Readonly<Terminator> | undefined
+): ((parser: Parser) => boolean) | undefined {
+  const condition = until?.condition;
+  if (condition === undefined) return undefined;
+  return (parser) => withoutFunctionArgumentStop(() => condition(parser));
+}
+
+function parseFraction(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
   const numer = parseFractionArgument(parser);
   const denom = parseFractionArgument(parser);
   // Leibniz partial-derivative notation, assembled from the ∂ markers emitted
@@ -1707,7 +1747,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       }
     }
     if (fn === null || fn === undefined || fn === 'Nothing')
-      fn = parseDerivativeOperand(parser);
+      fn = parseDerivativeOperand(parser, until);
 
     // Differentiation variables from the denominator's ∂ markers. Each marker
     // carries either a single variable or a `List` of them (a `∂x ∂y` chain).
@@ -1940,7 +1980,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     if (vars.length > 0) {
       // The function being differentiated is either folded into the numerator
       // (`\frac{d^n f}{dx^n}`) or follows the fraction (`\frac{d^n}{dx^n} f`).
-      let fn = numerFn ?? parseDerivativeOperand(parser);
+      let fn = numerFn ?? parseDerivativeOperand(parser, until);
       // The occurrences of a variable spelled as a subscript on an indexed
       // collection are that variable (see `collectVars()` above)
       const names = new Set<string>();

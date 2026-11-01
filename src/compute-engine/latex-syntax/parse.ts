@@ -75,6 +75,7 @@ import {
   normalizeKeywordText,
   normalizeContinuationRanges,
 } from './dictionary/definitions-core.js';
+import { isFunctionArgumentStopSuspended } from './dictionary/definitions-trigonometry.js';
 import {
   CONTENT_PARSE_HANDLERS,
   DECORATION_PARSE_HANDLERS,
@@ -4661,7 +4662,12 @@ export class _Parser implements Parser {
         ...until,
         minPrec: MULTIPLICATION_PRECEDENCE,
         condition: (p: Parser) => {
-          const w = this.peekBareWord();
+          // The operand of a Leibniz derivative turns this stop off (see
+          // `withoutFunctionArgumentStop()`): in `sin \frac{d}{dx} cos x`
+          // the operand of the derivative is `cos x`.
+          const w = isFunctionArgumentStopSuspended()
+            ? ''
+            : this.peekBareWord();
           return (
             (w.length > 0 && BARE_FUNCTION_MAP[w] !== undefined) ||
             (until?.condition?.(p) ?? false)

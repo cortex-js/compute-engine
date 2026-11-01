@@ -11,6 +11,43 @@ import {
 import { PIPE_TOPIC_MARKER } from './definitions-core.js';
 
 /**
+ * The number of active calls of `withoutFunctionArgumentStop()`. While it is
+ * positive, the argument of a function name written without parentheses does
+ * not stop before another function name. Parsing is synchronous, so a counter
+ * restored in a `finally` block is enough.
+ */
+let functionArgumentStopSuspended = 0;
+
+/**
+ * Evaluate `f` with the function argument stop turned off. The argument of a
+ * function name written without parentheses stops before another function
+ * name, so `\cos a \sin b` and, with `strict: false`, `cos a sin b` are
+ * products. Two conditions make this stop: the argument condition of a
+ * trigonometric command (see `parseTrig()`) and the argument condition of a
+ * bare function name (`tryParseBareFunction()` in `parse.ts`). While `f`
+ * runs, both fire only where the condition of their own enclosing
+ * expression fires.
+ *
+ * The operand of a Leibniz derivative uses it, so that in
+ * `\sin \frac{d}{dx}\cos x` the operand of the derivative is `\cos x` (see
+ * `derivativeOperandCondition()`).
+ */
+export function withoutFunctionArgumentStop<T>(f: () => T): T {
+  functionArgumentStopSuspended += 1;
+  try {
+    return f();
+  } finally {
+    functionArgumentStopSuspended -= 1;
+  }
+}
+
+/** True while `withoutFunctionArgumentStop()` runs: the function argument
+ * stop does not apply. */
+export function isFunctionArgumentStopSuspended(): boolean {
+  return functionArgumentStopSuspended > 0;
+}
+
+/**
  * Trigonometric functions have some special conventions that require a
  * custom parser: they can be followed by a "-1" superscript indicating
  * that the inversion function should be used, i.e. "\sin^{-1}" for "arcsin".
@@ -111,7 +148,8 @@ function parseTrig(op: string): ExpressionParseHandler {
     let args = parser.parseArguments('implicit', {
       minPrec: MULTIPLICATION_PRECEDENCE,
       condition: (parser) =>
-        trigCommands[parser.peek] !== undefined ||
+        (!isFunctionArgumentStopSuspended() &&
+          trigCommands[parser.peek] !== undefined) ||
         (until?.condition?.(parser) ?? false),
     });
 

@@ -253,6 +253,16 @@
 
 ### Bug Fixes
 
+- **A Leibniz derivative in the integrand of an integral leaves the closing
+  differential to the integral** (CE-617). `\int_0^1 \frac{d}{dx}x^3\,dx`
+  parsed as the derivative of `x^3·d·x`, so the integral had no variable and
+  its value still held `x`. The operand of `\frac{d}{dx}`,
+  `\frac{\partial}{\partial x}` and `\partial_x` now stops where the enclosing
+  expression stops: the integral reads `dx` as its variable, and with
+  `E = [1, 2]`, `\int_0^1 \frac{d}{dx}x^3 \cdot E\,dx` evaluates to `[1, 2]`,
+  as the MathJSON form does. A derivative operand that starts with a function
+  (`\sin \frac{d}{dx}\cos x`) still takes that function.
+
 - **A LaTeX `value` of `ce.declare()` is parsed** (CE-58). A value such as
   `'$1+2$'` gave an `unexpected-token` error, because the `$` delimiters were
   passed to the parser. It now gives `3`.

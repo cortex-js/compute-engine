@@ -22,7 +22,10 @@ import {
 } from '../../../math-json/types.js';
 import { joinLatex } from '../tokenizer.js';
 import { contentCommand, decoration } from '../decoration-handlers.js';
-import { parseDerivativeOperand } from './definitions-arithmetic.js';
+import {
+  derivativeOperandCondition,
+  parseDerivativeOperand,
+} from './definitions-arithmetic.js';
 import {
   PIPE_TOPIC_MARKER,
   derivativeOrder,
@@ -264,7 +267,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     name: 'PartialDerivative',
     latexTrigger: ['\\partial'],
     kind: 'prefix',
-    parse: (parser: Parser) => {
+    parse: (parser: Parser, until?: Readonly<Terminator>) => {
       let done = false;
       let sup: MathJsonExpression | null = 'Nothing';
       let sub: MathJsonExpression | null = 'Nothing';
@@ -322,8 +325,14 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
             const args = parser.parseArguments();
             if (args) rhs = [rhs as MathJsonSymbol, ...args];
           }
-        } else if (parser.atTerminator({ minPrec: 0 })) rhs = 'Nothing';
-        else rhs = parseDerivativeOperand(parser);
+        } else if (
+          parser.atTerminator({
+            minPrec: 0,
+            condition: derivativeOperandCondition(until),
+          })
+        )
+          rhs = 'Nothing';
+        else rhs = parseDerivativeOperand(parser, until);
         const names = new Set(
           vars.filter((v): v is string => typeof v === 'string')
         );
