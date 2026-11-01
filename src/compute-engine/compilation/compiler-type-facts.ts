@@ -50,6 +50,7 @@ import {
   exactValueDoubleRoundings,
 } from '../numeric-value/exact-integer-value.js';
 import { CompilerState } from './compiler-state.js';
+import type { SymbolInterface } from '../types-expression.js';
 import { core } from './compiler-core-hooks.js';
 
 /**
@@ -1200,11 +1201,9 @@ export function exactRationalDivisor(
  * for a consumer that declares every parameter `any`. A call of a user
  * function typed `any` and a `broadcastable<T>` type keep their reading.
  *
- * The JavaScript target still checks the value at run time at an arithmetic
- * site (`declaredTopGuard` in `BaseCompiler`): it emits the scalar code and
- * the list code, and chooses one with `Array.isArray`. The list code is
- * compiled while `declaredTopMode` is `'list'`, and then such a symbol is
- * read as a possible collection here.
+ * The JavaScript target declines an arithmetic site over such a symbol
+ * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`), because its
+ * value can be a list.
  *
  * `_target` is the target that compiles `e`, when it is not the target of
  * the call site in progress. The answer does not depend on it: the shape of
@@ -1216,8 +1215,6 @@ export function possiblyCollectionTypedForCompile(
   e: Expression,
   _target?: CompileTarget<Expression>
 ): boolean {
-  if (CompilerState.declaredTopMode === 'list')
-    return isPossiblyCollectionTyped(e);
   return isPossiblyCollectionTyped(e, { declaredSymbols: false });
 }
 
@@ -1242,7 +1239,7 @@ export function isDeclaredTopOperand(e: Expression): boolean {
  */
 export function collectDeclaredTopSymbols(
   e: Expression,
-  out: Set<Expression>,
+  out: Set<Expression & SymbolInterface>,
   visited: Set<Expression> = new Set()
 ): void {
   // An expression can share one node at many positions (a tower where each
@@ -1254,16 +1251,6 @@ export function collectDeclaredTopSymbols(
   if (isSymbol(e)) out.add(e);
   else if (isFunction(e))
     for (const op of e.ops) collectDeclaredTopSymbols(op, out, visited);
-}
-
-/**
- * For the JavaScript target: is `e` read as a possible collection only
- * because the list code of a run-time check is being compiled (see
- * `declaredTopMode`)? The JavaScript target has its own test of a possible
- * collection, and asks this one too.
- */
-export function isDeclaredTopListOperand(e: Expression): boolean {
-  return CompilerState.declaredTopMode === 'list' && isDeclaredTopOperand(e);
 }
 
 /**

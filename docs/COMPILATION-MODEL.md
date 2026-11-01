@@ -86,6 +86,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
   constant folding of the compiler reads the absent point as a number); the
   interpreter gives 1. With `G := (p, s) ↦ s·PointX(p)`,
   `Boole(IsMissing(G(At(L, 5), 2) < 1))` gives 0; the interpreter gives 1.
+- `javascript`, the interpreter fallback of a decline: with `L: list<real>`
+  and `p: any` assigned `2L`, `compile(p + 1, { constantFold: false })`
+  declines and `run({ L: [1, 2] })` gives `null` (the fallback does not pass
+  the input `L` to the value of `p`); the interpreter gives `[3, 5]`.
 
 ## Fail closed
 
@@ -1647,18 +1651,18 @@ call read as a scalar. A call in a branch of an `If` or a `Which`, the last
 statement of a `Block`, or a block local keeps the `_SYS.bcast` code with no
 test, because the test would evaluate the call before its branch is taken.
 
-An input that the host declared `any` or `value` can hold a list, and the
-JavaScript target tests its value at run time at an element-wise site: it
-emits the scalar code and the list code, and selects one with
-`Array.isArray` (`declaredTopGuard` in `compile-expr-handlers.ts`). The
-collection form of `Sum` and `Product` over such an input or over a
-parameter declared `any` or `value` (`Sum(x)`, no indexing set) compiles to a
-fold that tests the value at run time: a list is folded, a nested list
-element-wise (`[[1, 2], [3, 4]]` gives `[4, 6]`), and a scalar gives itself,
-as in the interpreter (`Sum(5)` is 5). An input
-declared `expression` (or with an alias of it) can hold a list too, but the
-compiled code has no such test for it, so the JavaScript target declines a
-read of it as an input, and the interpreter computes the value: with
+A symbol declared `any` or `value` can hold a number or a list, and compiled
+code does not test the shape of a value at run time. The JavaScript target
+declines an element-wise site, `Max`, `Min`, `Sum` and `Product` over such a
+symbol (a parameter declared `any` or `value`, an input declared `value`, or
+a symbol declared `any` or `value` that has a value), with the code
+`unsettled-shape` and the symbol in `unsupported`, and the interpreter
+computes the value: `Function(p + q, p: any, q: any)` declines, and
+`run([1, 2], [3, 4])` gives `[4, 6]`. An input declared `any` with no value
+is refused before, with `untyped-input`. The host declares the shape
+(`real`, `list<real>`) to compile such a program. An input
+declared `expression` (or with an alias of it) can hold a list too, so the
+JavaScript target declines a read of it as an input, and the interpreter computes the value: with
 `ce.declare("x", "expression")`, `2x` declines, and `run({ x: [1, 2] })`
 gives `[2, 4]`. A symbol declared `expression` with an assigned value is not
 an input: its value is folded, and the expression compiles. A parameter

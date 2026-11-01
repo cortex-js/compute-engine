@@ -890,26 +890,28 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
         ['List', 1, 2, 3],
       ] as never);
       expect(call.evaluate().toString()).toBe('6');
-      // Without constant folding, the generated code computes the sum. At a
-      // parameter declared `any` or `value`, `Sum` compiles to a fold that
-      // tests the value at run time, as for a free symbol declared `any`.
-      // A parameter declared `expression` declines, and the interpreter
-      // computes the sum. The value is the same: the list is summed whole,
-      // not mapped.
+      // Without constant folding, the generated code would compute the sum.
+      // The value of a parameter declared `any`, `value` or `expression` can
+      // be a number or a list, and compiled code does not test the shape of
+      // a value at run time, so the compilation declines, and the
+      // interpreter computes the sum. The list is summed whole, not mapped.
       const result = compile(call, {
         to: 'javascript',
         constantFold: false,
       } as never)!;
-      expect(result.success).toBe(type !== 'expression');
+      expect(result.success).toBe(false);
       expect(result.run!({})).toBe(6);
     }
   );
 
-  // The body `2t` maps over the list at run time. The compiled value is the
-  // value of the interpreter, on the literal route (with constant folding
-  // off, so that the generated code computes it) and on the named route
-  // (with the list as a run-time input). The same calls with a parameter
-  // declared `expression` are declined (see the tests below).
+  // The body `2t` maps over the list. On the literal route (with constant
+  // folding off, so that the generated code would compute it), the value of
+  // the parameter declared `any` or `value` can be a number or a list, and
+  // compiled code does not test the shape of a value at run time, so the
+  // compilation declines, and the interpreter fallback gives the value. On
+  // the named route, the argument is the input `L` declared `list`, and the
+  // compiled value is the value of the interpreter. The same calls with a
+  // parameter declared `expression` are declined (see the tests below).
   test.each([
     ['any', [[0, 0], 5], [[0, 0], 10]],
     ['value', [[0, 0], 5], [[0, 0], 10]],
@@ -944,12 +946,19 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       const f = ['Function', ['Multiply', 2, 't'], param(type)];
       const literalCall = ce.box([f, toList(arg)] as never);
       expect(literalCall.evaluate().json).toEqual(toList(expected));
-      const literalRun = compile(literalCall, {
+      expect(() =>
+        compile(literalCall, {
+          to: 'javascript',
+          fallback: false,
+          constantFold: false,
+        } as never)
+      ).toThrow(/declared `any` or `value`/);
+      const literal = compile(literalCall, {
         to: 'javascript',
-        fallback: false,
         constantFold: false,
-      } as never)!.run!;
-      expect(literalRun({})).toEqual(expected);
+      } as never)!;
+      expect(literal.success).toBe(false);
+      expect(literal.run!({})).toEqual(expected);
 
       ce.declare('W', 'function');
       ce.assign('W', ce.box(f as never));
@@ -966,8 +975,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
   );
 
   // Compiled code reads a parameter declared `expression` as a scalar, and
-  // it does not test the argument at run time as it does for `any` and
-  // `value`. So a call where an argument that can be a collection reaches
+  // it does not test the argument at run time. So a call where an argument that can be a collection reaches
   // such a parameter is declined, and the interpreter computes the value.
   // The routes: a function literal (with constant folding off, so that the
   // generated code would compute it), a named function with the list as a

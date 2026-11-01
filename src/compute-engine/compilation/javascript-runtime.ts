@@ -5688,13 +5688,6 @@ export const SYS_HELPERS = {
   // it, which the compiled form cannot know to do, and a silently-wrong point
   // is worse than an absent one.
   pointSlot: (v: unknown): unknown => (Array.isArray(v) ? NaN : v),
-  // A numeric typed array (`Float64Array`, ...) as a plain array, and any
-  // other value as it is. The list code of the run-time check of a symbol
-  // declared `any` or `value` (`declaredTopGuard`, `base-compiler.ts`) reads
-  // its symbols through this helper, because the list kernels (`bcast`,
-  // `eq`) test for a plain `Array`.
-  plainList: (v: unknown): unknown =>
-    isNumericTypedArray(v) ? copyToPlainArray(v) : v,
   /**
    * Coordinate `k` (0-based) of a point-shaped value whose static type did
    * not settle whether it is ONE point or a LIST of points. Mirrors the

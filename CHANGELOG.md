@@ -43,6 +43,17 @@
 - **On GLSL and WGSL, `First`, `Second`, `Third` and `Last` of `Missing` or
   `Undefined` decline.** In 0.176.0 they compiled to the shader `NaN`. The
   interpreter gives `Missing`, and a decline falls back to it.
+- **Compiled arithmetic over a symbol declared `any` or `value` declines.**
+  On the JavaScript target, an element-wise site, `Max`, `Min`, `Sum` and
+  `Product` over a parameter declared `any` or `value`, over an input
+  declared `value`, or over a symbol declared `any` or `value` that has a
+  value, no longer emit a run-time test of whether the value is a list. The
+  compilation declines with the code `unsettled-shape` and the symbol in
+  `unsupported`, and the interpreter computes the value:
+  `Function(p + q, p: any, q: any)` gives `success: false`, and
+  `run([1, 2], [3, 4])` still gives `[4, 6]`. Declare the shape of the symbol
+  (`real`, `list<real>`) to compile it. An input declared `any` with no value
+  is still refused with `untyped-input`.
 
 ### Resolved Issues
 
@@ -57,6 +68,89 @@
   infinities or NaN now has the type `real` together with the infinities
   and NaN of the base, not `number`: `Root(1/x, 3)` is
   `infinity | nan | real`.
+- **A compiled power of a list of extended reals no longer tests the shape
+  of the list at run time.** With `P` declared
+  `list<tuple<C, C>>` and `C` the type `real | signed_infinity | nan`, the
+  JavaScript code of `PointY(P)^2` called `_SYS.matrixPowerShape` to check
+  at run time whether the list was a matrix. It now gives the same
+  element-wise power as for `C = real`. The same applies to a
+  `list<real | signed_infinity | nan>`. The value is unchanged.
+- **A compiled call over a list of points compiles again when the function
+  passes a parameter declared `unknown` to another function.** With
+  `C := (D, d) ↦ ((D − d)/2, 0)` and `n := (q, D2, d2) ↦ q + C(D2, d2)`
+  declared `(tuple<number, number>, unknown, unknown) -> tuple<number, number>`,
+  the compilation of `n([(1, 2), (3, 4)], 4, 2)` declined in 0.176.0 with the
+  code `unsettled-shape`, although `n((1, 2), 4, 2)` compiled. Each call of the
+  compiled map now types `D2` and `d2` from their arguments, as the call on
+  one point does, and the result is `[(2, 2), (4, 4)]`, as `evaluate()` gives.
+- **The variable of a compiled derivative takes the type of its declaration
+  outside the derivative.** With `x` declared `real` and
+  `F := t ↦ Max(Abs(t), Abs(t - 1))`, `compile(D(F(x), x))` declined in
+  0.176.0 with the diagnostic code `'untyped-input'`, and
+  `freeSymbolTypes.x` was `unknown`. It now compiles to a numeric derivative
+  at `x`, `freeSymbolTypes.x` is `real` with the provenance `declared`, and
+  `run({ x: 2 })` gives 1. This is the rule that already applies to the
+  variable of an indefinite integral.
+- **The code of a `compile` handler on the definition of `Which` is used
+  when the branches have different shapes.** In 0.176.0, with `x` declared
+  `real` and a handler that returns `x > 0 ? [0, 0] : [1, 2]` for
+  `Which(x > 0, 0, True, [1, 2])`, the compilation declined with
+  `unsettled-shape`, because the branches are a number and a list. The
+  check of the shapes of the branches applies to the stock lowering of a
+  conditional, and a handler takes precedence over that lowering, so the
+  compilation now uses the code of the handler, as it did in 0.175.0. The
+  node then has its static type (here `integer | vector<integer^2>`). A
+  handler that returns no code gives the stock lowering, which still
+  declines. The admission check also no longer calls the handler a second
+  time for a node that the compilation already gave to it.
+- **Shader targets: `floor`, `fract` and `mod` of a bounded value no longer
+  keep the NaN-safe helper.** On `glsl` and `wgsl`, `sin`, `cos` and the other
+  guarded calls use the built-in only when their operand cannot overflow f32,
+  and each factor of a product must then have a known size. `floor`, `ceil`,
+  `round` and `trunc` of an operand had no size, so with `t` declared
+  `real<-5.5..5.5>`, `\sin(10000(51.1\lfloor t\rfloor-3.9))` compiled to
+  `_gpu_sin(…)`, while the same formula without `\lfloor\rfloor` compiled to
+  `sin(…)`. Now `floor`, `ceil`, `round` and `trunc` of an operand of size
+  `s` have the size `s + 1`, a fractional part (`Fract`, `Mod(a, 1)`) has the
+  size 1, and `Mod(a, d)` has about the size of `d` when `a` has a size. So
+  `\sin(10000(51.1\lfloor t\rfloor-3.9))`, `\sin(1000(t-\lfloor t\rfloor))`
+  and, with `T` declared `real<0..120>`,
+  `\cos(\frac{T}{40}+\frac{\pi\lfloor T\bmod 7\rfloor}{7})` call the built-in.
+  An operand with no size (`x` declared `real` with no range) keeps the
+  helper, as before.
+- **A function with a point parameter maps over a list of points that one
+  point of the same type would satisfy.** With `E = real | signed_infinity |
+  nan`, `g` declared `(tuple<E, E>) -> unknown` and assigned
+  `p ↦ p.x + p.y`, and `L` declared `list<tuple<number, number>>`, `g(L)`
+  had the type `error`, while `g(T)` was accepted for `T` declared
+  `tuple<number, number>`. Now a list, a matrix, or a union of one point and
+  a list of points is accepted when its point type would be accepted as the
+  whole argument: `g(L)` has the type `list<E>`, evaluates to one value per
+  point, and compiles to a call per point. The value of each point is
+  checked when it is bound to the parameter.
+- **Arithmetic on points whose components may be infinite keeps the signed
+  infinities in the component types.** With `P` and `Q` declared
+  `tuple<real | signed_infinity | nan, real | signed_infinity | nan>`, the
+  type of `P + Q`, `P - Q`, `2P` and `P / 2` was
+  `tuple<infinity | nan | real, infinity | nan | real>` (`P / 2` was
+  `tuple<number, number>`). The `infinity` type admits the complex infinity,
+  so a symbol declared with the type of `P` could not be assigned these
+  results. Now each component has the type `real | signed_infinity | nan`, as
+  the same arithmetic on scalars of that type has. A scalar quotient such as
+  `x / p`, with `x: real | signed_infinity` and `p` a finite real that is not
+  zero, is now `real | signed_infinity` (it was `infinity | nan | real`), and
+  with `a: real | signed_infinity | nan`, `a / p` is now
+  `real | signed_infinity | nan` (it was `number`).
+- **Reading `.latex` of an expression no longer changes the type of a call
+  to a recursive function.** With
+  `F := n ↦ Which(n = 9, [(0, 0, -n)], True, ListJoin([(0, 0, -n)], F(n + 1)))`,
+  `C := F(0)` and `N` declared `(tuple<number, number, number>) -> number`, a
+  read of `.latex` of `N(C)` changed the type of `F(0)` from
+  `list<tuple<integer, integer, number>>` to
+  `list<tuple<integer, integer, unknown>>`, and a later `compile()` of
+  `N(C)` declined. The type now stays
+  `list<tuple<integer, integer, number>>`, and the compile succeeds in
+  both orders.
 
 ## 0.176.0 _2026-11-01_
 

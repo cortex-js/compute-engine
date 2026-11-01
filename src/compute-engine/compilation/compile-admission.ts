@@ -5,6 +5,7 @@
 // (user decision 2026-10-31, option (A)).
 
 import type { Expression, Scope } from '../global-types.js';
+import type { SymbolInterface } from '../types-expression.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isDictionary,
@@ -26,6 +27,7 @@ import {
   UNTYPED_INPUT_CODE,
 } from './diagnostics.js';
 import { isCompileBoundName } from './compiler-names.js';
+import { collectDeclaredTopSymbols } from './compiler-type-facts.js';
 import {
   shapeOfType,
   shapesConflict,
@@ -172,11 +174,13 @@ export function untypedInputsOf(
   let read: ReturnType<typeof namesReadIn> | undefined;
   const names = (): ReturnType<typeof namesReadIn> =>
     (read ??= namesReadIn(expr, target));
-  const untyped = freeSymbols.filter((name) => {
-    if (target.boundVars?.has(name) || isCompileBoundName(name)) return false;
-    const symbol = freeSymbolOccurrence(name, occurrences) ?? ce.symbol(name);
-    return isUntypedType(symbol.type.type);
-  });
+  const untyped = freeSymbols.filter((name) =>
+    isUnboundUntypedName(
+      name,
+      freeSymbolOccurrence(name, occurrences) ?? ce.symbol(name),
+      target
+    )
+  );
   if (untyped.length === 0) return [];
   const { kept, dropped } = names();
   return untyped.filter((name) => kept.has(name) || !dropped.has(name));
@@ -232,6 +236,75 @@ export function declaredUnionInputsOf(
     if (members !== undefined) result.push({ name, members });
   }
   return result;
+}
+
+/**
+ * True when the name `name`, whose symbol is `symbol`, is bound by neither
+ * the target (`target.boundVars`: a parameter of the root function or of a
+ * function literal in compilation) nor the compiler
+ * (`isCompileBoundName()`), and its type is `unknown` or `any`
+ * (`isUntypedType()`). `untypedInputsOf()` refuses each free symbol of the
+ * root with no value for which this is true.
+ */
+function isUnboundUntypedName(
+  name: string,
+  symbol: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (target.boundVars?.has(name) || isCompileBoundName(name)) return false;
+  return isUntypedType(symbol.type.type);
+}
+
+/**
+ * Decline the compilation of `head` when one of its operands `args` is a
+ * symbol declared `any` or `value`, or a library application over one
+ * (`isDeclaredTopOperand()`). The value of such a symbol can be a number or
+ * a list, and compiled code does not test the shape of a value at run time.
+ * The decline has the code `'unsettled-shape'` and the kind `'capability'`,
+ * and its message names each such symbol.
+ *
+ * Its `value`, which the interpreter fallback puts in `unsupported`, is the
+ * name of the first symbol only: the other `'unsettled-shape'` declines
+ * name one node in `value` too (`throwUnsettledShape()`).
+ *
+ * A symbol that the admission of the root refuses after the code is
+ * generated is not named here, so that its decline has the code
+ * `'untyped-input'`, as on every other target: a name that is not bound,
+ * of type `any` (`isUnboundUntypedName()`), with no value. Every other such
+ * symbol declines here: a parameter declared `any` or `value`, an input
+ * declared `value`, and a symbol declared `any` or `value` that has a value
+ * (`ce.declare("k", "any")`, `ce.assign("k", [1, 2])`: the compiled code
+ * would read the list as a number in `k + x`).
+ */
+export function assertNoDeclaredTopOperands(
+  head: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): void {
+  const found = new Set<Expression & SymbolInterface>();
+  const visited = new Set<Expression>();
+  for (const a of args) collectDeclaredTopSymbols(a, found, visited);
+  const names = [...found]
+    .filter(
+      (s) =>
+        !isUnboundUntypedName(s.symbol, s, target) ||
+        s.engine._getSymbolValue(s.symbol) !== undefined
+    )
+    .map((s) => s.symbol);
+  if (names.length === 0) return;
+  const list = names.map((n) => `"${n}"`).join(', ');
+  throw new CompileDeclineError({
+    code: UNSETTLED_SHAPE_CODE,
+    kind: 'capability',
+    message:
+      `Could not compile \`${head}\` over ${list}: ` +
+      `${names.length === 1 ? 'it is' : 'they are'} declared \`any\` or ` +
+      `\`value\`, so ${names.length === 1 ? 'its value' : 'each value'} ` +
+      `can be a number or a list, and compiled code does not test the ` +
+      `shape of a value at run time. Declare the shape, for example ` +
+      `\`real\` or \`list<real>\`.`,
+    value: names[0],
+  });
 }
 
 /**

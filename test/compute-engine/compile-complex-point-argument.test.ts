@@ -327,7 +327,29 @@ describe('A position with no type is read as real', () => {
     ],
   ];
   for (const [name, body, message] of cases) {
-    test(`auto: ${name}`, () => expectSameValue(fn(body)));
+    // `gu` multiplies a parameter declared `U`, an alias of `any`, so the
+    // value of `p` can be a number or a list. Compiled code does not test
+    // the shape at run time, so the compilation declines in every mode
+    // (`assertNoDeclaredTopOperands()`), and the fallback gives the
+    // interpreter's value.
+    if (name === 'gu(P[1])') {
+      test(`auto: ${name} declines`, () => {
+        expect(() =>
+          compile(ce.box(fn(body) as any), { fallback: false })
+        ).toThrow(/declared `any` or `value`/);
+        const interp = ce.box(['Apply', fn(body), P] as any).evaluate();
+        const r = compile(ce.box(fn(body) as any))!;
+        expect(r.success).toBe(false);
+        const out = r.run!(jsP) as unknown[];
+        const expected = [...interp.each()];
+        expect(out.length).toBe(expected.length);
+        expected.forEach((x, i) => {
+          const [re, im] = parts(out[i]);
+          expect(re).toBeCloseTo(x.re, 12);
+          expect(im).toBeCloseTo(x.im, 12);
+        });
+      });
+    } else test(`auto: ${name}`, () => expectSameValue(fn(body)));
     if (message !== undefined)
       test(`strict: ${name}`, () => expectStrictDecline(fn(body), message));
   }

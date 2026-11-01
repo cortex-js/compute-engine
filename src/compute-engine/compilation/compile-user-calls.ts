@@ -1186,12 +1186,10 @@ export function expressionParameterDecline(
  * The interpreter accepts a collection as the value of such a symbol, and
  * an element-wise operator maps over it: with `x` declared `expression` and
  * `x = [1, 2]`, `2x` is `[2, 4]`. Compiled code reads such a symbol as a
- * scalar, and it does not test the value at run time as it does for a
- * symbol declared `any` or `value` (`declaredTopGuard`): `2x` compiled to
- * `2 * _.x`, which gives `null` for `[1, 2]`. The JavaScript target
- * declines a read of such a symbol as an input (`expressionInputDecline`),
- * as it declines a parameter declared `expression`
- * (`expressionParameterReadAt`).
+ * scalar: `2x` compiled to `2 * _.x`, which gives `null` for `[1, 2]`. The
+ * JavaScript target declines a read of such a symbol as an input
+ * (`expressionInputDecline`), as it declines a parameter declared
+ * `expression` (`expressionParameterReadAt`).
  */
 export function isExpressionDeclaredInput(
   engine: ComputeEngine,

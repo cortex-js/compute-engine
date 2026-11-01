@@ -558,10 +558,10 @@ import {
   typeHoldsKeyedValue,
   unionAdmitsIndexedCollection,
   isTopTypedLocalSymbol,
-  isDeclaredTopListOperand,
-  isDeclaredTopOperand,
   type LoopInvariantBinding,
 } from './base-compiler.js';
+import { isDeclaredTopOperand } from './compiler-type-facts.js';
+import { assertNoDeclaredTopOperands } from './compile-admission.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
@@ -2876,9 +2876,6 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
   // A `Block` local typed by a top type may hold a list (see
   // `isTopTypedBlockLocal`, `collection-utils.ts`).
   if (isTopTypedLocalSymbol(e)) return true;
-  // A symbol declared `any` or `value` while the list code of a run-time
-  // check of its value is compiled (`isDeclaredTopListOperand`).
-  if (isDeclaredTopListOperand(e)) return true;
   // A top-typed APPLICATION is a genuine possibly-collection signal only when
   // bound: an UNBOUND (non-canonical, non-structural) arithmetic subexpression
   // (e.g. the `{ canonical: false }` grouping-preservation path) types
@@ -13223,18 +13220,18 @@ function compileSumProduct(
       refuseNonNumericScalarProjection(kind, args[0]);
       return emitCollectionReduce(kind, args[0], target, true);
     }
-    // A symbol declared `any` or `value` (`isDeclaredTopOperand`: an input,
-    // or a parameter of a function literal) can hold a list at run time, and
-    // the interpreter folds it as one: `Sum(x)` with `x = [1, 2, 3]` is 6,
-    // and with `x = [[1, 2], [3, 4]]` it is `[4, 6]`. The guarded fold
-    // dispatches on the run-time value, and gives a scalar as it is, as the
-    // interpreter does (`Sum(5)` is 5). The value is read through
-    // `_SYS.plainList`, because the host can pass a numeric typed array
-    // (`Float64Array`) for such a symbol, and the fold tests for a plain
-    // `Array`. This branch declined before ("no indexing set").
+    // A symbol declared `any` or `value` (`isDeclaredTopOperand`: a
+    // parameter declared so, or an input declared `value`) can hold a number
+    // or a list, and the interpreter folds a list: `Sum(x)` with
+    // `x = [1, 2, 3]` is 6, and with `x = [[1, 2], [3, 4]]` it is `[4, 6]`.
+    // Compiled code does not test the shape of a value at run time, so the
+    // compilation declines. An input declared `any` with no value is not
+    // declined here: the admission of the root refuses it after the code is
+    // generated (`assertAdmitted()`), so the fold below is never run.
     if (isDeclaredTopOperand(args[0])) {
+      assertNoDeclaredTopOperands(kind, [args[0]], target);
       refuseNonNumericScalarProjection(kind, args[0]);
-      return emitCollectionReduce(kind, args[0], target, true, true);
+      return emitCollectionReduce(kind, args[0], target, true);
     }
     // A symbol typed as an abstract collection (declared or inferred): adding
     // or multiplying the elements needs no positions or order, so it is read
@@ -16335,6 +16332,12 @@ function compileExtremum(
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
+  // A symbol declared `any` or `value`, and a library application over one
+  // (`isDeclaredTopOperand`), can hold a number or a list, and the
+  // interpreter flattens and reduces a list: `Max(p)` with `p = [1, 5]` is 5.
+  // Compiled code does not test the shape of a value at run time, so the
+  // compilation declines.
+  assertNoDeclaredTopOperands(kind, args, target);
   // An operand whose static type settles a list of rank 2 or more with
   // real leaves (`list<list<real>>`, `list<vector<real^2>> | missing`) is
   // flattened at every level, as the interpreter flattens it:
@@ -16426,15 +16429,9 @@ function compileExtremum(
   // is `NaN`. An operand of a top type that may hold a list
   // (`isPossiblyCollectionTypedJS`: `missing | unknown`, the type of an
   // index into a `list<unknown>`) takes the same projection: it reached
-  // the scalar `Math.max(<array>, 1)` (ROADMAP CE-370). So does a symbol
-  // declared `any` or `value`, and a library application over one
-  // (`isDeclaredTopOperand`): the compiled lanes read it as a number, but
-  // the host can pass a list, and `Math.max(<array>, <array>)` is `NaN`
-  // where the interpreter flattens and reduces (ROADMAP CE-366).
+  // the scalar `Math.max(<array>, 1)` (ROADMAP CE-370).
   const mayBeArray = (a: Expression): boolean =>
-    couldBeIndexedCollectionOperand(a) ||
-    isPossiblyCollectionTypedJS(a) ||
-    isDeclaredTopOperand(a);
+    couldBeIndexedCollectionOperand(a) || isPossiblyCollectionTypedJS(a);
   if (
     args.length === 1 &&
     args[0] &&
@@ -17194,17 +17191,12 @@ function countingWalkPlan(target: CompileTarget<Expression>): RangeWalkPlan {
  * identity seed (`0` for Sum, `1` for Product) makes the empty collection agree
  * with the interpreter (`Sum([]) = 0`, `Product([]) = 1`). Real-valued reduce,
  * consistent with the `Reduce` handler (complex-element folds are not lowered).
- *
- * With `plainList`, the guarded fold reads the operand through
- * `_SYS.plainList`, which copies a numeric typed array to a plain array, so
- * that the `Array.isArray` test of the fold sees it as a list.
  */
 function emitCollectionReduce(
   kind: 'Sum' | 'Product',
   coll: Expression,
   target: CompileTarget<Expression>,
-  guarded: boolean,
-  plainList = false
+  guarded: boolean
 ): string {
   if (!guarded) {
     const mapped = emitMappedReduction(kind, coll, target);
@@ -17325,7 +17317,7 @@ function emitCollectionReduce(
     kind,
     mixedFoldLane(coll),
     kind === 'Sum' && elementsMayDifferInShape(coll, true)
-  )}, ${identity}) : ${otherwise})(${plainList ? `_SYS.plainList(${code})` : code})`;
+  )}, ${identity}) : ${otherwise})(${code})`;
   // When a parent reads the fold as a complex value (`isComplexValued`: an
   // operand typed `broadcastable<complex>`), the fold must give one: a sum
   // of real elements, or the identity of an empty list, is a plain number.

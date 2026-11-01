@@ -15,8 +15,9 @@
  * Unchanged on purpose: a symbol declared `unknown` and an auto-declared
  * symbol are read as scalars (the arithmetic's inference refines them), a
  * call of an undeclared function keeps its `broadcastable<number>` reading,
- * a comparison over the symbol keeps `broadcastable<boolean>` (its value is
- * never a point), and compiled code reads the symbol as a scalar.
+ * and a comparison over the symbol keeps `broadcastable<boolean>` (its value
+ * is never a point). Compiled code declines arithmetic over the symbol,
+ * because its value can be a list.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
@@ -229,68 +230,58 @@ describe('unchanged readings', () => {
   });
 });
 
-// The scalar reading is the code for a value that is not an array. Since
-// ROADMAP CE-366 (user decision 2026-10-25), the outermost element-wise site
-// over such a symbol checks the value at run time and takes a broadcast for
-// an array, so each pin below reads the scalar branch of that check.
-const scalarBranch = (code: string | undefined, read: string): string => {
-  const prefix = `(!(Array.isArray(${read}) || ArrayBuffer.isView(${read})) ? `;
-  expect(code?.startsWith(prefix)).toBe(true);
-  const rest = code!.slice(prefix.length);
-  return rest.slice(0, rest.indexOf(' : ((_tv'));
-};
-
-/** The code of the compiled function `(names) ↦ json`, whose parameters
- * have the types that `ce` declares, with the parameter list `(names) => `
- * removed. A free input declared `any` is refused (the compiled code must
- * know the shape of each input from its type); the run-time test of a value
- * that may be a list is still reachable for a parameter of the root function
- * declared `any`. */
-function rootCode(ce: ComputeEngine, json: unknown, names: string[]): string {
-  const code = compile(
+/** The compilation of the function `(names) ↦ json`, whose parameters
+ * have the types that `ce` declares. A free input declared `any` is refused
+ * (the compiled code must know the shape of each input from its type), so
+ * the symbol is read here as a parameter of the root function. */
+function compileRoot(ce: ComputeEngine, json: unknown, names: string[]) {
+  return compile(
     ce.box([
       'Function',
       json,
       ...names.map((n) => ['Typed', n, { str: ce.box(n).type.toString() }]),
     ] as never),
     { to: 'javascript' }
-  ).code!;
-  const prefix = `(${names.join(', ')}) => `;
-  expect(code.startsWith(prefix)).toBe(true);
-  return code.slice(prefix.length);
+  );
 }
 
-describe('compiled code reads the symbol as a scalar', () => {
-  test('no broadcast wrapper over a symbol declared `any` or library arithmetic over it', () => {
+describe('compiled code declines arithmetic over the symbol', () => {
+  // The value of a symbol declared `any` can be a number or a list, and
+  // compiled code does not test the shape of a value at run time (ROADMAP
+  // CE-366), so library arithmetic over it declines, and the interpreter
+  // fallback computes the value.
+  test('library arithmetic over a symbol declared `any` declines', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('a', 'any');
     expect(
       compile(ce2.box(['Abs', 'a']), { to: 'javascript' }).diagnostic?.code
     ).toBe('untyped-input');
-    expect(scalarBranch(rootCode(ce2, ['Abs', 'a'], ['a']), 'a')).toBe(
-      '_SYS.absAny(a)'
-    );
-    expect(
-      scalarBranch(rootCode(ce2, ce2.parse('2a + 1').json, ['a']), 'a')
-    ).toBe('2 * a + 1');
-    expect(
-      scalarBranch(
-        rootCode(ce2, ce2.parse('\\sin(2a + 1)').json, ['a']),
-        'a'
-      )
-    ).toBe('Math.sin(2 * a + 1)');
+    for (const json of [
+      ['Abs', 'a'],
+      ce2.parse('2a + 1').json,
+      ce2.parse('\\sin(2a + 1)').json,
+    ]) {
+      const result = compileRoot(ce2, json, ['a']);
+      expect(result.success).toBe(false);
+      expect(result.diagnostic?.code).toBe('unsettled-shape');
+      expect(result.unsupported).toContain('a');
+    }
   });
 
-  test('the scalar reading reaches the arms of a selection', () => {
+  test('a selection with the symbol in an arm declines', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('a', 'any');
     ce2.declare('d', 'number');
     ce2.declare('z', 'number');
-    const code = rootCode(
+    const result = compileRoot(
       ce2,
       ['Add', ['If', ['Less', 'd', 0], 'a', 5], 'z'],
       ['a', 'd', 'z']
     );
-    expect(scalarBranch(code, 'a')).not.toContain('_SYS.bcast');
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toContain('a');
+    const run = result.run as unknown as (...args: unknown[]) => unknown;
+    expect(run([1, 2], -1, 10)).toEqual([11, 12]);
+    expect(run([1, 2], 1, 10)).toBe(15);
   });
 });

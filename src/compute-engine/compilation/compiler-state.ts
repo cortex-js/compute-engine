@@ -92,18 +92,6 @@ export const ANTIDERIVATIVE_COMPILATION_STEPS = 600_000;
  */
 export class CompilerState {
   /**
-   * How the compiled lanes read a symbol declared `any` or `value`, and an
-   * application over such a symbol that the compiled lanes read as a scalar
-   * (`isDeclaredTopOperand`). `undefined` is the default: an arithmetic site of
-   * the JavaScript target over such an operand emits a run-time check of the
-   * value (`declaredTopGuard` in `BaseCompiler`). The check compiles the site
-   * twice: once with `'scalar'` (the operand is a number, and the code is the
-   * code compiled before the check existed) and once with `'list'` (the operand
-   * may be a list, and the code broadcasts). Inside either compilation, no
-   * other check is emitted.
-   */
-  static declaredTopMode: 'scalar' | 'list' | undefined = undefined;
-  /**
    * The kind lowering of the compilation in progress (`kind-lowering.ts`):
    * set at the compile boundary when the expression holds a kind value and
    * every kind type found has a representation on the target, `undefined`

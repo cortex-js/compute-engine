@@ -39,7 +39,6 @@ import { COMPLEX_CONTINUATION_HEADS } from './complex-continuation.js';
 import {
   compilationType,
   isBoundPossiblyCollectionTyped,
-  isDeclaredTopListOperand,
   isFlatAllStringComparisonParticipant,
   isGatedIndexedCollection,
   isGatedPoint,
@@ -608,14 +607,10 @@ export function tryCompileBroadcast(
       // 4)]` and `b` holding `[2, 3]` gave `[11, 16]`, where the interpreter
       // scales each point, `[(2, 4), (9, 12)]`. The element-wise code below
       // pairs each number with a point, as the interpreter does.
-      // An operand declared `any` read as a possible list by the run-time
-      // check of `declaredTopGuard` may hold points too, so it takes the
-      // entry-wise code, as a bare `list` does.
       const pointHolder = collection.some(
         (a) =>
-          isDeclaredTopListOperand(a) ||
-          (!isBoundPossiblyCollectionTyped(a, target) &&
-            typeMayHoldTuple(a.type.type))
+          !isBoundPossiblyCollectionTyped(a, target) &&
+          typeMayHoldTuple(a.type.type)
       );
       // A matrix beside an operand that may hold points at run time (the
       // sum of a list of lists of points, `At(L, 1)` over such a list, a

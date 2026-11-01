@@ -21,7 +21,7 @@ import {
   COMPLEX_PROPAGATING_HEADS,
   COMPLEX_TRANSPARENT_HEADS,
   CONTROL_FLOW_HEADS,
-  DECLARED_TOP_GUARD_HEADS,
+  DECLARED_TOP_DECLINE_HEADS,
   ELEMENTWISE_TUPLE_EXEMPT_HEADS,
   ELEMENTWISE_WIDTH_OPERATORS,
   EXACT_EXPONENT_HEADS,
@@ -503,7 +503,6 @@ import {
   compileExprGpuPoint,
   compileExprGpuRelational,
   compileExprTyped,
-  declaredTopGuard,
   noLoweringMessage,
 } from './compile-expr-handlers.js';
 import {
@@ -1351,8 +1350,7 @@ export class BaseCompiler {
     core.compileExpr = f;
   }
   static readonly compileExprCapturedBody = compileExprCapturedBody;
-  static readonly DECLARED_TOP_GUARD_HEADS = DECLARED_TOP_GUARD_HEADS;
-  static readonly declaredTopGuard = declaredTopGuard;
+  static readonly DECLARED_TOP_DECLINE_HEADS = DECLARED_TOP_DECLINE_HEADS;
   static readonly compileExprElementwiseBroadcast =
     compileExprElementwiseBroadcast;
   static readonly compileExprGpuRelational = compileExprGpuRelational;
@@ -2211,8 +2209,6 @@ export {
   isGatedIndexedCollection,
   shapeOperandRefusal,
   exactRationalDivisor,
-  isDeclaredTopOperand,
-  isDeclaredTopListOperand,
   isTopTypedLocalSymbol,
   isProvablyNumericListOperand,
   isGatedNumericListOperand,

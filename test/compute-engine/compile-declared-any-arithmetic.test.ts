@@ -3,15 +3,14 @@ import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
- * A symbol declared `any` is read as a number by the compiled code, so that a
- * host that declares every parameter `any` does not pay for a broadcast at
- * every arithmetic site. But the host can pass a list, and the JavaScript
- * operators give a wrong value for one: `p + q` gave the string `"1,23,4"`
- * for `[1, 2]` and `[3, 4]`, and `p·q` gave `NaN`. The arithmetic sites, the
- * comparisons and the other element-wise functions (`Sin`, `Abs`, …) over
- * such a symbol now check the value at run time, and
- * take the list code for an array (ROADMAP CE-366, user decision
- * 2026-10-25). A value that is not an array takes the code compiled before.
+ * A symbol declared `any` or `value` can hold a number or a list, and the
+ * interpreter maps an element-wise operator over a list. The JavaScript
+ * operators give a wrong value for a list: `p + q` gave the string
+ * `"1,23,4"` for `[1, 2]` and `[3, 4]`, and `p·q` gave `NaN` (ROADMAP
+ * CE-366). Compiled code does not test the shape of a value at run time, so
+ * an arithmetic site, a comparison, an element-wise function (`Sin`,
+ * `Abs`, …), `Max`, `Min`, `Sum` and `Product` over such a symbol decline,
+ * and the interpreter fallback computes the value.
  *
  * `PointX` of a number is the `incompatible-type` error in the interpreter.
  * Compiled code throws a `RangeError` for it (ROADMAP CE-214.2, user
@@ -44,8 +43,8 @@ function toMathJson(v: unknown): unknown {
 
 /** The function literal of `body` whose parameters `names` are declared
  * `any`. An INPUT declared `any` is refused (ROADMAP CE-712.1); a parameter
- * of the root function declared `any` compiles, with the run-time check of
- * its value that these tests read. */
+ * of the root function declared `any` is not an input, and the arithmetic
+ * over it declines. */
 function anyFunction(ce: ComputeEngine, body: unknown, names = ['p', 'q']) {
   return ce.box([
     'Function',
@@ -55,18 +54,26 @@ function anyFunction(ce: ComputeEngine, body: unknown, names = ['p', 'q']) {
 }
 
 /** The compiled result and the interpreted result of `expr` for the values
- * `p` and `q`. The compiled route compiles `expr` as the body of a
- * function whose parameters `p` and `q` are declared `any`, and calls it
- * with `p` and `q`. The interpreted route evaluates `expr` in a fresh
- * engine where `p` and `q` are declared `any` and hold the values. */
+ * `p` and `q`. Without the fallback, the compilation of the function whose
+ * parameters `p` and `q` are declared `any` throws the decline. With the
+ * fallback, the result has `success: false`, and its `run` is called with
+ * `p` and `q`. The interpreted route evaluates `expr` in a fresh engine
+ * where `p` and `q` are declared `any` and hold the values. */
 function bothRoutes(
   expr: unknown,
   p: unknown,
   q: unknown
-): { code: string; compiled: unknown; evaluated: Value } {
+): { compiled: unknown; evaluated: Value } {
   const ce = new ComputeEngine();
+  expect(() => compile(anyFunction(ce, expr), { fallback: false })).toThrow(
+    /declared `any` or `value`/
+  );
   const result = compile(anyFunction(ce, expr));
-  expect(result.success).toBe(true);
+  expect(result.success).toBe(false);
+  expect(result.diagnostic?.code).toBe('unsettled-shape');
+  expect(result.unsupported).toEqual(
+    expect.arrayContaining([expect.stringMatching(/^[pq]$/)])
+  );
   const compiled = (result.run as unknown as (...args: unknown[]) => unknown)(
     p,
     q
@@ -78,7 +85,7 @@ function bothRoutes(
   ce2.assign('p', ce2.box(toMathJson(p) as any));
   ce2.assign('q', ce2.box(toMathJson(q) as any));
   const evaluated = toValue(ce2.box(expr as any).evaluate());
-  return { code: result.code!, compiled, evaluated };
+  return { compiled, evaluated };
 }
 
 /** Compare two values with a tolerance for the float cells. */
@@ -104,7 +111,7 @@ const VALUES: Array<[unknown, unknown]> = [
   [2, [3, 4]],
 ];
 
-describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
+describe('CE-366: arithmetic over symbols declared any declines', () => {
   const heads: Array<[string, unknown]> = [
     ['Add', ['Add', 'p', 'q']],
     ['Subtract', ['Subtract', 'p', 'q']],
@@ -114,11 +121,10 @@ describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
     ['Negate', ['Negate', 'p']],
     ['nested sum and product', ['Add', ['Multiply', 2, 'p'], 'q', 1]],
     ['a sum with a library function', ['Add', ['Sin', 'p'], 'q']],
-    // An element-wise library function is checked too: its scalar kernel
-    // gives `NaN` for an array (`Math.sin([1, 2])`).
     ['Sin of a sum', ['Sin', ['Add', ['Multiply', 2, 'p'], 1]]],
     ['Abs', ['Abs', 'p']],
     ['Sqrt', ['Sqrt', ['Abs', 'p']]],
+    ['Sin(p) + Cos(Sin(p))', ['Add', ['Sin', 'p'], ['Cos', ['Sin', 'p']]]],
   ];
   for (const [name, expr] of heads) {
     for (const [p, q] of VALUES) {
@@ -129,32 +135,8 @@ describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
     }
   }
 
-  test('the sum of two lists is not a string', () => {
-    const { code, compiled } = bothRoutes(['Add', 'p', 'q'], [1, 2], [3, 4]);
-    expect(code).toBe(
-      '(p, q) => (!(Array.isArray(p) || ArrayBuffer.isView(p)) && ' +
-        '!(Array.isArray(q) || ArrayBuffer.isView(q)) ? p + q : ' +
-        '((_tv1, _tv2) => _SYS.bcast((_tv3, _tv4) => (_tv3 + _tv4), _tv1, _tv2))' +
-        '(_SYS.plainList(p), _SYS.plainList(q)))'
-    );
-    expect(compiled).toEqual([4, 6]);
-  });
-
-  test('a symbol used twice is tested once', () => {
-    const { code } = bothRoutes(
-      ['Add', ['Multiply', 'p', 'p'], ['Negate', 'p']],
-      2,
-      3
-    );
-    expect(code.match(/Array\.isArray\(p\)/g)?.length).toBe(1);
-  });
-
-  test('two matrices take the entry-wise product, as a bare list does', () => {
-    // An `any` value may hold a list of points, and compiled code holds a
-    // list of points and a matrix as the same array, so it cannot choose the
-    // matrix product the interpreter computes for two matrices (ROADMAP
-    // CE-216.1).
-    const { compiled } = bothRoutes(
+  test('two matrices take the matrix product of the interpreter', () => {
+    const { compiled, evaluated } = bothRoutes(
       ['Multiply', 'p', 'q'],
       [
         [1, 2],
@@ -165,10 +147,30 @@ describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
         [7, 8],
       ]
     );
-    expect(compiled).toEqual([
-      [5, 12],
-      [21, 32],
-    ]);
+    expectClose(compiled, evaluated);
+  });
+
+  test('the message names each symbol and says to declare its shape', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      compile(anyFunction(ce, ['Add', 'p', 'q']), { fallback: false })
+    ).toThrow(/`Add` over "p", "q".*Declare the shape/);
+  });
+
+  test('a parameter declared value declines too', () => {
+    const ce = new ComputeEngine();
+    const result = compile(
+      ce.box([
+        'Function',
+        ['Multiply', 2, 'p'],
+        ['Typed', 'p', { str: 'value' }],
+      ] as any)
+    );
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toContain('p');
+    const run = result.run as unknown as (p: unknown) => unknown;
+    expect(run([1, 2])).toEqual([2, 4]);
+    expect(run(3)).toBe(6);
   });
 
   test('a declared number keeps the scalar code with no check', () => {
@@ -177,43 +179,83 @@ describe('CE-366: arithmetic over symbols declared any that hold lists', () => {
     ce.declare('b', 'real');
     expect(compile(ce.box(['Add', 'a', 'b'])).code).toBe('_.a + _.b');
   });
+
+  test('a parameter declared any that is only returned compiles', () => {
+    const ce = new ComputeEngine();
+    const result = compile(anyFunction(ce, 'p', ['p']), { fallback: false });
+    expect(result.success).toBe(true);
+    const run = result.run as unknown as (p: unknown) => unknown;
+    expect(run([1, 2])).toEqual([1, 2]);
+  });
 });
 
-describe('CE-366: the run-time check and the shared subexpressions', () => {
-  // The scalar code and the list code are compiled in separate regions of
-  // common subexpressions. When they shared one region, the temporary that
-  // the scalar code bound for `Sin(p)` (`Math.sin(_.p)`) was bound before the
-  // check and read by the list code too, and a list `p` gave `NaN` cells.
-  const exprs: Array<[string, unknown]> = [
-    ['Sin(p) + Cos(Sin(p))', ['Add', ['Sin', 'p'], ['Cos', ['Sin', 'p']]]],
-    [
-      '(p + 1)^2 + (p + 1)',
-      ['Add', ['Power', ['Add', 'p', 1], 2], ['Add', 'p', 1]],
-    ],
-    [
-      'Sin(p q) + Sin(p q)^2',
-      [
-        'Add',
-        ['Sin', ['Multiply', 'p', 'q']],
-        ['Power', ['Sin', ['Multiply', 'p', 'q']], 2],
-      ],
-    ],
-  ];
-  for (const [name, expr] of exprs) {
-    for (const [p, q] of VALUES) {
-      test(`${name} at p = ${JSON.stringify(p)}, q = ${JSON.stringify(q)}`, () => {
-        const { compiled, evaluated } = bothRoutes(expr, p, q);
-        expectClose(compiled, evaluated);
-      });
-    }
-  }
+describe('CE-366: a symbol declared any or value with a value declines', () => {
+  // The compiled code reads the value of such a symbol where the symbol
+  // occurs. The value can be a list, and the scalar code gave a wrong
+  // value for one: with `p` declared `any` and assigned `2L`, `p + 1` gave
+  // the string "2,41" at `L = [1, 2]`, where the interpreter gives `[3, 5]`.
+  const engine = (type: string): ComputeEngine => {
+    const ce = new ComputeEngine();
+    ce.declare('k', type as never);
+    ce.assign('k', ce.box(['List', 1, 2]));
+    ce.declare('x', 'real');
+    return ce;
+  };
+
+  for (const type of ['any', 'value'])
+    test(`k + x with k: ${type} holding [1, 2]`, () => {
+      const ce = engine(type);
+      const expr = ce.box(['Add', 'k', 'x']);
+      expect(() =>
+        compile(expr, { to: 'javascript', fallback: false })
+      ).toThrow(/`Add` over "k": it is declared `any` or `value`/);
+      const result = compile(expr, { to: 'javascript' });
+      expect(result.success).toBe(false);
+      expect(result.diagnostic?.code).toBe('unsettled-shape');
+      expect(result.unsupported).toContain('k');
+      expect(result.run!({ x: 10 })).toEqual([11, 12]);
+    });
+
+  test.each([
+    ['Max(k, 1)', ['Max', 'k', 1], 2],
+    ['Sum(k)', ['Sum', 'k'], 3],
+  ])('%s with k: any holding [1, 2]', (_name, json, expected) => {
+    const ce = engine('any');
+    const expr = ce.box(json as any);
+    const options = { to: 'javascript', constantFold: false } as const;
+    expect(() => compile(expr, { ...options, fallback: false })).toThrow(
+      /over "k": it is declared `any` or `value`/
+    );
+    const result = compile(expr, options);
+    expect(result.success).toBe(false);
+    expect(result.run!({})).toBe(expected);
+    expect(toValue(expr.evaluate())).toBe(expected);
+  });
+
+  test('p + 1 with p: any assigned 2L', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'any');
+    ce.declare('L', 'list<real>');
+    ce.assign('p', ce.box(['Multiply', 2, 'L']));
+    const expr = ce.box(['Add', 'p', 1]);
+    const options = { to: 'javascript', constantFold: false } as const;
+    expect(() => compile(expr, { ...options, fallback: false })).toThrow(
+      /`Add` over "p": it is declared `any` or `value`/
+    );
+    const result = compile(expr, options);
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('unsettled-shape');
+    expect(result.unsupported).toContain('p');
+    // The interpreter's value.
+    ce.assign('L', ce.box(['List', 1, 2]));
+    expect(toValue(expr.evaluate())).toEqual([3, 5]);
+  });
 });
 
-describe('CE-366: the run-time check reads each input once', () => {
-  // A `vars` mapping can be any source. The check evaluated it once in the
-  // test and once more in the branch, so the value it tested was not the
-  // value it used. An input declared `any` is now refused (ROADMAP
-  // CE-712.1), so the interpreter reads the source once.
+describe('CE-366: an input declared any is refused before the decline', () => {
+  // An input declared `any` is refused (ROADMAP CE-712.1), with the code
+  // `untyped-input`, as on every other target, and the interpreter reads the
+  // source of a `vars` mapping once.
   test('an input declared any mapped through vars is refused', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'any');
@@ -227,52 +269,29 @@ describe('CE-366: the run-time check reads each input once', () => {
   });
 });
 
-describe('CE-366: a numeric typed array is a list', () => {
-  // A host can pass a `Float64Array` for a symbol declared `any`. The check
-  // tested `Array.isArray` only, and `p + q` concatenated two typed arrays as
-  // strings.
-  const exprs: Array<[string, unknown]> = [
-    ['Add', ['Add', 'p', 'q']],
-    ['Multiply', ['Multiply', 'p', 'q']],
-    ['Sin', ['Sin', 'p']],
-    ['Less', ['Less', 'p', 'q']],
-  ];
-  for (const [name, expr] of exprs) {
-    test(name, () => {
-      const p = [1, 2];
-      const q = [3, 4];
-      const { evaluated } = bothRoutes(expr, p, q);
-      const ce = new ComputeEngine();
-      const result = compile(anyFunction(ce, expr));
-      const compiled = (
-        result.run as unknown as (...args: unknown[]) => unknown
-      )(Float64Array.from(p), Float64Array.from(q));
-      expectClose(compiled, evaluated);
-    });
-  }
-});
-
 describe('CE-366: a shared expression is walked once', () => {
   // `t0 = p`, `tn = Beta(tn-1, tn-1)`: the expression has n + 1 nodes but
-  // 2^n positions. The walk that collects the symbols to test visited every
-  // position, and at depth 40 it did not end.
-  test('a tower of depth 40 compiles quickly', () => {
+  // 2^n positions. The walk that collects the symbols declared `any` visited
+  // every position, and at depth 40 it did not end.
+  test('a tower of depth 40 declines quickly', () => {
     const ce = new ComputeEngine();
     let t: Expression = ce.symbol('p');
     for (let i = 0; i < 40; i++) t = ce.function('Beta', [t, t]);
     const start = Date.now();
-    const result = compile(
-      ce.function('Function', [
-        ce.function('Add', [t, 1]),
-        ce.box(['Typed', 'p', { str: 'any' }]),
-      ])
-    );
-    expect(result.success).toBe(true);
+    expect(() =>
+      compile(
+        ce.function('Function', [
+          ce.function('Add', [t, 1]),
+          ce.box(['Typed', 'p', { str: 'any' }]),
+        ]),
+        { fallback: false }
+      )
+    ).toThrow(/declared `any` or `value`/);
     expect(Date.now() - start).toBeLessThan(5000);
   });
 });
 
-describe('CE-366: comparisons over symbols declared any that hold lists', () => {
+describe('CE-366: comparisons over symbols declared any decline', () => {
   const heads: Array<[string, unknown]> = [
     ['Less', ['Less', 'p', 'q']],
     ['GreaterEqual', ['GreaterEqual', 'p', 'q']],
@@ -294,9 +313,7 @@ describe('CE-366: comparisons over symbols declared any that hold lists', () => 
   }
 });
 
-describe('CE-366: Max and Min over symbols declared any that hold lists', () => {
-  // The interpreter flattens every level of a list operand and reduces;
-  // `Math.max(<array>, <array>)` was `NaN`.
+describe('CE-366: Max and Min over symbols declared any decline', () => {
   const heads: Array<[string, unknown]> = [
     ['Max(p, q)', ['Max', 'p', 'q']],
     ['Min(p, q)', ['Min', 'p', 'q']],

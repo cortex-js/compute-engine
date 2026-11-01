@@ -732,10 +732,12 @@ describe('COMPILED Abs OF AN OPERAND THAT CAN HOLD A SET OR A STRING', () => {
   ce2.declare('r', 'real');
   ce2.declare('S', 'set<integer>');
 
-  test('an operand of type any is tested at run time', () => {
+  test('an operand of type any declines', () => {
     // An INPUT declared `any` is refused at compile time (ROADMAP
-    // CE-712.1); a parameter of the root function declared `any` compiles,
-    // with the run-time test of its value.
+    // CE-712.1). `Abs` of a parameter of the root function declared `any`
+    // declines: its value can be a number or a list, and compiled code does
+    // not test the shape of a value at run time. The interpreter fallback
+    // computes the value.
     const refused = compile(ce2.box(['Abs', 'z']), { to: 'javascript' });
     expect(refused.success).toBe(false);
     expect(refused.diagnostic?.code).toBe('untyped-input');
@@ -744,19 +746,11 @@ describe('COMPILED Abs OF AN OPERAND THAT CAN HOLD A SET OR A STRING', () => {
       ce2.box(['Function', ['Abs', 'z'], ['Typed', 'z', "'any'"]]),
       { to: 'javascript' }
     );
-    expect(f.success).toBe(true);
-    // A value that is not an array takes `_SYS.absAny`; an array takes the
-    // broadcast, as in the interpreter (ROADMAP CE-366, user decision
-    // 2026-10-25; a list threw before).
-    expect(f.code).toContain(
-      '(!(Array.isArray(z) || ArrayBuffer.isView(z)) ? _SYS.absAny(z) : ' +
-        '((_tv1) => _SYS.bcast((_tv2) => _SYS.absAny(_tv2), _tv1))' +
-        '(_SYS.plainList(z)))'
-    );
+    expect(f.success).toBe(false);
+    expect(f.diagnostic?.code).toBe('unsettled-shape');
+    expect(f.unsupported).toContain('z');
     const run = f.run as unknown as (z: unknown) => unknown;
     expect(run(-3)).toBe(3);
-    expect(() => run('abc')).toThrow(/a string/);
-    expect(() => run(new Set([1, 2]))).toThrow(/a set/);
     expect(run([-1, 2])).toEqual([1, 2]);
   });
 

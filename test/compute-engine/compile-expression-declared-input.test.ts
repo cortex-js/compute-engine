@@ -6,8 +6,8 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
 // `expression`, and maps an element-wise operator over it. Compiled
 // JavaScript reads such a symbol as a scalar, with no run-time test of its
 // value, so a read of it as an input is declined and the interpreter
-// computes the value. A symbol declared `any` or `value` compiles, with a
-// run-time test (`declaredTopGuard`).
+// computes the value. Arithmetic over a symbol declared `any` or `value`
+// declines too, for the same reason.
 
 const js = (ce: ComputeEngine, json: unknown, options: object = {}) =>
   compile(ce.box(json as never), { to: 'javascript', ...options } as never)!;
@@ -79,18 +79,22 @@ describe('COMPILED CODE AND AN INPUT DECLARED `expression`', () => {
     expect(result.run!({})).toBe(6);
   });
 
-  test('a symbol declared value compiles with a run-time test', () => {
+  test('a symbol declared value declines', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'value');
+    expect(() => js(ce, ['Multiply', 2, 'x'], { fallback: false })).toThrow(
+      /"x": it is declared `any` or `value`/
+    );
     const result = js(ce, ['Multiply', 2, 'x']);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toContain('x');
     expect(result.run!({ x: [1, 2] })).toEqual([2, 4]);
     expect(result.run!({ x: 3 })).toBe(6);
   });
 
   // An INPUT declared `any` is refused at compile time (ROADMAP CE-712.1).
-  // A parameter of the root function declared `any` compiles, with the
-  // run-time test of its value.
+  // Arithmetic over a parameter of the root function declared `any`
+  // declines.
   test('an input declared any is refused', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'any');
@@ -100,7 +104,7 @@ describe('COMPILED CODE AND AN INPUT DECLARED `expression`', () => {
     expect(result.unsupported).toContain('x');
   });
 
-  test('a parameter declared any compiles with a run-time test', () => {
+  test('a parameter declared any declines', () => {
     const ce = new ComputeEngine();
     const result = compile(
       ce.box([
@@ -110,7 +114,8 @@ describe('COMPILED CODE AND AN INPUT DECLARED `expression`', () => {
       ] as never),
       { to: 'javascript' } as never
     )!;
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toContain('x');
     const run = result.run as unknown as (x: unknown) => unknown;
     expect(run([1, 2])).toEqual([2, 4]);
     expect(run(3)).toBe(6);

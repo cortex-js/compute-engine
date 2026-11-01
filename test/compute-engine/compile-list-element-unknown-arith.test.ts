@@ -85,7 +85,8 @@ type Run = readonly [unknown, unknown, boolean?];
 
 /** The compiled function of `json`, called with the values of the
  * parameters `names` (by default `x`, `c` and `z`; `c` is `true` and `z` is
- * `0` when the call leaves them out).
+ * `0` when the call leaves them out). With `fallback`, a compilation that
+ * declines gives the interpreter fallback.
  *
  * A compiled input whose type is `any` (`x`, `z`) is refused. So `json` is
  * compiled as the body of the function `(x, c, z) ↦ json`, whose parameters
@@ -94,7 +95,8 @@ type Run = readonly [unknown, unknown, boolean?];
 function compiledFunction(
   ce: ComputeEngine,
   json: unknown,
-  names: string[] = ['x', 'c', 'z']
+  names: string[] = ['x', 'c', 'z'],
+  fallback = false
 ): (vars: Record<string, unknown>) => unknown {
   const typed = (name: string): unknown => [
     'Typed',
@@ -103,7 +105,7 @@ function compiledFunction(
   ];
   const result = compile(
     ce.box(['Function', json, ...names.map(typed)] as never),
-    { to: 'javascript', fallback: false } as never
+    { to: 'javascript', fallback } as never
   );
   const run = result.run as unknown as (...args: unknown[]) => unknown;
   const defaults: Record<string, unknown> = { c: true, z: 0 };
@@ -132,15 +134,41 @@ function expectUnsettledDecline(ce: ComputeEngine, json: unknown): void {
   expect(r.unsupported).toContain('x');
 }
 
-/** For each run, the compiled value, the interpreted value, and whether
- * they agree. Throws when the expression does not compile. */
-function compiledAndInterpreted(
+/** Expect the compilation of `(x, c, z) ↦ json` to decline because the
+ * parameter `z` is declared `any`: its value can be a number or a list, and
+ * compiled code does not test the shape of a value at run time. The
+ * interpreter fallback gives the interpreted value for each run. */
+function expectAnyParameterDecline(
   ce: ComputeEngine,
   json: unknown,
   runs: ReadonlyArray<Run>
+): void {
+  const typed = (name: string): unknown => [
+    'Typed',
+    name,
+    { str: ce.box(name).type.toString() },
+  ];
+  const r = compile(
+    ce.box(['Function', json, ...['x', 'c', 'z'].map(typed)] as never),
+    { to: 'javascript' } as never
+  );
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+  expect(r.unsupported).toContain('z');
+  expectAgreement(compiledAndInterpreted(ce, json, runs, true));
+}
+
+/** For each run, the compiled value, the interpreted value, and whether
+ * they agree. Throws when the expression does not compile, unless
+ * `fallback` is set. */
+function compiledAndInterpreted(
+  ce: ComputeEngine,
+  json: unknown,
+  runs: ReadonlyArray<Run>,
+  fallback = false
 ): { compiled: unknown; interpreted: unknown; ok: boolean }[] {
   const expr = ce.box(json as any);
-  const run = compiledFunction(ce, json);
+  const run = compiledFunction(ce, json, undefined, fallback);
   return runs.map(([js, mathJson, c = true]) => {
     ce.assign('x', ce.box(mathJson as any));
     ce.assign('c', c);
@@ -252,6 +280,15 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
             json,
             ['a']
           );
+        // With `x: real`, the arm `z` reaches the `+` of a number, and the
+        // compilation declines (`expectAnyParameterDecline`). With a list
+        // `x`, the `+` broadcasts over the arms, and compiles.
+        if (name.endsWith('z: any') && xType === 'real')
+          return expectAnyParameterDecline(
+            rowEngine(signature, xType),
+            json,
+            X_RUNS[xType]
+          );
         expectAgreement(
           compiledAndInterpreted(
             rowEngine(signature, xType),
@@ -323,21 +360,17 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
     expect(expr.evaluate().type.matches(expr.type)).toBe(true);
   });
 
-  test('a parameter declared any stays scalar code for a number', () => {
-    // The value is checked at run time (ROADMAP CE-366, user decision
-    // 2026-10-25): a value that is not an array takes the scalar code, and
-    // an array takes the broadcast. A free input declared `any` is refused,
-    // so `z` is a parameter of the root function.
+  test('arithmetic over a parameter declared any declines', () => {
+    // The value of `z` can be a number or a list, and compiled code does not
+    // test the shape of a value at run time (ROADMAP CE-366). A free input
+    // declared `any` is refused, so `z` is a parameter of the root function.
     const ce = rowEngine('(unknown) -> list');
-    const code = compile(
-      ce.box(['Function', ['Add', 'z', 1], ['Typed', 'z', { str: 'any' }]]),
-      { to: 'javascript', fallback: false } as never
-    ).code!;
-    expect(
-      code.startsWith(
-        '(z) => (!(Array.isArray(z) || ArrayBuffer.isView(z)) ? z + 1 : '
+    expect(() =>
+      compile(
+        ce.box(['Function', ['Add', 'z', 1], ['Typed', 'z', { str: 'any' }]]),
+        { to: 'javascript', fallback: false } as never
       )
-    ).toBe(true);
+    ).toThrow(/"z": it is declared `any` or `value`/);
   });
 
   test('a global with an assigned value and a free variable stay scalar code', () => {
@@ -383,12 +416,19 @@ describe('CE-360: a number x keeps compiling to the interpreted value', () => {
               json,
               ['a']
             );
+          const runs: ReadonlyArray<Run> = [
+            [3, 3],
+            [0.5, 0.5],
+            [0.5, 0.5, false],
+          ];
+          if (name.endsWith('z: any'))
+            return expectAnyParameterDecline(
+              rowEngine(signature, xType),
+              json,
+              runs
+            );
           expectAgreement(
-            compiledAndInterpreted(rowEngine(signature, xType), json, [
-              [3, 3],
-              [0.5, 0.5],
-              [0.5, 0.5, false],
-            ])
+            compiledAndInterpreted(rowEngine(signature, xType), json, runs)
           );
         }
       );

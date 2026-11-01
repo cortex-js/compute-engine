@@ -99,7 +99,9 @@ describe('an absent value that a symbol declared any holds is NaN in arithmetic'
     const expr = ce.box(json as any);
     // Compiled, with `p` absent. An input declared `any` is refused
     // (ROADMAP CE-712.1), so the expression is compiled as the body of a
-    // function whose parameters `p` and `q` are declared `any`.
+    // function whose parameters `p` and `q` are declared `any`. The
+    // arithmetic over such a parameter declines, because its value can be
+    // a list, and the interpreter fallback computes the value.
     const compiled = compile(
       ce.box([
         'Function',
@@ -108,7 +110,8 @@ describe('an absent value that a symbol declared any holds is NaN in arithmetic'
         ['Typed', 'q', { str: 'any' }],
       ] as any)
     );
-    expect(compiled.success).toBe(true);
+    expect(compiled.success).toBe(false);
+    expect(compiled.unsupported).toContain('p');
     const run = compiled.run as unknown as (p: unknown, q: unknown) => unknown;
     expect(run(undefined, 2)).toBeNaN();
     // `subs`.

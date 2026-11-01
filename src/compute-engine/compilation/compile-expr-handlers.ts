@@ -1,4 +1,4 @@
-// The remaining compileExpr handlers: captured bodies, declared-top guards,
+// The remaining compileExpr handlers: captured bodies, declared-top declines,
 // element-wise broadcast, GPU relations and points, Declare, Coalesce, Assign,
 // ApplyField, Typed and AssertPresent.
 
@@ -28,7 +28,7 @@ import {
 import type { CompileTarget, TargetSource } from './types.js';
 import {
   CONTROL_FLOW_HEADS,
-  DECLARED_TOP_GUARD_HEADS,
+  DECLARED_TOP_DECLINE_HEADS,
   LOGICAL_BROADCAST_HEADS,
   SCALAR_ARITHMETIC_HEADS,
 } from './compiler-tables.js';
@@ -38,8 +38,8 @@ import {
   userFunctionLiteral,
 } from './compile-assignment-checks.js';
 import { CompilerState } from './compiler-state.js';
+import { assertNoDeclaredTopOperands } from './compile-admission.js';
 import {
-  collectDeclaredTopSymbols,
   compilationType,
   isBoundPossiblyCollectionTyped,
   isGatedIndexedCollection,
@@ -49,13 +49,10 @@ import {
 } from './compiler-type-facts.js';
 import { core } from './compiler-core-hooks.js';
 import {
-  _codeAliases,
-  _codeOverrides,
   isRealOnlyLowering,
   withPromotionSuppressed,
 } from './compiler-mode.js';
-import { ATOMIC_FRAGMENT, absenceAxisForType } from './compile-absence.js';
-import { tempVar } from './compiler-naming.js';
+import { absenceAxisForType } from './compile-absence.js';
 import {
   compileOp,
   compileOpValue,
@@ -148,167 +145,32 @@ export function compileExprCapturedBody(
 }
 
 /**
- * The JavaScript code of an arithmetic head, a comparison or another
- * element-wise head (`DECLARED_TOP_GUARD_HEADS`) with an operand whose
- * value may be a list although the compiled lanes read it as a number: a
- * symbol declared `any` or `value`, or a library application over one
- * (`isDeclaredTopOperand`). `undefined` when no operand is such an
- * operand, and the caller continues as before.
- *
- * The compiled lanes read such a symbol as a number, because a host that
- * declares every parameter `any` would otherwise pay for a broadcast at
- * every arithmetic site (`possiblyCollectionTypedForCompile`). But the
- * host can pass a list, and the JavaScript operators give a wrong value
- * for a list: `p + q` gave the string `"1,23,4"` for `[1, 2]` and
- * `[3, 4]`, where the interpreter gives `[4, 6]`. So the code checks the
- * values of the declared symbols at run time:
- *
- * `(!(Array.isArray(_.p) || ArrayBuffer.isView(_.p)) && … ? _.p + _.q :
- * <list code>)`
- *
- * The scalar branch is the code compiled before this check existed, so a
- * value that is not an array (a number, a complex number, an absent value)
- * gives the same result as before, and the cost for a number is one
- * `Array.isArray` and one `ArrayBuffer.isView` test per symbol. A plain
- * read such as `_.p` is repeated in the test; any other read is evaluated
- * once, into a temporary. Each operand is still evaluated once, in the
- * branch that runs. The list code is the code of an operand that may be
- * a number or a list at run time (`_SYS.bcast`, `_SYS.eq`). For `Multiply`
- * and `Power` it is the ENTRY-WISE code, not the matrix product or the
- * matrix power: an `any` value may hold a list of points, and compiled code
- * holds a list of points `[(1, 2), (3, 4)]` and the matrix
- * `[[1, 2], [3, 4]]` as the same array, so it cannot tell them apart. The
- * bare `list` type makes the same choice (ROADMAP CE-216).
- *
- * Only the outermost such site of an expression has the check: both
- * branches are compiled with `declaredTopMode` set, and no check is emitted
- * inside them. When the list code cannot be compiled, the scalar code is
- * returned, as before.
+ * Decline an arithmetic head, a comparison or another element-wise head
+ * (`DECLARED_TOP_DECLINE_HEADS`, or a head whose definition is
+ * `broadcastable`) with an operand whose type settles no shape: a symbol
+ * declared `any` or `value`, or a library application over one
+ * (`isDeclaredTopOperand`). Such a symbol is a parameter of a function
+ * literal or of a user function declared `any` or `value`, an input
+ * declared `value`, or a symbol declared `any` or `value` with a value
+ * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`). Its value can be a number or a list, and the
+ * interpreter maps an element-wise head over a list. The JavaScript
+ * operators give a wrong value for a list (`p + q` gives the string
+ * `"1,23,4"` for `[1, 2]` and `[3, 4]`, where the interpreter gives
+ * `[4, 6]`), and compiled code does not test the shape of a value at run
+ * time. So the compilation declines, and the message tells the host to
+ * declare the shape of the symbol (`real`, `list<real>`).
  */
-export function declaredTopGuard(
+function declineElementwiseOverDeclaredTop(
   engine: ComputeEngine,
   h: string,
   args: ReadonlyArray<Expression>,
-  prec: number,
-  target: CompileTarget<Expression>,
-  node: Expression | undefined
-): TargetSource | undefined {
-  if (CompilerState.declaredTopMode !== undefined) return undefined;
-  if (!DECLARED_TOP_GUARD_HEADS.has(h)) {
+  target: CompileTarget<Expression>
+): void {
+  if (!DECLARED_TOP_DECLINE_HEADS.has(h)) {
     const def = engine.lookupDefinition(h);
-    if (!isOperatorDef(def) || def.operator.broadcastable !== true)
-      return undefined;
+    if (!isOperatorDef(def) || def.operator.broadcastable !== true) return;
   }
-  const symbols = new Set<Expression>();
-  const visited = new Set<Expression>();
-  for (const a of args) collectDeclaredTopSymbols(a, symbols, visited);
-  if (symbols.size === 0) return undefined;
-
-  // The code that reads each symbol, grouped: two nodes of one symbol give
-  // the same code, and are tested once. A node that already has a
-  // replacement code (`_codeOverrides`, `_codeAliases`) is read through it
-  // and is not given a second one.
-  const nodesOfRead = new Map<string, Expression[]>();
-  for (const s of symbols) {
-    const read = core.compile(s, target);
-    if (_codeOverrides.has(s) || _codeAliases.has(s)) continue;
-    const nodes = nodesOfRead.get(read);
-    if (nodes === undefined) nodesOfRead.set(read, [s]);
-    else nodes.push(s);
-  }
-
-  // A read that is not a plain name or property access (a `vars` mapping
-  // can be any source, such as `_.values.shift()`) is evaluated once, into
-  // a temporary. The test and both branches then read the temporary, so
-  // the value that is tested is the value that is used. A plain read such
-  // as `_.p` stays inline, as the other run-time checks of this compiler
-  // do (`ATOMIC_FRAGMENT`).
-  const outer: Array<[string, TargetSource]> = [];
-  const reads: Array<{ code: TargetSource; nodes: Expression[] }> = [];
-  for (const [read, nodes] of nodesOfRead) {
-    if (ATOMIC_FRAGMENT.test(read)) {
-      reads.push({ code: read, nodes });
-      continue;
-    }
-    const name = tempVar(target);
-    outer.push([name, read]);
-    reads.push({ code: name, nodes });
-  }
-  const bind = (
-    bindings: Array<[string, TargetSource]>,
-    body: TargetSource
-  ): TargetSource =>
-    bindings.length === 0
-      ? body
-      : (target.bindExpr?.(bindings, body) ??
-        `((${bindings.map(([n]) => n).join(', ')}) => ${body})(${bindings.map(([, c]) => c).join(', ')})`);
-
-  // Compile `h` with the mode set and the symbol nodes read through
-  // `codes` (one code per entry of `reads`). Each compilation has its own
-  // region of common subexpressions that cannot read a temporary bound
-  // outside it (`withCseIsolatedInstance`): the same structure has scalar
-  // code in one branch and list code in the other, so a temporary bound in
-  // one branch must not be read in the other, or before the test.
-  const compileIn = (
-    mode: 'scalar' | 'list',
-    codes: ReadonlyArray<TargetSource>
-  ): TargetSource => {
-    const installed: Expression[] = [];
-    CompilerState.declaredTopMode = mode;
-    try {
-      reads.forEach(({ nodes }, i) => {
-        for (const s of nodes) {
-          _codeAliases.set(s, codes[i]);
-          installed.push(s);
-        }
-      });
-      return withCseIsolatedInstance(target, () =>
-        core.compileExpr(engine, h, args, prec, target, node)
-      );
-    } finally {
-      CompilerState.declaredTopMode = undefined;
-      for (const s of installed) _codeAliases.delete(s);
-    }
-  };
-
-  const scalar = compileIn(
-    'scalar',
-    reads.map(({ code }) => code)
-  );
-  // The list code reads each symbol through a second temporary that holds
-  // a plain array: the list kernels (`_SYS.bcast`, `_SYS.eq`) test for a
-  // plain `Array`, and a host can pass a numeric typed array
-  // (`Float64Array`) for a symbol declared `any`. `_SYS.plainList` copies
-  // such an array, and returns any other value as it is.
-  const listNames = reads.map(() => tempVar(target));
-  let list: TargetSource;
-  try {
-    list = compileIn('list', listNames);
-  } catch {
-    return bind(outer, scalar);
-  }
-  // When the list code is the scalar code with other names, the check
-  // changes nothing. The names are fresh temporaries, so they occur in the
-  // list code only where a symbol was read.
-  let listAsScalar = list;
-  listNames.forEach((name, i) => {
-    listAsScalar = listAsScalar.replace(
-      new RegExp(`\\b${name}\\b`, 'g'),
-      () => reads[i].code
-    );
-  });
-  if (listAsScalar === scalar) return bind(outer, scalar);
-  const listCode = bind(
-    listNames.map((name, i) => [name, `_SYS.plainList(${reads[i].code})`]),
-    list
-  );
-  // A numeric typed array is a list too: it takes the list code.
-  const test = reads
-    .map(
-      ({ code }) => `!(Array.isArray(${code}) || ArrayBuffer.isView(${code}))`
-    )
-    .join(' && ');
-  return bind(outer, `(${test} ? ${scalar} : ${listCode})`);
+  assertNoDeclaredTopOperands(h, args, target);
 }
 
 /**
@@ -325,8 +187,7 @@ export function compileExprElementwiseBroadcast(
   node: Expression | undefined
 ): TargetSource | undefined {
   if (target.language === 'javascript') {
-    const guarded = declaredTopGuard(engine, h, args, prec, target, node);
-    if (guarded !== undefined) return guarded;
+    declineElementwiseOverDeclaredTop(engine, h, args, target);
     const broadcast = tryCompileBroadcast(engine, h, args, target, node);
     if (broadcast !== null) return broadcast;
     // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,

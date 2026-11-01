@@ -128,6 +128,7 @@ The recommended order puts the small removals first:
 | 13 | −37 | 0 | 0 | applied, 2026-11-01 |
 | 7 | — | — | — | dropped, 2026-11-01: see below |
 | 8 | −81 | 0 | 0 | applied, 2026-11-01: only `bcastScalarAbsent` and the GPU positional read of an absent operand (now a decline); the rest gave wrong values in review and stays |
+| 6 | −118 | 0 | 0 | applied, 2026-11-01: a decline in place of the run-time list-or-scalar test |
 
 The line counts per candidate are those of each worktree diff. The three
 together, with the comment fixes of the reviews, remove 731 source lines net

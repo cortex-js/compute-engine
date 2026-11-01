@@ -3,10 +3,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 // A symbol declared `any` or `value` can hold a list, and the interpreter
 // folds `Sum(x)` and `Product(x)` over it: `Sum(x)` with `x = [1, 2, 3]` is 6.
-// For a scalar value it gives the value itself (`Sum(5)` is 5). The
-// JavaScript target compiles the collection form of `Sum` and `Product` over
-// such a symbol to a fold that tests the value at run time. It declined
-// before ("no indexing set").
+// For a scalar value it gives the value itself (`Sum(5)` is 5). Compiled code
+// does not test the shape of a value at run time, so the JavaScript target
+// declines `Sum` and `Product` over such a symbol, and the interpreter
+// fallback computes the value.
 
 const js = (ce: ComputeEngine, json: unknown, options: object = {}) =>
   compile(ce.box(json as never), { to: 'javascript', ...options } as never)!;
@@ -14,12 +14,16 @@ const js = (ce: ComputeEngine, json: unknown, options: object = {}) =>
 // The compiled function of `json` with the input `x` of type `type`, called
 // with the value of `x`. An INPUT declared `any` is refused at compile time
 // (ROADMAP CE-712.1), so for `any` the expression is compiled as the body of
-// a function literal whose parameter `x` is declared `any`: that parameter
-// keeps the run-time test of its value that these tests read.
+// a function literal whose parameter `x` is declared `any`. `unsupported`
+// names `x`.
 function compiled(
   type: string,
   json: unknown
-): { success: boolean; run: (input: unknown) => unknown } {
+): {
+  success: boolean;
+  unsupported: string[] | undefined;
+  run: (input: unknown) => unknown;
+} {
   const ce = new ComputeEngine();
   if (type === 'any') {
     const result = compile(
@@ -27,11 +31,19 @@ function compiled(
       { to: 'javascript' } as never
     )!;
     const run = result.run as unknown as (input: unknown) => unknown;
-    return { success: result.success, run: (input) => run(input) };
+    return {
+      success: result.success,
+      unsupported: result.unsupported,
+      run: (input) => run(input),
+    };
   }
   ce.declare('x', type as never);
   const result = js(ce, json);
-  return { success: result.success, run: (input) => result.run!({ x: input }) };
+  return {
+    success: result.success,
+    unsupported: result.unsupported,
+    run: (input) => result.run!({ x: input }),
+  };
 }
 
 // The interpreter's value of `json` with `x` assigned `value`, as a string.
@@ -77,9 +89,10 @@ const asString = (v: unknown): string =>
 describe('COMPILED SUM AND PRODUCT OVER A SYMBOL DECLARED `any` OR `value`', () => {
   for (const type of ['any', 'value']) {
     SHAPES.forEach((shape, k) => {
-      test(`${JSON.stringify(shape)} with \`x: ${type}\` compiles to the interpreter's values`, () => {
+      test(`${JSON.stringify(shape)} with \`x: ${type}\` declines, and the fallback gives the interpreter's values`, () => {
         const result = compiled(type, shape);
-        expect(result.success).toBe(true);
+        expect(result.success).toBe(false);
+        expect(result.unsupported).toContain('x');
         for (const row of ROWS) {
           const [value, input] = row;
           const expected = row[2 + k];
@@ -88,15 +101,6 @@ describe('COMPILED SUM AND PRODUCT OVER A SYMBOL DECLARED `any` OR `value`', () 
           expect(result.run(input)).toEqual(expected);
         }
       });
-    });
-
-    test(`a numeric typed array for \`x: ${type}\` is summed as a list`, () => {
-      expect(compiled(type, ['Sum', 'x']).run(new Float64Array([1, 2, 3]))).toBe(
-        6
-      );
-      expect(
-        compiled(type, ['Product', 'x']).run(new Float64Array([2, 3, 4]))
-      ).toBe(24);
     });
   }
 
@@ -117,15 +121,18 @@ describe('COMPILED SUM AND PRODUCT OVER A SYMBOL DECLARED `any` OR `value`', () 
     expect(result.run!({ x: [1, 2, 3] })).toBe(6);
   });
 
-  test('a function literal with a parameter declared `any` compiles', () => {
+  test('a function literal with a parameter declared `any` declines', () => {
     const ce = new ComputeEngine();
     const f = ce.box([
       'Function',
       ['Sum', 't'],
       ['Typed', 't', "'any'"],
     ] as never);
+    expect(() =>
+      compile(f, { to: 'javascript', fallback: false } as never)
+    ).toThrow(/`Sum` over "t": it is declared `any` or `value`/);
     const result = compile(f, { to: 'javascript' } as never)!;
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     const at = (arg: unknown) =>
       ce
         .box(['Apply', f.json, arg] as never)

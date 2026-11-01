@@ -279,14 +279,13 @@ export const BINARY_INFIX_VALUE_OPERATORS: ReadonlySet<string> = new Set([
  * that gives a wrong value for an array operand: `[1, 2] + [3, 4]` is the
  * string `"1,23,4"`, `[1, 2] * [3, 4]` is `NaN`, `[1, 2] < 3` is `false`
  * where the interpreter gives `[True, True]`, and `[1, 2] = [1, 2]` is
- * `false`. An operand declared `any` or `value` gets a run-time check of
- * its value at these heads (`declaredTopGuard`), and at every other head
- * whose definition is `broadcastable` (`Sin`, `Sqrt`, `Abs`, …): the scalar
- * kernel of such a head gives `NaN` for an array (`Math.sin([1, 2])`), and
- * `sin(2p + 1)` would apply it to the list that the check of `2p + 1`
- * gives.
+ * `false`. The JavaScript target declines these heads, and every other
+ * head whose definition is `broadcastable` (`Sin`, `Sqrt`, `Abs`, …), over
+ * an operand declared `any` or `value`, whose value can be a list
+ * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`): the scalar
+ * kernel of such a head gives `NaN` for an array (`Math.sin([1, 2])`).
  */
-export const DECLARED_TOP_GUARD_HEADS: ReadonlySet<string> = new Set([
+export const DECLARED_TOP_DECLINE_HEADS: ReadonlySet<string> = new Set([
   'Add',
   'Subtract',
   'Negate',
