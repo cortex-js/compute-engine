@@ -60,7 +60,17 @@ once, or a `ROADMAP.md` entry.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
-- (none recorded yet)
+- `javascript`, `x: real | nan`: `Arcsec(x)` and `Arccsc(x)` at `x = 0.5`,
+  and `InverseHaversine(x)` at `x = 4`, compile to the real lowering
+  (`Math.acos(1 / x)`, `2 * Math.asin(Math.sqrt(x))`) and give `NaN`; the
+  interpreter gives a complex value (`Arcsec(0.5)` is `1.3170i`). With
+  `x: real` the same programs take the complex lane and agree.
+- `javascript`: in a loop with an outer `a = 100`, `function f() { a }` and
+  `let (a, b) = (k, f())`, the compiled `b` is `k`; the interpreter gives
+  `b = 100` (was CE-756).
+- `javascript`: `Map(t ↦ 7, LL)` with `LL: list<list<real> | missing>` holding
+  `[[1, 2], [3]]` gives `[[7, 7], [7]]`; the interpreter gives `[7, 7]` (was
+  CE-742).
 
 ## Fail closed
 

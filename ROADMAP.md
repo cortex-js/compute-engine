@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-763.
+Next free reference: CE-767.
 
 **Entry format.**
 
@@ -138,64 +138,27 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Types and type inference
 
-### CE-753. A call of a function that indexes its parameter is not typed `error` for a `nan | real` argument
+### CE-765. `Apply` of a curried function to a list is typed as a scalar
 
-**Status:** ready; wrong value, S.
+**Status:** ready; defect, S.
+**Witness:** plausible; with `mk := n ↦ (x ↦ x + n)`, `Apply(mk(1), [1, 2])` is typed `number`, and its value is `[2, 3]`.
 
-`h = (p) ↦ p[1] + 1` (assigned with `ce.assign`). With `x: real`, `h(x)` is
-typed `error` and its compilation declines, as the contract asks. With
-`L: list<real>`, `h(L[1])` is typed `integer` (the argument type is
-`nan | real`), so the compiled code runs and gives `NaN`, where the
-interpreter gives an `incompatible-type` error. With `y: 'nan | real'`, `h(y)`
-does the same, and `h3 = (p) ↦ p[2]`, `h3(y)` is typed `unknown`. The type
-of the call must be `error` when the argument type, without `nan`, does not
-admit the parameter's use. Found 2026-11-01 (multi-index `At` work).
-
-### CE-729. Parameter default values in an overloaded signature and in a multi-clause function
-
-**Status:** proposed; capability, M. Spec
-`docs/plans/2026-10-31-parameter-default-values.md`, R9.
-
-Today a default in an arm of an intersection signature
-(`((x: number, k: number = 2) -> number) & ((x: string) -> string)`), or in a
-clause of a multi-clause Epsil function (`function f(0, k = 2) …` with a
-second clause), is refused at declaration: "a default value in an overloaded
-signature is not supported yet". The fill at canonicalization needs one
-signature, and with an operand of type `unknown` or `any` the arm is not
-known then. A sound rule: fill at canonicalization when every arm that can
-still match agrees on the default of the slot; otherwise fill at evaluation,
-when the arm is known. The compile side must then lower a defaulted clause
-(`compile-definitions.ts` declines "a clause with an optional or variadic
-parameter has no guard").
-
-### CE-730. Default values for library operators, with a serializer rule that leaves out a default operand
-
-**Status:** proposed; capability, M. Spec
-`docs/plans/2026-10-31-parameter-default-values.md`, R10.
-
-No library operator has a parameter default: each handler supplies the value
-of an absent optional operand itself (`LambertW(z)` uses branch 0). A default
-in the signature would change the canonical form and the LaTeX:
-`LambertW(1)` would become `LambertW(1, 0)`, written `\operatorname{W}_{0}(1)`
-instead of `\operatorname{W}(1)`. Adding defaults to library operators needs
-a serializer rule that leaves out an operand equal to the default. Candidates:
-`LambertW` (branch 0) and every handler that documents a default for an
-absent optional operand.
-
-### CE-731. An optional function-literal parameter with no default value
-
-**Status:** proposed; capability, S. Spec
-`docs/plans/2026-10-31-parameter-default-values.md`, §9.
-
-`["Optional", "k"]` (no default operand) is the error `missing` on the
-parameter. Allowing it would bind `k` to an absent value when the call leaves
-it out, which needs the rules for absent values of `docs/ERROR-MODEL.md`
-(`Nothing` or `Missing`, and what each operation does with it). Not requested
-so far; a default value covers the cases of GitHub issue #490.
+The type of the call does not hold its value, so compiled code can give a
+result of the wrong shape. `anonymousApplicationType` in
+`src/compute-engine/library/core.ts` maps the result type over a list
+argument only for a function-literal callee and for a `Derivative` callee
+(`appliedCalleeMapType`). For any other callee that is an application, such
+as `mk(1)`, it takes the scalar result of the signature. The rule cannot be
+given to every application callee:
+`Apply(Composition(Length, (x: real) ↦ [x, x]), [1, 2])` is the scalar `2`,
+because a composition applies its steps one after another. A sound fix types the call from the value of the callee
+when that value is a function literal (the result of `mk(1)` is
+`x ↦ x + 1`), and keeps the old type otherwise.
 
 ### CE-707. A list value is accepted for a scalar declared result when no argument is a list
 
 **Status:** decision needed; defect. GitHub issue #488.
+**Witness:** corpus; GitHub #488; list value for scalar declared result.
 
 ```
 ce.declare('h', '(number) -> number');  h := t ↦ [t, t]
@@ -235,6 +198,7 @@ value.
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
 **Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row 468.
+**Witness:** crafted; Needs an operand declared with the wide CE-502 form.
 
 A call over an operand typed `unknown` is typed with the wide form
 `number | tuple | list<number | tuple | list<any>>` (`S(1, g(2))`). A call over
@@ -252,36 +216,11 @@ numbers. User decision 2026-10-27: the bare `tuple` arm of the wide form keeps
 that reading (a point). What remains open is the first question: which of the
 two rules for a body that is not component-wise is right.
 
-### CE-524. A call of an inferred-signature function with a set, a character, a collection that holds a tuple, or a bare list of strings has a type that does not hold its value
-
-**Status:** proposed; wrong type, medium. Found 2026-10-26 by the review of the
-CE-514 type change; the same types are given at commit
-61cb3c14bc47d7b95fcbcf414eb8f43cf1dfa959, before that change.
-
-Each call below is typed with the inferred result of the function, or with a
-broadcast over the argument, and the value does not fit that type:
-
-- `f := x ↦ x + 1`, `f(Set(1, 2))` is typed `number`; the value is
-  `Error(incompatible-type, number, set<integer>)`. A call does not map over a
-  set.
-- `f := x ↦ 2x`, `a: collection<integer>` with `a := (1, 2)`: `f(a)` is typed
-  `broadcastable<number>`; the value is the tuple `(2, 4)`.
-- `f := x ↦ (-x, x)`, `f` of the character `'a'` is typed
-  `tuple<number, number>`; the value is
-  `(Error(incompatible-type, number, character), "a")`. `isNonNumericDatum`
-  (`call-result-type.ts`) reads strings and booleans only, and `character` is a
-  type separate from `string`.
-- The same `f`, `B: list` with `B := ["s"]`: `f(B)` is typed `list<error>`; the
-  value is `[(Error(…), "s")]`, a list of tuples.
-
-The fix is probably to type such a call from the body, as `dataArgumentCallType`
-does for a string or a boolean argument, or to answer `any`. Measure the number
-of tests that change before landing it.
-
 ### CE-27. An access over `any` or `unknown` elements has no `missing` arm
 
 **Status:** design needed; design. User decision 2026-10-20: a design item, not
 a small fix.
+**Witness:** plausible; `First(W)` with `W: list<any> := []` typed `unknown`, value `Missing`.
 
 `First(W)` with `W: list<any> := []` is typed `unknown`, but evaluates to
 `Missing`. Making `withMarker` answer `any` for `any` and `missing | unknown`
@@ -295,6 +234,7 @@ flow through inference?
 ### CE-40. The type of a held operand of a lazy operator is read without its binding
 
 **Status:** ready; defect.
+**Witness:** plausible; CE-40.2: `(xs) ↦ (xs \.
 
 A `lazy` operator receives its operands unbound. The two readers of a held
 operand's type are now one module, `library/held-operand-type.ts`
@@ -318,6 +258,7 @@ operand's type are now one module, `library/held-operand-type.ts`
 
 **Status:** design needed; design. Decision P8 and §7 item 6(h) of
 `docs/TYPE_SYSTEM_ROADMAP.md`.
+**Witness:** none; Protocol design (decision P8 of TYPE_SYSTEM_ROADMAP).
 
 The audit of 2026-08-21 sized the move of the collection capability from the
 type lattice onto the protocol system.
@@ -381,60 +322,10 @@ that the double checks disappear.
   for. The member table above is its input.
 - **CE-51.2** Point the 69 capability checks at conformance.
 
-### CE-55. A user-declared lazy operator with an arrow-typed callback slot admits every callback
-
-**Status:** proposed; capability.
-
-Design E's compatibility admission covers every eager slot and the library's
-lazy collection operators (through their canonical-handler funnel,
-`canonicalCallbackOperand`). A user-declared `lazy: true` operator with an
-arrow-typed callback slot still admits every callback until application, because
-the lazy branches of `validateArguments` return each operand before the check
-runs. The fix is a read-only planning pass at the lazy branches. Its benefit is
-narrow: the lazy solve contributes no bindings, so only GROUND arrow slots can
-be judged, and an unbound operand's type reads `unknown` (admits everything), so
-only NAMED callbacks read through a side-effect-free `lookupDefinition` would be
-judged. Do this when a consumer declares lazy operators with arrow slots.
-Reasoning recorded in `docs/TYPE-SYSTEM.md`.
-
-### CE-56. The `Sort`/`Ordering` comparator arm cannot keep its element type variable
-
-**Status:** proposed; design, low priority.
-
-The decided `Sort`/`Ordering` slot spelling was
-`((T) any -> unknown) | ((T, T) any -> number)` (Design E §9 item 6). The type
-language allows at most one arm of a union to reference a type variable (a
-solver-simplicity constraint), so the comparator arm is grounded as
-`(any, any) any -> number`. The arity duality and the documentation stay; the
-comparator-side disjointness rejection is lost: a `(string, string) -> number`
-comparator over an integer list is admitted and fails per element. To restore
-the decided spelling, lift the one-variable-arm constraint in `parseType` and
-the solve, which affects all union solving. The key arm keeps `T`, and no
-shipped signature needs a second variable-bearing arm. Deviation recorded in
-`docs/TYPE-SYSTEM.md`.
-
-### CE-57. A callback's parameter types do not bind a data-anchored type variable
-
-**Status:** proposed; capability.
-
-Design E decision R-E3: a callback operand's parameter types never bind a
-data-anchored domain variable. So `apply2(IsPrime, x)` leaves `x` `unknown`, and
-`CountIf(zs, IsPrime)` leaves `zs: collection<unknown>`. Binding it would create
-a contract that the slot does not carry and break a later `zs := [1, "a", 2]`
-(the `zs` KEEP pin). The extension point is `solveArm`
-(`generic-instantiation.ts`): R-E3′ already lets a callback bind variables with
-NO data anchor (the `comp`/`both` behavior), so only the data-anchored case is
-open. If a consumer asks for apply-style inference, use SOFT, PER-CALL,
-WRITE-FREE bounds: the callback's parameter types may sharpen the call's
-instantiation (stamping and result precision), are dropped on conflict with any
-data bound (the union-source case must never conflict), and never reach an
-`_infer` write (no symbol narrowing, so the `zs` pin holds). Full contribution
-with inference writes needs a new decision on the `zs` KEEP pin. Do not build
-before a consumer asks.
-
 ### CE-58. A `Declare` statement at the top level, and `ce.declare()` in a pushed scope, install a writer that does not state `scope`
 
 **Status:** decision needed; defect, M.
+**Witness:** plausible; Top-level Epsil `let f: () -> number = writer` installs a writer without `scope`.
 
 A named definition that states no effects must not write outside itself: the
 `scope` effect is opt-in (`docs/EFFECTS-MODEL.md`). A direct host call
@@ -469,108 +360,10 @@ Options:
 Recommended: (a), because the rule is stated for every named definition, and
 an Epsil `let` is one. If nothing is decided, (b) stays.
 
-### CE-61. Two kinds of user-defined callee are not checked statically
-
-**Status:** proposed; capability. User decision 2026-10-17: canonicalization owns
-the clause install.
-
-`DefineFunction`'s canonical handler installs the clause once the body has
-canonicalized, so later statements of the same program are checked against the
-real signature. One case is checked only when it evaluates:
-
-- **CE-61.1** Generic definitions. Rule G2 refuses any clause on a generic
-  target, so the install cannot repeat, and the evaluate route would refuse its
-  own re-installation. **User decision 2026-10-17 on the direction:
-  canonicalization owns the install**: the evaluation step recognizes a clause
-  that canonicalization already installed and skips it, so calls to a generic
-  function are checked statically. Do it only when other work needs a shared
-  installation step for canonicalization and evaluation.
-
-### CE-63. Contextual callback typing (`callback<S>`): deferred items and known limits
-
-**Status:** proposed; capability.
-
-The 15 collection operators use `callback<S>` for their callbacks.
-
-- **CE-63.1** Seeded-fold accumulator stamping. The accumulator is deliberately
-  not stamped (spec §12.1: stamping breaks accumulators that change type, as a
-  probe showed). Re-opening needs a bound (`forall T, U: value.`) and a new
-  decision.
-- **CE-63.2** Bounded numeric element types (`integer<1..10>`) and value-literal
-  types do not pass the stamp admission requirement (`admissibleElementType`). A
-  one-line widening if needed.
-
-Known limits recorded in spec §9b, no action unless a user asks:
-
-- Applications on the binder route (`rawOps`) skip the contextual stamp. This is
-  unreachable today; a comment at the requirement records it.
-- The intent that `callback<S>` applies only in a parameter position is not
-  enforced: in other positions it behaves as `function`.
-- A union of two DIFFERENT `callback<S>` members resolves to the first one seen.
-- Undeclared source symbols infer `collection<unknown>` (the standard polytype
-  behavior).
-
-### CE-64. `broadcastable<T>` typing: remaining items
-
-**Status:** proposed; capability. Plan:
-docs/plans/2026-07-11-broadcast-typing-lift-design.md.
-
-Respect these interactions: the non-finite typing convention, the destructive
-effect of `infer(unknown)`, and the contexts that require a scalar (exponents,
-comparisons, plot coordinates).
-
-- **CE-64.1** Phase-2 declared-type reconciliation for symbolic-length ranges
-  (see the design doc). Two broadcast-lift Phase-2 tests assert the declared
-  type and the `Map` form until this is done.
-- **CE-64.2** Lambda bodies over untyped parameters still type scalar; only
-  applications are lifted. Do this only with a design that types the body from
-  the parameter types.
-- **CE-64.3** Python broadcast compilation: the Python target lowers arithmetic
-  to infix and has no generic `_ce_bcastf` helper. A list beside a scalar
-  compiles (`L + 1` gives `[2, 3]`), and an input declared `real | list<real>`
-  compiles with one `hasattr(u, '__len__')` dispatch (`u + 1` gives `3` for
-  `u = 2` and `[2, 3]` for `u = [1, 2]`). Still declined (the interpreter
-  fallback is sound): arithmetic between two lists (`L * M` with
-  `L, M: list<real>`; the interpreter gives `[3, 8]` for `[1, 2]` and
-  `[3, 4]`), nested lists (`LL + 1`; `[[2, 3], [4, 5]]`) and an input declared
-  `broadcastable<real>` (`b + 1`; `3` for `b = 2`). Build the helper only if a
-  compiled-NumPy binding is needed.
-
-### CE-66. Typed function literals: optional and variadic parameters, result check, LaTeX notation
-
-**Status:** proposed; capability. Contract: `docs/LANGUAGE-MODEL.md`.
-
-- **CE-66.1** (S/M) Optional and variadic parameter annotations
-  (`["Typed", "xs", "'number+'"]`). The encoding already admits it; `makeLambda`
-  needs arity handling. Until then, the signature-string sugar
-  (`["Function", body, "'(x: integer) -> real'"]`) rejects these markers.
-- **CE-66.2** (S) A strict-mode run-time check of the result against the
-  declared return type. Today a return type is only an ascription.
-- **CE-66.3** (S) LaTeX notation for typed parameters behind a serialization
-  style flag. Today the annotations are dropped in LaTeX.
-
-### CE-67. Operator signatures need generic type arguments
-
-**Status:** proposed; capability.
-
-The warning in `boxed-operator-definition.ts` that checks the result type
-against the `at` handler is disabled. It needs generic type arguments in
-signatures: `Map` and `Filter` return an indexed collection if and only if the
-input is indexed.
-
-Measured 2026-10-25: the per-arm form of the `at`-handler check is already on
-(`couldReturnIndexedCollection`). The `Map` signature says
-`-> indexed_collection`, while `Map` over a set returns a set; only the type
-handlers give the right result types. A conditional result written as an
-intersection of two arms breaks callback parameter stamping
-(`(p: tuple<number, number>)` became `(p: unknown)`) and gives `unknown` for an
-undeclared source: 65 tests fail in the collection suites. It needs overload
-resolution that stamps callbacks across intersection arms, or a conditional
-result form in the signature language.
-
 ### CE-443. A pure function literal with nine or more nested literals is typed with effects `any`
 
 **Status:** design needed; types. Found 2026-10-24 while fixing CE-347.
+**Witness:** crafted; Needs a pure literal nested 9 deep; answer `any` is the safe direction.
 
 The effects walker stops at a depth of 8 nested function literals
 (`MAX_LITERAL_DEPTH`, `boxed-expression/effects-inference.ts`) and then answers
@@ -578,20 +371,27 @@ The effects walker stops at a depth of 8 nested function literals
 the safe direction but loses precision. A fix needs a design choice: the nested
 walk shares its confinement state with the enclosing literal.
 
-### CE-492. `Field` reports a static error for a key an open record type does not list
-
-**Status:** proposed; design.
-
-`Field(r, "b")` with `r: record{a: integer}` reports a static defect. Since
-2026-10-25 an open record type is not a dictionary of its listed fields (it can
-hold other fields), so the key may exist at run time. The check catches typos,
-but it refuses programs that are correct for a record with more fields.
-
 ## Collections, absence and broadcasting
+
+### CE-763. `Contains` of a list of valueless symbols gives `False` for a value that a symbol can hold
+
+**Status:** ready; wrong value, S.
+**Witness:** plausible; with `a` and `b` declared `integer` and no value,.
+`Contains([a, b], 3)` evaluates to `False`; it should stay unevaluated,
+because `a` can be 3.
+
+The `Contains` handler (`library/collections.ts`) compares each element with
+the value and answers `False` when no element is the same expression. For an
+element whose value is not known, the comparison is undecided, not false.
+The fix: answer `True` when an element is equal to the value, `False` only when
+every element is known to differ (for example, two distinct numbers), and stay
+unevaluated otherwise. The same answer is given over a listed `FlatMap` view,
+because the consumer reads the listed elements.
 
 ### CE-754. The chained `At` type handler gives wrong types for a tuple, record or gather step
 
 **Status:** ready; defect, M.
+**Witness:** plausible; Chained `At` types wrong: `At(L, 1, "a")` with `L: list<record{a: real}>` typed `error` though the read is valid.
 
 The type handler of a multi-index `At` (`library/collections.ts`, the
 chained branch) peels each index with the element type of an iteration:
@@ -613,6 +413,7 @@ the handler is fixed.
 
 **Status:** decision needed; defect. Found 2026-10-30 in the review of the
 interval-js `Linspace` lowering.
+**Witness:** crafted; `Linspace(0, +∞, 3)` reads disagree; an infinite endpoint is a value nobody writes.
 
 For `L = Linspace(0, +∞, 3)` the interpreter gives:
 
@@ -650,49 +451,10 @@ Decide which reading is the value of `L`:
 With no decision, the reads stay in disagreement, and `interval-js` keeps
 giving no value for such a `Linspace`.
 
-### CE-679. A `Range` with a `NaN` bound: the interpreter and the compile targets disagree
-
-**Status:** ready; defect (wrong values). Found 2026-10-30 in the review of
-the interval-js loop over a literal list (session compute-engine-61);
-measured by session compute-engine-2c. User decision 2026-10-30: option (b),
-`Range(1, NaN)` has no value. Implemented, not yet reviewed a second time or
-applied: `docs/scratch/2026-10-30-ce679-range-nan-handoff.md`.
-
-With `n` declared `number` and `n = NaN`:
-
-| Expression                 | Interpreter | `javascript` | `interval-js` |
-| -------------------------- | ----------- | ------------ | ------------- |
-| `Loop` over `Range(1, n)`  | 0           | 0            | `entire`      |
-| `Sum(Range(1, n))`         | no value    | 0            | `entire`      |
-| `Map(k ↦ 2k, Range(1, n))` | no value    | `[]`         | `entire`      |
-| `Count(Range(1, n))`       | no value    | 0            | not measured  |
-
-The `Loop` is `c ≔ 0; Loop(c ≔ c + k, k ∈ Range(1, n)); c`. The interpreter
-runs no pass of the loop (it reads the range as empty), but leaves `Sum`,
-`Map` and `Count` of the same range unevaluated. `docs/ERROR-MODEL.md` decides
-only a big-operator BOUND that evaluates to `NaN` (`Sum(x, (x, 1, n))` answers
-`NaN`), not a `Range` collection. `javascript` gives a value where the
-interpreter has none (`rangeCount` is `NaN`, and `Array.from` reads a `NaN`
-length as 0). `interval-js` answers `entire` for every row (`boundInterval`
-in `interval/collections.ts` refuses a non-finite bound), which is never
-wrong but has no value for the `Loop`.
-
-Options:
-
-- (a) `Range(1, NaN)` is the empty range: `Sum` is 0, `Map` is `[]`,
-  `Count` is 0 in the interpreter (the `Loop` stays 0); `javascript` stays as
-  it is; `_IA.range` gives `[]` for a `NaN` bound.
-- (b) `Range(1, NaN)` has no value, as a big-operator bound has: `Sum` and
-  `Count` are `NaN`, `Map` has no value, and the `Loop` has no value either
-  (an interpreter change); `javascript` gives `NaN` / no value; interval-js
-  keeps `entire` or gives `empty`.
-
-If nothing is decided, `javascript` keeps giving values where the
-interpreter has none, and interval-js keeps `entire` for the `Loop`.
-
 ### CE-665. A point beside a longer list is zipped to the shorter length, with no error, under heads that read it by position
 
 **Status:** ready; wrong value. Found 2026-10-30 while fixing CE-661.
+**Witness:** plausible; Interpreter: `Power((1, 2), [3, 4, 5])` evaluates to `[1, 16]`, typed `vector<3>`; should be `incompatible-dimensions`.
 
 `Power((1, 2), [3, 4, 5])` is typed `vector<3>` but evaluates to `[1, 16]`, and
 `Arctan2([3, 4, 5], (1, 2))` evaluates to `[arctan(3), arctan(2)]`. These heads
@@ -704,95 +466,19 @@ today.
 ### CE-666. The count of a list can be larger than the number of elements of its value
 
 **Status:** ready; defect. Found 2026-10-30 while fixing CE-661.
+**Witness:** plausible; Interpreter: `[If(0 < u, Nothing, (1, 1)), (2, 3)]` has `count` 2 but one element when the condition is true.
 
 `[If(0 < u, Nothing, (1, 1)), (2, 3)]` has `count` 2, but when the condition is
 true its value has one element (`Nothing` is dropped). A broadcast over such a
 list inherits the count. A count that can depend on a free variable should be
 `undefined`, as for `Range(1, Floor(u))`.
 
-### CE-667. A point added to a list of numbers is not refused when the list holds `When` elements
-
-**Status:** ready; defect. Found 2026-10-30 while fixing CE-661.
-
-`Add([3, 4, 5], (1, 2))` is refused at canonicalization (a point and a list of
-numbers do not combine). `Add([When(1, 1 < 0), When(u, 0 < u), 3], (1, 2))` is
-not: it evaluates to a list of 3 `Error` elements, and since CE-661 its count
-is 3. Expected: the same refusal as the list of plain numbers, since the
-elements of the `When` list are numbers or gaps.
-
-### CE-661. The count and the elements of a family of points are not known before evaluation
-
-**Status:** fixed in `0c1adc21a`, not released: delete this entry at the
-release; capability, medium. Tycho ledger row 477. The `count` of the input
-below is 34 before evaluation, and `at(k)` reads each element without evaluating the body
-(`test/compute-engine/ce-661-point-family-count-at.test.ts`). `at(k)` returns
-the element evaluated, not the unevaluated form: the `at` handler of `When` must
-see values, and `at()` must agree with `each()`. A new operator-definition hook
-`elementAt(expr, k)` is the `at()` twin of `elementCount`. The structural read
-is used only for a valid, pure expression with a known count and no evaluation
-cached for the current generation; a vector times a matrix, and a tuple with a
-list component, are read by evaluation.
-
-Input: a body of the form
-`Add(T, PointList(Add(Multiply(c, PointX(PointList(PointX(J), PointY(J)))), …), …, 0.4))`,
-where `T` is a point symbol and `J` is
-`ListJoin(L20, Add(L4, PointList(1.8, 0)), Add(L4, PointList(3.57, 0)), Add(L4, PointList(5.01, 0)), L2)`.
-`L20`, `L4` and `L2` are literal lists of 20, 4 and 2 points in `u` and `v`. The
-value is a list of 34 points (20 + 3 × 4 + 2). Today `count` is `undefined` at
-every node above the literal lists, and `at(k)` evaluates the whole body
-(`_materializedAt()` in `boxed-expression/boxed-function.ts`). Checked on
-0.174.0 and on main, 2026-10-30, with the two `G_{APS}` text faces of the Tycho
-document `art/2ki2hjsouf` (about 67 KB of MathJSON each).
-
-- **CE-661.1** `_broadcastCount()` (`boxed-function.ts`) counts every operand
-  whose type can be an unkeyed collection as a participant, a point too. The
-  evaluation lifts a point added to a list of points:
-  `Add(L4, PointList(1.8, 0))` has 4 elements. The count reads the point as a
-  participant: `PointList(1.8, 0)` has no count, so the answer is `undefined`;
-  with `Tuple(1.8, 0)` the counts 2 and 4 disagree, and the answer is also
-  `undefined`. The outer `Add(T, PointList(…))` loses its count in the same way
-  (`T` has the count 3). Fix: use the participant rule of the evaluation. Then
-  the count handler of `ListJoin` (`JOIN_COLLECTION_HANDLERS` in
-  `library/collections.ts`) can add the operand counts. Today it calls
-  `eagerViewSource()` for an operand with no count, which does not evaluate an
-  operand that holds an unevaluated call (here `PointList(1.8, 0)`).
-- **CE-661.2** `PointX`, `PointY`, `PointZ` and `PointList` have no
-  `elementCount`. `PointX(L)` of a list of points has the count of `L`.
-  `PointList(c₁, …, cₙ)` with at least one list component has the smallest count
-  of its list components (the zip rule of `docs/BROADCAST-MODEL.md`), and no
-  count when a list component has none.
-- **CE-661.3** Element reads without evaluation. A broadcast, `PointList` and
-  `PointX`/`PointY`/`PointZ` have no `at` handler, so `at(k)` evaluates the
-  whole expression. A structural read gives the k-th element unevaluated: for a
-  broadcast, `at(k)` of each participant with the lifted operands unchanged; for
-  `ListJoin`, the element of the operand that holds position k; for `PointX(L)`,
-  the first coordinate of `L.at(k)`; for `PointList`, the tuple of the
-  `cᵢ.at(k)`, with a scalar component `cᵢ` unchanged. Requirements: the element
-  equals `evaluate().at(k)`; a `When` gap stays at its position; the read is
-  done only for a draw-free expression; it answers `undefined` when a count
-  depends on a free variable (`Range(1, Floor(u))`). Each of the 34 members is
-  then a small part of the body. (Tycho's prototype that compiles `At(body, k)`
-  for each k increased the size of the members it transfers from 67 KB to 8.35
-  MB.)
-
-### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
-
-**Status:** proposed; task (precision; the type is sound).
-
-With `M: list<list<integer> | number>` and `C: broadcastable<number>`, `M + C`
-is typed `list<list<list<integer> | number> | number>`, while `M · C` is typed
-`list<list<number> | number>`. For one cell, `Add` gives the broadcast typing
-its answer for one element (`list<integer> | number`), where `Multiply` gives
-`number`. `broadcastLiftType` (`boxed-expression/broadcast-lift-type.ts`) asks
-the handler again for the cell type only when the answer is a
-`broadcastable<…>`; asking it also when the answer can hold a list would give
-`list<list<number> | number>` for `M + C`. Measure the pins that move first.
-
 ### CE-70. Presence contracts: absent arguments that are not refused or not reported
 
 **Status:** ready; defect, small. Plan:
 docs/plans/2026-10-21-presence-contracts-and-assertion.md (decisions P1 to P5;
 section 9 has the record).
+**Witness:** plausible; CE-70.2: Epsil `if !isMissing(v) { let g = () => f(v) … }` is still reported; plan decisions P1 to P5 exist.
 
 - **CE-70.1** An operator that holds its operands (`lazy`: `Expand`, `Factor`,
   `Together`, `ToCNF`) answers `Missing` for an absent argument. This is the
@@ -812,6 +498,7 @@ section 9 has the record).
 ### CE-71. Decide record-field omission, optional fields and a key-removal operation
 
 **Status:** design needed; design.
+**Witness:** none; Record-field omission design (Q5, Q10 of a plan).
 
 Decide how a record field is omitted, how an optional field is represented, and
 whether an explicit key-removal operation exists. Also classify the custom folds
@@ -821,6 +508,7 @@ Q10 of `docs/plans/2026-10-20-bare-tuple-record-any.md`).
 ### CE-72. `Scan` over a source declared with a `missing` element type is typed without the `missing` arm
 
 **Status:** ready; defect.
+**Witness:** plausible; `Scan` over a source declared `list<integer \.
 
 For a source declared `list<integer | missing>`, the `Scan` type handler
 receives `list<integer>`: the `missing` arm is dropped before the handler runs,
@@ -830,33 +518,12 @@ loses it. (A `Missing` inside a list LITERAL is typed `nan`, a subtype of
 `number`, so `Scan([Missing, Missing], Add)` typed as a numeric list is
 consistent.)
 
-### CE-384. A union of collection types drops the `missing` arm of an element
-
-**Status:** proposed; capability. User decision 2026-10-23: the reduction stays for
-now (`collection-type-followups.test.ts`, "Map over a dictionary arm of a
-union", pins it).
-
-The union reducer (`reduceUnionType`, `src/common/type/reduce.ts`) keeps the
-supertype of two arms related by subtyping. Since every type is a subtype of
-`unknown`, `list<missing | unknown>` is a subtype of `collection<unknown>`, so
-`collection<unknown> | list<missing | unknown>` reduces to
-`collection<unknown>`. The set of values is the same, but `provablyAdmits` no
-longer finds the `missing` arm of the elements, so the Epsil static check cannot
-report a possibly absent element. Example: `Map(x ↦ x, v)` with
-`v: tuple<integer, missing> | dictionary<integer>` is typed
-`collection<unknown>`. At the top of a union, decision D1
-(`docs/plans/2026-10-21-unknown-inference-marker.md`) keeps `missing | unknown`
-as two arms; this entry is the same rule one level down, for the elements of a
-collection. Fix: in `covers()` of `reduceUnionType`, do not let an arm whose
-elements state `missing` be absorbed by an arm whose elements do not. This
-changes the reduction of every such union: measure the test and snapshot changes
-in the full suite first.
-
 ### CE-74. The type of a lazy view does not say that an element can be `Nothing`
 
 **Status:** design needed; design. User decision 2026-10-20: a lazy view (`Map`,
 `Tabulate`, `Table`, `Scan`, `Iterate`) keeps a `Nothing` result in its own
 display, count, `.at()` and `.each()`; turning it into a list erases it.
+**Witness:** plausible; `Map(x ↦ If(x > 1, Nothing, x), [1, 2, 3])` typed without `nothing`; `Zip` loses elements.
 
 Done so far: `Map` keeps an immediate omission in its result type and does not
 call the callback for omitted inputs; `Filter` drops immediate omissions; paired
@@ -890,25 +557,11 @@ Sub-items:
   (`Sort(Map(x ↦ Nothing, [1, 2]))`) stays unevaluated, so `IsEmpty` of it stays
   unevaluated too. It should be `[]`.
 
-### CE-77. A record arm of a union type reads only its declared fields
-
-**Status:** ready; defect, small.
-
-A declared open record (`record{a: integer}`) now has the entry type
-`tuple<string, any>` wherever its elements are read, and a dictionary LITERAL
-keeps the join of its field types (`dictionaryValueValuesType()`,
-`common/type/utils.ts`; `facts.elementType` in `operand-descriptor.ts`; the
-`solveType` of `SolveActual`; the `Values` and `At` handlers). One site keeps
-the old reading: with `ru: record{a: integer} | indexed_collection<integer>`,
-`At(ru, 1)` is typed `integer | nan`, from the declared field only.
-`use-driven-element-inference.test.ts` ("a union base with a record arm reads
-the field values, not the iteration pair") pins that reading, so changing it
-means changing that test.
-
 ### CE-79. Indexing and slicing a collection whose count is a `bigint`
 
 **Status:** ready; capability. User decision 2026-10-06: `at()` and the readers
 that compute an index from the count accept a `bigint` index. Issue #416.
+**Witness:** corpus; Ready with user decision 2026-10-06; GitHub issue #416 (`Last(Range(1, 10^20))` stays unevaluated).
 
 A collection count that is not a safe integer is a `bigint` (`expr.count`, the
 `count` collection handler; see `smallCount()` in
@@ -920,23 +573,10 @@ that compute an index from the count (`Last`, a negative index, `Take`/`Drop`
 with a negative count, `Most`, the rotations) accept a `bigint` index, so that
 these give their value.
 
-### CE-80. Reducers over a `Range`: three cases still walk or round
-
-**Status:** ready; defect, small.
-
-`Sum`, `Mean`, `Median`, `Variance`, `PopulationVariance`, `Max` and `Min` of a
-literal `Range` with exact bounds and step use a closed form
-(`library/range-closed-form.ts`), also when a symbol holds the `Range`, and
-under `.N()` the statistics read the held operand before it is made numeric. One
-case remains:
-
-- **CE-80.3** Compiled JavaScript builds the whole array before it reduces it
-  (`_SYS.range(1, n, …).reduce(…)`, `_SYS.mean(_SYS.range(…))`), so the memory
-  use grows with `n`. The closed form, or a counted loop, would not.
-
 ### CE-81. Three lazy collections assigned to a variable stay a live view of the variables they read
 
 **Status:** ready; defect, small.
+**Witness:** plausible; `let big = filter(1.oo, c => c > k)`, later `k = 10` changes `first(big)` from 4 to 11.
 
 An assignment statement stores the elements of a FINITE lazy collection that
 reads a variable, as a list when the value is an indexed collection and as a set
@@ -960,6 +600,7 @@ defines one name from another wants the live view.
 ### CE-82. Point arithmetic with a valued symbol: the type and the value disagree
 
 **Status:** ready; defect, small.
+**Witness:** plausible; `Q := [(1, 2), (3, 4)]`, `x := 5`: `Q + x` typed a list of points, evaluates to a list of errors.
 
 With `Q := [(1, 2), (3, 4)]` and `x := 5`:
 
@@ -971,105 +612,29 @@ With `Q := [(1, 2), (3, 4)]` and `x := 5`:
   was only inferred keeps such a sum symbolic under `evaluate()`, so to type it
   `error` from the type alone would be wrong; a fix needs the symbol's value.
 
-### CE-83. A lazy `Map` or `Filter` over a `Join` or `Append` with an absent operand stays unevaluated
-
-**Status:** ready; defect.
-
-`Map(f, Join(Missing, [3]))` should be `Missing`, as `Map(f, Missing)` is. The
-source correctly declines to enumerate, but a lazy operator does not evaluate
-its collection operand, and conditional threading reads only direct
-`When`/`Which` operands.
-
-An `evaluate` handler on `Map`/`Filter` was tried and broke ordinary lazy
-evaluation (45 suites): do not do it. The fix belongs in the evaluation step
-(`boxed-function.ts`): evaluate a lazy operator's `Join`/`Append` operand when
-it may be absent, then thread the result.
-
-### CE-85. An absent list carries no shape: `Missing + 2\{b>0\}` is a scalar
-
-**Status:** ready; defect, small.
-
-`[1,2]\{a>0\} + 2\{b>0\}` with both conditions undecided is
-`[3\{b>0\}, 4\{b>0\}]\{a>0\}`, and once `a = -1` that held value is `Missing`.
-Evaluated fresh with `a = -1`, the list restriction is already `Missing` when
-the sum is formed, and `Missing + 2\{b>0\}` threads to `NaN\{b>0\}`: the absent
-operand is a bare `Missing`, which carries no shape, so the sum reads it as an
-absent scalar and answers the numeric marker still restricted by `b`. The two
-routes agree once `b` is decided too (`[NaN, NaN]` for `b = -1` with `a` free on
-both). A point keeps its shape: at `t = −1`, `(A\{0<t\}, B) + (A, B)` is
-`(NaN, 2B)` typed `tuple<nan, number>`. A fix needs the absent value of a list
-to remember that it was a list (a typed absence), which `Missing` does not.
-
-### CE-88. A broadcast does not compare the length of an operand whose length is not yet known
-
-**Status:** ready; defect.
-
-Broadcast policy (`docs/BROADCAST-MODEL.md`): strict lengths for LIFTED
-operators (a mismatch is `incompatible-dimensions` in the eager zip, the
-arithmetic broadcast and the lazy form); shortest input for explicit PAIRING
-constructors (`Zip`, variadic `Map`, `PointList`).
-
-The length check reads `count`. An operand that reports `undefined` (a
-symbolic-length `Range` before its bound resolves, an operand held raw by a lazy
-operator) is skipped, and the broadcast continues. The lazy `Map` then zips
-those operands with shortest-input semantics, so a mismatch that becomes visible
-only after the length resolves can truncate the result without an error. An
-infinite operand is already caught: its `count` is `Infinity`, which does not
-match a finite length.
-
-- **CE-88.1** Add a strict lazy zipper that reports `incompatible-dimensions`
-  when one operand ends before another. This is a change to `Map` iteration, not
-  to the length check.
-
-### CE-89. Lazy collections: `Keys`/`Values`/`Chunk` and the limits of `Map` auto-compile
-
-**Status:** proposed; performance, low priority. Model:
-`docs/COMPILATION-MODEL.md`.
-
-Convention to keep: `Slice` finiteness is honest. A negative end over an
-infinite source is an infinite tail, a negative start over one is inert, and a
-source of unknown length reports its finiteness as unknown.
-
-- **CE-89.1** Lazy `Keys`/`Values` (dictionaries are small) and `Chunk` (needs
-  the count only). Low value.
-- **CE-89.2** `Map` auto-compile does not handle lazy collections other than
-  `Map` (`Filter`, `Comprehension` bodies) or bignum drains. Look again with a
-  profile.
-- The explicit-materialization route stays interpreted by decision: do not
-  reorder steps 3/3b of `_computeValue`.
-
-### CE-90. Operators that do not report their element count
-
-**Status:** proposed; capability.
-
-`_broadcastCount` requires `broadcastable === true`. The optional `elementCount`
-handler of an operator definition (the `count` twin of `canEnumerate`) lets an
-operator give its length without evaluation. `Sort`, `Ordering`, `RandomShuffle`
-and `Chunk` have it (pins in
-`test/compute-engine/tycho-item-167-broadcast-count.test.ts`).
-
-- **CE-90.1** The other reshaping or eager operators report `undefined`
-  (`GroupBy`, `BinCounts`, `Histogram`, `Tally`, `Unique`, `Flatten`, `Shape`,
-  `Quartiles`, `RandomChoice`, `RandomSample`, `LinearRegression`,
-  `PolynomialFit`, …), and so do the count-preserving pass-throughs (`N`,
-  `Evaluate`, `Identity`, `Typed`, `Matrix`, `Transpose`, …). Add an
-  `elementCount` handler to each when there is demand. Never put a list of names
-  in engine code.
-- 56 element-wise operators have the `broadcastable` flag (user decision
-  2026-10-17), so `NthPrime([1,2,3])` gives `[2, 3, 5]` with a count of 3. Two
-  groups do not have the flag yet: `Degrees` and `DMS` (`trigonometry.ts`), and
-  the operators whose result for one element is a collection (`FactorInteger`,
-  `Divisors`, `PrimeFactors`, `ExtendedGCD`, `ContinuedFraction`,
-  `IntegerDigits`, `PrimitiveRootList`, `DigitCount`), which first need a
-  correct broadcast type lift. Both are tracked in CE-103.
-
 ## Evaluation, canonical forms and scoping
+
+### CE-766. `0^x` is folded with the value that `x` has when it is boxed
+
+**Status:** ready; wrong value, S.
+**Witness:** plausible; after `ce.assign('x', 2)`, `e = ce.box(['Power', 0, 'x'])` is `0`; after `ce.assign('x', -1)`, `e.evaluate()` still gives `0` and should give `~oo` (a new boxing gives `~oo`).
+
+The zero-base block of `canonicalPower`
+(`src/compute-engine/boxed-expression/arithmetic-power.ts`) reads
+`b.isGreater(0)` when the expression is boxed, and that comparison reads the
+value of the symbol at that moment. A host that boxes an expression once
+and then assigns new values (a slider) gets the old fold. The infinity
+branches of the same function fold only for a base whose value cannot
+change (`hasFixedValue()`); the zero-base block needs the same requirement
+for its exponent, and `evaluate()` folds with the current value. With
+`t: real` and no value, `0^t` already stays unfolded.
 
 ### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
 
 **Status:** decision needed; defect, small. Found 2026-11-01 while fixing a
 caller-binding defect (a function called with a block-local valueless `y`
 read the global `y`; that part is fixed).
+**Witness:** plausible; `Block(Declare(y,'real'), [y])` evaluated again gives `[5]`.
 
 With a global `y := 5` and `f := x ↦ NumericApproximation(x)`,
 `Block(Declare(y, 'real'), Map(f, [y]))` gives `[5]`: the block returns a lazy
@@ -1097,6 +662,7 @@ Question: what does a binding of a block that has ended read?
 **Status:** design needed; design, medium. Filed 2026-11-01 from CE-722 (user
 decision 2026-11-01: the compiler declines this shape; the meaning in the
 interpreter is this entry).
+**Witness:** crafted; Needs a list condition with an action branch (`If(M[1], p ≔ 5)`, `M: list<any>`); compiler already declines.
 
 An `If` or a `Which` whose condition is a list selects element by element: with
 `L: list<real>`, `If(L > 0, 1, -1)` gives a list. When a branch is an action
@@ -1124,6 +690,7 @@ interpreter's current results stand.
 ### CE-709. `Solve` with a float over a real domain lists only exact roots, and can claim no solution
 
 **Status:** decision needed; wrong value.
+**Witness:** crafted; Witnesses are floats nobody writes (`x = 10.0000000000001`, `x² = -1e-20`).
 
 The interpreter compares numbers within `engine.tolerance` (1e-10). Over a
 real domain, `Solve` lists the exact roots of an equation with a float, not
@@ -1147,43 +714,6 @@ enumerated). Options:
 
 If nothing is decided, (b) stays in force but is not documented.
 
-### CE-698. A saturated result that reads a written parameter outside every closure stays unevaluated
-
-**Status:** proposed; capability. The simple, sound version is in place: the
-call declines (`bindingKeyedSubs()`, `function-utils.ts`, the
-written-parameter rule).
-
-A saturated call keeps a written parameter as a variable that the returned
-closure shares. When the result also reads the parameter outside every
-returned closure (`y ↦ If(z > 0, y, () ↦ Block(y := y + 1, y))`), or holds a
-write (`y ↦ Hold(() ↦ Block(y := y + 1, y))`), the call declines and stays
-unevaluated. A more precise version would substitute the value when every
-read of the parameter in the result comes before its first write. (The
-partial application of such a function is no longer part of this entry: since
-CE-708 it is the deferred call of the original function, and
-`W = (y, w) ↦ (x ↦ Block(Block(y := 2, y + x)))` gives `W(q)(1)(5) = 7`.)
-
-### CE-694. Applying a `Composition` can call the wrong step and loses exact arguments
-
-**Status:** ready; wrong value. Found 2026-10-30 by a code review of the
-uncommitted `Composition` support in `src/compute-engine/function-utils.ts`
-(`composedApplication()`, `compositionLiteral()`); not checked with a probe.
-
-- **CE-694.1** A step given as a symbol is called by its name in the current
-  scope: `composedApplication()` builds `ce.function(name, …)`, which drops
-  the binding that the step symbol carries. A `Composition(Sin, Exp)` made
-  before a scope that declares another `Sin` calls that inner `Sin` when it is
-  applied there, while lexical scoping (`docs/SCOPING-MODEL.md`) says the step
-  denotes the `Sin` of the scope where it was written. The compilers use the
-  same function, so the compiled code has the same defect. Fix: build each
-  named call from the binding of the step symbol.
-- **CE-694.2** Under `.N()`, `Apply` passes the approximated arguments and
-  their exact sources (`exactSources`), but the `Composition` case of
-  `apply()` uses only the approximations. A step with a jump then gets a
-  rounded input: `Apply(Composition(Negate, Floor), (25! − 1)/24!).N()` can
-  give `−25` instead of `−24`. Fix: give the exact sources to the last step,
-  as the application of a function literal does.
-
 ### CE-692. Make `subs()` capture-avoiding
 
 **Status:** ready; design, medium. User decisions 2026-10-30: `subs()` becomes
@@ -1193,6 +723,7 @@ replacement is inserted as today, documented with examples, and an internal
 variant returns `undefined` there. Starts after the fix of GitHub issue #489 is
 committed. Plan:
 `docs/plans/2026-10-30-capture-avoiding-subs.md`.
+**Witness:** plausible; Ready with user decisions dated 2026-10-30 and a plan; `Sum(j + k, …).subs({j: k})` gives 12.
 
 Today `Sum(j + k, Limits(k, 1, 3)).subs({j: k})` gives `Sum(k + k, …)`, which
 is `12`: the replacement `k` is captured by the index. After the change, the
@@ -1200,57 +731,13 @@ index is renamed first: `Sum(k + k_1, Limits(k_1, 1, 3))`, which is `3k + 6`.
 Nine internal callers check for this capture and decline today; each check is
 removed in its own step, with a test.
 
-### CE-660. The interpreter runs a `Loop` over a list with no value zero times
-
-**Status:** proposed; design. User decision 2026-10-30: the result should
-have no value, but neither design is done now. Spec (on hold):
-`docs/plans/2026-10-30-loop-domain-no-value.md`; its review:
-`docs/scratch/LOOP_DOMAIN_NO_VALUE_SPEC_REVIEW.md`.
-
-With `L` declared `list<number>` and no value,
-`Block(c := 5, Loop(c := c + k, Element(k, L)), c)` gives `5`: the loop reads
-`L` as an empty list. `Sum(k, Element(k, L))` over the same `L` stays
-unevaluated, so `Loop` gives a definite value where `Sum` has none. The same
-holds for an Epsil `for k in L` and for a guard that stays undecided
-(`Element(k, [1, 2], k > m)` with `m` missing skips every element). Compiled
-code gives no value for a `Loop` over such an input, which is stricter than the
-interpreter.
-
-A statement list stops early only on `Return`, `Break`, `Continue` and an
-`Error` value, so the interpreter has no way to give "no value" for a statement
-that acts by effect. The two designs considered:
-
-- **A "no value" stop**: a new internal result that stops the statement lists
-  and leaves the block unevaluated. The spec review found 17 findings, the main
-  one being that the stop must be defined for every operator that can hold a
-  `Block` as an operand (`Assign`, `Add`, `Return`, a `Sum` body), for Epsil,
-  the debugger hooks and every compile target.
-- **An `Error` result**: the existing route of a loop domain that evaluates to
-  an error (`LoopState.domainError`, `library/control-structures.ts`). Small,
-  but the result is an error, not "no value".
-
-### CE-621. Host-code rule of CE-601: a nested asynchronous evaluation releases the host-derived source values of its parent
-
-**Status:** ready; defect. Found 2026-10-28 by the last review round of CE-601.
-It does not give a result that 0.173.0 did not give (0.173.0 kept every host
-result); it causes extra host calls. The fix needs one count of the evaluations
-in progress for each evaluation number, shared by the synchronous and the
-asynchronous evaluations (`evaluation-epoch.ts`); the store guard of the
-evaluation-cache migration does not decide it.
-
-- **CE-621.2** A nested `evaluateAsync()` started by a handler without a carried
-  context stack gets the parent's evaluation number but its own pending count;
-  when it ends, it releases the parent's host-derived source values
-  (`releaseHostEagerSourceValues`), and the parent calls the source again. The
-  same happens when a synchronous top-level evaluation ends while a nested
-  asynchronous evaluation that shares its number is pending.
-
 ### CE-657. A cache keeps a random draw or the value of an impure operator when the node does not look impure
 
 **Status:** design needed; wrong values; needs a design. Found 2026-10-30 by the reviews
 of the store-guard work (evaluation-cache plan, step 1); the same on HEAD
 `d1b7d0838`. Taken out of step 1 by user decision 2026-10-30, after four
 attempted designs each gave a new defect.
+**Witness:** crafted; Needs a host operator declared `pure: false` or one node reused across seeds; four designs failed.
 
 `isPure` of a node does not follow the value of a symbol it reads, and the store
 guard (`boxed-expression/store-guard.ts`) counts only host code that states no
@@ -1300,6 +787,7 @@ the store guard. The cost limit is the paired benchmark of
 **Status:** decision needed; defect (a hang), needs a design decision. Found 2026-10-30 by
 the review of the store-guard work (evaluation-cache plan, step 1); the same on
 HEAD `00869b80a`.
+**Witness:** crafted; Hang needs an async host handler that evaluates its own containing node.
 
 When `evaluateAsync()` reads a lazy collection node, a second caller of the same
 node with the same signal, frames and effects joins the walk in progress
@@ -1339,6 +827,7 @@ Options:
 ### CE-607. `Expand` and other rewrites copy one random draw into several
 
 **Status:** ready; defect. Found 2026-10-28 while fixing CE-598.
+**Witness:** plausible; `Expand((r(t) + 1)^2)` with `r` declared `random` makes three draws from one.
 
 `Expand((r(t) + 1)^2)`, with `r` declared with the `random` effect, gives
 `r(t)^2 + 2r(t) + 1`: one draw becomes three independent ones, which changes the
@@ -1364,6 +853,7 @@ unreachable with a draw); `a!/b!` and `n!/(k!(n−k)!) → Binomial`
 ### CE-608. The targets of a destructuring assignment in a `Block` are listed as unknowns
 
 **Status:** ready; defect. Found 2026-10-28 by the review of CE-597.
+**Witness:** plausible; `Block(Assign(Tuple(a, b), Tuple(1, 2)), Add(a, b)).unknowns` is `['a', 'b']`, should be `[]`.
 
 `Block(Assign(Tuple(a, b), Tuple(1, 2)), Add(a, b))` evaluates to 3 and does not
 declare `a` or `b` outside the block, but its `.unknowns` is `['a', 'b']`. A
@@ -1376,6 +866,7 @@ before CE-597.
 
 **Status:** decision needed; defect, S. Found 2026-10-28 while fixing a CE-597
 regression.
+**Witness:** corpus; Tycho row 426 case 12; only a log line under jest, values right.
 
 With `r` assigned a recursive function literal (`n ↦ 0` when `n ≤ 0`, else
 `s + r(n − 1)`) and `N: list<real>`,
@@ -1414,66 +905,11 @@ Options:
 Recommended: (a), because it is small and changes no result outside tests. If
 nothing is decided, the message stays in the test log.
 
-### CE-609. A library letter passed to an unannotated function parameter stays the operator
-
-**Status:** proposed; known limit. Found 2026-10-28 while fixing Tycho row 473.
-
-An unapplied library letter (`N`, `D`) used as a value becomes a variable, but
-an argument at an unannotated parameter of a function literal or a user function
-keeps the operator binding: with `g = (x) ↦ x + 1`, `g(N)` and
-`Apply((x) ↦ x + 1, N)` have no unknowns and evaluate to `N + 1` even after
-`N := 4`. The literal does not infer from its body whether a parameter is
-applied (`(f) ↦ f(2)`, where `N` must stay the operator) or read as a value. A
-fix needs that inference (`isAnnotatedValueParameter`,
-`boxed-expression/validate.ts`). An annotated parameter (`(x: number) ↦ x + 1`)
-works.
-
-### CE-590. After a checkpoint restore, a symbol declared in a scope pushed and popped during the window reads a later value with its old type
-
-**Status:** proposed; defect, known limit. Found 2026-10-28 by the review of the
-CE-586 fix. User decision 2026-10-28: leave open and accept the limit for now;
-fix it when a host needs it.
-
-A checkpoint restore makes a symbol inert (no value, counted as unknown) when
-the definition it is bound to was created during the rewound window in a scope
-that is on the engine's scope chain when the restore runs (`checkpoint.ts`, step
-5, `_rewound`; read by `bindingInContext`, `boxed-expression/binders.ts`). A
-scope that existed before the window, pushed and popped during it, is not on
-that chain, so its definitions are not marked. A host that keeps one scope per
-cell does this. Measured: create a scope with `pushScope()`/`popScope()`, take a
-checkpoint, push the scope again, `declare('q', {type: 'integer', value: 3})`,
-build `q + 1`, pop, restore; push the scope, declare `q` as a string `'hello'`:
-the old `q + 1` evaluates to an `incompatible-type` error, its type is
-`integer`, and `unknowns` is `[]`. The fix: mark a definition whose home scope
-was not CREATED in the window (rather than one on the chain). That needs a
-creation mark on each scope, and scopes are built in about 24 places
-(`bindings: new Map()`). Binder and `Block` scopes are created in the window, so
-they would stay unmarked. The `restore()` doc comment states the current limit.
-
-### CE-587. Hiding a stored value equal to an assumed value, during an evaluation, loses the stored value (known limit)
-
-**Status:** known limit; user decision 2026-10-28: no change. Reported by Tycho
-(`withValuesHidden()`, `src/plot-core/ce-module-registry.ts`).
-
-A host that evaluates an expression with some symbol values hidden removes each
-value, evaluates, and puts the values back. With `ce.checkpoint()`/`restore()`
-this is exact. But a checkpoint is refused while an evaluation is in progress
-(`assertQuiescent`, `checkpoint.ts`), so a host called from inside an evaluation
-falls back to the public `value` setter. With the public API, a name can hold a
-stored value and an assumed value only when the two are equal
-(`ce.assume(a = 3)` when `a` stores 2 returns `'contradiction'`, and `ce.assign`
-under an assumption that it contradicts throws). In that case (`a := 3`, then
-`Assume(a = 3)` typed by a user), clearing `a` with the setter leaves `a`
-reading 3 from the assumption, no public read tells the host that a stored 3 was
-also there, and when the assumption's scope pops, `a` has no value. Options
-considered: a public read of whether a stored value exists, or a checkpoint
-allowed during an evaluation. The user chose no change because the case needs a
-user assumption equal to the stored value and a call during an evaluation.
-
 ### CE-537. The free-variable walk misreads two binders
 
 **Status:** ready; defect. Found 2026-10-27 while fixing `subs()` for Tycho row
 464; `subs()` now follows this walk, so it inherits both readings.
+**Witness:** plausible; `Exists(y < x, x)` and `{x².
 
 - In a RAW `Sum(j·k, Limits(k, 1, k))` (no operator definition), the walk treats
   the index as bound in the whole `Limits` clause, so it reports only `j` as
@@ -1494,6 +930,7 @@ user assumption equal to the stored value and a call during an evaluation.
 ### CE-539. Compiling to a shader infers the root's free symbols as `number`
 
 **Status:** ready; defect. Found 2026-10-27 while working on CE-525.
+**Witness:** plausible; Compiling a user-function call to a shader changes the declared type of free `x`, `y` to `number` for the engine life.
 
 The GPU root inliners (`inlineCollectionValuedCallsAtRoot`, and
 `inlineSharedUserFunctionCalls` in `compilation/gpu-shared-calls.ts`) substitute
@@ -1506,6 +943,7 @@ the declarations of the symbols it reads.
 
 **Status:** design needed; defect. Found 2026-10-27 while fixing `subs()` for
 Tycho row 464 (CE-530).
+**Witness:** plausible; `replace({match: 'j', replace: 10}, {recursive: true})` rewrites a `Sum` index.
 
 `j + Sum(j, Limits(j, 1, 3))` with
 `replace({match: 'j', replace: 10}, {recursive: true})` gives
@@ -1518,37 +956,17 @@ rewrite inside the body of a binder (`Sum(2k, …)` to `2·Sum(k, …)`).
 ### CE-91. Define value capture on assignment, mutable-object boundaries and view reads
 
 **Status:** design needed; design.
+**Witness:** none; Design of value capture and view reads (plan Q11); no reproduction in the entry.
 
 Define the ordinary capture of a value on assignment, the boundaries of mutable
 objects, and the behavior of a view that is read more than once or whose read
 has effects (question Q11 of `docs/plans/2026-10-20-bare-tuple-record-any.md`;
 the probes are in `docs/plans/2026-10-20-lazy-view-read-capture-probes.md`).
 
-### CE-92. Sticky unresolved-call results with function declaration hoisting on every route
-
-**Status:** proposed; task.
-
-Implement sticky evaluated results of unresolved calls together with function
-declaration hoisting across the sequential runner, the whole-block interpreter
-and the compiler. Keep earlier bindings, declared signatures and constructors.
-See also CE-312.
-
-### CE-97. The interpreter leaves some collection reductions unevaluated that compiled code computes
-
-**Status:** ready; defect.
-
-Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
-
-- **CE-97.2** `Determinant(Scan(m, Add))` stays unevaluated for
-  `m: matrix<number>`, while the compiled code gives the value (`-2` for
-  `[[1,2],[3,4]]`). `Transpose(Scan(p, Add))` at `p = []` also stays
-  unevaluated, while compiled code gives `[]`.
-- **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
-  leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
-
 ### CE-103. A result built with the library π serializes as `Pi` in a scope that rebinds `Pi`
 
 **Status:** decision needed; defect, S.
+**Witness:** crafted; Needs `Pi` declared locally plus a `.json` round trip inside that scope.
 
 A declaration of `Pi` is refused in the global scope only, so that a function
 parameter, a `Sum` index or a block local can still be named `Pi`. In such a
@@ -1578,6 +996,7 @@ affected. If nothing is decided, the behavior stays and is not documented.
 ### CE-105. Error frames do not name the canonical operand or the declared call
 
 **Status:** ready; defect, small. See also CE-109.
+**Witness:** plausible; Epsil `let v = Ln("a") + Ln(2)` underlines the whole call; error frames name wrong operands.
 
 - **CE-105.1** The frame of an error that the evaluation of an operand of `Add`
   or `Multiply` makes counts the operands of the RESULT of the handler, not of
@@ -1604,6 +1023,7 @@ affected. If nothing is decided, the behavior stays and is not documented.
 ### CE-107. `isSame` is false between a boxed and a parsed `D` of the same function literal
 
 **Status:** decision needed; defect, small. Tycho row 394.
+**Witness:** corpus; Tycho row 394; `isSame` false, values right.
 
 `isSame` is `false` between `D(x ↦ f, x)` boxed from MathJSON and the same
 derivative parsed from `\frac{\mathrm{d}f}{\mathrm{d}x}`, although their `.json`
@@ -1639,38 +1059,10 @@ literal, or more work?
 - (c) v2 with a copy of the body that keeps its existing bindings in new
   scopes instead of a rebox from MathJSON (a new copy function; more work).
 
-### CE-108. Operators treat a symbol that holds or is declared an error in different ways
-
-**Status:** ready; defect, small.
-
-- **CE-108.3** With a symbol declared `error` with no value
-  (`ce.declare('e', 'error')`), `Length(e)` is valid at boxing and evaluates to
-  "expected `collection`, got `error`". A function with a single signature and a
-  `list` parameter refuses `e` at boxing. `Length` is declared
-  `(any) -> infinity | integer`, so boxing admits `e`, and its evaluate handler
-  refuses it. One of the two routes should change.
-
-### CE-109. Errors that a handler creates itself have no `ErrorTrace` frame
-
-**Status:** ready; defect, small.
-
-`Count`, `Length`, `First`/`Second`/`Third`/`Last`, `PointX`/`PointY`/`PointZ`,
-`Sort`, `Ordering`, `RandomShuffle` and `PointZ`'s dimension error carry the
-frame of the operator through `refusedOperandError` / `withErrorFrames`
-(`library/collections.ts`). The evaluation adds no frame to an error that a
-handler returns as the value of the whole call, so every other handler that
-creates an error itself has the same gap. Examples: the `out-of-range` errors of
-the sequence-search operator in `collections.ts` (an index below 1, an empty
-needle, near lines 12879 and 12889), and the many
-`ce.error('incompatible-type')` returns in `library/colors.ts`.
-
-Options: each handler goes through `withErrorFrames`, or the evaluation adds the
-frame of the call when a handler returns an error whose frames do not start with
-that call.
-
 ### CE-111. Some lazy operators still run synchronously under `evaluateAsync`
 
-**Status:** proposed; capability. Issue #392.
+**Status:** ready; capability. Issue #392. Approved 2026-11-01.
+**Witness:** corpus; CE-111.4 approved 2026-10-31 (async iterator, spec ready); CE-111.1, .5 are design (keep); rest proposed under issue #392.
 
 An operator opts in to the asynchronous route with `evaluatesOperands` ("the
 handler demands and evaluates every held operand and reads nothing else of their
@@ -1766,96 +1158,10 @@ collection through `runAsync`) already yield and honour an abort signal.
   operators get the iterator, which readers use it, and how an abort signal
   and the evaluation context carry across each `await`.
 
-### CE-112. A `WithRandomSeed` body that returns an eager operator holding a drawing view is reported pure
-
-**Status:** ready; wrong value, small.
-
-`WithRandomSeed(7, Repeat(Map(u ↦ Random(), Range(1, 3)), 2))` reports
-`isPure === true`. The escape check (`escapesAsDrawingLazyView`,
-`boxed-expression/effects-of.ts`) follows the operands of a LAZY view and the
-cells of a literal container, so a lazy `Take`, `Join` or `ListJoin` that holds
-a drawing view is impure, as it should be. The two-argument `Repeat` is an eager
-application before it is evaluated, so the check treats it as opaque, yet it
-evaluates to a `List` of two drawing views, which escape the frame and draw live
-at each read. A fix needs a rule for which eager operators store an operand in
-their result; it is a separate change from the lazy-view rule.
-
-### CE-113. A quotient has two canonical forms: `x·(1/y)` and `x/y`
-
-**Status:** proposed; design, medium. User decision: not now.
-
-`ce.box(['Multiply', 'x', ['Divide', 1, 'y']])` stays
-`Multiply(x, Divide(1, y))`, and `.isSame(ce.box(['Divide', 'x', 'y']))` is
-`false`. Parsing `x\times(y^2+z^2)^{-1}` gives the same product form, because
-`canonicalPower` turns `Power(D, -1)` into `Divide(1, D)` and
-`canonicalMultiply()` (`boxed-expression/arithmetic-mul-div.ts`) never merges a
-`Divide` factor with the other factors. `evaluate()` and `simplify()` give
-`Divide(x, y)` for both, so only `isSame`, hashing and pattern matching see two
-forms.
-
-A fold in `canonicalMultiply()` that returns
-`canonicalDivide(numerators, denominators)` for a product of scalars with a
-`Divide` factor was measured on the full suite (2026-10-03). It must not land
-until these are fixed first:
-
-- **CE-113.1** `expandProduct()` (called by `mul()` through `expandProducts()`)
-  has branches for `Divide` operands that distribute into a sum numerator and
-  call `.mul()`/`.div()` recursively. With the fold, product-rule terms become
-  `Divide` nodes and the derivative of a nested radical takes exponential time
-  (depth 12: 670 ms → 2,760 ms; `derivatives.test.ts` and both
-  `compile-derivative-numeric-fallback` test files did not finish).
-- **CE-113.2** A factor `Power(y, -n)` with `n ≠ 1` must go to the denominator
-  too, or `x·y^{-2}` and `x/y^2` stay two forms (and `Divide(2,x)·x^{-2}` prints
-  as a nested fraction).
-- **CE-113.3** `.N()` must give floats for the literals of a quotient it builds:
-  `(1/3)·(1/x)` stayed the exact `1/(3x)` with the fold.
-- **CE-113.4** Re-measure three integrals that stayed unevaluated with the fold
-  (`\int_{-1}^1 a\frac{\sin t}{t}dt`, `\int\frac{\mathrm{arcsinh}(x)}{x}dx` and
-  the Rubi case `#544`), because a constant factor ended up inside a numerator.
-  The integrator now splits constant numerator factors.
-
-After these, about 7 snapshots and 3 assertions change, all to a single quotient
-form. The measured patch (one file, `arithmetic-mul-div.ts`) is not kept in the
-repository.
-
-### CE-117. Linear-algebra operators give wrong or questionable values for symbolic or extreme input
-
-**Status:** ready; defect.
-
-- **CE-117.4** `LinearSolve` with complex cells that overflow gives `[0, 0]`.
-- **CE-117.5** `Kernel([[1.5e308, 1.5e308, 1], [1.5e308, -1.5e308, 1]])` gives
-  `[[0, 0, 1]]`, which is not in the kernel: the chop sets the small component
-  to zero.
-
-### CE-118. Engine code that builds a node by name picks up a user binding in the active scope
-
-**Status:** ready; wrong value.
-
-Inside a function body, a local definition named like a library operator is seen
-by engine code that runs during that body's evaluation:
-
-- `function f() { function Add(a, b) { 12345 }; expand((y + 1) * (y + 2)) }; f()`
-  evaluates to `152399025` (the user `Add` applied to the terms `Expand`
-  builds).
-- `function f() { function Add(a, b) { 999 }; D(y^2 + y, y) }; f()` is `999`.
-- `function f() { function Sin(a) { 999 }; D(cos(y), y) }; f()` is `-999`.
-
-The same shadow in a `do { }` block does not reproduce it. Engine code
-(`Expand`, `D`, the polynomial and simplification code) builds
-`Add`/`Multiply`/`Sin` nodes by name while the user's function scope is the
-current scope, and name resolution cannot tell that construction from a
-user-written call. At the top level, the formulas of the derivative table do the
-same: after `Sinh(x) := 3x`, `D(Cosh(t), t)` gives `3t`, because the rule for
-`Cosh` is the formula `Sinh(x)`. (`D(Sinh(t), t)` is `3`: `D` checks for a user
-definition of the name before it uses the rule for that name.)
-
-Fix direction: engine-built nodes resolve their head against the system scope (a
-construction route that does not consult the current scope), and only
-user-written code uses scope-based resolution.
-
 ### CE-123. A validation phase before canonicalization, so that a probe does not declare
 
 **Status:** design needed; design.
+**Witness:** none; Validation phase idea, "do it when a third instance appears".
 
 Two computations must VALIDATE an expression (decide what it is or what it would
 produce) without changing the environment. Each pays for this with a scratch
@@ -1878,6 +1184,7 @@ appears.
 ### CE-124. A `Which` whose list condition holds an unknown function over the list stays symbolic
 
 **Status:** ready; defect. Tycho ask 296.
+**Witness:** corpus; Tycho ask 296 with a Tycho repro script; `Which` over `foo(L)` blows up to 52 MB.
 
 The evaluator selects element-wise over a list condition
 (`Which([1,5,2] < 3, 10, True, 20)` is `[10, 20, 10]`). But when the condition
@@ -1890,35 +1197,10 @@ returns in about 0.2 s. Tycho's case (`conj`, Desmos's complex conjugate) now
 parses as `Conjugate` (`definitions-complex.ts`). Instrument on the Tycho side:
 `scripts/repros/2026-09-15-list-conditioned-piecewise-probe.mts` in `dev/tycho`.
 
-### CE-126. The capability registry has handlers for `console` and `entropy` only
-
-**Status:** proposed; capability. Plan: docs/EFFECTS-MODEL.md (Stage 4).
-
-`ce.effects` (the host capability registry) holds two handlers: `console`
-(`Print`/`Input`) and `entropy` (`RandomExpression`, and every random operator
-evaluated outside a `WithRandomSeed` frame, the stated exception to the coupling
-rule). The specification names four more (`network`, `filesystem`, `time`,
-`environment`) and the `random` draw kernel. No library operator reads them, so
-add each one with the first operator that uses it.
-
-- **CE-126.1** `random`: the seeded draw kernel `draw(seed, n)`, captured at
-  frame entry, with compile declining for an expression that carries `random`
-  while a non-default kernel is installed. Unframed draws use `entropy`, so the
-  kernel is only about replacing PCG3D under a frame.
-- **CE-126.2** `time`, `network`, `filesystem`, `environment` have no operator
-  yet. The first `network` operator (`Fetch`) is also the first operator that
-  returns a promise, and it starts the admission of the `async` label.
-- **CE-126.3** Compiled code draws through `_SYS.drawNextRandomNumber()` →
-  `ce._random()` and, for the Monte-Carlo integrals, through the engine-bound
-  `ce._liveRandom()`, so a mocked `entropy` handler applies to it. A DENIED
-  handler makes a compiled function THROW `CapabilityDeniedError` at run time
-  (compiled code has no error-value channel, `docs/ERROR-MODEL.md` §6). A
-  compile-time decline for a `random`-bearing expression under a denied
-  `entropy` handler would fail closed instead. Build it when a host asks.
-
 ### CE-127. A subscript index that is an expression is not canonicalized
 
 **Status:** decision needed; defect. Related: CE-135.
+**Witness:** plausible; `A_{i+1}` keeps a non-canonical index.
 
 The `Subscript` canonical handler (`library/core.ts`) canonicalizes a
 parenthesized or comma index, but passes any other index expression through
@@ -1960,31 +1242,11 @@ value spelled?
   that case only.
 - (c) Do nothing: the defect stays as described above.
 
-### CE-128. Pattern matching normalizes an `Error` subject only at the root
-
-**Status:** proposed; capability. No known user report.
-
-`normalizeErrorSubject` (`match-dispatch.ts`) strips the `ErrorTrace` breadcrumb
-of an `Error` subject, and strips its where/site operand when the pattern's
-arity does not ask for it, but only at the ROOT of the match. A sited or bubbled
-error nested as the cause of another error is not normalized, so an
-`Error(Error(c))` pattern does not see through the where or trace of the inner
-error. To fix it, the generic recursive matcher must normalize `Error`/`Error`
-subject–pattern pairs as it descends.
-
-### CE-130. A pre-boxed operand applied twice through a raw name is not told apart from a binding
-
-**Status:** proposed; design. Contract: `docs/SCOPING-MODEL.md`.
-
-A pre-boxed operand can be applied twice through a raw name instead of a
-binding, and binding identity cannot tell the two apart (raw-name-fallback
-provenance). The behavior is pinned by a characterization test marked `@fixme`,
-not fixed.
-
 ### CE-131. Disjunctive (`Or`) guards in the assumptions system
 
-**Status:** proposed; design. Plan: docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md
-§7 (non-goals).
+**Status:** ready; design. Plan: docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md
+§7 (non-goals). Approved 2026-11-01.
+**Witness:** corpus; a Fungrim corpus count (87 entries).
 
 87 complex-domain Fungrim corpus entries cannot be discharged because their
 guards have an `Or` at the root. The assumptions design does not cover
@@ -1994,18 +1256,10 @@ a design extension (case splitting or watched-disjunct propagation). The guard
 census (`scripts/fungrim/guard-census.json`, now 89.6 % complex-domain
 dischargeable) shows what it would gain. Do it when there is demand.
 
-### CE-132. Non-finite values: four residual items from the July 2026 reviews
-
-**Status:** ready; defect. Summary: docs/STATUS_REPORT.md.
-
-- **CE-132.1** Literal poles of the `Artanh`/`Arcoth` class.
-- **CE-132.2** Finiteness of the numeric value of `∞+i`.
-- **CE-132.3** The place of `~oo` in the type lattice (question).
-- **CE-132.4** Review the positivity of the `Multiply(x, +∞)` fold.
-
 ### CE-133. Other test-suite markers: assumptions, `Function` snapshot, equivalence groups
 
 **Status:** ready; defect.
+**Witness:** corpus; Test-suite markers; CE-133.3 is the `grudnitski` equivalence benchmark (9 skipped groups); CE-133.1/.2 have no program (would be drop).
 
 - **CE-133.1** Range and interval membership assumptions are not connected
   (`assumptions.test.ts`, `@fixme` setup lines).
@@ -2017,17 +1271,10 @@ dischargeable) shows what it would gain. Do it when there is demand.
 `test/playground.ts` tracks its own items (notation decisions, Iverson/Boole and
 inequality → `Range` wishes, matcher internals).
 
-### CE-134. Declared symbols are not checked against existing uses
-
-**Status:** ready; defect.
-
-A `@todo` at about line 2459 of `latex-syntax/parse.ts`: a declared symbol is
-not checked against an existing symbol, function or inferred use. The check
-probably belongs in canonicalization.
-
 ### CE-135. `Subscript(a, k)` fuses to `a_k` and loses a binder-bound `k`
 
 **Status:** ready; defect, low priority.
+**Witness:** plausible; `Subscript(a, k)` inside a `Sum` over `k` fuses to `a_k` and loses the index binding.
 
 `["Subscript", "a", "k"]` canonicalizes to the fused symbol `a_k`. When `k` is
 an index bound by a binder, the binding is lost. A correct fix needs
@@ -2037,9 +1284,25 @@ corpus uses it).
 
 ## Symbolic computation
 
+### CE-764. The derivative of `a ↦ h(a)` reads a global `a` of `h` as the parameter
+
+**Status:** ready; wrong value, M.
+**Witness:** plausible; with `a := 3` and `h := x ↦ a·x`, `Apply(Derivative(a ↦ h(a)), 2)` gives `4` and should give `3`; `Apply(Derivative(a ↦ a·h(a)), 2)` gives `14` and should give `12`.
+
+When the `Derivative` handler (`src/compute-engine/library/calculus.ts`)
+differentiates the body of the literal, it inlines the body of `h`. The free
+`a` of that body names the global, but after the inlining it has the same
+name as the parameter `a`, so it is differentiated as the variable. The
+shield of the parameter names (`withValueShield`) cannot separate the two,
+because it works by name. A fix keeps the global of `h` bound to its own
+definition when the body is inlined (for example, rename the parameter of
+the literal before the inlining, or substitute the value of a free name of
+`h` first).
+
 ### CE-738. `Integrate` of a block integrand: `evaluate()` integrates the first statement only
 
 **Status:** ready; wrong value, M.
+**Witness:** plausible; `Integrate(Block(c ≔ 2; c·x), Limits(x, 0, 1)).evaluate()` gives 2, `.N()` gives 1.
 
 `Integrate(Block(c ≔ 2; c·x), Limits(x, 0, 1))`: `.N()` gives `1`, and
 `.evaluate()` gives `2`, the integral of the value of the first statement
@@ -2055,151 +1318,10 @@ integration and the serializer take the value of the block (its last
 statement), or the symbolic integration declines for a block integrand and
 leaves it to the numeric one.
 
-### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
-
-**Status:** phases 1, 2 and 3 done 2026-10-26; the sub-items below are open;
-capability, large.
-[#477](https://github.com/cortex-js/compute-engine/issues/477) (closed by the
-three phases, user decision 2026-10-26),
-[#416](https://github.com/cortex-js/compute-engine/issues/416) (answered by
-phase 3). Plan: `docs/plans/2026-10-26-value-kinds.md` (revision 7). User
-decisions of 2026-10-26: one mechanism, the `arithmetic` field on the operator
-definition of the head, with recognition by the head's kind type; a kind type is
-a subtype of `value`, and the arithmetic operators admit a kind by rule (A); a
-function with a body admits a kind only when its parameter names it (B); a
-`compare` hook (C); `Measurement` is admitted as `number`, and a complex nominal
-is refused at evaluation (D); accidental behavior may change (section 6 of the
-plan).
-
-Phase 1 (done) added the `arithmetic` field of an operator definition
-(`ArithmeticDefinition`: `add`, `multiply`, `negate`, `divide`, `power`,
-`compare`, `apply`, `admittedAs`, `resultType`, `compile`), the kind types (the
-primitive `residue`, or a nominal type defined as exactly `value` and declared
-with `{ mint: false }`, now a public option of `ce.declareType()`), the kind
-registry, the admission, dispatch, typing and `simplify()` rules, the compile
-contract, and moved `ResidueClass` onto the field. A head declared `-> residue`
-(or `-> gf8`) now gives its own arithmetic: `x + MyMod(2, 4) + MyMod(1, 4)` is
-`x + MyMod(3, 4)`. The documentation is in
-`cortexjs.io/docs/compute-engine/06-guide-augmenting.md` ("Declaring a Value
-Kind"), `cortexjs.io/docs/compute-engine/08-guide-types.md` ("Kind Types"),
-`docs/TYPE-SYSTEM.md` ("Value kinds and kind types") and
-`docs/COMPILATION-MODEL.md` ("Value kinds").
-
-Phase 2 (done) moved `Measurement` and `Quantity` onto the field, with the 16
-decisions of the inventory
-(`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`) and the amendments
-A1 to A16 (plan section 13; decision 14 reversed in 13.2: `.re` and `.im` of a
-measurement keep the nominal). The kind primitives `measurement`
-(`admittedAs: 'number'`, `apply` propagates to first order) and `quantity`
-(`'none'`; the 24 trigonometric functions and `Abs` name it), the answer
-`'unordered'` of `compare`, the fields `isExact` and `numericValue`, and
-`ArithmeticContext.tolerance` are new. The name-based branches of the
-arithmetic, relational and statistics operators are gone. It fixed CE-508. The
-visible changes are in `CHANGELOG.md` and in section 6 of the plan; the
-documentation is in `cortexjs.io/docs/compute-engine/06-guide-augmenting.md`
-("Measurements and Quantities"),
-`cortexjs.io/docs/compute-engine/08-guide-types.md` ("Kind Types") and
-`docs/TYPE-SYSTEM.md` ("Measurements and quantities").
-
-Phase 3 (done) added the `Enclosure` value kind, an interval that holds one real
-(plan sections 4.9.2 and 4.9.3; the user's decisions of 2026-10-26 took every
-recommendation of 4.9.1 and the defaults (b) of 4.9.3). The head is in
-`library/enclosure.ts`, the hooks in `library/enclosure-arithmetic.ts` and the
-`interval-js` contract in `library/enclosure-compile.ts`. The kind primitive
-`enclosure` (`admittedAs: 'real'`) is new. Under `evaluate()` the hooks keep
-exact endpoints; under `.N()` the endpoints are converted to doubles outward and
-the interval library computes the image, one kernel for each form; the compiled
-code calls the same kernels, so the two give the same doubles. Two fields of
-`ArithmeticDefinition` are new for every kind: the `extremum` hook (asked by
-`Max`, `Min`, `Clamp`, `ElementMax`, `ElementMin` before `compare`;
-`kindExtremum()`, `kind-compare.ts`) and the answers `'<='` and `'>='` of
-`compare`, which every reader maps through `orderAnswer()` (`kind-compare.ts`).
-The interval runner checks the host value of an input typed by the kind
-(`run()`, `broadcast()`, `broadcastAsync()`; a union input by arm), and the
-kernel fixes of CE-522 landed with it. Four differences between the interpreter
-and the compiled code are accepted and stated in `docs/COMPILATION-MODEL.md`
-("Value kinds"): the identity shortcut of the six comparisons (`c = c` is `True`
-in the interpreter and `'maybe'` when compiled); the compiled comparisons
-compare doubles exactly, without the engine tolerance; in an angular mode other
-than radians the endpoints may differ by the rounding of the factor; and a
-non-integer point exponent with a negative base at run time is `empty` when
-compiled, where the interpreter uses the real branch. The implementation is
-tighter than one row of the plan: `Enclosure(-1, 1)^-2` is `Enclosure(1, +oo)`
-under `.N()` and compiled too (the composition `1 / x^2`), not the whole line.
-Tests: `test/compute-engine/enclosure-kind.test.ts`, `enclosure-apply.test.ts`,
-`enclosure-compile.test.ts` and `interval-kernels-ce522.test.ts`. The
-documentation is in `cortexjs.io/docs/compute-engine/06-guide-augmenting.md`
-("Enclosures"), `cortexjs.io/docs/compute-engine/08-guide-types.md` ("Kind
-Types"), `docs/TYPE-SYSTEM.md` and `docs/COMPILATION-MODEL.md`.
-
-- **CE-507.12** (later step) A serializable kind entry check. Two limits of the
-  compile contract of phase 1 stay for the enclosure. (1) Code compiled with a
-  kind input cannot be loaded again from its stored form: the loaders of
-  `createIntervalRuntime()` (`load()`, `loadBroadcast()`,
-  `loadBroadcastSlice()`) refuse it, because the `entry` check is a function of
-  the host and stored code cannot carry it; so `shippable` is `false` and the
-  kernel pool is not used. (2) An input typed `list<enclosure>` declines,
-  because `entry` and `lowered()` describe one value. On `interval-js` the check
-  of an enclosure is fixed (a record `{ lo, hi }` with `lo <= hi`, no `NaN`, not
-  the same infinity twice, or a number), so it could be written as data in the
-  stored code and applied to each element of a list. To do when a host asks for
-  stored or pooled enclosure code.
-
-- **CE-507.5** (defect, not reachable today) A kind registered inside an
-  inference rollback frame, or inside the Epsil static pre-pass, is not undone
-  when the frame or the pre-pass rolls back (`docs/CHECKPOINT-MODEL.md`, "State
-  coverage", says so). No route reaches it: Epsil cannot declare an `arithmetic`
-  field, and a host `ce.declare` with one runs outside a frame. Becomes
-  reachable when Epsil can declare hooks.
-- **CE-507.7** (on demand; user decision 2026-10-27: nothing now, review when a
-  consumer asks for the syntax; the design to build then is the `Compose`
-  alternative below, never the flag on `Multiply`) A non-commutative product for
-  a value kind. PR #482 (group theory based on GAP) does not block on it: it
-  ships named operators and refuses `Permutation(…) * Permutation(…)` by its own
-  design note. Plan section 4.3 says `multiply` must commute, because the
-  canonical form sorts a product, and names matrices over a finite field as out
-  of scope. PR #482 (`installGroupTheory`, 132 operators) meets exactly this: it
-  ships `PermutationCompose` and `GroupMatrixMultiply` as named operators, and
-  `Permutation(…) * Permutation(…)` is refused with `incompatible-type` (its
-  design note `docs/group-theory/FOUNDATIONS.md`, decision D3, says why).
-  Proposal: a kind declares `multiply: { commutes: false, … }` (or a separate
-  `compose` hook); the canonical form of `Multiply` keeps the operand order when
-  an operand is of such a kind; `Power` with an integer exponent is the repeated
-  product; `Divide` is the right multiplication by the inverse; the serializer
-  prints `\cdot` or juxtaposition in the given order. Permutations, matrices
-  over F_p, quaternions and matrix groups would use it. First step: measure how
-  much of the `Multiply` canonical form assumes sorting. Alternative recorded
-  2026-10-26: a separate associative, non-commutative operator (`Compose`, LaTeX
-  `\circ`) with a kind hook `compose`; the juxtaposition rule
-  (`invisible-operator.ts`) boxes two values of such a kind to `Compose(a, b)`
-  instead of `Multiply`, and `Power(a, n)` with an integer `n` is the repeated
-  compose; this touches none of the rules of `Multiply` (the canonical sort and
-  flatten, `Divide`, the collection of like factors, `Expand`, the serializer,
-  the compile targets), which a flag on `Multiply` would have to gate one by
-  one. The engine's own precedent is the named operator (`MatrixMultiply`;
-  `\cdot` over lists is element-wise).
-- Note (2026-10-26, phase-2 code review): `.N()` of a definite integral returns
-  a `Measurement` (the quadrature result), so the first such call opens the kind
-  gates of an engine (`engineHasKindValues`, `someKindAdmittedByCarrier`,
-  `someKindHasResultType`, `value-kinds.ts`) for the rest of its life, as any
-  measurement operation does. Measured on 1500 evaluations of five ordinary
-  expressions (`evaluate()` and `.N()`): 1.04× a fresh engine after the
-  integral, 0.92× after a measurement sum, both within the run-to-run noise.
-  Accepted as is; the deferred gates at bootstrap (`deferKindValueGates()`)
-  stay, because the constants would open them for every engine.
-- Note (2026-10-26, from the review of PR #482): `mint: false` has two uses that
-  are compatible: a kind type (a nominal type defined as exactly `value`, plan
-  4.1.1) and a nominal type over another definition (PR #482 declares
-  `Permutation = tuple<images: list<integer>>` with a checked constructor
-  operator of the same name). Only the first can take an `arithmetic` field;
-  `cortexjs.io/docs/compute-engine/08-guide-types.md` says so. PR #482 also
-  edits the "no caller uses it today" comment on `mint` in
-  `src/compute-engine/index.ts` that phase 1 rewrote: a trivial merge conflict
-  to expect.
-
 ### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
 
 **Status:** decision needed; defect, M.
+**Witness:** plausible; `lim e^{√x}/x^5` at ∞ gives 0, should be +∞.
 
 `lim_{x→∞} e^{√x}/x^5` is `+∞`, and `lim x^5/e^{√x}` is 0; today they give 0
 and `+∞`. The growth comparison of `symbolic/limit.ts` ranks `e^g` above every
@@ -2249,6 +1371,7 @@ wrong value of the title stays.
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
 **Status:** ready; defect, small. Tycho row 412.
+**Witness:** corpus; Tycho row 412; `Solve(t^3 x = 1, t)` stays unevaluated (CE-137.1); CE-137.3 only skips an optimization (would be drop).
 
 A decision of 2026-09-21 says an index never reads a global inside a called
 function. The capture cases are fixed (`renameCapturedIndexes()` in
@@ -2269,6 +1392,7 @@ items remain:
 ### CE-141. `simplify()` does not reduce some exact definite integrals from Rubi
 
 **Status:** ready; defect, small.
+**Witness:** corpus; Integration-families benchmark audit lists 8 Rubi values `simplify()` cannot reduce; CE-141.3 is a question.
 
 The report of `npx tsx benchmarks/audit/integration-families.ts` lists the exact
 values that `simplify()` cannot reduce to the reference (8 of 578 runs on
@@ -2287,6 +1411,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
 ### CE-142. Some infinite sums and products give an unevaluated, wrong-shaped or inconsistent result
 
 **Status:** ready; defect, small.
+**Witness:** plausible; `\sum_{k=0}^\infty (-2)^k` simplifies to `~oo`; `simplify()` misses telescoping that `evaluate()` finds.
 
 Each case also holds for the explicit `\sum_{k=1}^{\infty}` form. None gives a
 wrong value. `evaluate()` and `.N()` now give the limit of a divergent or
@@ -2313,6 +1438,7 @@ vanishing infinite product of a rational body (`divergentInfiniteProduct()`,
 ### CE-143. The rounding margin of a float contour or integrand does not bound the pole position
 
 **Status:** design needed; design.
+**Witness:** none; Soundness of the float margin for poles; no reproduction.
 
 A float radius, center, vertex or integrand coefficient is read as the exact
 value it holds, and the sum of the half-ulp rounding bounds of the replaced
@@ -2326,136 +1452,20 @@ sits on the contour; it does not prove that a pole farther away than the margin
 is on the right side. A strict bound needs a root-perturbation bound for each
 polynomial factor.
 
-### CE-144. The real-line residue route rejects a float integrand
-
-**Status:** proposed; capability, small.
-
-`ContourIntegrate(1/(x² + 2.25), x, RealLineContour(True))`, called directly,
-returns "unsupported: Rational coefficients must be exact", while the closed
-contours read a float as the exact rational it holds and answer a float. The
-`\int_{-\infty}^{\infty}` route is not affected: it integrates through the
-antiderivative. Extending the residue route needs a rule for a pole whose
-imaginary part is within the rounding of 0, because the float can move the pole
-onto or off the real axis.
-
-### CE-145. A characteristic polynomial with float entries keeps a float `0` term
-
-**Status:** proposed; question, small.
-
-`CharacteristicPolynomial([[1.5, 2], [3, 4]], x)` is `x^2 - 5.5x + 0`: the exact
-and float constants of the result now fold, and their sum is a float zero, which
-`Terms` keeps by design (`x + 0.0` stays `x + 0` under `evaluate()`, `.N()` and
-`simplify()`). Decide whether a float zero summand is dropped from a polynomial
-result. If it is kept, delete this entry.
-
-### CE-146. A determinant above the size limit of the cofactor expansion is a nested quotient
-
-**Status:** ready; defect, small.
-
-`AbstractTensor.determinant()` (`tensor/tensors.ts`) expands the cofactors of a
-matrix with a symbolic entry up to 6×6, and of a matrix with exact irrational
-numbers up to 8×8. A larger matrix goes through Bareiss elimination, which
-divides by the previous pivot. The values are correct.
-
-- **CE-146.1** A quotient by a sum of radicals or symbols is not reduced, so
-  each Bareiss step nests the previous one: the 7×7 symbolic case and a 9×9
-  radical case give results of many thousand characters. To do: rationalize each
-  exact Bareiss quotient, or use a division-free elimination.
-- **CE-146.2** A radical whose square-free radicand is above 10⁶ still becomes a
-  float in a product (`ExactNumericValue.mul`), because such a radicand is not
-  stored.
-
 ### CE-148. A complex-valued function whose parts cannot be separated has no symbolic limit
 
-**Status:** proposed; capability, small. Issue #396.
+**Status:** ready; capability, small. Issue #396. Approved 2026-11-01.
+**Witness:** corpus; Proposed capability with issue #396.
 
 `complexLimitAtPosInf` (`symbolic/limit.ts`) separates the real and imaginary
 parts of a complex-valued function only for sums, products, quotients, integer
 powers and the exponential. So `Limit(t ↦ t·Gamma(2 + i·t), ∞)` stays
 unevaluated, although its limit is `0`; `.N()` gives a value near `0` for it.
 
-### CE-149. `Solve` over a bounded domain stays unevaluated in some cases that have a complete answer
-
-**Status:** proposed; capability, small.
-
-A `Solve` over a bounded domain returns a list only when it is shown to be
-complete (`rootListIsComplete()` in `boxed-expression/solve-domain.ts`);
-otherwise it stays unevaluated (user decision). These cases stay unevaluated
-although a complete answer exists:
-
-- **CE-149.1** Far from 0, `rootSetDivisor()` compares `f(x)` with `f(x + T/n)`
-  to a relative 1e-9, which fails near `10^8`, so `sin(13x)·cos(x) = 0` over
-  `[10^8, 10^8 + 7]` stays unevaluated. Sampling near 0 instead of near the
-  lower bound would fix it.
-- **CE-149.2** Near `10^12`, one ulp moves `sin` by about 1e-4, more than the
-  scan's `1e-6·scale` threshold, so the scan declines (0.147.0 gave a correct
-  list there).
-- **CE-149.3** `checkNonPeriodicRoots()` returns no answer when the solver finds
-  no root, so an equation that is not periodic never gets a certified `[]`.
-- **CE-149.4** An equation with the unknown in a function that the root finder
-  cannot invert (`hasNonInvertibleHead()`) gets no answer over a bounded
-  interval, also when the function has no root:
-  `sin(x)·(BesselJ(0, 50x) + 2) = 0` over `[0.5, 3]` was `[]` and now stays
-  unevaluated. A bound on how fast such a function can oscillate would let the
-  scan check it.
-- **CE-149.5** Over a domain that is not bounded and is not ℝ or ℂ, a periodic
-  equation gets no answer, also when its roots are finite in number:
-  `x·sin(x) = 0` over `ℤ` (only `0`) and `sin(x) = 0` over `ℤ` were `[0]` and
-  now stay unevaluated. A proof that the periods have no common multiple with
-  the integers would give the answer.
-- **CE-149.6** `sin(x) = 1 - 10^-18` over `[0, 3]` or over ℝ: with the unknown
-  declared `real` (`symbolicRoots()`), `findUnivariateRoots()` gives no root, so
-  the `Solve` stays unevaluated. Without a domain, it gives both roots
-  `π/2 ± 1.4·10^-9`. The same occurs for `1 - c·10^-17` with `c ≤ 8`.
-- **CE-149.7** When a factor of a product is not solved (`stats.partial`), the
-  scan accepts the list only when each root it finds is a change of sign of `f`
-  located to `10^-9·max(1, |x|)` and matches exactly one listed value (`strict`
-  in `rootListIsComplete()`). Thus a root at an end of the domain
-  (`sin(x)·(x + e^x + 5) = 0` over `[0, 4]`, root `0` at the lower bound), and a
-  root where `f` touches zero, give no answer. The scan cannot tell three roots
-  in one cell of the scan from one root, but it does not accept a list alone:
-  the interval proof (CE-151) rejects a list that misses a root, except a root
-  inside the window around a listed root.
-
-### CE-404. `Solve` does not take out a common factor of a sum of trigonometric terms
-
-**Status:** proposed; capability, small.
-
-`Solve(sin x + 2 sin x cos x = 0, x)` stays unevaluated, although
-`sin x · (1 + 2 cos x) = 0` is solved, and so is `cos x + 2 cos x sin x = 0`
-once factored. The solver factors a product (the zero-product step) and expands
-multiple angles (`solveByMultipleAngleTrig`, `boxed-expression/solve.ts`), but
-it never takes a common factor out of a sum that has no multiple angle.
-`test/compute-engine/solve-domain.test.ts` uses this equation as an example that
-stays unevaluated; move it when this is fixed.
-
-### CE-151. `Solve` over a bounded domain does not see a root that is very near a listed root
-
-**Status:** ready; defect. User decision 2026-10-17: add the derivative proof for
-a simple root, and keep the tolerance window for a multiple root.
-
-Interval arithmetic proves that a root list over a bounded domain is complete
-(`enclosureShowsNoOtherRoot()` in `boxed-expression/solve-domain.ts`): each cell
-of the domain must have an enclosure of the equation that excludes 0, except the
-cells in the window `[v − t, v + t]` around each listed root `v`. The window
-tolerance `t` is `10^−6·max(1, |v|)` (at most 1/16 of a sample step), or
-`10^−9·max(1, |v|)` when the list is known to be partial. A second root inside a
-window is not seen: the two roots of `(sin x − 1/2)(sin x − 1/2 − 10^−8) = 0`
-are `1.15·10^−8` apart, and a list that holds only one of them passes the proof
-(the root finder gives both, thus the result is correct today).
-
-A proof of uniqueness closes this gap for a simple root: when the enclosure of
-the derivative `f'` over the window excludes 0, `f` is monotonic there and has
-at most one root. A root of higher multiplicity (`sin(x)^10` at `π`) has no such
-proof. **User decision 2026-10-17:** add the derivative proof for a simple root,
-and keep the tolerance window for a multiple root, so
-`Solve(sin(x)^10 = 0, x ∈ [3, 4])` still gives `[π]`. A second root closer than
-the window to a multiple root can still be missed; giving no answer in that case
-would remove correct answers to common equations.
-
 ### CE-153. Contour integration does not certify the complex roots of most polynomials of degree 3 or more
 
-**Status:** proposed; capability, small. PR #410.
+**Status:** ready; capability, small. PR #410. Approved 2026-11-01.
+**Witness:** corpus; Proposed capability with PR #410.
 
 `ce.contourIntegrate()` needs every root of a denominator in exact form. For a
 polynomial of degree 3 or more that is not even, it uses `solve()`, which
@@ -2471,7 +1481,8 @@ goes.
 
 ### CE-158. Definite integrals of `Abs` and `Sign`: undecided sign changes
 
-**Status:** proposed; capability, small. Issue #352.
+**Status:** ready; capability, small. Issue #352. Approved 2026-11-01.
+**Witness:** corpus; Proposed capability with issue #352.
 
 A definite integral whose integrand has `Abs(u)` or `Sign(u)`, with `u` linear
 or quadratic in the integration variable, is split at the points where `u`
@@ -2488,156 +1499,11 @@ changes sign, and each piece is integrated with `Abs(u)` replaced by `±u` and
   value (a `When` over the sign of `a`, or of `c`), or a use of the assumptions
   on `a`, would give these a value again.
 
-### CE-159. Fungrim: `Fibonacci` has no growth class and there is no `CartesianPower` operator
-
-**Status:** proposed; capability, low priority.
-
-- **CE-159.1** `Limit(Fibonacci(n+1)/Fibonacci(n), n→∞)` stays an inert `Limit`,
-  because `Fibonacci` has no growth class. To resolve it to φ, add a growth
-  level for exponential-class special functions.
-- **CE-159.2** A Compute Engine `CartesianPower` operator would make Fungrim
-  entry `4099d2` evaluable. `grim2mathjson` emits the shell
-  `CartesianPower(S, n)` for a set-based `Pow`, so the entry is `not-evaluable`
-  instead of False.
-
-### CE-160. `simplify()` does not sort the operands of `And` and `Or`
-
-**Status:** proposed; capability.
-
-The `eq` handler compares `And`/`Or` modulo permutation and nesting, and the
-`commutativeMatch` definition flag drives the permutation branch of the matcher
-(`logic-ac-equivalence.test.ts`). Step 3 of the agreed design ("Option B",
-2026-08-16) is not built: a canonical sort inside `simplify()` only, so that
-simplification can normalize the operand order without changing the written form
-or short-circuit evaluation. Do it only when a concrete workflow needs it.
-
-### CE-162. `Series`: bare `O(…)` parsing and expansions that defer
-
-**Status:** proposed; capability.
-
-- **CE-162.1** Bare `O(…)` parsing (design doc §8 Q3). Look at it again for
-  lenient mode after the parser work settles.
-- **CE-162.2** Expansions at ±∞ that carry a logarithm defer (`1/ln x`,
-  `ln(ln x)`, `sin(ln x)`, `e^{1/x}`); a defer is correct, not wrong.
-- **CE-162.3** Exact terminating expansions still emit a conservative `BigO`
-  (`assembleLaurent` has no notion of exactness).
-- **CE-162.4** Combined distinct radicals grow `lcm(d)` without a cap inside
-  add/mul (the deadline bounds it and gives a clean defer).
-- **CE-162.5** `diffLaurent` asserts `d === 1` (polygamma ladder only).
-
-### CE-164. `Solve`: Diophantine tiers, general inequalities and systems, missing rules
-
-**Status:** proposed; capability. Plan:
-docs/plans/2026-07-04-diophantine-assessment.md.
-
-The Wester `Solve` score is at its ceiling (14/21). The last two gaps, `xˣ = x`
-and `sin x = tan x`, are harness artifacts: the harness grades the arbitrary
-finite sets of roots that SymPy returns, not a CE capability. The Fungrim track
-refers to this explanation.
-
-- Diophantine equations (linear in n variables, Pell and Pythagorean triples are
-  done):
-  - **CE-164.1** The sum-of-squares tier (a representation function fits it
-    better than `Solve`).
-  - **CE-164.2** General binary quadratics through `transformation_to_DN`.
-  - **CE-164.3** Instantiation over a half-bounded `Range` (inert by design
-    today).
-  - **CE-164.4** Auto-factoring in the style of `factor_list`.
-  - Not planned: ternary quadratics (low value). Refused: weighted-coefficient
-    and ≥4-square parametrizations, because the textbook families are provably
-    incomplete and the contract emits only complete families.
-- **CE-164.5** Inequality and system solving through `Solve` is partial: linear
-  inequality systems work, general ones do not (see the `@todo` cases commented
-  out in `test/compute-engine/solve.test.ts`).
-- **CE-164.6** The solve rule set is incomplete (`solve.ts` "MOAR RULES", and
-  two deferred side-condition checks noted in the file).
-
-### CE-165. Multivariate polynomial `GCD` at the scale of the Fateman benchmark
-
-**Status:** proposed; capability, large.
-
-The variadic `GCD` uses Brown's dense modular GCD (`multivariate-gcd.ts`) and
-handles textbook multivariate cases. The 7-variable Fateman GCD benchmark
-(Symbolica 4 s / Mathematica 89 s / SymPy 61 min) is above the complexity cap of
-the dense algorithm, so it defers. The kernel
-(`boxed-expression/multivariate-poly.ts` + `multivariate-gcd.ts`) is shared:
-multivariate factorization, `Cancel`/`Together`, partial fractions and
-`Resultant` all use the same representation. Tracked against the Fateman
-footnote of `benchmarks/audit/`.
-
-- **CE-165.1** Zippel sparse interpolation (dense interpolation is the
-  bottleneck at 7 variables; Brown's algorithm is the baseline that Zippel
-  extends).
-- **CE-165.2** Multi-prime CRT and rational reconstruction (a single large prime
-  caps the coefficient size).
-- **CE-165.3** Faster `MPoly` arithmetic (the `Map`-keyed leading-term scan is
-  O(terms) per call).
-
-### CE-166. `DSolve`/`NDSolve`: system form of `NDSolveFunction`, root clustering, Laplace transforms
-
-**Status:** proposed; capability.
-
-An unsupported ODE form must stay **inert, not wrong**; keep that contract as
-coverage grows. The audit harness (`benchmarks/audit/dsolve.ts` +
-`gen_dsolve.py`, a substitute-back residual oracle on 51 cases from SymPy's
-`test_ode.py`) grades CE 50/51 correct, 0 wrong, the same as SymPy. The one
-unsupported row is variable-coefficient second order (`sin(x)y″ + y′ = cos x`),
-where SymPy returns nested unevaluated integrals, which `DSolve` does not
-return.
-
-- **CE-166.1** `NDSolveFunction` returns a callable
-  `Function(InterpolatingFunction(data, x), x)` for scalar forms only. The
-  system form with several dependent variables stays inert. A vector-valued
-  interpolating result needs a shape decision. Demand-paced.
-- **CE-166.2** Applying a MathJSON literal that was boxed again resolves the
-  interpolation one `evaluate()` late (`N()` is immediate). Pinned in tests.
-- **CE-166.3** Make the tolerance of the numeric characteristic-root clustering
-  more robust, so that near-degenerate roots are grouped reliably as coverage of
-  higher-order nonhomogeneous problems grows.
-- **CE-166.4** A `LaplaceTransform`/`InverseLaplaceTransform` pair (inert
-  today). It is a capability on its own and a second, independent route to
-  constant-coefficient IVPs that checks the initial-conditions work. (`RSolve`
-  already uses the characteristic-polynomial and root-multiplicity code for
-  linear constant-coefficient recurrences, with an `rⁿ·n^k` basis instead of
-  `e^{rx}·x^k`.)
-- **CE-166.5** A proper `DiracDelta` (derivatives of step functions are 0 almost
-  everywhere today). Possible future refinement.
-
-### CE-167. Wester capability gaps: recursive denesting, matrix functions, closed forms
-
-**Status:** proposed; capability.
-
-`test/compute-engine/wester.test.ts` is the CI correctness suite transcribed
-from Wester's CAS review (the categories that `benchmarks/audit/wester.ts`
-cannot ingest). A gap is a `test.skip` that asserts the **correct** answer;
-removing the skip is the acceptance test. One skip remains.
-
-- **CE-167.1** Wester 9, recursive denesting (the Putnam radical
-  `√(14+3√(3+2√(5−12√(3−2√2)))) → 3+√2`). Only single-level `√(a+b√c)` denesting
-  is implemented. The multi-level case is an algorithmic project (Landau/Blömer
-  style).
-- **CE-167.2** Matrix square root beyond exact 2×2 (n×n needs an
-  eigendecomposition or Denman–Beavers). Not representable as a skip.
-- **CE-167.3** Exact singular values beyond a 2×2 Gram matrix. Not representable
-  as a skip.
-- **CE-167.4** Two Wester tests are active but weakened, and their comments
-  still say "skipped" (outdated). The fused form `row-vector · (a·M1 + M2)`
-  asserts the current type rejection of `MatrixMultiply`. The symbolic
-  Vandermonde determinant is checked only numerically, because
-  `Factor`/`simplify` leave it unfactored (a `/(−w+x)` division artifact).
-- **CE-167.5** More closed forms for infinite sums and products beyond the
-  `namedSeriesClosedForm` table (for example `β(4)`, Hurwitz-shifted bases
-  `(k+m)^{−s}`, higher moments `Σk²rᵏ`). Demand-paced.
-- **CE-167.6** Transcribe the remaining Wester categories: systems of equations
-  and congruence solving, special functions, transforms, ODEs/PDEs (CE-166),
-  vector and tensor analysis, numerical analysis.
-- Missing heads noted in comments (`MatrixExp`, matrix functions, Jordan and
-  Smith normal forms) are in CE-168.
-
 ### CE-168. Wester problems with no CE API: periodic decimals, real QE, matrix functions, tests
 
 **Status:** design needed; capability. Decision 2026-07-05: do not alias
 Mathematica spellings.
+**Witness:** none; Wester problems with no CE API.
 
 These Wester problems have no CE API to express them, so they cannot be a
 `test.skip`. Each needs a naming and design decision first; then its acceptance
@@ -2664,26 +1530,10 @@ many heads that seem missing exist under CE names (`NthPrime`, `NPartition`,
 - **CE-168.6** Hypothesis testing (`MeanTest` and others), not declared. Do it
   only if the statistics work needs it.
 
-### CE-169. Definite integration does not split the parameter region into a `Which`
-
-**Status:** proposed; capability. Plan:
-docs/plans/2026-07-12-conditional-values-design.md.
-
-The conditional-values design is implemented through Phase 3b (`When` threading,
-the `Solve` guards, the convergence conditions). Definite integration is the
-only producer of a `Which` still open.
-
-- **CE-169.1** Region splitting for definite integrals. Example:
-  `∫_{−π}^{π} (1 − x·cos t)/(x² − 2x·cos t + 1) dt` is `2π` for `|x| < 1` and
-  `0` for `|x| > 1`. Today CE correctly stays inert. The hardest part is to find
-  where the poles cross the contour.
-- **CE-169.2** An unsatisfiable conjoined guard (`∫₀^∞xᵖdx`) is displayed
-  instead of collapsing. It needs contradiction detection in assumptions; not
-  worth doing alone.
-
 ### CE-170. Rubi: integration coverage by chapter
 
-**Status:** proposed; capability. Rung history: `docs/rubi/RUBI.md` §5.
+**Status:** ready; capability. Rung history: `docs/rubi/RUBI.md` §5. Approved 2026-11-01.
+**Witness:** corpus; Proposed Rubi coverage work with benchmark scores, no wrong results.
 
 The shipped bundle (`src/compute-engine/rubi/rubi-rules-data.json`, through
 `@cortex-js/compute-engine/integration-rules`) holds Chapters 1 (Algebraic), 2
@@ -2845,63 +1695,17 @@ Open items, in priority order:
     the ₚFq row #518, and the `√(Sinh·Tanh)`/`√(Cosh·Coth)` quarter-power rows
     (6.7.1 #560/#563).
 
-### CE-171. Guarded `arctan` addition and a sum-of-residues-in-a-region helper
-
-**Status:** proposed; capability, small to medium.
-
-The analytic-property store (`ce.functionProperties`, pole-aware `N()`), the
-`Residue` operator and the `onBranchCut` guard exist. The logarithm and
-power/root simplifications are branch-cut safe: `ln(a) + ln(b) → ln(ab)`
-(`simplify-log.ts`) requires every argument to be provably non-negative
-(decision of 2026-10-01), and the `.ln()` expansions (`boxed-function.ts`) stay
-symbolic when an operand is provably on the negative-real cut. The generic-real
-policy for even, odd and irrational exponents is in
-[`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).
-
-- **CE-171.1** A guarded `arctan(x) + arctan(y)` addition. This is a new
-  capability (CE does not combine inverse trig functions today). Its validity
-  region (`xy < 1`) is an arithmetic condition, not a branch-cut membership
-  test, so the store does not help.
-- **CE-171.2** A sum-of-residues-in-a-region helper. It needs a pole-enumeration
-  API over the analytic-property store. (`GammaLn` is not a goal: it has a
-  logarithmic branch point and is not meromorphic.)
-
-### CE-172. Simplifications that `simplify.test.ts` skips
-
-**Status:** proposed; capability. Each item has a `test.skip` in `simplify.test.ts`
-(12 in all) that is its acceptance test.
-
-- **CE-172.1** A common denominator for rational expressions
-  (`1/(x+1) − 1/x → −1/(x²+x)`).
-- **CE-172.2** Recognize inverse hyperbolic functions in logarithms (six
-  identities, for example `ln(x+√(x²+1)) → arsinh x`).
-- **CE-172.3** Inverse trig conversion (`arctan(x/√(1−x²)) → arcsin x`).
-- **CE-172.4** `factor()` extracts common factors from an `Add`
-  (`2π+2πe < 4π → 1+e < 2`).
-- **CE-172.5** `(−x)^{3/4}`.
-- **CE-172.6** `ln((x+1)/e^{2x})`: canonicalization expands it before the log
-  rules apply.
-- **CE-172.7** The multi-step trig identity of Phase 14 of the Fu paper.
-
 ### CE-173. The simplification case of issue #189
 
 **Status:** ready; defect. Issue #189.
+**Witness:** corpus; Issue #189 names the simplification case.
 
 `simplify-rules.ts` refers to a simplification case of issue #189.
-
-### CE-174. Risch algorithm and fractional calculus
-
-**Status:** proposed; capability.
-
-- **CE-174.1** The Risch algorithm is the principled end point for
-  `symbolic/antiderivative.ts`. The Rubi rules are the practical route; this is
-  a marker, not planned work.
-- **CE-174.2** A Liouville–Riemann fractional derivative (`@todo` in
-  `library/calculus.ts`). Not planned.
 
 ### CE-175. A multi-index big operator with a dependent bound stays symbolic
 
 **Status:** ready; defect, low priority.
+**Witness:** plausible; `Sum(j, Limits(i,5,5), Limits(j,i,10))` stays symbolic; a dependent bound is an ordinary double sum.
 
 `Sum(j, Limits(i,5,5), Limits(j,i,10))` canonicalizes intact but stays symbolic:
 `classifyBigopDomain` reads the symbolic lower bound `i` as not enumerable. To
@@ -2910,20 +1714,11 @@ iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
 
-### CE-672. `N()` and `evaluate()` disagree on `+∞` times a list of an integral and 0
-
-**Status:** ready; defect. Found 2026-10-30 while fixing CE-618.
-
-With `I = ∫_0^1 x^x dx`, `(+∞·[I, 0]).N()` gives `[Measurement(+∞, +∞), NaN]`,
-and `evaluate()` gives `[+∞·I, Indeterminate]`. The second cell is `NaN` on one
-route and `Indeterminate` on the other, and the first cell is a `Measurement` on
-one route only. Expected: the same values, `N()` being the numeric form of
-`evaluate()`.
-
 ### CE-600. An engine computes at the precision of the engine built last, not its own
 
 **Status:** design needed; defect (needs a design). Found 2026-10-28 while measuring why
 `test/compute-engine/item-395-log-gamma-barnes-g.test.ts` took 38 s.
+**Witness:** plausible; Two engines with different precisions in one host.
 
 `BigDecimal.precision` is global to the module, and constructing an engine (or
 setting its precision) writes it. An engine whose `precision` is 21 then
@@ -2943,6 +1738,7 @@ operations instead of read from a global (correct, a large change).
 **Status:** ready; defect. Found 2026-10-28 (the test "AN ISOLATED SINGULAR POINT
 IN A DOUBLE INTEGRAL", `test/compute-engine/integrate-symbolic-pole.test.ts`,
 accepts `NaN` or the value).
+**Witness:** plausible; Interpreter gives `NaN` for a finite double integral of `1/r` around an interior point (about 1.9451).
 
 `∫₀¹∫₀¹ ((x − 1/64)² + (y − 1/64)²)^(−1/2) dy dx` is finite, about 1.9451
 (around the point the integrand is `1/r` and the area element `r dr dθ`). The
@@ -2958,6 +1754,7 @@ like `1/r^p` with `p` less than the dimension.
 **Status:** design needed; defect (accuracy); numerics. User decision
 2026-10-30: record it as a design item. GitHub issue #494 (closed by the fix of
 the infinite error, commit `fb5469f19`).
+**Witness:** corpus; GitHub issue #494.
 
 `N(Integrate(t ↦ cos(t/2)/√(cos t − cos ½), [0, ½]))` is
 `2.2214414411509225 ± 0.0007` (true error `2.8e-8`); 0.170.0 gave
@@ -3002,174 +1799,11 @@ with the shells that the model of the first shells predicts.
   after a measurement that shows its error covers the true error on the endpoint
   test corpus. With (b) the integral above is `± 1.2e-7`.
 
-### CE-696. A small feature in the shells that the Levin u-transform does not read is not seen
-
-**Status:** ready; wrong value; numerics. Found 2026-10-30 while measuring
-CE-691; older than that fix.
-
-`1/(x·ln²x)` on `[0, ½]` plus a step of area `1e-12` at `1e-8` from 0: the
-result is extrapolated, `± 2.05e-13`, for a true error of `9.8e-13` (the whole
-area of the step). The Levin value of these shells reads the partial sums near
-the shells 8 and 16 (`LEVIN_START`), and the shells after them have no effect on
-the value: with and without the step it is `0.288539008177816` for the corner.
-`featureNearEndpoint` reads the integrand only next to the last 21 accurate
-shells. 16 of the 162 cases of `sweep-zero.mts` are like this (11 of
-`1/(x·ln²x)` with the area `1e-12`, 5 of `1/(x·(−ln x)³)` with the area
-`1e-6`). A test of the
-differences of the shells did not see the step: the smooth part of the
-differences of `ln` of these shells is about `1e-5` at shell 20, and the step
-changes them by about `1e-10`. A fix needs a model of the shells (for
-example, compare the partial sums with the Levin model of the tail), or a test
-of the integrand over every shell that the method reads (up to about 1000
-octaves next to 0, too many evaluations for an interpreted integrand at 4 per
-octave).
-
-### CE-697. Features next to a singular bound that `featureNearEndpoint` does not see
-
-**Status:** ready; wrong value (low); numerics. Found 2026-10-30 with the fix of
-CE-691.
-
-`featureNearEndpoint` (`numerics/endpoint-quadrature.ts`) does not see a
-feature smaller than 100 times the rounding noise of the integrand, a bump
-narrower than about a quarter of an octave of the distance (it falls between
-two samples), a feature nearer than 64 spacings of the doubles to a nonzero
-bound, a feature next to a bound where the shells change sign (the test does
-not run), or a feature in the outer octave of the tested range when the corner
-panel ends there (fewer than about 24 accurate shells, at a large bound such as
-`10⁵`; a noise level from one side only refused the smooth
-`t^(−1/2)·exp(10⁻⁴·t⁵)`). Measured: a bump of height `1e-8` and width `2.5e-4` at `1e-3` from
-0.3, on `(0.3 − x)^(−1/2)`, is `± 1.57e-13` for a true error of `1.93e-13`,
-before and after the fix (`sweep.mts` with `SWEEP_HEIGHTS=1e-6,1e-8`: 1 of 600
-cases). The other limits are not measured.
-
-### CE-701. A step deep next to a logarithmic singularity makes a convergent integral divergent
-
-**Status:** ready; wrong value; numerics. Found 2026-10-31 while measuring
-CE-695 (`docs/plans/2026-10-31-ce695-power-corner-area.md`).
-
-`adaptiveQuadrature(f, 0, ½, { singularEndpoints: true })` with
-`f = 1/(x·(−ln x)³)` plus a step of area `1e-6` on `[0, 1e-80]` (height
-`1e74`) returns `divergent: true`. The integral is `1/(2·ln²2) + 1e-6`. The
-same for the step at `1e-150` and `1e-300`, a bump of the same area at `1e-80`
-and `1e-150`, and the step or the bump on `1/(x·ln²x)` at `1e-300`: 7 of the
-162 cases of `docs/scratch/2026-10-30-ce691-quadrature/sweep-zero.mts`. The
-sweep reads the estimate of a divergent result as a value, so these cases count
-there as an error that is too small. A caller gets no value.
-
-The cause (traced 2026-10-31): `shellsDiverge()` (`numerics/gauss-kronrod.ts`)
-runs after each new corner shell, and it fires on the first shell that holds
-the step. That shell is 2 to 3 times the shells before it, so the ratio of the
-last block of 20 shells to the block before jumps above `SHELL_DECAY` (0.99):
-`0.96 → 1.03` for the step at `1e-80` (263 shells), `0.88 → 1.87` at
-`1e-150`. The branch "the ratio has stopped falling" tests
-`last >= before·(1 − SHELL_TREND_FLAT)`, which any rise passes, and reads a
-pole. The step shell stays in the recent block for 20 shells, so a test of the
-last three ratios only fires 2 shells later. A fix must tell a single large
-shell from a pole: for example, require the ratio to stay at least
-`SHELL_DECAY` for a whole block (the step then moves into the earlier block,
-and the ratio falls far below 1), or refuse a block that holds a local peak of
-the shells. Both change which integrals are divergent: next to a nonzero bound
-the corner has only about 48 shells, too few for a ratio that persists over a
-block, and `tailUnresolved()` then decides. A fix needs a spec measured on the
-divergent and the convergent corpora, and a decision of the user.
-
-### CE-702. A converged result next to a singular bound misses a feature inside the last corner panel
-
-**Status:** ready; wrong value; numerics. Found 2026-10-31 while measuring
-CE-695 (`docs/plans/2026-10-31-ce695-power-corner-area.md`).
-
-`x^(−1/2)·(−ln x)` on `[0, 1]` plus a step of area `1e-6` on `[0, 1e-80]`: the
-Gauss–Kronrod result converges, tanh-sinh agrees with it, and the result is
-`± 2.05e-11` for a true error of `1.00e-6` (the whole area of the step). The
-corner has 70 shells, and the step is inside the last corner panel, where the
-Gauss–Kronrod nodes do not reach it; the tanh-sinh value misses it too. With the
-step at `1e-12`, the Gauss–Kronrod result converges with `± 3.45e-11`,
-tanh-sinh does not converge, and the true error is `3.46e-9`. 25 of the 162
-cases of `docs/scratch/2026-10-30-ce691-quadrature/sweep-zero.mts` are like
-this: steps and bumps of area `1e-6` or `1e-9` at `1e-3` to `1e-300`. The
-converged route of `resolveCorners()` (`numerics/endpoint-quadrature.ts`) does
-not run `featureNearEndpoint`. A feature nearer than the last panel can be seen
-only by samples at each octave down to the bound (about 4300 evaluations next
-to 0 at 4 per octave), so a fix needs a decision on that cost.
-
-### CE-703. Tanh-sinh is not tried when the deepest corner shells overflow
-
-**Status:** proposed; accuracy; numerics. Found 2026-10-31 while measuring CE-695.
-
-`shellsHaveOneSign()` (`numerics/endpoint-quadrature.ts`) reads the last 8
-shells of a corner, also the shells that are not finite. Next to 0, the
-integrand `1/(x·ln²x)` overflows in the deepest shells, so the test fails, and
-`resolveCorners()` returns the Gauss–Kronrod result without trying tanh-sinh.
-The test is for an integrand that oscillates next to the bound, and an
-overflow is no sign of an oscillation; the `oneSign` test in the same function
-reads only the finite shells. What tanh-sinh gives for these integrands is not
-measured. A fix changes which route a result takes, so it must be measured on
-the corpora of `docs/scratch/2026-10-30-ce691-quadrature/`.
-
-### CE-561. An interval one double wide reports `0 ± 0`
-
-**Status:** ready; defect (low); numerics. Found 2026-10-27 in the review of
-CE-533, after the nodes of a panel were clamped to the panel.
-
-`adaptiveQuadrature` of `√(x − 1)` on `[1, 1 + ε]` (`ε = Number.EPSILON`, an
-interval one double wide) gives `0 ± 0`, converged, for a true value of
-`(2/3)·ε^1.5 ≈ 2.2e-24`. All 15 nodes of the panel round to `1`, where the
-integrand is 0, and the far endpoint is never sampled: a single panel has no
-edge samples for `hiddenEdgeError` (`numerics/gauss-kronrod.ts`). Converged is
-right against the absolute tolerance, but an error of 0 does not bound the true
-error. Before the clamp the result was `NaN`. A panel whose nodes all round to
-one double could report `(b − a)·max(|f(a)|, |f(b)|)` as its error, with `+∞`
-when an endpoint value is not finite.
-
-### CE-559. A logarithm 10⁴ doubles outside an endpoint reports an error about 1 % smaller than the true error
-
-**Status:** ready; defect (low); numerics. Found 2026-10-27 while fixing CE-558.
-
-`adaptiveQuadrature` with `singularEndpoints` of `ln|x − c|` on `[e, e + 1]`
-with `c` 10⁴ doubles below `e` reports, not converged, `± 1.05e-10` for a true
-error of `1.06e-10` at `e = 10⁵`, and `± 7.62e-10` for `7.78e-10` at `e = 10⁶`.
-The exponents next to the endpoint do not have the shape of a pole outside
-(`outsidePoleShape()`, `numerics/endpoint-quadrature.ts`, residual about 0.05),
-so the test of a singularity outside the interval does not apply, and the
-integrand is finite at `e`, so the area of the first double (`uncountedArea()`)
-is not charged either. A logarithm 10⁵ doubles outside is read as a pole and
-bounded. The probe is in the CE-558 sweep script (`scratchpad/c/p2.mts` of
-session compute-engine-07, 2026-10-27; rewrite it from the numbers above).
-
-### CE-560. Without `singularEndpoints`, an interior singularity reports an error 10 times smaller than the true error
-
-**Status:** ready; defect; numerics; not reachable from the engine. Found
-2026-10-27 while checking CE-376.
-
-`adaptiveQuadrature(f, −1, 1)` without the `singularEndpoints` option, for
-`|x − c|^(−0.9)` with `c = 0.3`, is not converged and reports `± 4.7e-2` for a
-true error of `0.42`. Every caller in `src` passes `singularEndpoints: true`
-(`library/calculus.ts`, `numerics/oscillatory-quadrature.ts`,
-`compilation/javascript-runtime.ts`), so no engine route reaches it; the test
-files that call the function without the option (`compile-integrate.test.ts`,
-`quadrature-deadline.test.ts`, `integrate-endpoint-pole.test.ts` and others) do
-not integrate such a function. A fix needs the model of the singular point that
-the `singularEndpoints` mode provides, or the option should become the only
-mode.
-
-### CE-541. A compiled nested integral does not add the errors of its inner integrals
-
-**Status:** ready; defect. Found 2026-10-27 while fixing the error of nested
-integrals (CE-529).
-
-Since 2026-10-27 the interpreted route adds the error of each inner integral to
-the error of the outer one (`nestedErrors`, `withNestedErrors()` in
-`numerics/gauss-kronrod.ts`, set by `integrateRealPart` in
-`library/calculus.ts`). The compiled route (`_SYS.integrate`) never sets
-`nestedErrors`. So a compiled middle integral reports its result to the outer
-level but does not add the errors of its own inner integrals, and the
-uncertainty of a compiled three-level integral can be smaller than its true
-error.
-
 ### CE-179. Under `.N()`, some uses of a parameter in a user-function body read the rounded argument
 
 **Status:** design needed; wrong value. User decision 2026-10-18: only the last
 statement of a body gets the numeric request (option (a)).
+**Witness:** crafted; Arguments such as `(25! − 1)/48` chosen next to a jump of `Floor`.
 
 The exact re-read of a recorded argument (`exact-argument-source.ts`) handles a
 parameter written alone as the operand of a jump function. The LAST statement of
@@ -3205,26 +1839,10 @@ shapes still read the float bound to the parameter:
 - A jump in an earlier statement (`y := Floor(x); y` gives 25) is accepted by
   the decision of 2026-10-18.
 
-### CE-180. `.N()` rounds an exact operand before the pole and branch-point tests of complex special functions
-
-**Status:** ready; wrong value.
-
-- **CE-180.1** The complex routes do not re-read the exact value with extra
-  digits, as the real inverse-trig route does.
-  `StieltjesGamma(1, (−10³⁰+1)/10³⁰).N()` is `~oo` at 21 digits, where
-  `evaluate()` stays symbolic. `Zeta(2, (−10³⁰+1)/10³⁰).N()` gives `2.6449` for
-  about `1e60`. `Arcosh(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i)` at 30 digits gives `1e−200(1+i)`.
-- **CE-180.2** At machine precision an operand that stays complex,
-  `Arcoth(1 + 10⁻¹⁰ + 10⁻²⁰⁰i)`, still reads the double of the real part:
-  `complexInverseTrig` returns `undefined` unless the small part is below
-  `SMALLEST_PART_RATIO`, so the double kernel runs. (A real operand next to ±1,
-  and one whose imaginary part rounds away, is read exactly.) Also unchecked:
-  `Arcoth(√(1+10⁻¹⁰)).N()` gives `12.20607260417249`, and `Sqrt` is not in
-  `LITERAL_ARITHMETIC`, so that exact operand is not re-read.
-
 ### CE-181. `.N()` of a `k^{-p}` shell integral (`1 < p < 1.5`) at a nonzero or infinite bound is wrong
 
 **Status:** ready; wrong value, small.
+**Witness:** plausible; Textbook integral `∫_2^∞ dx/(x ln^{1.1} x)` gives a wrong value (wide error) for `10.3733`; CE-181.4 is "not a defect", drop.
 
 Next to a bound at `0`, the part of the integral that cannot be sampled is
 computed from a model fitted to the sampled shells (`shellTail`,
@@ -3255,6 +1873,7 @@ gives `10.37329 ± 0.00007` (exact `10.3733`).
 ### CE-182. `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value
 
 **Status:** ready; wrong value, small.
+**Witness:** plausible; Textbook divergent `∫_2^∞ dx/(x ln x)` gives `4.0 ± 1.5` under `.N()`; `evaluate()` gives `+∞`.
 
 - **CE-182.1** `\int_2^\infty \frac{dx}{x\ln x}` gives `4.0 ± 1.5` and
   `\int_{1/2}^{1} \frac{-1}{(1-t)\ln(1-t)}\,dt` gives `4.0 ± 1.7`. Both are
@@ -3271,57 +1890,10 @@ gives `10.37329 ± 0.00007` (exact `10.3733`).
   verdicts: `(−ln t)^{-1.001}/t` gives `+∞` and `−t^{0.00001}/(t ln t)` gives
   `NaN`. The sign read of a detected divergence is not the same on the two.
 
-### CE-183. `PolyLog` past |z| = 1 at an order above 170 stays unevaluated for a very large |z|
-
-**Status:** proposed; capability, small.
-
-Past the unit circle, a real order uses the first terms of the power series when
-they give the value (`polylogSeriesOutsideDisk`, `numerics/numeric-complex.ts`).
-The series stops answering when its terms grow before they fall, which happens
-when |z| is large compared with 2ˢ, and on the branch cut z > 1 when the
-imaginary part −π·(ln z)^{s−1}/Γ(s) is above 1e−20. The other routes do not
-answer above the order 170: the inversion formula of the integer orders needs
-n!, which overflows a double at n = 171, and Jonquière's inversion of the
-non-integer orders needs Γ(s), which overflows at s ≈ 171.6. So `.N()` stays
-unevaluated for these points, although the values exist (mpmath gives
-`polylog(250, 1e100) = 8.997e99 − 3.778e98i`):
-
-- **CE-183.1** Integer orders: `PolyLog(171, z)`, `PolyLog(200, z)` and
-  `PolyLog(250, z)` for z = 1e100, −1e100, 1e100·i and 1e300 + 1e300·i;
-  `PolyLog(500, 1e100)`, `PolyLog(500, 1e300 + 1e300i)`,
-  `PolyLog(1000, 1e300 + 1e300i)`.
-- **CE-183.2** Non-integer orders: `PolyLog(250.5, z)` for the same four z,
-  `PolyLog(171.5, 1e300 + 1e300i)`, `PolyLog(1000.5, 1e300 + 1e300i)`,
-  `PolyLog(200.5, 1e40)`, and also `PolyLog(20.25, 1e300 + 1e300i)`.
-- **CE-183.3** The compiled lane (`_SYS.polyLog`, real values only) gives `NaN`
-  for `PolyLog(171, −1e100)`, `PolyLog(200, −1e100)` and `PolyLog(250, −1e100)`.
-
-A possible route: the asymptotic expansion of Liₛ(z) for a large |ln z| (DLMF
-25.12.12 with the Hurwitz zeta form of Jonquière's formula), with (2π)ˢ/Γ(s)
-computed from logarithms so that it does not overflow.
-
-### CE-394. `.N()` of an integral whose value is next to the largest double is `NaN`
-
-**Status:** proposed; defect, small; low priority (user decision 2026-10-23: later,
-because the result is an honest `NaN` and the fix changes `adaptiveQuadrature`,
-which every numeric integral uses). Found 2026-10-23 (session
-compute-engine-57).
-
-`∫₀^∞ xⁿ·e⁻ˣ dx` is `n!`. A product that overflows against itself is computed
-again in log space at the samples where it is not finite
-(`withLogSpaceFallback`, `library/calculus.ts`; `_SYS.finiteOr` in compiled
-code), and `.N()`, `NIntegrate` and compiled code give `n!` to 10 digits for
-`n = 100` and `n = 150`. For `n = 170` (`170! ≈ 7.3·10³⁰⁶`) the change of
-variable of the quadrature (`adaptiveQuadrature`, `numerics/gauss-kronrod.ts`)
-multiplies the peak past the largest double, and the result is `NaN`
-(`tailIsFinite`, `numerics/divergent-tail.ts`). A scaled quadrature (the
-integrand divided by its largest sample) would give the value. Compiled code
-with a caller mapping of `Ln`, `Exp`, `Abs`, `Sign` or the arithmetic does not
-use the log-space form (`logSpaceOpaque`, `compilation/javascript-target.ts`).
-
 ### CE-185. A numeric integral next to a singular bound: remaining cases
 
 **Status:** ready; defect, small.
+**Witness:** plausible; CE-185.3: divergent `∫₀^½ dt/(t·ln t)` gives `-6.9 ± 1.6`; CE-185.1, .2, .6, .7 crafted and .9 no reproduction: drop.
 
 `Integrate(f, x, a, b).N()` and `NIntegrate` (`integrateRealPart`,
 `library/calculus.ts`) find the part of an integral next to a singular bound by
@@ -3376,9 +1948,10 @@ of an iterated integral (`nIntegrateMultiple`) do the same. These cases remain
 
 ### CE-186. Oscillatory integrals whose lobe sums have no period or converge slowly are `NaN`
 
-**Status:** proposed; capability, small. User decision 2026-10-04: until a method
+**Status:** ready; capability, small. User decision 2026-10-04: until a method
 gives a value, the result stays `NaN`; do not let these integrals fall back to
-Monte Carlo. Issue #405.
+Monte Carlo. Issue #405. Approved 2026-11-01.
+**Witness:** corpus; Proposed capability with issue #405; result is an honest `NaN` by user decision.
 
 Both cases are in `integrateSemiInfiniteOscillatory`
 (`numerics/oscillatory-quadrature.ts`). Monte Carlo gave wrong values with small
@@ -3419,6 +1992,7 @@ A method that does not depend on the lobes is necessary. Possible methods:
 ### CE-187. A nested iterated integral on the parse route loses the error of the inner integral
 
 **Status:** ready; wrong value, small.
+**Witness:** plausible; `.N()` of a nested `∫∫ e^{-xy}/x^{0.99}` reports an error 1e5 times smaller than the true error.
 
 `.N()` of `\int_0^1\int_0^1 e^{-xy}/x^{0.99} dx dy` gives
 `99.575857194449625 ± 0.000000000000000011`; the integral is `99.5758571944484`,
@@ -3438,86 +2012,10 @@ result must then be computed again. A correct fix propagates the inner error
 through the compiled arithmetic of the integrand, or applies the bound only when
 the compiler proves that the integrand IS one inner integral.
 
-### CE-188. `HurwitzZeta(s, a)` declines far left of the imaginary axis for some orders
-
-**Status:** proposed; capability. Issue #340.
-
-`hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one direct term for each
-unit of −Re(a) before its Euler-Maclaurin tail, so the kernel declines when more
-than `HURWITZ_MAX_PASSED_TERMS` (2²⁰) terms lie between a and the right
-half-plane: `HurwitzZeta(2.5, −10^7 + i).N()` stays unevaluated (at once). An
-integer order has a route whose cost does not depend on Re(a)
-(`hurwitzZetaFarLeft`): the polygamma reflection for 2 ≤ s ≤ 10 001, and the
-Bernoulli polynomial for s = −n ≤ 0 (n ≤ 60). What still declines:
-
-- **CE-188.1** An order that is not an integer. It needs a representation whose
-  cost does not grow with −Re(a) (for example the Hurwitz functional equation
-  for a real a).
-- **CE-188.2** An order above about 3 000 at a small Im(a), where the error of
-  the reflection grows past 1e−12 of the value.
-- **CE-188.3** A real a that is a non-positive integer, at every order. There
-  `HurwitzZeta` drops the (a + k) = 0 term, while ψ has a pole.
-- **CE-188.4** The generalized `Zeta(s, a)` uses the far-left route for an even
-  order only: for an odd order its terms left of the axis are ((k + a)²)^(−s/2),
-  which is not (k + a)^(−s).
-
-### CE-189. `PolyGamma(m, z)` of an order above 400 declines close to a half-integer on the real axis
-
-**Status:** proposed; capability. Issue #340.
-
-For `Re(z) < 0`, `polygammaComplex` needs the m-th derivative of cot(πz). Close
-to a half-integer with a small `Im(z)`, the two series it can use for that
-derivative both lose all their digits, and the third form, a polynomial in
-cot(πz), now carries its coefficients with a common power-of-two exponent and is
-used up to order 400 (`COT_POLYNOMIAL_MAX_ORDER`,
-`numerics/numeric-complex.ts`). Above that, the Horner bound `4^(m+1)` of the
-polynomial is past the range of a double, so the order still declines. Most such
-values are past the double range anyway (`PolyGamma(200, -3/2 + 1e-4 i)`).
-
-### CE-190. Code that boxes a double with `ce.number(n)` can make an integer-valued float exact
-
-**Status:** ready; defect, small.
-
-Since floats print with a fraction part (`2.0`), a site that boxes a double
-result with `ce.number(n)` and so makes it exact is visible.
-
-- **CE-190.1** Audit the kernel bridges and the compiled-value readers that call
-  `ce.number(double)`; the float route is `ce._inexactNumericValue`.
-- **CE-190.3** The compiled `N()` of a lazy `Map` boxes an integer-valued result
-  as exact when its operands and the lambda are exact. An elementary function of
-  an exact integer whose double is exactly an integer near 2^53 (`exp(36)`) is
-  then exact where the interpreter gives a float (rare).
-
-Rules that stay: a literal with a fraction part (`1.0`, `2.0`, `{num: "1.0"}`)
-is a float on every route, and `ce.number(bigDecimal)` is exact for an
-integer-valued big decimal
-(`cortexjs.io/docs/compute-engine/12-guide-numerical-evaluations.md`, "Exact and
-Inexact Numbers: the Spelling Decides"). User decision 2026-10-15:
-`BoxedNumber.N()` returns a small exact integer unchanged (`\sqrt{4}.N()` is the
-exact `2`); changing it would touch many printed results for no gain.
-
-### CE-191. Ordering of constants with some special functions stays undecided
-
-**Status:** proposed; capability, low priority.
-
-`approximate()` (`compare.ts`) propagates an error bound through `Gamma`, `Erf`,
-`Erfc`, `Erfi`, `Zeta`, `Arcosh` and `Artanh`. At machine precision a fast path
-orders `f(literal)` from the machine values when the two are farther apart than
-`10⁻⁶` relative. Never a wrong order, only a lost answer.
-
-- **CE-191.1** The `Bessel` family is not covered: a clean derivative bound
-  exists only for an integer order, and the kernels' accuracy is unmeasured.
-- **CE-191.2** `LambertW` and the polygamma functions are not covered.
-- **CE-191.3** A tree whose leaves are not literals is not on the machine fast
-  path: `Max(1 + Γ(1/3), 3)` at machine precision stays unevaluated (above
-  machine precision the rigorous bound decides it).
-- **CE-191.4** The intervals for Γ, ζ, arcosh and artanh are computed with
-  doubles, so an argument within about `10⁻¹⁵` relative of a pole is refused at
-  every precision (`Γ(−3 + 10⁻³⁰)` against `0` stays undecided at 50 digits).
-
 ### CE-192. `Hypergeometric2F1` at machine precision has up to 3.7e-11 relative error
 
 **Status:** ready; defect, small.
+**Witness:** plausible; `Hypergeometric2F1(-6.937, -4.123, 4.354, -0.662).N()` has `3.7e-11` relative error at machine precision.
 
 Measured against mpmath over 2100 points: the largest relative error, 3.7e-11 at
 `a = −6.937, b = −4.123, c = 4.354, z = −0.662`, comes from the Gauss-series
@@ -3530,222 +2028,10 @@ itself is up to 26 ulp off for negative arguments. A fix needs a more accurate
 `gamma()` for negative arguments, or a tighter loss bound for the Gauss series
 with another route for the points it then refuses.
 
-### CE-193. Upper incomplete gamma: regions where the complex machine kernel declines or loses digits
-
-**Status:** proposed; capability. Issue #353.
-
-The complex kernel `incompleteGammaUpperComplex` (`numerics/numeric-complex.ts`)
-returns NaN (so `Gamma(s, x).N()` stays unevaluated) where no method can certify
-about 12 digits in doubles. Its series forms carry an error estimate that bounds
-the actual error (measured against mpmath on about 7500 points).
-
-- **CE-193.1** `|Im s| > 10` and `|x| < 3|s|`, with `Re x < 0`, or with
-  `Re s < 0` and `|x| < |s| + 1`. The continued fraction converges there but to
-  a wrong value (error `2e−8` at `s = −0.41 − 23.9i`, `x = 0.088 − 4.0i`), and
-  the power series often cancel too far. On 2500 random points with
-  `|Re s|, |Im s| ≤ 30` and `0.01 ≤ |x| ≤ 600`, 68 declines are in this region.
-  Example: `Gamma(19.427 + 13.838i, -8.4445 - 49.849i)`; mpmath gives
-  `-2.3715013352684768e45 - 1.8981893850660706e44i`. Uniform asymptotic
-  expansions for a large `|s|` would cover it.
-- **CE-193.2** `|x| > 700` near the negative real axis, where only the
-  asymptotic series is available, when the part of `Γ(s, x)` that it omits
-  (about `2π·e^{π|Im s|}/|Γ(1 − s)|`) is not negligible. Example:
-  `Gamma(100 + 600i, -800)` (mpmath `4.714e−133 − 1.980e−133i`).
-- **CE-193.3** For a large `|s|` the accuracy is that of the complex `Γ(s)`
-  (Lanczos formula): its relative error grows from about `5ε` at `|s| < 1` to
-  `500ε` at `|s| = 13` and `5300ε` at `|s| = 790`, and `Gamma(s, x)` inherits it
-  (`1.1e−12` at `s = 106 + 657i`, `x = −205 + 517i`). The per-point error
-  estimate (`incompleteGammaUpperComplexWithError`) grows with it, and so does
-  the cancellation check of `PolyLog`'s inversion formula
-  (`polylogInversionComplex`, `numerics/polylog.ts`), which declines about 6% of
-  the complex orders with `Re(s) < 0` past the unit disk for this reason. A more
-  accurate `Γ(s)` for a large `|s|` (Stirling series with the argument shifted)
-  would tighten all three. See also CE-192.
-
-### CE-194. Complex transcendental functions compute in doubles at every precision
-
-**Status:** proposed; capability. Plan: decision D4 of
-`docs/plans/2026-09-27-big-decimal-imaginary-part.md`.
-
-An inexact complex value holds its imaginary part as a big decimal, and `Ln`,
-`Exp`, `Power`, `Root`, `Sqrt` and the arithmetic compute both parts at the
-working precision.
-
-- **CE-194.1** `Sin`, `Cos`, `Tan` and the other trigonometric and hyperbolic
-  functions, `Gamma`, `Zeta`, the Bessel family and every other complex kernel
-  still compute in doubles (`complex.js`, `numerics/numeric-complex.ts`):
-  `Sin(1+i).N()` at 50 digits has 16 correct digits, and an imaginary part below
-  the double range reaches those kernels as `0`. Fix: a big-decimal complex
-  kernel per function family (the real `BigDecimal` kernels exist).
-- **CE-194.2** In the `e^{iθ}` Euler branch
-  (`boxed-expression/arithmetic-power.ts`, `halfTurns`), a large FLOAT angle is
-  reduced modulo π at the working precision with no extra digits, so
-  `e^{10^{30} i}` at 40 digits has about 10 correct digits
-  (`-0.99593119441358739…`, true `-0.99593119440539570…`); `BigNumericValue.exp`
-  called directly is correct. The reduction needs about `log10|θ|` more digits,
-  or a float angle above machine precision should take `exp` directly.
-- Expected float behaviour, not a defect: `e^{1152921504606846977.5 i\pi}`
-  `.N()` at precision 50 is `4.5e-32 − i`, the rounding of `c·π` for a 19-digit
-  `c` at 50 digits.
-
-### CE-195. Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route
-
-**Status:** proposed; capability.
-
-`Eigenvalues([[1, i, 0], [i, 2, 0], [0, 0, 3]])`, `Eigenvectors` of it,
-`CholeskyDecomposition([[2, 1+i], [1-i, 3]])`, and `LUDecomposition` and
-`QRDecomposition` of a complex matrix stay unevaluated under `evaluate()` AND
-under `.N()`. `SingularValues(...).N()` and `SVD(...).N()` of a complex matrix
-work through the kernel `singularValueDecomposition(re, im)` in
-`numerics/linear-algebra.ts` (QR with column pivoting, then a one-sided Jacobi
-pass), which returns the complex `U` and `V`.
-
-- **CE-195.1** Hermitian matrices: the real embedding that this kernel uses also
-  gives the eigenvalues. Run Jacobi on the embedding itself and take each
-  eigenvalue once; an eigenvector `[x; y]` gives `x + iy`.
-- **CE-195.2** A general complex matrix needs a complex QR iteration.
-- **CE-195.3** `CholeskyDecomposition`, `LUDecomposition` and `QRDecomposition`
-  of a complex matrix.
-
-### CE-196. Adaptive quadrature answers NaN for an integrand finite only on a narrow region
-
-**Status:** ready; defect.
-
-The adaptive quadrature stops when all panels are NaN, there are at least 16,
-and a bisection gave two NaN children (`ALL_BAD_STOP_PANELS` and
-`mustStopAllBad` in `numerics/gauss-kronrod.ts`). Isolated removable
-singularities move to panel boundaries when their panel is bisected, so they
-still converge, also when there is one at the center of each of the 16 starting
-panels. But an integrand that is finite only on a region narrower than 1/16 of
-the interval now answers NaN where the old loop could find a finite value. No
-test covers this case.
-
-### CE-197. Some Γ-ratio points stay symbolic past the exact-expansion caps
-
-**Status:** proposed; capability.
-
-- **CE-197.1** `Pochhammer(a, k)` with both `Γ(a)` and `Γ(a + k)` on a pole and
-  `|k| > 20` (`SYMBOLIC_EXPANSION_CAP`).
-- **CE-197.2** `GammaRegularized(n, z)` for `z < 0`: `evaluate()` for `n > 20`
-  (`MAX_GAMMA_Q_SERIES_ORDER`) and `.N()` for `n > 200`
-  (`MAX_GAMMA_Q_SERIES_ORDER_NUMERIC`, `library/distributions.ts`; a cap of 1000
-  took 10 s).
-
-These results stay symbolic; they are never `NaN`.
-
-### CE-198. A matrix p-norm for `p ∉ {1, 2, ∞}` stays inert
-
-**Status:** proposed; capability.
-
-The order passes the declared precondition (it is a well-formed order at rank
-
-1. and the operand is inside the carrier. The general matrix p-norm has no
-   closed form and needs a numeric kernel.
-
-### CE-199. `.N()` declines some convergent series with a slowly decaying or doubly logarithmic tail
-
-**Status:** proposed; capability, low priority.
-
-When the integer-power Richardson tableau does not certify, the infinite-series
-`.N()` fits the tail exponent of the partial sums
-(`fittedExponentExtrapolation`, `library/utils.ts`). The fitted route accepts a
-result only with an error estimate at or under `max(1e-12, 1e-11·|v|)`,
-agreement between the samples after `2^k` and `2^k + 1` terms, and a fitted
-exponent above 0.05, so a divergent series still declines. These stay symbolic
-(a safe result):
-
-- **CE-199.1** `Σ 1/n^1.1`: a small exponent amplifies round-off (estimate
-  1.2e-10).
-- **CE-199.2** `Σ ln(n)/n^1.5`: does not certify under the tight tolerance.
-- **CE-199.3** `Σ ln²(n)/n²`: needs each exponent three times in the tableau.
-- **CE-199.4** A doubly-infinite sum with a non-integer-power tail: the
-  absolute-series check that runs first declines it.
-
-An infinite product that does not converge walks the full term budget before it
-declines, as a declining sum does.
-
-### CE-200. `.N()` of a negative base to an odd-denominator power: two remaining limits
-
-**Status:** ready; defect, low priority.
-
-The branch of `(-2)^(p/q)` under `.N()` is decided by recovering `p/q` from the
-numericized exponent under a coincidence-budget criterion
-(`realPowerBranchTerms`, `arithmetic-power.ts`; tests in
-`power-negative-base-branch.test.ts`).
-
-- **CE-200.1** The `radical === 1` fast path of `_bignumComponent`
-  (`exact-numeric-value.ts`) numericizes an exact rational at the ambient
-  precision before the handler sees it. Keeping the exact exponent was measured:
-  28 snapshot failures across 5 suites (the display widths of machine `.N()`
-  change). It was reverted; it needs its own pass with the snapshot churn
-  reviewed.
-- **CE-200.2** The branch is decided by float reconstruction at `.N()` time. An
-  exponent whose terms are too large to recover from a 15-digit double
-  (denominator ≳ 3·10⁵ under the coincidence bound) takes the complex branch.
-  The fix is to let the exact exponent survive numericization, which changes the
-  evaluate-handler signature and needs its own design. Ask for a decision only
-  if a consumer relies on float exponents with very large denominators.
-
-### CE-201. Statistics Phase 3: inverse incomplete gamma/beta, more distributions, sampling, R²
-
-**Status:** proposed; capability. Design doc §10.
-
-- **CE-201.1** Inverse regularized incomplete gamma and beta kernels, and the
-  distributions that need them (Student-t, χ², F, Geometric…).
-- **CE-201.2** `RandomVariate` sampling (reuse the RNG and seed policy of
-  `Sample`).
-- **CE-201.3** Fit diagnostics (R²).
-- **CE-201.4** The Python execution-parity suite for the scipy mappings is
-  skipped until scipy is installed in `./venv`.
-
-### CE-202. `Measurement`: correlated uncertainty, relative error, distributions
-
-**Status:** proposed; capability.
-
-- **CE-202.1** Dual-number correlation tracking (correct by default).
-  Independent propagation over- or under-estimates when one measured variable is
-  used in several operands (`x·x`, `x/(x+1)`). The design is a
-  `BoxedMeasurement` carrier with a per-source identity; the hard part is
-  keeping the source id stable across re-boxing (design doc "Non-goals").
-- **CE-202.2** Relative-error notation (`±5%`).
-- **CE-202.3** Links to distributions and `RandomVariate` (reuse the statistics
-  RNG and seed policy).
-
-### CE-203. `FindFit`/`FindRoot` v2: weights, covariance, `FindMinimum`, multi-start search
-
-**Status:** proposed; capability.
-
-- **CE-203.1** Per-point weights. Decided shape: a trailing optional `weights`
-  argument, NOT a deduction from the tuple shape.
-- **CE-203.2** Parameter uncertainty and covariance output (`JᵀJ⁻¹` is a
-  byproduct).
-- **CE-203.3** A general `FindMinimum`.
-- **CE-203.4** Multi-start and global search. Do it only with corpus evidence of
-  basin sensitivity.
-- **CE-203.5** Document for consumers: a parameter named `e` canonicalizes to
-  `ExponentialE` and cannot be fit.
-
-### CE-204. The error bar of a definite integral is 1.6× optimistic on endpoint-singular integrands
-
-**Status:** ready; defect, large.
-
-The tanh-sinh quadrature reports an error bar that is 1.6× too small when the
-integrand is singular at an endpoint.
-
-### CE-205. Numeric residuals from the July 2026 reviews
-
-**Status:** ready; defect, low priority. Summary: docs/STATUS_REPORT.md.
-
-The source list of these items ended with "…"; the detailed records are in Git
-history.
-
-- **CE-205.1** Fu simplification of `sin⁴−cos⁴`.
-- **CE-205.2** The error bar of definite integrals and the tanh-sinh route.
-- **CE-205.3** Digits of the machine `gamma()` in its middle range.
-
 ### CE-206. Known numeric inaccuracies pinned in the tests
 
 **Status:** ready; defect.
+**Witness:** plausible; Interpreter inaccuracies pinned in tests: bignum `Arccos` near 1 loses about 8 digits, `ζ(−0.5)` 4 ulp off.
 
 - **CE-206.1** Bignum `Arccos` near 1 loses about 8 digits (endpoint
   cancellation; a per-case skip in `mpmath-kernels.test.ts`).
@@ -3753,196 +2039,22 @@ history.
 - **CE-206.3** One inexact `Multiply` case where the big-precision route is less
   accurate than the machine evaluation (`arithmetic.test.ts`, `@fixme`).
 
-### CE-207. `LerchPhi` past |z| = 1 declines for a complex `a` whose shift terms are much larger than the value
-
-**Status:** proposed; capability. Issue #340. Issue #353.
-
-`lerchPhiComplex` (`numerics/lerch-phi.ts`) declines (`N()` stays symbolic)
-where no route can vouch for 1e−11 relative accuracy. It does not return a wrong
-number: every returned value on about 30 000 sweep points is within 1.1e−12 of a
-reference (on a 2026-10-06 sweep of 12 000 points with orders up to 200 and |z|
-up to 1e300, within 8.8e−13).
-
-The routes past the circle: for `Re(s) > 0` off the cut, the leading terms of
-the series with a proven bound of the rest (`lerchSeriesOutsideDisk`); the
-continuation (`lerchContinuedWithError`); the sum over the Fourier modes of the
-base point for a real `a` and every `s` that is not a positive integer
-(`lerchModesComplex`); an integral route for `Re(s) > 0`
-(`lerchIntegralComplex`); and Lerch's transformation formula for a complex `a`
-(`lerchFunctionalComplex`). A Taylor series in `a` was tried and removed: it
-answered no point that the others miss and cost up to 0.5 s per declined call.
-
-What still declines:
-
-- **CE-207.1** A complex `a` with `Re(a) < 0` where the terms that move `a` into
-  the strip `0 ≤ Re(a) ≤ 1` are hundreds of times the value or more: 217 of 1197
-  points (`Re(s)` from −30 to 1, `|z|` up to 1e7), 31 of 1200 with `|z| < 32`.
-  Example: `LerchPhi(-246.62-375.42i, -29.535, -5.5009-2.4185i)`, reference
-  `1.1285770581632545e21 − 1.6446479143332522e22i`. The formula's value is
-  3.6e−12 off there, but its estimate is 1.7e−10: the term for the rounding of
-  `v = e^{2πib}` is pessimistic at a large order. Extended precision for the
-  shift would answer the worst of them.
-- **CE-207.2** A complex `a` with `Re(s) ≥ 1/2`, `|Im a| ≳ 3` and `|z| ≥ 1000`,
-  where the integral oscillates: 44 of 800 points, for example
-  `LerchPhi(2626400, 7.1652, -5.2092-3.5859i)`.
-- **CE-207.3** A real `a`, `Re(s) < −9`, `|z| ≥ 1000`: 3 of 3000, where the
-  estimate is 8 to 25 times the actual error. Example:
-  `LerchPhi(-552.66+1009.12i, -23.020, -6.1124)`, reference
-  `−4.7098482456230114e17 − 1.9081680693676611e18i`.
-
-The `hurwitzZetaComplex` kernel is not a limit of the modes route: it is within
-88ε of its envelope up to `|Im s| = 20` (`hurwitzKernelWeight`).
-
-References: do not take references for a complex `a` past the unit circle from
-mpmath's `lerchphi`. It returns a value on the wrong sheet of the incomplete
-gamma term in part of the `a` plane (see `closedTermSheet` in `lerch-phi.ts` and
-the tests that pin the corrected values). For `|z|` above about 1e5, `lerchphi`
-at 60 digits is also wrong (7.5e−7 at `lerchphi(-9959.2, -8.16, 1.25)`). Use 200
-digits or more, or the integral `(1/Γ(s))∫₀^∞ t^(s−1)e^(−at)/(1 − z·e^(−t)) dt`
-for `Re(s) > 0`.
-
-### CE-208. `HurwitzZeta` declines some complex arguments with a large `|Im a|` and `|Im s|`
-
-**Status:** proposed; capability.
-
-`hurwitzZetaComplexWithError` (`numerics/numeric-complex.ts`) declines, so the
-expression stays unevaluated, when its per-call error estimate is above 1e−12 of
-the value even after the powers are recomputed in double-double. On 11 900 sweep
-points against mpmath this happened at 26 points, all with `|Im a| ≥ 3.4` and
-`|Im s| ≥ 7` (20 of 1500 with `Re(a)` from −10 to 0, 3 of 2000 with
-`Re(a) > 0`).
-
-- **CE-208.1** Cancellation in doubles. Example:
-  `HurwitzZeta(-0.22+12.28i, -6.93-4.78i)`, mpmath
-  `-1.9865506122150481e-14 - 1.4517190884718218e-13i`. The terms of every route
-  are about 1e−7, so their sum in doubles loses the digits. The condition number
-  is small (below 4.4e−14), so a route that does not cancel would answer: a
-  big-decimal complex Hurwitz kernel, or a representation that does not pass
-  over the terms left of the imaginary axis. Another example with `Re(a) > 0`:
-  `HurwitzZeta(-11.57+17.97i, 0.0085-4.458i)`, mpmath
-  `-1.5251523329103249e-7 - 5.5532800426926228e-7i`.
-- **CE-208.2** The kernel also declines for `|Im s|` above about 12 800 (unless
-  `Re(a)` is large enough for the Euler–Maclaurin sum) and for `Re(a) < −2^20`,
-  both to bound its work.
-- **CE-208.3** `HurwitzZeta(0.5, 0.5+1e300i)` is `NaN`, not a decline, because
-  the modulus of `a` overflows.
-
-References: do not take references for `Re(a)` far below 0 from mpmath's
-`zeta(s, a)`. At `s = 0.3+50i`, `a = −300.5+2i` it disagrees with its own sum of
-the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
-
 ## Compilation
 
 ### CE-755. interval-js emits a folded false condition as the string `'false'`
 
 **Status:** ready; wrong value, S.
+**Witness:** plausible; interval-js emits `if ('false')`; a sum loop with a Break condition gives `[0, 0]`, interpreter 15.
 
 `Block(s ≔ 0; Loop(Block(If(k > 20, Break()), s ≔ s + k), k ∈ 1..5); s)`:
 the interpreter and JavaScript give 15. The interval-js target emits
 `if ('false') { break }`; the string is truthy, so the loop stops at once and
 the result is the interval `[0, 0]`.
 
-### CE-756. JavaScript: a destructuring `let` whose value calls a local function that reads a pattern name
-
-**Status:** ready; wrong value, S.
-
-In a loop body, with an outer `a = 100`, in Epsil:
-
-- `function f() { a }; let (a, b) = (k, f())` gives `b = k` in the compiled
-  code; the interpreter evaluates the whole tuple first, so `f()` reads 100.
-- `function f() { a }; let (b, a) = (f(), k)` and
-  `function f(k) { (a, k) }; let (a, b) = f(k)` throw `ReferenceError` when
-  they run.
-
-The cause: `desugarPatternDeclare()` declares the leaves one by one, and a
-function defined in the same statement list reads the new local. Declining
-every value that calls a non-library function would also decline the
-supported `let (a, b) = f(k)` (9 tests). Recommended fix: decline only when
-the statement list that holds the declaration also defines a function whose
-body reads a name of the pattern. Python and the shader targets decline
-these programs today.
-
-### CE-757. Python: `Apply` of a function literal to a point that may be absent emits `None + 1`
-
-**Status:** ready; defect, S.
-
-With `P: list<tuple<real, real>>`, `Apply((p) ↦ Max(p) + 1, P[1])` compiles
-on Python with the absent branch `(lambda p: p + 1)`. When the point is
-absent, `None + 1` raises a `TypeError`; the interpreter gives `NaN`. Not run
-yet: measure it first.
-
-### CE-758. Declines of a point at a parameter with no settled point type
-
-**Status:** ready; defect, M.
-
-Each case gives a value in the interpreter, with
-`P: list<tuple<real, real>>` at `[(1, 2), (3, 4)]`:
-
-- **CE-758.1** `g3 = (p) ↦ Norm(p)`, `g3(P[1])` declines on GLSL, WGSL and
-  Python (the point may be absent); `g3(q)` with `q: tuple<real, real>`
-  compiles on GLSL and WGSL.
-- **CE-758.2** interval-js returns `success: false` for every case of
-  `test/compute-engine/compile-point-untyped-parameter.test.ts`; the cause is
-  not known.
-- **CE-758.3** `gs = (p) ↦ Sum(p)`, `gs(P[1])` declines on JavaScript
-  ("possible 'Nothing' elements require a distinct omission
-  representation"); the interpreter gives 3.
-- **CE-758.4** `gm2 = (p, x) ↦ Max(p) + x`, `gm2(P[1], L)` with
-  `L: list<real>` declines; the interpreter gives `[12, 22]`.
-- **CE-758.5** `Map(gm, LM)` with `gm = (p) ↦ Max(p) + 1` and
-  `LM: list<tuple<real, real> | missing>` declines; the interpreter gives
-  `[3, NaN]`. The fork that sends the absent value to the generic definition
-  is not safe there (`Length` of `undefined` throws).
-- **CE-758.6** `Reduce(P, ghd, (0, 0))` with a declared tuple parameter
-  declines (the run-time check of the declared type); the interpreter gives
-  `(6, 0)`.
-- **CE-758.7** `Block(g := p ↦ Max(p) + 1, Map(g, P))` declines; the
-  interpreter gives `[3, 5]`.
-- **CE-758.8** A function local to a `Block` with a rest parameter does not
-  compile on JavaScript ("`Spread`: the argument's tuple arity is not
-  statically known"): `Map(h7, P)` with `h7 := (...xs) ↦ 7` gives `[7, 7]` in
-  the interpreter.
-
-### CE-759. Python declines a destructuring `let` whose value is a tuple-valued call
-
-**Status:** ready; defect, S.
-
-`function f(k) { (k, k + 1) }; let s = 0; for k in [1, 2, 3] { let (a, b) = f(k); s = s + a * b }; s`
-gives 20 on JavaScript and declines on Python ("Could not compile a
-destructuring declaration whose value is not a literal tuple").
-`destructureViaTemp()` (`compile-declarations.ts`) accepts only JavaScript;
-the per-leaf declarations must be split for a target with a `declare` hook.
-
-### CE-760. A literal out-of-range row of a rank-3 tensor declines
-
-**Status:** ready; defect, S.
-
-With `R` a tensor of rank 3, `R[3, 1]` (and the nested `R[3][1]`) declines on
-JavaScript and Python ("first operand is not an indexed collection"), because
-the inner read is typed `missing`. The interpreter gives `Missing`.
-
-### CE-761. A function whose body ends in a loop declines also when the call's value is discarded
-
-**Status:** ready; defect, S.
-
-`f(2); 3`, where the body of `f` ends in a `Loop` with an indexing set, gave
-3 on JavaScript before 2026-11-01. Now it declines, because the admission
-walk treats every function body as used and does not look at the call
-sites. Compile the body as a statement when no call site uses its value.
-
-### CE-762. GLSL and WGSL have no `At` lowering for a multi-axis base
-
-**Status:** ready; defect, M.
-
-`At(R, 1, 2)` with `R: matrix<real^2x2>` declines on GLSL and WGSL
-("multi-axis"), although GLSL has `mat2`. `list<list<real>>` declines too
-("not a statically counted collection"); that decline may be one the
-static-shape rule requires (a shader needs a static length): check it
-first. `list<vector<real^3>>` declines with "states no element type".
-
 ### CE-751. A `number` value that holds a complex number reaches code compiled for `real`
 
 **Status:** ready; wrong value, M. User decision 2026-11-01: option (a).
+**Witness:** plausible; `Map(g, L)` with `L: list<number>` at `[1+i, 2]` gives `[null, null]`; user decision 2026-11-01 option (a).
 
 - `Map(g, L)` with `L: list<number>` at `[1+i, 2]` gives `[null, null]` on
   JavaScript (block-local and engine-level `g`).
@@ -3980,6 +2092,7 @@ interpreter), with a priority by how often each occurs (AGENTS.md: a decline
 is a defect). Example: with `n: integer`, `DigitSum(n)` declines with the
 diagnostic code `bigint-lane`. The reply to GitHub issue #503 is deferred by
 the user.
+**Witness:** corpus; Declines of the `bigint` mode, named for GitHub #503; check that #503 needs these shapes, else drop as declines.
 
 - **CE-715.2** (medium) A rational `Range`/`Sum`/`Product` bound (`Sum(i, i = 1..n/2)`
   is `3` at `n = 5`).
@@ -4003,30 +2116,10 @@ the user.
   clause. With `n: integer`, `Piecewise(…)` over integer branches runs on the
   interpreter in the mode today.
 
-### CE-719. A `Return` inside a `Loop` that has code after it is not compiled
-
-**Status:** ready; decline (was a wrong value), medium. Found 2026-10-31 during
-CE-712.1.
-
-With `L = [1, 2, 3]`,
-`Apply(p ↦ Block(q ≔ 0, Loop(If(i > 1, Block(q ≔ 7, Return(5))), Element(i, L)), 100 + q), 1)`
-gives `5` in the interpreter. At HEAD `e3ca9c1a6` the compiled JavaScript gave
-`107`: the compiled loop is a function of its own (a closure called where the
-loop is), so the `Return` ended only the loop and `100 + q` still ran. CE-712.1
-makes it decline with the code `'unsettled-shape'` (`returnInLoopIn()`,
-`compilation/compile-admission.ts`), also in the root and in a stored
-function, on every target except Python. The Python target emits the loop
-inline, as a `for` statement in the compiled function, so the `return` ends
-that function and the case compiles there. A `Return` in a loop that is the
-last statement of the function still compiles.
-
-Fix: compile such a loop so that a `Return` in it ends the function: a
-sentinel value that the code after the loop call tests, or an inline loop
-where the target allows it.
-
 ### CE-749. The interpreter gives `Missing` for an absent element mapped by a literal
 
 **Status:** ready; wrong value, S.
+**Witness:** plausible; Interpreter: `Map(t ↦ 2t, PM)` gives `Missing` where the named form gives `NaN`, against the 2026-09-22 rule.
 
 With `PM: list<tuple<real, real> | missing>` and `PM = [(1, 2), Missing]`,
 and `f2 := t ↦ 2t`:
@@ -4047,82 +2140,10 @@ the body. When this is fixed, the compiled literal route
 declining a literal whose body reads its parameter over a list with absent
 points (`Map(t ↦ 2t, PM)`, `Map(t ↦ t[1], PM)`).
 
-### CE-748. The interpreter refuses an index into a call result that maps into coordinates
-
-**Status:** ready; defect, S.
-
-With `g7 := (t: real) ↦ 7` and `rows: list<list<tuple<real, real>>>`,
-`g7(rows)` evaluates to `[[(7, 7)], [(7, 7), (7, 7)]]`, and
-`At(At(g7(rows), 2), 1)` to `(7, 7)`. But `At(At(At(g7(rows), 2), 1), 2)`
-evaluates to an `incompatible-type` error, where the value is `7`; the
-compiled JavaScript gives `7`. The static type that the interpreter gives
-the inner `At` does not admit the index. Find which type is wrong (the call
-type of `g7(rows)` or the `At` result type) and fix it.
-
-### CE-747. A `Sum` over an indexing set (`\sum_{s\in S}`) does not compile
-
-**Status:** ready; capability, M.
-
-`Sum(Power(s, 2), Element(s, S))` with `S: list<real>` declines on every
-target: JavaScript "a Sum/Product over a COLLECTION is not lowered to
-JavaScript — this emitter builds a counted loop from a `Limits` clause",
-Python "expected a Limits indexing set", interval-js names `List`. The value
-is a loop over the elements of `S`. Lower it on JavaScript and Python as a
-loop over the list (or `sum(...)` on Python), and on interval-js as the sum
-of the element intervals.
-
-### CE-746. interval-js: an index into a list of points gives `entire`
-
-**Status:** ready; wrong value, M.
-
-`At(Q, 1) + At(Q, 2)` with `Q: list<tuple<real, real>>` and
-`Q = [(1, 2), (3, 4)]`: the interpreter gives `(4, 6)`, interval-js gives
-`{kind: 'entire'}`. Every `At` whose result is a point or a list gives
-`entire` there (`At(rows, 2)` with `rows: list<list<tuple<real, real>>>`).
-`entire` encloses the value, so it is not false, but it carries no
-information, and the comparison tests of the point variants of a declared
-union input (`test/compute-engine/ce-712-2-declared-union-dispatch.test.ts`)
-check the list case on JavaScript only because of it. Fix the interval `At`
-lowering of a point or list result (`interval-javascript-target.ts`).
-
-### CE-745. Python: `Max` and `Min` over a nested list of reals decline
-
-**Status:** ready; defect, S.
-
-`Max(M)` with `M: list<list<real>>`: the JavaScript target flattens the
-operand (`isNestedRealListOperand()` and `compileExtremum` in
-`javascript-target.ts`) and gives the interpreter's value; Python declines in
-its nested-data refusal (`python-target.ts`, the `Max`/`Min` lowering).
-Python also compiles `Max(R)` with `R: list<Row>` and `Row` a nominal type to
-`np.max(R)`; that value was not compared with the interpreter, because
-`ce.assign` refuses a list of `Row` values. Check both.
-
-### CE-744. Missing callback and `Apply` lowerings on interval-js and Python
-
-**Status:** ready; capability, M.
-
-These compile on JavaScript and decline on the targets named, at HEAD
-`e8a28b0b7` too:
-
-- interval-js and Python: a function defined on the engine, or a built-in
-  (`Sin`), as the callback of `Map` (`Map(f, L)` with `f := t ↦ 2t`,
-  `L: list<real>`). Python gives "the function operand has no Python form"
-  (`pyCallbackArg()` in `python-target.ts`).
-- interval-js: `Apply` of a `Function` literal to a list
-  (`Apply(t ↦ 2t, L)`).
-- JavaScript: `Fold` (`Reduce`) whose combiner is a multi-clause function.
-- Python: a callback with a parameter declared `expression` over a list of
-  lists (`Map((t: expression) ↦ 2t, rows)`, CE-693 on Python): refused by
-  `assertPyCallbackWideParams()`.
-
-Each declined case is a reachable shape (AGENTS.md: such a decline is a
-defect). The JavaScript lowering of each is the model: the static map of
-`staticMapCallback()` (`compile-callbacks.ts`) and `pythonMapCall()`
-(`compile-user-calls.ts`).
-
 ### CE-743. Python: a block-local function called with a point repeats the tuple
 
 **Status:** ready; wrong value, S.
+**Witness:** plausible; Python `Block(q ≔ t ↦ 2t, q(p))` with `p = (3, 4)` gives `(3, 4, 3, 4)`; interpreter `(6, 8)`.
 
 `Block(q ≔ t ↦ 2t, q(p))` with `p: tuple<real, real>` and `p = (3, 4)`: the
 compiled Python gives `(3, 4, 3, 4)`, because Python's `*` repeats a tuple.
@@ -4130,43 +2151,12 @@ The interpreter gives `(6, 8)`. The JavaScript target gives `(6, 8)`. The
 cause is the lowering of the block-local literal in `python-target.ts`: the
 product of a number and a tuple must be the product of each coordinate.
 
-### CE-742. A callback that the interpreter binds whole is mapped over a list element
-
-**Status:** ready; wrong value, M.
-
-The interpreter applies a `Function` literal and a block-local function to
-each element of the source of `Map` whole. It maps only a function defined on
-the engine with scalar parameters over a list element (user decision of
-2026-09-22). The compiled code maps the literal or the block local too in
-these cases:
-
-- `Map(t ↦ 7, LL)` with `LL: list<list<real> | missing>` and
-  `LL = [[1, 2], [3]]`: the compiled JavaScript gives `[[7, 7], [7]]`, the
-  interpreter gives `[7, 7]`. With `LL: list<list<real>>`, both give
-  `[7, 7]`: an element type that admits `missing` does not type the literal
-  by its element (`expressionParameterVariantTypes()` and the callback rank
-  in `compile-function-literals.ts`).
-- `Block(q ≔ s ↦ 7, Map(q, R))` with `R: list<list<real>>`,
-  `R = [[1, 2], [3]]`: compiled `[[7, 7], [7]]`, interpreter `[7, 7]`
-  (`localFunctionCallback()` in `compile-callbacks.ts`).
-- `Block(f ≔ t ↦ 7, f(rows))` with `rows: list<list<tuple<real, real>>>`,
-  `rows = [[(1, 2)], [(3, 4), (5, 6)]]`: compiled
-  `[[[7, 7]], [[7, 7], [7, 7]]]` (`_SYS.mapFn(f, [3], _.rows)`), interpreter
-  `[[7], [7, 7]]`. A function defined on the engine already gets the point
-  variant mapped over the list levels (`untypedPointListElement()` in
-  `compile-point-calls.ts`); a block-local call does not.
-
-The value at HEAD `e8a28b0b7` is the same (through `_SYS.bcastFn`). Fix: give
-the literal and the block-local callback the element whole when the
-interpreter does, and the block-local direct call the point variant. A body
-that is element-wise (`t ↦ t + 1`) gives the same value both ways, so the
-tests must use a body that is not (`t ↦ 7`, `t ↦ Length(t)`).
-
 ### CE-741. A complex argument to an untyped parameter that the body narrows to `real` gives `NaN` or a wrong value (JavaScript)
 
 **Status:** ready; wrong value, M. Starts after CE-712.2 is committed: it
 extends the per-call-site variant selection of CE-712.2. Plan:
 `docs/plans/2026-10-31-static-shape-compilation.md`, rule R2.
+**Witness:** plausible; `g := x ↦ If(x > 0, Mod(x, 3), x)`, `g(Sqrt(y))` at y = 16 gives 4 in complex/auto mode; interpreter 1.
 
 With `y: real`, `f := x ↦ Mod(x, 3)` and `f(Sqrt(y))`, in mode `auto` (which
 compiles again in mode `complex`) or `complex`, the compiled code gives `NaN`
@@ -4200,98 +2190,12 @@ mismatch (rule R5). Tests: `Mod`, `Remainder`, `Floor`, `Ceil`, `Round`; the
 `g` case at y = 16 and y = −16; a recursive function, whose recursive call
 takes the variant of its own argument type; the named and inline forms.
 
-### CE-740. A `Which` with a `compile` handler that returns no code declines for an untyped dropped operand
-
-**Status:** proposed; defect (decline), S. The more precise version of a
-sound decline (`AGENTS.md`): it waits until the user asks for it.
-
-With `M` undeclared and a `compile` handler on the definition of `Which` that
-returns no code (`undefined`, `null` or an empty string),
-`Which(True, 0, True, M)` declines with `'untyped-input'` for `M`. The stock
-lowering, which runs when the handler returns no code, drops the clauses
-after the first `True` condition and reads only `0`, so the expression has a
-settled shape and the interpreter gives `0`. Cause: `droppedOperandsOf()`
-(`compilation/compile-admission.ts`) keeps every operand of a `Which` whose
-definition has a `compile` handler, because that handler receives every
-operand and its code can read any of them. The admission does not call the
-handler: it can have effects (the tests count its calls), and its code
-depends on the compilation of the operands. The result is a decline, never a
-wrong value.
-
-Fix: let the admission drop the operands by the stock rules, and move the
-check of the dropped operands to the emission. When the handler's compile
-callback receives an operand that the admission dropped and that reads an
-input with no type, the compilation declines there with `'untyped-input'`.
-Skipping the operands after a literal `True` in the admission alone is not
-sound: a handler that returns code can read them.
-
-### CE-720. A callback that assigns a name of an enclosing scope is not compiled
-
-**Status:** ready; decline (was a wrong value), medium. Found 2026-10-31 during
-CE-712.1.
-
-At HEAD `e3ca9c1a6`, with `L: list<real>` and `L = [1, 2, 3]`:
-
-- `Block(p ≔ 0, Filter(L, u ↦ Block(p ≔ 5, u > 1)), p)`: interpreter `0`,
-  compiled `5`. The interpreter does not run the callback, because the result
-  of the `Filter` is not used; with `r ≔ Filter(…)` both give `5`.
-- `Block(p ≔ 0, Filter(L, u ↦ Block(p ≔ [1, 2], u > 1)), p + 1)`: interpreter
-  `1`, compiled `[2, 3]`.
-- `Block(p ≔ 0, Limit(u ↦ Block(p ≔ 5, u), 0), p)`: interpreter `5`,
-  compiled `0`.
-
-User decision 2026-11-01: the simple decline. CE-712.1 makes every function
-literal that assigns a name of an enclosing scope (or an element of one), or
-that a `Break` or a `Continue` leaves, decline with the code
-`'unsettled-shape'` (`assignmentConflictIn()`,
-`compilation/compile-admission.ts`): a callback, the value of a `Declare` or
-an `Assign`, a function returned by another one, and the body of a user
-function that the code calls. Only the root of the compilation and a literal
-that `Apply` applies where it is written to scalar arguments are exempt. A
-classification of stored and callback literals was tried first, and three
-review rounds each found a new way for a writer to reach a callback (behind
-an `If`, passed by name, returned by a curried literal). The decline also
-covers cases where the two agree: `Block(p ≔ 0, Declare(g, k ↦ Block(p ≔ k
-+ 1, p)), [g(1), p])` gives `[2, 2]` in the interpreter, and
-`Apply(Apply(Apply((y, w) ↦ (x ↦ Block(y ≔ 2, x + y)), 0), 1), u)` gives 7
-in the interpreter and at HEAD `e3ca9c1a6`; both now run on the interpreter.
-
-Fix: compile the effect as the interpreter has it, for each operator: when it
-runs the callback (eagerly or when its result is used), and whether the write
-reaches the enclosing scope. Then remove the decline for the operators where
-the two agree.
-
-### CE-721. An assignment in a `Comprehension`, in a clause of a `Sum` or a `Product`, or in an `Integrate` is not compiled
-
-**Status:** ready; decline (was a wrong value), medium. Found 2026-10-31 during
-CE-712.1.
-
-At HEAD `e3ca9c1a6`,
-`Block(p ≔ 0, Comprehension(Block(p ≔ 5, i), Element(i, [1])), p)` gives `0` in
-the interpreter, which evaluates the body of a `Comprehension` in a scope of
-its own (and here does not evaluate it, because the result is not used), and
-`5` in the compiled code. In an `Integrate`, an assignment in the integrand
-changes the name in the interpreter, but not in the compiled code, which
-evaluates the integrand in a function of its own. CE-712.1 makes these
-decline with the code `'unsettled-shape'` (`scopedPartsOf()`,
-`writesOuterName()`, `compilation/compile-admission.ts`), and a `Return`, a
-`Break` or a `Continue` in the body of a `Sum` or a `Product` declines too (it
-gave JavaScript with a syntax error, `Illegal break statement`).
-
-The decline is wider than the defect:
-`Comprehension(Block(q ≔ 2i, q + 3), Element(i, [1, 2, 3]))` compiled to
-`[5, 7, 9]` at HEAD and now declines, because the check counts an assignment
-of a block local with no `Declare` as a write of an outer name. With
-`Declare(q, "real")` in the block, it compiles.
-
-Fix: give the compiled code the scope rule of the interpreter for each
-operator, then narrow the decline to the cases that still differ.
-
 ### CE-722. A conditional that selects element by element and whose branch assigns a name is not compiled
 
 **Status:** ready; documentation, small. User decision 2026-11-01: option (a),
 the decline is the rule. Found 2026-10-31 during CE-712.1. The meaning of the
 expression in the interpreter is a separate question, CE-739.
+**Witness:** crafted; Ready with user decision 2026-11-01 option (a); remaining work is one example in `docs/COMPILATION-MODEL.md`.
 
 With `L: list<real>` and `L = [-1, -2]`,
 `Block(p ≔ 0, If(L > 0, p ≔ 5), 2p)` gives `0` in the interpreter. At HEAD
@@ -4312,95 +2216,10 @@ gets this example in the list of declines that the static-shape rule requires
 shape (for example, the branch runs when any element of the condition is
 true, and `p` is a number), the compiler can emit that, as a new entry.
 
-### CE-723. A function literal applied in a loop body that assigns the loop index is not compiled
-
-**Status:** ready; decline (was a wrong value), small. Found 2026-10-31 during
-CE-712.1.
-
-At HEAD `e3ca9c1a6`:
-
-- `Block(s ≔ 0, Loop(s ≔ s + Apply(u ↦ Block(k ≔ k + 1, k), 0), Element(k, 1..3)), s)`:
-  interpreter `9`, compiled `6`.
-- `Block(n ≔ 0, Loop(Block(Apply(u ↦ k ≔ 5, 0), n ≔ n + 1), Element(k, 1..3)), n)`:
-  interpreter `3`, compiled `1`.
-
-A loop body that assigns the index directly already declines ("the body
-assigns the loop index") on JavaScript, and compiles to a new variable on
-Python. CE-712.1 adds a decline, on every target, for an `Assign` in a function
-literal of the index of a `Loop`, `Sum`, `Product`, `Comprehension` or
-`Integrate` that encloses the literal, with the code `'unsettled-shape'`.
-
-Fix: give the compiled index the interpreter's rule (the write changes the
-variable for the rest of the iteration and does not change the next index),
-then remove the decline.
-
-### CE-724. The simple rule for the shapes of assigned names declines where the interpreter has a value
-
-**Status:** proposed; decline, large. User decision 2026-11-01: the simple rule
-for CE-712.1 (no flow analysis); this entry is the possible later precise
-version, which needs a user request.
-
-CE-712.1 declines when, in one scope, the values that the code assigns to a
-name, and the type of the name, do not all have one shape class (a number, a
-complex number, a string, a list, a point, a matrix; the length of a list is
-not part of its shape). It does not examine the order of the assignments or
-the paths of the code. So it declines these, where the interpreter has a
-value:
-
-- `Block(p ≔ 0, p ≔ [1, 2], p)`: interpreter `[1, 2]`.
-- `t ↦ Block(p ≔ 0, If(t > 0, Block(p ≔ [1, 2], Return(1))), 2p)`: `p` is a
-  number wherever `2p` is evaluated.
-- `Block(p ≔ 0, Match(x, MatchCase(_, p ≔ [1, 2])), 2p)`: interpreter
-  `[2, 4]`.
-- Two locals of the same name in different scopes with no `Declare` (two
-  function bodies that each assign a local `p` of a different shape): the rule
-  compares them as one variable.
-
-The flow analysis that was written and removed during CE-712.1 (a walk of the
-paths of the code that compared the shapes where paths meet) needed eight
-review rounds, and each round found new cases: a `Match` guard, the operands
-of `And` and `Or`, a loop that runs no time, a condition of type
-`boolean | missing` that selects no branch, a stored function whose outer
-write is checked only at its definition, a `Return` in the guard of a case.
-Each of these is now a test of the simple rule in
-`test/compute-engine/compile-admission.test.ts`. A precise version must handle
-all of them; it can instead compile each assignment to its own variable
-(static single assignment) where the shapes differ.
-
-### CE-733. On `interval-js`, a `Which` declines for a branch that a condition known at compile time excludes
-
-**Status:** ready; defect, S.
-
-With no declarations, `compile(Which(3 < 2, [1, 2], True, 0), { to: "interval-js" })`
-declines: "Could not compile `List`: the operator is known to the engine but
-target 'interval-javascript' has no lowering for it". The interpreter and the
-JavaScript target give `0`. The same expression with `If`,
-`If(3 < 2, [1, 2], 0)`, compiles on `interval-js` to the constant `0`, because
-the `If` emitter drops the branch that the known condition excludes. The
-interval `Which` emitter compiles every branch. Fix: drop in the interval
-`Which` emitter the clauses whose condition is known false at compile time, and
-stop at the first clause whose condition is known true, as the JavaScript
-target does.
-
-### CE-734. On `glsl` and `wgsl`, a branch that a condition known at compile time excludes is emitted
-
-**Status:** ready; defect, S.
-
-With `x: real`, `Which(3 < 2, x, True, 0)` compiles on `glsl` to
-`((false) ? (x) : ((0.0)))` and on `wgsl` to `select((0.0), x, false)`. The
-value is correct (`0`), but the emitted code keeps the excluded branch. When
-that branch has another shape, the compilation declines although the
-interpreter has a value: `Which(3 < 2, (1, 2), True, x)` declines on both
-targets with "its branches have different shapes", where the interpreter gives
-`x`. `If(False, (1, 2), 0)` declines in the same way. `If(2 < 3, x, y)`
-already compiles to `x`. Fix: in the shader emitters of `If` and `Which`, drop
-the branches whose condition is known at compile time, as the JavaScript
-target does (`droppedOperands()`), and let the check of settled shapes compare
-only the branches that are kept.
-
 ### CE-735. A compiled `Loop` ended by a `Break` with a value gives `undefined` on JavaScript
 
 **Status:** ready; wrong value, S.
+**Witness:** crafted; javascript; `Loop(If(x > 1, Break(3), Break(3)))` with `x: real` at 2; compiled `undefined`; interpreter 3.
 
 With `x: real`, `Loop(If(x > 1, Break(3), Break(3)))` compiles to this code
 (formatted):
@@ -4424,72 +2243,12 @@ The emitted `break` drops the value of the `Break`. Fix: assign the value of
 the `Break` to a result variable of the loop before `break`, and return that
 variable after the loop.
 
-### CE-736. A name that a chained assignment in a loop body writes is read after the loop with a type and no value
-
-**Status:** ready; defect, S.
-
-In `Block(t ≔ 0; Loop(t ≔ (w ≔ t + i), i ∈ 1..3); w + 0)` the compiled code
-declares `w` as a local of the loop body (`let w; w = i + t; t = w`) and reads
-the input `_.w` after the loop. `freeSymbols` is `["w"]`, and the read of `w`
-after the loop has the type `number`, so the refusal of an input with no type
-does not apply. The interpreter gives the symbol `w`; the compiled code gives
-`undefined` when `w` is not supplied, and `[1, 2]` when `w = [1, 2]` is
-supplied, although the type of the read is `number`. Cause: the read of `w`
-after the loop takes the type of the local of the loop body. Fix: give the read
-the type of its own binding (no type, so the compilation declines with
-`'untyped-input'`), or decide that the inner target is a local of the block
-and assign it there in the interpreter and in the compiled code.
-
-### CE-714. A point with a coordinate declared `real | list<real>` gives a norm per element in compiled code, an error in the interpreter
-
-**Status:** ready; wrong value, small. Found 2026-10-31 during CE-712.1.
-
-With `x` declared `real | list<real>`, `y` declared `real`, and
-`k = P ↦ |P − (4, 0)|` declared `(unknown) -> number`:
-
-```ts
-const e = ce.box(['k', ['Tuple', 'x', 'y']]);
-compile(e, { to: 'javascript' }).run({ x: [1, 2], y: 3 });
-// [4.2426…, 3.6055…]: one norm per element of x, success: true
-ce.assign('x', ce.box(['List', 1, 2]));
-ce.assign('y', 3);
-e.evaluate();
-// Error(ErrorCode("incompatible-type", "tuple<number, number>",
-//   "tuple<vector<integer^2>, integer>"), ([1,2], 3))
-```
-
-The LaTeX `k\left(\left(x,y\right)\right)` gives the same `Tuple` form and the
-same two values: with `x` declared, the parse does not give
-`PointList(x, y)`. The disagreement is at HEAD `acacab99a`; it is not caused by
-CE-712.1.
-
-The interpreter value is the right one. A MathJSON `Tuple` with a list
-coordinate is data, not a point (`docs/COLLECTIONS-MODEL.md`, "Points and
-`PointList`"; a list of points is `PointList(x, y)`), and arithmetic over it is
-an `incompatible-type` error. The compiler already refuses this tuple when `x`
-is declared `list<real>` ("a tuple with a list coordinate, which is not a
-point", `checkListCoordinateTupleArgs()` in `compile-point-calls.ts` and the
-operand check in `compiler-core.ts`); the test
-`tycho-item-253-abs-union-point-param.test.ts`, "a code-built Tuple with a list
-coordinate is an error, not a point", pins that refusal. When the coordinate
-type is a union that admits a list, the check does not see a list coordinate,
-and the run-time dispatch reads `([1, 2], 3)` as two points.
-
-Proposed fix: under rule R1 of
-`docs/plans/2026-10-31-static-shape-compilation.md`, a declared union is one
-dispatch at the input, with a body for each member shape. The body for the
-member `list<real>` holds a tuple with a list coordinate, so it must decline
-(or give the interpreter's error), as the `list<real>` declaration does today.
-No user decision is needed for the `Tuple` form. A decision is needed only if
-the LaTeX `(x, y)` with `x` declared `real | list<real>` must parse as
-`PointList(x, y)` (as it does for an undeclared `x` whose value is a list);
-then the LaTeX form gives one norm per point in both evaluators.
-
 ### CE-712. Static-shape compilation: settle every shape at compile time, emit no run-time test of a type
 
 **Status:** ready; design decided, large. User decision 2026-10-31: option (A) of
 `docs/plans/2026-10-31-static-shape-compilation.md`, rules R1 to R6 there.
 Replaces CE-683 and CE-711, whose scope it widens.
+**Witness:** corpus; User decision 2026-10-31 option (A); steps CE-712.3 to .5 remain; corpus audit counts cited.
 
 The compiler resolves every shape (scalar, list, point, list of points) from the
 static types at compile time, as the GLSL and WGSL targets already do, and emits
@@ -4570,268 +2329,35 @@ symbols (one line), call `hasUnresolvedInput` before a run, and optionally
 narrow the point-or-point-list union in the plot sampler route (one to two days)
 to avoid the entry dispatch.
 
-### CE-711. Remove the compile checks that exist only for unspecified cases
+### CE-662. Compiled code adds no run-time check of a value against a declared type; remove the checks that exist
 
-**Status:** ready; cleanup, large. User decision 2026-10-31 (option (b) of
-`docs/plans/2026-10-31-compiled-code-contract-for-errors.md`). Superseded
-2026-10-31 by CE-712, which does this removal as its step 3 with a wider scope;
-the check list below stays as the inventory.
+**Status:** ready; task, M. Approved 2026-11-01.
+**Witness:** plausible; `Block(Declare(p, "integer"), Assign(p, 0.5), p)` compiled.
+for `javascript` gives 0.5 where the interpreter gives `incompatible-type`;
+the caveats allow that difference.
 
-Compiled code now equals the interpreter only for a well-typed expression
-whose inputs hold values of their types; an expression with a
-sub-expression whose static type is `error` declines; every other error case
-is unspecified (`docs/COMPILATION-MODEL.md`, "Fail closed"). Many checks
-exist only for the unspecified cases and can go, in steps, each with its
-tests: for example the `run()` entry refusals of a non-number at a scalar
-input and of a non-string at a text input (`checkEntry`,
-`javascript-runtime.ts`), the same refusals in `broadcast()` and in the
-interval runner, `callResultGuard` and `declaredTopGuard`
-(`compile-expr-handlers.ts`), and the folds and projections that refuse a
-non-number operand that the static type does not show
-(`refuseBuiltinFoldOfNonNumbers`, `refuseNonNumericScalarProjection`,
-`javascript-target.ts`). The plan lists about 40 checks with their class; a
-check that also protects a well-typed expression stays (string and
-aggregate comparisons, complex lanes, `Missing`/`Nothing` values, declared
-`broadcastable<T>` parameters, multi-clause dispatch, domain guards). Each
-step reports the declines removed per target and the per-call cost saved.
-Open entries whose case is now unspecified (for example CE-706, an untyped
-parameter given a list) are re-read against the new rule in the first step.
-
-These stay, because the host Tycho depends on them (answer of the session
-tycho-desk, 2026-10-31): the `RangeError` of `Mod`, `Remainder`, `GCD` and
-`LCM` for a finite operand beyond ±(2^53 − 1), which Tycho turns into a gap
-of a plot; a complete `freeSymbols` list in the compile result, which Tycho
-uses to refuse to run a kernel that reads a name that nobody supplies; and
-the `unbound` decline, which names a call of a name with no binding in
-`unsupported`.
-
-Possibly dead since the static-type-error decline (`assertNoStaticTypeError()`,
-`compilation/compile-static-type-error.ts`) runs first: the GPU check
-"dimensions must agree" (`gpu-shapes.ts`, `Multiply(M2, M3)` with `M2` a
-2×2 and `M3` a 3×3 matrix), the JavaScript check "may be a point"
-(`Add(P, 1)` with `P` a point), and the check "tuple with a list
-coordinate". The shapes that their tests used now have the static type
-`error` and decline before these checks. For each check, find a shape that
-has no `error` type and still reaches it; if none exists, remove the check.
-
-### CE-693. Compiled code declines where a parameter declared `expression` can receive a collection
-
-**Status:** proposed; capability (declines). GitHub issue #488 (user decision
-2026-10-30: a parameter declared `any`, `expression` or `value` receives a
-collection whole).
-
-The interpreter binds a collection whole to a parameter declared `expression`,
-and the body maps over it. `Map`, `Filter`, `Reduce` and `Scan` compile on
-`javascript` when their callback has such a parameter: the callback is compiled
-with the parameter typed by the element, and the accumulator of `Reduce` and
-`Scan` also compiles. These cases still decline (falls back to the
-interpreter):
-
-- a direct call, of a named function or of a block local, with an argument that
-  can be a collection (`h(rows)`, `h(L)`);
-- an `Apply` of a function literal with such an argument;
-- the function as a value (`compile(h)`, a function literal at the root, a
-  block local that the block returns, stores or passes to a consumer, as in
-  `Block(g := (t: expression) ↦ 2t, Map(g, rows))`);
-- a consumer over a block local that is assigned more than once
-  (`Block(L := [1, 2], L := [[1, 2]], Map((t: expression) ↦ 2t, L))`), on
-  `javascript` and `python`;
-- `Map` and `Filter` on `python` over a source whose elements are collections:
-  the Python lambda reads the parameter as a scalar.
-
-Example: with `h := (t: expression) ↦ 2t` and `rows` declared
-`list<list<real>>`, `h(rows)` declines, and the interpreter gives
-`[[2, 4], [6, 8]]`. `Map(h, rows)` over `[[1, 2], [3, 4]]` compiles on
-`javascript` and gives the same value. The checks are
-`collectionAtExpressionParameter()` (`compilation/compile-user-calls.ts`) and
-`withCheckedCallback()` (`compilation/compile-callbacks.ts`).
-
-The precise version emits a run-time test of the argument
-(`Array.isArray(t) ? … : 2 * t`), as compiled code does for a parameter declared
-`any` or `value`, and removes these declines. Do it when the user asks.
-
-### CE-680. The `python` target does not compile `Sum` over a list input
-
-**Status:** ready; defect (decline). Found 2026-10-30 while comparing how each
-target takes a list input in `broadcast()`. Recorded by user decision 2026-10-30.
-
-With `L` declared `list<number>`, `compile(x + Sum(L), { to: "python" })`
-declines: "Could not compile `Sum`: no indexing set". The `javascript` and
-`interval-js` targets compile it (`(_.L).reduce(…)`). The list is an argument of the Python
-function, so the reduction can run over it (`sum(L)`, or `np.sum(L)` for an
-array). `Product`, `Max` and `Min` over a list input are probably in the same
-case; check them in the fix.
-
-### CE-683. Write the host's input contract in the compilation documents, and remove the guards it makes unnecessary
-
-**Status:** ready; task (documentation and code). Superseded 2026-10-31 by CE-712
-(steps 2, 3 and 5 do this work). User decision 2026-10-30: the host must respect
-what the program declares OR IMPLIES about a value, also a type that the engine
-inferred from a use. When the host does not, the compiled result is undefined:
-it may differ from the interpreter, give a wrong value, throw or hang. For an
-error or a contract violation in general, compiled code need not match the
-interpreter, nor throw or give an error consistently. This decision applies to
-every compile target, and it replaces the earlier rule that an inferred type "is
-not a promise about the value the caller passes" (`docs/COMPILATION-MODEL.md`,
-the paragraph on the `Array.isArray` guard of a user-function call, user rulings
-2026-08-30 and 2026-09-07).
-
-Work: (a) state the contract in `docs/COMPILATION-MODEL.md` and
-`docs/ERROR-MODEL.md`, and rewrite the guard paragraph; (b) find the run-time
-guards and compile-time declines that exist only to defend against a host that
-breaks an inferred type (start with the `Array.isArray` guard of an argument
-whose scalar type was inferred from its use), and remove them, with the
-emitted code and the decline counts before and after measured and reported;
-(c) keep every guard that defends against something other than a contract
-violation (a value the program itself can produce, such as a list from a
-broadcast). Example: `x` appears only in `h(x)` with `h: (number) -> number`;
-today a list passed for `x` is guarded and broadcast; after (b) the guard is
-not emitted, and a list for `x` breaks the contract.
-
-### CE-664. The `python` target compiles no call of a user function
-
-**Status:** ready; defect (decline). Found 2026-10-30 while fixing CE-658.
-
-With `g(t) := t^2 + 1`, `compile(g(x) + x, { to: "python" })` declines: "the
-operator is known to the engine but target 'python' has no lowering for it". The
-`javascript`, `interval-js`, `glsl` and `wgsl` targets compile it. Because of
-this, `f(x) + x` with `f(t) := At(P, 1)` (CE-658) also declines on `python`.
-Expected: a call of a user function compiles on `python` as on the other targets
-(a nested `def` or the body written in place), with the interpreter's value.
-
-### CE-681. Compiled code does not check the declared result type of a block-local function at a call
-
-**Status:** ready; wrong value. Found 2026-10-30 while fixing CE-662.
-
-`Block(Declare(f, "(real) -> integer", Function(x/2, x)), f(3))`: the
-interpreter gives `incompatible-type`, because the result 1.5 is not an
-`integer`; the compiled code gives 1.5. The declared result type of a function
-local to a block is not compared with the value at the call. Fix by the simple
-sound rule: classify the result of each call as CE-662 classifies an assigned
-value (certain, never, undecidable with a run-time test on `javascript` and
-`python`, a decline on the other targets). Related: CE-673. The same holds for
-a function declared at the top level: with `hh: (real) -> integer` assigned
-`t ↦ t/2`, the interpreter gives `incompatible-type` for `hh(3)` and the
-compiled code gives 1.5; with `g: (integer) -> integer` assigned `n ↦ "s"`,
-`compile(g(2))` succeeds.
-
-### CE-673. Compiled code does not check a function literal assigned to a local declared with a signature
-
-**Status:** ready; wrong value. Found 2026-10-30 while fixing CE-662.
-
-`Block(Declare(k, "(real) -> real"), Assign(k, Function("abc", a)), k(x))`: the
-interpreter gives `incompatible-type` ("real", "string"); the compiled code
-returns `"abc"`. CE-662 checks values against the declared type of a local, but
-not a function literal under a signature: the interpreter first gives the
-literal's parameters their declared types (`assignFn` in
-`engine-declarations.ts`, with `ascribeDeclaredParameterTypes()` and
-`reconcileFunctionLiteralReturn()`), and plain subtyping would decline
-`(u) => 2u` for `(real) -> real` (`compile-block-local-function.test.ts`,
-"compiles with a declared signature"). Fix: reconcile the literal with the
-declared signature as the interpreter does, then classify its result type as
-CE-662 does.
-
-### CE-674. GPU: `Smoothstep` with very large edges gives NaN, and the built-in `sin` of it gives 0
-
-**Status:** ready; wrong value. Found 2026-10-30 while fixing CE-619.
-
-`Sin(Smoothstep(-3e38, 3e38, y))` emits
-`sin(_gpu_smoothstep(-3e+38, 3e+38, y))`. In f32, `e1 − e0` is `+∞`, and
-`y − e0` is `+∞` for `y ≥ 0.4·10³⁸`, so the step computes `∞/∞ = NaN`, and the
-built-in `sin` of NaN gives 0 on Apple GPUs. `Smoothstep` is in
-`GPU_F32_BOUNDED_HEADS` (`gpu-target.ts`) with no check of its edges. Fix:
-accept it as bounded only when `|e1 − e0|` and the edges have known sizes within
-the f32 range, and the edges do not round to the same f32 value.
-
-### CE-675. GPU: a rational literal with a large numerator and denominator may be emitted as an infinite f32 literal
-
-**Status:** ready; defect (not reproduced). Found 2026-10-30 while fixing CE-619.
-
-The finiteness proof checks the value of a number literal (`|v| ≤ GPU_F32_MAX`),
-not the numerator and denominator that a shader target may emit separately
-(`x * 2.0 / 3.0`). A rational with a numerator and a denominator above 3.4·10³⁸
-has a finite value but would be `+∞ / +∞` in f32. First check how such a
-rational is emitted on `glsl` and `wgsl`; if it is emitted as a quotient, either
-emit its value or refuse it in the proof. `productBound` (the power-base rule)
-also refuses every rational factor, which is safe but loses `(x/2)^2`.
-
-### CE-676. A compiled `ReplaceAt` with an index past the end differs from the interpreter
-
-**Status:** ready; defect. Found 2026-10-30 while fixing CE-662.
-
-The interpreter keeps `ReplaceAt([1, 2], 5, 1)` unevaluated, and stores it in a
-`list<real>` local with no error. The compiled code does something else (code
-older than CE-662), and with CE-662 the element test of the new value can throw
-where the interpreter stores the unevaluated expression. Expected: the compiled
-code gives the interpreter's result, or the compile declines for an index that
-can be out of range.
-
-### CE-677. The JavaScript shape test of an argument has no test for a vector of open length
-
-**Status:** ready; defect. Found 2026-10-30 while fixing CE-662.
-
-`jsCollectionShapeGuard` (`compilation/base-compiler.ts`) returns no test for a
-declared `vector<T>` whose length is open (`dimensions: [-1]`), so a value that
-is not a list passes. Expected: the test checks that the value is a list (of any
-length) of the element type, as for `list<T>`.
-
-### CE-662. Compiled code does not check the declared type of a local when a value is assigned to it
-
-**Status:** ready; defect. The contract below applies to every target (user
-decision 2026-10-30, CE-683). User decision 2026-10-30: option B (a smaller rule),
-with this contract: the host must respect what the program declares or
-implies about a value (an argument of `h(x)` with `h: (integer) -> integer`
-must be an integer). When the host does not, the compiled result is undefined:
-it may differ from the interpreter, give a wrong value, throw or hang. So a
-static type, also one inferred from a use, may be trusted, and the next
-version classifies a value by its static type only: a subtype of the declared
-type compiles with no test, a type with no common value declines on every
-target, and an overlap gets a run-time test on `javascript` and `python` and a
-decline on `glsl`, `wgsl` and `interval-js`. The first version below was taken
-out of the main tree on 2026-10-30; it is saved, with its test file and
-CHANGELOG text, in `docs/scratch/2026-10-30-ce662-first-version/`. Each value assigned to a
-local declared with a type (`Assign`, the value of `Declare`, an Epsil typed
-`let`) is classified at compile time (`assertLocalWritesMatchDeclarations()`,
-`compilation/base-compiler.ts`): certain (its static type is a subtype of the
-declared type and is a fact about the value: no test), never (no common value:
-every target declines) or undecidable (`javascript` throws and `python` raises
-`incompatible-type` when the value fails a run-time test; `glsl`, `wgsl` and
-`interval-js` decline, and so does every target for a declared type with no
-simple test, such as `rational` or a tuple). Three review rounds found 7, 9
-and 9 more holes, most in the rule that decides when a static type is a fact
-about the value (a type narrowed by a use, a function literal that reads such a
-symbol, a parameter type that only `javascript` tests, a value node shared by
-two blocks, a float result that rounds to an integer, `2⁵⁴/3`); the full suite
-also fails in 10 files with the change (Tycho 332 programs, Python loops,
-compile time of shared subtrees). The decision is between keeping this design
-and fixing each hole, or a smaller rule (no test only for a value known at
-compile time; a run-time test on `javascript` and `python` for every other
-value; a decline on the other targets). Still a decline by this simple rule:
-on `interval-js`,
-`Function(Block(Declare(z, "number"), Assign(z, u + 1), Tuple(z, 2)), u)`,
-because the parameter `u` has no type (it can be a list) and `interval-js` has
-no run-time test; proving the parameter from the argument of each call is
-CE-669.
-
-`Block(Declare(p, "integer"), Assign(p, 0.5), p)`: the interpreter returns
-`Error(ErrorCode("incompatible-type", "integer", "0.5"), "p")`;
-`compile(…, { to: "javascript" })` succeeds, and the run returns 0.5. Also
-`Block(Declare(p, "integer"), Assign(p, u/2), p)` with `u = 1`: the interpreter
-gives `incompatible-type` (`rational<0.5..0.5>`), the compiled run gives 0.5.
-Checked on main, 2026-10-30. The interpreter checks the static type of the
-assigned value against the declaration of the local; the `Assign` lowering of
-the compiler (`compilation/base-compiler.ts`) does not. Proposed fix, by the
-simple sound rule: the compiler declines an `Assign` to a declared local when
-the static type of the value is not a subtype of the declared type. That
-declines some programs whose interpreted value is not an error once the inputs
-have values (`Declare(p, "real")`, `Assign(p, Sin(u))` with `u` undeclared,
-whose static type is `number`); a run-time check for those is a separate task.
+The host respects what the program declares or implies about a value (user
+decision 2026-10-30, restated 2026-11-01). When it does not, the compiled
+result is undefined: it may differ from the interpreter, give a wrong value,
+throw or hang (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). So
+the compiler adds no run-time test of a value against a declared or inferred
+type: not at an `Assign` to a declared local, not at a parameter, not at an
+input. The first version of such a check was taken out of the main tree on
+2026-10-30 and is saved in `docs/scratch/2026-10-30-ce662-first-version/`; it
+stays out. The work that remains is the reverse: find each run-time type test
+that compiled code still emits on `javascript` and `python` (an
+`incompatible-type` throw or raise, a test of a value whose static type is
+already settled), and remove each one whose only purpose is to validate a
+value against its type. A test that selects a shape at a declared union of
+shapes (the dispatch of the static-shape rule) is not validation and stays.
+Report each removed test with the emitted code before and after.
 
 ### CE-646. Compiled `Contains`/`Unique` over lists of lists decline in any program that holds a lazy collection
 
 **Status:** design needed; enhancement (needs a design). Recorded 2026-10-30 when PR #500
 (issue #499) landed in `f2c053f1e`. Not a regression: before that commit every
 list-of-lists element was refused.
+**Witness:** corpus; Names PR #500 and issue #499.
 
 On the JavaScript target, `Contains`, `Element`, `Unique`, `RangeOf`,
 `ContainsSequence`, `StartsWith` and `EndsWith` compare list elements by value
@@ -4850,126 +2376,11 @@ where a lazy view can become a list element at run time (or list callback
 results in the interpreter, which changes `.isSame()` results), with tests that
 compare each case against `evaluate()`.
 
-### CE-611. `interval-js` writes out a nested `Map` with no size limit
-
-**Status:** proposed; performance. Found 2026-10-28 while fixing CE-605.
-
-The `interval-js` target writes out each element of a `Map` through its own
-lowering, and nothing limits the product of the widths of nested `Map`s. A
-100×100 nested `Map` (`min(Map(k ↦ max(Map(j ↦ j·k, L2)), L1))`) compiles to
-about 570,000 characters in about 1.4 s; 20×20 gives about 23,000 characters.
-The `javascript` target emits two loops (about 2,600 characters at 100×100).
-Since CE-605 the shader targets decline above 64 written-out bodies
-(`nestedUnrollFits`, `compilation/fixed-width-unroll.ts`). Possible fixes: the
-same limit (decline, or fall back to a loop) or a loop lowering on
-`interval-js`. Same on main before CE-605.
-
-### CE-573. An `interval-wgsl` target for interval refinement on the GPU
-
-**Status:** proposed; not now (user decision 2026-10-27, Q4 (a) of
-`docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`): keep the
-contract in that document and wait for a profile where interval evaluation is
-the main cost and a measured prototype. Tycho ledger row 463 (filed 2026-10-26).
-The interval GLSL route was removed earlier; this asks again for a GPU interval
-target where Tycho keeps the cells, the subdivision and the output on the GPU.
-
-Asked now: feasibility, a minimal supported set and the semantic contract, not
-an implementation. The contract must include three-valued results for
-comparisons and booleans (restrictions, piecewise fields), the distinctions
-between a partial, singular, empty and entire interval, the error bounds of the
-endpoint conversion and of each built-in function, and a decline when the result
-is not certain. No rejection may depend on f32 rounding or on the NaN behavior
-of a GPU. Acceptance needs containment tests for poles, tangencies, isolated
-zeros, branch boundaries, subnormals and overflow. Tycho's profile
-(`sin(x²)+sin(y²)=0`) does not show that interval evaluation is the main cost.
-Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
-(the same document answers CE-571 and CE-572).
-
-### CE-635. `.N()` of a constant expression with shared subexpressions takes exponential time, which slows the GPU compile
-
-**Status:** ready; defect (performance). Found 2026-10-30 while fixing CE-593.
-
-The GPU lowering calls `.N()` on constant subtrees (`gpuProvablyFinite`,
-`gpuReduceTrigOffset`, `gpuLibraryConstant` in `compilation/gpu-target.ts`). For
-an exact expression whose subexpressions are shared objects
-(`e_{k+1} = e_k + sin(e_k)` with a constant base), `.N()` is not memoized, so it
-evaluates each shared node once per path: on GLSL at depth 16, a base of
-`1 + sqrt(2)` takes 8.9 s and `PointX((1, 2))` 1.4 s (a declared
-`tuple<real, real>` symbol as the base takes 0.12 s). The time is in `.N()` of
-`boxed-function`, `arithmetic-add` and `exact-operands-under-n`. Expected:
-`.N()` of a shared node is computed once per evaluation (a memo for the duration
-of one `.N()` call), so the time is linear in the number of distinct nodes.
-
-### CE-630. Compiled code: a call of a block-local function before the `Declare` of a name it reads is not refused
-
-**Status:** ready; defect. Found 2026-10-30 in the review of CE-583.
-
-`Block(g ≔ (t ↦ U + t); y ≔ g(1); Declare(U, real); U ≔ 3; U + y)`: the
-interpreter reports `read-before-declaration`. The `javascript` target compiles
-it, and the code throws `Cannot access 'U' before initialization` when it runs;
-the Python target raises `UnboundLocalError`. A direct use of `U` before its
-`Declare` is refused at compile time on every target (CE-583). A first attempt
-followed the calls of the block's function literals, and was removed: it refused
-a valid block where the function reads `U` only in a branch that does not run
-(`g ≔ (t ↦ If(t > 0, U, 0))` called with `-1`, which the interpreter evaluates
-to 3), and it missed calls through an immediately applied lambda, a nested
-block, `Map` and an alias. Expected: the compiled code fails at the same point
-as the interpreter (a compiled check at the call, or a refusal when the call
-provably runs before the `Declare`), never a value where the interpreter reports
-an error.
-
-A related case: on `javascript`, a variable assigned without a `Declare` in a
-nested block (an implicit local) and read after that block reads the input of
-the same name (`_.W`), so the code gives `NaN` where the interpreter reports an
-error. Python reports `NameError` at run time for the same block.
-
-### CE-658. JavaScript: a coordinate of a point-or-point-list symbol with an assigned point declines
-
-**Status:** fixed in `0c1adc21a`, not released: delete this entry at the
-release; defect (decline). Found
-2026-10-30 from Tycho ledger row 479, on the main tree after commit `f169546e9`.
-Every target now runs the point rewrite at its compile entry
-(`inlinePointValuesAtRoot()` in `compilation/point-value-inlining.ts`, the code
-moved from `gpu-target.ts`). The three examples below compile on `javascript`
-and `interval-js`; `At(P, 1) + x` and `At(P, 2) - x` also on `python`, where
-`f(x) + x` still declines because `python` compiles no call of a user function
-(CE-664). A `vars` entry for `P` still wins over the assigned value; a call
-whose head the caller overrides, or whose argument reads caller-supplied `vars`
-source, is left as written. Tests:
-`test/compute-engine/ce-658-point-or-point-list-coordinate.test.ts`.
-
-A `P` with no assigned value, declared
-`tuple<number, number> | list<tuple<number, number>>`, is an input with a union
-of shapes. On `javascript` and `interval-js`, `PointX(P) + x` compiles with one
-entry dispatch (point or list of points) and gives `5` for `P = (3, 4)`, `x = 2`
-and `[5, 7]` for `P = [(3, 4), (5, 6)]`. `At(P, 1) + x` compiles with `P` read
-as a point (`5`); for a list of points the interpreter gives an
-`incompatible-type` error, so the compiled value is unspecified. `python`
-compiles `At(P, 1) + x` and declines `PointX(P) + x`; `glsl` declines both.
-
-With `P: tuple<number, number> | list<tuple<number, number>>` and `P := (3, 4)`,
-the interpreter gives `At(P, 1) + x` = `3 + x`. The `glsl` and `wgsl` targets
-compile it to `x + 3.0`: they write the point in place of `P` before the
-compilation (`gpuInlinePointValues()` and `gpuInlinePointCalls()` in
-`gpu-target.ts`). The `javascript` target declines it with "an operand may be a
-point (a tuple) and another operand is a number", because the check of `Add` in
-`base-compiler.ts` reads the declared type of `At(P, 1)`,
-`missing | number | tuple<number, number>`. `At(P, 2) - x` declines in the same
-way, at the check of scalar arithmetic over a possibly list-valued operand, and
-so does `f(x) + x` with `f(t) := At(P, 1)`.
-
-A change of only the `Add` check is not sufficient: the next check that reads a
-declared type declines. The expected fix is to write the assigned point in place
-of such a symbol, and to replace such a call by its body, at the compile entry
-of every target, as the GPU targets do.
-
-Expected: the three examples above compile on `javascript`, `interval-js` and
-`python`, and give the interpreter's values.
-
 ### CE-651. interval-js: a `Break` condition that compares an interval input with a number never runs
 
 **Status:** ready; defect (wrong value). Found 2026-10-30 in the review of
 CE-636. Also at HEAD `fee72a864`.
+**Witness:** plausible; interval-js loop with `If(i > x, Break)` at `x = 2` gives the point interval 6; interpreter 4.
 
 `Block(n ≔ 0; Loop(Block(n ≔ i; If(i > x, Break)), i ∈ 1..5); n + 1)` at
 `x = 2`: the interpreter and Python give 4. `interval-js` gives the point
@@ -4985,6 +2396,7 @@ loop cannot take both paths.
 
 **Status:** ready; defect (wrong value). Found 2026-10-30 in the review of
 CE-636. Also at HEAD `fee72a864`.
+**Witness:** plausible; `Sum(n, Limits(n, 1, n))` with an outer `n = 5` gives 1 on JavaScript; interpreter 15; GLSL/WGSL read the index too.
 
 In `Sum(n, Limits(n, 1, n))` the upper bound `n` is evaluated in the enclosing
 scope: it is the outer `n`, not the index. With
@@ -4999,90 +2411,11 @@ each pass. Python and `interval-js` evaluate the bounds in the enclosing scope
 and are correct. Expected: every target evaluates the bounds before the index is
 declared, or gives the index a fresh name when a bound names it.
 
-### CE-653. JavaScript: a `Return` inside a block used as a value returns only from that block
-
-**Status:** ready; defect (wrong value). Found 2026-10-30 in the review of
-CE-636. Also at HEAD `fee72a864`.
-
-In `Block(tmp ≔ Block(42, Return(0)); tmp + 1)` the interpreter's result is
-`Return(0)`: a `Return` ends the whole program. The `javascript` target compiles
-the inner block as a nested function whose `return` gives only the value of that
-block, so the outer block continues and gives 1. Expected: a `Return` in a value
-position ends the compiled function, as in the interpreter, or the compiler
-refuses it.
-
-### CE-654. Compiled code: a constant shortcut drops an assignment in the operand it skips
-
-**Status:** ready; defect (wrong value). Found 2026-10-30 in the review of
-CE-636. Also at HEAD `fee72a864`.
-
-Several lowerings return a constant without evaluating an operand: the
-JavaScript `Power` handler returns `1` when the exponent is the constant 0
-(`javascript-target.ts`, `if (eConst === 0) return '1';`), the GLSL and WGSL
-handlers return `1.0` (`gpu-target.ts`), and the JavaScript `Multiply` lowering
-returns `0` for an operand that is the literal 0. When the skipped operand
-contains an assignment, the assignment does not happen. Example:
-`Block(Declare(y, integer); s ≔ Power(Block(y ≔ 1; x), 0); y)`. The interpreter
-gives 1. At HEAD, JavaScript returned `undefined`, and GLSL and WGSL read an
-unassigned `y`. Since CE-636, JavaScript throws `read-before-declaration` at the
-read, and GLSL and WGSL refuse. Expected: a shortcut applies only when the
-skipped operand has no effect (no assignment, and pure). Otherwise the operand
-is evaluated and its value discarded. When every lowering keeps this rule, the
-operators can return to the list that the CE-636 analysis treats as evaluating
-all operands (`STRICT_OPERATORS` in `base-compiler.ts`).
-
-### CE-656. JavaScript: a condition on a block local that holds an absent input is decided
-
-**Status:** ready; defect (wrong value). Found 2026-10-30 in the review of
-CE-636. Also at HEAD `fee72a864`.
-
-`Block(Declare(y, integer); v ≔ w; If(v > 0, y ≔ 1, y ≔ 2); y)` with the input
-`w` not supplied: the interpreter cannot decide `v > 0`, runs neither branch,
-and gives the symbol `y`. JavaScript emits
-`v = _.w; ((0 < v) ? (y = 1) : (y = 2)); return y` and gives 2. With the input
-in the condition directly, `If(w > 0, 1, 2)` gives `null`, because the condition
-gets the guard `_.w !== undefined`. `operandInputNodes()` in `base-compiler.ts`,
-which decides which operands of a condition may be absent, follows a symbol to
-its value only through the engine's global value, not through an assignment to a
-block local. The same happens with `v ≔ 2w`, a declared `v`, a value from a
-loop, a function parameter that receives an absent input, and an outer block
-local read in a nested block. The CE-636 analysis reads the same answer, so it
-treats such a condition as decided. Expected: a condition operand that is a
-block local or a parameter whose value can come from an absent input is treated
-as possibly absent, so the condition gets the guard.
-
-### CE-643. Compilation: the shared-subexpression harvest takes about 0.6 s for 160 repeated terms
-
-**Status:** ready; defect (speed). Found 2026-10-30 in the review of CE-595.
-
-An expression with 160 terms `g_j · g_j`, where each `g_j` is 30 nested
-`Sin`/`Add` levels (about 4,800 distinct nodes, no conditional), takes about 650
-ms in `harvestCse` and 1.6 s for the whole `javascript` compile at HEAD
-`0f1020490`. The number of nodes is small, so a linear harvest would take a few
-milliseconds. To reproduce, build each `g_j` once with `ce.function()` so that
-the nodes are shared, and time `harvestCse` (in
-`src/compute-engine/compilation/cse.ts`) on the sum. Expected: the harvest time
-is about linear in the number of distinct nodes. Measure where the time goes
-before changing the code.
-
-### CE-602. Re-boxing an invalid function literal over a shared graph is exponential
-
-**Status:** ready; defect. Found 2026-10-28 with the fix of CE-594.
-
-`ce.assign` re-boxes a recursive literal, and a literal with a declared
-signature, from a raw copy that keeps each shared node once. A literal that
-holds an `Error` node still takes the MathJSON route, which writes a shared
-graph out once per path: the `canonical` read of an invalid raw node returns it
-unchanged, where boxing the MathJSON canonicalizes the nodes around the error.
-Both assignments end in an error (`Invalid function …` for the recursive
-literal, a type error for the declared one), but only after the exponential
-re-box. Expected: the raw copy canonicalizes the valid nodes around an `Error`
-itself, so the route is linear for an invalid literal too.
-
 ### CE-592. `compileFieldFunction()`: a user function that reads a parameter with an inferred integer type declines
 
 **Status:** design needed; defect (needs a design). Found 2026-10-28 in the review of
 CE-591.
+**Witness:** plausible; `a := 5; h(t) := t + a` makes `compileFieldFunction` decline with a remedy (declare `a`).
 
 With `a := 5` and `h(t) := t + a` (or `A := (1, 2)` and `h(t) := t + A.x`),
 `compileFieldFunction(h(x))` declines: the field function reads `a` from the
@@ -5098,49 +2431,10 @@ including the captured-type snapshots of the checkpoint journal, on every exit
 (`boxed-operator-definition.ts`, `call-result-type.ts`,
 `checkpoint-journal.ts`).
 
-### CE-467. A `range` argument at an inferred point parameter declines to compile
-
-**Status:** proposed; capability, small.
-
-With `d(a) := a[1] + a[2]` (the index reads infer `a: tuple<number, number>`)
-and an input `r` declared `integer | range`, `compile(d(r))` declines on
-`javascript` and `interval-js` at the input: "the input `r` is declared with a
-union of shapes whose members the compiled code cannot tell apart at run time
-(the values of `range` do not all have the same array nesting)"
-(`discriminate()`, `compilation/static-shape.ts`). An input declared
-`integer | vector`, `integer | vector<2>`, `integer | list<integer>`, `range`,
-`vector<2>` or `list<integer>` compiles and gives 11 for `r = [5, 6]`, as the
-interpreter does. The interpreter binds a range of numbers whole at that
-parameter, as it binds a list of numbers. Check how a range value reaches
-compiled code at run time (an array, or a lazy range object), and what array
-nesting a `range` has, before accepting a `range` in a union there.
-
-### CE-209. `Sum(f(x), Element(x, xs))` does not check `xs` for raw `Nothing` positions
-
-**Status:** ready; defect. Part of CE-218.
-
-Add a distinct compiled representation of `Nothing` (CE-218). Keep the compiler
-refusals that are sound where omission cannot be represented yet. Audit the
-iterator domains too: the omission check of `Sum(f(x), Element(x, xs))` does not
-inspect `xs` for raw `Nothing` positions. The clause is binding syntax, not a
-collection operand.
-
-### CE-212. The compiled presence guard of a branch misses a variable read only in a nested arm
-
-**Status:** ready; defect. Tycho row 413. Part of CE-218.
-
-Compiled code guards a branch so that an unsupplied variable takes no arm. The
-guard is static. A variable read only by an arm of a nested `If`/`Which`, or by
-a later `Which` condition, is not guarded. So with `y` unsupplied,
-`If(If(x > 0, y, 1) > 0, 1, 0)` at `x = 1` is `0`, not `NaN`. Also, a variable
-in a nested connective that could decide without it is guarded anyway. A dynamic
-guard cannot recover the absence through arithmetic in the arm (`2y` of an
-unsupplied `y` is `NaN`, not `undefined`). So this needs the distinct compiled
-representation of absence (CE-218).
-
 ### CE-216. A compiled power of a list that may hold points squares each entry of a square matrix
 
 **Status:** ready; defect.
+**Witness:** plausible; `p: list` (or `any`) holding `[[1,2],[3,-4]]`: compiled `p^2` is entry-wise, interpreter gives matrix power `[[7,-6],[-9,22]]`; wrong finite values (also .1, .2, .4).
 
 For a base typed bare `list`, `list<unknown>` or `any` (a type that may hold
 points), compiled `p^2` gives the power of each entry. When the value is a
@@ -5175,6 +2469,7 @@ representation of points that differs from a row.
 **Status:** design needed; capability. User decision 2026-10-20: keep refusing
 omission-capable sources. Plan:
 `docs/plans/2026-10-20-bare-tuple-record-any.md`.
+**Witness:** corpus; Lifts refusals of `Nothing`-capable sources (Tycho 332).
 
 `IsMissing(x)` and non-final operands of `Coalesce` refuse compilation when
 their types admit `nothing`, including `any`, `nothing`, and unions such as
@@ -5217,50 +2512,10 @@ type, and the capture of bindings (question Q11 of
   tuple type restores compilation. A better proof here does not need a change to
   the slot policy, and must not treat omission as missing data.
 
-### CE-227. Two trigonometric argument shapes are not reduced on the shader targets
-
-**Status:** ready; defect, small.
-
-A shader computes in float32, and the constant term of a trigonometric argument
-is reduced by whole periods at compile time (`gpuReduceTrigOffset`,
-`compilation/gpu-target.ts`), so `\sin(x+10^6)` compiles to
-`sin(x + -0.35756418)`. One shape is not reduced, and its shader value can be
-far from the `javascript` value (a constant term that calls a pure library
-function, `\sin(x+\Gamma(20))`, is now folded by `gpuLibraryConstant()` unless
-it reaches a caller-mapped name):
-
-- **CE-227.2** A complex argument (`\sin(x+10^6+10^6i)` through `_gpu_csin`).
-  Its real part is periodic in the same way, but the constant is one complex
-  literal.
-
-A high-precision shader mode is not needed: Tycho's GPU picture promises float32
-only, and its curve lanes draw in float64 on the CPU. The shader accuracy
-measurements of 2026-10-18 are in the git history of ROADMAP.md before
-2026-10-19, under the title "The shader targets compute a large trigonometric
-argument in float32 with no warning".
-
-### CE-230. Cases where a compiled user function with a real result still leaves the real lane
-
-**Status:** ready; defect, small.
-
-Under the JavaScript target's default `auto` mode, a function declared `-> real`
-compiles its body on the real lane, the index of a sum, product, loop or
-comprehension over literal bounds is typed `integer<a..b>`, and a user function
-is compiled for the range of its argument when the range proves the sign of a
-radical in its body. These cases remain:
-
-- **CE-230.3** The range copies of a user function are shared by containment of
-  the argument range, in emission order: `1..16` compiled after `2..10` gives
-  two copies (`integer<2..>` and `integer<1..>`), where one would do. A copy
-  already emitted is not widened.
-- **CE-230.4** A clause that becomes a literal `Range` only after
-  canonicalization gets the inferred narrowing, which the first assignment of an
-  index value widens to `integer`; only a clause whose raw form has integer
-  literal bounds is declared ranged.
-
 ### CE-233. Integer and string operators that the JavaScript target does not lower (Epsil corpus)
 
-**Status:** proposed; capability.
+**Status:** ready; capability. Approved 2026-11-01.
+**Witness:** corpus; Epsil corpus report counts declines from missing integer and string lowerings (`IntegerDigits` 7, ..); a corpus decline. State is proposed.
 
 In the Epsil corpus report (`npm run epsil:corpus-report`, run of 2026-10-06),
 46 of the 59 compile declines come from a missing lowering. Operators the corpus
@@ -5277,114 +2532,10 @@ or `Sum` bound that is not a finite number, 4; multi-index `At`, 2; a `Find`
 over an infinite range; a `Sort` of characters; a mixed-string ordering; a
 `Filter` over a value that may be text.
 
-### CE-234. `Norm` and `Hypot` at extreme magnitudes in the other compile targets
-
-**Status:** proposed; task.
-
-At machine precision, the interpreter's `Norm` and `Hypot` and the compiled
-JavaScript `Norm`, `Hypot` and `Distance` scale the components by a power of 2
-when the largest one is outside the range where its square is a normal double
-(`scaledPNorm()` in `numerics/linear-algebra.ts`); the Python lowering scales
-the default, order-2 and Frobenius norms the same way (`pyNorm` in
-`compilation/python-target.ts`). To do for each case below: measure it at 1e-200
-and 1e200 (1e-30 and 1e30 for f32), and scale where the result underflows or
-overflows.
-
-- **CE-234.1** A literal p-norm with p other than 1, 2 and ∞ in Python (`|x|³`
-  overflows above about 5.6e102, inside the range that the power-of-2 rule
-  leaves alone).
-- **CE-234.2** The interval `Hypot` (`interval/elementary.ts`).
-- **CE-234.3** The GLSL and WGSL lowerings (f32, whose range is much smaller).
-- **CE-234.4** The spectral norm `Norm(M, 2)`.
-
-### CE-237. The Python target compiles a block-local function only in a direct call
-
-**Status:** proposed; capability, small.
-
-Python compiles a call of a block-local function as a direct call `h(n)` when
-every argument is provably a number, a boolean or a string (`const`, `let`,
-`function`, and `Declare` + `Assign`). Tests:
-`test/compute-engine/compile-block-local-function.test.ts`.
-
-- **CE-237.1** Still declined: a rebound local, and a call inside a loop body
-  (`compilePythonStatements`). With `h := m ↦ m + 1` and
-  `Block(…, s := 0, Loop(s := s + h(i), i ∈ 1..n), s)`, `n = 4`, `python`
-  declines and the interpreter gives 14. A rebound local (`h := m ↦ m + 1`,
-  then `h := m ↦ 3m`, then `h(n)`) declines too; the interpreter gives 9 for
-  `n = 3`. A call that is an operand of arithmetic (`2 * h(n)` gives 8), a
-  recursive call (`fact(5)` gives 120), a list argument (`h([1, 2, 3])` gives
-  `[2, 3, 4]`) and a call inside a lambda body compile.
-- **CE-237.2** The decline of an `If` with no else branch ("If: wrong number of
-  arguments") does not name its cause.
-
-### CE-240. Interval target: census declines that remain are not on the interval lane
-
-**Status:** proposed; capability.
-
-Tycho uses the interval lane for line plots (break detection, with a JavaScript
-fallback) and for implicit curves (the CPU quadtree). Parametric curves,
-surfaces and 3-D members never use it, although the Tycho census compiles every
-row on every target. The declines that remain in the 17 census documents with
-point arithmetic were traced to their source rows; none is an implicit curve.
-
-- **CE-240.1** A `PointList` with list components (7 rows): not built, by user
-  decision. Five rows (`n7uhaaoq1q`) are `[PointList(…) for …]` comprehensions,
-  3-D parametric surfaces; one (`2ki2hjsouf`) is in a document the plan of
-  2026-09-15 marks invalid; one (`mk7duulwxf`) is the restriction
-  `1 > 0 {|2C·√min(…) − (0..C)| ≤ 1}`, which after the zip stops again at a
-  relation over a `list<boolean>` (a list of verdicts is not a result of this
-  target). If it is ever wanted: `_IA.bcastPoint` already consumes a list of
-  points, so only the zip that builds one from the component lists is missing
-  (shortest length, a scalar component repeated), spelled in
-  `compileIntervalCollectionValue` under the `PointList` head when a component
-  is a list.
-- **CE-240.2** `List` in an operand position: two rows (`rwhqbsp4wq`) are
-  `P(0.1x, 6000·[0, 0.1, …, 1])`, an explicit list of ten line plots. The
-  JavaScript lane compiles them, so the cost is break detection on those lines,
-  not the plot. Two rows (`epq7yidtim`) are a 3-D `PointList` comprehension
-  under a `distance` restriction, a surface.
-- A matrix operand of a kernel (2 rows, `jgcclk1njk`), `GeometricVector` (6
-  rows) and `At` over a tuple with a component that is not a number (3 rows) are
-  not interval-lane members (vectors are drawing primitives; the matrix rows are
-  parametric). They are listed so the next measurement starts from the same
-  numbers.
-- **CE-240.3** An elementary function over a DECLARED point: `Sin(P)` with
-  `P: tuple<number, number>` declines ("the operand is a collection"), while
-  `Sin((a, b))` over a literal point of untyped symbols maps over the
-  coordinates, as the interpreter does for both. The pin of 2026-09-15 "a point
-  is consumed whole, never mapped over" keeps the declared case declining; point
-  arithmetic admits only `Add`, `Subtract`, `Negate`, `Multiply` and `Divide`.
-  `Abs` and `Hypot` read a point whole (its norm) and must stay out of any
-  widening. No census row stops here.
-
-### CE-242. A scalar compiled comparison with an absent operand answers a decided boolean
-
-**Status:** ready; defect, design.
-
-`Equal(a, b)` with either operand absent from the object of variables compiles
-to `false` (`NotEqual` to `true`); the interpreter answers `Missing` for
-`Equal(Missing, 5)` and `NotEqual(Missing, 5)`. The ELEMENT-WISE runtime is
-three-valued (an absent cell is marked `NaN`, read by the selection runtime and
-the element-wise connective guard); the scalar lowering is not, because four
-places rely on a real boolean:
-
-- `BRANCH_RELATIONS` states so.
-- `kleeneRelationLeaf` negates the comparison with a bare `not`, which would
-  turn a marker into `true`.
-- A value-position `And`/`Or` is a plain `&&`, which cannot let a decided
-  `false` absorb an undecided operand.
-- A chained comparison would need a three-valued fold that still stops at the
-  first false pair, as the interpreter does (`evaluateChainOperands`).
-
-Also: the marker arm would have to fire when EITHER operand may be absent (a
-literal on one side makes the pair decided today, so `Equal(a, 3)` and
-`Equal(a, b)` would disagree), and the emitted arm splices both operands twice,
-which double-evaluates a pure but expensive operand (only impure operands are
-bound today). A fix must change all of these together.
-
 ### CE-244. A point argument with a complex-valued coordinate declines on the JavaScript target
 
 **Status:** ready; defect.
+**Witness:** corpus; 244.2: Tycho document `neyret/hpr2q4kles` declines where the interpreter gives 1.024; cause and fix are stated.
 
 The emitted definition of a user function reads a point parameter's coordinates
 as plain numbers, so a call whose point argument has a `{re, im}` coordinate
@@ -5423,92 +2574,11 @@ helper compiles with its point argument written out at the call; only
 `P_0((x, y), …)` and `P_1((x, y), …)` decline, inside their bodies. So the
 parameter union does not block this document.
 
-### CE-245. Point arithmetic with a list of points still refuses to compile in some forms
-
-**Status:** ready; defect, small.
-
-These are refusals, not wrong values:
-
-- **CE-245.1** `P\{c\} + [Q_1, Q_2]`, with `P` declared
-  `tuple<…> | list<tuple<…>>`. The operand is a `When` call, not an input
-  symbol, and its type `list<tuple<…>> | missing | tuple<…>` is refused with
-  "may be a point or a list of points at run time". The same sum with an input
-  symbol `W` of that type compiles with one entry dispatch and gives the
-  interpreter's value (`[(2, 3), (3, 4)]` for a point `W`).
-- **CE-245.2** `[P\{c\}, Q] + R` and `[1,2]·P\{c\} + Q`: "scalar arithmetic over
-  a list-valued operand". The first also declines when `P` is a plain input of
-  the union type.
-
-Fixed: the sum of an input of the union type with a list of points (`P + [Q_1, Q_2]`),
-`[1,2]·P + Q` (the interpreter gives `[(11, 22), (16, 28)]` for a list `P`), and
-`PointList(t, t)` with `t: real | list<real>` compile with one entry dispatch
-and give the interpreter's values.
-
-`[1,2]·PointList(t,t)` with `t: real | list<real>` compiles on `javascript` and
-`interval-js` with an `Array.isArray(t)` dispatch and gives `[(2,2),(4,4)]` for
-`t = 2` and `[(1,1),(4,4)]` for `t = [1,2]`, as the interpreter does. With
-`t: real`, a list value is outside the declared type, so the result is
-unspecified. On `interval-js`, `2·PointList(t,1)` with `t = [1,2]` gives the
-point `([2,4], 2)`; plot variables on that target are numbers.
-
-### CE-247. Compiled colour values are stored in OKLCh instead of their own colour space
-
-**Status:** proposed; design.
-
-The compiled constructors store every colour in OKLCh (`_SYS.rgb(0.2, 0.5, 0.7)`
-is `{space: 'oklch', …}`), so each `AsRgb`/`AsHsv` of a constructed sRGB colour
-makes an OKLCh round trip (compiled `AsRgb(Rgb(0.2, 0.5, 0.7))` gives
-`0.20000000000000512`). The snapping tolerances in
-`numerics/color-conversion.ts` then correct it.
-
-- **CE-247.1** Fix at the cause: the compiled constructors keep their own space,
-  as the interpreter keeps the `Rgb` head.
-- **CE-247.2** `numerics/color-conversion.ts` copies conversions of
-  `@arnog/colors` because that package rounds to integers and does not clamp HSL
-  (`hslToRgb(30, 1, 2)` is `{r: 255, g: 510, b: 765}`). Fix it there and delete
-  the copies. The shader helpers (`gpu-target.ts`, `_gpu_srgb_to_oklab` and
-  neighbours) are a third copy of the conversion math, with their own f32
-  coefficients and an achromatic threshold of `1e-6`.
-
-Symptoms of the OKLCh storage:
-
-- `AsHsv(Hsv(120, 1, 0))` is `Hsv(120, 1, 0)` on the interpreter and `[0, 0, 0]`
-  compiled, because OKLCh has no hue at zero chroma (112 of 200 random
-  achromatic inputs differ).
-- The interpreter's `AsHsv`/`AsHsl` snap a saturation below `1e-9` and a hue
-  within `1e-9` of 0 to 0 (`ACHROMATIC_TOLERANCE`, `HUE_TOLERANCE`) only to
-  match the compiled round trip, so `AsHsv(Rgb(0.5, 0.5, 0.5000000001))` is
-  `Hsv(0, 0, …)`, not exact.
-- Compiled `ColorToString(Rgb(1, 0.5, 0))` is `#ff7f00` and the interpreter's is
-  `#ff8000`: the round trip gives a green channel of `0.49999999999999795`.
-
-A colour tuple that reaches a colour operator through a VARIABLE keeps the
-route's canonical reading (OKLCh on the compiled targets), because its shape is
-not known at compile time. This is documented in the handler comments and
-pinned; a better answer needs a run-time tag on colour values.
-
-### CE-248. Asking for the lane of a user call emits code and can throw
-
-**Status:** proposed; design.
-
-A user-function call reads the lane its emitted definition recorded
-(`userCallLane`, `recordUserFunctionLane` in `compilation/base-compiler.ts`). A
-parent lowering asks for the lane of an operand before it compiles the operand,
-so the question emits the definition on demand. This needs a global
-`_callSiteTarget`, a per-call route memo, and pruning of definitions that the
-question emitted but nothing uses; `isComplexValued` can therefore write
-definitions and throw user-facing diagnostics.
-
-Cleaner design: in `compileExpr`, before a lowering reads the lanes of its
-operands, emit the definitions of the user-function calls among its direct
-operands with the current target and frames. Then `userCallLane` only reads the
-record, and the global, the route memo, the ask-time pruning and the throws
-inside the predicate go away.
-
 ### CE-249. Tycho corpus document `s8ishknvhe`: two rows still decline to compile
 
 **Status:** ready; defect. Plan:
 `docs/plans/2026-09-19-codegen-reassessment-ce1313.md` (item 3).
+**Witness:** corpus; Tycho `s8ishknvhe`: `AsOklab(Hsv(57.29·PointX(A_rg(C)), 1, 0.5))` declines on javascript; 249.3 (no witness) is drop.
 
 A broadcast head now reads a list that mixes complex and real cells, and the
 compiled complex arithmetic of the JavaScript target answers a pole as the
@@ -5545,18 +2615,10 @@ so the saturation and the value of `c_f` are one number for the whole cloud. If
 Desmos evaluates `min(1, L)` element by element, the conversion of that row
 needs an element-wise form.
 
-### CE-250. interval-js library: `widen()` margins that stay after outward rounding
-
-**Status:** proposed; design.
-
-`integrate.ts` keeps its `widen()` margin for the partition widths, with a
-deliberate factor of three. The composed hyperbolic and reciprocal routines are
-built from unrounded kernels and take one rounding step at their own export,
-except `remainder`, whose three-operation composition takes three.
-
 ### CE-568. CSE: share a pure call across the statements of a `Block`
 
-**Status:** proposed; performance.
+**Status:** ready; performance. Approved 2026-11-01.
+**Witness:** corpus; Proposed performance idea names Tycho `hyvhlz4chj` but no measured cost.
 
 Each statement value of a `Block` is its own CSE region, so a pure call repeated
 in two statements is computed once per statement. Tycho `hyvhlz4chj`: the body
@@ -5565,89 +2627,10 @@ of `f_Bm` (a Desmos `with` lowered to a `Block` of two statements) calls
 to be bound before the first statement and to stay valid across any assignment
 the statements make to a symbol the call reads.
 
-### CE-585. The type of a recursive `function` binding depends on whether its first read hid the assumptions
-
-**Status:** ready; defect (determinism). Found 2026-10-27 at HEAD `df6edc26b`.
-
-With `F: function`, the assumption `x > 0` and
-`F := n ↦ If(n = 0, [1, 2], -F(n - 1))`: if the first read of `F(m).type` has
-the assumptions visible, the type is `broadcastable<unknown>`, the same as in an
-engine with no assumptions. If the first read has them hidden (any
-`ce.assign('y', F(m))`), it is `vector<integer^2>`, and every later read,
-visible too, gives `vector<integer^2>`. Same effect for `-F(n - 1)` with a
-number base (`number` against `broadcastable<unknown>`) and for `2·F(n - 1)`. No
-probe found an unsound type: each answer contains the values of `F(0)` … `F(5)`.
-The derived result of the binding is kept by whichever read derives it first.
-`definition-order.test.ts` already pins order independence for compiled results;
-a check of this case belongs there.
-
-### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
-
-**Status:** proposed; performance.
-
-Since CE-520, `sin`/`cos` (and `sign`, `max`, `min`, `clamp`) on the shader
-targets call a NaN-safe helper (a bit test and a selection per call, about 10%
-of a Tycho frame on WebGPU) unless the operand is finite for certain
-(`gpuProvablyFinite`, `gpu-target.ts`). Tycho declares its curve parameters and
-1-D axes `real` since Tycho `a2cd808f0` (all-states records with a helper call
-1,223 → 980). What remains:
-
-- **CE-565.5** On the `compileFunction` and shader routes
-  (`compileDeclaredFunctionBody`, `compileShaderBody` in `gpu-target.ts`), the
-  body of a user function keeps the helper for every parameter: these routes
-  open no common-subexpression session, so the call-site proof that the
-  expression route (`compileOrThrow`, `gpuRecordCallSiteFacts`) uses does not
-  run there. A declared parameter type is not enough on its own, because an
-  argument such as `exp(x)` can overflow to `+∞` in f32 before the call. Making
-  these routes run the call-site proof needs that session, which changes how
-  they emit code.
-- **CE-565.6** (Tycho ledger row 470, 2026-10-28) In Tycho's
-  `showcase/voronoi-diagram` on GLSL (0.172.0), `_gpu_min` stays at 15. Checked
-  2026-10-28: a common-subexpression temporary is NOT the cause (the `min`
-  handler sees the original subexpressions; with `T: real<-10..10>`,
-  `\min(2\cos(T+1.9)+\sin(2T+2.7), \cos(T+1.9)-\sin(2T+2.7))` uses the built-in
-  `min`). In that document each operand reads `x` or `y`, typed
-  `nan | real | signed_infinity`, so the helper is correct there (CE-565.3).
-  Done 2026-10-28: a power `b^n` (n = 2..4) of a base of declared range,
-  `sin`/`cos` or a sum of those is proven finite when it is the operand of the
-  guarded call or a term of a sum there (`\min((x-\cos(T))^2, y)` uses the
-  built-in `min`). What remains: an `Exp` of an operand whose declared upper
-  bound is at most 88 (`\min(\exp(T)+1, 2\exp(T))` keeps `_gpu_min`), and a
-  power in any other position (a factor, under `Floor`). A first attempt at both
-  was unsound in three review rounds; it needs CE-619 fixed first. Neither helps
-  Tycho's voronoi rows while `x` and `y` keep that type.
-- **CE-565.3** Tycho side, not CE: the document-level `x`/`y` are still typed
-  `real | signed_infinity | nan`; a slider range (`k: real<0..10>`) would prove
-  `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions
-  and animation can leave the range), so only a hard-bounded slider can carry
-  it.
-- **CE-565.7** (Tycho ledger row 480, 2026-10-30) FIXED 2026-10-31
-  (`545deb5e0`), not yet released. In Tycho's `kelvin-wake`, `\sum_{j=1}^{300} w(j)\cos(\ldots/\cos(\theta(j))^2)`
-  with `\theta(j) = -1.35 + 2.7\frac{j-0.5}{300}` kept `_gpu_min`, `_gpu_sin` and
-  `_gpu_cos` (+9–10 % per WebGL draw). Now the GLSL and WGSL proof
-  (`gpu-finite-proof.ts`) knows that the index of a `Sum`/`Product` with integer
-  literal bounds is finite (also in the loop body when the bounds are known at
-  compile time), proves a user call through its body with the facts of that
-  call (only under `angularUnit: 'rad'`; results kept per compilation, 4096
-  body proofs per operand at most), and accepts a divisor whose magnitude has a
-  normal f32 lower bound (`cos(u)` with `|u| < π/2`, an exact rational factor
-  as the emitter writes it, `b^{-n}`). Also fixed: `Abs` of a vector or point
-  (emitted `length(…)`) was proven finite where the norm overflows f32
-  (`sin(|(x,x,x,x)|)`). User decision 2026-10-31: on GLSL the `cos` rule
-  assumes an absolute error of at most 2⁻⁶ on [-π/2, π/2] (GLSL ES specifies
-  none; WGSL specifies 2⁻¹¹), recorded in `docs/COMPILATION-MODEL.md`.
-  Precise version on request: a lower bound for `sin(u)` or a sum of trig terms
-  as a divisor (`x / \sin(\theta(j))` keeps its helper), and the user-call rule
-  under degrees or turns. Test:
-  `test/compute-engine/ce-480-loop-index-argument-finite.test.ts`.
-
-By design the helper stays for a product of two symbols with no declared range
-(`sin(k t)`: f32 overflow), for a symbol whose `real` type is only inferred, for
-`smoothstep`, and for a value that can be NaN (an `arcsin`).
-
 ### CE-253. `Sum(At(P, Range(a, b)))` materializes the range on the JavaScript target
 
-**Status:** proposed; capability.
+**Status:** ready; capability. Approved 2026-11-01.
+**Witness:** corpus; Proposed optimization counts 24 corpus `Array.from` sites but no measured cost and no wrong value.
 
 The 24 `Array.from` range sites in the corpus are all places where the range is
 needed as a list (7 gather indices, 15 spread elements, 2 broadcast operands);
@@ -5655,48 +2638,10 @@ no site needs only a counting loop. The 7 gather sites need a gather/reduce
 fusion in `emitCollectionReduce` (`javascript-target.ts`), which is a new
 lowering.
 
-### CE-255. GPU literals use the full double spelling instead of the shortest float32 one
-
-**Status:** proposed; capability.
-
-Folded GPU literals are spelled with the full double `toString` through
-`formatFloat` (`0.00015625001105945557`). The shortest float32 round-trip
-spelling has about 9 digits and makes shaders smaller. `formatFloat` is shared
-by every GPU emission.
-
-### CE-259. Compiled arithmetic over a captured scalar-typed symbol does not broadcast at run time
-
-**Status:** proposed; design.
-
-`compile(2y)` emits `2 * _.y`, and `run({ y: [1, 2, 3] })` answers NaN where the
-interpreter answers `[2, 4, 6]`. This is the standing contract of the compile
-target for a free symbol (a number unless typed as a collection). The
-user-function call guard covers only call sites. Decide the contract if a
-consumer asks.
-
-### CE-263. Compiled `Norm(v, 0)` answers `NaN` where the interpreter answers a precondition error
-
-**Status:** proposed; design.
-
-An `Error` has no float representation, and `NaN` is the documented compiled
-spelling for "no value", so the lane changes the error to `NaN` instead of
-refusing to compile a whole program for one bad order. Not planned.
-
-The same spelling applies to the compiled `If`/`Which` (decision of 2026-09-02):
-a condition that is not exactly `true` or `false` at run time takes no branch
-and answers NaN, on the JavaScript-family targets
-(`BaseCompiler.conditionDecidability`), on Python (`compilePythonBranch`,
-`compilation/python-target.ts`) and in the interpreter. GLSL and WGSL
-deliberately keep JavaScript-style selection, because NaN propagation is not
-guaranteed on every driver (a shader compiler can assume under fast-math that
-operands are never NaN, which is why the shader targets omit the `isAbsent`
-capability). Interval-JavaScript lowers `If` to its own `_IA.piecewise` helper.
-`When` keeps the truthiness test on every target, because it is not a two-branch
-selection.
-
 ### CE-264. Clause sets that dispatch on `infinity`, `nan` or `non_finite_number` do not compile
 
 **Status:** design needed; capability.
+**Witness:** crafted; `g(1/w - 1/w)` with an `infinity` clause; the set declines today.
 
 Compiled float arithmetic does not keep a pole. The interpreter's `~oo - ~oo` is
 `~oo`; compiled, it is `Infinity - Infinity`, which is `NaN`. So a guard on a
@@ -5711,131 +2656,10 @@ A change to the guard does not fix this (measured 2026-08-30). Compilation needs
 either a float encoding in which a pole stays a pole through arithmetic, or a
 compiler that never folds a pole into a plain JavaScript number.
 
-### CE-265. A re-declared operator with a caller `compile` handler switches off call sharing
-
-**Status:** ready; design. Tycho item 217.
-
-`R(i,x,y) = R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` compiles to a linear artifact on
-a stock engine (the CSE harvest binds the repeated self-call: 0.03 ms/call at
-depth 18). It becomes exponential (×4 per two levels, 39 ms/call at depth 18)
-only after `engine.declare("Which", {...stock})` followed by
-`operator.compile = …` on the new definition. A handler attached IN PLACE to the
-stock `Which` definition, or a re-declaration WITHOUT a handler, stays linear.
-Tycho's shipped install attaches in place and is flat.
-
-Cause: `Harvester.hasCallerCompileHandler` (`compilation/cse.ts`). A `compile`
-handler on a definition that is not the system-scope one is a live-source splice
-that the harvest cannot analyse. So every node under that head is refused as a
-CSE candidate, and every callee body that contains it fails `calleeBodyClean`.
-It is admitted only for the NaN-skippability question, where the declared `pure`
-of the definition is trusted. An explicit `pure: true` on the re-declaration
-does NOT restore sharing (measured). The handler of the built-in definition is
-exempt by object identity.
-
-Option, if a consumer needs the re-declaration: the lazy-operand region table
-(`LAZY_OPERANDS`) is keyed by operator NAME, so a re-declared `Which` still
-opens the right regions at harvest. A caller handler that DECLINES at emission
-(returns `undefined`, Tycho's case) then emits through the built-in lowering,
-which pushes those regions. The refusal could be narrowed to "a caller handler
-that EMITS". This is unknown at harvest time, so it needs a declaration on the
-handler (or a contract of `pure` plus "lazy operands as the built-in").
-
-### CE-266. Cross-term CSE could partition a region by index-dependence
-
-**Status:** proposed; design.
-
-A `Sum`/`Product` with compile-time-constant bounds and at most 100 terms
-unrolls into a flat operator chain (`UNROLL_LIMIT`,
-`compilation/javascript-target.ts`). The unroll opens a FRESH CSE region per
-term: the same body nodes are compiled once per index value, so a reuse keyed by
-node across terms would emit term 1's temporary for every later term (silent
-wrong values). Hoisting an index-independent subexpression out of the terms is a
-separate, narrow mechanism. Today it covers COLLECTION-valued subexpressions
-only (`hoistLoopInvariants`, controlled by the CSE admissibility predicate;
-pinned by `test/compute-engine/compile-sum-unroll-guards.test.ts`).
-
-Nothing is known to be wrong. If more hoist sites of this kind appear, the
-general fix is to partition a region's candidate set by index-dependence in
-`compilation/cse.ts`, not to add more local hoists. Wait for a second case.
-
-### CE-267. A stored symbol value does not compile where a binder rebinds one of its names
-
-**Status:** proposed; capability.
-
-A stored symbol value keeps the binding it was written against. The JavaScript
-and `interval-js` targets emit the value as a preamble local outside every
-emitted function (`bindsFoldedValue`, `base-compiler.ts`). Two shapes have no
-such place. Both fail closed (D6), name the symbol and the shadowing name, and
-the public route answers through the interpreter. The answer is not wrong; the
-capability is missing. Both shapes are pinned in
-`compile-fold-shared-values.test.ts`.
-
-- **CE-267.1** A compiled top-level lambda holds its preamble INSIDE the lambda
-  body (`userFunctions.valueRoot`), because a compiled lambda takes only its
-  declared parameters, so a free symbol has no supply channel.
-  `compile((n) ↦ Σ_{n=1}^{3} a)` with `a := n + 1` declines; the interpreter
-  answers `3n + 3`. Fix: a lowering that puts the preamble at the ROOT and gives
-  the lambda a channel for the value's free names.
-- **CE-267.2** The shader targets (`glsl`, `wgsl`) declare statically typed
-  functions and have no place for an untyped value binding, so they fold inline.
-  `compile(g(2), { to: 'glsl' })` with `a := 3t + 1` and `g := t ↦ t + a`
-  declines (it used to emit `_fn_g(float t) { return (3.0 * t + 1.0) + t; }` and
-  read the parameter). A shader `Sum` whose body folds a value that names the
-  index declines for the same reason. Fix: pass the value as a uniform, or
-  alpha-rename the emitted parameter. A Desmos-style kernel where
-  `d_00 := p(x, y) · S` is read inside `c_2(x, y)` declines on the shader
-  targets for this reason.
-
-### CE-268. JavaScript declines scalar arithmetic over a list-valued operand: open corpus rows
-
-**Status:** proposed; capability.
-
-A CORE-corpus audit (2026-09-14) found 52 `javascript` records that fail closed
-with "cannot compile scalar arithmetic over a list-valued operand" (and one
-`Abs` variant). These are not defects, because the interpreter also gives no
-value: invalid input (`2ki2hjsouf`, 10 records, and `ifnnzttcqg`, 1, box with an
-`Error(incompatible-type)` node; `6kalzeiedk`, 1, references an undefined
-operator `B`); a point summed with a scalar (`urbddymicb`, 8,
-`(x − C_x)² + (y − C_y)² + (−R_2, −o_ut)`, where the interpreter answers
-`Error(incompatible-type, "tuple", "number")`); and `iqnkdz3ptt` (2), a point
-plus a number list (`(⌊…⌋, …) + [0, 1]`), which the interpreter answers as an
-`incompatible-type` error per element.
-
-- A point summed with a symbol declared
-  `indexed_collection<number | tuple<…>> | list<tuple<…>> | tuple<…>` compiles
-  on `javascript` with a run-time shape test
-  (`Array.isArray(_tv3) && (_tv3.length === 0 || Array.isArray(_tv3[0]))`),
-  because that type admits a flat list of numbers, which at run time has the
-  same shape as a point (`runtimePointShapeIsUnambiguous`). User decision
-  2026-10-17: the declaration `list<tuple<…>> | tuple<…>` gives one entry
-  dispatch instead. Tycho has declared its point results that way since
-  2026-09-14 (`POINT_RETURN_2D` in Tycho's `document-ce-manager.ts`).
-- **CE-268.2** `Power` over an input typed as a point (`Pt: tuple<number, number>`,
-  `Pt^2`) still emits a run-time shape test on `javascript`
-  (`Array.isArray(_tv3) && _tv3.length === 2 && !Array.isArray(_tv3[0]) ? [pow, pow] : _SYS.bcast(…)`).
-  The compiled value is right: `[9, 16]` for `(3, 4)²`, as the interpreter gives.
-  A static point type should select the element-wise body without a test. A
-  list of points gives `[(9, 16), (25, 36)]` and a union-typed input gets one
-  entry dispatch. On `interval-js`, `Power` over a point, a list of points or a
-  union declines ("kernels take one interval"). The corpus rows `hpr2q4kles`
-  (9 records, `P(U(x, y), …)`), `hbvzf9yk1r` (1) and the `Power` records of
-  `jgcclk1njk` are not reproduced yet; reproduce one before you widen the
-  `Power` broadcast admission.
-- **CE-268.3** A point whose own coordinate is a list: in `u1bpof8xfg` the
-  Multiply compiles, but the enclosing `Add` fails closed, because the point
-  `(−cos t, sin t · sgn R)` has a list second coordinate (`sgn R` over a list).
-  This is the open point-with-a-list-coordinate shape (decision A,
-  `COMPILATION-MODEL.md`).
-- **CE-268.4** The "color family" is not a separate color-broadcast gap:
-  `AsOklab` over a `list<color>` compiles to `_SYS.bcastColor`. These records
-  come from point-list arithmetic in documents with many colors. For
-  `s8ishknvhe`, see CE-249. `woeywky0kj` builds an RGB triple in a `list<color>`
-  context; the failing operand is not pinned (the isolated row compiles), and a
-  clean audit run must capture it.
-
 ### CE-269. A DAG-shared symbol value above the fold-size guard does not compile
 
-**Status:** proposed; capability, low priority.
+**Status:** ready; capability, low priority. Approved 2026-11-01.
+**Witness:** corpus; Tycho census: four terrain triangle rows of `art/nxlddeh5zv` decline at the fold-size guard; a corpus decline.
 
 On the `javascript` and `interval-js` targets, a symbol's compound pure value is
 emitted once as a preamble local (`ensureFoldedValueEmitted`,
@@ -5866,8 +2690,9 @@ registered-target route throws (pinned in `compile-fold-size-guard.test.ts`).
 
 ### CE-270. Compile declines in the code-generation census of CE 0.171.0
 
-**Status:** proposed; capability. Plan:
-docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md (§9).
+**Status:** ready; capability. Plan:
+docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md (§9). Approved 2026-11-01.
+**Witness:** corpus; Census of 0.171.0 on the Tycho corpus lists declines per target (270.1 to 270.4); corpus declines.
 
 Declines (distinct records) per target on the all-states Tycho corpus, CE
 0.171.0, measured 2026-10-27 (757 documents, 17,782 records): javascript 35 in
@@ -5893,42 +2718,10 @@ collections over 256 elements (7), interval-js ordering over a complex operand
 of CE-564. `D`, `PointList` and the complex rows on the interval target are
 design limits, not candidates.
 
-### CE-271. Collection values on the interval target: three cases that remain
-
-**Status:** proposed; capability. Plan:
-docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md.
-
-The interval target maps scalar kernels over provable lists of numbers, carries
-arrays across user-function boundaries, builds a range at run time and reduces
-over it. Three cases are not done:
-
-- **CE-271.1** A reduction over a bound that is not constant over the cell
-  answers `entire`. The indexed `Sum`/`Product` loop (a bound whose endpoints
-  floor to different integers) and the run-time range (`_IA.range`, a bound that
-  is not a point interval) both give up. The sound refinement is the hull over
-  the integer bound pairs: for `Σ_{k=a}^{b} f(k)` with `a ∈ A`, `b ∈ B`, the
-  union of the sums over every `(⌊a'⌋, ⌊b'⌋)` pair, computed from prefix sums
-  under a pair budget. A plotter refines its cells until the bound is constant,
-  so `entire` costs plotting time, not soundness. Do it when a corpus document
-  shows the cost.
-- **CE-271.2** `D` (a derivative) on the interval target has no lowering beyond
-  the closed form. `d/dx L(x)` compiles when the derivative of the body has a
-  closed form (the shared `compileDerivative`). The census cases lacked one (16
-  declines, 8 documents: a body with a sum over a symbolic bound, an integral, a
-  piecewise). The JavaScript target's numeric fallback is a finite-difference
-  stencil, which does not enclose the derivative over a cell: do not port it.
-  The sound route is forward-mode automatic differentiation in interval
-  arithmetic, a jet lane over the interval kernels (the interval counterpart of
-  `jet-derivative.ts`). Design work; do it on demand.
-- **CE-271.3** A relation over a provable list (`L < 1`) keeps the requirement
-  of a scalar operand. Its element-wise value is a list of tri-state verdicts,
-  which the result contract (`IntervalValue`) does not admit. Tycho compiles the
-  UNMASKED body of an implicit member, never the relation, so no corpus row
-  needs it.
-
 ### CE-272. Element-wise `Which` over fixed-size collections declines on `glsl` and `interval-js`
 
 **Status:** ready; capability. Tycho item 206.
+**Witness:** corpus; 272.2: Tycho `5qn5kcrszu`, 6 javascript records decline (Tycho item 206); 272.1 (no witness) and 272.3 (zero demand) are drop.
 
 The evaluator broadcasts `Which` element-wise over collection-valued operands,
 and the `javascript` target lowers the same shape (`compileJSSelection`,
@@ -5975,163 +2768,10 @@ requires matching genTypes), pinned in
 `test/compute-engine/compile-gpu-shape-gate-holes.test.ts`. Unrolling to SCALAR
 selections avoids it; a design that lifts the vec-width cap meets it.
 
-### CE-273. A shared subexpression in a shader lazy operand with no statement position is expanded at each occurrence
-
-**Status:** proposed; performance.
-
-A boxed expression is a DAG: `Max(e, e)` holds `e` once. The GLSL and WGSL
-targets bind such a shared node to a temporary through the common-subexpression
-pass wherever a statement position exists. A conditional whose arm repeats a
-subexpression takes the statement form (`gpuArmSharesWork` selects it,
-`compileGPUStatementSelection` emits it).
-
-- **CE-273.1** A shared subexpression in a lazy operand with NO reachable
-  statement position is not bound: the right side of an `&&`/`||`, and a
-  conditional nested where hoisting is refused (inside another arm, or an
-  expression-only position). The operand's text unfolds the sharing. Neither
-  shader language has a scoped let-expression, so the fix is a restructure that
-  lifts such an operand to a statement, or the acceptance that a deeply shared
-  lazy operand stays inline.
-- **CE-273.2** The common-subexpression pass itself runs super-linearly on a
-  very deeply shared DAG: a depth-20 shared tower takes tens of seconds to
-  compile even with no conditional, with a linear emission. The cost is in the
-  harvest, not in the conditional lowering.
-
-### CE-275. Lazy compilation of infinite collections supports only a small set of operators
-
-**Status:** proposed; capability.
-
-On the JavaScript target, `Take`/`TakeWhile`-bounded infinite pipelines compile
-to lazy `_SYS` iterator streams (`emitLazyStream`, `javascript-target.ts`; tests
-in `compile-lazy-collections.test.ts`). Sources: `Range` with a literal `±∞`
-stop. Transformers: `Map`/`Filter`/`Drop`/`Rest`. Bounders: `Take`/`TakeWhile`.
-Everything else declines at compile time with an error that names the bounding
-fix. These are extensions, not defects:
-
-- **CE-275.1** More lazy sources: 1-argument `Repeat(v)` (its handler declines
-  with "no compiled representation", which is now only true outside a bounding
-  consumer) and `Cycle` (no compile handler at all).
-- **CE-275.2** More bounding consumers: `First`/`At(k)`/`Find`/`IndexWhere` over
-  an infinite stream have finite answers that a lazy scan could give; today they
-  decline.
-- **CE-275.3** A symbolic step with an infinite stop (`Range(1, ∞, s)`): a step
-  that is negative at run time means an EMPTY range, and a stream cannot decide
-  that lazily (see `infiniteRangeStep`).
-- **CE-275.4** Python target: no lazy lowering. A non-finite `Range` bound
-  declines at compile time even under `Take` (a documented difference from the
-  JavaScript target).
-- `DropWhile` over an infinite source is inert in the interpreter, so it
-  deliberately does not compile (parity, not a gap).
-
-### CE-276. A compiled standalone lambda does not check the types of its callback parameters
-
-**Status:** ready; defect. Decision 2026-08-09: the direction is a
-check-emission table per primitive, and "cannot be enforced → decline".
-
-`literal.compile()` then `run(violatingValue)` computes a value without an
-error, where the interpreter reports an error. Every route inside the engine
-enforces the check. See the "Known limit" section of `docs/TYPE-SYSTEM.md`.
-
-### CE-277. A compiled ordering cannot tell an error operand from a numeric `NaN`
-
-**Status:** proposed; design.
-
-On the JavaScript target the orderings broadcast through `_SYS.bcast`. An error
-operand and a numeric `NaN` are both `NaN` at the ABI, and `NaN < 3` is `false`.
-That is correct for a numeric `NaN` (IEEE), but the interpreter keeps an error
-as an error. The connectives have a guard (`guardConnectiveAbsence`), because
-JavaScript coercion gave a wrong truth value there (`!NaN` → `true`). To do
-better, the orderings need a distinct absence sentinel carried through nested
-broadcasts.
-
-### CE-279. Compile-target coverage: heads and shapes that decline on the JavaScript target
-
-**Status:** proposed; capability. Ledger: do one sub-item per session.
-
-This ledger, with the GPU and Python ledgers below, lists the heads that have no
-lowering on a target. The counts (`members / states`) come from Tycho's
-684-document Desmos corpus at CE 0.99.0; CE-270 has the current counts. They
-show demand from one workload, not importance: a head that is rare there can be
-common elsewhere. A compile decline is not only a slow option: the consumer's
-JavaScript wrapper installs a `() => NaN` stub, so a row that declines draws
-nothing. Treat each item as a correctness gap.
-
-On the JavaScript target, 230 members / 81 states fail. By the consumer's
-per-bucket provenance rules, 82 members / 25 states are CE target gaps; the
-other 148/61 are the consumer's own unexpanded user-function heads, unparsed
-LaTeX and document-defined function heads. Use 82/25.
-
-The interval-js domain is scalar (one interval per quantity), so a
-collection-valued condition or operand declines by design beyond the
-provable-list lowerings of CE-271. The interpreted-mode evaluation memo (CSE
-Phase 3) is not pursued: the interpreted residue is target gaps, not work a memo
-can share (`docs/plans/2026-07-28-compile-cse-design.md` §10).
-
-- **CE-279.1** Multi-clause user functions: the §8 guard chain compiles on the
-  JavaScript target only. The interval, GLSL/WGSL and Python targets decline the
-  whole function (fail closed, interpreted fallback). Interval needs
-  interval-aware guards. The shader targets need a monomorphized (per-call-site
-  arity) lowering because they have no variadic dispatch. No corpus sizing yet.
-- Generic user functions: a quantified parameter is read at its DECLARED BOUND
-  (`test/compute-engine/compile-generic-monomorphization.test.ts`).
-  Per-call-site monomorphization was rejected: it would bring back the
-  `$`-suffixed specializations retired 2026-08-16 and has no call site on the
-  value-position route. These cases still decline the whole function, with a
-  sound interpreted fallback:
-  - **CE-279.2** A variable with NO ground bound: `(x: T) -> T where T` names no
-    type to compile against, so `gd(y)` emits no `_fn_gd`, and the fallback
-    runner answers `42` for `y = 21` and `[2,4,6]` for `y = [1,2,3]`.
-  - **CE-279.3** Every target other than JavaScript. The coercion and the
-    `_SYS.bcastFn` broadcast are JavaScript conventions, and the shader targets
-    synthesize a static signature that this reading was never validated against.
-  - **CE-279.4** A declared `broadcastable<T>` parameter over a
-    possibly-collection argument (fails closed).
-  - **CE-279.5** A body whose bound does not prove the capability it needs, such
-    as an indexed read under a `collection<number>` bound.
-- **CE-279.7** The arithmetic OPERAND boundary has the statically-scalar but
-  actually-array hole that the call boundary had. The runtime broadcast-dispatch
-  guard fixes the call: `f(y)` with `run({y: [1,2,3]})` broadcasts. But
-  `f(y + z)` with `run({y: [1,2,3], z: 0})` emits `(_.y + _.z)`, JavaScript
-  concatenates the array to the string `"1,2,30"`, `Array.isArray` on the result
-  is false, and the direct branch of the guarded call answers `NaN`. The fix is
-  the same declared-scalar-type-keyed treatment at scalar-infix operand
-  boundaries (or a broadcast-aware `+` lowering). It has the same performance
-  risk as the infix lowering of `target.operators`, which has no such check;
-  design the two together.
-- **CE-279.8** Re-examine the `Multiply` ≥2-arrayish carve-out and the
-  complex-element deferral. Both were kept verbatim through the broadcast
-  rework.
-- **CE-279.9** `Power`/`Root` compile to `NaN` where the interpreter returns a
-  complex value. This follows the `finite_number` policy and is not a defect,
-  but it is the surprise that the `realOnly` retirement removed for `Sqrt`. The
-  fix is to make those type handlers track the negative-base /
-  fractional-exponent case, which then lets the emitter fold them complex.
-- **CE-279.10** Audit the other compile-time refusals for consistency. The
-  retired `realOnly` constant-fold refusal (now `Sqrt(-N)` folds to the complex
-  value, or to `NaN` under `realOnly`, on every target) was an instance of a
-  class: a deliberate refusal enforced at some sites but not at sibling sites. A
-  rationale comment and a passing test show intent, not consistency. For each
-  refusal, reach the same mathematical situation another way (a variable, an
-  assigned symbol, another head of the same family, another target) and check
-  that it is refused there too.
-- Needs a witness from the consumer before any work (the compiled meaning is not
-  clear):
-  - **CE-279.11** `Set` (3/4), `Polygon` (3/16), `Sphere` (1/1),
-    `GeometricVector` (1/3). What must `compile(Polygon(…))` return at run time?
-    If the real need is membership (`x ∈ S`), the fix is different and much
-    smaller.
-  - **CE-279.12** `Subscript` (1/1): the probe COMPILES. `['Subscript','a','k']`
-    canonicalizes to the fused symbol `a_k` → `_.a_k`. The consumer's bucket is
-    outdated, or it is a shape where the fusion does not happen (see the G5 note
-    in CE-68, where a binder-bound index cuts the binding).
-  - **CE-279.13** `Loop: Element index must be a symbol` (1/1): reproduced only
-    when `Loop` gets a malformed index (a literal where a symbol belongs), so CE
-    correctly rejects bad input. Probably the consumer's expansion emits a
-    malformed `Loop`.
-
 ### CE-280. Compile-target coverage: heads and shapes that decline on GLSL and WGSL
 
-**Status:** proposed; capability. Ledger: do one sub-item per session.
+**Status:** ready; capability. Ledger: do one sub-item per session. Approved 2026-11-01.
+**Witness:** corpus; 280.1: GLSL `Integrate` declines on a corpus row (1 row in CE-270.3), direction decided 2026-10-17; other sub-items drop (no witness; 280.9 allowed).
 
 A decline on a shader target demotes the row from GPU to CPU. Counts are from
 the same Tycho corpus as the JavaScript coverage ledger.
@@ -6188,180 +2828,12 @@ array-uniform loop codegen, and it needs witnesses first.
   `Random()` draw in the shader. The other option (an `if`/`else` lowering with
   a temporary) needs a second witness; the count is one.
 
-### CE-283. Compiled recursive lambdas on GPU targets
-
-**Status:** proposed; capability, medium.
-
-Compiled recursive lambdas use lenient true recursion. Termination is the
-caller's responsibility: runaway recursion throws a catchable `RangeError`.
-Complex-valued recursion needs a `Typed` `complex` return ascription (untyped
-applications type `broadcastable<number>` and reach the complex-broadcast
-deferral).
-
-- **CE-283.1** WGSL and GLSL cannot recurse, so the GPU targets stay
-  fail-closed. The route is literal-depth unrolling: the v1 memoized
-  literal-argument specialization design, kept in the git history of the design
-  doc. Do it when a GPU consumer asks.
-
-### CE-284. GLSL loops and helper injection in a custom compile handler
-
-**Status:** proposed; capability.
-
-- **CE-284.1** `TODO(E3-GLSL)` in `base-compiler.ts`: it needs loop unrolling or
-  fixed-size arrays.
-- **CE-284.2** The public per-operator `compile` handler has no hook to inject a
-  preamble or helpers, so custom loops on GLSL/WGSL are hard to write. Extend
-  `OperatorCompileContext` when a real need appears.
-
-### CE-285. List-valued big-operator bodies on the non-JavaScript targets
-
-**Status:** ready; defect, low priority. Tycho row 171.
-
-A body with positive collection evidence declines on every non-JavaScript target
-with an actionable message (`assertScalarBigOpBody`, `base-compiler.ts`; pins in
-`list-valued-summand-compile.test.ts`).
-
-- **CE-285.2** The side effect of the JavaScript comparison test (`a(h(i)) < y`)
-  has no dedicated pin.
-
-### CE-286. GPU `LerchPhi` and `PolyLog` answer NaN where the terms cancel in f32
-
-**Status:** proposed; capability. Issue #340.
-
-The shader targets (`GPU_LERCH_PREAMBLE_GLSL`/`_WGSL`,
-`compilation/gpu-target.ts`) compute `LerchPhi(z, s, a)` and `PolyLog(s, z)` for
-real operands past the unit disk. The methods: a positive integral for `s > 0`;
-the Hermite form with a complex incomplete gamma for `s ≤ 0`; a rational form
-for an integer `s` from 0 to −16; the inversion formula for a negative
-non-integer order of `PolyLog`; and, after every other method, the sum over the
-Fourier modes of the base point `_gpu_lerch_modes` for `z < 0` and
-`−30 ≤ s ≤ −3`. Where they answer, they are within 1.5e−5 of the reference
-(worst 1.38e−5 on 4193 + 900 points, measured on an Apple M5 Max GPU through
-headless Chromium, GLSL and WGSL). Each method declines (NaN) when its own error
-estimate exceeds 3e−5 of the value.
-
-What still answers NaN:
-
-- **CE-286.1** Values small against the modes:
-  `Φ(−0.8818, −13.863, 1.7443) = −35.664`, `Li_{−11.65}(−22837.6) = −9.73e−6`.
-- **CE-286.2** `−3 < s < 0` below `z = −1`:
-  `Φ(−381112, −2.5, 0.33116) = −7.403e−6`.
-- **CE-286.3** `z > 1` with an integer `s`: `Φ(1.617, −6, 5.7837) = −16191.1`.
-- **CE-286.4** Values about 1e37 next to `z = 1` (f32 overflow).
-- **CE-286.5** `z < −1` with `a < 0` and an integer `s > 0`
-  (`Φ(−5.76, 12, −8.464)`): the shifted terms cancel.
-- **CE-286.6** Values below the smallest normal f32, which the GPU flushes to
-  zero. A `LerchPhi` true value below 1.18e−38 still returns 0 or a wrong
-  subnormal through the core methods.
-
-Far below `z = −1`, the mode sum and Jonquière's inversion decline unless the
-value is a finite normal f32. Their 3e−5 test is written `err ≤ 500·|value|`,
-because the form `ε·err ≤ 3e−5·|value|` flushed both sides to 0 below about
-4e−34 and accepted 0 and ∞. Over `z` in [−1e38, −1] and `s` in [−30, −3] on the
-M5 Max, 16 of 3485 `PolyLog` values and 17 of 960 `LerchPhi` values are more
-than 1.5e−5 off (15 of them with a true value below the smallest normal f32).
-
-- **CE-286.7** The 3e−5 estimate test admits values up to 2.04e−5 off on this
-  GPU (the inversion at `s < −20`, `|z| > 1e20`, and the modes), where the older
-  domains state 1.5e−5. A tighter test would decline more values. The doc
-  comment states 2.1e−5 for that region.
-- **CE-286.8** In an f32 model whose `log2` is 2.5 ulp off, the error estimates
-  (built for about 1 ulp) do not cover the far domain (worst 1.24e−4).
-
-Cost: a call takes at most about 1100 loop iterations below `z = −1`, plus up to
-128 modes and 100 shift terms for the mode sum, and about 4700 next to `z = 1`
-with `s < 0` (the 4096-term series first). The f32 model of the shader text is
-`test/compute-engine/gpu-lerch-f32-model.ts`; keep it in step with the text.
-
-### CE-287. GLSL on ANGLE Metal: arithmetic with a constant infinity reads back 0
-
-**Status:** ready; defect.
-
-On the Apple M5 Max through headless Chromium's WebGL2 (ANGLE over Metal),
-`z + _gpu_inf()` reads back `0.0`. Returning `_gpu_inf()` directly, negating it,
-`min`/`max` and comparisons are correct. Every constant spelling of the infinity
-was tried (a bit pattern, a global, a loop, `exp(1000)`). Only a bit pattern
-computed from a run-time input works, so no helper can fix it; a uniform would.
-WGSL is correct.
-
-Both targets spell non-finite constants through `_gpu_nan()`/`_gpu_inf()`, and
-the WGSL versions bitcast a `let`: a constant `bitcast<f32>` to NaN or infinity
-is a shader-creation error in Chrome ("value inf cannot be represented as
-'f32'").
-
-### CE-522. Interval library kernels: a known limit of the outward rounding
-
-**Status:** proposed; one known limit, low. Found 2026-10-26 by the spec review of
-plan `docs/plans/2026-10-26-value-kinds.md` section 4.9.2 (phase 3, the
-`Enclosure` value kind), which relies on these kernels
-(`src/compute-engine/interval/`); all are reachable through
-`compile(…, { to: 'interval-js' })` and through `.N()` of an enclosure. The
-unsound and too-wide answers that the review found are fixed in phase 3
-(`CHANGELOG.md`, "The interval library gives sound and tighter answers"; tests
-`test/compute-engine/interval-kernels-ce522.test.ts`). The answers that were
-sound but wider than necessary (.10 to .12) were made tighter on 2026-10-27.
-What remains is .5, a known limit of the transcendental kernels.
-
-- **CE-522.5** (known limit, not fixed in phase 3) The outward rounding of the
-  transcendental kernels is a minimum move, not a proof of containment
-  (`interval/rounding.ts` says so): `tanh` of a point can miss the true value by
-  one unit in the last place. The rational operations (`add`, `mul`, `div`,
-  integer powers, `abs`, the step functions) are rigorous. Certified kernels
-  (error bounds per function) are a separate project; the `Enclosure`
-  documentation states the limit.
-
-### CE-288. The f32 shader Hurwitz zeta answers NaN next to a zero of ζ(s, a)
-
-**Status:** proposed; capability, small.
-
-Where the Euler–Maclaurin terms cancel, `_gpu_hurwitz_zeta`
-(`GPU_ZETA_PREAMBLE_GLSL`/`_WGSL`, `compilation/gpu-target.ts`) takes ζ(s, b) at
-a base point `b` in (0, 1]: Hurwitz's Fourier formula for `s ≤ −3`, Hermite's
-integral for `−3 < s < 1`, and `b^(−s) + ζ(s, 1 + b)` from the Taylor series for
-`b < 2^−10`. It answers NaN when its error estimate exceeds 3e−5 of the value.
-On 18 361 points (`s` from −24.5 to 12, `a` from 0.01 to 30) every value is
-within 8.1e−6 on an Apple M5 Max GPU, and 432 are NaN. 387 of them are points
-where a half-ulp change of `s` or `a` moves the value by more than 1e−5.
-
-- **CE-288.1** The other 45 NaN values have `−3 < s < 0` next to a zero where
-  Hermite's closed terms and integral cancel, for example
-  `ζ(−2, 0.4666789…) = −0.0027644` and `ζ(−2.99, 0.8854986…) = 0.0058845`
-  (mpmath at the f32 operands). An error estimate on the Taylor series in
-  `a − round(a)` recovers 11 of them. The double kernel's exact Bernoulli value
-  plus a correction was not ported.
-- **CE-288.2** In an f32 model whose `log2` is 2.5 ulp off, 17 values with
-  `a > 16` and `s < −21` are up to 1.7e−5 off.
-
-The Apple GPU compiler reassociates `s + (2b − 1)` into `(s + 2b) − 1` (6.7%
-error at `ζ(−1e−6, 1/2)`). The shader text guards it with `max(2b − 1, −1)`, and
-a test pins the guard; keep the guard.
-
-### CE-289. Compile captured held functions whose ambient binding differs
-
-**Status:** proposed; capability.
-
-The interpreter resolves the captured binding of a callable: direct calls,
-eager, lazy and async callbacks, function-valued variables and operator
-callbacks. The compiler is conservative: a captured held function with a
-different ambient binding refuses compilation. Remove each refusal only when
-that lowering preserves binding identity and has interpreter/compiler parity
-tests.
-
-### CE-290. Compile `Tabulate`, `Scan` and `Iterate` that can omit elements (Nothing)
-
-**Status:** proposed; capability.
-
-`Tabulate`/`Table`, `Scan` and `Iterate` keep a possible Nothing in their
-element types, and a two-dimensional `Tabulate` returns lazy rows. Compiler
-guards refuse a `Tabulate` or `Scan` that can omit elements until the targets
-have a distinct representation for an omitted element. `Iterate` is not
-supported by the compiler. Custom accumulator delivery policies are unchanged.
-
 ## LaTeX parsing and serialization
 
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
 **Status:** design needed; defect.
+**Witness:** plausible; `((x,y)\mapsto xy)((3,4))` changes value through a LaTeX round trip.
 
 The `Function` serializer (`definitions-core.ts`) writes the parameter as a
 plain operand, and the parser has no notation for either form:
@@ -6394,6 +2866,7 @@ reads. Without a decision the LaTeX of such a literal stays lossy.
 **Status:** ready; defect. `\int dx` parses to `Integrate(1, x)`, and a `d` is
 pruned from the report of free symbols only where the integration variable
 follows it directly (`dx`), so a free variable named `d` is still reported.
+**Witness:** plausible; `\int \frac{dx}{x}` with `diagnostics: true` reports an undeclared symbol `d`.
 
 - **CE-291.2** With `diagnostics: true`, the `d` of a differential inside a
   fraction (`\int \frac{dx}{x}`) is reported as an undeclared symbol `d`. The
@@ -6406,6 +2879,7 @@ The parser is `parseIntegral()` in
 ### CE-293. A product with a reciprocal round-trips through LaTeX as a different expression
 
 **Status:** ready; defect, small. Same cause as CE-113.
+**Witness:** plausible; `Multiply(3, x, Power(y, -1))` round-trips through `\frac{3x}{y}` as `Divide(Multiply(3, x), y)`.
 
 - **CE-293.1** `Multiply(3, x, Power(y, -1))` is written `\frac{3x}{y}`, which
   parses back as `Divide(Multiply(3, x), y)`: the same value, but not the same
@@ -6418,35 +2892,12 @@ The parser is `parseIntegral()` in
   `Multiply(c, Divide(a, b))`) as one fraction, `\frac{ac}{b}`, which reads back
   as `Divide(Multiply(a, c), b)`.
 
-### CE-295. Some symbol names with subscripts or styles do not round-trip through LaTeX
-
-**Status:** ready; defect, small.
-
-- **CE-295.1** A symbol with two subscripts whose base is an indexed collection.
-  With `A` declared as a matrix, the symbol `A_1_2` is written `{A_1}_2`, which
-  reads back as `Subscript(At(A, 1), 2)`; the older spelling `A_{1,2}` read back
-  as `At(A, 1, 2)`. With `M_1` declared as a list, `{M_1}_2` reads back as
-  `At(M_1, 2)`. The parser reads a subscript of a collection as an index unless
-  the joined name is declared (`absorbSubscripts()` in
-  `latex-syntax/parse-symbol.ts`), and a single subscript has the same problem
-  (`A_1`). The current output is pinned in
-  `test/compute-engine/latex-syntax/double-subscript-symbol.test.ts`.
-- **CE-295.2** A name with the upright style after its first part, when the
-  parser drops that style. The parser keeps `\mathrm{}` only around a
-  one-character body, and it spells out a styled digit (`x_{\mathrm{1}}` is
-  `x_one`). So no spelling reads back as `x_1_upright` or `x__a_1_upright` (they
-  are written `x_1` and `\operatorname{x^{a}_1}`, the nearest names) or as
-  `speed_upright_1` (it is written `\mathrm{speed}_1`, which reads back as
-  `speed_1`). Also, no spelling reads back as a name with a unicode escape right
-  after a styled digit part, such as `x_1_bold____002012`: the parser reads no
-  text after a style command in a name. The parser never produces these names;
-  they come from MathJSON.
-
 ### CE-296. `\iint f\,dx\,dy` parses its `Limits` in the order opposite to the evaluation
 
 **Status:** ready; defect. User decision 2026-10-01: keep "first = outer", as
 Mathematica does; change the parser so that `\iint f\,dx\,dy` gives
 `Limits(y), Limits(x)`, and correct the reference.
+**Witness:** plausible; User decision 2026-10-01; `Integrate(x·y, Limits(x, 0, 2y), Limits(y, 0, 1))` gives `y²`, not `1/2`.
 
 `Integrate(f, Limits(x, …), Limits(y, …))` is evaluated with the FIRST `Limits`
 as the OUTERMOST integral: the `evaluate()` loop integrates the last `Limits`
@@ -6472,9 +2923,10 @@ a nested `Integrate`, which is not affected.
 
 ### CE-297. The lenient grammar makes reading choices that a host cannot detect
 
-**Status:** proposed; capability. User decision 2026-10-01: a parenthesized
+**Status:** ready; capability. User decision 2026-10-01: a parenthesized
 name is never a function head, and lenient `+-` is `±`. Plan:
-`docs/plans/2026-10-01-lenient-ambiguity-codes.md`.
+`docs/plans/2026-10-01-lenient-ambiguity-codes.md`. Approved 2026-11-01.
+**Witness:** corpus; Tycho request (repro file, Tycho reply) that "CE accepted"; the header makes a Tycho request `ready`, the label says `proposed`.
 
 Goal: a host that converts pasted plain text, such as Tycho's
 `plainTextToLatex`, should not need its own parser; the lenient grammar
@@ -6509,152 +2961,11 @@ grammar on CE main reads about 210 with no signal. The full reply is in Tycho's
 - **CE-297.5** `mod`, `pow`, `trunc`, `Re` and `Im` are not lenient function
   names. This may be a defect.
 
-### CE-298. The lenient line-level ambiguity checks read the raw tree before `resolveApplications()` regroups it
-
-**Status:** ready; defect, small.
-
-`reportLineAmbiguities` (`latex-syntax/lenient-ambiguity.ts`) runs in `parse()`
-on the raw result. It already sees the tree after
-`normalizeContinuationRanges()` (the range-precedence repair). It does not see
-the tree after `resolveApplications()`. Check whether that step regroups a shape
-that a line check matches (`NotEqual`, `Less`, `Equal`, `Element`, `Range`,
-`Delimiter`, `InvisibleOperator` lists with `Sqrt`, `Factorial`/`Power`). Either
-prove that no checked shape moves, or run the checks after that step and keep
-the `onAmbiguity` span map valid.
-
-### CE-299. A number followed by a bracket is read as an index, an Iverson bracket or an interval
-
-**Status:** ready; defect, small.
-
-Each case gives a visible error, not a wrong value:
-
-- **CE-299.1** `x4[1,2]`: the left side is already the product `x·4`.
-- **CE-299.2** `2^3[1,2]` and `\sin 4[1,2]` are read as an index (`At(…)`), then
-  give a type error.
-- **CE-299.3** `4[x=0]` is an Iverson bracket, so there is no product reading.
-- **CE-299.4** `4]1,2[` canonicalizes to `Tuple(4, Interval(…))`, which is
-  probably not what an author means.
-
-### CE-301. Very deeply nested parentheses overflow the stack in the parser and on a raw tree
-
-**Status:** ready; defect.
-
-A chain of `Delimiter` wrappers boxes to its operand at any depth
-(`canonicalDelimiter`, `library/core.ts`; `boxing-deep-trees.test.ts`), and
-`containsForeignEngineObject` (`boxed-expression/type-guards.ts`) uses an
-explicit stack. Two cases remain:
-
-- **CE-301.1** The recursive descent of the LaTeX parser
-  (`parseEnclosure → parsePrimary → parseExpression`) throws at about 1,870
-  nesting levels. Realistic input does not reach it; the fix is a parser change.
-- **CE-301.2** `.toString()` and `.evaluate()` on a NON-canonical `Delimiter`
-  chain 5,000 or more levels deep overflow. The canonical route does not produce
-  such a chain; a raw-boxed chain that is serialized before canonicalization
-  does.
-
-### CE-302. The LaTeX parser cannot stop at a deadline
-
-**Status:** proposed; capability. User decision 2026-08-19: unlikely to be
-scheduled, because the inputs that need it are self-inflicted.
-
-The megabyte-scale parses seen in the field come from a consumer that converts
-expressions back to LaTeX and parses the result again: LaTeX used as an internal
-interchange format. The supported answer is to keep expressions boxed and give
-the engine structure directly (raw MathJSON through `ce.box`, or Epsil source;
-both routes obey a deadline since 0.111.0/0.116.0). Do this item only if a
-workload that is not self-inflicted appears.
-
-**What is wrong.** Canonicalization obeys a deadline; the raw parse does not,
-and it grows faster than linearly. Medians of 3, fresh engine per run,
-`form: 'raw'` to isolate the parser:
-
-    N        raw parse   canonicalization   raw : canon
-    3 000     71 ms          45 ms            1.6 : 1
-    6 000    209 ms          49 ms            4.3 : 1
-    12 000   719 ms         111 ms            6.5 : 1
-
-The parser grows about 3× per doubling; canonicalization is close to linear.
-`form: 'raw'` is not a workaround: it skips the half that already obeys the
-deadline. A raw parse under a 1 ms budget and under a 50 ms budget both ran
-about 560 ms.
-
-The danger is that a tighter budget has no effect: the parse runs to completion
-and only then sees the cancellation. Measured on a 12 000-term sum:
-
-    CANONICALIZE   budget  1 ms → elapsed  17 ms   (17x)
-    CANONICALIZE   budget 50 ms → elapsed  51 ms   (1.02x)
-    PARSE          budget  1 ms → elapsed 832 ms   (832x)
-    PARSE          budget 50 ms → elapsed 795 ms   (16x)
-
-An operator who lowers a budget to bound a risk gets no error and no effect.
-
-**Field data.** The consumer (Tycho) passes `form: 'raw'` at its three most used
-parse sites: the Desmos import session (no deadline), the action-firing route
-(50 ms budget, one parse per step) and formula classification (5 000 ms budget).
-At those sites 100% of the cost is in the parser. On 6 679 imported Desmos
-formula slots across 585 states: 0.232 ms/slot raw, 0.380 ms/slot canonical,
-worst slot 71 ms (a 69 KB list literal), and the worst slot under a 50 ms span
-took 53.9 ms (1.08×). These slots are wide flat LIST LITERALS, not deep operator
-chains. Do not quote these numbers as proof that the parse is not a problem: for
-deep chains the synthetic curve above applies. The action-firing span is
-interactive (a user waits on it); the other spans are background or batch work.
-A fix there changes behavior that a user sees.
-
-**Why it is not the canonicalization fix.** Nothing under `latex-syntax/`
-references `ComputeEngine`, `_deadlineFrame` or `_timeRemaining`. This is
-deliberate: `LatexSyntax` is an injected, structurally typed dependency
-(`ILatexSyntax`), as `ARCHITECTURE.md` and `ARCHITECTURE.md` describe. So the
-parser has no deadline to read.
-
-- **CE-302.1** Fix when picked up: give the parser an optional cancellation
-  callback, supplied at construction or per parse, checked at a stride in
-  `parseExpression` (`latex-syntax/parse.ts`), the recursive point of the parse
-  walk. Keep it engine-agnostic so that the boundary stays structural. It is an
-  interface change to a decoupled subsystem: do not land it in the same pass as
-  a release.
-
-### CE-303. MathNet and MATH corpus: remaining parse failures
-
-**Status:** proposed; capability, small. The MathNet corpus is at 371/428 in CI.
-
-The Hendrycks MATH genre sweep (report: `docs/mathnet/math-genre-sweep.md`,
-tagged failures: `math-genre-failures.json`) is at 97.66% clean (371 of 735
-failures fixed). Remaining, by rank:
-
-- **CE-303.1** Styling remnants (11, mostly array environments and prose; low
-  value).
-- **CE-303.2** Units: `yd`/`qt`/`pt` and currency (`USD`, `cents`, `euro`) have
-  no `unit-data.ts` symbols. Adding them is a units-subsystem decision, not
-  parser work.
-- **CE-303.3** `\cancel` inside `array`-environment `@{}`/`\cline` layouts.
-- **CE-303.4** Possible upgrades of `IndexedSequence` (lazy-collection
-  semantics, the parenthesized `(a_n)_{n\in\mathbb{N}}` form).
-- **CE-303.5** ASCII-pipe divisibility (`p|a+1`) is deferred because it
-  conflicts with absolute-value syntax. The parenthesized form
-  `(a+f(b)) | (a^2+bf(a))` is not ambiguous and could be supported. The sweep
-  found 36 more hits.
-- **CE-303.6** Richer `array`/`cases` environment variants.
-- Out of scope or skipped: set arithmetic (`\{0,1\}+\{1,4\}\equiv…`,
-  `2\mathbb{Z}+1`), `array`-environment long-division layouts, `\nabla` puzzle
-  operators, repeating decimals `0.abab\overline{ab}`, and prose-heavy or
-  fragment-boundary inputs that need natural-language context.
-
-### CE-304. Loose parsing: `5 nPr 2` notation, `_a` wildcards in arrow-string rules, locale separators
-
-**Status:** proposed; capability, low priority.
-
-- **CE-304.1** Infix calculator notation `5 nPr 2` is not supported. It needs a
-  new-notation design, not a map entry.
-- **CE-304.2** Explicit `_a` wildcards in arrow-string rules do nothing and give
-  no message. They are redundant there, because auto-wildcarding covers them.
-- **CE-304.3** Locale separators (documentation and display).
-- Not a defect: `sqrt2x` → `√(2x)` is a deliberate policy, consistent with the
-  bare-function convention `cos 2x` → `Cos(2x)`.
-
 ### CE-305. LaTeX parser cases marked `@fixme` in the tests
 
 **Status:** ready; defect. Each item has a `@fixme` or skipped test in the named
 file.
+**Witness:** plausible; `@fixme` parser cases such as `\vec{AB}` and pre-subscripts `_p^qx`.
 
 - **CE-305.1** Pre-subscripts and pre-superscripts (`_p^qx`), and `\vec{AB}`
   over a multi-letter argument (`supsub.test.ts`).
@@ -6665,10 +2976,11 @@ file.
 
 ### CE-306. `list<list<string>>` and `list<list<integer>>` cannot both conform to a protocol
 
-**Status:** proposed; design. User decision 2026-10-23: a value whose only shared
+**Status:** ready; design. User decision 2026-10-23: a value whose only shared
 elements are empty lists counts like the empty list: both conformances are
 accepted, and a call on such a value (`[[]]`) is ambiguous at dispatch, as a
-call on `[]` is.
+call on `[]` is. Approved 2026-11-01.
+**Witness:** crafted; Status records user decision 2026-10-23 that gives the rule; if that counts as approval, `fix`; otherwise drop (crafted).
 
 In Epsil, `protocol Sizer { function sizeOf(self: Self) -> string }` with
 `type list<list<string>> is Sizer { … }` and
@@ -6684,9 +2996,10 @@ print the `value` of the result.
 
 ### CE-310. An Epsil function redefined in a later program cannot change its result type
 
-**Status:** proposed; design. User decision 2026-10-23: a redefinition replaces the
+**Status:** ready; design. User decision 2026-10-23: a redefinition replaces the
 whole contract, the result type included, as it does for the effects; code that
-used the old result type is checked again where it is next evaluated.
+used the old result type is checked again where it is next evaluated. Approved 2026-11-01.
+**Witness:** plausible; Status records user decision 2026-10-23 that gives the rule; if that counts as approval, `fix`; otherwise drop.
 
 A redefinition across programs replaces its effects (a later
 `function g(x: integer) random -> integer { 7 }` replaces an earlier `pure`
@@ -6697,8 +3010,9 @@ declared), or should the result type be replaced as the effects are?
 
 ### CE-311. Make cross-program redefinition an error on the Epsil route and delete the old mechanism
 
-**Status:** proposed; task. User decision 2026-08-18. Plan:
-`docs/plans/2026-08-18-checkpoint-restore-design.md`.
+**Status:** ready; task. User decision 2026-08-18. Plan:
+`docs/plans/2026-08-18-checkpoint-restore-design.md`. Approved 2026-11-01.
+**Witness:** corpus; User decision 2026-08-18 approves the work and the text says the stage can start; label `proposed` conflicts.
 
 User decision 2026-08-18 (Tycho agrees): a cross-program redefinition of types,
 protocols, conformances or same-signature clauses becomes an ERROR on the Epsil
@@ -6721,6 +3035,7 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
 
 **Status:** decision needed; defect. CE-312.1 and CE-312.2 need a user decision. Plan:
 docs/plans/2026-10-21-function-declaration-hoisting.md.
+**Witness:** plausible; CE-312.3 and .4 name a fix that needs no decision (fix).
 
 The rules: a call evaluated while its head had no value stays symbolic for the
 rest of the top-level evaluation that produced it, and a later evaluation
@@ -6790,28 +3105,11 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
-### CE-700. The check `CE_TYPE_PARANOID` changes the signature that a recursive function derives
-
-**Status:** proposed; correctness of a debugging aid. Found 2026-10-31 while
-fixing CE-689.
-
-`CE_TYPE_PARANOID=1` (`boxed-function.ts`, `_checkServedType()`) computes
-the type of a node again at each served cache hit and throws when the two
-differ. The computation it adds is not free of side effects inside the
-derivation of a recursive signature (`verifiedListHypothesis`): with the
-flag, the signature of the CE-479 probe function becomes
-`(n: unknown) -> unknown`, without it the signature is the one the tests
-expect. About 42 tests in 14 files fail with the flag, with the old cache
-key as with the new one, so the cause is older than CE-689. Until it is
-fixed, a run with the flag cannot tell an outdated type from the check's own
-effect. It can also mean that an entry of the signature derivation is
-retired at HEAD only because unrelated events move the `any` version: find
-the cause before deciding which.
-
 ### CE-689. Boxing the nested-`Fold` expression of issue #487 is about 3.5 times slower than in 0.156.0
 
-**Status:** proposed; performance, M. GitHub issue #487, closed after the
-evaluation part was fixed in `db796d62e`.
+**Status:** ready; performance, M. GitHub issue #487, closed after the
+evaluation part was fixed in `db796d62e`. Approved 2026-11-01.
+**Witness:** corpus; GitHub #487, 3.5x boxing regression measured.
 
 Boxing `['Function', RSK_ROW_INSERTION, '_raw']`
 (`test/compute-engine/fixtures/rsk-row-insertion.ts`: 8 `Fold`s nested 4 deep)
@@ -6827,21 +3125,11 @@ canonical passes in the first step of each enclosing fold
 rejected result of an inner fold across the steps of the enclosing fold, or
 make one canonical pass cheaper.
 
-### CE-668. The first `at()` of an evaluated lazy `Map` view advances the generation, so its cached evaluation is never used
-
-**Status:** proposed; performance. Found 2026-10-30 while fixing CE-661.
-
-Evaluate `Add(L, 1)` with `L` a symbol holding a list of 10,000 numbers, then
-compare `ce._cacheGeneration()` before and after `v.at(2)`: it advances by 4. So
-the `_eagerSource` cache of `_materializedAt()` (`boxed-function.ts`) never hits
-for such an expression, and a loop of `at()` on that route evaluates the whole
-list once per element (about 3.2 s for 10,000 reads, against about 65 ms by the
-structural read of CE-661). The cause is not found yet.
-
 ### CE-603. Reading the elements of a `Map` of 1,000 symbolic sums evaluates each sum with its free variable
 
 **Status:** ready; performance. Tycho ledger row 474, 2026-10-28; instrument
 `~/dev/tycho/scripts/repros/2026-10-28-ce474-literal-list-summand-evaluate-repro.mts`.
+**Witness:** corpus; Tycho ledger row 474 with instrument; Tycho request is ready by the header rule; user decision 2026-10-28 keeps it open.
 
 Reading the elements of `evaluate()` of
 `\sum_{n=0}^{3}2^{-n}|\sin(2^nx+[0...999]/1000)|` (a `Map` of 1,000) evaluates
@@ -6862,71 +3150,10 @@ and symbolic arithmetic (types take about 40 % of the time). User decision
 2026-10-28: the elements stay evaluated forms; this entry stays open as a typing
 and arithmetic speed item.
 
-### CE-618. A product with a list operand evaluates each cell product again, and `Integrate` has no evaluate memo
-
-**Status:** proposed; performance. Found 2026-10-28 while fixing CE-604 (Tycho row
-476, fixed by keeping the call on the list route of `Integrate`). The first cost
-is fixed (pending commit) 2026-10-30: a cell product of `mulTensors` uses each
-cell, and a scalar known to be a value, as its own value
-(`evaluateCellProduct()`, `cellProductOperandIsValue()`), so `y·c(y, L, E)` runs
-the `Integrate` handler 6 times, not 12 (139 → 84–97 ms, results identical;
-`test/compute-engine/ce-618-cell-product-operands-evaluated-once.test.ts`).
-Tycho row 474 is not changed by it (13–14× the boxing time; that cost is
-CE-603). Still open: (a) a scalar made of several factors is evaluated again for
-each cell: `Held(1)·y·[1, 2]` calls `Held` 3 times; a fix evaluates the combined
-scalar once before it scales the cells, which changes some results (`0.5·π`
-would become a float before the cell products), so it needs a decision; (b) the
-second cost below. An evaluation of an unevaluated integral advances the `any`
-axis 18 times: the antiderivative rules declare the pattern symbols `_a`, `__b`
-and `_n` and infer their types in the scope that
-`establishedAntiderivativeInRadians` pushes, the binders of new `Function` and
-`Integrate` nodes declare `x`, and the pops of those scopes advance the axis.
-This is the cause of CE-535; a memo of `Integrate` needs CE-535's design or step
-3b of the evaluation-cache plan, which the user postponed on 2026-10-30.
-
-Two costs remain when a list of unevaluated integrals is multiplied or evaluated
-again:
-
-- `multiplyCell` (`mulTensors`, `arithmetic-mul-div.ts`) calls `.evaluate()` on
-  each cell product `y·I_k`, which evaluates the inner `Integrate` again. A fix
-  needs a "fold of values" entry into the `Multiply` handler; an inline change
-  could change the errors for string cells and absence markers.
-- `Integrate` is lazy and gets no evaluate memo; each evaluation also moves the
-  generation about 19 times, so a generation-keyed memo is outdated at once
-  (same family as CE-535). Evaluating the same unevaluated
-  `∫_{-L}^{L} n(x, y, 0.001) dx` again costs about 9 ms each time.
-
-### CE-612. `isSame()` takes exponential time on an expression that shares its subtrees
-
-**Status:** ready; defect (performance). Found 2026-10-28 while fixing CE-603.
-
-`isSame()` (`boxed-expression/compare.ts`) follows every path of a graph whose
-subtrees are shared objects: with `e = q(e, e)` built k levels deep,
-`r.isSame(e)` takes 6 ms at k = 16, 32 ms at 20, and does not end at 40. Same
-class as commit `0904d0592` ("Fix exponential walks over shared expressions").
-Fix: remember the pairs already found equal during one top-level comparison, as
-`isSameCall()` (`boxed-function.ts`) does.
-
-### CE-627. A literal list integrand writes the body of the called function into each element
-
-**Status:** proposed; performance. Found 2026-10-28 while fixing CE-604.
-
-`\int [y\,c(y, L, 0.1), y]\,dy` still writes the body of `c` into each element,
-where an integrand that calls `c` with a list argument keeps the call (CE-604).
-The values are right; the integral is slower.
-
-### CE-637. `CircularIntegrate` does not inline a call of a user function
-
-**Status:** proposed; capability. Found 2026-10-30 while fixing CE-626.
-
-With `g(t) := 1/t`, `\oint_{|z|=2} g(z)\,dz` stays
-`CircularIntegrate(g(z), Limits(z, |z| = 2, Nothing))`, while
-`\oint_{|z|=2} \frac{1}{z}\,dz` gives `2iπ`. Both should give `2iπ`: the contour
-integral does not write in the body of a user function, as `Integrate` does.
-
 ### CE-638. An untyped parameter followed by parentheses is read as a product: `g \mapsto \int_0^1 g(x)\,dx`
 
 **Status:** decision needed; defect, M.
+**Witness:** plausible; User owns the parse decision; `h(p, a) := p(a)` gives a silent product.
 
 In a function literal or a definition, the parser reads `p(a)` as a product
 when `p` is a parameter with no type: `headHasNoTypeInformation()`
@@ -6987,6 +3214,7 @@ reading of a `\mapsto` parameter keeps depending on an outer declaration.
 
 **Status:** ready; defect. Found 2026-10-30 while reviewing CE-626 (also on
 0.174.0).
+**Witness:** plausible; One-line integrand `(g \coloneq t\mapsto t^2; g(x))` gives `incompatible-type` error instead of 1/3.
 
 `\int_0^1 (g \coloneq t\mapsto t^2; g(x))\,dx` evaluates to an
 `incompatible-type` error; it should give 1/3.
@@ -6994,6 +3222,7 @@ reading of a `\mapsto` parameter keeps depending on an outer declaration.
 ### CE-640. A call head defined later as a data symbol: `evaluate()` reports an error, `.N()` stays unevaluated
 
 **Status:** ready; defect (consistency). Found 2026-10-30 while reviewing CE-626.
+**Witness:** plausible; Interpreter: `.N()` stays unevaluated where `evaluate()` reports `expected-function`; short program, no decision needed.
 
 Parse `\int_0^1 g(x)\,dx`, then `ce.declare('g', 'real'); ce.assign('g', 5)`:
 `evaluate()` gives `Error(expected-function, g, real)`, `.N()` returns the
@@ -7001,29 +3230,11 @@ Parse `\int_0^1 g(x)\,dx`, then `ce.declare('g', 'real'); ce.assign('g', 5)`:
 The box route behaved this way before CE-626, and `Sum` also gives the error.
 `.N()` should report the same error as `evaluate()`.
 
-### CE-641. `.N()` of an integrand that calls `g` and passes `g` as a callback depends on the order of definition
-
-**Status:** ready; defect. Found 2026-10-30 while fixing CE-626.
-
-On the box route, `∫_0^1 g(x) + At(Map(g, [x]), 1)\,dx`: written after
-`g(t) := t`, `.N()` gives 1; written before it, `.N()` stays unevaluated,
-although the interpreter gives 1 at x = 0.5 and a direct compilation succeeds.
-With only the callback (`At(Map(g, [x]), 1)`) `.N()` gives 0.5 in both orders.
-Not checked on 0.174.0.
-
-### CE-642. An integrand that maps a function over a list is not integrated symbolically
-
-**Status:** proposed; capability. Found 2026-10-30 while fixing CE-626.
-
-`∫_0^1 At(Map(g, [x]), 1)\,dx` with `g(t) := t` stays unevaluated under
-`evaluate()` (`.N()` gives 0.5), and
-`∫_0^1 Total(Map(t \mapsto t^2, [x, x]))\,dx` stays unevaluated under both
-`evaluate()` and `.N()` (the value is 2/3).
-
 ### CE-625. A limit of a call that passes a function as an argument leaves a parameter name in the result
 
 **Status:** ready; defect (wrong values). Found 2026-10-28 while reviewing
 CE-614.
+**Witness:** plausible; Interpreter wrong value: `Limit(x ↦ h(g, x), 2)` gives `["p", 2]`, should give 4; two-line definitions.
 
 With `g := t ↦ t^2` and `h := (p, a) ↦ p(a)`, `Limit(x ↦ h(g, x), 2)` evaluates
 to `["p", 2]` (the parameter name of `h`), where the value is 4. The same
@@ -7033,7 +3244,8 @@ position.
 
 ### CE-624. The interpreter cannot compute a nested integral of a user-function call
 
-**Status:** proposed; capability. Found 2026-10-28 while fixing CE-614.
+**Status:** ready; capability. Found 2026-10-28 while fixing CE-614. Approved 2026-11-01.
+**Witness:** corpus; Tycho row 476 definitions; `NIntegrate` gives NaN with jit off.
 
 With Tycho's row-476 definitions (`c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx`)
 and `L := 0.5`, `.N()` of `\int_0^1 y\,c(y, L, 0.001)\,dy` gives 1.98376 only
@@ -7044,6 +3256,7 @@ through the compiled route; with `jit = 'off'` it stays unevaluated, and
 
 **Status:** design needed; performance, needs a design. Found by the Tycho document-open
 measurement, 2026-10-27. Same cause as CE-531.
+**Witness:** corpus; User owns the cache-key design; Tycho document-open benchmark.
 
 When Tycho opens the document `art/2ki2hjsouf`, it makes 1 994 canonical
 `ce.rebind` calls; the replay takes about 720 ms. A 425-byte tree such as
@@ -7081,8 +3294,9 @@ Reproduction: `npx tsx benchmarks/tycho-document-open/rebind.ts`
 
 ### CE-536. `evaluate()` of a large surface body evaluates each copy of a subtree again and types every new node again
 
-**Status:** proposed; performance. Found by the Tycho document-open measurement,
-2026-10-27.
+**Status:** ready; performance. Found by the Tycho document-open measurement,
+2026-10-27. Approved 2026-11-01.
+**Witness:** corpus; Tycho document `2ki2hjsouf`, benchmark reproduction, 1.6 s.
 
 When Tycho opens the document `art/2ki2hjsouf`, it calls `evaluate()` on 15
 surface bodies in `u` and `v` (2 to 67 KB of MathJSON each): 1 684 ms in Tycho,
@@ -7117,8 +3331,9 @@ them.
 
 ### CE-531. A call of a function literal invalidates the caches on the `any` axis
 
-**Status:** proposed; performance. Found 2026-10-27 while fixing the lazy collection
-chain of Tycho row 453.
+**Status:** ready; performance. Found 2026-10-27 while fixing the lazy collection
+chain of Tycho row 453. Approved 2026-11-01.
+**Witness:** corpus; chain of Tycho row 453.
 
 Each call of a function literal declares its parameters in a new call scope
 (`declareParameterActivation`, `function-utils.ts`). That declaration sends a
@@ -7144,6 +3359,7 @@ question.
 ### CE-532. A public API that binds values to symbols for the duration of a callback
 
 **Status:** ready; design. Tycho row 453 (second ask).
+**Witness:** corpus; Tycho row 453 request is ready by the header rule; status line records no dated user approval of the `ce.withValues` API.
 
 Tycho's `withValuelessVariablesBound()`
 (`~/dev/tycho/src/plot-core/list-materialize.ts`) assigns values to document
@@ -7160,7 +3376,8 @@ kept after `fn` returns.
 
 ### CE-313. Evaluating a symbolic closed form again after a state change rebuilds its nodes
 
-**Status:** proposed; performance. Same cause as CE-321; fix with that design.
+**Status:** ready; performance. Same cause as CE-321; fix with that design. Approved 2026-11-01.
+**Witness:** corpus; Tycho 29-piece path; text says "fix with that design" (CE-321).
 
 The value of `D(PointY(h(u)), u)` for Tycho's 29-piece path, a symbolic list,
 costs about 18 ms each time it is evaluated again after any assignment. The same
@@ -7184,6 +3401,7 @@ entry. Its asks (a time limit and event-loop turns on the asynchronous routes,
 fit) are done; CE-430 is what remains of them. Plan:
 `docs/plans/2026-10-20-worker-kernel-pool.md`,
 `docs/plans/2026-10-20-findfit-global-grid.md`.
+**Witness:** corpus; Ready with user decision 2026-10-20 in status; Tycho row 441; only CE-314.1 (c) remains open.
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads run in
@@ -7253,68 +3471,10 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 - The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24: "one
   formula, many points"; `runMany` says less).
 
-### CE-430. The canonical form of the data operand of `FindFit.evaluateAsync()` runs in one block
-
-**Status:** proposed; performance, small. User decision 2026-10-25: do not add
-the paced canonical form below until a consumer reports a slow abort of a large
-fit.
-
-The asynchronous evaluation of a large list gives the event loop a turn about
-every 8 ms and honors an abort (`holdMapAsync()`, the `evaluateAsync` handler of
-`List`), and written-out data (`_isLiteralData()`) is its own value on the
-asynchronous route, as on the synchronous one. The cost was linear in the count
-of rows: the 480 ms first measured for 20,000 rows came from machine load and
-garbage collection. What remains is the canonical form of the held data operand
-(`ops[0].canonical` in `findFitAsync`, `nonlinear-fit.ts`). It is a synchronous
-getter and cannot yield: 80 to 220 ms for 20,000 rows at a load average of 40 to
-50, about half of the earlier cost. Most of it is the creation of a big-number
-value for each float literal (`canonicalNumber`). A fix would make the elements
-of a raw `List` canonical in paced chunks inside the parse scope of the list and
-check that the result is the same as `.canonical`; this adds a second way for
-the data operand of `FindFit` to become canonical. The canonical form of a raw
-node is not memoized, so each evaluation of the same `FindFit` expression pays
-it again.
-
-### CE-317. An operator with only `evaluateAsync` walks the body at each asynchronous application
-
-**Status:** proposed; performance, small.
-
-With an operator that has only an `evaluateAsync` handler declared, each
-application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
-`function-utils.ts`) with no cache. Measured 2026-10-24: the walk is 0.5% of a
-depth-60 asynchronous recursion through three helper functions, so no cache was
-added. A sound cache key is also hard: the walk follows stored values, and a
-value write that is not callable (for example `x` assigned an unevaluated
-`AsyncOnly(2)`) does not advance the `callable` axis.
-
-### CE-320. Compiling shared nodes under lazy operands in nested regions is exponential
-
-**Status:** proposed; performance.
-
-- **CE-320.1** The CSE analysis (`compilation/cse.ts`) walks each distinct node
-  once per region. But `e_k = If(c, e_(k-1), e_(k-1))` creates one region per
-  chain of lazy arms, so the number of regions grows as `2^k`. This is a
-  property of the region model, not of the walk.
-- **CE-320.2** The compiler is recursive, so an expression nested deeply enough
-  overflows the stack. The failure is safe: `compile()` answers `success: false`
-  and runs the interpreter, which gives the right value. User decision
-  2026-10-24: raise the limit, do not remove it. The limit was raised on
-  2026-10-24: the large cases of `compileExpr` and `_compileInner` moved to
-  helper functions (the frame of `compileExpr` went from 1,632 to 328 bytes),
-  two callbacks on the path of every operand were removed, and the fold check
-  reads `unknowns` from a memo of the compilation. Measured with one compile per
-  process: a `Sin`/`Cos` chain compiles up to a depth of 421 (it was 278), and a
-  polynomial in Horner form, `a₀ + x(a₁ + x(a₂ + …))`, up to a degree of 208 (it
-  was 119); the test is `compile-deep-nesting.test.ts`. Not done, by the same
-  decision: removing the limit, by compiling a deep tree from the bottom up with
-  a temporary every N levels before the main walk. A CSE binding does not bound
-  the depth by itself, because it is compiled at its first occurrence, inside
-  the same recursion, so this would be a new mechanism in the region model of
-  `cse.ts`.
-
 ### CE-321. Each user-function call retires the inert evaluation memo, so a chain of calls copies each level
 
 **Status:** design needed; performance.
+**Witness:** corpus; User owns the type-cache key design; Tycho reproduction script; "no document is blocked".
 
 The memo of an inert evaluation (`_memoizedLazyCollectionValue`,
 `boxed-expression/boxed-function.ts`) is keyed on the `any` axis. A call of a
@@ -7344,7 +3504,8 @@ resolved to). This is a design change of the type cache and needs a decision.
 
 ### CE-324. Slow Epsil corpus programs, and a compile step that evaluates a closed program
 
-**Status:** proposed; performance.
+**Status:** ready; performance. Approved 2026-11-01.
+**Witness:** corpus; Epsil corpus report programs above 5 s.
 
 In the Epsil corpus report (`npm run epsil:corpus-report`, run of 2026-10-06),
 the interpreted median is 98 ms.
@@ -7361,7 +3522,8 @@ the interpreted median is 98 ms.
 
 ### CE-325. A user function applied per element of a lazy collection costs about 100 µs per application
 
-**Status:** proposed; performance.
+**Status:** ready; performance. Approved 2026-11-01.
+**Witness:** corpus; Project Euler corpus programs, 20 s.
 
 The full-size Project Euler programs give the right answers but are slow:
 `sum(filter(2..9999, isAmicable))` took about 20 s on a loaded machine,
@@ -7409,26 +3571,10 @@ Open options:
   a `Filter`/`Any` predicate is not covered: it returns a boolean, and no tier
   takes it.
 
-### CE-457. `.N()` of a geometric series with no closed form walks the whole extrapolation budget at machine precision
-
-**Status:** proposed; performance. Found 2026-10-24 while fixing slowly divergent
-series.
-
-With `ce.precision = 'machine'`, `\sum_{k=0}^\infty \frac{2^k}{3^k}` takes about
-15 minutes and gives `2.9999999999999987`. At a higher precision the closed form
-gives 3, so only machine precision shows it. The Richardson tableau
-(`extrapolate`, power 1, `library/utils.ts`) does not converge on a geometric
-tail: for the partial sums of `(2/3)^k` it gives 3.2866 with an error estimate
-of 0.0067, so the walk goes on to the second acceptance at 2¹⁵ terms, and each
-term is an exact bigint ratio. The compiled walk cannot help: `3^k` overflows at
-k = 647, and the compiled term 0 sends the walk back to the interpreter.
-`Σ k³/(3^k+1)` costs 4 to 12 s for the same reason. A fix needs an acceptance
-for a geometric tail (for example, partial sums that are constant over the last
-doubling windows), or exact terms that are rounded to doubles earlier.
-
 ### CE-329. A compiled loop that assigns `xs = ReplaceAt(xs, i, v)`: the Python target and aliased locals still copy
 
-**Status:** proposed; performance, small. Issue #386.
+**Status:** ready; performance, small. Issue #386. Approved 2026-11-01.
+**Witness:** corpus; issue #386; JavaScript part done, Python target copy remains.
 
 On JavaScript, a block local updated with `xs = ReplaceAt(xs, …)` is copied once
 and then written in place (`ownedLocalUpdateChains`,
@@ -7436,51 +3582,11 @@ and then written in place (`ownedLocalUpdateChains`,
 keeps the copying form, and the check gives up when the block names the list in
 any other way (`ys = xs` before the loop is safe at run time but is refused).
 
-### CE-330. Registering a chain of `-> unknown` functions reads signatures a polynomial number of times
-
-**Status:** proposed; performance, low priority.
-
-With `W_k` declared `(unknown) -> unknown` and each body calling `W_{k+1}`
-twice, registering the chain reads the declared signatures (`_deriveSignature`)
-850 times at depth 6, 5 666 at depth 12 and 20 962 at depth 20, about 70 ms at
-depth 20 (measured 2026-10-01). Single-call chains are linear. The effects
-inference already skips a callee that it walked into the same accumulator
-(`expandedLiterals`, `effects-inference.ts`), so the count no longer doubles per
-level.
-
-What remains is polynomial: each assignment types its body again, and each read
-of a signature whose cache generation has moved reads the type of the function
-value before its memo key is built. A cache of the derived signature stamped
-with the cache generation, checked before the key is built, gave no measurable
-gain at these depths: do not try it again as the fix.
-
-### CE-332. Higher-order symbolic derivatives of nested expressions still reach the size budget at order four
-
-**Status:** proposed; performance.
-
-Since 2026-10-25 each derivative of order 1 or more is simplified before it is
-differentiated again, and so is the inner derivative of a nested `D`
-(`derivative()` and `differentiateNode()`, `symbolic/derivative.ts`; user
-decision 2026-10-25, measured with no test or snapshot change). With
-`f(x) := √(x+√(x+√(x+√(x+x))))`, the third derivative went from about 6 s and
-31,386 characters to about 2.2 s and 19,919 characters, and three nested `D`
-from 78,793 to 30,070 characters. The step is skipped while `simplify()` folds a
-constant (`isFoldingConstant()`), so that route is not faster.
-
-What remains: the fourth derivative of the radical, and of
-`ln(1+ln(1+ln(1+x)))`, exceeds the size budget (`MAX_DERIVATIVE_NODES`) and
-declines; the decline of the `ln` witness takes 5.3 s (3.3 s before, because the
-third iterate is now simplified before the budget stops the work).
-
-Rejected (measured 2026-10-25): building the derivative of a nested power as a
-product of powers without expanding it. The third derivative of the radical went
-from 4.6 s to 32 s and from 31,386 to 67,501 characters, and the full test suite
-did not finish.
-
 ### CE-334. Each call of a user function invalidates every generation-keyed cache
 
-**Status:** proposed; performance. Decision 2026-09-24: no general per-call cache
-design now; reduce the per-call costs instead.
+**Status:** ready; performance. Decision 2026-09-24: no general per-call cache
+design now; reduce the per-call costs instead. Approved 2026-11-01.
+**Witness:** corpus; Tycho document `hyvhlz4chj`; same cause as CE-321.
 
 `invoke` → `declareParameterActivation` declares the parameters of the function
 in a new activation scope, and the `declare` state event advances the `any`
@@ -7524,7 +3630,8 @@ broadcast exemption.
 
 ### CE-335. Rubi 1.2.2.4 #214 reaches the 30 s guard in the rule matcher
 
-**Status:** proposed; performance.
+**Status:** ready; performance. Approved 2026-11-01.
+**Witness:** corpus; Rubi test problem 1.2.2.4 #214; CE-335.3 is an audit of radical-to-float folding with no witness.
 
 In a 200-problem chapter-1 sample (`--sample 200 --seed 14`), problem 1.2.2.4
 #214 still reaches the 30 s wall-clock guard, unsolved after about 80,000 steps.
@@ -7544,7 +3651,8 @@ cost of development and test runs only; the matcher time is real.
 
 ### CE-337. Reductions over ten thousand elements are slow at the default precision
 
-**Status:** proposed; performance.
+**Status:** ready; performance. Approved 2026-11-01.
+**Witness:** corpus; Tycho document `s8ishknvhe`.
 
 Example: `Min(1, 2 − 2·PointZ(C))` over ten thousand points (the colour row of
 the Tycho corpus document `s8ishknvhe`, which Tycho interprets because the row
@@ -7570,142 +3678,10 @@ two or more arguments to `ElementMin`/`ElementMax`
 received the reducing `Min(1, …)`, so the saturation and the value of the colour
 are one number for the whole cloud.
 
-### CE-339. The Python target does not hoist in two shapes
-
-**Status:** proposed; performance.
-
-The Python `Sum`/`Product` with one indexing set hoists its loop-invariant
-values (2026-10-24), and small unrolled JavaScript sums hoist in expression
-form. Still open: a Python sum with several indexing sets (an inner range can be
-empty, so the hoisted value needs a guard per range) and the Python callback
-lowerings (`Map` and similar) do not hoist.
-
-### CE-340. The interpreted growing-list loop is quadratic
-
-**Status:** proposed; performance.
-
-`let xs = []; for k in 1..n { xs = Join(xs, [k]) }` costs about 0.5 µs per
-element per turn on the interpreter (857 ms at 1000 turns; the compiled route
-copies a native array per turn). An immutable append copies the list. Options,
-if interpreted loops of many thousands of turns become important:
-
-- a growable backing buffer with prefix views (amortized O(1) append; safe
-  without ownership analysis, because every holder of an older value keeps its
-  own prefix), together with an incremental type for the new node;
-- a per-node descriptor cache on the invalidation axis of the type cache.
-
-### CE-458. Compiling a body that several binders share is exponential in the depth of the sharing
-
-**Status:** proposed; performance, design.
-
-A user function whose body holds a `Sum` and a `Product` over the same subtree,
-nested to depth _d_ (the level below shared by both), took 55 s to compile at
-_d_ = 10 (measured 2026-10-24). Nothing is evaluated during the compile. Two
-causes were fixed on 2026-10-25: unrolled clauses multiplied with no limit on
-their total size (`MAX_UNROLLED_NODES`, `compilation/unroll-budget.ts`, read by
-the JavaScript, interval and GPU targets), and the complexness analysis started
-with an empty memo each time it entered a binder mask (now one memo layer is
-kept for each enclosing layer and mask, `_pushKeyedComplexMemoLayer`,
-`base-compiler.ts`). Depth 10 now compiles in 1.7 s and depth 12 in 7.8 s (load
-10 on 18 cores); the test is `compile-shared-binder-body.test.ts`.
-
-What remains doubles at each level: the shared subtree is emitted once under the
-`Sum` and once under the `Product`, because the common-subexpression pass
-(`compilation/cse.ts`) does not share a node between two sibling binder bodies.
-Two changes are needed: the test of whether a candidate can leave a binder
-region must use the FREE names of the candidate (`symbolsOf` and
-`mentionsVarying` in `loopInvariantHoistCandidates` count a name that an inner
-binder binds again), and a temporary must be placed in the nearest common
-ancestor region even when that region holds no occurrence itself. Related to
-CE-320.1. The size estimate of `unroll-budget.ts` reads literal bounds only, so
-a nested clause whose bounds become constant only after a fold counts as a loop.
-
-### CE-341. Assigning a function literal whose body shares operands is exponential in the sharing depth
-
-**Status:** proposed; performance.
-
-`ce.assign('f', Function(Hold(e), t))`, with `e` a depth-_n_ shared tower
-(`Max(e, e)` nested, 31 distinct nodes at depth 30), doubles per level: 1.7 s at
-depth 16, 3.1 s at 18, 10.6 s at 19, and the process runs out of memory at 30.
-BOXING the same literal takes 1 ms and APPLYING it to an argument takes 9 ms at
-depth 30 (both pinned in `dag-shared-walks.test.ts`). Probe: the `assign` line
-above at depths 16, 18 and 19. Two walks on the assign route descend each
-operand independently:
-
-- **CE-341.1** `Walker.visit` in `boxed-expression/effects-inference.ts`, the
-  latent-effects inference of the literal's body
-  (`inferFunctionLiteralEffects`). A lazy collection that reads the effects of
-  its callback also reaches it: `Map(k ↦ e + k, Range(1, 3)).count` does not
-  return at depth 30, while the same `Map` with the tower in its SOURCE answers
-  in 3 ms. The visit carries order-sensitive state (the confinement set of
-  declared names per sequence, the registry-consulted bits, the saturation early
-  return). A per-node memo is sound only if the answer depends only on (node,
-  set of declared names), which needs the same analysis as the binder rewrite.
-- **CE-341.2** `jsonWithSourceOffsets` in `engine-declarations.ts`. The literal
-  is boxed again from its MathJSON (with `sourceOffsets`) to stamp parameter
-  types, and `BoxedFunction.structural` rebuilds each path of a shared operand
-  as a fresh tree. MathJSON cannot express sharing, so the serialization itself
-  is exponential in size. The re-box must work from boxed operands
-  (`ce.function('Function', [body, …params])`) instead.
-
-No known consumer assigns a literal whose body is an evaluated value: parsed
-bodies are trees, and Tycho never assigns a shared-operand RESULT as a function
-body.
-
-### CE-342. Fixed-width collection chains: compile optimizations that remain
-
-**Status:** proposed; performance.
-
-Cross-definition CSE (the former CE-342.1) left this entry 2026-10-26: Tycho
-measured the by-reference Voronoi row of the Desmos state `62urmx2dcm` on CE
-0.169.2 at 0.51 µs a sample against 0.25 µs inlined (2.7 and 1.2 µs in September
-2026), and reported that the row is an implicit region drawn on the GPU, so the
-CPU field serves only a host without WebGL, and the 2× does not matter to it.
-Its record: `~/dev/tycho/docs/COMPUTE_ENGINE_LOG.md`, section "Two CE maintainer
-requests answered 2026-10-26"; probe
-`~/dev/tycho/scripts/repros/2026-10-26-ce342-voronoi-row-cost-probe.mts`. The
-design notes of that item (a CSE harvest spanning several emitted definitions,
-alpha-renaming of parameters across bodies, a memo of an array result; inlining
-small scalar callees measured and rejected because a bound on the authored body
-does not bound the emitted code) are in the git history of this file. What
-remains:
-
-- **CE-342.2** A fixed width known only from a TYPE
-  (`P: list<tuple<number, number>^9>` as a symbol, `At(P, i)` reads) is not
-  unrolled; the pass needs a literal `List`. Unrolling from the type would
-  rewrite `Map(f, P)` to `[f(At(P, 1)), …, f(At(P, 9))]`, which then needs an
-  `At` lowering over a declared list on the shader targets. Corpus count
-  (tycho-perf, 2026-09-09): 0 sites on every target, because Tycho expands value
-  macros before compiling. The only case is the by-reference Voronoi row, whose
-  records fail at binding on Tycho's side (`Unknown operator d`), so the audit
-  harness cannot see it.
-- **CE-342.3** A point bound to an untyped parameter. The call site compiles an
-  impure point argument (`f((Random(), y))`), an impure callee, a multi-clause
-  callee and a parameter that the body never mentions (`k(P) := 5`) on
-  `javascript` and `glsl`, and on `interval-js` except the last. The point
-  argument selects a specialised definition of the callee
-  (`_fn_f_tuple_number__number__points_2`). Still declined: a recursive callee
-  (`rec((x, y))`) on `interval-js` ("a branch condition may be a collection at
-  run time") and on `glsl` ("parameter P has no static GLSL type"); `k((x, y))`
-  on `interval-js` ("no lowering for `Tuple`"); every call of a user function on
-  `python`; and a body that is invalid over a point (`P·P`, `2P + 1`), which is
-  correct, because the interpreter also gives an error (`no-product-between-points`,
-  `incompatible-type`). No consumer has asked for the rest.
-- **CE-342.4** `Map(h, list)` with a variadic user `h` is not unrolled: no
-  target compiles a function literal with a rest parameter, so the unroll would
-  gain nothing until one does. A library head with no required parameter
-  (`Map(Max, …)`) is not unrolled either, and the JavaScript target cannot
-  compile it as a callback.
-
-For Tycho: on `glsl`/`interval-js` the by-reference route needs the plot
-variables DECLARED (or supplied through `vars`). An `unknown`-typed argument
-could hold a collection that the by-reference call would broadcast, so
-`provablyScalarArg` refuses to inline over it. This is a soundness guard, not a
-defect.
-
 ### CE-343. A selection over a decidable list condition costs about 2 ms per element
 
 **Status:** ready; performance. Tycho ask 296.
+**Witness:** corpus; Tycho ask 296, document `s8ishknvhe` measured; Tycho request is ready by the header rule.
 
 For the body of Tycho's document `s8ishknvhe` (measured from source with `tsx`,
 which adds loader overhead): 500 points → 0.9–1.2 s, 2 000 points → 4.2 s; at 10
@@ -7746,37 +3722,10 @@ The compiled route does not take this body: Tycho's `javascript` compile of
 list-valued operand", `base-compiler.ts`), because `C_c` has a `number | tuple`
 element arm in its declared type (sub-item on `s8ishknvhe` in CE-268).
 
-### CE-344. `TYPE_CACHE` clears the whole map when it is full, which makes a 150× slowdown
-
-**Status:** proposed; performance. Re-open when `evictClear > 0` on a real
-workload.
-
-`TYPE_CACHE` (`common/type/parse.ts`) holds at most 2048 entries. When it is
-full it clears the entire map, on the assumption that the set of distinct type
-strings is small. Types with lengths break that assumption: each vector size is
-its own type string (`vector<finite_integer^303>`, `^304`, ...). Measured by
-re-parsing a working set of W distinct length-typed strings in a loop: W <= 2048
-costs 0.02-0.11 µs/parse; W = 2100 costs about 3-4 µs/parse (about 150× more),
-and stays flat above that, because each overflow drops 100% of the entries.
-
-A different eviction policy does not fix it: FIFO eviction of the oldest entry
-was slightly worse (5.8 vs 4.3 µs/parse over the limit), because a working set
-larger than the cache, re-parsed in a repeating order, is the worst case for any
-policy. The possible fixes:
-
-- **CE-344.1** Reduce the number of distinct type strings: cache a
-  length-parameterized type by structure, with the length as a parameter.
-- **CE-344.2** Size the cache to the working set.
-
-No real workload reaches the limit: the largest consumer document measured
-creates 329 distinct type strings (one with a length), with zero overflow clears
-and a 97.1% hit rate over 11,245 reads. `TYPE_CACHE` reports under
-`CE_CACHE_STATS` as the `typeParse` class (hits, cold stores, and `evictClear`,
-the count of whole-cache clears).
-
 ### CE-346. Compiling a `Derivative` of a deeply nested body runs the failed symbolic attempt to its budget
 
 **Status:** ready; performance. Tycho item 177.
+**Witness:** corpus; Tycho item 177 with repro script; ready Tycho request. CE-346.1 is conditional on Tycho's compile-time requirements failing.
 
 Past the differentiation growth budget, the javascript compile emits an
 8th-order centered-difference stencil (`_SYS.nd`), and interpreted `N()`
@@ -7798,43 +3747,10 @@ throws at depth 37; the body without differentiation takes single-digit ms at
 every depth. Bare-engine reproduction: `docs/scratch/d209-ce-asks-repro.mts` in
 `dev/tycho`.
 
-### CE-347. A `Map` nested in the body of a `Map` still canonicalizes faster than linearly with depth
-
-**Status:** proposed; performance.
-
-A `Map` nested in the body of a `Map` grows faster than linearly (40 → 80
-levels: about 3.5×), because the `rebindParameters` of each level walks its
-whole body and the result type gains one `list<…>` level per `Map`. Removing
-this needs a memo of the symbols of each node in `binders.ts`. At 160 levels
-canonicalization overflows the stack.
-
-### CE-348. Evaluate-handler contract: two sites test `unknowns.length === 0` in a dynamic scope
-
-**Status:** proposed; performance.
-
-The evaluate-handler contract (enforce it in review): a `lazy: true` operator
-receives RAW operands and its handler owns their single evaluation
-(`Add`/`Multiply`/`Sum`/`Product`/`Measurement`/`NumeratorDenominator`
-re-evaluate legitimately). A non-lazy operator receives EVALUATED operands and
-must not evaluate them again: each call descends the unmemoized subtree again,
-and under nesting the cost grows exponentially. Do not delete the lazy
-`Add`/`Multiply` maps: that experiment stopped recursive unrolling at one level
-per pass.
-
-- **CE-348.1** Two sites test the dynamic-scope predicate
-  `unknowns.length === 0`, a latent instance of the same trap with no observed
-  misbehavior. Leave them until one shows a problem. The equation-equivalence
-  `eq` in `relational-operator.ts` is reachable only through a direct
-  `.isEqual()` on two equation objects (`Equal(eq1, eq2)` canonicalizes to a
-  chain), and that call runs at top level where `unknowns` is correct.
-  `isPolynomialExpression` in `linear-algebra.ts` (3 sites) is behind callers
-  that evaluate operands first. A plain `isConstant` swap at either site would
-  change how assigned symbols in unevaluated input are classified, so it is not
-  a free rename.
-
 ### CE-349. Cold-start bundle size and six benchmark cases slower than 0.73.0
 
-**Status:** proposed; performance. Measure before work.
+**Status:** ready; performance. Measure before work. Approved 2026-11-01.
+**Witness:** corpus; benchmark cases vs 0.73.0.
 
 - **CE-349.1** Cold-start bundle size.
 - **CE-349.2** Six benchmark cases are still < 0.95× vs 0.73.0. The worst is CE4
@@ -7849,7 +3765,8 @@ per pass.
 
 ### CE-350. Bignum kernels: remaining speed-ups against mpmath
 
-**Status:** proposed; performance, low priority.
+**Status:** ready; performance, low priority. Approved 2026-11-01.
+**Witness:** corpus; mpmath benchmark.
 
 At 1000 digits, `ln`, `exp`, `kˣ`, `sqrt` and `Γ` are as fast as mpmath or
 faster.
@@ -7872,8 +3789,9 @@ faster.
 
 ### CE-351. Symbolic evaluation is still slower than in 0.118.2
 
-**Status:** proposed; performance. Plan:
-docs/plans/2026-09-06-type-facts-per-type.md.
+**Status:** ready; performance. Plan:
+docs/plans/2026-09-06-type-facts-per-type.md. Approved 2026-11-01.
+**Witness:** corpus; symbolic benchmark, plan doc.
 
 The symbolic benchmark cases became 1.7 to 2.8 times slower in steps at 0.119.0,
 0.120.0, 0.121.0 and 0.122.0. Fixes in 0.124.1, 0.124.2 and 0.124.3 recovered
@@ -7929,39 +3847,10 @@ per build, a warm-up pass, then the median of up to 50 calls per case) and
 prints one JSON line per engine and case; compare the `ce-pub` and `ce-current`
 lines. Bundles 0.116.0 to 0.123.2 are in `benchmarks/.competitors/`.
 
-### CE-352. Faster free-variable `eq()`: two designed speed-ups
-
-**Status:** proposed; performance.
-
-The free-variable branch of `eq()` samples before it runs the expand+simplify
-proof. That change met the need of the Tycho witness (14.6 s → 6.2 s). Build
-these only when a workload needs them:
-
-- **CE-352.1** Memo of `_expand(x).simplify()` per engine, for a workload where
-  repeated comparisons agree under sampling, so the symbolic proof still runs
-  each time. Key: structural hash, with an `isSame` guard. Invalidate on
-  `_mutationGeneration` and on the `_writeVersion` of each free symbol (plain
-  `_generation` changes on each loop-index write and would never hit inside a
-  drain). A bundle-patch prototype measured 14.6 s → 6.6 s on the witness.
-- **CE-352.2** Hoist loop-invariant broadcast operands. Each broadcast element
-  evaluation resolves invariant scalar operands to new nodes (a WeakMap keyed on
-  node identity got zero hits within a drain), so `stochasticEqual` compiles the
-  same tree again for each element. Hoisting the operands once per drain keeps
-  node identity and allows a compiled-evaluator cache per node. Do it only if a
-  witness shows that the sampling compile is the hot part; today one comparison
-  costs a compile and about 50 point evaluations.
-
-### CE-353. Bundle cold-start time
-
-**Status:** proposed; performance.
-
-This is the only performance item left from the July 2026 reviews. The
-cache-based speed-ups were measured and gave no gain (2026-07-18): do not try
-them again without a new profile.
-
 ### CE-442. A `D` node with a closed form computes the derivative again at each evaluation
 
-**Status:** proposed; performance. Found 2026-10-24 while measuring CE-313.
+**Status:** ready; performance. Found 2026-10-24 while measuring CE-313. Approved 2026-11-01.
+**Witness:** corpus; Tycho row 424, 0.5 s per evaluation.
 
 Evaluating the same `D(PointY(h(u)), u)` node of Tycho's 29-piece path (row 424)
 again differentiates again each time, about 0.5 s per evaluation on a loaded
@@ -7970,22 +3859,13 @@ machine. `D` is `lazy`, so the memo of inert evaluations leaves it out, and
 Possible fix: record a successful result with the same dependency stamps as a
 decline.
 
-### CE-474. `simplify()` of a definite integral of a second derivative takes about 6 seconds
-
-**Status:** proposed; performance. Found 2026-10-25 while landing CE-332.
-
-`simplify()` of `Integrate(t ↦ D(D(√(t+√t), t), t), [1, 2])` takes about 6 s
-(5.9 s at HEAD `472df47ee`, 6.9 s with the CE-332 change). The derivative itself
-is fast; the time is probably the antiderivative attempt of the integration.
-Profile it first, then find whether the integral could use the antiderivative of
-the second derivative (the first derivative) directly.
-
 ## Tests, tools, documentation and release tasks
 
 ### CE-540. The CI test job fails on `main` in four test files
 
 **Status:** ready; defect, small. Seen 2026-10-27 in the `main` run of commit
 `a23be5735` and in the run of pull request #482.
+**Witness:** corpus; CI failures on `main` run of `a23be5735` and PR #482.
 
 The `test` job of CI fails on Node 22 and Node 26. The failing tests:
 
@@ -8006,49 +3886,3 @@ The `test` job of CI fails on Node 22 and Node 26. The failing tests:
   draws in GPU statements), which is after `a23be5735`.
 - `test/compute-engine/ce-430-findfit-async-data.test.ts`, the three "a timer
   runs during …" tests, on Node 22 only.
-
-### CE-356. A `Solve` test returned `null` once in a loaded full-suite run
-
-**Status:** ready; defect, small. Not reproduced.
-
-The test "a parameter whose type is not declared is real" in
-`test/compute-engine/solve.test.ts` failed once in a full run (at commit
-`3bdee13b3`, full suite with the default workers):
-`Solve((x-1)(\tan(3x)-a)=0, x)` returned `null`. It passes alone, and the solve
-takes 50 to 700 ms. The engine has no ambient time limit (`solve.ts` reads
-`ce._deadline` only inside a `withTimeLimit` span, and the test arms none), so
-the time limit is not the cause. The test now has a 60 s jest timeout, because
-it runs about ten solves. If the `null` comes back, record the full output and
-the load average, and look for state that another test in the same file leaves
-on the shared engine.
-
-### CE-358. Remove the TypeScript 6 compatibility alias
-
-**Status:** proposed; task, small.
-
-`@typescript/native` (TypeScript 7) runs the build and the typecheck. The module
-name `typescript` is an alias for the TypeScript 6 API, because TypeScript 7.0
-has no programmatic API and ts-jest, typedoc and madge need one. Bare `npx tsc`
-is ambiguous: use the explicit native-binary path. Convention for new files:
-relative imports in `src/` use `.js` specifiers.
-
-Remove the alias when TypeScript 7.1 ships its new programmatic API and ts-jest,
-typedoc and madge support it. Until then the side-by-side install is the
-intended state.
-
-### CE-359. Test suites that fail only under load in a full-suite run
-
-**Status:** proposed; task.
-
-These suites failed in loaded full-suite runs and passed alone on an idle box.
-Before you blame the change under test in a full-suite report, check these. If
-one fails in a full run on a quiet box, investigate it as a real defect.
-
-- **CE-359.1** `functions.test.ts`, "ASYNC LANE KEEPS A SCOPED HANDLER'S LOCAL
-  SCOPE ALIVE" (6 tests): sensitive to concurrency timing (6-worker run).
-- **CE-359.3** `rubi-utils.test.ts`: one test of an R18 rung closure.
-- **CE-359.6** `integration-rules-substitutions.test.ts`: 1 test failed (R30
-  `∫Tanh(x)²/(a+b·Tanh(x))`) in one run and 5 tests (R29, R30, R8 and their
-  `RUBI_NO_*` tests) in another. The integral stayed inert, which agrees with
-  the 10-second rule-engine time limit running out under contention. Not run on
-  an idle box.

@@ -25,33 +25,35 @@ nightly run, tell the user; do not take over that investigation unless asked.
   instructions.
 - Keep changes focused. Check documented contracts before treating surprising
   behavior as a bug. Do not change a snapshot to hide a failure.
-- Fix every defect you discover; never drop one. Fix it in the same change when
-  the change introduces it, when it is in code the change rewrites, or when it
-  blocks the task. A defect in older code that the change does not touch is the
-  next task, done in the same session after this change is staged, with its own
-  review (`~/.claude/SHARED-BOX-PROTOCOL.md` §5.2). Record a defect in
-  `ROADMAP.md` instead only when the fix needs a user decision; the entry then
-  states the decision, with an example, and the defect is reported to the user
-  in the same turn. A fix needs a user decision only when no option is clearly
-  sound, or when the fix changes a documented contract. If you can name the
-  option you recommend, the fix does not need a decision: implement it and
-  report the alternatives. These are not reasons to defer a fix: the diff grows,
-  snapshots or pinned emissions change (measure and report them instead), or a
-  sub-agent reported it as "not fixed". Use permanent `CE-<n>` references,
+- Fix every defect that the change introduces, that is in code the change
+  rewrites, or that blocks the task, in the same change. These are not reasons
+  to defer such a fix: the diff grows, snapshots or pinned emissions change
+  (measure and report them instead), or a sub-agent reported it as "not fixed".
+  A defect in older code that the change does not touch is not fixed in this
+  task, and is not queued in a handoff file or in a report: record it in
+  `ROADMAP.md` as one entry with its witness and the strength of the witness
+  (the header of `ROADMAP.md` defines both), or, for a compiled-code difference
+  with a `crafted` witness, as one line in the known-limitations list of
+  `docs/COMPILATION-MODEL.md`. The user picks the next item from `ROADMAP.md`. A
+  fix needs a user decision only when no option is clearly sound, or when the
+  fix changes a documented contract; the entry is then `decision needed` and
+  states the options with an example. Use permanent `CE-<n>` references,
   allocated from the next-free-reference line.
-- Compiled code must agree with the interpreter for a well-typed expression
-  whose inputs are supplied and hold values of their declared (or inferred)
-  types. A compilation declines when a sub-expression is invalid or has the
-  static type `error`. Every other case is unspecified, and compiled code need
-  not check for it: an error that the static type does not show
-  (`If(u > 1, "ab", 1) + 1`), an input value outside its type (`"ab"` for an
-  input declared `real`, `NaN` for `real`, `7` for `real<0..5>`), an input left
-  out. The contract is in `docs/COMPILATION-MODEL.md`, "Fail closed". One
-  exception: in the JavaScript `bigint` compile mode, a `number` result (`NaN`
-  or `Infinity`) means that a sub-expression had no finite value, and it need
-  not equal the interpreter's value; a `bigint` or `boolean` result must. A
-  `bigint` cannot hold a non-finite value, and the one catch that returns it
-  skips every operator between the pole and the result
+- Compiled code gives the interpreter's value within the caveats of
+  `docs/COMPILATION-MODEL.md`, "Caveats of compiled code": the precision of the
+  target, and `NaN`, `0`, `±Infinity`, `undefined`, a throw or a decline where
+  the interpreter gives `Missing`, `Nothing`, `Indeterminate`, an unevaluated
+  form or an error. A wrong finite number or a wrong shape for a program with
+  inputs of their declared types is a defect. A compilation declines when a
+  sub-expression is invalid or has the static type `error`. Every other case is
+  unspecified, and compiled code need not check for it: an error that the static
+  type does not show (`If(u > 1, "ab", 1) + 1`), an input value outside its type
+  (`"ab"` for an input declared `real`, `NaN` for `real`, `7` for `real<0..5>`),
+  an input left out. One exception: in the JavaScript `bigint` compile mode, a
+  `number` result (`NaN` or `Infinity`) means that a sub-expression had no
+  finite value, and it need not equal the interpreter's value; a `bigint` or
+  `boolean` result must. A `bigint` cannot hold a non-finite value, and the one
+  catch that returns it skips every operator between the pole and the result
   (`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`, §3.4).
 - Compiled code settles every shape at compile time and emits no run-time test
   of a type. The shape of a node (scalar, list, tuple, string, complex, ...)
@@ -76,17 +78,18 @@ nightly run, tell the user; do not take over that investigation unless asked.
   that case is documented with an example, but it never gives a different value.
   A more precise version is a separate task, done when the user asks for it by
   name.
-- A reachable shape in the cases above, outside the declines that the
-  static-shape rule requires, that a compile target declines (it falls back to
-  the interpreter) or that gives a different value from the interpreter is a
-  defect, even when a corpus shows it only a few times. How often it occurs sets
-  the priority of the fix; it never closes the item. Do not resolve a ROADMAP
-  entry with "the decline stays" or "no consumer has asked".
-- Judge a design change first by correctness (compiled values equal the
-  interpreter's in the cases above; an expression whose static type is `error`
-  declines) and by code-generation coverage (declines removed per target). The
-  number of changed tests and snapshots is a cost to report, not a reason to
-  choose.
+- A decline is not a defect: it falls back to the interpreter, and it is the
+  preferred fix for a case that would otherwise need a handler of its own. A
+  decline is removed, or a wrong value is fixed with a handler, only for a
+  `corpus` or `plausible` witness. A `crafted` witness is resolved with a
+  decline or a known-limitations line, and an allowed difference with no entry
+  at all.
+- Judge a design change first by correctness within the caveats (a wrong finite
+  value or shape is never acceptable; an expression whose static type is `error`
+  declines), then by the code it removes or adds: a change that gives the same
+  values with fewer handlers is better. Declines removed per target count only
+  for `corpus` or `plausible` witnesses. The number of changed tests and
+  snapshots is a cost to report, not a reason to choose.
 - When working autonomously, continue independent work while a decision is
   pending. Report unresolved decisions and verification failures explicitly. At
   a design choice, take the option you recommend, continue to the end, and
@@ -102,7 +105,8 @@ nightly run, tell the user; do not take over that investigation unless asked.
   user (the states are defined in the header of `ROADMAP.md`). Do not add an
   entry for an idea (a capability, a performance change, a design or a task):
   put it in the report to the user, and add it as `proposed` only when the user
-  says to record it.
+  says to record it. Every defect entry names its witness and the strength of
+  the witness.
 - Do small follow-up work without asking, and report it: a review that the
   process still requires, a ROADMAP entry for a limitation the user decided, and
   removal of the worktrees, references and temporary files you created. Commits,

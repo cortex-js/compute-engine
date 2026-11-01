@@ -105,24 +105,26 @@ Before returning a delegated implementation:
    satisfy a generic completion checklist.
 4. For each defect found and not fixed, say which of these applies: a user
    decision blocks the fix (name it, with an example), or the defect is in
-   older code that the task does not change (report it as a follow-up task,
-   with a reproduction). "Out of scope" alone is not a reason; a defect that
+   older code that the task does not change (record it in `ROADMAP.md` with
+   its witness and strength, or in the known-limitations list of
+   `docs/COMPILATION-MODEL.md` for a compiled-code difference with a `crafted`
+   witness, and name the entry in the report). "Out of scope" alone is not a reason; a defect that
    the change introduces, or in code it rewrites, is fixed in the change.
 5. Before you ask the orchestrator or the user to decide, check the facts the
    question rests on: run the probe, and read the documented contract in
    `docs/` with its context.
 
 The orchestrator sorts every unfixed defect of a sub-agent report before writing
-its own summary: fix it (or send it back), queue it as the next task when it is
-in older code that the change does not touch, ask the user for the blocking
-decision, or state why it is not a defect. Only a defect that waits for a user
-decision goes to `ROADMAP.md` as an open entry. A queued follow-up is listed in
-the report and done after the current change is staged.
+its own summary: fix it (or send it back) when the change introduced it, record
+it in `ROADMAP.md` with its witness when it is in older code that the change
+does not touch, ask the user for the blocking decision, or state why it is not
+a defect (an allowed difference of compiled code is not one). No defect is
+queued for the session or carried in a handoff file.
 
 Before staging, the orchestrator lists each `ROADMAP.md` entry that the task
 created, and for each one states in one line why the current change does not
-fix it: the defect is in older code that the change does not touch (it is the
-next task), or a user decision blocks the fix (name the decision, and say why
+fix it: the defect is in older code that the change does not touch (name the
+file and the function), or a user decision blocks the fix (name the decision, and say why
 no option is clearly sound). An entry without one of these reasons blocks
 staging: fix the defect in the change first. The list goes in the report.
 

@@ -17,12 +17,17 @@ Label each finding with where the defect comes from:
 
 - **introduced**: the diff causes it, or it is in a line that the diff adds or
   changes;
-- **older**: it is in code that the diff does not change, and the review
-  reached it with a new example.
+- **older**: it is in code that the diff does not change, and a test, an
+  example or a path of the diff shows it. A review reads the diff: it does not
+  search older code for new cases, and it does not build a program to reach
+  one.
 
 Both kinds are reported. An `introduced` finding is fixed in the change; an
-`older` one becomes a follow-up task
-(`~/.claude/SHARED-BOX-PROTOCOL.md` §5.2). In a second review round, which
+`older` one is recorded in `ROADMAP.md` with its witness and strength (the
+header of `ROADMAP.md`), not fixed in the change and not queued as a next
+task (`~/.claude/SHARED-BOX-PROTOCOL.md` §5.2). A difference between
+compiled code and the interpreter that `docs/COMPILATION-MODEL.md`, "Caveats
+of compiled code", allows is not a finding. In a second review round, which
 reads only the delta of the round-1 fixes, report only regressions that those
 fixes caused.
 
@@ -176,7 +181,7 @@ there.
 - Do not edit generated files by hand: `src/api.md`, `src/epsil/docs/errors.md`,
   `src/epsil/docs/library.md`.
 - A defect found during the work is fixed in the same change, or added to
-  `ROADMAP.md`; a "follow-up" comment alone is a finding.
+  `ROADMAP.md` with its witness; a "follow-up" comment alone is a finding.
 - Never update a snapshot marked `@fixme`.
 
 ## Operator and regression checks

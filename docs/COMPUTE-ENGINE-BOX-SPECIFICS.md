@@ -151,7 +151,9 @@ Follow [BUILD.md](../BUILD.md#releasing-to-npm) for releases.
 
 Before a long run, write `docs/scratch/<date>-<topic>-handoff.md` as required by
 the shared protocol. Record the command, log path, and actual exit status when
-it finishes; keep the handoff current.
+it finishes; keep the handoff current. The file is not a work queue: a defect
+found during the work goes to `ROADMAP.md` with its witness (protocol §5.2),
+and the file lists no next tasks. Delete it when the work is committed.
 
 ## §9 Context size, agent types and work areas
 
