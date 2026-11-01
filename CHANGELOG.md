@@ -276,6 +276,15 @@
 
 ### Bug Fixes
 
+- **With `evaluateAsync()`, a lazy collection that leaves a `Block` reads the
+  locals of the block, as with `evaluate()`.** The function literal of the
+  collection read a local as a free symbol after the block ended:
+  `Block(Declare(c, 'real', 5), Map(k ↦ c + k, [1, 2]))` gave `[c + 1, c + 2]`
+  instead of `[6, 7]`. This also holds for a function defined in the block and
+  passed to the collection (`h(k) := c + k`, then `Map(h, [1, 2])`), for a
+  function literal returned as the value of the block, and for nested blocks
+  in a function body.
+
 - **An exact integer power or binomial near the 1,000,000-digit limit is
   computed.** The interpreter leaves an exact `Power` or `Binomial` with more
   than 1,000,000 decimal digits unevaluated, and two estimates of the number

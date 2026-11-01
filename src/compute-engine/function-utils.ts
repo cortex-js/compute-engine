@@ -3859,10 +3859,86 @@ export function resolveEscapingLambda(
     // The literal escapes as a closure: when it is defined in a nested block
     // of a running function or loop, capture that block's bindings now, as
     // the evaluation of a function literal does (`captureNestedLocals`).
-    if (literal !== undefined)
-      return captureNestedLocals(ce, literal) ?? literal;
+    if (literal !== undefined) return closeOverBlockRun(ce, literal);
   }
   return expr;
+}
+
+/**
+ * `fn`, a function literal that leaves the block whose run ends now, re-rooted
+ * on the run of that block when it reads the block through the scope the run
+ * copies. Then, when `nested` is true, the locals of the nested blocks in use
+ * are captured (`captureNestedLocals`). Call it while the scope of the block
+ * is the current lexical scope.
+ *
+ * On the asynchronous route, a block runs in an activation of its scope (a
+ * copy with its own value definitions, `asyncScopeActivation()` in
+ * `boxed-function.ts`). A function literal of the block has the scope that
+ * the activation copies (the template) in its chain, and the template does
+ * not hold the values of this run. While the block runs, a call of the
+ * literal reads the activation (`definingScopeOf`, `liveScopeOf`). After the
+ * block ends, the activation is no longer on the context stack, so a literal
+ * that leaves the block, alone or in a lazy collection that calls it later,
+ * read the local as a free symbol:
+ * `Block(Declare(c, 'real', 5), Map(k ↦ c + k, [1, 2]))` gave `[c + 1, c + 2]`
+ * with `evaluateAsync()` and `[6, 7]` with `evaluate()`. On the synchronous
+ * route the block writes its locals into the template, which keeps them after
+ * the block ends, so nothing is re-rooted there. The literal is re-rooted as
+ * `captureClosures` re-roots a closure on the frame of a call that ends.
+ *
+ * The chain is tested before the capture of the nested blocks: when the
+ * block is a nested block of a running function (an `If` branch), its
+ * template is in use (`enterNestedBodyScopes`), and that capture replaces it
+ * with a copy of its bindings, which do not hold the values of this run.
+ *
+ * A literal whose chain reaches the activation itself before the template
+ * (a nested block that ended re-rooted it on the scope that holds its own
+ * locals, whose parent is this activation) has the activation replaced in
+ * the same way. Otherwise the activation stays in the chain, and the end of a
+ * call whose body holds the blocks drops it (`rerootCapturedLocals`): with
+ * three nested blocks that declare `b`, `c` and `d` in a function body, a
+ * `Map(k ↦ b + c + d + k, [1, 2])` in the innermost block lost `c`.
+ *
+ * The literal is re-rooted on a scope that holds the bindings of the
+ * activation (`snapshotNestedScope`, as `captureNestedLocals` captures a
+ * nested block), not on the activation itself: when the block is in the body
+ * of a function, the end of that call re-roots the literal again on the call
+ * frame (`captureClosures`), and that re-rooting keeps only such scopes
+ * (`rerootCapturedLocals`). The scope is made once for each activation, so
+ * the literals of one run of the block share the bindings it holds.
+ */
+const BLOCK_RUN_CAPTURES = new WeakMap<Scope, Scope>();
+
+function closeOverBlockRun(
+  ce: ComputeEngine,
+  fn: Expression,
+  nested = true
+): Expression {
+  const scope = ce.context.lexicalScope;
+  const template = scopeActivationTemplate(scope);
+  let result = fn;
+  if (template !== undefined && isFunction(fn, 'Function')) {
+    const body = fn.op1;
+    let s: Scope | null | undefined = isFunction(body)
+      ? body.localScope?.parent
+      : undefined;
+    while (s != null && s !== scope && s !== template) s = s.parent;
+    if (s != null) {
+      let run = BLOCK_RUN_CAPTURES.get(scope);
+      if (run === undefined) {
+        run = snapshotNestedScope(ce, scope, scope.parent);
+        // The scope holds the locals of the run of a list of statements, so
+        // an `Assign` in the literal stores the values they hold, as it does
+        // with the activation (`snapshotRunVariables`).
+        if (isStatementListScope(scope)) STATEMENT_LIST_SCOPES.add(run);
+        BLOCK_RUN_CAPTURES.set(scope, run);
+      }
+      // `s` is the scope that the chain reaches: the template, or the
+      // activation itself.
+      result = captureClosures(ce, fn, run, s);
+    }
+  }
+  return nested ? (captureNestedLocals(ce, result) ?? result) : result;
 }
 
 /**
@@ -3946,7 +4022,7 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
       const literal = (binding.operator as { _lambdaLiteral?: Expression })
         ._lambdaLiteral;
       if (literal === undefined) return undefined;
-      return captureNestedLocals(ce, literal) ?? literal;
+      return closeOverBlockRun(ce, literal);
     }
     if (visiting.has(binding)) return undefined;
     const value = binding.value.value;
@@ -3971,12 +4047,12 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
       const literal = (binding.operator as { _lambdaLiteral?: Expression })
         ._lambdaLiteral;
       if (literal === undefined) return undefined;
-      return captureNestedLocals(ce, literal) ?? literal;
+      return closeOverBlockRun(ce, literal);
     }
     const value = binding.value.value;
     if (value === undefined || !value.type.matches('function'))
       return undefined;
-    return captureNestedLocals(ce, value) ?? value;
+    return closeOverBlockRun(ce, value);
   };
 
   const walk = (e: Expression, inLazy: boolean): Expression => {
@@ -3997,8 +4073,11 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
       return result;
     }
     if (!isFunction(e)) return e;
-    if (e.operator === 'Function')
-      return inLazy ? (captureNestedLocals(ce, e) ?? e) : e;
+    if (e.operator === 'Function') {
+      // A literal outside a lazy collection has captured the nested blocks
+      // when it was evaluated.
+      return closeOverBlockRun(ce, e, inLazy);
+    }
     // A store-backed list holds numbers only, and reading its `ops` would
     // box every element.
     if (e._numericStore !== undefined) return e;
