@@ -6,6 +6,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { literalTakesArgumentCount } from './compile-parameter-defaults.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -78,7 +79,8 @@ const NON_RETAINING_READS = new Set([
 export function inPlaceUpdateChains(
   step: Expression
 ): ReadonlyArray<Expression>[] | undefined {
-  if (!isFunction(step, 'Function') || step.nops !== 3) return undefined;
+  if (!isFunction(step, 'Function') || !literalTakesArgumentCount(step, 2))
+    return undefined;
   const acc = functionLiteralParameterName(step.ops[1]);
   if (!acc || acc === functionLiteralParameterName(step.ops[2]))
     return undefined;

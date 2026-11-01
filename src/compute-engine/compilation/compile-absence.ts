@@ -34,7 +34,10 @@ import {
   isString,
   isFunction,
 } from '../boxed-expression/type-guards.js';
-import { functionLiteralBoundNames } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralBoundNames,
+  optionalParameterTarget,
+} from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import type {
@@ -433,8 +436,10 @@ export function findDependentLocals(
         for (const binding of e.localScope.bindings.values()) bind(binding);
       if (h === 'Function' && isFunction(e.ops[0], 'Block')) {
         const scope = e.ops[0].localScope;
-        for (const param of e.ops.slice(1))
+        for (const written of e.ops.slice(1)) {
+          const param = optionalParameterTarget(written);
           if (isSymbol(param)) bind(scope?.bindings.get(param.symbol));
+        }
       }
       for (const op of e.ops) visit(op, inner);
     };

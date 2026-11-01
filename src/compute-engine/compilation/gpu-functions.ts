@@ -61,6 +61,7 @@ import {
   isPartialApplication,
   partialApplicationDecline,
 } from './partial-application.js';
+import { completedLiteralArguments } from './compile-parameter-defaults.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { rangeCount } from '../numerics/range-count.js';
 import {
@@ -4339,8 +4340,9 @@ function gpuAppliedBody(
   }
   if (isPartialApplication(args))
     return partialApplicationDecline(args, target.language ?? 'gpu');
-  const [callee, ...actuals] = args;
+  const [callee, ...written] = args;
   if (callee === undefined) return 'missing function';
+  let actuals: ReadonlyArray<Expression> = written;
   const literal = isFunction(callee, 'Derivative')
     ? BaseCompiler.appliedDerivativeLiteral(args)
     : callee;
@@ -4355,6 +4357,12 @@ function gpuAppliedBody(
       `the callee on target '${target.language}'.`
     );
   }
+  // A call that leaves out parameters with a default value is completed with
+  // the default operands, as operands written at this call site
+  // (`completedLiteralArguments`): a shader function has no default
+  // parameters.
+  const completed = completedLiteralArguments(literal, actuals);
+  if (completed !== undefined) actuals = completed;
   const params = literal.ops.slice(1);
   if (params.length !== actuals.length)
     return (

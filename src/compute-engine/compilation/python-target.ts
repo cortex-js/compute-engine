@@ -80,7 +80,16 @@ import {
   isRestParameter,
   isScalarType,
   isWideParameterType,
+  optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
+import {
+  callSiteDefault,
+  literalParameterDefault,
+} from '../boxed-expression/parameter-defaults.js';
+import {
+  literalAcceptsArgumentCount,
+  literalTakesArgumentCount,
+} from './compile-parameter-defaults.js';
 import { freeSymbolNames } from '../boxed-expression/utils.js';
 import { compositionLiteral } from '../function-utils.js';
 import {
@@ -7075,7 +7084,43 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       var: (id) => (params.includes(id) ? id : target.var(id)),
       ...BaseCompiler.withBoundScope(scope, params),
     });
-    return `(lambda ${params.join(', ')}: ${bodyCode})`;
+    // A parameter with a default value (`(x, k = 2) => x * k`). The default
+    // is compiled as an operand written at the call site (`callSiteDefault`),
+    // outside the scope of the parameters. A number, string or boolean
+    // default is a Python default parameter, `lambda x, k=2: …`. A Python
+    // default is evaluated once, when the lambda is made, so a symbol
+    // default (whose value is read at each call, as the interpreter reads
+    // it) and an empty list or dictionary (a new value at each call, as in
+    // the interpreter) take an omission marker instead: a fresh `object()`
+    // that no caller can pass, bound once around the lambda, and the body
+    // runs with the default in place of the marker:
+    // `(lambda _tv1: (lambda x, k=_tv1: (lambda k: …)(d if k is _tv1 else
+    // k)))(object())`. The marker has a fresh name, which no parameter,
+    // symbol or other emitted name uses, so nothing can shadow it.
+    let marker: string | undefined;
+    const declared: string[] = [];
+    const marked: [string, string][] = [];
+    args.slice(1).forEach((p, i) => {
+      const d = optionalParameterDefault(p);
+      if (d === undefined) {
+        declared.push(params[i]);
+        return;
+      }
+      const code = compile(callSiteDefault(d));
+      if (literalParameterDefault(d)?.kind === 'value') {
+        declared.push(`${params[i]}=${code}`);
+        return;
+      }
+      marker ??= BaseCompiler.tempVar(target);
+      declared.push(`${params[i]}=${marker}`);
+      marked.push([params[i], code]);
+    });
+    if (marker === undefined)
+      return `(lambda ${declared.join(', ')}: ${bodyCode})`;
+    const filled = `(lambda ${marked.map(([n]) => n).join(', ')}: ${bodyCode})(${marked
+      .map(([n, code]) => `${code} if ${n} is ${marker} else ${n}`)
+      .join(', ')})`;
+    return `((lambda ${marker}: (lambda ${declared.join(', ')}: ${filled}))(object()))`;
   },
 
   // --- List-shaped collection operators -------------------------------------
@@ -7518,7 +7563,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       }
       return `(lambda _l: float('nan') if len(_l) == 0 else ${builtin})(${coll})`;
     }
-    if ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)) {
+    if (
+      (isFunction(op, 'Function') && literalTakesArgumentCount(op, 2)) ||
+      isSymbol(op)
+    ) {
       if (init === undefined || init === null)
         throw new Error(
           `Could not compile \`Reduce\`: a custom combiner compiles only with an explicit ` +
@@ -7583,7 +7631,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     else assertAccumulatorFitsStep('Scan', op, init);
     const fn =
       builtin ??
-      ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)
+      ((isFunction(op, 'Function') && literalTakesArgumentCount(op, 2)) ||
+      isSymbol(op)
         ? pyFnArg(
             'Scan',
             op,
@@ -7705,12 +7754,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter and a `TypeError` in Python, and a literal with no
     // parameter ignores its arguments in the interpreter and raises in
     // Python. Both are declined. A rest parameter takes any count of
-    // trailing arguments.
+    // trailing arguments. A parameter with a default value can be left out:
+    // the Python lambda has a default for it.
     if (isFunction(args[0], 'Function')) {
       const params = args[0].ops.slice(1);
       if (
         !params.some((p) => isRestParameter(p)) &&
-        params.length !== args.length - 1
+        !literalAcceptsArgumentCount(args[0], args.length - 1)
       )
         throw new Error(
           `Could not compile \`Apply\`: the function takes ${params.length} ` +

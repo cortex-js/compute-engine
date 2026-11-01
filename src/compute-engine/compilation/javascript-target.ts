@@ -34,6 +34,12 @@ import {
   type CseHarvestOptions,
 } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
+import {
+  literalAcceptsArgumentCount,
+  literalDefaultFills,
+  literalHasParameterDefaults,
+  literalTakesArgumentCount,
+} from './compile-parameter-defaults.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   provenPointWidth,
@@ -2712,7 +2718,8 @@ function compilesToCheckedArray(
     if (name !== undefined && target?.reboundFunctions?.has(name) === true)
       return false;
     const literal = BaseCompiler.callbackLiteral(combiner, target);
-    if (literal === undefined || literal.nops !== 3) return false;
+    if (literal === undefined || !literalTakesArgumentCount(literal, 2))
+      return false;
     // The value of a block body is its last statement. A body whose earlier
     // statements are all declarations (`let v = …`) whose initializers
     // mention no `Return` has no other exit, so its last statement is read;
@@ -4606,17 +4613,22 @@ function compileColorEntryOperand(
  * for it rather than a color.
  */
 /**
- * Throw when the function literal `literal` does not take exactly `count`
+ * Throw when the function literal `literal` does not take `count`
  * arguments. The interpreter curries an application with too few arguments
  * and rejects one with too many (`makeLambda`, function-utils.ts). A
  * JavaScript call does neither: it binds a missing parameter to `undefined`
  * (the result is `NaN`) and ignores an extra argument. The application is
  * declined, and the caller can fall back to the interpreter.
+ *
+ * A literal with parameters with a default value takes any count from the
+ * number of its required parameters to the number of its parameters
+ * (`literalAcceptsArgumentCount()`): the compiled literal fills each
+ * parameter that the call leaves out (`compileExprFunctionLiteral`).
  */
 function assertApplyArity(literal: Expression, count: number): void {
   if (!isFunction(literal, 'Function')) return;
   const paramCount = literal.nops - 1;
-  if (paramCount !== count)
+  if (!literalAcceptsArgumentCount(literal, count))
     throw new Error(
       `Could not compile \`Apply\`: the function takes ${paramCount} parameter(s) but ` +
         `${count} argument(s) are supplied — the interpreter curries or ` +
@@ -10644,15 +10656,16 @@ function splitPreambleDefs(
   registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
   perCallIdentifiers: ReadonlyArray<string>,
   varsObject: boolean
-): { hoisted: string; perCall: string } {
+): { hoisted: string; perCall: string; perCallNames: string[] } {
   const defs = registry.defs;
-  if (defs.size === 0) return { hoisted: '', perCall: '' };
+  if (defs.size === 0) return { hoisted: '', perCall: '', perCallNames: [] };
   const identifier = (name: string): RegExp => identifierPattern(name);
   const readers = perCallIdentifiers.map(identifier);
   if (varsObject) readers.push(VARS_OBJECT_READ);
   const perCallDefNames: RegExp[] = [];
   const hoisted: string[] = [];
   const perCall: string[] = [];
+  const perCallNames: string[] = [];
   for (const [name, code] of defs) {
     const stays =
       registry.hoistable?.has(name) !== true ||
@@ -10660,12 +10673,60 @@ function splitPreambleDefs(
       perCallDefNames.some((r) => r.test(code));
     if (stays) {
       perCall.push(code);
+      perCallNames.push(name);
       perCallDefNames.push(identifier(name));
     } else hoisted.push(code);
   }
   return {
     hoisted: hoisted.length > 0 ? hoisted.join('\n') + '\n' : '',
     perCall: perCall.length > 0 ? perCall.join('\n') + '\n' : '',
+    perCallNames,
+  };
+}
+
+/**
+ * The preamble definitions named `names` (in emission order) of a function
+ * literal compiled on the lambda route, split around the statements that
+ * fill the parameters with a default value that a call leaves out.
+ *
+ * `before` holds the definitions that the compiled defaults `defaults`
+ * reference, directly or through another definition, and `after` holds the
+ * others. The fill runs between the two lists: a default reads every
+ * definition it needs, and a definition that can read a parameter runs
+ * after the fill, never with `undefined` for an omitted parameter. A
+ * default is compiled as an operand written at the call site, so no
+ * definition it references reads a parameter of the literal. The split is
+ * on the references of the defaults, not on a textual test of each
+ * definition for the parameter names: such a test also matches a name
+ * that a definition binds itself (`_val_g` for `g := (k) ↦ 10k` under a
+ * parameter `k`), and a default `g(1)` would then read `_val_g` before its
+ * declaration. `before` is closed under references, so each list keeps its
+ * order and `before` then `after` is a valid emission order. The fill
+ * runner of `ComputeEngineFunctionLiteral` runs only the definitions of
+ * `before`.
+ */
+function splitAroundDefaultFill(
+  registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+  names: ReadonlyArray<string>,
+  defaults: string
+): { before: string; after: string } {
+  const needed = new Set<string>();
+  const pending = [defaults];
+  while (pending.length > 0) {
+    const code = pending.pop()!;
+    for (const [name, text] of registry.defs)
+      if (!needed.has(name) && identifierPattern(name).test(code)) {
+        needed.add(name);
+        pending.push(text);
+      }
+  }
+  const join = (list: ReadonlyArray<string>): string =>
+    list.length > 0
+      ? list.map((n) => registry.defs.get(n)!).join('\n') + '\n'
+      : '';
+  return {
+    before: join(names.filter((n) => needed.has(n))),
+    after: join(names.filter((n) => !needed.has(n))),
   };
 }
 
@@ -10795,7 +10856,19 @@ export class ComputeEngineFunctionLiteral extends Function {
     reconstructionDigits?: number,
     /** As for `ComputeEngineFunction`: the value is returned without
      * `normalizeRunResult()`. */
-    rawResult = false
+    rawResult = false,
+    /** The fill of each parameter with a default value that a call leaves
+     * out: `run(count)` gives one `if (count < i + 1) p = …;` per such
+     * parameter (`lambdaDefaultFill()`), and `before` and `after` are the
+     * definitions of `perCall` split around the fill
+     * (`splitAroundDefaultFill()`). The fill runs after `hoisted` and
+     * `before`, which hold every definition a default reads, and before
+     * `after`. */
+    defaultFill?: {
+      run: (count: string) => string;
+      before: string;
+      after: string;
+    }
   ) {
     const perCallCode = `${perCall}${statementBody ?? `return ${body}`}`;
     super('_SYS', ...args, perCallCode);
@@ -10804,10 +10877,24 @@ export class ComputeEngineFunctionLiteral extends Function {
     // the definitions evaluated one time, here, and for each call below, as
     // in `ComputeEngineFunction`.
     let inner: ((...args: unknown[]) => unknown) | undefined;
-    if (hoisted) {
+    // The fill runs in a function of its own, with the definitions that
+    // the defaults read, and gives the completed argument list: the entry
+    // checks then read a default as they read an argument. Its first
+    // parameter is the number of arguments of the call, under a name with a
+    // `$`, which no parameter of the literal has.
+    let fill: ((...args: unknown[]) => unknown[]) | undefined;
+    if (hoisted || defaultFill !== undefined) {
       const previous = setReconstructionDigits(reconstructionDigits);
       try {
-        inner = twoStageRunner(this.SYS, hoisted, args, perCallCode);
+        if (hoisted)
+          inner = twoStageRunner(this.SYS, hoisted, args, perCallCode);
+        if (defaultFill !== undefined)
+          fill = twoStageRunner(
+            this.SYS,
+            hoisted,
+            ['$count', ...args],
+            `${defaultFill.before}${defaultFill.run('$count')}return [${args.join(', ')}];`
+          ) as (...args: unknown[]) => unknown[];
       } finally {
         setReconstructionDigits(previous);
       }
@@ -10817,6 +10904,17 @@ export class ComputeEngineFunctionLiteral extends Function {
     const preamble = hoisted + perCall;
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
+        // A parameter with a default value that the call leaves out is
+        // filled first, so that the entry checks read the default as they
+        // read an argument.
+        if (fill !== undefined && argumentsList.length < args.length) {
+          const previous = setReconstructionDigits(reconstructionDigits);
+          try {
+            argumentsList = fill(argumentsList.length, ...argumentsList);
+          } finally {
+            setReconstructionDigits(previous);
+          }
+        }
         const callArgs = entry
           ? checkEntry(entry, argumentsList)
           : argumentsList;
@@ -10842,11 +10940,17 @@ export class ComputeEngineFunctionLiteral extends Function {
       get: (target, prop) => {
         if (prop === 'toString')
           return (): string =>
-            statementBody
-              ? `(${args.join(', ')}) => { ${preamble}${statementBody} }`
-              : preamble
-                ? `(${args.join(', ')}) => { ${preamble}return ${body}; }`
-                : `(${args.join(', ')}) => ${body}`;
+            defaultFill !== undefined
+              ? `((...$args) => { let [${args
+                  .map((p, i) => (args.indexOf(p, i + 1) >= 0 ? '' : p))
+                  .join(
+                    ', '
+                  )}] = $args; ${hoisted}${defaultFill.before}${defaultFill.run('$args.length')}${defaultFill.after}${statementBody ?? `return ${body};`} })`
+              : statementBody
+                ? `(${args.join(', ')}) => { ${preamble}${statementBody} }`
+                : preamble
+                  ? `(${args.join(', ')}) => { ${preamble}return ${body}; }`
+                  : `(${args.join(', ')}) => ${body}`;
         if (prop === 'isCompiled') return true;
         return Reflect.get(target, prop);
       },
@@ -11938,6 +12042,86 @@ function broadcastStrideOfType(t: Type): number {
   return t.elements.every((e) => couldMatch(e.type, 'number')) ? n : 1;
 }
 
+/**
+ * The completion of the parameters with a default value of a function
+ * literal compiled as the root of a compilation (the lambda route), or
+ * `undefined` when no parameter has a default.
+ *
+ * `run(count)` is the code that `ComputeEngineFunctionLiteral` runs before
+ * each call with fewer arguments than parameters: one `if (count < i + 1)
+ * p = …;` per parameter with a default, where `count` is the code of the
+ * number of arguments of the call. A supplied argument is never replaced,
+ * also when it is `undefined` (the run-time value of `Missing`), as the
+ * interpreter keeps a `Missing` that a call supplies. A default can read a
+ * definition of the preamble (`_val_D` for a constant list `D`, `_fn_g` for
+ * a user function), so `run` comes after the definitions that the defaults
+ * reference (`splitAroundDefaultFill()`). `defaults` is the compiled default
+ * code, which the passes that look for references to definitions must also
+ * scan.
+ *
+ * `code(before, after, body)` is the function of the `code` field, with the
+ * preamble definitions `before` and `after` (`splitAroundDefaultFill()`) and
+ * the body statements `body`. When `before` is empty, it is an arrow with
+ * JavaScript default parameters (`(x, k = 2) => { return k * x; }`) when no
+ * parameter with a default can hold `Missing`. Otherwise it is an arrow
+ * with a rest parameter, which tests the number of arguments
+ * (`parameterCanBeMissing()`) after the definitions of `before`: a
+ * JavaScript default parameter is evaluated before the body declares them.
+ * The count is the length of the rest parameter, not `arguments.length`,
+ * because a parameter of the literal can have the name `arguments`. The
+ * name of the rest parameter, `$args`, contains a `$`, which no MathJSON
+ * symbol and so no emitted name contains.
+ *
+ * A default of a parameter annotated with a non-real number type is lifted
+ * to the `{ re, im }` value that the body reads (`_SYS.cplx`).
+ */
+function lambdaDefaultFill(
+  literalParams: ReadonlyArray<Expression>,
+  params: ReadonlyArray<string>,
+  compile: (e: Expression) => string
+):
+  | {
+      run: (count: string) => string;
+      defaults: string;
+      code: (before: string, after: string, body: string) => string;
+    }
+  | undefined {
+  const fills = literalDefaultFills(literalParams, compile, () => undefined);
+  if (!fills.some((f) => f !== undefined)) return undefined;
+  const value = (i: number): string => {
+    const t = functionLiteralParameterType(literalParams[i]);
+    const code = fills[i]!.code;
+    return t !== undefined && isNonRealNumber(t) ? `_SYS.cplx(${code})` : code;
+  };
+  const run = (count: string): string =>
+    fills
+      .map((f, i) =>
+        f === undefined
+          ? ''
+          : `if (${count} < ${i + 1}) ${params[i]} = ${value(i)}; `
+      )
+      .join('');
+  const defaults = fills
+    .map((f, i) => (f === undefined ? '' : value(i)))
+    .join(' ');
+  const byCount = fills.some((f) => f?.byCount === true);
+  const code = (before: string, after: string, body: string): string => {
+    if (!byCount && before === '')
+      return `(${params
+        .map((p, i) => (fills[i] === undefined ? p : `${p} = ${value(i)}`))
+        .join(', ')}) => { ${after}${body} }`;
+    // A name that two parameters share (`_` for each parameter without a
+    // name) is bound once, to the last of them, as in a `function` with
+    // duplicate parameters: a destructuring declaration refuses a name
+    // twice.
+    const bound = params.map((p, i) =>
+      params.indexOf(p, i + 1) >= 0 ? '' : p
+    );
+    return `((...$args) => { let [${bound.join(', ')}] = $args; ${before}${run('$args.length')}${after}${body} })`;
+  };
+  return { run, defaults, code };
+}
+
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
@@ -11966,6 +12150,9 @@ function compileToTarget(
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
     const lambdaScope = BaseCompiler.withBoundScope(target, params);
+    const defaults = lambdaDefaultFill(args.slice(1), params, (e) =>
+      BaseCompiler.compileValueOperand(e, target)
+    );
     // The parameters annotated `string`: a comparison over one has no value
     // when the caller omits it (`CompileTarget.omittableParams`).
     const textParams = new Set<string>();
@@ -12013,11 +12200,18 @@ function compileToTarget(
     // definition the artifact calls from two or more places is wrapped in a
     // last-call memo first (`memoizeSharedDefinitions`), so that both the
     // spliced `code` and the runner below carry the same definitions.
+    // The compiled defaults run with the definitions too, so the passes
+    // that keep the referenced definitions also scan them.
+    const referencing =
+      defaults !== undefined ? `${body} ${defaults.defaults}` : body;
     if (target.userFunctions) {
-      BaseCompiler.pruneUnreferencedVariantBases(target.userFunctions, body);
+      BaseCompiler.pruneUnreferencedVariantBases(
+        target.userFunctions,
+        referencing
+      );
       memoizeSharedDefinitions(
         target.userFunctions,
-        body,
+        referencing,
         params,
         false,
         javascriptStatements(target)
@@ -12044,7 +12238,27 @@ function compileToTarget(
     // `splitPreambleDefs`). `toString()` and `code` keep the single-body form.
     const split = target.userFunctions
       ? splitPreambleDefs(target.userFunctions, params, false)
-      : { hoisted: '', perCall: '' };
+      : { hoisted: '', perCall: '', perCallNames: [] };
+    // The fill of an omitted parameter runs after the definitions that the
+    // defaults reference and before the others (`splitAroundDefaultFill`),
+    // in `code` (all the definitions), in `callCode` and in `run()` (the
+    // per-call definitions).
+    const allAround =
+      defaults !== undefined && target.userFunctions
+        ? splitAroundDefaultFill(
+            target.userFunctions,
+            [...target.userFunctions.defs.keys()],
+            defaults.defaults
+          )
+        : { before: userDefs, after: '' };
+    const perCallAround =
+      defaults !== undefined && target.userFunctions
+        ? splitAroundDefaultFill(
+            target.userFunctions,
+            split.perCallNames,
+            defaults.defaults
+          )
+        : { before: split.perCall, after: '' };
     const statements = javascriptStatements(target);
     const statementBody = statements?.has(body)
       ? statements.functionBody(body)
@@ -12062,25 +12276,41 @@ function compileToTarget(
       split.hoisted,
       statementBody,
       reconstructionDigits,
-      kinds !== undefined
+      kinds !== undefined,
+      defaults !== undefined
+        ? { run: defaults.run, ...perCallAround }
+        : undefined
     );
     return {
       target: 'javascript' as const,
       success: true,
       runtimeVersion: RUNTIME_VERSION,
-      code: statementBody
-        ? `(${params.join(', ')}) => { ${userDefs}${statementBody} }`
-        : userDefs
-          ? `(${params.join(', ')}) => { ${userDefs}return ${body}; }`
-          : `(${params.join(', ')}) => ${body}`,
+      code:
+        defaults !== undefined
+          ? defaults.code(
+              allAround.before,
+              allAround.after,
+              statementBody ?? `return ${body};`
+            )
+          : statementBody
+            ? `(${params.join(', ')}) => { ${userDefs}${statementBody} }`
+            : userDefs
+              ? `(${params.join(', ')}) => { ${userDefs}return ${body}; }`
+              : `(${params.join(', ')}) => ${body}`,
       // A runtime evaluates the once-only definitions when it loads the code
       // and runs `callCode`, the same split as `run()`.
       ...(split.hoisted
         ? {
             preambleOnce: split.hoisted,
-            callCode: statementBody
-              ? `(${params.join(', ')}) => { ${split.perCall}${statementBody} }`
-              : `(${params.join(', ')}) => { ${split.perCall}return ${body}; }`,
+            callCode: defaults
+              ? defaults.code(
+                  perCallAround.before,
+                  perCallAround.after,
+                  statementBody ?? `return ${body};`
+                )
+              : statementBody
+                ? `(${params.join(', ')}) => { ${split.perCall}${statementBody} }`
+                : `(${params.join(', ')}) => { ${split.perCall}return ${body}; }`,
           }
         : {}),
       calling: 'lambda' as const,
@@ -13652,11 +13882,17 @@ function hoistedCallbackLambda(
   // is the number of parameter OPERANDS, which is not the number of names
   // they bind: a destructuring pattern is ONE parameter that binds a name per
   // leaf of the pattern, and a `_` leaf binds no name at all.
+  // A literal with a parameter with a default value can receive fewer
+  // arguments than its parameters: the shim then forwards only the
+  // arguments it receives, so the lambda fills each omitted parameter with
+  // its default (an explicit `undefined` is not an omitted argument for a
+  // fill that tests the number of arguments).
   return firstCallBoundLambda(
     lambda,
     callback.ops.length - 1,
     bindings,
-    target
+    target,
+    literalHasParameterDefaults(callback)
   );
 }
 
@@ -13664,6 +13900,9 @@ function hoistedCallbackLambda(
  * Wrap the compiled lambda `lambda` so that the loop-invariant `bindings`
  * its body reads are declared next to it and assigned on its FIRST call,
  * behind a flag. The shim forwards `arity` arguments to the held lambda.
+ * When `forwardReceived` is true, it forwards only the arguments it
+ * receives, at most `arity` of them, so that a call with fewer arguments
+ * reaches the lambda with fewer arguments.
  * `bindings` are in dependency order, as `hoistLoopInvariants` returns them:
  * a later right-hand side may read an earlier name. Shared by the callback
  * lowerings (`hoistedCallbackLambda`) and the quadrature lowering
@@ -13673,7 +13912,8 @@ function firstCallBoundLambda(
   lambda: string,
   arity: number,
   bindings: ReadonlyArray<LoopInvariantBinding>,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  forwardReceived = false
 ): string {
   const statements = javascriptStatements(target);
   const flag = BaseCompiler.tempVar(target);
@@ -13681,6 +13921,7 @@ function firstCallBoundLambda(
   const args = Array.from({ length: arity }, () =>
     BaseCompiler.tempVar(target)
   );
+  const rest = forwardReceived ? BaseCompiler.tempVar(target) : '';
   const declarations = `let ${flag} = false; let ${bindings
     .map(([name]) => name)
     .join(', ')}; `;
@@ -13691,9 +13932,11 @@ function firstCallBoundLambda(
         `${name} = ${code};`
     )
     .join(' ');
-  const shim =
-    `(${args.join(', ')}) => { if (!${flag}) { ${flag} = true; ` +
-    `${assignments} } return ${held}(${args.join(', ')}); }`;
+  const shim = forwardReceived
+    ? `(...${rest}) => { if (!${flag}) { ${flag} = true; ` +
+      `${assignments} } return ${held}(...${rest}.slice(0, ${arity})); }`
+    : `(${args.join(', ')}) => { if (!${flag}) { ${flag} = true; ` +
+      `${assignments} } return ${held}(${args.join(', ')}); }`;
   const holder =
     statements?.initialize(held, lambda) ?? `const ${held} = ${lambda};`;
   return (
@@ -14384,13 +14627,13 @@ function customCombiner(
 ): string | undefined {
   let callable = false;
   if (isFunction(op, 'Function')) {
-    callable = op.nops - 1 === 2;
+    callable = literalTakesArgumentCount(op, 2);
   } else if (isSymbol(op)) {
     // A block-local function (`function add(a, x) { … }` in the compiled
     // block) is found through the compiler's registry, an engine definition
     // through the engine (`BaseCompiler.callbackLiteral`).
     const literal = BaseCompiler.callbackLiteral(op, target);
-    if (literal !== undefined) callable = literal.nops - 1 === 2;
+    if (literal !== undefined) callable = literalTakesArgumentCount(literal, 2);
     else
       callable =
         target.operators?.(op.symbol) !== undefined &&
@@ -14491,7 +14734,11 @@ function listAccumulatorStep(
   target: CompileTarget<Expression>
 ): ReturnType<typeof BaseCompiler.combinerPlan> {
   const literal = plan?.op;
-  if (!isFunction(literal, 'Function') || literal.nops !== 3) return plan;
+  if (
+    !isFunction(literal, 'Function') ||
+    !literalTakesArgumentCount(literal, 2)
+  )
+    return plan;
   const [accParam, eltParam] = [literal.ops[1], literal.ops[2]];
   if (functionLiteralParameterType(accParam) !== undefined) return plan;
   let acc = BaseCompiler.foldAccumulatorArgType(coll, literal, init, target);

@@ -69,6 +69,7 @@ import {
   builtinCallbackArity,
   builtinOperatorDefinition,
 } from './builtin-callback.js';
+import { completedLiteralArguments } from './compile-parameter-defaults.js';
 import { isCompileBoundName } from './compiler-names.js';
 import {
   blockLocalFunction,
@@ -2341,6 +2342,21 @@ export function tryCompileLocalFunctionCall(
   // its expression type, so the map's value type carries no operand access.
   if (literal === undefined || !isFunction(literal, 'Function'))
     return undefined;
+
+  // A call that leaves out parameters with a default value is completed
+  // here with the default operands, compiled as operands written at this
+  // call site, as the interpreter completes the call
+  // (`completedLiteralArguments`). A rebound local is not completed: the
+  // literal in the scope is one of its values, and another value can have
+  // other defaults, so its call must supply every parameter (the arity
+  // check below).
+  if (rebound === undefined) {
+    const completed = completedLiteralArguments(literal, args);
+    if (completed !== undefined && completed.length > args.length) {
+      for (const a of completed.slice(args.length)) argTypes.push(a.type.type);
+      args = completed;
+    }
+  }
 
   // A rebound local is compiled on the JavaScript target only. The interval
   // target also binds a local function as a value, but it keeps the

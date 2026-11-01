@@ -857,6 +857,65 @@ record lives in the definition's closure, so two artifacts never share it. A
 definition called from one place, or only from the root, is emitted unchanged.
 The rule is implemented by `memoizeSharedDefinitions` in `javascript-target.ts`.
 
+### Parameters with a default value
+
+A parameter with a default value (`(x, k = 2) => x * k`, the MathJSON
+parameter `["Optional", "k", 2]`) is filled when a call leaves it out. A call
+of a declared function written in the expression needs no compiler work: its
+canonical form already holds the default (`f(3)` is `f(3, 2)`). The compiler
+fills the other calls. In each case the default is compiled as the operand
+that a call written at that place would read: a value default is the target's
+spelling of the value, a symbol default is a read of the symbol when the call
+is made, and `[]` or `{}` is a new value at each call (an empty dictionary
+does not compile on the JavaScript target, so a `{}` default declines there,
+as a written `{}` does).
+
+- JavaScript, a function literal compiled as a value (a `Map` callback, a
+  block-local function, the root of `compile()`): the emitted function fills
+  each parameter that the call leaves out. When the parameter's type cannot
+  hold `missing` (an annotation such as `k: number`), the fill is a JavaScript
+  default parameter, `(x, k = 2) => …`. A JavaScript default is also used for
+  a supplied `undefined`, which is the run-time value of `Missing`, and the
+  interpreter keeps a supplied `Missing`. So when the type can hold `missing`
+  (an unannotated parameter is `unknown`, or `k: number | missing = 2`), the
+  fill tests the number of arguments in a `function` expression:
+  `if (arguments.length < 2) k = 2`. A symbol default and a literal that a
+  broadcasting or complex-coercing wrapper calls take the fill in an outer
+  wrapper, so the inner wrappers receive every argument. A function from
+  `compile()` itself fills the omitted arguments before its entry checks,
+  after the definitions of its preamble, which a default can read (the
+  default `D` of a constant list is the definition `_val_D`).
+- JavaScript, a user function referenced as a value (`Map(f, L)`): its value
+  is an outer wrapper, `_fn_f$…$d`, with the same fills; its definition is
+  emitted with every parameter required, as all its written calls supply
+  them. When a default is a symbol, the wrapper is compiled where the value
+  is referenced, and is not shared: the symbol is read in that scope, as
+  for a call written there.
+- Python: a number, string or boolean default is a Python default parameter
+  (`lambda x, k=2: …`). A Python default is evaluated once, when the lambda
+  is made, so a symbol default and `[]` take an omission marker, a fresh
+  `object()` bound once around the lambda under a fresh name: `lambda x,
+  k=_tv1: …` runs the body with `d if k is _tv1 else k`.
+- GLSL and WGSL: a shader function has no default parameters. A call of a
+  literal that leaves out a parameter (a partial application applied to the
+  remaining required arguments, or the callback of a `Map` that is written
+  out element by element) is completed at the call site with the default
+  operand, compiled as a written operand. A symbol default that the target
+  cannot compile declines as the written symbol would.
+- Interval JavaScript: an application of a literal is completed at the call
+  site in the same way, so a value default is an interval constant (`_k1`).
+  A literal compiled as a value (the callback of `_IA.map`, a block-local
+  function) is a JavaScript function and takes the fills of the JavaScript
+  target, compiled by the interval target.
+
+A call of a block-local function is completed at the call site on every
+target, except for a local that is assigned more than once: its other values
+can have other defaults, so such a call must supply every parameter. The
+`Apply` arity checks of the targets accept any count from the number of
+required parameters to the number of parameters. A multi-clause function
+cannot have a default (it is a declaration error), so the multi-clause
+emission never sees one.
+
 ## Collections
 
 Compiled broadcasting preserves the interpreter's strict lifted regime.

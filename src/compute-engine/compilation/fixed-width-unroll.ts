@@ -16,7 +16,10 @@ import { isSubtype } from '../../common/type/subtype.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
+  optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
+import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
+import { literalTakesArgumentCount } from './compile-parameter-defaults.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   builtinCallbackArity,
@@ -1025,7 +1028,19 @@ function tryUnrollMap(
   if (isSymbol(callback))
     return unrollMapOfNamedFunction(callback.symbol, elements, expr.engine);
   const lambda = callback;
-  if (!isFunction(lambda, 'Function') || lambda.nops !== 2) return undefined;
+  // One parameter, or one required parameter and parameters with a default
+  // value: `Map` calls the callback with one argument, and each other
+  // parameter receives its default, the operand that a call written at the
+  // `Map` would read (`completedLiteralArguments`).
+  if (!isFunction(lambda, 'Function') || !literalTakesArgumentCount(lambda, 1))
+    return undefined;
+  const defaults: Record<string, Expression> = {};
+  for (const p of lambda.ops.slice(2)) {
+    const name = functionLiteralParameterName(p);
+    if (!name) return undefined;
+    defaults[name] = callSiteDefault(optionalParameterDefault(p)!);
+  }
+  const defaultOperands = Object.values(defaults);
 
   // A REST parameter — `["Spread", name]`, spelled `...r` — binds its ONE
   // name to a TUPLE of the arguments from its position onwards, so a mapped
@@ -1045,6 +1060,14 @@ function tryUnrollMap(
   if (isFunction(body, 'Block')) return undefined;
   if (body.isPure !== true) return undefined;
   if (!elements.every((e) => e.isPure === true)) return undefined;
+  // The defaults are substituted as the elements are: an inner binder must
+  // not bind a parameter with a default, nor capture the symbol of a default.
+  if (
+    !Object.keys(defaults).every((name) =>
+      binderSafeSubstitution(body, name, defaultOperands)
+    )
+  )
+    return undefined;
   // A body with a binder of its own (an inner lambda, a `Sum`) is written
   // out only for a target with no `Map` lowering at all (the shader
   // targets). Every other target lowers the `Map` as a loop, and writing
@@ -1060,7 +1083,7 @@ function tryUnrollMap(
 
   return expr.engine.function(
     'List',
-    elements.map((e) => body.subs({ [parameter]: e }))
+    elements.map((e) => body.subs({ ...defaults, [parameter]: e }))
   );
 }
 
@@ -1290,9 +1313,11 @@ function unrollMapOfNamedFunction(
     // evaluated, so the two can give different results.
     if (builtinOperatorDefinition(ce, name)?.lazy === true) return undefined;
   } else {
-    // A `Function` literal is `["Function", body, …params]`, so one
-    // parameter is two operands.
-    if (literal.nops !== 2) return undefined;
+    // A `Function` literal is `["Function", body, …params]`. One parameter,
+    // or one required parameter and parameters with a default value: the
+    // call `h(e)` written below is completed with the defaults when it is
+    // canonicalized, as the interpreter completes the call that `Map` makes.
+    if (!literalTakesArgumentCount(literal, 1)) return undefined;
     const parameter = literal.ops[1];
     if (isRestParameter(parameter)) return undefined;
     // A destructuring pattern is a raw `Tuple` operand, for which

@@ -11,6 +11,9 @@ import {
   functionLiteralDeclaredSignature,
   isDestructuringParameter,
   isRestParameter,
+  optionalParameterDefault,
+  optionalParameterTarget,
+  requiredParameterCount,
 } from '../boxed-expression/function-literal.js';
 import { appliedLiteralTypedFromArguments } from './applied-literal-types.js';
 
@@ -63,12 +66,12 @@ import { appliedLiteralTypedFromArguments } from './applied-literal-types.js';
 
 /**
  * The number of arguments that a call of `literal` must supply before the
- * call is saturated: the count of parameters, or the count of the parameters
- * before the rest parameter.
+ * call is saturated: the count of parameters before the first parameter with
+ * a default value or the rest parameter, or the count of parameters
+ * (`requiredParameterCount`).
  */
 function fixedParameterCount(params: ReadonlyArray<Expression>): number {
-  const rest = params.findIndex((p) => isRestParameter(p));
-  return rest >= 0 ? rest : params.length;
+  return requiredParameterCount(params);
 }
 
 /** True when `literal` has a signature with type parameters. */
@@ -305,11 +308,20 @@ export function partialApplicationValue(
     taken.add(name);
     return ce.symbol(name, { canonical: false });
   });
-  const residualParams = unapplied.map((param, i) =>
-    isFunction(param, 'Typed') && !isDestructuringParameter(param)
-      ? ce._fn('Typed', [fresh[i], param.op2], { canonical: false })
-      : fresh[i]
-  );
+  // A parameter with a default value keeps it in the residual, so a call of
+  // the residual that leaves it out reads the default, as the interpreter's
+  // residual does.
+  const residualParams = unapplied.map((written, i) => {
+    const param = optionalParameterTarget(written);
+    const p =
+      isFunction(param, 'Typed') && !isDestructuringParameter(param)
+        ? ce._fn('Typed', [fresh[i], param.op2], { canonical: false })
+        : fresh[i];
+    const d = optionalParameterDefault(written);
+    return d === undefined
+      ? p
+      : ce._fn('Optional', [p, d], { canonical: false });
+  });
   return ce.function('Function', [
     ce._fn('Apply', [literal, ...actuals, ...fresh], { canonical: false }),
     ...residualParams,

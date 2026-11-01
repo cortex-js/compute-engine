@@ -87,6 +87,10 @@ import {
   partialApplicationValueDecline,
   rewritePartialApplications,
 } from './partial-application.js';
+import {
+  completedLiteralArguments,
+  literalTakesArgumentCount,
+} from './compile-parameter-defaults.js';
 import { isOpaqueVarsSource, varsObjectSpelling } from './cse.js';
 import {
   couldBeIndexedCollectionOperand,
@@ -775,7 +779,11 @@ function compileIntervalCollectionValue(
   // interval before handing it to that arrow.
   if (literal.ops.length !== 2) return undefined;
   const fn = literal.ops[0];
-  if (!isFunction(fn, 'Function') || fn.ops.length !== 2) return undefined;
+  // One required parameter: `_IA.map` calls the arrow with one argument,
+  // and the compiled literal fills its other parameters, which have a
+  // default value (`compileExprFunctionLiteral`).
+  if (!isFunction(fn, 'Function') || !literalTakesArgumentCount(fn, 1))
+    return undefined;
   // The mapped value must have an interval reading: a predicate body
   // (`k ↦ k < 0`) would map to a list of verdicts, which is not a value of
   // this target (`IntervalValue`).
@@ -3893,6 +3901,12 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           : `Could not compile \`Apply\`: only a function-literal callee compiles on the ` +
               `interval target.`
       );
+    // A call that leaves out parameters with a default value is completed
+    // here with the default operands, compiled as operands written at this
+    // call site: a value default is then an interval constant
+    // (`completedLiteralArguments`).
+    const completed = completedLiteralArguments(fn, args.slice(1));
+    if (completed !== undefined) args = [args[0], ...completed];
     const paramCount = fn.ops.length - 1;
     if (args.length - 1 !== paramCount)
       throw new Error(
@@ -4527,7 +4541,10 @@ function dynamicRangeTerm(
     const inner = dynamicRangeTerm(node.ops[1], target);
     if (inner === undefined) return undefined;
     const fn = node.ops[0];
-    if (!isFunction(fn, 'Function') || fn.ops.length !== 2) return undefined;
+    // One required parameter; the `Apply` of a term completes the other
+    // parameters, which have a default value.
+    if (!isFunction(fn, 'Function') || !literalTakesArgumentCount(fn, 1))
+      return undefined;
     // A predicate body has no interval reading; the reduction's kernel would
     // read `.lo`/`.hi` off a verdict.
     if (!hasIntervalReading(fn.ops[0])) return undefined;

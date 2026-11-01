@@ -32,6 +32,8 @@ import {
   functionLiteralParameterType,
   isDestructuringParameter,
   isRestParameter,
+  optionalParameterDefault,
+  optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import type { CompileTarget } from './types.js';
 import { mayBeCollectionType } from './in-place-update.js';
@@ -401,7 +403,10 @@ export function enforcedParamTargets(
   literal: Expression & FunctionInterface
 ): ReadonlySet<string> {
   const out = new Set<string>();
-  for (const p of literal.ops.slice(1)) {
+  for (const param of literal.ops.slice(1)) {
+    // A parameter with a default value is enforced as the parameter it
+    // wraps.
+    const p = optionalParameterTarget(param);
     if (!isFunction(p, 'Typed')) continue;
     const sym = p.ops[0];
     const typeSource = p.ops[1];
@@ -931,6 +936,14 @@ export function assertCallbackAnnotations(
   for (let i = 0; i < params.length; i++) {
     const declared = functionLiteralParameterType(params[i]);
     if (declared === undefined) continue;
+    // A parameter with a default value that the lowering passes no value to
+    // receives its default, which matches the annotation (it is checked
+    // when the literal is made), and the compiled literal fills it.
+    if (
+      i >= argTypes.length &&
+      optionalParameterDefault(params[i]) !== undefined
+    )
+      continue;
     const actual = argTypes[i];
     // The subtype question is asked on the UNRESOLVED types: nominal opacity
     // is a property of `isSubtype`, and resolving either side would erase it

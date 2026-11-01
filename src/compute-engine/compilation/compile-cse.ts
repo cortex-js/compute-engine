@@ -21,6 +21,7 @@ import {
   functionLiteralParameterName,
   isDestructuringParameter,
   isRestParameter,
+  optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
@@ -242,7 +243,11 @@ export function substitutedUserFunctionBody(
   if (isContradictedScalarDeclaration(engine.function(h, args)))
     return undefined;
   const substitution: Record<string, Expression> = {};
-  for (const [i, p] of params.entries()) {
+  for (const [i, written] of params.entries()) {
+    // A parameter with a default value is read through the parameter it
+    // wraps. The call has an argument for it: canonicalization completes a
+    // call of a user function with the defaults.
+    const p = optionalParameterTarget(written);
     const name = isSymbol(p)
       ? p.symbol
       : isFunction(p, 'Typed') && isSymbol(p.op1)

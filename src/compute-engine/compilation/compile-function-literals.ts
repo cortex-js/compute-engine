@@ -13,11 +13,16 @@ import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isNonRealNumber } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
-import { isFunction } from '../boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
+  optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
+import {
+  defaultFillingWrapper,
+  literalDefaultFills,
+} from './compile-parameter-defaults.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { descendantRegionAt } from './cse.js';
 import { compileValueOperand } from './compile-statements.js';
@@ -86,16 +91,32 @@ export function checkedAppliedLiteralCompile<T>(
   );
   if (at >= 0)
     throw expressionParameterDecline('`Apply`', at, args[at].type.type);
+  // An application that supplies every parameter never reads a default, so
+  // the literal is then compiled without the fills of its parameters with a
+  // default value (`fullyAppliedLiterals`).
+  const full =
+    isFunction(literal, 'Function') && args.length === literal.nops - 1;
   return (e) => {
     if (e !== literal) return compile(e);
     const unmark = markCheckedLiteralApplications([literal]);
+    const wasFull = fullyAppliedLiterals.has(literal);
+    if (full) fullyAppliedLiterals.add(literal);
     try {
       return compile(e);
     } finally {
+      if (!wasFull) fullyAppliedLiterals.delete(literal);
       unmark();
     }
   };
 }
+
+/**
+ * The `Function` literals being compiled as the callee of an application
+ * that supplies every parameter (`checkedAppliedLiteralCompile`). Such a
+ * literal is compiled without the fills of its parameters with a default
+ * value, which no call of it reads.
+ */
+const fullyAppliedLiterals = new WeakSet<Expression>();
 
 /**
  * A `Function` literal. A case of `compileExpr`: it returns the code, or
@@ -391,13 +412,53 @@ export function compileExprFunctionLiteral(
     // complex-lane parameter is left out: its wrapper
     // (`complexCoercingWrapper`) converts the argument, and reads an absent
     // one as `NaN`, before the arrow receives it.
+    // A parameter with a default value (`(x, k = 2) => x * k`) is filled
+    // when a call leaves it out. The default is compiled as an operand
+    // written at the call site, by this target, so that a value default is
+    // the target's spelling of the value (an interval constant on the
+    // interval target) and a symbol default is read at each call, as the
+    // interpreter reads it. A consumer of the function value (`Map`, …)
+    // calls it with the arguments it has, so the fill is in the emitted
+    // function, not at the call sites.
+    //
+    // The fill is a JavaScript default parameter written in the arrow
+    // itself when nothing wraps the arrow, the default is not a symbol, and
+    // the parameter's type cannot hold `Missing` (`parameterCanBeMissing`).
+    // Otherwise it is an outer wrapper (`defaultFillingWrapper`), outside
+    // the complex-coercing and broadcasting wrappers, so they receive every
+    // argument. A symbol default goes in the wrapper, whose parameter names
+    // are fresh: in the arrow, a default expression can read a parameter of
+    // the arrow that has the name the target spells the symbol with.
+    const literalParams = ops.slice(1);
+    const fills =
+      node !== undefined && fullyAppliedLiterals.has(node)
+        ? []
+        : literalDefaultFills(
+            literalParams,
+            (e) => compileValueOperand(e, target),
+            (i) =>
+              literal === undefined
+                ? undefined
+                : signatureParamType(literal.type.type, i)
+          );
+    const hasFills = fills.some((f) => f !== undefined);
+    const fillsInArrow =
+      hasFills &&
+      !(target.language === 'javascript' && complexParam.some((c) => c)) &&
+      fills.every(
+        (f, i) =>
+          f === undefined ||
+          (!f.byCount && !isSymbol(optionalParameterDefault(literalParams[i])))
+      );
     const emittedParams = binding.emitted.map((name, i) =>
-      target.language === 'javascript' &&
-      !complexParam[i] &&
-      annotated[i] !== undefined &&
-      isSubtype(annotated[i]!, 'number')
-        ? `${name} = NaN`
-        : name
+      fillsInArrow && fills[i] !== undefined
+        ? `${name} = ${fills[i]!.code}`
+        : target.language === 'javascript' &&
+            !complexParam[i] &&
+            annotated[i] !== undefined &&
+            isSubtype(annotated[i]!, 'number')
+          ? `${name} = NaN`
+          : name
     );
     const arrow = `((${emittedParams.join(', ')}) => ${
       framedComplex.size > 0
@@ -450,14 +511,30 @@ export function compileExprFunctionLiteral(
     // argument that could be a collection. So does a literal whose consumer
     // proved that every argument it passes is a scalar (`fed`): the
     // wrapper's `Array.isArray` test can never be true there.
-    if (
+    const broadcasts =
       fed === undefined &&
       target.language === 'javascript' &&
       params.length > 0 &&
       literal !== undefined &&
       paramsAreScalar(literal.type.type) &&
-      signatureParamsLowerToScalars(literal.type.type)
-    ) {
+      signatureParamsLowerToScalars(literal.type.type);
+    // The wrapper that fills the parameters with a default value, around
+    // the whole value (see `fills` above). It is needed when the fills are
+    // not in the arrow, and when a broadcasting wrapper calls the arrow:
+    // that wrapper passes every parameter, `undefined` for one the call
+    // leaves out, and the number of arguments is then lost.
+    const withDefaults = (value: string): string => {
+      if (!hasFills || (fillsInArrow && !broadcasts)) return value;
+      const bound = tempVar(target);
+      const wrapper = defaultFillingWrapper(bound, fills, () =>
+        tempVar(target)
+      );
+      return (
+        javascriptStatements(target)?.parameters([[bound, value]], wrapper) ??
+        `((${bound}) => ${wrapper})(${value})`
+      );
+    };
+    if (broadcasts) {
       const bound = tempVar(target);
       const wrapper = broadcastingWrapper(
         bound,
@@ -465,12 +542,12 @@ export function compileExprFunctionLiteral(
         target,
         'bcastFn'
       );
-      return (
+      return withDefaults(
         javascriptStatements(target)?.parameters([[bound, callee]], wrapper) ??
-        `((${bound}) => ${wrapper})(${callee})`
+          `((${bound}) => ${wrapper})(${callee})`
       );
     }
-    return callee;
+    return withDefaults(callee);
   }
   return undefined;
 }

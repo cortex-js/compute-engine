@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-719.
+Next free reference: CE-733.
 
 **Entry format.**
 
@@ -114,43 +114,78 @@ token by its radix (with its sign), or refuse it with a parse error. A
 parameter default (CE-717) already refuses these spellings
 (`parseParameterDefault`), so the two places should agree after the fix.
 
-### CE-717. A default value for an optional parameter
+### CE-729. Parameter default values in an overloaded signature and in a multi-clause function
 
-**Status:** open; capability, L. Spec
-`docs/plans/2026-10-31-parameter-default-values.md` (revision 5, two dual
-reviews; the user's decisions of 2026-10-31 are in its §8). GitHub issue #490.
+**Status:** on demand; capability, M. Spec
+`docs/plans/2026-10-31-parameter-default-values.md`, R9.
 
-An optional parameter has no default: `Scaled(3)` with
-`(x: number, factor: number?) -> number` reaches the handler with one operand,
-so every handler re-implements "if the operand is missing, use 2";
-`factor: number = 2` in a signature fails to parse (`=` is not a token of the
-type DSL); and a function literal with `["Typed", "f", "'number?'"]` curries
-instead of calling, because `number?` is not a type and the `?` is ignored
-without a diagnostic (the parameter is typed `unknown` and loses its name).
+Today a default in an arm of an intersection signature
+(`((x: number, k: number = 2) -> number) & ((x: string) -> string)`), or in a
+clause of a multi-clause Epsil function (`function f(0, k = 2) …` with a
+second clause), is refused at declaration: "a default value in an overloaded
+signature is not supported yet". The fill at canonicalization needs one
+signature, and with an operand of type `unknown` or `any` the arm is not
+known then. A sound rule: fill at canonicalization when every arm that can
+still match agrees on the default of the slot; otherwise fill at evaluation,
+when the arm is known. The compile side must then lower a defaulted clause
+(`compile-definitions.ts` declines "a clause with an optional or variadic
+parameter has no guard").
 
-The spec: `name: type = default` in the signature marks an optional parameter
-with a default (a number, a string, a boolean, a symbol, `[]` or `{}`), stored
-on the parameter in the parsed `Type` beside its name; canonicalization inserts
-the default, so `Scaled(3)` and `Scaled(3, 2)` are one expression; a function
-literal spells it `["Optional", param, default]` (Epsil `(x, k = 2) => …`), and
-a call with the required arguments is a full call. Out of the first version:
-overload arms and multi-clause functions, library operators, `Optional` without
-a default, LaTeX parsing of `k = 2`.
+### CE-730. Default values for library operators, with a serializer rule that leaves out a default operand
 
-- **CE-717.1** Type DSL: `=` token, parse, build, serialize, grammar docs (spec
-  §6 step 1).
-- **CE-717.2** Definitions: box and check each default, refuse the unsupported
-  positions, subtype exception for a declared type (step 2).
-- **CE-717.3** The fill at canonicalization on each route of `box.ts`, and the
-  re-fill at evaluation for callees that can change (step 3).
-- **CE-717.4** Function literals: the `Optional` carrier, saturation and the
-  residual in `apply`, the parameter-list readers census, the LaTeX serializer
-  (step 4).
-- **CE-717.5** Epsil syntax, formatter, diagnostics (step 5).
-- **CE-717.6** Compilation: JavaScript and Python defaults, call-site completion
-  for GLSL/WGSL/interval, arity checks (step 6).
-- **CE-717.7** CHANGELOG, the v2 entries for overloads and library defaults, the
-  reply on the issue (step 7).
+**Status:** on demand; capability, M. Spec
+`docs/plans/2026-10-31-parameter-default-values.md`, R10.
+
+No library operator has a parameter default: each handler supplies the value
+of an absent optional operand itself (`LambertW(z)` uses branch 0). A default
+in the signature would change the canonical form and the LaTeX:
+`LambertW(1)` would become `LambertW(1, 0)`, written `\operatorname{W}_{0}(1)`
+instead of `\operatorname{W}(1)`. Adding defaults to library operators needs
+a serializer rule that leaves out an operand equal to the default. Candidates:
+`LambertW` (branch 0) and every handler that documents a default for an
+absent optional operand.
+
+### CE-731. An optional function-literal parameter with no default value
+
+**Status:** on demand; capability, S. Spec
+`docs/plans/2026-10-31-parameter-default-values.md`, §9.
+
+`["Optional", "k"]` (no default operand) is the error `missing` on the
+parameter. Allowing it would bind `k` to an absent value when the call leaves
+it out, which needs the rules for absent values of `docs/ERROR-MODEL.md`
+(`Nothing` or `Missing`, and what each operation does with it). Not requested
+so far; a default value covers the cases of GitHub issue #490.
+
+### CE-728. A lazy `Map` view loses the binding of a named callback's symbol default
+
+**Status:** decision needed; defect (compiled and interpreted values differ).
+
+With `f := (x, k = d) => x * k` (a parameter default that is the symbol `d`,
+CE-717) and `g := (d, xs) => Map(f, xs)`, the interpreter's `g(10, [1, 2])`
+is the lazy view `Map(f, [1, 2])`. Its elements are computed when the view is
+read, after `g` has returned, so the inserted default `d` has no binding any
+more and the elements are `d` and `2d`. The compiled function computes the
+elements inside `g` and gives `[10, 20]`; so does the interpreter when the
+view is read inside `g` (`ListFrom(Map(f, xs))` gives `[10, 20]`). A literal
+callback does not have the problem: `Map((x) => f(x), xs)` fills the default
+when the literal is canonicalized inside `g`, and the literal captures the
+`d` of `g`. Measured 2026-10-31 at `38f9b8375` with Epsil
+(`let f = (x, k = d) => x * k; let g = (d, xs) => map(f, xs); g(10, [1, 2])`).
+
+The rule that a symbol default is read "as a symbol written in the call"
+(`docs/plans/2026-10-31-parameter-default-values.md`, R4 and §11) does not say
+where the call of a callback invoked later by a lazy view is. Options:
+
+- (a) Recommended: a lazy view records the lexical scope in which it was
+  created, and calls its callback in that scope, so a symbol default reads
+  the binding of the place where `Map(f, xs)` was written. The interpreter
+  then agrees with the compiled code. Cost: the view keeps a reference to the
+  scope (and its activation values) while it lives.
+- (b) Keep the interpreter's behavior and make the compiled code agree, by
+  declining a named callback with a symbol default whose result can escape
+  as a lazy view. Cost: a decline of a reachable shape.
+- (c) Document the difference as a limit. AGENTS.md does not allow this for
+  a well-typed expression.
 
 ### CE-707. A list value is accepted for a scalar declared result when no argument is a list
 
@@ -3880,6 +3915,62 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-732. A function-literal parameter named `arguments` gives JavaScript `code` that strict mode refuses
+
+**Status:** open; defect, S.
+
+`compile(ce.box(["Function", ["Multiply", 2, "arguments"], ["Typed", "arguments", "'real'"]]), { to: 'javascript' })`
+succeeds and `run(3)` is 6, but its `code` string is
+`(arguments) => 2 * arguments`, which is a syntax error in strict-mode code
+("Unexpected eval or arguments in strict mode"; measured 2026-10-31 with
+`new Function('"use strict"; return (' + code + ')')`). A host that evaluates
+`code` in a module (always strict) fails. `eval` as a parameter name has the
+same problem. Fix: rename a parameter whose name JavaScript reserves in a
+function scope everywhere it is emitted, as the target already renames
+other reserved identifiers.
+
+### CE-725. `Sort` with a callback, `Iterate` and `Pipe` decline on the JavaScript target
+
+**Status:** open; defect, M.
+
+Measured 2026-10-31 at `a4d2de2d5` with `compile(ce.box(expr), { to:
+'javascript' })`; each is a reachable shape that falls back to the
+interpreter:
+
+- **CE-725.1** `Sort(["List", 3, "y", 2], (x) => -x)` (a key callback; a
+  comparator too): "a custom comparator is not supported; only the default
+  order".
+- **CE-725.2** `Take(Iterate((x) => x + 1, y), 3)`: "the operator is known to
+  the engine but target 'javascript' has no lowering for it" (`Iterate`).
+- **CE-725.3** `Pipe(["List", 1, "y"], Map((x) => 2x))`: the same message for
+  `Pipe`.
+
+Because of these declines, the compiled tests of CE-717 (parameter default
+values) cover a callback with a default inside `Map` only; `Sort`, `Iterate`
+and `Pipe` with such a callback are tested interpreted only
+(`test/compute-engine/compile-parameter-defaults.test.ts`).
+
+### CE-726. A function literal compiled at the root for `interval-js` cannot be called
+
+**Status:** open; defect, S.
+
+`compile(ce.box(["Function", ["Multiply", 2, "x"], "x"]), { to:
+'interval-js' })` reports `success: true`, but `run(3)` returns `undefined`
+(measured 2026-10-31 at `a4d2de2d5`). On the JavaScript target the same
+literal returns a callable function. Either the interval target returns a
+callable (an interval-valued function of its arguments) or it declines with
+a reason.
+
+### CE-727. An empty dictionary does not compile on the JavaScript target
+
+**Status:** open; defect, S.
+
+`compile(ce.box(["Dictionary"]), { to: 'javascript' })` fails with "Could not
+compile expression: `{->}`" (measured 2026-10-31 at `a4d2de2d5`). A parameter
+default `{}` (CE-717) therefore declines on the JavaScript target, while
+`[]` compiles. The expected emission is a fresh `{}` (or the target's
+dictionary representation) per evaluation.
+
 ### CE-715. A `bigint` compile mode on the JavaScript target: exact integers past 2^53
 
 **Status:** open; capability, large. Spec approved by the user 2026-10-31
@@ -3928,6 +4019,163 @@ occurs (AGENTS.md: a decline is a defect).
   statement, an `If` with no else branch, and a `Which` with no final `True`
   clause. With `n: integer`, `Piecewise(…)` over integer branches runs on the
   interpreter in the mode today.
+
+### CE-719. A `Return` inside a `Loop` that has code after it is not compiled
+
+**Status:** open; decline (was a wrong value), medium. Found 2026-10-31 during
+CE-712.1.
+
+With `L = [1, 2, 3]`,
+`Apply(p ↦ Block(q ≔ 0, Loop(If(i > 1, Block(q ≔ 7, Return(5))), Element(i, L)), 100 + q), 1)`
+gives `5` in the interpreter. At HEAD `e3ca9c1a6` the compiled JavaScript gave
+`107`: the compiled loop is a function of its own (a closure called where the
+loop is), so the `Return` ended only the loop and `100 + q` still ran. CE-712.1
+makes it decline with the code `'unsettled-shape'` (`returnInLoopIn()`,
+`compilation/compile-admission.ts`), on every target, also in the root and in
+a stored function. A `Return` in a loop that is the last statement of the
+function still compiles.
+
+Fix: compile such a loop so that a `Return` in it ends the function: a
+sentinel value that the code after the loop call tests, or an inline loop
+where the target allows it. The decline on the Python target, where the loop
+may be emitted inline, is not verified to be needed; check it first.
+
+### CE-720. A callback that assigns a name of an enclosing scope is not compiled
+
+**Status:** open; decline (was a wrong value), medium. Found 2026-10-31 during
+CE-712.1.
+
+At HEAD `e3ca9c1a6`, with `L: list<real>` and `L = [1, 2, 3]`:
+
+- `Block(p ≔ 0, Filter(L, u ↦ Block(p ≔ 5, u > 1)), p)`: interpreter `0`,
+  compiled `5`. The interpreter does not run the callback, because the result
+  of the `Filter` is not used; with `r ≔ Filter(…)` both give `5`.
+- `Block(p ≔ 0, Filter(L, u ↦ Block(p ≔ [1, 2], u > 1)), p + 1)`: interpreter
+  `1`, compiled `[2, 3]`.
+- `Block(p ≔ 0, Limit(u ↦ Block(p ≔ 5, u), 0), p)`: interpreter `5`,
+  compiled `0`.
+
+CE-712.1 makes a function literal decline with the code `'unsettled-shape'`
+when it assigns a name of an enclosing scope, or calls a function that does,
+and its consumer calls it (`assignmentConflictIn()`,
+`compilation/compile-admission.ts`). The consumer is the nearest ancestor past
+a branch of `If` or `Which` and the last statement of a `Block`. A literal is
+not declined when `Apply` applies it where it is written to scalar arguments,
+or when its consumer holds it as a value (`Declare`, `Assign`,
+`DefineFunction`, a statement of a `Block`); a stored function that writes an
+outer name declines when its name is passed as a value (`Filter(L, g)`). The
+decline includes `Map`, `Tabulate`, `Find`, `Count`, `Any`, `All` and
+`Reduce`, where the values may agree, and a literal that the body of another
+literal returns: `Apply(Apply(Apply((y, w) ↦ (x ↦ Block(y ≔ 2, x + y)), 0),
+1), u)` gives 7 in the interpreter and at HEAD `e3ca9c1a6`, and now declines,
+because the returned literal could reach a `Filter`
+(`Filter(L, Apply(y ↦ (u ↦ Block(p ≔ 5, u > 1)), 0))` gave 5, interpreter 0).
+
+Fix: compile the effect as the interpreter has it, for each operator: when it
+runs the callback (eagerly or when its result is used), and whether the write
+reaches the enclosing scope. Then remove the decline for the operators where
+the two agree.
+
+### CE-721. An assignment in a `Comprehension`, in a clause of a `Sum` or a `Product`, or in an `Integrate` is not compiled
+
+**Status:** open; decline (was a wrong value), medium. Found 2026-10-31 during
+CE-712.1.
+
+At HEAD `e3ca9c1a6`,
+`Block(p ≔ 0, Comprehension(Block(p ≔ 5, i), Element(i, [1])), p)` gives `0` in
+the interpreter, which evaluates the body of a `Comprehension` in a scope of
+its own (and here does not evaluate it, because the result is not used), and
+`5` in the compiled code. In an `Integrate`, an assignment in the integrand
+changes the name in the interpreter, but not in the compiled code, which
+evaluates the integrand in a function of its own. CE-712.1 makes these
+decline with the code `'unsettled-shape'` (`scopedPartsOf()`,
+`writesOuterName()`, `compilation/compile-admission.ts`), and a `Return`, a
+`Break` or a `Continue` in the body of a `Sum` or a `Product` declines too (it
+gave JavaScript with a syntax error, `Illegal break statement`).
+
+The decline is wider than the defect:
+`Comprehension(Block(q ≔ 2i, q + 3), Element(i, [1, 2, 3]))` compiled to
+`[5, 7, 9]` at HEAD and now declines, because the check counts an assignment
+of a block local with no `Declare` as a write of an outer name. With
+`Declare(q, "real")` in the block, it compiles.
+
+Fix: give the compiled code the scope rule of the interpreter for each
+operator, then narrow the decline to the cases that still differ.
+
+### CE-722. A conditional that selects element by element and whose branch assigns a name is not compiled
+
+**Status:** open; decline (was a wrong value), medium. Found 2026-10-31 during
+CE-712.1.
+
+With `L: list<real>` and `L = [-1, -2]`,
+`Block(p ≔ 0, If(L > 0, p ≔ 5), 2p)` gives `0` in the interpreter. At HEAD
+`e3ca9c1a6` the compiled JavaScript gave `10`: it ran the branch when any
+element of `L > 0` was true. With `M: list<any>`,
+`Block(p ≔ 0, If(M[1], p ≔ 5), 2p)` gave `0` compiled for
+`M = [[True, False]]`, where the interpreter selects element by element and
+gives `10`. CE-712.1 makes an `If` or a `Which` whose condition is or can be a
+collection, and whose branch assigns a name or has a `Return`, a `Break` or a
+`Continue`, decline with the code `'unsettled-shape'` on every target.
+
+Fix: a decision is needed first: what the value of `p` is after an
+element-wise selection whose branches assign it (the interpreter's current
+result is the reference). Then compile that value, or keep the decline as
+the documented rule.
+
+### CE-723. A function literal applied in a loop body that assigns the loop index is not compiled
+
+**Status:** open; decline (was a wrong value), small. Found 2026-10-31 during
+CE-712.1.
+
+At HEAD `e3ca9c1a6`:
+
+- `Block(s ≔ 0, Loop(s ≔ s + Apply(u ↦ Block(k ≔ k + 1, k), 0), Element(k, 1..3)), s)`:
+  interpreter `9`, compiled `6`.
+- `Block(n ≔ 0, Loop(Block(Apply(u ↦ k ≔ 5, 0), n ≔ n + 1), Element(k, 1..3)), n)`:
+  interpreter `3`, compiled `1`.
+
+A loop body that assigns the index directly already declines ("the body
+assigns the loop index") on JavaScript, and compiles to a new variable on
+Python. CE-712.1 adds a decline, on every target, for an `Assign` in a function
+literal of the index of a `Loop`, `Sum`, `Product`, `Comprehension` or
+`Integrate` that encloses the literal, with the code `'unsettled-shape'`.
+
+Fix: give the compiled index the interpreter's rule (the write changes the
+variable for the rest of the iteration and does not change the next index),
+then remove the decline.
+
+### CE-724. The simple rule for the shapes of assigned names declines where the interpreter has a value
+
+**Status:** open; decline, large. User decision 2026-11-01: the simple rule
+for CE-712.1 (no flow analysis); this entry is the possible later precise
+version, which needs a user request.
+
+CE-712.1 declines when, in one scope, the values that the code assigns to a
+name, and the type of the name, do not all have one shape class (a number, a
+complex number, a string, a list, a point, a matrix; the length of a list is
+not part of its shape). It does not examine the order of the assignments or
+the paths of the code. So it declines these, where the interpreter has a
+value:
+
+- `Block(p ≔ 0, p ≔ [1, 2], p)`: interpreter `[1, 2]`.
+- `t ↦ Block(p ≔ 0, If(t > 0, Block(p ≔ [1, 2], Return(1))), 2p)`: `p` is a
+  number wherever `2p` is evaluated.
+- `Block(p ≔ 0, Match(x, MatchCase(_, p ≔ [1, 2])), 2p)`: interpreter
+  `[2, 4]`.
+- Two locals of the same name in different scopes with no `Declare` (two
+  function bodies that each assign a local `p` of a different shape): the rule
+  compares them as one variable.
+
+The flow analysis that was written and removed during CE-712.1 (a walk of the
+paths of the code that compared the shapes where paths meet) needed eight
+review rounds, and each round found new cases: a `Match` guard, the operands
+of `And` and `Or`, a loop that runs no time, a condition of type
+`boolean | missing` that selects no branch, a stored function whose outer
+write is checked only at its definition, a `Return` in the guard of a case.
+Each of these is now a test of the simple rule in
+`test/compute-engine/compile-admission.test.ts`. A precise version must handle
+all of them; it can instead compile each assignment to its own variable
+(static single assignment) where the shapes differ.
 
 ### CE-714. A point with a coordinate declared `real | list<real>` gives a norm per element in compiled code, an error in the interpreter
 
@@ -4000,22 +4248,25 @@ run-time dispatch produced.
 Steps (plan §6; each in a worktree, with the dual review, the before/after
 corpus audit and a report of the declines per target and the `code` changes):
 
-- **CE-712.1** (implemented, uncommitted, in worktree
-  `/tmp/wt-compute-engine-34-ce712-1`; `assertSettledShapes()` and
-  `assertTypedInputs()`, `compilation/compile-admission.ts`. Not finished:
-  the existing tests that compile an input with no type fail until each
-  declares its input; the corpus audit is not run. Order of the reasons,
-  decided by the orchestrator 2026-10-31 (the user can reverse it): the
-  refusal of an input with no type runs after the code was generated, so a
-  more specific reason to decline (an operator with no lowering, a value with
-  no settled shape, a timeout) stays the error and the diagnostic, and
-  `unsupported` also names the inputs with no type; the alternative, the
-  refusal first, hid the precise reason. Fixed with it: the reference
-  analysis listed a local that only a nested block of a function body
-  assigns (a loop body of a function declared with the `scope` effect) as a
-  free symbol; the exception for assigned names is removed, so an undeclared
-  `u` in `u ≔ If(x < 0, u, 0)` is refused. Points of different sizes in the
-  branches of a conditional conflict only on `glsl` and `wgsl`) Admission:
+- **CE-712.1** (in progress, uncommitted, in worktree
+  `/tmp/wt-compute-engine-34-ce712-1b`; state, open findings and the
+  continuation prompt in `docs/scratch/2026-10-31-ce712-1-handoff.md`. R1 (an
+  input of type `unknown` or `any` declines, its name in `unsupported`) and R3
+  for conditionals (`compilation/compile-admission.ts`) are done and tested.
+  User decision 2026-10-31: R3 for assignments is the simple rule, option (1)
+  of the handoff ("let's keep the simple rule, option (1). That's the point of
+  this workstream"): within one scope, a name whose assigned values do not
+  all have one emitted shape class (number, list, tuple or point, matrix,
+  string, complex; a length is not a shape) declines, and a declared type on
+  a local settles its shape. The flow analysis `assignmentConflictIn()` is
+  dropped. The short sound declines for the scoping cases stay (an assignment
+  inside a `Comprehension`, a `Sum` bound, an `Integrate`, or a callback other
+  than an inline `Apply`; a `Return` inside a `Loop` on JavaScript). The wrong
+  values at HEAD that the walk closed get ROADMAP entries with the example and
+  both values, and the walk's cases stay as tests of the simple rule. Order of
+  the reasons, decided by the orchestrator 2026-10-31 (the user can reverse
+  it): a more specific reason to decline stays the error, and `unsupported`
+  also names the inputs with no type) Admission:
   refuse `unknown` and `any` inputs by name; decline a
   produced value with no settled shape; verify that the compiler reads the
   `unknown` signature of a Tycho document function, not its
@@ -6027,6 +6278,12 @@ plain operand, and the parser has no notation for either form:
   parameters `x` and `y`. So the round trip changes the value of a call:
   `((x,y)\mapsto xy)((3,4))` evaluates to `12`, and the expression parsed from
   that LaTeX evaluates to the function `(_) => (3 * _, 4 * _)`.
+- A parameter with a default value (CE-717),
+  `["Function", ["Multiply", "x", "k"], "x", ["Optional", "k", 2]]`, is
+  written `(x, k=2)\mapsto kx`. Parsing it gives
+  `["Sequence", ["Tuple", "x", ["Equal", "k", 2]], ["Error", "'unexpected-operator'", …]]`
+  (recorded by `test/compute-engine/parameter-default-values.test.ts`). The
+  parser should read `k=2` in a parameter list as `["Optional", "k", 2]`.
 
 Options: (a) write the destructuring parameter with a second pair of
 parentheses, `((x,y))\mapsto xy`, the Epsil spelling, and teach the parser to

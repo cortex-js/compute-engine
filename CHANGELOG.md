@@ -2,6 +2,39 @@
 
 ### New Features
 
+- **An optional parameter can have a default value.** Write it after the type
+  in a signature: `ce.declare("Scaled", { signature: "(x: number, factor:
+  number = 2) -> number", evaluate: … })`. A call that leaves the parameter
+  out gets the default when it is made canonical, so `Scaled(3)` and
+  `Scaled(3, 2)` are the same expression: the `evaluate` handler, the type
+  handlers and the compiler receive two operands, and `def.signature` prints
+  `(x: number, factor: number = 2) -> number`. Before, `= 2` was a parse error
+  and each handler had to supply the value of a missing operand itself. A
+  default is a number (`-1`, `NaN`, `+oo`), a string, `true` or `false`, a
+  symbol, `[]` or `{}`. A symbol default is the symbol itself, read as if it
+  were written in the call (`over: set = Integers`,
+  `mode: symbol<Auto> | symbol<Manual> = Auto`); it need not be declared. For
+  another value, declare a constant and name it as the default. A named
+  argument can skip a parameter that has a default:
+  `F(3, factor: 5)` with `(x, density: number = 1, factor: number = 2)` is
+  `F(3, 1, 5)`. A variable declared with such a signature fills its calls the
+  same way, and accepts a function that requires the parameter. In a function
+  literal, a parameter with a default is `["Optional", param, default]`; in
+  Epsil it is written `function f(x: number, k: number = 2)`,
+  `(x, k = 2) => x * k` or `(x, k: number = 2) => x * k`. A call of the
+  literal with the required arguments is a full call, not a partial
+  application: `((x, k = 2) => x * k)(3)` is `6`. Compiled code fills the
+  default on every target (JavaScript and Python default parameters, call-site
+  completion on GLSL, WGSL and interval-js). A default that does not match its
+  parameter type, a default in an overloaded signature or a multi-clause
+  function, and a default on a parameter whose type uses a type variable are
+  refused when the function is declared. The operand descriptor and
+  `LambdaDefinition.parameters` report `optional` and `default` for such a
+  parameter. The annotation `["Typed", "k", "'number?'"]`, which was ignored
+  before (the call was a partial application), is now the error
+  `invalid-parameter-annotation`. (#490, requested by
+  [enumeratio](https://github.com/enumeratio))
+
 - **A `bigint` compile mode on the JavaScript target (in progress).** The
   compile option `mode: 'bigint'` is accepted by the `javascript` target, and
   the exported types change: `CompileMode` is now

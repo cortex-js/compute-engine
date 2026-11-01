@@ -9,8 +9,10 @@ and no shorthand for a union of literal symbol types. Revision 4 applied the
 (`docs/scratch/2026-10-31-parameter-default-values_SPEC_REVIEW.md`);
 revision 5 applies the 14 findings of the second
 (`docs/scratch/2026-10-31-parameter-default-values_SPEC_REVIEW_ROUND2.md`).
-Two review rounds are the limit of the review process; the spec is ready
-for implementation. Nothing is implemented; §6 lists the steps. The
+Two review rounds are the limit of the review process. IMPLEMENTED
+2026-10-31: steps 1-5 of §6 are commits `c3317ef55`, `a4d2de2d5` (steps 2
+and 3), `920ac2012` and `38f9b8375`; step 6 and step 7 complete the work.
+§11 records the corrections found during the implementation. The
 measurements in §2 were made on the working tree at commit `5f44931f4` with
 scratch scripts (`ce.declare`, `ce.box`, `ce.type`, `executeEpsil`).
 

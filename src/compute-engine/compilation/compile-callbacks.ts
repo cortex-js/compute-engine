@@ -38,12 +38,15 @@ import {
   isSymbol,
   isString,
   isFunction,
+  isNumber,
 } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterType,
   functionLiteralReturnMarker,
   functionLiteralReturnType,
+  optionalParameterDefault,
+  optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState, type FunctionClause } from '../multi-clause.js';
 import {
@@ -70,9 +73,17 @@ import {
   userFunctionParamType,
 } from './compile-user-calls.js';
 import {
+  signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
 } from './compile-assignment-checks.js';
+import { compileValueOperand } from './compile-statements.js';
+import {
+  defaultFillingWrapper,
+  literalDefaultFills,
+  literalHasParameterDefaults,
+  literalTakesArgumentCount,
+} from './compile-parameter-defaults.js';
 import { blockLocalOf, userFunctionSignature } from './compile-absence.js';
 import type {
   DeclineNote,
@@ -425,11 +436,17 @@ export function literalWithParameterTypes(
       ...params.map((p, i) => {
         const t = types[i];
         if (t === undefined) return p.json;
-        return [
+        const typed = [
           'Typed',
           functionLiteralParameterName(p)!,
           `'${typeToString(t)}'`,
         ] as MathJsonExpression;
+        // A parameter with a default value keeps its default: a call of
+        // the rebuilt literal that leaves the parameter out still reads it.
+        const d = optionalParameterDefault(p);
+        return d === undefined
+          ? typed
+          : (['Optional', typed, d.json] as MathJsonExpression);
       }),
     ]);
   } finally {
@@ -478,6 +495,44 @@ export function foldLaneIsComplex(
   );
 }
 
+/**
+ * Enter in the shape frame `complex` and `vector` each named parameter of
+ * the combiner `literal` after the first two. A fold calls the combiner
+ * with two arguments, so such a parameter has a default value, which the
+ * compiled literal fills. A name left out of the frame is answered by an
+ * enclosing rule, and for a parameter named `i` that rule is the imaginary
+ * unit: `Reduce(L, (a, x, i = 1) ↦ a + x·i, 0)` put the fold in the
+ * complex lane, where the interpreter gives a real value.
+ *
+ * The lane of the parameter is complex when its annotation is a non-real
+ * number type, or, without an annotation, when its default is
+ * complex-valued. The parameter is a scalar (`LOCAL_SCALAR`) when its
+ * annotation is a subtype of `number`, or, without an annotation, when its
+ * default is a number. Otherwise (a default `[]`, `{}`, a string or a
+ * symbol) its shape is not entered.
+ */
+function frameDefaultedCombinerParams(
+  literal: Expression,
+  complex: Map<string, boolean>,
+  vector: Map<string, number>
+): void {
+  if (!isFunction(literal, 'Function')) return;
+  for (const param of literal.ops.slice(3)) {
+    const name = functionLiteralParameterName(param);
+    if (!name) continue;
+    const t = functionLiteralParameterType(param);
+    const d = optionalParameterDefault(param);
+    complex.set(
+      name,
+      t !== undefined
+        ? isNonRealNumber(t)
+        : d !== undefined && core.isComplexValued(d)
+    );
+    if (t !== undefined ? isSubtype(t, 'number') : isNumber(d))
+      vector.set(name, LOCAL_SCALAR);
+  }
+}
+
 export function combinerPlan(
   coll: Expression,
   op: Expression,
@@ -495,7 +550,13 @@ export function combinerPlan(
   // (`callbackLiteral`); the engine's definitions cannot see it.
   const literal = callbackLiteral(op, target);
   if (literal === undefined) return undefined;
-  if (!isFunction(literal, 'Function') || literal.nops !== 3) return undefined;
+  // Two parameters, or two required parameters and parameters with a
+  // default value, which the compiled literal fills.
+  if (
+    !isFunction(literal, 'Function') ||
+    !literalTakesArgumentCount(literal, 2)
+  )
+    return undefined;
   // A parameter spelled `_` (or a destructuring pattern) has no name to
   // enter in a frame — `functionLiteralParameterName` answers `''` — but the
   // OTHER lane still needs planning: `(a, _) ↦ a + i` widens its accumulator
@@ -527,6 +588,7 @@ export function combinerPlan(
     // `[{re: null}, {re: null}]` where `(acc, x)` answered `[4, 7]`.
     if (eltName) complex.set(eltName, eltComplex);
     if (accName) complex.set(accName, false);
+    frameDefaultedCombinerParams(literal, complex, vector);
     accComplex = core.withLocalShapeFrame(
       complex,
       vector,
@@ -783,7 +845,10 @@ export function compileCombinerLiteral(
   compile: (e: Expression) => string
 ): string {
   const literal = plan.op;
-  if (!isFunction(literal, 'Function') || literal.nops !== 3)
+  if (
+    !isFunction(literal, 'Function') ||
+    !literalTakesArgumentCount(literal, 2)
+  )
     return compile(literal);
   const accName = functionLiteralParameterName(literal.ops[1]);
   const eltName = functionLiteralParameterName(literal.ops[2]);
@@ -797,6 +862,7 @@ export function compileCombinerLiteral(
     vector.set(eltName, LOCAL_SCALAR);
     complex.set(eltName, plan.eltComplex);
   }
+  frameDefaultedCombinerParams(literal, complex, vector);
   return core.withLocalShapeFrame(
     complex,
     vector,
@@ -892,8 +958,73 @@ export function ensureUserFunctionValueRef(
 }
 
 /** `ensureUserFunctionValueRef` after the check of a parameter declared
- * `expression`. */
+ * `expression`.
+ *
+ * A function with a parameter with a default value (`f := (x, k = 2) => x
+ * * k`) is handed out behind one more wrapper, `$d`, that fills each
+ * parameter that the consumer leaves out with its default
+ * (`defaultFillingWrapper()`): `Map(f, [1, 2])` calls the value with one
+ * argument, and the interpreter fills `k` with 2. A call written in the
+ * expression needs no wrapper, because canonicalization already wrote the
+ * default into it (`f(3)` is `f(3, 2)`). The wrapper is the outermost one,
+ * so the checking, complex-coercing and broadcasting wrappers inside it see
+ * every argument, as for a call that supplies them all. */
 function userFunctionValueRef(
+  engine: ComputeEngine,
+  h: string,
+  target: CompileTarget<Expression>,
+  decline?: DeclineNote
+): string | undefined {
+  const ref = userFunctionValueRefWithoutDefaults(engine, h, target, decline);
+  if (ref === undefined) return undefined;
+  if (
+    target.language !== 'javascript' &&
+    target.language !== 'interval-javascript'
+  )
+    return ref;
+  const registry = target.userFunctions;
+  const literal = userFunctionLiteral(engine, h);
+  if (!registry || literal === undefined) return ref;
+  if (!literalHasParameterDefaults(literal)) return ref;
+  const signature = userFunctionSignature(engine, h);
+  // A symbol default is read where the consumer calls the value, as if the
+  // call were written there (`callSiteDefault()`): with `f := (x, k = d) =>
+  // x * k`, `(d, xs) => Map(f, xs)` reads its own parameter `d`. Such a
+  // wrapper is compiled in the scope of the reference, and is not shared
+  // with another reference, which can see another binding of `d`.
+  const readsBinding = literal.ops.slice(1).some((p) => {
+    const d = optionalParameterDefault(p);
+    return isSymbol(d) && d.symbol !== 'True' && d.symbol !== 'False';
+  });
+  if (readsBinding) {
+    const fills = literalDefaultFills(
+      literal.ops.slice(1),
+      (e) => compileValueOperand(e, target),
+      (i) => signatureParamType(signature, i)
+    );
+    return `(${defaultFillingWrapper(ref, fills, () => tempVar(target))})`;
+  }
+  const wrapperName = `${ref}$d`;
+  if (!registry.defs.has(wrapperName)) {
+    const root = registry.root ?? target;
+    const fills = literalDefaultFills(
+      literal.ops.slice(1),
+      (e) => compileValueOperand(e, root),
+      (i) => signatureParamType(signature, i)
+    );
+    registry.defs.set(
+      wrapperName,
+      `const ${wrapperName} = ${defaultFillingWrapper(ref, fills, () =>
+        tempVar(target)
+      )};`
+    );
+  }
+  return wrapperName;
+}
+
+/** `userFunctionValueRef` without the wrapper that fills the parameters
+ * with a default value. */
+function userFunctionValueRefWithoutDefaults(
   engine: ComputeEngine,
   h: string,
   target: CompileTarget<Expression>,
@@ -1692,7 +1823,10 @@ export function literalDeclaredParamTypes(
   literal: Expression & FunctionInterface
 ): Record<string, Type> {
   const out: Record<string, Type> = {};
-  for (const p of literal.ops.slice(1)) {
+  for (const param of literal.ops.slice(1)) {
+    // A parameter with a default value, `["Optional", param, default]`, is
+    // read through the parameter it wraps.
+    const p = optionalParameterTarget(param);
     if (!isFunction(p, 'Typed') || !isSymbol(p.ops[0])) continue;
     const t = declaredParamType(p);
     if (t !== undefined) out[p.ops[0].symbol] = t;
@@ -1712,6 +1846,9 @@ export function literalDeclaredParamTypes(
  * them by name agree on what a parameter is declared as.
  */
 export function declaredParamType(p: Expression): Type | undefined {
+  // A parameter with a default value, `["Optional", param, default]`, has
+  // the declared type of the parameter it wraps.
+  p = optionalParameterTarget(p);
   if (!isFunction(p, 'Typed') || !isSymbol(p.ops[0])) return undefined;
   const src = p.ops[1];
   const text = isString(src)
