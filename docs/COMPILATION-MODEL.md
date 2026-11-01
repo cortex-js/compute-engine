@@ -71,6 +71,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`: `Map(t ↦ 7, LL)` with `LL: list<list<real> | missing>` holding
   `[[1, 2], [3]]` gives `[[7, 7], [7]]`; the interpreter gives `[7, 7]` (was
   CE-742).
+- `javascript`, `python`: dependent `Sum` clauses with an outer `k = 3`,
+  `Sum(j + k, Limits(j, 1, k), Limits(k, 1, k))`, give 36; the interpreter
+  gives 24.
 
 ## Fail closed
 

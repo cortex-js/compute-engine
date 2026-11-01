@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-767.
+Next free reference: CE-784.
 
 **Entry format.**
 
@@ -371,6 +371,22 @@ The effects walker stops at a depth of 8 nested function literals
 the safe direction but loses precision. A fix needs a design choice: the nested
 walk shares its confinement state with the enclosing literal.
 
+### CE-769. A partial `Apply` used as a `Map` callback is typed `number` and the call is a type error
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; A partial application used as a `Map` callback gives `incompatible-type`; the interpreter should map it.
+
+A partial application used as a `Map` callback gives `incompatible-type`; the interpreter should map it. Found during the work of 2026-10-30 and 2026-10-31 (Item 5); the
+reproduction above is the record.
+
+### CE-772. A function assigned in a `Block` gets its static type before the assignment
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Type computed before `f` is assigned; a type that does not hold the value can give a compiled wrong shape (as F56).
+
+Type computed before `f` is assigned; a type that does not hold the value can give a compiled wrong shape (as F56). Found during the work of 2026-10-30 and 2026-10-31 (Defect 25); the
+reproduction above is the record.
+
 ## Collections, absence and broadcasting
 
 ### CE-763. `Contains` of a list of valueless symbols gives `False` for a value that a symbol can hold
@@ -611,6 +627,22 @@ With `Q := [(1, 2), (3, 4)]` and `x := 5`:
   (`collection-utils.ts`) reads operand TYPES only. A number symbol whose type
   was only inferred keeps such a sum symbolic under `evaluate()`, so to type it
   `error` from the type alone would be wrong; a fix needs the symbol's value.
+
+### CE-773. `Scan(M, (a, t) ↦ a + t, 0)` over the rows of a matrix stays unevaluated
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; A running sum of matrix rows is a one-line program; file says "check intent" first.
+
+A running sum of matrix rows is a one-line program; file says "check intent" first. Found during the work of 2026-10-30 and 2026-10-31 (Item 30); the
+reproduction above is the record.
+
+### CE-776. `Sort([])` stays unevaluated
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Sorting an empty list is a one-line program; expected `[]`.
+
+Sorting an empty list is a one-line program; expected `[]`. Found during the work of 2026-10-30 and 2026-10-31 (Item 8a); the
+reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
 
@@ -1282,6 +1314,22 @@ binder-aware canonicalization: at fusion time the canonicalizer has no scope of
 the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
+### CE-767. An asynchronous `Max`, `Min` or `Sum` of a `FlatMap` with an async-only callback stays unevaluated
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; `Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` under `evaluateAsync()` gives `Max(2, slowF(1), slowF(2))`, not 20. State: NOT STARTED.
+
+`Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` under `evaluateAsync()` gives `Max(2, slowF(1), slowF(2))`, not 20. State: NOT STARTED. Found during the work of 2026-10-30 and 2026-10-31 (4b list); the
+reproduction above is the record.
+
+### CE-768. Two functions with the same block-local `g` read each other's binding
+
+**Status:** ready; wrong value. Approved 2026-11-01.
+**Witness:** plausible; `k(1)(0)` with `h = n ↦ Block(g := (z ↦ 0), z ↦ g(z) + n)`, `k = n ↦ Block(g := h(n), z ↦ g(z) + n)` gives "Recursion limit exceeded", expected 2.
+
+`k(1)(0)` with `h = n ↦ Block(g := (z ↦ 0), z ↦ g(z) + n)`, `k = n ↦ Block(g := h(n), z ↦ g(z) + n)` gives "Recursion limit exceeded", expected 2. Found during the work of 2026-10-30 and 2026-10-31 (Items 2 and 9); the
+reproduction above is the record.
+
 ## Symbolic computation
 
 ### CE-764. The derivative of `a ↦ h(a)` reads a global `a` of `h` as the parameter
@@ -1712,6 +1760,22 @@ Open items, in priority order:
 enumerate it, the multi-set walk must resolve dependent bounds again at each
 iteration. This may be the same problem as CE-115.
 
+### CE-780. `\int_0^1 x` without a differential reports `x` as an unknown
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; `\int_0^1 x\,dx` gives `[]`; an integral without `dx` is common input.
+
+`\int_0^1 x\,dx` gives `[]`; an integral without `dx` is common input. Found during the work of 2026-10-30 and 2026-10-31 (Item 13); the
+reproduction above is the record.
+
+### CE-781. `D` of a definite integral in another variable stays unevaluated
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Expected 1/2; differentiation under a definite integral is a one-line program.
+
+Expected 1/2; differentiation under a definite integral is a one-line program. Found during the work of 2026-10-30 and 2026-10-31 (Item 15); the
+reproduction above is the record.
+
 ## Numeric evaluation and special functions
 
 ### CE-600. An engine computes at the precision of the engine built last, not its own
@@ -2039,6 +2103,14 @@ with another route for the points it then refuses.
 - **CE-206.3** One inexact `Multiply` case where the big-precision route is less
   accurate than the machine evaluation (`arithmetic.test.ts`, `@fixme`).
 
+### CE-782. `Series(sin x).N()` and `Series(exp x).N()` give `NaN`
+
+**Status:** ready; wrong value. Approved 2026-11-01.
+**Witness:** plausible; Also `Series(exp x).N()`; a one-line program.
+
+Also `Series(exp x).N()`; a one-line program. Found during the work of 2026-10-30 and 2026-10-31 (Item 20); the
+reproduction above is the record.
+
 ## Compilation
 
 ### CE-755. interval-js emits a folded false condition as the string `'false'`
@@ -2078,8 +2150,7 @@ compiled for `real`?
   interpreter computes the value; the host declares `real` to compile.
 
 Recommendation: (a). With no decision, both examples keep their wrong
-values. Found 2026-11-01 (handoff
-`docs/scratch/2026-11-01-ce715-next-tasks-followups-handoff.md`, item 2).
+values.
 
 ### CE-715. The `bigint` compile mode: the shapes it declines
 
@@ -2271,8 +2342,7 @@ Steps (plan §6; each in a worktree, with the dual review, the before/after
 corpus audit and a report of the declines per target and the `code` changes):
 
 - **CE-712.1** (done, committed by the user 2026-11-01 as `5b60e6081`;
-  record in `docs/scratch/2026-10-31-ce712-1-handoff.md`, section "Applied
-  and staged"; corpus: JavaScript declines 24 to 47, GLSL 49 to 48,
+  corpus: JavaScript declines 24 to 47, GLSL 49 to 48,
   interval-js 75 to 80, code changed in 0 records that compile in both. User decision 2026-11-01: every function literal that assigns
   a name of an enclosing scope declines, except the root and a literal that
   `Apply` applies where it is written to scalar arguments (CE-720). R1 (an
@@ -2343,8 +2413,7 @@ throw or hang (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). So
 the compiler adds no run-time test of a value against a declared or inferred
 type: not at an `Assign` to a declared local, not at a parameter, not at an
 input. The first version of such a check was taken out of the main tree on
-2026-10-30 and is saved in `docs/scratch/2026-10-30-ce662-first-version/`; it
-stays out. The work that remains is the reverse: find each run-time type test
+2026-10-30 and stays out. The work that remains is the reverse: find each run-time type test
 that compiled code still emits on `javascript` and `python` (an
 `incompatible-type` throw or raise, a test of a value whose static type is
 already settled), and remove each one whose only purpose is to validate a
@@ -2827,6 +2896,62 @@ array-uniform loop codegen, and it needs witnesses first.
   hoisting a loop out of an arm that it never feeds would shift every later
   `Random()` draw in the shader. The other option (an `if`/`else` lowering with
   a temporary) needs a second witness; the count is one.
+
+### CE-770. Python: `Apply((x, y) ↦ x + y, L, 3)` with a list `L` raises `TypeError` instead of mapping
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Interpreter maps over `L`; a throw where the interpreter gives a list is not an allowed difference.
+
+Interpreter maps over `L`; a throw where the interpreter gives a list is not an allowed difference. Found during the work of 2026-10-30 and 2026-10-31 (Item 6); the
+reproduction above is the record.
+
+### CE-771. `(s ↦ Length(s))(t)` with `t: string` throws `RangeError` on JavaScript
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Interpreter gives 3, `Length(t)` alone compiles; file says it is well-typed and stays a defect.
+
+Interpreter gives 3, `Length(t)` alone compiles; file says it is well-typed and stays a defect. Found during the work of 2026-10-30 and 2026-10-31 (Item 12); the
+reproduction above is the record.
+
+### CE-774. JavaScript: `And` over a list input is not mapped and gives a scalar
+
+**Status:** ready; wrong value. Approved 2026-11-01.
+**Witness:** plausible; `Not(And(b, u > 0))`, `b = true`, `u = [1, 2, 3]` gives `true`; interpreter `[False, False, False]`.
+
+`Not(And(b, u > 0))`, `b = true`, `u = [1, 2, 3]` gives `true`; interpreter `[False, False, False]`. Found during the work of 2026-10-30 and 2026-10-31 (Item 38); the
+reproduction above is the record.
+
+### CE-777. Compiling `Block(If(x < 1, b ≔ 1, b ≔ 2); b)` declares a global `b`
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Compilation changes the engine's scope; a two-line program.
+
+Compilation changes the engine's scope; a two-line program. Found during the work of 2026-10-30 and 2026-10-31 (Compiling `Block(If(x < 1, b ≔ 1, b ≔ 2); b)` creates a global `b`); the
+reproduction above is the record.
+
+### CE-778. GPU: a negated comparison chain loses its parentheses
+
+**Status:** ready; wrong value. Approved 2026-11-01.
+**Witness:** plausible; `Not(Less(3, y, x))` emits `!(3.0 < y) && (y < x)`; at y = 4, x = 1 shader false, interpreter True.
+
+`Not(Less(3, y, x))` emits `!(3.0 < y) && (y < x)`; at y = 4, x = 1 shader false, interpreter True. Found during the work of 2026-10-30 and 2026-10-31 (Item 1); the
+reproduction above is the record.
+
+### CE-779. GLSL: a `list<real>` input compiles to a bare name and reports success instead of declining
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Shader code that no shader can declare, reported as a success; it must decline.
+
+Shader code that no shader can declare, reported as a success; it must decline. Found during the work of 2026-10-30 and 2026-10-31 (Item 4); the
+reproduction above is the record.
+
+### CE-783. JavaScript: `Apply(D(x ↦ sin(nx), x), 1)` throws "is not a function"
+
+**Status:** ready; defect. Approved 2026-11-01.
+**Witness:** plausible; Interpreter gives a value; "not compared with HEAD", and F41 (`c12544982`) changed this code: probe first.
+
+Interpreter gives a value; "not compared with HEAD", and F41 (`c12544982`) changed this code: probe first. Found during the work of 2026-10-30 and 2026-10-31 (§5.8b); the
+reproduction above is the record.
 
 ## LaTeX parsing and serialization
 
@@ -3886,3 +4011,12 @@ The `test` job of CI fails on Node 22 and Node 26. The failing tests:
   draws in GPU statements), which is after `a23be5735`.
 - `test/compute-engine/ce-430-findfit-async-data.test.ts`, the three "a timer
   runs during …" tests, on Node 22 only.
+
+### CE-775. The arithmetic guide page of cortexjs.io still owes the text of a public behavior change
+
+**Status:** ready; documentation. Approved 2026-11-01.
+**Witness:** plausible; Owed by the AGENTS.md rule on public behavior; the text was in a lost scratch report. Check the cortexjs.io page.
+
+Owed by the AGENTS.md rule on public behavior; the text was in a lost scratch report. Check the cortexjs.io page. Found during the work of 2026-10-30 and 2026-10-31 (F16); the
+reproduction above is the record.
+
