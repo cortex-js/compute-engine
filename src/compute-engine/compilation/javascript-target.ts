@@ -97,7 +97,8 @@ import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { operandMayBeAbsent } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
-import { reservedNameSpelling } from './compile-loops.js';
+import { reservedNameSpelling, writesSymbol } from './compile-loops.js';
+import { nestDependentLimits } from '../library/utils.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import {
   tryGetConstant,
@@ -16906,6 +16907,13 @@ function unrolledBigOpLane(expr: Expression): boolean | undefined {
   if (!isFunction(limits, 'Limits')) return undefined;
   const { index, lowerExpr, upperExpr } = extractLimits(limits);
   if (index === '_') return undefined;
+  // A body that writes its index is never unrolled, and the loop that
+  // `emitSumProduct` emits for it chooses its lane from the masked reading
+  // of the body, not from the literal index values. Reading the literal
+  // terms here would call the node real while the loop makes `{ re, im }`
+  // values (`1 + Sum(Block(j ≔ -j, √j), Limits(j, 1, 4))`), so the node has
+  // no lane fact of its own.
+  if (writesSymbol(expr.ops[0], index)) return undefined;
   const lowerNum = BaseCompiler.bigOpBoundConstant(lowerExpr, target);
   const upperNum = BaseCompiler.bigOpBoundConstant(upperExpr, target);
   if (
@@ -16935,6 +16943,21 @@ function unrolledBigOpLane(expr: Expression): boolean | undefined {
 
 installUnrolledBigOpLane(unrolledBigOpLane);
 
+/**
+ * An index of a `Sum` or `Product` clause that the body writes. Its loop
+ * steps `counter`, and each iteration declares `let <code> = <counter>;`, so
+ * the next iteration starts from the next index value whatever the body
+ * wrote (`emitSumProduct`).
+ */
+type WrittenLoopIndex = {
+  /** The index, as the expression names it. */
+  name: string;
+  /** The emitted name of the index (a fresh name for a reserved one). */
+  code: string;
+  /** The emitted name of the counter that the loop steps. */
+  counter: string;
+};
+
 function emitSumProduct(
   kind: 'Sum' | 'Product',
   body: Expression,
@@ -16942,7 +16965,16 @@ function emitSumProduct(
   target: CompileTarget<Expression>,
   /** `false` for the nested invocation of a multi-clause node's inner
    * clauses, whose lane the whole-node reading above does not model. */
-  isRootClause = true
+  isRootClause = true,
+  /** The indices of the enclosing clauses that the body writes, each with
+   * its emitted name and the name of the separate counter that its loop
+   * steps (see `bodyWritesIndex` below). */
+  enclosingWrittenIndices: ReadonlyArray<WrittenLoopIndex> = [],
+  /** Whether the interpreter evaluates the clauses as nested operators,
+   * because a bound of one clause names the index of another
+   * (`nestDependentLimits`). Decided once, for all the clauses of the node. */
+  clausesNest: boolean = clauses.length > 1 &&
+    nestDependentLimits(kind, body, clauses, body.engine) !== undefined
 ): string {
   const statements = javascriptStatements(target);
   const expression = (
@@ -17011,12 +17043,37 @@ function emitSumProduct(
   // with a complex local `n` is complex while the term is emitted, and `n²`
   // reads `.re`/`.im` off an integer.
   const sumNode = BaseCompiler.cseParentNode();
-  const compileTerm = (innerTarget: CompileTarget<Expression>): string =>
+  const compileTerm = (
+    innerTarget: CompileTarget<Expression>,
+    writtenIndices: ReadonlyArray<WrittenLoopIndex> = enclosingWrittenIndices
+  ): string =>
     BaseCompiler.withRealLoopIndices([index], () =>
       rest.length > 0
-        ? emitSumProduct(kind, body, rest, innerTarget, false)
+        ? emitSumProduct(
+            kind,
+            body,
+            rest,
+            innerTarget,
+            false,
+            writtenIndices,
+            clausesNest
+          )
         : BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body)
     );
+
+  // A body can write the index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
+  // The interpreter binds each index to its next value at each iteration
+  // (for several clauses, at each tuple of the cartesian product), whatever
+  // the body wrote. So the loop of a written index steps a separate counter,
+  // and the innermost iteration declares the index from the counter of each
+  // written index (`WrittenLoopIndex`). An unrolled term reads the index as
+  // a literal, which a write cannot change, and the terms of an unrolled
+  // inner clause share the index of the enclosing clause: so no clause
+  // unrolls when the body writes the index of any clause.
+  const bodyWritesIndex = writesSymbol(body, index);
+  const noUnroll =
+    enclosingWrittenIndices.length > 0 ||
+    indices.some((name) => writesSymbol(body, name));
 
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
   const budget = target.iterationBudget;
@@ -17030,7 +17087,7 @@ function emitSumProduct(
   // arm never unrolls: joining array terms with the bare scalar operator
   // would string-concatenate them — it always takes the `_SYS.bcast` fold
   // loop below.
-  if (bothConstant && withinBudget && !elementwiseBody) {
+  if (bothConstant && withinBudget && !elementwiseBody && !noUnroll) {
     const termCount = upperNum - lowerNum + 1;
     // A clause whose terms would hold too many nodes in all is a loop
     // (`unroll-budget.ts`).
@@ -17200,17 +17257,19 @@ function emitSumProduct(
   }
 
   // Keep the body, accumulator and parent on the same real representation.
+  // The lane reads the index as at least the lower bound, which a write to
+  // the index does not keep (`Assign(j, -j)`).
   const loopLane =
-    isRootClause && rest.length === 0
+    isRootClause && rest.length === 0 && !bodyWritesIndex
       ? realLoopClauseLane(body, index, lowerNum, target)
       : undefined;
   const loopIsComplex = loopLane ?? bodyIsComplex;
   const compileLoopTerm = (innerTarget: CompileTarget<Expression>): string =>
     loopLane === false
       ? BaseCompiler.withLoopIndexLowerBound(index, lowerNum!, () =>
-          compileTerm(innerTarget)
+          compileTerm(innerTarget, innerWrittenIndices)
         )
-      : compileTerm(innerTarget);
+      : compileTerm(innerTarget, innerWrittenIndices);
 
   // Emit a loop (either large constant range or symbolic bounds)
   const lowerCode = compileBound(lowerExpr, lowerNum, target);
@@ -17250,6 +17309,28 @@ function emitSumProduct(
       : {}),
   };
 
+  // The loop steps `counter`. It is the index itself, unless the body
+  // writes the index: then it is a separate name, and the iteration
+  // declares the index from it (`iterationPrelude`). Each clause declares
+  // its own index; an enclosing clause does it for the bounds of the inner
+  // clauses that read it. The interpreter walks independent clauses as one
+  // cartesian product and binds every index at each tuple, so there the
+  // innermost clause also declares the written indices of the enclosing
+  // clauses: a write to an outer index lasts for one tuple. Clauses that
+  // nest (`clausesNest`) are evaluated as nested operators, so there a
+  // write to an outer index lasts until the next value of that index.
+  const counter = bodyWritesIndex ? BaseCompiler.tempVar(target) : indexCode;
+  const innerWrittenIndices: ReadonlyArray<WrittenLoopIndex> = bodyWritesIndex
+    ? [...enclosingWrittenIndices, { name: index, code: indexCode, counter }]
+    : enclosingWrittenIndices;
+  const declaredIndices =
+    rest.length === 0 && !clausesNest
+      ? innerWrittenIndices
+      : innerWrittenIndices.filter((w) => w.name === index);
+  const iterationPrelude = declaredIndices
+    .map((w) => `let ${w.code} = ${w.counter}; `)
+    .join('');
+
   // The counter stays numeric unless the body writes it. Declining on any
   // same-named assignment also conservatively covers nested binder scopes.
   const writesCounter = (expr: Expression): boolean => {
@@ -17271,7 +17352,10 @@ function emitSumProduct(
     recordScalarParams(innerTarget, new Set([index]));
     recordDecidedLoopIndex(innerTarget, index);
   }
-  if (BaseCompiler.isEmissionSkippable([body], indices, target)) {
+  if (
+    !bodyWritesIndex &&
+    BaseCompiler.isEmissionSkippable([body], indices, target)
+  ) {
     // Inspect only a complete numeric spelling, optionally floored by
     // compileBound; a numeric prefix of runtime code is not a constant.
     const bound = (code: string): number =>
@@ -17280,8 +17364,13 @@ function emitSumProduct(
   }
   const { bindings: hoistedBindings, result: bodyCode } =
     rest.length === 0
-      ? BaseCompiler.hoistLoopInvariants(body, [index], target, () =>
-          compileLoopTerm(innerTarget)
+      ? BaseCompiler.hoistLoopInvariants(
+          body,
+          // A subexpression that reads an index the body writes is not
+          // invariant.
+          [index, ...innerWrittenIndices.map((w) => w.name)],
+          target,
+          () => compileLoopTerm(innerTarget)
         )
       : { bindings: [], result: compileLoopTerm(innerTarget) };
   // The bindings follow the loop-entry guard and an EMPTY-RANGE return: a
@@ -17295,7 +17384,7 @@ function emitSumProduct(
   ): string =>
     hoistedBindings.length === 0
       ? ''
-      : `if (!(${indexCode} <= _upper)) ${exit(empty)} ` +
+      : `if (!(${counter} <= _upper)) ${exit(empty)} ` +
         hoistedBindings
           .map(([name, code]) => `${initialize(name, code)} `)
           .join('');
@@ -17333,10 +17422,9 @@ function emitSumProduct(
         : `(Number.isFinite(${b}) && !Number.isSafeInteger(${b}))`;
     const checks = [
       ...(upperNum === undefined ? [unsafe('_upper')] : []),
-      ...(lowerNum === undefined ? [unsafe(indexCode)] : []),
+      ...(lowerNum === undefined ? [unsafe(counter)] : []),
     ];
-    if (budget !== undefined)
-      checks.push(`!(_upper - ${indexCode} < ${budget})`);
+    if (budget !== undefined) checks.push(`!(_upper - ${counter} < ${budget})`);
     return checks.length > 0 ? `if (${checks.join(' || ')}) ${exit(nan)} ` : '';
   };
 
@@ -17391,7 +17479,7 @@ function emitSumProduct(
     if (elementwiseExit)
       return expression(
         (exit) =>
-          `let ${acc} = null; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${exit('NaN')} ${indexCode}++; } ${exit(`${acc} === null ? ${identity} : ${acc}`)}`
+          `let ${acc} = null; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${exit('NaN')} ${counter}++; } ${exit(`${acc} === null ? ${identity} : ${acc}`)}`
       );
     // The flag, not the accumulator, carries the verdict to the end: once the
     // fold has collapsed to a scalar NaN the following iteration broadcasts it
@@ -17400,7 +17488,7 @@ function emitSumProduct(
     const latched = BaseCompiler.tempVar(target);
     return expression(
       (exit) =>
-        `let ${acc} = null; let ${latched} = false; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${latched} = true; ${indexCode}++; } ${exit(`${latched} ? NaN : (${acc} === null ? ${identity} : ${acc})`)}`
+        `let ${acc} = null; let ${latched} = false; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${latched} = true; ${counter}++; } ${exit(`${latched} ? NaN : (${acc} === null ? ${identity} : ${acc})`)}`
     );
   }
 
@@ -17409,12 +17497,12 @@ function emitSumProduct(
     if (isSum) {
       return expression(
         (exit) =>
-          `let ${acc} = { re: 0, im: 0 }; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 0, im: 0 }', exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${indexCode}++; } ${exit(acc)}`
+          `let ${acc} = { re: 0, im: 0 }; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 0, im: 0 }', exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${counter}++; } ${exit(acc)}`
       );
     }
     return expression(
       (exit) =>
-        `let ${acc} = { re: 1, im: 0 }; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 1, im: 0 }', exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${indexCode}++; } ${exit(acc)}`
+        `let ${acc} = { re: 1, im: 0 }; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 1, im: 0 }', exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${counter}++; } ${exit(acc)}`
     );
   }
 
@@ -17444,7 +17532,7 @@ function emitSumProduct(
     const term =
       statements?.consume(bodyCode, (value) => `${acc} ${op}= ${value};`) ??
       `${acc} ${op}= ${bodyCode};`;
-    return `let ${acc} = ${identity}; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${indexCode} <= _upper) { ${term} ${loopExit ? `if (${acc} !== ${acc}) ${exit('NaN')} ` : ''}${indexCode}++; } ${exit(acc)}`;
+    return `let ${acc} = ${identity}; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${counter} <= _upper) { ${iterationPrelude}${term} ${loopExit ? `if (${acc} !== ${acc}) ${exit('NaN')} ` : ''}${counter}++; } ${exit(acc)}`;
   });
 }
 

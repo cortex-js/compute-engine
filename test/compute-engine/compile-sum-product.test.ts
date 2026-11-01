@@ -2,8 +2,11 @@
  * Tests for Sum and Product compilation
  */
 
+import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import { TEST_PYTHON } from './test-python';
 
 const ce = new ComputeEngine();
 ce.declare('m', 'real');
@@ -543,4 +546,330 @@ describe('COMPILE SUM/PRODUCT: THE INDEX IS A REAL COUNTER', () => {
       expect(expected.im).toBe(0);
       expect(value).toBeCloseTo(expected.re, 12);
     });
+});
+
+describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
+  // The interpreter binds the index to its next value at each iteration,
+  // whatever the body wrote: `Σ_{j=1}^{4} (j ≔ j + 1; j)` is 2 + 3 + 4 + 5 =
+  // 14. The JavaScript loop stepped the variable that the body wrote, so it
+  // skipped every other iteration and gave 6. An unrolled term read the
+  // index as a literal, and the write declined. Each target now steps a
+  // separate counter, or copies the counter to a local that the body writes.
+  const I = "'integer'";
+  const inc = (index: string, step: unknown = 1): unknown => [
+    'Block',
+    ['Assign', index, ['Add', index, step]],
+    index,
+  ];
+  const fn = (body: unknown, ...limits: unknown[]): unknown => [
+    'Function',
+    ['Sum', body, ...limits],
+    ['Typed', 'n', I],
+  ];
+  const product = (body: unknown, ...limits: unknown[]): unknown => [
+    'Function',
+    ['Product', body, ...limits],
+    ['Typed', 'n', I],
+  ];
+
+  /** The interpreter's value of `f` at `n`, as `{ re, im }`. */
+  function interpreted(f: unknown, n: number): { re: number; im: number } {
+    const v = new ComputeEngine().box(['Apply', f, n] as any).N();
+    return { re: v.re, im: v.im };
+  }
+
+  const JS_CASES: [string, unknown, number, number | undefined][] = [
+    ['the reported case', fn(inc('j'), ['Limits', 'j', 1, 'n']), 4, 14],
+    ['a Product', product(inc('j'), ['Limits', 'j', 1, 'n']), 4, 120],
+    [
+      'an index with a reserved name',
+      fn(inc('Math'), ['Limits', 'Math', 1, 'n']),
+      4,
+      14,
+    ],
+    ['constant bounds', fn(inc('j'), ['Limits', 'j', 1, 4]), 4, 14],
+    [
+      'constant bounds, a Product',
+      product(inc('Math'), ['Limits', 'Math', 1, 4]),
+      4,
+      120,
+    ],
+    [
+      'constant bounds too many to unroll',
+      fn(['Divide', inc('j'), 1000], ['Limits', 'j', 1, 200]),
+      4,
+      undefined,
+    ],
+    [
+      'a write that would loop forever on the counter',
+      fn(
+        ['Block', ['Assign', 'j', ['Negate', 'j']], ['Abs', 'j']],
+        ['Limits', 'j', 1, 'n']
+      ),
+      4,
+      10,
+    ],
+    [
+      'two independent clauses, a write to the outer index',
+      fn(
+        ['Block', ['Assign', 'j', ['Add', 'j', 10]], ['Add', 'j', 'k']],
+        ['Limits', 'j', 1, 'n'],
+        ['Limits', 'k', 1, 3]
+      ),
+      2,
+      81,
+    ],
+    [
+      'two independent clauses, a write to the inner index',
+      fn(
+        [
+          'Block',
+          ['Assign', 'k', ['Add', 'k', 10]],
+          ['Add', ['Multiply', 100, 'j'], 'k'],
+        ],
+        ['Limits', 'j', 1, 'n'],
+        ['Limits', 'k', 1, 3]
+      ),
+      2,
+      undefined,
+    ],
+    [
+      'an inner bound that reads the outer index',
+      fn(
+        ['Block', ['Assign', 'j', ['Add', 'j', 5]], ['Add', 'j', 'k']],
+        ['Limits', 'j', 1, 'n'],
+        ['Limits', 'k', 1, 'j']
+      ),
+      3,
+      74,
+    ],
+  ];
+
+  test.each(JS_CASES)('JS: %s', (_name, f, n, expected) => {
+    const result = compile(ce.box(f as any), { to: 'javascript' });
+    expect(result.success).toBe(true);
+    const code = result.code as string;
+    // eslint-disable-next-line no-new-func
+    expect(() => new Function(`"use strict"; return (${code});`)).not.toThrow();
+    const value = result.run!(n as never) as number;
+    const reference = interpreted(f, n);
+    expect(reference.im).toBe(0);
+    if (expected !== undefined) expect(reference.re).toBe(expected);
+    expect(value).toBeCloseTo(reference.re, 8);
+  });
+
+  test('JS: the loop steps a counter, and each iteration declares the index from it', () => {
+    const result = compile(
+      ce.box(fn(inc('j'), ['Limits', 'j', 1, 'n']) as any),
+      { to: 'javascript' }
+    );
+    expect(result.code).toMatch(/while \((_tv\d+) <= _upper\) \{ let j = \1; /);
+  });
+
+  test('JS: a complex body after a write to the index', () => {
+    const f = fn(
+      ['Block', ['Assign', 'j', ['Negate', 'j']], ['Sqrt', 'j']],
+      ['Limits', 'j', 1, 'n']
+    );
+    const result = compile(ce.box(f as any), { to: 'javascript' });
+    expect(result.success).toBe(true);
+    const value = result.run!(4 as never) as { re: number; im: number };
+    const reference = interpreted(f, 4);
+    expect(value.re).toBeCloseTo(reference.re, 10);
+    expect(value.im).toBeCloseTo(reference.im, 10);
+    expect(reference.im).toBeCloseTo(1 + Math.SQRT2 + Math.sqrt(3) + 2, 10);
+  });
+
+  test('JS: a parent operator reads the complex Sum of a body that writes its index', () => {
+    // Constant bounds: the node is not unrolled, so its lane comes from the
+    // loop, and the `1 + …` reads a complex value, not a string.
+    const expr = [
+      'Add',
+      1,
+      [
+        'Sum',
+        ['Block', ['Assign', 'j', ['Negate', 'j']], ['Sqrt', 'j']],
+        ['Limits', 'j', 1, 4],
+      ],
+    ];
+    const result = compile(ce.box(expr as any), { to: 'javascript' });
+    expect(result.success).toBe(true);
+    const value = result.run!({} as never) as { re: number; im: number };
+    const reference = ce.box(expr as any).N();
+    expect(value.re).toBeCloseTo(reference.re, 10);
+    expect(value.im).toBeCloseTo(reference.im, 10);
+    expect(value.im).toBeCloseTo(1 + Math.SQRT2 + Math.sqrt(3) + 2, 10);
+  });
+
+  test('JS: a list body after a write to the index', () => {
+    const f = fn(
+      [
+        'Block',
+        ['Assign', 'j', ['Add', 'j', 1]],
+        ['Multiply', 'j', ['List', 1, 2]],
+      ],
+      ['Limits', 'j', 1, 'n']
+    );
+    const result = compile(ce.box(f as any), { to: 'javascript' });
+    expect(result.success).toBe(true);
+    expect(result.run!(4 as never)).toEqual([14, 28]);
+  });
+
+  const intervalEngine = (): ComputeEngine => {
+    const engine = new ComputeEngine();
+    engine.declare('n', 'integer');
+    return engine;
+  };
+  test.each([
+    ['Sum', 'j', 'n', 14],
+    ['Product', 'j', 'n', 120],
+    ['Sum', 'j', 4, 14],
+    ['Sum', '_IA', 4, 14],
+  ] as const)(
+    'interval-js: %s with index %s, upper bound %s',
+    (op, j, hi, v) => {
+      const result = compile(
+        intervalEngine().box([op, inc(j), ['Limits', j, 1, hi]] as any),
+        { to: 'interval-js', fallback: false }
+      );
+      expect(result.success).toBe(true);
+      expect(unwrapInterval(result.run!({ n: 4 } as never))).toEqual({
+        lo: v,
+        hi: v,
+      });
+    }
+  );
+
+  // A small translation of the shader code to JavaScript, enough for the
+  // loops below: the declarations become `let`, the conversions disappear.
+  const runShader = (code: string): number =>
+    // eslint-disable-next-line no-new-func
+    new Function(
+      code
+        .replace(/^(\s*)(?:float|int) (\w+)(;| =)/gm, '$1let $2$3')
+        .replace(/^(\s*)var (\w+): \w+(;| =)/gm, '$1let $2$3')
+        .replace(/for \((?:int|var) (\w+)(?:: i32)? =/g, 'for (let $1 =')
+        .replace(/\b(?:float|f32)\(/g, '(')
+    )();
+  test.each([
+    ['glsl', 'Sum', 'j', 14],
+    ['glsl', 'Product', 'j', 120],
+    ['glsl', 'Sum', 'Math', 14],
+    ['wgsl', 'Sum', 'j', 14],
+    ['wgsl', 'Product', 'j', 120],
+  ] as const)('%s: %s with index %s', (to, op, j, v) => {
+    const result = compile(ce.box([op, inc(j), ['Limits', j, 1, 4]] as any), {
+      to,
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    const code = result.code as string;
+    // The body reads and writes a float local, a copy of the counter.
+    expect(code).toMatch(
+      to === 'glsl'
+        ? new RegExp(`float _tv\\d+ = float\\(${j}\\);`)
+        : new RegExp(`var _tv\\d+: f32 = f32\\(${j}\\);`)
+    );
+    expect(runShader(code)).toBe(v);
+  });
+
+  // The Python loop form: a `for` binds its variable to the next value of
+  // the range at each iteration. Of several independent clauses, the `for`
+  // of a written outer index steps a counter that the innermost loop copies
+  // to the index.
+  const PYTHON_CASES: [string, unknown][] = [
+    ['a Sum', ['Sum', inc('j'), ['Limits', 'j', 1, 'n']]],
+    ['a Product', ['Product', inc('j'), ['Limits', 'j', 1, 'n']]],
+    ['constant bounds', ['Sum', inc('j'), ['Limits', 'j', 1, 4]]],
+    ['a reserved name', ['Sum', inc('Math'), ['Limits', 'Math', 1, 'n']]],
+    [
+      'a write to the outer index',
+      [
+        'Sum',
+        ['Block', ['Assign', 'j', ['Add', 'j', 10]], ['Add', 'j', 'k']],
+        ['Limits', 'j', 1, 'n'],
+        ['Limits', 'k', 1, 3],
+      ],
+    ],
+    [
+      'a write to the inner index',
+      [
+        'Sum',
+        [
+          'Block',
+          ['Assign', 'k', ['Add', 'k', 10]],
+          ['Add', ['Multiply', 100, 'j'], 'k'],
+        ],
+        ['Limits', 'j', 1, 'n'],
+        ['Limits', 'k', 1, 3],
+      ],
+    ],
+    [
+      'an inner bound that reads the outer index',
+      [
+        'Sum',
+        ['Block', ['Assign', 'j', ['Add', 'j', 5]], ['Add', 'j', 'k']],
+        ['Limits', 'j', 1, 'n'],
+        ['Limits', 'k', 1, 'j'],
+      ],
+    ],
+  ];
+  (TEST_PYTHON === undefined ? it.skip : it)(
+    'Python: the loop form gives the interpreter value',
+    () => {
+      const py = new PythonTarget();
+      let program = 'import math\nout = []\n';
+      PYTHON_CASES.forEach(([, json], i) => {
+        const code = py.compile(intervalEngine().box(json as any))
+          .code as string;
+        const body = code
+          .split('\n')
+          .map((l) => `    ${l}`)
+          .join('\n');
+        program += `def f${i}(n):\n${body}\nout.append(f${i}(4))\n`;
+      });
+      program += 'print(out)\n';
+      const out = JSON.parse(
+        execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
+      ) as number[];
+      PYTHON_CASES.forEach(([name, json], i) => {
+        const engine = intervalEngine();
+        engine.assign('n', 4);
+        expect([name, out[i]]).toEqual([
+          name,
+          engine
+            .box(json as any)
+            .evaluate()
+            .N().re,
+        ]);
+      });
+    }
+  );
+
+  test('a target with no Sum lowering of its own (the generic loop)', () => {
+    const target: any = {
+      language: 'custom',
+      operators: (op: string) =>
+        op === 'Add' ? ['+', 11] : op === 'Multiply' ? ['*', 12] : undefined,
+      functions: () => undefined,
+      var: (id: string) => id,
+      string: (s: string) => JSON.stringify(s),
+      number: (x: number) => String(x),
+      indent: 0,
+      ws: () => ' ',
+      preamble: '',
+    };
+    for (const [op, v] of [
+      ['Sum', 14],
+      ['Product', 120],
+    ] as const) {
+      const result = compile(
+        ce.box([op, inc('j'), ['Limits', 'j', 1, 4]] as any),
+        { target, fallback: false }
+      );
+      expect(result.success).toBe(true);
+      // eslint-disable-next-line no-new-func
+      expect(new Function(`return ${result.code};`)()).toBe(v);
+    }
+  });
 });

@@ -568,6 +568,23 @@ export function elementBinderLane(
 }
 
 /**
+ * Whether evaluating `expr` can write the symbol `name`: an `Assign` or a
+ * `Declare` of `name`, or of a target that is not a symbol, anywhere in the
+ * tree. A nested scope that binds its own `name` is counted too, which is
+ * conservative. The `Sum` and `Product` emitters use it: a body that writes
+ * its index must not change the value of the index at the next iteration.
+ */
+export function writesSymbol(expr: Expression, name: string): boolean {
+  if (!isFunction(expr)) return false;
+  if (
+    (expr.operator === 'Assign' || expr.operator === 'Declare') &&
+    (!isSymbol(expr.ops[0]) || expr.ops[0].symbol === name)
+  )
+    return true;
+  return expr.ops.some((op) => writesSymbol(op, name));
+}
+
+/**
  * The emitted name of each loop variable in `names`. A name that the
  * emitted code uses as an identifier (`CompileTarget.reservedEmittedNames`,
  * for example `_SYS`, the runtime helper object of the JavaScript target)
@@ -1614,6 +1631,13 @@ export function compileLoop(
   const fn = compileOp(node, 0, bodyTarget, 0, args[0]);
 
   const acc = tempVar(target);
+  // A body can write the index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
+  // The interpreter binds the index to its next value at each iteration,
+  // whatever the body wrote. So the loop of such a body steps a separate
+  // counter, and each iteration declares the index from it.
+  const counter = writesSymbol(args[0], index) ? tempVar(target) : index;
+  const declareIndex =
+    counter === index ? '' : `\n  let ${index} = ${counter};`;
 
   // Iteration-budget guard (see CompileTarget.iterationBudget): a trip
   // count over the budget — including infinite or NaN bounds, for which
@@ -1622,7 +1646,7 @@ export function compileLoop(
   const budget = target.iterationBudget;
   const guardNaN = (nan: string): string =>
     budget !== undefined
-      ? `\n  if (!((${upper}) - ${index} < ${budget})) return ${nan};`
+      ? `\n  if (!((${upper}) - ${counter} < ${budget})) return ${nan};`
       : '';
 
   if (bodyIsComplex) {
@@ -1631,11 +1655,11 @@ export function compileLoop(
     if (isSum) {
       return `(() => {
 let ${acc} = { re: 0, im: 0 };
-let ${index} = ${lower};${guard}
-while (${index} <= ${upper}) {
+let ${counter} = ${lower};${guard}
+while (${counter} <= ${upper}) {${declareIndex}
   const ${val} = ${fn};
   ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im };
-  ${index}++;
+  ${counter}++;
 }
 return ${acc};
 })()`;
@@ -1643,11 +1667,11 @@ return ${acc};
     // Product
     return `(() => {
 let ${acc} = { re: 1, im: 0 };
-let ${index} = ${lower};${guard}
-while (${index} <= ${upper}) {
+let ${counter} = ${lower};${guard}
+while (${counter} <= ${upper}) {${declareIndex}
   const ${val} = ${fn};
   ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re };
-  ${index}++;
+  ${counter}++;
 }
 return ${acc};
 })()`;
@@ -1655,10 +1679,10 @@ return ${acc};
 
   return `(() => {
 let ${acc} = ${isSum ? '0' : '1'};
-let ${index} = ${lower};${guardNaN('NaN')}
-while (${index} <= ${upper}) {
+let ${counter} = ${lower};${guardNaN('NaN')}
+while (${counter} <= ${upper}) {${declareIndex}
   ${acc} ${op}= ${fn};
-  ${index}++;
+  ${counter}++;
 }
 return ${acc};
 })()`;

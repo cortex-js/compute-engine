@@ -276,6 +276,21 @@
 
 ### Bug Fixes
 
+- **A compiled `Sum` or `Product` whose body writes its index gives the value
+  of the interpreter.** The interpreter binds the index to its next value at
+  each iteration, whatever the body wrote: `Σ_{j=1}^{n} (j ≔ j + 1; j)` at
+  `n = 4` is 2 + 3 + 4 + 5 = 14. The JavaScript loop stepped the variable
+  that the body wrote, so it skipped iterations and gave 6 (and a write such
+  as `j ≔ −j` looped forever). With constant bounds, the JavaScript target
+  declined the write, and the Python, interval, GLSL and WGSL targets
+  declined it with any bounds. Now the loop steps a separate counter, and
+  each iteration gives the index the value of the counter, on the JavaScript,
+  Python, interval, GLSL and WGSL targets and on a custom target with no
+  `Sum` of its own; a body that writes its index is not unrolled. With
+  several independent clauses, a write to an outer index lasts for one tuple
+  of indices, as in the interpreter; when a bound reads another index, the
+  clauses nest, and the write lasts until the next value of that index.
+
 - **`FlatMap` with a callback that names a user function gives the same
   result as the same callback written inline.** With `f := x ↦ [x, x]`,
   `ListFrom(FlatMap([1, 2], f))` is now `[1, 1, 2, 2]`, and `Count`, `Sum`

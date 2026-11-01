@@ -622,34 +622,28 @@ describe('CE-732: a binding with a reserved name, interval-js target', () => {
     return { code: result.code as string, value: result.run!(vars as never) };
   }
 
-  // The interval `Sum` reads its index as `_IA.point(<index>)`, which is not
-  // an assignable reference, so a write to the index declines whether the
-  // index has a reserved name or not.
-  test.each(['j', 'Math'])(
-    'a `Sum` body that assigns its index `%s` declines',
-    (k) => {
-      const ce = new ComputeEngine();
-      ce.declare('n', 'integer');
-      const expr = [
-        'Sum',
-        ['Block', ['Assign', k, k], k],
-        ['Limits', k, 1, 'n'],
-      ];
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        const result = compile(ce.box(expr as never), {
-          to: 'interval-js',
-          constantFold: false,
-        } as never);
-        expect(result.success).toBe(false);
-        expect(String(warn.mock.calls[0]?.[0])).toContain(
-          'not an assignable reference'
-        );
-      } finally {
-        warn.mockRestore();
-      }
-    }
-  );
+  // The interval `Sum` reads its index as an interval. When the body writes
+  // the index, each iteration copies the counter to a local interval, which
+  // the body reads and writes, whether the index has a reserved name or not.
+  test.each(['j', 'Math'])('a `Sum` body that assigns its index `%s`', (k) => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    const expr = [
+      'Sum',
+      ['Block', ['Assign', k, ['Add', k, 1]], k],
+      ['Limits', k, 1, 'n'],
+    ];
+    const result = compile(ce.box(expr as never), {
+      to: 'interval-js',
+      constantFold: false,
+      fallback: false,
+    } as never);
+    expect(result.success).toBe(true);
+    const code = result.code as string;
+    expect(() => assertStrictModeValid(code)).not.toThrow();
+    // 2 + 3 + 4 + 5, as the interpreter gives.
+    expect(result.run!({ n: 4 } as never)).toEqual(point(14));
+  });
 
   test('a block local', () => {
     const { code, value } = run(

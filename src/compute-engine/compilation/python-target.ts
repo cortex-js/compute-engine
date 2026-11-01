@@ -58,6 +58,8 @@ import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { tryGetConstant } from './constant-folding.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { cseSharingOff } from './compile-cse.js';
+import { writesSymbol } from './compile-loops.js';
+import { nestDependentLimits } from '../library/utils.js';
 import { operandMayBeAbsent } from './compile-absence.js';
 import {
   COINCIDENCE_BUDGET,
@@ -1606,12 +1608,47 @@ function compilePythonSumProductLoop(
     ...target,
     cse: cseSharingOff(target),
   };
+  const indexNames: string[] = [];
   const { forClauses, idxTarget } = compilePythonSumProductClauses(
     kind,
     args.slice(1),
     plain,
-    () => BaseCompiler.tempVar(target)
+    () => {
+      const fresh = BaseCompiler.tempVar(target);
+      indexNames.push(fresh);
+      return fresh;
+    }
   );
+  // A body can write an index (`Sum(Block(Assign(j, j + 1), j), j=1..n)`).
+  // A Python `for` binds its variable to the next value of the range at each
+  // iteration, whatever the body wrote, as the interpreter does. With
+  // several clauses, the interpreter walks independent clauses as one
+  // cartesian product and binds every index at each tuple, so a write to an
+  // outer index lasts for one tuple: the `for` of such an index steps a
+  // separate counter, and each iteration of the innermost loop assigns the
+  // index from it. The bounds of independent clauses read no index, so they
+  // do not see the assignment. Clauses where a bound names another index are
+  // evaluated as nested operators (`nestDependentLimits`), as the nested
+  // `for` statements are, so there a write lasts until the next value of
+  // that index.
+  const clauseIndices = args
+    .slice(1)
+    .map((c) => (isFunction(c, 'Limits') ? c.ops[0] : undefined));
+  const rebinds: string[] = [];
+  if (
+    clauseIndices.length > 1 &&
+    nestDependentLimits(kind, body, args.slice(1), body.engine) === undefined
+  ) {
+    for (let i = 0; i < clauseIndices.length - 1; i++) {
+      const index = clauseIndices[i];
+      if (!isSymbol(index) || !writesSymbol(body, index.symbol)) continue;
+      const counter = BaseCompiler.tempVar(target);
+      const prefix = `for ${indexNames[i]} in `;
+      if (!forClauses[i].startsWith(prefix)) return undefined;
+      forClauses[i] = `for ${counter} in ${forClauses[i].slice(prefix.length)}`;
+      rebinds.push(`${indexNames[i]} = ${counter}`);
+    }
+  }
   // The body is compiled as the body of a function would be: a block with its
   // locals, whose last line returns its value (the `block` hook), or a single
   // line. The body has a statement sink of its own, so a `Sum` with a
@@ -1626,10 +1663,14 @@ function compilePythonSumProductLoop(
   // where a local `t` of the body would write a parameter or a local `t` of
   // the enclosing code. Each local of a block of the body is spelled with a
   // fresh name (`withFreshBlockLocals`), as the indices are.
-  const code = BaseCompiler.withFreshBlockLocals(() =>
-    BaseCompiler.compile(body, { ...idxTarget, hoist: sink })
+  // An index with a fresh name stays a variable that the body can assign,
+  // as with its own name.
+  const code = BaseCompiler.withWritableLoopIndices(indexNames, () =>
+    BaseCompiler.withFreshBlockLocals(() =>
+      BaseCompiler.compile(body, { ...idxTarget, hoist: sink })
+    )
   );
-  const lines = [...sink.stmts, ...code.split('\n')];
+  const lines = [...rebinds, ...sink.stmts, ...code.split('\n')];
   // The value of an iteration: the value the last line returns, or the
   // name that a last line which is an assignment writes (the convention of
   // the `block` hook: no Python expression starts with a token free of
