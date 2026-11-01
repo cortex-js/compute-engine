@@ -141,6 +141,24 @@ export function appliesAsyncOnlyOperator(x: Expression): boolean {
   return containsAsyncOnly(x, false, false, true);
 }
 
+/**
+ * Whether the emptiness of the view `x` can depend on an operator that has
+ * only an `evaluateAsync` handler, for a walk that stops at the first
+ * element of `x` (`finiteUncountedIsEmpty()`, `collection-utils.ts`). The
+ * rule is the one of {@link appliesAsyncOnlyOperator}, with one more data
+ * position: a `Map` at a data position has as many elements as its source,
+ * whatever its callback gives, so its callback is not examined, and its
+ * source is at a data position. So the emptiness of
+ * `FlatMap([1, 2], x ↦ Map(slowF, Range(1, x)))` is decided by the walk
+ * (the view is not empty), although its elements are known only when
+ * `slowF` is awaited. The `isEmpty` facet of `Map` reads its source in the
+ * same way.
+ */
+export function emptinessAppliesAsyncOnlyOperator(x: Expression): boolean {
+  if (!x.engine._hasAsyncOnlyOperator) return false;
+  return containsAsyncOnly(x, false, false, true, true);
+}
+
 /** The operators whose operands keep the position of the operator: an
  * operand at a data position is data. */
 const DATA_CONSTRUCTORS = new Set(['List', 'Tuple', 'Set']);
@@ -158,7 +176,8 @@ function containsAsyncOnly(
   x: Expression,
   held = false,
   includeSymbolCallbacks = false,
-  dataPositions = false
+  dataPositions = false,
+  emptinessOnly = false
 ): boolean {
   // A released quote can reach the same raw node as an ordinary operand,
   // so keep those two resolution contexts separate. Shared nodes and
@@ -252,10 +271,23 @@ function containsAsyncOnly(
     if (!isFunction(e) || e._numericStore !== undefined) return false;
     if (e.operator === 'ReleaseHold' && isFunction(e.op1, 'Hold'))
       return visit(e.op1.op1, true);
-    if (dataPositions)
+    if (dataPositions) {
+      // See `emptinessAppliesAsyncOnlyOperator()`: the callback of a `Map`
+      // at a data position does not change the count of the `Map`.
+      // The shortcut holds when the callback is a function literal or a
+      // symbol. Another callback expression (`mk(0)`) is evaluated to find
+      // the function, so it is visited at a position that is not data.
+      if (emptinessOnly && data && e.operator === 'Map' && e.nops === 2) {
+        const callback = e.op1;
+        if (!isFunction(callback, 'Function') && !isSymbol(callback)) {
+          if (visit(callback, inHeld)) return true;
+        }
+        return visit(e.op2, inHeld, true);
+      }
       return e.ops.some((op, i) =>
         visit(op, inHeld, ...operandPosition(e, i, data, bodyIsData))
       );
+    }
     return e.ops.some((op) => visit(op, inHeld));
   };
   return visit(x, held, dataPositions);

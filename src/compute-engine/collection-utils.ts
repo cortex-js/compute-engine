@@ -68,7 +68,10 @@ import { Type } from '../common/type/types.js';
 import type { EvaluateOptions, Scope } from './types-evaluation.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import { incompleteWalkCount } from './boxed-expression/incomplete-walks.js';
-import { appliesAsyncOnlyOperator } from './boxed-expression/async-only-descendants.js';
+import {
+  appliesAsyncOnlyOperator,
+  emptinessAppliesAsyncOnlyOperator,
+} from './boxed-expression/async-only-descendants.js';
 import {
   withErrorFrames,
   type ErrorFrame,
@@ -340,13 +343,162 @@ export function listedFlatMapView(
   frame?: ErrorFrame
 ): Expression | undefined {
   if (!isFlatMapOverFiniteSource(xs)) return undefined;
-  if (appliesAsyncOnlyOperator(xs)) return undefined;
-  try {
-    return listedValue(xs.evaluate({ materialization: true }), frame);
-  } catch (e) {
-    if (isIterationLimit(e)) return undefined;
-    throw e;
+  const memo = currentListingMemo();
+  const known = memo !== undefined ? takeListing(memo, xs) : undefined;
+  let value: Expression | null;
+  if (known !== undefined && !(known instanceof Promise)) value = known;
+  else {
+    if (appliesAsyncOnlyOperator(xs)) return undefined;
+    try {
+      value = xs.evaluate({ materialization: true });
+    } catch (e) {
+      if (!isIterationLimit(e)) throw e;
+      value = null;
+    }
   }
+  if (memo !== undefined) keepListing(memo, xs, value);
+  return value === null ? undefined : listedValue(value, frame);
+}
+
+/**
+ * The views that one call of a handler listed or walked, kept for a second
+ * call of the handler.
+ *
+ * A handler that lists or walks a view and then declines (`ListFrom` with a
+ * valueless operand, `Max` of an infinite view) is called again over the
+ * listed views (`declinedOverListedFlatMaps()`, `boxed-function.ts`). The
+ * listing of the views for the second call, and the second call itself,
+ * REPLAY what the first call did, so that each callback of a view runs once
+ * for each element of its source in the evaluation of the application, and
+ * in the order of the first call:
+ * - `listings` holds, for each `FlatMap` node, the values of the listings
+ *   that the first call made, in order ({@link listedFlatMapView},
+ *   {@link listedFlatMapViewAsync}): a value of
+ *   `evaluate({ materialization: true })`, `null` when the walk stopped
+ *   with `iteration-limit-exceeded`, or the promise of one of these. During
+ *   the replay, each listing of the node takes the first value that is left,
+ *   so a node that occurs at two positions is listed twice, as without the
+ *   memo. A value that is not a list is kept for the second call, which
+ *   meets the same view again.
+ * - `walks` holds, for each operand position, the operand that the first
+ *   call walked and its elements ({@link walkedElements}). The second call
+ *   reads them for the same operand at the same position. A walk that missed
+ *   elements or failed is not kept. The first call walks every operand
+ *   itself, so the same view at two positions is walked twice, and the
+ *   callbacks of the views run from left to right.
+ *
+ * The memo of a handler call is put in place by {@link pushListingMemo},
+ * before the synchronous call, and removed by {@link popListingMemo}, after
+ * it. {@link beginReplay} starts the replay. Each call of a handler has its
+ * own memo, so a view whose bindings change between two calls (the body of
+ * a loop) is listed again in the next call. The stack is empty whenever no
+ * synchronous handler call runs, in particular after an `await`: code that
+ * resumes after an `await` reads and writes no memo of another evaluation.
+ *
+ * Limit: a listing that an `evaluateAsync` handler makes after its first
+ * `await` finds no memo in place, and is not kept: the replay lists the
+ * view again, and its callback runs a second time. No handler that is
+ * called again lists a view after an `await` today: the handlers that do
+ * (`Sum`, `Reduce`, `MaxBy`) are `lazy`, and a `lazy` handler is not called
+ * again. A new handler of an operator that is not `lazy` must list its
+ * views before its first `await`.
+ */
+export type ListingMemo = {
+  replay: boolean;
+  listings: Map<Expression, ListingValue[]>;
+  walks: Map<
+    number,
+    { operand: Expression; elements: ReadonlyArray<Expression> }
+  >;
+};
+
+type ListingValue = Expression | null | Promise<Expression | null>;
+
+const listingMemoStack: (ListingMemo | undefined)[] = [];
+
+/** A new memo, for a first call of a handler (see {@link ListingMemo}). */
+export function newListingMemo(): ListingMemo {
+  return { replay: false, listings: new Map(), walks: new Map() };
+}
+
+/** Put in place the memo of one synchronous handler call: `memo`, the memo
+ * of the first call for a second call, or else a new memo (see
+ * {@link ListingMemo}). The call must end with {@link popListingMemo}. */
+export function pushListingMemo(memo?: ListingMemo): void {
+  listingMemoStack.push(memo);
+}
+
+/** Remove the memo that {@link pushListingMemo} put in place, and return
+ * it, or `undefined` when the call listed and walked no view. */
+export function popListingMemo(): ListingMemo | undefined {
+  return listingMemoStack.pop();
+}
+
+/** Start the replay of `memo`, or of the memo in place: the listings for
+ * the second call of the handler, and that call (see {@link ListingMemo}). */
+export function beginReplay(memo?: ListingMemo): void {
+  const m = memo ?? currentListingMemo();
+  if (m !== undefined) m.replay = true;
+}
+
+/** The memo in place, created when it does not exist yet, or `undefined`
+ * when no handler call runs. */
+function currentListingMemo(): ListingMemo | undefined {
+  const top = listingMemoStack.length - 1;
+  if (top < 0) return undefined;
+  return (listingMemoStack[top] ??= newListingMemo());
+}
+
+/** During the replay of `memo`, the first value left of a listing of `xs`
+ * by the first call, removed from `memo`; else `undefined`. */
+function takeListing(
+  memo: ListingMemo,
+  xs: Expression
+): ListingValue | undefined {
+  if (!memo.replay) return undefined;
+  return memo.listings.get(xs)?.shift();
+}
+
+/** Keep the value of a listing of `xs` in `memo`: every value in the first
+ * call, at the end of the queue of `xs`, and a value that is not a list
+ * during the replay, back at the front of the queue, where the replay took
+ * it, so that the next consumer of `xs` reads it and not the value of
+ * another listing. */
+function keepListing(
+  memo: ListingMemo,
+  xs: Expression,
+  value: Expression | null
+): void {
+  if (memo.replay && value !== null && isFunction(value, 'List')) return;
+  const values = memo.listings.get(xs);
+  if (values === undefined) memo.listings.set(xs, [value]);
+  else if (memo.replay) values.unshift(value);
+  else values.push(value);
+}
+
+/**
+ * The elements of the finite collection `xs`, the operand at `position` of
+ * the handler that calls this function. In the second call of the handler
+ * (see {@link ListingMemo}), they are the elements that the first call
+ * walked for the same operand at the same position. Otherwise `xs` is
+ * walked, and, in the first call, its elements are kept when the walk is
+ * complete.
+ */
+export function walkedElements(
+  xs: Expression,
+  position: number
+): ReadonlyArray<Expression> {
+  const memo = currentListingMemo();
+  if (memo?.replay) {
+    const walk = memo.walks.get(position);
+    if (walk !== undefined && walk.operand === xs) return walk.elements;
+  }
+  const before = incompleteWalkCount();
+  const elements: Expression[] = [];
+  for (const x of xs.each()) elements.push(x);
+  if (memo !== undefined && !memo.replay && incompleteWalkCount() === before)
+    memo.walks.set(position, { operand: xs, elements });
+  return elements;
 }
 
 /**
@@ -366,30 +518,64 @@ export function listedFlatMapView(
 export function listedFlatMapViewAsync(
   xs: Expression,
   options: Partial<EvaluateOptions>,
-  frame?: ErrorFrame
+  frame?: ErrorFrame,
+  memo?: ListingMemo
 ): Promise<Expression | undefined> | undefined {
   // The answer is `undefined`, not a promise, when `xs` is not listed, so
   // that the caller does not await: code after an `await` runs in a later
   // task, and every evaluation of an operand that does not hold such a view
   // then lost the bindings of the caller.
   if (!isFlatMapOverFiniteSource(xs)) return undefined;
-  if (appliesAsyncOnlyOperator(xs)) return undefined;
-  return xs
-    .evaluateAsync({
-      ...options,
-      // The registry of effects of this evaluation, named so that the
-      // nested evaluation keeps it if the spread above is ever changed.
-      _effects: options._effects,
-      numericApproximation: false,
-      materialization: true,
-    })
-    .then(
-      (value) => listedValue(value, frame),
-      (e: unknown) => {
-        if (isIterationLimit(e)) return undefined;
-        throw e;
-      }
-    );
+  // The listings of this handler call (see `ListingMemo`): the memo given by
+  // a caller that resumed after an `await`, or else the memo of the
+  // synchronous handler call that runs now.
+  const m = memo ?? currentListingMemo();
+  const known = m !== undefined ? takeListing(m, xs) : undefined;
+  let pending: Promise<Expression | null>;
+  if (known !== undefined) pending = Promise.resolve(known);
+  else {
+    if (appliesAsyncOnlyOperator(xs)) return undefined;
+    pending = xs
+      .evaluateAsync({
+        ...options,
+        // The registry of effects of this evaluation, named so that the
+        // nested evaluation keeps it if the spread above is ever changed.
+        _effects: options._effects,
+        numericApproximation: false,
+        materialization: true,
+      })
+      .then(
+        (value) => value,
+        (e: unknown) => {
+          if (isIterationLimit(e)) return null;
+          throw e;
+        }
+      );
+  }
+  if (m !== undefined) {
+    // The first call keeps the promise, so that a replay that starts while
+    // the listing is pending reads it. The replay keeps a value that is not
+    // a list, once it is known; this runs before the caller reads it.
+    if (!m.replay) {
+      const values = m.listings.get(xs);
+      if (values === undefined) m.listings.set(xs, [pending]);
+      else values.push(pending);
+    } else
+      void pending.then(
+        (value) => keepListing(m, xs, value),
+        () => undefined
+      );
+  }
+  return pending.then((value) => {
+    // The walk of `FlatMap` is synchronous and does not read the signal. A
+    // signal aborted while the callback ran (a host callback that aborts) is
+    // honored here, before a consumer reads the list: the evaluation is
+    // canceled, as an asynchronous walk would be.
+    const signal = options.signal;
+    if (signal?.aborted)
+      throw new CancellationError({ cause: signal.reason as unknown });
+    return value === null ? undefined : listedValue(value, frame);
+  });
 }
 
 /** The answer of {@link listedFlatMapView} for the materialized `value`. */
@@ -469,6 +655,201 @@ function isFlatMapOverFiniteSource(xs: Expression): boolean {
 }
 
 /**
+ * Rebuild the application `x` over the operands `ops`, keeping the operator
+ * definition that `x` is bound to (`BoxedFunction._withSameBinding()`). The
+ * caller gives it, because this module cannot import `boxed-function.ts`.
+ */
+export type RebuildWithSameBinding = (
+  x: Expression,
+  ops: ReadonlyArray<Expression>
+) => Expression;
+
+/**
+ * The operands of an application of `operator`, with each `FlatMap` over a
+ * finite source whose finiteness is not known replaced by the list of its
+ * elements ({@link listedFlatMapView}), for a second call of a handler that
+ * declined on the operands `ops`.
+ *
+ * Most consumers of a collection need a collection that is known to be
+ * finite (`isWalkableFiniteCollection()`), and decline on
+ * `FlatMap([1, 2], x ↦ Range(1, x))`, whose finiteness is known only after
+ * the callback is applied. They also decline on a view over such a
+ * `FlatMap` (`Reverse`, `Union`, `Drop`, ...): the finiteness of the view is
+ * the one of its source. With the operands listed, `Mean`, `Sort` or
+ * `ListFrom(Reverse(...))` give their value on the listed elements:
+ * `ListFrom(Reverse(FlatMap([1, 2], x ↦ Range(1, x))))` is `[2, 1, 1]`, the
+ * value of `ListFrom(Reverse([1, 1, 2]))`.
+ *
+ * A `FlatMap` is looked for in an operand, and in the collection operands of
+ * a view over it, at any depth. The search does not enter:
+ * - a callback, or another operand that is not a collection;
+ * - an element of a literal `List`, `Set` or `Tuple`: an element is data;
+ * - a view that is finite and can be walked (`isWalkableFiniteCollection()`),
+ *   such as `Take(FlatMap(...), 2)`: its source is not the cause of the
+ *   decline, and the view reads only the elements that it needs.
+ *
+ * A `FlatMap` that the handler listed in its first call is not walked again:
+ * the listings of one handler call are kept ({@link pushListingMemo}), and
+ * read here. The rebuilt views keep their bindings (`rebuild`). The answer
+ * is:
+ * - the new operands, when at least one `FlatMap` was listed;
+ * - an error value, when the evaluation of one `FlatMap` is an error that
+ *   does not prove it infinite (see {@link listedFlatMapView}). The trace of
+ *   the error has the frame of `operator` and of the position of the
+ *   operand;
+ * - `undefined` otherwise: no such `FlatMap`, or none can be listed. A
+ *   `FlatMap` with an inner result that is provably infinite
+ *   (`x ↦ Range(1, ∞)`), with more than `engine.maxCollectionSize`
+ *   elements, or whose walk applies an operator that has only an
+ *   `evaluateAsync` handler, is not listed, and the walk that tells this
+ *   stops: it does not run without end. The handler then keeps its decline.
+ */
+export function operandsWithListedFlatMaps(
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  rebuild: RebuildWithSameBinding
+): ReadonlyArray<Expression> | Expression | undefined {
+  if (!ops.some(holdsFlatMapView)) return undefined;
+  let changed = false;
+  const result: Expression[] = [];
+  for (const [i, op] of ops.entries()) {
+    const listed = withListedFlatMaps(op, { operator, index: i + 1 }, rebuild);
+    if (listed !== op) {
+      if (isFunction(listed, 'Error')) return listed;
+      changed = true;
+    }
+    result.push(listed);
+  }
+  return changed ? result : undefined;
+}
+
+/**
+ * The asynchronous form of {@link operandsWithListedFlatMaps}, for a handler
+ * that declined under `evaluateAsync()`. Each `FlatMap` is listed by
+ * {@link listedFlatMapViewAsync}, with the options of that evaluation
+ * (`signal`, `_effects`, `_contextStack`, `_precisionWindow`). `memo` holds
+ * the listings of the first call of the handler ({@link popListingMemo}),
+ * and gets the new ones.
+ */
+export async function operandsWithListedFlatMapsAsync(
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions>,
+  memo: ListingMemo,
+  rebuild: RebuildWithSameBinding
+): Promise<ReadonlyArray<Expression> | Expression | undefined> {
+  if (!ops.some(holdsFlatMapView)) return undefined;
+  let changed = false;
+  const result: Expression[] = [];
+  for (const [i, op] of ops.entries()) {
+    const listed = await withListedFlatMapsAsync(
+      op,
+      { operator, index: i + 1 },
+      options,
+      memo,
+      rebuild
+    );
+    if (listed !== op) {
+      if (isFunction(listed, 'Error')) return listed;
+      changed = true;
+    }
+    result.push(listed);
+  }
+  return changed ? result : undefined;
+}
+
+/** The operators of the literal collections, whose operands are elements:
+ * the search of {@link operandsWithListedFlatMaps} does not enter them. */
+const LITERAL_COLLECTIONS = new Set(['List', 'Set', 'Tuple']);
+
+/** Whether {@link withListedFlatMaps} enters `x`: `x` is a collection
+ * application that is not a literal collection and is not a walkable finite
+ * view. */
+function searchEnters(x: Expression): boolean {
+  return (
+    isFunction(x) &&
+    !LITERAL_COLLECTIONS.has(x.operator) &&
+    x.isCollection &&
+    !isWalkableFiniteCollection(x)
+  );
+}
+
+/** Whether `x` is a `FlatMap`, or a collection application with a `FlatMap`
+ * in one of its collection operands at any depth, outside a literal
+ * collection. The test does not read the finiteness of any node. It is the
+ * cheap test made before the search of {@link operandsWithListedFlatMaps}. */
+function holdsFlatMapView(x: Expression): boolean {
+  if (!isFunction(x)) return false;
+  if (x.operator === 'FlatMap') return true;
+  if (LITERAL_COLLECTIONS.has(x.operator)) return false;
+  return x.isCollection && x.ops.some(holdsFlatMapView);
+}
+
+/**
+ * `x` with each `FlatMap` that {@link listedFlatMapView} lists replaced by
+ * its list (see {@link operandsWithListedFlatMaps}), or `x` itself when none
+ * is listed, or the error of a listing that is an error and does not prove
+ * the view infinite. Each node is visited once.
+ */
+function withListedFlatMaps(
+  x: Expression,
+  frame: ErrorFrame,
+  rebuild: RebuildWithSameBinding
+): Expression {
+  if (!searchEnters(x) || !isFunction(x)) return x;
+  // The operands first: the source of a `FlatMap` can be a view over
+  // another `FlatMap`, whose list makes the source finite. The callback of a
+  // `FlatMap` is not a collection, and is not entered.
+  let changed = false;
+  const ops: Expression[] = [];
+  for (const op of x.ops) {
+    const listed = withListedFlatMaps(op, frame, rebuild);
+    if (listed !== op) {
+      if (isFunction(listed, 'Error')) return listed;
+      changed = true;
+    }
+    ops.push(listed);
+  }
+  const y = changed ? rebuild(x, ops) : x;
+  if (y.operator !== 'FlatMap') return y;
+  const listed = listedFlatMapView(y, frame);
+  if (listed === undefined || isInfiniteListing(listed)) return y;
+  return listed;
+}
+
+/** The asynchronous form of {@link withListedFlatMaps}. */
+async function withListedFlatMapsAsync(
+  x: Expression,
+  frame: ErrorFrame,
+  options: Partial<EvaluateOptions>,
+  memo: ListingMemo,
+  rebuild: RebuildWithSameBinding
+): Promise<Expression> {
+  if (!searchEnters(x) || !isFunction(x)) return x;
+  let changed = false;
+  const ops: Expression[] = [];
+  for (const op of x.ops) {
+    const listed = await withListedFlatMapsAsync(
+      op,
+      frame,
+      options,
+      memo,
+      rebuild
+    );
+    if (listed !== op) {
+      if (isFunction(listed, 'Error')) return listed;
+      changed = true;
+    }
+    ops.push(listed);
+  }
+  const y = changed ? rebuild(x, ops) : x;
+  if (y.operator !== 'FlatMap') return y;
+  const listed = await listedFlatMapViewAsync(y, options, frame, memo);
+  if (listed === undefined || isInfiniteListing(listed)) return y;
+  return listed;
+}
+
+/**
  * The emptiness of the finite collection `xs`, decided by a walk, for an
  * `IsEmpty` read when the `isEmpty` facet gives no answer (see
  * `walkCanAnswerCount()`). The walk stops at the first element: the
@@ -490,10 +871,13 @@ export function finiteUncountedIsEmpty(xs: Expression): boolean | undefined {
   // is synchronous, so a view whose walk applies an operator with only an
   // `evaluateAsync` handler is not walked, as in `listedFlatMapView()`. A
   // function symbol that the callback gives as data (`x ↦ [x, slowF]`) is
-  // not applied, and the view is walked.
+  // not applied, and the view is walked. The callback of a `Map` in the
+  // callback result does not change the emptiness of the view either
+  // (`emptinessAppliesAsyncOnlyOperator()`): `x ↦ Map(slowF, Range(1, x))`
+  // is walked.
   if (
     !walkCanAnswerCount(xs) &&
-    (!isFlatMapOverFiniteSource(xs) || appliesAsyncOnlyOperator(xs))
+    (!isFlatMapOverFiniteSource(xs) || emptinessAppliesAsyncOnlyOperator(xs))
   )
     return undefined;
   const before = incompleteWalkCount();

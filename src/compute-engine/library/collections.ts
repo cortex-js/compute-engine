@@ -90,6 +90,7 @@ import {
   listFiniteUncountedCollection,
   listedFlatMapView,
   listedFlatMapViewAsync,
+  walkedElements,
   uncountedCollectionCount,
   isInfiniteListing,
   markInfiniteListing,
@@ -19945,17 +19946,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) =>
       runWalk(extremumWalk(xs, fn, ce, 'max', 'element'), ce),
     evaluateAsync: ([xs, fn], options) =>
-      runWalkAsync(
-        extremumWalk(
-          xs,
-          fn,
-          options.engine,
-          'max',
-          'element',
-          asyncCallbackRoute(options)
-        ),
-        options
-      ),
+      extremumAsync(xs, fn, options, 'max', 'element'),
   },
 
   MinBy: {
@@ -19995,17 +19986,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) =>
       runWalk(extremumWalk(xs, fn, ce, 'min', 'element'), ce),
     evaluateAsync: ([xs, fn], options) =>
-      runWalkAsync(
-        extremumWalk(
-          xs,
-          fn,
-          options.engine,
-          'min',
-          'element',
-          asyncCallbackRoute(options)
-        ),
-        options
-      ),
+      extremumAsync(xs, fn, options, 'min', 'element'),
   },
 
   // Return the 1-based index (Julia semantics) of the element maximizing/
@@ -20055,17 +20036,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) =>
       runWalk(extremumWalk(xs, fn, ce, 'max', 'index'), ce),
     evaluateAsync: ([xs, fn], options) =>
-      runWalkAsync(
-        extremumWalk(
-          xs,
-          fn,
-          options.engine,
-          'max',
-          'index',
-          asyncCallbackRoute(options)
-        ),
-        options
-      ),
+      extremumAsync(xs, fn, options, 'max', 'index'),
   },
 
   ArgMin: {
@@ -20106,17 +20077,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) =>
       runWalk(extremumWalk(xs, fn, ce, 'min', 'index'), ce),
     evaluateAsync: ([xs, fn], options) =>
-      runWalkAsync(
-        extremumWalk(
-          xs,
-          fn,
-          options.engine,
-          'min',
-          'index',
-          asyncCallbackRoute(options)
-        ),
-        options
-      ),
+      extremumAsync(xs, fn, options, 'min', 'index'),
   },
 
   // Randomize the order of the elements in the collection. Seeding is
@@ -21797,6 +21758,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // contributes itself) — see `canEnumerateCollectionOperands`.
     canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {
+      // The operands are walked from left to right, so the callbacks of
+      // their views run in that order. A second call of the handler, over
+      // the listed `FlatMap` views among its operands
+      // (`declinedOverListedFlatMaps()`, `boxed-function.ts`), reads the
+      // elements that the first call walked for the same operand at the
+      // same position (`walkedElements()`), so they are walked once.
       const elements: Expression[] = [];
       for (const [i, operand] of ops.entries()) {
         // A `FlatMap` over a finite source with no known finiteness is
@@ -21832,7 +21799,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // because `ListFrom` is the explicit way to list a collection
           // (`TupleFrom(Range(1, 300000))` is listed).
           if (typeof xs.count === 'bigint') return undefined;
-          for (const x of xs.each()) elements.push(x);
+          for (const x of walkedElements(xs, i)) elements.push(x);
         }
       }
       return ce.function('List', elements);
@@ -21913,7 +21880,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
-      for (const xs of ops) {
+      for (const [i, xs] of ops.entries()) {
         if (!xs.isCollection) {
           // A collection-TYPED operand that is not a collection right now (a
           // valueless `list<integer>` symbol, an unevaluated eager producer)
@@ -21929,7 +21896,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // collection whose count is a `bigint` stays unevaluated, as in
           // `ListFrom`.
           if (typeof xs.count === 'bigint') return undefined;
-          for (const x of xs.each()) elements.push(x);
+          // An operand walked once, as in `ListFrom` (`walkedElements()`).
+          for (const x of walkedElements(xs, i)) elements.push(x);
         }
       }
       return ce.function('Set', elements);
@@ -21966,7 +21934,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
-      for (const xs of ops) {
+      for (const [i, xs] of ops.entries()) {
         if (!xs.isCollection) {
           // A collection-TYPED operand that is not a collection right now (a
           // valueless `list<integer>` symbol, an unevaluated eager producer)
@@ -21982,7 +21950,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // collection whose count is a `bigint` stays unevaluated, as in
           // `ListFrom`.
           if (typeof xs.count === 'bigint') return undefined;
-          for (const x of xs.each()) elements.push(x);
+          // An operand walked once, as in `ListFrom` (`walkedElements()`).
+          for (const x of walkedElements(xs, i)) elements.push(x);
         }
       }
       return tupleOf(
@@ -26326,8 +26295,94 @@ function extremumWalk(
 ):
   | Generator<PromiseLike<unknown> | undefined, Expression | undefined, unknown>
   | undefined {
-  if (!isWalkableFiniteCollection(xs)) return undefined;
+  if (!isWalkableFiniteCollection(xs)) {
+    // These operators are `lazy`, so the generic second call of a handler
+    // that declined over the listed `FlatMap` views among its operands
+    // (`declinedOverListedFlatMaps()`, `boxed-function.ts`) does not apply
+    // to them. A `FlatMap` over a finite source with no known finiteness is
+    // listed here instead (`listedFlatMapView`):
+    // `MaxBy(FlatMap([1, 2], x ↦ Range(1, x)), k ↦ k)` is `2`. The
+    // asynchronous route lists it with `extremumAsync()`.
+    const listed = listedFlatMapView(xs, extremumFrame(mode, want));
+    if (listed === undefined || isInfiniteListing(listed)) return undefined;
+    if (!isFunction(listed, 'List')) return valueWalk(listed);
+    xs = listed;
+  }
   return extremumBy(xs, fn ? applicable(fn) : undefined, ce, mode, want, route);
+}
+
+/** The error frame of the operator of `extremumWalk()` for `mode` and
+ * `want`, at its collection operand. */
+function extremumFrame(
+  mode: 'max' | 'min',
+  want: 'element' | 'index'
+): { operator: string; index: number } {
+  const operator =
+    want === 'index'
+      ? mode === 'max'
+        ? 'ArgMax'
+        : 'ArgMin'
+      : mode === 'max'
+        ? 'MaxBy'
+        : 'MinBy';
+  return { operator, index: 1 };
+}
+
+/**
+ * The `evaluateAsync` handler of `MaxBy`, `MinBy`, `ArgMax` and `ArgMin`
+ * (see `extremumWalk()`). A `FlatMap` over a finite source with no known
+ * finiteness is listed by `listedFlatMapViewAsync()`, with the options of
+ * this evaluation, so that the listing honors its abort `signal` and runs in
+ * its registry and context stack. A `FlatMap` whose walk applies an operator
+ * that has only an `evaluateAsync` handler is not listed, and the operator
+ * stays unevaluated, as on the synchronous route. A collection that is
+ * known to be finite is walked before any `await`, in the context of the
+ * call.
+ */
+async function extremumAsync(
+  xs: Expression,
+  fn: Expression | undefined,
+  options: EvaluateHandlerOptions,
+  mode: 'max' | 'min',
+  want: 'element' | 'index'
+): Promise<Expression | undefined> {
+  const ce = options.engine;
+  const walkOver = (source: Expression) =>
+    runWalkAsync(
+      extremumBy(
+        source,
+        fn ? applicable(fn) : undefined,
+        ce,
+        mode,
+        want,
+        asyncCallbackRoute(options)
+      ),
+      options
+    );
+  if (isWalkableFiniteCollection(xs)) return walkOver(xs);
+  const pending = listedFlatMapViewAsync(
+    xs,
+    awaitedOperandOptions(options),
+    extremumFrame(mode, want)
+  );
+  if (pending === undefined) return undefined;
+  const listed = await pending;
+  if (listed === undefined || isInfiniteListing(listed)) return undefined;
+  if (!isFunction(listed, 'List')) return listed;
+  return runWithEvaluationEffects(
+    ce,
+    options.effects,
+    () => walkOver(listed),
+    options._contextStack,
+    options._precisionWindow
+  );
+}
+
+/** A walk that yields nothing and answers `value`. */
+function* valueWalk(
+  value: Expression
+): Generator<PromiseLike<unknown> | undefined, Expression, unknown> {
+  return value;
 }
 
 function* extremumBy(

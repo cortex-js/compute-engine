@@ -192,6 +192,13 @@ import {
   isAbsentScalarTerm,
   collectionSourceOperands,
   viewOverListedSource,
+  operandsWithListedFlatMaps,
+  operandsWithListedFlatMapsAsync,
+  pushListingMemo,
+  popListingMemo,
+  beginReplay,
+  newListingMemo,
+  type ListingMemo,
   shapedBroadcastResultType,
   isTopTypedBlockLocal,
   isRecordShapedType,
@@ -8814,7 +8821,7 @@ export class BoxedFunction
         else if (kindAnswer !== undefined && 'value' in kindAnswer)
           evalResult = kindAnswer.value;
         else {
-          evalResult = def.evaluate?.(kindAnswer?.operands ?? handlerOperands, {
+          const handlerOptions = {
             numericApproximation,
             engine: this.engine,
             materialization: materialization,
@@ -8831,7 +8838,32 @@ export class BoxedFunction
             // Set by the enclosing `evaluate()`; the fallback covers a caller
             // that reaches this step without going through it.
             effects: this.engine._evaluationEffects ?? this.engine.effects,
-          });
+          };
+          const ops = kindAnswer?.operands ?? handlerOperands;
+          // The `FlatMap` views that the handler lists are kept for its
+          // second call (`ListingMemo`, `collection-utils.ts`).
+          pushListingMemo();
+          try {
+            evalResult = def.evaluate?.(ops, handlerOptions);
+            // A first call that read a walk that missed elements, or a walk
+            // that failed, keeps its decline, as on the asynchronous route:
+            // the handler is not called again.
+            if (
+              evalResult === undefined &&
+              def.evaluate !== undefined &&
+              !handlerWalkMissedElements(walksBefore) &&
+              handlerWalkFailure(failuresBefore) === undefined
+            )
+              evalResult = declinedOverListedFlatMaps(
+                this,
+                def,
+                ops,
+                handlerOptions,
+                def.evaluate
+              );
+          } finally {
+            popListingMemo();
+          }
           // A copy of a library definition under another name keeps its head
           // (`withOwnHead()`): the library handler of `Sin` returns `Sin(x)`
           // for `MySin(x)`, and the nodes that the handler builds with the
@@ -10182,6 +10214,11 @@ export class BoxedFunction
       let handlerFailure: Expression | undefined;
       // The same, for the synchronous part of an `evaluateAsync` handler.
       let asyncSliceFailure: Expression | undefined;
+      // The listings of the synchronous part of the handler call.
+      let listingMemo: ListingMemo | undefined;
+      // Whether the handler was called (an apply-site hook can answer in its
+      // place).
+      let handlerCalled = false;
       try {
         const opts: Partial<EvaluateOptions> & {
           engine: ComputeEngine;
@@ -10307,6 +10344,10 @@ export class BoxedFunction
           () => {
             const enclosingNumericRequest = engine._numericRequest;
             engine._numericRequest = numericApproximation;
+            // The `FlatMap` views that the synchronous part of the handler
+            // call lists are kept for a second call (`ListingMemo`,
+            // `collection-utils.ts`).
+            pushListingMemo();
             try {
               // At an apply site of a value kind, the `apply` hook answers in
               // place of the handler, as on the synchronous route
@@ -10321,6 +10362,7 @@ export class BoxedFunction
               if (kindAnswer !== undefined && 'value' in kindAnswer)
                 return kindAnswer.value;
               if (kindAnswer !== undefined) handlerOps = kindAnswer.operands;
+              handlerCalled = true;
               if (def.evaluateAsync !== undefined) {
                 // A walk that failed in the synchronous part of the call
                 // (before its first `await`), where no other evaluation can
@@ -10399,6 +10441,7 @@ export class BoxedFunction
                 }
               }
             } finally {
+              listingMemo = popListingMemo();
               engine._numericRequest = enclosingNumericRequest;
             }
           },
@@ -10407,6 +10450,23 @@ export class BoxedFunction
         );
         if (handlerMissedElements) value = handlerFailure;
         else value ??= asyncSliceFailure;
+        // Only a handler that was called and declined is called again: an
+        // apply-site hook that answers `unevaluated` is not a decline of the
+        // handler, as on the synchronous route.
+        //
+        // A standard-library handler that declined on a `FlatMap` of
+        // unknown finiteness is called again, over the list of its elements,
+        // as on the synchronous route (`declinedOverListedFlatMaps()`). The
+        // call is made here, in this step, as the first call.
+        if (value === undefined && handlerCalled && !handlerMissedElements)
+          value = await evaluateAsyncOverListedFlatMaps(
+            this,
+            def,
+            handlerOps,
+            listingMemo,
+            { ...options, _effects: effects, _contextStack: contextStack },
+            opts
+          );
         // A handler that answers `undefined` leaves the operator as it is;
         // over evaluated operands that is the operator over the values, as
         // an inert comparison answers on the synchronous route.
@@ -22252,4 +22312,185 @@ function sameOperands(
   b: ReadonlyArray<Expression>
 ): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/**
+ * The answer of the `evaluate` handler of a standard-library operator that
+ * declined on the operands `ops`, called again with each `FlatMap` of
+ * unknown finiteness in `ops` listed (`operandsWithListedFlatMaps()`,
+ * `collection-utils.ts`). `Mean(FlatMap([1, 2], x ↦ Range(1, x)))` is then
+ * `Mean([1, 1, 2])`, and `ListFrom(Reverse(FlatMap(...)))` is
+ * `ListFrom(Reverse([1, 1, 2]))`. When the evaluation of a `FlatMap` is an
+ * error, the answer is that error. The answer is `undefined` when no
+ * `FlatMap` can be listed: the handler then keeps its decline.
+ *
+ * Only a handler that declined is called again, so an operator that reads a
+ * prefix of the view (`First`, `Take`, `Find`) keeps reading it lazily, and
+ * applies the callback only to the elements that it reads. The operand
+ * `expression` of the options is the application over the listed operands.
+ *
+ * These operators are not called again:
+ * - an operator with collection handlers (a view such as `Reverse`): its
+ *   evaluation keeps the view lazy, and the consumer of the view lists the
+ *   `FlatMap` in its source;
+ * - a `lazy` operator: its operands are not evaluated, so a `FlatMap` in
+ *   them is not a view yet;
+ * - an operator that the host or the user defined: a second call of its
+ *   handler can repeat its effects.
+ */
+function declinedOverListedFlatMaps<O extends { expression?: Expression }>(
+  node: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  ops: ReadonlyArray<Expression>,
+  options: O,
+  handler: (
+    ops: ReadonlyArray<Expression>,
+    options: O
+  ) => Expression | undefined
+): Expression | undefined {
+  if (!retriesOverListedFlatMaps(def)) return undefined;
+  // The listings below and the second call replay the listings and walks
+  // of the first call (`ListingMemo`, `collection-utils.ts`).
+  beginReplay();
+  const listed = operandsWithListedFlatMaps(
+    node.operator,
+    ops,
+    rebuildWithSameBinding
+  );
+  if (listed === undefined) return undefined;
+  if (!Array.isArray(listed)) return listed as Expression;
+  return handler(listed, {
+    ...options,
+    expression: node._withSameBinding(listed),
+  });
+}
+
+/** `x` over the operands `ops`, bound to the definition of `x`
+ * (`BoxedFunction._withSameBinding()`), for the views that the listing of a
+ * `FlatMap` rebuilds (`operandsWithListedFlatMaps()`). */
+function rebuildWithSameBinding(
+  x: Expression,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  return x instanceof BoxedFunction ? x._withSameBinding(ops) : x;
+}
+
+/** Whether a handler of `def` that declined is called again over the listed
+ * `FlatMap` views among its operands (see `declinedOverListedFlatMaps()`). */
+function retriesOverListedFlatMaps(def: BoxedOperatorDefinition): boolean {
+  return (
+    def._standardLibrary && def.lazy !== true && def.collection === undefined
+  );
+}
+
+/** The options that the asynchronous route gives to a handler. */
+type AsyncHandlerOptions = Partial<EvaluateOptions> & {
+  engine: ComputeEngine;
+  expression: Expression;
+  precision: number | undefined;
+  effects: EffectHandlers;
+};
+
+/**
+ * The asynchronous form of `declinedOverListedFlatMaps()`, for a handler of
+ * `node` that declined under `evaluateAsync()` on the operands `ops`: the
+ * answer of a second call of the handler over the listed operands, or
+ * `undefined` when no `FlatMap` can be listed or when the handler declines
+ * again. The asynchronous route calls it inside the step that calls the
+ * handler, so that an exception of the second call becomes an error value,
+ * the local scope of the first call is still in place, and the steps after
+ * the handler call (string preservation, materialization, pole override)
+ * apply to the answer.
+ *
+ * `memo` holds the listings and walks of the first call (`ListingMemo`,
+ * `collection-utils.ts`), which the listings below and the second call
+ * replay. The listing is awaited (`operandsWithListedFlatMapsAsync()`) with
+ * the evaluation options `options`. The handler is then called once, with
+ * the options `handlerOptions` of the first call, in the registry `effects`
+ * and the context stack `contextStack` of this evaluation. The walks of the
+ * second call are measured as those of the first call: a walk that missed
+ * elements makes the answer `undefined` (or the error of a failed walk). The
+ * handler is not called a third time.
+ */
+async function evaluateAsyncOverListedFlatMaps(
+  node: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  ops: ReadonlyArray<Expression>,
+  memo: ListingMemo | undefined,
+  options: Partial<EvaluateOptions> & { _effects: EffectHandlers },
+  handlerOptions: AsyncHandlerOptions
+): Promise<Expression | undefined> {
+  if (!retriesOverListedFlatMaps(def)) return undefined;
+  const firstCall = memo ?? newListingMemo();
+  beginReplay(firstCall);
+  const listed = await operandsWithListedFlatMapsAsync(
+    node.operator,
+    ops,
+    options,
+    firstCall,
+    rebuildWithSameBinding
+  );
+  if (listed === undefined) return undefined;
+  if (!Array.isArray(listed)) return listed as Expression;
+  const engine = node.engine;
+  const callOptions: AsyncHandlerOptions = {
+    ...handlerOptions,
+    expression: node._withSameBinding(listed),
+  };
+  // As in the first call: a synchronous handler that read a walk that
+  // missed elements stays unevaluated, or gives the error of a failed walk;
+  // an `evaluateAsync` handler that declines gives the error of a walk that
+  // failed in its synchronous part.
+  let missedElements = false;
+  let walkFailure: Expression | undefined;
+  let sliceFailure: Expression | undefined;
+  let answer: Expression | undefined;
+  try {
+    answer = await runWithEvaluationEffects(
+      engine,
+      options._effects,
+      () => {
+        const enclosingNumericRequest = engine._numericRequest;
+        engine._numericRequest = handlerOptions.numericApproximation ?? false;
+        pushListingMemo(firstCall);
+        try {
+          if (def.evaluateAsync !== undefined) {
+            const failuresBefore = failedWalksMeasuredBy(def);
+            const pending = def.evaluateAsync(listed, callOptions);
+            sliceFailure = handlerWalkFailure(failuresBefore);
+            return pending;
+          }
+          const walksBefore = walksMeasuredBy(def, listed);
+          const failuresBefore = failedWalksMeasuredBy(def);
+          let declined = false;
+          try {
+            const result = def.evaluate?.(listed, callOptions);
+            declined = result === undefined;
+            return result;
+          } finally {
+            missedElements = handlerWalkMissedElements(walksBefore);
+            if (missedElements) walkFailure = handlerWalkFailure(walksBefore);
+            else if (declined) {
+              walkFailure = handlerWalkFailure(failuresBefore);
+              missedElements = walkFailure !== undefined;
+            }
+          }
+        } finally {
+          popListingMemo();
+          engine._numericRequest = enclosingNumericRequest;
+        }
+      },
+      options._contextStack,
+      options._precisionWindow
+    );
+  } catch (e) {
+    // A second call that read a walk that missed elements, and then threw,
+    // keeps the decline (or gives the error of a failed walk), as on the
+    // synchronous route, where the walk check runs after the exception is
+    // made an error value. A cancellation is thrown again.
+    if (missedElements && !(e instanceof CancellationError)) return walkFailure;
+    throw e;
+  }
+  if (missedElements) return walkFailure;
+  return answer ?? sliceFailure;
 }

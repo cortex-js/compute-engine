@@ -363,6 +363,22 @@
 
 ### Bug Fixes
 
+- **Every collection operator reads a `FlatMap` whose finiteness is known only
+  after its callback is applied.** With `v = FlatMap([1, 2], x ↦ Range(1, x))`,
+  only `ListFrom`, `Count`, `Length`, `IsEmpty`, `Sum`, `Product`, `Max`,
+  `Min` and `Reduce` listed `v`. `Mean(v)`, `Median(v)`, `Sort(v)`,
+  `Unique(v)`, `Contains(v, 2)`, `SetFrom(v)`, `MaxBy(v, k ↦ k)` and the other
+  consumers stayed unevaluated, and so did a consumer of a view over `v`:
+  `ListFrom(Reverse(v))` was not `[2, 1, 1]`. Each of them now gives its value
+  over the elements `[1, 1, 2]`, under `evaluate()` and `evaluateAsync()`.
+  The callback is applied once for each element of the source, and an
+  operator that reads a prefix (`First`, `Take`) still applies it only to the
+  elements that it reads. A `FlatMap` with an infinite inner result
+  (`x ↦ Range(1, ∞)`) stays unevaluated in these operators. Also,
+  `IsEmpty(FlatMap([1, 2], x ↦ Map(slowF, Range(1, x))))`, where `slowF` has
+  only an `evaluateAsync` handler, is now `False`: the callback of a `Map`
+  does not change the number of its elements.
+
 - **`evaluateAsync({ numericApproximation: true })` of a block whose lazy `Map`
   calls a function that the block defines now reads the locals of the block.**
   `Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), Map(k ↦ h(k) + 1, [1, 2]))`
