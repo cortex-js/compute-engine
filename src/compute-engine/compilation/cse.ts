@@ -499,6 +499,17 @@ export interface CseHarvestOptions {
   readonly admitPureUserFunctions?: boolean;
 
   /**
+   * A node that the compilation must emit where it is, so that no pass may
+   * share or move it: it is never recorded as an occurrence, and never
+   * admitted (`isCseAdmissible`). Its operands and its parent stay
+   * candidates. `mode: 'bigint'` gives it (`bigintCseExclusion`): a
+   * non-integer subtree whose lowering depends on its integer-forcing
+   * parent, a rational constant (the operand of a comparison or the factor
+   * of such a subtree, which has no `bigint` value) and a callback literal.
+   */
+  readonly notACandidate?: (node: Expression) => boolean;
+
+  /**
    * Names that must NEVER be admitted as user-function callees nor relaxed as
    * named callbacks — the caller's enclosing binder/parameter names. A name
    * that is bound by an enclosing lambda resolves to that BINDING at run time,
@@ -1143,6 +1154,7 @@ class Harvester {
    * subtree must be known before the first verdict is cached.
    */
   admits(node: Expression): boolean {
+    if (this.options.notACandidate?.(node) === true) return false;
     this.prepass(this.root, new Set<Expression>());
     return this.isEligible(node);
   }
@@ -1166,6 +1178,7 @@ class Harvester {
       isFunction(node) &&
       node.isPure &&
       !readsExpressionParameter(node) &&
+      this.options.notACandidate?.(node) !== true &&
       this.isEligible(node)
     );
   }
@@ -1614,6 +1627,7 @@ class Harvester {
       !underMapped &&
       node.isPure &&
       !readsExpressionParameter(node) &&
+      this.options.notACandidate?.(node) !== true &&
       (this.sizeOf(node) >= this.minSize ||
         this.isNegationCredited(node) ||
         this.isAdmittedUserFnApp(node) ||

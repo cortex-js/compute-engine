@@ -9,8 +9,11 @@
  * target it created and registered here. The JavaScript target registers a
  * target that it creates with its own emitters only: a target made by
  * `createTarget()` with none of these fields given in the options, and the
- * target of its own `compile()` when the caller gives no `operators` and no
- * `functions` option. A copy of a registered target made with object spread
+ * target of its own `compile()`. The `operators` and `functions` options of
+ * `compile()` are wrapped by that target's own emitters, so that target is
+ * registered too; the lane analysis of the mode declines an expression
+ * that uses a head the caller replaced (`CompileTarget.overridesHead`,
+ * `compile-bigint-lane.ts`). A copy of a registered target made with object spread
  * keeps the same objects, so it offers `'bigint'` when it replaces none of
  * these fields; it does not offer the mode when it replaces one of them. The
  * other fields of a target are not compared. A custom target cannot register

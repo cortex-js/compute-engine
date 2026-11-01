@@ -76,7 +76,11 @@ import { ABS_ARG_REFUSAL, containsDerivativeHead } from './angular-unit.js';
 import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
-import { CompileDeclineError, bigintLaneError } from './diagnostics.js';
+import { CompileDeclineError } from './diagnostics.js';
+import {
+  bigintEmissionNotImplemented,
+  bigintLaneAnalysisFor,
+} from './compile-bigint-lane.js';
 import { isColorValued } from './color-space-fact.js';
 import { candidateAt } from './cse.js';
 import {
@@ -921,24 +925,24 @@ export function compile(
   try {
     // In `mode: 'bigint'` the lane analysis of the outermost expression
     // decides, before any emission, whether every numeric node is on the
-    // integer lane. That analysis is not implemented yet, so the outermost
-    // compilation declines here with `code: 'bigint-lane'`: the code that the
-    // emitters would give computes with doubles, and a caller that requested
-    // `'bigint'` must not receive it. The decline is inside the `try`, so the
-    // `finally` below restores the latches. (CE-715, step 2 of
-    // `docs/plans/2026-10-31-ce715-bigint-compile-mode.md` replaces this
-    // with the lane analysis.)
+    // integer lane (`compile-bigint-lane.ts`); a node that is not declines
+    // here with `code: 'bigint-lane'`. The JavaScript target analyzes the
+    // expression before its CSE harvest, and that analysis is used again
+    // here; a target passed directly to `compile()` gets its analysis here.
+    // The bigint emission is not implemented yet, so an expression that the
+    // analysis accepts declines too: the code that the emitters would give
+    // computes with doubles, and a caller that requested `'bigint'` must not
+    // receive it. The declines are inside the `try`, so the `finally` below
+    // restores the latches. (CE-715, step 3 of
+    // `docs/plans/2026-10-31-ce715-bigint-compile-mode.md` replaces the
+    // second decline with the emission.)
     if (
       CompilerState._compileDepth === 1 &&
       CompilerState._integerLane === 'bigint'
-    )
-      throw bigintLaneError({
-        node: expr.toString(),
-        type: expr.type.toString(),
-        reason: 'the bigint mode is not implemented yet for this expression',
-        message:
-          "Could not compile in mode 'bigint': the integer-lane analysis is not implemented yet.",
-      });
+    ) {
+      bigintLaneAnalysisFor(expr, target);
+      throw bigintEmissionNotImplemented(expr);
+    }
     // Compile-time constant folding, attempted top-down at every function
     // node so the largest constant subtree folds: a pure subtree with no
     // free variables evaluates at compile time and emits as a literal

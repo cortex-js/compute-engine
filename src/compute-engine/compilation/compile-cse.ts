@@ -852,6 +852,8 @@ export function openCseSession(
     isPureOverriddenOperator?: (name: string) => boolean;
     isStringVar?: (name: string) => boolean;
     isVarsKey?: (name: string) => boolean;
+    /** See `CseHarvestOptions.notACandidate`. */
+    notACandidate?: (node: Expression) => boolean;
   } = {}
 ): void {
   const harvestOptions: CseHarvestOptions = {
@@ -859,6 +861,7 @@ export function openCseSession(
     isPureOverriddenOperator: options.isPureOverriddenOperator,
     isStringVar: options.isStringVar,
     isVarsKey: options.isVarsKey,
+    notACandidate: options.notACandidate,
     // A target may decline the symbol-square exemption (the Python target
     // does — see `CompileTarget.shareSymbolSquares`). Carried on the
     // session so nested harvests of user-function bodies apply it too.

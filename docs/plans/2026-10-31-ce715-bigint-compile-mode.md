@@ -6,7 +6,12 @@ with one amendment: a non-finite value is returned as a `number` (`NaN`,
 rounds of the dual review
 (`docs/scratch/2026-10-31-ce715-bigint-compile-mode_SPEC_REVIEW.md`, 18 and
 14 findings) with the recommended options; §7 lists the choices made there,
-so the user can reverse them. Implementation not started. Written for GitHub
+so the user can reverse them. Revision 4 (2026-10-31, user decisions during
+step 2): refined types for `Length`/`Count`, arithmetic and user calls
+(§3.1.3); `Piecewise` and four control shapes decline (CE-715.8); and the
+pole analysis is replaced by a documented rule (§3.4: a `number` result has
+no defined relation to the interpreter's value). Step 1 is committed
+(`8c94c065f`). Written for GitHub
 issue #503 (RFC by `enumeratio`, 2026-10-30). The reply to the issue is
 deferred until the implementation is done. Facts below were read in the tree
 at commit `cda9d54e3`; the interpreter values and types were measured with
@@ -69,8 +74,8 @@ new public extension point is needed, and the subclass in the issue becomes
 
 In the `bigint` mode **every numeric node is on the bigint lane or the
 compilation declines**. The exceptions off the lane are: a rational constant
-as the operand of a comparison (§3.3), boolean nodes, and `String` of a lane
-value. A node is on the lane (its value at run time is a JavaScript `bigint`)
+as the operand of a comparison (§3.3) and boolean nodes. A node is on the
+lane (its value at run time is a JavaScript `bigint`)
 when **both** hold:
 
 - its **refined type** (§3.1.3) is a subtype of
@@ -99,7 +104,7 @@ Why the type and not the literal: canonicalization makes `n(n+1)/2`, with
 | -------------------------------- | ----------------------------------- | -------------------------------------------------- |
 | `Binom(2n, n) − Binom(2n, n+1)`  | `integer`                           | yes, exact `bbinomial`                             |
 | `Mod(n, 7)`, `GCD(n, m)`, `−n`   | `integer`                           | yes                                                |
-| `Mod(n, m)`                      | `nan \| real`, refined `integer \| nan` | yes, pole-capable (§3.4)                       |
+| `Mod(n, m)`                      | `nan \| real`, refined `integer \| nan` | yes; `NaN` at `m = 0` (§3.4)                   |
 | `Abs(n!)`                        | `real<0..> \| signed_infinity`, refined `integer<0..> \| infinity` | yes            |
 | `Sum(i², i = 1..n)`, `Prod(i)`   | `integer`                           | yes, counter is bigint                             |
 | `Floor(n/3)`                     | `integer`                           | yes, floor division §3.2                           |
@@ -126,16 +131,17 @@ exact check.
 | ------------------------------------------------------ | ----------------------------------------------------------------------- |
 | `Add`, `Subtract`, `Negate`, `Multiply`                | (a) `+ − *` on `bigint`                                                 |
 | `Power` with an exponent typed `integer<0..>`          | (a) `bpow` with the size limit of §3.9; a negative or unsigned exponent only under a rounding parent (§3.2) |
+| `Power(−1, k)`: a literal base `−1`, any exponent on the lane | (a) `±1n` by the parity of `k` (`k % 2n === 0n ? 1n : -1n`); exact for a negative `k` too (user decision 2026-10-31: the loop index is typed `integer`, so `(−1)^k` in an alternating sum needs this row) |
 | `Abs`, `Min`, `Max`, `Sign`                            | (a) `babs`, `bmin`, `bmax`, `bsign` (`Sign` gives `−1n`, `0n`, `1n`)   |
 | `Mod`, `Remainder`, `GCD`, `LCM`                       | (a) `bfloorMod`, `bremainder`, `bgcd`, `blcm` (values in §3.6)          |
 | `Factorial`, `Binomial`, `Fibonacci`                   | (a) `bfactorial`, `bbinomial`, `bfibonacci` (values in §3.6, size limit §3.9) |
 | `Factorial2` of an operand typed `integer<0..>`        | (a) `bfactorial2`; any other operand type declines (`(−5)!! = 1/3`)     |
 | `Floor`, `Ceil`, `Round`, `Truncate`                   | (a) over the shapes of §3.2 only                                        |
-| `Sum`, `Product` with `Limits` on the lane             | (a) loop with a `bigint` counter (§3.7); the body must be pole-free (§3.4) |
-| `Fold`, `Reduce` over a `Range` or a `list<integer>`   | (a) same, with a lane callback whose body is pole-free                  |
+| `Sum`, `Product` with `Limits` on the lane             | (a) loop with a `bigint` counter (§3.7)                                 |
+| `Fold`, `Reduce` over a `Range` or a `list<integer>`   | (a) same, with a lane callback                                          |
 | `Range` with lane bounds and step                      | (a) array of `bigint`; the `4294967295` length limit stays              |
-| `List`, `Map` over a lane list with a lane callback    | (a) array of `bigint`, or of `bigint \| number` with the per-cell catch (§3.4) |
-| `If`, `Which`, `Piecewise`                             | (a) branches on the lane; the test is a boolean node (§3.3)             |
+| `List`, `Map` over a lane list with a lane callback    | (a) array of `bigint`; a pole in a cell makes the whole result a `number` (§3.4) |
+| `If` with an else branch, `Which` with a final `True` clause | (a) branches on the lane; the test is a boolean node (§3.3). `Piecewise`, an `If` with no else, a `Which` with no final `True`, a chained comparison and a `Block` of more than one statement decline (CE-715.8, user decision 2026-10-31) |
 | `Typed(…, T)` with `T` a subtype of `integer`          | (a) the ascription (§3.2)                                               |
 | `Length`, `Count`                                      | (b) `BigInt(<number lowering>)`                                         |
 | `Boole`                                                | (b) `BigInt(<boolean>)`                                                 |
@@ -162,12 +168,13 @@ emitted definition (a recursive function, for example) compiles under the
 mode with the parameter lanes of its signature.
 
 A call node is on the lane when the declared or inferred result type of the
-function passes the test of §3.1, and it is **pole-capable** (§3.4) when that
-type has a non-finite member (`f(x) := x!` gives `f(n)` the type
-`infinity | integer`). An emitted definition has **no catch and no lift**:
-a `NonFiniteValue` thrown in its body propagates to the catch of the
-compiled entry, so `f(n) + 1` compiles and `f(n) > 5` declines, as for `n!`
-(measured: `f(−1) > 5` is `False` in the interpreter). A function declared
+function passes the test of §3.1. The engine types `f(n)` as `number` for
+`f := x ↦ x!` (measured 2026-10-31), so the lane analysis uses the refined
+type of the body analyzed with integer parameters, `infinity | integer`
+(§3.1.3). An emitted definition has **no catch and no lift**: a
+`NonFiniteValue` thrown in its body propagates to the catch of the compiled
+entry (§3.4), so `f(n) + 1` and `f(n) > 5` both compile, and both give
+`Infinity` at `n = −1`. A function declared
 `-> integer` is an integer promise for its body (§3.2): the interpreter
 checks the declared result as it checks `Typed` (measured: `g(−1)` with
 `g: (integer) -> integer := x ↦ x!` is an `incompatible-type` error).
@@ -184,9 +191,18 @@ type** for them, which never admits a value the engine's type excludes:
 | `Mod(t, u)`, `Remainder(t, u)`               | `nan \| real`                   | `integer \| nan`; `integer` when `u` is a non-zero literal |
 | `Power(t, u)` with `u` typed `integer<0..>`  | `infinity \| nan \| real`       | `integer`, plus `nan` when `t` and `u` can both be `0` |
 | `Factorial2(t)` with `t` typed `integer<0..>`| `infinity \| rational`          | `integer`                                     |
+| `Length(L)`, `Count(L)`                      | `integer \| signed_infinity`    | `integer<0..>` (the array of a list input is finite) |
+| `Add`, `Subtract`, `Negate`, `Multiply`, `Min`, `Max` (at least one operand), `If`, `Which`, `Fold`, `Reduce`, with every operand on the lane | `number`, `real \| signed_infinity`, … (for example `f(n) + 1`, `Max(n, n!)`, `Length(L) + n`) | `integer`, plus the non-finite members of the operands |
+| A user call `f(t)` (§3.1.2)                   | `number` for `f := x ↦ x!`      | the refined type of the body, analyzed with the parameter lanes |
+| `Sum`, `Product` with every term on the lane  | `number` for `Sum(k!, k = 0..n)`, `nan \| real` for `Sum(Mod(n, k), k = 1..n)` | `integer`, plus the non-finite members of the body (user decision 2026-10-31) |
 
-Every other node keeps the engine's type. A refinement is a rule of this
-mode only; the engine's type handlers do not change.
+A refinement applies only when the engine's type is not already on the lane:
+a narrower engine type is kept (`n^2` stays `integer<0..>`). Every other node
+keeps the engine's type. A refinement is a rule of this mode only; the
+engine's type handlers do not change. The `Length`/`Count`, arithmetic and
+user-call rows were added by user decision 2026-10-31: the engine gives
+these nodes a type off the lane, so §5 listed as compiling cases that the
+rule as first written would have declined.
 
 ### 3.2 A non-integer subtree under an integer-forcing parent
 
@@ -246,8 +262,7 @@ compiler knows the types, so the mode declines at compile time instead: a
 `real`, `number` or `complex` binding read by the expression; a numeric head
 whose refined type is not an integer type (`Sqrt`, `Sin`, `Ln`, `Divide`
 typed `real`, `n^m` with an unsigned exponent) outside the shapes of §3.2; a
-list whose element type is not integer, except a result-only list of §3.4;
-an integer-typed head that is not on the allow-list (§3.1.1); a user call
+list whose element type is not integer; an integer-typed head that is not on the allow-list (§3.1.1); a user call
 whose lanes differ (§3.1.2); a real (non-rational) constant anywhere. The
 decline has its **own diagnostic code**, `'bigint-lane'`, of kind
 `'capability'`, naming the node and its type. It is not `'lane-mismatch'`:
@@ -269,101 +284,94 @@ against the rounded double, and `Equal(n, (2^53 + 1)/2^53)` at `n = 1` is
 other non-lane operand decline. A `Length` or `Count` is a lane value (§3.1.1
 (b)), so it needs no special case.
 
-**Strings.** `String(x)` of a lane value uses the JavaScript `String(x)`,
-which gives the exact digits. Every other string head with a lane operand
-declines in the first version (CE-715.3): their lowerings call
+**Strings.** Every string head with a lane operand declines in the first
+version (CE-715.3), `String` too. The interpreter prints a large integer in
+exponent form (measured 2026-10-31: `String(n^2)` at `n = 10^15` is
+`"1e+30"`, `String(1000003·n)` is `"1000003e+15"`), and the JavaScript
+`String(10n ** 30n)` prints all the digits; the other string lowerings call
 `Number.prototype` methods or `JSON.stringify`, which throws on a `bigint`.
+Found in the review of step 2; the first text of this rule said `String`
+compiles.
 A `boolean` result (`IsPrime`, a comparison) is a `boolean`.
 
-### 3.4 Values with no `bigint` representation (trade-off T1, amended)
+### 3.4 Values with no `bigint` representation (trade-off T1, decided 2026-10-31)
 
 An integer-lane type may hold `nan`, `infinity` or `signed_infinity`
-members from a pole: `n!` is `infinity | integer`, `Floor(x)` has such
-members. A `bigint` cannot hold them. The result of the compiled function
-is therefore `bigint | number`: a `bigint` for every integer value, and a
-`number` for a value that is not finite. **A `number` result is never
-finite.**
+members from a pole: `n!` is `infinity | integer`, `Mod(n, m)` is
+`integer | nan` (refined, §3.1.3). A `bigint` cannot hold them. The result of
+the compiled function is therefore `bigint | boolean | number`.
 
-**Which poles exist on the lane.** The lane helpers produce two non-finite
-kinds only, measured in §3.6: `~oo` (`ComplexInfinity`: `n!` at `n < 0`,
-`Floor(n/0)`, `0^(−k)`) and `NaN` (`Indeterminate`: `Mod(n, 0)`,
-`Floor(0/0)`, `0^0`, `bisqrt` of a negative, an out-of-range `At`). The
-`number` carried is the projection the double mode uses today
-(`docs/COMPILATION-MODEL.md`, "Divergences of the `Infinity` projection"):
-`~oo` is `Infinity`, `NaN` is `NaN`. No signed infinity arises on the lane.
+**The rule.** A `bigint` or `boolean` result is always the value of
+`evaluate()`. A `number` result (`NaN` or `Infinity`) means that a
+sub-expression had no finite value: it has **no defined relation** to the
+value of `evaluate()`, which can be a finite integer, a boolean, another
+non-finite value or an error. A host that needs the value evaluates the
+expression with the interpreter. This is an exception, for the `bigint`
+mode only, to the rule that compiled values agree with the interpreter for
+well-typed inputs (AGENTS.md; `docs/COMPILATION-MODEL.md`, "Fail closed").
 
-**Pole-capable nodes.** A node is pole-capable when its refined type
-(§3.1.3) has a `nan`, `infinity` or `signed_infinity` member. For a
-parent-lowered quotient or square root (§3.2) the pole-capable node is the
-**rounding parent or the promise node**, the node that calls the helper, and
-it is pole-capable only when the divisor can be zero (a divisor that is a
-non-zero literal, or a power of a non-zero literal such as `2^n`, cannot) or
-the radicand can be negative (a radicand typed `integer<0..>` cannot). So
-`Sum(i², i = 1..n)`, `Floor(2^(−n))`, `Floor(n/3)` and `Mod(n, 7)·2` have no
-pole-capable node and compile; `Floor(n/m)`, `Mod(n, m)`, `n!`, `At(L, k)`
-and `f(n)` with `f := x ↦ x!` are pole-capable.
+Examples at `n = −1`, `m = 0`:
 
-**The mechanism is one `try`/`catch` emitted around the body**, not a check
-in every operation. On the lane every value is a `bigint`, and the operators
+| Expression        | `evaluate()`         | Compiled                        |
+| ----------------- | -------------------- | ------------------------------- |
+| `n!`              | `~oo`                | `Infinity`                      |
+| `−\|n!\|`         | `−oo`                | `Infinity`                      |
+| `n! > 5`          | `False`              | `Infinity` (not a boolean)      |
+| `g(n!)`, `g := x ↦ 1` | `1`              | `Infinity`                      |
+| `Mod(n, m)`       | `Indeterminate`      | `NaN`                           |
+| `Mod(n!, 7)`      | `incompatible-type` error | `Infinity`                 |
+| `Map(Range(−1, 1), k ↦ k!)` | `[~oo, 1, 1]` | `Infinity` (the whole list)  |
+
+**The mechanism.** On the lane every value is a `bigint`, and the operators
 and helpers stay `bigint`-only. A helper at a pole throws an internal
-`NonFiniteValue` carrying the `number`; the emitted wrapper catches it and
-returns that `number`. The wrapper is part of the generated code of the
-compiled entry and of a closure returned to the host, so every runner
-(`run`, the function-literal runner, code rebuilt by `load()`) gets it
-(§3.5). An emitted internal definition has no wrapper (§3.1.2).
+`NonFiniteValue` that carries a `number`: `Infinity` for a `~oo`
+(`bfactorial` of a negative, a zero divisor with a non-zero dividend, `0` to
+a negative power), `NaN` for an `Indeterminate` (`bfloorMod(a, 0n)`, `0/0`,
+`0^0`, `bisqrt` of a negative, an out-of-range `bindex`). These are the
+projections that the double mode uses (`docs/COMPILATION-MODEL.md`,
+"Divergences of the `Infinity` projection"). One `try`/`catch` around the
+body of the compiled entry, and around the body of a closure returned to the
+host, catches it and returns the `number`. The catch is part of the
+generated code, so every runner (`run`, the function-literal runner, code
+rebuilt by `load()`) has it (§3.5). An emitted internal definition (a
+recursive function) has no catch: the throw goes up to the catch of the
+entry. There is no catch per list cell: a pole in any cell makes the whole
+result a `number`.
 
-**When the route is sound.** A thrown value skips every operator between the
-pole and the result, so the route is taken only when each ancestor of the
-pole-capable node, up to the root or to a cell boundary (below), is one that
-**keeps both kinds** in the interpreter (measured): `Negate` (`−~oo = ~oo`),
-`Abs` (`|~oo| = +oo`, also `Infinity`), `Add`/`Subtract` whose **other
-operands cannot be poles** by their refined types (`~oo + 3 = ~oo`; two
-pole-capable operands decline, since `~oo − ~oo` is `~oo` but the first
-helper to throw would win, and `~oo + NaN` is not `~oo`), and the chosen
-branch of `If`/`Which`/`Piecewise`. An **integer promise** (`Typed(…, T)`,
-a `-> integer` body) keeps a `NaN`-only pole (measured:
-`Typed(Floor(0/0), 'integer')` is `Indeterminate`) but **not** `~oo`
-(measured: `Typed((−1)!, 'integer')` and `g(−1)` are `incompatible-type`
-errors), so a pole-capable node whose type has an `infinity` member declines
-under an integer promise, and one whose type has only `nan` compiles. A
-pole-capable node under any other ancestor **declines**: under `Multiply`
-(`0·~oo = NaN`), under a comparison (`n! > 5` is a `boolean`), under `Mod`,
-`Binomial`, `Max`, a rounding head, an integer parameter, as an argument of
-a user call, or inside the body of `Sum`, `Product`, `Fold` or `Reduce`.
-Examples: `If(n < 0, 0, n!)` compiles (the pole is in a chosen branch);
-`Abs(n!)` compiles; `−(n!) + 3` compiles; `f(n) + 1` compiles; `n! > 5`
-declines; `f(n) > 5` declines; `If((n!) > 5, m!, 7)` declines (the pole is
-in the test); `n! − m!` declines (two pole-capable operands); `0·n!`
-declines; `Typed(n!, 'integer')` declines; `Sum(k!, k = −1..n)` declines
-(CE-715.1).
+**What the compiler does not do.** It does not test where a pole can occur:
+there is no pole-capable test, no rule on the ancestors of a pole, no
+decline for a pole under a comparison, a `Multiply` or in a loop body, and
+no exclusion from common-subexpression elimination for a node that can be a
+pole. A throw ends the whole computation, so no operator ever receives a
+non-finite value, and a finite result is never computed from one.
 
-This is the simple sound version. A finer rule (a `Multiply` by an operand
-proved non-zero, a loop body) is CE-715.1, done when a user asks for it.
+**Why.** The rule of revision 3 (a pole compiles only where every ancestor
+keeps it in the interpreter) needed an ancestor rule, three pole bits (one
+for the sign that `Abs` gives), a catch per list cell, result-only lists, a
+fixpoint for recursive functions and a range analysis of loop indices; the
+review of step 2 found 14 defects in the first version, most of them in this
+analysis, and it declined common counting sums (`Sum(k!, k = 0..n)`, whose
+index type `integer` does not show that `k ≥ 0`). The user chose the
+documented rule on 2026-10-31, consistent with R5 of
+`docs/plans/2026-10-31-static-shape-compilation.md`.
 
-**Collections.** For a list built by `List` or by `Map`, **each cell is a
-catch boundary**: when the cell's type has a non-finite member, the ancestor
-walk of a pole inside the cell stops at the cell, the cell's code is wrapped
-in its own `try`/`catch`, and the cell holds the `number`. The result is an
-array of `bigint | number`, the shape the interpreter gives
-(`Map(Range(−1, n), k ↦ k!)` at `n = 1` is `[Infinity, 1n, 1n]`). A list
-whose element type is a subtype of `integer` has no catch. Nested lists
-apply the rule at each level. Such a list is **result-only**: it may be the
-result or a cell of an enclosing `List`; as the operand of `At`, `Fold`,
-`Reduce`, `Map`, `Take`, `Drop` or any other head it declines (a `number`
-cell read back onto the lane would meet `bigint` arithmetic). CSE treats a
-cell with a catch as a lazy region (as it treats a conditional branch,
-`lazyOperandRegions` in `compile-cse.ts`): a pole-capable node is never
-hoisted out of its cell (`List(n!, Abs(n!))` at `n = −1` is
-`[Infinity, Infinity]`, two throws, two catches).
+**The two `RangeError` cases.** A checked exact division with a remainder
+under an integer promise (§3.2), and the size limit of §3.9, throw a
+`RangeError` to the caller: there the value is outside the declared type, or
+beyond what the mode computes, not a pole. When a body holds both a pole and
+one of these (`n! + Binomial(10^9, …)`), whichever is evaluated first
+decides whether the result is a `number` or a `RangeError`; both mean "no
+value". The native `RangeError` of a BigInt division by `0n` never reaches
+the caller: every helper tests its divisor (§3.6).
 
-The one case that throws a `RangeError` to the caller is a checked exact
-division with a remainder (§3.2), and the size limit of §3.9: there the
-value is outside the declared type, or beyond what the mode computes, not a
-pole. When a body holds both a pole and an operation past the size limit
-(`n! + Binomial(10^9, …)`), whichever is evaluated first decides whether the
-result is a `number` or a `RangeError`; both are "no value" and either is
-acceptable. The native `RangeError` of a BigInt division by `0n` never
-reaches the caller: every helper tests its divisor (§3.6).
+**A `Map` callback runs on every element.** The interpreter's `Map` is a
+lazy view, so a consumer that reads only its length does not call the
+callback; the compiled `Map` builds the array. With
+`hf: (integer) -> integer := x ↦ x/2`, `Length(Map(hf, L))` at `L = [1, 2]`
+is `2` in the interpreter, and the compiled code throws the `RangeError` of
+the checked exact division at `hf(1)`. A pole in the callback body gives a
+`number` the same way. Both are "no value" cases of this section (found in
+the review of step 2).
 
 ### 3.5 The boundary (trade-offs T2, T3)
 
@@ -488,8 +496,7 @@ by the mode, with no `_SYS` replacement API.
   safe integer range" rule of folding becomes simpler here, since no
   rounding happens. A fold whose value is not an integer declines (§3.2),
   never becomes a double. A hoisted `bigint` literal is a CSE candidate as
-  any literal is; a parent-lowered quotient is not (§3.2), and a
-  pole-capable node is not hoisted out of a cell (§3.4).
+  any literal is; a parent-lowered quotient is not (§3.2).
 
 ### 3.8 The four hooks of the issue
 
@@ -528,7 +535,9 @@ compiles untrusted expressions bounds its inputs, as it must today.
 - **T1. Non-integer value in an integer-lane type** (`n!` at `n = −1`).
   DECIDED (user amendment): return the non-finite value as a `number`, so
   the result type is `bigint | number` and a `number` result is never finite
-  (§3.4). The options were (a) throw a `RangeError` at run time, (b) decline
+  (§3.4). Refined 2026-10-31 (user decision during step 2): a `number`
+  result has no defined relation to the interpreter's value, and the
+  compiler does no pole analysis. The options were (a) throw a `RangeError` at run time, (b) decline
   when the type has a `nan`/`infinity` member, which would decline `n!`.
 - **T2. Result value.** (a) `bigint` for every integer value, approved; only
   a non-finite value is a `number` (T1). (b) `number` when the value is safe,
@@ -558,8 +567,8 @@ compiles untrusted expressions bounds its inputs, as it must today.
 2. **Lane analysis.** `bigintLane(type)` (the subtype test of §3.1), the
    refined types (§3.1.3), the allow-list (§3.1.1), the parameter-lane and
    call rules (§3.1.2), the mixed-lane decline (§3.3), the integer-forcing
-   parents and the four shapes (§3.2), the pole-capable test and the
-   ancestor rule (§3.4), the cell boundaries and the CSE exclusions.
+   parents and the four shapes (§3.2), and the CSE exclusion of a
+   parent-lowered node. No pole analysis (§3.4, user decision 2026-10-31).
    (`compile-declarations.ts`, `compile-operators.ts`,
    `compile-real-analysis.ts` for the rounding heads, `compile-cse.ts`,
    `compile-user-calls.ts`.)
@@ -567,8 +576,7 @@ compiles untrusted expressions bounds its inputs, as it must today.
    comparisons, with the exact rational comparison (§3.3); the guards
    through `isIntegerValue`; the helper set of §3.6 with the zero tests and
    the size limit of §3.9; `isPrimeBigint`; the loop counters; the index and
-   count conversions of the collection heads; the per-cell catch of a list
-   (§3.4). (`javascript-target.ts`, `javascript-runtime.ts` with a
+   count conversions of the collection heads. (`javascript-target.ts`, `javascript-runtime.ts` with a
    `runtimeVersion` bump, `compile-loops.ts`.)
 4. **Boundary** (§3.4, §3.5): the `NonFiniteValue` class, the emitted
    wrapper (lift and catch) on the entry and on returned closures, the
@@ -589,19 +597,21 @@ compiles untrusted expressions bounds its inputs, as it must today.
    and `20`, and past `2^53`; `At(L, k)` in range, at `0` and past the
    length (a `NaN` result); `Take(L, 0)`; `Length(L) + n`; `n > 1/2`,
    `n ≥ (3·2^53 + 1)/2` at `n = 3·2^52`, `Equal(n, (2^53 + 1)/2^53)` at
-   `n = 1`; `IsPrime(n)` at `17`; `String(n)` past `2^53`; `1^(10^7)`; the
-   declines of §3.1 to §3.4 (`DigitSum(n)`, `Mod(n/2, 7)`, `n^m`,
+   `n = 1`; `IsPrime(n)` at `17`; the decline of `String(n)`; `1^(10^7)`; the
+   declines of §3.1 to §3.3 (`DigitSum(n)`, `Mod(n/2, 7)`, `n^m`,
    `Factorial2(n)` with `n: integer`, `f(n)` with `f: (number) -> number`,
-   `n! > 5`, `f(n) > 5`, `If((n!) > 5, m!, 7)`, `n! − m!`, `0·n!`,
-   `Typed(n!, 'integer')`, `Sum(k!, k = −1..n)`, `At(Map(Range(−1, n), k ↦
-   k!), 1)`, a real constant); the `number` results (`n!` at `−1`, `If(n <
-   0, 0, n!)`, `Abs(n!)`, `f(n) + 1`, `Typed(Mod(n, m), 'integer')` at
-   `m = 0`, `Map(Range(−1, n), k ↦ k!)` and `List(n!, Abs(n!))` with
-   `number` cells); the entry lift and refusals, with `entryChecks` on and
+   a real constant); counting sums that compile (`Sum(k!, k = 0..n)`,
+   `Sum(Floor(n/k), k = 1..n)`, the derangement sum with `(n − k)!`); the
+   `number` results of §3.4, each a `number` (not compared with the
+   interpreter's value): `n!` at `−1`, `−|n!|`, `n! > 5`, `0·n!`,
+   `n! − m!`, `Sum(k!, k = −1..n)`, `Mod(n, m)` at `m = 0`,
+   `Map(Range(−1, n), k ↦ k!)` (the whole result), and a finite or boolean
+   result next to them that equals `evaluate()` (`If(n < 0, 0, n!)` at
+   `n = −1` is `0n`); the entry lift and refusals, with `entryChecks` on and
    off; a returned closure; `run` versus `load()` parity on the same cases;
    the refusal of the five batch routes, also on stored code; the size limit
    on each guarded helper (`Fibonacci(10^9)` is a `RangeError` at once).
-7. **ROADMAP.** The sub-items CE-715.1 to .7 (§6) stay open after the mode
+7. **ROADMAP.** The sub-items CE-715.2 to .8 (§6) stay open after the mode
    lands; the entry itself is deleted.
 8. **Reply to #503** with the mode and the version (deferred by the user).
 
@@ -614,16 +624,16 @@ work, most of it in steps 2 and 3.
 Priorities: how often the shape occurs in the issue's domain (counting
 functions) and in a host that compiles user expressions.
 
-- **CE-715.1** (medium) A pole-capable node under `Multiply` by an operand
-  proved non-zero, or inside a loop body: the finer pole-keeping rule (§3.4).
-  Example: `Sum(k!, k = −1..n)` declines; the interpreter gives `~oo`.
+- **CE-715.1** Removed 2026-10-31: the finer pole-keeping rule has no use
+  since the pole analysis was replaced by the rule of §3.4.
 - **CE-715.2** (medium) A rational `Range`/`Sum`/`Product` bound (§3.2).
   Example: `Sum(i, i = 1..n/2)` declines; the interpreter gives `3` at
   `n = 5`.
 - **CE-715.3** (high) Integer-typed heads not on the allow-list, boolean
-  heads other than the comparisons and `IsPrime`, and string heads other
-  than `String` (§3.1.1, §3.3). Examples: `DigitSum(n)`, `IntegerDigits(n)`,
-  `IndexOf(L, n)`, `IsEven(n)`.
+  heads other than the comparisons and `IsPrime`, and every string head,
+  `String` included (§3.1.1, §3.3; `String` needs a helper that prints as
+  the interpreter does, `"1e+30"`). Examples: `DigitSum(n)`,
+  `IntegerDigits(n)`, `IndexOf(L, n)`, `IsEven(n)`, `String(n)`.
 - **CE-715.4** (low) A binding whose type admits a non-finite member
   (`integer | infinity`) as a lane input (§3.1).
 - **CE-715.5** (medium) A `bigint` output form for `broadcast()`,
@@ -632,18 +642,23 @@ functions) and in a host that compiles user expressions.
   (§3.7, T6).
 - **CE-715.7** (low) The Python target's `Rational` lowering as an exact
   `fractions.Fraction` (§3.5).
+- **CE-715.8** (medium) `Piecewise`, a chained comparison, a `Block` of more
+  than one statement, an `If` with no else and a `Which` with no final `True`
+  decline in the first version (§3.1.1, user decision 2026-10-31).
 
 ## 7. Choices made in revisions 2 and 3 (reversible)
 
 Each was a design choice in the review; the recommended option was taken.
 
-- **The pole-keeping ancestors** (round 1, finding 1): `Negate`, `Abs`,
-  `Add`/`Subtract` with pole-free other operands, a chosen branch; an
-  integer promise for a `NaN`-only pole (round 2). Alternative: a smaller
-  list (the root only), which would decline `If(n < 0, 0, n!)`.
-- **A list with a non-finite cell** (round 1, finding 2): catch per cell,
-  keep the shape, and the list is result-only (round 2). Alternative:
-  decline such lists.
+- **Poles** (replaced by user decision 2026-10-31, after the review of
+  step 2): no pole analysis; a `number` result has no defined relation to
+  the interpreter's value (§3.4). The rule of revisions 2 and 3 (a pole
+  compiles only where every ancestor keeps it; a catch per list cell and
+  result-only lists) is removed. Alternative: keep that analysis and add a
+  range analysis of loop indices so that `Sum(k!, k = 0..n)` compiles.
+- **A list with a pole in a cell** (user decision 2026-10-31): the whole
+  result is a `number`. Alternative: a catch per cell, which keeps
+  `[Infinity, 1n, 1n]` but needs result-only lists and CSE exclusions.
 - **`broadcast()` in the mode** (round 1, finding 6): refuse with a
   diagnostic, on every batch route including the stored loaders (round 2).
   Alternative: a `bigint` output form now (CE-715.5).

@@ -3899,27 +3899,35 @@ head or an integer promise (an `integer` ascription or parameter) as a rounded
 or checked exact division; a real or complex operand, or a head not on the
 list, declines with its own diagnostic code. The result is `bigint | number`: a
 `bigint` for every integer value, a `number` only for a non-finite value (`n!`
-at `n < 0` is `Infinity`), caught once in the emitted code, and only where every
-ancestor of the pole keeps its value. Inputs accept a `bigint` or a safe-integer
+at `n < 0` is `Infinity`), caught once in the emitted code; a `number` result
+has no defined relation to the interpreter's value (user decision
+2026-10-31). Inputs accept a `bigint` or a safe-integer
 `number`. `broadcast()` refuses in the mode. No auto-escalation in the first
 version. The spec names the files, the steps and the tests. The sub-items below
 are the shapes the first version declines, with a priority by how often each
 occurs (AGENTS.md: a decline is a defect).
 
-- **CE-715.1** (medium) A pole-capable node under `Multiply` by an operand proved
-  non-zero, or inside a loop body (`Sum(k!, k = −1..n)`): the finer
-  pole-keeping rule.
 - **CE-715.2** (medium) A rational `Range`/`Sum`/`Product` bound (`Sum(i, i = 1..n/2)`
   is `3` at `n = 5`).
 - **CE-715.3** (high) Integer-typed heads not on the allow-list (`DigitSum`,
   `IntegerDigits`, `IndexOf`), boolean heads other than the comparisons and
-  `IsPrime` (`IsEven`), and string heads other than `String`.
+  `IsPrime` (`IsEven`), and every string head, `String` included: the
+  interpreter prints `String(n^2)` at `n = 10^15` as `"1e+30"`, and the
+  JavaScript `String` of a `bigint` prints all the digits, so `String` needs
+  a helper that prints as the interpreter does.
 - **CE-715.4** (low) A binding typed `integer | infinity` as a lane input.
 - **CE-715.5** (medium) A `bigint` output form for `broadcast()`,
   `broadcastAsync()` and the stored batch loaders.
 - **CE-715.6** (low) Escalation to `bigint` on a run-time value past `2^53`.
 - **CE-715.7** (low) The Python target's `Rational` lowering as an exact
   `fractions.Fraction`.
+- **CE-715.8** (medium) Control and comparison shapes that the lane analysis
+  declines in the first version (user decision 2026-10-31): `Piecewise` (its
+  engine type is not a number type, so its branches need their own refined
+  type), a chained comparison (`a < n < b`), a `Block` with more than one
+  statement, an `If` with no else branch, and a `Which` with no final `True`
+  clause. With `n: integer`, `Piecewise(…)` over integer branches runs on the
+  interpreter in the mode today.
 
 ### CE-714. A point with a coordinate declared `real | list<real>` gives a norm per element in compiled code, an error in the interpreter
 

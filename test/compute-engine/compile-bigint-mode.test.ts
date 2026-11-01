@@ -27,12 +27,19 @@ import { createJavaScriptRuntime } from '../../src/runtime';
  *   (`BaseCompiler.mode` is `'strict'`, `strictLanes` is `true`,
  *   `complexDiscipline` is `false`) and the integer lane `'bigint'`
  *   (`BaseCompiler.integerLane`).
- * - The lane analysis (step 2) is not implemented, so every compilation in
- *   the mode declines with `code: 'bigint-lane'`, a `capability` decline
- *   that never starts the `auto` retry.
+ * - The bigint emission (step 3) is not implemented, so every compilation
+ *   in the mode declines with `code: 'bigint-lane'`, a `capability` decline
+ *   that never starts the `auto` retry: an expression that the lane
+ *   analysis (step 2, `compile-bigint-lane.test.ts`) rejects declines with
+ *   its reason, and an expression that it accepts declines because the
+ *   emission is not implemented yet.
  */
 
 const ce = new ComputeEngine();
+ce.declare('n', 'integer');
+
+const INTERIM_MESSAGE =
+  "Could not compile in mode 'bigint': the bigint emission is not implemented yet.";
 
 describe('bigint mode: targets other than javascript', () => {
   it.each(['interval-js', 'glsl', 'wgsl', 'python'] as const)(
@@ -54,7 +61,10 @@ describe('bigint mode: the interim decline on javascript', () => {
     ['an integer literal', ce.box(5)],
     ['a symbol', ce.parse('n')],
     ['an integer expression', ce.parse('\\binom{2n}{n} + n!')],
-    ['a function literal', ce.box(['Function', ['Factorial', 'n'], 'n'])],
+    [
+      'a function literal',
+      ce.box(['Function', ['Factorial', 'k'], ['Typed', 'k', "'integer'"]]),
+    ],
   ])('%s declines with bigint-lane and falls back', (_, expr) => {
     const r = compile(expr, { mode: 'bigint' });
     expect(r.success).toBe(false);
@@ -85,26 +95,32 @@ describe('bigint mode: the interim decline on javascript', () => {
     expect(BaseCompiler.integerLane).toBe('double');
   });
 
-  it('the decline carries the node and says the analysis is not implemented', () => {
+  it('the decline carries the node and says the emission is not implemented', () => {
     const r = compile(ce.parse('n + 1'), { mode: 'bigint' });
     expect(r.diagnostic!.value).toBe('n + 1');
     // The interim message does not say that the node is off the integer
     // lane: `n + 1` is an integer expression.
-    expect(r.diagnostic!.message).toBe(
-      "Could not compile in mode 'bigint': the integer-lane analysis is not implemented yet."
-    );
+    expect(r.diagnostic!.message).toBe(INTERIM_MESSAGE);
+  });
+
+  it('an expression that the lane analysis rejects declines with its reason', () => {
+    const r = compile(ce.parse('\\sqrt{n}'), { mode: 'bigint' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic!.code).toBe('bigint-lane');
+    expect(r.diagnostic!.message).toMatch(/is not on the integer lane/);
+    expect(r.diagnostic!.message).not.toMatch(/not implemented yet/);
   });
 
   // The JavaScript target compiles an operator symbol (`Divide`) to
   // `(a, b) => a / b` without the core compiler, so it declines before
   // that shortcut. Without the decline, the code called with `5n, 2n`
-  // gives `2n`.
+  // gives `2n`. The lane analysis rejects it: it is not an integer binding.
   it('an operator symbol declines with bigint-lane', () => {
     const r = compile(ce.symbol('Divide'), { mode: 'bigint' });
     expect(r.success).toBe(false);
     expect(r.diagnostic!.code).toBe('bigint-lane');
     expect(r.diagnostic!.kind).toBe('capability');
-    expect(r.diagnostic!.message).toMatch(/not implemented yet/);
+    expect(r.diagnostic!.message).toMatch(/is not on the integer lane/);
   });
 
   it('an operator symbol with fallback: false throws the decline', () => {
@@ -176,15 +192,60 @@ describe('bigint mode: custom targets', () => {
   });
 
   // A per-call `operators` or `functions` option replaces the emission of a
-  // head with caller code, so the built-in target does not offer `'bigint'`
-  // for that compilation.
-  it("a per-call operators option declines 'bigint' with unsupported-mode", () => {
+  // head with caller code that computes with doubles. The built-in target
+  // still offers `'bigint'`; the lane analysis declines only an expression
+  // that uses a replaced head.
+  it.each([
+    ['operators', { operators: { Add: ['+', 11] } }],
+    ['operators (function form)', { operators: (op: string) => (op === 'Add' ? ['+', 11] : undefined) }],
+    ['functions', { functions: { Add: (a: number, b: number) => a + b } }],
+  ] as const)(
+    "a per-call %s option that replaces a head of the expression declines with bigint-lane",
+    (_, replaced) => {
+      const r = compile(ce.parse('n + 1'), {
+        mode: 'bigint',
+        ...(replaced as object),
+      });
+      expect(r.success).toBe(false);
+      expect(r.diagnostic!.code).toBe('bigint-lane');
+      expect(r.diagnostic!.message).toMatch(
+        /the caller replaced the compilation of `Add`/
+      );
+    }
+  );
+
+  it('a per-call operators option that replaces another head keeps the mode', () => {
     const r = compile(ce.parse('n + 1'), {
       mode: 'bigint',
-      operators: { Add: ['+', 11] },
+      operators: { Multiply: ['*', 12] },
     });
     expect(r.success).toBe(false);
-    expect(r.diagnostic!.code).toBe('unsupported-mode');
+    expect(r.diagnostic!.code).toBe('bigint-lane');
+    expect(r.diagnostic!.message).toBe(INTERIM_MESSAGE);
+  });
+
+  // A `vars` entry that names a user function is given as a `functions`
+  // entry (`withVarsMappedUserFunctionHeads`): a call of that function
+  // declines, and an expression that does not call it keeps the mode.
+  it('a vars entry mapped to a user function head declines only its calls', () => {
+    const engine = new ComputeEngine();
+    engine.declare('n', 'integer');
+    engine.declare('g', '(integer) -> integer');
+    engine.box(['Assign', 'g', ['Function', ['Add', 'x', 1], 'x']]).evaluate();
+    const calls = compile(engine.box(['g', 'n']), {
+      mode: 'bigint',
+      vars: { g: '_.g' },
+    });
+    expect(calls.diagnostic!.code).toBe('bigint-lane');
+    expect(calls.diagnostic!.message).toMatch(
+      /the caller replaced the compilation of `g`/
+    );
+    const other = compile(engine.parse('n + 1'), {
+      mode: 'bigint',
+      vars: { g: '_.g' },
+    });
+    expect(other.diagnostic!.code).toBe('bigint-lane');
+    expect(other.diagnostic!.message).toBe(INTERIM_MESSAGE);
   });
 
   // A custom compilation target registered on the engine builds its own

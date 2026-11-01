@@ -558,8 +558,19 @@ import {
 } from './fixed-width-unroll.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
-import { bigintLaneError, compileDiagnosticOf } from './diagnostics.js';
-import { registerBuiltInBigintTarget } from './bigint-mode-registry.js';
+import { compileDiagnosticOf } from './diagnostics.js';
+import {
+  offersBigintMode,
+  registerBuiltInBigintTarget,
+} from './bigint-mode-registry.js';
+import {
+  bigintCseExclusion,
+  bigintEmissionNotImplemented,
+  bigintLaneAnalysisFor,
+  requireBigintLane,
+  setPreparedBigintLane,
+} from './compile-bigint-lane.js';
+import { assertNoStaticTypeError } from './compile-static-type-error.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
@@ -11479,12 +11490,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
     // The emitters of this target are this target's own, so it offers
-    // `'bigint'` (`bigint-mode-registry.ts`), unless the caller gives an
-    // `operators` or a `functions` option: such an entry replaces the
-    // emission of a head with caller code that computes with doubles, so
-    // a requested `'bigint'` is then the `unsupported-mode` decline.
-    if (operators === undefined && functions === undefined)
-      registerBuiltInBigintTarget(target);
+    // `'bigint'` (`bigint-mode-registry.ts`). An `operators` or a
+    // `functions` option replaces the emission of a head with caller code
+    // that computes with doubles: the lane analysis of the mode declines an
+    // expression that uses such a head (`overridesHead`), and the other
+    // expressions compile in the mode.
+    registerBuiltInBigintTarget(target);
     // A symbol whose type admits a point and a list of points, with an
     // assigned point that the code holds anyway, is replaced by that point,
     // and a call whose body then is a point or a number by that body, as on
@@ -11528,11 +11539,37 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
             typeof v !== 'string' || !/^_(\.[A-Za-z_$][\w$]*|\[.*\])$/.test(v)
         ));
 
+    // In `mode: 'bigint'` the lane analysis of the tree the emitters walk
+    // runs before the CSE harvest, which must not share or move the nodes
+    // whose lowering the analysis ties to their position
+    // (`bigintCseExclusion`). A node that is not on the integer lane
+    // declines here. A `vars` entry that is not the vars-object read of
+    // its symbol gives a value the analysis cannot read as a bigint input.
+    // A requested `'bigint'` that the target does not offer is left to the
+    // `unsupported-mode` decline of the core compiler. An expression with a
+    // sub-expression of static type `error` declines first with the
+    // `static-type-error` decline of every mode, which the lane analysis
+    // must not replace (`assertNoStaticTypeError`).
+    const bigintMode = options.mode === 'bigint' && offersBigintMode(target);
+    if (bigintMode) assertNoStaticTypeError(expr, target);
+    const bigintLane = bigintMode
+      ? requireBigintLane(expr, {
+          target,
+          isCallerSourceVar: (name) =>
+            vars !== undefined &&
+            Object.hasOwn(vars, name) &&
+            (typeof vars[name] !== 'string' || opaqueVar(name)),
+        })
+      : undefined;
+    if (bigintLane !== undefined) setPreparedBigintLane(target, bigintLane);
+
     // Common-subexpression elimination (design §4.2). Harvest the SAME tree
     // the emitters walk (post `rewriteAngularUnit`). The G1b provenance
     // predicates are built from the RAW options here — the resolver closures
     // above cannot tell a caller-supplied entry from a built-in one.
     BaseCompiler.openCseSession(expr, target, {
+      notACandidate:
+        bigintLane === undefined ? undefined : bigintCseExclusion(bigintLane),
       enabled: options.cse,
       isOverriddenOperator: (name) =>
         Object.prototype.hasOwnProperty.call(namedFunctions, name) ||
@@ -12056,17 +12093,16 @@ function compileToTarget(
 
   // In `mode: 'bigint'` an operator symbol must decline like every other
   // expression: the shortcut below returns `(a, b) => a / b` without the
-  // core compiler, so the decline of the core compiler (the integer-lane
-  // analysis is not implemented yet, `compile` in `compiler-core.ts`)
-  // never runs for it, and `Divide` called with `5n, 2n` gives `2n`.
-  if (mode === 'bigint' && isSymbol(expr) && target.operators?.(expr.symbol))
-    throw bigintLaneError({
-      node: expr.toString(),
-      type: expr.type.toString(),
-      reason: 'the bigint mode is not implemented yet for this expression',
-      message:
-        "Could not compile in mode 'bigint': the integer-lane analysis is not implemented yet.",
-    });
+  // core compiler, so the lane analysis and the decline of the core
+  // compiler (`compile` in `compiler-core.ts`) never run for it, and
+  // `Divide` called with `5n, 2n` gives `2n`. The lane analysis declines an
+  // operator symbol (its type is a function type). The bigint emission is
+  // not implemented yet, so a symbol it accepted declines too. (CE-715,
+  // step 3 of `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`.)
+  if (mode === 'bigint' && isSymbol(expr) && target.operators?.(expr.symbol)) {
+    bigintLaneAnalysisFor(expr, target);
+    throw bigintEmissionNotImplemented(expr);
+  }
 
   if (isSymbol(expr)) {
     const op = target.operators?.(expr.symbol);
