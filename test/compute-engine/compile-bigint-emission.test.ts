@@ -631,6 +631,170 @@ describe('constants', () => {
   });
 });
 
+describe('constant folding (§3.7)', () => {
+  const declines = (json: Json) => {
+    const r = compile(ce.box(json), { mode: 'bigint' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic!.code).toBe('bigint-lane');
+  };
+
+  it.each([
+    ['2^60 + 1', ['Add', ['Power', 2, 60], 1], 2n ** 60n + 1n],
+    ['Fibonacci(100)', ['Fibonacci', 100], 354224848179261915075n],
+    ['Fibonacci(80)', ['Fibonacci', 80], 23416728348467685n],
+    ['30!', ['Factorial', 30], 265252859812191058636308480000000n],
+  ] as const)('%s past 2^53 is the exact bigint literal', (_, json, value) => {
+    expect(compiled(json as Json).code).toBe(`${value}n`);
+    expect(agrees(json as Json)).toBe(value);
+  });
+
+  it('n + 2^60 at n = 1', () => {
+    expect(compiled(['Add', 'n', ['Power', 2, 60]]).code).toContain(
+      `${2n ** 60n}n`
+    );
+    expect(agrees(['Add', 'n', ['Power', 2, 60]], { n: 1n })).toBe(
+      2n ** 60n + 1n
+    );
+  });
+
+  it('a folded boolean: IsPrime(17)', () => {
+    expect(compiled(['IsPrime', 17]).code).toBe('true');
+    expect(agrees(['IsPrime', 17])).toBe(true);
+  });
+
+  it.each([
+    ['Floor(7/2)', ['Floor', ['Divide', 7, 2]], 3n],
+    ['Floor(10^20/3)', ['Floor', ['Divide', ['Power', 10, 20], 3]], 33333333333333333333n],
+    ['Ceil(10^20/3)', ['Ceil', ['Divide', ['Power', 10, 20], 3]], 33333333333333333334n],
+  ] as const)('a folded constant under a rounding parent: %s', (_, json, value) => {
+    expect(compiled(json as Json).code).toBe(`${value}n`);
+    expect(agrees(json as Json)).toBe(value);
+    expect(agrees(['Add', 'n', json as Json], { n: 1n })).toBe(value + 1n);
+  });
+
+  it('a rational constant in a comparison is compared exactly: n > 7/2', () => {
+    const json: Json = ['Greater', 'n', ['Divide', 7, 2]];
+    expect(compiled(json).code).toContain('7n < 2n * ');
+    expect(agrees(json, { n: 3n })).toBe(false);
+    expect(agrees(json, { n: 4n })).toBe(true);
+  });
+
+  it('a symbol with a rational value in a comparison: n > h, h := 7/2', () => {
+    ce.assign('hRational', ce.box(['Rational', 7, 2]));
+    const json: Json = ['Greater', 'n', 'hRational'];
+    expect(agrees(json, { n: 3n })).toBe(false);
+    expect(agrees(json, { n: 4n })).toBe(true);
+  });
+
+  it('a repeated folded literal is hoisted by CSE as a bigint', () => {
+    const P: Json = ['Binomial', ['Fibonacci', 80], 3];
+    const json: Json = [
+      'Add',
+      ['Multiply', 'n', P],
+      ['Multiply', ['Add', 'n', 1], P],
+      ['Mod', P, 'n'],
+    ];
+    const code = compiled(json).code!;
+    const value = interpreted(P) as bigint;
+    expect(code).toMatch(new RegExp(`const _cse\\d+ = ${value}n;`));
+    expect(code.split(`${value}n`)).toHaveLength(2);
+    agrees(json, { n: 2n });
+    agrees(json, { n: 7n });
+  });
+
+  it('a folded value that is not an integer outside an integer-forcing parent declines: n + 1/2', () => {
+    declines(['Add', 'n', ['Rational', 1, 2]]);
+    declines(['Add', 'n', ['Divide', 1, 2]]);
+  });
+
+  it('a folded value that the interpreter leaves unevaluated declines', () => {
+    declines(['Fibonacci', ['Power', 10, 9]]);
+    // Past the size limit of §3.9 (1,000,000 decimal digits).
+    declines(['Add', 'n', ['Power', 2, ['Power', 10, 7]]]);
+  });
+
+  describe('a constant whose value is a pole (§3.4)', () => {
+    it.each([
+      ['(−1)!', ['Factorial', -1], Infinity],
+      ['Mod(5, 0)', ['Mod', 5, 0], NaN],
+      ['Remainder(5, 0)', ['Remainder', 5, 0], NaN],
+    ] as const)('%s is the number of its pole', (_, json, value) => {
+      noValue(() => run(json as Json), value);
+      noValue(() => run(['Add', 'n', json as Json], { n: 1n }), value);
+    });
+
+    it('the pole is thrown only when its branch runs', () => {
+      const json: Json = ['If', ['Greater', 'n', 0], 'n', ['Factorial', -1]];
+      expect(agrees(json, { n: 3n })).toBe(3n);
+      noValue(() => run(json, { n: -2n }), Infinity);
+      const mod: Json = ['If', ['Greater', 'n', 0], 'n', ['Mod', 5, 0]];
+      expect(agrees(mod, { n: 3n })).toBe(3n);
+      noValue(() => run(mod, { n: -1n }), NaN);
+    });
+
+    // The canonical form of `0^(−1)` and `1/0` is `~oo`, and of `0^0` it
+    // is `Indeterminate`: a non-finite literal is a pole, as is a
+    // `Divide` whose divisor has the value zero.
+    it.each([
+      ['0^(−1)', ['Power', 0, -1], Infinity],
+      ['0^0', ['Power', 0, 0], NaN],
+      ['1/Fibonacci(0)', ['Divide', 1, ['Fibonacci', 0]], Infinity],
+      ['ComplexInfinity', 'ComplexInfinity', Infinity],
+      ['Floor(1/0)', ['Floor', ['Divide', 1, 0]], Infinity],
+    ] as const)('n + %s is the number of its pole', (_, json, value) => {
+      noValue(() => run(['Add', 'n', json as Json], { n: 1n }), value);
+    });
+
+    it('a symbol whose value is not finite is a pole', () => {
+      ce.assign('cPole', ce.box(['Divide', 1, 0]));
+      noValue(() => run(['Add', 'n', 'cPole'], { n: 1n }), Infinity);
+    });
+
+    it('a non-finite literal is thrown only when its branch runs', () => {
+      const json: Json = ['If', ['Greater', 'n', 0], 'n', ['Power', 0, -1]];
+      expect(agrees(json, { n: 3n })).toBe(3n);
+      noValue(() => run(json, { n: -2n }), Infinity);
+    });
+
+    it('a repeated pole is not hoisted by CSE', () => {
+      const P: Json = ['Divide', 1, ['Fibonacci', 0]];
+      const json: Json = [
+        'If',
+        ['Greater', 'n', 0],
+        'n',
+        ['Add', ['Multiply', P, 'n'], ['Multiply', P, ['Add', 'n', 2]]],
+      ];
+      const code = compiled(json).code!;
+      expect(code).not.toMatch(/const _cse\d+ =/);
+      expect(code.split('NonFiniteValue(Infinity)')).toHaveLength(3);
+      expect(agrees(json, { n: 3n })).toBe(3n);
+      noValue(() => run(json, { n: -2n }), Infinity);
+      // At the root, outside a branch.
+      const root: Json = [
+        'Add',
+        ['Multiply', ['Factorial', -1], 'n'],
+        ['Multiply', ['Factorial', -1], ['Add', 'n', 1]],
+      ];
+      expect(compiled(root).code!).not.toMatch(/const _cse\d+ =/);
+      noValue(() => run(root, { n: 1n }), Infinity);
+    });
+
+    it('a pole in a comparison is the number of the pole', () => {
+      noValue(() => run(['Greater', 'n', ['Factorial', -1]], { n: 2n }), Infinity);
+      noValue(() => run(['Less', 'n', ['Divide', 1, 0]], { n: 2n }), Infinity);
+      noValue(() => run(['Equal', 'n', ['Power', 0, 0]], { n: 2n }), NaN);
+    });
+
+    it('a constant with a pole of a head that is not on the lane declines', () => {
+      declines(['Add', 'n', ['Ln', 0]]);
+      declines(['Add', 'n', ['Factorial', ['Ln', 0]]]);
+      // The operand of `Factorial2` must be typed `integer<0..>`, as for
+      // an input.
+      declines(['Add', 'n', ['Factorial2', -2]]);
+    });
+  });
+});
+
 describe('poles (§3.4): the number result', () => {
   it.each([
     ['n! at n = −1', ['Factorial', 'n'], { n: -1n }, Infinity],

@@ -232,6 +232,11 @@ export interface BigintLaneRecord {
   promiseType?: Type;
   /** The exact value of a `rational-constant`, `q > 0`. */
   rational?: { p: bigint; q: bigint };
+  /** Set on a `folded` node whose value is a pole (§3.4): the `number`
+   * that the emitted code throws in a `NonFiniteValue` where the node is
+   * evaluated, `Infinity` for an infinite value and `NaN` for
+   * `Indeterminate` (`LaneAnalyzer.constantPole`). */
+  pole?: number;
   /**
    * A comparison with a rational constant operand (§3.3): the operand at
    * `constantOperand` is `p/q` (`q > 0`). The comparison is emitted exactly
@@ -366,7 +371,10 @@ export function bigintLaneAnalysisFor(
  * that is not on the lane is not a candidate (only a parent-lowered
  * subtree can be one in an accepted compilation). A node that can give a
  * non-finite value stays a candidate: its helper throws, and the throw
- * ends the whole computation wherever the node is emitted (§3.4).
+ * ends the whole computation wherever the node is emitted (§3.4). A
+ * constant whose value is a pole (`record.pole`) is not a candidate: its
+ * code is a throw, and a hoisted binding would throw before the code that
+ * comes before the node in the evaluation order runs.
  */
 export function bigintCseExclusion(
   analysis: BigintLaneAnalysis
@@ -376,6 +384,7 @@ export function bigintCseExclusion(
     if (record !== undefined)
       return (
         record.parentLowered !== undefined ||
+        record.pole !== undefined ||
         record.value === 'rational-constant' ||
         record.value === 'function'
       );
@@ -416,6 +425,26 @@ const PLAIN_LANE_HEADS: ReadonlySet<string> = new Set([
   'Factorial',
   'Binomial',
   'Fibonacci',
+]);
+
+/** The heads whose application to exact integer constants can have a
+ * non-finite value, which the analysis folds as a pole (§3.4,
+ * `LaneAnalyzer.constantPole`): `Factorial` of a negative integer
+ * (`(−1)!`), `Mod` and `Remainder` with a zero divisor (`Mod(5, 0)`),
+ * `Power` with a base whose value is zero (`Fibonacci(0)^(−1)`,
+ * `Abs(0)^0`), and `Divide` with a divisor whose value is zero
+ * (`1/Fibonacci(0)`). The canonical form of a literal zero base or
+ * divisor (`0^(−1)`, `1/0`) is a non-finite literal (`~oo`,
+ * `Indeterminate`), not an application of these heads: the analysis of
+ * a number literal folds it as a pole (`LaneAnalyzer.numberLiteral`). `Factorial2` is not one of them: its
+ * operand must be typed `integer<0..>`, and its helper throws a
+ * `RangeError` for a negative operand. */
+const POLE_HEADS: ReadonlySet<string> = new Set([
+  'Factorial',
+  'Mod',
+  'Remainder',
+  'Power',
+  'Divide',
 ]);
 
 /** The heads that give an integer for integer operands, whose type the
@@ -737,8 +766,16 @@ class LaneAnalyzer {
         node,
         'a rational constant is on the lane only as an operand of a comparison or of an integer-forcing parent (Floor, Ceil, Round, Truncate, an integer promise)'
       );
+    // A non-finite literal (`~oo`, `+oo`, `−oo`, `NaN`) is a pole
+    // (§3.4): its code throws where the node is evaluated. The canonical
+    // form of `0^(−1)` and `1/0` is `~oo`, and of `0^0` it is
+    // `Indeterminate`, so these nodes give the same result as the same
+    // operation on inputs.
     if (bigintLane(t) && hasNonFiniteMember(t))
-      this.fail(node, 'a non-finite constant has no bigint value');
+      return this.pole(
+        node,
+        isNumber(node) && node.isNaN === true ? NaN : Infinity
+      );
     if (isInexactDecimalInteger(node))
       this.fail(
         node,
@@ -779,7 +816,15 @@ class LaneAnalyzer {
     // A constant is folded from its value: the value must be an exact
     // integer, or a list of them, whatever the type of the symbol. With
     // `c := Floor(Sin(x))`, `c` is typed `integer` but has no value to
-    // fold.
+    // fold. A constant whose value is not finite (`c := 1/0`) is a pole, as
+    // a non-finite literal is (§3.4).
+    if (
+      constant &&
+      bigintLane(t) &&
+      isNumber(value) &&
+      (value.isNaN === true || value.isFinite === false)
+    )
+      return this.pole(node, value.isNaN === true ? NaN : Infinity);
     if (
       constant &&
       (bigintLane(t) || (t !== 'never' && isListOfIntegers(t))) &&
@@ -838,6 +883,8 @@ class LaneAnalyzer {
       return this.set(node, this.blank('boolean', 'folded', t));
     if (isListOfIntegers(t))
       return this.set(node, this.blank('bigint-list', 'folded', t));
+    const pole = this.constantPole(node);
+    if (pole !== undefined) return this.pole(node, pole);
     if (isSubtype(t, 'string')) return undefined;
     // A constant whose type is a real type that is not on the lane (`π`,
     // `1/2`). A constant of a wider type (`f(3)`, typed `number` by the
@@ -854,6 +901,55 @@ class LaneAnalyzer {
       );
     }
     return undefined;
+  }
+
+  /**
+   * The pole of a constant node, or `undefined`. A constant node has a pole
+   * when its head is a head of the lane that has poles (§3.4), every
+   * operand is an exact integer constant, and the value of `evaluate()` is
+   * not finite: `(−1)!` is `~oo`, `Mod(5, 0)` is `Indeterminate`. The
+   * result is the `number` that the helper of the head throws for the same
+   * operands at run time: `NaN` for `Indeterminate`, `Infinity` for every
+   * infinite value.
+   *
+   * The engine types some of these nodes as `number` (`(−1)!`), and such a
+   * node is not on the lane as an application. The analysis folds it as a
+   * pole instead, so that the node gives the same result as the same
+   * operation on inputs (`n!` at `n = −1`). The emitted code throws where
+   * the node is evaluated, not at compile time: a pole on a branch that
+   * does not run has no effect (`If(n > 0, n, (−1)!)` is `n` for `n > 0`).
+   *
+   * Another head (`Ln(0)`, `Max()`, `Factorial2(−2)`), or an operand that
+   * is not an exact integer (`Factorial(Ln(0))`), gives `undefined`, and
+   * the node is analyzed as any other node.
+   */
+  private constantPole(
+    node: Expression & FunctionInterface
+  ): number | undefined {
+    if (!POLE_HEADS.has(node.operator)) return undefined;
+    for (const op of node.ops) {
+      const r = exactRational(isNumber(op) ? op : op.evaluate());
+      if (r === undefined || r.q !== 1n) return undefined;
+    }
+    const value = node.evaluate();
+    if (!isNumber(value)) return undefined;
+    if (value.isNaN === true) return NaN;
+    if (value.isFinite === false) return Infinity;
+    return undefined;
+  }
+
+  /** The record of a constant node whose value is the pole `pole`
+   * (`Infinity` or `NaN`): a folded `bigint` node whose code throws a
+   * `NonFiniteValue` with `pole` where it is evaluated (§3.4). */
+  private pole(node: Expression, pole: number): BigintLaneRecord {
+    return this.set(node, {
+      ...this.blank(
+        'bigint',
+        'folded',
+        Number.isNaN(pole) ? INTEGER_OR_NAN : INTEGER_OR_INFINITY
+      ),
+      pole,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -2090,11 +2186,14 @@ function isNonEmptyCollection(coll: Expression): boolean {
 }
 
 /** A numeric subtree with no free variable, which `evaluate()` reduces to
- * a number. */
+ * a number. A symbol with an assigned value (`h := 7/2`) is such a
+ * subtree: its `unknowns` is empty. The caller still tests that the name
+ * is not bound by an enclosing construct and has no `vars` entry
+ * (`LaneAnalyzer.foldable`). */
 function isConstantNumeric(node: Expression): boolean {
   if (isNumber(node)) return true;
   return (
-    isFunction(node) &&
+    (isFunction(node) || isSymbol(node)) &&
     node.unknowns.length === 0 &&
     node.isPure &&
     isSubtype(node.type.type, 'number')

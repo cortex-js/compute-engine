@@ -223,7 +223,7 @@ class BigintEmitter {
         'a non-integer value is on the lane only as the operand of an integer-forcing parent'
       );
     return this.shared(node, () => {
-      if (record.lowering === 'folded') return this.folded(node);
+      if (record.lowering === 'folded') return this.folded(node, record);
       if (isSymbol(node)) return this.symbol(node, record);
       if (!isFunction(node))
         throw this.decline(node, 'this kind of expression has no bigint code');
@@ -314,12 +314,22 @@ class BigintEmitter {
   /**
    * The code of a constant subtree, from the exact value of `evaluate()`:
    * an integer is a `bigint` literal, a boolean is `true` or `false`, and a
-   * list holds such values. A value of another kind (an expression that
-   * `evaluate()` leaves unevaluated, such as `Fibonacci(10^9)`, whose value
-   * is above the size limit of the interpreter) declines. (Constant folding
-   * of the mode is step 5 of the spec, §3.7.)
+   * list holds such values. The literal is exact at every size: no value
+   * is rounded to a double, also past `2^53` (`2^60 + 1` is
+   * `1152921504606846977n`). A value of another kind declines: an
+   * expression that `evaluate()` leaves unevaluated (`Fibonacci(10^9)`,
+   * whose value is above the size limit of the interpreter, §3.9) or a
+   * value that is not an integer (§3.2, §3.7).
+   *
+   * A constant whose value is a pole (`record.pole`, §3.4) is a throw of a
+   * `NonFiniteValue` with that `number`, in an expression. The throw
+   * happens only when the code of the node runs, so a pole on a branch
+   * that does not run has no effect. The catch of the compiled entry
+   * returns the `number`.
    */
-  private folded(node: Expression): string {
+  private folded(node: Expression, record: BigintLaneRecord): string {
+    if (record.pole !== undefined)
+      return `(() => { throw new _SYS.NonFiniteValue(${String(record.pole)}); })()`;
     const value = isNumber(node) ? node : node.evaluate();
     const code = literalCode(value);
     if (code === undefined)

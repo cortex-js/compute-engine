@@ -497,9 +497,15 @@ by the mode, with no `_SYS` replacement API.
 - **Constant folding.** A folded integer-lane subtree emits a `bigint`
   literal (`123n`) from the exact value of `evaluate()`; the "beyond the
   safe integer range" rule of folding becomes simpler here, since no
-  rounding happens. A fold whose value is not an integer declines (§3.2),
-  never becomes a double. A hoisted `bigint` literal is a CSE candidate as
-  any literal is; a parent-lowered quotient is not (§3.2).
+  rounding happens. A fold whose value is a finite number that is not an
+  integer declines (§3.2), never becomes a double. A fold whose value is
+  not finite (`~oo`, `±oo`, `NaN`: `(−1)!`, `0^(−1)`, `Mod(5, 0)`, or a
+  symbol assigned such a value) is a pole, also as the operand of a
+  comparison (`n < 1/0` gives `Infinity`, §3.4): it is emitted as a throw of the `NonFiniteValue` of §3.4, which runs
+  only where the node is evaluated, so `If(n > 0, n, (−1)!)` is `3n` at
+  `n = 3` and `Infinity` at `n = −2` (step 5, 2026-10-31). A hoisted `bigint`
+  literal is a CSE candidate as any literal is; a parent-lowered quotient and
+  a pole are not (§3.2).
 
 ### 3.8 The four hooks of the issue
 
