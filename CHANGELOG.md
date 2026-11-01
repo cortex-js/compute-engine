@@ -276,6 +276,13 @@
 
 ### Bug Fixes
 
+- **A `Map` callback that calls a block local holding a function is
+  evaluated.** `Block(Declare(c, 'real', 5), Assign(h, k ↦ c + k), Map(k ↦ h(k), [1, 2]))`,
+  and the same with `Declare(g, 'unknown', x ↦ c + x)`, gave `[h(1), h(2)]`
+  with `evaluate()` and `evaluateAsync()`. They now give `[6, 7]`, as a
+  function defined with `DefineFunction` does. A function value assigned in
+  the global scope is not changed.
+
 - **With `evaluateAsync()`, a function literal that leaves a `Block` and
   calls a function that the block defines reads the locals of the block.**
   `Apply(Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), k ↦ h(k)), 1)`

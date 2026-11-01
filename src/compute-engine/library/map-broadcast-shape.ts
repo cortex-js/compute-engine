@@ -8,6 +8,7 @@ import type { Type } from '../../common/type/types.js';
 
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import { functionLiteralDefiningScope } from '../function-utils.js';
+import { isValueDef } from '../boxed-expression/definition-guards.js';
 import { functionLiteralParameterType } from '../boxed-expression/function-literal.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { withoutNothing } from '../../common/type/omission.js';
@@ -101,7 +102,10 @@ export interface LoweredLevel {
 
 /**
  * `true` when `e`, or an application in its operands, calls a function that
- * the user defined (`DefineFunction`, `h(k) = …`) outside the global scope.
+ * the user defined (`DefineFunction`, `h(k) = …`) outside the global scope,
+ * or calls a symbol that holds a function value (`Assign(h, k ↦ …)`,
+ * `Declare(g, 'unknown', x ↦ …)`) whose value definition is not the one that
+ * the global scope binds.
  *
  * Such a function reads its free symbols in the scope where it was defined.
  * When that scope is a block that ran on the asynchronous route, its locals
@@ -118,13 +122,32 @@ export interface LoweredLevel {
  */
 function callsLocalUserFunction(ce: ComputeEngine, e: Expression): boolean {
   if (!isFunction(e)) return false;
+  const globalScope = ce._evalContextStack[1]?.lexicalScope;
   const literal = (
     e.operatorDefinition as { _lambdaLiteral?: Expression } | undefined
   )?._lambdaLiteral;
   const scope = functionLiteralDefiningScope(literal);
   if (scope !== undefined) {
-    const globalScope = ce._evalContextStack[1]?.lexicalScope;
     if (scope !== globalScope && scope !== globalScope?.parent) return true;
+  }
+  // The head is a symbol that holds a function value (`h := k ↦ c + k`, or
+  // `Declare(g, 'unknown', x ↦ c + x)`), not a function definition. A local
+  // of a block is not visible in the ambient scope, so the application
+  // stays unevaluated there: in the ambient scope,
+  // `Block(Assign(h, k ↦ 1 + k), Map(k ↦ h(k), [1, 2]))` gave `[h(1), h(2)]`
+  // with `evaluate()` and with `evaluateAsync()`. Only a symbol bound in the
+  // global scope can be called from the ambient scope.
+  const valueDef = e.valueDefinition;
+  if (valueDef !== undefined) {
+    const isGlobal = [globalScope, globalScope?.parent].some((s) => {
+      const binding = s?.bindings.get(e.operator);
+      return (
+        binding !== undefined &&
+        isValueDef(binding) &&
+        binding.value === valueDef
+      );
+    });
+    if (!isGlobal) return true;
   }
   return e.ops.some((x) => callsLocalUserFunction(ce, x));
 }

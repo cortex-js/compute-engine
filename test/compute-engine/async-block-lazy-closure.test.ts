@@ -412,6 +412,111 @@ describe('a function literal that leaves a block reads its locals on both routes
     expect(elements(mapped)).toBe('[6,7]');
   });
 
+  // A local that holds a function value (not a function definition) and is
+  // called from the callback of a lazy `Map` or `Filter`. The application in
+  // the callback was evaluated in the ambient scope, where the local is not
+  // visible, and stayed unevaluated (`[h(1), h(2)]`) on both routes.
+  test.each([
+    [
+      'a local assigned a function literal',
+      [
+        'Block',
+        declareC(5),
+        ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
+      ],
+      '[6,7]',
+    ],
+    [
+      'a local declared with a function literal as its value',
+      [
+        'Block',
+        declareC(5),
+        [
+          'Declare',
+          'g',
+          { str: 'unknown' },
+          ['Function', ['Add', 'c', 'x'], 'x'],
+        ],
+        ['Map', ['Function', ['g', 'k'], 'k'], ['List', 1, 2]],
+      ],
+      '[6,7]',
+    ],
+    [
+      'a local that does not read another local',
+      [
+        'Block',
+        ['Assign', 'h', ['Function', ['Add', 1, 'k'], 'k']],
+        ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
+      ],
+      '[2,3]',
+    ],
+    [
+      'a call of the local in an operand of the callback',
+      [
+        'Block',
+        declareC(5),
+        ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        ['Map', ['Function', ['Add', ['h', 'k'], 1], 'k'], ['List', 1, 2]],
+      ],
+      '[7,8]',
+    ],
+    [
+      'a nested block',
+      [
+        'Block',
+        declareC(5),
+        ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        [
+          'Block',
+          ['Declare', 'd', { str: 'real' }, 10],
+          ['Map', ['Function', ['Add', 'd', ['h', 'k']], 'k'], ['List', 1, 2]],
+        ],
+      ],
+      '[16,17]',
+    ],
+    [
+      'a Filter predicate',
+      [
+        'Block',
+        declareC(5),
+        ['Assign', 'p', ['Function', ['Greater', 'k', 'c'], 'k']],
+        [
+          'Filter',
+          ['List', 4, 5, 6, 7],
+          ['Function', ['p', 'k'], 'k'],
+        ],
+      ],
+      '[6,7]',
+    ],
+  ])(
+    'a lazy collection calls a block local that holds a function value: %s',
+    async (_name, program, expected) => {
+      const sync = new ComputeEngine().box(program as any).evaluate();
+      const async = await new ComputeEngine()
+        .box(program as any)
+        .evaluateAsync();
+      expect([elements(sync), elements(async)]).toEqual([expected, expected]);
+    }
+  );
+
+  // `.N()` boxes the callback again from MathJSON
+  // (`lazyMapNumericApproximation`), and the head of the application in the
+  // callback must still be found as the block local.
+  test('a lazy collection calls a block local that holds a function value, with N()', async () => {
+    const program = [
+      'Block',
+      declareC(5),
+      ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+      ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
+    ];
+    const sync = new ComputeEngine().box(program as any).N();
+    const async = (
+      await new ComputeEngine().box(program as any).evaluateAsync()
+    ).N();
+    expect([elements(sync), elements(async)]).toEqual(['[6,7]', '[6,7]']);
+  });
+
   test('a synchronous evaluation gives the same value before and after an asynchronous one', async () => {
     const ce = new ComputeEngine();
     const defineH = [
