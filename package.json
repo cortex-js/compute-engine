@@ -196,7 +196,10 @@
   "overrides": {
     "deepmerge": "$deepmerge",
     "glob": "$glob",
-    "minimatch": "$minimatch"
+    "minimatch": "$minimatch",
+    "typedoc": {
+      "minimatch": "^10.2.5"
+    }
   },
   "lint-staged": {
     "src/**/*.{ts,js,css,md}": "prettier --write",

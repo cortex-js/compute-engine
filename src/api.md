@@ -740,11 +740,33 @@ OLDEST makes the state before the next-younger one unreachable.
 ##### ComputeEngine.declareProtocol() {#declareprotocol-1}
 
 ```ts
-declareProtocol(name, members): void
+declareProtocol(name, members, options?): void
 ```
 
 Declare a protocol (Appendix A "Host API"). Throws on error, including
 on re-declaration — the Epsil statement route replaces instead (P5).
+
+`options.extends` lists the PARENTS of the protocol, protocols that must
+already be declared:
+
+```js
+ce.declareProtocol('PartialOrder', {
+  functions: { compare: '(self: Self, other: Self) -> integer' },
+});
+ce.declareProtocol('LinearOrder', {}, { extends: ['PartialOrder'] });
+```
+
+A type that conforms to `LinearOrder` then conforms to `PartialOrder`
+too: a conformance to a protocol registers a conformance to each of its
+ancestors that the type does not already conform to, and the
+implementation given to `declareProtocolImplementation` may implement
+the members of every ancestor. A protocol may not declare a member that
+one of its ancestors declares (`protocol-member-inherited`), and two
+parents whose ancestors declare the same member name cannot be extended
+together (`protocol-extends-member-conflict`). An `extends` value that is
+not an array of strings, or that lists a name twice, throws
+`invalid-protocol-declaration`; a name that is not a declared protocol
+throws `protocol-unknown`.
 
 ####### name
 
@@ -753,6 +775,12 @@ on re-declaration — the Epsil statement route replaces instead (P5).
 ####### members
 
 [`ProtocolMembersInput`](#protocolmembersinput)
+
+####### options?
+
+####### extends?
+
+readonly `string`[]
 
 </MemberCard>
 
@@ -2107,6 +2135,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `elementAt`: (`expr`, `index`) => [`Expression`](#expression-5) \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
      \| readonly (
      \| [`Type`](#type-3)
@@ -2190,6 +2219,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `elementAt`: (`expr`, `index`) => [`Expression`](#expression-5) \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
      \| readonly (
      \| [`Type`](#type-3)
@@ -6877,6 +6907,19 @@ The eager producer's element count — see the `elementCount` contract on
 
 <MemberCard>
 
+##### BoxedOperatorDefinition.elementAt? {#elementat}
+
+```ts
+elementAt?: (expr, index) => Expression | undefined;
+```
+
+The eager producer's element read — see the `elementAt` contract on
+[OperatorDefinition](#operatordefinition).
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedOperatorDefinition.inferOperandTypes? {#inferoperandtypes}
 
 ```ts
@@ -9524,10 +9567,12 @@ type ResolvedSerializeLatexOptions = Omit<SerializeLatexOptions,
   | "indexStyle"
   | "readsAsPointList"
   | "readsAsCardinality"
-  | "readsAsMatrixPowerBase"> & {
+  | "readsAsMatrixPowerBase"
+  | "readsAsFunctionSymbol"> & {
   readsAsPointList: ((operands) => boolean | undefined) | undefined;
   readsAsCardinality: ((operand) => boolean | undefined) | undefined;
   readsAsMatrixPowerBase: ((base) => boolean | undefined) | undefined;
+  readsAsFunctionSymbol: ((name) => boolean | undefined) | undefined;
   applyFunctionStyle: (expr, level) => DelimiterScale;
   groupStyle: (expr, level) => DelimiterScale;
   rootStyle: (expr, level) => RootStyle;
@@ -11405,6 +11450,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   arithmetic: ArithmeticDefinition;
   canEnumerate: (expr) => boolean | undefined;
   elementCount: (expr) => number | undefined;
+  elementAt: (expr, index) => Expression | undefined;
   inferOperandTypes: (ops, requirement) => 
      | ReadonlyArray<
      | Type
@@ -11971,6 +12017,30 @@ Contract, mirroring `canEnumerate`:
 Consulted only when the definition has no `collection.count` handler —
 a declared `count` owns the answer, including its `undefined`.
 
+#### OperatorDefinition.elementAt?
+
+```ts
+elementAt?: (expr, index) => Expression | undefined;
+```
+
+For an operator that RETURNS a collection but has no `collection`
+handlers: the element at the 1-based position `index` of the
+collection that `evaluate()` would produce, built from the operands
+with no evaluation. `PointX(L)` at `k` is `PointX(L.at(k))`.
+
+The `at()` twin of elementCount. Contract:
+
+- Called only for a valid, pure expression whose `count` is known, with
+  `1 ≤ index ≤ count`.
+- MUST NOT evaluate the expression. The element it returns can be
+  unevaluated, and its evaluation MUST equal
+  `expr.evaluate().at(index)`: `at()` returns that evaluation.
+- Anything not cheaply knowable must report `undefined` (decline):
+  `at()` then evaluates the expression and reads the element of the
+  result.
+
+Consulted only when the definition has no `collection.at` handler.
+
 #### OperatorDefinition.inferOperandTypes?
 
 ```ts
@@ -12340,6 +12410,8 @@ type ConformanceRecord = {
     };
   pending: boolean;
   _pendingReason: string;
+  _via: string;
+  _derived: true;
   declaredByStatement: boolean;
 };
 ```
@@ -12382,6 +12454,7 @@ wrong body for another.
 type ProtocolRecord = {
   name: string;
   members: Record<string, ProtocolMember>;
+  extends: string[];
   conformances: ConformanceRecord[];
   declaredByStatement: boolean;
   _sumConformances: SumConformanceRecord[];
@@ -13116,11 +13189,33 @@ OLDEST makes the state before the next-younger one unreachable.
 ##### IComputeEngine.declareProtocol() {#declareprotocol}
 
 ```ts
-declareProtocol(name, members): void
+declareProtocol(name, members, options?): void
 ```
 
 Declare a protocol (Appendix A "Host API"). Throws on error, including
 on re-declaration — the Epsil statement route replaces instead (P5).
+
+`options.extends` lists the PARENTS of the protocol, protocols that must
+already be declared:
+
+```js
+ce.declareProtocol('PartialOrder', {
+  functions: { compare: '(self: Self, other: Self) -> integer' },
+});
+ce.declareProtocol('LinearOrder', {}, { extends: ['PartialOrder'] });
+```
+
+A type that conforms to `LinearOrder` then conforms to `PartialOrder`
+too: a conformance to a protocol registers a conformance to each of its
+ancestors that the type does not already conform to, and the
+implementation given to `declareProtocolImplementation` may implement
+the members of every ancestor. A protocol may not declare a member that
+one of its ancestors declares (`protocol-member-inherited`), and two
+parents whose ancestors declare the same member name cannot be extended
+together (`protocol-extends-member-conflict`). An `extends` value that is
+not an array of strings, or that lists a name twice, throws
+`invalid-protocol-declaration`; a name that is not a declared protocol
+throws `protocol-unknown`.
 
 ####### name
 
@@ -13129,6 +13224,12 @@ on re-declaration — the Epsil statement route replaces instead (P5).
 ####### members
 
 [`ProtocolMembersInput`](#protocolmembersinput)
+
+####### options?
+
+####### extends?
+
+readonly `string`[]
 
 </MemberCard>
 
@@ -14483,6 +14584,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `elementAt`: (`expr`, `index`) => [`Expression`](#expression-5) \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
      \| readonly (
      \| [`Type`](#type-3)
@@ -14566,6 +14668,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `elementAt`: (`expr`, `index`) => [`Expression`](#expression-5) \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
      \| readonly (
      \| [`Type`](#type-3)
@@ -20749,12 +20852,50 @@ release cycle and normalizes each to the name it denotes
 
 <MemberCard>
 
+### ParameterDefault {#parameterdefault}
+
+```ts
+type ParameterDefault = 
+  | {
+  kind: "value";
+  value: number | string | boolean;
+ }
+  | {
+  kind: "symbol";
+  name: string;
+ }
+  | {
+  kind: "empty-list";
+ }
+  | {
+  kind: "empty-dictionary";
+};
+```
+
+The default value of an optional function parameter, written after the
+parameter type in a signature: `(x: number, factor: number = 2) -> number`.
+
+- `value`: a number that a JavaScript `number` holds (a finite number,
+  `NaN`, `+oo` or `-oo`), a string, or a boolean.
+- `symbol`: a symbol, stored by name. The symbol itself is the default;
+  it is not evaluated when the signature is parsed.
+- `empty-list` and `empty-dictionary`: `[]` and `{}`.
+
+A default is part of the type: the serializer prints it, so two signatures
+that differ only by a default have different identity keys. Subtyping and
+matching ignore it, as they ignore the parameter name.
+
+</MemberCard>
+
+<MemberCard>
+
 ### NamedElement {#namedelement}
 
 ```ts
 type NamedElement = {
   name: string;
   type: Type;
+  default: ParameterDefault;
 };
 ```
 
@@ -21389,6 +21530,14 @@ spelling that round-trips through serialization. See {@link EffectSet}.)
            | <name> "..." <type>
 
 <optional_argument> ::= <argument> "?"
+           | <argument> "=" <default_value>
+
+<default_value> ::= <value> | <identifier> | "[" "]" | "{" "}"
+
+(An argument with a default value is optional; it is not combined with
+`?`. The arguments with a default come before the optional arguments
+without one. A default is not allowed on a rest argument, nor in a tuple
+type. See {@link ParameterDefault}.)
 
 <optional_arguments> ::= <optional_argument> ("," <optional_argument>)*
 
