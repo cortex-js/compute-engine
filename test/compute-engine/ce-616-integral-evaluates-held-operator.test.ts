@@ -236,3 +236,149 @@ describe('CE-616: a definite integral evaluates a held Sum, Product or D', () =>
     expect(value.operator).toBe('Integrate');
   });
 });
+
+// The numeric route of `Integrate` (`N()`) stayed symbolic for an integrand
+// with a free symbol, also when the symbol is the variable of a held `D` whose
+// value does not read it: `∫_0^1 D(y·z^2, y) dz` gave no value under `N()`,
+// where `evaluate()` gave 1/3. The held operator is now evaluated first on
+// this route too.
+describe('N() of an integral with a held D whose variable is free', () => {
+  const dz = (integrand: unknown, ...limits: unknown[]) =>
+    new ComputeEngine().box([
+      'Integrate',
+      integrand as any,
+      ...((limits.length > 0 ? limits : [['Limits', 'z', 0, 1]]) as any[]),
+    ]);
+
+  test('a D with respect to a variable other than the integration variable', () => {
+    // D(y·z^2, y) is z^2, and ∫_0^1 z^2 dz is 1/3.
+    const I = dz(['D', ['Multiply', 'y', ['Power', 'z', 2]], 'y']);
+    expect(I.N().re).toBeCloseTo(1 / 3, 10);
+    expect(I.evaluate().json).toEqual(['Rational', 1, 3]);
+  });
+
+  test('a D times a constant', () => {
+    const I = dz([
+      'Multiply',
+      2,
+      ['D', ['Multiply', 'y', ['Power', 'z', 2]], 'y'],
+    ]);
+    expect(I.N().re).toBeCloseTo(2 / 3, 10);
+  });
+
+  test('a double integral', () => {
+    // D(y·z^2·w, y) is z^2·w, and ∫_0^2 ∫_0^1 z^2·w dz dw is 2/3.
+    const I = dz(
+      ['D', ['Multiply', 'y', ['Power', 'z', 2], 'w'], 'y'],
+      ['Limits', 'z', 0, 1],
+      ['Limits', 'w', 0, 2]
+    );
+    expect(I.N().re).toBeCloseTo(2 / 3, 10);
+  });
+
+  test('an assigned global with the name of the variable of D or of the integral', () => {
+    for (const name of ['y', 'z']) {
+      const ce = new ComputeEngine();
+      ce.assign(name, 5);
+      const I = ce.box([
+        'Integrate',
+        ['D', ['Multiply', 'y', ['Power', 'z', 2]], 'y'],
+        ['Limits', 'z', 0, 1],
+      ]);
+      expect(I.N().re).toBeCloseTo(1 / 3, 10);
+    }
+  });
+
+  test('a free symbol left in the value of the D stays symbolic', () => {
+    // D(a·y·z^2, y) is a·z^2, and `a` has no value.
+    const I = dz(['D', ['Multiply', 'a', 'y', ['Power', 'z', 2]], 'y']);
+    expect(I.N().operator).toBe('Integrate');
+  });
+
+  test('a D in a Hold stays held', () => {
+    const value = dz([
+      'Hold',
+      ['D', ['Multiply', 'y', ['Power', 'z', 2]], 'y'],
+    ]).N();
+    expect(value.operator).toBe('Integrate');
+    expect(value.has('Hold')).toBe(true);
+  });
+
+  test('a Sum with a bound that reads the integration variable stays held', () => {
+    // D(y·z^2, y) is z^2, whose integral on [0, 3] is 9. The sum
+    // Σ_{k=1}^{z} k is kept: its value is a step function of z (0, 1, 3 on
+    // [0, 1), [1, 2), [2, 3)), whose integral is 4. Its closed form
+    // z(z + 1)/2 would give 27/4.
+    const I = dz(
+      [
+        'Add',
+        ['D', ['Multiply', 'y', ['Power', 'z', 2]], 'y'],
+        ['Sum', 'k', ['Limits', 'k', 1, 'z']],
+      ],
+      ['Limits', 'z', 0, 3]
+    );
+    expect(I.N().re).toBeCloseTo(13, 6);
+  });
+
+  test('a free symbol outside the held operators: the Sum is not evaluated', () => {
+    // `a` is outside the Sum, so no evaluation of the Sum can remove it. The
+    // integral stays symbolic, with the Sum as it was written.
+    const value = dz([
+      'Multiply',
+      'a',
+      ['Sum', ['Multiply', 'k', 'z'], ['Limits', 'k', 1, 3]],
+    ]).N();
+    expect(value.operator).toBe('Integrate');
+    expect(value.has('Sum')).toBe(true);
+  });
+
+  test('an integrand with an effect is not evaluated before the quadrature', () => {
+    // `a` is free and the Sum calls `Random()`: the integral stays symbolic,
+    // and the Sum keeps its `Random()`.
+    const value = dz([
+      'Add',
+      'a',
+      ['Sum', ['Random'], ['Limits', 'k', 1, 2]],
+    ]).N();
+    expect(value.operator).toBe('Integrate');
+    expect(value.has('Random')).toBe(true);
+  });
+
+  test('an effect in the value of a symbol is not run before the quadrature', () => {
+    // `r` holds `Random()`: the Sum is impure through `r`, though `isPure`
+    // of the integrand is true. `a` is free and inside the Sum, so only an
+    // evaluation of the Sum could show whether it stays: the Sum is not
+    // evaluated, and no number is drawn.
+    const ce = new ComputeEngine();
+    ce.declare('r', { value: ce.box(['Random'], { form: 'raw' }) });
+    let draws = 0;
+    const random = Math.random;
+    Math.random = () => {
+      draws += 1;
+      return random();
+    };
+    try {
+      const value = ce
+        .box([
+          'Integrate',
+          ['Sum', ['Add', 'a', ['Multiply', 'k', 'r']], ['Limits', 'k', 1, 2]],
+          ['Limits', 'z', 0, 1],
+        ])
+        .N();
+      expect(value.operator).toBe('Integrate');
+    } finally {
+      Math.random = random;
+    }
+    expect(draws).toBe(0);
+  });
+
+  test('a Sum and a D in one integrand', () => {
+    // Σ_{k=1}^{3} k·z is 6z and D(y·z, y) is z: ∫_0^1 7z dz is 7/2.
+    const I = dz([
+      'Add',
+      ['Sum', ['Multiply', 'k', 'z'], ['Limits', 'k', 1, 3]],
+      ['D', ['Multiply', 'y', 'z'], 'y'],
+    ]);
+    expect(I.N().re).toBeCloseTo(3.5, 10);
+  });
+});

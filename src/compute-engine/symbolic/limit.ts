@@ -475,7 +475,13 @@ function substituteAtFinitePoint(
   // but is `1/0`, and `(x − a)/(x³ + 1)` substitutes to `0`, although it is
   // `0/0`. With the replacement they give `~∞` and `NaN`, which are not read
   // as a limit, and the caller uses L'Hôpital or the pole resolution.
+  //
+  // A power or a root whose base is 0 at the point, and whose exponent or
+  // degree is not known to be positive there, declines the substitution
+  // (see `hasPowerOfZeroAt`). The check runs before the evaluation, which
+  // folds `0 · 0^m` to 0 and would hide the term.
   const substituteAndCheck = (expr: Expression): Expression | undefined => {
+    if (hasPowerOfZeroAt(expr, x, a)) return undefined;
     const at = replaceExactZeros(expr, x, a, ce)
       .subs({ [x]: a })
       .evaluate();
@@ -1366,6 +1372,29 @@ function limitRatioAtPosInf(
     ce
   );
 
+  // A quotient in a part has no growth level, and the numeric comparison
+  // does not see a slow rate: `1/(ln(x)/√x)` gave no limit, but `√x/ln(x)`
+  // gives `+∞` (a polynomial grows faster than a logarithm). The rewrite
+  // `(a/b)/(c/d) = (a·d)/(b·c)` is exact where the four parts are defined
+  // and `b`, `c` and `d` are not 0, which is where the quotient is defined.
+  // The rewritten ratio replaces the original one: the rules below would
+  // give it no other result, and a second try with the parts as they are
+  // would double the recursion at each depth.
+  if (
+    depth < MAX_DEPTH &&
+    (n.operator === 'Divide' || d.operator === 'Divide')
+  ) {
+    const [a, b] = n.operator === 'Divide' ? [o1(n), o2(n)] : [n, ce.One];
+    const [c, dd] = d.operator === 'Divide' ? [o1(d), o2(d)] : [d, ce.One];
+    return limitRatioAtPosInf(
+      ce.function('Multiply', [a, dd]),
+      ce.function('Multiply', [b, c]),
+      x,
+      ce,
+      depth + 1
+    );
+  }
+
   // Compare growth *first*. (Simplifying the quotient first can re-expand it
   // back into the original product and loop — e.g. x/(1/ln(1+a/x)).)
   const cmp = compareGrowth(n, d, x, ce);
@@ -1509,11 +1538,12 @@ function limitPowerAtPosInf(
     }
   }
 
-  // General fᵍ → exp(g · ln f), provided the base is eventually positive.
+  // General fᵍ → exp(g · ln f), provided the base is proved positive for
+  // large `x` (see `eventuallyPositive()`).
   if (
     base.isNonNegative === true ||
     base.isPositive === true ||
-    baseEventuallyPositive(base, x, ce)
+    eventuallyPositive(base, x, ce)
   ) {
     const g = expo.mul(ce.function('Ln', [base]));
     const inner = limitAtPosInf(g, x, ce, depth + 1);
@@ -2340,7 +2370,91 @@ function isDefiniteValue(e: Expression, x?: string): boolean {
   if (e.isInfinity === true) return false;
   if (x !== undefined && e.has(x)) return false;
   if (hasQuotientByZero(e)) return false;
+  if (hasRootOfZeroWithUnknownSign(e)) return false;
+  if (hasInfinitySubterm(e)) return false;
   return true;
+}
+
+/**
+ * Whether `e` holds `Root(0, k)` or `Power(0, k)`, with the number 0 as
+ * base, where `k` is not known to be positive. Such a term is not a limit
+ * value. When `k < 0`, the root `Root(t, k) = t^{1/k}` and the power `t^k`
+ * grow without bound as `t` tends to 0 from above. When the sign of `k` is
+ * not known, the limit can be 0 or infinite. The evaluation does not fold
+ * these terms when `k` is a symbol. A term with `k > 0` is 0 and stays a
+ * valid value. The base must be the number 0 exactly: a base such as
+ * `10^{-30}` is not 0, although it is within the tolerance of `.is(0)`.
+ */
+function hasRootOfZeroWithUnknownSign(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (
+    (e.operator === 'Root' || e.operator === 'Power') &&
+    isNumber(e.op1) &&
+    e.op1.isSame(0) &&
+    e.op2.isPositive !== true
+  )
+    return true;
+  return e.ops.some(hasRootOfZeroWithUnknownSign);
+}
+
+/**
+ * Whether `e` holds an infinity in a position where it is an argument of a
+ * computation. A value such as `e^{-∞ · m}`, `√(-∞ · m)` or `∛(-∞ · m)`, with
+ * `m` of unknown sign, is not settled: `e^{-∞ · m}` is 0 for `m > 0` and
+ * infinite for `m < 0`. `e` itself being an infinity is checked by the
+ * caller.
+ *
+ * The search does not enter the heads in `HEADS_WITH_INFINITE_PARTS`, where
+ * an infinity is part of a finite value: the bound of
+ * `Integrate(f(t), [t, 0, +∞])` or of `Sum(f(k), [k, 1, +∞])`, the end of an
+ * interval, a condition. It enters every other head, so a function that the
+ * list does not name is checked, and the check can only decline a limit.
+ */
+function hasInfinitySubterm(e: Expression): boolean {
+  if (!isFunction(e) || HEADS_WITH_INFINITE_PARTS.has(e.operator)) return false;
+  return e.ops.some((op) => op.isInfinity === true || hasInfinitySubterm(op));
+}
+
+const HEADS_WITH_INFINITE_PARTS = new Set([
+  'Integrate',
+  'Sum',
+  'Product',
+  'Limits',
+  'Interval',
+  'Range',
+  'Element',
+  'Condition',
+  'When',
+  'Which',
+  'If',
+  'Hold',
+  'Function',
+]);
+
+/**
+ * Whether `e` holds a `Power` or a `Root` whose base contains `x` and is the
+ * number 0 at `x = a`, and whose exponent or degree at `x = a` is not known
+ * to be positive. The substitution `x = a` into such a term gives `0^k`,
+ * which is 0 only when `k > 0`: when `k < 0`, `t^k` grows without bound as
+ * `t` tends to 0. For example, with `n < 0`, `Root(x, n)` at `x = 0` gives
+ * `Root(0, n)`, while the limit from the right is `+∞`. The check is on the
+ * expression before the substitution is evaluated, because the evaluation
+ * folds a product with a zero factor: `x · x^m` at 0 evaluates to
+ * `0 · 0^m = 0`, which is wrong for `m < −1`.
+ */
+function hasPowerOfZeroAt(e: Expression, x: string, a: Expression): boolean {
+  if (!isFunction(e) || !e.has(x)) return false;
+  if ((e.operator === 'Power' || e.operator === 'Root') && e.op1.has(x)) {
+    const base = e.op1.subs({ [x]: a }).evaluate();
+    // `isUnfoldedZero` finds a base that is 0 but does not fold to the
+    // number 0, such as `(1 + π)² − 1 − 2π − π²`. The substitution replaces
+    // such a base by 0 (`replaceExactZeros`), so the check must see it too.
+    if ((isNumber(base) && base.isSame(0)) || isUnfoldedZero(base)) {
+      const k = e.op2.has(x) ? e.op2.subs({ [x]: a }).evaluate() : e.op2;
+      if (k.isPositive !== true) return true;
+    }
+  }
+  return e.ops.some((op) => hasPowerOfZeroAt(op, x, a));
 }
 
 /** Whether `e` holds a `Divide` whose divisor is the number 0. */
@@ -2514,7 +2628,8 @@ function constantTermAtInfinity(
 /**
  * `e` with each `|x|` replaced by `x`, and each `√(x^m)` and `ⁿ√(x^m)`
  * (a real constant `m`, an exact integer degree `n ≥ 2`) replaced by
- * `x^(m/n)`. As `x → +∞`, `x` is positive for large values, so these forms
+ * `x^(m/n)`. A radicand `1/x` or `1/x^m` gives `x^(-1/n)` or `x^(-m/n)`.
+ * As `x → +∞`, `x` is positive for large values, so these forms
  * are equal there. The leading-order rewrite gives such terms: the leading order of
  * `√(2x² + 1)/x` is `√2·√(x²)/x`. Without this step, the ratio still
  * contains `x`, and `leadingCoefficientRatio()` reads its value from
@@ -2528,35 +2643,59 @@ function forPositiveVariable(
   if (!isFunction(e) || !e.has(x)) return e;
   const isX = (u: Expression): boolean => isSymbol(u) && u.symbol === x;
   if (e.operator === 'Abs' && isX(e.op1)) return e.op1;
-  if (
-    (e.operator === 'Sqrt' || e.operator === 'Root') &&
-    e.op1.operator === 'Power' &&
-    isX(o1(e.op1))
-  ) {
+  if (e.operator === 'Sqrt' || e.operator === 'Root') {
     // The exponent `m` is kept as an expression, and the new exponent is the
     // `Divide` expression `m/n`. The double value of `m` is not read: the
     // exact `2 + 10^-30` has the double value `2`, but `√(x^(2 + 10^-30))`
     // is not `x`. A float exponent stays a float. The degree must be an
     // exact integer, for the same reason.
-    const m = o2(e.op1);
-    const n = e.operator === 'Sqrt' ? 2 : asExactSmallInteger(e.op2);
-    if (n !== null && n >= 2 && !m.has(x) && m.type.matches('finite_real'))
-      return ce.function('Power', [
-        o1(e.op1),
-        ce.function('Divide', [m, ce.number(n)]),
-      ]);
+    // A radicand `1/x` or `1/x^m` is `x^(-1)` or `x^(-m)`, so `√(1/x)` is
+    // `x^(-1/2)`. Without this case, `√(1/x)` had no growth level, and
+    // `1/(ln(x)·√(1/x))` (the canonical form of `Root(1/x, -2)/ln(x)`, which
+    // tends to `+∞`) had no limit.
+    const r = e.op1;
+    const isReciprocal =
+      r.operator === 'Divide' && isNumber(o1(r)) && o1(r).isSame(1);
+    const u = isReciprocal ? o2(r) : r;
+    const p = isX(u)
+      ? ce.One
+      : u.operator === 'Power' && isX(o1(u))
+        ? o2(u)
+        : undefined;
+    if (p !== undefined && (isReciprocal || u.operator === 'Power')) {
+      const m = isReciprocal ? p.neg() : p;
+      const n = e.operator === 'Sqrt' ? 2 : asExactSmallInteger(e.op2);
+      if (n !== null && n >= 2 && !p.has(x) && p.type.matches('finite_real'))
+        return ce.function('Power', [
+          isX(u) ? u : o1(u),
+          ce.function('Divide', [m, ce.number(n)]),
+        ]);
+    }
   }
   const ops = e.ops.map((op) => forPositiveVariable(op, x, ce));
   if (ops.every((op, k) => op === e.ops[k])) return e;
   return ce.function(e.operator, ops);
 }
 
-function baseEventuallyPositive(
-  base: Expression,
+/**
+ * True when `eventualSignAtInf()` proves from the form of `e` that `e` is
+ * positive for every large enough positive `x`. Else false.
+ *
+ * A numeric value at one point is not a proof: `130 − x` is positive at
+ * `x = 120` and negative for `x > 130`, and `sin(x) + 0.9` is positive at
+ * `x = 120` but changes sign again and again. With such a test,
+ * `ln(x) − ln(130 − x)` was combined to `ln(x/(130 − x))`, with the limit
+ * `ln(−1) = iπ`, but its limit is `−iπ`. A limit of `e` that is `+∞` or a
+ * positive number is not a proof either, because the limit computation can
+ * read a sign from numeric probes: `x/(1/2 + sin(2πx))` is positive at each
+ * probe and its limit was read as `+∞`, but it changes sign.
+ */
+function eventuallyPositive(
+  e: Expression,
   x: string,
   ce: ComputeEngine
 ): boolean {
-  return numericAt(base, x, 120, ce) > 0;
+  return eventualSignAtInf(e, x, ce) === 1;
 }
 
 /**
@@ -2574,6 +2713,13 @@ function baseEventuallyPositive(
  * - A sum of terms `k·x^m` (a constant `k`, an exact integer `m`) has the
  *   sign of the terms of highest degree `m`, when they have the same sign:
  *   that degree dominates for large `x`. `130 − x` is negative.
+ * - Another sum has a sign when all its terms have that sign.
+ * - `e^g`, and `b^g` with a constant `b > 0`, are positive when the sign of
+ *   `g` is proved.
+ * - `ln b` is positive when `b − 1` is positive, and negative when `b` is
+ *   positive and `b − 1` is negative.
+ * - `cos(k·x^m)` with `m < 0` is positive, and `sin(k·x^m)` has the sign
+ *   of `k`.
  *
  * Any other form, for example `sin(x)` or `√x − 50`, gives `0`. A numeric
  * probe at one point is not a proof: `(130 − x)/x²` is positive at
@@ -2623,15 +2769,52 @@ function eventualSignAtInf(
   if (op === 'Add') {
     let top = -Infinity;
     let sign = 0;
+    let monomials = true;
     for (const t of oo(e)) {
       const term = monomialAtInf(t, x, ce);
-      if (term === undefined) return 0;
+      if (term === undefined) {
+        monomials = false;
+        break;
+      }
       if (term.degree > top) {
         top = term.degree;
         sign = term.sign;
       } else if (term.degree === top && term.sign !== sign) return 0;
     }
-    return sign;
+    if (monomials) return sign;
+    // A sum whose terms all have the same proved sign has that sign.
+    const first = eventualSignAtInf(o1(e), x, ce);
+    if (first === 0) return 0;
+    return oo(e).every((t) => eventualSignAtInf(t, x, ce) === first)
+      ? first
+      : 0;
+  }
+  // `e^g`, or `b^g` with a constant `b > 0`, is positive when `g` is real.
+  // `g` is real when its sign is proved (a proved sign is the sign of a real
+  // value). `e^{√(130 − x)}` is not real for `x > 130`.
+  if (
+    op === 'Exp' ||
+    (op === 'Power' && !o1(e).has(x) && o1(e).isPositive === true)
+  ) {
+    const g = op === 'Exp' ? o1(e) : o2(e);
+    return eventualSignAtInf(g, x, ce) === 0 ? 0 : 1;
+  }
+  // `ln b` is positive when `b − 1` is positive, and negative when `b` is
+  // positive and `b − 1` is negative.
+  if (op === 'Ln') {
+    const b = o1(e);
+    const s = eventualSignAtInf(b.sub(ce.One), x, ce);
+    if (s === 1) return 1;
+    if (s === -1 && eventualSignAtInf(b, x, ce) === 1) return -1;
+    return 0;
+  }
+  // `sin(g)` and `cos(g)` when `g = k·x^m` with a finite constant `k` and
+  // `m < 0`: `g` tends to 0, so `cos(g)` is positive and `sin(g)` has the
+  // sign of `k`. This proves that `cos(1/x)` is positive.
+  if ((op === 'Sin' || op === 'Cos') && !hasInfinitySubterm(o1(e))) {
+    const g = monomialAtInf(o1(e), x, ce);
+    if (g === undefined || g.degree >= 0) return 0;
+    return op === 'Cos' ? 1 : g.sign;
   }
   return 0;
 }
@@ -2795,6 +2978,10 @@ function combineCancellingPairs(
     return k.isSame(1) ? q : ce.function('Multiply', [k, q]);
   };
 
+  // Each rewrite below needs operands that are positive for every large
+  // enough `x`, proved by `eventuallyPositive()`.
+  const positive = (u: Expression): boolean => eventuallyPositive(u, x, ce);
+
   // The rewrite `a − b → (aⁿ − bⁿ)/(…)` is used only when `aⁿ` and `bⁿ` are
   // polynomials in `x`. Then `expand()` cancels their leading terms. With
   // another function, such as `x²·cos²(1/x)`, the expanded numerator keeps
@@ -2825,11 +3012,7 @@ function combineCancellingPairs(
         if (si === sj || cj.operator !== 'Ln') continue;
         // (u, v) so that the pair is `ln(u) − ln(v)`.
         const [u, v] = si === 1 ? [o1(ci), o1(cj)] : [o1(cj), o1(ci)];
-        if (
-          !baseEventuallyPositive(u, x, ce) ||
-          !baseEventuallyPositive(v, x, ce)
-        )
-          continue;
+        if (!positive(u) || !positive(v)) continue;
         combined = ce.function('Ln', [ce.function('Divide', [u, v])]);
       } else if (ri !== undefined) {
         const rj = radicalTerm(ops[j]);
@@ -2840,11 +3023,7 @@ function combineCancellingPairs(
         if (!isPolynomial(ri.u) || !isPolynomial(rj.u)) continue;
         // (a, b) so that the pair is `k·(a − b)` with `k > 0`.
         const [a, b] = ri.k.isPositive === true ? [ri, rj] : [rj, ri];
-        if (
-          !baseEventuallyPositive(a.u, x, ce) ||
-          !baseEventuallyPositive(b.u, x, ce)
-        )
-          continue;
+        if (!positive(a.u) || !positive(b.u)) continue;
         combined = rootDifference(a.k, a.root, a.u, b.root, b.u, ri.n);
       }
       if (combined === undefined) continue;
@@ -2861,7 +3040,7 @@ function combineCancellingPairs(
     if (used[i]) continue;
     const ri = radicalTerm(ops[i]);
     if (ri === undefined || !ri.root.has(x) || !isPolynomial(ri.u)) continue;
-    if (!baseEventuallyPositive(ri.u, x, ce)) continue;
+    if (!positive(ri.u)) continue;
     for (let j = 0; j < ops.length; j++) {
       if (j === i || used[j]) continue;
       const t = ops[j];
@@ -2869,7 +3048,7 @@ function combineCancellingPairs(
         ? t.neg()
         : ce.function('Divide', [t.neg(), ri.k]);
       if (!isPolynomial(q)) continue;
-      if (stableSignAtInf(q, x, ce) !== 1) continue;
+      if (!positive(q)) continue;
       if (compareGrowth(ri.root, q, x, ce) !== 0) continue;
       combinedAt[i] = rootDifference(
         ri.k,

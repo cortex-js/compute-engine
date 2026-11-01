@@ -1214,6 +1214,33 @@ function evaluateInnerIntegrals(
   return changed ? expr.engine.function(expr.operator, ops) : expr;
 }
 
+/** `expr` with each subexpression that `evaluateInnerIntegrals` replaces by
+ * its value (an inner `Integrate`, `Sum`, `Product` or `D`) replaced by 0.
+ * The walk stops where `evaluateInnerIntegrals` stops: at a quote operator
+ * and at an operand where a binder binds a variable. The result is in raw
+ * form, so a product with the 0 is not folded and keeps its other factors:
+ * the free symbols of the result are the free symbols of `expr` that are
+ * outside those subexpressions. */
+function withoutEvaluatedFirst(expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  if (expr.operatorDefinition?.holdClass === 'quote') return expr;
+  if (
+    expr.operator === 'Integrate' ||
+    INTEGRAND_BINDERS_EVALUATED_FIRST.has(expr.operator)
+  )
+    return expr.engine.Zero;
+  let changed = false;
+  const ops = expr.ops.map((op, i) => {
+    if (boundVariableNamesInOperand(expr, i).length > 0) return op;
+    const value = withoutEvaluatedFirst(op);
+    if (value !== op) changed = true;
+    return value;
+  });
+  return changed
+    ? expr.engine.function(expr.operator, ops, { form: 'raw' })
+    : expr;
+}
+
 /** Whether `expr` has a `Sign(u)` subexpression whose argument depends on
  * `variable`. Such a term of an antiderivative jumps where `u` changes sign,
  * so the antiderivative may not be continuous between the bounds. */
@@ -7066,7 +7093,7 @@ volumes
             );
         if (numericApproximation && !indefinite) {
           // If a numeric approximation is requested, equivalent to NIntegrate
-          const f = ops[0];
+          let f = ops[0];
 
           // A free symbol in the integrand — a parameter with no value, e.g.
           // `a` in `∫₀¹ a·sin(x) dx` or an unassigned slider in `∫ n(x,q) dx`
@@ -7096,7 +7123,69 @@ volumes
           // `boundVars` is passed IN rather than used to filter the result: it
           // binds the surface only, so a callee's capture that happens to share
           // an integration variable's name is not mistaken for it.
-          if (transitiveUnknowns(f, boundVars).length > 0) return undefined;
+          // A free symbol can be the variable of a held operator whose value
+          // does not read it: in `∫₀¹ D(y·z², y) dz`, `y` is free (the
+          // derivative is taken at `y`), but the value of the `D` is `z²`.
+          // The scalar route evaluates such an operator before it integrates
+          // (`evaluateInnerIntegrals`), so `.evaluate()` gives 1/3. Evaluate
+          // it here too, under the same shield of the integration variables,
+          // and integrate the value when it has no free symbol left. When a
+          // free symbol is left, stay symbolic as above. An integrand with
+          // no free symbol is integrated as it is, so this changes nothing
+          // for it. The integrand is a `Function` literal of the variables:
+          // its body is lifted out (`liftIntegrand`) and evaluated, and the
+          // value replaces the literal. The quadrature below wraps a bare
+          // integrand in a literal of the variables of the limits, so the
+          // value replaces the literal only when its parameters are these
+          // variables, in the order of the limits. A literal with other
+          // parameters, or a limit that names no variable, stays symbolic.
+          // The inner operators are evaluated only when the evaluation can
+          // remove every free symbol: the integrand is transitively pure (an
+          // effect in the value of a symbol counts), and no free
+          // symbol is outside the operators that `evaluateInnerIntegrals`
+          // replaces (`withoutEvaluatedFirst`). In
+          // `∫₀¹ a·(Σ_{k=1}^{3} k·z) dz` the free `a` stays, so the sum is
+          // not evaluated for a value that is then discarded; in
+          // `∫₀¹ (a + Σ Random()) dz` no effect runs. The inner integrals
+          // are evaluated knowing the ranges of this integral and of the
+          // enclosing ones, as on the exact route below.
+          if (transitiveUnknowns(f, boundVars).length > 0) {
+            const limitVars = ops
+              .slice(1)
+              .map((l) => (isFunction(l) ? sym(l.op1) : undefined));
+            const params = isFunction(f, 'Function')
+              ? f.ops.slice(1).map((p) => functionLiteralParameterName(p))
+              : limitVars;
+            const lifted = liftIntegrand(f);
+            if (
+              (isFunction(f, 'Function') && lifted === f) ||
+              params.length !== limitVars.length ||
+              params.some(
+                (p, k) =>
+                  p === undefined || p === 'Nothing' || p !== limitVars[k]
+              )
+            )
+              return undefined;
+            if (
+              !isTransitivelyPure(lifted) ||
+              transitiveUnknowns(withoutEvaluatedFirst(lifted), boundVars)
+                .length > 0
+            )
+              return undefined;
+            const ranges = [
+              ...outerRanges(ops.slice(1)),
+              ...enclosingRanges(ce),
+            ];
+            const variables = [...boundVars, ...ranges.map((r) => r.name)];
+            const g = withValueShield(ce, intVarNames, () =>
+              withEnclosingRanges(ce, ranges, () =>
+                evaluateInnerIntegrals(lifted, variables)
+              )
+            );
+            if (g === lifted || transitiveUnknowns(g, boundVars).length > 0)
+              return undefined;
+            f = g;
+          }
 
           // A LIST bound (`∫_{-∞}^{G} f(Z) dZ` with `G = [-1, 0, 1]`): one
           // integral per element. This covers a single limit and several

@@ -359,6 +359,82 @@ describe('LIMIT AT INFINITY: THE GROWTH OF AN EXPONENTIAL', () => {
     ).toBe(0);
   });
 
+  test('a numeric negative degree of a radicand that decays', () => {
+    // `Root(1/t, -2) = (1/t)^{-1/2} = √t`, and `√t` grows faster than
+    // `ln t`, so `Root(1/t, -2)/ln t` → `+∞`. Its canonical form is
+    // `1/(ln(t)·√(1/t))`, and the limit was unevaluated: `√(1/t)` had no
+    // growth level, and the numeric probes do not separate `ln t` from
+    // `√t`.
+    const root = (n: number) => ['Root', ['Divide', 1, 't'], n];
+    expect(lim(['Divide', root(-2), ['Ln', 't']]).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    expect(
+      lim(['Divide', ['Negate', root(-2)], ['Ln', 't']]).evaluate().json
+    ).toBe('NegativeInfinity');
+    expect(lim(['Divide', root(-3), ['Ln', 't']]).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    expect(lim(['Divide', ['Ln', 't'], root(-2)]).evaluate().json).toBe(0);
+    // `√(1/t²) = 1/t` for `t > 0`.
+    expect(
+      lim([
+        'Divide',
+        1,
+        ['Multiply', ['Ln', 't'], ['Sqrt', ['Divide', 1, ['Power', 't', 2]]]],
+      ]).evaluate().json
+    ).toBe('PositiveInfinity');
+    // A quotient of quotients: `(1/t)/(ln(t)/√t) = 1/(√t·ln t)` → 0.
+    expect(
+      lim([
+        'Divide',
+        ['Divide', 1, 't'],
+        ['Divide', ['Ln', 't'], ['Sqrt', 't']],
+      ]).evaluate().json
+    ).toBe(0);
+    // Controls.
+    expect(lim(['Divide', ['Sqrt', 't'], ['Ln', 't']]).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    expect(
+      lim(['Multiply', ['Ln', 't'], ['Sqrt', ['Divide', 1, 't']]]).evaluate()
+        .json
+    ).toBe(0);
+  });
+
+  test('a quotient of quotients is read as one quotient where it is defined', () => {
+    // `(a/b)/(c/d)` is read as `(a·d)/(b·c)`. The rewrite adds the zeros of
+    // `d` to the domain, and the limit is still taken where the quotient is
+    // defined: `(t/sin t)/(1/sin t)` is `t` there, and `(1/t)/(sin t/t)` is
+    // `1/sin t`, which has no limit.
+    expect(
+      lim([
+        'Divide',
+        ['Divide', 't', ['Sin', 't']],
+        ['Divide', 1, ['Sin', 't']],
+      ]).evaluate().json
+    ).toBe('PositiveInfinity');
+    expect(
+      lim([
+        'Divide',
+        ['Divide', 1, 't'],
+        ['Divide', ['Sin', 't'], 't'],
+      ]).evaluate().operator
+    ).toBe('Limit');
+  });
+
+  test('a negative degree of a radicand 1/t at −∞ stays unevaluated', () => {
+    // For t < 0, `1/t` is negative and `Root(1/t, -2)` is not real.
+    const value = ce
+      .box([
+        'Limit',
+        ['Function', ['Divide', ['Root', ['Divide', 1, 't'], -2], ['Ln', 't']], 't'],
+        'NegativeInfinity',
+      ])
+      .evaluate();
+    expect(value.operator).toBe('Limit');
+  });
+
   test('a root with a negative degree of a radicand that goes to 0', () => {
     // With `n < 0`, `Root(1/t, n) = t^{-1/n}` is real and positive and
     // grows. The limit of the radicand is 0, and `0^{1/n}` evaluated to
