@@ -8131,6 +8131,24 @@ export function normalizeRunResult(r: unknown): unknown {
 }
 
 /**
+ * The result convention for a value whose static type holds a dictionary or
+ * a record at some depth. Such a value is a plain object, and an object
+ * with the keys `re` and `im` (`{re -> x, im -> 0}`) is a dictionary there,
+ * not a complex number: `normalizeRunResult` would return the number `x`.
+ * So an object is returned as it is, also as a cell of an array, and an
+ * array is returned as it is. A FUNCTION is returned under a wrapper that
+ * applies `normalizeRunResult` to what it answers, as there.
+ *
+ * A complex cell of such a value with a zero imaginary part is then
+ * returned as `{re, im: 0}`, not as a number: the value has no other
+ * representation that tells the two kinds of objects apart.
+ */
+export function normalizeKeyedRunResult(r: unknown): unknown {
+  if (typeof r === 'function') return normalizeRunResult(r);
+  return r;
+}
+
+/**
  * The result convention of `normalizeRunResult` applied to an array without
  * a defensive copy. The array is walked once; when no cell has to be
  * rewritten (every cell is a number, a boolean, or a nested array or complex

@@ -8158,6 +8158,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
       complex: (re, im) =>
         `complex(${pythonFloatLiteral(re)}, ${pythonFloatLiteral(im)})`,
       string: (str) => JSON.stringify(str),
+      // A `dict` display, which makes a new `dict` at each evaluation. A key
+      // is a string literal: the escapes of `JSON.stringify` are also Python
+      // escapes.
+      dictionary: (entries) =>
+        `{${entries
+          .map(([key, value]) => `${JSON.stringify(key)}: ${value}`)
+          .join(', ')}}`,
       number: (n) => {
         // Python number literals
         if (!isFinite(n)) {

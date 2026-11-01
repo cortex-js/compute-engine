@@ -2218,6 +2218,7 @@ export {
   isProvablyStringOperand,
   isProvablyCharacterOperand,
   unfaithfulComparisonAggregate,
+  typeHoldsKeyedValue,
   isProvablyNonTupleCollectionParticipant,
   isProvablyTupleParticipant,
   isNumericTupleParticipant,

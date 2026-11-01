@@ -1383,8 +1383,9 @@ computed key `["__proto__"]: v`, because the plain form `"__proto__": v` sets
 the prototype of the object instead of making an own key. The shape of each
 value comes from its static type: a value whose type is `unknown` or `any`
 declines (a call of a block-local function has the result type of its
-literal; an untyped input is refused by the admission of the inputs, which
-names it in `unsupported`). A value whose type can be `Nothing` declines:
+literal; an untyped free input is refused by the admission of the inputs,
+which names it in `unsupported`; an untyped parameter or local is not an
+input there, and declines here). A value whose type can be `Nothing` declines:
 the interpreter leaves out such an entry, and the literal would keep the
 key. Each value compiles as a value operand (`compileValueOperand()`), so an
 assignment in a value declines on Python, as in any other operand. The
@@ -1396,7 +1397,10 @@ and a dictionary declines on them with that reason
 (`CompileTarget.dictionary`, `_compileInner()` in `compiler-core.ts`).
 
 On the JavaScript target, a result whose static type holds a dictionary or a
-record at some depth is returned under `normalizeKeyedRunResult()`, not
+record at some depth (in a union member, a tuple element or a collection
+element, at every level: `typeHoldsKeyedValue()`; for a `Block` that ends
+with a call of a block-local function, the result type of its literal) is
+returned under `normalizeKeyedRunResult()`, not
 `normalizeRunResult()`: an object of such a result with the keys `re` and
 `im` is a dictionary, not a complex number, so it is returned as it is. In
 a value whose type holds both a record and a complex number, a complex

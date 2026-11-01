@@ -340,6 +340,37 @@ export function unfaithfulComparisonAggregate(
 }
 
 /**
+ * True when a value of type `t` can hold a dictionary or a record at some
+ * depth: `t` itself, a member of a union, an element of a tuple, or an
+ * element of a collection, at every level. The declared reading of `t` is
+ * used (`resolveDeclaredTypeForCompilation()`), so a tuple member of an
+ * open form is seen. A recursive alias (`type json = … | dictionary<json>`)
+ * is entered once.
+ */
+export function typeHoldsKeyedValue(t: Type): boolean {
+  const walk = (t: Type, visited: ReadonlySet<TypeReference>): boolean => {
+    if (
+      typeof t === 'object' &&
+      t.kind === 'reference' &&
+      t.def !== undefined
+    ) {
+      const decl = declarationOf(t);
+      if (visited.has(decl)) return false;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveDeclaredTypeForCompilation(t);
+    if (typeof r === 'string') return r === 'dictionary' || r === 'record';
+    if (r.kind === 'dictionary' || r.kind === 'record') return true;
+    if (r.kind === 'union') return r.types.some((m) => walk(m, visited));
+    if (r.kind === 'tuple')
+      return r.elements.some((e) => walk(e.type, visited));
+    const elt = leafwardElementType(r);
+    return elt !== undefined && walk(elt, visited);
+  };
+  return walk(t, new Set());
+}
+
+/**
  * True when a comparison PARTICIPANT is provably tuple-typed — a `Tuple`
  * literal, or a symbol/application whose static type is a tuple (through a
  * union only when EVERY member is one).

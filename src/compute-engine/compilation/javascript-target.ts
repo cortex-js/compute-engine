@@ -3,6 +3,7 @@ import { shadowsLibraryName } from '../library-shadowing.js';
 import {
   makeSysHelpers,
   normalizeRunResult,
+  normalizeKeyedRunResult,
   twoStageRunner,
   loadBatchBody,
   checkEntry,
@@ -545,6 +546,7 @@ import {
   pointHasBroadcastComponent,
   shapeOperandRefusal,
   unfaithfulComparisonAggregate,
+  typeHoldsKeyedValue,
   unionAdmitsIndexedCollection,
   isTopTypedLocalSymbol,
   isDeclaredTopListOperand,
@@ -10752,6 +10754,61 @@ function engineRuntimeSource(ce: ComputeEngine): RuntimeSource {
 }
 
 /**
+ * The value of a call of compiled code under the result convention that
+ * `rawResult` names: `true`, the value as the code makes it (a value kind
+ * lowering); `'keyed'`, the convention for a value whose static type holds
+ * a dictionary or a record (`normalizeKeyedRunResult()`); `false`, the
+ * general convention (`normalizeRunResult()`).
+ */
+function runResult(value: unknown, rawResult: boolean | 'keyed'): unknown {
+  if (rawResult === true) return value;
+  if (rawResult === 'keyed') return normalizeKeyedRunResult(value);
+  return normalizeRunResult(value);
+}
+
+/**
+ * The result convention of compiled code whose value is `body`: `'keyed'`
+ * when its static type holds a dictionary or a record at some depth
+ * (`typeHoldsKeyedValue()`; its objects are then not complex numbers), else
+ * `false`.
+ */
+function keyedResult(body: Expression): 'keyed' | false {
+  return typeHoldsKeyedValue(resultTypeOf(body)) ? 'keyed' : false;
+}
+
+/**
+ * The static type of the value of `body`. The engine types a call of a
+ * block-local function `unknown`, so a `Block` whose last statement is such
+ * a call (`Block(f ≔ (u) ↦ {re -> u, im -> 0}, f(x))`) has the result type
+ * of the literal that the block assigns to the function's name, when the
+ * literal has a signature. The block must bind the name once: when it is
+ * assigned or declared again, the call reads the last binding, whose result
+ * type can differ, so the type stays as it is. Any other `unknown` or `any`
+ * stays as it is.
+ */
+function resultTypeOf(body: Expression): Type {
+  const t = body.type.type;
+  if (t !== 'unknown' && t !== 'any') return t;
+  if (!isFunction(body, 'Block') || body.nops === 0) return t;
+  const last = body.ops[body.nops - 1];
+  if (isFunction(last, 'Block')) return resultTypeOf(last);
+  if (!isFunction(last)) return t;
+  const bindings = body.ops.filter(
+    (s) =>
+      (isFunction(s, 'Assign') || isFunction(s, 'Declare')) &&
+      isSymbol(s.ops[0]) &&
+      s.ops[0].symbol === last.operator
+  );
+  if (bindings.length !== 1 || !isFunction(bindings[0], 'Assign')) return t;
+  const signature = resolveTypeAlias(
+    bindings[0].ops[1]?.type.type ?? 'unknown'
+  );
+  if (typeof signature === 'object' && signature.kind === 'signature')
+    return signature.result;
+  return t;
+}
+
+/**
  * JavaScript-specific function extension that provides system functions
  */
 export class ComputeEngineFunction extends Function {
@@ -10772,10 +10829,12 @@ export class ComputeEngineFunction extends Function {
     hoisted = '',
     statementBody?: string,
     reconstructionDigits?: number,
-    /** The value of a call is returned as the code makes it, without
-     * `normalizeRunResult()`: the code of a value kind lowering returns the
-     * representation of the kind (`CompilationResult.valueKinds`). */
-    rawResult = false
+    /** `true`: the value of a call is returned as the code makes it,
+     * without `normalizeRunResult()`: the code of a value kind lowering
+     * returns the representation of the kind (`CompilationResult.valueKinds`).
+     * `'keyed'`: the value holds a dictionary or a record, and is returned
+     * under `normalizeKeyedRunResult()` (`runResult()`). */
+    rawResult: boolean | 'keyed' = false
   ) {
     const perCallCode = `${perCall}${perCall ? ';' : ''}${statementBody ?? `return ${body}`}`;
     super('_SYS', '_', perCallCode);
@@ -10822,7 +10881,7 @@ export class ComputeEngineFunction extends Function {
               inner !== undefined
                 ? inner.apply(thisArg, args)
                 : super.apply(thisArg, [this.SYS, ...args]);
-            return rawResult ? value : normalizeRunResult(value);
+            return runResult(value, rawResult);
           } catch (error) {
             // A body error caused by a scalar in an array-read binding is
             // named after that binding (`namedEntryError`).
@@ -10856,9 +10915,8 @@ export class ComputeEngineFunctionLiteral extends Function {
     hoisted = '',
     statementBody?: string,
     reconstructionDigits?: number,
-    /** As for `ComputeEngineFunction`: the value is returned without
-     * `normalizeRunResult()`. */
-    rawResult = false,
+    /** As for `ComputeEngineFunction` (`runResult()`). */
+    rawResult: boolean | 'keyed' = false,
     /** The fill of each parameter with a default value that a call leaves
      * out: `run(count)` gives one `if (count < i + 1) p = …;` per such
      * parameter (`lambdaDefaultFill()`), and `before` and `after` are the
@@ -10930,7 +10988,7 @@ export class ComputeEngineFunctionLiteral extends Function {
               inner !== undefined
                 ? inner.apply(thisArg, callArgs)
                 : super.apply(thisArg, [this.SYS, ...callArgs]);
-            return rawResult ? value : normalizeRunResult(value);
+            return runResult(value, rawResult);
           } catch (error) {
             // As in the expression runner above (`namedEntryError`).
             throw namedEntryError(entry, callArgs, error);
@@ -11016,6 +11074,18 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // code-point sequence, so declaring the capability here is not merely
       // "it has string literals".
       character: (str) => JSON.stringify(str),
+      // An object literal, a new plain object at each evaluation. The
+      // parentheses keep it an expression at the start of an arrow function
+      // body or a statement. The key `__proto__` is written as a computed
+      // key, `["__proto__"]: v`: the plain form `"__proto__": v` sets the
+      // prototype of the object instead of making an own property.
+      dictionary: (entries) =>
+        `({${entries
+          .map(([key, value]) => {
+            const k = JSON.stringify(key);
+            return `${key === '__proto__' ? `[${k}]` : k}: ${value}`;
+          })
+          .join(', ')}})`,
       number: (n) => n.toString(),
       complex: (re, im) => `({ re: ${re}, im: ${im} })`,
       // Keep an expression spelling for consumers that need one, together
@@ -11838,6 +11908,17 @@ function isTextEntryType(t: Type): boolean {
   return r !== 'never' && isSubtype(r, 'string');
 }
 
+/** True when a binding of type `t` holds a dictionary or a record (or is
+ * absent). Its value is a plain object, which can have the keys `re` and
+ * `im` (`{re: 1, im: 0}`), so no rule for a real or a complex number
+ * applies to it: the real rule refused such an object as a complex number. */
+function isKeyedEntryType(t: Type): boolean {
+  const r = resolveTypeForCompilation(stripMissingFromType(t));
+  return (
+    r !== 'never' && (isSubtype(r, 'dictionary') || isSubtype(r, 'record'))
+  );
+}
+
 /** True when a binding of type `t` holds a boolean (or is absent):
  * `boolean`, or `boolean | missing`. For such a binding `broadcast()` reads
  * an empty array as an empty column. */
@@ -11914,6 +11995,7 @@ function lambdaEntryPlan(
       texts.push(i);
       return;
     }
+    if (t !== undefined && isKeyedEntryType(t)) return;
     // Under the complex discipline an unannotated (wide) parameter is
     // complex-shaped too — a number is lifted at entry, an object accepted.
     const isComplex =
@@ -12024,6 +12106,7 @@ function varsEntryPlan(
       texts.push(id);
       continue;
     }
+    if (declared !== undefined && isKeyedEntryType(declared)) continue;
     // Built OUTSIDE the compilation (the mode latch has been restored), so
     // the complex discipline's wide rule is applied here explicitly.
     const isComplex =
@@ -12313,7 +12396,7 @@ function compileToTarget(
       split.hoisted,
       statementBody,
       reconstructionDigits,
-      kinds !== undefined,
+      kinds !== undefined || keyedResult(args[0].canonical),
       defaults !== undefined
         ? { run: defaults.run, ...perCallAround }
         : undefined
@@ -12487,7 +12570,7 @@ function compileToTarget(
       ? `${localVars};\n${statementBody}`
       : statementBody,
     reconstructionDigits,
-    kinds !== undefined
+    kinds !== undefined || keyedResult(expr)
   );
   // The batch body of `broadcast()` (ROADMAP CE-410), compiled when the
   // caller asked for it (`batchBody` is given with `broadcast: true`, ROADMAP

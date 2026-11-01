@@ -24,6 +24,7 @@ import {
   isNumber,
   isSymbol,
   isString,
+  isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { shallowApplicationEffects } from '../boxed-expression/effects-of.js';
@@ -1395,6 +1396,7 @@ class Harvester {
     const enter = this.clock++;
 
     if (isSymbol(node)) this.usedNames.add(node.symbol);
+    if (isDictionary(node)) this.recordDictionaryAssignments(node);
 
     const walkId = this.firstWalks.length;
     if (isFunction(node)) {
@@ -2063,6 +2065,34 @@ class Harvester {
   private recordAssignment(node: Expression & FunctionInterface): void {
     if (node.operator !== 'Assign' && node.operator !== 'Declare') return;
     this.recordAssignedTarget(node.ops[0]);
+  }
+
+  /** Record the targets of every `Assign`/`Declare` in the values of the
+   * dictionary literal `dict`, as `recordAssignment` does for a node that
+   * the walk reaches. The values are not operands (`ops`), so the walk does
+   * not enter them, and none of their subexpressions is a candidate; but
+   * the compiled literal evaluates them in place, so a write there must
+   * still drop the candidates that read the name: in
+   * `[Sin(q), {a -> (q = q + 1)}, Sin(q)]` the two `Sin(q)` are not
+   * shared. A literal inside a value is walked too, which can drop a
+   * candidate for a write that is local to the literal: no value is
+   * wrong, a subexpression is only computed again. Each symbol of the
+   * values is also a used name (`usedNames`), so that the name of a
+   * temporary is not the name of a symbol that only a value reads. */
+  private recordDictionaryAssignments(dict: Expression): void {
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): void => {
+      if (seen.has(e)) return;
+      seen.add(e);
+      if (isSymbol(e)) this.usedNames.add(e.symbol);
+      else if (isDictionary(e)) {
+        for (const value of e.values) visit(value);
+      } else if (isFunction(e)) {
+        this.recordAssignment(e);
+        for (const op of e.ops) visit(op);
+      }
+    };
+    visit(dict);
   }
 
   private recordAssignedTarget(target: Expression | undefined): void {

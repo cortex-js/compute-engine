@@ -158,6 +158,23 @@ describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
     expect(interpreted(ce, ['Apply', lit])).toEqual(['List']);
   });
 
+  test('a dictionary default is a fresh empty object at each call', () => {
+    const lit = [
+      'Function',
+      'm',
+      ['Optional', ['Typed', 'm', "'dictionary<integer>'"], ['Dictionary']],
+    ];
+    const fn: any = jsFunction(ce, lit);
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('(m = ({})) => { return m; }');
+    const a = fn.run();
+    const b = fn.run();
+    expect(a).toEqual({});
+    expect(b).toEqual({});
+    expect(a).not.toBe(b);
+    expect(interpreted(ce, ['Apply', lit])).toEqual({ dict: {} });
+  });
+
   test('`Map((x, k = 2) => x * k, [1, 2])` is `[2, 4]`', () => {
     const expr = ['Map', defaulted(2), ['List', 1, 2]];
     expect(run(ce, expr, 'javascript').value).toEqual([2, 4]);
@@ -285,6 +302,31 @@ describe('COMPILED PARAMETER DEFAULTS: PYTHON', () => {
     }
     expect(JSON.parse(out)).toEqual([6, 15, 30, 15, [], [], true]);
     expect(interpreted(ce, ['Apply', defaulted('d'), 3], { d: 10 })).toBe(30);
+  });
+
+  pythonTest('a dictionary default is a new empty `dict` at each call', () => {
+    const lit = [
+      'Function',
+      'm',
+      ['Optional', ['Typed', 'm', "'dictionary<integer>'"], ['Dictionary']],
+    ];
+    const program = [
+      'import json',
+      `h = ${run(ce, lit, 'python').code}`,
+      'a = h()',
+      'b = h()',
+      'print(json.dumps([a, b, a is not b]))',
+    ].join('\n');
+    const file = path.join(os.tmpdir(), `ce-py-dict-default-${process.pid}.py`);
+    fs.writeFileSync(file, program);
+    let out = '';
+    try {
+      out = execFileSync(python, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    expect(JSON.parse(out)).toEqual([{}, {}, true]);
+    expect(interpreted(ce, ['Apply', lit])).toEqual({ dict: {} });
   });
 });
 

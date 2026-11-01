@@ -299,6 +299,7 @@ import {
   assertNoAmbiguousComplexElementRead,
   containsUnboundedBigOp,
   isTabulateWithNonPositiveDimension,
+  isCompileBoundName,
   mentionsCompileBoundName,
   mentionsExcludedName,
   reachesExcludedName,
@@ -2750,7 +2751,15 @@ export function _compileInner(
       const typed = localCallWithResultType(value, target) ?? value;
       const t = resolveTypeAlias(dictionaryValueType(typed, target));
       const untyped = t === 'unknown' || t === 'any';
-      if (untyped && isSymbol(typed))
+      // A free input is refused by the admission of the inputs, by name. A
+      // name that the code binds (a parameter, a local) is never an input
+      // there, so it declines here.
+      if (
+        untyped &&
+        isSymbol(typed) &&
+        target.boundVars?.has(typed.symbol) !== true &&
+        !isCompileBoundName(typed.symbol)
+      )
         return [key, compileValueOperand(typed, target, 0)];
       if (untyped)
         throw new Error(

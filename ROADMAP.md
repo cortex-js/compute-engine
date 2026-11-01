@@ -3862,16 +3862,6 @@ literal returns a callable function. Either the interval target returns a
 callable (an interval-valued function of its arguments) or it declines with
 a reason.
 
-### CE-727. An empty dictionary does not compile on the JavaScript target
-
-**Status:** ready; defect, S.
-
-`compile(ce.box(["Dictionary"]), { to: 'javascript' })` fails with "Could not
-compile expression: `{->}`" (measured 2026-10-31 at `a4d2de2d5`). A parameter
-default `{}` (CE-717) therefore declines on the JavaScript target, while
-`[]` compiles. The expected emission is a fresh `{}` (or the target's
-dictionary representation) per evaluation.
-
 ### CE-715. A `bigint` compile mode on the JavaScript target: exact integers past 2^53
 
 **Status:** ready; capability, large. Spec approved by the user 2026-10-31
