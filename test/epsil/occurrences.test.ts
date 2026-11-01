@@ -351,6 +351,15 @@ describe('EPSIL OCCURRENCES — type names inside type text', () => {
     expect(leftBehind(src, 'Located')).toEqual([]);
   });
 
+  test('a protocol named in an `extends` tail is a use of its declaration', () => {
+    const src = 'protocol P {}\nprotocol Q extends P {}';
+    expect(parseEpsil(src)[1]).toEqual([]);
+    const groups = groupsOf(src);
+    const p = groupAt(groups, at(src, 'P'));
+    expect(spans(src, p)).toEqual(['P@9', 'P@33']);
+    expect(groupAt(groups, at(src, 'P', 1))).toBe(p);
+  });
+
   test('a generic bound is a use; only the declared parameters are type variables', () => {
     const src = [
       'type point = integer',

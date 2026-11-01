@@ -36,6 +36,7 @@ import {
 } from '../compute-engine/boxed-expression/type-guards.js';
 import { readBeforeDeclarationSite } from '../compute-engine/boxed-expression/read-before-declaration.js';
 import { listedElement } from '../compute-engine/boxed-expression/listed-element.js';
+import { protocolExtendsConflicts } from '../compute-engine/engine-protocols.js';
 import {
   isOperatorDef,
   isValueDef,
@@ -881,6 +882,24 @@ function* executeEpsilSteps(
             protocol.name
           ) ?? [0, source.length],
         });
+
+  // A protocol replacement may leave one member name declared by two
+  // protocols of the closure of a protocol that extends it. The replacement
+  // does not refuse it, because the rest of an edited program usually
+  // resolves it (the extending protocol is re-declared without the member);
+  // each conflict still present at the end of the batch is an error here,
+  // and is reported again by every later batch until it is resolved. The
+  // range is the whole program: the conflict belongs to no one statement.
+  for (const conflict of protocolExtendsConflicts(ce))
+    diagnostics.push({
+      severity: 'error',
+      message: [
+        'protocol-extends-member-conflict',
+        conflict.protocol,
+        conflict.message,
+      ],
+      range: [0, source.length],
+    });
 
   // The final statement's error stays a VALUE (no diagnostic, by design), so
   // the notes that would have travelled on a diagnostic are returned beside

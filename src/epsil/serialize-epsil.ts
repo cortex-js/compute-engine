@@ -44,7 +44,10 @@ import {
   Formatter,
   FormattingBlock,
 } from './formatter.js';
-import { HARD_RESERVED_WORDS } from './reserved-words.js';
+import {
+  CONTEXTUAL_STATEMENT_WORDS,
+  HARD_RESERVED_WORDS,
+} from './reserved-words.js';
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 import {
   CONDITIONAL_PRECEDENCE,
@@ -1375,13 +1378,29 @@ export function serializeEpsil(
     // statement verbatim. A protocol with no members is a SEMANTIC protocol
     // and prints as `protocol NAME {}`.
     //
+    // The optional third operand, `["List", parent, …]`, is the list of the
+    // protocols this one extends, printed as `protocol NAME extends P₁, P₂ {`.
+    // An empty list is the same as no list, and prints nothing.
+    //
     DeclareProtocol: (expr: MathJsonExpression): FormattingBlock => {
       const args = operands(expr);
-      if (args.length !== 1 && args.length !== 2)
+      if (args.length < 1 || args.length > 3)
         return serializeGenericFunction(expr);
       const rawName = symbol(args[0]) ?? stringValue(args[0]);
       if (rawName === null) return serializeGenericFunction(expr);
-      const name = escapeSymbol(rawName);
+      let name = escapeSymbol(rawName);
+      if (args.length === 3) {
+        if (operator(args[2]) !== 'List') return serializeGenericFunction(expr);
+        const parents = operands(args[2]).map(
+          (p) => symbol(p) ?? stringValue(p)
+        );
+        if (parents.some((p) => p === null))
+          return serializeGenericFunction(expr);
+        if (parents.length > 0)
+          name += ` extends ${parents
+            .map((p) => escapeProtocolName(p!))
+            .join(', ')}`;
+      }
       if (args.length === 1) return fmt.line('protocol ', name, ' {}');
 
       const entries = attributeEntries(args[1]);
@@ -1429,7 +1448,7 @@ export function serializeEpsil(
       const names = listed.map((p) => symbol(p) ?? stringValue(p));
       if (names.length === 0 || names.some((n) => n === null))
         return serializeGenericFunction(expr);
-      let head = `type ${target} is ${names.map((n) => escapeSymbol(n!)).join(' & ')}`;
+      let head = `type ${target} is ${names.map((n) => escapeProtocolName(n!)).join(' & ')}`;
 
       // A CONDITIONAL conformance carries its trailing `where` clause as SOURCE
       // TEXT, ahead of the implementation block and told apart from it by its
@@ -3354,6 +3373,19 @@ function addName(name: string, names: ExpressionNames, pattern: boolean): void {
       names.bound.add(decoded);
     }
   }
+}
+
+/**
+ * Spell a protocol name in a position that names a protocol: a parent in the
+ * `extends` list of a `protocol` statement, or a name in the conformance tail
+ * of `type T is P & Q`. In these two positions the parser refuses an unquoted
+ * contextual statement word (`let`, `type`, `alias`) and reports a missing
+ * protocol name, so such a name is printed in the verbatim form. Any other
+ * name is spelled as `escapeSymbol()` spells it.
+ */
+function escapeProtocolName(s: string): string {
+  if (CONTEXTUAL_STATEMENT_WORDS.has(s)) return `\`${s}\``;
+  return escapeSymbol(s);
 }
 
 function escapeSymbol(s: string): string {

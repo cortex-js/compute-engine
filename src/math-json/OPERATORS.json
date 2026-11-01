@@ -1966,13 +1966,13 @@
       "name": "DeclareProtocol",
       "category": "Core",
       "arity": "optional",
-      "signature": "(symbol|string, members: dictionary<any>?) scope -> nothing",
+      "signature": "(symbol|string, members: dictionary<any>?, parents: any?) scope -> nothing",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> [\"Pair\", \"function\"|\"readonly\"|\"readwrite\", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). Evaluates to `Nothing`.",
+      "description": "Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> [\"Pair\", \"function\"|\"readonly\"|\"readwrite\", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `[\"List\", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`[\"Dictionary\"]` when there are none). Evaluates to `Nothing`.",
       "examples": [
         "protocol Area { function area(self: Self) -> number }\ntype square = tuple<side: number> is Area {\n  function area(self: square) -> number { self.side^2 }\n}\narea(square(3))"
       ]

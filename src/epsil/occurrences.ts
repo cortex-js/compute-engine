@@ -759,7 +759,10 @@ export function documentBindings(
       case 'DeclareProtocol': {
         // The declared name is a symbol; every USE of a type name lives
         // inside type text — annotations, the declaration's own right-hand
-        // side, member signatures — resolved by `resolveTypeRegions`. The
+        // side, member signatures — resolved by `resolveTypeRegions`. A
+        // protocol's third operand, `["List", parent, …]` from its
+        // `extends P₁, P₂` tail, holds protocol names as symbols: they are
+        // walked as reads, like the protocol list of a conformance. The
         // remaining operands hold no written symbols and are not walked.
         bindTypeName(node, scope, true);
         const statementSpan = spanOf(node);
@@ -780,11 +783,15 @@ export function documentBindings(
               scope,
               sum: head === 'DeclareSumType',
             });
-        } else
+        } else {
           // A protocol's members: `name: Pair("function", "⟨signature⟩")`.
           for (const member of operands(operand(node, 2) ?? 'Nothing'))
             if (operator(member) === 'KeyValuePair')
               typeText(operand(operand(member, 2), 2), scope);
+          // The protocols it extends.
+          const parents = operand(node, 3);
+          if (parents !== null) walk(parents, scope);
+        }
         return;
       }
 

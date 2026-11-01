@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-713.
+Next free reference: CE-717.
 
 **Entry format.**
 
@@ -391,6 +391,66 @@ that the double checks disappear.
 - **CE-51.1** Write the requirement-table design document that item 6(h) asks
   for. The member table above is its input.
 - **CE-51.2** Point the 69 capability checks at conformance.
+
+### CE-713. Protocol extension: a protocol that extends other protocols
+
+**Status:** approved 2026-10-31, implementation in progress (session
+compute-engine-37); capability, medium. Spec:
+`docs/plans/2026-10-31-protocol-refinement.md` (§8 records the decisions,
+all as recommended). User decision 2026-10-31: the spelling is
+`protocol A extends B, C { … }`. Issue #491 (follows #362). Prerequisite of
+CE-51 (`Indexable` extends `Iterable`).
+
+A protocol hierarchy (`FloorRing` extends `LinearOrder`, `Ring` and
+`FloorOrder`, which extend `PartialOrder`) has no spelling. A user declares
+every ancestor by hand for each type, and the engine does not know that a
+`FloorRing` conformance implies `PartialOrder`. The reporter measured one
+`declareProtocolImplementation` at about 100 µs, so a type at depth 8 costs
+about 860 µs instead of about 100.
+
+Design: an `extends` list on the protocol (`ce.declareProtocol(name, members,
+{ extends: [...] })`, Epsil `protocol LinearOrder extends PartialOrder { … }`).
+A conformance to an extending protocol registers an ordinary edge on every
+protocol of its closure that the type does not conform to yet, so
+`conformsTo`, dispatch, the `where T is P` constraint and the compiled
+planner do not change. The block of the conformance is split by the
+declaring protocol; an uncovered ancestor is `protocol-implementation-missing`.
+A member name is declared by one protocol per closure, and the closure of a
+protocol only grows under replacement (v1).
+
+### CE-716. A protocol member named like a library function dispatches in a later batch but not in the same batch
+
+**Status:** open, decision needed; defect, small. Found 2026-10-31 while
+testing CE-713; older code, not caused by it.
+
+```epsil
+protocol F { function floor(self: Self) -> integer }
+type Money = tuple<cents: integer>
+type Money is F { function floor(self: Money) -> integer { self.cents } }
+floor(Money(3))
+```
+
+In one batch, the call is a static `incompatible-type` error: `floor` is the
+library `Floor`, which expects a real. With the three declarations in one
+batch and the call in a later batch, the call returns `3`: the bare name
+reaches the protocol member. A member named `flr` returns `3` in both cases.
+
+The documented rule (`engine-protocols.ts`, `installDispatcher`, and Appendix
+A of `docs/TYPE_SYSTEM_ROADMAP.md`, pipeline step 1) is that a builtin keeps
+the bare name and only the qualified form `F.floor(x)` reaches the protocol.
+The same-batch behavior follows that rule; the later-batch behavior does not.
+The cause to trace: the Epsil lowercase name `floor` is resolved against the
+bindings that exist when the call is parsed, so the dispatcher installed by
+the first batch captures it in the second.
+
+Decision: (a) the documented rule holds in every batch, so the later batch
+must also give the static error (the user writes `F.floor(x)`); or (b) a
+protocol member declared by the user shadows a library function of the same
+lowercase name in every batch, so the same batch must also return `3`, and
+the documented rule changes to "a USER definition shadows; a library name is
+shadowed by a protocol member". Option (a) keeps library names stable; option
+(b) is what a Mathlib-style hierarchy (`floor`, `min`, `max`, `abs` as
+members) needs, and it is what issue #491's reporter does.
 
 ### CE-55. A user-declared lazy operator with an arrow-typed callback slot admits every callback
 
@@ -3811,6 +3871,92 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-715. A `bigint` compile mode on the JavaScript target: exact integers past 2^53
+
+**Status:** open; capability, large. Spec approved by the user 2026-10-31
+(trade-offs T1-T7), revision 3 after two dual review rounds:
+`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`. GitHub issue #503; the
+reply is deferred until the mode is implemented.
+
+With `n: integer`, `Binom(2n, n) − Binom(2n, n+1)` compiled to JavaScript
+computes with doubles and is rounded past `2^53`; `Mod(2^60 + 1, 10)` throws a
+`RangeError`. The interpreter gives the exact value. The issue's author
+subclasses `JavaScriptTarget` to emit `BigInt` code and asks for four hooks.
+Proposed: a compile mode `'bigint'` next to `'strict'`, `'complex'` and `'auto'`
+on the `javascript` target only. A node whose type is a subtype of
+`integer | nan | infinity | signed_infinity` and whose head is on an allow-list
+computes as a `bigint`; a rational-typed subtree compiles only under a rounding
+head or an integer promise (an `integer` ascription or parameter) as a rounded
+or checked exact division; a real or complex operand, or a head not on the
+list, declines with its own diagnostic code. The result is `bigint | number`: a
+`bigint` for every integer value, a `number` only for a non-finite value (`n!`
+at `n < 0` is `Infinity`), caught once in the emitted code, and only where every
+ancestor of the pole keeps its value. Inputs accept a `bigint` or a safe-integer
+`number`. `broadcast()` refuses in the mode. No auto-escalation in the first
+version. The spec names the files, the steps and the tests. The sub-items below
+are the shapes the first version declines, with a priority by how often each
+occurs (AGENTS.md: a decline is a defect).
+
+- **CE-715.1** (medium) A pole-capable node under `Multiply` by an operand proved
+  non-zero, or inside a loop body (`Sum(k!, k = −1..n)`): the finer
+  pole-keeping rule.
+- **CE-715.2** (medium) A rational `Range`/`Sum`/`Product` bound (`Sum(i, i = 1..n/2)`
+  is `3` at `n = 5`).
+- **CE-715.3** (high) Integer-typed heads not on the allow-list (`DigitSum`,
+  `IntegerDigits`, `IndexOf`), boolean heads other than the comparisons and
+  `IsPrime` (`IsEven`), and string heads other than `String`.
+- **CE-715.4** (low) A binding typed `integer | infinity` as a lane input.
+- **CE-715.5** (medium) A `bigint` output form for `broadcast()`,
+  `broadcastAsync()` and the stored batch loaders.
+- **CE-715.6** (low) Escalation to `bigint` on a run-time value past `2^53`.
+- **CE-715.7** (low) The Python target's `Rational` lowering as an exact
+  `fractions.Fraction`.
+
+### CE-714. A point with a coordinate declared `real | list<real>` gives a norm per element in compiled code, an error in the interpreter
+
+**Status:** open; wrong value, small. Found 2026-10-31 during CE-712.1.
+
+With `x` declared `real | list<real>`, `y` declared `real`, and
+`k = P ↦ |P − (4, 0)|` declared `(unknown) -> number`:
+
+```ts
+const e = ce.box(['k', ['Tuple', 'x', 'y']]);
+compile(e, { to: 'javascript' }).run({ x: [1, 2], y: 3 });
+// [4.2426…, 3.6055…]: one norm per element of x, success: true
+ce.assign('x', ce.box(['List', 1, 2]));
+ce.assign('y', 3);
+e.evaluate();
+// Error(ErrorCode("incompatible-type", "tuple<number, number>",
+//   "tuple<vector<integer^2>, integer>"), ([1,2], 3))
+```
+
+The LaTeX `k\left(\left(x,y\right)\right)` gives the same `Tuple` form and the
+same two values: with `x` declared, the parse does not give
+`PointList(x, y)`. The disagreement is at HEAD `acacab99a`; it is not caused by
+CE-712.1.
+
+The interpreter value is the right one. A MathJSON `Tuple` with a list
+coordinate is data, not a point (`docs/COLLECTIONS-MODEL.md`, "Points and
+`PointList`"; a list of points is `PointList(x, y)`), and arithmetic over it is
+an `incompatible-type` error. The compiler already refuses this tuple when `x`
+is declared `list<real>` ("a tuple with a list coordinate, which is not a
+point", `checkListCoordinateTupleArgs()` in `compile-point-calls.ts` and the
+operand check in `compiler-core.ts`); the test
+`tycho-item-253-abs-union-point-param.test.ts`, "a code-built Tuple with a list
+coordinate is an error, not a point", pins that refusal. When the coordinate
+type is a union that admits a list, the check does not see a list coordinate,
+and the run-time dispatch reads `([1, 2], 3)` as two points.
+
+Proposed fix: under rule R1 of
+`docs/plans/2026-10-31-static-shape-compilation.md`, a declared union is one
+dispatch at the input, with a body for each member shape. The body for the
+member `list<real>` holds a tuple with a list coordinate, so it must decline
+(or give the interpreter's error), as the `list<real>` declaration does today.
+No user decision is needed for the `Tuple` form. A decision is needed only if
+the LaTeX `(x, y)` with `x` declared `real | list<real>` must parse as
+`PointList(x, y)` (as it does for an undeclared `x` whose value is a list);
+then the LaTeX form gives one norm per point in both evaluators.
+
 ### CE-712. Static-shape compilation: settle every shape at compile time, emit no run-time test of a type
 
 **Status:** open; design decided, large. User decision 2026-10-31: option (A) of
@@ -3837,7 +3983,23 @@ run-time dispatch produced.
 Steps (plan §6; each in a worktree, with the dual review, the before/after
 corpus audit and a report of the declines per target and the `code` changes):
 
-- **CE-712.1** Admission: refuse `unknown` and `any` inputs by name; decline a
+- **CE-712.1** (implemented, uncommitted, in worktree
+  `/tmp/wt-compute-engine-34-ce712-1`; `assertSettledShapes()` and
+  `assertTypedInputs()`, `compilation/compile-admission.ts`. Not finished:
+  the existing tests that compile an input with no type fail until each
+  declares its input; the corpus audit is not run. Order of the reasons,
+  decided by the orchestrator 2026-10-31 (the user can reverse it): the
+  refusal of an input with no type runs after the code was generated, so a
+  more specific reason to decline (an operator with no lowering, a value with
+  no settled shape, a timeout) stays the error and the diagnostic, and
+  `unsupported` also names the inputs with no type; the alternative, the
+  refusal first, hid the precise reason. Fixed with it: the reference
+  analysis listed a local that only a nested block of a function body
+  assigns (a loop body of a function declared with the `scope` effect) as a
+  free symbol; the exception for assigned names is removed, so an undeclared
+  `u` in `u ≔ If(x < 0, u, 0)` is refused. Points of different sizes in the
+  branches of a conditional conflict only on `glsl` and `wgsl`) Admission:
+  refuse `unknown` and `any` inputs by name; decline a
   produced value with no settled shape; verify that the compiler reads the
   `unknown` signature of a Tycho document function, not its
   `broadcastable<number | tuple>` body binding. Closes CE-222, CE-706 (option
@@ -3923,7 +4085,11 @@ has no `error` type and still reaches it; if none exists, remove the check.
 
 ### CE-706. A compiled root function with an untyped parameter gives `null` for a list argument
 
-**Status:** decision needed; wrong value. GitHub issue #488.
+**Status:** fixed by CE-712.1 (uncommitted), option (c): the parameter of a
+root function is not an input, so `t ↦ 2t` still compiles, and a list
+argument at its untyped parameter is a value outside the type that the body
+implies, documented as an unspecified result in `docs/COMPILATION-MODEL.md`
+"Fail closed" (no code change for this case). GitHub issue #488.
 
 `compile(t ↦ 2t, { to: "javascript" })` emits `(t) => 2 * t`, and
 `run([[1, 2], [3, 4]])` returns `null`. The interpreter maps an untyped
@@ -4451,7 +4617,11 @@ accepting it there.
 
 ### CE-463. Compiled effectful input reads are merged by emitted source and reordered
 
-**Status:** open; possible defect, not verified. Reported by a reviewer on the
+**Status:** fixed by CE-712.1 (uncommitted): inputs declared `any`, mapped
+through `vars` or not, now decline, so the guard bindings of the two examples
+are not emitted (`test/compute-engine/compile-admission.test.ts`, "CE-463").
+Was: open;
+possible defect, not verified. Reported by a reviewer on the
 code committed in `cd704b6b8` (`compilation/base-compiler.ts`, the guard
 bindings of `vars`-mapped symbols near lines 13400 to 13435).
 
@@ -4572,7 +4742,10 @@ type, and the capture of bindings (question Q11 of
 
 ### CE-222. Compiled code reads an undeclared symbol as a number, so a list argument gives a wrong value
 
-**Status:** open; wrong value.
+**Status:** fixed by CE-712.1 (uncommitted): an input whose type is `unknown`
+or `any` declines on every target with its name in `unsupported`, so
+`If(M < 3, M, 0)` with `M` undeclared gives the interpreter's `[1, 0]` for
+`M = [1, 5]` (`test/compute-engine/compile-admission.test.ts`).
 
 With `M` not declared, `compile(If(M < 3, M, 0))` (JavaScript) emits
 `((_.M !== undefined) ? ((_.M < 3) ? (_.M) : (0)) : NaN)`. `run({M: [1, 5]})`

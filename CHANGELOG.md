@@ -2,6 +2,30 @@
 
 ### New Features
 
+- **A protocol can extend other protocols.** In Epsil, `protocol FloorOrder
+  extends PartialOrder { function floor(self: Self) -> integer }`; the parents
+  are separated by commas. With the host API, `ce.declareProtocol("FloorOrder",
+  { functions: { floor: "(self: Self) -> integer" } }, { extends:
+  ["PartialOrder"] })`. In MathJSON, `["DeclareProtocol", name, members,
+  ["List", parent, …]]`. A type that conforms to `FloorOrder` conforms to
+  `PartialOrder` too, and one implementation block supplies the members of
+  the whole hierarchy: `type Money is FloorOrder { function compare(…) {…}
+  function floor(…) {…} }`, or one `ce.declareProtocolImplementation("Money",
+  "FloorOrder", { functions: { compare, floor } })`. Before, each ancestor
+  needed its own declaration, and nothing stopped a type from conforming to
+  `FloorOrder` without `PartialOrder`. The conformance registers an ordinary
+  conformance on each ancestor, so `ce.conformsTo("Money", "PartialOrder")`
+  is still a direct lookup, and dispatch is unchanged. Code that declares
+  every ancestor by hand, parents first, keeps working. A parent must be
+  declared first (`protocol-unknown`); a member name can be declared by only
+  one protocol of a hierarchy (`protocol-member-inherited`,
+  `protocol-extends-member-conflict`); running a `protocol` statement again
+  can add a parent but cannot remove one (`protocol-extends-removal`); a
+  cycle is `protocol-extends-cycle`. A qualified name names the protocol that
+  declares the member: `FloorOrder.compare` is `protocol-member-unknown`,
+  with the hint "write `PartialOrder.compare`". `extends` is a soft keyword: a
+  symbol named `extends` stays legal. (#491)
+
 - **The `broadcast()` of an `interval-js` result accepts a list input, as its
   `run()` does.** With `L` declared `list<number>`, the code of `x + Sum(L)`
   reads `L` as a list. `run({ x: { lo: 1, hi: 1 }, L: [1, 2] })` gave the point

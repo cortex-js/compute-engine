@@ -46,6 +46,7 @@ import {
 } from '../common/type/effects.js';
 import { isValidPrimitiveType } from '../common/type/primitive.js';
 import {
+  freeTypeVariables,
   isReservedTypeName,
   substituteTypeVariables,
 } from '../common/type/instantiate.js';
@@ -186,6 +187,238 @@ function messageOf(e: unknown): string {
 }
 
 //
+// ── Protocol extension ───────────────────────────────────────────────────────
+//
+// A protocol may EXTEND other protocols (`protocol LinearOrder extends
+// PartialOrder { … }`): it has every requirement of its parents plus its own,
+// and a type that conforms to it conforms to each of its ancestors. The
+// engine keeps that invariant with ordinary conformance edges: a conformance
+// to a protocol registers one edge on every protocol of its CLOSURE (its
+// ancestors plus itself) that the target does not already conform to. Every
+// reader of the registry (`conformsTo`, dispatch, the `where T is P` oracle,
+// the compiled planner) therefore reads a flat list of edges and never walks
+// the parent lists.
+//
+// Three rules keep the expansion well defined:
+//
+//   * A member name is declared by at most one protocol of a closure, so each
+//     member of an implementation block belongs to exactly one protocol of
+//     the statement protocol's closure.
+//   * The parents exist before the protocol (no forward reference), and a
+//     closure contains no cycle.
+//   * A replacement of a protocol may add parents but may not remove a
+//     protocol from its closure: conformance is monotone, and an edge that
+//     was derived from an ancestor must stay true for every later type.
+//
+// Source: `docs/plans/2026-10-31-protocol-refinement.md`, rules R1–R10.
+//
+
+/**
+ * An error of a protocol DECLARATION that carries its diagnostic code. The
+ * message keeps the host convention (`code: detail`), and the statement route
+ * (`declareProtocolStatement` in `library/core.ts`) reads `code` and `detail`
+ * to build the error value with that code.
+ */
+export class ProtocolDeclarationError extends Error {
+  readonly code: string;
+  readonly detail: string;
+  constructor(code: string, detail: string) {
+    super(`${code}: ${detail}`);
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+/**
+ * The ancestors of the protocols `parents`, in CLOSURE ORDER: a depth-first
+ * post-order over the parent lists in their written order, each protocol kept
+ * at its first occurrence. For `FloorRing extends LinearOrder, Ring,
+ * FloorOrder`, each of the three extending `PartialOrder`, the parents
+ * `LinearOrder, Ring, FloorOrder` give `PartialOrder, LinearOrder, Ring,
+ * FloorOrder`.
+ *
+ * A name that is not in the registry is kept (it has no parents to visit),
+ * so a caller that validates the names first never sees it.
+ */
+function closureOfParents(
+  ce: ProtocolReadView,
+  parents: readonly string[]
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const visit = (name: string): void => {
+    // Marked before the parents are visited, so a cycle (which the
+    // declaration refuses, but a caller may ask about a proposed parent
+    // list) cannot loop.
+    if (seen.has(name)) return;
+    seen.add(name);
+    for (const p of registryRecord(ce, name)?.extends ?? []) visit(p);
+    out.push(name);
+  };
+  for (const p of parents) visit(p);
+  return out;
+}
+
+/**
+ * The CLOSURE of the protocol `name`: its ancestors in closure order (see
+ * {@link closureOfParents}), then `name` itself, last. Diagnostics list the
+ * protocols of a closure in this order.
+ */
+export function protocolClosure(ce: ProtocolReadView, name: string): string[] {
+  const ancestors = closureOfParents(
+    ce,
+    registryRecord(ce, name)?.extends ?? []
+  );
+  // The protocol itself cannot be one of its ancestors (the declaration
+  // refuses a cycle), so it is appended without a test.
+  return [...ancestors, name];
+}
+
+/** A member name declared twice in one closure: by the ancestor `first` and
+ * by `second`, which is a later ancestor or the protocol itself. */
+type ClosureMemberConflict = {
+  member: string;
+  first: string;
+  second: string;
+};
+
+/**
+ * The first member name that two protocols of the closure of a protocol
+ * named `name`, with the own members `ownMembers` and the parents `parents`,
+ * both declare — or `null` when every member name of the closure has one
+ * declaring protocol. `second === name` means the protocol itself declares a
+ * member of an ancestor (`protocol-member-inherited`); otherwise two
+ * ancestors declare it (`protocol-extends-member-conflict`).
+ *
+ * The reason for the rule: the bare dispatcher of a member name serves every
+ * protocol that declares it, so a type that conforms to the closure would
+ * reach the member through two edges, and every call would be
+ * `protocol-call-ambiguous`.
+ */
+function closureMemberConflict(
+  ce: ProtocolReadView,
+  name: string,
+  ownMembers: Readonly<Record<string, unknown>>,
+  parents: readonly string[]
+): ClosureMemberConflict | null {
+  const declarer = new Map<string, string>();
+  for (const ancestor of closureOfParents(ce, parents)) {
+    const record = registryRecord(ce, ancestor);
+    if (record === undefined) continue;
+    for (const member of Object.keys(record.members)) {
+      const first = declarer.get(member);
+      if (first !== undefined) return { member, first, second: ancestor };
+      declarer.set(member, ancestor);
+    }
+  }
+  for (const member of Object.keys(ownMembers)) {
+    const first = declarer.get(member);
+    if (first !== undefined) return { member, first, second: name };
+  }
+  return null;
+}
+
+/** The text of `protocol-extends-member-conflict` for the protocol `name`. */
+function extendsMemberConflictMessage(
+  name: string,
+  conflict: ClosureMemberConflict
+): string {
+  const { member, first, second } = conflict;
+  if (second === name)
+    return `\`${member}\` is declared by \`${name}\` and by \`${first}\`, which \`${name}\` extends; a member name can be declared by only one protocol of a closure. Remove \`${member}\` from one of the two protocols`;
+  return `\`${member}\` is declared by both \`${first}\` and \`${second}\`, and \`${name}\` extends both; a member name can be declared by only one protocol of a closure. Remove \`${member}\` from one of the two protocols`;
+}
+
+/**
+ * Validate the parent list of a declaration of `name`, and return it as a
+ * fresh array. Throws {@link ProtocolDeclarationError}: a value that is not
+ * an array of strings and a repeated name are `invalid-protocol-declaration`;
+ * a name that is a type, or that is not a declared protocol, is
+ * `protocol-unknown` (no forward reference); a parent whose closure contains
+ * `name` is `protocol-extends-cycle`.
+ */
+function validatedParents(
+  ce: IComputeEngine,
+  name: string,
+  parents: unknown
+): string[] {
+  if (parents === undefined) return [];
+  if (!Array.isArray(parents) || parents.some((p) => typeof p !== 'string'))
+    throw new ProtocolDeclarationError(
+      'invalid-protocol-declaration',
+      `the \`extends\` option of \`${name}\` must be an array of protocol names, e.g. \`{ extends: ["PartialOrder"] }\``
+    );
+  const result: string[] = [];
+  for (const parent of parents as string[]) {
+    if (result.includes(parent))
+      throw new ProtocolDeclarationError(
+        'invalid-protocol-declaration',
+        `\`${parent}\` is listed twice in the parents of \`${name}\``
+      );
+    if (parent === name)
+      throw new ProtocolDeclarationError(
+        // A fresh declaration names a protocol that does not exist yet; a
+        // replacement names itself, which is a cycle of length one.
+        registryRecord(ce, name) === undefined
+          ? 'protocol-unknown'
+          : 'protocol-extends-cycle',
+        `\`${name}\` cannot extend itself`
+      );
+    if (registryRecord(ce, parent) === undefined) {
+      if (isValidPrimitiveType(parent) || isDeclaredTypeName(ce, parent))
+        throw new ProtocolDeclarationError(
+          'protocol-unknown',
+          `\`${parent}\` is a type, not a protocol`
+        );
+      throw new ProtocolDeclarationError(
+        'protocol-unknown',
+        `the protocol \`${parent}\` is unknown; declare a parent before the protocol that extends it`
+      );
+    }
+    // A fresh declaration cannot form a cycle, because its parents exist
+    // before it. A replacement can: the parent may already extend `name`.
+    if (closureOfParents(ce, [parent]).includes(name))
+      throw new ProtocolDeclarationError(
+        'protocol-extends-cycle',
+        `\`${name}\` cannot extend \`${parent}\`, which already extends \`${name}\``
+      );
+    result.push(parent);
+  }
+  return result;
+}
+
+/**
+ * Report and forget the closure member conflicts recorded by protocol
+ * replacements (see `IComputeEngine._protocolExtendsConflicts`). Called at the
+ * end of an Epsil batch. Each recorded protocol is checked again against the
+ * registry as it stands: a conflict that the rest of the batch resolved (the
+ * extending protocol was re-declared without the member) is dropped, and a
+ * conflict still present is returned and stays recorded, so the next batch
+ * reports it again until it is resolved.
+ */
+export function protocolExtendsConflicts(
+  ce: IComputeEngine
+): { protocol: string; message: string }[] {
+  const result: { protocol: string; message: string }[] = [];
+  for (const name of [...ce._protocolExtendsConflicts]) {
+    const record = registryRecord(ce, name);
+    const conflict =
+      record === undefined
+        ? null
+        : closureMemberConflict(ce, name, record.members, record.extends);
+    if (conflict === null) {
+      ce._protocolExtendsConflicts.delete(name);
+      continue;
+    }
+    result.push({
+      protocol: name,
+      message: extendsMemberConflictMessage(name, conflict),
+    });
+  }
+  return result;
+}
+
+//
 // ── Protocol declaration ─────────────────────────────────────────────────────
 //
 
@@ -193,12 +426,19 @@ function messageOf(e: unknown): string {
  * Register a protocol. Host API errors throw. The Epsil statement route passes
  * `fromStatement: true`, allowing a later statement batch to replace its own
  * declaration and converting a thrown error into an error value.
+ *
+ * `options.extends` is the parent list (see the "Protocol extension" section
+ * above). The host passes its option unchecked, so it is validated here.
  */
 export function declareProtocolImpl(
   ce: IComputeEngine,
   name: string,
   members: ProtocolMembersInput | undefined,
-  options?: { fromStatement?: boolean; origin?: DeclarationOrigin }
+  options?: {
+    fromStatement?: boolean;
+    origin?: DeclarationOrigin;
+    extends?: readonly string[];
+  }
 ): void {
   if (!isValidTypeName(name))
     throw Error(`The protocol name "${name}" is invalid`);
@@ -284,6 +524,36 @@ export function declareProtocolImpl(
     }
   }
 
+  // The parent list, validated like the members before anything is touched.
+  const parents = validatedParents(ce, name, options?.extends);
+  // One declaring protocol per member name in the closure, checked against
+  // the NEW parents. A conflict with a protocol that extends this one is not
+  // refused here; it is recorded below, after the replacement.
+  const conflict = closureMemberConflict(ce, name, validated, parents);
+  if (conflict !== null)
+    throw new ProtocolDeclarationError(
+      conflict.second === name
+        ? 'protocol-member-inherited'
+        : 'protocol-extends-member-conflict',
+      conflict.second === name
+        ? `\`${conflict.member}\` is already a member of \`${conflict.first}\`, which \`${name}\` extends`
+        : extendsMemberConflictMessage(name, conflict)
+    );
+  // The closure only grows. A conditional edge derived from an ancestor, or
+  // the implication test of two `where` clauses, is sound only while a
+  // closure never loses a protocol, the same monotonicity as conformance.
+  const previousClosure =
+    existing === undefined ? [] : protocolClosure(ce, name);
+  const nextClosure = [...closureOfParents(ce, parents), name];
+  if (existing !== undefined) {
+    const removed = previousClosure.find((p) => !nextClosure.includes(p));
+    if (removed !== undefined)
+      throw new ProtocolDeclarationError(
+        'protocol-extends-removal',
+        `\`${name}\` extended \`${removed}\`; an extension cannot be removed. Start a new engine to drop it`
+      );
+  }
+
   if (existing !== undefined) {
     // Replacing a protocol can widen a dispatcher's effect set: a
     // requirement's ceiling loosened from `pure` to `random`, or a bare
@@ -299,6 +569,7 @@ export function declareProtocolImpl(
     // Conformance edges survive a re-declaration because conformance is
     // monotone.
     existing.members = validated;
+    existing.extends = parents;
     existing.declaredByStatement = fromStatement;
     // The redefinition stamp belongs to the declaration it describes. A
     // replacement without an origin (the box route, which has no batch) clears
@@ -363,6 +634,16 @@ export function declareProtocolImpl(
     for (const b of blockLessBefore)
       if (b.edge.impl !== b.impl || b.edge.pending !== b.pending)
         noteEdgePendingReason(ce, existing, b.edge, null, true);
+    // Every conformer of this protocol must conform to each ancestor the
+    // replacement ADDS. A refusal undoes the whole replacement, by the route
+    // the widening refusal below takes.
+    const added = nextClosure.filter((p) => !previousClosure.includes(p));
+    const refusal = deriveAddedAncestorEdges(ce, existing, added);
+    if (refusal !== null) {
+      restore();
+      syncProtocolDispatchers(ce);
+      throw refusal;
+    }
     // A replacement is a `config`-class state event, exactly like a type
     // redefinition: cached decisions taken against the old requirement set
     // must not be left stale.
@@ -390,12 +671,29 @@ export function declareProtocolImpl(
         )}`
       );
     }
+    // A protocol that extends this one may now see one member name declared
+    // twice in its closure: this replacement added a member it declares, or
+    // a parent whose closure declares a member of another of its parents.
+    // That is not refused here, because an edited program that MOVES a member
+    // from the extending protocol to this one replaces this protocol first and
+    // the extending one after it. The end of the batch reports the conflicts
+    // that are still present (`protocolExtendsConflicts`).
+    for (const other of registryRecords(ce)) {
+      if (other.name === name) continue;
+      if (!closureOfParents(ce, other.extends).includes(name)) continue;
+      if (
+        closureMemberConflict(ce, other.name, other.members, other.extends) !==
+        null
+      )
+        ce._protocolExtendsConflicts.add(other.name);
+    }
     return;
   }
 
   const record: ProtocolRecord = {
     name,
     members: validated,
+    extends: parents,
     conformances: [],
     declaredByStatement: fromStatement,
   };
@@ -905,6 +1203,792 @@ function edgeCouldApply(
   return isSubtype(edgeComparisonTarget(edge), receiver);
 }
 
+//
+// ── Conformance to a protocol that extends others ────────────────────────────
+//
+
+/**
+ * The head pattern `head` with its type variables renamed in the order of
+ * their first occurrence, serialized, and the renaming (original name →
+ * new name). Two head patterns are THE SAME HEAD when they are identical up
+ * to a renaming of their variables, which is exactly when their renamed
+ * forms serialize to the same text: `list<T>` and `list<U>` are the same
+ * head, `tuple<T, T>` and `tuple<T, U>` are not, and neither are `list<T>`
+ * and `list<list<U>>`.
+ */
+function renamedHead(head: Type): {
+  key: string;
+  renaming: Map<string, string>;
+} {
+  const renaming = new Map<string, string>();
+  const bindings: Record<string, Type> = Object.create(null);
+  let i = 0;
+  for (const name of freeTypeVariables(head)) {
+    // A name no clause can spell (a clause variable is an identifier), so a
+    // renamed variable never collides with a variable left as it was.
+    const fresh = `#${i++}`;
+    renaming.set(name, fresh);
+    bindings[name] = { kind: 'variable', name: fresh };
+  }
+  return {
+    key: typeToString(substituteTypeVariables(head, bindings)),
+    renaming,
+  };
+}
+
+/** When the head patterns `a` and `b` are identical up to a renaming of
+ * their variables (see {@link renamedHead}), the two renamings, which fix
+ * the variable of `b` that corresponds to each variable of `a`; otherwise
+ * `null`. */
+function sameHead(
+  a: Type,
+  b: Type
+): { a: Map<string, string>; b: Map<string, string> } | null {
+  const ra = renamedHead(a);
+  const rb = renamedHead(b);
+  return ra.key === rb.key ? { a: ra.renaming, b: rb.renaming } : null;
+}
+
+/** A conditional conformance target: a head pattern and its clause. */
+type ClauseTarget = { target: Type; where: readonly TypeParameter[] };
+
+/**
+ * Does the clause of `incoming` IMPLY the clause of `existing`, so that every
+ * instantiation `incoming` admits is admitted by `existing`?
+ *
+ * The test is syntactic and sound, not complete. The two heads must be the
+ * same head (see {@link sameHead}); the renaming fixes which variable of one
+ * corresponds to which variable of the other. For each pair of
+ * corresponding variables, the bounds must be the same type (both absent,
+ * or each a subtype of the other), and every protocol of the `is` list of
+ * the `existing` variable must be in the closure of the `is` list of the
+ * `incoming` variable: `T is FloorRing` implies `T is PartialOrder` when
+ * `FloorRing` extends `PartialOrder`, because a type that conforms to
+ * `FloorRing` conforms to `PartialOrder`. The implication stays true for
+ * types declared later only because a closure never loses a protocol (a
+ * replacement may not remove a parent).
+ */
+function clauseImplies(
+  ce: ProtocolReadView,
+  existing: ClauseTarget,
+  incoming: ClauseTarget
+): boolean {
+  const heads = sameHead(existing.target, incoming.target);
+  if (heads === null) return false;
+  const incomingByFresh = new Map<string, string>();
+  for (const [name, fresh] of heads.b) incomingByFresh.set(fresh, name);
+  for (const [name, fresh] of heads.a) {
+    const pa = existing.where.find((p) => p.name === name);
+    const other = incomingByFresh.get(fresh);
+    const pb = incoming.where.find((p) => p.name === other);
+    if (pa === undefined || pb === undefined) return false;
+    if (pa.kind !== pb.kind) return false;
+    if ((pa.bound === undefined) !== (pb.bound === undefined)) return false;
+    if (
+      pa.bound !== undefined &&
+      pb.bound !== undefined &&
+      !(isSubtype(pa.bound, pb.bound) && isSubtype(pb.bound, pa.bound))
+    )
+      return false;
+    const covered = new Set(
+      (pb.protocols ?? []).flatMap((p) => protocolClosure(ce, p))
+    );
+    if (!(pa.protocols ?? []).every((p) => covered.has(p))) return false;
+  }
+  return true;
+}
+
+/**
+ * An edge of `record`, other than the one with the same target key, through
+ * which the target ALREADY conforms to `record` — or `undefined`.
+ *
+ * For a ground target: a settled unconditional edge whose target is the
+ * target or a supertype of it, or a settled conditional edge whose clause
+ * the target's arguments satisfy. For a conditional target (a head pattern
+ * with its clause `params`): a settled unconditional edge whose target
+ * contains the widest instantiation of the head (the test
+ * {@link refreshInheritedPending} uses), or a conditional edge with the same
+ * head whose clause the new clause implies (see {@link clauseImplies}); the
+ * last one is returned even when it is PENDING, with `sameHead: true`,
+ * because the author declared that conformance ahead of its implementation
+ * and a new conformance does not take it over.
+ */
+function existingCoverage(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  target: Type,
+  targetKey: string,
+  params: readonly TypeParameter[] | undefined
+): { edge: ConformanceRecord; sameHead: boolean } | undefined {
+  for (const c of record.conformances) {
+    if (c.targetKey === targetKey) continue;
+    if (params === undefined) {
+      if (!c.pending && edgeTargetAt(ce, c, target) !== null)
+        return { edge: c, sameHead: false };
+      continue;
+    }
+    if (c.where === undefined) {
+      if (
+        !c.pending &&
+        isSubtype(widestConditionalTarget(target, params), c.target)
+      )
+        return { edge: c, sameHead: false };
+      continue;
+    }
+    if (clauseImplies(ce, c as ClauseTarget, { target, where: params }))
+      return { edge: c, sameHead: true };
+  }
+  return undefined;
+}
+
+/**
+ * A conditional edge of `record` that an earlier conformance to an
+ * extending protocol, or a protocol replacement that added an ancestor,
+ * DERIVED (it carries the `_derived` flag, which a written statement that
+ * claims the edge clears), with the same head
+ * as the conditional target `target`/`params` and a clause that implies the
+ * new one: `list<T> is PartialOrder where T is FloorRing`, derived from
+ * `list<T> is FloorRing where T is FloorRing`, before the wider `list<T> is
+ * PartialOrder where T is PartialOrder`. A block-less such edge is replaced
+ * by the wider conformance; the type still conforms, because the wider
+ * clause admits every argument the narrower one did.
+ */
+function narrowerDerivedEdge(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  target: Type,
+  targetKey: string,
+  params: readonly TypeParameter[] | undefined
+): ConformanceRecord | undefined {
+  if (params === undefined) return undefined;
+  return record.conformances.find(
+    (c) =>
+      c.targetKey !== targetKey &&
+      c.where !== undefined &&
+      c._derived === true &&
+      clauseImplies(ce, { target, where: params }, c as ClauseTarget)
+  );
+}
+
+/** The member a key of an implementation block implements: the key itself
+ * for a function, the property name for a mangled accessor. */
+function memberOfImplementationKey(key: string): string {
+  return key.startsWith(GET_PREFIX) || key.startsWith(SET_PREFIX)
+    ? key.slice(GET_PREFIX.length) // Same length.
+    : key;
+}
+
+/** The requirements of `record` that the merged map `impl` does not answer,
+ * as an author spells them (`compare`, `get hash`, `set name`). */
+function missingRequirements(
+  record: ProtocolRecord,
+  impl: Record<string, Expression | JSImplementation> | undefined
+): string[] {
+  const has = (key: string): boolean =>
+    impl !== undefined && Object.prototype.hasOwnProperty.call(impl, key);
+  const missing: string[] = [];
+  for (const [member, requirement] of Object.entries(record.members)) {
+    if (requirement.kind === 'function') {
+      if (!has(member)) missing.push(member);
+      continue;
+    }
+    if (!has(`${GET_PREFIX}${member}`)) missing.push(`get ${member}`);
+    if (requirement.kind === 'readwrite' && !has(`${SET_PREFIX}${member}`))
+      missing.push(`set ${member}`);
+  }
+  return missing;
+}
+
+/** The first problem of a conformance registration: a diagnostic code, its
+ * message, and optionally the arguments of the error value when they are not
+ * the message alone. */
+type ConformanceProblem = {
+  code: string;
+  message: string;
+  errorArgs?: string[];
+};
+
+/** What one conformance registration does to one protocol of the expansion.
+ * `none` registers nothing; `fill` installs a part on the edge with the same
+ * target key; `new` registers an edge; `replace` registers an edge in place
+ * of `replaced` (see {@link narrowerDerivedEdge}). */
+type ExpansionStep = {
+  record: ProtocolRecord;
+  /** A protocol the conformance names, as opposed to an ancestor of one. */
+  written: boolean;
+  /** The part of the block this step installs as the edge's authored block,
+   * or `undefined` for a block-less edge (or no edge at all). */
+  part: Record<string, Expression | JSImplementation> | undefined;
+  action: 'none' | 'fill' | 'new' | 'replace';
+  /** The edge of `record` with the conformance's target key. */
+  exact: ConformanceRecord | undefined;
+  replaced?: ConformanceRecord;
+};
+
+/**
+ * Register the conformance of `target` to each protocol of `records` and to
+ * each of their ancestors — the one registration both the statement route
+ * (`declareConformance`) and the host route
+ * (`declareProtocolImplementationImpl`) go through. Returns the first problem,
+ * or `null` on success. All or nothing: a problem found after the registry
+ * was changed restores it.
+ *
+ * THE EXPANSION. A conformance with a block names one protocol, the
+ * STATEMENT PROTOCOL `Q`. With closure `P1, …, Pn, Q`, `type T is Q { block }`
+ * means `type T is P1 { part for P1 } … type T is Q { part for Q }`, where
+ * the part of the block for a protocol is the subset of its members that
+ * this protocol declares (well defined, because a member name is declared by
+ * only one protocol of a closure). A conformance without a block registers
+ * the closures of all the protocols it names, each protocol once.
+ *
+ * A protocol the conformance NAMES behaves as before extension existed. For
+ * an ANCESTOR:
+ *
+ *   * With an edge for the same target key: a non-empty part fills or
+ *     replaces it (`protocol-implementation-duplicate` for a second block in
+ *     the same batch, and always on the host route), and so does an empty
+ *     part when the edge is authored and stamped `_via: Q` (an edited cell
+ *     that dropped the ancestor's members). Otherwise nothing.
+ *   * When the target already conforms through another edge (see
+ *     {@link existingCoverage}): nothing for an empty part, an edge for the
+ *     target with a non-empty part (a more specific implementation), and
+ *     `protocol-conformance-overlap` for a non-empty part under a conditional
+ *     edge with the same head, whose implementation a narrower clause cannot
+ *     replace.
+ *   * Otherwise an edge: with the part, or BLOCK-LESS for an empty part. A
+ *     block-less edge is settled by the existing rules (field backing, the
+ *     marker rule, inheritance); when the conformance has a block, one left
+ *     pending refuses the whole registration with
+ *     `protocol-implementation-missing`.
+ *
+ * Every protocol that registers runs the per-protocol pre-pass
+ * (`headConflictOf`, `overlapConflict`, the mutability gate) and the
+ * validation of its part before anything is registered; the rollback point
+ * is taken once, and the widening check of the declared effect contracts
+ * runs once over all the new edges.
+ *
+ * Source: `docs/plans/2026-10-31-protocol-refinement.md`, rules R4–R7.
+ */
+function registerConformance(
+  ce: IComputeEngine,
+  input: {
+    /** The host route: errors are thrown by the caller, an authored edge is
+     * never replaced, and nothing is stamped with a batch. */
+    host: boolean;
+    target: Type;
+    targetKey: string;
+    targetSource: string;
+    params: TypeParameter[] | undefined;
+    /** The protocols as the author wrote them. */
+    records: readonly ProtocolRecord[];
+    /** The implementation block, UNGROUNDED on the statement route. Implies
+     * a single protocol in `records`. */
+    impl: Record<string, Expression | JSImplementation> | undefined;
+    block?: Expression;
+    fromStatementRoute?: boolean;
+  }
+): ConformanceProblem | null {
+  const { host, target, targetKey, targetSource, params, records, impl } =
+    input;
+  const statement = impl === undefined ? undefined : records[0];
+
+  // The expansion: the closure of each protocol the conformance names, in
+  // closure order, each protocol once.
+  const written = new Set<ProtocolRecord>(records);
+  const order: ProtocolRecord[] = [];
+  const seen = new Set<string>();
+  for (const r of records) {
+    const closure = protocolClosure(ce, r.name);
+    // A protocol replacement may have left one member name declared twice in
+    // this closure (it reports that at the end of its batch); until then the
+    // split of a block is not defined.
+    if (closure.length > 1) {
+      const conflict = closureMemberConflict(ce, r.name, r.members, r.extends);
+      if (conflict !== null)
+        return {
+          code: 'protocol-extends-member-conflict',
+          message: `\`${targetKey}\` cannot conform to \`${r.name}\`: ${extendsMemberConflictMessage(r.name, conflict)}`,
+        };
+    }
+    for (const name of closure) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const record = registryRecord(ce, name);
+      if (record !== undefined) order.push(record);
+    }
+  }
+
+  // The split of the block into one part per protocol of the closure. A key
+  // that no protocol of the closure declares stays in the statement
+  // protocol's part, whose validation reports it as an unknown member.
+  const parts = new Map<
+    ProtocolRecord,
+    Record<string, Expression | JSImplementation>
+  >();
+  let closureContext: ClosureContext | undefined;
+  if (statement !== undefined) {
+    if (order.length === 1) parts.set(statement, impl!);
+    else {
+      const declarer = new Map<string, ProtocolRecord>();
+      for (const r of order)
+        for (const member of Object.keys(r.members)) declarer.set(member, r);
+      closureContext = {
+        statement: statement.name,
+        members: [...declarer.keys()],
+      };
+      for (const key of Object.keys(impl!)) {
+        const owner = declarer.get(memberOfImplementationKey(key)) ?? statement;
+        let part = parts.get(owner);
+        if (part === undefined) {
+          part = Object.create(null) as Record<
+            string,
+            Expression | JSImplementation
+          >;
+          parts.set(owner, part);
+        }
+        part[key] = impl![key]!;
+      }
+      // The statement protocol's own edge always receives its part, even an
+      // empty one: an empty block claims the edge, as it always has.
+      if (!parts.has(statement)) parts.set(statement, Object.create(null));
+    }
+  }
+
+  // What each protocol of the expansion does.
+  const steps: ExpansionStep[] = [];
+  for (const record of order) {
+    const exact = record.conformances.find((c) => c.targetKey === targetKey);
+    const step: ExpansionStep = {
+      record,
+      written: written.has(record),
+      part: parts.get(record),
+      action: 'none',
+      exact,
+    };
+    steps.push(step);
+    if (step.written) {
+      if (exact !== undefined) {
+        // A re-declared conformance is a no-op unless a block fills or
+        // replaces the edge.
+        step.action = impl !== undefined ? 'fill' : 'none';
+        continue;
+      }
+      const narrower = narrowerDerivedEdge(
+        ce,
+        record,
+        target,
+        targetKey,
+        params
+      );
+      if (narrower !== undefined) {
+        if (narrower._authored !== undefined)
+          return narrowerAuthoredProblem(record, narrower, targetKey);
+        step.action = 'replace';
+        step.replaced = narrower;
+        continue;
+      }
+      step.action = 'new';
+      continue;
+    }
+
+    const nonEmpty =
+      step.part !== undefined && Object.keys(step.part).length > 0;
+    if (exact !== undefined) {
+      const replacesOwnPart =
+        statement !== undefined &&
+        exact._authored !== undefined &&
+        exact._via === statement.name;
+      if (nonEmpty || replacesOwnPart) {
+        step.part ??= Object.create(null);
+        step.action = 'fill';
+      } else step.part = undefined;
+      continue;
+    }
+    if (!nonEmpty) step.part = undefined;
+    const coverage = existingCoverage(ce, record, target, targetKey, params);
+    if (coverage !== undefined) {
+      if (nonEmpty && coverage.sameHead)
+        return {
+          code: 'protocol-conformance-overlap',
+          message: `\`${coverage.edge.targetKey}\` already conforms to \`${record.name}\`; its implementation of \`${Object.keys(
+            step.part!
+          )
+            .map(memberOfImplementationKey)
+            .join(
+              '`, `'
+            )}\` cannot be replaced from a conformance to \`${statement!.name}\` under the narrower clause \`${clauseToString(params!)}\``,
+        };
+      step.action = nonEmpty ? 'new' : 'none';
+      continue;
+    }
+    const narrower = narrowerDerivedEdge(ce, record, target, targetKey, params);
+    if (narrower !== undefined) {
+      if (narrower._authored !== undefined)
+        return narrowerAuthoredProblem(record, narrower, targetKey);
+      step.action = 'replace';
+      step.replaced = narrower;
+      continue;
+    }
+    step.action = 'new';
+  }
+
+  // The host route refuses to replace an implementation somebody WROTE: an
+  // AUTHORED edge, empty or not (ruling P5). An edge carrying nothing but the
+  // accessors the engine synthesized for its stored fields has no author to
+  // displace.
+  if (host)
+    for (const step of steps)
+      if (step.action === 'fill' && step.exact!._authored !== undefined)
+        return {
+          code: 'protocol-implementation-duplicate',
+          message: `the type \`${targetKey}\` already has an implementation of the \`${step.record.name}\` protocol`,
+        };
+
+  // The per-protocol pre-pass, so a rejected conformance registers nothing
+  // at all. A protocol the conformance names is always checked, as before
+  // extension existed; an ancestor only when this registration changes it.
+  for (const step of steps) {
+    if (!step.written && step.action === 'none') continue;
+    const { record } = step;
+    if (!(host && step.action === 'fill')) {
+      const headConflict = headConflictOf(
+        record,
+        target,
+        targetKey,
+        params,
+        step.replaced
+      );
+      if (headConflict !== null)
+        return { code: 'protocol-conformance-overlap', message: headConflict };
+      const conflict = overlapConflict(record, target, targetKey, params);
+      if (conflict !== null)
+        return {
+          code: 'protocol-conformance-overlap',
+          message: host
+            ? `\`${targetKey}\` overlaps \`${conflict.other}\` (meet \`${conflict.meet}\`) for the protocol \`${record.name}\`, and neither contains the other`
+            : `\`${targetKey}\` overlaps \`${conflict.other}\` (meet \`${conflict.meet}\`) for the protocol \`${record.name}\`, and neither contains the other. Conform the common supertype, or disjoint refinements, instead.`,
+        };
+    }
+    // A protocol that can modify object state is conformable only by object
+    // types. Checked in the pre-pass, so a multi-protocol `is A & B` whose
+    // second protocol gates registers nothing at all, and before
+    // `implementationProblem` because the verdict is on the (type, protocol)
+    // pair whatever the block contains.
+    const gated = mutabilityGateProblem(ce, record, target, targetSource);
+    if (gated !== null)
+      return { code: 'protocol-requires-object', message: gated };
+  }
+
+  // A second implementation block for the same (type, protocol) pair within
+  // one batch is an error; the same statement re-run in a later batch
+  // replaces the implementation. The install's batch stamp distinguishes the
+  // two. A re-registration of the same block — one statement registers up to
+  // three times per batch: the static pre-pass canonicalizes it, then the
+  // evaluation loop canonicalizes and evaluates it — is not a second block,
+  // and is a no-op for that protocol. Checked before validating the block: a
+  // second block is inadmissible whatever it contains.
+  const batch = ce._epsilBatchId;
+  if (!host && impl !== undefined && batch !== undefined) {
+    for (const step of steps) {
+      if (step.action !== 'fill' || step.part === undefined) continue;
+      const origin = step.exact!._implOrigin;
+      if (origin === undefined || origin.batch !== batch) continue;
+      if (origin.block !== input.block)
+        return {
+          code: 'protocol-implementation-duplicate',
+          message: `the type \`${targetKey}\` already has an implementation of the \`${step.record.name}\` protocol in this batch`,
+        };
+      // The canonical and evaluate handlers pass the same block object, so
+      // their repeated registration is a no-op. `fromStatementRoute` keeps
+      // this shortcut narrower than a batch-id check: a re-entrant box-route
+      // evaluation can use the same batch and object after the registry has
+      // changed, and must take the full replacement path. Requiring a real
+      // block also prevents unrelated registrations without block identity
+      // from aliasing one another.
+      if (input.fromStatementRoute === true && input.block !== undefined)
+        step.action = 'none';
+    }
+  }
+  if (steps.every((s) => s.action === 'none')) {
+    // A block-less restatement of an edge the expansion derived claims the
+    // edge: it counts as hand-written from now on, so a later wider
+    // conformance no longer replaces it (see `narrowerDerivedEdge`).
+    for (const s of steps)
+      if (s.written && s.exact !== undefined) delete s.exact._derived;
+    return null;
+  }
+
+  // Apply `Self` substitution once per part, before it is validated or
+  // stored. Every downstream consumer — validation, the effect walk,
+  // dispatch's `apply()`, the literal's own `.type` arrow — reads the stored
+  // literal with an ordinary resolver that does not know `Self`. See
+  // {@link groundedImplementationLiteral}. Then validate every part before
+  // storing anything: a rejected block must leave the previous
+  // implementation (and `pending`) untouched, so that a re-run with an
+  // edited, broken block does not destroy a working one.
+  for (const step of steps) {
+    if (step.action === 'none' || step.part === undefined) continue;
+    if (!host)
+      step.part = groundedImplementationBlock(
+        ce,
+        step.part,
+        target,
+        targetKey,
+        params
+      );
+    const failure = implementationProblem(
+      ce,
+      step.record,
+      target,
+      targetKey,
+      step.part,
+      params,
+      closureContext
+    );
+    if (failure !== null) return failure;
+  }
+
+  // Registering a conformance can WIDEN a dispatcher's DERIVED effect set (the
+  // union over the conformers of a bare requirement), and a function annotated
+  // `pure` that calls through that dispatcher then declares something that is
+  // no longer true. Such a statement is BLOCKED, not merely flagged — the same
+  // polarity as an `Assign` that violates a declared type — but the contracts
+  // can only be re-derived against the live registry, so the registration
+  // happens first and is undone if a contract no longer holds.
+  const restore = ce._protocolRegistryRollbackPoint();
+  /** The block-less edges this registration derived for an ancestor while
+   * the conformance carries a block: each must be settled at once. */
+  const derivedBlockLess: {
+    record: ProtocolRecord;
+    edge: ConformanceRecord;
+  }[] = [];
+
+  for (const step of steps) {
+    // A written step that claims an existing edge (it fills the edge, or
+    // restates it block-less) makes the edge hand-written: a later wider
+    // conformance no longer replaces it (see `narrowerDerivedEdge`). The
+    // rollback point above restores the flag.
+    if (
+      step.written &&
+      step.exact !== undefined &&
+      (step.action === 'fill' || step.action === 'none')
+    )
+      delete step.exact._derived;
+    if (step.action === 'none') continue;
+    const { record } = step;
+    let edge: ConformanceRecord;
+    if (step.action === 'fill') edge = step.exact!;
+    else {
+      // A replaced edge is removed rather than edited, so the rollback point
+      // (which copies the edge list) restores it.
+      if (step.action === 'replace') {
+        const at = record.conformances.indexOf(step.replaced!);
+        if (at >= 0) record.conformances.splice(at, 1);
+      }
+      edge = {
+        target,
+        targetKey,
+        // Settled below, once the edge exists: field backing is derived from
+        // the edge (its target's layout and its own block), and an edge with
+        // no block at all is settled by `refreshInheritedPending`.
+        pending: true,
+        declaredByStatement: !host,
+      };
+      if (params !== undefined) edge.where = params;
+      // An edge for an ancestor the author did not write is derived, with
+      // or without a block: a later wider conditional conformance to that
+      // ancestor replaces it (see `narrowerDerivedEdge`).
+      if (!written.has(record)) edge._derived = true;
+      record.conformances.push(edge);
+    }
+    if (step.part !== undefined) {
+      edge._authored = step.part;
+      edge.impl = step.part;
+      // The stamp rides with the implementation: an install from outside a
+      // batch leaves it unstamped and replaces freely. The host route never
+      // stamps.
+      if (!host) {
+        if (batch === undefined) delete edge._implOrigin;
+        else edge._implOrigin = { batch, block: input.block };
+      }
+      // Field backing is settled against the edge as it now stands: the
+      // block just installed replaces whatever accessors the engine had
+      // synthesized, and a property the block does not implement may be
+      // covered by a stored field of the same name.
+      edge.pending = !settleFieldBacking(ce, record, edge);
+      // Whatever a previous re-settlement recorded about this edge is now out
+      // of date: the block just installed is the new answer. Cleared BEFORE
+      // the call, because `noteEdgePendingReason` deliberately leaves an
+      // existing reason alone when it is not itself re-settling — otherwise a
+      // block that fixes some but not all of the requirements would leave the
+      // edge pending while still quoting the layout or signature problem the
+      // author has just addressed.
+      delete edge._pendingReason;
+      noteEdgePendingReason(ce, record, edge, null);
+    } else if (statement !== undefined) derivedBlockLess.push({ record, edge });
+    // The statement protocol that installed the part. A block-less
+    // conformance never sets or clears it.
+    if (statement !== undefined) {
+      if (record === statement) delete edge._via;
+      else edge._via = statement.name;
+    }
+    // The new edge may inherit an implementation registered for a supertype,
+    // and (with a block of its own) may fulfil impl-less subtype edges.
+    refreshInheritedPending(ce, record);
+    // A conformance addition must invalidate cached static-dispatch
+    // decisions, so it is a `config` event (all axes), not a `declare`.
+    ce._noteStateEvent({ kind: 'config' });
+    ce._noteConformanceRegistryChange();
+  }
+
+  // An ancestor whose part is empty must be complete on the spot when the
+  // conformance carries a block: the author wrote the implementation, and a
+  // member of an ancestor left out of it is a hole, not a forward
+  // declaration.
+  for (const { record, edge } of derivedBlockLess) {
+    if (!edge.pending) continue;
+    restore();
+    const missing = missingRequirements(record, edge.impl);
+    return {
+      code: 'protocol-implementation-missing',
+      message: `the \`${record.name}\` protocol, which \`${statement!.name}\` extends, expects a definition of \`${(missing.length > 0 ? missing : Object.keys(record.members)).join('`, `')}\``,
+    };
+  }
+
+  const violations = conformanceWideningViolations(ce);
+  if (violations.length > 0) {
+    // The rollback thunk emits its own `config` state event and bumps the
+    // conformance version when it restores anything, so the unions derived
+    // while the registration stood are not served to the restored world.
+    // Nothing is emitted here on top of that.
+    restore();
+    return {
+      code: 'conformance-widens-declared-contract',
+      message: wideningRejectionMessage(violations),
+    };
+  }
+  return null;
+}
+
+/** `protocol-conformance-overlap` for a wider conformance declared after a
+ * narrower one that an extending protocol derived WITH an implementation.
+ *
+ * The second message, for an edge without a `_via` stamp, is a defensive
+ * fallback that no path reaches today: a derived edge receives an authored
+ * part only from a statement with a block, which stamps `_via`, and a block
+ * of the ancestor protocol itself is a written step, which clears
+ * `_derived`, so the edge is no longer derived and this function is not
+ * called for it. */
+function narrowerAuthoredProblem(
+  record: ProtocolRecord,
+  narrower: ConformanceRecord,
+  targetKey: string
+): ConformanceProblem {
+  const via = narrower._via;
+  return {
+    code: 'protocol-conformance-overlap',
+    message:
+      via !== undefined
+        ? `\`${narrower.targetKey}\` already conforms to \`${record.name}\` with an implementation given in a conformance to \`${via}\`; the wider conformance \`${targetKey}\` must be declared before the conformance to \`${via}\` (in a new engine if the program already ran)`
+        : `\`${narrower.targetKey}\` already conforms to \`${record.name}\` with an implementation; the wider conformance \`${targetKey}\` must be declared before it (in a new engine if the program already ran)`,
+  };
+}
+
+/**
+ * Give every conformer of the replaced protocol `q` a conformance to each
+ * protocol of `added`, the ancestors the replacement ADDS to its closure, so
+ * that a type that conforms to `q` conforms to every ancestor of `q`.
+ *
+ * For each edge of `q` (conditional edges and the per-variant edges of a sum
+ * included) and each added ancestor: nothing when the target already
+ * conforms or has a pending edge for it (see {@link existingCoverage});
+ * otherwise a block-less edge with the same target and clause, stamped
+ * `_via: q`. Each new edge passes the per-protocol pre-pass
+ * (`conformanceTargetProblem`, `headConflictOf`, `overlapConflict`), and a
+ * problem is returned for the caller to refuse the replacement. The mutability
+ * gate does not refuse: a value-type conformer of an object-only ancestor
+ * leaves its edge pending with the gate's reason, as a replacement that makes
+ * a protocol object-only does. An edge left pending otherwise says why.
+ *
+ * Returns the refusal, or `null`. The caller restores the registry.
+ */
+function deriveAddedAncestorEdges(
+  ce: IComputeEngine,
+  q: ProtocolRecord,
+  added: readonly string[]
+): ProtocolDeclarationError | null {
+  for (const name of added) {
+    if (name === q.name) continue;
+    const ancestor = registryRecord(ce, name);
+    if (ancestor === undefined) continue;
+    const derived: ConformanceRecord[] = [];
+    for (const e of [...q.conformances]) {
+      if (ancestor.conformances.some((c) => c.targetKey === e.targetKey))
+        continue;
+      if (
+        existingCoverage(ce, ancestor, e.target, e.targetKey, e.where) !==
+        undefined
+      )
+        continue;
+      const problem = conformanceTargetProblem(
+        e.target,
+        e.targetKey,
+        [ancestor.name],
+        e.where !== undefined
+      );
+      if (problem !== null)
+        return new ProtocolDeclarationError(
+          'protocol-conformance-target-invalid',
+          problem
+        );
+      const headConflict = headConflictOf(
+        ancestor,
+        e.target,
+        e.targetKey,
+        e.where
+      );
+      if (headConflict !== null)
+        return new ProtocolDeclarationError(
+          'protocol-conformance-overlap',
+          `\`${q.name}\` cannot extend \`${ancestor.name}\`: ${headConflict}`
+        );
+      const conflict = overlapConflict(
+        ancestor,
+        e.target,
+        e.targetKey,
+        e.where
+      );
+      if (conflict !== null)
+        return new ProtocolDeclarationError(
+          'protocol-conformance-overlap',
+          `\`${q.name}\` cannot extend \`${ancestor.name}\`: its conformer \`${e.targetKey}\` overlaps \`${conflict.other}\` (meet \`${conflict.meet}\`) for the protocol \`${ancestor.name}\`, and neither contains the other`
+        );
+      const edge: ConformanceRecord = {
+        target: e.target,
+        targetKey: e.targetKey,
+        pending: true,
+        declaredByStatement: e.declaredByStatement,
+        _via: q.name,
+        _derived: true,
+      };
+      if (e.where !== undefined) edge.where = e.where;
+      ancestor.conformances.push(edge);
+      derived.push(edge);
+      // The coverage test of the next edge may ask the conformance oracle,
+      // whose answers are keyed on the registry version.
+      ce._noteConformanceRegistryChange();
+    }
+    if (derived.length === 0) continue;
+    refreshInheritedPending(ce, ancestor);
+    for (const edge of derived)
+      if (edge.pending)
+        edge._pendingReason =
+          mutabilityGateProblem(ce, ancestor, edge.target, edge.targetKey) ??
+          `\`${edge.targetKey}\` conforms to \`${q.name}\`, which now extends \`${ancestor.name}\``;
+  }
+  return null;
+}
+
 /**
  * Register the conformance of `targetSource` to each of `protocolNames`,
  * optionally with an implementation block.
@@ -1024,191 +2108,22 @@ export function declareConformance(
       ? typeToString(target)
       : `${typeToString(target)} where ${clauseToString(params)}`;
 
-  // Validate the overlap rules against every protocol first, so a rejected
-  // multi-protocol conformance registers nothing at all.
-  for (const record of records) {
-    const headConflict = headConflictOf(record, target, targetKey, params);
-    if (headConflict !== null)
-      return ce.error(['protocol-conformance-overlap', headConflict]);
-    const conflict = overlapConflict(record, target, targetKey, params);
-    if (conflict !== null)
-      return ce.error([
-        'protocol-conformance-overlap',
-        `\`${targetKey}\` overlaps \`${conflict.other}\` (meet \`${conflict.meet}\`) for the protocol \`${record.name}\`, and neither contains the other. Conform the common supertype, or disjoint refinements, instead.`,
-      ]);
-    // A protocol that can modify object state is
-    // conformable only by object types. Checked here, in the per-protocol
-    // pre-pass, so a multi-protocol `is A & B` whose second arm gates
-    // registers nothing at all. Check before `implementationProblem` because
-    // the verdict is on the (type, protocol) pair whatever the block contains.
-    const gated = mutabilityGateProblem(ce, record, target, targetSource);
-    if (gated !== null) return ce.error(['protocol-requires-object', gated]);
-  }
-
-  // A second implementation block for the same (type, protocol) pair within one
-  // batch is an error; the same statement re-run in a later batch replaces the
-  // implementation. The install's batch stamp distinguishes the two. A
-  // re-registration of the same block — one
-  // statement registers up to three times per batch: the static pre-pass
-  // canonicalizes it, then the evaluation loop canonicalizes and evaluates it
-  // — is not a second block. Check before validating the block: a second
-  // block is inadmissible whatever it contains. `impl` implies a single
-  // protocol (checked above).
-  const batch = ce._epsilBatchId;
-  if (impl !== undefined && batch !== undefined) {
-    const origin = records[0]!.conformances.find(
-      (c) => c.targetKey === targetKey
-    )?._implOrigin;
-    if (
-      origin !== undefined &&
-      origin.batch === batch &&
-      origin.block !== options?.block
-    )
-      return ce.error([
-        'protocol-implementation-duplicate',
-        `the type \`${targetKey}\` already has an implementation of the \`${records[0]!.name}\` protocol in this batch`,
-      ]);
-    // The canonical and evaluate handlers pass the same block object, so their
-    // repeated registration is a no-op. `fromStatementRoute` keeps this shortcut
-    // narrower than a batch-id check: a re-entrant box-route evaluation can use
-    // the same batch and object after the registry has changed, and must take
-    // the full replacement path. Requiring a real block also prevents unrelated
-    // registrations without block identity from aliasing one another.
-    if (
-      options?.fromStatementRoute === true &&
-      origin !== undefined &&
-      origin.batch === batch &&
-      options.block !== undefined &&
-      origin.block === options.block
-    )
-      return null;
-  }
-
-  // Apply `Self` substitution once, before the block is validated or stored.
-  // Every downstream consumer — validation, the
-  // effect walk, dispatch's `apply()`, the literal's own `.type` arrow — reads
-  // the stored literal with an ordinary resolver that does not know `Self`.
-  // See {@link groundedImplementationLiteral}.
-  if (impl !== undefined)
-    impl = groundedImplementationBlock(ce, impl, target, targetKey, params);
-
-  // Validate the implementation block before storing anything: a
-  // rejected block must leave the previous implementation (and `pending`)
-  // untouched, so that a re-run with an edited, broken block does not destroy
-  // a working one. `impl` implies a single protocol (checked above).
-  if (impl !== undefined) {
-    const failure = implementationProblem(
-      ce,
-      records[0]!,
-      target,
-      targetKey,
-      impl,
-      params
-    );
-    if (failure !== null)
-      return ce.error([
-        failure.code,
-        ...(failure.errorArgs ?? [failure.message]),
-      ] as [string, string, ...string[]]);
-  }
-
-  // Registering a conformance can WIDEN a dispatcher's DERIVED effect set (the
-  // union over the conformers of a bare requirement), and a function annotated
-  // `pure` that calls through that dispatcher then declares something that is
-  // no longer true. Such a statement is BLOCKED, not merely flagged — the same
-  // polarity as an `Assign` that violates a declared type — but the contracts
-  // can only be re-derived against the live registry, so the registration
-  // happens first and is undone if it turns out to have falsified one
-  // if a contract no longer holds.
-  const restore = ce._protocolRegistryRollbackPoint();
-  /** Did the loop below actually change the registry? A re-declared
-   * conformance with no implementation block is a no-op, and re-deriving every
-   * declared contract for it would be pure cost. */
-  let mutated = false;
-
-  for (const record of records) {
-    const existing = record.conformances.find((c) => c.targetKey === targetKey);
-    if (existing !== undefined) {
-      // A re-declared conformance is a no-op unless an implementation block
-      // fulfils a pending edge by covering the
-      // requirements.
-      if (impl !== undefined) {
-        mutated = true;
-        existing._authored = impl;
-        existing.impl = impl;
-        // The stamp rides with the implementation: an install from outside a
-        // batch leaves it unstamped and replaces freely.
-        if (batch === undefined) delete existing._implOrigin;
-        else existing._implOrigin = { batch, block: options?.block };
-        // Field backing is settled against the edge as it now stands: the
-        // block just installed replaces whatever accessors the engine had
-        // synthesized, and a property the block does not implement may be
-        // covered by a stored field of the same name.
-        existing.pending = !settleFieldBacking(ce, record, existing);
-        // Whatever a previous re-settlement recorded about this edge is now out
-        // of date: the block just installed is the new answer. Cleared BEFORE
-        // the call, because `noteEdgePendingReason` deliberately leaves an
-        // existing reason alone when it is not itself re-settling — otherwise a
-        // block that fixes some but not all of the requirements would leave the
-        // edge pending while still quoting the layout or signature problem the
-        // author has just addressed.
-        delete existing._pendingReason;
-        noteEdgePendingReason(ce, record, existing, null);
-        // The new implementation may also fulfil the impl-less edges of the
-        // target's SUBTYPES, which inherit it.
-        refreshInheritedPending(ce, record);
-        ce._noteStateEvent({ kind: 'config' });
-        ce._noteConformanceRegistryChange();
-      }
-      continue;
-    }
-    const conformance: ConformanceRecord = {
-      target,
-      targetKey,
-      // Settled below, once the edge exists: field backing is derived from the
-      // edge (its target's layout and its own block), and an edge with no
-      // block at all is settled by `refreshInheritedPending`.
-      pending: true,
-      declaredByStatement: true,
-    };
-    if (params !== undefined) conformance.where = params;
-    if (impl !== undefined) {
-      conformance._authored = impl;
-      conformance.impl = impl;
-      if (batch !== undefined)
-        conformance._implOrigin = { batch, block: options?.block };
-    }
-    record.conformances.push(conformance);
-    if (impl !== undefined) {
-      conformance.pending = !settleFieldBacking(ce, record, conformance);
-      noteEdgePendingReason(ce, record, conformance, null);
-    }
-    mutated = true;
-    // The new edge may inherit an implementation registered for a supertype,
-    // and (with a block of its own) may fulfil impl-less subtype edges.
-    refreshInheritedPending(ce, record);
-    // A conformance addition must invalidate cached static-dispatch
-    // decisions, so it is a `config` event (all axes), not a `declare`.
-    ce._noteStateEvent({ kind: 'config' });
-    ce._noteConformanceRegistryChange();
-  }
-
-  if (mutated) {
-    const violations = conformanceWideningViolations(ce);
-    if (violations.length > 0) {
-      // The rollback thunk emits its own `config` state event and bumps the
-      // conformance version when it restores anything, so the unions derived
-      // while the registration stood are not served to the restored world.
-      // Nothing is emitted here on top of that.
-      restore();
-      return ce.error([
-        'conformance-widens-declared-contract',
-        wideningRejectionMessage(violations),
-      ]);
-    }
-  }
-
-  return null;
+  const failure = registerConformance(ce, {
+    host: false,
+    target,
+    targetKey,
+    targetSource,
+    params,
+    records,
+    impl,
+    block: options?.block,
+    fromStatementRoute: options?.fromStatementRoute,
+  });
+  if (failure === null) return null;
+  return ce.error([
+    failure.code,
+    ...(failure.errorArgs ?? [failure.message]),
+  ] as [string, string, ...string[]]);
 }
 
 /**
@@ -1342,6 +2257,19 @@ export function refreshSumConformances(
     if (entry === undefined) continue;
     for (const variant of variants) {
       if (record.conformances.some((c) => c.targetKey === variant)) continue;
+      // The registration expands over the closure of the protocol as it
+      // stands NOW (an ancestor a replacement added since the statement ran
+      // is covered), and may install a part on an edge of each ancestor. The
+      // batch stamps it finds are remembered, so that only the stamps this
+      // registration installs are removed below.
+      const closure = protocolClosure(ce, record.name)
+        .map((name) => registryRecord(ce, name))
+        .filter((r): r is ProtocolRecord => r !== undefined);
+      const edgeOf = (r: ProtocolRecord) =>
+        r.conformances.find((c) => c.targetKey === variant);
+      const stampsBefore = new Map(
+        closure.map((r) => [r, edgeOf(r)?._implOrigin] as const)
+      );
       const failure = declareConformance(
         ce,
         variant,
@@ -1361,8 +2289,13 @@ export function refreshSumConformances(
       // that same batch would be read as a second block for the pair and
       // reported as `protocol-implementation-duplicate` — which is what a
       // notebook cell that grows the sum and restates its conformance does.
-      const edge = record.conformances.find((c) => c.targetKey === variant);
-      if (edge !== undefined) delete edge._implOrigin;
+      // The same holds for every edge of an ancestor that received a part.
+      for (const r of closure) {
+        const edge = edgeOf(r);
+        if (edge === undefined || edge._implOrigin === undefined) continue;
+        if (r === record || edge._implOrigin !== stampsBefore.get(r))
+          delete edge._implOrigin;
+      }
     }
   }
 }
@@ -2528,10 +3461,14 @@ function headConflictOf(
   record: ProtocolRecord,
   target: Type,
   targetKey: string,
-  params: readonly TypeParameter[] | undefined
+  params: readonly TypeParameter[] | undefined,
+  /** An edge the new conformance replaces, which therefore cannot conflict
+   * with it (see `narrowerDerivedEdge`). */
+  replaced?: ConformanceRecord
 ): string | null {
   const head = headKeyOf(target);
   for (const c of record.conformances) {
+    if (c === replaced) continue;
     if (c.targetKey === targetKey) continue; // A duplicate, handled by caller.
     if (params === undefined && c.where === undefined) continue; // Checked by overlapConflict.
     if (headKeyOf(c.target) !== head) continue;
@@ -3177,13 +4114,16 @@ function suggestMemberName(
 function unknownMemberProblem(
   protocol: string,
   spelled: string,
-  candidates: readonly string[]
+  candidates: readonly string[],
+  /** Appended to "the `P` protocol" when the candidates are the members of
+   * the whole closure of `P`. */
+  scope = ''
 ): ImplementationProblem {
   const suggestion = suggestMemberName(spelled, candidates);
   return {
     code: 'protocol-member-unknown',
     message:
-      `\`${spelled}\` is not a member of the \`${protocol}\` protocol.` +
+      `\`${spelled}\` is not a member of the \`${protocol}\` protocol${scope}.` +
       (suggestion !== undefined ? ` Did you mean \`${suggestion}\`?` : ''),
   };
 }
@@ -3214,10 +4154,25 @@ function implementationProblem(
   target: Type,
   targetKey: string,
   impl: Record<string, Expression | JSImplementation>,
-  params?: readonly TypeParameter[]
+  params?: readonly TypeParameter[],
+  /** Present when `impl` is the part of a block for one protocol of the
+   * closure of a statement protocol with ancestors: the diagnostics then
+   * name the statement protocol, and an unknown member is matched against
+   * every member of the closure. */
+  closure?: ClosureContext
 ): ImplementationProblem | null {
   const members = record.members;
   const memberNames = Object.keys(members);
+  /** Names the protocol in an unknown-member or missing-member message. */
+  const unknownMember = (spelled: string): ImplementationProblem =>
+    closure === undefined
+      ? unknownMemberProblem(record.name, spelled, memberNames)
+      : unknownMemberProblem(
+          closure.statement,
+          spelled,
+          closure.members,
+          ' or of the protocols it extends'
+        );
   // Which property requirements the target's stored fields answer on their own
   // (Appendix B), read BEFORE the conditional widening below rewrites
   // `target`. Two verdicts come out of it: a name declared as both a stored
@@ -3337,16 +4292,14 @@ function implementationProblem(
           code: 'protocol-member-unknown',
           message: `\`${member}\` is a ${requirement.kind} PROPERTY of the \`${record.name}\` protocol, not a function; implement it with \`get ${member}(…)\``,
         };
-      if (requirement === undefined)
-        return unknownMemberProblem(record.name, member, memberNames);
+      if (requirement === undefined) return unknownMember(member);
     } else {
       if (requirement?.kind === 'function')
         return {
           code: 'protocol-member-unknown',
           message: `\`${member}\` is a FUNCTION member of the \`${record.name}\` protocol, not a property; implement it with \`function ${member}(…)\``,
         };
-      if (requirement === undefined)
-        return unknownMemberProblem(record.name, member, memberNames);
+      if (requirement === undefined) return unknownMember(member);
       // A `readonly` property has no `set` handler to implement.
       if (accessor === 'set' && requirement.kind === 'readonly')
         return {
@@ -3529,11 +4482,22 @@ function implementationProblem(
   if (missing.length > 0)
     return {
       code: 'protocol-implementation-missing',
-      message: `the \`${record.name}\` protocol expects a definition of \`${missing.join('`, `')}\``,
+      message:
+        closure === undefined || closure.statement === record.name
+          ? `the \`${record.name}\` protocol expects a definition of \`${missing.join('`, `')}\``
+          : `the \`${record.name}\` protocol, which \`${closure.statement}\` extends, expects a definition of \`${missing.join('`, `')}\``,
     };
 
   return null;
 }
+
+/** See the `closure` parameter of {@link implementationProblem}. */
+type ClosureContext = {
+  /** The statement protocol. */
+  statement: string;
+  /** Every member name of its closure. */
+  members: readonly string[];
+};
 
 /** `compare`, `get hash`, `set name` — how a member is spelled in a
  * diagnostic. */
@@ -3636,17 +4600,9 @@ export function declareProtocolImplementationImpl(
     throw Error(
       `protocol-implementation-duplicate: the type \`${targetKey}\` already has an implementation of the \`${protocolName}\` protocol`
     );
-
-  if (existing === undefined) {
-    const headConflict = headConflictOf(record, target, targetKey, params);
-    if (headConflict !== null)
-      throw Error(`protocol-conformance-overlap: ${headConflict}`);
-    const conflict = overlapConflict(record, target, targetKey, params);
-    if (conflict !== null)
-      throw Error(
-        `protocol-conformance-overlap: \`${targetKey}\` overlaps \`${conflict.other}\` (meet \`${conflict.meet}\`) for the protocol \`${protocolName}\`, and neither contains the other`
-      );
-  }
+  // The overlap rules (`headConflictOf`, `overlapConflict`) are checked by
+  // `registerConformance` below, for this protocol and for each ancestor that
+  // the registration changes.
 
   // The three buckets flatten onto the internal keys — the `__get__x` /
   // `__set__x` mangling is not part of the public surface.
@@ -3672,76 +4628,27 @@ export function declareProtocolImplementationImpl(
   for (const [name, fn] of Object.entries(impl.setters ?? {}))
     add(`${SET_PREFIX}${name}`, fn);
 
-  const failure = implementationProblem(
-    ce,
-    record,
-    target,
-    targetKey,
-    members,
-    params
-  );
-  if (failure !== null) throw Error(`${failure.code}: ${failure.message}`);
-
-  // The declared-contract widening guard, exactly as on the statement route
-  // (see {@link conformanceWideningViolations} and the rollback comment in
-  // `declareConformance`): the contracts can only be re-derived against the
-  // live registry, so the registration happens and is undone if it falsified
-  // one. This route reports by THROWING, its error convention throughout.
-  const restore = ce._protocolRegistryRollbackPoint();
-
-  if (existing !== undefined) {
-    existing._authored = members;
-    existing.impl = members;
-    // The block was validated as complete above, but a property requirement it
-    // leaves to a stored field still needs its synthesized accessors installed
-    // before anything can dispatch to it (Appendix B).
-    existing.pending = !settleFieldBacking(ce, record, existing);
-    // Whatever a previous re-settlement recorded about this edge is now out of
-    // date: the block just installed is the new answer. See the same two
-    // deletions on the statement route in `declareConformance`.
-    delete existing._pendingReason;
-    noteEdgePendingReason(ce, record, existing, null);
-  } else {
-    const edge: ConformanceRecord = {
-      target,
-      targetKey,
-      _authored: members,
-      impl: members,
-      pending: false,
-      declaredByStatement: false,
-    };
-    if (params !== undefined) edge.where = params;
-    record.conformances.push(edge);
-    edge.pending = !settleFieldBacking(ce, record, edge);
-    noteEdgePendingReason(ce, record, edge, null);
-  }
-  // The implementation may fulfil the impl-less edges of the target's
-  // SUBTYPES, which inherit it.
-  refreshInheritedPending(ce, record);
-  // P16 — a conformance addition (and an implementation) invalidates cached
-  // static-dispatch decisions: a `config` event, all axes.
-  ce._noteStateEvent({ kind: 'config' });
-  ce._noteConformanceRegistryChange();
-
-  // This check cannot currently fire through this route's OWN inputs: a
-  // `ProtocolImplementationInput` carries host callbacks only, and a host
+  // The registration, its validation and the declared-contract widening
+  // guard are those of the statement route (see `registerConformance`),
+  // including the expansion over the ancestors of the protocol. This route
+  // reports by THROWING, its error convention throughout.
+  //
+  // The widening check cannot currently fire through this route's OWN inputs:
+  // a `ProtocolImplementationInput` carries host callbacks only, and a host
   // callback contributes the empty set to a bare requirement's derived union
   // (see {@link derivedDispatcherEffects}), so nothing registered here widens
   // a dispatcher. It is kept because the guard belongs to the REGISTRATION,
-  // not to the shape of one route's argument: the day
-  // `ProtocolImplementationInput` admits an EXPRESSION implementation — the
-  // only thing separating this route from the statement one, which does widen
-  // — the check would otherwise be silently absent, with nothing failing to
-  // signal it.
-  const violations = conformanceWideningViolations(ce);
-  if (violations.length > 0) {
-    // The rollback thunk emits its own `config` event and bumps the
-    // conformance version, so nothing is emitted here on top of it.
-    restore();
-    throw Error(
-      `conformance-widens-declared-contract: ${wideningRejectionMessage(violations)}`
-    );
-  }
+  // not to the shape of one route's argument.
+  const failure = registerConformance(ce, {
+    host: true,
+    target,
+    targetKey,
+    targetSource,
+    params,
+    records: [record],
+    impl: members,
+  });
+  if (failure !== null) throw Error(`${failure.code}: ${failure.message}`);
 }
 
 //
@@ -4961,14 +5868,46 @@ export function qualifiedMemberRequirementShape(
   return requirementShape(ce, record, member);
 }
 
-/** The value of `P.m`: a function literal that dispatches inside `P` only. */
+/**
+ * The error of a QUALIFIED name `P.m` (a call, a value, or a property read
+ * or write) whose member `m` the protocol `P` does not declare. A qualified
+ * name names only a member that `P` itself declares: its value dispatches
+ * inside `P` only, over the edges of `P`, and an inherited member would need
+ * the edges of the ancestor restricted to the conformers of `P`, which no
+ * reader of the registry computes. When an ancestor of `P` declares `m`, the
+ * error is `protocol-member-unknown` and says which qualified name to write
+ * (`PartialOrder.compare` for `FloorRing.compare`); otherwise it is the
+ * ordinary `unknown-field`.
+ */
+function qualifiedMemberError(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  member: string
+): Expression {
+  for (const name of closureOfParents(ce, record.extends)) {
+    if (registryRecord(ce, name)?.members[member] === undefined) continue;
+    return ce.error([
+      'protocol-member-unknown',
+      `\`${member}\` is a member of \`${name}\`, which \`${record.name}\` extends; write \`${name}.${member}\``,
+    ]);
+  }
+  return ce.error(['unknown-field', member], record.name);
+}
+
+/** The value of `P.m`: a function literal that dispatches inside `P` only.
+ * `undefined` when `m` is not a function member of `P`, except that a member
+ * an ancestor of `P` declares gives the error of
+ * {@link qualifiedMemberError}. */
 export function protocolMemberValue(
   ce: IComputeEngine,
   record: ProtocolRecord,
   member: string
 ): Expression | undefined {
   const shape = requirementShape(ce, record, member);
-  if (shape === null) return undefined;
+  if (shape === null)
+    return record.members[member] === undefined && record.extends.length > 0
+      ? qualifiedMemberError(ce, record, member)
+      : undefined;
   const arity = shape.args?.length ?? 0;
   const params = parameterNames(shape, arity);
   return ce.box([
@@ -5022,6 +5961,8 @@ export function evaluateProtocolMember(
       'protocol-unknown',
       `the protocol \`${parts.protocol}\` is unknown`,
     ]);
+  if (record.members[parts.member] === undefined)
+    return qualifiedMemberError(ce, record, parts.member);
   if (record.members[parts.member]?.kind !== 'function')
     return ce.error(['unknown-field', parts.member], parts.protocol);
   return dispatchMember(ce, parts.member, record, parts.args, options);
@@ -5697,7 +6638,9 @@ export function evaluateProtocolPropertyOperator(
       `the protocol \`${parts.protocol}\` is unknown`,
     ]);
   const requirement = record.members[parts.name];
-  if (requirement === undefined || requirement.kind === 'function')
+  if (requirement === undefined)
+    return qualifiedMemberError(ce, record, parts.name);
+  if (requirement.kind === 'function')
     return ce.error(['unknown-field', parts.name], record.name);
 
   if (parts.value === undefined) {
@@ -5983,7 +6926,8 @@ export function protocolNamedPropertyRefusal(
       `the protocol \`${protocol}\` is unknown`,
     ]);
   const requirement = record.members[name];
-  if (requirement === undefined || requirement.kind === 'function')
+  if (requirement === undefined) return qualifiedMemberError(ce, record, name);
+  if (requirement.kind === 'function')
     return ce.error(['unknown-field', name], record.name);
   return undefined;
 }

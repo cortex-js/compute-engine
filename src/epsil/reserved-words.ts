@@ -81,6 +81,19 @@ export const HARD_RESERVED_WORDS: ReadonlySet<string> = new Set<string>([
 ]);
 
 /**
+ * The statement heads that are CONTEXTUAL rather than reserved (`let type =
+ * 5` parses, so they are ordinary identifiers everywhere else). A protocol
+ * conformance tail and an `extends` parent list refuse them unquoted: the
+ * parser reads one there as a missing protocol name. The serializer therefore
+ * prints a protocol name in those positions in the verbatim form.
+ */
+export const CONTEXTUAL_STATEMENT_WORDS: ReadonlySet<string> = new Set<string>([
+  'let',
+  'type',
+  'alias',
+]);
+
+/**
  * Every word the language reserves the right to claim. Only the members of
  * `HARD_RESERVED_WORDS` are rejected today; the rest are ordinary identifiers
  * (see the module comment). Mirrored by `docs/literals.md`.

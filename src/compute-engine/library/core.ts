@@ -273,6 +273,7 @@ import {
   evaluateProtocolMember,
   evaluateProtocolPropertyOperator,
   isProtocolDispatcher,
+  ProtocolDeclarationError,
   protocolMemberResultType,
   protocolNamedPropertyRefusal,
   protocolPropertyStore,
@@ -4621,11 +4622,18 @@ function rawDictionaryEntries(
  * The members ride as a dictionary of `member -> ["Pair", kind, signature]`,
  * with the signature as SOURCE TEXT parsed here (so `Self` handling stays
  * engine-side, P11/P12).
+ *
+ * The optional third operand is the PARENT list, `["List", parent, …]`, of a
+ * protocol that extends other protocols (`protocol LinearOrder extends
+ * PartialOrder { … }`). The members operand is then required, so the
+ * position of the parents is fixed: `["Dictionary"]` for a protocol with no
+ * members of its own.
  */
 function declareProtocolStatement(
   ce: ComputeEngine,
   nameOp: Expression | undefined,
   membersOp: Expression | undefined,
+  parentsOp: Expression | undefined,
   /** See `declareTypeStatement`'s parameter of the same name. */
   onStatementRoute: boolean
 ): Expression | null {
@@ -4690,15 +4698,34 @@ function declareProtocolStatement(
     }
   }
 
+  let parents: string[] | undefined;
+  if (parentsOp !== undefined) {
+    const names = isFunction(parentsOp, 'List')
+      ? parentsOp.ops.map((op) => declarationName(op))
+      : undefined;
+    if (names === undefined || names.some((p) => p === undefined))
+      return ce.error(
+        [
+          'invalid-protocol-declaration',
+          `Expected the parents of \`${name}\` as \`["List", parent, …]\``,
+        ],
+        name
+      );
+    parents = names as string[];
+  }
+
   // Errors are values: a malformed signature must not throw to the host.
   try {
     declareProtocolImpl(ce, name, members, {
       fromStatement: true,
       origin: statementOrigin(ce, nameOp, onStatementRoute),
+      extends: parents,
     });
   } catch (e) {
     if (e instanceof RedefinitionError)
       return ce.error([e.code, e.message], e.declaredName);
+    if (e instanceof ProtocolDeclarationError)
+      return ce.error([e.code, e.detail], name);
     return ce.error(
       [
         'invalid-protocol-declaration',
@@ -7660,11 +7687,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'with the signature as a type-expression string. A `function` ' +
         "member's first parameter must be typed `Self`, the substitution " +
         'token standing for the conforming type. A protocol with no members ' +
-        'is a SEMANTIC protocol (a marker). Evaluates to `Nothing`.',
+        'is a SEMANTIC protocol (a marker). An optional third operand ' +
+        '`["List", parent, …]` names the protocols this one EXTENDS: a type ' +
+        'that conforms to it conforms to each of them, and its ' +
+        'implementation block may implement their members. The members ' +
+        'operand is then required (`["Dictionary"]` when there are none). ' +
+        'Evaluates to `Nothing`.',
       lazy: true,
       // Introduces an engine-global declaration that outlives the
       // application: the `scope` label (see `DeclareType`).
-      signature: '(symbol|string, members: dictionary<any>?) scope -> nothing',
+      signature:
+        '(symbol|string, members: dictionary<any>?, parents: any?) scope -> nothing',
       examples: [
         'protocol Area { function area(self: Self) -> number }\ntype square = tuple<side: number> is Area {\n  function area(self: square) -> number { self.side^2 }\n}\narea(square(3))',
       ],
@@ -7676,14 +7709,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // auto-declare it as a variable, and the members dictionary carries
         // `Self`-typed signatures no type resolver knows.
         const err = withStatementRoute(ce, (route) =>
-          declareProtocolStatement(ce, args[0], args[1], route)
+          declareProtocolStatement(ce, args[0], args[1], args[2], route)
         );
         if (err) return err;
         return ce._fn('DeclareProtocol', args);
       },
       evaluate: (ops, { engine: ce }) =>
         withStatementRoute(ce, (route) =>
-          declareProtocolStatement(ce, ops[0], ops[1], route)
+          declareProtocolStatement(ce, ops[0], ops[1], ops[2], route)
         ) ?? ce.Nothing,
     },
 

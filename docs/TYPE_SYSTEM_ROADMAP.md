@@ -1183,7 +1183,10 @@ protocol Comparable {
 ### Grammar
 
 ```
-protocol_decl    ::= "protocol" IDENT "{" protocol_member* "}"
+protocol_decl    ::= "protocol" IDENT ("extends" IDENT ("," IDENT)*)?
+                     "{" protocol_member* "}"     // `extends` is a soft
+                                                  // keyword, see “Protocol
+                                                  // extension”
 protocol_member  ::= "function" IDENT "(" param_list ")" "->" type
                    | ("readonly" | "readwrite") IDENT ":" type
 
@@ -1471,6 +1474,230 @@ incremental-session posture of §1):
   ordinary runtime error value (`protocol-implementation-missing`);
 - a later batch may fulfil the pending conformance with an implementation
   block, clearing the warning.
+
+### Protocol extension
+
+> Added 2026-10-31 (CE-713, GitHub issue #491). Design and decision record:
+> `docs/plans/2026-10-31-protocol-refinement.md`, rules R1–R10.
+
+A protocol may **extend** other protocols, its *parents*. It has every
+requirement of its parents plus its own, and a type that conforms to it
+conforms to each of its ancestors. The parents follow the soft keyword
+`extends`, separated by commas (`&` stays the separator of a conformance's
+protocol names). `extends` is recognized only in this position, like `is`
+and `where`, so a symbol named `extends` stays legal everywhere else.
+
+```epsil
+protocol PartialOrder {
+  function compare(self: Self, other: Self) -> integer
+}
+protocol LinearOrder extends PartialOrder {}          // a marker may extend
+protocol FloorOrder extends PartialOrder {
+  function floor(self: Self) -> integer
+}
+protocol FloorRing extends LinearOrder, FloorOrder {}
+```
+
+MathJSON: `["DeclareProtocol", name, members, ["List", parent, …]]`. The
+members operand is required when the parent list is present
+(`["Dictionary"]` for no members), so the position of the parents is
+fixed; the two-operand form keeps its meaning, and an empty parent list is
+the same as none. Host API: `ce.declareProtocol(name, members, { extends:
+["PartialOrder"] })`.
+
+The *closure* of a protocol is its ancestors plus itself, in a depth-first
+post-order over the parent lists in their written order, each protocol at
+its first occurrence; the protocol itself comes last. The closure of
+`FloorRing` above is `PartialOrder, LinearOrder, FloorOrder, FloorRing`.
+Diagnostics list the protocols of a closure in that order.
+
+**The mechanism.** A conformance to `Q` registers one ordinary conformance
+edge on every protocol of the closure of `Q` that the target does not
+already conform to. `conformsTo`, dispatch, the `where T is P` constraint,
+the compiled dispatch planner and inheritance by subtype read these edges
+as they read any other, so `conformsTo` stays a flat lookup.
+
+**Parents first, no cycle.** A parent must be a declared protocol; a
+forward reference is refused, as for the protocol names of a conformance.
+
+```epsil
+protocol A extends Nope {}
+// -> protocol-unknown: the protocol `Nope` is unknown; declare a parent
+//    before the protocol that extends it
+protocol B extends integer {}
+// -> protocol-unknown: `integer` is a type, not a protocol
+protocol C extends PartialOrder, PartialOrder {}
+// -> invalid-protocol-declaration: `PartialOrder` is listed twice in the
+//    parents of `C`
+```
+
+A fresh declaration cannot form a cycle; a replacement can, and is refused:
+
+```epsil
+protocol PartialOrder extends FloorOrder { … }
+// -> protocol-extends-cycle: `PartialOrder` cannot extend `FloorOrder`,
+//    which already extends `PartialOrder`
+```
+
+A parent that another parent already extends is allowed: the closure is a
+set, so a diamond is harmless.
+
+**One declaring protocol per member name in a closure.** A protocol may not
+declare a member that one of its ancestors declares, and two parents whose
+closures declare the same member name cannot be extended together. Reason:
+the bare dispatcher of a member name serves every protocol that declares
+it, so a conformer of the closure would reach the member through two edges,
+and every call would be `protocol-call-ambiguous`. Two unrelated protocols
+may still share a member name (see "Dispatching").
+
+```epsil
+protocol LinearOrder extends PartialOrder {
+  function compare(self: Self, other: Self) -> integer
+}
+// -> protocol-member-inherited: `compare` is already a member of
+//    `PartialOrder`, which `LinearOrder` extends
+protocol Bad extends Comparator, FloorOrder {}   // both reach `compare`
+// -> protocol-extends-member-conflict: `compare` is declared by both
+//    `Comparator` and `PartialOrder`, and `Bad` extends both; …
+```
+
+A REPLACEMENT of a protocol that gives a DESCENDANT such a conflict (it adds
+a member that the descendant declares, or a parent whose closure declares
+what another parent of the descendant declares) is not refused at the
+statement. The conflict is recorded, and the end of EVERY later batch
+reports `protocol-extends-member-conflict`, naming the descendant, until a
+replacement resolves it. So an edited program that moves a member from `Q`
+into its parent `P` converges in one run when it declares `P` first, then
+`Q` without the member. While the conflict is recorded, a conformance
+statement to the descendant is refused with
+`protocol-extends-member-conflict`, with or without an implementation
+block.
+
+**One block implements the closure.** `type T is Q { block }`, with closure
+`P1, …, Pn, Q`, splits the block by the protocol that declares each member
+(well defined, because of the rule above) and means the same as one
+statement per protocol of the closure, with these differences: the
+statement is all or nothing (each protocol is checked before any edge is
+registered); an ancestor that `T` already conforms to (directly, through a
+supertype, or through a conditional conformance whose clause `T`
+satisfies) and whose part is empty gets no new edge; an ancestor that `T`
+does not conform to and whose part is empty gets a BLOCK-LESS edge, which
+the usual rules settle (a marker, a stored field that satisfies a
+property, a supertype's implementation later). A member that no protocol
+of the closure declares is `protocol-member-unknown`, with a suggestion
+over the whole closure. A block-less `type T is A & B` registers the union
+of the two closures; `type T is A & B { block }` stays
+`protocol-implementation-split`.
+
+```epsil
+type Money is FloorOrder {
+  function floor(self: Money) -> integer { self.cents }
+}
+// -> protocol-implementation-missing: the `PartialOrder` protocol, which
+//    `FloorOrder` extends, expects a definition of `compare`
+//    (nothing is registered)
+type Money is FloorOrder {
+  function compar(self: Money, other: Money) -> integer { 0 }
+  …
+}
+// -> protocol-member-unknown: `compar` is not a member of the `FloorOrder`
+//    protocol or of the protocols it extends. Did you mean `compare`?
+```
+
+Without a block (`type Money is FloorOrder`), each protocol of the closure
+that is still pending gets its own `protocol-implementation-pending`
+warning at the end of the batch. An ancestor that already has a PENDING
+edge (declared ahead of its implementation) stays pending: the statement
+does not take it over.
+
+**Duplicates and replacement.** A member whose declaring ancestor already
+has an implementation for the same target follows the rule of that
+ancestor's own block: a second block in the same batch is
+`protocol-implementation-duplicate`, a later batch replaces, and the host
+API (`ce.declareProtocolImplementation`) throws. Code that declared every
+ancestor by hand, parents first, keeps working: each call finds its
+ancestors already conformed to and registers only its own edge. A later
+batch that runs the same statement with an edited block replaces every
+implementation that statement installed, so a member the edited block
+drops is `protocol-implementation-missing`; an unchanged statement runs
+again without a diagnostic.
+
+**Conditional conformance.** `type list<T> is Q where T is Q { … }`
+expands in the same way, and each derived edge carries the same clause.
+The one-conditional-conformance-per-head rule applies to each derived edge.
+An ancestor that already has a conditional conformance on the same head is
+covered when its clause is IMPLIED by the new one: the heads are identical
+up to a renaming of their variables, each pair of variables has the same
+bound, and each protocol of the existing clause is in the closure of the
+new clause's protocols. The part of the block for a covered ancestor must
+be empty:
+
+```epsil
+type list<T> is PartialOrder where T is PartialOrder { … }
+type list<T> is FloorOrder where T is FloorOrder {
+  function compare(self: list<T>, other: list<T>) -> integer { 0 }
+  …
+}
+// -> protocol-conformance-overlap: `list<T> where T is PartialOrder` already
+//    conforms to `PartialOrder`; its implementation of `compare` cannot be
+//    replaced from a conformance to `FloorOrder` under the narrower clause
+//    `T is FloorOrder`
+```
+
+In the other order, the narrower conformance first, a later and wider
+conformance to the ancestor (`type list<T> is PartialOrder where T is
+PartialOrder { … }`) REPLACES the narrower edge only when the expansion
+derived that edge and the edge has no implementation of its own, whether or
+not the narrower statement had a block: the edge takes the wider clause and
+the new block. When the narrower statement implemented the
+ancestor's members itself, the wider one is refused:
+
+```epsil
+// -> protocol-conformance-overlap: `list<T> where T is FloorOrder` already
+//    conforms to `PartialOrder` with an implementation given in a
+//    conformance to `FloorOrder`; the wider conformance `list<T> where T is
+//    PartialOrder` must be declared before the conformance to `FloorOrder`
+//    (in a new engine if the program already ran)
+```
+
+A narrower conditional conformance written BY HAND
+(`type list<T> is PartialOrder where T is FloorOrder`, not derived from a
+conformance to `FloorOrder`) is not replaced: the wider one is refused by
+the one-per-head rule, as before.
+
+**Sum types.** `type shape is Q { … }` for a sum type expands per variant;
+a variant the sum gains later receives the block through the closure as it
+stands then.
+
+**A replacement can add parents, never remove one.** Running a `protocol`
+statement again replaces its members and its parent list. Every conformer
+of the protocol gets a block-less edge on each ancestor the replacement
+adds (unless it already conforms to it), with the pending reason "`T`
+conforms to `Q`, which now extends `P`" until the edge is settled. A derived
+edge that the overlap or one-per-head rule refuses refuses the whole
+replacement, and the registry is unchanged; an object-only ancestor leaves
+a value-type conformer pending, not refused. A replacement whose closure
+lacks a protocol of the previous closure is refused, the same monotonicity
+as conformance (added, never removed); it also keeps the clause
+implication above true for later declarations:
+
+```epsil
+protocol FloorOrder { function floor(self: Self) -> integer }
+// -> protocol-extends-removal: `FloorOrder` extended `PartialOrder`; an
+//    extension cannot be removed. Start a new engine to drop it
+```
+
+**Qualified names name the declaring protocol.** `P.m` names only a member
+that `P` declares itself. Reason: `P.m` dispatches inside `P` only, through
+its edges, and an inherited member would need the edges of the ancestor
+restricted to the conformers of `P`. The hint is reported when the
+qualified call, dot form or property is evaluated:
+
+```epsil
+FloorOrder.compare(a, b)            // also `a.(FloorOrder.compare)(b)`
+// -> protocol-member-unknown: `compare` is a member of `PartialOrder`,
+//    which `FloorOrder` extends; write `PartialOrder.compare`
+```
 
 ### Protocol Implementation
 

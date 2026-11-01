@@ -48,7 +48,11 @@ import {
   postfixOperatorForSymbol,
   prefixOperatorForSymbol,
 } from './operators.js';
-import { HARD_RESERVED_WORDS, LITERAL_WORDS } from './reserved-words.js';
+import {
+  CONTEXTUAL_STATEMENT_WORDS,
+  HARD_RESERVED_WORDS,
+  LITERAL_WORDS,
+} from './reserved-words.js';
 import { SourceSpan, Token, TokenType } from './tokens.js';
 import { CHAINABLE_COMPARISONS } from '../compute-engine/latex-syntax/comparison-chain.js';
 
@@ -2027,14 +2031,8 @@ export class Parser {
   // `protocol` itself is claimed.
   //
 
-  /** The statement heads that are CONTEXTUAL rather than reserved (`let type =
-   * 5` parses, so they are ordinary identifiers everywhere else). A
-   * conformance tail refuses them all the same: the only way one appears
-   * there is a missing protocol name. */
-  private static readonly CONTEXTUAL_STATEMENT_WORDS: ReadonlySet<string> =
-    new Set(['let', 'type', 'alias']);
-
-  /** `protocol NAME { member* }` — top-level only, like `type`. */
+  /** `protocol NAME [extends P₁, P₂, …] { member* }` — top-level only, like
+   * `type`. */
   private parseProtocolStatement(): MathJsonExpression | null {
     const kw = this.advance(); // 'protocol'
 
@@ -2067,6 +2065,49 @@ export class Parser {
       return null;
     };
     this.protocolNames.add(name);
+
+    // The optional `extends P₁, P₂, …` tail: the protocols this one extends.
+    // `extends` is a SOFT keyword, recognized only here (like `is` and
+    // `where`), so a symbol named `extends` stays legal everywhere else. The
+    // parents are separated by commas, not by `&`: `&` joins the protocols of
+    // a conformance, and this list reads like a parameter list. A parent is
+    // NOT seeded in `protocolNames`: a parent must be declared before the
+    // protocol that extends it, so a parent the parser does not know is left
+    // to the engine's `protocol-unknown`.
+    const parents: MathJsonExpression[] = ['List'];
+    let parentsStart = 0;
+    let parentsEnd = 0;
+    if (this.check('SYMBOL') && this.current.text === 'extends') {
+      parentsStart = this.advance().end;
+      for (;;) {
+        const tok = this.current;
+        if (tok.type !== 'SYMBOL' && tok.type !== 'VERBATIM_SYMBOL') {
+          this.error(['protocol-name-expected'], tok.start, tok.end);
+          this.recoverAtStatementBoundary();
+          return discardProtocol();
+        }
+        const parent =
+          tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
+        if (
+          tok.type === 'SYMBOL' &&
+          (HARD_RESERVED_WORDS.has(parent) ||
+            CONTEXTUAL_STATEMENT_WORDS.has(parent))
+        ) {
+          // The same reading as a conformance tail: a statement head in this
+          // position is a missing protocol name.
+          if (CONTEXTUAL_STATEMENT_WORDS.has(parent))
+            this.error(['protocol-name-expected'], tok.start, tok.end);
+          else this.error(['reserved-word', parent], tok.start, tok.end);
+          this.recoverAtStatementBoundary();
+          return discardProtocol();
+        }
+        this.advance();
+        this.harvest(tok);
+        parents.push(this.wrap({ sym: parent }, tok.start, tok.end));
+        parentsEnd = tok.end;
+        if (!this.match('COMMA')) break;
+      }
+    }
 
     if (!this.check('OPEN_BRACE')) {
       this.error(
@@ -2136,8 +2177,13 @@ export class Parser {
       this.wrap({ sym: name }, nameTok.start, nameTok.end),
     ];
     // A SEMANTIC protocol (`protocol Copyable {}`) declares no members, so it
-    // carries no dictionary at all.
-    if (entries.length > 1) parts.push(this.wrap(entries, open.start, end));
+    // carries no dictionary at all, unless it has parents: the parent list is
+    // the third operand, so the members operand is then required, an empty
+    // `["Dictionary"]` for a protocol with no members of its own.
+    if (entries.length > 1 || parents.length > 1)
+      parts.push(this.wrap(entries, open.start, end));
+    if (parents.length > 1)
+      parts.push(this.wrap(parents, parentsStart, parentsEnd));
     return this.wrap(parts, kw.start, end);
   }
 
@@ -2359,13 +2405,12 @@ export class Parser {
         tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
       if (
         tok.type === 'SYMBOL' &&
-        (HARD_RESERVED_WORDS.has(name) ||
-          Parser.CONTEXTUAL_STATEMENT_WORDS.has(name))
+        (HARD_RESERVED_WORDS.has(name) || CONTEXTUAL_STATEMENT_WORDS.has(name))
       ) {
         // `let`/`type`/`alias` are contextual, not reserved (`let type = 5`
         // parses), but a statement head is never what a conformance tail
         // meant — a missing name reads as one otherwise.
-        if (Parser.CONTEXTUAL_STATEMENT_WORDS.has(name))
+        if (CONTEXTUAL_STATEMENT_WORDS.has(name))
           this.error(['protocol-name-expected'], tok.start, tok.end);
         else this.error(['reserved-word', name], tok.start, tok.end);
         this.recoverAtStatementBoundary();

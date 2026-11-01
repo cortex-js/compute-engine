@@ -653,6 +653,10 @@ export class ComputeEngine implements IComputeEngine {
   readonly _protocolRegistry: Record<string, ProtocolRecord> =
     Object.create(null);
 
+  /** See `IComputeEngine._protocolExtendsConflicts`.
+   * @internal */
+  readonly _protocolExtendsConflicts: Set<string> = new Set();
+
   /** The engine-level KIND registry: the value kinds declared by the
    * `arithmetic` field of operator definitions. Read and written through
    * `boxed-expression/value-kinds.ts` only.
@@ -852,6 +856,9 @@ export class ComputeEngine implements IComputeEngine {
       return {
         r,
         members: r.members,
+        // The parent list is replaced (never mutated in place) by a
+        // replacement of the protocol, so the array reference is enough.
+        extends: r.extends,
         conformances: [...r.conformances],
         // Conformance records are mutated in place too (an implementation
         // block fulfils a pending edge), so their fields are snapshotted with
@@ -876,6 +883,13 @@ export class ComputeEngine implements IComputeEngine {
           // reason would leave the end-of-batch warning quoting a layout
           // change this rollback just undid.
           pendingReason: c._pendingReason,
+          // The statement protocol that installed the edge's part rides with
+          // the part: a later conformance with a block reads it to decide
+          // which authored edges it replaces.
+          via: c._via,
+          // The flag that lets a wider conditional conformance replace a
+          // derived edge rides with the edge, like the stamp above.
+          derived: c._derived,
         })),
         declaredByStatement: r.declaredByStatement,
         // The whole-SUM conformances, copied because the list is pushed to in
@@ -907,6 +921,10 @@ export class ComputeEngine implements IComputeEngine {
         const r = s.r;
         if (r.members !== s.members) changed = true;
         r.members = s.members;
+        // A different parent list changes which edges a conformance
+        // registers, so restoring it is a change.
+        if (r.extends !== s.extends) changed = true;
+        r.extends = s.extends;
         if (r.declaredByStatement !== s.declaredByStatement) changed = true;
         r.declaredByStatement = s.declaredByStatement;
         // The redefinition stamp (see the snapshot above); silent, like the
@@ -940,6 +958,12 @@ export class ComputeEngine implements IComputeEngine {
           // answer a boxed expression read.
           if (e.pendingReason === undefined) delete e.c._pendingReason;
           else e.c._pendingReason = e.pendingReason;
+          // Silent, like the `_implOrigin` restore: the stamp selects nothing
+          // a boxed expression could have read.
+          if (e.via === undefined) delete e.c._via;
+          else e.c._via = e.via;
+          if (e.derived === undefined) delete e.c._derived;
+          else e.c._derived = e.derived;
         }
         // The remembered whole-sum statements (see the snapshot above).
         // Silent, like the `_implOrigin` restore: they select nothing a boxed
@@ -1045,8 +1069,17 @@ export class ComputeEngine implements IComputeEngine {
 
   /** See `IComputeEngine.declareProtocol`. Throws on error, including on
    * re-declaration (P5) — the Epsil statement route replaces instead. */
-  declareProtocol(name: string, members: ProtocolMembersInput): void {
-    declareProtocolImpl(this, name, members);
+  declareProtocol(
+    name: string,
+    members: ProtocolMembersInput,
+    options?: { extends?: readonly string[] }
+  ): void {
+    declareProtocolImpl(
+      this,
+      name,
+      members,
+      options?.extends === undefined ? undefined : { extends: options.extends }
+    );
   }
 
   /** See `IComputeEngine.declareProtocolImplementation`. Throws on error —

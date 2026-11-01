@@ -499,6 +499,8 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `The protocol member "${args[0]}" needs a keyword; did you mean "readonly ${args[0]}" or "readwrite ${args[0]}"?`;
     case 'protocol-member-signature-expected':
       return `Expected a member of the "${args[0]}" protocol: "function name(self: Self, …) -> type", "readonly name: type" or "readwrite name: type"`;
+    case 'protocol-extends-member-conflict':
+      return `The closure of the protocol "${args[0]}" declares one member name twice: ${args[1]}`;
     case 'protocol-implementation-pending':
       return args[2]
         ? `The conformance "type ${args[0]} is ${args[1]}" is not satisfied: ${args[2]}`

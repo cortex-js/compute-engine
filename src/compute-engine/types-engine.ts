@@ -354,6 +354,48 @@ export type ConformanceRecord = {
    * Absent on an edge that is not pending, and on one pending only because no
    * implementation has been written yet. */
   _pendingReason?: string;
+  /** The STATEMENT PROTOCOL that installed this edge's part, when that
+   * protocol is not the edge's own protocol: `FloorRing` on the
+   * `PartialOrder` edge that `type Money is FloorRing { compare … }`
+   * registered, because `FloorRing` extends `PartialOrder`.
+   *
+   * Every conformance with an implementation block sets it on each edge its
+   * expansion over the protocol's ancestors installs (created, filled, or
+   * replaced), including a block-less edge it derives for an ancestor whose
+   * part of the block is empty. A block whose protocol is the edge's own
+   * protocol (`type Money is PartialOrder { compare }`) deletes it, and a
+   * block-less conformance never sets or clears it. A protocol replacement
+   * that adds an ancestor stamps the edges it derives with the replaced
+   * protocol's name.
+   *
+   * Read by a later conformance with a block, for the same target and the
+   * same statement protocol: it replaces every AUTHORED edge stamped with
+   * that protocol with its new part, even an empty one, so a member that an
+   * edited notebook cell dropped is reported as missing. An edge with no
+   * stamp, or with the stamp of another statement protocol, is only checked
+   * as an existing conformance, never replaced.
+   *
+   * Source: `docs/plans/2026-10-31-protocol-refinement.md`, rule R4(e). */
+  _via?: string;
+  /** Set on an edge that the expansion of a conformance to an extending
+   * protocol registered on an ancestor that the author did not write, with
+   * or without an implementation block: `type list<T> is FloorRing where T
+   * is FloorRing` registers `list<T> is PartialOrder where T is FloorRing`
+   * with this flag. A protocol replacement that adds an ancestor sets it on
+   * the edges it derives for that ancestor.
+   *
+   * A written statement that claims the edge (it fills the edge with a
+   * block, or restates it block-less) clears the flag: from then on the edge
+   * counts as hand-written.
+   *
+   * A later wider conditional conformance to the ancestor (`type list<T> is
+   * PartialOrder where T is PartialOrder { compare … }`) replaces an edge
+   * that has this flag and no authored part. The replacement reads this flag
+   * only, not `_via`, which only a conformance with a block sets, so it also
+   * applies after a block-less conformance.
+   *
+   * Source: `docs/plans/2026-10-31-protocol-refinement.md`, rule R7. */
+  _derived?: true;
   declaredByStatement: boolean;
 };
 
@@ -382,6 +424,18 @@ export type SumConformanceRecord = {
 export type ProtocolRecord = {
   name: string;
   members: Record<string, ProtocolMember>;
+  /** The PARENTS of this protocol, in the order the declaration wrote them
+   * (`protocol FloorRing extends LinearOrder, Ring, FloorOrder`). Empty when
+   * the protocol extends nothing.
+   *
+   * A type that conforms to this protocol conforms to every protocol of its
+   * CLOSURE (the parents, their parents, and so on), because a conformance
+   * registers one ordinary edge on each protocol of the closure that the type
+   * does not already conform to. Each parent is a declared protocol, the
+   * closure contains no cycle, and no member name is declared by two
+   * protocols of one closure. A replacement of the protocol may add parents
+   * but may not remove a protocol from the closure. */
+  extends: string[];
   conformances: ConformanceRecord[];
   declaredByStatement: boolean;
   /** The whole-SUM conformance statements registered against this protocol,
@@ -586,6 +640,19 @@ export interface IComputeEngine {
    * Epsil static pre-pass alongside it.
    * @internal */
   _protocolRegistryRollbackPoint(): () => void;
+
+  /** The names of the protocols whose closure MAY declare one member name
+   * twice, recorded when a protocol replacement creates such a conflict for
+   * a protocol that extends it. A replacement does not refuse that case,
+   * because the program that resolves it (it removes the member from the
+   * extending protocol, too) re-declares the extending protocol AFTER the
+   * replacement. The end of every Epsil batch checks each recorded name
+   * again, reports `protocol-extends-member-conflict` for each conflict still
+   * present, and removes the names whose conflict is gone. The set is not
+   * restored by the registry rollback point: a name recorded by a rolled-back
+   * replacement is checked again and dropped.
+   * @internal */
+  readonly _protocolExtendsConflicts: Set<string>;
 
   /** The engine-level KIND registry: the value kinds declared by the
    * `arithmetic` field of operator definitions. Engine-level like the type
@@ -933,8 +1000,34 @@ export interface IComputeEngine {
   _withBoxingPassWindow<T>(fn: () => T): T;
 
   /** Declare a protocol (Appendix A "Host API"). Throws on error, including
-   * on re-declaration — the Epsil statement route replaces instead (P5). */
-  declareProtocol(name: string, members: ProtocolMembersInput): void;
+   * on re-declaration — the Epsil statement route replaces instead (P5).
+   *
+   * `options.extends` lists the PARENTS of the protocol, protocols that must
+   * already be declared:
+   *
+   * ```js
+   * ce.declareProtocol('PartialOrder', {
+   *   functions: { compare: '(self: Self, other: Self) -> integer' },
+   * });
+   * ce.declareProtocol('LinearOrder', {}, { extends: ['PartialOrder'] });
+   * ```
+   *
+   * A type that conforms to `LinearOrder` then conforms to `PartialOrder`
+   * too: a conformance to a protocol registers a conformance to each of its
+   * ancestors that the type does not already conform to, and the
+   * implementation given to `declareProtocolImplementation` may implement
+   * the members of every ancestor. A protocol may not declare a member that
+   * one of its ancestors declares (`protocol-member-inherited`), and two
+   * parents whose ancestors declare the same member name cannot be extended
+   * together (`protocol-extends-member-conflict`). An `extends` value that is
+   * not an array of strings, or that lists a name twice, throws
+   * `invalid-protocol-declaration`; a name that is not a declared protocol
+   * throws `protocol-unknown`. */
+  declareProtocol(
+    name: string,
+    members: ProtocolMembersInput,
+    options?: { extends?: readonly string[] }
+  ): void;
 
   /** Implement `protocol` for `type`, declaring the conformance edge if it is
    * not already registered (Appendix A "Host API").

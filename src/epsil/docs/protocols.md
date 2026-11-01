@@ -2,7 +2,7 @@
 title: Epsil Protocols
 sidebar_label: Protocols
 slug: /epsil/protocols/
-description: "Protocols in Epsil: declaring a set of operations, conforming types to it, dynamic dispatch on the receiver, properties, and conditional conformance."
+description: "Protocols in Epsil: declaring a set of operations, conforming types to it, protocol extension, dynamic dispatch on the receiver, properties, and conditional conformance."
 hide_title: true
 date: Last Modified
 ---
@@ -156,6 +156,72 @@ Three rules follow from that:
   cannot be written this way: each variant is declared with only the type
   parameters its own payload uses, so there is no one spelling that fits
   every variant. Write the conformance for each variant.
+
+## Extending a protocol
+
+A protocol can **extend** other protocols: it has every requirement of its
+parents plus its own, and a type that conforms to it conforms to each of
+its ancestors too. Write the parents after `extends`, separated by commas
+(`protocol FloorRing extends LinearOrder, Ring {}`). One implementation
+block supplies the members of the whole hierarchy:
+
+```epsil-live
+protocol PartialOrder {
+  function compare(self: Self, other: Self) -> integer
+}
+protocol FloorOrder extends PartialOrder {
+  function floor(self: Self) -> integer
+}
+
+type Money = tuple<cents: integer> is FloorOrder {
+  function compare(self: Money, other: Money) -> integer { self.cents - other.cents }
+  function floor(self: Money) -> integer { self.cents }
+}
+
+compare(Money(250), Money(100))
+// ➔ 150
+```
+
+`Money` now conforms to `FloorOrder` and to `PartialOrder`: a function
+written for `where T is PartialOrder` accepts a `Money`, and `compare`
+dispatches to the implementation above.
+
+The rules:
+
+- **Parents first.** A parent must be declared before the protocol that
+  extends it; an unknown parent is `protocol-unknown`, and a protocol cannot
+  extend itself through its parents (`protocol-extends-cycle`). A parent
+  may be listed even when another parent already extends it (a diamond is
+  allowed).
+- **One block for the hierarchy.** The block of `type T is FloorOrder { … }`
+  implements the members of `FloorOrder` and of every ancestor. A member
+  that an ancestor requires and the block leaves out is
+  `protocol-implementation-missing`, and nothing is registered: "the
+  `PartialOrder` protocol, which `FloorOrder` extends, expects a definition
+  of `compare`". An ancestor that `T` already conforms to — declared
+  earlier, or inherited from a supertype — needs no members in the block. A
+  member that an ancestor implemented in an earlier block of the same
+  program is `protocol-implementation-duplicate`; put each member in one
+  block.
+- **A member name is declared by one protocol of a hierarchy.** A protocol
+  cannot declare a member that one of its ancestors declares
+  (`protocol-member-inherited`), and it cannot extend two parents that both
+  reach a member of the same name (`protocol-extends-member-conflict`).
+  Two protocols that are not related may still share a member name, as
+  before.
+- **An extension is never removed.** Running a `protocol` statement again
+  can add parents, and every type that conforms to the protocol then
+  conforms to the new parents too; it cannot drop one
+  (`protocol-extends-removal`). Start a new engine to drop it.
+- **A qualified name names the protocol that declares the member.**
+  `PartialOrder.compare` and `x.(PartialOrder.compare)(y)` reach `compare`;
+  `FloorOrder.compare` is `protocol-member-unknown`, with the hint "write
+  `PartialOrder.compare`".
+
+When an edited program moves a member from a protocol to its parent, run
+the parent's statement first, then the descendant's statement without the
+member. Until the descendant's statement runs, the end of each run reports
+`protocol-extends-member-conflict` for it.
 
 ## Calling a protocol function
 
@@ -467,7 +533,14 @@ each names the protocol, the type, and the way out. The full set of codes,
 grouped by when they fire:
 
 - **Declaring**: `protocol-member-keyword-missing`,
-  `protocol-self-required`, `protocol-scope-invalid`.
+  `protocol-self-required`, `protocol-scope-invalid`,
+  `protocol-name-expected` (no protocol name after `extends` or a comma),
+  `protocol-unknown` (a parent that is not a declared protocol),
+  `protocol-extends-cycle`, `protocol-extends-removal`,
+  `protocol-member-inherited` (a member an ancestor already declares),
+  `protocol-extends-member-conflict` (two protocols of one hierarchy declare
+  the same member name; also reported at the end of a run after a
+  replacement causes it, until it is resolved).
 - **Conforming**: `protocol-conformance-target-invalid`,
   `protocol-target-unknown`, `protocol-conformance-overlap`,
   `protocol-implementation-split` (an implementation block on a
