@@ -1,11 +1,167 @@
 import type { Expression, RuleStep } from '../global-types.js';
-import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  sym,
+} from '../boxed-expression/type-guards.js';
 import {
   hasInexactLiteral,
   matchesRationalPattern,
 } from '../boxed-expression/rational-body.js';
 import { asFloat } from '../boxed-expression/float-result.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+
+/**
+ * Whether a bound of a `Sum` or `Product` is proved not to be an integer, so
+ * that a closed form must not substitute it for the index.
+ *
+ * The enumeration of the operator rounds a numeric bound down
+ * (`reduceBigOp()` in `library/utils.ts`), and a closed form does not: with
+ * `y: real`, `Σ_{k=1}^{y} (1/k − 1/(k+1))` has the closed form
+ * `1 − 1/(y+1)`, which is about 0.714 at `y = 2.5`, while the sum at
+ * `y = 2.5` is 2/3. The value then depends on whether the closed form was
+ * made before or after the substitution.
+ *
+ * A bound is proved not to be an integer when it is not an integer
+ * (`isInteger` is false: `2.5`, `π`), when it holds a symbol declared with a
+ * type that is not an integer type (`real`, `number`, `complex`), or when
+ * every symbol in it is declared or constant and its type is not an integer
+ * type (`n/2` or `n + 1/2` with `n: integer` has the type `rational`, and
+ * `isInteger` is undefined). A call of a host function whose fixed result
+ * type is a real type that is not an integer type is handled as such a
+ * declared symbol (`isNonIntegerCallOfFixedType()`). An undeclared symbol,
+ * or a symbol whose type was only inferred, is a generic value and does not prevent the closed form, as
+ * with the other conventions for generic symbols (`x/x → 1`): `u − 1` with
+ * an undeclared `u` has the type `number`, and keeps the closed form. An
+ * infinite bound is not an integer, but it is the range of a series, and the
+ * series rules read it.
+ */
+export function boundIsNotInteger(bound: Expression): boolean {
+  if (bound.isInfinity === true) return false;
+  if (bound.isInteger === true) return false;
+  if (bound.isInteger === false) return true;
+  // A bound with a free symbol can have a constant value, and the
+  // enumeration reads that value (`bigopBoundValue()` in
+  // `library/utils.ts`): `D(x, x) + 0.5` has `x` free and the value 1.5, so
+  // `Π_{k=1}^{D(x, x) + 0.5} k` is 1, and its closed form
+  // `(D(x, x) + 0.5)!` is about 1.329.
+  const value = constantBoundValue(bound);
+  if (value !== undefined)
+    return Number.isFinite(value) && !Number.isInteger(value);
+  if (holdsDeclaredNonIntegerSymbol(bound)) return true;
+  return holdsOnlyDeclaredSymbols(bound) && !isIntegerOrInfinityType(bound);
+}
+
+/** The real value of a pure function expression whose value has no free
+ * symbol, or `undefined`. The bound `D(x, x) + 0.5` has `x` free (the
+ * derivative is taken at `x`) and the value 1.5. A value with a free symbol
+ * (`2x` for `D(x^2, x)`) or with an imaginary part that is not zero has no
+ * real value to read. */
+function constantBoundValue(bound: Expression): number | undefined {
+  if (!isFunction(bound) || !bound.isPure) return undefined;
+  const value = bound.evaluate({ numericApproximation: true });
+  if (value.unknowns.length > 0) return undefined;
+  const im = value.im;
+  if (!Number.isNaN(im) && im !== 0) return undefined;
+  const re = value.re;
+  return Number.isNaN(re) ? undefined : re;
+}
+
+/** Whether the type of `e` admits only integers and infinities. The type of
+ * `n!` or of `Length(L)` includes an infinity (`infinity | integer`), but
+ * each finite value is an integer, so the bound can take the closed form. */
+function isIntegerOrInfinityType(e: Expression): boolean {
+  return e.type.matches('integer | infinity');
+}
+
+/** Whether a symbol has a declared type: it is not undeclared, its type was
+ * not only inferred, and the type is not `unknown` or `any`. */
+function hasDeclaredType(e: Expression): boolean {
+  const def = e.valueDefinition;
+  if (def === undefined || def.inferredType) return false;
+  const t = e.type;
+  return !t.isUnknown && t.type !== 'any';
+}
+
+/** Whether each symbol of `e` is a constant or has a declared type
+ * (`hasDeclaredType()`). */
+function holdsOnlyDeclaredSymbols(e: Expression): boolean {
+  if (isSymbol(e)) return e.isConstant || hasDeclaredType(e);
+  if (isFunction(e)) return e.ops.every(holdsOnlyDeclaredSymbols);
+  return true;
+}
+
+/** Whether `e` holds a symbol with a declared numeric type that is not an
+ * integer type, or a call whose fixed result type is such a type
+ * (`isNonIntegerCallOfFixedType()`). */
+function holdsDeclaredNonIntegerSymbol(e: Expression): boolean {
+  if (isSymbol(e)) {
+    // A symbol whose type is not numeric (the list `L` of `Length(L)`) is
+    // not a numeric part of the bound.
+    if (e.isConstant || !hasDeclaredType(e) || !e.type.matches('number'))
+      return false;
+    return !isIntegerOrInfinityType(e);
+  }
+  if (isFunction(e))
+    return (
+      isNonIntegerCallOfFixedType(e) ||
+      e.ops.some(holdsDeclaredNonIntegerSymbol)
+    );
+  return false;
+}
+
+/**
+ * Whether `e` is a call of a host function whose result type is fixed by
+ * the function, not by the types of the arguments, and is a numeric type
+ * that is not an integer type.
+ *
+ * A host function with no type handler has the result type of its
+ * signature, declared or inferred from its body, for every argument. With
+ * `g(t) := 0.5 if t < 1`, `g(n)` has the type `missing | real` also when `n`
+ * is undeclared, so a generic `n` does not make `g(n)` an integer: the
+ * closed form of `Σ_{k=g(n)}^{3} k` is 6.125 at `n = 0`, and the sum is 6.
+ *
+ * Only a real result type proves that the call is not generic: `real`,
+ * `finite_real`, `rational`, or such a type with `missing` or `NaN`. A
+ * result type of `number` (`h(t) := 2t` with an untyped `t`) is the type of
+ * a generic value, and keeps the closed form, as the same bound written
+ * inline (`2n`) does. A library operator, or a host function with a type
+ * handler, computes its type from the types of its arguments, and an
+ * undeclared symbol in them keeps the convention for generic symbols. A
+ * call of a symbol whose function type was only inferred is also generic.
+ *
+ * The binding is the one the call kept when it was boxed
+ * (`docs/SCOPING-MODEL.md`, "Callable resolution"), not the binding of the
+ * same name in the current scope: a call `r(n)` boxed in a scope that
+ * declares `r: (real) -> real` keeps that binding after the scope is
+ * removed, or under a shadowing `r`.
+ *
+ * A closed form that relied on the result type of a call is not changed
+ * when the function is defined again: with `u(t) := 3`, the closed form of
+ * `Σ_{k=1}^{u(n)} k` is `(u(n) + u(n)^2)/2`, which is 6. After
+ * `u(t) := 2.5` that closed form is 4.375, and the sum is 3. This is
+ * the case of a value assigned to an undeclared `n` after the closed form
+ * of `Σ_{k=1}^{n} k` was made, which the convention for generic symbols
+ * accepts.
+ */
+function isNonIntegerCallOfFixedType(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  const opDef = e.operatorDefinition;
+  if (opDef !== undefined) {
+    if (opDef._standardLibrary || opDef.type !== undefined) return false;
+  } else {
+    const def = e.valueDefinition;
+    if (def === undefined || def.inferredType) return false;
+  }
+  const t = e.type;
+  // A result that can be `missing` (no case of a `Which` applies) is a bound
+  // with no value: it does not make the bound an integer.
+  return (
+    t.matches('real | infinity | nan | missing') &&
+    !t.matches('integer | infinity | nan | missing')
+  );
+}
 
 /**
  * The body and index of a `Sum` or `Product` whose single range has
@@ -159,7 +315,15 @@ function simplifySumRules(x: Expression): RuleStep | undefined {
   if (body.operator === 'Sum' || body.operator === 'Product') {
     const simplifiedBody = body.simplify();
     if (!simplifiedBody.isSame(body)) {
-      const newSum = ce.function('Sum', [simplifiedBody, limits]);
+      // The new sum is built on the scope of `x`. The scope of a nested sum
+      // in the body has the scope of `x` as its parent, and the index of `x`
+      // is bound there. On a new scope, the nested sum would read the index
+      // from the scope of `x`, which the new sum does not update: with
+      // `g(0) = 0.5`, `Sum(Sum(k, Limits(k, g(0), j)), Limits(j, 1, 3))`
+      // gave 18 (the last value of `j` for each term), not 10.
+      const newSum = ce.function('Sum', [simplifiedBody, limits], {
+        scope: x.localScope,
+      });
       return { value: newSum, because: 'simplified nested sum/product' };
     }
   }
@@ -204,6 +368,10 @@ function simplifySumRules(x: Expression): RuleStep | undefined {
       }
     }
   }
+
+  // A bound proved not to be an integer (`y: real`, `2.5`) is not put into
+  // a closed form: `evaluate()` rounds it down (`boundIsNotInteger()`).
+  if (boundIsNotInteger(lower) || boundIsNotInteger(upper)) return undefined;
 
   // For a symbolic upper bound `b`, the closed forms below are the generic
   // answer, as in Mathematica: they fire without a proof that `b ≥ a − 1`.
@@ -750,7 +918,11 @@ function simplifySumRules(x: Expression): RuleStep | undefined {
         indexFactors.length === 1
           ? indexFactors[0]
           : ce.function('Multiply', indexFactors);
-      const newSum = ce.function('Sum', [indexPart, limits]);
+      // On the scope of `x`, for the reason given at the nested-sum rule
+      // above: a nested sum in `indexPart` reads the index from that scope.
+      const newSum = ce.function('Sum', [indexPart, limits], {
+        scope: x.localScope,
+      });
       return {
         value: constant.mul(newSum),
         because: 'factor out constant from sum',

@@ -1,6 +1,10 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
-import { infiniteRange, keepInfiniteRangeStep } from './simplify-sum.js';
+import {
+  boundIsNotInteger,
+  infiniteRange,
+  keepInfiniteRangeStep,
+} from './simplify-sum.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 
 /**
@@ -103,7 +107,14 @@ function simplifyProductRules(x: Expression): RuleStep | undefined {
   if (body.operator === 'Sum' || body.operator === 'Product') {
     const simplifiedBody = body.simplify();
     if (!simplifiedBody.isSame(body)) {
-      const newProduct = ce.function('Product', [simplifiedBody, limits]);
+      // The new product is built on the scope of `x`. The scope of a nested
+      // sum or product in the body has the scope of `x` as its parent, and
+      // the index of `x` is bound there. On a new scope, the nested operator
+      // would read the index from the scope of `x`, which the new product
+      // does not update, so each factor would use an outdated index value.
+      const newProduct = ce.function('Product', [simplifiedBody, limits], {
+        scope: x.localScope,
+      });
       return { value: newProduct, because: 'simplified nested sum/product' };
     }
   }
@@ -148,6 +159,10 @@ function simplifyProductRules(x: Expression): RuleStep | undefined {
       }
     }
   }
+
+  // A bound proved not to be an integer (`y: real`, `2.5`) is not put into
+  // a closed form: `evaluate()` rounds it down (`boundIsNotInteger()`).
+  if (boundIsNotInteger(lower) || boundIsNotInteger(upper)) return undefined;
 
   const bodyUnknowns = new Set(body.unknowns);
 
@@ -471,7 +486,12 @@ function simplifyProductRules(x: Expression): RuleStep | undefined {
           ? indexFactors[0]
           : ce.function('Multiply', indexFactors);
       const count = upper.sub(lower).add(ce.One).simplify();
-      const newProduct = ce.function('Product', [indexPart, limits]);
+      // On the scope of `x`, for the reason given at the nested-product rule
+      // above: a nested operator in `indexPart` reads the index from that
+      // scope.
+      const newProduct = ce.function('Product', [indexPart, limits], {
+        scope: x.localScope,
+      });
       return {
         value: constant.pow(count).mul(newProduct),
         because: 'factor out constant from product',

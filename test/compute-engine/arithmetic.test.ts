@@ -1660,10 +1660,19 @@ describe('SUM', () => {
 
   // General bounds for triangular number
   it('should simplify sum with general lower bound', () => {
-    // 'a' already declared above
+    // 'a' is declared `real` above, so it is not put into the closed form:
+    // the enumeration rounds the bound down, and with a = 2.5, b = 5 the
+    // closed form gave 13.125, the sum 14.
     expect(
       ce.parse('\\sum_{n=a}^{b}(n)').simplify().toString()
-    ).toMatchInlineSnapshot(`1/2 * (-a^2 + b^2 + a + b)`);
+    ).toMatchInlineSnapshot(`sum_(n=a)^(b)(n)`);
+  });
+
+  it('should simplify sum with a general lower bound declared integer', () => {
+    ce.declare('p', 'integer');
+    expect(
+      ce.parse('\\sum_{n=p}^{b}(n)').simplify().toString()
+    ).toMatchInlineSnapshot(`1/2 * (b^2 - p^2 + b + p)`);
   });
 
   it('should evaluate sum with numeric lower bound', () => {

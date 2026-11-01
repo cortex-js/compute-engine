@@ -41,7 +41,10 @@ import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { noteKindTypeDeclaration } from '../boxed-expression/residue-class.js';
 import { symbolicLimit } from '../symbolic/limit.js';
 import { constantProductOverInfiniteRange } from '../symbolic/simplify-product.js';
-import { limitsHaveInfinitelyManyTerms } from '../symbolic/simplify-sum.js';
+import {
+  boundIsNotInteger,
+  limitsHaveInfinitelyManyTerms,
+} from '../symbolic/simplify-sum.js';
 import { implicitCompileNumeric } from '../implicit-compile.js';
 import {
   bignumPreferred,
@@ -464,10 +467,13 @@ export function constantBigOpOverInfiniteDomain(
  * Desmos spelling; `length(P)`, `count(P)` and the dot form `P.length` all
  * parse to this same `Length` node, so they are one bug, not three).
  *
- * Only a CLOSED bound is evaluated — one with no free symbols. A genuinely
- * free bound (`n` in `Σ_{k=1}^{n}`) keeps reading `NaN` and so keeps
+ * A bound is read only when its VALUE is closed — it has no free symbols. A
+ * genuinely free bound (`n` in `Σ_{k=1}^{n}`) keeps reading `NaN` and so keeps
  * classifying as symbolic: that is the guard which stops `Sum(k, [k, 1, n])`
  * from being read as if `n` were the default iteration window (→ 50015001).
+ * A bound with a free symbol can still have a closed value, so it is
+ * evaluated too: `D(x, x)` has `x` free (the derivative is taken at `x`), but
+ * its value is the constant 1, so `Σ_{k=1}^{D(x, x) + 2} k` is 6.
  *
  * Only a PURE bound is evaluated. Closed does not imply safe to evaluate
  * repeatedly: this is consulted once by classification and again by
@@ -488,11 +494,19 @@ export function bigopBoundValue(bound: Expression): number {
   if (hasNonZeroImaginaryPart(bound)) return NaN;
   const r = bound.re;
   if (!Number.isNaN(r)) return r;
-  // A free symbol (or an expression over one) has no value to read.
-  if (bound.unknowns.length > 0) return r;
+  // A free symbol has no value to read.
+  if (isSymbol(bound) && bound.unknowns.length > 0) return r;
   if (!bound.isPure) return r;
   const value = bound.evaluate({ numericApproximation: true });
+  // A value with a free symbol (`n − 1`, or `2x` for `D(x^2, x)`) has no
+  // value to read.
+  if (value.unknowns.length > 0) return NaN;
   if (hasNonZeroImaginaryPart(value)) return NaN;
+  // A bound with a free symbol whose value is an infinity
+  // (`D(x, x) + ∞`) is not read: the series rules for an infinite domain
+  // read the bound as written, and they recognize only an infinity, so the
+  // operator stays symbolic instead.
+  if (bound.unknowns.length > 0 && !Number.isFinite(value.re)) return NaN;
   return value.re;
 }
 
@@ -503,19 +517,22 @@ function hasNonZeroImaginaryPart(expr: Expression): boolean {
 }
 
 /**
- * Whether a `Limits` bound is ABSENT: the `Missing` symbol itself, or a closed
- * pure expression that evaluates to it — a piecewise with no default arm whose
+ * Whether a `Limits` bound is ABSENT: the `Missing` symbol itself, or a pure
+ * expression that evaluates to it — a piecewise with no default arm whose
  * conditions all fail, `Σ_{x=g(3)}^{3} x` with `g(t) := {0.5 if t < 1}`.
  * Such a bound is not symbolic (nothing is left to resolve), so the big
  * operator does not stay unevaluated: a numeric slot normalizes an absence to
  * `NaN` (`docs/ERROR-MODEL.md` §3), and `classifyBigopDomain` reports it as
- * its own verdict so the operator can answer `NaN`. A bound with free
- * variables or an impure bound is left to the symbolic classification.
+ * its own verdict so the operator can answer `NaN`. A bound with a free
+ * symbol is evaluated too, as in `bigopBoundValue()`: `g(D(x, x) + 2)` is
+ * `g(3)`, which is absent. A bound whose condition reads a free symbol
+ * (`g(n)`) evaluates to a `Which`, not to `Missing`. An impure bound is left
+ * to the symbolic classification.
  */
 function absentBigopBound(bound: Expression): boolean {
   if (isSymbol(bound, 'Missing')) return true;
   if (!isFunction(bound)) return false;
-  if (bound.unknowns.length > 0 || !bound.isPure) return false;
+  if (!bound.isPure) return false;
   return isSymbol(bound.evaluate(), 'Missing');
 }
 
@@ -941,6 +958,9 @@ export function symbolicSumClosedForm(
   // substituted either: its value may be a string or a tuple.
   if (boundMayNotBeNumber(lower) || boundMayNotBeNumber(upper))
     return undefined;
+  // A bound proved not to be an integer is not substituted: the enumeration
+  // rounds it down, and the closed form would not (`boundIsNotInteger()`).
+  if (boundIsNotInteger(lower) || boundIsNotInteger(upper)) return undefined;
 
   // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper
   // bound), and the named families that admit a free variable (exponential
@@ -1055,6 +1075,11 @@ export function symbolicProductClosedForm(
   // since `Factorial` maps over a collection.
   if (boundMayNotBeNumber(lower) || boundMayNotBeNumber(upper))
     return undefined;
+  // A bound proved not to be an integer is not substituted: the enumeration
+  // rounds it down, and the closed form would not (`Π_{k=1}^{y} k = y!`
+  // with `y: real` gave `Γ(3.5) ≈ 3.32` at `y = 2.5`, the enumeration `2`;
+  // see `boundIsNotInteger()`).
+  if (boundIsNotInteger(lower) || boundIsNotInteger(upper)) return undefined;
 
   // Π_{k=1}^{n} k = n!  (bare index, lower bound 1).
   if (isSymbol(body) && body.symbol === index && lower.isSame(1))

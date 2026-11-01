@@ -1011,7 +1011,12 @@ function simplifyOperands(
     // Use _fn() to bypass canonicalization - operands are already canonical.
     // This avoids triggering handlers like D's canonicalFunctionLiteralArguments
     // which would add extra Function wrappers.
-    const build = (o: Expression[]) => expr.engine._fn(expr.operator, o);
+    // The rebuilt expression keeps the local scope of `expr`: the scope holds
+    // the binding of the index, and the body is not re-canonicalized, so
+    // without it the index in the body is read as a free symbol. With
+    // `g(0) = 0.5`, `Sum(k, Limits(k, g(0), 3))` gave `4k`, not 6.
+    const build = (o: Expression[]) =>
+      expr.engine._fn(expr.operator, o, { scope: expr.localScope });
     const simplifiedOps: Expression[] = [];
     for (let i = 0; i < expr.ops.length; i++) {
       const x = expr.ops[i];
