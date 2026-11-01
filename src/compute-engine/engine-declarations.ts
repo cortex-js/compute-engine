@@ -122,6 +122,7 @@ import {
   type InferenceRollbackFrame,
 } from './inference-rollback.js';
 import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
+import { countDeclaredHolder, uncountRemovedHolder } from './engine-scope.js';
 import { binderBindingOf } from './boxed-expression/binders.js';
 import {
   assertNoParameterDefault,
@@ -666,6 +667,19 @@ export function declareSymbolValue(
   // type that enable the recognition of its values (`residue-class.ts`).
   if (isValueDef(boxedDef))
     noteKindTypeDeclaration(ce, boxedDef.value.type.type);
+  // A live frame whose scope receives the definition holds it, so the pop
+  // of another frame that holds it too does not dispose it
+  // (`countDeclaredHolder`, `engine-scope.ts`).
+  // The definition that it replaces is uncounted (`uncountRemovedHolder`).
+  if (isValueDef(boxedDef)) {
+    countDeclaredHolder(ce, scope, boxedDef.value);
+    if (
+      replaced !== undefined &&
+      isValueDef(replaced) &&
+      replaced.value !== boxedDef.value
+    )
+      uncountRemovedHolder(ce, scope, replaced.value);
+  }
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({
@@ -3099,6 +3113,9 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
     undo: () => scope.bindings.set(name, binding),
   });
   scope.bindings.delete(name);
+  // A live frame that counted the removed definition stops counting it
+  // (`uncountRemovedHolder`, `engine-scope.ts`).
+  if (isValueDef(binding)) uncountRemovedHolder(ce, scope, binding.value);
 
   // The base cases and the recurrence assigned to the name before its
   // sequence definition is complete (`F_0 := 10` without `F_n := …`) are

@@ -363,6 +363,20 @@
 
 ### Bug Fixes
 
+- **The pop of a scope no longer disposes a definition that another live
+  evaluation context holds**, also when that context is on another stack (an
+  asynchronous evaluation, a lazy view), and the debug check of dead bindings
+  (`CE_DEBUG_BINDINGS`) now reports a read of the index of a `Sum` or
+  `Product` after `evaluateAsync()`, as it does after `evaluate()`. In
+  `u(u(b))` with `u := (l) => [l[i] for i in 1..n]`, and in a recursive
+  call that runs the same loop, the inner pop disposed a definition that
+  the outer evaluation still read. The values were correct, but an
+  assumption about a disposed definition is ignored. The pop of an
+  asynchronous evaluation of a `Sum` did not mark the definitions of its
+  local scope as dead, so a later read of its index was not reported. Two
+  overlapping `evaluateAsync()` calls of a node with a `const` in its body
+  no longer report a read of the constant.
+
 - **A function called with a block-local valueless symbol reads that local.**
   A function called in a `Block` with an argument that holds a valueless
   local of the block read a binding of the same name from the scope that

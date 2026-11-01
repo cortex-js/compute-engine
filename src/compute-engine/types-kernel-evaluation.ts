@@ -605,4 +605,17 @@ export type EvalContext<
    * nothing.
    */
   _restoreParentOnPop?: Scope<Binding> | null;
+  /**
+   * The value definitions that this frame counts as a holder of
+   * (`_holders` of the definition, `countHolders` in `engine-scope.ts`): the
+   * ones its scope held at the push, and the ones declared into its scope
+   * while it is live. The discard of the frame uncounts exactly these.
+   * Absent when the frame is not counted.
+   */
+  _countedDefs?: Set<object>;
+  /** Set when `discardEvalContext` has discarded this frame. */
+  _discarded?: true;
+  /** Set on the temporary context of `inScope`, which is popped without
+   * `discardEvalContext`: it is never counted (`countHolders`). */
+  _uncounted?: true;
 };

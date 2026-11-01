@@ -419,6 +419,12 @@ export class _BoxedValueDefinition
   _deadStack: string | undefined = undefined;
   _deadScope: string | undefined = undefined;
 
+  // The number of live evaluation contexts whose scope holds this definition
+  // (`countHolders`, `engine-scope.ts`). The pop of a context disposes the
+  // definition only when no other live context holds it. Not part of the
+  // checkpoint snapshot: it counts frames, not a state of the record.
+  _holders = 0;
+
   // The STATIC binding this definition is a per-call activation of, when it is
   // a `Function` call frame's parameter binding (`markActivation`,
   // `binders.ts`; `docs/SCOPING-MODEL.md`).

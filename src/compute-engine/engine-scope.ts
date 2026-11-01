@@ -121,10 +121,10 @@ export function pushEvalContext(
       ? { _restoreParentOnPop: restoreParentOnPop }
       : {}),
   });
-  if (restoreParentOnPop !== undefined) {
-    const frame = ce._evalContextStack[ce._evalContextStack.length - 1];
+  const frame = ce._evalContextStack[ce._evalContextStack.length - 1];
+  countHolders(frame);
+  if (restoreParentOnPop !== undefined)
     addChainingFrame(scope, frame, restoreParentOnPop);
-  }
 }
 
 export function popEvalContext(ce: IComputeEngine): void {
@@ -239,14 +239,26 @@ function discardEvalContext(
   // the caller does not push the scope again. Only the debug check reads
   // this, so the walk of the stack happens only when the flag is on.
   //
-  // For the same reason, a definition that the scope of another context of
-  // the stack holds under the same name is not tombstoned. Two scope
-  // objects can hold one definition: the lazy comprehension that each call
-  // of `u := (l) => [l[i] for i in 1..n]` returns is a new node with a new
+  // A definition that the scope of another live context holds is not
+  // tombstoned and not disposed: that context still reads it, and the pop
+  // of the last such context disposes it. The live contexts that hold a
+  // definition are counted on the definition (`countHolders`), not looked
+  // for on the stack: the context can be on another stack (the copy of an
+  // asynchronous evaluation, the recorded stack of a lazy view, put in place
+  // for a while). The temporary context of `inScope` is not counted: it is
+  // popped without `discardEvalContext`. A definition that a pop keeps this
+  // way is disposed by the pop of the last context that holds it, or by the
+  // `ce.contextStack` setter when it drops that context
+  // (`settleKeptDefinition`). Two scope objects can hold one
+  // definition: the lazy comprehension that each call of
+  // `u := (l) => [l[i] for i in 1..n]` returns is a new node with a new
   // local scope, and each of these scopes holds the definition of `i` of
   // the comprehension in the body of `u`. A walk of the result of `u(u(b))`
   // runs in the scope of the outer result and evaluates the inner result,
-  // whose pop must not tombstone the `i` that the outer walk still reads.
+  // whose pop must not dispose the `i` that the outer walk still reads. The
+  // same applies to a recursive call that runs the same loop. A disposed
+  // definition is treated as dead by the assumptions (`assume.ts`) and by
+  // the caches keyed on its `_writeVersion`.
   const keepsTombstone =
     ce._debugBindings &&
     !isDormantPop() &&
@@ -254,7 +266,36 @@ function discardEvalContext(
     !retained &&
     !isRetainedNodeScope(context.lexicalScope) &&
     !ce._evalContextStack.some((c) => c.lexicalScope === context.lexicalScope);
-  for (const [name, binding] of context?.lexicalScope.bindings ?? []) {
+  // The pop of an activation (the copy of a local scope that an asynchronous
+  // evaluation pushes) tombstones the definitions of the scope that it
+  // copies, when no live context holds them: the symbols of the body are
+  // bound to those definitions, and the evaluation that read them through
+  // the copy has ended. They are not disposed here: the activation used its
+  // own. Another asynchronous evaluation of the same node can still be
+  // suspended on its own copy of the stack. Its reads are not reported: the
+  // check reads the definition that the context of the read finds, the one
+  // of its own activation (`assertLiveRead`, `binders.ts`).
+  const template =
+    ce._debugBindings && context !== undefined
+      ? scopeActivationTemplate(context.lexicalScope)
+      : undefined;
+  if (template !== undefined && keepsTombstone) {
+    for (const binding of template.bindings.values()) {
+      if (isValueDef(binding) && holderCount(binding.value) === 0)
+        tombstoneBinding(binding.value, context!.name ?? '<unnamed>');
+    }
+  }
+  // The definitions that this frame counted (`countHolders`). A retained
+  // frame keeps its count: its definitions stay alive.
+  const counted = retained ? undefined : context?._countedDefs;
+  if (context !== undefined) {
+    context._discarded = true;
+    if (counted !== undefined) {
+      context._countedDefs = undefined;
+      noteFrameUncounted(context);
+    }
+  }
+  for (const binding of context?.lexicalScope.bindings.values() ?? []) {
     if (retained) {
       if (isValueDef(binding))
         (
@@ -269,19 +310,31 @@ function discardEvalContext(
       // canonical expression keeps and pushes again on every evaluation, so
       // that pop is not the scope's death and a tombstone there would report
       // every bound variable of every canonicalized binder.
-      if (
-        keepsTombstone &&
-        !ce._evalContextStack.some((c) => {
-          const held = c.lexicalScope.bindings.get(name);
-          return (
-            held !== undefined &&
-            isValueDef(held) &&
-            held.value === binding.value
-          );
-        })
-      )
-        tombstoneBinding(binding.value, context?.name ?? '<unnamed>');
-      binding.value.dispose();
+      //
+      // A definition that this frame did not count (installed in its scope
+      // after the push by a route other than a declaration) adds nothing to
+      // the count: the pop disposes it unless another counted frame holds
+      // it. A definition under two names is uncounted once: it leaves
+      // `counted` at the first one.
+      const def = binding.value;
+      if (counted?.delete(def)) decrementHolders(ce, def);
+      if (holderCount(def) > 0) {
+        keptDefinitions.set(def, keepsTombstone);
+        continue;
+      }
+      keptDefinitions.delete(def);
+      if (keepsTombstone) tombstoneBinding(def, context?.name ?? '<unnamed>');
+      def.dispose();
+    }
+  }
+  // What is left in `counted` is a counted definition that the scope no
+  // longer holds (replaced or removed by a route that does not uncount it,
+  // `uncountRemovedHolder`). It is uncounted too, and it is not this
+  // scope's to dispose, unless an earlier pop kept it for this frame.
+  if (counted !== undefined && counted.size > 0) {
+    for (const def of counted as Set<BoxedValueDefinition>) {
+      decrementHolders(ce, def);
+      if (holderCount(def) === 0) settleKeptDefinition(ce, def, context!.name);
     }
   }
   // The pending sequence definitions of the scope (`F_0 := 10` without a
@@ -364,6 +417,10 @@ export function inScope<T>(
     assumptions: new ExpressionMap(ce.context?.assumptions ?? []),
     // See `pushEvalContext`: the overlay is copied and dropped with the frame.
     assumedValues: new Map(ce.context?.assumedValues ?? []),
+    // Popped without `discardEvalContext`, so never counted as a holder of
+    // the definitions of its scope, also when the `ce.contextStack` setter
+    // gets it back in a stack (`countHolders`).
+    _uncounted: true,
   });
 
   try {
@@ -550,4 +607,171 @@ function isRetainedNodeScope(scope: Scope): boolean {
   if (isRetainedScope(scope)) return true;
   const template = scopeActivationTemplate(scope);
   return template !== undefined && isRetainedScope(template);
+}
+
+/** The empty set of counted definitions, shared by the frames whose scope
+ * holds no value definition at the push. Never changed: a declaration
+ * replaces it (`countDeclaredHolder`). */
+const NO_COUNTED_DEFS: Set<object> = new Set();
+
+/** The number of counted live frames for each bindings map of a scope. A
+ * declaration into a scope that no such frame holds skips the walk of the
+ * stack (`countDeclaredHolder`, `uncountRemovedHolder`). */
+const countedFramesByBindings = new WeakMap<object, number>();
+
+function noteFrameCounted(context: EvalContext): void {
+  const key = context.lexicalScope.bindings;
+  countedFramesByBindings.set(key, (countedFramesByBindings.get(key) ?? 0) + 1);
+}
+
+function noteFrameUncounted(context: EvalContext): void {
+  const key = context.lexicalScope.bindings;
+  const n = (countedFramesByBindings.get(key) ?? 1) - 1;
+  if (n > 0) countedFramesByBindings.set(key, n);
+  else countedFramesByBindings.delete(key);
+}
+
+/**
+ * The definitions that a pop did not dispose because another live context
+ * held them, with whether that pop would have tombstoned them (the debug
+ * check of dead bindings). The pop of the last holder disposes such a
+ * definition as one of its own bindings; the `ce.contextStack` setter and a
+ * holder whose scope no longer holds it use this record
+ * (`settleKeptDefinition`).
+ */
+const keptDefinitions = new WeakMap<BoxedValueDefinition, boolean>();
+
+/** The number of live contexts whose scope holds `def`. */
+function holderCount(def: BoxedValueDefinition): number {
+  return (def as { _holders?: number })._holders ?? 0;
+}
+
+/** Take one holder from the count of `def`. With the debug check of dead
+ * bindings on, a count that is already 0 throws: each decrement matches an
+ * increment recorded on a frame (`_countedDefs`). */
+function decrementHolders(ce: IComputeEngine, def: BoxedValueDefinition): void {
+  const d = def as { _holders?: number };
+  if ((d._holders ?? 0) > 0) d._holders! -= 1;
+  else if (ce._debugBindings)
+    throw new Error(
+      `The holder count of "${(def as unknown as { name: string }).name}" is already 0.`
+    );
+}
+
+/** Dispose `def`, whose holder count is 0, when an earlier pop kept it for
+ * another holder (`keptDefinitions`), and tombstone it when that pop would
+ * have. A definition that no pop kept is left as it is. */
+function settleKeptDefinition(
+  ce: IComputeEngine,
+  def: BoxedValueDefinition,
+  scopeName: string | undefined
+): void {
+  const tombstone = keptDefinitions.get(def);
+  if (tombstone === undefined) return;
+  keptDefinitions.delete(def);
+  if (tombstone && ce._debugBindings)
+    tombstoneBinding(def, scopeName ?? '<unnamed>');
+  def.dispose();
+}
+
+/**
+ * Count `context` as a holder of each value definition of its scope, and
+ * record them on it (`_countedDefs`). `pushEvalContext` calls it, and so
+ * does the `ce.contextStack` setter for a frame that it adds. A context is
+ * counted once, and a discarded context is not counted again.
+ *
+ * A definition that a declaration installs in the scope while the frame is
+ * live is counted then (`countDeclaredHolder`). One that another route
+ * installs (a binding set aside and put back by a block, a borrowed
+ * binding) is not counted: this frame adds nothing to its count, so the pop
+ * of this frame disposes it unless another counted frame holds it, and the
+ * pop of another frame that holds it can dispose it while this frame is
+ * live, as before the count existed. The temporary context of `inScope` is
+ * never counted (`_uncounted`).
+ */
+export function countHolders(context: EvalContext): void {
+  if (
+    context._countedDefs !== undefined ||
+    context._discarded ||
+    context._uncounted
+  )
+    return;
+  let defs = NO_COUNTED_DEFS;
+  for (const binding of context.lexicalScope.bindings.values()) {
+    if (!isValueDef(binding)) continue;
+    const def = binding.value as { _holders?: number };
+    if (defs.has(def)) continue;
+    if (defs === NO_COUNTED_DEFS) defs = new Set();
+    defs.add(def);
+    def._holders = (def._holders ?? 0) + 1;
+  }
+  context._countedDefs = defs;
+  noteFrameCounted(context);
+}
+
+/**
+ * Count the live frames of the current stack whose scope has the bindings
+ * of `scope` as holders of `def`, which a declaration has just installed
+ * in `scope` (`engine-declarations.ts`).
+ */
+export function countDeclaredHolder(
+  ce: IComputeEngine,
+  scope: Scope,
+  def: BoxedValueDefinition
+): void {
+  if (!countedFramesByBindings.has(scope.bindings)) return;
+  for (const frame of ce._evalContextStack) {
+    const defs = frame._countedDefs;
+    if (defs === undefined || frame.lexicalScope.bindings !== scope.bindings)
+      continue;
+    if (defs.has(def)) continue;
+    if (defs === NO_COUNTED_DEFS) frame._countedDefs = new Set([def]);
+    else defs.add(def);
+    const d = def as { _holders?: number };
+    d._holders = (d._holders ?? 0) + 1;
+  }
+}
+
+/**
+ * Uncount `def`, which a declaration has just replaced in `scope` or that
+ * `ce.undeclare()` has removed from it, for the live frames of the current
+ * stack whose scope has the bindings of `scope`. Their records then do not
+ * keep the definition (and its value) for the life of the frame, which is
+ * the life of the engine for the global frame. A definition whose count
+ * reaches 0 and that an earlier pop kept is disposed
+ * (`settleKeptDefinition`).
+ */
+export function uncountRemovedHolder(
+  ce: IComputeEngine,
+  scope: Scope,
+  def: BoxedValueDefinition
+): void {
+  if (!countedFramesByBindings.has(scope.bindings)) return;
+  // The scope can still hold the definition under another name.
+  for (const binding of scope.bindings.values())
+    if (isValueDef(binding) && binding.value === def) return;
+  for (const frame of ce._evalContextStack) {
+    if (frame.lexicalScope.bindings !== scope.bindings) continue;
+    if (!frame._countedDefs?.delete(def)) continue;
+    decrementHolders(ce, def);
+    if (holderCount(def) === 0) settleKeptDefinition(ce, def, frame.name);
+  }
+}
+
+/**
+ * Stop counting `context` as a holder of the definitions it counted: the
+ * `ce.contextStack` setter drops it. A definition whose count reaches 0 and
+ * that an earlier pop kept is disposed (`settleKeptDefinition`). The other
+ * definitions of the scope of `context` are not disposed: the frame leaves
+ * the stack without a pop.
+ */
+export function uncountHolders(ce: IComputeEngine, context: EvalContext): void {
+  const defs = context._countedDefs;
+  if (defs === undefined) return;
+  context._countedDefs = undefined;
+  noteFrameUncounted(context);
+  for (const def of defs as Set<BoxedValueDefinition>) {
+    decrementHolders(ce, def);
+    if (holderCount(def) === 0) settleKeptDefinition(ce, def, context.name);
+  }
 }

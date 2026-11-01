@@ -617,6 +617,10 @@ describe('snapshot completeness — the drift guard', () => {
     // The scope the definition was installed in, written once when it is
     // constructed in an open window and read only by a restore.
     '_checkpointHome',
+    // The number of live evaluation contexts whose scope holds the
+    // definition: it counts frames of the stack, which a restore does not
+    // change, so it is not a state of the record.
+    '_holders',
   ]);
 
   const OPERATOR_DEF_EXCLUSIONS = new Set([

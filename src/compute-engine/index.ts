@@ -242,6 +242,8 @@ import {
   popEvalContext as popEvalContextImpl,
   removeEvalContext as removeEvalContextImpl,
   releaseChainingFrame,
+  countHolders,
+  uncountHolders,
   inScope as inScopeImpl,
   printStack as printStackImpl,
 } from './engine-scope.js';
@@ -633,9 +635,20 @@ export class ComputeEngine implements IComputeEngine {
     // A frame that the new stack does not keep is dropped without a pop. If
     // it chains its scope onto an ambient scope, release it, so that the
     // scope gets its parent link back when no other live frame chains it.
+    // A frame that the new stack adds holds the definitions of its scope,
+    // unless it was discarded (`countHolders`). A dropped frame no longer
+    // holds them, so the pop of another frame that holds one of them
+    // disposes it. A definition that an earlier pop kept only for the
+    // dropped frames is disposed now (`uncountHolders`); the other
+    // definitions of a dropped frame are not. The new frames are counted
+    // first, so a frame both dropped and added keeps its count.
     const kept = new Set(stack);
+    for (const frame of stack) countHolders(frame);
     for (const frame of this._evalContextStack)
-      if (!kept.has(frame)) releaseChainingFrame(frame);
+      if (!kept.has(frame)) {
+        releaseChainingFrame(frame);
+        uncountHolders(this, frame);
+      }
     this._evalContextStack = [...stack];
   }
 

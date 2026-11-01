@@ -120,13 +120,12 @@ import {
   evaluateInOwnBindingsAsync,
   bindingInContext,
   ownBindingRewriteCount,
-  sameBindingDef,
+  assertLiveRead,
 } from './binders.js';
 import { containsObject } from './object-walk.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { beginStoreGuard } from './store-guard.js';
-import { assertLiveBinding, isTombstoned } from './binding-tombstone.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
 import { assignmentLocalsOf } from '../assignment-locals.js';
 import { isProvisionalHead } from './provisional-application.js';
@@ -1270,34 +1269,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   /**
    * The debug check of dead bindings (`ce._debugBindings`) at a resolution
-   * site: throw if this read uses a binding of a discarded scope.
-   *
-   * `def` is the definition this occurrence was bound to at
-   * canonicalization. When it carries a tombstone, the read can still be
-   * live: an asynchronous evaluation of a scoped node (a `Sum`, a
-   * `Product`) pushes an activation, a copy of the node's local scope with
-   * its own definitions (`asyncScopeActivation`, `boxed-function.ts`), not
-   * the local scope itself. The pop of an earlier synchronous evaluation
-   * left its tombstone on the definitions of the local scope, and only a
-   * push of that scope removes it. The read then finds the definition of
-   * the activation in the context (`_contextBinding`), and that definition
-   * is the one checked. A binding found in the context that is not a copy
-   * of `def` (a definition of the same name in an enclosing scope) does not
-   * stand for `def`, and `def` is checked. A constant definition is read
-   * from `def` itself, not from the context, so `def` is checked.
+   * site: throw if this read uses a binding of a discarded scope
+   * (`assertLiveRead`, `binders.ts`).
    */
   private _assertLiveRead(def: BoxedValueDefinition): void {
-    if (!isTombstoned(def)) return;
-    if (def.isConstant) {
-      assertLiveBinding(def, this._id);
-      return;
-    }
-    const found = this._contextBinding();
-    const live = found !== undefined && 'value' in found ? found.value : def;
-    assertLiveBinding(
-      live !== def && sameBindingDef(live, def) ? live : def,
-      this._id
-    );
+    assertLiveRead(this.engine, def, this._id);
   }
 
   /**

@@ -17,7 +17,7 @@ import type {
 } from '../global-types.js';
 import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
-import { assertLiveBinding } from './binding-tombstone.js';
+import { assertLiveBinding, isTombstoned } from './binding-tombstone.js';
 import {
   binderBoundAt,
   declaredBinders,
@@ -1613,6 +1613,73 @@ export function evaluateInOwnBindings(
   }
 }
 
+/**
+ * The debug check of dead bindings (`ce._debugBindings`) at a resolution
+ * site: throw if a read of `name` through `def`, the definition that the
+ * occurrence was bound to at canonicalization, uses a binding of a
+ * discarded scope.
+ *
+ * When `def` carries a tombstone, the read can still be live. An
+ * asynchronous evaluation of a scoped node (a `Sum`, a `Product`) pushes an
+ * activation, a copy of the local scope of the node with its own
+ * definitions (`asyncScopeActivation`, `boxed-function.ts`), not the local
+ * scope itself. The symbols of the body stay bound to the definitions of the
+ * local scope, and the pop of any other evaluation of the node (a
+ * synchronous one, or an asynchronous one on its own copy of the context
+ * stack) tombstones them, also while this evaluation is suspended. The read
+ * then finds the definition of the activation in the context
+ * (`bindingInContext`), and that definition is the one checked. This
+ * applies to a constant too: the activation holds a copy of it. A binding
+ * found in the context that is not a copy of `def` (a definition of the
+ * same name in an enclosing scope) does not stand for `def`, and `def` is
+ * checked.
+ */
+export function assertLiveRead(
+  ce: ComputeEngine,
+  def: BoxedValueDefinition,
+  name: string
+): void {
+  if (!isTombstoned(def)) return;
+  const found = bindingInContext(ce, name, def);
+  const live = found !== undefined && 'value' in found ? found.value : def;
+  if (live !== def && sameBindingDef(live, def)) {
+    assertLiveBinding(live, name);
+    return;
+  }
+  const activated = activationBindingOf(ce, name, def);
+  assertLiveBinding(activated ?? def, name);
+}
+
+/**
+ * The value definition of `name` in the innermost scope of the context that
+ * has a binding of `name`, when that scope is an activation of the scope
+ * that holds `def` under `name`. A definition that the evaluation
+ * installs in the activation (a `Declare` in a `Block` makes a new one)
+ * is not a copy of `def`, but the read goes through the activation.
+ * `undefined` otherwise.
+ */
+function activationBindingOf(
+  ce: ComputeEngine,
+  name: string,
+  def: BoxedValueDefinition
+): BoxedValueDefinition | undefined {
+  let scope: Scope | null | undefined = ce.context?.lexicalScope;
+  while (scope) {
+    const found = scope.bindings.get(name);
+    if (found !== undefined) {
+      // Inline value-definition checks: importing `isValueDef` from
+      // `utils.ts` would restore the import cycle that this module breaks.
+      if (!('value' in found)) return undefined;
+      const held = scopeActivationTemplate(scope)?.bindings.get(name);
+      return held !== undefined && 'value' in held && held.value === def
+        ? found.value
+        : undefined;
+    }
+    scope = scope.parent;
+  }
+  return undefined;
+}
+
 function ownBindingEnvironment(
   ce: ComputeEngine,
   value: Expression
@@ -1630,7 +1697,7 @@ function ownBindingEnvironment(
     // the withdrawal below: were a borrowed definition ever left behind for the
     // pop to dispose, the caller's next use of that symbol would report it here
     // instead of silently going stale.
-    if (ce._debugBindings) assertLiveBinding(own, name);
+    if (ce._debugBindings) assertLiveRead(ce, own, name);
     let scope: Scope | null = ce.context.lexicalScope;
     let innermost: BoxedDefinition | undefined;
     let reachable = false;
