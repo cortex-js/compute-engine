@@ -249,81 +249,19 @@ Options:
 If nothing is decided, the calls above keep a type that does not hold their
 value.
 
-### CE-663. A list literal fixes the type of its free symbols as `number` for the life of the engine
+### CE-663. `Mean([p, q])` does not infer `p` and `q` as numbers
 
-**Status:** partly fixed (`cca0280f4`; the generic route pending commit); types.
-Reported in GitHub issue #485 (0.170.0, 0.171.0); reproduced at `1f36c5d48`
-(0.175.0) on 2026-10-30. User decision 2026-10-30: option (c), with one
-addition. A list literal does not infer its free symbols. An operator that
-requires a numeric vector or matrix infers the cells of a literal operand as
-numbers (`Determinant([[a, b], [c, d]])` infers the four symbols). The narrowing
-of the symbols of an arithmetic cell (CE-39.6) stays. Fixed after `cca0280f4`:
-`Reverse([p, q])` and `Sort([p, q])` inferred `p` as a number, because their
-generic `T` is solved from the list type `vector<2>` itself; at a generic
-parameter, a list literal now gets only the declared bound of the variable
-(`distributeLiteralElementInference()`, `validate.ts`). Still open:
-`Mean([p, q])` does not infer `p`, although `Mean` requires numbers: its
-parameter is a union (`collection<nothing | number> | distribution | number`),
-and the distribution gives nothing for a union. Also open (limitation of the
-simple, sound version): for a function assigned `g := x ↦ Length([-x, y])`, `y`
-is recorded as a number cell (`noteDefinitionCapturedTypes()`,
-`function-literal.ts`), so after `y := "abc"` the compiled `g` is refused,
-although the result `2` does not depend on `y`. This refusal also occurred
-before this change. A precise version must find whether the result depends on
-the element types of the list; it is a separate task.
+**Status:** ready; defect, S. GitHub issue #485 (closed); the list-literal part
+was fixed in `cca0280f4` and `3bb738928`.
 
-Since CE-39.4 (option (a), user decision 2026-10-25), boxing a list literal
-narrows each free symbol in it to `number` (`narrowFreeSymbolCells()`,
-`boxed-expression/canonical-utils.ts`), also when the list is not evaluated or
-assigned. A later boolean use of the symbol is then an error, and the result
-depends on the order of the uses:
-
-```js
-const ce = new ComputeEngine();
-ce.box(['List', 'p', 'q']); // only boxed
-ce.box('p').type; // number (it was unknown)
-ce.box(['And', 'p', 'q']).evaluate(); // incompatible-type error
-// The other order: And(p, q) first makes p boolean, and [p, q] is valid.
-```
-
-Unlike `p + 1`, the list does not require a number: `[p, q]` is also a valid
-list of propositions, sets or strings. The number reading comes from the
-convention of `classifyCellD()` (`library/collections.ts`) that types `[p, q]`
-as `vector<2>`. A REPL or notebook that shows `[p, q]` in one cell makes `p ∧ q`
-an error in every later cell, and library code that only boxes a list changes
-the types of the session.
-
-Measured 2026-10-30 with the narrowing turned off: 5 of the 10 tests in
-`ce-39-literal-cell-types.test.ts` fail. Three only assert that the symbol
-becomes `number`. Two are real gaps: with `L := [u, v]`, `At(L, 1)` is typed
-`number` and its value `u` is typed `unknown` (`.matches()` is false), and
-`PseudoInverse([[x, y], [z, w]])` is typed `matrix` with a value typed
-`list<list<list<list<any> | number | tuple> | number | tuple>>`.
-`AdjugateMatrix` of the same matrix stays `matrix<2x2>`. The full suite was not
-run.
-
-Options:
-
-- (a) Keep the current rule (it is documented in the CHANGELOG of 0.170.0) and
-  answer the issue: declare the symbol (`ce.declare('p', 'boolean')`) before the
-  list is boxed.
-- (b) Narrow only when a list literal is assigned (`L := [u, v]`), not when it
-  is boxed or passed as an argument. The issue's example works. `L := [p, q]`
-  followed by `p ∧ q` is still an error. `At([u, v], 1)` keeps the gap above.
-- (c) Never narrow from a list literal (the 0.167.0 behavior). This reverses the
-  user decision of 2026-10-25 on CE-39.4 (option (a)). The list keeps its type
-  (`[p, q]` is still `vector<2>`); only the symbols are no longer changed. A use
-  that requires a number (`p + 1`, `Negate(p)`) still narrows `p`. The CE-39.6
-  narrowing of the symbols in an arithmetic cell built with `.neg()` or `.add()`
-  can be kept: such a cell does require a number. The measurement above turned
-  off both kinds of narrowing. The two gaps above come back: an `unknown` value
-  is admitted at a declared type (`docs/TYPE-SYSTEM.md`, "A value whose type is
-  `unknown`"), but the value and the static type disagree under `.matches()`.
-  The `PseudoInverse` type needs its own fix.
-- (d) Keep (a) as the default and add an engine option that turns the narrowing
-  off.
-
-If nothing is decided, the current rule (a) stays and the issue stays open.
+An operator that requires a numeric vector or matrix infers the cells of a
+literal operand as numbers: `Determinant([[a, b], [c, d]])` infers the four
+symbols (user decision 2026-10-30, option (c)). `Mean` requires numbers, but
+`Mean([p, q])` leaves `p` and `q` unknown: its parameter is a union
+(`collection<nothing | number> | distribution | number`), and
+`distributeLiteralElementInference()` (`boxed-expression/validate.ts`) infers
+nothing for a union parameter. Fix: for a union, infer the cells from the
+only arm that a list literal can match.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
@@ -816,9 +754,9 @@ elements of the `When` list are numbers or gaps.
 
 ### CE-661. The count and the elements of a family of points are not known before evaluation
 
-**Status:** fixed (pending commit), 2026-10-30; capability, medium. Tycho ledger
-row 477. The `count` of the input below is 34 before evaluation, and `at(k)`
-reads each element without evaluating the body
+**Status:** fixed in `0c1adc21a`, not released: delete this entry at the
+release; capability, medium. Tycho ledger row 477. The `count` of the input
+below is 34 before evaluation, and `at(k)` reads each element without evaluating the body
 (`test/compute-engine/ce-661-point-family-count-at.test.ts`). `at(k)` returns
 the element evaluated, not the unevaluated form: the `at` handler of `When` must
 see values, and `at()` must agree with `each()`. A new operator-definition hook
@@ -1185,48 +1123,23 @@ enumerated). Options:
 
 If nothing is decided, (b) stays in force but is not documented.
 
-### CE-699. The implicit variable of `Integrate`, `D` and `Series` depends on the order of boxing and assignment
+### CE-699. The implicit variable of `Integrate`, `D` and `Series`: two cases still depend on the order of boxing and assignment
 
-**Status:** done 2026-10-31. User decision 2026-10-31: option (a) for
-`Integrate`, `D` and `Series`; `NIntegrate` and `ND` follow it too (the same
-order defect). `Limit` and `NLimit` follow it since commit `afbcdfc3e`. The
-rule is `isImplicitVariableCandidate()`
-(`boxed-expression/implicit-variable-rule.ts`). Remaining limitation: a
-symbol with no declaration that receives a value that is not a number after
-boxing is still a candidate (its type is unknown at boxing), and `subs()` on
-a non-canonical `Integrate` still replaces the implicit variable.
+**Status:** ready; defect, S.
 
-An operator that does not write its variable takes it from the unknowns of
-its body: a symbol with an assigned value is not an unknown. So the result
-depends on whether the assignment came before or after boxing:
+The implicit variable of an operator whose variable is not written is chosen
+when the expression is boxed, by `isImplicitVariableCandidate()`
+(`boxed-expression/implicit-variable-rule.ts`). A symbol whose declared type,
+or the type of its value, has no value in common with `number` is not a
+candidate. Two cases remain:
 
-- `x := 4`, then `["Integrate", ["Sqrt", "x"], ["Limits", 0, 1]]` is the
-  integral of the constant `√4 = 2`, so 2. Boxed before the assignment, it is
-  `∫₀¹ √x dx = 2/3`. The form with the variable written, `Limits(x, 0, 1)`,
-  gives 2/3 in both orders.
-- `x := 4`, then `["D", ["Power", "x", 3]]` finds no variable and stays
-  unevaluated; boxed before, it is `3x²`. `Series` is the same.
-- `docs/SCOPING-MODEL.md` ("Binders") says a bound variable hides an assigned
-  value of the same name. It does not say how an omitted variable is chosen.
-
-Options:
-
-- **(a)** The implicit variable is chosen from the symbols written in the
-  body, with or without a value: the first in sorted order, the same choice as
-  today when nothing is assigned. The result is the same in both orders.
-  `Limit`/`NLimit` do this (`canonicalImplicitLimitFunction()`,
-  `library/calculus.ts`). For `Integrate` the change is in its canonical
-  handler and `implicitIntegrationVariable()`
-  (`boxed-expression/integration-variables.ts`); for `D` and `Series`, in
-  `defaultUnknown()` (`boxed-expression/utils.ts`). Cost: the canonical form
-  of these expressions changes when a symbol has a value (the variable becomes
-  a parameter of the literal), and an expression that a user wrote to mean
-  "the constant `x`" now means "the variable `x`".
-- **(b)** Keep the current rule (an assigned symbol is a constant in an
-  implicit body), document it in the reference of each operator, and change
-  `Limit`/`NLimit` back to it.
-
-If nothing is decided, `Limit` follows (a) and the other operators follow (b).
+- **CE-699.1** A symbol with no declaration that receives a value that is not
+  a number after boxing is still the variable, because its type was unknown
+  when the expression was boxed. Boxed after the assignment, it is not a
+  candidate.
+- **CE-699.2** `subs()` on a non-canonical `Integrate` replaces the implicit
+  variable. On the canonical form the variable is bound, and `subs()` does
+  not replace it.
 
 ### CE-698. A saturated result that reads a written parameter outside every closure stays unevaluated
 
@@ -4415,41 +4328,6 @@ coordinate". The shapes that their tests used now have the static type
 `error` and decline before these checks. For each check, find a shape that
 has no `error` type and still reaches it; if none exists, remove the check.
 
-### CE-706. A compiled root function with an untyped parameter gives `null` for a list argument
-
-**Status:** fixed by CE-712.1 (uncommitted), option (c): the parameter of a
-root function is not an input, so `t ↦ 2t` still compiles, and a list
-argument at its untyped parameter is a value outside the type that the body
-implies, documented as an unspecified result in `docs/COMPILATION-MODEL.md`
-"Fail closed" (no code change for this case). GitHub issue #488.
-
-`compile(t ↦ 2t, { to: "javascript" })` emits `(t) => 2 * t`, and
-`run([[1, 2], [3, 4]])` returns `null`. The interpreter maps an untyped
-parameter over a list and gives `[[2,4],[6,8]]`. With `t: any` the compiled
-code has a run-time array test and gives the interpreter's value. A function
-literal in value position is already wrapped (`broadcastingWrapper(…,
-'bcastFn')` in `compileExprFunctionLiteral`,
-`src/compute-engine/compilation/compile-function-literals.ts`); the root
-lambda branch of `compileToTarget()` (`javascript-target.ts`) is not. A
-refusal of an array at entry is not sound: `u ↦ q(u)` and `t ↦ t` give the
-right value for a list today.
-
-Options:
-
-- (a) Wrap the root lambda as a literal in value position is wrapped:
-  `(t) => 2 * t` becomes
-  `((f) => (_tv) => Array.isArray(_tv) ? _SYS.bcastFn(f, _tv) : f(_tv))((t) => 2 * t)`.
-  The `code` text of every compiled root function with scalar parameters
-  changes, and each call does one array test (a cost in a plotting loop).
-- (b) Map in the runner only: the function that `run` holds calls `bcastFn`
-  when an argument is an array. The `code` text does not change, but a host
-  that uses `code` directly still gets `null`.
-- (c) Read a list argument at an untyped parameter of a root function as a
-  host contract violation (the body `2t` implies a number, CE-683), and
-  document it. No code change.
-
-If nothing is decided, the wrong value `null` stays.
-
 ### CE-693. Compiled code declines where a parameter declared `expression` can receive a collection
 
 **Status:** proposed; capability (declines). GitHub issue #488 (user decision
@@ -4771,7 +4649,8 @@ error. Python reports `NameError` at run time for the same block.
 
 ### CE-658. JavaScript: a coordinate of a point-or-point-list symbol with an assigned point declines
 
-**Status:** fixed (pending commit), 2026-10-30; defect (decline). Found
+**Status:** fixed in `0c1adc21a`, not released: delete this entry at the
+release; defect (decline). Found
 2026-10-30 from Tycho ledger row 479, on the main tree after commit `f169546e9`.
 Every target now runs the point rewrite at its compile entry
 (`inlinePointValuesAtRoot()` in `compilation/point-value-inlining.ts`, the code
@@ -4947,29 +4826,6 @@ at that parameter, as it binds a list of numbers. Check how a range value
 reaches compiled code at run time (an array, or a lazy range object) before
 accepting it there.
 
-### CE-463. Compiled effectful input reads are merged by emitted source and reordered
-
-**Status:** fixed by CE-712.1 (uncommitted): inputs declared `any`, mapped
-through `vars` or not, now decline, so the guard bindings of the two examples
-are not emitted (`test/compute-engine/compile-admission.test.ts`, "CE-463").
-Was: open;
-possible defect, not verified. Reported by a reviewer on the
-code committed in `cd704b6b8` (`compilation/base-compiler.ts`, the guard
-bindings of `vars`-mapped symbols near lines 13400 to 13435).
-
-- **CE-463.1** The bindings group reads by emitted source, so two symbols mapped
-  to the same effectful expression share one read: with `p` and `q` declared
-  `any` and both mapped to `_.values.shift()`, compiled `p + q` reads the queue
-  once and gives `4` for the values `[2, 3]` instead of `5`. Deduplicate by
-  symbol identity, or merge only reads proved free of effects.
-- **CE-463.2** The outer bindings evaluate mapped symbols before every other
-  operand: for a structural `Subtract(F(), p)` where `F()` and the mapping of
-  `p` each consume `_.values.shift()`, the values `[10, 3]` gave `7` before and
-  `−7` now. Evaluate the operands in their original order, or decline the guard
-  when the effectful reads cannot be bound without reordering.
-
-First write the two tests; if they pass, delete this entry.
-
 ### CE-209. `Sum(f(x), Element(x, xs))` does not check `xs` for raw `Nothing` positions
 
 **Status:** ready; defect. Part of CE-218.
@@ -5071,21 +4927,6 @@ type, and the capture of bindings (question Q11 of
   constructor refuses compilation. Annotating the parameter with its numeric
   tuple type restores compilation. A better proof here does not need a change to
   the slot policy, and must not treat omission as missing data.
-
-### CE-222. Compiled code reads an undeclared symbol as a number, so a list argument gives a wrong value
-
-**Status:** fixed by CE-712.1 (uncommitted): an input whose type is `unknown`
-or `any` declines on every target with its name in `unsupported`, so
-`If(M < 3, M, 0)` with `M` undeclared gives the interpreter's `[1, 0]` for
-`M = [1, 5]` (`test/compute-engine/compile-admission.test.ts`).
-
-With `M` not declared, `compile(If(M < 3, M, 0))` (JavaScript) emits
-`((_.M !== undefined) ? ((_.M < 3) ? (_.M) : (0)) : NaN)`. `run({M: [1, 5]})`
-and `run({M: [[1, 2], [3, 4]]})` both give `0`, while the interpreter gives
-`[1, 0]` and `[[1, 2], [0, 0]]`. Nothing checks at run time that the argument is
-a number. Expected: a run-time check of an argument that the compiled code
-assumes to be a number (or a refusal to compile a symbol whose type is not
-known), so a list argument gives the interpreter's value or an error.
 
 ### CE-227. Two trigonometric argument shapes are not reduced on the shader targets
 
@@ -5544,53 +5385,6 @@ of a Tycho frame on WebGPU) unless the operand is finite for certain
 By design the helper stays for a product of two symbols with no declared range
 (`sin(k t)`: f32 overflow), for a symbol whose `real` type is only inferred, for
 `smoothstep`, and for a value that can be NaN (an `arcsin`).
-
-### CE-619. The GPU finiteness proof accepts operands that overflow f32
-
-**Status:** fixed (pending commit), 2026-10-30, all five sub-items; defect.
-Tests: `test/compute-engine/ce-619-gpu-finite-proof-overflow.test.ts`. A value
-of unknown size now counts as any finite f32 value: a product needs a known size
-for every factor (or only literals of magnitude at most 1 beside one unknown
-factor), a sum adds the sizes of its terms (one unknown term is accepted beside
-terms that add up to at most 2¹⁰⁰), `Mod` and `Divide` need a divisor bound, a
-type range is read only for a host-input symbol with a declared range, a
-constant subtree gives its value only when the emitter folds it into one
-literal, a stored value is read in radians, and `abs`, `min`, `max` give a bound
-only for real scalar operands. Cost: the NaN-safe helper comes back for a
-product of a literal larger than 1 and a `real` with no range (`\sin(2x+1)`),
-and for a sum of two such terms; a declared range removes it. Tycho's voronoi
-base still uses the built-in `min`. Found while fixing, not fixed: CE-674,
-CE-675. Found 2026-10-28 while working on CE-565.6; each item measured on main
-with GLSL. When the proof (`gpuFiniteProof`, `gpu-target.ts`) accepts an operand
-that is `+∞` or NaN in f32, the shader emits the built-in (`sin`, `min`, …)
-instead of the NaN-safe helper, and `sin(∞)` gives 0 on Apple GPUs where the
-helper gives NaN. A larger attempt to prove `exp` and more powers finite was
-found unsound in three review rounds and dropped; these holes need fixing before
-such rules come back.
-
-- **CE-619.1** A function parameter counts as a host input: `F(p) := \sin(Hp)`
-  with `H: real<0..1e19>`, called as `F(Hx)`, emits `sin(H * p)`, but `p` holds
-  `H·x`, so the operand is `H²·x`, `+∞` from `x ≈ 4`. `gpuRecordCallSiteFacts`
-  records only `finite` and `magnitude` for a parameter.
-- **CE-619.2** A product with one factor of unknown size accepts known factors
-  up to `F32_MAX/2` (`productStaysFinite`): `\sin(Hx)` with `H: real<0..1e30>`
-  emits `sin(H * x)` (`+∞` for `x ≥ 3.4·10⁸`); `\sin(x/10^{-30})`,
-  `\sin(\lfloor x\rfloor\cdot10^{30})` and `\sin(H(Hx))` with `H: real<0..1e19>`
-  are accepted the same way. The comment calls it an accepted limit (a host
-  value near the f32 maximum), but ordinary inputs reach it.
-- **CE-619.3** `Random()` is evaluated at compile time by the constant-subtree
-  check (`e.unknowns.length === 0`, then `e.N()`):
-  `\sin(5\mathrm{Random}()\cdot10^{38})` emitted the built-in in 6 of 8
-  compilations (`+∞` for any draw above 0.68), and the compiled output changes
-  from run to run.
-- **CE-619.4** `Mod` with a tiny divisor:
-  `\sin(\operatorname{mod}(R, 10^{-30}))` with `R: real<0..1e17>` emits
-  `sin(_gpu_fmod(R, 1e-30))`; in f32 the quotient is `+∞` and the result NaN.
-  `Mod` is in `GPU_F32_BOUNDED_HEADS` with no check of the quotient.
-- **CE-619.5** A sum of terms with large declared ranges: `\sin(R+Q)` with
-  `R, Q: real<0..2e38>` emits `sin(Q + R)` (up to 4·10³⁸). The comment of
-  `gpuProvablyFinite` calls it an accepted limit, but the declared ranges show
-  the overflow and a check is simple.
 
 ### CE-253. `Sum(At(P, Range(a, b)))` materializes the range on the JavaScript target
 
@@ -6775,101 +6569,24 @@ effect. It can also mean that an entry of the signature derivation is
 retired at HEAD only because unrelated events move the `any` version: find
 the cause before deciding which.
 
-### CE-689. Evaluating nested folds recomputes the types and effects of the body at every step
+### CE-689. Boxing the nested-`Fold` expression of issue #487 is about 3.5 times slower than in 0.156.0
 
-**Status:** fixed in `db796d62e` (2026-10-31, session compute-engine-7b).
-User decision 2026-10-30: option (A), the type of a node
-of a function body comes from the declared (static) bindings only. The type
-cache of `BoxedFunction.type` is keyed on `typeVersion`
-(`engine-configuration-lifecycle.ts`), which the declarations and the frame
-pop of a call of a function literal do not advance, and on the innermost
-call frame; a type computation reads the static bindings
-(`static-typing-view.ts`); a type computed from an answer that holds only
-while another computation runs is kept under the `any` version. Measured:
-480 type recomputations per `Apply` instead of 6,332, about 19 ms instead
-of about 100 ms (from source), same values; full suite green in the main
-tree. Tests: `test/compute-engine/ce-689-type-cache-across-calls.test.ts`.
-The rest of this entry is the record that led to the decision.
+**Status:** proposed; performance, M. GitHub issue #487, closed after the
+evaluation part was fixed in `db796d62e`.
 
-**Earlier status:** decision needed; performance, large. GitHub issue #487
-(2026-10-30). User decision 2026-10-30: a separate item, after the box part of
-the issue (fixed in `e8b748554`: the comparison type with an operand that may
-be an absent collection, and the rejected-fixpoint record of
-`FoldRefinementState`, `collections.ts`). That decision named step 3b of the
-evaluation-cache plan; the cause is the one of Decision 2 of that plan (see
-below), which the user decided "no" on 2026-10-30. The user said on
-2026-10-30 that the decisions of the evaluation-cache plan are open to
-revisiting, and that part of the committed cache work may be incorrect: a
-new decision is needed, with the measurements of this workload.
-
-The expression of the issue is about 1.8 KB of MathJSON: 8 `Fold`s nested 4
-deep (`test/compute-engine/fixtures/rsk-row-insertion.ts`). Measured on the
-built packages (mean of 10 calls after a warm-up, 2026-10-30): `Apply` of a
-`Function` boxed once takes 23 ms on 0.156.0, 33 ms on 0.169.0 and 42 ms on
-0.173.0. No fold fixpoint runs on that route, but each step of a fold changes
-bindings, which moves the engine generation, so the types (`boundCallType`,
-`functionLiteralSignatureType`) and effects (`isPure`, read by the
-shared-evaluation memo in `evaluate()`) of the body are computed again at
-every step. This is §5.3 of
-`docs/plans/2026-10-30-evaluation-cache-architecture.md`: each call of a
-function literal declares its parameters in a new scope, which moves the `any`
-version, the key of the type, sign and structural caches of every node. The fix
-is step 7 of that plan (a cache key per activation), which Decision 2 rejected
-on 2026-10-30 (the decision of 2026-09-24 in CE-334 stays: a simple version
-gave wrong results, and the measured gain on the Tycho workloads was small).
-CE-334, CE-531 and CE-321 record the earlier measurements.
-
-Measured 2026-10-30 at `399b29e6c` (session compute-engine-7b):
-
-- One `Apply` makes 75 calls of function literals. Each call declares its
-  parameters (131 declarations) and pops its frame (75 pops), so the `any`
-  version moves 206 times. The type cache then has 59,338 reads and 6,332
-  misses because the version moved; each of the 6,332 gives the same type
-  again. The effects cache has 1,960 reads and 1,050 misses because the
-  lexical scope changed (a new call scope); each gives the same effects
-  again. The shared-evaluation memo has 770 look-ups and 154 hits; with it
-  off (`CE_CACHE_OFF=shared`) the time does not change.
-- With every cache switch off except `type`, the values for five
-  permutations are the same. With `type` off the run does not end in 300 s
-  (the exponential case that `cache-switches.ts` documents). A check that
-  computes the type again at each served hit found no difference.
-- Experiment: a second version for the type cache only, which a declaration
-  into a call scope that is not pushed yet and the pop of that call frame
-  do not move (all other caches keep the `any` version). `Apply` goes from
-  about 100 ms to about 14 ms from source, and on a build from about 98 ms
-  to about 18 ms (0.156.0: about 48 ms; the box was loaded by another
-  session's suite during this paired run). The full suite passes with it
-  (1,691 files, 73,269 tests). The experiment has no guard for a type
-  handler that reads the value of a parameter through the call frame;
-  such a guard is needed before it can ship.
-- The guard, tried 2026-10-30 (worktree `/tmp/wt-compute-engine-7b`): a
-  type computation that looks up a name that a call has bound keeps its
-  type under the `any` version only. With it the gain is gone (3,043
-  type misses per `Apply` instead of 6,332; no time saved). The type
-  computations of a function body read the values of the parameters:
-  the operand views read `BoxedSymbol.value` (`isFiniteBroadcastParticipant`,
-  `isNumericScalarOperandView`, `isTuple`, `isTextAtom`), and
-  `structureOfExpression` (`operand-descriptor.ts`) compares the lookup of
-  a symbol by name with its own definition (`lookupByName`), which inside
-  a call finds the activation. So at HEAD the type of a node of a body
-  can depend on the values of the call in which it is read. A type
-  handler that reads a parameter by name (`lookupDefinition('x')`) gives
-  `integer` in a call `g(3)` and `string` in `g("ab")` at HEAD; without
-  the guard it gave the type computed at boxing, `any`, in both calls.
-  The experiment was right on this workload only because these value
-  reads did not change any type here.
-- Timing of every first-parent commit from 0.156.0 to 0.158.0, 0.167.0 to
-  0.169.0 and 0.170.0 to 0.173.0: no commit stands out from the noise
-  (commits that change only documentation show rises of 2 to 6 ms). The
-  growth is many small costs, each multiplied by the 6,332 type
-  recomputations of each `Apply`.
-
-The box route is also still slower than in 0.156.0 (30 ms on 0.156.0, 106 ms on
-0.173.0, built packages). One canonical pass of the same tree with no fold
-handler (`Fold` renamed) went from 3 to 5 ms, so part of the growth is the cost
-of each pass, and the fold fixpoint repeats that cost: the inner folds are still
-rejected at every step (the `If` in their body can be `Missing`), and each
-rejected fold costs 4 passes in the first step of each enclosing fold.
+Boxing `['Function', RSK_ROW_INSERTION, '_raw']`
+(`test/compute-engine/fixtures/rsk-row-insertion.ts`: 8 `Fold`s nested 4 deep)
+took 30 ms on the 0.156.0 build and 106 ms on the 0.173.0 build (measured
+2026-10-30). At `2e6479dc8` it takes about 110 ms from source (the fastest of
+10 warm runs, load average 5 on 18 cores, measured 2026-10-31). One canonical
+pass of the same tree with no fold handler (`Fold` renamed) went from 3 ms to
+5 ms between those versions, so part of the growth is the cost of each pass.
+The fold fixpoint repeats that cost: the inner folds are rejected at every step
+(the `If` in their body can be `Missing`), and each rejected fold costs 4
+canonical passes in the first step of each enclosing fold
+(`FoldRefinementState`, `library/collections.ts`). Two possible fixes: keep the
+rejected result of an inner fold across the steps of the enclosing fold, or
+make one canonical pass cheaper.
 
 ### CE-668. The first `at()` of an evaluated lazy `Map` view advances the generation, so its cached evaluation is never used
 
