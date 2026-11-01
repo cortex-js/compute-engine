@@ -276,6 +276,15 @@
 
 ### Bug Fixes
 
+- **`Limit` at infinity of a power whose base tends to 0 and whose exponent
+  is negative.** With `n < 0`, `Limit(Root(1/x, n), x, +∞)` gave
+  `ComplexInfinity`; `x^{-1/n}` is real and positive, and the limit is now
+  `+∞`. The rule gives `±∞` only when the base is proved positive (or
+  negative, with an exact integer exponent, by parity) for large `x` from its
+  form, and the limit of the base is exactly 0: `Root((130 − x)/x², n)` and
+  `Root(sin(x)/x, n)` stay unevaluated, and `Root(10^{-30} + 1/x, n)` gives
+  the finite `(10^{-30})^{1/n}`.
+
 - **With `evaluateAsync()`, a function literal that a block returns, applied
   inside a function body, reads the locals of the block.**
   `Apply(Function(Apply(Block(Declare(c, 'real', 5), k ↦ c + k), n), n), 1)`

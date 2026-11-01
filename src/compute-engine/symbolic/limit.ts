@@ -1473,6 +1473,28 @@ function limitPowerAtPosInf(
       }
       return undefined;
     }
+    // A base that goes to 0 with an exponent that is not known to be
+    // positive. `0^{expo}` evaluates to `ComplexInfinity` for a negative
+    // exponent, which is not the limit of a real function: `(1/x)^{1/n}`
+    // with `n < 0` is real and positive and goes to `+∞`. With a negative
+    // exponent, a base that is proved positive for large `x` gives `+∞`. A
+    // base that is proved negative gives a signed infinity by the parity of
+    // an exact integer exponent (`(−1/x)^{−3} = −x³`), and a complex value
+    // for any other exponent. The sign must be proved from the form of the
+    // base: `(130 − x)/x²` is positive at `x = 120` but negative for
+    // `x > 130`. Any other case (a sign that is not proved, or an exponent
+    // with an unknown sign) is declined. The test for 0 is exact: `is(0)`
+    // accepts a value within the engine tolerance, and the limit of
+    // `10^{-30} + 1/x` is not 0.
+    if (isNumber(b) && b.isSame(0) && expo.isPositive !== true) {
+      if (expo.isNegative !== true) return undefined;
+      const s = eventualSignAtInf(base, x, ce);
+      if (s === 1) return ce.PositiveInfinity;
+      const k = asExactSmallInteger(expo);
+      if (s === -1 && k !== null)
+        return k % 2 === 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+      return undefined;
+    }
     if (isDefiniteValue(b)) return ce.function('Power', [b, expo]).evaluate();
     return undefined;
   }
@@ -2535,6 +2557,122 @@ function baseEventuallyPositive(
   ce: ComputeEngine
 ): boolean {
   return numericAt(base, x, 120, ce) > 0;
+}
+
+/**
+ * The sign of `e` for every large enough positive `x`, proved from its form
+ * with no numeric probe: `1` or `−1`, else `0`.
+ *
+ * - A constant has the sign that the engine proves for it, and `x` is
+ *   positive.
+ * - A product or a quotient has the product of the signs of its parts.
+ * - A power `b^c` with a real constant `c` is positive when `b` is
+ *   positive. When `b` is negative and `c` is an exact integer, the parity
+ *   of `c` gives the sign.
+ * - A root `ⁿ√b` with a real constant degree that is not 0 is positive when
+ *   `b` is positive.
+ * - A sum of terms `k·x^m` (a constant `k`, an exact integer `m`) has the
+ *   sign of the terms of highest degree `m`, when they have the same sign:
+ *   that degree dominates for large `x`. `130 − x` is negative.
+ *
+ * Any other form, for example `sin(x)` or `√x − 50`, gives `0`. A numeric
+ * probe at one point is not a proof: `(130 − x)/x²` is positive at
+ * `x = 120` and negative for `x > 130`.
+ */
+function eventualSignAtInf(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): number {
+  if (!e.has(x)) {
+    if (e.isPositive === true) return 1;
+    if (e.isNegative === true) return -1;
+    return 0;
+  }
+  if (isSymbol(e) && e.symbol === x) return 1;
+  const op = e.operator;
+  if (op === 'Negate') return -eventualSignAtInf(o1(e), x, ce);
+  if (op === 'Multiply' || op === 'Divide') {
+    let sign = 1;
+    for (const f of oo(e)) sign *= eventualSignAtInf(f, x, ce);
+    return sign;
+  }
+  if (op === 'Power' && !o2(e).has(x)) {
+    // `x^i = e^{i·ln x}` turns on the unit circle: a constant exponent that
+    // is not real gives no sign.
+    if (!o2(e).type.matches('finite_real')) return 0;
+    const s = eventualSignAtInf(o1(e), x, ce);
+    if (s === 1) return 1;
+    const k = asExactSmallInteger(o2(e));
+    if (s === -1 && k !== null) return k % 2 === 0 ? 1 : -1;
+    return 0;
+  }
+  if (op === 'Sqrt') return eventualSignAtInf(o1(e), x, ce) === 1 ? 1 : 0;
+  if (op === 'Root') {
+    // The degree must be a real constant that is not 0: `Root(b, 0)` has no
+    // value.
+    const k = o2(e);
+    if (
+      k.has(x) ||
+      !k.type.matches('finite_real') ||
+      (k.isPositive !== true && k.isNegative !== true)
+    )
+      return 0;
+    return eventualSignAtInf(o1(e), x, ce) === 1 ? 1 : 0;
+  }
+  if (op === 'Add') {
+    let top = -Infinity;
+    let sign = 0;
+    for (const t of oo(e)) {
+      const term = monomialAtInf(t, x, ce);
+      if (term === undefined) return 0;
+      if (term.degree > top) {
+        top = term.degree;
+        sign = term.sign;
+      } else if (term.degree === top && term.sign !== sign) return 0;
+    }
+    return sign;
+  }
+  return 0;
+}
+
+/**
+ * The sign of the constant `k` and the exact integer degree `m` of a term
+ * `k·x^m`, or `undefined` when the term does not have this form or the sign
+ * of `k` is not proved. See `eventualSignAtInf()`.
+ */
+function monomialAtInf(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): { sign: number; degree: number } | undefined {
+  if (!e.has(x)) {
+    const sign = eventualSignAtInf(e, x, ce);
+    return sign === 0 ? undefined : { sign, degree: 0 };
+  }
+  if (isSymbol(e) && e.symbol === x) return { sign: 1, degree: 1 };
+  const op = e.operator;
+  if (op === 'Negate') {
+    const t = monomialAtInf(o1(e), x, ce);
+    return t && { sign: -t.sign, degree: t.degree };
+  }
+  const b = o1(e);
+  if (op === 'Power' && isSymbol(b) && b.symbol === x) {
+    const m = asExactSmallInteger(o2(e));
+    return m === null ? undefined : { sign: 1, degree: m };
+  }
+  if (op === 'Multiply' || op === 'Divide') {
+    let sign = 1;
+    let degree = 0;
+    for (const [i, f] of oo(e).entries()) {
+      const t = monomialAtInf(f, x, ce);
+      if (t === undefined) return undefined;
+      sign *= t.sign;
+      degree += op === 'Divide' && i > 0 ? -t.degree : t.degree;
+    }
+    return { sign, degree };
+  }
+  return undefined;
 }
 
 /**

@@ -359,6 +359,83 @@ describe('LIMIT AT INFINITY: THE GROWTH OF AN EXPONENTIAL', () => {
     ).toBe(0);
   });
 
+  test('a root with a negative degree of a radicand that goes to 0', () => {
+    // With `n < 0`, `Root(1/t, n) = t^{-1/n}` is real and positive and
+    // grows. The limit of the radicand is 0, and `0^{1/n}` evaluated to
+    // `ComplexInfinity`, which was the limit.
+    const neg = new ComputeEngine();
+    neg.declare('n', 'real');
+    neg.assume(neg.parse('n < 0'));
+    const limIn = (body: unknown) =>
+      neg.box(['Limit', ['Function', body, 't'], 'PositiveInfinity'] as any);
+    const r = ['Root', ['Divide', 1, 't'], 'n'];
+    expect(limIn(r).evaluate().json).toBe('PositiveInfinity');
+    expect(limIn(r).N().json).toBe('PositiveInfinity');
+    expect(
+      limIn(['Power', ['Divide', 1, 't'], ['Divide', 1, 'n']]).evaluate().json
+    ).toBe('PositiveInfinity');
+    expect(limIn(['Multiply', r, 't']).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    // A negative radicand gives complex values: no limit.
+    expect(
+      isUnevaluated(limIn(['Root', ['Divide', -1, 't'], 'n']).evaluate())
+    ).toBe(true);
+    // The sign of the radicand must be proved for every large `t`.
+    // `(130 − t)/t²` is positive at `t = 120` and negative for `t > 130`,
+    // and `sin(t)/t` changes sign: their roots take complex values.
+    const late = ['Divide', ['Subtract', 130, 't'], ['Power', 't', 2]];
+    expect(isUnevaluated(limIn(['Root', late, 'n']).evaluate())).toBe(true);
+    const sinc = ['Divide', ['Sin', 't'], 't'];
+    expect(isUnevaluated(limIn(['Root', sinc, 'n']).evaluate())).toBe(true);
+    expect(
+      limIn([
+        'Root',
+        ['Divide', ['Add', 't', 1], ['Power', 't', 2]],
+        'n',
+      ]).evaluate().json
+    ).toBe('PositiveInfinity');
+    // A base that goes to 0 through negative values: a negative integer
+    // exponent gives an infinity with the sign of its parity
+    // (`(−1/t + 1/t²)^{−3}` is about `−t³`).
+    const negBase = ['Add', ['Divide', -1, 't'], ['Power', 't', -2]];
+    expect(limIn(['Power', negBase, -3]).evaluate().json).toBe(
+      'NegativeInfinity'
+    );
+    expect(limIn(['Power', negBase, -2]).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    // A radicand with a non-real power has no sign: `t^i = e^{i·ln t}`
+    // turns on the unit circle, so `Root(t^i/t, n)` takes complex values.
+    expect(
+      isUnevaluated(
+        limIn([
+          'Root',
+          ['Divide', ['Power', 't', 'ImaginaryUnit'], 't'],
+          'n',
+        ]).evaluate()
+      )
+    ).toBe(true);
+    // The limit of the radicand must be exactly 0: `10^{-30} + 1/t` tends
+    // to `10^{-30}`, which is within the engine tolerance of 0, and the
+    // limit is `(10^{-30})^{1/n}`, not `+∞`.
+    expect(
+      limIn([
+        'Root',
+        ['Add', ['Power', 10, -30], ['Divide', 1, 't']],
+        'n',
+      ]).evaluate().json
+    ).not.toBe('PositiveInfinity');
+    // An exponent with an unknown sign: no limit.
+    expect(
+      isUnevaluated(limIn(['Power', ['Divide', 1, 't'], 'a']).evaluate())
+    ).toBe(true);
+    // Controls: a radicand that grows, and a positive degree.
+    expect(limIn(['Root', 't', 'n']).evaluate().json).toBe(0);
+    expect(limIn(['Root', ['Divide', 1, 't'], 2]).evaluate().json).toBe(0);
+    expect(limIn(['Sqrt', 't']).evaluate().json).toBe('PositiveInfinity');
+  });
+
   test('an exponent that is real at the first probe only', () => {
     // `√(200 − t)` is real at `t = 120` and imaginary for `t > 200`, so
     // `e^{√(200−t)}` is not positive for large `t`: `t/e^{√(200−t)}` has
