@@ -126,8 +126,23 @@ export function _withFoldedRealOverride(
   return verdict;
 }
 
-export function mode(): CompileMode {
+export function mode(): Exclude<CompileMode, 'bigint'> {
   return CompilerState._mode;
+}
+
+/**
+ * The representation of the integer lane for the compilation in progress:
+ * `'bigint'` when the caller requested `mode: 'bigint'` (JavaScript target
+ * only), `'double'` in every other mode and outside any compilation.
+ *
+ * In `mode: 'bigint'`, `mode()` reads `'strict'`: the bigint mode is the
+ * strict discipline plus this lane, so `strictLanes()` is `true`,
+ * `complexDiscipline()` is `false` and nothing is promoted. Latched and
+ * restored with the mode at the outermost compilation
+ * (`CompilerState._integerLane`).
+ */
+export function integerLane(): 'double' | 'bigint' {
+  return CompilerState._integerLane;
 }
 
 /**

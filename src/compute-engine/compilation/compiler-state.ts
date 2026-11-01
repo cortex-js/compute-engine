@@ -155,7 +155,18 @@ export class CompilerState {
    * `promotionActive`/`runtimeRealGuards` (auto, complex); see
    * `docs/COMPILATION-MODEL.md` for the disciplines.
    */
-  static _mode: CompileMode = 'strict';
+  static _mode: Exclude<CompileMode, 'bigint'> = 'strict';
+  /**
+   * The representation of the integer lane for the OUTERMOST compilation,
+   * latched and restored with `_mode`. `'bigint'` when the caller requested
+   * `mode: 'bigint'` (JavaScript target only): `_mode` is then `'strict'`,
+   * so the strict discipline applies unchanged (`strictLanes()` is `true`,
+   * `complexDiscipline()` is `false`, nothing is promoted), and this latch
+   * says that integer values are computed as JavaScript `bigint` values.
+   * `'double'` in every other mode and outside any compilation. Read it
+   * through `integerLane()` (`compiler-mode.ts`).
+   */
+  static _integerLane: 'double' | 'bigint' = 'double';
   /**
    * The number of `withPromotionSuppressed` calls in progress. While it is
    * more than zero, `promotionActive` is `false`. Both the analysis
@@ -211,7 +222,7 @@ export class CompilerState {
    * instead — it emitted no code for a report to describe.
    */
   static _lastReport: {
-    mode: 'strict' | 'complex';
+    mode: 'strict' | 'complex' | 'bigint';
     promoted: boolean;
   } = { mode: 'strict', promoted: false };
   /**
@@ -220,11 +231,15 @@ export class CompilerState {
    * from the emitted code (`pruneUnreferencedVariantBases`): the registry of
    * the definitions, whether the discipline was `complex`, and whether a
    * promotion was recorded outside the body of every definition.
+   * `bigintLane` is whether the integer lane was `'bigint'`
+   * (`_integerLane`), so that the report computed again keeps
+   * `mode: 'bigint'`.
    */
   static _lastReportBasis:
     | {
         registry: UserFunctionRegistry | undefined;
         complexDiscipline: boolean;
+        bigintLane: boolean;
         promotedOutsideDefinitions: boolean;
       }
     | undefined;

@@ -34,6 +34,7 @@ import type {
 } from './types.js';
 import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
 import { CompilerState } from './compiler-state.js';
+import { offersBigintMode } from './bigint-mode-registry.js';
 import { core } from './compiler-core-hooks.js';
 import {
   _codeOverrides,
@@ -389,7 +390,18 @@ export function userParamBinding(
 export function resolveCompileMode(
   target: CompileTarget<Expression>
 ): CompileMode {
-  const supported: readonly CompileMode[] = target.supportedModes ?? ['strict'];
+  const declared: readonly CompileMode[] = target.supportedModes ?? ['strict'];
+  // `'bigint'` is offered only by a target that the built-in JavaScript
+  // target created with its own emitters, or a spread copy of one that
+  // replaces none of them (`offersBigintMode`): the integer values are
+  // computed as JavaScript `bigint` values, which only the JavaScript
+  // emitters can do. Any other target that lists `'bigint'` (a custom
+  // target, or a copy of the built-in one with other `operators`) does not
+  // offer it, so a requested `'bigint'` is the `unsupported-mode` decline
+  // below.
+  const supported = offersBigintMode(target)
+    ? declared
+    : declared.filter((m) => m !== 'bigint');
   const requested = target.mode;
   if (requested === undefined)
     return supported.includes('auto') ? 'auto' : 'strict';

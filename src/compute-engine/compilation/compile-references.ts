@@ -952,7 +952,7 @@ export function withReferences<
   R extends {
     freeSymbols?: string[];
     unsupported?: string[];
-    mode?: 'strict' | 'complex';
+    mode?: 'strict' | 'complex' | 'bigint';
     promoted?: boolean;
   },
 >(
@@ -1162,11 +1162,15 @@ export function defaultLoweredSymbolType(
  * differ, since an explicitly requested `'complex'` compile that contained
  * no promotable head reports `('complex', false)`.
  *
+ * A compilation in `mode: 'bigint'` that emitted code reports
+ * `('bigint', false)`: the integer lane is a choice of representation over
+ * the strict discipline, and the strict discipline never promotes.
+ *
  * A DECLINE reports the neutral `('strict', false)`: the report describes
  * emitted code, and a decline emitted none (see `compile`'s `finally`).
  */
 export function modeReport(): {
-  mode: 'strict' | 'complex';
+  mode: 'strict' | 'complex' | 'bigint';
   promoted: boolean;
 } {
   return { ...CompilerState._lastReport };

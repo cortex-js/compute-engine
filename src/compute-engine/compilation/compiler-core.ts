@@ -76,7 +76,7 @@ import { ABS_ARG_REFUSAL, containsDerivativeHead } from './angular-unit.js';
 import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
-import { CompileDeclineError } from './diagnostics.js';
+import { CompileDeclineError, bigintLaneError } from './diagnostics.js';
 import { isColorValued } from './color-space-fact.js';
 import { candidateAt } from './cse.js';
 import {
@@ -794,6 +794,7 @@ export function compile(
   // happens outside the `try`/`finally` below, so a latch mutated ahead of
   // it would never be restored.
   const prevMode = CompilerState._mode;
+  const prevIntegerLane = CompilerState._integerLane;
   const prevRealOnlyLowering = CompilerState._realOnlyLowering;
   // Fold-before-shape for the complexness oracle (Tycho item 229): with
   // this latch set, `isComplexValued` answers `false` for a closed pure
@@ -867,7 +868,12 @@ export function compile(
     // same target, and the answers of `mayHoldCallBroadcastResult` read
     // those definitions.
     resetCallBroadcastMemo();
-    CompilerState._mode = nextMode;
+    // `mode: 'bigint'` is the strict discipline plus the bigint integer
+    // lane: `_mode` is latched as `'strict'`, so every reader of the
+    // discipline (`strictLanes`, `complexDiscipline`, the promotion gates)
+    // behaves as in `mode: 'strict'`, and `_integerLane` carries the lane.
+    CompilerState._mode = nextMode === 'bigint' ? 'strict' : nextMode;
+    CompilerState._integerLane = nextMode === 'bigint' ? 'bigint' : 'double';
     // The per-compilation report (`modeReport`) starts fresh: no head
     // promoted yet; the discipline is the one just latched.
     CompilerState._promoted = false;
@@ -913,6 +919,26 @@ export function compile(
   const isParent = isFunction(expr);
   if (isParent) _compileParents.push(expr);
   try {
+    // In `mode: 'bigint'` the lane analysis of the outermost expression
+    // decides, before any emission, whether every numeric node is on the
+    // integer lane. That analysis is not implemented yet, so the outermost
+    // compilation declines here with `code: 'bigint-lane'`: the code that the
+    // emitters would give computes with doubles, and a caller that requested
+    // `'bigint'` must not receive it. The decline is inside the `try`, so the
+    // `finally` below restores the latches. (CE-715, step 2 of
+    // `docs/plans/2026-10-31-ce715-bigint-compile-mode.md` replaces this
+    // with the lane analysis.)
+    if (
+      CompilerState._compileDepth === 1 &&
+      CompilerState._integerLane === 'bigint'
+    )
+      throw bigintLaneError({
+        node: expr.toString(),
+        type: expr.type.toString(),
+        reason: 'the bigint mode is not implemented yet for this expression',
+        message:
+          "Could not compile in mode 'bigint': the integer-lane analysis is not implemented yet.",
+      });
     // Compile-time constant folding, attempted top-down at every function
     // node so the largest constant subtree folds: a pure subtree with no
     // free variables evaluates at compile time and emits as a literal
@@ -1033,18 +1059,26 @@ export function compile(
       const registry = target.userFunctions;
       const promoted =
         CompilerState._promoted || hasPromotedDefinition(registry);
+      // In `mode: 'bigint'` the discipline is `'strict'`, which never
+      // promotes, and the report names the requested mode.
       CompilerState._lastReport = {
         mode:
-          CompilerState._mode === 'complex' || promoted ? 'complex' : 'strict',
+          CompilerState._integerLane === 'bigint'
+            ? 'bigint'
+            : CompilerState._mode === 'complex' || promoted
+              ? 'complex'
+              : 'strict',
         promoted,
       };
       CompilerState._lastReportBasis = {
         registry,
         complexDiscipline: CompilerState._mode === 'complex',
+        bigintLane: CompilerState._integerLane === 'bigint',
         promotedOutsideDefinitions: CompilerState._promoted,
       };
     }
     CompilerState._mode = prevMode;
+    CompilerState._integerLane = prevIntegerLane;
     CompilerState._realOnlyLowering = prevRealOnlyLowering;
     // Restore the caller's oracle-fold latch (undefined at depth 0:
     // outside a compilation the conservative shape-first verdict is the
@@ -5878,7 +5912,11 @@ export function pruneUnreferencedVariantBases(
     !hasPromotedDefinition(registry)
   )
     CompilerState._lastReport = {
-      mode: basis.complexDiscipline ? 'complex' : 'strict',
+      mode: basis.complexDiscipline
+        ? 'complex'
+        : basis.bigintLane
+          ? 'bigint'
+          : 'strict',
       promoted: false,
     };
 }

@@ -558,7 +558,8 @@ import {
 } from './fixed-width-unroll.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
-import { compileDiagnosticOf } from './diagnostics.js';
+import { bigintLaneError, compileDiagnosticOf } from './diagnostics.js';
+import { registerBuiltInBigintTarget } from './bigint-mode-registry.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
@@ -830,14 +831,17 @@ const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The compile modes the JavaScript target offers (`CompileMode`): all three.
+ * The compile modes the JavaScript target offers (`CompileMode`): all four.
  * Its emitters implement the complex lowering (`_SYS.c*`), so `'complex'` and
  * `'auto'` are deliverable; the effective default is therefore `'auto'`.
+ * `'bigint'` is offered by this target only (the strict discipline with
+ * integer values as JavaScript `bigint` values).
  */
 const JS_SUPPORTED_MODES: readonly CompileMode[] = [
   'strict',
   'complex',
   'auto',
+  'bigint',
 ];
 
 /**
@@ -11003,6 +11007,18 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       target.foldEmittedConstant = (_expr, code) =>
         foldEmittedJavaScriptCode(code, splices);
     }
+    // The target offers `'bigint'` only when its emitters are this target's
+    // own: the options replace none of them (`bigint-mode-registry.ts`).
+    // `compile()` gives its own emitters in the options and registers its
+    // target itself (`prepareCompilation`).
+    if (
+      options.operators === undefined &&
+      options.functions === undefined &&
+      options.constant === undefined &&
+      options.number === undefined &&
+      options.supportedModes === undefined
+    )
+      registerBuiltInBigintTarget(target);
     return target;
   }
 
@@ -11462,6 +11478,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // never against whichever nested target requested the emission (see
     // `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
+    // The emitters of this target are this target's own, so it offers
+    // `'bigint'` (`bigint-mode-registry.ts`), unless the caller gives an
+    // `operators` or a `functions` option: such an entry replaces the
+    // emission of a head with caller code that computes with doubles, so
+    // a requested `'bigint'` is then the `unsupported-mode` decline.
+    if (operators === undefined && functions === undefined)
+      registerBuiltInBigintTarget(target);
     // A symbol whose type admits a point and a list of points, with an
     // assigned point that the code holds anyway, is replaced by that point,
     // and a call whose body then is a point or a number by that body, as on
@@ -12030,6 +12053,20 @@ function compileToTarget(
       run: fn as unknown as CompiledRunner<CompiledValue, JavaScriptRunnerVars>,
     };
   }
+
+  // In `mode: 'bigint'` an operator symbol must decline like every other
+  // expression: the shortcut below returns `(a, b) => a / b` without the
+  // core compiler, so the decline of the core compiler (the integer-lane
+  // analysis is not implemented yet, `compile` in `compiler-core.ts`)
+  // never runs for it, and `Divide` called with `5n, 2n` gives `2n`.
+  if (mode === 'bigint' && isSymbol(expr) && target.operators?.(expr.symbol))
+    throw bigintLaneError({
+      node: expr.toString(),
+      type: expr.type.toString(),
+      reason: 'the bigint mode is not implemented yet for this expression',
+      message:
+        "Could not compile in mode 'bigint': the integer-lane analysis is not implemented yet.",
+    });
 
   if (isSymbol(expr)) {
     const op = target.operators?.(expr.symbol);

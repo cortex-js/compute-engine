@@ -88,6 +88,41 @@ export class KindDeclineError extends CompileDeclineError {
   }
 }
 
+/**
+ * The decline of `mode: 'bigint'` (JavaScript target only): a node that is
+ * not on the integer lane, so the compilation cannot compute it with
+ * JavaScript `bigint` values. Reported as `code: 'bigint-lane'`, `kind:
+ * 'capability'`: no value that was computed right before is withdrawn, the
+ * expression runs on the interpreter instead.
+ *
+ * It is NOT a lane mismatch (`isLaneMismatchError` is `false` for it), so
+ * `compileWithAutoEscalation` never redoes the compilation in `complex`
+ * mode on it. A requested `'bigint'` is not `'auto'` and compiles once
+ * anyway, but the code stays separate so that no route can change one
+ * decline into the other.
+ *
+ * `node` is the node as `toString()` writes it (carried as `value` on the
+ * diagnostic), `type` its static type, and `reason` says why the node is not
+ * on the lane. `message`, when given, replaces the whole message: the
+ * decline that is not about one node (the lane analysis is not implemented
+ * yet) must not say that the node is off the lane.
+ */
+export function bigintLaneError(payload: {
+  node: string;
+  type: string;
+  reason: string;
+  message?: string;
+}): CompileDeclineError {
+  return new CompileDeclineError({
+    code: 'bigint-lane',
+    kind: 'capability',
+    message:
+      payload.message ??
+      `Could not compile in mode 'bigint': \`${payload.node}\` (type \`${payload.type}\`) is not on the integer lane: ${payload.reason}.`,
+    value: payload.node,
+  });
+}
+
 /** Whether `e` is a `CompileDeclineError` (name-keyed, bundle-safe). */
 export function isCompileDeclineError(e: unknown): e is CompileDeclineError {
   return (

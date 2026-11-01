@@ -202,6 +202,7 @@ import {
   liftPromotionSuppression,
   mentionsAnyName,
   mode,
+  integerLane,
   notePromoted,
   oracleFoldTarget,
   rebindsAnyName,
@@ -964,6 +965,9 @@ export class BaseCompiler {
   }
   static get mode() {
     return mode();
+  }
+  static get integerLane() {
+    return integerLane();
   }
   static get strictLanes() {
     return strictLanes();

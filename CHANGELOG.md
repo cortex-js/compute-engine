@@ -2,6 +2,19 @@
 
 ### New Features
 
+- **A `bigint` compile mode on the JavaScript target (in progress).** The
+  compile option `mode: 'bigint'` is accepted by the `javascript` target, and
+  the exported types change: `CompileMode` is now
+  `'strict' | 'complex' | 'auto' | 'bigint'`, and the `mode` of a compilation
+  result and of stored JavaScript can be `'bigint'`. A custom target with an
+  exhaustive `switch` on `CompileMode` must add the new case. Only the built-in
+  `javascript` target offers the mode: on any other target, also a custom
+  target that lists `'bigint'` in its `supportedModes`, a request for the mode
+  declines with `unsupported-mode`. In this release every compilation in the
+  mode declines with the new diagnostic code `bigint-lane` and runs on the
+  interpreter, as every decline does. The mode will compute integer-typed
+  expressions with exact JavaScript `BigInt` values past `2^53`. (#503)
+
 - **A protocol can extend other protocols.** In Epsil, `protocol FloorOrder
   extends PartialOrder { function floor(self: Self) -> integer }`; the parents
   are separated by commas. With the host API, `ce.declareProtocol("FloorOrder",

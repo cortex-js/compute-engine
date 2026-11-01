@@ -176,7 +176,12 @@ function assertCompileTargetContract(
   assertCompileTargetModesContract(target);
 }
 
-const COMPILE_MODES: readonly string[] = ['strict', 'complex', 'auto'];
+const COMPILE_MODES: readonly string[] = [
+  'strict',
+  'complex',
+  'auto',
+  'bigint',
+];
 
 /**
  * The compile-mode declaration of a custom target (`CompileTarget.mode`,
@@ -350,7 +355,7 @@ export function assertCompilationOptionsContract(
     !COMPILE_MODES.includes(options.mode as string)
   ) {
     throw new Error(
-      'Invalid compilation option "mode": expected "strict", "complex" or "auto"'
+      'Invalid compilation option "mode": expected "strict", "complex", "auto" or "bigint"'
     );
   }
 

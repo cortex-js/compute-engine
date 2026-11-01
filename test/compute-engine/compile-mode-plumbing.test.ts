@@ -290,9 +290,14 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     ).toThrow(/supportedModes/);
   });
 
-  it('a built-in target passed directly declares all three modes with its hooks, and defaults to strict there (no reset)', () => {
+  it('a built-in target passed directly declares all four modes with its hooks, and defaults to strict there (no reset)', () => {
     const jsRaw = new JavaScriptTarget().createTarget();
-    expect(jsRaw.supportedModes).toEqual(['strict', 'complex', 'auto']);
+    expect(jsRaw.supportedModes).toEqual([
+      'strict',
+      'complex',
+      'auto',
+      'bigint',
+    ]);
     expect(jsRaw.complexLift!('v')).toBe('_SYS.cplx(v)');
     expect(jsRaw.complexIsReal!('v')).toBe('_SYS.cisreal(v)');
     const r = compile(ce.parse('x + 1'), { target: jsRaw });

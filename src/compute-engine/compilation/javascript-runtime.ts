@@ -8088,6 +8088,11 @@ export type StoredJavaScript = {
   reconstructionDigits?: number;
   /** The input checks and conversions `run()` applies; `load()` applies them. */
   entryPlan?: StoredEntryPlan;
+  /** The `mode` field of the compilation result: the mode the code was
+   * compiled in. It is set whatever the entry checks are. `'bigint'` code
+   * takes and returns JavaScript `bigint` values. Absent on code stored
+   * before the field existed. */
+  mode?: 'strict' | 'complex' | 'bigint';
   /** The count of values per cell that `loadBroadcast()` and
    * `loadBroadcastSlice()` write when the `outputs` option is absent: the
    * arity of a tuple-of-numbers expression. Absent means 1. */
@@ -8434,6 +8439,7 @@ export function createSysRuntime(
             stored.entryPlan === undefined
               ? undefined
               : structuredClone(stored.entryPlan),
+          mode: stored.mode,
           broadcastOutputs: stored.broadcastOutputs,
           batch:
             stored.batch === undefined
