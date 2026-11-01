@@ -5495,6 +5495,23 @@ volumes
         // that the operator inferred (`number` for the argument of `Sin`).
         // That type then applied to every later use of `x` and `_`: after
         // `Derivative(Sin)` was evaluated, `x && True` was an error.
+        //
+        // The parameters of the function literal are bound by the literal:
+        // a variable of the same name that has a value where the derivative
+        // is evaluated (a global `a := [1, 2]`, or the parameter `a` of the
+        // function whose body holds `Derivative(a ↦ a^2)`) is another
+        // variable. But an occurrence of a parameter read outside a call of
+        // the literal reads that value by name, and the arithmetic that
+        // builds the derivative reads it too: `2·a` became `[2, 4]`, so the
+        // derivative of `a ↦ a^2` was the constant function `a ↦ [2, 4]`.
+        // The parameters are shielded from such a value while the body is
+        // differentiated (`withValueShield`).
+        const boundParams = isFunction(literal, 'Function')
+          ? literal.ops
+              .slice(1)
+              .map((p) => functionLiteralParameterName(p))
+              .filter((name) => name !== '')
+          : [];
         if (orders.length <= 1) {
           const order = orders[0] ?? 1;
           return memoizedDerivativeResult(op, order, () => {
@@ -5502,7 +5519,7 @@ volumes
             let r: Expression | undefined;
             try {
               ce.declare('_', 'unknown');
-              r = derivative(op, order);
+              r = withValueShield(ce, boundParams, () => derivative(op, order));
             } finally {
               ce.popScope();
             }
@@ -5602,9 +5619,11 @@ volumes
                 .map((p) => functionLiteralParameterName(p));
               if (params.length === orders.length && params.every((p) => !!p)) {
                 let body: Expression | undefined = canonical.op1;
-                for (let i = 0; i < orders.length && body; i++)
-                  for (let d = 0; d < orders[i] && body; d++)
-                    body = differentiate(body, params[i]!);
+                withValueShield(ce, boundParams, () => {
+                  for (let i = 0; i < orders.length && body; i++)
+                    for (let d = 0; d < orders[i] && body; d++)
+                      body = differentiate(body, params[i]!);
+                });
                 // A body that holds a `D` the symbolic differentiator could
                 // not resolve (the partial of `Round(x, y)` in `y`) is no
                 // closed form: the node stays inert, as in the univariate arm

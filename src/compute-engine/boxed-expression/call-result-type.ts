@@ -2044,6 +2044,11 @@ function literalBodyResultType(
         t !== undefined && expr.operator === 'List'
           ? describe(expr).structureOf?.()
           : undefined;
+      // A `Derivative` keeps its structure too: the type of an application
+      // of it reads the head, because the derivative is a whole function
+      // that maps over a list argument (`appliedCalleeMapType`, `core.ts`).
+      // In `(a: list<real>) ↦ Apply(Derivative(b ↦ b^2), a)` applied to
+      // `[1, 2]`, the call is a list, not a number.
       const result =
         t === undefined
           ? undefined
@@ -2056,7 +2061,9 @@ function literalBodyResultType(
                   elements: operands,
                 }),
               }
-            : describeType(t);
+            : expr.operator === 'Derivative'
+              ? { ...describeType(t), structureOf: describe(expr).structureOf }
+              : describeType(t);
       if (
         result !== undefined &&
         t === 'unknown' &&

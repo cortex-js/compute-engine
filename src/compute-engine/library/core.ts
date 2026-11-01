@@ -1247,6 +1247,83 @@ function literalCellType(
 }
 
 /**
+ * The static type of `Apply(fn, …args)` when the callee `fn` is a
+ * `Derivative` application, such as `Derivative(x ↦ x^2)` or
+ * `Derivative(Sin)`, whose signature has scalar parameters
+ * (`literalParamsMap`), and an argument can hold a list or a tuple.
+ *
+ * The callee is evaluated before it is applied, and its value is the
+ * derivative as a whole function: a function literal with the parameters of
+ * the derived function, which maps over a list argument
+ * (`applyLiteralMaps`), or an operator, which maps over it too. So
+ * `Apply(Derivative(x ↦ x^2), [1, 2])` is `[2, 4]`, and the call is typed as
+ * a list of the result of the signature of `fn` (`list<number>`), with the
+ * depth of the list argument. An argument that can hold a scalar or a list
+ * (`number | list<list<number>>`) gives the union of the types for each of
+ * its members. Before, the call was typed as the scalar result (`number`)
+ * for a list value.
+ *
+ * A tuple argument is bound whole, and the body of the derivative decides
+ * the shape of the value (`Apply(Derivative(x ↦ x^2), (1, 2))` is
+ * `(2, 4)`). The body is not known here, so the call is typed `any`. So is a
+ * call with more than one argument that can hold a scalar or a list.
+ *
+ * Other application callees are not typed by this rule, because their
+ * application does not always map the whole function over a list: a
+ * `Composition` applies its steps one after another, and
+ * `Apply(Composition(Length, (x: real) ↦ [x, x]), [1, 2])` is the scalar
+ * `2`. The answer is `undefined` for them, and when no argument can hold a
+ * list or a tuple: the call is then typed by `functionResult` of the
+ * signature.
+ */
+function appliedCalleeMapType(
+  fn: OperandDescriptor,
+  args: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  const st = fn.structureOf?.();
+  if (st?.kind !== 'application' || st.head !== 'Derivative') return undefined;
+  const signature = fn.type;
+  if (!literalParamsMap(signature)) return undefined;
+  // A rest parameter takes its arguments whole (`mappedArgumentCount`).
+  const mappedArgs = args.slice(0, mappedArgumentCount(signature));
+  const isTupleLike = (t: Type): boolean => isTupleShapedType(t);
+  const mapsOver = (t: Type): boolean =>
+    isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isSubtype(t, 'string') &&
+    !isTupleLike(t);
+  const members = (t: Type): Type[] => {
+    const r = resolveTypeAlias(t);
+    return typeof r === 'object' && r.kind === 'union' ? r.types : [r];
+  };
+  if (mappedArgs.some((a) => members(a.type).some(isTupleLike))) return 'any';
+  const cell = functionResult(signature) ?? 'unknown';
+  const mapped = (collections: Type[]): Type =>
+    collections.length === 0
+      ? cell
+      : isSubtype(cell, COLLECTION_SHAPE_TYPE)
+        ? nestedBroadcastResultType(collections, cell)
+        : shapedBroadcastResultType(collections, cell);
+  const collections = mappedArgs
+    .filter((a) => mapsOver(a.type))
+    .map((a) => a.type);
+  // An argument that can hold a list, or something else (a union with a
+  // list member): each member gives its own result.
+  const mixed = mappedArgs.filter(
+    (a) => !mapsOver(a.type) && members(a.type).some(mapsOver)
+  );
+  if (mixed.length > 1) return 'any';
+  if (mixed.length === 1)
+    return reduceType({
+      kind: 'union',
+      types: members(mixed[0].type).map((m) =>
+        mapped(mapsOver(m) ? [...collections, m] : collections)
+      ),
+    });
+  if (collections.length === 0) return undefined;
+  return mapped(collections);
+}
+
+/**
  * The static type of `Apply(fn, …args)` when it maps (`applyLiteralMaps`),
  * read from operand descriptors; `undefined` otherwise. The gate is the
  * evaluate-time one: a function-literal callee whose parameters are scalar
@@ -1260,6 +1337,10 @@ function applyLiteralMapType(
 ): Type | undefined {
   const st = fn.structureOf?.();
   const signature = fn.type;
+  // A callee that is a `Derivative` application (`Derivative(x ↦ x^2)`) is
+  // evaluated to a function before the call: `appliedCalleeMapType` types
+  // the call. Any other application keeps the type of its signature.
+  if (st?.kind === 'application') return appliedCalleeMapType(fn, args);
   if (st?.kind !== 'function-literal') {
     // A type-only signature can map a scalar tuple position even when a
     // different parameter consumes a list whole. Operator symbols keep their
