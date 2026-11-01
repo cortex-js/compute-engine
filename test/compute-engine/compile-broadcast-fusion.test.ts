@@ -163,7 +163,12 @@ describe('Nested broadcasts fuse into one closure', () => {
     ce.assign('sq', ce.parse('t \\mapsto t^2 + 1'));
     const r = compile(ce.box(['Add', ['sq', 'L'], 1]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.bcastFn(');
+    // The call maps `sq` over the list (`_SYS.mapFn`), and the sum maps over
+    // the list that the call gives: the call is not fused into the closure
+    // of the sum.
+    expect(r.code).toBe(
+      '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _SYS.mapFn(_fn_sq, [1], _.L), 1)'
+    );
     const out = r.run!(INPUT) as number[];
     out.forEach((v, i) => expect(v).toBeCloseTo(LIST[i] ** 2 + 2, 12));
   });

@@ -11,7 +11,7 @@ import {
   isFunction,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { isSubtype, listElementType } from '../../common/type/subtype.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   resolveTypeAlias,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
@@ -26,6 +26,12 @@ import {
   UNTYPED_INPUT_CODE,
 } from './diagnostics.js';
 import { isCompileBoundName } from './compiler-names.js';
+import {
+  shapeOfType,
+  shapesConflict,
+  unionShapeMembers,
+} from './static-shape.js';
+import type { UnionShapeMember, ValueShape } from './static-shape.js';
 import {
   analyzeReferences,
   freeSymbolOccurrence,
@@ -177,6 +183,58 @@ export function untypedInputsOf(
 }
 
 /**
+ * The inputs of `expr` that a declaration types with a union of shapes
+ * (`U: real | list<real>`, `P: tuple<real, real> | list<tuple<real, real>>`),
+ * each with its members grouped by shape (`unionShapeMembers()`).
+ *
+ * Only an input that the root expression reads itself is in the list: its
+ * name occurs in `expr`, outside the bodies of the user functions that
+ * `expr` calls. The input has no value, and its type comes from a
+ * declaration (`ce.declare("U", "real | list<real>")`), not from an
+ * inference: a union that the engine infers is not a request for a
+ * dispatch. A name that the target or the compiler binds is not an input.
+ *
+ * When the reference analysis fails, the list is empty: the other checks
+ * of the compilation decline for that expression.
+ *
+ * The reference analysis runs only when a symbol of `expr` has such a
+ * declaration. It compiles the operands of each operator, and so calls the
+ * compile handlers of the operators; without a candidate, the compilation
+ * calls them in the order it did before this dispatch existed.
+ */
+export function declaredUnionInputsOf(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): { name: string; members: UnionShapeMember[] }[] {
+  const ce = expr.engine;
+  const candidates = new Map<string, UnionShapeMember[]>();
+  for (const name of expr.symbols) {
+    if (target.boundVars?.has(name) || isCompileBoundName(name)) continue;
+    const def = ce.lookupDefinition(name);
+    if (def === undefined || !('value' in def) || def.value === undefined)
+      continue;
+    if (def.value.inferredType !== false || def.value.value !== undefined)
+      continue;
+    const members = unionShapeMembers(def.value.type.type);
+    if (members !== undefined) candidates.set(name, members);
+  }
+  if (candidates.size === 0) return [];
+  let freeSymbols: string[];
+  try {
+    freeSymbols = inputsOf(expr, target).freeSymbols;
+  } catch (e) {
+    throwIfCallerCancellation(e, expr.engine._deadlineFrame);
+    return [];
+  }
+  const result: { name: string; members: UnionShapeMember[] }[] = [];
+  for (const name of freeSymbols) {
+    const members = candidates.get(name);
+    if (members !== undefined) result.push({ name, members });
+  }
+  return result;
+}
+
+/**
  * True when `t` is `unknown` or `any`, after the transparent aliases that
  * name it are unfolded (`resolveTypeAlias()`, which stops at a cycle of
  * aliases). A nominal type is a type of its own, and is not unfolded.
@@ -316,73 +374,6 @@ function throwUntypedInputs(names: ReadonlyArray<string>): never {
       `\`ce.declare("${names[0]}", "real")\`.`,
     value: names.join(','),
   });
-}
-
-/**
- * The shape of the values of a type, as the compiled code represents them:
- * a scalar (a number or a boolean), a tuple (a point) of `arity` elements,
- * or a list whose elements have the shape `element`. An `arity` or an
- * `element` that is `undefined` is not known.
- */
-type ValueShape =
-  | { kind: 'scalar' }
-  | { kind: 'tuple'; arity?: number }
-  | { kind: 'list'; element?: ValueShape };
-
-/**
- * The shape of the values of `t`, or `undefined` when `t` does not settle
- * one: `unknown`, `any`, a string, a record, a function, or a union whose
- * members have different shapes (`real | list<real>`, `broadcastable<real>`).
- */
-function shapeOfType(t: Readonly<Type>, depth = 0): ValueShape | undefined {
-  if (depth > 16) return undefined;
-  const r = resolveTypeForCompilation(t);
-  if (r === 'unknown' || r === 'any' || r === 'never' || r === 'error')
-    return undefined;
-  if (typeof r !== 'string' && r.kind === 'union') {
-    const shapes = r.types.map((m) => shapeOfType(m, depth + 1));
-    const first = shapes[0];
-    if (first === undefined) return undefined;
-    for (const s of shapes)
-      if (s === undefined || shapesConflict(first, s)) return undefined;
-    return first;
-  }
-  if (isSubtype(r, 'number') || isSubtype(r, 'boolean'))
-    return { kind: 'scalar' };
-  if (typeof r !== 'string' && r.kind === 'tuple')
-    return { kind: 'tuple', arity: r.elements.length };
-  if (typeof r !== 'string' && r.kind === 'list')
-    return {
-      kind: 'list',
-      element: shapeOfType(listElementType(r), depth + 1),
-    };
-  if (isSubtype(r, 'tuple')) return { kind: 'tuple' };
-  if (isSubtype(r, 'list')) return { kind: 'list' };
-  return undefined;
-}
-
-/**
- * True when no value can have both shapes: a scalar and a list, a point and
- * a list of points, two lists whose elements conflict, and, when `arity` is
- * true, two points of different arities. A part that is not known does not
- * conflict.
- */
-function shapesConflict(a: ValueShape, b: ValueShape, arity = true): boolean {
-  if (a.kind !== b.kind) return true;
-  if (a.kind === 'tuple' && b.kind === 'tuple')
-    return (
-      arity &&
-      a.arity !== undefined &&
-      b.arity !== undefined &&
-      a.arity !== b.arity
-    );
-  if (a.kind === 'list' && b.kind === 'list')
-    return (
-      a.element !== undefined &&
-      b.element !== undefined &&
-      shapesConflict(a.element, b.element, arity)
-    );
-  return false;
 }
 
 /**

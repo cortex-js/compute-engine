@@ -50,7 +50,6 @@ import type {
   LoopInvariantBinding,
 } from './compiler-types.js';
 import {
-  provablyScalarArg,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
 } from './compile-assignment-checks.js';
@@ -72,6 +71,7 @@ import {
   _codeOverrides,
   _prefixCallOverrides,
 } from './compiler-mode.js';
+import { isScalarShaped } from './static-shape.js';
 
 /**
  * Generated local-function name for a user-defined function `id`. Prefixed to
@@ -188,7 +188,7 @@ export function userFunctionIsGeneric(
  * `enclosing` describes the definition whose body this call sits in, when
  * there is one (the definition-emission route). Its `scalarNames` name
  * symbols that hold a run-time SCALAR although their static type does not
- * say so, and so pass the argument test as if `provablyScalarArg` had
+ * say so, and so pass the argument test as if `isScalarShaped` had
  * answered `true`; see {@link EnclosingDefinition} for why they qualify.
  * Its `localNames` are the names that definition BINDS: a free symbol of
  * the callee's body that collides with one of them would be CAPTURED by the
@@ -229,7 +229,7 @@ export function substitutedUserFunctionBody(
     !args.every(
       (a) =>
         a.isPure === true &&
-        (provablyScalarArg(a) ||
+        (isScalarShaped(a.type.type) ||
           (isSymbol(a) && enclosing?.scalarNames.has(a.symbol) === true) ||
           isSinglePointArg(a) ||
           admits?.(a) === true)
@@ -532,14 +532,16 @@ export function inlineCollectionValuedCallsOnce(
   // and fails closed on it; reading the engine here would silently compile
   // the wrong body instead.
   if (enclosing?.localNames.has(node.operator) === true) return node;
-  if (provablyScalarArg(node)) return node;
+  if (isScalarShaped(node.type.type)) return node;
   if (bodyType !== undefined) {
     const literal = userFunctionLiteral(engine, node.operator);
     if (literal === undefined || !literal.ops[0].type.matches(bodyType))
       return node;
     // A literal point is a shape the substitution reads exactly, as
     // `substitutedUserFunctionBody` admits it for a definition body.
-    if (!node.ops.every((a) => provablyScalarArg(a) || isSinglePointArg(a)))
+    if (
+      !node.ops.every((a) => isScalarShaped(a.type.type) || isSinglePointArg(a))
+    )
       return node;
   }
   const body = substitutedUserFunctionBody(

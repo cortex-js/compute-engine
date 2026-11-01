@@ -94,6 +94,7 @@ import {
 import { _popLocalComplex, _pushLocalComplex } from './compile-loops.js';
 import { compileValueOperand } from './compile-statements.js';
 import { cseAdmission } from './compile-cse.js';
+import { mapRankOfType, shapeOfType } from './static-shape.js';
 import { guardConnectiveAbsence } from './compile-conditionals.js';
 
 /**
@@ -217,7 +218,7 @@ export function tryCompileBroadcast(
   // (Historical note: this used to be a fail-closed gate, because a compiled
   // `q(L)` applied SCALAR callee code to an array and returned NaN, which a
   // comparison then turned into a plausible `false`. The application site now
-  // dispatches through `_SYS.bcastFn`, so `q(L)` is an array at run time.)
+  // maps over the list (`_SYS.mapFn`), so `q(L)` is an array at run time.)
   //
   // Array-ness is provable for a concrete collection, a list-typed SYMBOL
   // (a parameter, which the caller supplies as a JS array), and an
@@ -1389,12 +1390,22 @@ export function tryCompileBroadcast(
     // CONSTRUCTION — a constructor the common-subexpression pass has
     // named, a sum of points, a point-valued call — needs no test either
     // (`provenPointWidth`); a declared input read from `vars` keeps it.
+    //
+    // Neither does a name that the emitted body binds (a parameter, a
+    // local) whose static type is a point of `componentWidth` scalars: the
+    // value of the name has that type (rule R1 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`). The parameter
+    // `z` of the member variant of `g: (tuple<real, real> |
+    // list<tuple<real, real>>) -> any` is one: `z + z` is written
+    // `[z[0] + z[0], z[1] + z[1]]`. An input of the compilation keeps its
+    // test.
     const needsGuard = compiledArgs.map(
       (code, i) =>
         isArrayOperand(args[i]) &&
         arrayLiteralWidth(hoistedListLiteralText(target, code)) !==
           componentWidth &&
-        provenPointWidth(args[i], target) !== componentWidth
+        provenPointWidth(args[i], target) !== componentWidth &&
+        !isBoundScalarPoint(args[i], componentWidth, target)
     );
     // When no source needs the run-time test, a source that is one array
     // literal of the right width is read component by component from its
@@ -1939,4 +1950,23 @@ export function tryCompilePythonElementwise(
     target
   );
   return out === undefined || out === '' ? undefined : out;
+}
+
+/**
+ * True when `a` is a name that the emitted body binds (`boundVars`: a
+ * parameter or a local) and whose static type is a point of `width`
+ * coordinates that are scalars.
+ */
+function isBoundScalarPoint(
+  a: Expression,
+  width: number,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isSymbol(a) || target.boundVars?.has(a.symbol) !== true) return false;
+  const shape = shapeOfType(a.type.type);
+  return (
+    shape?.kind === 'tuple' &&
+    shape.arity === width &&
+    mapRankOfType(a.type.type) === 0
+  );
 }

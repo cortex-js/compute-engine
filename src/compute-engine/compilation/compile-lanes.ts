@@ -66,13 +66,13 @@ import {
   pointArgumentAtUntypedParameter,
 } from './compile-user-calls.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
+import { namedPointArgumentAtUntypedParameter } from './compile-callbacks.js';
 import { _invalidateComplexMemo } from './compile-folding.js';
 import { LOGICAL_BROADCAST_HEADS } from './compiler-tables.js';
 import type { ElementLane } from './compiler-types.js';
 import {
   compilationType,
   isBoundPossiblyCollectionTyped,
-  mayHoldCallBroadcastResult,
 } from './compiler-type-facts.js';
 
 /**
@@ -647,6 +647,16 @@ export function userCallDefinition(
     if (specialized === undefined) return undefined;
     if (specialized.name !== undefined) return { name: specialized.name };
   }
+  // One point named through an alias, a union with `missing` or a nominal
+  // type, at a parameter with no declared type, that the copy for one
+  // point above did not take: the call of `tryCompileUserFunction`
+  // declines, since the generic definition reads the parameter as a
+  // scalar.
+  if (
+    literal !== undefined &&
+    namedPointArgumentAtUntypedParameter(engine, h, args) >= 0
+  )
+    return undefined;
   if (pointArgumentAtUntypedParameter(engine, h, args) >= 0) return inline();
   const ordinary = emit(() =>
     core.ensureUserFunctionEmitted(engine, h, target)
@@ -928,17 +938,8 @@ export function _operandElementLane(
   // the same evidence. `'mixed'` lowers through the dispatching helpers,
   // which read the shape of the value when the code runs: a number, a
   // `{re, im}` object, or an array of either. (ROADMAP CE-215.2.)
-  //
-  // A call of a user function that maps over a list argument at run time
-  // (`mayHoldCallBroadcastResult`: `h(x) + 1` with `h := t ↦ t + i` and an
-  // untyped `x`) is not such a binding either: the compiled code computes
-  // its value, a `{re, im}` object or an array of them.
   if (isBoundPossiblyCollectionTyped(a))
-    return isCollectionFold(a) ||
-      complexDiscipline() ||
-      mayHoldCallBroadcastResult(a)
-      ? 'mixed'
-      : undefined;
+    return isCollectionFold(a) || complexDiscipline() ? 'mixed' : undefined;
   return 'mixed';
 }
 

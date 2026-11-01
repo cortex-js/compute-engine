@@ -51,9 +51,9 @@ export type UnsafeIntegerOperand = {
  * `scalarNames` are the parameters that hold a run-time SCALAR. A caller never
  * passes a COLLECTION to a function whose formal parameters are all scalar:
  * the interpreter broadcasts the call element-wise instead
- * (`applyFunctionLiteral`, step 2b), and every emitted call site mirrors that,
- * with an unconditional `_SYS.bcastFn` dispatch or a runtime `Array.isArray`
- * guard around the direct call (`emitUserFunctionCall`). Each parameter
+ * (`applyFunctionLiteral`, step 2b), and every emitted call site mirrors that
+ * with a static map (`_SYS.mapFn`) over a list argument
+ * (`emitUserFunctionCall`). Each parameter
  * therefore holds one element, whatever its static type says — and a
  * definition body's parameters usually type `unknown`, so without this
  * evidence the argument test declines every nested call and nothing is ever

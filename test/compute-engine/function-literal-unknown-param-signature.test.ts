@@ -184,14 +184,20 @@ describe('A USE DOES NOT REWRITE A SIGNATURE DERIVED FROM A BODY', () => {
       .subs({ x: 2 })
       .N();
     expect(ce.box('g').type.toString()).toBe(before);
-    // A free input with no type is refused, so `x` is a parameter, declared
-    // `any`, of the root function.
+    // A free input with no type is refused, so `x` is a parameter of the
+    // root function. Declared `any`, it has no settled shape, and the call
+    // `g(x)` declines: the compiled code does not test the shape of a value
+    // at run time (rule R1 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`). Declared `real`,
+    // the call compiles.
     const det = ce.parse('\\operatorname{Determinant}(g(x)) + 1');
-    const result = compile(
-      ce.box(['Function', det.json, ['Typed', 'x', { str: 'any' }]]),
-      { to: 'javascript', fallback: false } as any
-    );
-    expect(result.run(2)).toBe(5);
+    const rootOf = (type: string) =>
+      compile(ce.box(['Function', det.json, ['Typed', 'x', { str: type }]]), {
+        to: 'javascript',
+        fallback: false,
+      } as any);
+    expect(() => rootOf('any')).toThrow(/does not settle one shape/);
+    expect(rootOf('real').run(2)).toBe(5);
   });
 
   test('a result the body leaves unknown is refined by a use', () => {
@@ -334,28 +340,36 @@ describe('A COMPILED CALL OF A FUNCTION THAT RETURNS A LIST', () => {
       ]);
       // The signature of `g` says `list<unknown>`, so the engine types
       // `g(x)[1]` as unknown. A free input with no type is refused, so `x`
-      // is a parameter, declared `any`, of the root function, and the call
+      // is a parameter of the root function. Declared `real`, the call
       // compiles on every lane (ROADMAP CE-377; the complex lane declined
-      // before).
-      const run = () =>
+      // before). Declared `any`, `x` has no settled shape, and the call
+      // declines: the compiled code does not test the shape of a value at
+      // run time (rule R1 of
+      // `docs/plans/2026-10-31-static-shape-compilation.md`).
+      const run = (type: string) =>
         compile(
-          ce.box(['Function', expr.json, ['Typed', 'x', { str: 'any' }]]),
+          ce.box(['Function', expr.json, ['Typed', 'x', { str: type }]]),
           { to: 'javascript', mode, fallback: false } as any
         );
-      expect(run().run(3)).toBe(5);
+      expect(run('real').run(3)).toBe(5);
+      expect(() => run('any')).toThrow(/does not settle one shape/);
     });
 
     test(`${mode}: Determinant(m(x)) + 1, m := t ↦ [[t, 1], [2, 3]]`, () => {
       const ce = new ComputeEngine();
       ce.assign('m', ce.parse('t \\mapsto [[t, 1], [2, 3]]'));
-      // `x` is a parameter, declared `any`, of the root function: a free
-      // input with no type is refused.
+      // `x` is a parameter of the root function: a free input with no type
+      // is refused. Declared `any`, it has no settled shape, and the call
+      // declines (rule R1 of
+      // `docs/plans/2026-10-31-static-shape-compilation.md`).
       const expr = ce.box(['Add', ['Determinant', ['m', 'x']], 1]);
-      const result = compile(
-        ce.box(['Function', expr.json, ['Typed', 'x', { str: 'any' }]]),
-        { to: 'javascript', mode, fallback: false } as any
-      );
-      expect(result.run(3)).toBe(8);
+      const rootOf = (type: string) =>
+        compile(
+          ce.box(['Function', expr.json, ['Typed', 'x', { str: type }]]),
+          { to: 'javascript', mode, fallback: false } as any
+        );
+      expect(rootOf('real').run(3)).toBe(8);
+      expect(() => rootOf('any')).toThrow(/does not settle one shape/);
     });
   }
 });

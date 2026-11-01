@@ -555,6 +555,31 @@ export interface CompileTarget<Expr = unknown> {
   var: (id: MathJsonSymbol) => string | undefined;
 
   /**
+   * Join the bodies compiled for two members of an input declared with a
+   * union of shapes (`real | list<real>`): the code of `value` is the
+   * input as the code reads it, `test` is the run-time test of its shape
+   * (`ShapeTest` in `static-shape.ts`: the value has an array nesting of
+   * at least `test.depth`; depth 1 is "the value is an array", depth 2 is
+   * "the value is an empty array or its first element is an array"), and
+   * the result is `ifTrue` when the test holds, `ifFalse` otherwise. Each body is compiled for one member, so this is the only
+   * test of the shape in the code.
+   *
+   * A target without this hook (the shader targets, which type each input
+   * statically) compiles the expression with one body, as for any other
+   * input.
+   */
+  shapeDispatch?: (
+    value: TargetSource,
+    test: {
+      readonly depth: number;
+      readonly absentValue?: boolean;
+      readonly absentFirst?: boolean;
+    },
+    ifTrue: TargetSource,
+    ifFalse: TargetSource
+  ) => TargetSource;
+
+  /**
    * Get the target's inlined spelling of a mathematical CONSTANT, or
    * `undefined` when the target has no constant by that name.
    *

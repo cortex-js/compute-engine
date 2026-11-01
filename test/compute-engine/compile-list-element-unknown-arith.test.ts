@@ -3,35 +3,33 @@
  * `list<unknown>` (ROADMAP CE-360).
  *
  * The case: `g` declared `(unknown) -> list<unknown>` and assigned
- * `t ↦ [t, 2t]`, and `x` declared `any`. The index `g(x)[1]` is typed
- * `missing | unknown`. When `x` is a list, the call maps over it, and the
- * element is a list: `g([1, 2])[1]` is `[1, 2]`. The readers that ask
- * whether an operand may be a collection (`isPossiblyCollectionTyped` in
- * `collection-utils.ts`, its typing twins, and the compiled predicates in
- * `base-compiler.ts` and `javascript-target.ts`) read a union only by its
- * `broadcastable` branches, so they took the element for a scalar. The
- * compiled `g(x)[1] + 1` added `1` to an array with the JavaScript `+`, and
- * gave the string `"1,21"` at `x = [1, 2]`, where the interpreter gives
- * `[2, 3]`. A product gave `NaN` and a comparison gave one `false`. The
- * typing route typed `Sin(g(x)[1])` as `number`, so the compiled
- * `Sin(g(x)[1]) + 1` also concatenated strings.
+ * `t ↦ [t, 2t]`. The index `g(x)[1]` is typed `missing | unknown`. When `x`
+ * is a list, the call maps over it, and the element is a list:
+ * `g([1, 2])[1]` is `[1, 2]`. The element of such a call may be a list, so
+ * the operators around it (`+`, `Sin`, `<`, ...) must broadcast over it
+ * (`topTypeBesideAbsence`, `common/type/utils.ts`, reads a type that is a
+ * top type beside absence markers as that top type). The typing route
+ * types `Sin(g(x)[1])` so that it holds the list too.
  *
- * The fix reads an application typed by a top type beside absence markers
- * only (`topTypeBesideAbsence`, `common/type/utils.ts`) as that top type,
- * which the compiled code broadcasts at run time (`_SYS.bcast`), as it
- * already did for the bare `list` signature (whose element is typed `any`).
- * A `Block` local that takes its type from the element is read the same way:
- * it is typed `missing | unknown`, or `any` inferred from the value.
+ * The compiler settles the shape of every call argument at compile time.
+ * So the cases are of two kinds:
  *
- * Each case compares the compiled value with the interpreted value
- * (`.N()`), at a number `x` and at list values of `x`. The three
- * signatures of `g` are `(unknown) -> list<unknown>`, `(unknown) -> list`
- * and no declaration (the inferred signature, `(unknown) -> vector<2>`).
+ * - `x` declared `any`: the shape of the argument of `g(x)` is not settled,
+ *   and the compilation declines with the code `unsettled-shape` and the
+ *   name `x` in `unsupported`.
+ * - `x` declared with a settled shape (`real`, `list<real>`,
+ *   `list<list<real>>`): the compilation maps `g` over the argument with a
+ *   static map, and the compiled value equals the interpreted value (`.N()`)
+ *   at a number, at a list, at a nested list and at an empty list.
+ *
+ * The three signatures of `g` are `(unknown) -> list<unknown>`,
+ * `(unknown) -> list` and no declaration (the inferred signature,
+ * `(unknown) -> vector<2>`).
  *
  * At `x = []` the element is absent, and both routes answer `Missing`: the
  * compiled code gave `NaN` (or `false` for a comparison) there, on every
- * signature, until the run-time broadcast made a result with an absent
- * operand absent (ROADMAP CE-368).
+ * signature, until the broadcast made a result with an absent operand
+ * absent (ROADMAP CE-368).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -89,13 +87,10 @@ type Run = readonly [unknown, unknown, boolean?];
  * parameters `names` (by default `x`, `c` and `z`; `c` is `true` and `z` is
  * `0` when the call leaves them out).
  *
- * A compiled input whose type is `any` (`x`, `z`) is refused: the compiled
- * code must know the shape of each input from its type. The run-time test of
- * a value that may be a list is still reachable for a parameter of the root
- * function declared `any`. So `json` is compiled as the body of the function
- * `(x, c, z) ↦ json`, whose parameters have the types that `ce` declares
- * for the symbols. The symbol `a`, when `json` reads it, stays a free input
- * with no type. */
+ * A compiled input whose type is `any` (`x`, `z`) is refused. So `json` is
+ * compiled as the body of the function `(x, c, z) ↦ json`, whose parameters
+ * have the types that `ce` declares for the symbols. The symbol `a`, when
+ * `json` reads it, stays a free input with no type. */
 function compiledFunction(
   ce: ComputeEngine,
   json: unknown,
@@ -126,6 +121,15 @@ function expectUntypedRefusal(
   expect(r.success).toBe(false);
   expect(r.diagnostic?.code).toBe('untyped-input');
   for (const name of names) expect(r.unsupported).toContain(name);
+}
+
+/** Expect the compilation of `json` to decline because the argument of the
+ * call of `g` has a type that does not settle its shape (`x` is `any`). */
+function expectUnsettledDecline(ce: ComputeEngine, json: unknown): void {
+  const r = compile(ce.box(json as any), { to: 'javascript' } as never);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+  expect(r.unsupported).toContain('x');
 }
 
 /** For each run, the compiled value, the interpreted value, and whether
@@ -201,39 +205,74 @@ const CASES: [string, unknown][] = [
   ],
 ];
 
-const X_VALUES: ReadonlyArray<Run> = [
-  [3, 3],
-  [
-    [1, 2],
-    ['List', 1, 2],
+/** The values of `x`, by its declared type. An empty list: the element is
+ * absent (ROADMAP CE-368). */
+const X_RUNS: Record<string, ReadonlyArray<Run>> = {
+  real: [
+    [3, 3],
+    [0.5, 0.5],
+    [0.5, 0.5, false],
   ],
-  [
-    [[1, 2], [3]],
-    ['List', ['List', 1, 2], ['List', 3]],
+  'list<real>': [
+    [
+      [1, 2],
+      ['List', 1, 2],
+    ],
+    [[1, 2], ['List', 1, 2], false],
+    [[], ['List']],
   ],
-  [[1, 2], ['List', 1, 2], false],
-  // An empty list: the element is absent (ROADMAP CE-368).
-  [[], ['List']],
-];
+  'list<list<real>>': [
+    [
+      [[1, 2], [3]],
+      ['List', ['List', 1, 2], ['List', 3]],
+    ],
+    [[], ['List']],
+  ],
+};
+const X_TYPES = Object.keys(X_RUNS);
 
 describe('CE-360: compiled operators over an element that may be a list', () => {
+  // `x` is declared `any`: the shape of the argument of `g(x)` is not
+  // settled, so the compilation declines.
   for (const signature of SIGNATURES) {
-    test.each(CASES)(`${signature}: %s`, (name, json) => {
-      // The input `a` has no type, so the compilation is refused.
-      if (name.endsWith('a undeclared'))
-        return expectUntypedRefusal(rowEngine(signature), json, ['a']);
-      expectAgreement(
-        compiledAndInterpreted(rowEngine(signature), json, X_VALUES)
-      );
+    test.each(CASES)(`${signature}, x: any declines: %s`, (_name, json) => {
+      expectUnsettledDecline(rowEngine(signature), json);
     });
+  }
+
+  // `x` is declared with a settled shape: the compiled value is the
+  // interpreted value.
+  for (const signature of SIGNATURES) {
+    for (const xType of X_TYPES) {
+      test.each(CASES)(`${signature}, x: ${xType}: %s`, (name, json) => {
+        // The input `a` has no type, so the compilation is refused.
+        if (name.endsWith('a undeclared'))
+          return expectUntypedRefusal(
+            rowEngine(signature, xType),
+            json,
+            ['a']
+          );
+        expectAgreement(
+          compiledAndInterpreted(
+            rowEngine(signature, xType),
+            json,
+            X_RUNS[xType]
+          )
+        );
+      });
+    }
   }
 
   test('the reported case: g(x)[1] + 1 at x = [1, 2] is [2, 3]', () => {
     const ce = rowEngine('(unknown) -> list<unknown>');
     expect(ce.box(ELEMENT as any).type.toString()).toBe('missing | unknown');
-    const run = compiledFunction(ce, ['Add', ELEMENT, 1]);
-    expect(run({ x: [1, 2] })).toEqual([2, 3]);
-    expect(run({ x: 3 })).toBe(4);
+    // `x` is a list in one compilation and a number in the other.
+    const list = rowEngine('(unknown) -> list<unknown>', 'list<real>');
+    expect(compiledFunction(list, ['Add', ELEMENT, 1])({ x: [1, 2] })).toEqual(
+      [2, 3]
+    );
+    const scalar = rowEngine('(unknown) -> list<unknown>', 'real');
+    expect(compiledFunction(scalar, ['Add', ELEMENT, 1])({ x: 3 })).toBe(4);
   });
 
   test('a cell function of the element is typed as a possible list', () => {
@@ -250,19 +289,30 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
   });
 
   // With the bare `list` signature the element is typed `any`, and so is the
-  // `Block` local `y` that holds it. The compiled code reads a symbol the
-  // user declared `any` as a scalar (the host passes its value). Before, it
-  // read the local `y` the same way, and the compiled `y + 1` gave the
-  // string "1,21" at `x = [1, 2]`, where the interpreter gives `[2, 3]`.
+  // `Block` local `y` that holds it. The local `y` is read as a possible
+  // list: the compiled `y + 1` gave the string "1,21" at `x = [1, 2]` when it
+  // was read as a scalar, where the interpreter gives `[2, 3]`.
   for (const signature of SIGNATURES) {
     test.each(BLOCK_CASES)(
-      `${signature}: a Block local holding the element, %s`,
+      `${signature}, x: any declines: a Block local holding the element, %s`,
       (_name, json) => {
-        expectAgreement(
-          compiledAndInterpreted(rowEngine(signature), json, X_VALUES)
-        );
+        expectUnsettledDecline(rowEngine(signature), json);
       }
     );
+    for (const xType of X_TYPES) {
+      test.each(BLOCK_CASES)(
+        `${signature}, x: ${xType}: a Block local holding the element, %s`,
+        (_name, json) => {
+          expectAgreement(
+            compiledAndInterpreted(
+              rowEngine(signature, xType),
+              json,
+              X_RUNS[xType]
+            )
+          );
+        }
+      );
+    }
   }
 
   test('a cell function of a Block local is typed as a possible list', () => {
@@ -303,9 +353,20 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
       fallback: false,
     } as never).code;
     expect(code).not.toMatch(/_SYS\.bcast/);
-    // The compiled code reads the value of `k`, `g(x)[1]`, so it reads the
-    // input `x`, declared `any`: the compilation is refused.
-    expectUntypedRefusal(ce, ['Add', 'k', 1], ['x']);
+    // The compiled code reads the value of `k`, `g(x)[1]`, so it calls `g`
+    // on the input `x`, declared `any`: the compilation declines.
+    expectUnsettledDecline(ce, ['Add', 'k', 1]);
+    // With `x` declared `real`, the value of `k` is compiled in place.
+    const real = rowEngine('(unknown) -> list', 'real');
+    real.assign('k', real.box(ELEMENT as any));
+    const result = compile(real.box(['Add', 'k', 1]), {
+      to: 'javascript',
+      fallback: false,
+    } as never);
+    for (const x of [3, 0.5]) {
+      real.assign('x', real.number(x));
+      expect((result.run as any)({ x })).toBe(real.box(['Add', 'k', 1]).N().re);
+    }
   });
 });
 
@@ -342,16 +403,17 @@ describe('CE-368: the absence marker of an element follows its value', () => {
   // or an empty list. The run-time broadcast keeps a `NaN` operand a `NaN`
   // (a numeric slot) and makes the result absent for an absent operand.
   test('g(x)[5] + 1 is NaN at x = 3 and Missing at x = [] on both routes', () => {
-    const ce = rowEngine('(unknown) -> list<unknown>');
+    // One compilation per declared shape of `x`: a number, and a list.
     const json = ['Add', ['At', ['g', 'x'], 5], 1];
-    const expr = ce.box(json as any);
-    const run = compiledFunction(ce, json, ['x']);
-    ce.assign('x', ce.number(3));
-    expect(expr.evaluate().toString()).toBe('NaN');
-    expect(run({ x: 3 })).toBeNaN();
-    ce.assign('x', ce.box(['List']));
-    expect(expr.evaluate().toString()).toBe('"Missing"');
-    expect(run({ x: [] })).toBeUndefined();
+    const scalar = rowEngine('(unknown) -> list<unknown>', 'real');
+    scalar.assign('x', scalar.number(3));
+    expect(scalar.box(json as any).evaluate().toString()).toBe('NaN');
+    expect(compiledFunction(scalar, json, ['x'])({ x: 3 })).toBeNaN();
+
+    const list = rowEngine('(unknown) -> list<unknown>', 'list<real>');
+    list.assign('x', list.box(['List']));
+    expect(list.box(json as any).evaluate().toString()).toBe('"Missing"');
+    expect(compiledFunction(list, json, ['x'])({ x: [] })).toBeUndefined();
   });
 
   test('a decisive operand of a connective wins over an absent one', () => {
@@ -361,7 +423,7 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     // rule (`_SYS.bcastPlain`), so their closure reads the absent operand:
     // with `b = true` the result is the absent boolean, spelled `NaN` by
     // the compiled connectives.
-    const ce = rowEngine('(unknown) -> list<unknown>');
+    const ce = rowEngine('(unknown) -> list<unknown>', 'list<real>');
     ce.declare('b', 'boolean');
     const json = ['And', ['Less', ['At', ['g', 'x'], 5], 1], 'b'];
     const expr = ce.box(json as any);
@@ -380,7 +442,7 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     // shape, and the absent operand is `NaN` in each cell, as in the
     // interpreter. The compiled `RotateLeft` may pass a rotation view, not
     // an array, to the broadcast, which reads it as a collection.
-    const ce = rowEngine('(unknown) -> list<unknown>');
+    const ce = rowEngine('(unknown) -> list<unknown>', 'list<real>');
     ce.declare('xs', 'list<number>');
     const json = ['Add', ['At', ['g', 'x'], 5], ['RotateLeft', 'xs']];
     const expr = ce.box(json as any);
@@ -418,60 +480,81 @@ describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence'
   // routes: `False` for `Equal`, `True` for `NotEqual`. The Kleene guard of
   // the compiled equality read `NaN` as absent and answered `Missing`. At
   // `x = "a"` the value is the object absence `undefined`, and both routes
-  // answer `Missing` (landed 2026-10-23).
-  function engine(value: any): ComputeEngine {
+  // answer `Missing` (landed 2026-10-23). `x` is declared with the shape
+  // of its value: `real`, `string` or `list<real>`.
+  //
+  // The interpreter reads the value assigned to `x`. The compiler folds an
+  // assigned value into the code, so `compiled` builds its own engine with
+  // `x` declared and not assigned: `x` is then an input of the code.
+  function engine(value: any, xType: string, assigned = true): ComputeEngine {
     const ce = new ComputeEngine();
-    ce.declare('x', 'any');
+    ce.declare('x', xType);
     ce.assign(
       'g',
       ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
     );
-    ce.assign('x', value === 'a' ? ce.string('a') : ce.box(value));
+    if (assigned)
+      ce.assign('x', value === 'a' ? ce.string('a') : ce.box(value));
     return ce;
   }
-  const run = (ce: ComputeEngine, json: any, x: unknown): unknown =>
-    (compile(ce.box(json), { to: 'javascript', fallback: false }) as any).run({
-      x,
+  const compiled = (json: any, xType: string): any =>
+    compile(engine(undefined, xType, false).box(json), {
+      to: 'javascript',
+      fallback: false,
     });
+  const run = (xType: string, json: any, x: unknown): unknown =>
+    compiled(json, xType).run({ x });
 
   test('g(x)[5] = 1 at x = 3 is False on both routes', () => {
-    const ce = engine(3);
+    const ce = engine(3, 'real');
     const json = ['Equal', ['At', ['g', 'x'], 5], 1];
     expect(ce.box(json).evaluate().symbol).toBe('False');
-    expect(run(ce, json, 3)).toBe(false);
+    expect(run('real', json, 3)).toBe(false);
   });
 
   test('g(x)[5] ≠ 1 at x = 3 is True on both routes', () => {
-    const ce = engine(3);
+    const ce = engine(3, 'real');
     const json = ['NotEqual', ['At', ['g', 'x'], 5], 1];
     expect(ce.box(json).evaluate().symbol).toBe('True');
-    expect(run(ce, json, 3)).toBe(true);
+    expect(run('real', json, 3)).toBe(true);
   });
 
-  test('g(x)[5] = 1 at x = "a" is Missing on both routes', () => {
-    const ce = engine('a');
+  test('g(x)[5] = 1 declines for x: any and for x: string', () => {
+    // An `any` input does not settle the shape of the argument of `g`. For a
+    // `string` input the shape is settled, and the element read finds no
+    // `string`: the compiled equality cannot tell the absent `string` from
+    // a number, so it declines and the interpreter answers `Missing`.
     const json = ['Equal', ['At', ['g', 'x'], 5], 1];
+    const any = engine('a', 'any');
+    const unsettled = compile(any.box(json), { to: 'javascript' } as never);
+    expect(unsettled.success).toBe(false);
+    expect(unsettled.diagnostic?.code).toBe('unsettled-shape');
+    expect(unsettled.unsupported).toContain('x');
+    const ce = engine('a', 'string');
     expect(ce.box(json).evaluate().symbol).toBe('Missing');
-    expect(run(ce, json, 'a')).toBeUndefined();
+    expect(compile(ce.box(json), { to: 'javascript' } as never).success).toBe(
+      false
+    );
   });
 
   test('g(x)[5] = 1 at x = [] is Missing on both routes', () => {
-    const ce = engine(['List']);
+    const ce = engine(['List'], 'list<real>');
     const json = ['Equal', ['At', ['g', 'x'], 5], 1];
     expect(ce.box(json).evaluate().symbol).toBe('Missing');
-    expect(run(ce, json, [])).toBeUndefined();
+    expect(run('list<real>', json, [])).toBeUndefined();
   });
 
   test('an impure operand of the guarded comparison is evaluated once', () => {
     // The guard tests each operand for absence and the comparison reads it
     // again: an element read or a call is bound to a temporary, so
     // `Random()` draws once, and the read of `g(x)[1]` runs once.
-    const ce = engine(3);
     const json = ['Equal', ['At', ['g', 'x'], 1], ['Random']];
-    const code = String(
-      (compile(ce.box(json), { to: 'javascript', fallback: false }) as any).code
-    );
+    const code = String(compiled(json, 'real').code);
     expect(code.match(/drawNextRandomNumber/g)).toHaveLength(1);
-    expect(code.match(/atWithValueMarker/g)).toHaveLength(1);
+    expect(code.match(/atNumeric/g)).toHaveLength(1);
+    // The same holds for a list `x`, where the element read maps `g`.
+    const listCode = String(compiled(json, 'list<real>').code);
+    expect(listCode.match(/drawNextRandomNumber/g)).toHaveLength(1);
+    expect(listCode.match(/_SYS\.at\(/g)).toHaveLength(1);
   });
 });

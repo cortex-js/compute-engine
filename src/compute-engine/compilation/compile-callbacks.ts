@@ -8,7 +8,10 @@ import type {
 } from '../global-types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
-import { isDeclaredScalarType } from '../boxed-expression/boxed-function.js';
+import {
+  isDeclaredScalarType,
+  paramsAreScalar,
+} from '../boxed-expression/boxed-function.js';
 import {
   isTuple,
   isTupleShapedType,
@@ -41,6 +44,7 @@ import {
   isNumber,
 } from '../boxed-expression/type-guards.js';
 import {
+  functionLiteralDeclaredSignature,
   functionLiteralParameterName,
   functionLiteralParameterType,
   functionLiteralReturnMarker,
@@ -68,11 +72,14 @@ import {
   expressionParameterDecline,
   expressionParameterReadAt,
   paramElementTypeIsOpen,
+  admitsAbsentAtMappedLevel,
   provablyScalarOrFramedScalar,
+  pythonMapCall,
   signatureParamsLowerToScalars,
   userFunctionParamType,
 } from './compile-user-calls.js';
 import {
+  groundSignature,
   signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
@@ -94,6 +101,15 @@ import { foldValueImpure, parametersCanBeTyped } from './compile-folding.js';
 import { tempVar } from './compiler-naming.js';
 import { isEmissionSkippable } from './compile-cse.js';
 import { jsComplexObjectTest } from './compiler-type-facts.js';
+import {
+  isScalarShaped,
+  isNominalWithUnsettledRank,
+  isUndeclaredParameterType,
+  mapRankOfType,
+  pointOfType,
+  pointsBelowLists,
+} from './static-shape.js';
+import { CompileDeclineError, UNSETTLED_SHAPE_CODE } from './diagnostics.js';
 
 /**
  * The complex-ness every element of `collection` shares, or `undefined` when
@@ -250,9 +266,9 @@ export function userFunctionSignatureIsInferred(
  *
  * Shared by the call route (`tryCompileUserFunction`, which emits a
  * checked call through the shim in every form the call takes) and the
- * value route (`ensureUserFunctionValueRef`, whose broadcasting wrapper
- * wraps the shim, so an element of a collection is checked after the
- * descent to it).
+ * value route (`ensureUserFunctionValueRef`, whose static map over list
+ * elements wraps the shim, so an element of a collection is checked after
+ * the descent to it).
  */
 export function checkingShimName(
   engine: ComputeEngine,
@@ -881,7 +897,7 @@ export function compileCombinerLiteral(
 
 /**
  * The name to use where a user function is referenced as a VALUE rather than
- * called — `Map(Q, xs)`, `CountIf`, `Find`, `_SYS.bcastFn`.
+ * called — `Map(Q, xs)`, `CountIf`, `Find`, `_SYS.mapFn`.
  *
  * The consumers of a function value hand the callee a RAW element: the
  * argument coercion lives in `emitUserFunctionCall`, which only the call
@@ -898,34 +914,31 @@ export function compileCombinerLiteral(
  * reference is compiled without one — `_SYS.cplx` is idempotent, so a
  * complex element passes through and a real one is wrapped.
  *
- * The second coercion a raw element needs is the BROADCAST one. A user
- * function whose parameters are all scalar is applied element-wise by the
- * interpreter when an argument is a collection, and the emitted CALL sites
- * reproduce that (`_SYS.bcastFn`, or an `Array.isArray` guard); the body
- * itself is emitted for scalars only. A value reference had no such
- * dispatch, and the consumer of the value passes whatever element it holds:
- * for `f(x) := 2x`, `Map(f, [[1, 2], [3, 4]])` handed a whole ROW to a body
- * that multiplies, and answered `[NaN, NaN]` where the interpreter answers
- * `[[2, 4], [6, 8]]`. So a scalar-parameter function is handed out as a
- * shape-aware wrapper under its own name, emitted ONCE next to the
- * function itself — a consumer that maps over a million elements pays one
- * closure, not one per element. The wrapper always BROADCASTS (`$b`),
- * because the interpreter always does at a callback position: a callback
- * whose parameters are all scalar is applied element-wise to a collection
- * element, whether those parameters are DECLARED scalars
- * (`(number) -> number`) or left open, which is the user ruling of
- * 2026-09-22. Before that ruling a declared-scalar callback was refused
- * there, and the reference took a second, guarding form that projected an
- * array element to NaN. A function with a parameter that is NOT scalar
- * binds its arguments whole and keeps the plain reference, because the
- * interpreter does not broadcast it either.
+ * The second coercion a raw element needs is the MAP over a list element.
+ * A user function whose parameters are all scalar is applied element-wise
+ * by the interpreter when an argument is a collection, whether those
+ * parameters are DECLARED scalars (`(number) -> number`) or left open (user
+ * decision of 2026-09-22); the body itself is emitted for scalars only. The
+ * consumer of the value passes whatever element its source holds: for
+ * `f(x) := 2x`, `Map(f, [[1, 2], [3, 4]])` handed a whole ROW to a body that
+ * multiplies, and answered `[NaN, NaN]` where the interpreter answers
+ * `[[2, 4], [6, 8]]`. The consumer records the static types of the values
+ * it passes (`withCallbackArgumentTypes`), and they select the value: the
+ * function itself over scalar elements, a static map of it over list
+ * elements (`const _fn_f$m1 = (_tv1) => _SYS.mapFn(_fn_f, [1], _tv1)`),
+ * emitted ONCE next to the function itself, and a decline over elements
+ * whose shape is not settled (`callbackArgumentRanks()`). No code tests
+ * the shape of an element at run time. A value with no consumer (the root
+ * `compile(f)`, an argument of a call) is the scalar variant. A function
+ * with a parameter that is NOT scalar binds its arguments whole and keeps
+ * the plain reference, because the interpreter does not map it either.
  *
- * The wrapper takes the complex-coercing shim as its callee where both
- * apply, so an element reaches the body coerced, the same order the
- * call route dispatches in (`dispatchCall`).
+ * The map takes the complex-coercing shim as its callee where both apply,
+ * so an element reaches the body coerced, the same order the call route
+ * uses.
  *
  * Returns the plain name unchanged when there is nothing to coerce and no
- * argument that could be a collection.
+ * argument that is a list.
  */
 export function ensureUserFunctionValueRef(
   engine: ComputeEngine,
@@ -941,6 +954,10 @@ export function ensureUserFunctionValueRef(
   // scalar. With `h := (t: expression) ↦ 2t`, `Map(h, rows)` over
   // `[[1, 2], [3, 4]]` gave `[null, null]` where the interpreter gives
   // `[[2, 4], [6, 8]]`.
+  // What the consumer of this value passes to it (`callbackArguments`).
+  // The entry covers this value only: the definition of `h`, emitted
+  // below, can read `h` as a value again, and that value has no consumer.
+  const passed = callbackArgumentsOf(h);
   const marks = checkedFunctionValues.get(h);
   if (marks === undefined) {
     const literal = userFunctionLiteral(engine, h);
@@ -952,13 +969,16 @@ export function ensureUserFunctionValueRef(
           );
     if (at >= 0)
       throw expressionParameterDecline(`the function value \`${h}\``, at);
-    return userFunctionValueRef(engine, h, target, decline);
+    return withoutCallbackArguments(h, () =>
+      userFunctionValueRef(engine, h, target, decline, passed)
+    );
   }
-  // The mark covers this value only. The definition of `h`, emitted below,
-  // can read `h` as a value again, and that value is checked as any other.
+  // The mark covers this value only, as the consumer entry does.
   checkedFunctionValues.delete(h);
   try {
-    return userFunctionValueRef(engine, h, target, decline);
+    return withoutCallbackArguments(h, () =>
+      userFunctionValueRef(engine, h, target, decline, passed)
+    );
   } finally {
     checkedFunctionValues.set(h, marks);
   }
@@ -974,15 +994,22 @@ export function ensureUserFunctionValueRef(
  * argument, and the interpreter fills `k` with 2. A call written in the
  * expression needs no wrapper, because canonicalization already wrote the
  * default into it (`f(3)` is `f(3, 2)`). The wrapper is the outermost one,
- * so the checking, complex-coercing and broadcasting wrappers inside it see
- * every argument, as for a call that supplies them all. */
+ * so the checking and complex-coercing wrappers and the static map inside
+ * it see every argument, as for a call that supplies them all. */
 function userFunctionValueRef(
   engine: ComputeEngine,
   h: string,
   target: CompileTarget<Expression>,
-  decline?: DeclineNote
+  decline?: DeclineNote,
+  passed?: CallbackArguments
 ): string | undefined {
-  const ref = userFunctionValueRefWithoutDefaults(engine, h, target, decline);
+  const ref = userFunctionValueRefWithoutDefaults(
+    engine,
+    h,
+    target,
+    decline,
+    passed
+  );
   if (ref === undefined) return undefined;
   if (
     target.language !== 'javascript' &&
@@ -1030,16 +1057,56 @@ function userFunctionValueRef(
 }
 
 /** `userFunctionValueRef` without the wrapper that fills the parameters
- * with a default value. */
+ * with a default value. `passed` is what the consumer of the value passes
+ * to it (`callbackArguments`), `undefined` for a value with no consumer. */
 function userFunctionValueRefWithoutDefaults(
   engine: ComputeEngine,
   h: string,
   target: CompileTarget<Expression>,
-  decline?: DeclineNote
+  decline?: DeclineNote,
+  passed?: CallbackArguments
 ): string | undefined {
+  // A parameter declared `expression` that receives a collection takes the
+  // variant typed by the values the consumer passes
+  // (`expressionParameterVariantRef`).
+  const variant = expressionParameterVariantRef(engine, h, target, passed);
+  if (variant !== undefined) return variant;
   const name = core.ensureUserFunctionEmitted(engine, h, target, decline);
   if (name === undefined) return undefined;
-  if (target.language !== 'javascript') return name;
+  if (target.language !== 'javascript') {
+    // A target with its own definition lowering (the shader targets)
+    // decides what the value means. Elsewhere, a value with scalar
+    // parameters fed list values is a static map of it, as on JavaScript.
+    if (passed === undefined || target.userFunctions?.lowering) return name;
+    if (!userFunctionParamsAreScalar(engine, h))
+      return absentGuardedValueRef(engine, h, name, passed);
+    // The interpreter binds a point whole at a parameter with no declared
+    // type, and this target has no definition compiled for one point.
+    if (
+      passed.types.some(
+        (t) => t !== undefined && pointsBelowLists(t) !== undefined
+      )
+    )
+      throw new Error(
+        `Could not compile the function value \`${h}\`: its consumer ` +
+          `passes it lists of points, and the target has no definition of ` +
+          `the function for one point.`
+      );
+    const literal = userFunctionLiteral(engine, h);
+    const ranks = callbackArgumentRanks(
+      h,
+      passed,
+      literal === undefined ? 0 : literal.ops.length - 1
+    );
+    const mapped = staticMapCallback(name, ranks, target, passed.types);
+    if (mapped === undefined)
+      throw new Error(
+        `Could not compile the function value \`${h}\`: its consumer ` +
+          `passes it list values, and the target has no map of a function ` +
+          `over a list.`
+      );
+    return mapped;
+  }
   const registry = target.userFunctions;
   if (!registry) return name;
 
@@ -1047,7 +1114,7 @@ function userFunctionValueRefWithoutDefaults(
   // A MULTI-CLAUSE function has no single literal to read a parameter list
   // from, and takes its own wrapper.
   if (literal === undefined)
-    return multiClauseValueRef(engine, h, name, target) ?? name;
+    return multiClauseValueRef(engine, h, name, target, passed) ?? name;
   const nParams = literal.ops.length - 1;
   const complexParam: boolean[] = [];
   for (let i = 0; i < nParams; i++) {
@@ -1074,53 +1141,651 @@ function userFunctionValueRefWithoutDefaults(
   // A parameter with a DECLARED type takes the checking shim
   // (`checkingShimName`): the consumer of a value reference hands the body
   // a raw element, which the interpreter would have checked against the
-  // annotation. The broadcasting wrapper below wraps the shim, so an
-  // element of a collection argument is checked after the descent to it.
+  // annotation. The static map below wraps the shim, so an element of a
+  // collection argument is checked after the descent to it.
   callee = checkingShimName(engine, h, callee, target) ?? callee;
 
   // A parameterless function has no argument that could be a collection.
   if (nParams === 0) return callee;
   if (!userFunctionParamsAreScalar(engine, h))
-    return (
-      listSpecializedValueRef(engine, h, literal, callee, target) ?? callee
+    return absentGuardedValueRef(
+      engine,
+      h,
+      listSpecializedValueRef(engine, h, literal, target, passed) ?? callee,
+      passed
     );
   // A parameter that lowers to an array or object (a tuple, a record, a
   // nominal value) must reach the body whole — see
   // `signatureParamsLowerToScalars`.
   if (!signatureParamsLowerToScalars(userFunctionSignature(engine, h)))
-    return callee;
+    return absentGuardedValueRef(engine, h, callee, passed);
 
-  // Every scalar-parameter function takes the BROADCASTING wrapper, whatever
-  // its parameter types say. Until the user ruling of 2026-09-22 a function
-  // whose parameters were DECLARED scalars — `(number) -> number` — was
-  // refused by the interpreter at a callback position, and took a guarding
-  // wrapper that projected an array element to NaN. The interpreter now
-  // broadcasts there, exactly as a direct application of the same function
-  // always has, so the guarding form has no behavior left to reproduce.
-  const wrapperName = `${name}$b`;
+  // A value with no consumer is the scalar variant.
+  if (passed === undefined) return callee;
+  // The interpreter applies a function with scalar parameters to each
+  // element of a list value at a callback position, whether the parameters
+  // are declared scalars (`(number) -> number`) or left open (user decision
+  // of 2026-09-22). The static types of the values select the variant: the
+  // function itself over scalar values, a static map over list values
+  // (`const _fn_f$m1 = (_tv1) => _SYS.mapFn(_fn_f, [1], _tv1)`).
+  const pointRef = pointListValueRef(
+    engine,
+    h,
+    literal,
+    name,
+    callee,
+    target,
+    passed
+  );
+  if (pointRef !== undefined) return pointRef;
+  const ranks = callbackArgumentRanks(h, passed, nParams);
+  return mappedValueRef(name, callee, ranks, registry, target, passed.types);
+}
+
+/**
+ * The function value `ref` of the user function `h`, whose parameters are
+ * not all scalars. Throws (the consumer declines) when the consumer passes
+ * a value that may be absent at a parameter of `h` with no declared type.
+ *
+ * The interpreter binds `Missing` to the parameter and runs the body: with
+ * `fl := t ↦ Length(t)`, `Map(fl, [(1, 2), Missing])` is `[2, NaN]`. The
+ * compiled definition is compiled for a collection, and its body can fail
+ * on an absent value (the compiled `Length` of `undefined` throws), so the
+ * value is not compiled.
+ */
+function absentGuardedValueRef(
+  engine: ComputeEngine,
+  h: string,
+  ref: string,
+  passed: CallbackArguments | undefined
+): string {
+  if (passed === undefined) return ref;
+  const literal = userFunctionLiteral(engine, h);
+  if (literal === undefined) return ref;
+  const params = literal.ops.slice(1);
+  // A consumer that fills fewer parameters than the function has (a
+  // trailing parameter with a default value, `fl := (t, k = 0) ↦
+  // Length(t)`): the parameters that receive the values are not known
+  // here, so a value that may be absent declines as well.
+  if (passed.types.length !== params.length) {
+    if (passed.types.some((t) => t !== undefined && isSubtype('missing', t)))
+      throw new Error(
+        `Could not compile the function value \`${h}\`: its consumer ` +
+          `passes it a value that may be absent, and fills ` +
+          `${passed.types.length} of its ${params.length} parameters.`
+      );
+    return ref;
+  }
+  const absent = passed.types.map((t, i) => {
+    if (t === undefined) return false;
+    const declared = declaredParamType(params[i]);
+    if (declared !== undefined && declared !== 'unknown') return false;
+    return isSubtype('missing', t);
+  });
+  if (!absent.some((a) => a)) return ref;
+  throw new Error(
+    `Could not compile the function value \`${h}\`: its consumer passes ` +
+      `it a value that may be absent, at a parameter with no declared ` +
+      `type, and the definition of \`${h}\`, compiled for a collection, ` +
+      `may fail on an absent value where the interpreter runs the body ` +
+      `with \`Missing\`.`
+  );
+}
+
+/**
+ * The value of the user function `h`, emitted as `name` and called through
+ * `callee`, for a consumer that passes it values that hold points below a
+ * list level (`pointsBelowLists()`): a static map over the list levels
+ * above the points, of the definition of `h` compiled for one point.
+ * `undefined` when no value holds such points.
+ *
+ * At a parameter with no declared type, the interpreter maps the function
+ * over the list levels of the value and binds each point whole: with
+ * `f := t ↦ 7` and `rows = [[(1, 2)], [(3, 4), (5, 6)]]`, `Map(f, rows)` is
+ * `[[7], [7, 7]]`. The definition of `f` is compiled for a scalar
+ * parameter, so a static map over the coordinates gave
+ * `[[[7, 7]], [[7, 7], [7, 7]]]`. The value is
+ * `(_tv1) => _SYS.mapFn(_fn_f_point, [1], _tv1)`, where `_fn_f_point` is the
+ * definition with the parameter typed as the point.
+ *
+ * The value declines when the list levels do not lead to one point type,
+ * when a parameter that receives points has a declared type, when the
+ * consumer does not fill every parameter, when the function is called
+ * through a wrapper (a test of a declared type, a complex lane), or when
+ * the definition for one point cannot be emitted.
+ */
+function pointListValueRef(
+  engine: ComputeEngine,
+  h: string,
+  literal: Expression & FunctionInterface,
+  name: string,
+  callee: string,
+  target: CompileTarget<Expression>,
+  passed: CallbackArguments
+): string | undefined {
+  // `pointsBelowLists()` gives `null` for points whose list levels do not
+  // lead to one point type (a union of point lists, a matrix of points):
+  // that value must reach the decline below, so `absentPointType()` is
+  // read only when it gives `undefined` (no points below list levels).
+  const found = passed.types.map((t) => {
+    if (t === undefined) return undefined;
+    const below = pointsBelowLists(t);
+    return below !== undefined ? below : absentPointType(t);
+  });
+  if (found.every((x) => x === undefined)) return undefined;
+  const fail = (why: string): Error =>
+    new Error(
+      `Could not compile the function value \`${h}\`: its consumer passes ` +
+        `it lists of points, which the interpreter maps over, binding each ` +
+        `point whole, and ${why}`
+    );
+  const nParams = literal.ops.length - 1;
+  if (passed.types.length !== nParams)
+    throw fail(`the consumer does not fill every parameter.`);
+  const types = found.map((x, i) => {
+    if (x === null)
+      throw fail(`the list levels do not lead to one point type.`);
+    if (x === undefined) return undefined;
+    const pt = userFunctionParamType(engine, h, i);
+    if (pt !== undefined && !isUndeclaredParameterType(pt))
+      throw fail(`parameter ${i + 1} has a declared type.`);
+    return x.point;
+  });
+  if (callee !== name)
+    throw fail(
+      `the function is called through a wrapper that the definition for ` +
+        `one point does not have.`
+    );
+  const registry = target.userFunctions;
+  const point = registry
+    ? listSpecializedDefinition(engine, h, literal, target, types)
+    : undefined;
+  if (point === undefined || !registry)
+    throw fail(
+      `the definition of the function for one point could not be emitted.`
+    );
+  const ranks = callbackArgumentRanks(h, passed, nParams).map(
+    (r, i) => found[i]?.rank ?? r
+  );
+  // A value that holds points may also hold an absent value, as a point
+  // (`list<tuple<real, real> | missing>`) or as a list level above the
+  // points. The interpreter binds `Missing` to the parameter and runs the
+  // body: with `f := t ↦ 2t`, `Map(f, [(1, 2), Missing])` is
+  // `[(2, 4), NaN]`. The definition for one point reads its coordinates,
+  // so an absent argument at a position that receives points goes to the
+  // definition compiled for any argument (`absentArgumentFork()`), as a
+  // call `f(Missing)` does. `_SYS.mapFn` passes an absent value at any
+  // list level to the function as it is, so an absent list level goes
+  // there too. A `missing` inside a coordinate
+  // (`list<tuple<real | missing, real>>`) does not make the point absent,
+  // so it needs no guard: `stripMissingFromType(t, 'keep')` keeps the
+  // coordinates and removes only a `missing` at a point or list level.
+  const absent = found.map((x, i) => {
+    if (x === undefined || x === null) return false;
+    const t = passed.types[i]!;
+    return typeToString(stripMissingFromType(t, 'keep')) !== typeToString(t);
+  });
+  let fn = point;
+  if (absent.some((a) => a)) {
+    // The generic definition receives every argument of the call, so the
+    // fork is sound only when no other argument may hold a point: with
+    // `f := (a, x) ↦ 2a`, `Reduce([Missing], f, (1, 2))` passes the point
+    // `(1, 2)` to `a` and `Missing` to `x`, and the definition for any
+    // argument gave `NaN` where the interpreter gives `(2, 4)`.
+    if (
+      passed.types.some(
+        (t, i) => !absent[i] && (t === undefined || !isScalarShaped(t))
+      )
+    )
+      throw fail(
+        `a value may be absent beside an argument that is not a scalar, ` +
+          `and the definition for any argument would receive that argument.`
+      );
+    fn = `${point}$a${absent.map((a) => (a ? '1' : '0')).join('')}`;
+    if (!registry.defs.has(fn))
+      registry.defs.set(
+        fn,
+        `const ${fn} = ${absentArgumentFork(point, name, absent, target)};`
+      );
+  }
+  return mappedValueRef(fn, fn, ranks, registry, target, passed.types);
+}
+
+/**
+ * The function value that calls `point`, the definition compiled for one
+ * point, with its arguments, or `generic`, the definition compiled for any
+ * argument, when one of the arguments at a position where `absent` is true
+ * is absent (`undefined` on JavaScript, `None` on Python):
+ * `((_p, _g) => (_t) => _t === undefined ? _g(_t) : _p(_t))(point, generic)`.
+ * `point` and `generic` are expressions of functions; each is evaluated
+ * once.
+ *
+ * At a parameter with no declared type, the interpreter binds `Missing` to
+ * the parameter and runs the body: with `f2 := t ↦ 2t`,
+ * `f2([(1, 2), Missing])` is `[(2, 4), NaN]`. The definition for one point
+ * reads the coordinates of its argument, so an absent argument goes to the
+ * definition for any argument, as the call `f2(Missing)` does.
+ *
+ * Throws on another target, which has no test of an absent value.
+ */
+export function absentArgumentFork(
+  point: string,
+  generic: string,
+  absent: ReadonlyArray<boolean>,
+  target: CompileTarget<Expression>
+): string {
+  const p = tempVar(target);
+  const g = tempVar(target);
+  const params = absent.map(() => tempVar(target));
+  const tested = params.filter((_x, i) => absent[i]);
+  const list = params.join(', ');
+  if (target.language === 'javascript') {
+    const test = tested.map((x) => `${x} === undefined`).join(' || ');
+    return `((${p}, ${g}) => (${list}) => ${test} ? ${g}(${list}) : ${p}(${list}))(${point}, ${generic})`;
+  }
+  if (target.language === 'python') {
+    const test = tested.map((x) => `${x} is None`).join(' or ');
+    return `(lambda ${p}, ${g}: lambda ${list}: ${g}(${list}) if ${test} else ${p}(${list}))(${point}, ${generic})`;
+  }
+  throw new Error(
+    `Could not compile the call: an argument is a point that may be ` +
+      `absent, at a parameter with no declared type, and the ` +
+      `'${target.language ?? 'unknown'}' target has no test of an absent ` +
+      `value.`
+  );
+}
+
+/**
+ * For the type `t` of a value that a consumer passes to a function, or of
+ * an argument of a call: when `t` is one point that the canonical form
+ * does not type as a point, the point type with rank 0, as
+ * `pointsBelowLists()` gives it for a point below list levels, and whether
+ * the value may be absent. The point is read through `pointOfType()`,
+ * which reads the definitions of aliases and nominal types:
+ * `tuple<real, real> | missing`, `mpt`, an alias of that union, or `Row`, a
+ * nominal type declared `tuple<real, real>`. `undefined` for any other
+ * type, and for a tuple type that `isTupleShapedType()` reads as a point
+ * (`tuple<real, real>`, or an alias of it), which takes the route of a
+ * point.
+ *
+ * At a parameter with no declared type, the interpreter binds the point
+ * whole. For the absent value, it gives `Missing` at a callback, and it
+ * runs the body with `Missing` at a call.
+ */
+export function absentPointType(
+  t: Readonly<Type>
+): { rank: number; point: Type; absent: boolean } | undefined {
+  const p = pointOfType(t);
+  if (p === undefined) return undefined;
+  if (
+    !p.absent &&
+    (typeof t === 'string' || t.kind !== 'reference' || isTupleShapedType(t))
+  )
+    return undefined;
+  return { rank: 0, point: p.point, absent: p.absent };
+}
+
+/**
+ * The 0-based position of the first argument of the call `h(args)` of a
+ * function defined on the engine that is one point named through an alias,
+ * a union with `missing` or a nominal type (`absentPointType()`), at a
+ * parameter with no declared type, or `-1` when there is none.
+ *
+ * The interpreter binds such a point whole: with `f2 := t ↦ 2t` and `r`
+ * of the nominal type `Row`, declared `tuple<real, real>`, `f2(r)` is
+ * `(2, 4)`. The generic definition of `f2` reads the parameter as a
+ * scalar, so only the copy of the definition for one point can receive
+ * the point.
+ */
+export function namedPointArgumentAtUntypedParameter(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>
+): number {
+  return args.findIndex((a, i) => {
+    const declared = userFunctionParamType(engine, h, i);
+    if (declared !== undefined && !isUndeclaredParameterType(declared))
+      return false;
+    return absentPointType(a.type.type) !== undefined;
+  });
+}
+
+/**
+ * The call `point(args)`, where `point` is a definition compiled for a
+ * point at position `at`, when the argument at `at` may be absent: the
+ * absent value goes to `scalar`, the definition compiled for a scalar
+ * parameter, and a present value goes to `point`. Each argument is
+ * evaluated once, in order.
+ *
+ * The interpreter binds the absent value to a parameter with no declared
+ * type and runs the body with it: with `f2 := t ↦ 2t`, `f2(Missing)` is
+ * `NaN`, and with `f7 := t ↦ 7`, `f7(Missing)` is 7. The definition for a
+ * scalar parameter gives these values for the compiled absent value. The
+ * definition for one point reads the coordinates of its argument, so it
+ * cannot receive the absent value.
+ *
+ * On JavaScript:
+ * `((_tv1) => _tv1 === undefined ? _fn_f2(_tv1) : _fn_f2_point(_tv1))(_.e)`.
+ * Throws on a target other than JavaScript and Python.
+ */
+export function absentPointFork(
+  point: string,
+  scalar: string,
+  args: ReadonlyArray<string>,
+  at: number,
+  target: CompileTarget<Expression>
+): string {
+  const params = args.map(() => tempVar(target));
+  const list = params.join(', ');
+  if (target.language === 'javascript')
+    return `((${list}) => ${params[at]} === undefined ? ${scalar}(${list}) : ${point}(${list}))(${args.join(', ')})`;
+  if (target.language === 'python')
+    return `(lambda ${list}: ${scalar}(${list}) if ${params[at]} is None else ${point}(${list}))(${args.join(', ')})`;
+  throw new Error(
+    `Could not compile the call: an argument is one point that may be ` +
+      `absent, at a parameter with no declared type, and the ` +
+      `'${target.language ?? 'unknown'}' target has no test of an absent ` +
+      `value.`
+  );
+}
+
+/**
+ * The `Apply` of the `Function` literal `literal` to `args`, when an
+ * argument at a parameter with no declared type is one point named through
+ * an alias, a union with `missing` or a nominal type (`absentPointType()`):
+ * `npt`, a nominal type declared `missing | tuple<real, real>`, `Row`, a
+ * nominal type declared `tuple<real, real>`, or `tuple<real, real> |
+ * missing`. `undefined` when no argument is such a point.
+ *
+ * The interpreter binds the point whole: `Apply(t ↦ 2t, r)` is `(2, 4)`
+ * for `r = (1, 2)`. The literal is compiled for a scalar parameter, so
+ * the call gave `NaN` for each coordinate. The call uses the literal with
+ * the parameter typed as the point, as a callback over such points does.
+ * When the point may be absent, the absent value goes to the literal
+ * compiled for a scalar (`absentPointFork()`), which `scalarCallee`
+ * compiles: `Apply(t ↦ 2t, Missing)` is `NaN`.
+ *
+ * `codes` are the compiled arguments. Throws (the `Apply` declines) when
+ * the typed literal is not valid, when the target is not JavaScript or
+ * Python, or when a point that may be absent is beside another point or
+ * an argument that is not a scalar: the definition for a scalar would
+ * receive that argument.
+ */
+export function appliedLiteralNamedPointCall(
+  literal: Expression,
+  args: ReadonlyArray<Expression>,
+  codes: ReadonlyArray<string>,
+  compile: (e: Expression) => string,
+  scalarCallee: () => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  const params = literal.ops.slice(1);
+  if (params.length !== args.length) return undefined;
+  const found = args.map((a, i) => {
+    const declared = declaredParamType(params[i]);
+    if (declared !== undefined && declared !== 'unknown') return undefined;
+    return absentPointType(a.type.type);
+  });
+  if (found.every((x) => x === undefined)) return undefined;
+  const decline = (why: string): Error =>
+    new Error(
+      `Could not compile \`Apply\`: an argument is one point at a ` +
+        `parameter with no declared type, which the interpreter binds ` +
+        `whole, and ${why}`
+    );
+  if (target.language !== 'javascript' && target.language !== 'python')
+    throw decline(
+      `the '${target.language ?? 'unknown'}' target does not compile the ` +
+        `literal for one point.`
+    );
+  const typed = literalWithParameterTypes(
+    literal.engine,
+    literal,
+    found.map((x) => x?.point)
+  );
+  if (typed === undefined)
+    throw decline(
+      `the literal with the parameter typed as the point is not valid.`
+    );
+  const point = `(${compile(typed)})`;
+  const at = found.findIndex((x) => x?.absent === true);
+  if (at < 0) return `${point}(${codes.join(', ')})`;
+  if (
+    found.some((x, i) => x !== undefined && i !== at) ||
+    args.some((a, i) => found[i] === undefined && !isScalarShaped(a.type.type))
+  )
+    throw decline(
+      `the point may be absent beside an argument that is not a scalar.`
+    );
+  return absentPointFork(point, `(${scalarCallee()})`, codes, at, target);
+}
+
+/**
+ * The `Apply` of the `Function` literal `literal` with scalar parameters
+ * to `args`, when an argument at a parameter with no declared type is a
+ * list of points, or a list of lists of points (`pointsBelowLists()`).
+ * `undefined` when no argument is such a list.
+ *
+ * The interpreter maps the literal over the list levels and binds each
+ * point whole: `Apply(t ↦ 7, L)` is `[7, 7]` for `L = [(1, 2), (3, 4)]`,
+ * and `[7, 7]` for `L = [(1, 2), Missing]`. An absent list is bound
+ * whole, and the body runs with `Missing`: `Apply(t ↦ 7, L)` is `7` for
+ * an absent `L` of type `list<tuple<real, real>> | missing`. The static
+ * map of a literal with scalar parameters (`emitUserFunctionCall()`) reads
+ * the coordinates of each point as one more list level, and gave
+ * `[[7, 7], [7, 7]]`.
+ *
+ * The call is the static map over the list levels (`staticMapCallback()`)
+ * of the literal with the parameter typed as the point. When a point or a
+ * list level may be absent, the absent value goes to the literal compiled
+ * for any argument, which `scalarCallee` compiles (`absentArgumentFork()`):
+ * the interpreter binds `Missing` to the parameter and runs the body. When
+ * the list may be absent as a whole, a test gives the absent list to that
+ * literal too, as a call of a user function does
+ * (`untypedPointListElement()`).
+ *
+ * `codes` are the compiled arguments. Throws (the `Apply` declines) when
+ * the list levels do not lead to one point type, when another argument is
+ * not a scalar, when the typed literal is not valid, or when the target is
+ * not JavaScript or Python.
+ */
+export function appliedLiteralPointListCall(
+  literal: Expression,
+  args: ReadonlyArray<Expression>,
+  codes: ReadonlyArray<string>,
+  compile: (e: Expression) => string,
+  scalarCallee: () => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  if (!paramsAreScalar(literal.type.type)) return undefined;
+  const params = literal.ops.slice(1);
+  if (params.length !== args.length) return undefined;
+  const at = args.findIndex((a, i) => {
+    const declared = declaredParamType(params[i]);
+    if (declared !== undefined && declared !== 'unknown') return false;
+    return !isTuple(a) && pointsBelowLists(a.type.type) !== undefined;
+  });
+  if (at < 0) return undefined;
+  const decline = (why: string): Error =>
+    new Error(
+      `Could not compile \`Apply\`: argument ${at + 1}, of type ` +
+        `\`${typeToString(args[at].type.type)}\`, is a list of points at a ` +
+        `parameter with no declared type, which the interpreter maps over ` +
+        `binding each point whole, and ${why}`
+    );
+  const below = pointsBelowLists(args[at].type.type);
+  if (!below) throw decline(`the list levels do not lead to one point type.`);
+  if (target.language !== 'javascript' && target.language !== 'python')
+    throw decline(
+      `the '${target.language ?? 'unknown'}' target does not compile the ` +
+        `literal for one point.`
+    );
+  if (args.some((a, i) => i !== at && !isScalarShaped(a.type.type)))
+    throw decline(`another argument is not a scalar.`);
+  const typed = literalWithParameterTypes(
+    literal.engine,
+    literal,
+    params.map((_p, i) => (i === at ? below.point : undefined))
+  );
+  if (typed === undefined)
+    throw decline(
+      `the literal with the parameter typed as the point is not valid.`
+    );
+  const t = args[at].type.type;
+  // A `missing` at a point or at a list level below the top (a `missing`
+  // inside a coordinate does not make the point absent).
+  const absentInside =
+    typeToString(stripMissingFromType(t, 'keep')) !== typeToString(t);
+  // On Python, the literal compiled for any argument raises a `TypeError`
+  // for `None` when its body reads the parameter (`max(None, 0)`,
+  // `abs(None)`, `np.sin(None)`), where the interpreter runs the body with
+  // `Missing`: `Apply(t ↦ Max(t, 0), [(1, 2), Missing])` is `[2, NaN]`. So
+  // a point or a list that may be absent declines there, unless the body
+  // does not read the parameter (`t ↦ 7`).
+  if (
+    target.language === 'python' &&
+    (absentInside || isSubtype('missing', t))
+  ) {
+    const name = functionLiteralParameterName(params[at]);
+    if (name === '' || literal.ops[0].symbols.includes(name))
+      throw decline(
+        `the list may hold an absent point, and on Python the body, which ` +
+          `reads the parameter, fails on \`None\`.`
+      );
+  }
+  const point = `(${compile(typed)})`;
+  const scalar = `(${scalarCallee()})`;
+  const fn = absentInside
+    ? absentArgumentFork(
+        point,
+        scalar,
+        args.map((_a, i) => i === at),
+        target
+      )
+    : point;
+  const mapped = staticMapCallback(
+    fn,
+    args.map((_a, i) => (i === at ? below.rank : 0)),
+    target,
+    args.map((a) => a.type.type)
+  );
+  if (mapped === undefined)
+    throw decline(`the target has no map of a function over a list.`);
+  if (!isSubtype('missing', t)) return `(${mapped})(${codes.join(', ')})`;
+  const temps = args.map(() => tempVar(target));
+  const list = temps.join(', ');
+  if (target.language === 'javascript')
+    return `((${list}) => ${temps[at]} === undefined ? ${scalar}(${list}) : (${mapped})(${list}))(${codes.join(', ')})`;
+  return `(lambda ${list}: ${scalar}(${list}) if ${temps[at]} is None else (${mapped})(${list}))(${codes.join(', ')})`;
+}
+
+/**
+ * The value `callee` of the function emitted as `name`, mapped over its
+ * list values with the ranks `ranks` (`staticMapCallback()`): `callee`
+ * itself when every rank is 0, else a wrapper defined once under the name
+ * `${name}$m<ranks>` (`_fn_f$m1`).
+ */
+function mappedValueRef(
+  name: string,
+  callee: string,
+  ranks: ReadonlyArray<number>,
+  registry: UserFunctionRegistry,
+  target: CompileTarget<Expression>,
+  types?: ReadonlyArray<Type | undefined>
+): string {
+  if (!ranks.some((r) => r > 0)) return callee;
+  const wrapperName = `${name}$m${mapWrapperSuffix(ranks, types, target)}`;
   if (!registry.defs.has(wrapperName))
     registry.defs.set(
       wrapperName,
-      `const ${wrapperName} = ${broadcastingWrapper(
-        callee,
-        nParams,
-        target,
-        'bcastFn'
-      )};`
+      `const ${wrapperName} = ${staticMapCallback(callee, ranks, target, types)};`
     );
   return wrapperName;
+}
+
+/**
+ * The value of the function `h` with a parameter declared `expression`
+ * that the body reads, for a consumer that passes it values that can be
+ * collections at such a parameter (`expressionParameterVariantTypes()`):
+ * the definition of `h` with these parameters typed by the values. The
+ * interpreter binds a collection whole to such a parameter, and the body
+ * maps over it: with `h := (t: expression) ↦ 2t` and
+ * `rows: list<list<real>>`, `Map(h, rows)` gives `[[2, 4], [6, 8]]` for
+ * `[[1, 2], [3, 4]]`, and the variant `t: list<real>` computes it.
+ * `undefined` when `h` has no such parameter, when the consumer passes
+ * scalars there, or on a target other than JavaScript, where the
+ * consumer has declined first. Throws when the variant cannot be emitted.
+ */
+function expressionParameterVariantRef(
+  engine: ComputeEngine,
+  h: string,
+  target: CompileTarget<Expression>,
+  passed: CallbackArguments | undefined
+): string | undefined {
+  if (passed === undefined) return undefined;
+  const literal = userFunctionLiteral(engine, h);
+  if (literal === undefined) return undefined;
+  const declared = (i: number) => userFunctionParamType(engine, h, i);
+  if (expressionParameterReadAt(literal, declared) < 0) return undefined;
+  const variant = expressionParameterVariantTypes(
+    literal,
+    passed.types,
+    declared
+  );
+  if (variant === undefined || variant.every((t) => t === undefined))
+    return undefined;
+  const registry = target.userFunctions;
+  const at = variant.findIndex((t) => t !== undefined);
+  const fail = () =>
+    expressionParameterDecline(
+      `the function value \`${h}\``,
+      at,
+      variant[at] ?? null
+    );
+  if (!registry || registry.lowering || target.language !== 'javascript')
+    throw fail();
+  if (!isFunction(literal, 'Function') || !parametersCanBeTyped(literal))
+    throw fail();
+  const specialized = cachedLiteralWithParameterTypes(
+    engine,
+    h,
+    literal,
+    variant,
+    registry
+  );
+  // The types of the specialized definition, for its key and its record.
+  const types: Type[] = literal.ops
+    .slice(1)
+    .map(
+      (p, i) =>
+        variant[i] ??
+        functionLiteralParameterType(p) ??
+        declared(i) ??
+        'unknown'
+    );
+  if (specialized === undefined) throw fail();
+  const name = core.emitFunctionLiteralDefinition(
+    h,
+    specialized,
+    target,
+    registry,
+    { key: parameterTypesKey(h, variant), types }
+  );
+  if (name === undefined) throw fail();
+  return name;
 }
 
 /**
  * The value reference of a ONE-parameter user function `h` whose parameter
  * binds a collection whole and has an open element type (a lifted slot
  * such as `collection<any> | value`, see `wholeCollectionParameterType`,
- * or a declared `collection<any> | number`): a dispatcher that hands an
- * array element to the definition SPECIALIZED to `list<number>` and any
- * other element to `callee`:
- *
- *     const _fn_h$l = (_$0) =>
- *       Array.isArray(_$0) ? _fn_h_list_number_(_$0) : _fn_h(_$0);
+ * or a declared `collection<any> | number`), for a consumer that passes it
+ * the values `passed`: over list values, the definition SPECIALIZED to
+ * `list<number>` (`_fn_h_list_number_`); over other values, the generic
+ * definition. The static type of the values selects the
+ * definition, and no code tests the shape of a value at run time.
  *
  * The generic definition is compiled against the scalar arm of the slot
  * (`_SYS.mean(xs * xs)` for `h(xs) := mean(xs^2)`), so a row of
@@ -1128,26 +1793,54 @@ function userFunctionValueRefWithoutDefaults(
  * the row whole and answers its mean of squares; the specialization maps
  * the element-wise operators over the array
  * (`ensureSpecializedUserCallEmitted` does the same for a direct call with
- * a list argument). `undefined` when the specialization cannot be emitted
- * (the parameters cannot be typed again, a target with its own definition
- * lowering), or when the function has not exactly one parameter or its
- * slot's element type is not open.
+ * a list argument). `undefined` (the caller takes the generic definition) when the
+ * function has not exactly one parameter, when its slot's element type is
+ * not open, when the value has no consumer, or when the values are not
+ * lists. A value whose shape is not settled declines
+ * (`callbackArgumentRanks()`), and so do list values when the
+ * specialization cannot be emitted (the parameters cannot be typed again,
+ * a target with its own definition lowering).
  */
 export function listSpecializedValueRef(
   engine: ComputeEngine,
   h: string,
   literal: Expression & FunctionInterface,
-  callee: string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  passed?: CallbackArguments
+): string | undefined {
+  if (literal.ops.length !== 2) return undefined;
+  if (!paramElementTypeIsOpen(engine, h, 0)) return undefined;
+  if (passed === undefined) return undefined;
+  if (callbackArgumentRanks(h, passed, 1)[0] === 0) return undefined;
+  const registry = target.userFunctions;
+  const name = listSpecializedDefinition(engine, h, literal, target);
+  if (name === undefined || !registry)
+    throw new Error(
+      `Could not compile the function value \`${h}\`: its consumer ` +
+        `passes it lists, and the definition for a list argument could ` +
+        `not be emitted.`
+    );
+  return name;
+}
+
+/** The definition of `h` with its parameters typed `types`, by default
+ * one `list<number>` argument (`listSpecializedValueRef`), or `undefined`
+ * when it cannot be emitted. A parameter whose entry is `undefined` keeps
+ * its type. */
+function listSpecializedDefinition(
+  engine: ComputeEngine,
+  h: string,
+  literal: Expression & FunctionInterface,
+  target: CompileTarget<Expression>,
+  types: ReadonlyArray<Type | undefined> = [
+    { kind: 'list', elements: 'number' },
+  ]
 ): string | undefined {
   const registry = target.userFunctions;
   if (!registry || registry.lowering || target.language !== 'javascript')
     return undefined;
-  if (literal.ops.length !== 2) return undefined;
-  if (!paramElementTypeIsOpen(engine, h, 0)) return undefined;
   if (!parametersCanBeTyped(literal)) return undefined;
   if (registry.specializing?.has(h)) return undefined;
-  const types: Type[] = [{ kind: 'list', elements: 'number' }];
   const specialized = cachedLiteralWithParameterTypes(
     engine,
     h,
@@ -1165,7 +1858,12 @@ export function listSpecializedValueRef(
       specialized,
       target,
       registry,
-      { key: parameterTypesKey(h, types), types }
+      {
+        key: parameterTypesKey(h, types),
+        // Read only by a target with its own definition lowering, which
+        // this function refuses above.
+        types: types.map((t) => t ?? 'unknown'),
+      }
     );
   } catch (e) {
     if (e instanceof Error && e.name === 'CancellationError') throw e;
@@ -1173,21 +1871,18 @@ export function listSpecializedValueRef(
   } finally {
     active.delete(h);
   }
-  if (name === undefined) return undefined;
-  const dispatcher = `${callee}$l`;
-  if (!registry.defs.has(dispatcher))
-    registry.defs.set(
-      dispatcher,
-      `const ${dispatcher} = (_$0) => Array.isArray(_$0) ? ${name}(_$0) : ${callee}(_$0);`
-    );
-  return dispatcher;
+  return name;
 }
 
 /**
  * The value reference of a MULTI-CLAUSE user function `h`, emitted under
- * `name`: the shape-aware wrapper `ensureUserFunctionValueRef` describes,
- * or `undefined` when `h` is not a multi-clause function, when one of its
- * clauses binds an argument whole, or when every clause is parameterless.
+ * `name`, for a consumer that passes it the values `passed`: the variant
+ * for the shapes of these values that `ensureUserFunctionValueRef`
+ * describes, which is the dispatcher `name` itself over scalar values and
+ * a static map of it over list values (`_fn_mc$m1`). `undefined` (the
+ * caller takes `name`) when `h` is not a multi-clause function, when one
+ * of its clauses binds an argument whole, when every clause is
+ * parameterless, or when the value has no consumer.
  *
  * A clause set has no single function literal, so the single-clause route
  * cannot read a parameter list from it and the bare DISPATCHER used to be
@@ -1198,14 +1893,9 @@ export function listSpecializedValueRef(
  * clause bodies that are scalar code, and answered `["3,61", "91"]` (the
  * row's string coercion) where the interpreter answers `[[4, 7], [10]]`.
  *
- * The wrapper takes a REST parameter where a single-clause function's takes
- * a fixed one: the dispatcher selects a clause on the NUMBER of arguments,
- * so any fixed arity would answer `no-matching-clause` for every other
- * overload. What makes the rest form safe here is that every emitted
- * consumer applies a function value through an arrow of the arity it means
- * to pass — `(_x) => _f(_x)` for `Map`, `(_a, _b) => _f(_a, _b)` for a
- * `Reduce` combiner — so none of them supplies the extra index and source
- * arguments `Array.prototype.map` would.
+ * The dispatcher selects a clause on the NUMBER of arguments, so the map
+ * takes the number of values that the consumer passes, not the arity of
+ * one clause.
  *
  * The complex `{ re, im }` coercion needs no shim on this route: the
  * dispatcher lifts a declared-complex parameter itself, per clause, after
@@ -1215,7 +1905,8 @@ export function multiClauseValueRef(
   engine: ComputeEngine,
   h: string,
   name: string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  passed?: CallbackArguments
 ): string | undefined {
   const registry = target.userFunctions;
   if (!registry) return undefined;
@@ -1241,23 +1932,250 @@ export function multiClauseValueRef(
   ];
   if (clauses.every((c) => clauseParams(c).length === 0)) return undefined;
 
-  // Every clause set that reaches here takes the BROADCASTING wrapper. A
-  // clause set whose every parameter was a DECLARED scalar used to take a
-  // guarding wrapper instead, because the interpreter refused a collection
-  // argument at a callback position; since the user ruling of 2026-09-22 it
-  // broadcasts there, so there is one form left.
-  const wrapperName = `${name}$b`;
-  if (!registry.defs.has(wrapperName))
-    registry.defs.set(
-      wrapperName,
-      `const ${wrapperName} = ${broadcastingWrapper(
-        name,
-        'rest',
-        target,
-        'bcastFn'
-      )};`
-    );
-  return wrapperName;
+  // A value with no consumer is the scalar variant, the dispatcher.
+  if (passed === undefined) return undefined;
+  // The interpreter applies the clause set to each element of a list value
+  // at a callback position (user decision of 2026-09-22), whether its
+  // parameters are declared scalars or left open.
+  const ranks = callbackArgumentRanks(h, passed, passed.types.length);
+  return mappedValueRef(name, name, ranks, registry, target, passed.types);
+}
+
+/**
+ * What a callback consumer (`Map`, `Filter`, `Reduce`, `Fold`, …) passes
+ * to the callback that it compiles: `types[i]` is the static type of the
+ * value at parameter `i` (an element of the source, or the accumulator),
+ * `undefined` when no type is provable, and `sources[i]`, when given, is
+ * the collection whose elements reach parameter `i`.
+ */
+export interface CallbackArguments {
+  readonly types: ReadonlyArray<Type | undefined>;
+  readonly sources?: ReadonlyArray<Expression | undefined>;
+}
+
+/**
+ * The callbacks that are being compiled for a consumer, with what the
+ * consumer passes to them (`CallbackArguments`). A `Function` literal is
+ * keyed by its node, a function defined on the engine and a built-in
+ * operator by their name. The value of a callback whose parameters are
+ * scalar is the variant for the shape of these values
+ * (`callbackArgumentRanks()`): the function itself for scalar values, a
+ * static map of it for list values. A function value with no entry (the
+ * root `compile(f)`, a local that a block returns or stores, an argument
+ * of a user function) is the scalar variant.
+ *
+ * An entry exists only while `withCallbackArgumentTypes` runs, so the same
+ * callback in another position is not affected. A reader that emits a
+ * definition removes the entry for that time (`withoutCallbackArguments`),
+ * so a reference to the same function inside its own body is not read as
+ * the callback.
+ */
+const callbackArguments = new Map<Expression | string, CallbackArguments>();
+
+function callbackKey(
+  callback: Expression | undefined
+): Expression | string | undefined {
+  if (callback === undefined) return undefined;
+  if (isSymbol(callback)) return callback.symbol;
+  if (isFunction(callback, 'Function')) return callback;
+  return undefined;
+}
+
+/**
+ * Run `compile` with `callback` marked as fed values of the types
+ * `args.types` (see `callbackArguments`).
+ */
+export function withCallbackArgumentTypes<T>(
+  callback: Expression | undefined,
+  args: CallbackArguments,
+  compile: () => T
+): T {
+  const key = callbackKey(callback);
+  if (key === undefined) return compile();
+  const previous = callbackArguments.get(key);
+  callbackArguments.set(key, args);
+  try {
+    return compile();
+  } finally {
+    if (previous === undefined) callbackArguments.delete(key);
+    else callbackArguments.set(key, previous);
+  }
+}
+
+/**
+ * What the consumer that compiles the callback `key` (a `Function` node or
+ * the name of a function) passes to it, or `undefined` when the callback is
+ * not compiled for a consumer.
+ */
+export function callbackArgumentsOf(
+  key: Expression | string
+): CallbackArguments | undefined {
+  return callbackArguments.get(key);
+}
+
+/** Run `compile` with no consumer entry for `key` (see `callbackArguments`). */
+export function withoutCallbackArguments<T>(
+  key: Expression | string,
+  compile: () => T
+): T {
+  const previous = callbackArguments.get(key);
+  if (previous === undefined) return compile();
+  callbackArguments.delete(key);
+  try {
+    return compile();
+  } finally {
+    callbackArguments.set(key, previous);
+  }
+}
+
+/**
+ * For a callback `name` whose parameters are scalar, the number of list
+ * levels that the value of the callback maps over at each parameter
+ * (`mapRankOfType()`), for the values `args` that its consumer passes. The
+ * array has `arity` entries, or more when the consumer passes more values;
+ * a parameter that the consumer does not fill (one with a default value)
+ * has the rank 0.
+ *
+ * The interpreter applies a callback with scalar parameters to each
+ * element of a list value: with `f := t ↦ 2t`, `Map(f, [[1, 2], [3]])` is
+ * `[[2, 4], [6]]`. The static type of the value selects the code: the
+ * function itself where every rank is 0, else a static map of depth rank
+ * (`_SYS.mapFn(f, [1], x)`). No code tests the shape of a value at run
+ * time. A value whose type does not settle a shape (`list<unknown>` for a
+ * source, `real | list<real>`, a source with no provable element type)
+ * declines (rule R3 of `docs/plans/2026-10-31-static-shape-compilation.md`),
+ * with code `'unsettled-shape'` and the source in `unsupported`.
+ */
+export function callbackArgumentRanks(
+  name: string,
+  args: CallbackArguments,
+  arity: number
+): number[] {
+  const n = Math.max(arity, args.types.length);
+  const ranks: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (i >= args.types.length) {
+      ranks.push(0);
+      continue;
+    }
+    const t = args.types[i];
+    // A value of a nominal type has the rank 0, unless its definition has
+    // no settled rank (`isNominalWithUnsettledRank()`).
+    const rank =
+      t === undefined || isNominalWithUnsettledRank(t)
+        ? undefined
+        : mapRankOfType(t);
+    if (rank === undefined) {
+      const source = args.sources?.[i];
+      // `toString()` quotes a symbol of more than one letter (`"xs"`), so a
+      // symbol is named by its plain name, in the message and in
+      // `unsupported`.
+      const sourceName =
+        source === undefined
+          ? undefined
+          : isSymbol(source)
+            ? source.symbol
+            : source.toString();
+      throw new CompileDeclineError({
+        code: UNSETTLED_SHAPE_CODE,
+        kind: 'capability',
+        message:
+          `Could not compile the callback \`${name}\`: the value that its ` +
+          `consumer passes to parameter ${i + 1}` +
+          (sourceName !== undefined ? ` (an element of "${sourceName}")` : '') +
+          ` has the type \`${t === undefined ? 'unknown' : typeToString(t)}\`, ` +
+          `which does not settle one shape (a scalar, a point, or a list ` +
+          `of known depth). The interpreter maps the callback over a list ` +
+          `value and applies it to a scalar, so the shape of the value ` +
+          `would be known only at run time.`,
+        value: sourceName ?? name,
+      });
+    }
+    ranks.push(rank);
+  }
+  return ranks;
+}
+
+/**
+ * For each value that a consumer passes to a callback mapped with `ranks`,
+ * true when its static type (`types[i]`) admits an absent value at a
+ * mapped level, so the Python comprehension must test it with `is None`
+ * (`pythonMapCall()`). A value with no known type is not flagged: its rank
+ * was settled from a type, so `types[i]` is known when `ranks[i] > 0`.
+ */
+export function pythonCallbackAbsentFlags(
+  ranks: ReadonlyArray<number>,
+  types: ReadonlyArray<Type | undefined> | undefined
+): boolean[] {
+  return ranks.map((r, i) => {
+    const t = types?.[i];
+    return t !== undefined && admitsAbsentAtMappedLevel(t, r);
+  });
+}
+
+/**
+ * The name suffix of a static-map wrapper for the ranks `ranks`: the ranks
+ * (`1_0`), and on Python the indices of the values tested for absence
+ * (`pythonCallbackAbsentFlags()`), so two wrappers whose code differs never
+ * share one name.
+ */
+export function mapWrapperSuffix(
+  ranks: ReadonlyArray<number>,
+  types: ReadonlyArray<Type | undefined> | undefined,
+  target: CompileTarget<Expression>
+): string {
+  const base = ranks.join('_');
+  if (target.language !== 'python') return base;
+  const flagged = pythonCallbackAbsentFlags(ranks, types)
+    .map((f, i) => (f ? i : -1))
+    .filter((i) => i >= 0);
+  return flagged.length === 0 ? base : `${base}$a${flagged.join('_')}`;
+}
+
+/**
+ * The value of the callback `callee` (compiled code) for the map ranks
+ * `ranks` (`callbackArgumentRanks()`): `callee` itself when every rank is
+ * 0, else an arrow of `ranks.length` parameters that maps `callee` over the
+ * list values, `(_tv1) => _SYS.mapFn(callee, [1], _tv1)` on JavaScript and
+ * `_IA.mapFn` on interval-js, and a nested comprehension on Python
+ * (`pythonMapCall()`). The callee is bound once, so the arrow is not built
+ * again at each element. `undefined` on a target with no map.
+ *
+ * `types` are the static types of the values that the consumer passes
+ * (`CallbackArguments.types`). On Python, a value whose type admits an
+ * absent value at a mapped level (`list<real> | missing`) is tested with
+ * `is None` at that level, and an absent value goes to the callee
+ * unchanged (`pythonCallbackAbsentFlags()`). The JavaScript and interval
+ * helpers do this at run time for every value, so they need no flag.
+ */
+export function staticMapCallback(
+  callee: string,
+  ranks: ReadonlyArray<number>,
+  target: CompileTarget<Expression>,
+  types?: ReadonlyArray<Type | undefined>
+): string | undefined {
+  if (!ranks.some((r) => r > 0)) return callee;
+  if (target.language === 'python') {
+    const params = ranks.map(() => tempVar(target));
+    const named = /^[A-Za-z_][A-Za-z0-9_]*$/.test(callee);
+    const fn = named ? callee : tempVar(target);
+    const absent = pythonCallbackAbsentFlags(ranks, types);
+    const inner = `(lambda ${params.join(', ')}: ${pythonMapCall(fn, ranks, params, [], target, absent)})`;
+    return named ? inner : `((lambda ${fn}: ${inner})(${callee}))`;
+  }
+  const helper =
+    target.language === 'javascript'
+      ? '_SYS.mapFn'
+      : target.language === 'interval-javascript'
+        ? '_IA.mapFn'
+        : undefined;
+  if (helper === undefined) return undefined;
+  const params = ranks.map(() => tempVar(target));
+  const body = (fn: string) =>
+    `(${params.join(', ')}) => ${helper}(${fn}, [${ranks.join(', ')}], ${params.join(', ')})`;
+  if (/^[A-Za-z_$][\w$]*$/.test(callee)) return `(${body(callee)})`;
+  const bound = tempVar(target);
+  return `((${bound}) => ${body(bound)})(${callee})`;
 }
 
 /**
@@ -1273,7 +2191,7 @@ export const scalarFedLiterals = new Map<Expression, 'scalar' | 'finite'>();
 /**
  * Run `compile` with `literal` (a `Function` expression) marked as fed
  * run-time scalars only — see `scalarFedLiterals`. The `Function` lowering
- * then emits the bare arrow without the broadcast wrapper, and records its
+ * then emits the bare arrow with no static map, and records its
  * parameters as scalars (and, for `'finite'`, as decided values) for the
  * body. The caller is responsible for the claim: it must pass the
  * resulting function only arguments of the stated kind.
@@ -1400,6 +2318,185 @@ export function withCheckedCallback<T>(
   sources?: ReadonlyArray<Expression | undefined>
 ): T {
   if (callback === undefined) return compile();
+  // The value of the callback is the variant for the shapes of the values
+  // that the consumer passes (`callbackArguments`).
+  const types = argTypes.map((t, i) =>
+    callbackSourceElementType(sources?.[i], t)
+  );
+  if ((kind === 'Reduce' || kind === 'Scan') && types.length === 2)
+    types[0] = foldAccumulatorShapeType(
+      types[0] ?? declaredScalarAccumulatorType(callback, target),
+      types[1]
+    );
+  const passed: CallbackArguments = { types, sources };
+  const code = withCallbackArgumentTypes(callback, passed, () =>
+    checkedCallbackCompile(kind, callback, passed.types, target, compile)
+  );
+  return localFunctionCallback(callback, passed, target, code);
+}
+
+/**
+ * The value `code` of the callback `callback`, mapped over the list values
+ * that its consumer passes (`passed`) when `callback` names a function
+ * local to the enclosing block with scalar parameters. Such a function is
+ * compiled where the block defines it, with no consumer, so its value
+ * there is the scalar variant; the map is added where the consumer reads
+ * it. With `q := s ↦ 3s` and `M: list<list<real>>`, `Map(q, M)` reads
+ * `((_tv1) => _SYS.mapFn(q, [1], _tv1))`. Any other callback is mapped by
+ * its own lowering (`callbackArgumentsOf()`), and `code` is returned as it
+ * is.
+ */
+function localFunctionCallback<T>(
+  callback: Expression,
+  passed: CallbackArguments,
+  target: CompileTarget<Expression> | undefined,
+  code: T
+): T {
+  if (typeof code !== 'string' || target === undefined || !isSymbol(callback))
+    return code;
+  const local = target.localFunctions?.get(callback.symbol);
+  if (!isFunction(local, 'Function') || local.nops < 2) return code;
+  if (
+    !paramsAreScalar(local.type.type) ||
+    !signatureParamsLowerToScalars(local.type.type)
+  )
+    return code;
+  // The map takes as many values as the consumer passes, not one per
+  // parameter: a parameter with a default value that the consumer does not
+  // fill must reach the local as omitted, so that the local fills it. With
+  // `q := (x, k = 2) ↦ x·k`, `Map(q, M)` reads
+  // `((_tv1) => _SYS.mapFn(q, [1], _tv1))`, and `q` receives one argument.
+  const ranks = callbackArgumentRanks(
+    callback.symbol,
+    passed,
+    passed.types.length
+  );
+  const mapped = staticMapCallback(code, ranks, target, passed.types);
+  if (mapped === undefined)
+    throw new Error(
+      `Could not compile the callback \`${callback.symbol}\`: its consumer ` +
+        `passes it list values, and the target has no map of a function ` +
+        `over a list.`
+    );
+  return mapped as T;
+}
+
+/**
+ * The declared type of the accumulator parameter of the fold combiner
+ * `callback`, read at the bounds of its declared signature, when this type
+ * and the declared result type are scalar types: a well-typed fold passes a
+ * scalar there at every step. `(a: T, x: T) -> T where T: complex` gives
+ * `complex`. `undefined` otherwise.
+ */
+function declaredScalarAccumulatorType(
+  callback: Expression,
+  target: CompileTarget<Expression> | undefined
+): Type | undefined {
+  const literal = callbackLiteral(callback, target);
+  if (!isFunction(literal, 'Function')) return undefined;
+  const ground = groundSignature(functionLiteralDeclaredSignature(literal));
+  const param = signatureParamType(ground, 0);
+  const result = functionResult(ground);
+  if (param === undefined || result === undefined) return undefined;
+  return mapRankOfType(param) === 0 && mapRankOfType(result) === 0
+    ? param
+    : undefined;
+}
+
+/**
+ * The type of the accumulator of a fold (`Reduce`, `Scan`) for the map
+ * rank of its combiner (`callbackArgumentRanks()`), from `acc`, the join of
+ * the seed type and the result type of the combiner
+ * (`foldAccumulatorArgType`), and `element`, the element type of the
+ * source. A combiner with scalar parameters is mapped over a list element,
+ * so its result has the rank of the element when the element has the
+ * greater rank, and the accumulator then holds the seed at the first step
+ * and a list after it: its shape is not settled, and the type is
+ * `undefined`, so the fold declines (rule R3). With `g := (a, x) ↦ a + x`,
+ * `Reduce(rows, g, 0)` over `[[1, 2], [3, 4]]` gives `[4, 6]` in the
+ * interpreter, where the accumulator is `0`, then `[1, 2]`. Otherwise
+ * `acc`.
+ */
+function foldAccumulatorShapeType(
+  acc: Type | undefined,
+  element: Type | undefined
+): Type | undefined {
+  if (acc === undefined || element === undefined) return acc;
+  const accRank = mapRankOfType(acc);
+  const elementRank = mapRankOfType(element);
+  if (accRank === undefined || elementRank === undefined) return acc;
+  return elementRank > accRank ? undefined : acc;
+}
+
+/**
+ * The element type that a consumer passes from `source` to a callback,
+ * where `elementType` is the static element type of `source`. A local of
+ * a block whose element type the block does not prove
+ * (`untrustedCallbackSource`) has the element type of its values when
+ * they all have one and the same map rank (`L := [1, 2]` then
+ * `L := [3, 4]`), else none (`L := [1, 2]` then `L := [[1, 2]]`).
+ */
+function callbackSourceElementType(
+  source: Expression | undefined,
+  elementType: Type | undefined
+): Type | undefined {
+  if (!untrustedCallbackSource(source)) return elementType;
+  const entry = blockLocalOf(source!);
+  if (entry === undefined || entry.values.length === 0) return undefined;
+  const types = entry.values.map((v) => collectionElementTypeOf(v));
+  if (types.some((t) => t === undefined)) return undefined;
+  const ranks = types.map((t) => mapRankOfType(t!));
+  if (ranks[0] === undefined || ranks.some((r) => r !== ranks[0]))
+    return undefined;
+  return types[0];
+}
+
+/**
+ * The parameter types of the variant of the callback `literal` for the
+ * values of the types `types` that its consumer passes, where a parameter
+ * declared `expression` that the body reads can receive a collection
+ * (`collectionAtExpressionParameter`): `result[i]` is `types[i]` for such
+ * a parameter, `undefined` for a parameter that keeps its type. The
+ * interpreter binds a collection whole to a parameter declared
+ * `expression`, and the body maps over it; the variant typed by the value
+ * does the same in compiled code. With `h := (t: expression) ↦ 2t` and
+ * `rows: list<list<real>>`, `Map(h, rows)` is the variant `t: list<real>`.
+ *
+ * `undefined` when such a value has no provable type or no settled shape
+ * (`mapRankOfType()`): the consumer then declines.
+ */
+export function expressionParameterVariantTypes(
+  literal: Expression,
+  types: ReadonlyArray<Type | undefined>,
+  declaredType?: (i: number) => Type | undefined
+): (Type | undefined)[] | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  const result: (Type | undefined)[] = [];
+  for (let i = 0; i < literal.ops.length - 1; i++) {
+    const at = collectionAtExpressionParameter(
+      literal,
+      types.map((t, j) => (j === i ? t : 'number')),
+      declaredType
+    );
+    if (at !== i) {
+      result.push(undefined);
+      continue;
+    }
+    const t = types[i];
+    if (t === undefined || mapRankOfType(t) === undefined) return undefined;
+    result.push(t);
+  }
+  return result;
+}
+
+/** `withCheckedCallback` once the consumer entry of the callback is set. */
+function checkedCallbackCompile<T>(
+  kind: string,
+  callback: Expression,
+  argTypes: ReadonlyArray<Type | undefined>,
+  target: CompileTarget<Expression> | undefined,
+  compile: () => T
+): T {
   const literal = callbackLiteral(callback, target);
   if (literal === undefined) return compile();
   const named =
@@ -1412,13 +2509,15 @@ export function withCheckedCallback<T>(
       ? undefined
       : (i: number) => userFunctionParamType(callback.engine, named, i);
   if (expressionParameterReadAt(literal, declaredType) < 0) return compile();
-  const types = literal.ops
-    .slice(1)
-    .map((_, i) =>
-      untrustedCallbackSource(sources?.[i]) ? undefined : argTypes[i]
-    );
+  const types = literal.ops.slice(1).map((_, i) => argTypes[i]);
+  // A collection at such a parameter is bound whole by the variant typed by
+  // the value (`expressionParameterVariantTypes()`), which the lowering of
+  // the callback emits. A value with no settled shape declines.
   const at = collectionAtExpressionParameter(literal, types, declaredType);
-  if (at >= 0)
+  if (
+    at >= 0 &&
+    expressionParameterVariantTypes(literal, types, declaredType) === undefined
+  )
     throw expressionParameterDecline(`\`${kind}\``, at, types[at] ?? null);
   let unmark: () => void;
   if (named !== undefined) {
@@ -1468,15 +2567,13 @@ export function untrustedCallbackSource(
  * local function which the list only ever calls, so that the literal is
  * never handed out as a value.
  *
- * A function literal is compiled with a broadcast wrapper, because a
- * consumer of a function value (`Map`, `Filter`, …) gives it the elements
- * as they are, and an element can be a list. A call of a block-local
- * function does not need that wrapper: the call site broadcasts by itself
- * (`tryCompileLocalFunctionCall`, which calls the function directly only
- * when every argument is a scalar, and through `_SYS.bcastFn` otherwise).
- * So when every mention of the local in the list is the head of a call,
- * the literal is only ever given scalars, and the wrapper costs one extra
- * call and one `Array.isArray` test per call for nothing (CE-338).
+ * A call of a block-local function maps over a list argument at the call
+ * site (`tryCompileLocalFunctionCall`, a static map selected by the static
+ * type of the argument), and a consumer that reads the local as a value
+ * maps it there (`localFunctionCallback`). So when every mention of the
+ * local in the list is the head of a call, the literal is only ever given
+ * scalars, and its body can read each parameter as a scalar
+ * (`markScalarFedLiterals`).
  *
  * A literal is accepted when it is the value of a top-level `Assign` or
  * `Declare` of a local of the list that is bound once
@@ -1484,8 +2581,8 @@ export function untrustedCallbackSource(
  * the list as a symbol, except as the target of its own `Assign` or
  * `Declare`. Any other mention, such as `Map(L, g)`, `h = g` or a
  * function literal that returns `g`, hands the value out, and the literal
- * keeps the wrapper. A nested scope that binds the same name is counted
- * as a mention too, which can only keep a wrapper that is not needed.
+ * is not accepted. A nested scope that binds the same name is counted as a
+ * mention too, which can only leave out a literal that could be accepted.
  *
  * With `checkedCallbacks`, a mention of the local as the callback of a
  * consumer of `CHECKED_CALLBACK_CONSUMERS` is not counted either, when no
@@ -1668,57 +2765,6 @@ function untrustedListSource(
   for (const stmt of stmts) visit(stmt);
   return (
     values.length !== 1 || collectionElementTypeOf(values[0]) === undefined
-  );
-}
-
-/**
- * A wrapper around `callee` that calls it directly when none of its
- * `nParams` arguments is an array, and takes the `helper` route otherwise:
- * `(_tv1) => Array.isArray(_tv1) ? _SYS.<helper>(callee, _tv1) : callee(_tv1)`.
- *
- * `helper` selects what the wrapper does with an array argument. `bcastFn`
- * is the user-function form and `bcast` the OPERATOR form; both follow the
- * same element-wise rule, empty position included — an empty operand
- * answers the empty list, as it does in the interpreter (`Sin([])` is
- * `[]`). Both recurse into nested arrays.
- *
- * The wrapper takes a FIXED number of parameters wherever the function has
- * one, read from the function literal, rather than a rest argument: a
- * consumer that hands the value straight to `Array.prototype.map` would
- * supply the index and the source array as extra arguments, and a rest form
- * would see that array and broadcast over it. `nParams` is `'rest'` for the
- * one function that has no single parameter list — a MULTI-CLAUSE
- * dispatcher, which selects its clause on the number of arguments, so a
- * fixed arity would answer `no-matching-clause` for every other overload
- * (`multiClauseValueRef`, which also records why the rest form is safe for
- * the consumers this compiler emits).
- *
- * The `Array.isArray` test is done here rather than left to the runtime
- * helper so the scalar case — every element of an ordinary flat list — costs
- * one type test instead of the broadcast's operand-shape analysis.
- */
-export function broadcastingWrapper(
-  callee: string,
-  nParams: number | 'rest',
-  target: CompileTarget<Expression>,
-  helper: 'bcast' | 'bcastFn'
-): string {
-  if (nParams === 'rest') {
-    const rest = tempVar(target);
-    // `Array.isArray` reads only its first argument, so it serves as the
-    // `some` predicate unchanged.
-    return (
-      `(...${rest}) => ${rest}.some(Array.isArray) ? ` +
-      `_SYS.${helper}(${callee}, ...${rest}) : ${callee}(...${rest})`
-    );
-  }
-  const params: string[] = [];
-  for (let i = 0; i < nParams; i++) params.push(tempVar(target));
-  const args = params.join(', ');
-  const test = params.map((p) => `Array.isArray(${p})`).join(' || ');
-  return (
-    `(${args}) => ${test} ? _SYS.${helper}(${callee}, ${args}) : ` +
-    `${callee}(${args})`
   );
 }
 

@@ -471,8 +471,9 @@ describe('TYCHO ITEM 335: COMPILED RESTRICTION OVER AN ORDERED CARRIER', () => {
  * Review of the 2026-09-29 change. A type with a tuple arm or a string arm
  * is not an ordered carrier, also when the arm is one arm of a union: the
  * value it holds can be one point or one string, which a mask never splits.
- * The JavaScript compiler declines such a union (a flat array cannot say
- * whether it is a point or a list).
+ * The JavaScript compiler tests the shape of such a union at run time and
+ * holds one body for each member (a flat array of numbers is a point, an
+ * array of arrays is a list of points).
  */
 describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
   const MASK = ['List', 'True', 'False'];
@@ -515,11 +516,36 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
     expect(v.toString()).toBe('["ab","Missing"]');
   });
 
-  test('the compiler declines a point-or-point-list union', () => {
+  test('the compiler dispatches on a point-or-point-list union', () => {
+    // A flat array cannot say by itself whether it is a point or a list, but
+    // a list of points holds arrays and a point holds numbers. The compiled
+    // code tests the value of `P` once and holds one body for each shape: a
+    // point is one value, repeated under the mask; a list of points is zipped
+    // with the mask. Each result equals the interpreter's for a value of each
+    // shape.
+    const type = 'tuple<number, number> | list<tuple<number, number>>';
     const ce = new ComputeEngine();
-    ce.declare('P', 'tuple<number, number> | list<tuple<number, number>>');
-    const result = compile(ce.box(['When', 'P', MASK] as any))!;
-    expect(result.success).toBe(false);
+    ce.declare('P', type);
+    const result = compile(ce.box(['When', 'P', MASK] as any), {
+      fallback: false,
+    })!;
+    expect(result.success).toBe(true);
+    const run = result.run as (s: Record<string, unknown>) => unknown;
+    expect(run({ P: [1, 2] })).toEqual([[1, 2], undefined]);
+    expect(evaluated(type, ['Tuple', 1, 2]).v.toString()).toBe(
+      '[(1, 2),"Missing"]'
+    );
+    expect(
+      run({
+        P: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([[1, 2], undefined]);
+    expect(
+      evaluated(type, ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]).v.toString()
+    ).toBe('[(1, 2),"Missing"]');
   });
 
   // A string is one value under a restriction whatever the declaration: the

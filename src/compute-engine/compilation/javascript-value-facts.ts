@@ -142,7 +142,7 @@ const scalarParams = new WeakMap<ReadonlySet<string>, ReadonlySet<string>>();
 /**
  * Record bindings that hold a runtime scalar throughout this scope. Callers
  * prove that through the function's argument contract or its local writes.
- * See `isConstructedScalar` for how emission uses the fact.
+ * See `isScalarParam` for how emission uses the fact.
  */
 export function recordScalarParams(
   target: CompileTarget<Expression>,
@@ -166,7 +166,7 @@ export function recordScalarParams(
  * variable of the same name — the same rule {@link isDecidedLoopIndex}
  * applies for the same reason.
  */
-function isScalarParam(
+export function isScalarParam(
   name: string,
   boundVars: ReadonlySet<string> | undefined
 ): boolean {
@@ -427,98 +427,56 @@ export function numericArrayCells(
   return coll.ops;
 }
 
-/** A scalar constructed from numeric literals, compiler-owned counters and
- * scalar arithmetic, from an explicitly declared scalar runtime input, or
- * from a parameter of the emitted body this expression belongs to whose
- * function binds no argument whole. An INPUT whose scalar type is merely
- * inferred remains eligible for runtime broadcasting; a body PARAMETER does
- * not, because its every call site is broadcast-aware.
- *
- * `memo` holds the answers of the current top-level call for each node object
- * and depth (`DepthMemo`), so an expression that holds the same node object at
- * many positions is examined in time linear in its distinct nodes. */
-export function isConstructedScalar(
-  expr: Expression,
-  target: CompileTarget<Expression>,
-  depth = 0,
-  memo: DepthMemo<boolean> = new WeakMap()
+/**
+ * True when the symbol `expr` holds one scalar in the emitted body that it
+ * belongs to: a compiler-owned counter, a parameter of the scalar variant of
+ * a function (`isScalarParam()`), `True` or `False`, or an input that the
+ * caller declared with a number, boolean or string type. A symbol whose
+ * numeric type was inferred from its uses is not counted.
+ */
+function isScalarSymbol(
+  expr: Expression & { symbol: string },
+  target: CompileTarget<Expression>
 ): boolean {
-  if (!isFunction(expr))
-    return isConstructedScalarUncached(expr, target, depth, memo);
-  return memoizedByDepth(memo, expr, depth, () =>
-    isConstructedScalarUncached(expr, target, depth, memo)
-  );
-}
-
-function isConstructedScalarUncached(
-  expr: Expression,
-  target: CompileTarget<Expression>,
-  depth: number,
-  memo: DepthMemo<boolean>
-): boolean {
-  if (depth > 32) return false;
-  if (isNumber(expr)) return true;
-  if (isSymbol(expr)) {
-    if (integerRange(expr, target) !== undefined) return true;
-    // A parameter of the emitted body this expression belongs to, when no
-    // parameter of that function binds a collection, a tuple or a point whole
-    // (user rulings 2026-09-08 and 2026-09-09). The parameter's own type does
-    // not matter — `unknown` counts, which is what an unannotated parameter
-    // gets. Every emitted call of such a function hands that parameter a
-    // scalar: a call whose argument is not provably one is dispatched
-    // element-wise (`_SYS.bcastFn`) or guarded by `Array.isArray`, so the
-    // body sees one element; the only call form that passes an argument
-    // straight through is the one an explicit caller declaration already
-    // exempts. A function with a collection parameter records nothing,
-    // because such a body may receive a list whole. Recorded by the emission
-    // (`BaseCompiler.recordScalarParams`).
-    if (isScalarParam(expr.symbol, target.boundVars)) return true;
-    // These names emit Boolean literals only when no local or caller mapping
-    // replaces them. Their held symbolic value is not a numeric literal.
-    if (
-      (expr.symbol === 'True' || expr.symbol === 'False') &&
-      !target.boundVars?.has(expr.symbol) &&
-      !target.varsKeys?.has(expr.symbol)
-    )
-      return true;
-    // A caller's explicit declaration is the input contract. A type inferred
-    // from use in a scalar parameter is not such a promise. Local binders and
-    // caller mappings have their own representations and do not inherit it.
-    // A symbol that HOLDS a value compiles to that value, so it is the
-    // value's shape that decides: a number (a library constant such as
-    // `Pi`, or `t_0 := 2.855`) is a scalar; any other held value — a
-    // collection, a symbolic expression — is not judged here.
-    const held = expr.engine._getSymbolValue(expr.symbol);
-    // Retained helper bodies may predate the caller's input declarations.
-    // A free symbol emits the current runtime input accessor, so use that
-    // input's current explicit contract rather than its old inferred type.
-    const current = expr.engine.lookupDefinition(expr.symbol);
-    const definition = isValueDef(current)
-      ? current.value
-      : expr.valueDefinition;
-    return (
-      !target.boundVars?.has(expr.symbol) &&
-      !target.varsKeys?.has(expr.symbol) &&
-      definition?.inferredType === false &&
-      (held === undefined ? true : isNumber(held)) &&
-      ['number', 'boolean', 'string'].some((t) =>
-        isSubtype(definition.type.type, t as 'number' | 'boolean' | 'string')
-      )
-    );
-  }
-  if (!isFunction(expr) || !builtin(expr, target)) return false;
-  // A scalar read off a constructed POINT — the inner product of two points,
-  // a coordinate, a norm — is a constructed scalar too. Decided with an
-  // empty walk, so every leaf is held to this function's own input contract.
+  if (integerRange(expr, target) !== undefined) return true;
+  // A parameter of the scalar variant of a function, when no parameter of
+  // that function binds a collection, a tuple or a point whole (user
+  // rulings 2026-09-08 and 2026-09-09). The parameter's own type does not
+  // matter: `unknown` counts, which is what an unannotated parameter gets.
+  // Every call reaches the scalar variant with scalar values, directly or
+  // from inside a static map (`_SYS.mapFn`). Recorded by the emission
+  // (`recordScalarParams()`).
+  if (isScalarParam(expr.symbol, target.boundVars)) return true;
+  // These names emit Boolean literals only when no local or caller mapping
+  // replaces them. Their held symbolic value is not a numeric literal.
   if (
-    scalarOverPoints(expr, target, freshWalk(), depth) ||
-    (SCALAR_ARITHMETIC_HEADS.includes(expr.operator) &&
-      expr.ops.every((arg) =>
-        isConstructedScalar(arg, target, depth + 1, memo)
-      ))
+    (expr.symbol === 'True' || expr.symbol === 'False') &&
+    !target.boundVars?.has(expr.symbol) &&
+    !target.varsKeys?.has(expr.symbol)
   )
     return true;
-  return isScalarUserFunctionCall(expr, target, depth, memo);
+  // A caller's explicit declaration is the input contract. A type inferred
+  // from use in a scalar parameter is not such a promise. Local binders and
+  // caller mappings have their own representations and do not inherit it.
+  // A symbol that HOLDS a value compiles to that value, so it is the
+  // value's shape that decides: a number (a library constant such as
+  // `Pi`, or `t_0 := 2.855`) is a scalar; any other held value — a
+  // collection, a symbolic expression — is not judged here.
+  const held = expr.engine._getSymbolValue(expr.symbol);
+  // Retained helper bodies may predate the caller's input declarations.
+  // A free symbol emits the current runtime input accessor, so use that
+  // input's current explicit contract rather than its old inferred type.
+  const current = expr.engine.lookupDefinition(expr.symbol);
+  const definition = isValueDef(current) ? current.value : expr.valueDefinition;
+  return (
+    !target.boundVars?.has(expr.symbol) &&
+    !target.varsKeys?.has(expr.symbol) &&
+    definition?.inferredType === false &&
+    (held === undefined ? true : isNumber(held)) &&
+    ['number', 'boolean', 'string'].some((t) =>
+      isSubtype(definition.type.type, t as 'number' | 'boolean' | 'string')
+    )
+  );
 }
 
 /** Whether a value is scalar under the bindings established for its emitted
@@ -530,8 +488,7 @@ export function isScalarValue(
   return scalarShapedValue(expr, target, freshWalk(), 0);
 }
 
-/** The scalar heads whose application to constructed scalars is itself a
- * constructed scalar. Every one of them maps scalars to a scalar. */
+/** The scalar heads whose application to scalars is a scalar. */
 const SCALAR_ARITHMETIC_HEADS = [
   'Add',
   'Subtract',
@@ -602,7 +559,7 @@ function isScalarResultType(t: Type): boolean {
  * carry its own evidence:
  *
  *  - a number literal is a scalar;
- *  - a free symbol is a scalar only when `isConstructedScalar` says so — an
+ *  - a free symbol is a scalar only when `isScalarSymbol` says so — an
  *    explicitly declared scalar input, or a compiler-owned counter. A symbol
  *    whose numeric type was INFERRED is not evidence: the caller may still
  *    hand it a list at run time, and the emission broadcasts over it. The
@@ -659,10 +616,7 @@ function scalarShapedValueUncached(
       return walk.locals.get(expr.symbol) === 'scalar';
     // A parameter hypothesised to hold a POINT is an array, never a scalar.
     if (walk.points.has(expr.symbol)) return false;
-    return (
-      walk.shadowed.has(expr.symbol) ||
-      isConstructedScalar(expr, target, depth + 1)
-    );
+    return walk.shadowed.has(expr.symbol) || isScalarSymbol(expr, target);
   }
   if (!isFunction(expr) || !builtin(expr, target)) return false;
   const scalarOperand = (a: Expression) =>
@@ -724,8 +678,8 @@ function isUserFunctionHead(expr: Expression & FunctionInterface): boolean {
  *  - `broadcast`: the head maps element-wise, so an array operand gives an
  *    array result whatever the static result type says. Both a built-in
  *    `broadcastable` head and a user-defined function are of this kind: the
- *    emitted call of a user function dispatches an array argument through
- *    `_SYS.bcastFn`.
+ *    emitted call of a user function maps over a list argument
+ *    (`_SYS.mapFn`).
  *  - `reduction`: every other head. Its result shape is what its static type
  *    says, because no operand shape reaches the result.
  */
@@ -1216,7 +1170,7 @@ function commonWidth(
 
 /** The width of a declared POINT runtime input — a symbol whose explicitly
  * declared type is a tuple of numbers — on the same terms as the declared
- * scalar input of `isConstructedScalar`: the declaration is the caller's
+ * scalar input of `isScalarSymbol`: the declaration is the caller's
  * input contract, an inferred type is not. */
 function constructedPointWidth(
   expr: Expression & { readonly symbol: string },
@@ -1685,36 +1639,4 @@ function parameterName(p: Expression): string | undefined {
   if (isSymbol(p)) return p.symbol;
   if (isFunction(p, 'Typed') && isSymbol(p.ops[0])) return p.ops[0].symbol;
   return undefined;
-}
-
-/**
- * Is `expr` the application of an engine-defined function that yields a
- * scalar at run time — so the value it produces can never be an array, and
- * every arithmetic head around it can compile as ordinary scalar code?
- *
- * Two things must hold. Every ARGUMENT must be a constructed scalar, which is
- * also exactly the condition under which the call itself is emitted BARE (see
- * `BaseCompiler.emitUserFunctionCall`: a constructed-scalar argument is
- * exempt from the runtime `Array.isArray` guard, so no argument is left to
- * test and no broadcast dispatch is emitted). And the callee's BODY must be
- * scalar-shaped under scalar parameters.
- *
- * A body that CONSTRUCTS a collection — `m(t) := [t, 2t]` — is refused by the
- * body test, so `2·m(t)` keeps its runtime broadcast. A point-valued body
- * (`p(t) := (t, t²)`) is refused too: a tuple lowers to a JavaScript array,
- * which the scalar arithmetic around it must not read as one number.
- */
-function isScalarUserFunctionCall(
-  expr: Expression & FunctionInterface,
-  target: CompileTarget<Expression>,
-  depth: number,
-  memo: DepthMemo<boolean>
-): boolean {
-  return scalarShapedCall(
-    expr,
-    target,
-    (a) => isConstructedScalar(a, target, depth + 1, memo),
-    freshWalk(),
-    depth
-  );
 }

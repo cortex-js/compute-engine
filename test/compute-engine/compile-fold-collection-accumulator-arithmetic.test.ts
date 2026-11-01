@@ -108,13 +108,54 @@ describe('a fold whose accumulator becomes a list maps over it', () => {
     ).toEqual(['Tuple', 4, 6]);
   });
 
-  test('a user function as the step', () => {
+  test('a user function as the step, with a scalar seed, declines', () => {
+    // A user function passed as the step is the variant for the shapes of
+    // the values the fold passes it. With the seed `0` over a list of
+    // rows, the accumulator is `0`, then a list: it has no settled shape,
+    // and the compilation declines with the code `unsettled-shape` (rule R3
+    // of `docs/plans/2026-10-31-static-shape-compilation.md`). The
+    // interpreter evaluates the expression. The settled version is the
+    // seed `[0, 0]`, in the test below.
     const ce = engine();
     ce.declare('f', 'function');
     ce.assign('f', ce.box(ADD));
     const json = ['Reduce', 'M', 'f', 0];
-    expect(compiled(ce, json).run!({ M: ROWS })).toEqual([4, 6]);
+    expect(() => compiled(ce, json)).toThrow(/does not settle one shape/);
+    const result = compile(ce.box(json), { to: 'javascript' } as any)!;
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('unsettled-shape');
+    expect(result.unsupported).toContain('f');
+    expect(result.run!({ M: ROWS })).toEqual([4, 6]);
     expect(interpreted(ce, json, { M: ROWS_JSON })).toEqual(['List', 4, 6]);
+  });
+
+  test('a user function as the step, with a list seed, compiles', () => {
+    // With the seed `[0, 0]`, the accumulator is a list at each step. The
+    // function has no declared result type, so the type of the
+    // accumulator is the result type of the variant of the step for a
+    // list accumulator and a list element (rule R2 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`), and the step
+    // maps over both.
+    const ce = engine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.box(ADD));
+    const json = ['Reduce', 'M', 'f', ['List', 0, 0]];
+    const result = compiled(ce, json);
+    expect(result.run!({ M: ROWS })).toEqual([4, 6]);
+    expect(interpreted(ce, json, { M: ROWS_JSON })).toEqual(['List', 4, 6]);
+  });
+
+  test('a user function as the step of a scalar fold compiles', () => {
+    // Over a list of numbers with the seed `0`, the accumulator is a
+    // number at each step, and the step is the function itself.
+    const ce = engine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.box(ADD));
+    const json = ['Reduce', 'L', 'f', 0];
+    const result = compiled(ce, json);
+    expect(result.code).toContain('(_fn_f)');
+    expect(result.run!({ L: [1, 2, 3] })).toBe(6);
+    expect(interpreted(ce, json, { L: ['List', 1, 2, 3] })).toBe(6);
   });
 });
 

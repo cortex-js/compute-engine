@@ -1628,11 +1628,10 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     // The single call is the binding's initializer — no other call site.
     expect(callSites(result.code, '_fn_f_2')).toBe(1);
-    // The binding's initializer IS the call site — a guarded one, so the
-    // temporary is bound to the guard rather than to a bare `_fn_f_2(…)`.
-    expect(result.code).toMatch(
-      /const _cse\d+ = \(\(_tv\d+\) => Array\.isArray/
-    );
+    // The binding's initializer IS the call site. The argument `x + 1` has a
+    // scalar static type, so the call is a direct call of the scalar
+    // function.
+    expect(result.code).toMatch(/const _cse\d+ = _fn_f_2\(_\.x \+ 1\)/);
 
     expect((result.run as (v: any) => number)({ x: 0.3 })).toBeCloseTo(
       compile(expr, { fallback: false, cse: false }).run!({

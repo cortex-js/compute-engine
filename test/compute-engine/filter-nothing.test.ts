@@ -235,12 +235,31 @@ describe('Filter drops immediate Nothing without calling its predicate', () => {
     '%s checks every collection alternative for possible omissions',
     (to) => {
       const ce = new ComputeEngine();
-      ce.declare('xs', 'list<integer | nothing> | tuple<integer, integer>');
+      ce.declare('xs', 'list<integer | nothing> | list<list<integer>>');
       const filtered = ce.box(['Filter', 'xs', ['Function', 'True', 'x']]);
       expect(filtered.isValid).toBe(true);
       const result = compile(filtered, { to });
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/Nothing/);
+      // A list and a number are told apart at run time, so the compilation
+      // of the list member reads its possible `Nothing` elements.
+      ce.declare('zs', 'list<integer | nothing> | integer');
+      const scalarOrList = compile(
+        ce.box(['Filter', 'zs', ['Function', 'True', 'x']]),
+        { to }
+      );
+      expect(scalarOrList.success).toBe(false);
+      expect(scalarOrList.error).toMatch(/Nothing/);
+      // A union of a list and a tuple of two numbers declines before: the
+      // compiled code holds both as an array, and cannot tell a list of
+      // two numbers from the tuple at run time.
+      ce.declare('ys', 'list<integer | nothing> | tuple<integer, integer>');
+      const union = compile(
+        ce.box(['Filter', 'ys', ['Function', 'True', 'x']]),
+        { to }
+      );
+      expect(union.success).toBe(false);
+      expect(union.error).toMatch(/cannot tell apart/);
     }
   );
 

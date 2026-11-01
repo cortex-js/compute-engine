@@ -53,7 +53,6 @@ import {
   isSymbol,
   isNumber,
   isFunction,
-  isDictionary,
 } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralParameterName,
@@ -62,7 +61,6 @@ import {
   isRestParameter,
   isScalarType,
 } from '../boxed-expression/function-literal.js';
-import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
@@ -75,17 +73,12 @@ import {
   blockLocalFunction,
   declaredUserSignature,
   groundSignature,
-  provablyScalarArg,
   signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
   wholeTupleCall,
 } from './compile-assignment-checks.js';
-import {
-  assignedNamesIn,
-  registryLocalName,
-  userFunctionIsGeneric,
-} from './compile-cse.js';
+import { assignedNamesIn, registryLocalName } from './compile-cse.js';
 import { countMayBeNaN, gatedCollectionArms } from './compiler-type-facts.js';
 import {
   ABSENCE_DISCHARGING_HEADS,
@@ -101,15 +94,13 @@ import {
 import { core } from './compiler-core-hooks.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import { compileValueOperand } from './compile-statements.js';
-import {
-  collectionElementTypeOf,
-  declareValueOperand,
-  typedTemp,
-} from './compile-declarations.js';
+import { collectionElementTypeOf, typedTemp } from './compile-declarations.js';
 import { CompilerState } from './compiler-state.js';
 import { resetCompilationMemos, tryConstantFold } from './compile-folding.js';
 import {
+  absentPointType,
   appliedArgumentTypeMismatch,
+  appliedLiteralNamedPointCall,
   checkedParameterType,
   checkingShimName,
   failedCheckMarker,
@@ -117,6 +108,7 @@ import {
   jsParameterGuard,
   laneMismatchAt,
   laneRequestParamType,
+  namedPointArgumentAtUntypedParameter,
 } from './compile-callbacks.js';
 import { laneMismatch, userParamBinding } from './compile-lanes.js';
 import {
@@ -128,6 +120,7 @@ import {
 } from './compile-point-calls.js';
 import {
   absentArgumentChecks,
+  callArgumentMapRank,
   checkDeclaredBroadcast,
   checkDeclaredBroadcastAgainst,
   collectionAtExpressionParameter,
@@ -147,6 +140,7 @@ import {
 import { trySpecializedUserCall } from './compile-user-specialization.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
 import { userFunctionSignature } from './compile-absence.js';
+import { isScalarShaped, isUndeclaredParameterType } from './static-shape.js';
 
 /**
  * Compile an expression to target language source code
@@ -1260,7 +1254,13 @@ export function tryCompileUserFunction(
   // Fail closed BEFORE emission: whether the callee can be emitted at
   // all is irrelevant to whether an emitted call would be sound, and the
   // caller's generic "no lowering" message hides the real reason.
-  checkDeclaredBroadcast(engine, h, args, provablyScalarArg, target);
+  checkDeclaredBroadcast(
+    engine,
+    h,
+    args,
+    (a) => isScalarShaped(a.type.type),
+    target
+  );
 
   // The complex lanes are a JavaScript-convention matter (`{re, im}`
   // objects flowing through parameters). A target with its own definition
@@ -1443,9 +1443,19 @@ export function tryCompileUserFunction(
   // definitions added by the attempt are removed, and the call takes the
   // routes below, which can inline it (the substitution folds `[a, b][1]`
   // to `a`). A cancellation propagates.
+  // A parameter declared with a union of shapes whose argument has the
+  // shape of one member: the call reads that member's variant directly,
+  // with no run-time test of the shape (`declaredUnionMemberVariant()`).
+  // A call with an argument of no settled shape at such a parameter calls
+  // the dispatcher, the ordinary name of the function.
+  const memberVariant =
+    literal === undefined
+      ? undefined
+      : core.declaredUnionMemberVariant(engine, h, args, target);
   let specialized: TargetSource | undefined;
   if (
     literal !== undefined &&
+    memberVariant === undefined &&
     !intervalChecks.some((checks) => checks.length > 0)
   ) {
     const registry = target.userFunctions;
@@ -1470,6 +1480,26 @@ export function tryCompileUserFunction(
     }
   }
   if (specialized !== undefined) return specialized;
+
+  // One point named through an alias, a union with `missing` or a nominal
+  // type whose definition is one point (`absentPointType()`), at a
+  // parameter with no declared type, that the copy for one point above
+  // did not take (another target, a point that may be absent beside an
+  // argument that is not a scalar). The generic definition reads the
+  // parameter as a scalar, and the interpreter binds the point whole:
+  // with `f2 := t ↦ 2t` and `r` of the nominal type `Row`, declared
+  // `tuple<real, real>`, `f2(r)` is `(2, 4)`. The call declines.
+  if (literal !== undefined) {
+    const at = namedPointArgumentAtUntypedParameter(engine, h, args);
+    if (at >= 0)
+      throw new Error(
+        `Could not compile a call of \`${h}\`: argument ${at + 1} is one ` +
+          `point named through an alias, a union with \`missing\` or a ` +
+          `nominal type, at a parameter with no declared type. The ` +
+          `interpreter binds the point whole, and the generic definition ` +
+          `reads the parameter as a scalar.`
+      );
+  }
 
   // A POINT bound to an UNTYPED parameter never goes by reference: the
   // emitted body treats that parameter as a scalar and answers NaN over the
@@ -1550,25 +1580,12 @@ export function tryCompileUserFunction(
     // clause set instead.
     return multiClauseParamIsComplex(engine, h, i);
   });
-  // A GENERIC callee always takes the runtime broadcast dispatch (when its
-  // parameters are scalar at their bounds), never the provably-scalar fast
-  // path. At a generic parameter the argument's static type is INFERRED
-  // FROM THE BOUND rather than declared by the caller — `gd(y)` under
-  // `(x: T) -> T where T: number` types the free `y` as `number` — so
-  // "provably not a collection" is not proof there: `run({ y: [1,2,3] })`
-  // still hands the call an array, which the interpreter broadcasts. The
-  // dispatch applies the closure directly when no argument is an array, so
-  // the only cost is one closure on the scalar path.
-  //
-  // No `literal !== undefined` pre-gate: `userFunctionIsGeneric` itself
-  // accepts an absent literal (a multi-clause callee) and can still
-  // answer from the operator/value definition's declared polymorphic
-  // signature. Gating on `literal` here would silently drop that
-  // definition-sourced answer for any literal-less callee, which is
-  // harmless today only because a literal-less function currently routes
-  // to the multi-clause emitter before this generic-bound dispatch is
-  // ever reached.
-  const generic = userFunctionIsGeneric(engine, h, literal);
+  // A GENERIC callee is called like any other: the static type of each
+  // argument, read at the bound of its type variable when the caller does
+  // not settle it, selects the direct call or the static map
+  // (`emitUserFunctionCall`). A host value outside that type (a list for
+  // `y` in `gd(y)`, with `gd: (x: T) -> T where T: number`) gives an
+  // unspecified result.
   const paramsAreScalar = userFunctionParamsAreScalar(engine, h);
 
   // A call a repetition site rewrote to the callee's INVARIANT-PREFIX
@@ -1639,7 +1656,6 @@ export function tryCompileUserFunction(
         target,
         coerceToComplex,
         paramsAreScalar,
-        generic,
         prefixed.values.map((v) => core.compile(v, target)),
         absentArgumentChecks(h, literal, args, target)
       );
@@ -1690,13 +1706,13 @@ export function tryCompileUserFunction(
   // A target with its own call-site lowering (the shader targets, which must
   // check the argument shapes against the statically synthesized signature)
   // owns the whole call site: none of the JS convention handling below —
-  // complex `{re, im}` coercion, the `_SYS.bcastFn` runtime broadcast — has
+  // complex `{re, im}` coercion, the static map `_SYS.mapFn` — has
   // an analog there.
   const lowering = target.userFunctions?.lowering;
   if (lowering) return lowering.call({ id: h, name, args, target });
 
   const callee = !checked
-    ? name
+    ? (memberVariant ?? name)
     : target.language === 'interval-javascript'
       ? intervalCheckingCallee(name, intervalChecks, target)
       : (checkingShimName(engine, h, name, target) ?? name);
@@ -1706,7 +1722,6 @@ export function tryCompileUserFunction(
     target,
     coerceToComplex,
     paramsAreScalar,
-    generic,
     [],
     absentArgumentChecks(h, literal, args, target)
   );
@@ -1735,7 +1750,7 @@ export function parameterCheckNeeded(
 ): boolean {
   const declared = checkedParameterType(engine, h, i, target);
   if (declared === undefined) return false;
-  return !argumentProvesParameterType(a, declared, target);
+  return !argumentProvesParameterType(a, declared);
 }
 
 /**
@@ -1768,7 +1783,7 @@ export function declaredParameterCheck(
 ): 'none' | 'guard' | 'refuse' {
   if (declared === undefined) return 'none';
   if (declared === 'number' || isNonRealNumber(declared)) return 'none';
-  if (argumentProvesParameterType(a, declared, target)) return 'none';
+  if (argumentProvesParameterType(a, declared)) return 'none';
   const restrictsReals =
     isSubtype(declared, 'real') && !isSubtype('real', declared);
   if (target.language === 'javascript') {
@@ -1922,7 +1937,6 @@ export function appliedLiteralCheckedCall(
       return pt !== undefined && isNonRealNumber(pt);
     }),
     paramsAreScalar(signature),
-    false,
     [],
     absentArgumentChecks('(function)', literal, args, target)
   );
@@ -1998,18 +2012,16 @@ export function localCheckingCallee(
  * the call maps over it and each element reaches the body; an element
  * type that is not known is no proof.
  *
- * The static type is a proof only when it does not rest on a type that
- * the engine inferred from a USE of a symbol
- * (`staticTypeIsEvidence`). A symbol with no value takes the type of
- * the first parameter it is passed to: in `h(x)` with `h` declared
- * `(integer) -> integer`, the free `x` is typed `integer` because of this
- * call, and `run({ x: 2.5 })` still hands the call `2.5`, where the
- * interpreter, given `x = 2.5`, answers an `incompatible-type` error.
+ * The static type is the contract, also when the engine inferred it from
+ * a use (rules R1 and R5 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`): in `h(x)` with `h`
+ * declared `(integer) -> integer`, the free `x` is typed `integer` because
+ * of this call, and the host must supply an integer. A value outside that
+ * type (`run({ x: 2.5 })`) gives an unspecified result.
  */
 export function argumentProvesParameterType(
   a: Expression,
-  declared: Type,
-  target: CompileTarget<Expression>
+  declared: Type
 ): boolean {
   // An absent value is the business of the absent-argument check
   // (`absentArgumentChecks`), which runs first.
@@ -2019,156 +2031,17 @@ export function argumentProvesParameterType(
   // body, so the points are read against the declared type, as the
   // elements of a list at a scalar parameter are.
   if (isPointListArgumentType(t, declared)) {
-    if (!staticTypeIsEvidence(a, { kind: 'list', elements: declared }, target))
-      return false;
     const element = collectionElementType(resolveTypeForCompilation(t));
     return (
       element !== undefined &&
       isSubtype(stripMissingFromType(element), declared)
     );
   }
-  if (!staticTypeIsEvidence(a, declared, target)) return false;
   if (isSubtype(t, declared)) return true;
-  if (provablyScalarArg(a) || !isScalarType(declared)) return false;
+  if (isScalarShaped(a.type.type) || !isScalarType(declared)) return false;
   const element = collectionElementType(resolveTypeForCompilation(t));
   if (element === undefined) return false;
   return isSubtype(stripMissingFromType(element), declared);
-}
-
-/**
- * Whether the static type of `a` is a fact about its run-time values, for
- * a test against the parameter type `declared`: it does not rest on the
- * type of a symbol that the engine inferred from the use of the symbol.
- *
- * - A symbol whose type is inferred (`inferredType`: a free input with no
- *   declaration, a function parameter with no annotation, a block local
- *   with no stated type) is no evidence. A block local whose `Declare`
- *   states a type (`CompileTarget.declaredVarTypes`) is evidence: the
- *   canonical form types it before its `Declare` runs, so its own
- *   definition still reads as inferred. A block local with no stated type
- *   is evidence when each value that the compiled code assigns to it is
- *   evidence, and is in `declared` (`assignmentsProveType`): `let a = 3`
- *   then `f(a)`.
- * - A constant, a symbol with a declared type, and a function literal
- *   (whose parameters it binds itself) are evidence.
- * - An application is evidence when the result type that its operator
- *   DECLARES is in `declared` (`Floor(x)` is an integer whatever `x`
- *   is), or when each of its operands is evidence.
- */
-export function staticTypeIsEvidence(
-  a: Expression,
-  declared: Type,
-  target: CompileTarget<Expression>
-): boolean {
-  if (isSymbol(a)) {
-    if (a.isConstant) return true;
-    if (a.valueDefinition?.inferredType !== true) return true;
-    if (target.declaredVarTypes?.[a.symbol] !== undefined) return true;
-    return assignmentsProveType(a, declared, target);
-  }
-  // The parameters of a function literal operand (the predicate of
-  // `Filter`) are bound by it: their types are not the type of a value
-  // of `a`.
-  if (!isFunction(a)) return true;
-  if (a.operator === 'Function') return true;
-  const def = a.operatorDefinition;
-  if (def !== undefined && !def.inferredSignature) {
-    const result = functionResult(def.signature.type);
-    if (result !== undefined && isSubtype(result, declared)) return true;
-  }
-  return a.ops.every((op) => staticTypeIsEvidence(op, declared, target));
-}
-
-/**
- * The statement list of each `Block` that is being compiled, with the
- * scope of the block, innermost last (`assignmentsProveType`).
- */
-export const _blockStatements: {
-  scope: NonNullable<Expression['localScope']>;
-  args: ReadonlyArray<Expression>;
-}[] = [];
-
-/**
- * The value definitions of the locals whose assignments
- * `assignmentsProveType` reads now: a value that reads one of them again
- * (`a = a + 1`, or `a = b` and `b = a`) is no proof.
- */
-export const _provingLocals = new Set<object>();
-
-/**
- * Whether the symbol `a` is a local of a block that is being compiled,
- * and each value that the block assigns to it is in the type `declared`,
- * with a static type that is evidence (`staticTypeIsEvidence`). Only the
- * compiled code writes a block local, so these values are all the values
- * that the local can hold: in `let a = 3; f(a)`, `a` is an integer.
- *
- * The assignments are read in all the statements of the block, at any
- * depth (a branch, a loop body, a function literal). An assignment to a
- * name of a nested scope with the same name is read too: it can only
- * make the proof fail. A destructuring assignment of the name, and an
- * assignment to a part of it, are no proof. A local with no assigned
- * value is no proof: a read before its first assignment is checked in
- * another way (`checkedLocalReads`).
- */
-export function assignmentsProveType(
-  a: Expression,
-  declared: Type,
-  target: CompileTarget<Expression>
-): boolean {
-  if (!isSymbol(a)) return false;
-  const def = a.valueDefinition;
-  if (def === undefined) return false;
-  const name = a.symbol;
-  const frames = _blockStatements;
-  let frame: (typeof frames)[number] | undefined;
-  for (let i = frames.length - 1; i >= 0 && frame === undefined; i--) {
-    const binding = frames[i].scope.bindings.get(name);
-    if (binding !== undefined && 'value' in binding && binding.value === def)
-      frame = frames[i];
-  }
-  if (frame === undefined || _provingLocals.has(def)) return false;
-  const values: Expression[] = [];
-  let unknown = false;
-  const seen = new Set<Expression>();
-  const visit = (e: Expression): void => {
-    if (unknown || seen.has(e)) return;
-    seen.add(e);
-    if (isDictionary(e)) {
-      for (const value of e.values) visit(value);
-      return;
-    }
-    if (!isFunction(e)) return;
-    if (e.operator === 'Assign' || e.operator === 'Declare') {
-      const lhs = e.ops[0];
-      if (isSymbol(lhs, name)) {
-        const value =
-          e.operator === 'Assign' ? e.ops[1] : declareValueOperand(e.ops);
-        if (value === undefined) {
-          if (e.operator === 'Assign') unknown = true;
-        } else values.push(value);
-      } else if (
-        lhs !== undefined &&
-        !isSymbol(lhs) &&
-        (isFunction(lhs, 'Tuple')
-          ? tuplePatternNames(lhs).includes(name)
-          : lhs.has(name))
-      )
-        unknown = true;
-    }
-    for (const op of e.ops) visit(op);
-  };
-  for (const statement of frame.args) visit(statement);
-  if (unknown || values.length === 0) return false;
-  _provingLocals.add(def);
-  try {
-    return values.every(
-      (v) =>
-        isSubtype(stripMissingFromType(v.type.type), declared) &&
-        staticTypeIsEvidence(v, declared, target)
-    );
-  } finally {
-    _provingLocals.delete(def);
-  }
 }
 
 export function mayBeAbsentCollection(
@@ -2306,7 +2179,7 @@ export function checkedCallMayBeAbsent(
  *
  * The callee's signature is read from the declared LITERAL rather than from
  * an engine definition; everything downstream of that — complex `{re, im}`
- * coercion, the `_SYS.bcastFn` runtime broadcast — is the shared
+ * coercion, the static map `_SYS.mapFn` — is the shared
  * `emitUserFunctionCall`, so a local and an engine-level function of the
  * same shape compile to the same call. A GENERIC literal is read at its
  * declared bounds, the same reading the engine route performs, so the two
@@ -2585,7 +2458,7 @@ export function tryCompileLocalFunctionCall(
   checkDeclaredBroadcastAgainst(
     h,
     args,
-    provablyScalarArg,
+    (a) => isScalarShaped(a.type.type),
     broadcastableParamSlots(declared),
     () => declaresBroadcastableParam(declared)
   );
@@ -2600,7 +2473,7 @@ export function tryCompileLocalFunctionCall(
   // and broadcast wraps that ground signature earns.
   //
   // Two conditions gate it, matching the engine route. The target must be
-  // JAVASCRIPT, since the coercion and the `_SYS.bcastFn` broadcast the
+  // JAVASCRIPT, since the coercion and the `_SYS.mapFn` map the
   // emitted call boundary relies on are both JavaScript conventions; and the
   // bound reading must be GROUND, which an unbounded `where T` is not — it
   // names no type to compile against. Either way the call fails closed here
@@ -2630,11 +2503,86 @@ export function tryCompileLocalFunctionCall(
       );
   }
 
+  // One point named through an alias, a union with `missing` or a nominal
+  // type whose definition is one point (`absentPointType()`), at a
+  // parameter with no declared type: `npt`, a nominal type declared
+  // `missing | tuple<real, real>`, `Row`, a nominal type declared
+  // `tuple<real, real>`, or `tuple<real, real> | missing`. The interpreter
+  // binds the point whole: with `g := t ↦ 2t` local to the block, `g(r)`
+  // is `(2, 4)` for `r = (1, 2)`. The block binds the literal compiled for
+  // a scalar parameter, so the call gave `NaN` for each coordinate on
+  // JavaScript, and repeated the tuple on Python. On JavaScript the call
+  // applies the literal compiled with the parameter typed as the point, as
+  // the call of a function defined on the engine takes its copy for one
+  // point; a point that may be absent goes to the local as it is bound
+  // (`absentPointFork()`). On another target the call declines.
+  const namedPointAt = args.findIndex((_a, i) => {
+    const pt = annotations[i];
+    if (pt !== undefined && !isUndeclaredParameterType(pt)) return false;
+    // A parameter whose type the body settles (`p[1]` reads a point) is
+    // compiled for that type, which receives the point.
+    const inferred = signatureParamType(declared, i);
+    if (inferred !== undefined && !isUndeclaredParameterType(inferred))
+      return false;
+    return absentPointType(argTypes[i]) !== undefined;
+  });
+  if (namedPointAt >= 0) {
+    const reason =
+      `Could not compile \`${h}\`: argument ${namedPointAt + 1} is one ` +
+      `point named through an alias, a union with \`missing\` or a ` +
+      `nominal type, at a parameter of the block-local function with no ` +
+      `declared type. The interpreter binds the point whole, and the ` +
+      `block binds the function compiled for a scalar parameter`;
+    if (target.language !== 'javascript')
+      throw new Error(
+        `${reason}. The '${target.language ?? 'unknown'}' target does not ` +
+          `compile the function for one point.`
+      );
+    // The call applies the literal, not the run-time value of the local,
+    // and the literal does not test the declared parameter types.
+    if (rebound !== undefined || checked)
+      throw new Error(
+        `${reason}. The function is assigned more than once, or a ` +
+          `declared parameter type is tested at run time, and the call of ` +
+          `the function compiled for one point does not do it.`
+      );
+    // The literal is compiled at the call, not where the local is
+    // defined. A binder that encloses the call can bind a name that the
+    // body reads, and it would capture that name. A recursive call in the
+    // body would compile the literal for one point again at each level.
+    const captured = [...freeSymbolNames(literal)].find(
+      (n) => n === h || target.boundVars?.has(n) === true
+    );
+    if (captured !== undefined)
+      throw new Error(
+        `${reason}. The function compiled for one point is written at the ` +
+          `call, and its body reads \`${captured}\`, which a binding at ` +
+          `the call or the function itself can change.`
+      );
+    const checks = absentArgumentChecks(h, literal, args, target);
+    const named = appliedLiteralNamedPointCall(
+      literal,
+      args,
+      args.map((a, i) =>
+        presentCheckedCode(compileValueOperand(a, target), checks[i])
+      ),
+      (e) => core.compile(e, target),
+      () => target.var(h) ?? h,
+      target
+    );
+    if (named === undefined)
+      throw new Error(
+        `${reason}. The type of the argument at the call does not name ` +
+          `the point.`
+      );
+    return named;
+  }
+
   // A TUPLE argument, or a list of tuples, at a parameter with no
   // annotation. The interpreter binds a tuple whole at such a parameter,
   // and applies the function to each tuple of a list of tuples. But the
   // binding of a local whose parameters read as scalars is wrapped in the
-  // run-time broadcast (`_SYS.bcastFn`), which maps into any array, a point
+  // static map (`_SYS.mapFn`), which maps into any array, a point
   // included: `const g = (v) => 7` then `g((5, 6))` gave `[7, 7]` where the
   // interpreter gives `7`. Thus the call is written as the `Apply` of the
   // literal is on the engine route (`wholeTupleCall`): the body with the
@@ -2716,16 +2664,42 @@ export function tryCompileLocalFunctionCall(
   }
 
   // PYTHON. The block binds the local as a Python value
-  // (`h = lambda k: k + 1`), and a call is compiled as a direct call of it,
-  // `h(n)`. A direct call agrees with the interpreter only when no argument
-  // can be a collection: the interpreter maps a function over a list
-  // argument (and binds it whole at a collection parameter), and this
-  // target has no run-time dispatch that tells the two apart, as
-  // `_SYS.bcastFn` does on JavaScript. The run-time tests of the
-  // JavaScript call are not spelled on Python either: a test of a
-  // declared parameter type and a test that an argument is present. Each
-  // of these shapes fails closed, and the interpreter evaluates the call.
-  // CE-237.
+  // (`h = lambda k: k + 1`). A call of a local whose parameters are scalar
+  // is compiled as on JavaScript (`emitUserFunctionCall`): the static type
+  // of each argument selects the direct call `h(n)`, or a comprehension
+  // that maps `h` over a list argument, as the interpreter does
+  // (`[h(e) for e in L]`). A local with a parameter that binds a
+  // collection whole is called directly only when no argument can be a
+  // collection: the Python operators of the body repeat or concatenate a
+  // list. The run-time tests of the JavaScript call are not spelled on
+  // Python: a test of a declared parameter type and a test that an
+  // argument is present. Each of these shapes fails closed, and the
+  // interpreter evaluates the call. CE-237.
+  // A tuple at a parameter with no declared type is bound whole by the
+  // interpreter: with `g := t ↦ 2t`, `g(y)` is `(2, 4)` for `y = (1, 2)`.
+  // On a target other than JavaScript, which writes such a call with the
+  // body of the function above, the block binds the literal compiled for
+  // a scalar parameter: the Python product `2 * y` repeats the tuple, and
+  // the interval product gives an empty interval. The call declines.
+  if (target.language !== 'javascript') {
+    const tupleAt = args.findIndex((_a, i) => {
+      const pt = annotations[i];
+      if (pt !== undefined && !isUndeclaredParameterType(pt)) return false;
+      const inferred = signatureParamType(declared, i);
+      if (inferred !== undefined && !isUndeclaredParameterType(inferred))
+        return false;
+      return isTupleShapedType(resolveTypeAlias(argTypes[i]));
+    });
+    if (tupleAt >= 0)
+      throw new Error(
+        `Could not compile \`${h}\`: argument ${tupleAt + 1} is a tuple at ` +
+          `a parameter of the block-local function with no declared type. ` +
+          `The interpreter binds the tuple whole, and the ` +
+          `'${target.language ?? 'unknown'}' target compiles the function ` +
+          `for a scalar parameter.`
+      );
+  }
+
   if (target.language === 'python') {
     const reason = (why: string): Error =>
       new Error(
@@ -2737,7 +2711,10 @@ export function tryCompileLocalFunctionCall(
         `a declared parameter type is not proved by the type of its ` +
           `argument, and the Python call does not test it at run time.`
       );
+    const scalarParams =
+      signature === undefined ? true : paramsAreScalar(signature);
     const notScalar = args.findIndex((a) => {
+      if (scalarParams) return false;
       const t = resolveTypeForCompilation(a.type.type);
       return !(
         t !== 'never' &&
@@ -2764,10 +2741,13 @@ export function tryCompileLocalFunctionCall(
           `refuses an absent value, and the Python call does not test it ` +
           `at run time.`
       );
-    const callee = target.var(h) ?? h;
-    return `${callee}(${args
-      .map((a) => compileValueOperand(a, target))
-      .join(', ')})`;
+    return emitUserFunctionCall(
+      target.var(h) ?? h,
+      args,
+      target,
+      args.map(() => false),
+      scalarParams
+    );
   }
 
   // Parameter-typed, not argument-typed — see the sibling computation in
@@ -2794,6 +2774,32 @@ export function tryCompileLocalFunctionCall(
   // not prove is tested at run time (`localParameterChecks`), by a callee
   // that tests the arguments and then calls the local.
   const local = target.var(h) ?? h;
+  // A tuple argument at a parameter declared as a scalar: the interpreter
+  // maps the function over the components of the tuple (`g(p)` with
+  // `g := (v: real) ↦ v + 10` and `p = (5, 6)` is `(15, 16)`). A local
+  // that the block binds once takes the same map from the component
+  // rewrite of the call (`declaredScalarTupleCall`); the call of a local whose
+  // value is known only at run time maps the local over the tuple with a
+  // static map, one level deep. The other arguments must be scalars.
+  if (target.language === 'javascript' && !checked) {
+    const overTuple = args.map((a, i) => {
+      const pt = annotations[i];
+      if (pt === undefined || !isSubtype(pt, 'number')) return false;
+      const t = resolveTypeForCompilation(a.type.type);
+      return (
+        typeof t === 'object' &&
+        t.kind === 'tuple' &&
+        t.elements.every((e) => isSubtype(e.type, 'number'))
+      );
+    });
+    if (
+      overTuple.some((x) => x) &&
+      args.every((a, i) => overTuple[i] || callArgumentMapRank(a, target) === 0)
+    )
+      return `_SYS.mapFn(${local}, [${overTuple.map((x) => (x ? 1 : 0)).join(', ')}], ${args
+        .map((a) => compileValueOperand(a, target))
+        .join(', ')})`;
+  }
   return emitUserFunctionCall(
     !checked
       ? local
@@ -2804,12 +2810,6 @@ export function tryCompileLocalFunctionCall(
     target,
     coerceToComplex,
     signature === undefined ? true : paramsAreScalar(signature),
-    // A GENERIC callee always takes the runtime broadcast dispatch: at a
-    // generic parameter the argument's static type is INFERRED FROM THE
-    // BOUND rather than declared by the caller, so "provably not a
-    // collection" is no proof there. Same reasoning as the engine route —
-    // see the call in `tryCompileUserFunction`.
-    generic,
     [],
     absentArgumentChecks(h, literal, args, target)
   );

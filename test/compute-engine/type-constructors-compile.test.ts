@@ -701,7 +701,7 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
     ce.declare('L', 'mylist');
     expect(ce.box('L').type.toString()).toBe('mylist');
     const r = compile(ce.box(['q', 'L'] as never), { fallback: false });
-    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.code).toContain('_SYS.mapFn(_fn_q, [1], _.L)');
     expect(r.run!({ L: [1, 2, 3] })).toEqual([5, 9, 13]);
   });
 

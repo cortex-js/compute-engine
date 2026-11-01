@@ -10,9 +10,14 @@
  * collection whole at a parameter declared `any` or `value`, where each
  * element-wise operator of the body maps over it. The Python target
  * compiled the call to `((lambda t: 2 * t))([[1, 2], [3, 4]])` and gave
- * `[[1, 2], [3, 4], [1, 2], [3, 4]]`. It now declines the call
- * (`assertPyAppliedLiteralBindsScalars` in `python-target.ts`), and the
- * interpreter evaluates it. A callback (`Map`, `Reduce`, …) with a
+ * `[[1, 2], [3, 4], [1, 2], [3, 4]]`. At a scalar parameter, the static
+ * type of the argument now selects a map of the call over the list, a
+ * nested comprehension of the depth of the list,
+ * `[[f(e) for e in r] for r in L]`, which gives the interpreter value
+ * (rule R2 of `docs/plans/2026-10-31-static-shape-compilation.md`). A call
+ * that binds a collection whole at a parameter declared `any` or `value`
+ * is still declined (`assertPyAppliedLiteralBindsScalars` in
+ * `python-target.ts`), and the interpreter evaluates it. A callback (`Map`, `Reduce`, …) with a
  * parameter declared `any` or `value` that receives a collection is declined
  * for the same reason (`assertPyCallbackWideParams`).
  */
@@ -48,6 +53,26 @@ function runPython(code: string): string {
     .trim();
 }
 
+/** The numbers of a number or of a nested list of numbers of the engine. */
+function numbersOf(e: any): unknown {
+  return e.ops !== undefined && e.operator === 'List'
+    ? e.ops.map(numbersOf)
+    : e.re;
+}
+
+/**
+ * The compiled call is a map over the list (a comprehension), and, when
+ * Python is available, its value is the interpreter value.
+ */
+function expectMappedValue(json: unknown): void {
+  const { expr, result } = compilePython(json);
+  expect(result.success).toBe(true);
+  expect(result.code).toMatch(/\[.* for _tv\d+ in _tv\d+\]/);
+  if (TEST_PYTHON === undefined) return;
+  const value = JSON.parse(runPython(result.code).replace(/'/g, '"'));
+  expect(value).toEqual(numbersOf(expr.evaluate().N()));
+}
+
 describe('PYTHON: A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
   const PARAMS: Array<[string, string | undefined]> = [
     ['no declaration', undefined],
@@ -63,7 +88,22 @@ describe('PYTHON: A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
     ['Divide', ['Divide', 't', 2], '[[1/2,1],[3/2,2]]'],
     ['Negate', ['Negate', 't'], '[[-1,-2],[-3,-4]]'],
   ];
-  for (const [label, type] of PARAMS) {
+  // A parameter with no declaration, `unknown` or `number` is a scalar
+  // parameter: the call maps over the nested list.
+  for (const [label, type] of PARAMS.slice(0, 3)) {
+    test.each(BODIES)(
+      `%s over a nested list at a parameter with ${label} is mapped`,
+      (_, body, value) => {
+        const json = ['Apply', ['Function', body, param(type)], NESTED];
+        expect(compilePython(json).expr.evaluate().toString()).toBe(value);
+        expectMappedValue(json);
+      }
+    );
+  }
+
+  // A parameter declared `any` or `value` binds the list whole, and the
+  // Python operators do not map over it.
+  for (const [label, type] of PARAMS.slice(3)) {
     test.each(BODIES)(
       `%s over a nested list at a parameter with ${label} is declined`,
       (_, body, value) => {
@@ -80,25 +120,21 @@ describe('PYTHON: A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
 
   // A scalar parameter maps the function even when the body does not read
   // the parameter: the interpreter gives `[1, 1]`, not `1`.
-  test('a constant body at a parameter with no declaration is declined', () => {
-    const { expr, result } = compilePython([
-      'Apply',
-      ['Function', 1, 't'],
-      ['List', 1, 2],
-    ]);
-    expect(expr.evaluate().toString()).toBe('[1,1]');
-    expect(result.success).toBe(false);
+  test('a constant body at a parameter with no declaration is mapped', () => {
+    const json = ['Apply', ['Function', 1, 't'], ['List', 1, 2]];
+    expect(compilePython(json).expr.evaluate().toString()).toBe('[1,1]');
+    expectMappedValue(json);
   });
 
-  test('a list at one parameter of two is declined', () => {
-    const { expr, result } = compilePython([
+  test('a list at one parameter of two is mapped, the other is reused', () => {
+    const json = [
       'Apply',
       ['Function', ['Add', 't', 's'], 't', 's'],
       ['List', 1, 2],
       10,
-    ]);
-    expect(expr.evaluate().toString()).toBe('[11,12]');
-    expect(result.success).toBe(false);
+    ];
+    expect(compilePython(json).expr.evaluate().toString()).toBe('[11,12]');
+    expectMappedValue(json);
   });
 
   // The cases that still compile.

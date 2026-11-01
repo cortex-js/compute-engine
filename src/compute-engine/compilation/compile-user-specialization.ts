@@ -46,6 +46,7 @@ import type { UserFunctionRegistry } from './compiler-types.js';
 import { memoFor } from './compiler-tables.js';
 import { numericRangeOf, parametersCanBeTyped } from './compile-folding.js';
 import {
+  absentPointFork,
   cachedLiteralWithParameterTypes,
   parameterTypesKey,
 } from './compile-callbacks.js';
@@ -111,7 +112,6 @@ export function trySpecializedUserCall(
         target,
         args.map(() => false),
         userFunctionParamsAreScalar(engine, h),
-        false,
         prefixed.values.map((v) => core.compile(v, target)),
         absentArgumentChecks(h, literal, args, target)
       );
@@ -130,7 +130,6 @@ export function trySpecializedUserCall(
       target,
       args.map(() => false),
       true,
-      false,
       [],
       absentChecks
     );
@@ -149,18 +148,21 @@ export function trySpecializedUserCall(
       target,
       args.map(() => false),
       false,
-      false,
       [],
       absentChecks
     );
-  return `${name}(${args
-    .map((a, i) => {
-      return presentCheckedCode(
-        compileValueOperand(a, target),
-        absentChecks[i]
-      );
-    })
-    .join(', ')})`;
+  const codes = args.map((a, i) =>
+    presentCheckedCode(compileValueOperand(a, target), absentChecks[i])
+  );
+  // One point that may be absent: the absent value goes to the generic
+  // definition, which reads the parameter as a scalar, as the interpreter
+  // runs the body with `Missing` (`absentPointFork()`).
+  if (emitted.absentPointAt >= 0) {
+    const generic = core.ensureUserFunctionEmitted(engine, h, target);
+    if (generic === undefined) return undefined;
+    return absentPointFork(name, generic, codes, emitted.absentPointAt, target);
+  }
+  return `${name}(${codes.join(', ')})`;
 }
 
 /**

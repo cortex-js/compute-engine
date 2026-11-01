@@ -2276,6 +2276,8 @@ describeMaybe(
           [['If', 'bool', 1, 2], { bool: 'boolean' }, 'bool'],
           [
             ['Norm', 'x', 'isinstance'],
+            // The order is declared a number or a string, so the code
+            // tests it with `isinstance(_q, str)`.
             { x: 'list<real>', isinstance: 'real | string' },
             'isinstance',
           ],

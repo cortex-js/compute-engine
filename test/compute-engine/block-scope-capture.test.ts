@@ -679,7 +679,7 @@ describe('a lazy collection that leaves an Epsil block or function', () => {
     ],
     [
       'a function body',
-      'function f(xs) { let h = (k) => k + 1; map(h, xs) }\nf([1, 2])',
+      'function f(xs: list<integer>) { let h = (k) => k + 1; map(h, xs) }\nf([1, 2])',
       [2, 3],
     ],
     [
@@ -690,6 +690,19 @@ describe('a lazy collection that leaves an Epsil block or function', () => {
   ])('%s', (_label, src, expected) => {
     expect(run(src)).toBe(JSON.stringify(expected));
     expect(compiled(src)).toEqual(expected);
+  });
+
+  // A function defined in a program is compiled once, as a value, for the
+  // types of its parameters. With `xs` not declared, the elements of `xs`
+  // have the type `unknown`, so the value that `map` passes to `h` has no
+  // settled shape, and the compilation declines: the compiled code does
+  // not test the shape of a value at run time (rule R3 of
+  // `docs/plans/2026-10-31-static-shape-compilation.md`). The case above
+  // declares `xs`.
+  test('a function body with a parameter that has no declared type', () => {
+    const src = 'function f(xs) { let h = (k) => k + 1; map(h, xs) }\nf([1, 2])';
+    expect(run(src)).toBe('[2,3]');
+    expect(() => compiled(src)).toThrow(/does not settle one shape/);
   });
 
   test('a reduce', () => {

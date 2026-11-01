@@ -16,8 +16,11 @@
  * (`docs/COMPILATION-MODEL.md`, "Fail closed"), the JavaScript target
  * refuses an untyped free input with the diagnostic `untyped-input`. The
  * tests of the JavaScript target check the refusal and the interpreted
- * value; the tests of a run-time dispatch compile `(x) ↦ expr`, whose
- * parameter `x` is declared `any`.
+ * value. The tests that need a parameter compile `(x) ↦ expr`: with `x`
+ * declared `any` the shape of the argument of `g(x)` is not settled and the
+ * compilation declines (`unsettled-shape`); with `x` declared `real` or
+ * `list<real>` the call is direct or a static map, and the compiled value is
+ * the interpreter's.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
@@ -35,17 +38,31 @@ function expectRefused(expr: any, mode: string): void {
 }
 
 /** The value of the compiled function `(x) ↦ expr`, whose parameter `x` is
- * declared `any`, called with `x`. The run-time test of the shape of a value
- * is still reachable for a parameter of the root function declared `any`. */
-function jsRoot(expr: any, mode: string, x: unknown): unknown {
+ * declared `type`, called with `x`. */
+function jsRoot(expr: any, mode: string, x: unknown, type: string): unknown {
+  const fn = expr.engine.box([
+    'Function',
+    expr.json,
+    ['Typed', 'x', { str: type }],
+  ]);
+  return (
+    compile(fn, { to: 'javascript', mode, fallback: false } as any) as any
+  ).run(x);
+}
+
+/** Expect the compilation of `(x) ↦ expr`, whose parameter `x` is declared
+ * `any`, to decline: the shape of the argument of the call of `g` is not
+ * settled. */
+function expectUnsettledRoot(expr: any, mode: string): void {
   const fn = expr.engine.box([
     'Function',
     expr.json,
     ['Typed', 'x', { str: 'any' }],
   ]);
-  return (
-    compile(fn, { to: 'javascript', mode, fallback: false } as any) as any
-  ).run(x);
+  const r = compile(fn, { to: 'javascript', mode } as any);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+  expect(r.unsupported).toContain('x');
 }
 
 function listEngine(): ComputeEngine {
@@ -124,15 +141,24 @@ describe('A CALL OF A USER FUNCTION OVER AN UNTYPED FREE INPUT (CE-377)', () => 
     expectRefused(expr, 'complex');
   });
 
-  test('strict: only the type reads the input as a number; the call keeps its run-time broadcast', () => {
+  test('strict: only the type reads the input as a number; the call maps over a declared list', () => {
     // As a free input, `x` is refused. As a parameter of the root function
-    // declared `any`, the call is emitted through `_SYS.bcastFn`, so a value
-    // that holds a list at run time maps `g` over it: `g([1, 2])` is
-    // `[[1, 2], [2, 2]]`, and the sum of its two elements is `[3, 4]`.
+    // declared `any`, the shape of the argument is not settled, and the
+    // compilation declines. Declared `list<real>`, the call maps `g` over
+    // the list: `g([1, 2])` is `[[1, 2], [2, 2]]`, and the sum of its two
+    // elements is `[3, 4]`. Declared `real`, the call is direct.
     const ce = listEngine();
     const expr = ce.box(['Add', ['At', ['g', 'x'], 1], ['At', ['g', 'x'], 2]]);
     expectRefused(expr, 'strict');
-    expect(jsRoot(expr, 'strict', [1, 2])).toEqual([3, 4]);
+    expectUnsettledRoot(expr, 'strict');
+    expect(jsRoot(expr, 'strict', [1, 2], 'list<real>')).toEqual([3, 4]);
+    expect(
+      expr
+        .subs({ x: ce.box(['List', 1, 2]) })
+        .evaluate()
+        .toString()
+    ).toBe('[3,4]');
+    expect(jsRoot(expr, 'strict', 3, 'real')).toBe(5);
   });
 
   test('complex: an input that holds a list at run time is read as the lane reads every free input', () => {
@@ -153,19 +179,19 @@ describe('A CALL OF A USER FUNCTION OVER AN UNTYPED FREE INPUT (CE-377)', () => 
       expect(value.re).toBeNaN();
     }
     // In the two blocks below, `x` has no type, so it is refused as a free
-    // input. The function `(x) ↦ expr`, with the parameter `x` declared
-    // `any`, keeps the run-time dispatch.
+    // input, and the function `(x) ↦ expr` with the parameter `x` declared
+    // `any` declines. Declared `list<real>`, the parameter keeps the
+    // interpreter's value.
     // `h(x) + 1` with `h := t ↦ 2t` does not narrow the type of `x`: the
-    // call maps `h` over a list (`_SYS.bcastFn`), and the `+` maps over the
-    // result of the call (`_SYS.bcast`), so the value is the interpreter's
-    // `[3, 5]`. (Before, the `+` read the result of the call as one scalar
-    // and gave `NaN`.)
+    // call maps `h` over the list, and the `+` maps over the result of the
+    // call, so the value is the interpreter's `[3, 5]`.
     {
       const ce = listEngine();
       ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't']));
       const expr = ce.box(['Add', ['h', 'x'], 1]);
       expectRefused(expr, 'complex');
-      expect(jsRoot(expr, 'complex', [1, 2])).toEqual([3, 5]);
+      expectUnsettledRoot(expr, 'complex');
+      expect(jsRoot(expr, 'complex', [1, 2], 'list<real>')).toEqual([3, 5]);
       expect(
         expr
           .subs({ x: ce.box(['List', 1, 2]) })
@@ -173,14 +199,13 @@ describe('A CALL OF A USER FUNCTION OVER AN UNTYPED FREE INPUT (CE-377)', () => 
           .toString()
       ).toBe('[3,5]');
     }
-    // `g(x)[1]` may be a number or a list, and the complex lane dispatches
-    // on the shape of its value when the code runs (ROADMAP CE-215.2): the
-    // element read is the list `[1, 2]`, and the sum is the interpreter's
-    // `[2, 3]`.
+    // `g(x)[1]` is the list `[1, 2]` for the list `x = [1, 2]`, and the sum
+    // is the interpreter's `[2, 3]`.
     const ce = listEngine();
     const expr = ce.box(['Add', ['At', ['g', 'x'], 1], 1]);
     expectRefused(expr, 'complex');
-    expect(jsRoot(expr, 'complex', [1, 2])).toEqual([2, 3]);
+    expectUnsettledRoot(expr, 'complex');
+    expect(jsRoot(expr, 'complex', [1, 2], 'list<real>')).toEqual([2, 3]);
     expect(
       expr
         .subs({ x: ce.box(['List', 1, 2]) })

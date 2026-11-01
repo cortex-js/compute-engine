@@ -87,21 +87,30 @@ describe('complex mode — one emission per user function, lift at use (design �
 
   it('b(a), b(z), b(√a): the same `_fn_b`, no `$z` specialization', () => {
     const ce = engineWith();
-    // A parameter `a` declared `any` (possibly a collection) takes the
-    // runtime broadcast dispatch — with the lifted argument and the ONE
-    // `_fn_b`, which the dispatch takes as its function value: with no
-    // argument to coerce inside it, a closure would only eta-expand `_fn_b`.
+    // A parameter `a` declared `any` (possibly a collection) does not settle
+    // the shape of the argument of the call, so the compilation declines.
     // (An INPUT `a` with no type is refused, ROADMAP CE-712.1, so the
-    // dispatch is read on a parameter of the root function.)
+    // decline is read on a parameter of the root function.)
     const ba = compile(
       ce.box(['Function', ['b', 'a'], ['Typed', 'a', "'any'"]]),
+      { mode: 'complex' }
+    );
+    expect(ba.success).toBe(false);
+    expect(ba.diagnostic?.code).toBe('unsettled-shape');
+    expect(ba.unsupported).toContain('a');
+    // A parameter declared `list<real>` maps the ONE `_fn_b` over the list,
+    // with the lifted element and no `$z` specialization.
+    const list = new ComputeEngine();
+    list.assign('b', list.parse('x \\mapsto 2x'));
+    const bl = compile(
+      list.box(['Function', ['b', 'a'], ['Typed', 'a', { str: 'list<real>' }]]),
       CX
     );
-    expect(ba.code).toContain('_SYS.bcastFn(_fn_b,');
-    expect(ba.code).toContain('_SYS.cplx(a)');
-    expect(ba.code).not.toContain('$z');
-    const runA = ba.run as unknown as (a: unknown) => unknown;
-    expect(runA(-2)).toBe(-4);
+    expect(bl.code).toContain('_fn_b');
+    expect(bl.code).toContain('_SYS.cplx(');
+    expect(bl.code).not.toContain('$z');
+    expect(bl.code).not.toContain('bcastFn');
+    const runA = bl.run as unknown as (a: unknown) => unknown;
     expect(runA([1, -2])).toEqual([2, -4]);
     // The input `a` declared `number` is a scalar: the call is direct.
     const baNumber = compile(ce.parse('b(a)'), CX);

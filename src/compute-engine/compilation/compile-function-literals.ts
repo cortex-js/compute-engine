@@ -25,6 +25,7 @@ import {
 } from './compile-parameter-defaults.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { descendantRegionAt } from './cse.js';
+import { isScalarShaped } from './static-shape.js';
 import { compileValueOperand } from './compile-statements.js';
 import {
   assertParameterWritesMatchTypes,
@@ -42,13 +43,21 @@ import {
   lambdaParamBinding,
 } from './compile-definitions.js';
 import {
-  broadcastingWrapper,
+  callbackArgumentRanks,
+  callbackArgumentsOf,
   checkedLiteralApplications,
+  expressionParameterVariantTypes,
+  literalWithParameterTypes,
+  staticMapCallback,
+  withCallbackArgumentTypes,
   complexCoercingWrapper,
   markCheckedLiteralApplications,
   declaredParamType,
   literalDeclaredParamTypes,
   scalarFedLiterals,
+  absentPointType,
+  absentArgumentFork,
+  withoutCallbackArguments,
 } from './compile-callbacks.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import {
@@ -130,6 +139,124 @@ export function compileExprFunctionLiteral(
   node: Expression | undefined
 ): TargetSource | undefined {
   if (h === 'Function') {
+    // A callback consumer that passes collections to a parameter declared
+    // `expression` that the body reads gets the literal with these
+    // parameters typed by the values (`expressionParameterVariantTypes()`):
+    // the interpreter binds a collection whole there, and the body maps
+    // over it. With `rows: list<list<real>>`, `Map((t: expression) ↦ 2t,
+    // rows)` compiles the literal `(t: list<real>) ↦ 2t`.
+    const passed = node === undefined ? undefined : callbackArgumentsOf(node);
+    if (passed !== undefined && isFunction(node, 'Function')) {
+      const variant = expressionParameterVariantTypes(node, passed.types);
+      if (variant !== undefined && variant.some((t) => t !== undefined)) {
+        const typed = literalWithParameterTypes(engine, node, variant);
+        if (typed === undefined)
+          throw expressionParameterDecline(
+            'a `Function` literal',
+            variant.findIndex((t) => t !== undefined)
+          );
+        return withCallbackArgumentTypes(typed, passed, () =>
+          compileExprFunctionLiteral(engine, h, typed.ops, target, typed)
+        );
+      }
+      // A consumer that passes a point or an absent value
+      // (`tuple<real, real> | missing`, the element type of
+      // `list<tuple<real, real> | missing>`) to a parameter with no
+      // declared type. The interpreter binds the point whole, and binds
+      // `Missing` to the parameter and runs the body for the absent value.
+      // The canonical
+      // form types such a parameter as the point only when the element type
+      // is a point, so the literal was compiled for a scalar
+      // (`(t) => 2 * t`) and gave `[NaN, NaN]`. The literal is compiled
+      // with the parameter typed as the point.
+      //
+      // When the point may be absent, the interpreter binds `Missing` to the
+      // parameter and runs the body. The value it gives then depends on the
+      // body, and can differ from the literal compiled for any argument:
+      // `Map(t ↦ 2t, [(1, 2), Missing])` is `[(2, 4), Missing]` for the
+      // literal (the compiled `2 * undefined` is `NaN`), where the named
+      // `f2 := t ↦ 2t` gives `[(2, 4), NaN]`, and `Map(t ↦ Length(t), …)`
+      // gives `NaN` (the compiled `Length` of `undefined` throws). So the
+      // absent point goes to the literal compiled for any argument
+      // (`absentArgumentFork()`) only when the body does not read the
+      // parameter (`t ↦ 7`), and the literal declines otherwise.
+      const params = node.ops.slice(1);
+      const points = passed.types.map((t, i) => {
+        if (t === undefined || params[i] === undefined) return undefined;
+        const declared = declaredParamType(params[i]);
+        if (declared !== undefined && declared !== 'unknown') return undefined;
+        return absentPointType(t)?.point;
+      });
+      // A consumer that fills fewer parameters than the literal has (a
+      // trailing parameter with a default value): the parameters that
+      // receive an absent point are not known here, so the literal
+      // declines.
+      if (
+        passed.types.length !== params.length &&
+        passed.types.some((t) => t !== undefined && absentPointType(t)?.absent)
+      )
+        throw new Error(
+          'Could not compile a `Function` literal: its consumer passes it ' +
+            'points that may be absent, and fills fewer parameters than ' +
+            'the literal has.'
+        );
+      if (
+        passed.types.length === params.length &&
+        points.some((t) => t !== undefined)
+      ) {
+        const typed = literalWithParameterTypes(engine, node, points);
+        if (typed === undefined)
+          throw new Error(
+            'Could not compile a `Function` literal: its consumer passes ' +
+              'it points that may be absent, and the literal with the ' +
+              'parameter typed as the point is not valid.'
+          );
+        const code = compileExprFunctionLiteral(
+          engine,
+          h,
+          typed.ops,
+          target,
+          typed
+        );
+        if (code === undefined) return undefined;
+        const absent = passed.types.map(
+          (t, i) =>
+            points[i] !== undefined && absentPointType(t!)?.absent === true
+        );
+        if (!absent.some((a) => a)) return code;
+        // The literal for any argument receives every argument, so another
+        // argument that may hold a point declines (`pointListValueRef()`).
+        if (
+          passed.types.some(
+            (t, i) => !absent[i] && (t === undefined || !isScalarShaped(t))
+          )
+        )
+          throw new Error(
+            'Could not compile a `Function` literal: its consumer passes ' +
+              'it a point that may be absent beside an argument that is ' +
+              'not a scalar.'
+          );
+        const body = node.ops[0];
+        if (
+          absent.some((a, i) => {
+            if (!a) return false;
+            const name = functionLiteralParameterName(params[i]);
+            return name === '' || body.symbols.includes(name);
+          })
+        )
+          throw new Error(
+            'Could not compile a `Function` literal: its consumer passes ' +
+              'it points that may be absent, at a parameter with no ' +
+              'declared type that the body reads, and the value that the ' +
+              'interpreter gives for an absent point depends on the body.'
+          );
+        const generic = withoutCallbackArguments(node, () =>
+          compileExprFunctionLiteral(engine, h, node.ops, target, node)
+        );
+        if (generic === undefined) return undefined;
+        return absentArgumentFork(code, generic, absent, target);
+      }
+    }
     // A literal with a parameter declared `expression` that the body reads
     // is declined when it is compiled as a function value: its arguments
     // are not known at compile time, and one of them can be a collection.
@@ -155,8 +282,38 @@ export function compileExprFunctionLiteral(
     }
     // Dispatch to target-specific handler if available (e.g. GPU throws)
     const fnFn = target.functions?.(h);
-    if (typeof fnFn === 'function')
-      return fnFn(args, (expr) => compileValueOperand(expr, target), target);
+    if (typeof fnFn === 'function') {
+      const code = fnFn(
+        args,
+        (expr) => compileValueOperand(expr, target),
+        target
+      );
+      // The map over list values, as for the arrow below. The map takes as
+      // many values as the consumer passes, not one per parameter: the
+      // target's lambda fills a parameter with a default value that the
+      // consumer does not pass (`lambda x, k=2: k` on Python), and a map
+      // with one parameter per parameter of the literal would require it.
+      const lowered =
+        passed !== undefined &&
+        isFunction(node, 'Function') &&
+        node.nops > 1 &&
+        paramsAreScalar(node.type.type) &&
+        signatureParamsLowerToScalars(node.type.type)
+          ? callbackArgumentRanks(
+              'a `Function` literal',
+              passed,
+              passed.types.length
+            )
+          : undefined;
+      if (lowered === undefined || !lowered.some((r) => r > 0)) return code;
+      const mapped = staticMapCallback(code, lowered, target, passed?.types);
+      if (mapped === undefined)
+        throw new Error(
+          'Could not compile a `Function` literal: its consumer passes it ' +
+            'list values, and the target has no map of a function over a list.'
+        );
+      return mapped;
+    }
     // A GENERIC literal is lowered at its GROUND BOUND reading, the same
     // repair the engine-defined route performs in
     // `ensureUserFunctionEmitted`. Reading the bound settles what the CALL
@@ -243,7 +400,7 @@ export function compileExprFunctionLiteral(
 
     // A consumer that knows every value this literal will receive is a
     // run-time scalar has said so (`withScalarFedLiteral`). The literal then
-    // needs no broadcast wrapper (see below), and its body may read each
+    // needs no static map (see below), and its body may read each
     // parameter as a scalar: a nested call of a scalar-parameter function
     // takes the direct call form. When the values are also finite numbers
     // by construction (the elements of a range with a finite literal start
@@ -256,7 +413,7 @@ export function compileExprFunctionLiteral(
     // own and the body may reassign it (`q = NaN`, `q = [1, 2]`), and after
     // such a write it holds whatever was assigned. So a parameter the body
     // assigns anywhere, a nested function included, gets neither fact. The
-    // wrapper is still left out, because the arguments are what it tests.
+    // static map is still left out, because it reads only the arguments.
     const fed =
       target.language === 'javascript' &&
       node !== undefined &&
@@ -267,6 +424,28 @@ export function compileExprFunctionLiteral(
       signatureParamsLowerToScalars(literal.type.type)
         ? scalarFedLiterals.get(node)
         : undefined;
+    // A literal whose parameters are all scalar, and that no consumer marks
+    // as fed with scalars, is applied to one element at a time: the static
+    // map below maps it over a list value that its consumer passes, and a
+    // literal with no consumer is the scalar variant. Its parameters hold
+    // scalars in the body too, so a
+    // nested call of a function with scalar parameters is a direct call
+    // (`callArgumentMapRank()`), not a decline for an argument of type
+    // `unknown`.
+    const elementFed =
+      fed === undefined &&
+      literal !== undefined &&
+      params.length > 0 &&
+      !complexParam.some((c) => c) &&
+      paramsAreScalar(literal.type.type) &&
+      signatureParamsLowerToScalars(literal.type.type);
+    if (elementFed) {
+      const written = assignedNamesIn(ops[0]);
+      recordScalarParams(
+        lambdaTarget,
+        new Set(params.filter((name) => name !== '_' && !written.has(name)))
+      );
+    }
     if (fed !== undefined) {
       const written = assignedNamesIn(ops[0]);
       const names = new Set(
@@ -426,8 +605,8 @@ export function compileExprFunctionLiteral(
     // itself when nothing wraps the arrow, the default is not a symbol, and
     // the parameter's type cannot hold `Missing` (`parameterCanBeMissing`).
     // Otherwise it is an outer wrapper (`defaultFillingWrapper`), outside
-    // the complex-coercing and broadcasting wrappers, so they receive every
-    // argument. A symbol default goes in the wrapper, whose parameter names
+    // the complex-coercing wrapper and the static map, so they receive
+    // every argument. A symbol default goes in the wrapper, whose parameter names
     // are fresh: in the arrow, a default expression can read a parameter of
     // the arrow that has the name the target spells the symbol with.
     const literalParams = ops.slice(1);
@@ -491,41 +670,40 @@ export function compileExprFunctionLiteral(
         ? `(${complexCoercingWrapper(arrow, complexParam, target)})`
         : arrow;
 
-    // The BROADCAST coercion, the second one a raw element needs. A literal
-    // whose parameters are all scalar is applied element-wise by the
-    // interpreter when an argument is a collection — `Map((x) ↦ 2x,
-    // [[1, 2], [], [3]])` answers `[[2, 4], [], [6]]` — but the arrow's body
-    // is emitted for scalars only, so the bare arrow multiplied a whole row
-    // as a number and answered `[NaN, 0, 6]` behind `success: true`. The
-    // wrapper is the one a NAMED scalar-parameter function is handed out
-    // under (`ensureUserFunctionValueRef`), with the same `_SYS.bcastFn`
-    // helper, so the two spellings of one function behave alike.
-    //
-    // The arrow is bound to a name FIRST, because the wrapper mentions its
-    // callee twice: splicing the arrow text into both arms would construct a
-    // fresh closure on every element. A statement sink flattens the binding
-    // into a `const`; without one it stays an immediately applied arrow.
+    // The MAP over list values, the second coercion a raw element needs. A
+    // literal whose parameters are all scalar is applied element-wise by the
+    // interpreter when an argument is a collection, but the arrow's body is
+    // emitted for scalars only. The static types of the values that the
+    // consumer passes (`callbackArgumentsOf()`) select the variant: the
+    // arrow itself over scalar values, and a static map of it over list
+    // values (`((_tv1) => (_tv2) => _SYS.mapFn(_tv1, [1], _tv2))(arrow)`,
+    // `_IA.mapFn` on interval-js, a comprehension on Python). A value whose
+    // shape is not settled declines (`callbackArgumentRanks()`). A literal
+    // with no consumer (the root `compile(f)`, a local that a block stores
+    // or returns, an argument of a call) is the scalar variant, the arrow.
     //
     // A literal with a collection-typed parameter binds its argument whole
     // (the same `paramsAreScalar` reading `applyFunctionLiteral` makes) and
     // keeps the bare arrow, as does a parameterless one, which has no
     // argument that could be a collection. So does a literal whose consumer
-    // proved that every argument it passes is a scalar (`fed`): the
-    // wrapper's `Array.isArray` test can never be true there.
-    const broadcasts =
+    // proved that every argument it passes is a scalar (`fed`).
+    const ranks =
       fed === undefined &&
-      target.language === 'javascript' &&
+      passed !== undefined &&
       params.length > 0 &&
       literal !== undefined &&
       paramsAreScalar(literal.type.type) &&
-      signatureParamsLowerToScalars(literal.type.type);
+      signatureParamsLowerToScalars(literal.type.type)
+        ? callbackArgumentRanks(`a \`Function\` literal`, passed, params.length)
+        : undefined;
+    const maps = ranks !== undefined && ranks.some((r) => r > 0);
     // The wrapper that fills the parameters with a default value, around
     // the whole value (see `fills` above). It is needed when the fills are
-    // not in the arrow, and when a broadcasting wrapper calls the arrow:
-    // that wrapper passes every parameter, `undefined` for one the call
-    // leaves out, and the number of arguments is then lost.
+    // not in the arrow, and when a map calls the arrow: the map passes
+    // every parameter, `undefined` for one the call leaves out, and the
+    // number of arguments is then lost.
     const withDefaults = (value: string): string => {
-      if (!hasFills || (fillsInArrow && !broadcasts)) return value;
+      if (!hasFills || (fillsInArrow && !maps)) return value;
       const bound = tempVar(target);
       const wrapper = defaultFillingWrapper(bound, fills, () =>
         tempVar(target)
@@ -535,18 +713,14 @@ export function compileExprFunctionLiteral(
         `((${bound}) => ${wrapper})(${value})`
       );
     };
-    if (broadcasts) {
-      const bound = tempVar(target);
-      const wrapper = broadcastingWrapper(
-        bound,
-        params.length,
-        target,
-        'bcastFn'
-      );
-      return withDefaults(
-        javascriptStatements(target)?.parameters([[bound, callee]], wrapper) ??
-          `((${bound}) => ${wrapper})(${callee})`
-      );
+    if (maps) {
+      const mapped = staticMapCallback(callee, ranks!, target, passed?.types);
+      if (mapped === undefined)
+        throw new Error(
+          'Could not compile a `Function` literal: its consumer passes it ' +
+            'list values, and the target has no map of a function over a list.'
+        );
+      return withDefaults(mapped);
     }
     return withDefaults(callee);
   }

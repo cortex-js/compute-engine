@@ -1,7 +1,7 @@
 // A boxed expression can hold the same node object at several positions (a
 // DAG). `e_k = Add(e_(k-1), e_(k-1))` repeated `d` times has about `d`
 // distinct nodes but about `2^d` paths. The shape predicates of
-// `compilation/javascript-value-facts.ts` (`isConstructedScalar`,
+// `compilation/javascript-value-facts.ts` (`isScalarValue`,
 // `integerRange`, and the statement test of `blockValueKind`) followed every
 // path, so the compilation of such an expression took exponential time: 1 s
 // at depth 18, and about an hour at depth 30. Each predicate now remembers its

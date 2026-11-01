@@ -1321,13 +1321,13 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
       const r = compile(e.parse(src), { fallback: false });
       expect(r.run!({ L })).toEqual(expected);
     }
-    // A real source keeps the real-lane `_fn_b` reference — handed out
-    // through the broadcast wrapper, which every scalar-parameter function
-    // takes in value position, and with no complex coercion in it.
+    // A real source keeps the real-lane `_fn_b` reference, with no complex
+    // coercion in it. The elements are scalars, so `Map` reads the function
+    // itself, with no test of the shape of an element.
     e.declare('R', 'list<real>');
     const real = compile(e.parse('\\mathrm{Map}(b, R)'), { fallback: false });
-    expect(real.code).toContain('(_fn_b$b)');
-    expect(real.preamble).toContain('_SYS.bcastFn(_fn_b,');
+    expect(real.code).toContain('(_fn_b)');
+    expect(real.preamble).not.toContain('Array.isArray');
     expect(real.preamble).not.toContain('_fn_b$v');
     expect(real.run!({ R: [1, 2] })).toEqual([2, 4]);
   });
@@ -1487,15 +1487,11 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     const expr = engine.box(['Map', 'Q', ['List', 1, 2, 3]]);
     const r = compile(expr, { constantFold: false });
     expect(r.success).toBe(true);
-    // The callback passed to `Map` is the shim, not the bare definition. It
-    // reaches `Map` through the broadcasting wrapper every scalar-parameter
-    // function takes in value position: since the user ruling of 2026-09-22
-    // the interpreter maps such a callback over an element that is itself a
-    // collection, whether its parameter is a DECLARED scalar such as `complex`
-    // or an open one. The wrapper's callee is the shim, so a raw element is
-    // still coerced.
-    expect(r.code).toContain('_fn_Q$b');
-    expect(r.preamble).toContain('? _SYS.bcastFn(_fn_Q$v, ');
+    // The callback passed to `Map` is the shim, not the bare definition. The
+    // elements are scalars, so `Map` reads the shim itself, with no test of
+    // the shape of an element; a raw element is still coerced.
+    expect(r.code).toContain('(_fn_Q$v)');
+    expect(r.preamble).not.toContain('Array.isArray');
     expect(r.run!({})).toEqual([
       { re: 1, im: 1 },
       { re: 2, im: 1 },
@@ -1744,12 +1740,11 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
       define(engine);
       engine.assign('R', engine.box(['List', 1, 2, 3]));
       const r = compile(engine.box(['Reduce', 'R', 'h', 0]), opts);
-      // The combiner reaches `Reduce` through the broadcast wrapper `$b`,
-      // which every scalar-parameter function takes in value position. There
-      // is no complex coercion in it: the wrapper's callee is the real-lane
-      // definition itself.
-      expect(r.code).toContain('_fn_h$b)');
-      expect(r.preamble).toContain('_SYS.bcastFn(_fn_h,');
+      // The accumulator and the elements are scalars, so the combiner
+      // reaches `Reduce` as the real-lane definition itself, with no complex
+      // coercion and no test of the shape of a value.
+      expect(r.code).toContain('(_fn_h)');
+      expect(r.preamble).not.toContain('Array.isArray');
       expect(r.preamble).not.toContain('_fn_h$v');
       expect(r.run!({})).toBe(12);
     });

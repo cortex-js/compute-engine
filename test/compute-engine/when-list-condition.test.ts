@@ -140,11 +140,40 @@ describe('a restriction with a list of conditions', () => {
     ).toEqual([]);
   });
 
-  test('a value that may be a list or a point at run time fails closed', () => {
+  test('a value declared as a point or a list of points is decided at run time', () => {
+    // A flat array cannot say by itself whether it is a point or a list, but
+    // a list of points holds arrays and a point holds numbers. The compiled
+    // code tests the value of `Q` once and holds one body for each shape: a
+    // point is one value, repeated at every position; a list of points is
+    // zipped with the conditions. Each result equals the interpreter's.
     ce.declare('Q', 'list<tuple<number, number>> | tuple<number, number>');
-    expect(() =>
-      compile(ce.box(['When', 'Q', COND]), { fallback: false })
-    ).toThrow(/may be a list or a point at run time/);
+    const r = compile(ce.box(['When', 'Q', COND]), { fallback: false });
+    expect(r.success).toBe(true);
+    const interpQ = (Q: unknown) =>
+      ce
+        .box(['When', 'Q', COND])
+        .subs({ Q: ce.box(Q as never), v: 1 })
+        .evaluate()
+        .toString();
+    expect(r.run!({ ...VARS, Q: [3, 4] })).toEqual([
+      [3, 4],
+      undefined,
+      undefined,
+    ]);
+    expect(interpQ(['Tuple', 3, 4])).toBe('[(3, 4),"Missing","Missing"]');
+    expect(
+      r.run!({
+        ...VARS,
+        Q: [
+          [1, 2],
+          [3, 4],
+          [5, 6],
+        ],
+      })
+    ).toEqual([[1, 2], undefined, undefined]);
+    expect(
+      interpQ(['List', ['Tuple', 1, 2], ['Tuple', 3, 4], ['Tuple', 5, 6]])
+    ).toBe('[(1, 2),"Missing","Missing"]');
   });
 
   test('both routes agree with the one-clause Which', () => {

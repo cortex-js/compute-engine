@@ -33,19 +33,48 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       engine.box(['PointList', ['List', 1, 2, 3], 'x'] as any);
 
     // On JavaScript a list COMPONENT is now a zip source (it lowers to the
-    // list of points), so the JS diagnostic re-pins on the shape that still
-    // declines there: a union component, which is neither a scalar slot nor a
-    // list source. Same 109a guarantee, different witness.
+    // list of points), and a component declared `number | list<number>`
+    // compiles with one body for each shape. The JS diagnostic re-pins on the
+    // shape that still declines there: a union whose members are the same
+    // array at run time (a list of two numbers and a point of two numbers), so
+    // the declared-union dispatch cannot choose a body. Same 109a guarantee,
+    // different witness.
     const unionComponent = () => {
       const e = new ComputeEngine();
       e.declare('x', 'number');
-      e.declare('U', 'number | list<number>');
+      e.declare('U', 'list<number> | tuple<number, number>');
       return e.box(['PointList', 'x', 'U'] as any);
     };
 
-    it('javascript names the offending component and its type', () => {
+    it('javascript compiles a component declared as a number or a list', () => {
+      const e = new ComputeEngine();
+      e.declare('x', 'number');
+      e.declare('V', 'number | list<number>');
+      const expr = e.box(['PointList', 'x', 'V'] as any);
+      const r = new JavaScriptTarget().compile(expr);
+      expect(r.success).toBe(true);
+      // The compiled value equals the interpreter's for a value of each shape.
+      for (const V of [2, [1, 2, 3]]) {
+        const plain = new ComputeEngine();
+        plain.assign('x', -6);
+        plain.assign('V', Array.isArray(V) ? plain.box(['List', ...V]) : V);
+        const expected = JSON.parse(
+          JSON.stringify(plain.box(['PointList', 'x', 'V']).evaluate().json)
+        );
+        const actual = (r.run as (s: any) => unknown)({ x: -6, V });
+        const toJson = (v: any): unknown =>
+          Array.isArray(v) && v.length > 0 && Array.isArray(v[0])
+            ? ['List', ...v.map((p: any) => ['Tuple', ...p])]
+            : Array.isArray(v)
+              ? ['Tuple', ...v]
+              : v;
+        expect(toJson(actual)).toEqual(expected);
+      }
+    });
+
+    it('javascript names the input whose union of shapes cannot be dispatched', () => {
       expect(() => new JavaScriptTarget().compile(unionComponent())).toThrow(
-        /Could not compile `PointList`: component 2 \(type `[^`]*list<number>[^`]*`\) is neither a scalar slot nor a list source/
+        /Could not compile: the input `U` is declared with a union of shapes whose members the compiled code cannot tell apart at run time/
       );
     });
 

@@ -46,7 +46,6 @@ import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   provenPointWidth,
   canIndexArrayDirectly,
-  isConstructedScalar,
   isScalarValue,
   isDecidedLoopIndex,
   numericArrayCells,
@@ -558,7 +557,6 @@ import {
   countMayBeNaN,
 } from './base-compiler.js';
 export { countMayBeNaN } from './base-compiler.js';
-import { mayHoldCallBroadcastResult } from './compiler-type-facts.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
@@ -598,6 +596,7 @@ import {
   type BroadcastAsyncSpec,
 } from '../kernel-pool.js';
 import { literalParamsMap } from '../library/core.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
@@ -624,6 +623,8 @@ import type {
   StoredBatchBody,
   TargetSource,
 } from './types.js';
+import { javascriptShapeDispatch, mapRankOfType } from './static-shape.js';
+import { core } from './compiler-core-hooks.js';
 
 /**
  * The values that the `run()` of a `javascript` compilation accepts for a
@@ -2872,9 +2873,6 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
   // A symbol declared `any` or `value` while the list code of a run-time
   // check of its value is compiled (`isDeclaredTopListOperand`).
   if (isDeclaredTopListOperand(e)) return true;
-  // A scalar-typed call of a user function that maps over a list argument
-  // at run time (`q(u)` with `u: unknown`), or an operator over one.
-  if (mayHoldCallBroadcastResult(e)) return true;
   // A top-typed APPLICATION is a genuine possibly-collection signal only when
   // bound: an UNBOUND (non-canonical, non-structural) arithmetic subexpression
   // (e.g. the `{ canonical: false }` grouping-preservation path) types
@@ -3869,14 +3867,13 @@ function compileJSPointList(
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    // A component the emission proves scalar by CONSTRUCTION — an explicitly
-    // declared scalar input, scalar arithmetic over such values, or a call of
-    // a user function whose body yields a scalar under scalar parameters — is
-    // a slot, whatever its static type says. It is decided before the type
+    // A component whose static type is a scalar — the result type of the
+    // variant included for a call of a user function declared `-> unknown`
+    // (`isScalarShapedArg()`) — is a slot. It is decided before the type
     // reading below because a top-typed (`unknown`) component would otherwise
     // read as a zip SOURCE (`matches` answers "could be a collection" for a
     // top type).
-    const constructedScalarSlot = isConstructedScalar(a, target);
+    const constructedScalarSlot = BaseCompiler.isScalarShapedArg(a, target);
     // A source that may be absent (`list<real> | missing`): an absent value
     // makes the whole point list absent, as in the interpreter.
     const absentableSource =
@@ -5414,9 +5411,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       !isNumericIndexOperand(index)
         ? undefined
         : runtimeCheckedArrayCode('At', coll, compile);
+    // A call of a user function whose type does not settle a shape (a
+    // function assigned with no declaration, or declared `-> unknown`) is
+    // read with the result type of its variant (`staticTypeOf()`, rule R2
+    // of `docs/plans/2026-10-31-static-shape-compilation.md`): with
+    // `g := t ↦ [t, 2t]` and `p: tuple<real, real>`, `g(p)` is a list of
+    // two points.
+    const collType = resolveTypeForCompilation(core.staticTypeOf(coll, target));
+    const variantIndexed =
+      collType !== jsType(coll) &&
+      !isSubtype(collType, 'string') &&
+      isSubtype(collType, INDEXED_COLLECTION_SHAPE_TYPE);
     const provablyIndexed =
       stringBase ||
       checkedBase !== undefined ||
+      variantIndexed ||
       isIndexedCollectionOperand(coll, target);
     if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
       throw new Error(
@@ -5511,12 +5520,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const slotT =
       stringBase || position === undefined
         ? undefined
-        : tupleSlotReadType(jsType(coll), position);
+        : tupleSlotReadType(collType, position);
     const eltT = stringBase
       ? 'character'
       : (slotT ??
         indexElementType(
-          withoutNumberArms(stripMissingFromType(jsType(coll)), coll)
+          withoutNumberArms(stripMissingFromType(collType), coll)
         ));
     // The third argument of `_SYS.atWithValueMarker`: `NaN` for an absent
     // base when the slots of the tuples in the type of the base are numbers
@@ -5556,7 +5565,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       eltT === undefined &&
       scalarIndex &&
       !stringBase &&
-      isUnionWithCollectionOrAbsentArm(jsType(coll))
+      isUnionWithCollectionOrAbsentArm(collType)
     )
       return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)}${absentNaN()})`;
     // A base whose elements are of unknown type (`At(m(x), 1)` with
@@ -7497,11 +7506,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           target
         )
       : [];
-    // When every argument is a run-time scalar by construction — the same
-    // proof that lets a call of a named function skip its broadcast dispatch
-    // (`isConstructedScalar`) — the literal is applied as a bare arrow,
-    // without the broadcast wrapper and the closure that binds it, which were
-    // otherwise built again at every evaluation of the application.
     const literal = args[0];
     // An argument that an annotation of the literal does not prove is
     // tested at run time.
@@ -7513,15 +7517,69 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         target
       );
       if (checked !== undefined) return checked;
+      // One point named through an alias, a union with `missing` or a
+      // nominal type, at a parameter with no declared type: the literal
+      // typed by the point (`appliedLiteralNamedPointCall()`).
+      const named = BaseCompiler.appliedLiteralNamedPointCall(
+        literal,
+        args.slice(1),
+        args
+          .slice(1)
+          .map((a, i) =>
+            BaseCompiler.presentCheckedCode(compile(a), checks[i])
+          ),
+        compile,
+        () =>
+          BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
+            compile(literal)
+          ),
+        target
+      );
+      if (named !== undefined) return named;
+      // A list of points, or a list of lists of points, at a parameter with
+      // no declared type: the map over the list levels of the literal for
+      // one point (`appliedLiteralPointListCall()`).
+      const points = BaseCompiler.appliedLiteralPointListCall(
+        literal,
+        args.slice(1),
+        args
+          .slice(1)
+          .map((a, i) =>
+            BaseCompiler.presentCheckedCode(compile(a), checks[i])
+          ),
+        compile,
+        () =>
+          BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
+            compile(literal)
+          ),
+        target
+      );
+      if (points !== undefined) return points;
     }
-    const callee =
+    // A literal with scalar parameters is applied as a call of a function
+    // with scalar parameters is (`emitUserFunctionCall`): the static type
+    // of each argument selects the direct call or the static map over the
+    // lists, and an argument with no settled shape declines. The arrow
+    // receives scalars in both forms, so it is compiled bare.
+    if (
       isFunction(literal, 'Function') &&
       literal.nops === args.length &&
-      args.slice(1).every((a) => isConstructedScalar(a, target))
-        ? BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
-            compile(literal)
-          )
-        : compile(args[0]);
+      paramsAreScalar(literal.type.type)
+    ) {
+      const arrow = BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
+        compile(literal)
+      );
+      return BaseCompiler.emitUserFunctionCall(
+        `(${arrow})`,
+        args.slice(1),
+        target,
+        args.slice(1).map(() => false),
+        true,
+        [],
+        checks
+      );
+    }
+    const callee = compile(args[0]);
     return `(${callee})(${args
       .slice(1)
       .map((a, i) => BaseCompiler.presentCheckedCode(compile(a), checks[i]))
@@ -10371,7 +10429,7 @@ function compileInPlaceUpdateChain(
  * A pattern that matches the emitted identifier `name` as a whole word: not
  * preceded by an identifier character or a `.` (so a member `obj.name` and
  * a longer identifier `_name` do not match) and not followed by an
- * identifier character (so `name$b`, the broadcast wrapper of `name`, does
+ * identifier character (so `name$m1`, the static map of `name`, does
  * not match either). Textual, like every test in this preamble analysis: an
  * emitted definition is a string by the time it is classified.
  */
@@ -10431,7 +10489,7 @@ const MEMO_MIN_BODY_LENGTH = 600;
  * The artifact must call the definition from inside ANOTHER definition, and
  * from two or more places in all — counted as occurrences of its name in
  * the emitted text: the root code, and the definitions other than the
- * definition itself and its own call-site shims (`<name>$b`, `<name>$v`,
+ * definition itself and its own call-site shims (`<name>$m1`, `<name>$v`,
  * …). Two calls with the same arguments inside one region are already
  * merged by common-subexpression elimination, which admits pure user-
  * function applications; what CSE cannot merge is a call inside one
@@ -10468,7 +10526,7 @@ const MEMO_MIN_BODY_LENGTH = 600;
  * and cannot disagree.)
  *
  * The wrapper keeps the definition's name, arity, and `const` declaration
- * — every call site, broadcast dispatch (`_SYS.bcastFn(_fn_f, …)`), and
+ * — every call site, static map (`_SYS.mapFn(_fn_f, …)`), and
  * value-position use is unchanged. Its private names carry a `$memo`
  * suffix; `$` cannot appear in a MathJSON symbol, so they collide with no
  * emitted name.
@@ -11094,6 +11152,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // spelled this way shadows it for its whole body — see
       // `CompileTarget.reservedEmittedNames`.
       reservedEmittedNames: JS_RESERVED_EMITTED_NAMES,
+      // See `CompileTarget.shapeDispatch`.
+      shapeDispatch: javascriptShapeDispatch,
       var: (id) => {
         const result = JAVASCRIPT_CONSTANTS[id];
         return result;
@@ -11591,6 +11651,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // See `CompileTarget.reservedEmittedNames`.
       reservedEmittedNames: JS_RESERVED_EMITTED_NAMES,
       constant: (id) => JAVASCRIPT_CONSTANTS[id],
+      // See `CompileTarget.shapeDispatch`.
+      shapeDispatch: javascriptShapeDispatch,
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
@@ -12330,6 +12392,26 @@ function compileToTarget(
         ...BaseCompiler.literalDeclaredParamTypes(expr),
       },
     };
+    // A root literal whose parameters are scalar compiles its scalar
+    // variant (decision D3 of the CE-712.2 design,
+    // `docs/plans/2026-10-31-static-shape-compilation.md` rule R2): the
+    // host passes one scalar to each parameter, so a nested call of a
+    // function with scalar parameters is a direct call
+    // (`callArgumentMapRank()`). A parameter that the body assigns can hold
+    // another value after the write, and is left out.
+    if (
+      paramsAreScalar(expr.type.type) &&
+      !args.slice(1).some((p) => {
+        const t = functionLiteralParameterType(p);
+        return t !== undefined && isNonRealNumber(t);
+      })
+    ) {
+      const written = BaseCompiler.assignedNamesIn(args[0]);
+      recordScalarParams(
+        lambdaTarget,
+        new Set(params.filter((n) => n !== '_' && !written.has(n)))
+      );
+    }
     // The emitted definitions land inside the lambda body (below), where the
     // parameters are in scope: a folded symbol value that mentions one is
     // bound there rather than re-emitted at every reference.
@@ -14272,7 +14354,7 @@ function callbackArg(
   }
   // A one-parameter literal fed the elements of a range whose start and step
   // are finite literals receives a finite number at every call. It needs no
-  // broadcast wrapper, and its body needs no NaN test on its parameter.
+  // static map, and its body needs no NaN test on its parameter.
   if (
     extraArgTypes.length === 0 &&
     target !== undefined &&
@@ -15340,6 +15422,23 @@ function hasNumberArm(t: Type | undefined): boolean {
 }
 
 /**
+ * True when the static type of `a` settles a list of rank 2 or more
+ * (`mapRankOfType()`) whose innermost elements are real numbers:
+ * `list<list<real>>`, `matrix<real^(2x2)>`, `list<vector<real^2>>`. A
+ * `missing` arm of the whole operand is allowed (it is read as the absent
+ * value); an absent innermost element is not.
+ */
+function isNestedRealListOperand(a: Expression | undefined): boolean {
+  if (a === undefined) return false;
+  const rank = mapRankOfType(a.type.type);
+  if (rank === undefined || rank < 2) return false;
+  let leaf: Type | undefined = stripMissingFromType(a.type.type);
+  for (let k = 0; k < rank && leaf !== undefined; k++)
+    leaf = collectionElementType(resolveTypeForCompilation(leaf));
+  return leaf !== undefined && isSubtype(leaf, 'real');
+}
+
+/**
  * Fail closed when the data of a statistics operator (`Mean`, `Median`,
  * `Variance`, `Max`, `Min`, …) is a list of lists: one operand whose
  * elements are collections, or several operands of which one is a
@@ -15520,7 +15619,17 @@ function compileExtremum(
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  refuseNestedData(kind, args, true);
+  // An operand whose static type settles a list of rank 2 or more with
+  // real leaves (`list<list<real>>`, `list<vector<real^2>> | missing`) is
+  // flattened at every level, as the interpreter flattens it:
+  // `Max([[1, 2], [3, 4]])` is 4. Every other operand whose elements are
+  // collections is refused (`refuseNestedData`).
+  const nested = args.map((a) => isNestedRealListOperand(a));
+  refuseNestedData(
+    kind,
+    args.filter((_a, i) => !nested[i]),
+    true
+  );
   const fn = kind === 'Max' ? 'Math.max' : 'Math.min';
   const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
   // Reduce with the identity seed, but map an empty input to `NaN` (interpreter
@@ -15548,6 +15657,7 @@ function compileExtremum(
     // one position, because `rangeGatherSource` declines a gather with no
     // position at all, so the empty-input branch above has no counterpart
     // there.
+    if (nested[0]) return guardedReduce(`${compile(args[0])}.flat(Infinity)`);
     const loop = emitRangeGatherReduction(
       args[0],
       target,
@@ -15655,7 +15765,7 @@ function compileExtremum(
       `for (const _x of ${p}) { ${step('_x')} }`;
     const body = args.map((a, i) => {
       const p = params[i]!;
-      if (isFolded(a, i)) return loop(p);
+      if (isFolded(a, i)) return loop(nested[i] ? `${p}.flat(Infinity)` : p);
       // An operand that may be an array at run time is flattened at every
       // level, as in the single-operand projection above: its type does not
       // say how deep its rows are.
@@ -16271,7 +16381,7 @@ type RangeWalkPlan = {
  *   `start − i` in floating point;
  * - the predicate is compiled by `fnArg`, exactly as the array lowering
  *   compiles it — same annotation checks, same loop-invariant hoist, same
- *   broadcast wrapper — and called with the element alone, as the array
+ *   variant for the element shape — and called with the element alone, as the array
  *   callbacks `(_x) => _f(_x)` called it;
  * - the operands are evaluated once each and in the array lowering's order:
  *   the predicate first (it was the argument of the outer arrow), then the
@@ -17714,16 +17824,23 @@ function compileIntegrate(
   // so that statement is what is scanned (the same reading
   // `hoistedCallbackLambda` takes). The block itself is still what compiles,
   // and its statement is the very node the scan rewrote.
+  //
+  // Each integration variable holds one real number at each sample. The
+  // engine types it `unknown`, so the body and the bounds compile with the
+  // variables entered as real scalars (`withRealLoopIndices`): a call
+  // `f(t)` of a user function is then the direct call, not a call whose
+  // argument has no settled shape.
   const bodyTarget = scoped(lambdaVars);
   const scanned =
     isFunction(bodyExpr, 'Block') && bodyExpr.nops === 1
       ? bodyExpr.ops[0]
       : bodyExpr;
-  const { bindings, result: f } = BaseCompiler.hoistLoopInvariants(
-    scanned,
+  const { bindings, result: f } = BaseCompiler.withRealLoopIndices(
     lambdaVars,
-    bodyTarget,
-    () => BaseCompiler.compile(bodyExpr, bodyTarget)
+    () =>
+      BaseCompiler.hoistLoopInvariants(scanned, lambdaVars, bodyTarget, () =>
+        BaseCompiler.compile(bodyExpr, bodyTarget)
+      )
   );
 
   // Multiple limits nest, innermost last (Mathematica iterator convention:
@@ -17762,11 +17879,10 @@ function compileIntegrate(
       // kept out of its exponential, `1/Γ(k/2)`), assigned on its first call,
       // as the integrand does.
       const innermost = lambdaVars[lambdaVars.length - 1];
-      const hoisted = BaseCompiler.hoistLoopInvariants(
-        logSpace,
-        lambdaVars,
-        bodyTarget,
-        () => BaseCompiler.compile(logSpace, bodyTarget)
+      const hoisted = BaseCompiler.withRealLoopIndices(lambdaVars, () =>
+        BaseCompiler.hoistLoopInvariants(logSpace, lambdaVars, bodyTarget, () =>
+          BaseCompiler.compile(logSpace, bodyTarget)
+        )
       );
       const plainAlternative = `(${spell(innermost)}) => (${hoisted.result})`;
       const name = BaseCompiler.tempVar(target);
@@ -17791,8 +17907,10 @@ function compileIntegrate(
   for (let d = limits.length - 1; d >= 0; d--) {
     const outer = lambdaVars.slice(0, d);
     const boundTarget = outer.length > 0 ? scoped(outer) : sized;
-    const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
-    const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
+    const [lo, hi] = BaseCompiler.withRealLoopIndices(outer, () => [
+      BaseCompiler.compile(limits[d].lowerExpr, boundTarget),
+      BaseCompiler.compile(limits[d].upperExpr, boundTarget),
+    ]);
     // The innermost lambda carries the invariant bindings. In a nest it sits
     // inside the outer lambdas, where every name the body reads is in
     // scope; the bindings mention no integration variable, so an outer

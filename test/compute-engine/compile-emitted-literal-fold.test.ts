@@ -243,28 +243,47 @@ describe('an unrolled Sum leaves no literal arithmetic', () => {
     expect(js).toContain(String(0.1 * 3));
   });
 
-  it('a call that can map over an untyped input is summed element-wise', () => {
-    // An untyped `s` can be a list at run time, and the call `f(0.1 i, s)`
-    // then maps over it. The unrolled terms were joined with the scalar
-    // `+`, which concatenated the arrays as strings
-    // (`"1.01,2.01,3.011.04,…"` for `s = [1, 2, 3]`). The `Sum` is now the
-    // element-wise loop, whose accumulator adds lists.
+  it('a call that maps over a list input is summed element-wise', () => {
+    // With `s` a list, the call `f(0.1 i, s)` maps over it. The unrolled
+    // terms were joined with the scalar `+`, which concatenated the arrays
+    // as strings (`"1.01,2.01,3.011.04,…"` for `s = [1, 2, 3]`). The `Sum`
+    // is now the element-wise loop, whose accumulator adds lists.
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('(x, y) \\mapsto x^2 + y'));
     const expr = ce.parse('\\sum_{i=1}^{3} f(0.1 i, s)');
-    // An INPUT `s` with no type is refused (ROADMAP CE-712.1). A parameter
-    // `s` of the root function declared `any` compiles, with the run-time
-    // test of its value.
+    // An INPUT `s` with no type is refused (ROADMAP CE-712.1).
     const refused = compile(expr, { to: 'javascript' });
     expect(refused.success).toBe(false);
     expect(refused.diagnostic?.code).toBe('untyped-input');
     expect(refused.unsupported).toContain('s');
-    const r = compile(
+    // A parameter `s` of the root function declared `any` settles no shape:
+    // the call maps over a list and binds a number whole, which only a
+    // run-time test of the value could choose, so the compilation declines
+    // and names `s` (rule R3 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`).
+    const untyped = compile(
       ce.box(['Function', expr.json, ['Typed', 's', "'any'"]] as never),
+      { to: 'javascript' }
+    );
+    expect(untyped.success).toBe(false);
+    expect(untyped.diagnostic?.code).toBe('unsettled-shape');
+    expect(untyped.unsupported).toContain('s');
+    // With `s` declared a number, and then a list, the call is direct, and
+    // then the static map, and both values equal the interpreter's.
+    const scalar = compile(
+      ce.box(['Function', expr.json, ['Typed', 's', "'real'"]] as never),
       { to: 'javascript', fallback: false }
     );
+    expect((scalar.run as unknown as (s: unknown) => number)(2)).toBeCloseTo(
+      6.14,
+      12
+    );
+    const r = compile(
+      ce.box(['Function', expr.json, ['Typed', 's', "'list<real>'"]] as never),
+      { to: 'javascript', fallback: false }
+    );
+    expect(r.code).toContain('_SYS.mapFn(');
     const run = r.run as unknown as (s: unknown) => unknown;
-    expect(run(2)).toBeCloseTo(6.14, 12);
     const list = run([1, 2, 3]) as number[];
     expect(list).toHaveLength(3);
     [3.14, 6.14, 9.14].forEach((v, i) => expect(list[i]).toBeCloseTo(v, 12));

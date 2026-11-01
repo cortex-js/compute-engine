@@ -211,32 +211,70 @@ describe('the compiled JavaScript route agrees with the interpreter', () => {
     ]);
   });
 
-  // A source only SOME of whose elements are collections: each row
-  // broadcasts and each number is a direct call, on both routes (user
-  // decision 2026-09-22 (a), ROADMAP CE-257). The compiled code gave
-  // `[NaN, 6]` when the declared-scalar callback refused a row.
-  test.each([
-    ['Map(f, S)', ['Map', 'f', 'S']],
-    ['k(S) with k := L ↦ Map(f, L)', ['k', 'S']],
-    ['k3(S) with a typed parameter', ['k3', 'S']],
-  ])('a partly nested source: %s', (_name, json) => {
+  /** The engine for the three spellings of a map over the input `S`
+   * declared `type`: `Map(f, S)`, `k(S)` with `k := L ↦ Map(f, L)`, and
+   * `k3(S)` with `k3 := (L: type) ↦ Map(f, L)`. */
+  function engineWithSource(type: string): ComputeEngine {
     const ce = engineWithScalarF();
     ce.declare('k', 'function');
     ce.assign('k', ce.box(['Function', ['Map', 'f', 'L'], 'L']));
     ce.declare('k3', 'function');
     ce.assign(
       'k3',
-      ce.parse(
-        '(L: list<list<number> | number>) \\mapsto \\operatorname{Map}(f, L)'
-      )
+      ce.parse(`(L: ${type}) \\mapsto \\operatorname{Map}(f, L)`)
     );
-    ce.declare('S', 'list<list<number> | number>');
-    const expr = ce.box(json as any);
-    const result = compile(expr, { to: 'javascript', fallback: false });
-    expect(result.success).toBe(true);
+    ce.declare('S', type);
+    return ce;
+  }
+  const SPELLINGS: [string, any][] = [
+    ['Map(f, S)', ['Map', 'f', 'S']],
+    ['k(S) with k := L ↦ Map(f, L)', ['k', 'S']],
+    ['k3(S) with a typed parameter', ['k3', 'S']],
+  ];
+
+  // A source only SOME of whose elements are collections: the interpreter
+  // maps `f` over each row and applies it to each number (user decision
+  // 2026-09-22 (a), ROADMAP CE-257). The element type
+  // `list<number> | number` does not settle one shape, so the compiled code
+  // would have to test each element at run time: the compilation declines
+  // with the code `unsettled-shape` (rule R3 of
+  // `docs/plans/2026-10-31-static-shape-compilation.md`), and the
+  // interpreter evaluates the expression.
+  test.each(SPELLINGS)('a partly nested source declines: %s', (_name, json) => {
+    const ce = engineWithSource('list<list<number> | number>');
+    const expr = ce.box(json);
+    const result = compile(expr, { to: 'javascript' });
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('unsettled-shape');
+    expect(result.unsupported).toContain(json[0] === 'Map' ? 'S' : 'L');
     ce.assign('S', ce.box(['List', ['List', 1, 2], 3]));
     expect(expr.evaluate().toString()).toBe('[[2,4],6]');
     expect(result.run!({ S: [[1, 2], 3] } as any)).toEqual([[2, 4], 6]);
+  });
+
+  // The same three spellings over a source of rows, and over a source of
+  // numbers, compile with no run-time shape test and give the values of
+  // the interpreter.
+  test.each(SPELLINGS)('a source of rows: %s', (_name, json) => {
+    const ce = engineWithSource('list<list<number>>');
+    const expr = ce.box(json);
+    const result = compile(expr, { to: 'javascript', fallback: false });
+    expect(result.success).toBe(true);
+    expect(result.code).not.toContain('Array.isArray');
+    ce.assign('S', ce.box(['List', ['List', 1, 2], ['List', 3]]));
+    expect(expr.evaluate().toString()).toBe('[[2,4],[6]]');
+    expect(result.run!({ S: [[1, 2], [3]] } as any)).toEqual([[2, 4], [6]]);
+  });
+
+  test.each(SPELLINGS)('a source of numbers: %s', (_name, json) => {
+    const ce = engineWithSource('list<number>');
+    const expr = ce.box(json);
+    const result = compile(expr, { to: 'javascript', fallback: false });
+    expect(result.success).toBe(true);
+    expect(result.code).not.toContain('Array.isArray');
+    ce.assign('S', ce.box(['List', 1, 3]));
+    expect(expr.evaluate().toString()).toBe('[2,6]');
+    expect(result.run!({ S: [1, 3] } as any)).toEqual([2, 6]);
   });
 
   test('an untyped named callback already broadcast', () => {

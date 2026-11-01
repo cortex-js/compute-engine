@@ -122,7 +122,7 @@ test('lists passed to scalar helpers still broadcast instead of becoming whole p
   define(ce, 's', ['Block', ['Add', 'u', 'v']]);
   const r = compile(ce.box(['s', ['List', 'x', 'y'], 1]));
   expect(r.success).toBe(true);
-  expect(source(r)).toContain('_SYS.bcastFn');
+  expect(source(r)).toContain('_SYS.mapFn(_fn_s, [1, 0], [_.x, _.y], 1)');
   expect(r.run!({ x: 2, y: 4 })).toEqual([3, 5]);
 });
 
@@ -326,7 +326,8 @@ test.each([false, true])(
     ];
     if (listFirst) calls.reverse();
     const r = compile(ce.expr(['Tuple', ...calls]), { fallback: false });
-    expect(source(r)).toContain('_SYS.bcastFn');
+    expect(source(r)).toContain('_fn_vector(_.x)');
+    expect(source(r)).toContain('_SYS.mapFn(_fn_vector, [1], _.L)');
     for (const L of [[], [1], [1, 2, 3], [NaN, Infinity]]) {
       const expected = [[2, 3], L.map((t) => [t, t + 1])];
       if (listFirst) expected.reverse();

@@ -2,21 +2,20 @@
  * A `Function` literal whose arguments are run-time scalars by construction
  * compiles to a bare arrow (issue #388).
  *
- * A literal in value position is normally wrapped in a broadcast dispatch,
- * `(_tv1) => (_tv2) => Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) :
- * _tv1(_tv2)`, because the interpreter maps a scalar-parameter function over
- * a collection argument. Two consumers know that no argument can be a
- * collection, and skip the wrapper:
+ * The static type of the values that a consumer passes to a literal selects
+ * its variant: the bare arrow over scalars, a static map of it over lists
+ * (rule R2 of `docs/plans/2026-10-31-static-shape-compilation.md`), with no
+ * run-time test of the shape of a value. Two consumers also know that every
+ * argument is a scalar by construction, and record it for the body:
  *
  * - a callback fed the elements of a `Range` whose start and step are finite
  *   literals. Every element is also a finite number, so a comparison against
  *   the parameter needs no NaN (`q === q`) or absence (`typeof q`) test, as
  *   for an emitted loop index;
  * - an `Apply` of a literal to arguments that are constructed scalars (a
- *   literal, a declared scalar input, a loop index). The closure that bound
- *   the wrapper was otherwise built again at every evaluation.
+ *   literal, a declared scalar input, a loop index).
  *
- * Every other source keeps the wrapper, so a list argument still broadcasts.
+ * A list of lists maps the literal over each row with a static map.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -77,7 +76,7 @@ describe('a callback fed a literal-start range', () => {
     }
   });
 
-  test('a range with a symbolic start keeps the wrapper and its tests', () => {
+  test('a range with a symbolic start keeps its tests', () => {
     // A relation with a NaN operand is decided (user decisions 2026-10-20
     // and 2026-10-23), so the parameter takes no NaN test; the test that
     // remains is the one on the unsupplied input `m`.
@@ -86,17 +85,19 @@ describe('a callback fed a literal-start range', () => {
       ['Function', ['If', ['NotEqual', 'q', 'm'], 0, 1], 'q'],
       ['Range', 'm', 5],
     ]);
-    expect(r.code).toContain('bcastFn');
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.code).not.toContain('Array.isArray');
     expect(r.code).toContain('_.m !== undefined');
     expect(r.run!({ m: 2 })).toEqual([1, 0, 0, 0]);
   });
 
-  test('a list of lists still broadcasts the callback', () => {
+  test('a list of lists maps the callback over each row', () => {
     const r = js([
       'Map',
       ['Function', ['Multiply', 2, 'x'], 'x'],
       ['List', ['List', 1, 2], ['List', 3]],
     ]);
+    expect(r.code).not.toContain('Array.isArray');
     expect(r.run!({})).toEqual([[2, 4], [6]]);
   });
 });
@@ -133,7 +134,7 @@ describe('an Apply of a literal to scalar arguments', () => {
 
   test('a list argument still broadcasts', () => {
     const r = js(['Apply', ['Function', ['Multiply', 2, 'y'], 'y'], 'L']);
-    expect(r.code).toContain('bcastFn');
+    expect(r.code).toBe('_SYS.mapFn((((y) => 2 * y)), [1], _.L)');
     expect(r.run!({ L: [1, 2, 3] })).toEqual([2, 4, 6]);
   });
 });

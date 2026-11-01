@@ -2582,8 +2582,10 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   });
 
   // Over a list of lists, a statistic reads each row as a number, so it does
-  // not compile and the interpreter answers: an `incompatible-type` error for
-  // `Mean`, the extremum of every element for `Max`. A built-in `Add` fold adds
+  // not compile and the interpreter answers an `incompatible-type` error for
+  // `Mean`. `Max` and `Min` give the extremum of every element, as the
+  // interpreter does: the compiled code flattens a list of lists of reals.
+  // A built-in `Add` fold adds
   // the rows element-wise, as `Sum` does. A fold step whose `acc` was typed
   // for numbers from its uses (`Sum(acc)`) does not compile over rows either.
   // Every compiled value was checked against the interpreter.
@@ -2591,8 +2593,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = new ComputeEngine();
     e.declare('s', 'list<list<integer>>');
     for (const head of [
-      'Max',
-      'Min',
       'Mean',
       'Median',
       'Variance',
@@ -2613,6 +2613,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
           [3, 5],
         ],
       });
+    // The interpreter gives 5 and 1 for `s = [[1, 2], [3, 5]]`.
+    expect(run(['Max', 's'])).toBe(5);
+    expect(run(['Min', 's'])).toBe(1);
     expect(run(['Reduce', 's', 'Add'])).toEqual([4, 7]);
     expect(run(['Scan', 's', 'Add'])).toEqual([
       [1, 2],
@@ -2641,13 +2644,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = new ComputeEngine();
     e.declareType('Row', 'list<real>');
     e.declare('R', 'list<Row>');
-    for (const json of [
-      ['Mean', 'R'],
-      ['Max', 'R'],
-    ])
-      expect(() => compile(e.box(json), { fallback: false })).toThrow(
-        /collection/
-      );
+    expect(() => compile(e.box(['Mean', 'R']), { fallback: false })).toThrow(
+      /collection/
+    );
     expect(
       compile(e.box(['Reduce', 'R', 'Add']), { fallback: false })!.run!({
         R: [
@@ -3920,8 +3919,11 @@ describe('COMPILE user-defined function calls', () => {
       // lowering and the per-parameter complex coercion inside it.
       const r = compile(expr, { fallback: false, constantFold: false });
       expect(r.success).toBe(true);
+      // The list maps at rank 1 and the coerced scalar is reused at rank 0.
       // The wrap is inside the closure, around the element parameter.
-      expect(r.code).toMatch(/_SYS\.bcastFn\(\(\w+, (\w+)\) =>.*re: \1, im: 0/);
+      expect(r.code).toMatch(
+        /_SYS\.mapFn\(\(\(\w+, (\w+)\) =>.*re: \1, im: 0.*\[1, 0\]/
+      );
       // Same values as the interpreter. The callee computes in the complex
       // convention, but the elements are real, so the runner's result
       // convention (design §5, 2026-08-16, applied element by element) hands
@@ -5276,9 +5278,7 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
   it('JS: the DECLARED user-function route runs to 3√10 (was undefined)', () => {
     const r = compile(engineWithA(true).box(['a', 'u']));
     expect(r?.success).toBe(true);
-    expect(r!.code).toBe(
-      '((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn(_fn_a, _tv1) : _fn_a(_tv1))(_.u)'
-    );
+    expect(r!.code).toBe('_fn_a(_.u)');
     expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
   });
 

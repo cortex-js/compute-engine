@@ -189,7 +189,7 @@ describe('a block-local function that is only called has no broadcast wrapper (C
 
   test('a call with a list argument broadcasts at the call site', () => {
     const json = block(['g', 'V']);
-    expect(codeOf(ce, json)).toContain('_SYS.bcastFn(g, _.V)');
+    expect(codeOf(ce, json)).toContain('_SYS.mapFn(g, [1], _.V)');
     expect(run(ce, json, { V: [1, 2] })).toEqual([2, 4]);
   });
 
@@ -198,19 +198,26 @@ describe('a block-local function that is only called has no broadcast wrapper (C
     expect(run(ce, json, { LL: [[1, 2], [], [3]] })).toEqual([[2, 4], [], [6]]);
   });
 
-  test('the function as a value keeps the wrapper', () => {
+  test('the function as a value over list elements is a static map', () => {
+    // The elements of `LL` are lists, so `Map` reads the static map of `g`
+    // over each row, with no run-time test of the shape of a row.
     const json = block(['Map', 'g', 'LL']);
-    expect(codeOf(ce, json)).toContain('Array.isArray');
+    const code = codeOf(ce, json);
+    expect(code).toContain('_SYS.mapFn(g, [1], ');
+    expect(code).not.toContain('Array.isArray');
     expect(run(ce, json, { LL: [[1, 2], [], [3]] })).toEqual([[2, 4], [], [6]]);
   });
 
-  test('an assignment that is the last statement keeps the wrapper', () => {
-    // The value of the block is the literal, so a caller can give it a list.
+  test('an assignment that is the last statement gives the scalar variant', () => {
+    // The value of the block is the literal, with no consumer: the scalar
+    // variant, the bare arrow (rule R2 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`).
     const r = compile(ce.box(block() as never), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.code).not.toContain('_SYS.bcastFn');
+    expect(r.code).not.toContain('Array.isArray');
     const g = (r.run as (v: unknown) => (x: unknown) => unknown)({});
-    expect(g([1, 2])).toEqual([2, 4]);
+    expect(g(3)).toBe(6);
   });
 });
 

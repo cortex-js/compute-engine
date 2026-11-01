@@ -44,7 +44,10 @@ import {
 import { CompilerState } from './compiler-state.js';
 import { core } from './compiler-core-hooks.js';
 import {
-  broadcastingWrapper,
+  callbackArgumentRanks,
+  callbackArgumentsOf,
+  mapWrapperSuffix,
+  staticMapCallback,
   checkingShimTests,
   declaredParamType,
   jsClauseParamGuard,
@@ -77,14 +80,10 @@ import { isContradictedScalarFunctionBody } from './compile-conditions.js';
  *
  * `target` is the target that compiles `e`, when it is not the target of
  * the call site in progress: for the body of an emitted user-function
- * definition, the target of that body. A parameter of a function whose
- * parameters are all scalar receives one element of a list argument (the
- * call maps the function over the list), so a call in the body whose
- * argument is such a parameter does not map over a list
- * (`mayHoldCallBroadcastResult`). Read with the target of the call site,
- * the parameter is a free symbol of type `unknown`, and the body of
- * `g(s) := h(s)` was read as a possible list: the definition then recorded
- * no lane, and `g(x)` was read as real when `h` returns a complex value.
+ * definition, the target of that body. The answer reads only the static
+ * type of `e`: a call of a user function gives a list only when its static
+ * type says so, because the compiler settles the shape of each argument of
+ * the call at compile time.
  */
 export function mayBeCollectionValued(
   e: Expression,
@@ -511,8 +510,9 @@ export function ensureHostOperatorCallbackEmitted(
 
 /**
  * The name under which the eta-expanded built-in `s` is handed to a consumer
- * of a function VALUE: the broadcast-aware wrapper when the operator is
- * element-wise, and the plain `name` otherwise.
+ * of a function VALUE: for an element-wise operator, the variant for the
+ * shape of the values that the consumer passes (`callbackArgumentRanks()`),
+ * and the plain `name` otherwise.
  *
  * The synthesized body applies the operator to SCALARS — `(_tv1) =>
  * Math.sin(_tv1)` — while the consumers of a function value hand the callee
@@ -521,13 +521,14 @@ export function ensureHostOperatorCallbackEmitted(
  * `[[1, 2], [], [3]]` answered `[NaN, 0, 0.141…]` behind `success: true`,
  * because `Math.sin` coerces an array through `Number`. The interpreter
  * applies the operator's own broadcast to such an element, so
- * `Sin([1, 2])` is `[sin 1, sin 2]`.
+ * `Sin([1, 2])` is `[sin 1, sin 2]`. The static element type selects the
+ * code: `name` itself over scalar elements, and a static map of `name`
+ * (`const _fn_Sin$m1 = (_tv1) => _SYS.mapFn(_fn_Sin, [1], _tv1)`) over
+ * list elements, with no run-time test of the shape of an element. A
+ * value of the built-in with no consumer (`compile(Sin)`) is the scalar
+ * variant, `name`.
  *
- * The runtime helper is `_SYS.bcast`, the OPERATOR broadcast, not the
- * `_SYS.bcastFn` a user function gets. The two answer alike today; the
- * names stay apart so the emitter keeps saying which form it lowers.
- *
- * Only an element-wise operator is wrapped. A built-in that consumes its
+ * Only an element-wise operator is mapped. A built-in that consumes its
  * argument WHOLE — `Length`, `Sum`, `Min` over a list — is not broadcast by
  * the interpreter either, and keeps the bare name so a collection element
  * still reaches its kernel intact.
@@ -557,19 +558,17 @@ export function builtinCallbackValueRef(
   if (opDef?.broadcastable !== true) return name;
   const arity = operatorCallbackArity(opDef);
   if (arity === undefined) return name;
-
-  const bcastName = `${name}$b`;
-  if (!registry.defs.has(bcastName))
+  const passed = callbackArgumentsOf(s);
+  if (passed === undefined) return name;
+  const ranks = callbackArgumentRanks(s, passed, arity);
+  if (!ranks.some((r) => r > 0)) return name;
+  const mapName = `${name}$m${mapWrapperSuffix(ranks, passed.types, target)}`;
+  if (!registry.defs.has(mapName))
     registry.defs.set(
-      bcastName,
-      `const ${bcastName} = ${broadcastingWrapper(
-        name,
-        arity,
-        target,
-        'bcast'
-      )};`
+      mapName,
+      `const ${mapName} = ${staticMapCallback(name, ranks, target, passed.types)};`
     );
-  return bcastName;
+  return mapName;
 }
 
 /**
@@ -789,16 +788,15 @@ export function prepareUserFunctionBody(
  * 2026-09-08 and 2026-09-09).
  *
  * The reason is that the body never chooses what reaches it — its call
- * sites do, and they are all broadcast-aware. A call whose argument is not
- * provably a scalar is dispatched element-wise (`_SYS.bcastFn`) or guarded
- * by `Array.isArray`, so the body runs once per element with a scalar
- * bound; a function REFERENCED AS A VALUE is handed out through a
- * broadcasting or guarding wrapper for the same reason. The only call form
- * that passes an argument straight through is the one an explicit caller
- * declaration already exempts, and a caller that hands that form a list has
- * broken its own declared contract. The body's own arithmetic already
- * assumes this: `f(x) := x * x` computes a product, not a Hadamard product
- * it wrote itself.
+ * sites do. The static type of each argument selects the call: a direct
+ * call for a scalar, a static map (`_SYS.mapFn`) for a list, so the body
+ * runs once per element with a scalar bound; an argument with no settled
+ * shape declines (rule R3 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`). The body's own
+ * arithmetic already assumes this: `f(x) := x * x` computes a product, not
+ * a Hadamard product it wrote itself. The parameters of this variant are
+ * not typed `number` in its literal, so this record is the fact that the
+ * nested calls of the body read (`isScalarParam()`).
  *
  * A definition with a parameter that binds its argument whole — the
  * collection parameter of `k(L) := Sum(L)` — makes
@@ -811,7 +809,16 @@ export function recordScalarParams(
   literal: Expression & FunctionInterface,
   bodyTarget: CompileTarget<Expression>
 ): void {
-  if (bodyTarget.language !== 'javascript') return;
+  // The interval target emits its calls with the same three forms as
+  // JavaScript (`emitUserFunctionCall()`: a direct call, a static map, or
+  // a decline), so the body of such a function receives one scalar there
+  // too. Without the record, a recursive call `f(x, n - 1)` in the body
+  // declined, because the parameter `x` has the type `unknown`.
+  if (
+    bodyTarget.language !== 'javascript' &&
+    bodyTarget.language !== 'interval-javascript'
+  )
+    return;
   const engine = literal.engine as unknown as ComputeEngine;
   if (!userFunctionParamsAreScalar(engine, h)) return;
   const signature = userFunctionSignature(engine, h);

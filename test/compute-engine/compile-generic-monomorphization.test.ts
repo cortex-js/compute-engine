@@ -52,8 +52,7 @@ describe('G3 lift — scalar-bounded generic, whole-fn emission', () => {
   test('a collection instantiation broadcasts, agreeing with the interpreter', () => {
     const ce = doubler('(x: T) -> T where T: number');
     const r = build(ce, ['gd', ['List', 1, 2, 3]]);
-    expect(r?.code).toContain('_SYS.bcastFn');
-    expect(r?.code).toContain('_fn_gd');
+    expect(r?.code).toBe('_SYS.mapFn(_fn_gd, [1], _lit_1)');
     expect(r?.run?.({})).toEqual([2, 4, 6]);
     expect(
       ce
@@ -64,13 +63,14 @@ describe('G3 lift — scalar-bounded generic, whole-fn emission', () => {
   });
 
   test('a run()-supplied collection broadcasts too', () => {
-    // The free `y` types `number` by INFERENCE from the bound, which is not
-    // proof that the caller will supply a scalar: the runtime dispatch is
-    // emitted anyway, so both shapes answer what the interpreter answers.
+    // `y` is declared `real | list<real>`, so the code has one body per
+    // shape: a static map over the list, and a direct call of the scalar.
+    // Both shapes answer what the interpreter answers.
     const ce = doubler('(x: T) -> T where T: number');
     const r = build(ce, ['gd', 'y']);
-    expect(r?.code).toContain('_SYS.bcastFn');
-    expect(r?.code).toContain('_fn_gd');
+    expect(r?.code).toBe(
+      '(Array.isArray(_.y) ? _SYS.mapFn(_fn_gd, [1], _.y) : _fn_gd(_.y))'
+    );
     expect(r?.run?.({ y: 21 })).toBe(42);
     expect(r?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
   });
@@ -82,17 +82,23 @@ describe('G3 lift — scalar-bounded generic, whole-fn emission', () => {
     const r = build(ce, ['g2', 'a', 'b']);
     expect(r?.preamble).toContain('const _fn_g2 = (x, y) => x + y;');
     expect(r?.run?.({ a: 2, b: 3 })).toBe(5);
-    expect(r?.run?.({ a: [1, 2], b: 10 })).toEqual([11, 12]);
+    // A list is given only to an input declared as a list: the call maps
+    // over it and reuses the scalar.
+    ce.declare('A', 'list<number>');
+    const rl = build(ce, ['g2', 'A', 'b']);
+    expect(rl?.code).toBe('_SYS.mapFn(_fn_g2, [1, 0], _.A, _.b)');
+    expect(rl?.run?.({ A: [1, 2], b: 10 })).toEqual([11, 12]);
+    expect(
+      ce
+        .box(['g2', ['List', 1, 2], 10] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[11,12]');
   });
 
   test('a boolean-literal argument takes the direct call, not the runtime broadcast dispatch', () => {
-    // A generic callee always dispatches through `_SYS.bcastFn`
-    // (`certainlyScalarArg`, since a bound-inferred parameter type is not
-    // proof the caller supplies a scalar) EXCEPT when the argument is a
-    // scalar by construction — a number/string/character literal, or now a
-    // boolean literal (`True`/`False`), which can never be an array at run
-    // time. `certainlyScalarArg` used to omit the boolean-literal case, so
-    // this call took the dispatch branch needlessly.
+    // The static type of the argument `True` is `boolean`, a scalar, so
+    // the call of the generic callee is the direct call.
     const ce = fresh();
     ce.declare('gb', '(x: T) -> T where T: boolean');
     ce.assign('gb', ce.box(['Function', 'x', 'x'] as any));
@@ -188,7 +194,7 @@ describe('G3 lift — what still declines', () => {
       constantFold: false,
       fallback: false,
     } as any);
-    expect(r.code).toBe('_SYS.bcastFn(_fn_gd, _.zs)');
+    expect(r.code).toBe('_SYS.mapFn(_fn_gd, [1], _.zs)');
     expect(r.run!({ zs: [1, 2, 3] } as never)).toEqual([2, 4, 6]);
   });
 
@@ -541,15 +547,16 @@ describe('G3 lift — a BLOCK-LOCAL generic reads the same bounds', () => {
         .toString()
     ).toBe('[2,4,6]');
     const r = buildLocal('(x: T) -> T where T: number', ['List', 1, 2, 3]);
-    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.code).toContain('_SYS.mapFn(gd, [1], ');
     expect(r.run?.({})).toEqual([2, 4, 6]);
   });
 
   test('a run()-supplied argument takes the runtime dispatch, both shapes', () => {
-    // As at engine level: the free `y` types `number` by INFERENCE from the
-    // bound, which is no proof the caller supplies a scalar.
+    // As at engine level: `y` is declared `real | list<real>`, so the code
+    // has one body per shape.
     const r = buildLocal('(x: T) -> T where T: number', 'y');
-    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.code).toContain('_SYS.mapFn(gd, [1], _.y)');
+    expect(r.code).toContain('return gd(_.y)');
     expect(r.run?.({ y: 21 })).toBe(42);
     expect(r.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
   });

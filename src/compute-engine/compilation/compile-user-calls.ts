@@ -11,7 +11,7 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isConstructedScalar } from './javascript-value-facts.js';
+import { isScalarParam } from './javascript-value-facts.js';
 import {
   isOperatorDef,
   isValueDef,
@@ -41,8 +41,6 @@ import type { Type } from '../../common/type/types.js';
 import {
   isSymbol,
   isNumber,
-  isString,
-  isCharacter,
   isFunction,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -54,8 +52,6 @@ import { multiClauseState } from '../multi-clause.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
-  provablyScalarArg,
-  provablyScalarArg as provablyScalarArg__,
   signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
@@ -73,7 +69,6 @@ import type {
 import {
   compilationType,
   isNominalAtomicType,
-  isProvablyNumericListOperand,
   isTopTypedLocalSymbol,
 } from './compiler-type-facts.js';
 import { compileValueOperand } from './compile-statements.js';
@@ -89,17 +84,25 @@ import {
 import { core } from './compiler-core-hooks.js';
 import { userFunctionSignature } from './compile-absence.js';
 import { NO_NAMES } from './compiler-tables.js';
+import { CompileDeclineError, UNSETTLED_SHAPE_CODE } from './diagnostics.js';
+import {
+  isNominalWithUnsettledRank,
+  isOpenScalarRankType,
+  isScalarShaped,
+  mapRankOfType,
+} from './static-shape.js';
 
 /**
- * `provablyScalarArg`, extended to a symbol the innermost local shape frame
- * records as a SCALAR (`LOCAL_SCALAR`). A declared-complex parameter is
- * entered that way (`addDeclaredComplexParams`): its declared type says
- * complex but not "scalar" to `provablyScalarArg`, yet a complex-typed
- * parameter holds exactly one complex object, and a nested call passing it
- * on (`c(x: complex) := b(x) + 1`) must see a scalar argument.
+ * True when the static type of `a` is a scalar (`isScalarShaped()`), or `a`
+ * is a symbol that the innermost local shape frame records as a SCALAR
+ * (`LOCAL_SCALAR`). A declared-complex parameter is entered that way
+ * (`addDeclaredComplexParams`): in the complex variant of a shader target
+ * its type in context reads as a pair, yet a complex-typed parameter holds
+ * exactly one complex object, and a nested call passing it on
+ * (`c(x: complex) := b(x) + 1`) must see a scalar argument.
  */
 export function provablyScalarOrFramedScalar(a: Expression): boolean {
-  if (provablyScalarArg(a)) return true;
+  if (isScalarShaped(a.type.type)) return true;
   if (!isSymbol(a)) return false;
   return localShapeFrameOf(a.symbol)?.get(a.symbol) === LOCAL_SCALAR;
 }
@@ -238,22 +241,34 @@ export function presentCheckedCode(
 }
 
 /**
- * The call site of an already-emitted user function `name`: a direct scalar
- * call, the unconditional broadcast dispatch, or a runtime `Array.isArray`
- * guard that chooses between the two, per the rules below.
+ * The call site of an already-emitted user function `name`, in one of three
+ * forms that the static types of the arguments select at compile time
+ * (rule R2 of `docs/plans/2026-10-31-static-shape-compilation.md`):
  *
- * Shared by the ENGINE-defined route (`tryCompileUserFunction`) and the
- * BLOCK-LOCAL route (`tryCompileLocalFunctionCall`), which differ only in
- * where they read the callee's signature from — the engine's definition
- * versus the declared literal's own type — never in how the call is spelled.
+ * - a direct call, `name(a…)`, when no argument is a list that the call
+ *   maps over;
+ * - a static map, when the parameters of the callee are scalar
+ *   (`paramsAreScalar`) and some arguments are lists: the interpreter
+ *   applies the function to each element (`f(L)` with `f(t) := 2t + 1`
+ *   and `L = [1, 2, 3]` is `[3, 5, 7]`). The depth of the map over each
+ *   argument is its rank (`callArgumentMapRank()`), written into the code
+ *   by the compiler: `_SYS.mapFn(name, [1, 0], L, x)` on JavaScript,
+ *   `_IA.mapFn(…)` on interval-js, a comprehension on Python;
+ * - a decline, when an argument at a scalar parameter has no settled
+ *   shape (rule R3): the code would have to test the value at run time to
+ *   know whether to map. The decline names the argument.
+ *
+ * The code tests no shape of a value at run time. A host value outside
+ * the static type of its argument (a list for an input whose type is
+ * `real`) gives an unspecified result.
+ *
+ * Shared by the ENGINE-defined route (`tryCompileUserFunction`), the
+ * BLOCK-LOCAL route (`tryCompileLocalFunctionCall`) and the specialized
+ * copies (`trySpecializedUserCall`), which differ only in where they read
+ * the callee's signature from, never in how the call is spelled.
  *
  * `coerceToComplex[i]` marks an argument to wrap in the `{ re, im }`
  * convention; `paramsAreScalar` says no parameter binds a collection whole.
- * `alwaysDispatch` suppresses the provably-scalar fast path, so the runtime
- * broadcast dispatch is emitted even for arguments whose static type says
- * they cannot be collections — the callee's parameters are open type
- * variables and that static type came from their bounds, not from the
- * caller (see the call in `tryCompileUserFunction`).
  */
 export function emitUserFunctionCall(
   name: string,
@@ -261,15 +276,13 @@ export function emitUserFunctionCall(
   target: CompileTarget<Expression>,
   coerceToComplex: ReadonlyArray<boolean>,
   paramsAreScalar: boolean,
-  alwaysDispatch = false,
   /**
    * Compiled arguments appended after `args` in EVERY call form, and
-   * never broadcast over: the values of an invariant-prefix variant's
+   * never mapped over: the values of an invariant-prefix variant's
    * extra parameters (`tryCompileUserFunction`). A hoisted prefix is a
    * value the callee's body reads whole — a list the body indexes must
    * reach it as that list — so it is passed the way an atomic argument
-   * is, whatever its run-time shape, while the ordinary arguments keep
-   * their dispatch.
+   * is, while the ordinary arguments keep their map.
    */
   held: ReadonlyArray<string> = [],
   /**
@@ -278,315 +291,348 @@ export function emitUserFunctionCall(
    */
   absentChecks: ReadonlyArray<AbsentArgumentCheck | undefined> = []
 ): TargetSource {
-  const provablyScalarArg = provablyScalarArg__;
+  // The rank of each argument: the number of list levels that the call
+  // maps over. A callee with a parameter that binds a collection whole
+  // binds every argument whole, as the interpreter does.
+  const ranks = args.map((a) =>
+    paramsAreScalar ? callArgumentMapRank(a, target) : 0
+  );
+  // A value of a nominal type has the rank 0: the call does not map over
+  // it. When its definition has no settled rank (`broadcastable<real>`), no
+  // variant has a parameter of that type, and the call declines
+  // (`isNominalWithUnsettledRank()`).
+  const nominal = paramsAreScalar
+    ? args.findIndex((a) =>
+        isNominalWithUnsettledRank(core.staticTypeOf(a, target))
+      )
+    : -1;
+  if (nominal >= 0) throw unsettledArgumentDecline(name, args[nominal]);
+  const unsettled = ranks.findIndex((r) => r === undefined);
+  if (unsettled >= 0) {
+    const open = openRankCall(
+      name,
+      args,
+      target,
+      coerceToComplex,
+      held,
+      absentChecks
+    );
+    if (open !== undefined) return open;
+    throw unsettledArgumentDecline(name, args[unsettled]);
+  }
 
   // On a target that spells collection values only in consuming positions
   // (`CompileTarget.compileCollectionValue`), an argument is one when the
   // callee binds it WHOLE (a collection-typed parameter: `d(a, b) :=
-  // a[1]·b[1] + a[2]·b[2]` infers both parameters as collections) — and
-  // when the callee's parameters are scalar but the argument is provably a
-  // list of numbers, which the element-wise call below maps the callee
-  // over. An argument the spelling does not cover compiles as before.
-  const spellCollection = (a: Expression): TargetSource | undefined => {
+  // a[1]·b[1] + a[2]·b[2]` infers both parameters as collections), and
+  // when the call maps over it (a rank above 0).
+  const spellCollection = (
+    a: Expression,
+    i: number
+  ): TargetSource | undefined => {
     if (target.compileCollectionValue === undefined) return undefined;
-    if (paramsAreScalar && !isProvablyNumericListOperand(a)) return undefined;
+    if (paramsAreScalar && !(ranks[i]! > 0)) return undefined;
     return target.compileCollectionValue(a, target);
   };
   const compiledArgs = args.map((a, i) => {
-    const code = spellCollection(a) ?? compileValueOperand(a, target);
+    const code = spellCollection(a, i) ?? compileValueOperand(a, target);
     return presentCheckedCode(code, absentChecks[i]);
   });
-  // The interval target's call-boundary broadcast. The interpreter maps a
-  // scalar-parameter callee over a list argument (`f(x) := x²` applied to
-  // `[1, 2]` answers `[1, 4]`), and the emitted callee is scalar interval
-  // code, so a bare `_fn_f([…])` would read `.lo`/`.hi` off an array and
-  // answer nonsense behind `success: true` (measured before this branch:
-  // `{ lo: -5e-324, hi: null }`). The JavaScript target's runtime dispatch
-  // (`_SYS.bcastFn`, below) does not exist on this target — its `_SYS` is
-  // reserved but never emitted — so the decision is static: an argument
-  // PROVABLY a list of numbers is mapped through `_IA.bcast` with every
-  // other argument reused at each position, which requires those others to
-  // be provably numbers; any other collection-shaped argument beside a
-  // scalar parameter fails closed. An argument whose collection-ness is not
-  // provable keeps the direct call, exactly as before — scalar curve and
-  // implicit plotting ride this target on such arguments.
-  if (
-    target.language === 'interval-javascript' &&
-    paramsAreScalar &&
-    args.length > 0
-  ) {
-    const lists = args.map(isProvablyNumericListOperand);
-    if (lists.some((x) => x)) {
-      const offending = args.find(
-        (a, i) => !lists[i] && !a.type.matches('number')
-      );
-      if (offending !== undefined)
-        throw new Error(
-          `Could not compile \`${name}\`: the call maps over a list argument, ` +
-            `and the argument \`${offending.toString()}\` (type ` +
-            `\`${offending.type.toString()}\`) is not provably a number to ` +
-            `reuse at every position.`
-        );
-      const params = args.map(() => tempVar(target));
-      return (
-        `_IA.bcastFn((${params.join(', ')}) => ` +
-        `${name}(${[...params, ...held].join(', ')}), ` +
-        `${compiledArgs.join(', ')})`
-      );
-    }
-    const collection = args.find(
-      (a) => a.isCollection || a.type.matches('collection<any>')
-    );
-    if (collection !== undefined && !isTuple(collection))
-      throw new Error(
-        `Could not compile \`${name}\`: the argument ` +
-          `\`${collection.toString()}\` is a collection (type ` +
-          `\`${collection.type.toString()}\`) handed to a scalar parameter. ` +
-          `The interpreter maps the call over it, and this target maps only ` +
-          `over a provable list of numbers.`
-      );
-  }
+
   // Deliver a `{ re, im }` to a declared-complex parameter, in whichever of
-  // three forms the argument's static shape already settles:
-  //
-  //  - provably COMPLEX: the emitted code is already an object, so it is
-  //    passed through untouched — no wrap, no runtime test;
-  //  - provably REAL: wrapped statically, the shape being known;
-  //  - neither (an untyped free symbol bound at `run()` time — the common
-  //    case): the caller may hand over a plain number OR an already-complex
-  //    object and only a runtime test can tell, so `_SYS.cplx` decides. It
-  //    is idempotent, so an object passes through instead of nesting.
-  const complexWrap = complexWrapCode;
+  // three forms the argument's static shape already settles
+  // (`complexWrapCode`). In a map, the wrap applies to the element.
+  const coerce = (code: string, i: number) =>
+    coerceToComplex[i] ? complexWrapCode(code, args[i], target) : code;
 
-  // The interpreter BROADCASTS a user function over a collection argument
-  // (`applyFunctionLiteral` / the step-2b lambda broadcast): `q(L)` with
-  // `q: t ↦ n·t+1` and `L = [1,2,3]` answers `[5,9,13]`, not a scalar. The
-  // emitted callee is SCALAR code, so a bare `_fn_q([1,2,3])` computes
-  // `4*[1,2,3]+1` — the string-coerced NaN this dispatch fixes.
-  //
-  // Mirroring the interpreter's *runtime* dispatch (the item-34 ruling)
-  // rather than a compile-time "is this operand provably a collection?"
-  // gate: `_SYS.bcast` applies the scalar closure directly when no argument
-  // is an array and maps it element-wise otherwise, so a declared type wider
-  // than the runtime value costs nothing. Length mismatches project the
-  // interpreter's `incompatible-dimensions` error to NaN, as everywhere else
-  // in `bcast`.
-  //
-  // What is decided at compile time is only a property of the CALLEE and of
-  // the argument's static shape class, both of which the interpreter also
-  // reads statically:
-  //   - `paramsAreScalar`: a collection-typed parameter binds its argument
-  //     WHOLE (`f: (list<number>) -> number`), so it must not be mapped;
-  //   - a TUPLE argument is atomic (a point/vector), excluded from broadcast
-  //     by the interpreter yet lowered to a JS array here — `bcast` would
-  //     map over its components. Leave those on the direct-call path;
-  //   - a NOMINAL-TYPED argument is atomic for exactly the same reason
-  //     (`isNominalAtomicArg`, ruled 2026-08-12 — see
-  //     `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` context):
-  //     D3 opacity means the interpreter binds the whole tagged value, but
-  //     D11 erasure lowers `bag([1,2,3])` to the bare JS array, which
-  //     `bcastFn`'s runtime `Array.isArray` dispatch would then map over —
-  //     `size(bag([1,2,3]))` answering `[42,42,42]` where the interpreter
-  //     answers `42`. Leave those on the direct-call path too;
-  //   - every argument PROVABLY not a collection (`provablyScalarArg`, at
-  //     the top of this function) takes the cheaper runtime `Array.isArray`
-  //     guard below instead of this unconditional dispatch. That static
-  //     reading alone chooses the form of the test. Explicit scalar input
-  //     declarations and constructed scalar values can remove it.
-  // The dispatch is `_SYS.bcastFn`, not `_SYS.bcast`: applying a function
-  // literal to an EMPTY collection zips zero elements and answers `[]` in
-  // the interpreter, where an empty operator position answers `Nothing`
-  // (NaN). Everything else — mismatch → NaN, scalar reuse, nesting — is
-  // shared.
-  //
-  // The two conditions that are NOT about the argument's shape class — the
-  // JavaScript target and a scalar-parameter callee — gate every emitted
-  // broadcast form. An ATOMIC argument (a tuple or a nominal value, the two
-  // clauses just above) additionally bars the two forms below, which would
-  // hand that argument to the broadcast as a source; where such an argument
-  // has a sibling that may be a collection, the third form — the HOLDING
-  // dispatch further down — broadcasts over the sibling alone.
-  const atomicArg = args.map((a) => isTuple(a) || isNominalAtomicArg(a));
-  const mayBroadcast =
-    target.language === 'javascript' &&
-    args.length > 0 &&
-    !atomicArg.some((x) => x) &&
-    paramsAreScalar;
+  if (!ranks.some((r) => r! > 0))
+    return `${name}(${[...compiledArgs.map(coerce), ...held].join(', ')})`;
 
-  /** The scalar call, with each argument's complex coercion applied. */
-  const directCall = (codes: ReadonlyArray<string>) =>
-    `${name}(${[
-      ...codes.map((code, i) =>
-        coerceToComplex[i] ? complexWrap(code, args[i], target) : code
-      ),
-      ...held,
-    ].join(', ')})`;
+  if (target.language === 'python')
+    return pythonMapCall(
+      name,
+      ranks as number[],
+      compiledArgs,
+      held,
+      target,
+      args.map((a, i) =>
+        admitsAbsentAtMappedLevel(core.staticTypeOf(a, target), ranks[i]!)
+      )
+    );
 
-  /**
-   * `_SYS.bcastFn(closure, …)` over `codes`.
-   *
-   * A complex-typed parameter is coerced INSIDE the closure, on the element
-   * the broadcast selected: wrapping the whole argument would both hand the
-   * callee `{ re: [1,2,3], im: 0 }` and (before) force the entire call onto
-   * the direct scalar path, so a sibling collection argument never
-   * broadcast. The wrap applies to the ELEMENT the broadcast selected, but
-   * the ARGUMENT's realness still settles which wrap: a provably
-   * real-valued operand — a scalar like `0`, or a collection of reals —
-   * yields only real elements, so the static wrap holds and no runtime test
-   * is emitted. Anything else takes `_SYS.cplx`.
-   */
-  const dispatchCall = (codes: ReadonlyArray<string>) => {
-    // With no argument to coerce, the closure would be an ETA-EXPANSION of
-    // the callee — `(a, b) => _fn_f(a, b)` — so hand `_SYS.bcastFn` the
-    // function itself. The broadcast never reads the closure's `length`
-    // (`bcastWith` and its generated kernels spread the cell array into
-    // `f(...)`), so a named function behaves exactly as the arrow did, and
-    // one closure per call site is saved. (The Tycho code-generation audit
-    // of 2026-09-08 measured 297 such eta-expanded dispatches.)
-    // A held argument is appended inside the closure, so the broadcast
-    // never sees it as a source.
-    if (!coerceToComplex.some((c) => c) && held.length === 0)
-      return `_SYS.bcastFn(${name}, ${codes.join(', ')})`;
+  const helper =
+    target.language === 'javascript'
+      ? '_SYS.mapFn'
+      : target.language === 'interval-javascript'
+        ? '_IA.mapFn'
+        : undefined;
+  if (helper === undefined)
+    throw new Error(
+      `Could not compile a call of \`${name}\`: the call maps the function ` +
+        `over a list argument, which this target does not compile.`
+    );
+  // With no argument to coerce and no held value, the mapped function is
+  // the callee itself, not an arrow that only calls it.
+  let fn = name;
+  if (coerceToComplex.some((c) => c) || held.length > 0) {
     const params = args.map(() => tempVar(target));
-    const callParams = [
-      ...params.map((p, i) =>
-        coerceToComplex[i] ? complexWrap(p, args[i], target) : p
-      ),
-      ...held,
-    ];
-    return `_SYS.bcastFn((${params.join(', ')}) => ${name}(${callParams.join(
-      ', '
-    )}), ${codes.join(', ')})`;
+    fn =
+      `((${params.join(', ')}) => ` +
+      `${name}(${[...params.map(coerce), ...held].join(', ')}))`;
+  }
+  return `${helper}(${fn}, [${ranks.join(', ')}], ${compiledArgs.join(', ')})`;
+}
+
+/**
+ * The call of the function `name`, whose parameters are scalar, when an
+ * argument is declared `broadcastable<T>` with `T` a scalar type
+ * (`isOpenScalarRankType()`): the host asks for an open rank, so the call
+ * maps the function over every list level of the value at run time, with
+ * the broadcast helper of the operators (`_SYS.bcast` on JavaScript,
+ * `_IA.bcast` on interval-js). With `g := t ↦ t + 1` and
+ * `b: broadcastable<real>`, `g(b)` is `_SYS.bcast(_fn_g, _.b)`: 3 for 2,
+ * `[2, 3]` for `[1, 2]`, `[[2, 3], [4]]` for `[[1, 2], [3]]`, as the
+ * interpreter gives.
+ *
+ * The helper maps over every array that it receives, so each other
+ * argument must be one scalar or have an open rank too. A point or a list
+ * of known rank beside the value, a held value, a complex coercion, or
+ * another target gives `undefined`, and the call declines.
+ */
+function openRankCall(
+  name: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  coerceToComplex: ReadonlyArray<boolean>,
+  held: ReadonlyArray<string>,
+  absentChecks: ReadonlyArray<AbsentArgumentCheck | undefined>
+): TargetSource | undefined {
+  const helper =
+    target.language === 'javascript'
+      ? '_SYS.bcast'
+      : target.language === 'interval-javascript'
+        ? '_IA.bcast'
+        : undefined;
+  if (helper === undefined || held.length > 0) return undefined;
+  if (coerceToComplex.some((c) => c)) return undefined;
+  const types = args.map((a) => core.staticTypeOf(a, target));
+  if (!types.some((t) => isOpenScalarRankType(t))) return undefined;
+  if (!types.every((t) => isOpenScalarRankType(t) || isScalarShaped(t)))
+    return undefined;
+  const codes = args.map((a, i) =>
+    presentCheckedCode(compileValueOperand(a, target), absentChecks[i])
+  );
+  return `${helper}(${name}, ${codes.join(', ')})`;
+}
+
+/**
+ * The decline of a call of the function `name` whose argument `a` has no
+ * settled shape at a scalar parameter (rule R3 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`): the interpreter
+ * maps the function over a list and applies it to a scalar, so the code
+ * would have to test the value at run time. The interpreter fallback puts
+ * the argument in `unsupported`: its name for a symbol, else the text
+ * that `toString()` writes.
+ */
+export function unsettledArgumentDecline(
+  name: string,
+  a: Expression
+): CompileDeclineError {
+  // `toString()` quotes a symbol of more than one letter (`"xs"`), so a
+  // symbol is named by its plain name.
+  const argName = isSymbol(a) ? a.symbol : a.toString();
+  return new CompileDeclineError({
+    code: UNSETTLED_SHAPE_CODE,
+    kind: 'capability',
+    message:
+      `Could not compile a call of \`${name}\`: the argument ` +
+      `"${argName}" has the type \`${a.type.toString()}\`, which ` +
+      `does not settle one shape (a scalar, a point, or a list of known ` +
+      `depth). The interpreter maps the function over a list argument ` +
+      `and applies it to a scalar, so the shape of the value would be ` +
+      `known only at run time.`,
+    value: argName,
+  });
+}
+
+/**
+ * The static map of a call on the Python target: a nested list
+ * comprehension, one level per rank. Every argument is bound once by a
+ * `lambda`, so an argument is evaluated once, in source order, as in the
+ * direct call. Several lists at one level are read in step with `zip`.
+ *
+ * `absent[j]`: the argument `j` can be absent (`None`) at a mapped level,
+ * the whole argument (`L: list<real> | missing`) or an element above the
+ * rank-0 level (`list<list<real> | missing>`). At each mapped level, the
+ * code then tests that value: an absent value is not iterated, and reaches
+ * the function as it is, as an argument of rank 0 does. This is what
+ * `mapWith` in `javascript-runtime.ts` does, and the interpreter applies
+ * the function to the absent value (`Apply(t ↦ 7, L)` is 7 for an absent
+ * `L`). Without the test, the comprehension iterated `None` and raised a
+ * `TypeError`.
+ */
+export function pythonMapCall(
+  name: string,
+  ranks: ReadonlyArray<number>,
+  codes: ReadonlyArray<string>,
+  held: ReadonlyArray<string>,
+  target: CompileTarget<Expression>,
+  absent: ReadonlyArray<boolean> = []
+): string {
+  // A callee that is not a name (a `lambda`) is bound once too, so it is
+  // not built again at each element.
+  const fn = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : tempVar(target);
+  const bound = codes.map(() => tempVar(target));
+  const level = (vars: string[], rs: ReadonlyArray<number>): string => {
+    const mapped = rs.map((r, j) => (r > 0 ? j : -1)).filter((j) => j >= 0);
+    if (mapped.length === 0) return `${fn}(${[...vars, ...held].join(', ')})`;
+    return guard(
+      vars,
+      rs,
+      mapped,
+      mapped.filter((j) => absent[j] === true)
+    );
   };
-
-  const scalarArg = (a: Expression): boolean =>
-    certainlyScalarArg(a) ||
-    (target.language === 'javascript' && isConstructedScalar(a, target));
-
-  // A CONSTRUCTED scalar settles the call form on both routes. On the
-  // generic route it is the only admissible evidence (`alwaysDispatch`:
-  // the static type came from a type variable's bound, not from the
-  // caller). On the ordinary route it stands beside the static type, so an
-  // argument whose type is wider than `number` — a call of a user function
-  // whose result type is open — still keeps the direct call form its
-  // construction proves sound, instead of forcing the whole application
-  // through the runtime broadcast.
-  const directCallArg = (a: Expression): boolean =>
-    alwaysDispatch ? scalarArg(a) : provablyScalarArg(a) || scalarArg(a);
-
-  if (mayBroadcast && !args.every(directCallArg))
-    return dispatchCall(compiledArgs);
-
-  // An ATOMIC argument beside one that may be a collection. The atomic one
-  // must reach the callee WHOLE — the runtime broadcast descends a nested
-  // array (`bcastWith`), so a point handed to it as a broadcast source is
-  // mapped over its coordinates, which is not what the interpreter does
-  // with a point — while the sibling still has to be mapped, because the
-  // callee's body is scalar code. So each atomic argument is bound to a
-  // temporary and the broadcast CLOSES OVER it, mapping the other
-  // arguments only: `((_t1, _t2) => _SYS.bcastFn((_t3) => _fn_f(_t1, _t3),
-  // _t2))(codeP, codeX)`. With `g(x) := 2x` and `f(p, x) := g(x)`, the
-  // application `f((a, b), [u, v])` answers the interpreter's `[2, 4]`
-  // this way, where the bare direct call computed `2 * [u, v]` and
-  // answered NaN.
-  //
-  // Every argument that is not a literal is bound in the outer call, so an
-  // argument is evaluated exactly once and in source order — `Random()` as
-  // a coordinate of the point draws one number, as it does in the direct
-  // call and under the `Array.isArray` guard below.
-  //
-  // When every non-atomic argument is provably scalar there is nothing to
-  // map over, and the bare direct call stands.
-  if (
-    target.language === 'javascript' &&
-    args.length > 0 &&
-    paramsAreScalar &&
-    atomicArg.some((x) => x) &&
-    !args.every((a, i) => atomicArg[i] || directCallArg(a))
-  ) {
-    // `bound`: the outer temporaries, in argument order. `element`: the
-    // closure parameter each mapped argument's ELEMENT arrives in.
-    const bound = new Map<number, string>();
-    const element = new Map<number, string>();
-    args.forEach((a, i) => {
-      if (atomicArg[i] || !certainlyScalarArg(a)) bound.set(i, tempVar(target));
-      if (!atomicArg[i]) element.set(i, tempVar(target));
-    });
-    const callArgs = args.map((a, i) => {
-      // An atomic argument is coerced where it is BOUND, so the coercion
-      // runs once instead of once per element; a mapped one is coerced
-      // inside the closure, on the element the broadcast selected, for the
-      // reason `dispatchCall` gives.
-      if (atomicArg[i]) return bound.get(i)!;
-      const p = element.get(i)!;
-      return coerceToComplex[i] ? complexWrap(p, a, target) : p;
-    });
-    const sources = [...element.keys()].map(
-      (i) => bound.get(i) ?? compiledArgs[i]
+  // The test of each argument of `pending` that can be absent at this
+  // level: when it is `None`, the code continues with the rank 0 for it.
+  const guard = (
+    vars: string[],
+    rs: ReadonlyArray<number>,
+    mapped: ReadonlyArray<number>,
+    pending: ReadonlyArray<number>
+  ): string => {
+    if (pending.length > 0) {
+      const [j, ...more] = pending;
+      const whole = level(
+        vars,
+        rs.map((r, i) => (i === j ? 0 : r))
+      );
+      return `(${whole} if ${vars[j]} is None else ${guard(vars, rs, mapped, more)})`;
+    }
+    const elements = mapped.map(() => tempVar(target));
+    const inner = vars.slice();
+    mapped.forEach((j, k) => (inner[j] = elements[k]));
+    const body = level(
+      inner,
+      rs.map((r) => (r > 0 ? r - 1 : 0))
     );
-    const outerArgs = [...bound.keys()].map((i) =>
-      atomicArg[i] && coerceToComplex[i]
-        ? complexWrap(compiledArgs[i], args[i], target)
-        : compiledArgs[i]
-    );
-    return (
-      `((${[...bound.values()].join(', ')}) => ` +
-      `_SYS.bcastFn((${[...element.values()].join(', ')}) => ` +
-      `${name}(${[...callArgs, ...held].join(', ')}), ${sources.join(', ')}))` +
-      `(${outerArgs.join(', ')})`
-    );
+    const source =
+      mapped.length === 1
+        ? vars[mapped[0]]
+        : `zip(${mapped.map((j) => vars[j]).join(', ')})`;
+    return `[${body} for ${elements.join(', ')} in ${source}]`;
+  };
+  const params = fn === name ? bound : [fn, ...bound];
+  const values = fn === name ? codes : [name, ...codes];
+  return (
+    `(lambda ${params.join(', ')}: ${level(bound, ranks)})` +
+    `(${values.join(', ')})`
+  );
+}
+
+/**
+ * True when a value of type `t`, mapped over `rank` list levels, can be
+ * absent at one of these levels: the value itself, or an element at a
+ * level less than `rank` (`list<list<real> | missing>` with the rank 2).
+ * An absent element at the level `rank` reaches the function, and is not
+ * tested. When the element type is not known, the answer is true if `t`
+ * holds `missing` anywhere.
+ */
+export function admitsAbsentAtMappedLevel(
+  t: Readonly<Type>,
+  rank: number
+): boolean {
+  if (rank <= 0) return false;
+  if (isSubtype('missing', t)) return true;
+  if (rank === 1) return false;
+  // `t` does not admit `missing` here, so its element type is read as it
+  // is: `stripMissingFromType()` also removes `missing` from the elements.
+  const element = collectionElementType(t);
+  return element === undefined
+    ? typeContainsMissing(t)
+    : admitsAbsentAtMappedLevel(element, rank - 1);
+}
+
+/**
+ * True when the argument `a` is one scalar: its static type is a number, a
+ * boolean or a string (`isScalarShaped()`), the result type of the variant
+ * included for a call of a user function, and a parameter of the scalar
+ * variant of a function (`staticTypeOf()`).
+ */
+export function isScalarShapedArg(
+  a: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  return isScalarShaped(core.staticTypeOf(a, target));
+}
+
+/**
+ * The number of list levels that a call of a function with scalar
+ * parameters maps over for the argument `a`, or `undefined` when the
+ * static type of `a` does not settle it (`mapRankOfType()`).
+ *
+ * The static type is the contract (rule R1): an argument typed `number` is
+ * a scalar. An argument that is a call of a user function whose type does
+ * not settle the rank (a function assigned with no declaration, or
+ * declared `-> unknown`) is read with the result type of its variant
+ * (`staticTypeOf()`, rule R2). A parameter of the scalar variant of a
+ * function whose parameters are scalar is a scalar (`staticTypeOf()` reads
+ * `isScalarParam()`): that variant is compiled from the literal, whose bare
+ * parameters have the type `unknown`, and every call reaches it with scalar
+ * values, directly or from inside a static map. A point (`isTuple`) and a value of a nominal
+ * type (`isNominalAtomicArg`) reach the callee whole.
+ *
+ * An argument that is a call of a user function is also read with the type
+ * of the call in the current scope (`callTypeInCurrentScope()`) when the
+ * rules above do not settle the rank.
+ */
+export function callArgumentMapRank(
+  a: Expression,
+  target: CompileTarget<Expression>
+): number | undefined {
+  if (provablyScalarOrFramedScalar(a)) return 0;
+  if (isTuple(a) || isNominalAtomicArg(a)) return 0;
+  const rank = mapRankOfType(core.staticTypeOf(a, target));
+  if (rank !== undefined) return rank;
+  const inScope = callTypeInCurrentScope(a);
+  const rankInScope =
+    inScope === undefined ? undefined : mapRankOfType(inScope);
+  if (rankInScope !== undefined) return rankInScope;
+  // An input with no type is refused by the root (`assertAdmitted()`, code
+  // `'untyped-input'`), which names it in `unsupported`. The call does not
+  // decline for it first, so that the decline names the input as one to
+  // declare.
+  if (isUntypedFreeInput(a, target)) return 0;
+  return undefined;
+}
+
+/**
+ * The type of the call `a` of a user function (a symbol whose value is a
+ * function literal) when it is boxed again in the current scope, or
+ * `undefined` when `a` is not such a call.
+ *
+ * The compiled code calls the function that the name of the callee names
+ * in the current scope, and the type of the call there is the type of the
+ * compiled value. It can be more precise than the type of `a`: the
+ * compilation of a user function that shadows a library name
+ * (`withShadowingCallsRenamed()`, `shadowing-calls.ts`) binds the renamed
+ * calls to declarations with no value, and a call of `Floor := x ↦ [x, x]`
+ * then has the type `list<unknown>`, where the same call bound to the copy
+ * with its value has the type `vector<real^2>`.
+ */
+function callTypeInCurrentScope(a: Expression): Type | undefined {
+  if (!isFunction(a)) return undefined;
+  const ce = a.engine;
+  const def = ce.lookupDefinition(a.operator);
+  if (def === undefined || !isValueDef(def)) return undefined;
+  const value = def.value.value;
+  if (value === undefined || !isFunction(value, 'Function')) return undefined;
+  try {
+    return ce.function(a.operator, [...a.ops]).type.type;
+  } catch (e) {
+    if (e instanceof Error && e.name === 'CancellationError') throw e;
+    return undefined;
   }
-
-  // A statically scalar argument is still not a run-time scalar. Reaching
-  // here, every argument's TYPE says it cannot be a collection — but that
-  // type is usually an INFERENCE from the callee's own declared parameter,
-  // not a fact about the value: `f(x: number) = 2x + 1` types the free `y`
-  // in `f(y)` as `number`, and `run({ y: [1, 2, 3] })` then hands the call
-  // an array all the same. A bare `_fn_f(_.y)` computed NaN there, where
-  // the interpreter broadcasts to `[3, 5, 7]`.
-  //
-  // Inferred scalar types choose a guarded direct call instead of an
-  // unconditional broadcast. Explicit scalar input declarations and values
-  // constructed from known scalars are stronger contracts: `scalarArg`
-  // excludes those arguments from the test.
-  //
-  // The guard binds each tested argument to a temporary, so an argument
-  // expression is evaluated exactly once however the test goes. A LITERAL
-  // argument (`certainlyScalarArg` — a number, string, character or boolean
-  // literal) is a run-time scalar by construction: it is neither tested nor
-  // bound, and a call whose arguments are all literals keeps the bare
-  // direct call it emitted before.
-  //
-  // An array is not always a collection to broadcast over: a POINT — a
-  // tuple-typed value — lowers to a JS array too, and mapping the callee
-  // over its coordinates would answer one result per coordinate where the
-  // interpreter answers one result for the whole point. The guard cannot
-  // reach such a value. It is emitted only where `mayBroadcast` holds, which
-  // requires a callee whose parameters are all SCALAR — a tuple-, point- or
-  // collection-typed parameter makes `paramsAreScalar` false and keeps the
-  // bare direct call — and only where every argument passed
-  // `provablyScalarArg`, whose answer is `true` for exactly the `number`,
-  // `boolean` and `string` types. A point-typed argument fails that test, so
-  // it never reaches the guard; it takes whichever path it took before.
-  if (mayBroadcast && !args.every(scalarArg)) {
-    const tested = args
-      .map((a, i) => (scalarArg(a) ? -1 : i))
-      .filter((i) => i >= 0);
-    const temps = new Map(tested.map((i) => [i, tempVar(target)] as const));
-    // Each argument as the guarded branches see it: a bound temporary where
-    // one was made, the literal's own code everywhere else.
-    const bound = compiledArgs.map((code, i) => temps.get(i) ?? code);
-    const test = tested
-      .map((i) => `Array.isArray(${temps.get(i)})`)
-      .join(' || ');
-    return (
-      `((${tested.map((i) => temps.get(i)).join(', ')}) => ${test} ? ` +
-      `${dispatchCall(bound)} : ${directCall(bound)})` +
-      `(${tested.map((i) => compiledArgs[i]).join(', ')})`
-    );
-  }
-
-  return directCall(compiledArgs);
 }
 
 /**
@@ -602,14 +648,13 @@ export function emitUserFunctionCall(
  *  - an OPAQUE nominal reference (`alias !== true`). D3: a nominal's
  *    representation is not its definition, so the interpreter binds the
  *    tagged value whole. Compilation erases the tag (D11), and the bare
- *    array left behind is what `bcastFn` would wrongly map.
+ *    array left behind is what a static map would wrongly map.
  *  - a TRANSPARENT alias reference that is a sugar-declared SUM — its
  *    declaration record carries `_sumVariants`. Every arm of such a sum is
  *    a nominal, so every runtime value is atomic by the clause above,
  *    whichever arm it came from. (Under the TAGGED policy the value is a
- *    `{_tag}` object, which `bcastFn` would not map anyway; under the
- *    ERASED policy it can be a bare array, which it would. The static test
- *    covers both uniformly.)
+ *    `{_tag}` object; under the ERASED policy it can be a bare array. The
+ *    static test covers both uniformly.)
  *
  * Everything else is `false` — in particular a plain transparent alias
  * (`type alias mylist = list<number>`), which the interpreter DOES look
@@ -637,15 +682,14 @@ export function isNominalAtomicArg(a: Expression): boolean {
 /**
  * Does every parameter of `signature` lower to a JavaScript SCALAR — a
  * number, a `{re, im}` object, a boolean, a string — or to an `unknown`
- * value the runtime reads by shape? The broadcast-aware wrapper a function
- * value receives (`broadcastingWrapper`) decides at run time with
- * `Array.isArray`, and a tuple, a record, a nominal (tagged or opaque) value
- * and a collection all lower to a bare JavaScript array or object, so the
- * wrapper would map over the FIELDS of one such argument where the
- * interpreter binds the whole value. Such a function keeps the bare
- * reference. A parameter typed `unknown` or `any` is admitted, as the
- * interpreter's own broadcast gate admits it; a record reaching it through a
- * callback value is a known limitation recorded in ROADMAP.md.
+ * value? A tuple, a record, a nominal (tagged or opaque) value and a
+ * collection all lower to a bare JavaScript array or object, and the
+ * interpreter binds such an argument whole, so a function with such a
+ * parameter keeps the bare reference as a value, with no static map over
+ * its arguments. A parameter typed `unknown` or `any` is admitted, as the
+ * interpreter's own broadcast gate admits it; the static type of the value
+ * that reaches it selects the map (`callbackArgumentRanks()`), and a record
+ * has the rank 0 (`mapRankOfType()`).
  */
 export function signatureParamsLowerToScalars(
   signature: Type | undefined
@@ -731,10 +775,9 @@ export function userFunctionBroadcastPlan(
  * Neither emitted form expresses the one-rank map:
  *   - a direct scalar call hands the callee the whole array (`_fn_g([1,2,3])`
  *     computes the JS string `"1,2,31"` for `x + 1`);
- *   - `_SYS.bcastFn` recurses into NESTED arrays — that is the unannotated
- *     default's leaf descent, not the declaration's one rank — and is
- *     all-or-nothing across arguments, so a sibling slot the declaration
- *     binds WHOLE would be mapped too.
+ *   - a static map (`_SYS.mapFn`) over the rank of the static type descends
+ *     to the leaves, which is the unannotated default, not the
+ *     declaration's one rank.
  *
  * PER SLOT, though: only an argument that could actually be MAPPED forces
  * the decline. A collection at a slot the contract binds whole compiles
@@ -844,6 +887,29 @@ export function isRealListArg(a: Expression): boolean {
   if (!isSubtype(t, 'indexed_collection<number>')) return false;
   const elt = collectionElementType(t);
   return elt !== undefined && isSubtype(elt, 'number') && !isNonRealNumber(elt);
+}
+
+/**
+ * Is this argument a list of lists of real numbers by its type, at any
+ * depth (`list<list<real>>`, `list<vector<real^3>>`), and not a point? A
+ * complex leaf type is refused, as for `isRealListArg()`. A union element
+ * type (`list<list<real> | real>`) is refused: such an element has no
+ * settled shape.
+ */
+export function isNestedRealListArg(a: Expression): boolean {
+  if (isSinglePointArg(a)) return false;
+  let t = resolveTypeForCompilation(a.type.type);
+  if (!isSubtype(t, 'indexed_collection<indexed_collection<any>>'))
+    return false;
+  for (let depth = 0; depth < 16; depth++) {
+    const elt = collectionElementType(t);
+    if (elt === undefined) return false;
+    if (isSubtype(elt, 'number')) return !isNonRealNumber(elt);
+    const resolved = resolveTypeForCompilation(elt);
+    if (!isSubtype(resolved, 'indexed_collection<any>')) return false;
+    t = resolved;
+  }
+  return false;
 }
 
 /**
@@ -1147,39 +1213,17 @@ export function expressionInputDecline(id: string): Error {
   );
 }
 
-/**
- * Is `a` a scalar by CONSTRUCTION rather than by its static type — a number,
- * string or character LITERAL, whose runtime value is the literal itself?
- *
- * The stricter sibling of {@link provablyScalarArg}, for the call boundary
- * of a callee whose parameter types are read off a `where` clause rather
- * than declared by the caller. A scalar TYPE is not proof there (a free
- * symbol at a `T: number` parameter types `number` by inference, yet
- * `run({ y: [1,2,3] })` still hands the call an array); a literal is.
- */
-export const certainlyScalarArg = (a: Expression): boolean =>
-  (isNumber(a) && a.isNumberLiteral === true) ||
-  isString(a) ||
-  isCharacter(a) ||
-  // A boolean LITERAL — the symbols `True`/`False` — is scalar by
-  // construction, the same way a number/string/character literal is: its
-  // runtime value cannot be an array. `a.type.matches('boolean')`, used by
-  // `provablyScalarArg`, is not enough here, since a free symbol bound to a
-  // `boolean`-typed parameter can still be an array at run time.
-  isSymbol(a, 'True') ||
-  isSymbol(a, 'False');
-
 export function checkDeclaredBroadcast(
   engine: ComputeEngine,
   h: string,
   args: ReadonlyArray<Expression>,
-  provablyScalarArg: (a: Expression) => boolean,
+  isScalarArg: (a: Expression) => boolean,
   target?: CompileTarget<Expression>
 ): void {
   checkDeclaredBroadcastAgainst(
     h,
     args,
-    provablyScalarArg,
+    isScalarArg,
     userFunctionBroadcastPlan(engine, h),
     () => userFunctionHasBroadcastableParam(engine, h),
     () => userFunctionParamsAreScalar(engine, h),
@@ -1226,13 +1270,13 @@ export function bakedTupleValueType(
 export function checkDeclaredBroadcastAgainst(
   h: string,
   args: ReadonlyArray<Expression>,
-  provablyScalarArg: (a: Expression) => boolean,
+  isScalarArg: (a: Expression) => boolean,
   plan: BroadcastSlotPlan | undefined,
   hasBroadcastableParam: () => boolean,
   // Whether the callee compiles as a function of scalar parameters, each
   // `broadcastable<T>` slot whose `T` cannot hold a list read as `T`
   // (`withCellSlotsAsElements`): its calls are then emitted through the
-  // element-wise call (`_SYS.bcastFn`), which maps to the cells as the
+  // static map (`_SYS.mapFn`), which maps to the cells as the
   // interpreter does for such a slot (user decision 2026-10-24, ROADMAP
   // CE-405).
   compilesAsScalarParams: () => boolean = () => false,
@@ -1246,7 +1290,7 @@ export function checkDeclaredBroadcastAgainst(
     plan !== undefined
       ? args.some((a, i) => {
           const slot = plan.at(i);
-          if (!slot.mappable || provablyScalarArg(a)) return false;
+          if (!slot.mappable || isScalarArg(a)) return false;
           // An ATOMIC argument — a tuple, or a nominal-typed value (see
           // {@link isNominalAtomicArg}; same 2026-08-12 ruling) — binds
           // whole, so it is safe to emit, provided the slot's element
@@ -1267,7 +1311,7 @@ export function checkDeclaredBroadcastAgainst(
         })
       : // An OVERLOAD set has no single plan — which arm binds is a runtime
         // question — so answer conservatively over the whole argument list.
-        hasBroadcastableParam() && !args.every(provablyScalarArg);
+        hasBroadcastableParam() && !args.every(isScalarArg);
   if (!risky) return;
   throw new Error(
     `Could not compile \`${h}\`: an application of a function with a declared \`broadcastable<T>\` parameter over a possibly-collection argument — the declaration maps ONE rank down and the compile targets map to the leaves. Evaluate this expression with evaluate() instead, or declare the parameter as its element type.`
@@ -1397,7 +1441,7 @@ export function multiClauseLaneMismatchAt(
  *    by reference), or one already being inlined higher up (mutual
  *    recursion through inlining) — an inlining would not terminate;
  *  - every argument is provably a scalar or a literal point: a collection
- *    argument is broadcast by the by-reference call (`_SYS.bcastFn`) but
+ *    argument is mapped over by the by-reference call (`_SYS.mapFn`) but
  *    would be substituted whole into the body;
  *  - every argument is pure: the by-reference call evaluates an argument
  *    ONCE, while substitution repeats it at every occurrence of its
@@ -1633,11 +1677,9 @@ export function isUntypedFreeInput(
  * whose operands keep their types keeps its own type, and so does one
  * whose rederived type does not fit its own. The operands of a scoped
  * operator (a `Sum` over an index) are not rederived. A scalar parameter
- * of the emitted body (`isConstructedScalar`) is read as a number too.
- * Only the TYPE is read here: a call of a user function is emitted as
- * before, with its run-time broadcast (`_SYS.bcastFn`), so an input that
- * holds a list at run time still maps the call over it; the scalar code
- * around the call is the lane every free input already takes. `memo`
+ * of the scalar variant (`isScalarParam()`) is read as a number too.
+ * Only the TYPE is read here; the scalar code around the call is the lane
+ * every free input already takes. `memo`
  * holds the answers of one top-level call, so a shared subexpression is
  * walked once. The shader targets read a free input as a float for the
  * same reason, and `gpuAtBaseShape` (`gpu-at.ts`) reads the static
@@ -1654,7 +1696,8 @@ export function typeWithFreeInputsAsNumbers(
   if (depth > 32) return own;
   if (isSymbol(expr)) {
     if (own !== 'unknown') return own;
-    return isUntypedFreeInput(expr, target) || isConstructedScalar(expr, target)
+    return isUntypedFreeInput(expr, target) ||
+      isScalarParam(expr.symbol, target.boundVars)
       ? 'number'
       : own;
   }

@@ -45,7 +45,12 @@ import {
 import { tempVar } from './compiler-naming.js';
 import { core } from './compiler-core-hooks.js';
 import { NON_PROMOTING_ELEMENTWISE_HEADS } from './compiler-tables.js';
-import { userFunctionLiteral } from './compile-assignment-checks.js';
+import {
+  userFunctionLiteral,
+  userFunctionParamsAreScalar,
+} from './compile-assignment-checks.js';
+import { mapRankOfType } from './static-shape.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import type {
   ElementLane,
   UnrolledIndexBinderEntry,
@@ -857,8 +862,15 @@ export function callbackLiteral(
  * Before this the accumulator position was passed as "not provable", so
  * every annotated accumulator declined, including the list-building fold
  * `Fold((acc: list<integer | nan>, i) => Join(acc, [2 p[i]]), [], 1..n)`
- * (issue #369). A `unknown`/`any` seed or result still answers
- * `undefined`: nothing is provable from a top type.
+ * (issue #369). A `unknown`/`any` seed still answers `undefined`: nothing
+ * is provable from a top type.
+ *
+ * A combiner whose result type is `unknown` or `any` (a function assigned
+ * with no declaration, or declared `-> unknown`), or whose join with the
+ * seed type does not settle a map rank, is read with the result type of
+ * its variant for the accumulator and element types
+ * (`foldVariantAccumulatorType()`, rule R2 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`).
  */
 export function foldAccumulatorArgType(
   coll: Expression,
@@ -868,9 +880,6 @@ export function foldAccumulatorArgType(
 ): Type | undefined {
   const literal = callbackLiteral(op, target);
   if (literal === undefined) return undefined;
-  const result = functionResult(literal.type.type);
-  if (result === undefined || result === 'unknown' || result === 'any')
-    return undefined;
   let seed: Type | undefined;
   if (init === undefined || init === null) {
     seed = collectionElementTypeOf(coll);
@@ -880,7 +889,64 @@ export function foldAccumulatorArgType(
   }
   if (seed === undefined || seed === 'unknown' || seed === 'any')
     return undefined;
-  return widen(seed, result);
+  const result = functionResult(literal.type.type);
+  const joined =
+    result === undefined || result === 'unknown' || result === 'any'
+      ? undefined
+      : widen(seed, result);
+  if (joined !== undefined && mapRankOfType(joined) !== undefined)
+    return joined;
+  // The result type of the literal is the one of its scalar variant: with
+  // `(a, t) ↦ a + t` it is `number`, also when the fold passes lists, which
+  // the call maps over. The variant for the types of the accumulator and
+  // the element gives the type of the value.
+  const element = collectionElementTypeOf(coll);
+  if (element === undefined) return joined;
+  const scalarParams =
+    isSymbol(op) && target?.localFunctions?.get(op.symbol) === undefined
+      ? userFunctionParamsAreScalar(op.engine, op.symbol)
+      : paramsAreScalar(literal.type.type);
+  return (
+    foldVariantAccumulatorType(literal, seed, element, scalarParams) ?? joined
+  );
+}
+
+/**
+ * The type of the accumulator of a fold whose combiner `literal` has no
+ * settled result type, from the type `seed` of the seed and the type
+ * `element` of the elements: the join of the seed type and the result
+ * types of the variant of the combiner (`literalVariantResultType()`),
+ * found in a few steps. Each step types the variant with the accumulator
+ * type of the step before; the type is found when the result type of the
+ * variant is a subtype of it. `undefined` when a result type has another
+ * map rank than the accumulator (the accumulator holds values of two
+ * shapes, rule R3), or when no type is found in four steps.
+ *
+ * With `f := (a, t) ↦ a + t` and `M: list<list<real>>`, `Reduce(M, f,
+ * [0, 0])` has the accumulator type `list<real>`. `Reduce(M, f, 0)` has
+ * none: the accumulator is the number `0`, then a list.
+ */
+function foldVariantAccumulatorType(
+  literal: Expression & FunctionInterface,
+  seed: Type,
+  element: Type,
+  scalarParams: boolean
+): Type | undefined {
+  const rank = mapRankOfType(seed);
+  if (rank === undefined) return undefined;
+  let acc = seed;
+  for (let step = 0; step < 4; step++) {
+    const result = core.literalVariantResultType(
+      literal,
+      [acc, element],
+      scalarParams
+    );
+    if (result === undefined || mapRankOfType(result) !== rank)
+      return undefined;
+    if (isSubtype(result, acc)) return acc;
+    acc = widen(acc, result);
+  }
+  return undefined;
 }
 
 /**

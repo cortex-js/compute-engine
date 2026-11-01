@@ -1,20 +1,21 @@
 /**
  * An operator over a call of a user function that maps over a list argument.
  *
- * With `q(t) := 2t` and a free input `u` that nothing types, the JavaScript
- * call `q(u)` maps `q` over a list at run time (`_SYS.bcastFn(_fn_q, _.u)`),
- * as the interpreter does. The engine types `q(u)` as `number`, and the
- * operator around the call was compiled as scalar code: `1 + q(u)` was
+ * With `q(t) := 2t`, the JavaScript call `q(u)` maps `q` over a list
+ * argument, as the interpreter does. An earlier version compiled the
+ * operator around the call as scalar code: `1 + q(u)` was
  * `_SYS.bcastFn(_fn_q, _.u) + 1`, which ran to the string `"2,4,61"` at
  * `u = [1, 2, 3]`, where the interpreter gives `[3, 5, 7]`.
  *
- * The compiler now reads such a call as a value that can be a list
- * (`mayHoldCallBroadcastResult`, `compilation/compiler-type-facts.ts`), so
- * the operator maps over its result too (`_SYS.bcast`). A list is a valid
- * input there: the program does not declare or imply that `u` is a number.
- * When it does (`u` declared `number`, or narrowed to `number` by a use such
- * as `u + 1`), a list for `u` breaks the host's input contract, and the
- * scalar code stays.
+ * The shape of the call is now settled at compile time from the static type
+ * of `u` (`docs/plans/2026-10-31-static-shape-compilation.md`). Most tests
+ * declare `u: real | list<real>`: the code tests `Array.isArray(_.u)` once,
+ * at the input, and holds one body per shape. In the list body the call is a
+ * static map (`_SYS.mapFn(_fn_q, [1], _.u)`) with a list type, so the
+ * operator maps over its result (`_SYS.bcast`); in the scalar body the call
+ * and the operator are scalar code. The code has no run-time test of the
+ * value of the call. When a member body has no settled shape (an `If` whose
+ * branches are a list and a number), the compilation declines.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
@@ -56,9 +57,9 @@ function code(json: Json, types: Record<string, string> = {}): string {
 
 /**
  * The compiled function `(params) => json`, whose parameters have no type.
- * An input with no type is refused, but a parameter with no type is not: the
- * code then reads the result of the call `q(u)` with the run-time test of
- * a value that can be a list (`callResultGuard`, `compile-expr-handlers.ts`).
+ * An input with no type is refused, but a parameter with no type is not:
+ * the root function is compiled with scalar parameters, and a list given
+ * for one of them is a value outside that type.
  */
 function compileFn(json: Json, params: string[]): any {
   return compile(engine().box(['Function', json, ...params]), {
@@ -111,7 +112,6 @@ const CASES: [string, Json][] = [
   ['1 + p(q(u))', ['Add', 1, ['p', ['q', 'u']]]],
   ['q(u) + q(u)', ['Add', ['q', 'u'], ['q', 'u']]],
   ['Sum(k q(u), k = 1..3)', ['Sum', ['Multiply', 'k', ['q', 'u']], ['Limits', 'k', 1, 3]]],
-  ['1 + If(w > 0, q(u), 0)', ['Add', 1, ['If', ['Greater', 'w', 0], ['q', 'u'], 0]]],
   [
     'Block(z := q(u); 1 + z)',
     ['Block', ['Assign', 'z', ['q', 'u']], ['Add', 1, 'z']],
@@ -169,19 +169,41 @@ describe('an operator over a call that maps over a list argument', () => {
   }
 
   test('1 + q(u) broadcasts the sum when the call gives a list', () => {
-    // The call is evaluated once, into a temporary. A number takes the
-    // scalar `+`, so a scalar evaluation does not pay the closure call of
-    // `_SYS.bcast` (`callResultGuard`, `compile-expr-handlers.ts`). The
-    // parameter `u` has no type.
+    // A parameter with no type is a scalar of the root function: the call
+    // and the sum are scalar code.
     const result = compileFn(['Add', 1, ['q', 'u']], ['u']);
     const text = String(result.code).replace(/\s+/g, ' ');
-    expect(text).toContain('const _js1 = _SYS.bcastFn(_fn_q, u);');
-    expect(text).toContain(
-      'return ((Array.isArray(_tv1) || _tv1 === undefined) ? ' +
-        '_SYS.bcast((_tv2, _tv3) => (_tv2 + _tv3), _tv1, 1) : _tv1 + 1);'
-    );
-    expect(result.run([1, 2, 3])).toEqual([3, 5, 7]);
+    expect(text).toContain('return _fn_q(u) + 1;');
     expect(result.run(2)).toBe(5);
+    // An input declared as a list: the call maps, and the sum maps over the
+    // list that the call gives. There is no run-time test of a shape.
+    const listCode = code(['Add', 1, ['q', 'u']], { u: 'list<real>' });
+    expect(listCode).toBe(
+      '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _SYS.mapFn(_fn_q, [1], _.u), 1)'
+    );
+    expect(run(['Add', 1, ['q', 'u']], { u: [1, 2, 3] }, { u: 'list<real>' })).toEqual(
+      interpret(['Add', 1, ['q', 'u']], [1, 2, 3])
+    );
+  });
+
+  test('1 + If(w > 0, q(u), 0) declines for a union input: the list body has two shapes', () => {
+    // In the body for `u: list<real>`, one branch is a list and the other a
+    // number, so the shape of the `If` is known only at run time.
+    const json = ['Add', 1, ['If', ['Greater', 'w', 0], ['q', 'u'], 0]];
+    const result = compile(engine().box(json), { to: 'javascript' } as any) as any;
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toContain('u');
+    // With `u` declared `real`, the shape is settled.
+    expect(run(json, { u: 2, w: 1 }, { u: 'real' })).toBeCloseTo(
+      interpret(json, 2) as number,
+      12
+    );
+    // With `u` declared `list<real>` and two list branches, the shape is
+    // settled too.
+    const lists = ['Add', 1, ['If', ['Greater', 'w', 0], ['q', 'u'], 'u']];
+    expect(run(lists, { u: [1, 2, 3], w: 1 }, { u: 'list<real>' })).toEqual(
+      interpret(lists, [1, 2, 3])
+    );
   });
 
   // The local `t` holds a value built from shared subtrees: 30 levels of
@@ -208,9 +230,12 @@ describe('an operator over a call that maps over a list argument', () => {
   });
 
   test('a call in a branch of an If is not evaluated before the test', () => {
-    const text = code(['Add', 1, ['If', ['Greater', 'w', 0], ['q', 'u'], 0]]);
-    expect(text).toContain('_SYS.bcast(');
-    expect(text).not.toContain('Array.isArray');
+    const text = code(['Add', 1, ['If', ['Greater', 'w', 0], ['q', 'u'], 'u']], {
+      u: 'list<real>',
+    });
+    expect(text).toBe(
+      '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), ((_.w !== undefined) ? ((0 < _.w) ? (_SYS.mapFn(_fn_q, [1], _.u)) : (_.u)) : undefined), 1)'
+    );
   });
 
   test('a Return of the call in a block: the sum maps over the list', () => {
@@ -227,8 +252,33 @@ describe('an operator over a call that maps over a list argument', () => {
         0,
       ],
     ];
-    expect(run(json, { u: [1, 2, 3], w: 1 })).toEqual([3, 5, 7]);
-    expect(run(json, { u: 2, w: 1 })).toBe(5);
+    // For `u: list<real>`, the value of the block is a list (the `Return`)
+    // or a number (its last value): the compilation declines, also for the
+    // union input whose list body this is.
+    for (const u of ['real | list<real>', 'list<real>']) {
+      const result = compile(engine({ u }).box(json), {
+        to: 'javascript',
+      } as any) as any;
+      expect(result.success).toBe(false);
+    }
+    expect(run(json, { u: 2, w: 1 }, { u: 'real' })).toBe(5);
+    // With a last value that is a list too, the shape is settled.
+    const lists = [
+      'Add',
+      1,
+      [
+        'Block',
+        ['Assign', 'z', ['q', 'u']],
+        ['If', ['Greater', 'w', 0], ['Return', 'z']],
+        'u',
+      ],
+    ];
+    expect(run(lists, { u: [1, 2, 3], w: 1 }, { u: 'list<real>' })).toEqual([
+      3, 5, 7,
+    ]);
+    expect(run(lists, { u: [1, 2, 3], w: -1 }, { u: 'list<real>' })).toEqual([
+      2, 3, 4,
+    ]);
   });
 
   test('a call in an operand of And is not evaluated before the And', () => {
@@ -241,7 +291,7 @@ describe('an operator over a call that maps over a list argument', () => {
     const text = String(compileFn(json, ['b', 'u']).code);
     expect(text.indexOf('=== false ? false')).toBeGreaterThanOrEqual(0);
     expect(text.indexOf('=== false ? false')).toBeLessThan(
-      text.indexOf('_SYS.bcastFn(_fn_q')
+      text.indexOf('_fn_q(u)')
     );
     expect(compileFn(json, ['b', 'u']).run(false, 2)).toBe(true);
     // With the first operand `False`, the code maps the `And` over its
@@ -261,26 +311,31 @@ describe('an operator over a call that maps over a list argument', () => {
   });
 
   test('a call in a chain of comparisons: y < 0 < q(u) at y = 1', () => {
-    // The parameters `y` and `u` have no type. The chain maps over the list
-    // that the call gives, as the interpreter does when `u` has no type,
-    // and the code has no run-time test of the call.
+    // The parameters `y` and `u` have no type: they are scalars of the root
+    // function, and the chain is scalar code.
     const json = ['Less', 'y', 0, ['q', 'u']];
     const result = compileFn(json, ['y', 'u']);
     expect(String(result.code)).not.toContain('Array.isArray');
-    for (const u of [[1, 2, 3], 2])
-      expect(result.run(1, u)).toEqual(interpretUntyped(json, { y: 1, u }));
-    expect(result.run(1, [1, 2, 3])).toEqual([false, false, false]);
+    expect(result.run(1, 2)).toEqual(interpretUntyped(json, { y: 1, u: 2 }));
     expect(result.run(1, 2)).toBe(false);
+    // With `u` declared as a list, the chain maps over the list that the
+    // call gives, as the interpreter does, and the code has no run-time
+    // test of the call.
+    const types = { u: 'list<real>', y: 'real' };
+    expect(code(json, types)).not.toContain('Array.isArray');
+    for (const y of [1, -1])
+      expect(run(json, { y, u: [1, 2, 3] }, types)).toEqual(
+        interpretUntyped(json, { y, u: [1, 2, 3] })
+      );
   });
 
   test('Random() / q(u) keeps the order of the operands', () => {
-    // The run-time test of the call would evaluate the call before
-    // `Random()`.
+    // A run-time test of the value of the call would evaluate the call
+    // before `Random()`. The only test is of the input `u`, and in each
+    // body the draw comes before the call.
     const text = code(['Divide', ['Random'], ['q', 'u']]);
-    expect(text).not.toContain('Array.isArray');
-    expect(text.indexOf('drawNextRandomNumber')).toBeGreaterThanOrEqual(0);
-    expect(text.indexOf('drawNextRandomNumber')).toBeLessThan(
-      text.indexOf('_fn_q')
+    expect(text).toBe(
+      '(Array.isArray(_.u) ? _SYS.bcast((_tv1, _tv2) => ((_tv1) / (_tv2)), _SYS.drawNextRandomNumber(), _SYS.mapFn(_fn_q, [1], _.u)) : _SYS.drawNextRandomNumber() / _fn_q(_.u))'
     );
   });
 
@@ -291,7 +346,11 @@ describe('an operator over a call that maps over a list argument', () => {
       to: 'javascript',
       fallback: false,
     } as any) as any;
-    expect(result.code).not.toContain('Array.isArray');
+    // The only run-time test is of the input `u` (one body per member of
+    // its type), not of the value of the call.
+    expect(result.code).toBe(
+      '(Array.isArray(_.u) ? _SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.L, _SYS.mapFn(_fn_q, [1], _.u)) : _SYS.bcast((_tv3, _tv4) => (_tv3 + _tv4), _.L, _fn_q(_.u)))'
+    );
     expect(result.run({ L: [1, 2], u: 3 })).toEqual([7, 8]);
     expect(result.run({ L: [1, 2], u: [1, 2] })).toEqual([3, 6]);
   });
@@ -300,7 +359,8 @@ describe('an operator over a call that maps over a list argument', () => {
     // The complex element lane reads the result of the call by its shape at
     // run time (`_SYS.sadd`). Before, this declined, also for a `u` declared
     // `list<number>`. With no declaration, `u` is a parameter with no type:
-    // an input with no type is refused.
+    // an input with no type is refused. A parameter with no type is a scalar
+    // of the root function, so only a number is given for it.
     for (const declared of [undefined, 'list<number>']) {
       const ce = new ComputeEngine();
       ce.declare('h', 'function');
@@ -313,10 +373,11 @@ describe('an operator over a call that maps over a list argument', () => {
       ) as any;
       const call = (u: unknown): unknown =>
         declared === undefined ? result.run(u) : result.run({ u });
-      expect(call([1, 2])).toEqual([
-        { re: 2, im: 1 },
-        { re: 3, im: 1 },
-      ]);
+      if (declared !== undefined)
+        expect(call([1, 2])).toEqual([
+          { re: 2, im: 1 },
+          { re: 3, im: 1 },
+        ]);
       if (declared === undefined) expect(call(3)).toEqual({ re: 4, im: 1 });
     }
   });

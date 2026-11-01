@@ -362,7 +362,12 @@ describe('A coordinate of point arithmetic over a list of points held by a symbo
   test('a union of a point and a list of points keeps the run-time dispatch', () => {
     const r = compileP(['PointX', scaled('U')], 'javascript');
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.pointComponent(');
+    // `U` is declared as a point or a list of points, so the code tests the
+    // value of `_.U` once (an empty array, or an array whose first element is
+    // an array, is a list of points) and holds one body for each shape.
+    expect(r.code).toMatch(
+      /^\(\(_\.U\.length === 0 \|\| Array\.isArray\(_\.U\[0\]\)\) \? /
+    );
     expect(r.run!({ t: 0.5, U: POINTS })).toEqual(
       interpretedP(['PointX', scaled('U')], 0.5)
     );

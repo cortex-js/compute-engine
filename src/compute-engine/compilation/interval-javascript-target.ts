@@ -187,6 +187,8 @@ import {
   preservesMappedSplices,
 } from './constant-folding.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { intervalShapeDispatch, isOpenScalarRankType } from './static-shape.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.
@@ -3875,7 +3877,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // function-literal form reaches this handler; the literal compiles to an
   // arrow over intervals through the shared `Function` lowering.
   // (Tycho item 237.)
-  Apply: (args, compile) => {
+  Apply: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
     // A partial application of a function literal applied to more arguments
@@ -3927,6 +3929,34 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args.slice(1),
       compile
     );
+    // One point named through an alias, a union with `missing` or a
+    // nominal type, at a parameter with no declared type: this target does
+    // not compile the literal for one point, and the call declines
+    // (`appliedLiteralNamedPointCall()`).
+    BaseCompiler.appliedLiteralNamedPointCall(
+      fn,
+      args.slice(1),
+      [],
+      compile,
+      () => compile(fn),
+      target
+    );
+    // A literal with scalar parameters applied to an argument declared
+    // `broadcastable<T>`, with `T` a scalar type, maps over every list
+    // level of the value at run time, as a call of a user function does
+    // (`emitUserFunctionCall`). The direct call gave the absence marker
+    // for a list.
+    if (
+      paramsAreScalar(fn.type.type) &&
+      args.slice(1).some((a) => isOpenScalarRankType(a.type.type))
+    )
+      return BaseCompiler.emitUserFunctionCall(
+        `(${compile(fn)})`,
+        args.slice(1),
+        target,
+        args.slice(1).map(() => false),
+        true
+      );
     return `(${compile(fn)})(${args
       .slice(1)
       .map((a) => compile(a))
@@ -5067,16 +5097,23 @@ function compileIntervalIntegrate(
   // invariants (`hoistScalarInvariants`), so `Γ(k/2)·√2^k` is one binding.
   // A `Function` integrand's body is a one-statement `Block`, a scope the
   // candidate pass never descends into; the statement is what is scanned.
+  //
+  // Each integration variable holds one real interval at each piece. The
+  // engine types it `unknown`, so the body and the bounds compile with the
+  // variables entered as real scalars (`withRealLoopIndices`): a call
+  // `f(t)` of a user function is then the direct call, not a call whose
+  // argument has no settled shape.
   const bodyTarget = scoped(lambdaVars);
   const scanned =
     isFunction(bodyExpr, 'Block') && bodyExpr.nops === 1
       ? bodyExpr.ops[0]
       : bodyExpr;
-  const { bindings, result: bodyCode } = BaseCompiler.hoistLoopInvariants(
-    scanned,
+  const { bindings, result: bodyCode } = BaseCompiler.withRealLoopIndices(
     lambdaVars,
-    bodyTarget,
-    () => BaseCompiler.compile(bodyExpr, bodyTarget)
+    () =>
+      BaseCompiler.hoistLoopInvariants(scanned, lambdaVars, bodyTarget, () =>
+        BaseCompiler.compile(bodyExpr, bodyTarget)
+      )
   );
   let code = bodyCode;
 
@@ -5089,8 +5126,10 @@ function compileIntervalIntegrate(
   for (let d = limits.length - 1; d >= 0; d--) {
     const outer = lambdaVars.slice(0, d);
     const boundTarget = outer.length > 0 ? scoped(outer) : sized;
-    const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
-    const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
+    const [lo, hi] = BaseCompiler.withRealLoopIndices(outer, () => [
+      BaseCompiler.compile(limits[d].lowerExpr, boundTarget),
+      BaseCompiler.compile(limits[d].upperExpr, boundTarget),
+    ]);
     // The innermost lambda carries the invariant bindings, declared next to
     // it and assigned on its first call: an empty range asks for no piece,
     // and the unhoisted integrand then evaluated nothing.
@@ -6366,6 +6405,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     return {
       language: 'interval-javascript',
+      // See `CompileTarget.shapeDispatch`.
+      shapeDispatch: intervalShapeDispatch,
       // Intervals are real: the strict discipline is the only mode this
       // target offers (`CompileMode`); a requested `'complex'`/`'auto'` is
       // the `unsupported-mode` decline.
@@ -7251,15 +7292,9 @@ function compileToIntervalTarget(
   const lambda = functionValuedRoot(expr);
   let js: string;
   try {
-    // A literal single point at the ROOT is the one collection-shaped value
-    // this function builds itself: the JavaScript array of its compiled
-    // coordinates. `literalRootPointOps` says which roots qualify and why the
-    // spelling is confined to this position. Every other root, a point in an
-    // operand position included, compiles through its ordinary lowering.
-    const point = literalRootPointOps(expr, target);
-    // A collection-BUILDING root (a list of numbers, a range, a `Map`) is the
-    // other collection-shaped root this function spells itself, through the
-    // same spelling every consuming position uses
+    // A collection-BUILDING root (a list of numbers, a range, a `Map`) is a
+    // collection-shaped root this function spells itself, through the same
+    // spelling every consuming position uses
     // (`compileIntervalCollectionValue`); a root that spelling declines — a
     // list of booleans — compiles the ordinary way, which refuses it.
     // A `Which` or `If` root is a collection root when one of its arms is
@@ -7271,68 +7306,91 @@ function compileToIntervalTarget(
     // A `When` root is one when its value is spelled as a collection
     // (`compileIntervalRestrictedValue`: `[1, 2]\{0 < t\}`); any other value
     // compiles through the `When` handler as before.
-    const rootLiteral = assignedLiteral(expr, target) ?? expr;
-    const collectionRoot =
-      point === undefined &&
-      (COLLECTION_VALUE_HEADS.has(rootLiteral.operator) ||
-        rootLiteral.operator === 'Which' ||
-        // An `If` root only when an arm is a collection by its type, its
-        // absent arms set aside (`If(d, (x, y), Missing)` as an arm is a
-        // point): any other `If` root (a scalar selection, one whose arms are
-        // `Return` statements) keeps the ordinary route.
-        (isFunction(rootLiteral, 'If') &&
-          rootLiteral.ops
-            .slice(1)
-            .some((arm) =>
-              isSubtype(
-                BaseCompiler.withoutAbsentArms(arm.type.type),
-                'collection<any>'
-              )
-            )) ||
-        rootLiteral.operator === 'When' ||
-        (isFunction(rootLiteral, 'WithRandomSeed') &&
-          isFunction(rootLiteral.ops[1], 'RandomChoice')) ||
-        // A call that maps over a tuple argument is a tuple
-        // (`BaseCompiler.declaredScalarTupleCall`).
-        (isFunction(rootLiteral) &&
-          BaseCompiler.declaredScalarTupleCall(
-            rootLiteral.engine,
-            rootLiteral.operator,
-            rootLiteral.ops,
-            target
-          ) !== undefined));
-    js =
-      point !== undefined
-        ? BaseCompiler.compileCseRoot(
-            expr,
-            target,
-            0,
-            () =>
-              `[${point
-                .map((c) => BaseCompiler.compileValueOperand(c, target))
-                .join(', ')}]`
-          )
-        : collectionRoot
+    const isCollectionRoot = (rootLiteral: Expression): boolean =>
+      COLLECTION_VALUE_HEADS.has(rootLiteral.operator) ||
+      rootLiteral.operator === 'Which' ||
+      // An `If` root only when an arm is a collection by its type, its
+      // absent arms set aside (`If(d, (x, y), Missing)` as an arm is a
+      // point): any other `If` root (a scalar selection, one whose arms are
+      // `Return` statements) keeps the ordinary route.
+      (isFunction(rootLiteral, 'If') &&
+        rootLiteral.ops
+          .slice(1)
+          .some((arm) =>
+            isSubtype(
+              BaseCompiler.withoutAbsentArms(arm.type.type),
+              'collection<any>'
+            )
+          )) ||
+      rootLiteral.operator === 'When' ||
+      (isFunction(rootLiteral, 'WithRandomSeed') &&
+        isFunction(rootLiteral.ops[1], 'RandomChoice')) ||
+      // A call that maps over a tuple argument is a tuple
+      // (`BaseCompiler.declaredScalarTupleCall`).
+      (isFunction(rootLiteral) &&
+        BaseCompiler.declaredScalarTupleCall(
+          rootLiteral.engine,
+          rootLiteral.operator,
+          rootLiteral.ops,
+          target
+        ) !== undefined);
+    // The code of a root: `expr`, or the body of one member of a declared
+    // union of shapes (below).
+    const rootCode = (root: Expression): string => {
+      // A literal single point at the ROOT is the one collection-shaped
+      // value this function builds itself: the JavaScript array of its
+      // compiled coordinates. `literalRootPointOps` says which roots qualify
+      // and why the spelling is confined to this position. Every other root,
+      // a point in an operand position included, compiles through its
+      // ordinary lowering.
+      const point = literalRootPointOps(root, target);
+      const code =
+        point !== undefined
           ? BaseCompiler.compileCseRoot(
-              expr,
+              root,
               target,
               0,
               () =>
-                compileIntervalCollectionValue(expr, target) ??
-                BaseCompiler.compile(expr, target)
+                `[${point
+                  .map((c) => BaseCompiler.compileValueOperand(c, target))
+                  .join(', ')}]`
             )
-          : // A `Block` root is consumed whole too: its last statement is
-            // spelled as a collection value when it is one (a tuple, a call
-            // that maps over a tuple argument), in the scope of the block.
-            // See `BaseCompiler.compileCollectionValueBlock`.
-            isFunction(expr, 'Block')
-            ? BaseCompiler.compileCseRoot(expr, target, 0, () =>
-                BaseCompiler.compileCollectionValueBlock(expr, target)
+          : isCollectionRoot(assignedLiteral(root, target) ?? root)
+            ? BaseCompiler.compileCseRoot(
+                root,
+                target,
+                0,
+                () =>
+                  compileIntervalCollectionValue(root, target) ??
+                  BaseCompiler.compile(root, target)
               )
-            : BaseCompiler.compileCseRoot(expr, target);
-    // The compilation tells which block-local function bodies were spelled
-    // as collections, so this check runs after it.
-    assertSpelledLocalCallsConsumed(expr);
+            : // A `Block` root is consumed whole too: its last statement is
+              // spelled as a collection value when it is one (a tuple, a call
+              // that maps over a tuple argument), in the scope of the block.
+              // See `BaseCompiler.compileCollectionValueBlock`.
+              isFunction(root, 'Block')
+              ? BaseCompiler.compileCseRoot(root, target, 0, () =>
+                  BaseCompiler.compileCollectionValueBlock(root, target)
+                )
+              : BaseCompiler.compileCseRoot(root, target);
+      // The compilation tells which block-local function bodies were
+      // spelled as collections, so this check runs after it.
+      assertSpelledLocalCallsConsumed(root);
+      return code;
+    };
+    // A root that this function spells itself (a point, a collection, a
+    // `Block`) does not reach the dispatch of `compile()` on an input
+    // declared with a union of shapes (`x: real | list<real>`). The
+    // dispatch is made here instead, with one body per member, each spelled
+    // as the root is. Any other root reaches `compile()`, which makes it.
+    const spelledHere =
+      literalRootPointOps(expr, target) !== undefined ||
+      isFunction(expr, 'Block') ||
+      isCollectionRoot(assignedLiteral(expr, target) ?? expr);
+    js =
+      (spelledHere
+        ? BaseCompiler.compileDeclaredUnionDispatch(expr, target, rootCode)
+        : undefined) ?? rootCode(expr);
     // After the compilation, so that a decline of the core compiler (a
     // sub-expression of static type `error`) comes first.
     if (lambda) assertCallableFunctionRoot(expr);

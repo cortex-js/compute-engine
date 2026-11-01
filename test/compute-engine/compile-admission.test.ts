@@ -363,11 +363,11 @@ describe('A Tycho document function (signature `(unknown) -> unknown`)', () => {
     }
   });
 
-  test('a list argument keeps its run-time dispatch on javascript', () => {
+  test('a list argument maps the function on javascript', () => {
     const ce = tychoEngine();
     const r = compile(ce.box(['f', 'L']));
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_SYS.bcastFn(_fn_f, _.L)');
+    expect(r.code).toBe('_SYS.mapFn(_fn_f, [1], _.L)');
     expect(r.run!({ L: [1, 2, 3] })).toEqual([1, 4, 9]);
   });
 

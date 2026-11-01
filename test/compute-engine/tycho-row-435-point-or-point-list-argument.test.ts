@@ -40,6 +40,27 @@ function run(ce: ComputeEngine, value: unknown): unknown {
   return result.run!({ L: value });
 }
 
+/**
+ * The code and the value of the diagnostic of the decline of `f(L)` on
+ * javascript. A declared union input whose members no run-time test tells
+ * apart (a point whose coordinate is a list or a tuple and a list of such
+ * points are arrays of the same nesting) declines with `union-dispatch`,
+ * and the value names the input.
+ */
+function declineOf(ce: ComputeEngine): { code?: string; value?: string } {
+  try {
+    const r = compile(ce.parse('f(L)'), { fallback: false } as never) as {
+      success: boolean;
+      diagnostic?: { code?: string; value?: string };
+    };
+    return { code: r.diagnostic?.code, value: r.diagnostic?.value };
+  } catch (e) {
+    const d = (e as { diagnostic?: { code?: string; value?: string } })
+      .diagnostic;
+    return { code: d?.code, value: d?.value };
+  }
+}
+
 describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
   test('the union: the call is typed as a point or a list of points', () => {
     const ce = engine(UNION);
@@ -192,9 +213,7 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     ce.declare('f', { signature: `(${param}) -> number` });
     ce.assign('f', ce.parse('a \\mapsto a.y+1'));
     ce.declare('L', `${param} | list<${param}>`);
-    expect(() =>
-      compile(ce.parse('f(L)'), { fallback: false } as never)
-    ).toThrow(/cannot tell one point from a list of points/);
+    expect(declineOf(ce)).toEqual({ code: 'union-dispatch', value: 'L' });
   });
 
   test('a parameter with a tuple coordinate is declined', () => {
@@ -205,9 +224,7 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     ce.declare('f', { signature: `(${param}) -> number` });
     ce.assign('f', ce.parse('a \\mapsto 7'));
     ce.declare('L', `${param} | list<${param}>`);
-    expect(() =>
-      compile(ce.parse('f(L)'), { fallback: false } as never)
-    ).toThrow(/cannot tell one point from a list of points/);
+    expect(declineOf(ce)).toEqual({ code: 'union-dispatch', value: 'L' });
   });
 
   test('a list whose first point is absent is still mapped', () => {
@@ -227,10 +244,10 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
   });
 
   test('a union with a bare `list` arm is declined', () => {
+    // A bare `list` admits any elements, so no test of the nesting of the
+    // value tells it from a point.
     const ce = engine(`${POINT} | list`);
-    expect(() =>
-      compile(ce.parse('f(L)'), { fallback: false } as never)
-    ).toThrow(/admits a collection that is not a list of points/);
+    expect(declineOf(ce)).toEqual({ code: 'union-dispatch', value: 'L' });
   });
 
   test('controls: a list of points and a point keep their typing and code', () => {

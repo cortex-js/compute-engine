@@ -1603,7 +1603,26 @@ describe('§5.13 — G3, compile() emits a BOUNDED generic user function whole-f
     const r = compile(ce.box(['gd', 'y'] as any));
     expect(r?.code ?? '').toContain('_fn_gd');
     expect(r?.run?.({ y: 21 })).toBe(42);
-    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
+    // A list for `y`, which is not declared and whose type is inferred
+    // `number`, is a value outside the type of the input, so the compiled
+    // value is not specified (rule R5 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`). With `y`
+    // declared `list<real>`, the compiled call maps over the list, as the
+    // interpreter does.
+    const lists = fresh();
+    lists.declare('gd', '(x: T) -> T where T: number');
+    lists.assign(
+      'gd',
+      lists.box(['Function', ['Multiply', 2, 'x'], 'x'] as any)
+    );
+    lists.declare('y', 'list<real>');
+    const rl = compile(lists.box(['gd', 'y'] as any));
+    expect(rl?.code ?? '').toContain('_fn_gd');
+    const expected = lists
+      .box(['gd', 'y'] as any)
+      .subs({ y: lists.box(['List', 1, 2, 3] as any) })
+      .evaluate();
+    expect(rl?.run?.({ y: [1, 2, 3] })).toEqual(expected.ops!.map((x) => x.re));
     expect(ce.box(['gd', 21] as any).evaluate().re).toBe(42);
     expect(
       ce
@@ -1622,7 +1641,25 @@ describe('§5.13 — G3, compile() emits a BOUNDED generic user function whole-f
     const r = compile(ce.box(['hd', 'y'] as any));
     expect(r?.code ?? '').toContain('_fn_hd');
     expect(r?.run?.({ y: 21 })).toBe(42);
-    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
+    // A list for `y`, which is not declared and whose type is inferred
+    // `number`, is a value outside the type of the input, so the compiled
+    // value is not specified (rule R5 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`). With `y`
+    // declared `list<real>`, the compiled call maps over the list, as the
+    // interpreter does.
+    const lists = fresh();
+    lists.assign(
+      'hd',
+      e2(lists, ['Add', 'x', 'x'], '(x: T) -> T where T: number', 'x')
+    );
+    lists.declare('y', 'list<real>');
+    const rl = compile(lists.box(['hd', 'y'] as any));
+    expect(rl?.code ?? '').toContain('_fn_hd');
+    const expected = lists
+      .box(['hd', 'y'] as any)
+      .subs({ y: lists.box(['List', 1, 2, 3] as any) })
+      .evaluate();
+    expect(rl?.run?.({ y: [1, 2, 3] })).toEqual(expected.ops!.map((x) => x.re));
   });
 
   it('an UNBOUNDED variable still declines, fallback agrees with the interpreter', () => {

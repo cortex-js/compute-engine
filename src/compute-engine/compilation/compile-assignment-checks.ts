@@ -40,6 +40,7 @@ import {
   capturedTypeWidening,
 } from '../boxed-expression/function-literal.js';
 import type { CompileTarget } from './types.js';
+import { isScalarShaped } from './static-shape.js';
 
 /**
  * The signature DECLARED for the user function `id`
@@ -67,11 +68,10 @@ export function declaredUserSignature(
  * list of tuples at a parameter with NO declared type, written in a form
  * that the JavaScript target compiles with the meaning the interpreter
  * gives it: an untyped parameter binds a tuple whole, and a list maps over
- * its elements, each one a point bound whole. The emitted JavaScript maps
- * a function over any array at run time (`_SYS.bcastFn`), and a point is
- * an array, so `Apply(u ↦ 7, (a, b))` gave `[7, 7]` and `g(P)` for a list
- * of points `P` gave `[[7, 7], [7, 7]]`, where the interpreter gives `7`
- * and `[7, 7]`.
+ * its elements, each one a point bound whole. A point is an array in the
+ * emitted JavaScript, so a map over every array level gave `[7, 7]` for
+ * `Apply(u ↦ 7, (a, b))` and `[[7, 7], [7, 7]]` for `g(P)` with a list of
+ * points `P`, where the interpreter gives `7` and `[7, 7]`.
  *
  * - `Apply(literal, …args)` where every argument is a tuple at an untyped
  *   parameter: the body of the literal with each parameter replaced by
@@ -243,7 +243,7 @@ export function wholeTupleCall(
  * the call `unknown` or `any` and that result type is a tuple. A call
  * whose arguments may be lists is skipped on every target except
  * `interval-javascript`. The JavaScript call of a local function maps over
- * a list argument (`_SYS.bcastFn`), and its value is then a list of
+ * a list argument (`_SYS.mapFn`), and its value is then a list of
  * tuples, not a tuple; the other targets are treated the same way, since
  * their calls may map too. The `interval-javascript` target applies the
  * local function to its argument directly, with no map, so the value of
@@ -265,7 +265,7 @@ export function localCallWithResultType(
   if (typeof result !== 'object' || result.kind !== 'tuple') return undefined;
   if (
     target.language !== 'interval-javascript' &&
-    !call.ops.every(provablyScalarArg)
+    !call.ops.every((a) => isScalarShaped(a.type.type))
   )
     return undefined;
   return call.engine.function('Typed', [
@@ -511,7 +511,7 @@ export function blockLocalFunction(
  * `T` cannot hold a list (a number, a boolean, a string, a tuple) read as
  * `T`. Such a parameter maps to the cells (user decision 2026-10-24,
  * ROADMAP CE-405), as a scalar parameter does in the compiled code
- * (`_SYS.bcastFn`), so a signature whose every parameter is then scalar
+ * (`_SYS.mapFn`), so a signature whose every parameter is then scalar
  * compiles as one with scalar parameters. A parameter declared
  * `broadcastable<value>` maps one rank, which no compiled form expresses,
  * and is kept.
@@ -564,18 +564,6 @@ export function userFunctionParamsAreScalar(
   }
   return paramsAreScalar(literal);
 }
-
-/**
- * Is `a` PROVABLY not a collection (`number`/`boolean`/`string`-typed — a
- * plain numeric call such as `f(2)`), and so incapable of broadcasting at
- * run time? Note the direction: this decides only where the answer is
- * certain, so a type merely WIDER than the runtime value is treated as
- * possibly a collection.
- */
-export const provablyScalarArg = (a: Expression): boolean =>
-  a.type.matches('number') ||
-  a.type.matches('boolean') ||
-  a.type.matches('string');
 
 /**
  * The type signature `t` gives positional parameter `i`: the required

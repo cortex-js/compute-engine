@@ -786,7 +786,7 @@ describe('A parameter with no declared type called with a list of points maps ov
       fallback: false,
     } as any);
     expect(r.success).toBe(true);
-    expect(r.code).toMatch(/_SYS\.bcastFn\(/);
+    expect(r.code).toBe('_SYS.mapFn(_fn_k2, [1], _.x)');
     expect((r.run as any)({ x: [1, 2] })).toEqual([2, 5]);
   });
 

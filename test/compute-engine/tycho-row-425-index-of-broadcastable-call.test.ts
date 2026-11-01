@@ -50,6 +50,15 @@
  *   (`_SYS.atWithValueMarker`), and arithmetic on an absent read keeps it
  *   absent (`numberOrGatedCollectionArms`, `base-compiler.ts`).
  *
+ * The compiled tests compile `g(x)` for three declarations of `x`. With
+ * `x: any` the compiler cannot settle the shape of the argument of the call
+ * (a number, or a list that the call maps over), so the compilation declines
+ * with the code `unsettled-shape` and the name `x` in `unsupported`. With
+ * `x: real` and `x: list<real>` the shape is settled at compile time, and
+ * the compiled value equals the interpreted value at a number, a list and an
+ * empty list. The static-type tests keep `x: any`: the type of an index into
+ * `broadcastable<T>` is a property of the type system, not of compiled code.
+ *
  * Each test reads the static type BEFORE `x` or `p` is assigned: an
  * assigned value narrows the type, and the check would then prove nothing.
  *
@@ -118,10 +127,12 @@ function spell(v: unknown): string {
 /** The compiled function `(symbol) ↦ expr`, whose parameter has the type
  * that `ce` declares for `symbol`, called with one value.
  *
- * A free input declared `any` is refused: the compiled code must know the
- * shape of each input from its type. The run-time test of a value that may
- * be a list is still reachable for a parameter of the root function declared
- * `any`, so `expr` is compiled as the body of such a function. */
+ * A free input declared `any` is refused, and so is a parameter of the root
+ * function declared `any` that a call of a user function reads: the shape of
+ * the argument is not settled. So `expr` is compiled as the body of a
+ * function whose parameter has the type that `ce` declares for `symbol`,
+ * and that type has a settled shape in the tests that read the compiled
+ * value. */
 function compileRoot(
   ce: ComputeEngine,
   expr: Expression,
@@ -137,6 +148,26 @@ function compileRoot(
   return (value) => run(value);
 }
 
+/** Expect the compilation of `(symbol) ↦ expr` to decline because the type
+ * of `symbol` (`any`) does not settle the shape of the argument of a call of
+ * a user function: the code is `unsettled-shape` and `unsupported` names
+ * `symbol`. */
+function expectUnsettledDecline(
+  ce: ComputeEngine,
+  expr: Expression,
+  symbol = 'x'
+): void {
+  const fn = ce.box([
+    'Function',
+    expr.json,
+    ['Typed', symbol, { str: ce.box(symbol).type.toString() }],
+  ] as never);
+  const r = compile(fn, { to: 'javascript' } as never);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+  expect(r.unsupported).toContain(symbol);
+}
+
 /** For each value of `x` (a JavaScript value and its MathJSON spelling):
  * the interpreted value, and the compiled value spelled the same way, or
  * `throws` when the compiled code throws. `declined` when the expression
@@ -144,7 +175,8 @@ function compileRoot(
 function compiledAndInterpreted(
   ce: ComputeEngine,
   expr: Expression,
-  values: ReadonlyArray<readonly [unknown, unknown]>
+  values: ReadonlyArray<readonly [unknown, unknown]>,
+  numeric = false
 ): [string, string][] | 'declined' {
   let run: ((value: unknown) => unknown) | undefined;
   try {
@@ -154,7 +186,9 @@ function compiledAndInterpreted(
   }
   return values.map(([js, json]) => {
     ce.assign('x', ce.box(json as any));
-    const interpreted = expr.evaluate().toString().replace(/"/g, '');
+    const interpreted = (numeric ? expr.N() : expr.evaluate())
+      .toString()
+      .replace(/"/g, '');
     let compiled: string;
     try {
       compiled = spell(run!(js));
@@ -470,11 +504,11 @@ describe('Tycho row 425: a declared broadcastable<T>', () => {
 });
 
 describe('Tycho row 425: compiled and interpreted values agree', () => {
-  // Each expression either does not compile, or compiles to the value the
+  // With `x: any` the shape of the argument of `g(x)` is not settled, and
+  // each expression declines. With `x` declared `real` or `list<real>`, each
+  // expression either does not compile, or compiles to the value the
   // interpreter gives (or throws where the interpreter answers an error),
-  // at x = 3, x = [1, 2, 3] and x = []. The outcome of each aggregate is
-  // the outcome on the commit before this change, except for `Sum(g(x))`
-  // and `Product(g(x))`: they declined while they were typed `number`, and
+  // at x = 3, x = [1, 2, 3] and x = []. `Sum(g(x))` and `Product(g(x))`
   // compile since they are typed `number | vector<2>` (ROADMAP CE-361,
   // `test/compute-engine/sum-unknown-element-type.test.ts`).
   // An absent element (an index past the end, or into an empty list) makes
@@ -509,14 +543,64 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
       expect(compiled).toBe(interpreted);
   }
 
-  test.each(cases)('%s', (_name, json, expected) => {
+  test.each(cases)('x: any declines: %s', (_name, json, expected) => {
     const ce = rowEngine();
-    const result = compiledAndInterpreted(ce, ce.box(json as any), X_VALUES);
     if (expected === 'declined') {
-      expect(result).toBe('declined');
+      // With `x: any`, the elements of `g(x)` may be numbers or rows, and
+      // the statistics decline.
+      expect(compiledAndInterpreted(ce, ce.box(json as any), X_VALUES)).toBe(
+        'declined'
+      );
       return;
     }
-    expectAgreement(result, expected);
+    expectUnsettledDecline(ce, ce.box(json as any));
+  });
+
+  // For a number `x`, the statistics compile: the elements of `g(x)` are
+  // numbers. `g(x)[5]` is proved to find nothing there, so `Sin(g(x)[5])`
+  // is an invalid expression (the sine of `NaN` has no type), and its
+  // compilation declines. The compiled float is compared with `.N()`: the
+  // interpreter keeps `Mean` exact (`9/2`).
+  describe('x: real', () => {
+    test.each(cases)('%s', (name, json, expected) => {
+      const ce = rowEngine('real');
+      const result = compiledAndInterpreted(
+        ce,
+        ce.box(json as any),
+        X_VALUES.slice(0, 1),
+        true
+      );
+      if (name === 'Sin(g(x)[5])') {
+        expect(ce.box(json as any).isValid).toBe(false);
+        expect(result).toBe('declined');
+        return;
+      }
+      expectAgreement(result, expected === 'declined' ? 'compiles' : expected);
+    });
+  });
+
+  // For a list `x`, `g(x)` is a list of rows of numbers, whose static
+  // type settles the rank 2. `Max` and `Min` flatten both levels, as the
+  // interpreter does, so they compile with the interpreter's value. The
+  // other statistics read each row as a number, and they decline.
+  describe('x: list<real>', () => {
+    test.each(cases)('%s', (name, json, expected) => {
+      const ce = rowEngine('list<real>');
+      const result = compiledAndInterpreted(
+        ce,
+        ce.box(json as any),
+        X_VALUES.slice(1)
+      );
+      if (/^M(ax|in)\(/.test(name)) {
+        expectAgreement(result, 'compiles');
+        return;
+      }
+      if (expected === 'declined') {
+        expect(result).toBe('declined');
+        return;
+      }
+      expectAgreement(result, expected);
+    });
   });
 
   // For `x = 3` the interpreter leaves these unevaluated (as on the commit
@@ -525,8 +609,9 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
   test.each([
     ['Sum(Rest(g(x)))', ['Sum', ['Rest', ['g', 'x']]]],
     ['Reduce(Rest(g(x)), Add, 0)', ['Reduce', ['Rest', ['g', 'x']], 'Add', 0]],
-  ])('%s', (_name, json) => {
-    const ce = rowEngine();
+  ])('x: any declines, x: list<real> compiles: %s', (_name, json) => {
+    expectUnsettledDecline(rowEngine(), rowEngine().box(json as any));
+    const ce = rowEngine('list<real>');
     const result = compiledAndInterpreted(
       ce,
       ce.box(json as any),
@@ -540,27 +625,35 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
     // different lengths. Each step of the compiled `Multiply` fold is the
     // run-time product, which multiplies such rows as the interpreter does.
     // The fold was refused before the run-time product did (ROADMAP CE-98.3).
-    const ce = rowEngine();
+    const json = ['Product', ['Rest', ['g', 'x']]];
+    expectUnsettledDecline(rowEngine(), rowEngine().box(json as any));
+    const ce = rowEngine('list<real>');
     const result = compiledAndInterpreted(
       ce,
-      ce.box(['Product', ['Rest', ['g', 'x']]]),
+      ce.box(json as any),
       X_VALUES.slice(1)
     );
     expectAgreement(result, 'compiles');
   });
 
   test('Repeat(0, g(x)[1]) throws where the interpreter answers an error', () => {
-    const ce = rowEngine();
-    const result = compiledAndInterpreted(
-      ce,
-      ce.box(['Repeat', 0, ['At', ['g', 'x'], 1]]),
-      X_VALUES
+    const json = ['Repeat', 0, ['At', ['g', 'x'], 1]];
+    expectUnsettledDecline(rowEngine(), rowEngine().box(json as any));
+    const scalar = rowEngine('real');
+    const number = compiledAndInterpreted(
+      scalar,
+      scalar.box(json as any),
+      X_VALUES.slice(0, 1)
     ) as [string, string][];
-    expect(result[0]).toEqual(['[0,0,0]', '[0,0,0]']);
-    expect(result[1][0]).toMatch(/incompatible-type/);
-    expect(result[1][1]).toBe('throws');
-    expect(result[2][0]).toMatch(/incompatible-type/);
-    expect(result[2][1]).toBe('throws');
+    expect(number[0]).toEqual(['[0,0,0]', '[0,0,0]']);
+    // For a list `x`, `g(x)[1]` is a vector: the count is of type
+    // `missing | vector<2>`, the expression is invalid at boxing, and its
+    // compilation declines.
+    const ce = rowEngine('list<real>');
+    expect(ce.box(json as any).isValid).toBe(false);
+    expect(
+      compiledAndInterpreted(ce, ce.box(json as any), X_VALUES.slice(1))
+    ).toBe('declined');
   });
 
   test('an index in range is the element, NaN included', () => {
@@ -648,11 +741,11 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
   // is a number and a matrix when `x` is a list. Arithmetic on it maps over
   // each arm and keeps the `missing` arm; it was typed `number`, and the
   // compiled code read the absent value as a number.
-  function matrixEngine(): ComputeEngine {
+  function matrixEngine(xType = 'any'): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('m', 'function');
     ce.assign('m', ce.parse('t \\mapsto [[t, 2t], [3t, 4t]]'));
-    ce.declare('x', 'any');
+    ce.declare('x', xType);
     return ce;
   }
   const VALUES = [
@@ -686,19 +779,30 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
     const ce = matrixEngine();
     const expr = ce.parse(latex);
     expect(expr.type.toString()).toBe(type);
-    const result = compiledVsInterpreted(ce, expr, 'x', VALUES);
-    expect(result).not.toBe('declined');
-    // `Sqrt` and `Sin` of an exact number stay exact in the interpreter:
-    // the compiled float is compared with `.N()`.
-    for (const [i, [interpreted, compiled]] of (
-      result as [string, string][]
-    ).entries()) {
-      ce.assign('x', ce.box(VALUES[i][1] as any));
-      const numeric = expr.N().toString().replace(/"/g, '');
-      expect([
-        compiled,
-        compiled === interpreted || approximatelyEqual(compiled, numeric),
-      ]).toEqual([compiled, true]);
+    // `x: any` does not settle the shape of the argument of `m(x)`.
+    expectUnsettledDecline(ce, expr);
+    // With `x` declared `real` and `list<real>`, the compiled value is the
+    // interpreted value. `Sqrt` and `Sin` of an exact number stay exact in
+    // the interpreter: the compiled float is compared with `.N()`.
+    for (const [xType, values] of [
+      ['real', VALUES.slice(0, 1)],
+      ['list<real>', VALUES.slice(1)],
+    ] as const) {
+      const typed = matrixEngine(xType);
+      const typedExpr = typed.parse(latex);
+      const result = compiledVsInterpreted(typed, typedExpr, 'x', values);
+      expect(result).not.toBe('declined');
+      for (const [i, [interpreted, compiled]] of (
+        result as [string, string][]
+      ).entries()) {
+        typed.assign('x', typed.box(values[i][1] as any));
+        const numeric = typedExpr.N().toString().replace(/"/g, '');
+        expect([
+          xType,
+          compiled,
+          compiled === interpreted || approximatelyEqual(compiled, numeric),
+        ]).toEqual([xType, compiled, true]);
+      }
     }
     // The type holds the value.
     for (const [, json] of VALUES) {
@@ -715,8 +819,15 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
     // an element can be a list whose rows differ in length, which is not a
     // `tensor`.
     expect(expr.type.toString()).toBe('list<any> | number');
+    expectUnsettledDecline(ce, expr);
     // At x = 3 the interpreter leaves the sum of `Rest(m(3))` unevaluated.
-    const result = compiledVsInterpreted(ce, expr, 'x', VALUES.slice(1));
+    const typed = matrixEngine('list<real>');
+    const result = compiledVsInterpreted(
+      typed,
+      typed.parse('\\sum \\operatorname{Rest}(m(x))'),
+      'x',
+      VALUES.slice(1)
+    );
     expect(result).toEqual([
       ['[[2,4],[6,8]]', '[[2,4],[6,8]]'],
       ['0', '0'],
@@ -994,20 +1105,48 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     ['At(At(m(x), 1), 5) + 1', ['Add', ['At', ['At', ['m', 'x'], 1], 5], 1]],
     ['At(At(nest(x), 1), 5)', ['At', ['At', ['nest', 'x'], 1], 5]],
     ['Last(At(nest(x), 2))', ['Last', ['At', ['nest', 'x'], 2]]],
-  ])('%s', (_name, json) => {
-    const ce = new ComputeEngine();
-    ce.declare('m', 'function');
-    ce.assign('m', ce.parse('t \\mapsto [[t, 2t], [3t, 4t]]'));
-    ce.declare('nest', 'function');
-    ce.assign('nest', ce.parse('t \\mapsto [[t], [t, t]]'));
-    ce.declare('x', 'any');
-    expectParity(
-      compiledVsInterpreted(ce, ce.box(json as any), 'x', [
-        [3, 3],
-        [[1, 2, 3], L(1, 2, 3)],
-        [[], L()],
-      ])
-    );
+  ])('%s', (name, json) => {
+    const engine = (xType: string): ComputeEngine => {
+      const ce = new ComputeEngine();
+      ce.declare('m', 'function');
+      ce.assign('m', ce.parse('t \\mapsto [[t, 2t], [3t, 4t]]'));
+      ce.declare('nest', 'function');
+      ce.assign('nest', ce.parse('t \\mapsto [[t], [t, t]]'));
+      ce.declare('x', xType);
+      return ce;
+    };
+    // `x: any` does not settle the shape of the argument of the call.
+    const any = engine('any');
+    expectUnsettledDecline(any, any.box(json as any));
+    // With a declared shape, the compiled value is the interpreted value.
+    for (const [xType, values] of [
+      ['real', [[3, 3]]],
+      [
+        'list<real>',
+        [
+          [[1, 2, 3], L(1, 2, 3)],
+          [[], L()],
+        ],
+      ],
+    ] as const) {
+      const ce = engine(xType);
+      const result = compiledVsInterpreted(
+        ce,
+        ce.box(json as any),
+        'x',
+        values as never
+      );
+      // Two reads decline for a declared shape. `At(m(3), 7)` is proved to
+      // find nothing and is typed `nan`, which `At` does not index.
+      // `At(m(x)[1], 5)` finds no `vector<2>`, which the compiled
+      // arithmetic cannot spell as an absent row. The interpreter answers
+      // `NaN` and `Missing`.
+      const declines =
+        (name === 'At(At(m(x), 7), 1)' && xType === 'real') ||
+        (name === 'At(At(m(x), 1), 5) + 1' && xType === 'list<real>');
+      expect([xType, result === 'declined']).toEqual([xType, declines]);
+      expectParity(result);
+    }
   });
 
   test('Max(At(m(x), 1)) declines', () => {
@@ -1043,32 +1182,47 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     expect(product.isValid).toBe(true);
     ce.assign('p', ce.box(L(L(1, 2), L(3, 4)) as any));
     expect(product.evaluate().toString()).toBe('[3,4]');
-    ce.declare('nest', 'function');
-    ce.assign('nest', ce.parse('t \\mapsto [[t], [t, t]]'));
-    ce.declare('x', 'any');
-    // Every expression is boxed before `x` is assigned: an assigned value
-    // narrows the type.
-    const exprs = [
+    const folds = [
       ['Product', ['Rest', ['nest', 'x']]],
       ['Reduce', ['Rest', ['nest', 'x']], 'Multiply'],
       ['Fold', 'Multiply', 1, ['Rest', ['nest', 'x']]],
-    ].map((json) => ce.box(json as any));
+    ];
+    const engine = (xType: string): ComputeEngine => {
+      const e = new ComputeEngine();
+      e.declare('nest', 'function');
+      e.assign('nest', e.parse('t \\mapsto [[t], [t, t]]'));
+      e.declare('x', xType);
+      return e;
+    };
+    // Every expression is boxed before `x` is assigned: an assigned value
+    // narrows the type. With `x: any` the shape of the argument of
+    // `nest(x)` is not settled, and the compilation declines.
+    const any = engine('any');
+    for (const json of folds) {
+      const expr = any.box(json as any);
+      expect(expr.isValid).toBe(true);
+      expectUnsettledDecline(any, expr);
+    }
     // The rows of `nest(x)` have different lengths. Each step of the
     // compiled `Multiply` fold is the run-time product, which multiplies
     // them as the interpreter does (ROADMAP CE-98.3).
-    for (const expr of exprs) {
+    const typed = engine('list<real>');
+    for (const json of folds) {
+      const expr = typed.box(json as any);
       expect(expr.isValid).toBe(true);
       expect(
-        compiledVsInterpreted(ce, expr, 'x', [[[1, 2, 3], L(1, 2, 3)]])
+        compiledVsInterpreted(typed, expr, 'x', [[[1, 2, 3], L(1, 2, 3)]])
       ).toEqual([['[[6],[6,6]]', '[[6],[6,6]]']]);
     }
   });
 
   test('Repeat with a fractional count throws', () => {
-    const ce = rowEngine();
+    const json = ['Repeat', 0, ['At', ['g', 'x'], 1]];
+    expectUnsettledDecline(rowEngine(), rowEngine().box(json as any));
+    const ce = rowEngine('real');
     const result = compiledVsInterpreted(
       ce,
-      ce.box(['Repeat', 0, ['At', ['g', 'x'], 1]]),
+      ce.box(json as any),
       'x',
       [[1.5, 1.5]]
     ) as [string, string][];
@@ -1262,15 +1416,19 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
   });
 
   test.each(['First', 'Second'])(
-    '%s of an empty number | list<number> is Missing',
+    '%s of an empty number | list<number> is NaN',
     (op) => {
+      // `p` is declared with two shapes, so the compiled code holds one body
+      // for each. The list body reads an empty list with a numeric element
+      // type as NaN (error-model rule 5), as it does for a plain
+      // `list<number>` input.
       const ce = new ComputeEngine();
       ce.declare('p', 'number | list<number>');
       const run = compile(ce.box([op, 'p']), {
         to: 'javascript',
         fallback: false,
       } as never).run!;
-      expect(run({ p: [] } as never)).toBeUndefined();
+      expect(run({ p: [] } as never)).toBeNaN();
     }
   );
 

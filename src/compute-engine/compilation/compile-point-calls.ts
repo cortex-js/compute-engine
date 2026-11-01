@@ -35,11 +35,14 @@ import { isScalarType } from '../boxed-expression/function-literal.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
   absentArgumentChecks,
+  callArgumentMapRank,
+  emitUserFunctionCall,
   presentCheckedCode,
+  unsettledArgumentDecline,
   userFunctionParamType,
 } from './compile-user-calls.js';
 import {
-  provablyScalarArg,
+  signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
 } from './compile-assignment-checks.js';
@@ -47,8 +50,16 @@ import { core } from './compiler-core-hooks.js';
 import { compileValueOperand } from './compile-statements.js';
 import { tempVar } from './compiler-naming.js';
 import { isSinglePointArg } from './compile-cse.js';
-import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
+import {
+  absentArgumentFork,
+  userFunctionSignatureIsInferred,
+} from './compile-callbacks.js';
 import { hasBroadcastableCoordinate } from './compiler-type-facts.js';
+import {
+  isScalarShaped,
+  isUndeclaredParameterType,
+  pointsBelowLists,
+} from './static-shape.js';
 
 /**
  * Compile a call of user function `h` in which an argument is a LIST OF
@@ -98,8 +109,23 @@ export function tryCompilePointListCall(
   // an argument whose rank the type does not give is mapped recursively
   // (see `dispatch` below). ROADMAP CE-412.
   const cells: boolean[] = [];
+  // A parameter of a function with no signature of its own (`w` declared
+  // `function`, then assigned `p ↦ p[1] + p[2]`) has no declared type. The
+  // interpreter reads its slot from the signature that the body of the
+  // assigned literal infers (`pointListParamSlots()` in
+  // `boxed-function.ts`): when that type is a point, it maps a list of
+  // points one point at a time, so `w([(1, 2), (3, 4)])` is `[3, 7]`. The
+  // inferred point is read here the same way. Without it, the call was
+  // inlined with the list in place of `p`, and `p[1] + p[2]` added the two
+  // points: `[4, 6]`.
+  const literal = userFunctionLiteral(engine, h);
   const params = args.map((_a, i) => {
-    const pt = userFunctionParamType(engine, h, i);
+    let pt = userFunctionParamType(engine, h, i);
+    if (pt === undefined && literal !== undefined) {
+      const inferred = signatureParamType(literal.type.type, i);
+      if (inferred !== undefined && isPointParameterType(inferred))
+        pt = inferred;
+    }
     const r = pt === undefined ? undefined : resolveTypeForCompilation(pt);
     cells[i] =
       r !== undefined &&
@@ -153,6 +179,11 @@ export function tryCompilePointListCall(
   // The index of an argument the interpreter pairs with the list of points
   // only when its value is a list (see the `'untyped'` case below), or -1.
   let untypedSlot = -1;
+  // True when the list of points at `at` is paired with other arguments at
+  // scalar parameters that may be lists (`scalarLists`). The call is then
+  // a static map whose ranks the static types give (see `pairedRanks`
+  // below).
+  let paired = false;
   if (at < 0) {
     at = args.findIndex(
       (a, i) => untypedPointListElement(engine, h, a, params[i]) !== undefined
@@ -161,7 +192,7 @@ export function tryCompilePointListCall(
       // Only the plain form is handled: every other argument is a
       // scalar. Other calls keep their ordinary route (another list
       // argument is paired with this one by the interpreter's broadcast).
-      if (args.some((a, i) => i !== at && !provablyScalarArg(a)))
+      if (args.some((a, i) => i !== at && !isScalarShaped(a.type.type)))
         return undefined;
       untypedElement = untypedPointListElement(engine, h, args[at], params[at]);
     } else {
@@ -203,18 +234,26 @@ export function tryCompilePointListCall(
           `or more than one argument is a list, and the compiled call ` +
           `maps over one list only.`
       );
-    // The compiled map goes one rank down, so each element must be a
-    // number, a boolean or a string. The interpreter maps a nested list
-    // to the cells, and binds an absent element to the parameter. It also
-    // checks each element against the parameter's type (an
-    // `incompatible-type` error for `0` at a `boolean` parameter, or for
-    // `0.5` at an `integer` one), and the compiled map does not, so the
-    // element type must be a subtype of the parameter's type.
-    const listType = resolveTypeForCompilation(args[at].type.type);
-    const element =
-      typeof listType === 'string'
-        ? undefined
-        : collectionElementType(listType);
+    // The compiled map goes down as many ranks as the static type gives
+    // (`callArgumentMapRank()`: 2 for `list<list<real>>`), so each
+    // innermost element must be a number, a boolean or a string. The
+    // interpreter maps a nested list to the cells, and binds an absent
+    // element to the parameter. It also checks each element against the
+    // parameter's type (an `incompatible-type` error for `0` at a
+    // `boolean` parameter, or for `0.5` at an `integer` one), and the
+    // compiled map does not, so the element type must be a subtype of the
+    // parameter's type. A rank above 1 is emitted as the static map of the
+    // paired case (`paired` below).
+    const scalarRank = callArgumentMapRank(args[at], target) ?? 1;
+    let element: Type | undefined = args[at].type.type;
+    for (let k = 0; k < scalarRank && element !== undefined; k++) {
+      const listType = resolveTypeForCompilation(element);
+      element =
+        typeof listType === 'string'
+          ? undefined
+          : collectionElementType(listType);
+    }
+    if (scalarRank > 1) paired = true;
     const slotType = scalarSlotElementType(params, cells, at);
     if (
       element === undefined ||
@@ -281,6 +320,13 @@ export function tryCompilePointListCall(
       scalarLists.indexOf('untyped') >= 0
     )
       untypedSlot = scalarLists.indexOf('untyped');
+    else if (
+      !dispatch &&
+      !declaredPlan &&
+      untypedElement === undefined &&
+      !typeContainsMissing(args[at].type.type)
+    )
+      paired = true;
     else
       throw new Error(
         `Could not compile a call of \`${h}\`: argument ${at + 1} is a ` +
@@ -441,42 +487,185 @@ export function tryCompilePointListCall(
         `parameter, declared \`broadcastable<…>\`, refuses an absent point ` +
         `passed whole.`
     );
-  const listGuard = absent ? `${temps[at]} === undefined ? undefined : ` : '';
-  const pointGuard = absent ? `${point} === undefined ? undefined : ` : '';
+  // At a parameter with no declared type, the interpreter binds an absent
+  // list whole to the parameter and evaluates the body: with
+  // `f7 := t ↦ 7`, `f7(LP)` is `7` when `LP` is `Missing`. The absent list
+  // is then given to the definition of `h` compiled for any argument, as
+  // for a call `f7(Missing)`. An absent point of a present list, and an
+  // absent list level, go there too: the interpreter binds `Missing` to
+  // the parameter and runs the body, so `f2([(1, 2), Missing])` is
+  // `[(2, 4), NaN]` with `f2 := t ↦ 2t`. At a parameter declared as a
+  // point, the interpreter gives `Missing` for an absent point and for an
+  // absent list (see above), and the map gives `undefined`.
+  let wholeDef: string | undefined;
+  if (untypedElement !== undefined && absent) {
+    wholeDef = core.ensureUserFunctionEmitted(engine, h, target);
+    if (wholeDef === undefined)
+      throw new Error(
+        `${reason} The points may be absent, and no definition of \`${h}\` ` +
+          `for an absent argument could be compiled.`
+      );
+  }
+  const absentListCall =
+    wholeDef !== undefined && mayBeAbsentWhole(args[at].type.type)
+      ? `${wholeDef}(${temps
+          .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
+          .join(', ')})`
+      : undefined;
+  const listGuard = absent
+    ? `${temps[at]} === undefined ? ${absentListCall ?? 'undefined'} : `
+    : '';
+  const pointGuard = absent
+    ? `${point} === undefined ? ${
+        wholeDef === undefined
+          ? 'undefined'
+          : `${wholeDef}(${callArgs.join(', ')})`
+      } : `
+    : '';
   const map =
     `${temps[at]}.map((${point}) => ` +
     `${pointGuard}${name}(${callArgs.join(', ')}))`;
   const head = `(${temps.join(', ')}) => ${listGuard}`;
-  if (untypedSlot >= 0) {
-    // When the value of the `unknown` argument is an array, point `i` is
-    // paired with its element `i`, and an element that is itself a list
-    // maps the call again (`_SYS.bcastFn`), as the interpreter does for
-    // an `unknown` slot. A length mismatch is the interpreter's
-    // `incompatible-dimensions` error, which the compiled broadcast gives
-    // as `NaN` (`bcastWith` in `javascript-runtime.ts`). Any other value
-    // is passed whole to each call of the map.
-    const u = temps[untypedSlot];
-    const idx = tempVar(target);
-    const el = tempVar(target);
-    const pairArgs = temps.map((t, i) =>
-      i === at
-        ? point
-        : presentCheckedCode(i === untypedSlot ? el : t, checks[i])
+  // A list of points paired with lists at scalar parameters
+  // (`f(Ps, t)` with `Ps: list<tuple<real, real>>` and `t: list<real>`):
+  // the interpreter gives point `i` and element `i` of `t` to one call,
+  // and maps the call again over an element that is a list. The static
+  // map `_SYS.mapFn` does the same, with the ranks that the static types
+  // give: 1 for the list of points (a point is given whole), and the rank
+  // of each other argument at a scalar parameter (`callArgumentMapRank()`).
+  // A length mismatch gives `NaN`, the compiled value of the interpreter's
+  // `incompatible-dimensions` error. An argument whose type settles no
+  // rank declines (rule R3).
+  if (paired) {
+    const ranks = args.map((a, i) =>
+      i === at && !scalarList
+        ? 1
+        : scalarLists[i] === false
+          ? 0
+          : callArgumentMapRank(a, target)
     );
-    const paired =
-      `(${u}.length !== ${temps[at]}.length ? NaN : ` +
-      `${temps[at]}.map((${point}, ${idx}) => ${pointGuard}` +
-      `_SYS.bcastFn((${el}) => ${name}(${pairArgs.join(', ')}), ` +
-      `${u}[${idx}])))`;
-    return (
-      `(${head}Array.isArray(${u}) ? ${paired} : ${map})` +
-      `(${codes.join(', ')})`
+    const unsettled = ranks.findIndex((r) => r === undefined);
+    if (unsettled >= 0) throw unsettledArgumentDecline(h, args[unsettled]);
+    // The compiled map does not check an element against the parameter
+    // type, which the interpreter does, so the innermost element type of
+    // each mapped list must fit its parameter.
+    args.forEach((a, i) => {
+      if (i === at || ranks[i] === 0) return;
+      let element: Type | undefined = a.type.type;
+      for (let k = 0; k < ranks[i]! && element !== undefined; k++)
+        element = collectionElementType(resolveTypeForCompilation(element));
+      const slotType = scalarSlotElementType(params, cells, i);
+      if (
+        element === undefined ||
+        slotType === undefined ||
+        !isSubtype(element, resolveTypeForCompilation(slotType))
+      )
+        throw new Error(
+          `${reason} The elements of argument ${i + 1}, typed ` +
+            `\`${typeToString(element ?? 'unknown')}\`, may not fit the ` +
+            `parameter type \`${typeToString(slotType ?? 'unknown')}\`, ` +
+            `and the compiled map does not check them.`
+        );
+    });
+    // With no absent-argument check, the mapped function is the callee
+    // itself, not an arrow that only calls it.
+    const cellArgs = temps.map((t, i) =>
+      i === at ? t : presentCheckedCode(t, checks[i])
     );
+    const fn = checks.every((c, i) => i === at || c === undefined)
+      ? name
+      : `((${temps.join(', ')}) => ${name}(${cellArgs.join(', ')}))`;
+    return `_SYS.mapFn(${fn}, [${ranks.join(', ')}], ${codes.join(', ')})`;
+  }
+  // The argument at the parameter typed `unknown` is passed whole to each
+  // call of the map when its static type settles a value that is not a
+  // list. The interpreter pairs it with the points when its value is a
+  // list, which only a run-time test of the value would know, so the call
+  // declines then (rule R3 of
+  // `docs/plans/2026-10-31-static-shape-compilation.md`).
+  if (untypedSlot >= 0 && callArgumentMapRank(args[untypedSlot], target) !== 0)
+    throw unsettledArgumentDecline(h, args[untypedSlot]);
+  // A tensor of points (`list<list<P>>`) at a parameter with no declared
+  // type: the interpreter maps the call over every list level above the
+  // points and binds each point whole (`untypedPointListElement()`), so
+  // the call is the static map over those levels of the definition for
+  // one point, with every other argument given whole to each call.
+  const untypedRank =
+    untypedElement === undefined
+      ? undefined
+      : pointsBelowLists(args[at].type.type)?.rank;
+  if (untypedRank !== undefined && untypedRank > 1) {
+    const checked = checks.every((c, i) => i === at || c === undefined)
+      ? name
+      : `((${temps.join(', ')}) => ${name}(${temps
+          .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
+          .join(', ')}))`;
+    // An argument that may be absent or hold an absent value, as a point
+    // or as a list level: `_SYS.mapFn` passes the absent value to the
+    // function as it is, and the interpreter binds `Missing` to the
+    // parameter and runs the body, so the absent value goes to the
+    // definition for any argument (`absentArgumentFork()`).
+    const checkedWhole =
+      wholeDef === undefined
+        ? undefined
+        : checks.every((c, i) => i === at || c === undefined)
+          ? wholeDef
+          : `((${temps.join(', ')}) => ${wholeDef}(${temps
+              .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
+              .join(', ')}))`;
+    const fn =
+      checkedWhole !== undefined
+        ? absentArgumentFork(
+            checked,
+            checkedWhole,
+            args.map((_a, i) => i === at),
+            target
+          )
+        : checked;
+    const ranksCode = `[${args.map((_a, i) => (i === at ? untypedRank : 0)).join(', ')}]`;
+    // A list that may be absent as a whole is bound whole to the
+    // parameter (`absentListCall` above), not given `Missing`.
+    if (absentListCall !== undefined)
+      return (
+        `((${temps.join(', ')}) => ${temps[at]} === undefined ? ` +
+        `${absentListCall} : _SYS.mapFn(${fn}, ${ranksCode}, ` +
+        `${temps.join(', ')}))(${codes.join(', ')})`
+      );
+    return `_SYS.mapFn(${fn}, ${ranksCode}, ${codes.join(', ')})`;
   }
   if (!dispatch && !deep) return `(${head}${map})(${codes.join(', ')})`;
-  // One point or a list of points: an empty array, or an array whose first
-  // element is an array, is a list of points (see the coordinate check
-  // above); any other value is one point, given whole to the function.
+  // An argument whose type is one point or a list of points, which the
+  // compiler infers (`If(c, (1, 2), [(1, 2)])`): only a run-time test of
+  // the value would select the map or the call. An input declared with
+  // such a union is narrowed before (`compileDeclaredUnionDispatch()`).
+  if (!deep) throw unsettledArgumentDecline(h, args[at]);
+  // A tensor of points whose static type gives its rank
+  // (`list<list<P>>`, `matrix<P^(2x2)>`) at a parameter declared or
+  // inferred as the point `P`: the interpreter maps the call to the points
+  // at every depth, so the call is the static map over that rank, with
+  // every other argument given whole to each call. No value is tested at
+  // run time. A parameter declared `broadcastable<P>` keeps its run-time
+  // walk below (a host declaration), as does an argument whose type does
+  // not give the rank (`tensor<P>`, `broadcastable<P>`) or may be absent.
+  const rank =
+    cells[at] || absent
+      ? undefined
+      : pointTensorRank(args[at].type.type, params[at]!);
+  if (rank !== undefined) {
+    const fn = checks.every((c, i) => i === at || c === undefined)
+      ? name
+      : `((${temps.join(', ')}) => ${name}(${temps
+          .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
+          .join(', ')}))`;
+    return (
+      `_SYS.mapFn(${fn}, [${args.map((_a, i) => (i === at ? rank : 0)).join(', ')}], ` +
+      `${codes.join(', ')})`
+    );
+  }
+  // A parameter declared `broadcastable<P>`: an empty array, or an array
+  // whose first element is an array, is a list of points (see the
+  // coordinate check above); any other value is one point, given whole to
+  // the function.
   const onePointArgs = temps.map((t, i) => presentCheckedCode(t, checks[i]));
   const v = temps[at];
   // An absent point lowers to `undefined` (`[undefined, [3, 4]]`), so the
@@ -487,47 +676,40 @@ export function tryCompilePointListCall(
   const isListOf = (x: string) =>
     `Array.isArray(${x}) && ((${e}) => ${e} === undefined || ` +
     `Array.isArray(${e}))(${x}.find((${e}) => ${e} !== undefined))`;
-  const isList = isListOf(v);
-  if (deep) {
-    // A `broadcastable<P>` parameter maps to the cells at every depth: a
-    // named function expression applies the same test to each element,
-    // maps again over a list, and calls the function on a point.
-    const go = tempVar(target);
-    const p = tempVar(target);
-    const pointArgs = onePointArgs.map((c, i) =>
-      i === at ? presentCheckedCode(p, checks[at]) : c
-    );
-    const walk =
-      `(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
-      `${p}.map((${point}) => ${pointGuard}${go}(${point})) : ` +
-      `${name}(${pointArgs.join(', ')}); })(${v})`;
-    // A recursive alias whose lists can hold both points and lists
-    // (`type B = list<B> | P`): the interpreter refuses a value where one
-    // list holds a point and a list with an `incompatible-type` error.
-    // The compiled call gives `NaN` for such a value, as the compiled
-    // broadcast does for an error of the interpreter (ROADMAP CE-505).
-    if (pointArgumentMayMixDepths(args[at].type.type, params[at]!)) {
-      const ok = tempVar(target);
-      const q = tempVar(target);
-      const kind = tempVar(target);
-      const el = tempVar(target);
-      const l = tempVar(target);
-      const uniform =
-        `(function ${ok}(${q}) { if (!(${isListOf(q)})) return true; ` +
-        `let ${kind}; for (const ${el} of ${q}) { ` +
-        `if (${el} === undefined) continue; ` +
-        `const ${l} = ${isListOf(el)}; ` +
-        `if (${kind} === undefined) ${kind} = ${l}; ` +
-        `else if (${kind} !== ${l}) return false; ` +
-        `if (${l} && !${ok}(${el})) return false; } return true; })(${v})`;
-      return `(${head}(${uniform} ? ${walk} : NaN))(${codes.join(', ')})`;
-    }
-    return `(${head}${walk})(${codes.join(', ')})`;
-  }
-  return (
-    `(${head}(${isList}) ? ${map} : ` +
-    `${name}(${onePointArgs.join(', ')}))(${codes.join(', ')})`
+  // A `broadcastable<P>` parameter maps to the cells at every depth: a
+  // named function expression applies the same test to each element,
+  // maps again over a list, and calls the function on a point.
+  const go = tempVar(target);
+  const p = tempVar(target);
+  const pointArgs = onePointArgs.map((c, i) =>
+    i === at ? presentCheckedCode(p, checks[at]) : c
   );
+  const walk =
+    `(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
+    `${p}.map((${point}) => ${pointGuard}${go}(${point})) : ` +
+    `${name}(${pointArgs.join(', ')}); })(${v})`;
+  // A recursive alias whose lists can hold both points and lists
+  // (`type B = list<B> | P`): the interpreter refuses a value where one
+  // list holds a point and a list with an `incompatible-type` error.
+  // The compiled call gives `NaN` for such a value, as the compiled
+  // broadcast does for an error of the interpreter (ROADMAP CE-505).
+  if (pointArgumentMayMixDepths(args[at].type.type, params[at]!)) {
+    const ok = tempVar(target);
+    const q = tempVar(target);
+    const kind = tempVar(target);
+    const el = tempVar(target);
+    const l = tempVar(target);
+    const uniform =
+      `(function ${ok}(${q}) { if (!(${isListOf(q)})) return true; ` +
+      `let ${kind}; for (const ${el} of ${q}) { ` +
+      `if (${el} === undefined) continue; ` +
+      `const ${l} = ${isListOf(el)}; ` +
+      `if (${kind} === undefined) ${kind} = ${l}; ` +
+      `else if (${kind} !== ${l}) return false; ` +
+      `if (${l} && !${ok}(${el})) return false; } return true; })(${v})`;
+    return `(${head}(${uniform} ? ${walk} : NaN))(${codes.join(', ')})`;
+  }
+  return `(${head}${walk})(${codes.join(', ')})`;
 }
 
 /**
@@ -552,6 +734,26 @@ export function tryCompilePointListCall(
  * `broadcastable<P>` and read as the point `P`: it counts as a point
  * parameter.
  */
+/**
+ * The number of list levels above the points in an argument of type `t`
+ * at a point parameter of type `param`: 1 for `list<P>`, 2 for
+ * `list<list<P>>` and `matrix<P^(2x2)>`. `undefined` when the type does
+ * not give one rank (`tensor<P>`, a union, `broadcastable<P>`), or when a
+ * point is not a subtype of `param`.
+ */
+function pointTensorRank(t: Type, param: Type, depth = 0): number | undefined {
+  if (depth > 16) return undefined;
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string') return undefined;
+  if (r.kind === 'tuple')
+    return depth > 0 && isSubtype(r, param) ? 0 : undefined;
+  if (r.kind !== 'list') return undefined;
+  const element = collectionElementType(r);
+  if (element === undefined) return undefined;
+  const inner = pointTensorRank(element, param, depth + 1);
+  return inner === undefined ? undefined : inner + 1;
+}
+
 export function scalarSlotListArgs(
   args: ReadonlyArray<Expression>,
   params: ReadonlyArray<Type | undefined>,
@@ -598,12 +800,11 @@ export function scalarSlotListArgs(
  * The interpreter maps the call over such an argument when its value is a
  * list, at every depth, and binds the value whole otherwise, as for the
  * parameter of a one-parameter function (user decision 2026-10-24,
- * ROADMAP CE-414.2). The compiled call decides at run time in the same way
- * with `_SYS.bcastFn`, which a one-parameter function uses too
- * (`g := t ↦ (t, 1)` declared `(unknown) -> unknown` compiles `g(x)` to
- * `_SYS.bcastFn(_fn_g, x)`). Every other argument is evaluated once and
- * passed whole to each call, so it must be a tuple (one point) or provably
- * not a list.
+ * ROADMAP CE-414.2). The compiled call reads the static type of the
+ * argument instead (`emitUserFunctionCall`): a direct call for a scalar, a
+ * static map for a list, and a decline when the type settles no shape.
+ * Every other argument is passed whole to each call, so it must be a tuple
+ * (one point) or provably not a list.
  *
  * The call fails closed on a target other than JavaScript, when another
  * argument may be a list, when a parameter is declared `broadcastable<…>`
@@ -644,7 +845,9 @@ export function compileUntypedScalarSlotCall(
   if (
     args.some(
       (a, i) =>
-        scalarLists[i] !== 'untyped' && !isTuple(a) && !provablyScalarArg(a)
+        scalarLists[i] !== 'untyped' &&
+        !isTuple(a) &&
+        !isScalarShaped(a.type.type)
     )
   )
     throw new Error(
@@ -664,20 +867,17 @@ export function compileUntypedScalarSlotCall(
     args,
     target
   );
-  const codes = args.map((a) => compileValueOperand(a, target));
-  const temps = args.map(() => tempVar(target));
-  const elements = args.map((_a, i) =>
-    scalarLists[i] === 'untyped' ? tempVar(target) : undefined
-  );
-  const callArgs = temps.map((t, i) =>
-    presentCheckedCode(elements[i] ?? t, checks[i])
-  );
-  const elementParams = elements.filter((e): e is string => e !== undefined);
-  const sources = temps.filter((_t, i) => elements[i] !== undefined);
-  return (
-    `((${temps.join(', ')}) => _SYS.bcastFn((${elementParams.join(', ')}) => ` +
-    `${name}(${callArgs.join(', ')}), ${sources.join(', ')}))` +
-    `(${codes.join(', ')})`
+  // The static type of each argument typed `unknown` there selects the
+  // direct call or the static map (`emitUserFunctionCall`), or declines
+  // when it does not settle a shape.
+  return emitUserFunctionCall(
+    name,
+    args,
+    target,
+    args.map(() => false),
+    true,
+    [],
+    checks
   );
 }
 
@@ -737,7 +937,11 @@ export function scalarSlotElementType(
  *
  * `a` is a list of points when it is not a tuple and its type is an
  * indexed collection whose element type is a tuple type
- * (`list<tuple<real, real>>`, the type of `PointList(x, y)`). The
+ * (`list<tuple<real, real>>`, the type of `PointList(x, y)`). A list of
+ * lists of points (`list<list<tuple<real, real>>>`) counts too: the
+ * interpreter maps the call over both list levels and binds each point
+ * whole, so `f := t ↦ 7` gives `[[7], [7, 7]]` for
+ * `[[(1, 2)], [(3, 4), (5, 6)]]` (`pointsBelowLists()`). The
  * interpreter maps such an argument only when it broadcasts the call, that
  * is when every parameter of `h` is a scalar or has no type
  * (`userFunctionParamsAreScalar`); otherwise it binds the list whole.
@@ -748,14 +952,32 @@ export function untypedPointListElement(
   a: Expression,
   param: Type | undefined
 ): Type | undefined {
-  if (param !== 'unknown' && param !== 'any' && param !== 'value')
+  if (param === undefined || !isUndeclaredParameterType(param))
     return undefined;
   if (isTuple(a)) return undefined;
-  const t = resolveTypeForCompilation(a.type.type);
+  // The `missing` arms are removed before the alias is resolved: the
+  // resolved type of `list<tuple<real, real>> | missing` is a union, which
+  // has no element type, and the call would then map over the coordinates
+  // of each point. An absent list takes the guard of the list level, which
+  // gives the value of the call with `Missing`.
+  const t = resolveTypeForCompilation(stripMissingFromType(a.type.type));
   if (typeof t === 'string' || t.kind === 'tuple') return undefined;
   const element = collectionElementType(t);
-  if (element === undefined || !isPointParameterType(element)) return undefined;
-  if (!isPointListArgumentType(t, element)) return undefined;
+  if (element === undefined) return undefined;
+  if (isPointParameterType(element)) {
+    if (!isPointListArgumentType(t, element)) return undefined;
+  } else {
+    // A list of lists of points, or a list of points whose element type
+    // also admits an absent value (`list<tuple<real, real> | missing>`):
+    // the element type is then not a point type, and `pointsBelowLists()`
+    // removes `missing` from each list level. A list of points (rank 1)
+    // takes the same route as the plain list of points, which gives
+    // `Missing` for an absent element.
+    const below = pointsBelowLists(t);
+    if (!below || !isPointParameterType(below.point)) return undefined;
+    if (!userFunctionParamsAreScalar(engine, h)) return undefined;
+    return below.point;
+  }
   if (!userFunctionParamsAreScalar(engine, h)) return undefined;
   return element;
 }

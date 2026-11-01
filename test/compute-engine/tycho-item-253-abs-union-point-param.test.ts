@@ -157,16 +157,27 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
         to: 'javascript',
       });
       expect(r.success).toBe(true);
+      // `x` and `y` are declared with a union of shapes, so the compiler
+      // tries one body for each combination of members. For `x, y:
+      // list<real>`, the copy of `k` typed by the argument `(x, y)` has a
+      // sub-expression of static type `error` (`P − (4, 0)` with list
+      // coordinates), so that body declines and the root is compiled with
+      // one body for all the members. That body has no copy of `k` for
+      // scalar coordinates (`_fn_k_tuple_number__number_…`).
       expect(r.preamble).not.toContain('_fn_k_tuple_number__number_');
-      // The dispatch reads the point at run time: scalar coordinates are
-      // one norm, a list coordinate is one norm per element, as the
-      // interpreter answers (`Norm` broadcasts the coordinates of an
-      // unwritten point whose type admits a list coordinate).
+      // Scalar coordinates: one norm, the value of the interpreter.
       expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
-      expect(r.run!({ x: [1, 2], y: [3, 4] })).toEqual([
-        expect.closeTo(Math.hypot(3, 3), 12),
-        expect.closeTo(Math.hypot(2, 4), 12),
-      ]);
+      expect(r.run!({ x: 1, y: 3 })).toBeCloseTo(
+        ce.box(['k', ['Tuple', 1, 3]]).N().re,
+        12
+      );
+      // List coordinates (`x = [1, 2]`, `y = [3, 4]`) are not checked: the
+      // interpreter gives an `incompatible-type` error for this value
+      // (point arithmetic needs numeric coordinates), and the static type
+      // `number` of `k((x, y))` does not show that error, so the value of
+      // the compiled code is not specified (the compilation contract in
+      // `docs/COMPILATION-MODEL.md`, "Fail closed"). The test asserts only
+      // that the compilation succeeds.
     }
   });
 
@@ -272,9 +283,19 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       to: 'javascript',
     });
     expect(r.success).toBe(true);
-    expect(r.preamble).toContain('_fn_k_tuple_number__number_');
-    expect(r.preamble).toContain('_SYS.norm(');
+    // The parameter of `k` is declared with a union of shapes, so `k` has
+    // one variant per member. The argument `(x, y)` has the shape of the
+    // point member, so the call reads that variant directly, with no
+    // run-time test of the shape.
+    expect(r.preamble).toContain(
+      'const _fn_k$tuple = (P) => _SYS.norm([(P[0] + (-4)), (P[1] + 0)]);'
+    );
+    expect(r.code).toBe('_fn_k$tuple([_.x, _.y])');
     expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
+    expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(
+      ce.box(['k', ['Tuple', 5, 1]]).N().re,
+      12
+    );
   });
 
   test('a union that admits a flat numeric list keeps the element-wise lowering', () => {

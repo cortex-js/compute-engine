@@ -409,13 +409,28 @@ describe('PointList compile — non-scalar component', () => {
     expect(typeof r.run).toBe('function');
   });
 
-  it('javascript: a `number | list<number>` union component fails closed', () => {
+  it('javascript: a `number | list<number>` union component compiles with one body for each shape', () => {
+    // The compiled code tests the shape of `U` once: a list zips, a number is
+    // a scalar slot. Each result equals the interpreter's.
     const js = new JavaScriptTarget();
-    expect(() => js.compile(ce.box(['PointList', 'x', 'U']))).toThrow(
-      /Could not compile `PointList`: component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\./
-    );
-    const r = js.compile(ce.box(['PointList', 'x', 'U']), { fallback: true });
-    expect(r.success).toBe(false);
+    const r = js.compile(ce.box(['PointList', 'x', 'U']));
+    expect(r.success).toBe(true);
+    const run = r.run as (s: Record<string, unknown>) => unknown;
+    expect(run({ x: -6, U: [1, 2, 3] })).toEqual([
+      [-6, 1],
+      [-6, 2],
+      [-6, 3],
+    ]);
+    expect(run({ x: -6, U: 2 })).toEqual([-6, 2]);
+    const plain = new ComputeEngine();
+    expect(
+      plain.box(['PointList', -6, ['List', 1, 2, 3]]).evaluate().json
+    ).toEqual(['List', ['Tuple', -6, 1], ['Tuple', -6, 2], ['Tuple', -6, 3]]);
+    expect(plain.box(['PointList', -6, 2]).evaluate().json).toEqual([
+      'Tuple',
+      -6,
+      2,
+    ]);
   });
 
   it('glsl: a list-typed component throws by default', () => {

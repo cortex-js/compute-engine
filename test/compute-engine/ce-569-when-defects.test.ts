@@ -245,6 +245,8 @@ describe('CE-569 — python: a condition read by its value', () => {
   const run = TEST_PYTHON === undefined ? it.skip : it;
   run('the compiled code runs: a value of c that is not a boolean', () => {
     const ce = engine();
+    // An input must have a type (`untyped-input` otherwise): the input
+    // named like the generated parameter is declared.
     ce.declare('_CND', 'real');
     const cases: Array<[unknown, Record<string, string>, string]> = [
       [['When', 'x', 'c'], { x: '2.0', c: 'True' }, '2.0'],

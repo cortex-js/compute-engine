@@ -189,7 +189,13 @@ describe('code generation from numeric and representation facts', () => {
       expect(folded.run!({ u: 2, v })).toEqual(original.run!({ u: 2, v }));
   });
 
-  test('JS trusts explicit scalar declarations while inferred and mapped inputs keep broadcasting', () => {
+  test('JS selects the call from the static type of the argument', () => {
+    // A scalar argument, declared or inferred, is a direct call; a list
+    // argument is a static map over the list (rule R2 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`). A list given to
+    // an input whose type is a scalar, or to a variable that `vars` maps to
+    // a host expression, is a value outside the type of the input, and the
+    // result is not specified.
     const ce = engine();
     ce.declare('f', '(a: number) -> number');
     ce.assign(
@@ -200,13 +206,20 @@ describe('code generation from numeric and representation facts', () => {
     expect(typed.code).toBe('_fn_f(_.x)');
     expect(typed.run!({ x: 3 })).toBe(7);
     const inferred = compile(ce.expr(['f', 't']), { constantFold: false });
-    expect(inferred.code).toContain('Array.isArray(');
-    expect(inferred.run!({ t: [1, 2] })).toEqual([3, 5]);
+    expect(inferred.code).toBe('_fn_f(_.t)');
+    expect(inferred.run!({ t: 3 })).toBe(7);
+    ce.declare('L', 'list<real>');
+    const list = compile(ce.expr(['f', 'L']), { constantFold: false });
+    expect(list.code).toBe('_SYS.mapFn(_fn_f, [1], _.L)');
+    ce.assign('L', ce.expr(['List', 1, 2]));
+    expect(list.run!({ L: [1, 2] })).toEqual(
+      ce.expr(['f', 'L']).evaluate().json.slice(1)
+    );
     const mapped = compile(ce.expr(['f', 'x']), {
       constantFold: false,
       vars: { x: '_.read()' },
     });
-    expect(mapped.code).toContain('Array.isArray(');
-    expect(mapped.run!({ read: () => [1, 2] })).toEqual([3, 5]);
+    expect(mapped.code).toBe('_fn_f(_.read())');
+    expect(mapped.run!({ read: () => 3 })).toBe(7);
   });
 });

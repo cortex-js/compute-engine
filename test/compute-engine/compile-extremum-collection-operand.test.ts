@@ -52,6 +52,30 @@ const BODIES: [string, unknown, unknown][] = [
   ['Product(w)', ['Product', 'w'], 6],
 ];
 
+/** True for the body `Count(w, p)` over a parameter whose element type is
+ * `expression`. Its predicate is a callback, and an element of type
+ * `expression` can be a number or a list: the interpreter applies the
+ * predicate to a number and maps it over a list. The shape of the element
+ * is not settled, so the compilation declines with the code
+ * `unsettled-shape` (rule R3 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`). The same body over
+ * `collection<integer>`, `set<integer>`, `collection<real>` or
+ * `list<integer>` compiles. */
+function callbackOverExpressions(label: string, type: string): boolean {
+  return label === 'Count(w, p)' && type.endsWith('<expression>');
+}
+
+/** Assert that the lambda declines with the code `unsettled-shape`, and
+ * that its fallback gives the interpreter's value for the elements 3, 1,
+ * 2. */
+function expectUnsettledDecline(body: unknown, type: string, expected: unknown) {
+  const c = compile(lambda(new ComputeEngine(), body, type));
+  expect(c.success).toBe(false);
+  expect(c.diagnostic?.code).toBe('unsettled-shape');
+  expect(c.unsupported).toContain('w');
+  expect((c.run as (v: unknown) => unknown)([3, 1, 2])).toEqual(expected);
+}
+
 describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', () => {
   test.each(['collection', 'collection<any>'])(
     '%s cannot prove omission-free numeric reduction',
@@ -81,6 +105,11 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     'set<integer>',
   ])
     for (const [label, body, expected] of BODIES) {
+      if (callbackOverExpressions(label, type)) {
+        test(`${label} with w: ${type} declines`, () =>
+          expectUnsettledDecline(body, type, expected));
+        continue;
+      }
       test(`${label} with w: ${type}, over an array and a set`, () => {
         const fn = compiled(new ComputeEngine(), body, type);
         expect(fn([3, 1, 2])).toEqual(expected);
@@ -104,11 +133,12 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
   test('a number at a parameter DECLARED collection stops the run', () => {
     // The interpreter checks the declared type and answers
     // `incompatible-type`; the compiled code throws.
-    for (const [, body] of BODIES) {
+    for (const [label, body] of BODIES) {
       const ce = new ComputeEngine();
-      expect(() => compiled(ce, body, 'collection<expression>')(4)).toThrow(
-        /not a list or a set at run time/
-      );
+      if (!callbackOverExpressions(label, 'collection<expression>'))
+        expect(() => compiled(ce, body, 'collection<expression>')(4)).toThrow(
+          /not a list or a set at run time/
+        );
       expect(
         ce
           .box([
@@ -280,8 +310,10 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
       'indexed_collection<expression>',
       'list<expression>',
     ])
-      for (const [, body, expected] of BODIES)
-        expect(compiled(ce, body, type)([3, 1, 2])).toEqual(expected);
+      for (const [label, body, expected] of BODIES)
+        if (callbackOverExpressions(label, type))
+          expectUnsettledDecline(body, type, expected);
+        else expect(compiled(ce, body, type)([3, 1, 2])).toEqual(expected);
   });
 
   test('a dictionary operand still declines', () => {
@@ -554,9 +586,17 @@ describe('MAX AND MIN OVER A TENSOR OF UNKNOWN RANK', () => {
     expect(() =>
       compile(lambda(ce, body, 'tensor<integer>'), { fallback: false })
     ).toThrow(/an element of the data is a collection/);
-    expect(() =>
-      compile(lambda(ce, body, 'matrix<integer>'), { fallback: false })
-    ).toThrow(/an element of the data is a collection/);
+    // A matrix has the settled rank 2, so the compiled code flattens both
+    // levels, as the interpreter does, and gives the same value.
+    expect(compiled(ce, body, 'matrix<integer>')(v2)).toBe(r2);
+    expect(
+      ce
+        .box([
+          lambda(ce, body, 'matrix<integer>'),
+          ['List', ...v2.map((row) => ['List', ...row])],
+        ] as any)
+        .evaluate().re
+    ).toBe(r2);
     const c = compile(lambda(ce, body, 'tensor<integer>'));
     expect(c.success).toBe(false);
     const run = c.run as (v: unknown) => unknown;

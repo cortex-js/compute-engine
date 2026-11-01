@@ -429,16 +429,58 @@ export function bcast(
 }
 
 /**
- * `bcast` for the application of a USER FUNCTION to its arguments (`f(L)`
- * with `f(x) := x²`): the same element-wise rule, empty argument included.
- * The two names are kept apart because the emitter picks between them by
- * what it is lowering.
+ * The map of a USER-FUNCTION application over its list arguments, with the
+ * depth of each map fixed by the compiler from the static types: `ranks[j]`
+ * is the number of list levels of argument `j` to map over, and an
+ * argument of rank 0 is reused whole at every element (a point beside a
+ * list reaches `f` as the point). The arguments of rank > 0 are mapped in
+ * step at each level; a length mismatch gives the absence marker, and an
+ * empty level gives the empty list, as `bcast` does. The helper reads no
+ * shape of a value.
+ *
+ * An absent value at a mapped position (`undefined`, or the absence marker
+ * of this target, which is an interval and not an array) is not a list: it
+ * reaches `f` as the absence marker, and the interpreter applies the
+ * function to the absent value there. Without this, the map read the
+ * length of `undefined` and threw.
  */
-export function bcastFn(
+export function mapFn(
   f: (...operands: unknown[]) => unknown,
+  ranks: ReadonlyArray<number>,
   ...args: unknown[]
 ): unknown {
-  return bcastWith(f, args);
+  const at = ranks.map((r, j) => (r > 0 && Array.isArray(args[j]) ? r : 0));
+  let n = -1;
+  for (let j = 0; j < args.length; j++) {
+    if (!(at[j] > 0)) continue;
+    const len = (args[j] as unknown[]).length;
+    if (n < 0) n = len;
+    else if (len !== n) return absent();
+  }
+  // An absent value at a mapped position reaches `f` as the absence
+  // marker, as an absent element does (`elementOperand`): `f(undefined)` is
+  // not a value of this target, and gave `entire` for `f := t ↦ 2t + 1`.
+  if (n < 0)
+    return f(...args.map((a, j) => (ranks[j] > 0 ? elementOperand(a) : a)));
+  if (n === 0) return [];
+  const inner = at.map((r) => (r > 0 ? r - 1 : 0));
+  const deeper = inner.some((r) => r > 0);
+  const out: unknown[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    // A mapped argument that is absent (rank > 0, but not an array) reaches
+    // `f` as the absence marker at every element, as in the case where no
+    // mapped argument is a list: a raw `undefined` is not a value of this
+    // target, and gave `entire` for `g := (a, b) ↦ 2a + b` with `a` absent.
+    const cell = args.map((a, j) =>
+      at[j] > 0
+        ? elementOperand((a as unknown[])[i])
+        : ranks[j] > 0
+          ? elementOperand(a)
+          : a
+    );
+    out[i] = deeper ? mapFn(f, inner, ...cell) : f(...cell);
+  }
+  return out;
 }
 
 /**
@@ -472,7 +514,7 @@ export function bcastProduct(
   return bcastWith(f, args);
 }
 
-/** Shared implementation of `bcast` and `bcastFn`. */
+/** Shared implementation of `bcast` and `mapFn`. */
 function bcastWith(
   f: (...operands: unknown[]) => unknown,
   args: unknown[]

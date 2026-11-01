@@ -7,21 +7,21 @@
  * `_fn_g(x)`, where it used to emit `_SYS.bcastFn(_fn_g, x)` for the sole
  * reason that inference leaves an unannotated parameter typed `unknown`. The
  * reason the bare call is sound is that the body never chooses what reaches
- * it: its call sites do, and every one of them is broadcast-aware. A caller
- * that hands `f` a list is dispatched element-wise (or guarded by
- * `Array.isArray`) at the CALLER's site, so the body runs once per element
- * with a scalar bound — which is what the body's own arithmetic already
- * assumes when it writes `x * x` for a product.
+ * it: its call sites do. A call whose argument has a list static type maps
+ * the function over the list at the CALLER's site (`_SYS.mapFn`), so the
+ * body runs once per element with a scalar bound — which is what the body's
+ * own arithmetic already assumes when it writes `x * x` for a product.
  *
  * This is the shape a Desmos macro chain has: a chain of small functions of
  * one or two variables, whose parameters cannot be annotated.
  *
  * The three exclusions are unchanged and pinned here as well: a
  * collection-typed parameter binds its argument whole and keeps the nested
- * dispatch; a tuple/point argument is atomic and never broadcast; and at the
- * ROOT, a free symbol whose scalar type was merely INFERRED still gets the
- * `Array.isArray` guard (user ruling 2026-08-30), while an explicitly
- * declared one gets the bare call (user ruling 2026-09-07).
+ * dispatch; a tuple/point argument is atomic and never broadcast. At the
+ * ROOT, a free symbol whose scalar type is inferred or declared gets the
+ * bare call: the static type is the contract
+ * (`docs/plans/2026-10-31-static-shape-compilation.md`, R1 and R5), and a
+ * list given for it is a value outside its type.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -69,8 +69,12 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
         .evaluate()
         .toString()
     ).toBe('[3,9,19]');
-    // A NESTED list broadcasts one rank further, as the interpreter does.
-    expect(r.run({ x: [[1, 2], [3]] })).toEqual([[3, 9], [19]]);
+    // A NESTED list, declared as one, maps one rank further, as the
+    // interpreter does.
+    const nested = macroChain('list<list<real>>');
+    const rn = build(nested, ['f', 'x']);
+    expect(rn.code).toBe('_SYS.mapFn(_fn_f, [2], _.x)');
+    expect(rn.run({ x: [[1, 2], [3]] })).toEqual([[3, 9], [19]]);
     expect(
       ce
         .box(['f', ['List', ['List', 1, 2], ['List', 3]]] as any)
@@ -95,34 +99,47 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
   });
 
   test('every clause of a MULTI-CLAUSE definition gets the same treatment', () => {
-    const ce = new ComputeEngine();
-    // The test passes a number and a list for `u`. An input with no type is
-    // refused (ROADMAP CE-712.1), and an input declared
-    // `real | list<real>` declines on this call (`f` is a broadcastable
-    // head over a possibly list-valued operand), so `u` is a parameter of
-    // the root function declared `any`, which keeps the run-time dispatch.
-    executeEpsil(
-      ce,
-      `function h(x) { x * x }\n` +
-        `function f(x) { h(x) + 1 }\n` +
-        `function f(x, y) { h(x) + h(y) }`
-    );
-    const r = build(ce, ['Function', ['f', 'u'], ['Typed', 'u', "'any'"]]);
+    const multiClause = (): ComputeEngine => {
+      const ce = new ComputeEngine();
+      executeEpsil(
+        ce,
+        `function h(x) { x * x }\n` +
+          `function f(x) { h(x) + 1 }\n` +
+          `function f(x, y) { h(x) + h(y) }`
+      );
+      return ce;
+    };
+    // An argument typed `any` has no settled shape: the call declines, and
+    // names the argument.
+    const any = build(multiClause(), [
+      'Function',
+      ['f', 'u'],
+      ['Typed', 'u', "'any'"],
+    ]);
+    expect(any.success).toBe(false);
+    expect(any.unsupported).toContain('u');
+    // `u` declared with a union of a number and a list: one body per shape.
+    const ce = multiClause();
+    ce.declare('u', 'real | list<real>');
+    const r = build(ce, ['f', 'u']);
     expect(r.success).toBe(true);
-    expect(r.code).toContain('const _fn_f$c1 = (x) => _fn_h(x) + 1;');
-    expect(r.code).toContain(
+    expect(r.code).toBe(
+      '(Array.isArray(_.u) ? _SYS.mapFn(_fn_f, [1], _.u) : _fn_f(_.u))'
+    );
+    expect(r.preamble).toContain('const _fn_f$c1 = (x) => _fn_h(x) + 1;');
+    expect(r.preamble).toContain(
       'const _fn_f$c2 = (x, y) => _fn_h(x) + _fn_h(y);'
     );
-    expect(r.code).not.toContain('_SYS.bcastFn(_fn_h');
+    expect(r.preamble).not.toContain('_SYS.bcastFn(_fn_h');
     // The dispatcher, and both clauses, answer what the interpreter answers.
-    expect(r.run(3)).toBe(10);
+    expect(r.run({ u: 3 })).toBe(10);
     expect(
       ce
         .box(['f', 3] as any)
         .evaluate()
         .toString()
     ).toBe('10');
-    expect(r.run([1, 2])).toEqual([2, 5]);
+    expect(r.run({ u: [1, 2] })).toEqual([2, 5]);
     expect(
       ce
         .box(['f', ['List', 1, 2]] as any)
@@ -148,7 +165,7 @@ describe('what the ruling does NOT change', () => {
       ] as any)
     );
     const r = build(ce, ['fL', ['List', 1, 2, 3]]);
-    expect(r.preamble).toContain('_SYS.bcastFn(_fn_g, L)');
+    expect(r.preamble).toContain('_SYS.mapFn(_fn_g, [1], L)');
     expect(r.run({})).toEqual([8, 10, 12]);
     expect(
       ce
@@ -178,7 +195,7 @@ describe('what the ruling does NOT change', () => {
     expect(r.run({})).toBe(7);
   });
 
-  test('a root free symbol whose scalar type was INFERRED keeps the guard', () => {
+  test('a root free symbol whose scalar type was INFERRED takes the bare call', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(x: number) -> number');
     ce.assign(
@@ -186,10 +203,19 @@ describe('what the ruling does NOT change', () => {
       ce.box(['Function', ['Add', ['Multiply', 2, 'x'], 1], 'x'] as any)
     );
     const r = build(ce, ['f', 'y']);
-    expect(r.code).toContain('Array.isArray');
-    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.code).toBe('_fn_f(_.y)');
     expect(r.run({ y: 21 })).toBe(43);
-    expect(r.run({ y: [1, 2, 3] })).toEqual([3, 5, 7]);
+    // A list is given only to an input declared as a list: the call maps.
+    ce.declare('Y', 'list<number>');
+    const rl = build(ce, ['f', 'Y']);
+    expect(rl.code).toBe('_SYS.mapFn(_fn_f, [1], _.Y)');
+    expect(rl.run({ Y: [1, 2, 3] })).toEqual([3, 5, 7]);
+    expect(
+      ce
+        .box(['f', ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[3,5,7]');
   });
 
   test('a root free symbol explicitly DECLARED scalar keeps the bare call', () => {
@@ -231,9 +257,11 @@ describe('an ATOMIC argument does not switch off the sibling broadcast', () => {
     const ce = pointAndListEngine();
     const expr = ['f', ['Tuple', 'a', 'b'], ['List', 'u', 'v']];
     const r = build(ce, expr);
-    // The point is bound to a temporary and closed over, so the broadcast
-    // never sees it as a source; the list is the only source.
-    expect(r.code).toContain('_SYS.bcastFn(');
+    // The point is passed at rank 0, so the map reuses it whole for each
+    // element; the list is the only argument mapped over (rank 1).
+    expect(r.code).toBe(
+      '_SYS.mapFn(_fn_f_tuple_number__number__number_points_2_, [0, 1], [_.a, _.b], [_.u, _.v])'
+    );
     expect(r.run({ a: 1, b: 2, u: 1, v: 2 })).toEqual([2, 4]);
     expect(
       ce
@@ -279,17 +307,15 @@ describe('an ATOMIC argument does not switch off the sibling broadcast', () => {
     // A coordinate with a side effect — a random draw — must be drawn once
     // for the whole call, not once per element of the sibling list. The
     // emission is what settles it: the draw sits in the argument list of the
-    // outer call, which binds it to a temporary before the broadcast runs,
-    // and it appears nowhere inside the closure the broadcast applies.
+    // map, which evaluates it once before it maps, and it appears nowhere
+    // inside the function that the map applies.
     const ce = pointAndListEngine();
     const r = build(ce, ['f', ['Tuple', ['Random'], 0], ['List', 'u', 'v']]);
     const draws = r.code.match(/drawNextRandomNumber/g) ?? [];
     expect(draws).toHaveLength(1);
-    // The one draw is in the OUTER argument list, at the end of the emitted
-    // call, and the closure the broadcast applies per element holds only the
-    // temporary the point was bound to.
+    // The one draw is in the argument list of the map, at rank 0.
     expect(r.code).toMatch(
-      /\)\)\(\[_SYS\.drawNextRandomNumber\(\), 0\], \[_\.u, _\.v\]\)$/
+      /^_SYS\.mapFn\(_fn_f\w*, \[0, 1\], \[_SYS\.drawNextRandomNumber\(\), 0\], \[_\.u, _\.v\]\)$/
     );
     expect(r.run({ u: 1, v: 2 })).toEqual([2, 4]);
   });
@@ -320,9 +346,14 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
     const ce = clauseEngine();
     const expr = ['Map', 'mc', ['List', ['List', 1, 2], ['List', 3]]];
     const r = build(ce, expr);
-    // The wrapper keeps a REST parameter: the dispatcher selects its clause
-    // on the number of arguments.
-    expect(r.preamble).toContain('const _fn_mc$b = (..._');
+    // The elements of the source are lists, so the reference is a static map
+    // of the dispatcher over each row. The map passes one argument, so the
+    // dispatcher selects the one-parameter clause for each entry.
+    expect(r.code).toContain('(_fn_mc$m1)');
+    expect(r.preamble).toContain(
+      'const _fn_mc$m1 = ((_tv1) => _SYS.mapFn(_fn_mc, [1], _tv1));'
+    );
+    expect(r.code).not.toContain('Array.isArray');
     expect(r.run({})).toEqual([[4, 7], [10]]);
     expect(
       ce
@@ -336,6 +367,7 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
     const ce = clauseEngine();
     const expr = ['Map', 'mc', ['List', 1, 2, 3]];
     const r = build(ce, expr);
+    expect(r.code).toContain('(_fn_mc)');
     expect(r.run({})).toEqual([4, 7, 10]);
     expect(
       ce
@@ -347,7 +379,7 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
 
   test('a clause parameter that binds a value whole keeps the bare reference', () => {
     // A nominal parameter is atomic (`signatureParamsLowerToScalars`), so no
-    // broadcasting wrapper is emitted for such a clause set.
+    // static-map wrapper is emitted for such a clause set.
     //
     // The gate is unreachable through this route today: a clause parameter
     // of a type with no faithful JavaScript guard — a nominal, a tuple, a
@@ -357,7 +389,7 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
     // pre-existing defect (ROADMAP.md, "A user function that cannot be
     // emitted, referenced as a VALUE, compiles to a broken artifact"). What
     // this test pins is the part that is settled: such a function does not
-    // get the broadcasting wrapper.
+    // get a static-map wrapper.
     const ce = new ComputeEngine();
     const r0 = executeEpsil(
       ce,
@@ -367,7 +399,7 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
     );
     expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
     const r = build(ce, ['Map', 'w', ['List', 1, 2, 3]]);
-    expect(r.preamble ?? '').not.toContain('$b');
+    expect(r.preamble ?? '').not.toContain('$m1');
   });
 });
 

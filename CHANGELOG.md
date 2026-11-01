@@ -154,6 +154,34 @@
 
 ### Behavior Changes
 
+- **Two calls of a function declared with the `random` effect are two
+  independent draws** (CE-606). For example with `r` declared
+  `(number) random -> number`, an equality comparison no longer reads `r(t)`
+  and `r(t)` as one value because their trees are the same.
+  `Equal(r(t), r(t))` evaluated to `True` and now stays inert;
+  `NotEqual(r(t), r(t))` evaluated to `False` and now stays inert;
+  `r(t).isEqual(r(t))` and `r(t).isIdenticallyEqual(r(t))` returned `true` and
+  now return `undefined`. The same applies to two sets that hold such a call
+  (`Equal(Set(r(t), 1), Set(1, r(t)))` stays inert). A call of a pure function
+  or of an undeclared function is still equal to itself, `isSame()` still
+  compares the trees, and a list with a `NaN` element is still not equal to
+  itself.
+
+- **Limits at infinity no longer read the sign of a base from a sample.** The
+  rules `f^g → exp(g·ln f)` and `ln u − ln v → ln(u/v)`, and the conjugate
+  rewrites of a difference of radicals, need operands that are positive for
+  every large `x`. They took a positive value at `x = 120` as a proof.
+  `Limit(ln(x) − ln(130 − x), x, +∞)` gave `ln(−1) = iπ`, but the limit is
+  `−iπ`, and `Limit((sin(x) + 0.9)^{1/x}, x, +∞)` gave `1`, but there is no
+  limit. Both now stay unevaluated. The sign is now proved from the form of
+  the operand only: a polynomial with a positive leading term, a sum of
+  positive terms, a product, a power or a root of operands with a proved
+  sign, `e^g`, `ln b` with `b − 1` proved positive, and `cos(1/x)`. Some
+  limits that were correct now stay unevaluated, because the sign of their
+  base is not proved from its form: `Limit((1 + sin²x)^{1/x}, x, +∞)` and
+  `Limit((2 + sin x)^{1/x}, x, +∞)` (both `1`), and
+  `Limit((ln(ln x))^{1/x}, x, +∞)` (`1`).
+
 - **`ce.declare()` with a function value refuses a function that writes
   outside itself** (CE-58). A named definition that states no effects must not
   write outside itself (the `scope` effect is opt-in), but
@@ -255,6 +283,51 @@
   a `Declare` of a nested block declares is another variable; two locals of
   the same name with no `Declare` are compared as one.
 
+- **A compiled call selects the variant of a function from the static type of
+  its argument, and emits no run-time test of the shape.** With
+  `f := t ↦ 2t`, a call of `f`, a `Map(f, L)` or an `Apply` of a literal now
+  compiles to the variant that the declared or inferred type of the argument
+  selects: a direct call of the scalar variant for a `real`, a map over the
+  list levels for a `list<real>` or a `list<list<real>>`, and a variant
+  compiled for a point (`_fn_f_tuple_real__real_`) for a
+  `tuple<real, real>`, a list of points or an alias of a point type. Before,
+  the JavaScript and interval-js targets tested the shape of each argument
+  at run time (`_SYS.bcastFn`, `_IA.bcastFn`). In the Tycho corpus of 757
+  documents, no record holds `bcastFn` now (320 JavaScript and 27
+  interval-js records before), the records that hold `Array.isArray` fall
+  from 510 to 269, and no record declines that compiled before. Some values
+  change because the old test was wrong:
+  - A point at a parameter with no declared type is bound whole, as in the
+    interpreter. With `f7 := t ↦ 7` and
+    `LP: list<tuple<real, real>> | missing` holding `[(1, 2), (3, 4)]`,
+    `f7(LP)` gave `[[7, 7], [7, 7]]`; it now gives `[7, 7]`.
+  - An absent element (`Missing`, compiled as `undefined`) is passed to the
+    function, as in the interpreter: with
+    `PM: list<tuple<real, real> | missing>` holding `[(1, 2), Missing]`,
+    `Map(f7, PM)` gave `[[7, 7], 7]`; it now gives `[7, 7]`.
+
+  An input or a parameter declared with a union of shapes
+  (`real | tuple<real, real>`) gets one test at that binding and one body per
+  member. These cases decline with the code `'unsettled-shape'`, where the
+  value has no single shape or a route cannot give the interpreter's value:
+  - a list whose element type is a union of shapes:
+    `Map(f2, CS)` with `CS: list<real | tuple<real, real>>`, and a list of
+    points of two widths;
+  - a callback whose body reads an absent point, other than through a
+    function defined on the engine with one parameter: `Map(t ↦ t[1], PM)`,
+    `Find(PM, t ↦ Length(t) > 1)` (JavaScript gave the right value only when
+    the match came before the absent element, and threw otherwise);
+  - an absent element beside an argument that may hold a point:
+    `Reduce(L, g, S)` with `g := (a, x) ↦ 2a`,
+    `L: list<tuple<real, real> | missing>` and
+    `S: tuple<real, real> | missing`;
+  - an absent element at a callback with a parameter that has a default
+    value;
+  - on Python, an `Apply` of a literal whose body reads a point that may be
+    absent (`Apply(t ↦ Max(t, 0), PD)`).
+
+  The interpreter fallback gives the value of each case that declines.
+
 - **MCP clients cannot remove or extend the server's deadline, and a public
   listener must be authenticated.** With a nonzero server `--time-limit`, a
   tool argument of `timeLimit: 0` now uses that server limit instead of
@@ -276,6 +349,150 @@
 
 ### Bug Fixes
 
+- **Python compilation: the name of an operator or a function used as a value
+  declines.** The interpreter gives the symbol itself, and Python code has no
+  form for a symbol value. `Head(List(1))` and `Head(Dictionary())` compiled to
+  the Python code `List` and `Dictionary`, and a bare `Sqrt` or user function
+  `f` to its name, which raise a `NameError` when the code runs; `Head(x + 1)`
+  and a bare `Add` compiled to the JavaScript source `(a,b) => a + b`, which is
+  a Python syntax error. These compilations now decline with a reason, and the
+  default `fallback: true` uses the interpreter. A parameter or a `vars` key
+  spelled like an operator (`Add`) is an input and still compiles. This change
+  does not affect the callback operand of a higher-order operator: as
+  before, `Add`, `Subtract`, `Multiply` and `Divide` compile as the combiner
+  of `Reduce` (which also accepts `Min` and `Max`), and another operator or
+  function name, such as `Sqrt` in `Map(Sqrt, v)`, declines.
+
+- **`N()` of a definite integral evaluates a `D` in the integrand whose
+  variable is not the integration variable.** Before,
+  `Integrate(D(y·z², y), Limits(z, 0, 1)).N()` stayed unevaluated, because the
+  numeric route read `y` as a free symbol with no value, while `evaluate()`
+  gave `1/3`. When the integrand has a free symbol, the numeric route now
+  evaluates each held `Integrate`, `Sum`, `Product` or `D` first, as the exact
+  route does, and integrates the result when no free symbol is left: the
+  example gives `0.3333…`. A `Sum` or `Product` with a bound that reads an
+  integration variable stays held, and the content of a `Hold` is not
+  evaluated.
+
+- **A `Sum` or `Product` whose bound is a call of a host function with a real
+  result type that is not an integer type stays symbolic.** With
+  `g(t) := \begin{cases} 0.5 & t < 1 \end{cases}`, `\sum_{k=g(n)}^{3} k`
+  simplified to `1/2·(−g(n)^2 + g(n) + 12)`, which is 6.125 at `n = 0`, while
+  the sum, which rounds the bound 0.5 down, is 6. The undeclared `n` in the
+  argument no longer lets the closed form through: the result type of a host
+  function without a type handler (here `missing | real`) does not depend on
+  its arguments. A host function whose result type is `number`
+  (`h(t) := 2t`) or an integer type, and a library operator such as
+  `\sqrt{n}`, keep the closed form, as the same bound written inline (`2n`)
+  does.
+
+- **`simplify()` keeps the binding of the index of a `Sum` or a `Product` when
+  it rewrites a bound and keeps the body as it is.** With
+  `g(t) := \begin{cases} 0.5 & t < 1 \end{cases}`,
+  `Sum(k, Limits(k, g(0), 3)).simplify()` printed as
+  `Sum(k, Limits(k, 0.5, 3))`, but its value was `4k`, not 6: the index `k` in
+  the body was read as a free symbol. Its value is now 6.
+
+- **A type is computed again at once when an inferred type of a symbol it
+  uses widens** (CE-36). When an inferred type widens while a type is being
+  computed (for example `x`, inferred `integer`, becomes `real`, as a `for`
+  index widened by a later assignment in the loop of a signature derivation),
+  a type cached before the widening was served until the outermost
+  computation ended, so `x + 1` could stay `integer` after `x` became `real`,
+  and a derived result type could be too narrow. A narrowing of an inferred
+  type still takes effect when the outermost computation ends: until then a
+  cached type can be wider than it could be, but it is never wrong.
+
+- **A set no longer merges two random draws into one.** The canonical form of
+  `Set(Random(), Random())` was `Set(Random())`, so
+  `Count(Set(Random(), Random()))` was always `1`. Two elements with a known
+  effect (a call of `Random()`, or of a function declared with the `random`
+  effect) are now both kept in a set literal, in a set comprehension, and in
+  the results of `Union`, `Intersection` and `SymmetricDifference`, also when
+  an unevaluated `Union` is counted or walked. Pure elements are still
+  deduplicated.
+
+- **A subscript with several indices is serialized with its commas.**
+  `ce.parse('A_{n,m}').latex` was `A_{n m}`, which parses back as the symbol
+  `A_nm`, and `ce.parse('A_{i,j}').latex` was `A_{\imaginaryI j}`, which
+  parses back as the symbol `A_ImaginaryUnitj`. The indices of
+  `Subscript(A, Sequence(n, m))` are now written `A_{n, m}`, which parses back
+  as the same expression. A subscript with one index is not changed.
+
+- **A free symbol in a `Block` body of a function literal is declared in the
+  scope that encloses the literal** (CE-107), as a free symbol of any other
+  body already was. Before, a statement that gave the symbol no type (a bare
+  `f`, a tuple, an equation) declared it in the scope of the `Block`, so
+  `ce.box(["D", ["Function", ["Block", "f"], "x"], "x"])` and a later
+  `ce.parse("\\frac{\\mathrm{d}f}{\\mathrm{d}x}")` had the same MathJSON but
+  were not `isSame`, and a later `ce.box("f")` was a different symbol. Values
+  do not change.
+
+- **`subs()` and `freeVariables` read the index of a raw `Sum`, `Product`,
+  `Integrate` or `NDSolveFunction` as the canonical form does.** With
+  `e = ce.expr(['Sum', ['Add', 'x', 1], ['Limits', 'x', 1, ['Add', 'x', 1]]], {form: 'raw'})`,
+  `e.subs({x: 2})` kept the upper bound `x + 1`, and `e.freeVariables` was
+  `[]`. Now the upper bound is `2 + 1` and `e.freeVariables` is `["x"]`: the
+  bounds of a clause read the outer `x`. The `Tuple` and bare-symbol
+  spellings of a clause now bind their index: raw `["Sum", "k", "k"]` with
+  `subs({k: 7})` gave `["Sum", 7, 7]`, and now stays `["Sum", "k", "k"]`. A
+  bound of a `Tuple` clause or of a flat clause reads the outer value of the
+  index, in the raw and the structural forms: `["Sum", "k", ["Tuple", "k", 1,
+  "k"]]` with `subs({k: 7})` gives `["Sum", "k", ["Tuple", "k", 1, 7]]`, as
+  `Limits` does. The variable of an indefinite `Tuple` or `Hold` clause of an
+  `Integrate` is free: `["Integrate", "x", ["Tuple", "x"]]` has the free
+  variables `["x"]`.
+
+- **A `Sum` or `Product` whose bound is a call of a user function with a
+  real result type that is not an integer type stays symbolic.** With
+  `g(t) := \begin{cases} 0.5 & t < 1 \end{cases}`, `\sum_{k=g(n)}^{3} k`
+  simplified to `1/2·(−g(n)^2 + g(n) + 12)`, which is 6.125 at `n = 0`, while
+  the sum, which rounds the bound 0.5 down, is 6. The undeclared `n` in the
+  argument no longer lets the closed form through: the result type of a user
+  function without a type handler (here `missing | real`) does not depend on
+  its arguments. A user function whose result type is `number`
+  (`h(t) := 2t`) or an integer type, and a library operator such as
+  `\sqrt{n}`, keep the closed form, as the same bound written inline (`2n`)
+  does.
+
+- **A `Sum` or `Product` keeps the binding of its index when `simplify()`
+  rewrites a bound or the body.** With `g(t) := {0.5 if t < 1}`,
+  `ce.box(['Sum', 'k', ['Limits', 'k', ['g', 0], 3]]).simplify()` printed
+  `Sum(k, Limits(k, 0.5, 3))`, but its `N()` and `evaluate()` gave `4k`, not
+  `6`: the rebuilt `Sum` had no local scope, so the index `k` in the body was
+  read as a free symbol. A nested sum gave a wrong number:
+  `Sum(Sum(k, Limits(k, g(0), j)), Limits(j, 1, 3)).simplify()` gave `18`, not
+  `10`, because the inner sum read the index `j` of the outer sum before the
+  simplification. The rebuilt `Sum` and `Product` now keep their local scope.
+
+- **A limit at 0 of a root or a power with a symbolic degree or exponent no
+  longer gives a wrong value.** With `n` assumed negative,
+  `ce.box(['Limit', ['Root', 'x', 'n'], 'x', 0]).evaluate()` gave `Root(0, n)`,
+  although `Root(x, n) = x^{1/n}` grows without bound as `x` tends to 0 from
+  above. With `m` of unknown sign, `Limit(x^m, x, 0)` gave `0^m`,
+  `Limit(x·x^m, x, 0)` gave `0`, and `Limit(e^{m ln x}, x, 0)` gave
+  `e^{-∞·m}`, although each limit is infinite for some negative `m`. These
+  limits now stay unevaluated. A degree or an exponent known to be positive
+  still gives the value at 0.
+
+- **A `Sum` or a `Product` whose bound is a derivative with a constant value
+  is evaluated.** The variable of a derivative is free in it (`D(x, x)` is the
+  derivative at `x`), so a bound such as `D(x, x) + 2` was read as a symbolic
+  bound. The bound is now evaluated, and its value is used when it has no free
+  variable. `\sum_{k=1}^{D(x,x)+2} k` stayed unevaluated and is now `6`.
+  `\prod_{k=1}^{D(x,x)+2} k` was `(D(x,x)+2)!` and is now `6`. A bound whose
+  value still has a free variable (`D(x^2, x)`, which is `2x`) keeps the
+  operator symbolic, and `simplify()` gives no closed form for a bound whose
+  value is not an integer.
+
+- **In a function body, the asynchronous evaluation of an arithmetic
+  operator or a user function applied to a lazy `Map` or `Filter` of a
+  parameter gives the value of `evaluate()`.**
+  `(xs ↦ 1 + Map(x ↦ 2x, xs))([1, 4])` gave `[]` under `evaluateAsync()`,
+  and `(xs ↦ -Map(x ↦ 2x, xs))([1, 4])` did not end; they now give `[3, 9]`
+  and `[-2, -8]`. The code that runs after each `await` of a broadcast now
+  runs in the context of the evaluation, where the parameter has its value.
+
 - **A compiled `Sum` or `Product` whose body writes its index gives the value
   of the interpreter.** The interpreter binds the index to its next value at
   each iteration, whatever the body wrote: `Σ_{j=1}^{n} (j ≔ j + 1; j)` at
@@ -291,6 +508,89 @@
   of indices, as in the interpreter; when a bound reads another index, the
   clauses nest, and the write lasts until the next value of that index.
 
+- **A limit at infinity of a root of `1/x`.**
+  `Limit(Root(1/x, -2)/Ln(x), x, +∞)` stayed unevaluated. Its canonical form
+  is `1/(ln(x)·√(1/x))`, and `Root(1/x, -2) = √x` grows faster than `ln x`, so
+  the limit is `+∞`. As `x → +∞`, `√(1/x)` and `ⁿ√(1/x^m)` are now rewritten
+  to `x^(-1/2)` and `x^(-m/n)`, and a quotient of quotients `(a/b)/(c/d)` is
+  compared as `(a·d)/(b·c)`. Before, the factor `√(1/x)` and a quotient in the
+  denominator had no growth order, and the numeric comparison does not
+  separate `ln x` from `√x`.
+
+- **The asynchronous numeric evaluation of a lazy `Map` that a call makes
+  reads the names of that call.** With `f := (x, k = d) => x * k` and
+  `g := (d, xs) => Map(f, xs)`,
+  `await ce.box(['g', 10, ['List', 1, 2]]).evaluateAsync({ numericApproximation: true })`
+  gave `Map(…NumericApproximation(f(_1, d))…, [1, 2])`, read as `[d, 2d]`; it
+  now gives `[10, 20]`, as `evaluate()` and `N()` do. An asynchronous
+  evaluation keeps its own stack of contexts, and two steps used the stack of
+  the engine instead: the numeric rewrite of the callback of `Map`, and the
+  read of a lazy view in the context of the call that made it.
+
+- **A closure made in a function call no longer reports a "discarded scope"
+  error under the debug check of bindings (`ce._debugBindings`)** when it
+  reads a name of that call after the call has returned. With
+  `f := (x, k = d) => x * k` and `o1 := d => (xs => ListFrom(Map(f, xs)))`,
+  `o1(7)([1, 2])` threw 'The binding of "d" belongs to the discarded scope
+  "call"'. The same happened for a closure that the call assigns to an outer
+  variable. The frame of a call that makes such a closure is now kept alive,
+  as for a lazy view. The same holds for a closure made in a loop body, a
+  block, a comprehension or a big operator (`Sum`, `Product`), and for a
+  recursive call that runs the same loop as its caller, which reported a read
+  of a discarded scope between two live runs of the loop. The values were
+  already correct without the debug check.
+
+- **A function literal that a comprehension element assigns to an outer
+  variable captures the index of its element** and the parameters of the
+  enclosing call, as a literal made in a `for` loop body does. In Epsil,
+  `let h = (x) => x` then `ListFrom([do { h = (x => x + d); 0 } for d in [3]])`
+  then `h(1)` gave `d + 1`; it now gives `4`. Inside a function `b(n)`, with
+  `x + d * n`, the result was `d·n + 1`.
+
+- **A lazy view that a loop iteration or a block stores outside it reads the
+  values of that iteration.** In Epsil,
+  `let h = []; for d in [3, 6] { if d == 3 { h = Map(x => x + d, Range(1, Infinity)) } }`
+  then `ListFrom(Take(h, 2))` gave `[7, 8]`, the value of `d` after the loop;
+  inside a function it gave `[d + 1, d + 2]`. It now gives `[4, 5]`. A lazy
+  operator keeps its callback unevaluated, so the callback was never captured
+  as a closure is. Now, when a `Map`, `Filter`, `Scan` or other lazy
+  collection is assigned to a variable outside the loop or block, to a
+  destructured target or to an object field, the loop indices and block
+  locals that it reads are replaced by their values at the assignment. This
+  also applies to a view inside a list, a dictionary or a branch of an `If`,
+  and to a local that holds another view. A view read in its own scope, or
+  stored in a variable of that scope, still reads the current values. A view
+  reads a `let` local by its value at the assignment, while a closure reads
+  it by binding (`docs/SCOPING-MODEL.md`).
+
+- **`N()` of a definite integral evaluates a `D` whose variable is not the
+  integration variable.** `Integrate(D(y·z², y), Limits(z, 0, 1)).N()` stayed
+  unevaluated: the numeric route read `y` as a free symbol with no value,
+  while `evaluate()` gave `1/3`. When the integrand has a free symbol, the
+  numeric route now evaluates each `Integrate`, `Sum`, `Product` or `D` in it
+  first, as the exact route does, and integrates the result when no free
+  symbol is left: the example gives `0.3333…`. This is done only when it can
+  remove every free symbol: the integrand has no effect (also through the
+  value of a symbol), and no free symbol is outside these operators.
+  `∫_0^1 a·Σ_{k=1}^{3} k·z\,dz` stays symbolic, and its `Sum` is not
+  evaluated. A `Sum` or `Product` with a bound that reads an integration
+  variable stays held, and the content of a `Hold` is not evaluated.
+
+- **A `Sum` or `Product` bound that is not an integer is not put into a closed
+  form.** `evaluate()` and `simplify()` put such a bound into a closed form,
+  but the enumeration of the same operator rounds a numeric bound down. So the
+  value depended on whether the closed form was made before or after the
+  substitution. With `y` declared `real`,
+  `\sum_{k=1}^{y}\left(\frac{1}{k}-\frac{1}{k+1}\right)` evaluated to
+  `1 - 1/(y+1)`, about `0.714` at `y = 2.5`, while the sum at `y = 2.5` is
+  `2/3`. `\prod_{k=1}^{y} k` gave `y!` (`3.32` at `y = 2.5`; the product is
+  `2`). The operator now stays symbolic in these cases: a bound that is not an
+  integer (`2.5`), a bound that holds a symbol declared with a type that is not
+  an integer type (`real`, `number`, `complex`), and a bound whose symbols are
+  all declared and whose type is not an integer type (`n/2` or `n + 1/2` with
+  `n` declared `integer`). A bound declared `integer` (`n`, `2n`, `n!`) and an
+  undeclared symbol keep the closed forms.
+
 - **`FlatMap` with a callback that names a user function gives the same
   result as the same callback written inline.** With `f := x ↦ [x, x]`,
   `ListFrom(FlatMap([1, 2], f))` is now `[1, 1, 2, 2]`, and `Count`, `Sum`
@@ -301,6 +601,24 @@
   `FlatMap([1, 2], f)` is `list<integer>`, as for the inline callback. A
   callback that returns a tuple also gives a finite result now:
   `ListFrom(FlatMap([1, 2], x ↦ (x, x)))` is `[1, 1, 2, 2]`.
+
+- **`ListFrom`, `Count`, `Length`, `IsEmpty`, `Sum`, `Product`, `Max`, `Min`,
+  `Reduce` and `Fold` give a value for a `FlatMap` over a finite source whose
+  callback result has no fixed length.** `Sum(FlatMap([1, 2], x ↦ Range(1, x)))`
+  is now `4`; before, it stayed unevaluated, because the type `list<integer>`
+  of `Range(1, x)` does not show whether the inner result is finite. These
+  operators now list the view with the same bounded walk as
+  `evaluate({ materialization: true })`. When an inner result is infinite,
+  `ListFrom` gives the `out-of-range` error "a finite collection", `Count` and
+  `Length` give `+∞`, and the others stay unevaluated, as for any other
+  infinite collection. When the evaluation of the view is another error (a
+  callback symbol that holds an error value), each of them gives that error. A
+  `FlatMap` over an empty source is finite. `Take` and `First` still apply the
+  callback only to the elements they read. The materialization of a `FlatMap`
+  now stays lazy when an inner result is a `Filter` that stops at the
+  iteration limit, or applies an operator that has only an `evaluateAsync`
+  handler. Before, the first threw an iteration-limit error, and the second
+  listed the unevaluated calls as elements.
 
 - **A non-canonical `Integrate` binds the variable of its canonical form**
   (CE-699). `subs()` on a non-canonical `Integrate` whose limits name no
@@ -422,6 +740,24 @@
   JavaScript, so `compile(…, { fallback: false })` threw a `SyntaxError`. It
   now compiles on every target, and the name gets the value at its last
   position, also in a nested pattern, a loop body or a `Sum` body.
+
+- **A block-local function that receives complex values compiles in the
+  complex lane.** In `Block(g ≔ (a, b) ↦ a + b, Reduce(L, g, 0))` with
+  `L: list<complex>`, the compiled code used the real `+` for `g` and gave
+  the string `"[object Object]…"` for `[1 + i, 2]`; the interpreter gives
+  `3 + i`. A call of a block-local function, as a `Reduce`, `Fold` or `Scan`
+  combiner, as a `Map` callback or directly, with a complex argument (or a
+  point with a complex coordinate) at a parameter that is not typed complex
+  now restarts the compilation in `mode: 'complex'`, which gives the
+  interpreter's value. With `mode: 'strict'` the compilation declines, with a
+  message that asks for a `complex` annotation on the parameter of the
+  function literal. The same applies to a function defined with
+  `ce.assign()` that receives a point with a complex coordinate: with
+  `h = (p) ↦ p[1] + 1` and `P: list<tuple<complex, real>>`, `h(P[1])` gave
+  `"[object Object]1"`; it now gives `2 + i`. The argument and the parameter
+  types are compared position by position, and a position with no type
+  (`any`, `unknown`) counts as real: in `mode: 'strict'`,
+  `(L) ↦ Length(L)` applied to such a point now declines.
 
 - **A Leibniz derivative in the integrand of an integral leaves the closing
   differential to the integral** (CE-617). `\int_0^1 \frac{d}{dx}x^3\,dx`
@@ -1660,6 +1996,17 @@
   source text is the caller's own value and is not checked, as before.
 
 ### Performance
+
+- **`subs()` substitutes a node that an expression uses more than once only
+  once.** On a non-canonical expression, `subs()` substituted a shared node
+  again for each path from the root, so its time doubled with each level of
+  sharing: with `e = x` and then `e = ce.function('Add', [e, e], { form:
+  'raw' })` repeated 18 times, `e.subs({ x: 3 })` took about 0.5 s, and 30
+  levels did not finish. Now the time grows with the number of distinct nodes
+  (18 or 20 levels take less than a millisecond), and a node that is shared
+  in the input is shared in the result. A shared node below a binder that
+  binds a substituted name (the parameter of a `Function`, the index of a
+  `Sum`, a local of a `Block`) still keeps that name there.
 
 - **An assignment whose value shares one list or tuple at several positions
   takes linear time.** In a block `a1 := (a0, a0)`, `a2 := (a1, a1)`, …, the

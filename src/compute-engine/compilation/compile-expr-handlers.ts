@@ -39,7 +39,6 @@ import {
 } from './compile-assignment-checks.js';
 import { CompilerState } from './compiler-state.js';
 import {
-  callBroadcastSources,
   collectDeclaredTopSymbols,
   compilationType,
   isBoundPossiblyCollectionTyped,
@@ -52,14 +51,11 @@ import { core } from './compiler-core-hooks.js';
 import {
   _codeAliases,
   _codeOverrides,
-  _pushComplexMemoLayer,
   isRealOnlyLowering,
   withPromotionSuppressed,
 } from './compiler-mode.js';
 import { ATOMIC_FRAGMENT, absenceAxisForType } from './compile-absence.js';
 import { tempVar } from './compiler-naming.js';
-import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import { reachesCallerCodeOn } from './compile-folding.js';
 import {
   compileOp,
   compileOpValue,
@@ -88,7 +84,6 @@ import {
 } from './compile-operators.js';
 import { isNonScalarShape, isProvablyRealValued } from './compile-shapes.js';
 import {
-  _popComplexMemoLayer,
   declareValueOperand,
   promotionActive,
 } from './compile-declarations.js';
@@ -100,6 +95,7 @@ import {
 import { tryCompileProtocolDispatch } from './compile-protocol-dispatch.js';
 import { readsAsScalarThroughFreeInputs } from './compile-user-calls.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
+import { multiClauseState } from '../multi-clause.js';
 import { _reservedDeclareNames, assignLValue } from './compile-locals.js';
 import { mayHoldComplexElement } from './compile-complexness.js';
 
@@ -316,117 +312,6 @@ export function declaredTopGuard(
 }
 
 /**
- * The JavaScript code of a `broadcastable` head whose operands can be lists
- * at run time only because a call of a user function maps over a list
- * argument (`mayHoldCallBroadcastResult`): `q(x) + 1` with `q := t ↦ 2t`
- * and an untyped `x`. `undefined` when there is no such call, and the
- * caller continues as before.
- *
- * The code must broadcast when the call gives a list (`_SYS.bcast`), but
- * `_SYS.bcast` costs a closure call at each evaluation, and the value is a
- * number at almost every evaluation (a plot variable). So the code
- * evaluates each such call once, into a temporary, and tests the value:
- *
- * `((_tv3) => (Array.isArray(_tv3) || _tv3 === undefined) ?
- * _SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _tv3, 1) : _tv3 + 1)(
- * _SYS.bcastFn(_fn_q, _.x))`
- *
- * The scalar branch is compiled with the tested calls, and the operators
- * between them and the site, read as scalars
- * (`CompilerState.scalarCallResults`). It is the code compiled before the
- * calls were read as possible lists. An absent value (`undefined`) takes the
- * broadcast, whose absence rule makes the result absent, as before this
- * check. The calls are found through applications of library operators
- * only (`callBroadcastSources`); a call that the site evaluates only on a
- * condition (a branch of an `If`, an operand of `And`, a chain of
- * comparisons) gives no check, because it must not be evaluated before its
- * condition is tested. Each branch has its own region of common
- * subexpressions, as in `declaredTopGuard`, and its own layer of the complex
- * and lane memos. The calls are evaluated before the other operands of the
- * site, so there is no check when a call or another operand has an effect.
- *
- * Only the outermost site has the check: inside the broadcast branch, each
- * call is read through its temporary (`_codeAliases`), and a call that is
- * already read through a temporary gives no check. When the two branches
- * are the same code (another operand is a list, `q(x) + L`), there is no
- * check.
- */
-function callResultGuard(
-  engine: ComputeEngine,
-  h: string,
-  args: ReadonlyArray<Expression>,
-  prec: number,
-  target: CompileTarget<Expression>,
-  node: Expression | undefined
-): TargetSource | undefined {
-  if (target.bindExpr === undefined) return undefined;
-  const sources = callBroadcastSources(h, args, target);
-  if (sources === undefined) return undefined;
-  const { calls, between, others } = sources;
-  if (calls.some((c) => _codeAliases.has(c) || _codeOverrides.has(c)))
-    return undefined;
-  // The check evaluates the calls before the other operands, so there is no
-  // check when an operand has an effect: an effect of another operand would
-  // happen after the calls (`Random() / q(u)` keeps `_SYS.bcast`), and a
-  // call with an effect can change what another operand reads (for
-  // `x + q(u)` where `q` writes `x`, the check would call `q` before `x` is
-  // read).
-  const hasEffect = (a: Expression): boolean =>
-    !isTransitivelyPure(a) || reachesCallerCodeOn(a, target);
-  if (others.some(hasEffect)) return undefined;
-  if (calls.some(hasEffect)) return undefined;
-  const names = calls.map(() => tempVar(target));
-  const compileIn = (scalar: boolean): TargetSource => {
-    const scalarNodes = CompilerState.scalarCallResults;
-    const added: Expression[] = [];
-    if (scalar)
-      for (const e of [...calls, ...between, ...(node ? [node] : [])])
-        if (!scalarNodes.has(e)) {
-          scalarNodes.add(e);
-          added.push(e);
-        }
-    calls.forEach((c, i) => _codeAliases.set(c, names[i]));
-    // The complex and lane memos keyed by node get a layer of their own: an
-    // answer of one branch is not an answer of the other branch, or of the
-    // code after the check.
-    _pushComplexMemoLayer();
-    try {
-      return withCseIsolatedInstance(target, () =>
-        core.compileExpr(engine, h, args, prec, target, node)
-      );
-    } finally {
-      _popComplexMemoLayer();
-      for (const e of added) scalarNodes.delete(e);
-      for (const c of calls) _codeAliases.delete(c);
-    }
-  };
-  const list = compileIn(false);
-  const scalar = compileIn(true);
-  // Another operand is a list too (`q(x) + L`): the check changes nothing.
-  // `callBroadcastSources` answers `undefined` for an operand that is a list
-  // by its static type; this comparison covers the other cases. Each
-  // branch names its own temporaries (the element parameters of a
-  // broadcast), so the two codes are compared with the temporaries renamed
-  // in the order they occur.
-  const renamed = (code: string): string => {
-    const names = new Map<string, number>();
-    return code.replace(/\b_tv\d+\b/g, (name) => {
-      if (!names.has(name)) names.set(name, names.size);
-      return `_tv#${names.get(name)}`;
-    });
-  };
-  if (renamed(list) === renamed(scalar)) return undefined;
-  const bindings: Array<[string, TargetSource]> = calls.map((c, i) => [
-    names[i],
-    core.compile(c, target),
-  ]);
-  const test = names
-    .map((n) => `Array.isArray(${n}) || ${n} === undefined`)
-    .join(' || ');
-  return target.bindExpr(bindings, `((${test}) ? ${list} : ${scalar})`);
-}
-
-/**
  * The element-wise JavaScript broadcast of a `broadcastable` head over list
  * operands. A case of `compileExpr`: it returns the code, or `undefined` when
  * `compileExpr` continues with its next case.
@@ -442,8 +327,6 @@ export function compileExprElementwiseBroadcast(
   if (target.language === 'javascript') {
     const guarded = declaredTopGuard(engine, h, args, prec, target, node);
     if (guarded !== undefined) return guarded;
-    const checked = callResultGuard(engine, h, args, prec, target, node);
-    if (checked !== undefined) return checked;
     const broadcast = tryCompileBroadcast(engine, h, args, target, node);
     if (broadcast !== null) return broadcast;
     // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,
@@ -756,10 +639,20 @@ export function compileExprBroadcastJavaScript(
     // same name, so the engine definition does not tell how its call
     // broadcasts. The call of the local (`tryCompileLocalFunctionCall`)
     // decides that from the local literal.
+    //
+    // A user function (one `Function` literal, or the clauses of a
+    // multi-clause function) is not this gate's business either. Its
+    // definition is `broadcastable` when its parameters are scalar
+    // (`c := (x: complex) ↦ x + 1`, assigned with no declared signature),
+    // and its call route (`tryCompileUserFunction`) maps it over a list
+    // argument with the static rank of the argument: `c(L)` with
+    // `L: list<real>` is `_SYS.mapFn(…, [1], _.L)`.
     const isBroadcastableHead =
       SCALAR_ARITHMETIC_HEADS.has(h) ||
       (isOperatorDef(def) &&
         blockLocalFunction(h, target) === undefined &&
+        userFunctionLiteral(engine, h) === undefined &&
+        multiClauseState(def) === undefined &&
         def.operator.broadcastable === true &&
         !isRelationalOperator(h) &&
         !LOGICAL_BROADCAST_HEADS.has(h));
@@ -969,7 +862,7 @@ export function compileExprBroadcastPython(
           // `missing | C`): `t * ((t, 1) if c else None)` repeats a
           // tuple or raises in Python, for the same reason.
           isGatedIndexedCollection(a) ||
-          isBoundPossiblyCollectionTyped(a)
+          isBoundPossiblyCollectionTyped(a, target)
       )
     ) {
       const elementwise = tryCompilePythonElementwise(engine, h, args, target);

@@ -258,7 +258,7 @@ describe('Interval target — collection values across a user-function boundary'
   test('a scalar-parameter helper is mapped over a provable list argument', () => {
     const ce = engine();
     const { code, out } = run(ce, 'f(V)', { V: [1, 2, 3] });
-    expect(code).toBe("(_.V === undefined ? { kind: 'empty' } : _IA.bcastFn((_tv1) => _fn_f(_tv1), _.V))");
+    expect(code).toBe("(_.V === undefined ? { kind: 'empty' } : _IA.mapFn(_fn_f, [1], _.V))");
     expectEncloses(out, [1, 4, 9]);
     // The interpreter zips zero elements into the empty list.
     const r = compile(ce.parse('f([])'), { to: 'interval-js' });
@@ -275,7 +275,9 @@ describe('Interval target — collection values across a user-function boundary'
   test('a scalar-parameter helper over a set argument fails closed', () => {
     const ce = engine();
     ce.declare('S', 'set<number>');
-    declines(ce, 'f(S)', /handed to a scalar parameter/);
+    // A set is not an indexed collection: the shape of the call is not
+    // settled, so the call declines.
+    declines(ce, 'f(S)', /the argument "S" has the type `set<number>`, which does not settle one shape/);
   });
 
   test('a Map-bodied helper of unknown width (a comprehension over 1..n)', () => {
@@ -645,10 +647,12 @@ describe('Interval target — collection-valued roots', () => {
     for (const shape of SHAPES) {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
+      // Through the parameter of `g`, the argument `f(x)` has no settled
+      // shape at a scalar parameter, and the call of `g` declines first.
       declines(
         ce,
         shape,
-        /Could not compile `f\(x\)`: it is a call of a block-local function that returns a collection, and its value is not consumed whole/
+        /Could not compile `f\(x\)`: it is a call of a block-local function that returns a collection, and its value is not consumed whole|Could not compile a call of `g`: the argument "f\(x\)" has the type `unknown`, which does not settle one shape/
       );
       expect(ce.box(shape as never).evaluate().toString()).toMatch(
         /incompatible-type/
@@ -777,7 +781,14 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe("(_.c === undefined ? { kind: 'empty' } : _IA.pointComponent(_.c, 1))");
+    // `c` is declared as a point or a list of points. After the check for an
+    // absent value, the code tests the value of `_.c` once (an empty array,
+    // or an array whose first element is an array, is a list of points) and
+    // holds one body for each shape: the list body reads the coordinate of
+    // every point, the point body reads it directly.
+    expect(r.code).toBe(
+      "(_.c === undefined ? { kind: 'empty' } : ((_.c.length === 0 || Array.isArray(_.c[0])) ? _IA.pointComponent(_.c, 1, true, true) : _IA.component(_.c, 1)))"
+    );
     expect(bands(r.run!({ c: POINTS }))).toEqual([
       [2, 2],
       [4, 4],
@@ -907,8 +918,11 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(plus.success).toBe(true);
+    // `U` is declared with two shapes, so the code tests
+    // `Array.isArray(_.U)` once: the list body broadcasts, the number body
+    // adds directly.
     expect(plus.code).toBe(
-      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _.U)'
+      '(Array.isArray(_.U) ? _IA.bcast((_tv1) => _IA.add(_tv1, _k1), _.U) : _IA.add(_.U, _k1))'
     );
     expect(bands(plus.run!({ U: [1, 2] }))).toEqual([
       [2, 2],
@@ -1040,7 +1054,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     });
     expect(mapped.success).toBe(true);
     expect(mapped.code).toBe(
-      "(_.L === undefined ? { kind: 'empty' } : _IA.pointComponent(_IA.bcastFn((_tv1, _tv2) => _fn_U(_tv1, _tv2), _.L, _k2), 1, true, true))"
+      "(_.L === undefined ? { kind: 'empty' } : _IA.pointComponent(_IA.mapFn(_fn_U, [1, 0], _.L, _k2), 1, true, true))"
     );
     expect(bands(mapped.run!({ L: [1, 2] }))).toEqual([
       [2, 2],
@@ -1248,12 +1262,19 @@ describe('Interval target — a PointList of list-typed symbols', () => {
     expect(r.run!({ L_1: pt(3), L_2: [1] })).toEqual({ kind: 'entire' });
   });
 
-  test('a component with no stated role fails closed', () => {
-    // A number-or-list component (`B`) and an untyped one (`x`) may be a
-    // source or a slot at run time; the JavaScript target decides at the
-    // value, this target declines.
-    declines(zipEngine(), ['PointX', ['PointList', 'L_1', 'B']], /PointList/);
-    declines(zipEngine(), ['PointX', ['PointList', 'L_1', 'x']], /PointList/);
+  test('a component declared as a number or a list compiles with one body for each shape', () => {
+    // `B` is declared `list<real> | real`, so the code tests `B` once and
+    // holds a zipping body for a list and a slot body for a number. Each
+    // result encloses the interpreter's value for a value of each shape.
+    const expr = ['PointX', ['PointList', 'L_1', 'B']];
+    agrees(expr, { L_1: [1, 2, 3], B: [4, 5, 6] });
+    agrees(expr, { L_1: [1, 2, 3], B: 5 });
+  });
+
+  test('an untyped component fails closed', () => {
+    // An input with no declared type (`x`) is refused, because the compiled
+    // code cannot know whether it is a source or a slot.
+    declines(zipEngine(), ['PointX', ['PointList', 'L_1', 'x']]);
   });
 });
 

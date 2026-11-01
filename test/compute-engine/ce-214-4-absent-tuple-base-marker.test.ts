@@ -100,14 +100,34 @@ function tupleListJson(v: unknown[][]): unknown {
   ];
 }
 
-describe('CE-214.4: tup(x) with x: any', () => {
-  function engine(): ComputeEngine {
+describe('CE-214.4: tup(x) with x: any, and with x declared as a list', () => {
+  function engine(type = 'list<number>'): ComputeEngine {
     const ce = new ComputeEngine();
-    ce.declare('x', 'any');
+    ce.declare('x', type);
     ce.assign('tup', ce.box(TUP as never));
     return ce;
   }
   const R: unknown = ['At', ['tup', 'x'], 1];
+
+  test('a call of `tup` with an argument typed `any` declines', () => {
+    // The parameter of `tup` is a scalar, so the interpreter maps `tup`
+    // over a list argument and applies it to a scalar: with `x: any`, the
+    // shape of `tup(x)` is known only at run time, and the call declines
+    // (`docs/plans/2026-10-31-static-shape-compilation.md`, R3). The tests
+    // below declare `x` as a list, the shape of the values they give.
+    const ce = engine('any');
+    const r = compile(
+      ce.box([
+        'Function',
+        ['At', R, 2],
+        ['Typed', 'x', { str: 'any' }],
+      ] as never),
+      { to: 'javascript' } as never
+    );
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.unsupported).toContain('x');
+  });
 
   test.each([
     [['At', R, 1]],

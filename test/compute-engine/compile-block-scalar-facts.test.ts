@@ -1,7 +1,7 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import {
-  isConstructedScalar,
+  isScalarValue,
   recordBlockScalarLocals,
 } from '../../src/compute-engine/compilation/javascript-value-facts';
 import type { MathJsonExpression } from '../../src/math-json/types';
@@ -194,7 +194,7 @@ describe('scalar facts through retained helper locals', () => {
       recordBlockScalarLocals(statements, target);
       // A mapped condition may contain `q = [2, 3]`. Its source is opaque,
       // so no scalar fact may survive even though both written arms are scalar.
-      expect(isConstructedScalar(ce.symbol('q'), target)).toBe(
+      expect(isScalarValue(ce.symbol('q'), target)).toBe(
         kind === 'builtin'
       );
     }

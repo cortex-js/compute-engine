@@ -128,17 +128,67 @@ describe('COMPILE a run-time check of an annotated literal applied directly', ()
     ['Typed', 'p', "'tuple<number, number>'"],
   ];
 
+  /**
+   * The interpreter's value of `Apply(fn, v)` with `v` declared `type` and
+   * assigned `json`, and the compiled value of the root function
+   * `(v: type) ↦ Apply(fn, v)` called with `value`.
+   */
+  function applyTyped(
+    type: string,
+    fn: unknown,
+    value: unknown,
+    json: unknown
+  ) {
+    const ce1 = new ComputeEngine();
+    ce1.declare('v', type);
+    const expr = ce1.box(['Apply', fn, 'v'] as never);
+    ce1.assign('v', ce1.box(json as never));
+    const interpreted = expr.evaluate().toString();
+    const ce2 = new ComputeEngine();
+    const result = compile(
+      ce2.box([
+        'Function',
+        ['Apply', fn, 'v'],
+        ['Typed', 'v', { str: type }],
+      ] as never),
+      { to: 'javascript', fallback: false }
+    );
+    const compiled = (result.run as unknown as (v: unknown) => unknown)(
+      value
+    );
+    return { interpreted, compiled };
+  }
+
+  it('a parameter declared `any` at a scalar annotation declines', () => {
+    // `k: integer` is a scalar parameter: the call maps over a list and
+    // binds a number. A value of `any` can be either, so the shape of the
+    // call is not settled, and the compilation declines (rule R3 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`).
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Function',
+      ['Apply', K, 'v'],
+      ['Typed', 'v', { str: 'any' }],
+    ] as never);
+    expect(() =>
+      compile(expr, { to: 'javascript', fallback: false })
+    ).toThrow(/does not settle one shape/);
+    const r = compile(expr, { to: 'javascript' });
+    expect(r.success).toBe(false);
+    expect(r.unsupported).toContain('v');
+  });
+
   it('a value outside an `integer` annotation', () => {
-    const r = apply(K, 1.5, 1.5);
+    const r = applyTyped('real', K, 1.5, 1.5);
     expect(r.interpreted).toMatch(/incompatible-type/);
     expect(r.compiled).toBeNaN();
-    const ok = apply(K, 2, 2);
+    const ok = applyTyped('real', K, 2, 2);
     expect(ok.interpreted).toBe('3');
     expect(ok.compiled).toBe(3);
   });
 
   it('a list maps, and each element is tested', () => {
-    const r = apply(K, [1, 2.5], ['List', 1, 2.5]);
+    const r = applyTyped('list<real>', K, [1, 2.5], ['List', 1, 2.5]);
     expect(r.interpreted).toMatch(/^\[2,Error/);
     expect((r.compiled as number[])[0]).toBe(2);
     expect((r.compiled as number[])[1]).toBeNaN();

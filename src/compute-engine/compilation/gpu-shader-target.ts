@@ -905,8 +905,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // to 4 real numbers at one or more of its scalar parameters. The
     // interpreter applies the function to each element of the list (the
     // call broadcasts), so `f([a, b])` with `f(q) := Mod(q, 1) - 0.5` is
-    // `[f(a), f(b)]`. The JavaScript target does the same at run time
-    // (`_SYS.bcastFn`). Here the list is a `vecN`, and the definition of
+    // `[f(a), f(b)]`. The JavaScript target does the same with a static
+    // map (`_SYS.mapFn`). Here the list is a `vecN`, and the definition of
     // `f` has a `float` parameter, which a `vecN` does not convert to. The
     // call is emitted through a wrapper that applies the definition to each
     // component and builds the `vecN` of the results:
@@ -1314,8 +1314,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                   `(declared "${sig.params[i]}").`
               );
             // A collection argument beyond the static vec2–vec4 shapes: the
-            // JS target answers this with the `_SYS.bcastFn` runtime
-            // broadcast dispatch, which a shader has no analog for. Scalar
+            // JS target answers this with the static map `_SYS.mapFn`,
+            // which a shader has no analog for. Scalar
             // applying it silently would compute a different value.
             if (t === undefined)
               throw new Error(

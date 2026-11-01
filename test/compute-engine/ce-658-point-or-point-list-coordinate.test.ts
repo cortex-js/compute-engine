@@ -13,10 +13,14 @@
  * `src/compute-engine/compilation/point-value-inlining.ts`). The
  * compilation then reads the type of the tuple `(3, 4)`.
  *
- * The declines that stay: a `P` with no assigned value, an assigned list of
- * points (the interpreter gives an error for `At(P, 1) + x` too), and a `P`
- * that a `vars` entry maps (the value of the entry wins over the assigned
- * value, as on the shader targets).
+ * The declines that stay: an assigned list of points (the interpreter gives
+ * an error for `At(P, 1) + x` too). A `P` with no assigned value, or that a
+ * `vars` entry maps (the value of the entry wins over the assigned value,
+ * as on the shader targets), is an input declared with a union of shapes:
+ * the code has one body per member (CE-712.2). For a list of points, the
+ * interpreter gives an error for `At(P, 1) + x`, and the static type of the
+ * sum does not show it, so that member has no body, and the code reads
+ * `P` as a point.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -147,14 +151,28 @@ describe('CE-658: the declines that stay', () => {
   const sum = ['Add', ['At', 'P', 1], 'x'];
 
   test.each(['javascript', 'interval-js', 'python'] as const)(
-    '%s: no assigned value',
+    '%s: no assigned value compiles the point member',
     (to) => {
       const ce = engine();
-      expect(declineOf(ce.box(sum as any), to)).toMatch(
-        /an operand may be a point/
-      );
+      expect(declineOf(ce.box(sum as any), to)).toBeUndefined();
     }
   );
+
+  test('no assigned value: the point member gives the interpreter value', () => {
+    const ce = engine();
+    const expr = ce.box(sum as any);
+    const js = compile(expr, { fallback: false });
+    const interval = compile(expr, { to: 'interval-js', fallback: false });
+    for (const x of SAMPLES) {
+      const expected = expr
+        .subs({ x, P: ce.box(['Tuple', 3, 4]) })
+        .N().re;
+      expect(js.run!({ x, P: [3, 4] } as any)).toBe(expected);
+      expect(pointInterval(interval.run!({ x, P: [3, 4] } as any))).toBe(
+        expected
+      );
+    }
+  });
 
   test.each(['javascript', 'interval-js', 'python'] as const)(
     '%s: an assigned list of points',
@@ -181,9 +199,12 @@ describe('CE-658: the declines that stay', () => {
     expect(r.success).toBe(true);
     expect(r.code).toContain('_.P');
     expect(r.run!({ x: 1, P: [10, 20] } as any)).toBe(11);
-    expect(
-      declineOf(ce.box(sum as any), 'javascript', { P: '_.P' })
-    ).toMatch(/an operand may be a point/);
+    const mapped = compile(ce.box(sum as any), {
+      fallback: false,
+      vars: { P: '_.P' },
+    });
+    expect(mapped.success).toBe(true);
+    expect(mapped.run!({ x: 1, P: [10, 20] } as any)).toBe(11);
   });
 });
 

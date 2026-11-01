@@ -192,13 +192,24 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
         // The signature of `g` says `(unknown) -> list<list<unknown>>` (its
         // parameter has no use that narrows it), so with a free `x` the
         // engine types the entries of `g(x)` as unknown. A free input with
-        // no type is refused, so `x` is a parameter, declared `any`, of the
-        // root function, and `Trace(g(x))` compiles on every lane (ROADMAP
+        // no type is refused, so `x` is a parameter of the root function.
+        const root = (e: any, type: string) =>
+          ce.box(['Function', e.json, ['Typed', 'x', { str: type }]]);
+        // With `x: any` the shape of the argument of `g(x)` is not settled,
+        // and the compilation declines on every lane.
+        for (const e of [trace, det]) {
+          const r = compile(root(e, 'any'), { to: 'javascript', mode } as any);
+          expect(r.success).toBe(false);
+          expect(r.diagnostic?.code).toBe('unsettled-shape');
+          expect(r.unsupported).toContain('x');
+        }
+        // With `x: real`, `Trace(g(x))` compiles on every lane (ROADMAP
         // CE-377; the complex lane declined before).
-        const root = (e: any) =>
-          ce.box(['Function', e.json, ['Typed', 'x', { str: 'any' }]]);
-        expectValue(js(root(trace), mode).run(2), trace.subs({ x: 2 }).N());
-        expectValue(js(root(det), mode).run(2), det.subs({ x: 2 }).N());
+        expectValue(
+          js(root(trace, 'real'), mode).run(2),
+          trace.subs({ x: 2 }).N()
+        );
+        expectValue(js(root(det, 'real'), mode).run(2), det.subs({ x: 2 }).N());
       });
 });
 

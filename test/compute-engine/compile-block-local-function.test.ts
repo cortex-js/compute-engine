@@ -88,10 +88,11 @@ describe('COMPILE a block-local function definition', () => {
       'const g = (k) => Sum(Take(Map( _ => _^2, 1..oo), k))\ng(n)',
       { vars: { n: 3 } }
     );
-    // `n` is a caller-supplied variable, so the call takes the runtime
-    // broadcast dispatch, which is handed the local `g` itself — with no
-    // argument to coerce inside it, a closure would only eta-expand `g`.
-    expect(code).toContain('_SYS.bcastFn(g,');
+    // `n` is declared with two shapes, so the code has one body per shape:
+    // the list body maps the local `g` itself over `n` (with no argument to
+    // coerce, a closure would only eta-expand `g`), the scalar body calls it.
+    expect(code).toContain('_SYS.mapFn(g, [1], _.n)');
+    expect(code).toContain('return g(_.n)');
     expect(code).not.toContain('return 14');
     expect(compiled).toBe(14);
   });
@@ -128,14 +129,14 @@ describe('COMPILE a block-local function definition', () => {
 
   it('BROADCASTS over a collection argument, as the interpreter does', () => {
     ce.declare('xs', 'list<real>');
-    // A scalar callee applied to a list maps element-wise (`_SYS.bcastFn`),
-    // the same dispatch an engine-level user function gets. The argument is a
+    // A scalar callee applied to a list maps element-wise (`_SYS.mapFn`),
+    // the same map an engine-level user function gets. The argument is a
     // run-time input, so this exercises the emitted dispatch rather than the
     // constant fold (which would answer `[2, 3, 4]` without it).
     const { compiled, code } = both('const h = (k) => k + 1\nh(xs)', {
       vars: { xs: [1, 2, 3] },
     });
-    expect(code).toContain('_SYS.bcastFn');
+    expect(code).toContain('_SYS.mapFn(h, [1], _.xs)');
     expect(compiled).toEqual([2, 3, 4]);
     // …and the same call with a LITERAL list folds to the same answer.
     expect(both('const h = (k) => k + 1\nh([1, 2, 3])')).toMatchObject({
@@ -321,7 +322,7 @@ describe('COMPILE a `function` definition', () => {
     expect(scalar.compiled).toBe(10);
     expect(scalar.interpreted).toBe('10');
     const list = both(`${src}gd([1, 2, 3])`, { constantFold: false });
-    expect(list.code).toContain('_SYS.bcastFn');
+    expect(list.code).toContain('_SYS.mapFn(gd, [1], ');
     expect(list.compiled).toEqual([2, 4, 6]);
     expect(list.interpreted).toBe('[2,4,6]');
   });
@@ -461,7 +462,10 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     );
     expect(r.compiled).toBe(6);
     expect(r.interpreted).toBe('6');
-    expect(r.code).toContain('_SYS.bcastFn(k, _.x)');
+    // `x` is declared with two shapes: one body maps `k` over the list, the
+    // other calls it.
+    expect(r.code).toContain('_SYS.mapFn(k, [1], _.x)');
+    expect(r.code).toContain('return k(_.x)');
   });
 
   it('folds a call with a constant argument', () => {
@@ -512,7 +516,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       ],
       { xs: [1, 2, 3] }
     );
-    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.code).toContain('_SYS.mapFn(k, [1], _.xs)');
     expect(r.compiled).toEqual([2, 4, 6]);
     expect(r.interpreted).toBe('[2,4,6]');
   });
@@ -804,6 +808,14 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       kind: 'interval',
       value: { lo: 6, hi: 6 },
     });
+    // `x` is declared `real | list<real>`. The interval target spells a
+    // `Block` root itself, and it still has one body per shape of `x`: the
+    // list body maps `k` over the list, as the interpreter does.
+    expect(result.code).toContain('_IA.mapFn(k, [1], _.x)');
+    expect(result.run!({ x: [1, 2] } as never)).toEqual([
+      { kind: 'interval', value: { lo: 2, hi: 2 } },
+      { kind: 'interval', value: { lo: 4, hi: 4 } },
+    ]);
   });
 
   it('the GPU targets and Python fail closed, as for the `const` form', () => {
@@ -813,6 +825,9 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       ['Assign', 'k', twice],
       ['k', 'x'],
     ];
+    // On Python the root `Block` lowers to statements, which the dispatch on
+    // the shape of `x` (declared `real | list<real>`) cannot join in one
+    // conditional expression: the call of `k` over the union declines.
     for (const to of ['glsl', 'wgsl', 'python'])
       expect(() =>
         compile(ce.box(json as never), { to, fallback: false } as never)
@@ -1058,9 +1073,10 @@ describe('COMPILE a call of a block-local function with a tuple argument', () =>
 
 /**
  * The Python target binds a block-local function as a Python value
- * (`h = (lambda k: k + 1)`) and compiles a call of it as a direct call. A
- * direct call agrees with the interpreter only when no argument can be a
- * collection, so every other shape fails closed with the reason (CE-237).
+ * (`h = (lambda k: k + 1)`). A call with scalar arguments is a direct call;
+ * a call with a list argument at a scalar parameter is a comprehension that
+ * maps the function over the list, as the interpreter does. A call whose
+ * result type is settled is an operand of arithmetic like any other value.
  */
 describe('COMPILE a block-local function on the Python target', () => {
   const python = new PythonTarget();
@@ -1111,18 +1127,42 @@ describe('COMPILE a block-local function on the Python target', () => {
     );
   });
 
-  it('a list argument fails closed: the interpreter maps over it', () => {
-    expect(() =>
-      pyFunction('const h = (k) => k + 1\nh(xs)', { xs: 'list<integer>' })
-    ).toThrow(
-      /block-local function `h` on the Python target: argument 1 has the type `list<integer>`/
+  it('a list argument maps the local over the list, as the interpreter does', () => {
+    const code = pyFunction('const h = (k) => k + 1\nh(xs)', {
+      xs: 'list<integer>',
+    });
+    expect(code).toContain('[h(_tv2) for _tv2 in _tv1]');
+    ce = new ComputeEngine();
+    ce.assign('xs', ce.box(['List', 1, 2, 3]));
+    expect(program('const h = (k) => k + 1\nh(xs)').evaluate().toString()).toBe(
+      '[2,3,4]'
     );
   });
 
-  it('a call inside arithmetic fails closed, and the message names the call', () => {
-    expect(() =>
-      pyFunction('const h = (k) => k + 1\n2 * h(n)', { n: 'integer' })
-    ).toThrow(/an operand is a call of the block-local function `h`/);
+  itPython('a list argument maps the local over the list: the Python value', () => {
+    const code = pyFunction('const h = (k) => k + 1\nh(xs)', {
+      xs: 'list<integer>',
+    });
+    expect(runPython(code, [[1, 2, 3]])).toEqual([2, 3, 4]);
+  });
+
+  it('a call inside arithmetic is a scalar operand', () => {
+    const code = pyFunction('const h = (k) => k + 1\n2 * h(n)', {
+      n: 'integer',
+    });
+    expect(code).toContain('return 2 * h(n)');
+    ce = new ComputeEngine();
+    ce.assign('n', 3);
+    expect(program('const h = (k) => k + 1\n2 * h(n)').evaluate().toString()).toBe(
+      '8'
+    );
+  });
+
+  itPython('a call inside arithmetic is a scalar operand: the Python value', () => {
+    const code = pyFunction('const h = (k) => k + 1\n2 * h(n)', {
+      n: 'integer',
+    });
+    expect(runPython(code, [3])).toBe(8);
   });
 
   it('a local assigned twice fails closed, with the reason', () => {

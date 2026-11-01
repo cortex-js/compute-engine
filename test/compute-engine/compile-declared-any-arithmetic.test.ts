@@ -344,40 +344,61 @@ describe('CE-214.2: the coordinate of a number', () => {
   }
 
   // The compiled route compiles the expression as the body of a function
-  // whose parameter `x` is declared `any`: an input declared `any` is
+  // whose parameter `x` is declared `type`: an input declared `any` is
   // refused (ROADMAP CE-712.1).
-  const run = (ce: ComputeEngine, body: unknown) => {
-    const result = compile(anyFunction(ce, body, ['x']));
-    expect(result.success).toBe(true);
-    return result.run as unknown as (x: unknown) => unknown;
-  };
+  const compiledWith = (ce: ComputeEngine, body: unknown, type: string) =>
+    compile(
+      ce.box(['Function', body, ['Typed', 'x', { str: type }]] as any)
+    );
 
+  // `g` maps over a list and binds a number, so a call of `g` with a
+  // parameter declared `any` has no settled shape, and the compilation
+  // declines (rule R3 of `docs/plans/2026-10-31-static-shape-compilation.md`).
   for (const head of ['PointX', 'PointY', 'PointZ']) {
-    test(`${head}(g(x)[1]) with a number x throws a RangeError`, () => {
+    test(`${head}(g(x)[1]) with x declared any declines`, () => {
       const ce = setup();
-      const json = [head, ['At', ['g', 'x'], 1]];
-      const e = ce.box(json as any);
-      const compiled = run(ce, json);
-      expect(() => compiled(3)).toThrow(RangeError);
-      ce.assign('x', 3);
-      expect(e.evaluate().json).toMatchObject(['Error', expect.anything(), 3, expect.anything()]);
+      const result = compiledWith(ce, [head, ['At', ['g', 'x'], 1]], 'any');
+      expect(result.success).toBe(false);
+      expect(result.unsupported).toContain('x');
     });
   }
 
-  test('a point and a list of points are unchanged', () => {
+  // With `x: real`, `g(x)[1]` is the number `x`, and `PointX` of a number
+  // has the static type `error`: the compilation declines, and the
+  // interpreter gives the `incompatible-type` error.
+  test('PointX(g(x)[1]) with x declared real declines', () => {
     const ce = setup();
     const json = ['PointX', ['At', ['g', 'x'], 1]];
-    const e = ce.box(json as any);
-    const compiled = run(ce, json);
-    expect(compiled([1, 2])).toBe(1);
+    expect(compiledWith(ce, json, 'real').success).toBe(false);
+    ce.declare('y', 'real');
+    ce.assign('y', 3);
     expect(
-      compiled([
-        [1, 2],
-        [3, 4],
-      ])
-    ).toEqual([1, 2]);
-    ce.assign('x', ce.box(['List', 1, 2]));
-    expect(e.evaluate().json).toBe(1);
+      ce.box(['PointX', ['At', ['g', 'y'], 1]] as any).evaluate().toString()
+    ).toMatch(/incompatible-type/);
+  });
+
+  test('a list and a list of points give the interpreter value', () => {
+    for (const [type, value, json] of [
+      ['list<real>', [1, 2], ['List', 1, 2]],
+      [
+        'list<tuple<real, real>>',
+        [
+          [1, 2],
+          [3, 4],
+        ],
+        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      ],
+    ] as const) {
+      const ce = setup();
+      const body = ['PointX', ['At', ['g', 'x'], 1]];
+      const result = compiledWith(ce, body, type);
+      expect(result.success).toBe(true);
+      const run = result.run as unknown as (x: unknown) => unknown;
+      ce.declare('y', type);
+      ce.assign('y', ce.box(json as any));
+      const e = ce.box(['PointX', ['At', ['g', 'y'], 1]] as any);
+      expect(run(value)).toEqual(toValue(e.evaluate()));
+    }
   });
 
   // An input declared `any` is refused (ROADMAP CE-712.1); the

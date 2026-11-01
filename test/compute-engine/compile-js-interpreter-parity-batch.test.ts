@@ -52,10 +52,8 @@ function parity(
   values: ReadonlyArray<unknown>
 ): Array<[unknown, unknown]> | 'declined' {
   let run: (vars: Record<string, unknown>) => unknown;
-  // A free input declared `any` is refused: the compiled code must know the
-  // shape of each input from its type. The run-time dispatch over a value
-  // that may be a list is still reachable for a parameter of the root
-  // function declared `any`, so such a `symbol` is compiled as one.
+  // A free input declared `any` is refused, so a `symbol` of that type is
+  // compiled as the parameter of a root function.
   const type = ce.box(symbol).type.toString();
   const root = type === 'any' || type === 'unknown';
   try {
@@ -102,8 +100,28 @@ function expectParity(rows: Array<[unknown, unknown]> | 'declined'): void {
     expectSame(compiled, interpreted);
 }
 
-/** `g := t ↦ [t, 2t]`, `h := (t: number) ↦ [t, 2t]` and `x: any`. */
-function engineWithG(): ComputeEngine {
+/** Expect `(symbol) ↦ expr` to decline because the type of `symbol` (`any`)
+ * does not settle the shape of the argument of a call: the code is
+ * `unsettled-shape` and `unsupported` names `symbol`. */
+function expectUnsettledDecline(
+  ce: ComputeEngine,
+  expr: Expression,
+  symbol: string
+): void {
+  const fn = ce.box([
+    'Function',
+    expr.json,
+    ['Typed', symbol, { str: ce.box(symbol).type.toString() }],
+  ] as never);
+  const r = compile(fn, { to: 'javascript' } as never);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+  expect(r.unsupported).toContain(symbol);
+}
+
+/** `g := t ↦ [t, 2t]`, `h := (t: number) ↦ [t, 2t]` and `x` of type
+ * `xType`. */
+function engineWithG(xType = 'any'): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('g', 'function');
   // The body of `g` is `[t, t]`, so that an element of `g(x)` is of unknown
@@ -112,9 +130,25 @@ function engineWithG(): ComputeEngine {
   ce.assign('g', ce.parse('t \\mapsto [t, t]'));
   ce.declare('h', 'function');
   ce.assign('h', ce.parse('(t: number) \\mapsto [t, 2t]'));
-  ce.declare('x', 'any');
+  ce.declare('x', xType);
   return ce;
 }
+
+/** The values of `x` for each declared type of `x` that settles a shape. */
+const DECLARED_X: ReadonlyArray<[string, unknown[]]> = [
+  ['real', [3]],
+  ['list<real>', [[1, 2]]],
+  [
+    'list<list<real>>',
+    [
+      [
+        [1, 2],
+        [3, 4],
+      ],
+      [[1, 2], [3]],
+    ],
+  ],
+];
 
 const X_VALUES = [
   3,
@@ -127,13 +161,29 @@ const X_VALUES = [
 ];
 
 describe('CE-370: Max and Min flatten every level of an element that may be a list', () => {
+  // With `x: any` the shape of the argument of `g(x)` is not settled, and the
+  // compilation declines.
   test.each([
-    ['Max', 'g'],
-    ['Min', 'g'],
-  ])('%s(%s(x)[1], 1)', (head, f) => {
+    ['Max(g(x)[1], 1)', ['Max', ['At', ['g', 'x'], 1], 1]],
+    ['Min(g(x)[1], 1)', ['Min', ['At', ['g', 'x'], 1], 1]],
+    ['Max(g(x)[1]) with one operand', ['Max', ['At', ['g', 'x'], 1]]],
+    ['Min(g(x)[1]) with one operand', ['Min', ['At', ['g', 'x'], 1]]],
+  ])('x: any declines: %s', (_name, json) => {
     const ce = engineWithG();
-    const expr = ce.box([head, ['At', [f, 'x'], 1], 1] as never);
-    expectParity(parity(ce, expr, 'x', X_VALUES));
+    expectUnsettledDecline(ce, ce.box(json as never), 'x');
+  });
+
+  // With a declared shape, the compiled value is the interpreted value.
+  describe.each(DECLARED_X)('x: %s', (xType, values) => {
+    test.each([
+      ['Max(g(x)[1], 1)', ['Max', ['At', ['g', 'x'], 1], 1]],
+      ['Min(g(x)[1], 1)', ['Min', ['At', ['g', 'x'], 1], 1]],
+      ['Max(g(x)[1]) with one operand', ['Max', ['At', ['g', 'x'], 1]]],
+      ['Min(g(x)[1]) with one operand', ['Min', ['At', ['g', 'x'], 1]]],
+    ])('%s', (_name, json) => {
+      const ce = engineWithG(xType);
+      expectParity(parity(ce, ce.box(json as never), 'x', values));
+    });
   });
 
   // `h(x)` is typed `R | list<R | list<any>>` with `R = vector<2>` (ROADMAP
@@ -147,14 +197,8 @@ describe('CE-370: Max and Min flatten every level of an element that may be a li
     expect(parity(ce, expr, 'x', X_VALUES)).toBe('declined');
   });
 
-  test.each([['Max'], ['Min']])('%s(g(x)[1]) with one operand', (head) => {
-    const ce = engineWithG();
-    const expr = ce.box([head, ['At', ['g', 'x'], 1]] as never);
-    expectParity(parity(ce, expr, 'x', X_VALUES));
-  });
-
   test('an absent element gives NaN on both routes', () => {
-    const ce = engineWithG();
+    const ce = engineWithG('list<real>');
     const expr = ce.box(['Max', ['At', ['g', 'x'], 1], 1] as never);
     const rows = parity(ce, expr, 'x', [[]]);
     expect(rows).toEqual([[NaN, NaN]]);

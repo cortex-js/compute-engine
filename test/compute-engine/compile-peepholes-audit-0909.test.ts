@@ -282,18 +282,24 @@ describe('a coordinate of a constructed point is the component', () => {
     ).toBe('(_.a ?? NaN)');
   });
 
-  test('an opaque component keeps its `_SYS.pointSlot` guard', () => {
-    // A component whose type does not prove it is a number may hold an array
-    // at run time; `_SYS.pointSlot` answers `NaN` for one.
+  test('a component declared with two shapes dispatches on its shape', () => {
+    // `q` is declared as a number or a list of numbers. The compiled code
+    // tests `Array.isArray(_.q)` once and holds one body per shape: for a
+    // list, `PointList(p, q)` zips into a list of points and `PointY` reads
+    // the second coordinate of each; for a number, it reads the component
+    // directly. Each result equals the interpreter's.
     const open = new ComputeEngine();
     open.declare('p', 'real');
     open.declare('q', 'real | list<real>');
-    const r = compile(open.box(['PointY', ['PointList', 'p', 'q']]), {
-      fallback: false,
-    });
-    expect(r.code).toBe('(_SYS.pointSlot(_.q) ?? NaN)');
+    const expr = open.box(['PointY', ['PointList', 'p', 'q']]);
+    const r = compile(expr, { fallback: false });
+    expect(r.code).toMatch(/^\(Array\.isArray\(_\.q\) \? /);
+    expect(r.code).toContain('(_.q ?? NaN)');
     expect(r.run!({ p: 1, q: 2 })).toBe(2);
-    expect(r.run!({ p: 1, q: [2, 3] })).toBeNaN();
+    expect(r.run!({ p: 1, q: [2, 3] })).toEqual([2, 3]);
+    expect(expr.subs({ p: 1, q: 2 }).evaluate().json).toBe(2);
+    expect(expr.subs({ p: 1, q: open.box(['List', 2, 3]) }).evaluate().json)
+      .toEqual(['List', 2, 3]);
   });
 
   test('a caller-supplied constructor stands the shortcut down', () => {

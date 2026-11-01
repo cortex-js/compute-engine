@@ -11,7 +11,7 @@ import type {
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import {
   boundNamesAddedBy,
-  isConstructedScalar,
+  isScalarParam,
   recordConstructedPointParams,
   provenScalarPointWidth,
 } from './javascript-value-facts.js';
@@ -21,6 +21,7 @@ import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
   isNonSquareMatrixPower,
   isSquareMatrixPower,
+  paramsAreScalar,
 } from '../boxed-expression/boxed-function.js';
 import {
   composedApplication,
@@ -56,7 +57,10 @@ import { kindTypeNames } from '../boxed-expression/value-kinds.js';
 import { multiClauseState } from '../multi-clause.js';
 import { hasEnclosureArm } from '../library/enclosure-compile.js';
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
-import { typeToIdentityKey } from '../../common/type/serialize.js';
+import {
+  typeToIdentityKey,
+  typeToString,
+} from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
 import { hasOneSidedLimits, withDefaultBigOpBounds } from '../library/utils.js';
 import {
@@ -76,7 +80,7 @@ import { ABS_ARG_REFUSAL, containsDerivativeHead } from './angular-unit.js';
 import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
-import { CompileDeclineError } from './diagnostics.js';
+import { CompileDeclineError, UNION_DISPATCH_CODE } from './diagnostics.js';
 import { bigintLaneAnalysisFor } from './compile-bigint-lane.js';
 import { emitBigintLane } from './compile-bigint-emit.js';
 import { isColorValued } from './color-space-fact.js';
@@ -92,7 +96,6 @@ import {
   isRuntimePointShaped,
   literalDoubleRoundings,
   literalHasNoDoubleValue,
-  resetCallBroadcastMemo,
   typeHasPointArm,
   unionAdmitsFlatNumericList,
 } from './compiler-type-facts.js';
@@ -107,6 +110,7 @@ import {
 import {
   assertParameterWritesInUnit,
   blockLocalFunction,
+  declaredUserSignature,
   localCallWithResultType,
   signatureParamType,
   userFunctionLiteral,
@@ -138,7 +142,7 @@ import {
   protocolCallParts,
   tryCompileProtocolDispatch,
 } from './compile-protocol-dispatch.js';
-import { newNamingContext, tempVar } from './compiler-naming.js';
+import { namingContext, newNamingContext, tempVar } from './compiler-naming.js';
 import {
   absenceAxisForType,
   absentComparisonGuard,
@@ -160,8 +164,6 @@ import {
   unsuppliedComparisonGuard,
   userFunctionSignature,
   withConditionOperands,
-  blockLocalOf,
-  _localValueFrames,
 } from './compile-absence.js';
 import {
   appliesToEachTupleCoordinate,
@@ -254,6 +256,7 @@ import {
   foldEmitted,
   isEmissionSkippable,
   isSinglePointArg,
+  assignedNamesIn,
   userFunctionIsGeneric,
   userFunctionName,
   withCseBlind,
@@ -375,7 +378,9 @@ import {
 import {
   assertExtraParamsRead,
   declaredPointAdmitsListCoordinate,
+  isNestedRealListArg,
   isRealListArg,
+  isScalarShapedArg,
   isShaderVectorListArg,
   isUnionOfPoints,
   operandTypeInContext,
@@ -431,6 +436,7 @@ import {
 } from './compile-user-specialization.js';
 import {
   cachedLiteralWithParameterTypes,
+  absentPointType,
   lastCallMemoEligible,
   literalWithParameterTypes,
   parameterTypesKey,
@@ -438,10 +444,30 @@ import {
 import { identifierPattern } from './compile-folded-values.js';
 import {
   assertAdmitted,
+  declaredUnionInputsOf,
   unsettledShapeIn,
   untypedInputsOf,
 } from './compile-admission.js';
-import { assertNoStaticTypeError } from './compile-static-type-error.js';
+import { untypedPointListElement } from './compile-point-calls.js';
+import {
+  isScalarShaped,
+  mapRankOfType,
+  noShapeDiscriminatorReason,
+  shapeDiscriminator,
+  shapeOfType,
+  shapesConflict,
+  unionShapeMembers,
+} from './static-shape.js';
+import type {
+  ShapeDecision,
+  ShapeTest,
+  UnionShapeMember,
+} from './static-shape.js';
+import {
+  assertNoStaticTypeError,
+  compiledNodeWhere,
+  throwStaticTypeError,
+} from './compile-static-type-error.js';
 
 export function compile(
   expr: Expression | undefined,
@@ -451,6 +477,8 @@ export function compile(
   if (expr === undefined) return '';
   if (CompilerState._compileDepth !== 0 || CompilerState._rootAdmission)
     return compileExpression(expr, target, prec);
+  const dispatched = compileDeclaredUnionDispatch(expr, target);
+  if (dispatched !== undefined) return dispatched;
   // The outermost compilation declines, on every target, when a value has
   // no settled shape or when an input has no type (`assertAdmitted()`).
   // The decline is thrown after the code was generated with no decline, so
@@ -464,6 +492,337 @@ export function compile(
   const code = compileExpression(expr, target, prec, admission);
   assertAdmitted(expr, target, admission.unsettled);
   return code;
+}
+
+/**
+ * The targets for which `compileDeclaredUnionDispatch()` is compiling the
+ * body of one member: the inputs of that body are already narrowed, so the
+ * body is not dispatched again on that target. A compilation on another
+ * target in the meantime is not affected.
+ */
+const _compilingUnionMember = new WeakSet<CompileTarget<Expression>>();
+
+/** The most bodies that the dispatch of the declared-union inputs emits. */
+const MAX_UNION_DISPATCH_BODIES = 4;
+
+/**
+ * The code of the root `expr` when an input that `expr` reads is DECLARED
+ * with a union of shapes (`U: real | list<real>`,
+ * `P: tuple<real, real> | list<tuple<real, real>>`), or `undefined` when no
+ * input is (`declaredUnionInputsOf()`).
+ *
+ * Such a declaration asks for both shapes. The root is compiled once per
+ * combination of members, boxed again in a scope that declares each such
+ * input with one member (`U: list<real>`). The type of every node of the
+ * body, and the call routes that the types select, are then those of the
+ * member. The bodies are joined by
+ * the run-time tests of the shapes of the inputs (`shapeDiscriminator()`,
+ * `CompileTarget.shapeDispatch`): `f(U)` with `f := t ↦ 2t + 1` gives
+ * `(Array.isArray(_.U) ? <f over the list> : <f of the number>)`. The hook
+ * puts the joined code in parentheses, so it is an operand at any
+ * precedence. These are
+ * the only tests of the shapes of these inputs in the code. Without them,
+ * one body read both shapes: on interval-js, `f(U)` gave the empty interval
+ * for `U = [1, 2]`, where the interpreter gives `[3, 5]`.
+ *
+ * A union that the engine infers is not a declaration, and causes no
+ * dispatch. A target without the hook (the shader targets) compiles the
+ * root as it did before, with one body.
+ *
+ * The compilation declines, with the names of the inputs in `unsupported`:
+ * - when no test tells the members of an input apart: a point of two reals
+ *   and a list of two reals are both `[a, b]`, so
+ *   `tuple<real, real> | list<real>` has no test;
+ * - when the inputs would need more than four bodies (three inputs of two
+ *   members each give eight).
+ *
+ * A member whose body is an error for every value of the member is left
+ * out (`isErrorForEveryValue()`). When the body of another member declines,
+ * the root is compiled with one body for all the members, as it was before
+ * this dispatch existed: `undefined` is returned.
+ *
+ * `emit` compiles the root of one member. By default it is `compile()`. A
+ * target that spells some roots itself (the interval target spells a
+ * `Block` root, a point root and a collection root as a collection value)
+ * passes that spelling, so that each member body is spelled as the root
+ * would be: `Block(k ≔ u ↦ 2u; k(x))` with `x: real | list<real>` gives
+ * one body that maps `k` over the list and one that calls `k`.
+ */
+export function compileDeclaredUnionDispatch(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  emit: (body: Expression) => TargetSource = (body) => compile(body, target, 0)
+): TargetSource | undefined {
+  if (_compilingUnionMember.has(target) || target.shapeDispatch === undefined)
+    return undefined;
+  const inputs = declaredUnionInputsOf(expr, target);
+  if (inputs.length === 0) return undefined;
+  const decisions = inputs.map((input) => shapeDiscriminator(input.members));
+  const untested = inputs
+    .filter((_input, k) => decisions[k] === undefined)
+    .map((input) => input.name);
+  const bodies = inputs.reduce((n, input) => n * input.members.length, 1);
+  if (untested.length > 0 || bodies > MAX_UNION_DISPATCH_BODIES) {
+    const names = untested.length > 0 ? untested : inputs.map((i) => i.name);
+    const list = names.map((name) => `\`${name}\``).join(', ');
+    const plural = names.length > 1;
+    // The reason for each input that no test reads: the members that
+    // lower to the same run-time value (`noShapeDiscriminatorReason()`).
+    const reasons = inputs
+      .filter((_input, k) => decisions[k] === undefined)
+      .map((input) => noShapeDiscriminatorReason(input.members))
+      .filter((r) => r !== undefined)
+      .join('; ');
+    throw new CompileDeclineError({
+      code: UNION_DISPATCH_CODE,
+      kind: 'correctness',
+      message:
+        untested.length > 0
+          ? `Could not compile: the input${plural ? 's' : ''} ${list} ` +
+            `${plural ? 'are' : 'is'} declared with a union of shapes ` +
+            `whose members the compiled code cannot tell apart at run ` +
+            `time (${reasons}). Declare one shape for each input.`
+          : `Could not compile: the inputs ${list} are declared with ` +
+            `unions of shapes that need ${bodies} compiled bodies, more ` +
+            `than ${MAX_UNION_DISPATCH_BODIES}. Declare one shape for some ` +
+            `of these inputs.`,
+      value: names.join(','),
+    });
+  }
+  const ce = expr.engine;
+  // The body of one combination of members: the root boxed again in a
+  // scope that declares each input with its member type. The input stays a
+  // symbol, so every route of the compiler that reads a symbol and its
+  // declared type (a reduce over a symbol, a component of a `PointList`)
+  // reads the member. The scope stays open while the body compiles,
+  // because the compiler reads the definitions of the symbols then.
+  const withMembers = <T>(
+    members: Readonly<Record<string, Type>>,
+    fn: (body: Expression) => T
+  ): T => {
+    ce.pushScope();
+    try {
+      for (const [name, t] of Object.entries(members))
+        ce.declare(name, typeToString(t));
+      return fn(boxedInCurrentScope(expr));
+    } finally {
+      ce.popScope();
+    }
+  };
+  const tree = (
+    k: number,
+    members: Readonly<Record<string, Type>>
+  ): DispatchTree<Readonly<Record<string, Type>>> | undefined => {
+    if (k === inputs.length)
+      return withMembers(members, (body) => isErrorForEveryValue(body, target))
+        ? undefined
+        : { body: members };
+    const { name } = inputs[k];
+    const walk = (
+      d: ShapeDecision
+    ): DispatchTree<Readonly<Record<string, Type>>> | undefined =>
+      'member' in d
+        ? tree(k + 1, { ...members, [name]: memberType(d.member) })
+        : joinDispatch(
+            target.var(name) ?? name,
+            d.test,
+            walk(d.ifTrue),
+            walk(d.ifFalse)
+          );
+    return walk(decisions[k]!);
+  };
+  // When every member is an error, the ordinary compilation declines.
+  const root = tree(0, {});
+  if (root === undefined) return undefined;
+  try {
+    return emitDispatch(root, target, (members) =>
+      withMembers(members, (body) => {
+        // The earlier state is restored, not cleared, when the body ends.
+        const wasMember = _compilingUnionMember.has(target);
+        _compilingUnionMember.add(target);
+        try {
+          // The body is a new tree, so the CSE analysis of the root does
+          // not hold its nodes: the body shares its repeated nodes under a
+          // CSE analysis of its own. Without it, a value built from shared
+          // subtrees (30 levels of `Beta(t, t)`) was emitted once per path.
+          return withNestedCseHarvest(body, target, [], () => emit(body));
+        } finally {
+          if (!wasMember) _compilingUnionMember.delete(target);
+        }
+      })
+    );
+  } catch (e) {
+    // A body that declines for its own reason (`Sum(U)` with `U: number`
+    // has no indexing set on javascript) sends the root to the ordinary
+    // compilation, with one body for all the members, as before this
+    // dispatch existed. A cancellation of the caller is thrown again. The
+    // test is on the name, not `instanceof`: an error of another bundle of
+    // the engine is not an instance of this bundle's class.
+    if (e instanceof Error && e.name === 'CancellationError') throw e;
+    return undefined;
+  }
+}
+
+/**
+ * `expr` boxed again in the current scope of its engine, so that every
+ * symbol reads its definition in that scope.
+ *
+ * The MathJSON of `expr` has one copy of a subexpression for each path to
+ * it: 30 levels of `Beta(t, t)`, each level with the one node of the level
+ * below twice, have 31 distinct nodes and 2^30 paths. When the paths are
+ * many, the expression is boxed again node by node, once for each distinct
+ * node, and the new nodes share their operands as the old ones do.
+ */
+function boxedInCurrentScope(expr: Expression): Expression {
+  const ce = expr.engine;
+  const paths = new Map<Expression, number>();
+  const pathCount = (e: Expression): number => {
+    const known = paths.get(e);
+    if (known !== undefined) return known;
+    let n = 1;
+    if (isFunction(e)) for (const op of e.ops) n += pathCount(op);
+    paths.set(e, n);
+    return n;
+  };
+  if (pathCount(expr) <= 10_000) return ce.box(expr.json);
+  const memo = new Map<Expression, Expression>();
+  const rebox = (e: Expression): Expression => {
+    const known = memo.get(e);
+    if (known !== undefined) return known;
+    const r = isFunction(e)
+      ? ce.function(e.operator, e.ops.map(rebox))
+      : isSymbol(e)
+        ? ce.symbol(e.symbol)
+        : e;
+    memo.set(e, r);
+    return r;
+  };
+  return rebox(expr);
+}
+
+/**
+ * The bodies of a declared union of shapes and the run-time tests that
+ * select one (`compileDeclaredUnionDispatch()`,
+ * `emitDeclaredUnionParameterDispatch()`): a body, or a test of the shape
+ * of `value` (the code of an input or of a parameter).
+ */
+type DispatchTree<T> =
+  | { readonly body: T }
+  | {
+      readonly value: string;
+      readonly test: ShapeTest;
+      readonly ifTrue: DispatchTree<T>;
+      readonly ifFalse: DispatchTree<T>;
+    };
+
+/**
+ * The test of `value` between two subtrees. A subtree that is `undefined`
+ * has no body (each of its members is an error), and the other subtree is
+ * kept with no test.
+ */
+function joinDispatch<T>(
+  value: string,
+  test: ShapeTest,
+  ifTrue: DispatchTree<T> | undefined,
+  ifFalse: DispatchTree<T> | undefined
+): DispatchTree<T> | undefined {
+  if (ifTrue === undefined) return ifFalse;
+  if (ifFalse === undefined) return ifTrue;
+  return { value, test, ifTrue, ifFalse };
+}
+
+/**
+ * The code of `tree`: each body compiled by `body`, joined by the tests.
+ * When the two bodies of a test have the same code, the code does not
+ * depend on the shape there, and the test is left out:
+ * `Restrict(U, y > 2)` with `U: number | list<number>` restricts either
+ * shape with one call.
+ *
+ * Each body allocates its own temporaries (`_tv<n>`), so two bodies with
+ * the same code differ in these names. The two codes are compared after
+ * the temporaries that each subtree allocated are renamed in the order of
+ * their first use, and when they are equal the first body is emitted. A
+ * temporary that a subtree reads but did not allocate (one of the code
+ * around the dispatch) keeps its name, so two bodies that read different
+ * outer temporaries do not compare equal. The temporaries a subtree
+ * allocated are the numbers that the naming counter of the compilation
+ * passed while the subtree compiled.
+ */
+function emitDispatch<T>(
+  tree: DispatchTree<T>,
+  target: CompileTarget<Expression>,
+  body: (b: T) => string
+): string {
+  if ('body' in tree) return body(tree.body);
+  const naming = namingContext(target);
+  const start = naming.counter;
+  const ifTrue = emitDispatch(tree.ifTrue, target, body);
+  const middle = naming.counter;
+  const ifFalse = emitDispatch(tree.ifFalse, target, body);
+  const end = naming.counter;
+  if (ifTrue === ifFalse) return ifTrue;
+  if (
+    withOrderedTemporaries(ifTrue, start, middle) ===
+    withOrderedTemporaries(ifFalse, middle, end)
+  )
+    return ifTrue;
+  return target.shapeDispatch!(tree.value, tree.test, ifTrue, ifFalse);
+}
+
+/**
+ * `code` with each temporary name `_tv<n>` with `after < n <= last`
+ * replaced by `_tv#<k>`, where `k` counts these temporaries in the order of
+ * their first use. Two codes that differ only in the numbers of the
+ * temporaries in their ranges give the same text. A temporary outside the
+ * range keeps its name.
+ */
+function withOrderedTemporaries(
+  code: string,
+  after: number,
+  last: number
+): string {
+  const names = new Map<string, string>();
+  return code.replace(/\b_tv\d+\b/g, (name) => {
+    const n = Number(name.slice(3));
+    if (n <= after || n > last) return name;
+    let renamed = names.get(name);
+    if (renamed === undefined) {
+      renamed = `_tv#${names.size}`;
+      names.set(name, renamed);
+    }
+    return renamed;
+  });
+}
+
+/** The type of the values of one member of a union of shapes. */
+function memberType(m: UnionShapeMember): Type {
+  return m.types.length === 1
+    ? m.types[0]
+    : { kind: 'union', types: [...m.types] };
+}
+
+/**
+ * True when the interpreter gives an error for every value of the inputs of
+ * `body`, a body compiled for one member of a declared union of shapes: it
+ * is not valid (`First(Typed(p, "number"))` is an `incompatible-type`
+ * error), or a sub-expression that the code evaluates has the static type
+ * `error`.
+ *
+ * The static type of the expression that holds the union does not show
+ * this error, so the value of the compiled code for a value of that member
+ * is not specified (the compiled code need not check for an error that the
+ * static type does not show). The dispatch leaves the member out, and its
+ * values reach the body of another member, with no test for it.
+ */
+function isErrorForEveryValue(
+  body: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!body.isValid) return true;
+  return (
+    compiledNodeWhere(body, target, (node) => node.type.type === 'error') !==
+    undefined
+  );
 }
 
 function compileExpression(
@@ -806,6 +1165,7 @@ function compileExpression(
   // boxed expression can outlive the compile that cached its answer.
   if (CompilerState._compileDepth === 0) {
     resetCompilationMemos();
+    CompilerState._variantResultTypeMemo = new WeakMap();
     // The report of a compilation that declines is the neutral one (see
     // the reset of `_lastReport` below). It is written here too, because
     // the `AbsArg` refusal below throws before that reset.
@@ -915,10 +1275,6 @@ function compileExpression(
     // Written only after `resolveCompileMode`, like the latches above: its
     // throw escapes the `try`/`finally` below, which is what restores this.
     CompilerState._unrolledIndexValues = [];
-    // A host can redefine a user function between two compilations with the
-    // same target, and the answers of `mayHoldCallBroadcastResult` read
-    // those definitions.
-    resetCallBroadcastMemo();
     // `mode: 'bigint'` is the strict discipline plus the bigint integer
     // lane: `_mode` is latched as `'strict'`, so every reader of the
     // discipline (`strictLanes`, `complexDiscipline`, the promotion gates)
@@ -1062,7 +1418,10 @@ function compileExpression(
     // point calls reads `foldValueImpure`), and those passes would
     // otherwise read the answers of an earlier compilation, made with
     // other engine values: `r` recorded as pure, then `r := Random()`.
-    if (CompilerState._compileDepth === 0) resetCompilationMemos();
+    if (CompilerState._compileDepth === 0) {
+      resetCompilationMemos();
+      CompilerState._variantResultTypeMemo = new WeakMap();
+    }
     // Leaving the OUTERMOST compilation: freeze its report for the target
     // to attach (`withReferences` → `modeReport`), before the latches are
     // restored.
@@ -5073,6 +5432,12 @@ export function ensureSpecializedUserCallEmitted(
       bindsListsWhole: boolean;
       /** The specialization key, for a range specialization only. */
       rangeKey?: string;
+      /**
+       * The position of an argument that is one point that may be absent
+       * (`absentPointType()`), or -1. The call gives the absent value to
+       * the definition for a scalar (`absentPointFork()`).
+       */
+      absentPointAt: number;
     }
   | undefined {
   const registry = target.userFunctions;
@@ -5117,6 +5482,7 @@ export function ensureSpecializedUserCallEmitted(
   let listArgument = false;
   let complexArgument = false;
   let wholeListArgument = false;
+  let absentPointAt = -1;
   // How the interpreter binds a LIST argument at an untyped parameter
   // depends on the definition as a whole (`paramsAreScalar`): when every
   // parameter is scalar or untyped the call is BROADCAST over the list,
@@ -5194,7 +5560,7 @@ export function ensureSpecializedUserCallEmitted(
       }
     } else if (
       target.language === 'javascript'
-        ? isConstructedScalar(a, target)
+        ? isScalarShapedArg(a, target)
         : isSubtype(operandTypeInContext(a, target), 'number') ||
           isSubtype(a.type.type, 'boolean') ||
           // A complex parameter of the enclosing shader definition (`w` in
@@ -5222,9 +5588,34 @@ export function ensureSpecializedUserCallEmitted(
         complexArgument = true;
       } else t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
     } else if (
+      target.language === 'javascript' &&
+      declaredIsOpen &&
+      !openIndexReadTuple &&
+      absentPointType(a.type.type) !== undefined
+    ) {
+      // One point named through an alias, a union with `missing` or a
+      // nominal type whose definition is one point (`absentPointType()`):
+      // `npt`, a nominal type declared `missing | tuple<real, real>`, or
+      // `tuple<real, real> | missing`. The interpreter binds the point
+      // whole at a parameter with no declared type, as it binds a value
+      // of `tuple<real, real>`, so the call takes the copy for one point.
+      // The generic definition reads the parameter as a scalar: with
+      // `f2 := t ↦ 2t`, `f2(e)` gave `NaN` for each coordinate. A point
+      // that may be absent is given to the definition for a scalar when
+      // it is absent (`absentPointFork()`), only when it is the one point
+      // argument and every other argument is a scalar.
+      const found = absentPointType(a.type.type)!;
+      if (found.absent) {
+        if (absentPointAt >= 0) return undefined;
+        absentPointAt = i;
+      }
+      pointArgument = true;
+      t = found.point;
+    } else if (
       (target.language === 'javascript' || interval) &&
       bindsListsWhole &&
-      isRealListArg(a) &&
+      (isRealListArg(a) ||
+        (target.language === 'javascript' && isNestedRealListArg(a))) &&
       paramElementTypeIsOpen(engine, h, i)
     ) {
       wholeListArgument = true;
@@ -5261,6 +5652,13 @@ export function ensureSpecializedUserCallEmitted(
       // `collArg` throw), so the call falls back to the interpreter.
       // Witness: Tycho item 323, three helpers declared as bare `function`
       // or as `(list) -> unknown`.
+      //
+      // On JavaScript, a list of lists of real numbers (`list<list<real>>`)
+      // takes this branch too. The generic definition compiles the body
+      // against the open parameter type, and a callback over the
+      // parameter's elements (`k(L) := Map(f, L)`) then has no settled
+      // element shape and declines. The copy typed `list<list<real>>`
+      // gives the callback a list element, and it maps over each row.
       const own = a.type.type;
       const element = collectionElementType(own);
       t =
@@ -5385,6 +5783,11 @@ export function ensureSpecializedUserCallEmitted(
     });
     narrower = true;
   }
+  if (
+    absentPointAt >= 0 &&
+    args.some((a, i) => i !== absentPointAt && !isScalarShaped(a.type.type))
+  )
+    return undefined;
   if (listArgument && !pointArgument) return undefined;
   // On interval-js, only a call with a list bound whole takes a copy (see
   // the comment on `interval` above).
@@ -5419,6 +5822,24 @@ export function ensureSpecializedUserCallEmitted(
     cache.set(key, specialized);
   }
   if (!isFunction(specialized, 'Function')) return undefined;
+  // The copy types each parameter with the static type of its argument, so
+  // a node of its body can have the static type `error` where the
+  // definition with the declared types has none. The check of the root
+  // (`assertNoStaticTypeError()`) walks the declared definition only, and
+  // does not see this node. With `k: (tuple<number, number> |
+  // tuple<list<number>, list<number>>) -> number`, `k := P ↦ |P − (4, 0)|`
+  // and `x, y: list<real>`, the copy for `k((x, y))` types `P` as
+  // `tuple<list<real>, list<real>>`, and `P − (4, 0)` has the static type
+  // `error`: the interpreter gives an `incompatible-type` error for every
+  // value of these arguments, because point arithmetic needs numeric
+  // coordinates. The call declines, as the root does for a sub-expression
+  // of static type `error`, and the copy is not emitted.
+  const typeError = compiledNodeWhere(
+    specialized,
+    target,
+    (node) => node.type.type === 'error'
+  );
+  if (typeError !== undefined) throwStaticTypeError(typeError);
   const active = (registry.specializing ??= new Set());
   active.add(h);
   let name: string | undefined;
@@ -5441,7 +5862,174 @@ export function ensureSpecializedUserCallEmitted(
     listArgument,
     bindsListsWhole,
     rangeKey: rangeTypes === undefined ? undefined : key,
+    absentPointAt,
   };
+}
+
+/**
+ * The static type of `a` for a consumer that reads its shape or its rank.
+ * It is the type of `a` when that type settles a map rank
+ * (`mapRankOfType()`). Otherwise, when `a` is a call of a user function or
+ * of a block-local function, it is the result type of the variant that the
+ * call reads (`variantResultType()`), when that one settles a rank. Else it
+ * is the type of `a`, which leaves the shape unsettled.
+ *
+ * A function that is assigned with no declaration, or declared
+ * `-> unknown`, has a call type `unknown` or `any`, which carries no
+ * information (rule R2 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`). With
+ * `g := t ↦ [t, 2t]` and `p: tuple<real, real>`, the call `g(p)` has the
+ * type `any`, and the variant `t: tuple<real, real>` has the result type
+ * `list<tuple<real, real>^2>`, so `At(g(p), 1)` reads a list.
+ */
+export function staticTypeOf(
+  a: Expression,
+  target: CompileTarget<Expression>
+): Type {
+  const t = a.type.type;
+  if (mapRankOfType(t) !== undefined) return t;
+  // A parameter of the scalar variant of a function holds one scalar,
+  // whatever its own type (`unknown` with no annotation): every call
+  // reaches that variant with scalar values (`isScalarParam()`).
+  if (isSymbol(a) && isScalarParam(a.symbol, target.boundVars)) return 'number';
+  const variant = variantResultType(a, target);
+  return variant !== undefined && mapRankOfType(variant) !== undefined
+    ? variant
+    : t;
+}
+
+/**
+ * The result type of the variant that the call `a` of a user function or
+ * of a block-local function reads: the static type of the body of the
+ * function, with each parameter typed by the static type of its argument
+ * (`staticTypeOf()`). `undefined` when `a` is not such a call, or when the
+ * type of the body is `unknown` or `any`.
+ *
+ * When every parameter is scalar (`paramsAreScalar()`), an argument of
+ * list rank `r` (`mapRankOfType()`) types its parameter with the element
+ * type at depth `r`, and the result is a list of depth the greatest rank,
+ * as the static map of the call (`_SYS.mapFn`) gives. When a parameter
+ * binds whole, each parameter takes the type of its argument.
+ *
+ * A parameter that the body assigns is typed with the widest type of the
+ * shape of its argument (`number` for a scalar): the body can assign it
+ * any value of that shape. For another shape the result is `undefined`.
+ *
+ * A call in the body is typed by the engine, which reads the declared
+ * result of the called function. A recursive function is not analyzed to
+ * a fixed point: with `r := n ↦ If(n ≤ 0, 0, r(n − 1) + 1)` declared
+ * `-> unknown`, the inner call `r(n − 1)` keeps the type `unknown`, and if
+ * the type of the body is then not settled, a consumer that needs the
+ * shape declines (rule R3).
+ */
+export function variantResultType(
+  a: Expression,
+  target: CompileTarget<Expression>
+): Type | undefined {
+  if (!isFunction(a) || typeof a.operator !== 'string') return undefined;
+  let memo = CompilerState._variantResultTypeMemo.get(target);
+  if (memo === undefined) {
+    memo = new WeakMap();
+    CompilerState._variantResultTypeMemo.set(target, memo);
+  }
+  const known = memo.get(a);
+  if (known !== undefined) return known ?? undefined;
+  const local = blockLocalFunction(a.operator, target);
+  const literal =
+    local === undefined
+      ? target.boundVars?.has(a.operator)
+        ? undefined
+        : userFunctionLiteral(a.engine, a.operator)
+      : (local ?? undefined);
+  let result: Type | undefined;
+  if (literal !== undefined && literal.ops.length === a.ops.length + 1) {
+    // A list of points at a parameter of a user function with no declared
+    // type: the call maps the variant for one point over the list levels
+    // only and binds each point whole (`untypedPointListElement()`), when
+    // every other argument is a scalar. The same test selects that form of
+    // the emitted call.
+    const h = a.operator;
+    const at =
+      local !== undefined
+        ? -1
+        : a.ops.findIndex(
+            (arg, i) =>
+              untypedPointListElement(
+                a.engine,
+                h,
+                arg,
+                userFunctionParamType(a.engine, h, i)
+              ) !== undefined
+          );
+    const wholePoints =
+      at >= 0 &&
+      a.ops.every((arg, i) => i === at || isScalarShaped(arg.type.type))
+        ? a.ops.map((_arg, i) => i === at)
+        : undefined;
+    result = literalVariantResultType(
+      literal,
+      a.ops.map((arg) => staticTypeOf(arg, target)),
+      local !== undefined
+        ? paramsAreScalar(literal.type.type)
+        : userFunctionParamsAreScalar(a.engine, a.operator),
+      wholePoints
+    );
+  }
+  memo.set(a, result ?? null);
+  return result;
+}
+
+/**
+ * The result type of the variant of the function literal `literal` for
+ * arguments of the types `argTypes` (see `variantResultType()`).
+ * `scalarParams` is true when the interpreter maps a call of the function
+ * over a list argument (`paramsAreScalar()`). `undefined` when an argument
+ * type does not settle a rank, or when the type of the body is `unknown`
+ * or `any`.
+ *
+ * `wholePoints[i]` is true when the call maps over the list levels of
+ * argument `i` and binds each point whole (`mapRankOfType()` with `tuples`
+ * set to `'whole'`). The parameter then has the type of one point, and the
+ * result has one list level per list level of the argument. With
+ * `f := t ↦ 7` and `rows: list<list<tuple<real, real>>>`, the result type
+ * of `f(rows)` is `list<list<integer>>`, not `list<list<list<integer>>>`.
+ */
+export function literalVariantResultType(
+  literal: Expression & FunctionInterface,
+  argTypes: ReadonlyArray<Type>,
+  scalarParams: boolean,
+  wholePoints?: ReadonlyArray<boolean>
+): Type | undefined {
+  if (literal.ops.length !== argTypes.length + 1) return undefined;
+  const ranks = argTypes.map((t, i) =>
+    !scalarParams
+      ? 0
+      : wholePoints?.[i]
+        ? mapRankOfType(t, 0, 'whole')
+        : mapRankOfType(t)
+  );
+  if (ranks.some((r) => r === undefined)) return undefined;
+  const written = assignedNamesIn(literal.ops[0]);
+  const types: Type[] = [];
+  for (let i = 0; i < argTypes.length; i++) {
+    let t: Type | undefined = argTypes[i];
+    for (let k = 0; k < ranks[i]! && t !== undefined; k++)
+      t = collectionElementType(resolveTypeForCompilation(t));
+    if (t === undefined) return undefined;
+    const name = functionLiteralParameterName(literal.ops[i + 1]);
+    if (name !== undefined && written.has(name)) {
+      if (shapeOfType(t)?.kind !== 'scalar') return undefined;
+      t = 'number';
+    }
+    types.push(t);
+  }
+  const variant = literalWithParameterTypes(literal.engine, literal, types);
+  if (variant === undefined) return undefined;
+  let result = variant.ops[0].type.type;
+  if (result === 'unknown' || result === 'any') return undefined;
+  const depth = Math.max(0, ...(ranks as number[]));
+  for (let k = 0; k < depth; k++) result = { kind: 'list', elements: result };
+  return result;
 }
 
 /**
@@ -5563,7 +6151,7 @@ export function ensureUserFunctionEmitted(
   //
   // Two conditions gate it. The bound reading must be GROUND — an unbounded
   // `where T` names no type to compile against — and the target must be
-  // JAVASCRIPT: the coercion and the `_SYS.bcastFn` broadcast the emitted
+  // JAVASCRIPT: the coercion and the `_SYS.mapFn` map the emitted
   // call boundary relies on are both JavaScript conventions, and a target
   // with its own definition lowering (the shader targets) synthesizes a
   // static signature this reading was never validated against. Every other
@@ -5605,7 +6193,242 @@ export function ensureUserFunctionEmitted(
   // consults are recorded by the body compile below.
   target.symbolDeps?.add(h);
 
+  const dispatcher = emitDeclaredUnionParameterDispatch(
+    engine,
+    h,
+    emitted,
+    target,
+    registry
+  );
+  if (dispatcher !== undefined) return dispatcher;
+
   return core.emitFunctionLiteralDefinition(h, emitted, target, registry);
+}
+
+/**
+ * The key of the definition of the user function `h` compiled for one
+ * member of each parameter that its signature declares with a union of
+ * shapes: `kinds` holds, for each such parameter in order, the label of the
+ * member (`UnionShapeMember.label`: the kind of its shape, `'scalar'`,
+ * `'tuple'` or `'list'`, followed by its depth when two members of the
+ * union have the same kind, `'list2'` and `'list3'`). With
+ * `k: (number | list<number>) -> number`, the member variants have the keys
+ * `k$scalar` and `k$list`, and the local names `_fn_k$scalar` and
+ * `_fn_k$list` (`userFunctionName()`). A call whose argument has the shape
+ * of one member can call that variant directly, with no test.
+ *
+ * The label names a member without ambiguity: the members of a union that
+ * has a run-time test (`shapeDiscriminator()`) have different depths.
+ */
+export function unionMemberVariantKey(
+  h: string,
+  kinds: ReadonlyArray<string>
+): string {
+  return [h, ...kinds].join('$');
+}
+
+/**
+ * The local name of the member variant of the user function `h` that a
+ * call with the arguments `args` reads, when the declared signature of `h`
+ * types a parameter with a union of shapes and the static shape of each
+ * argument at such a parameter is the shape of one member
+ * (`k(L)` with `k: (number | list<number>) -> number` and `L: list<real>`
+ * reads `_fn_k$list`). The call then calls the variant directly, with no
+ * run-time test of the shape. `undefined` when `h` has no such parameter,
+ * when an argument at one does not select a member, or when the dispatch
+ * was not emitted (`emitDeclaredUnionParameterDispatch()`: the function
+ * has one ordinary definition, or the variant is left out because its body
+ * is an error for every value of its member).
+ */
+export function declaredUnionMemberVariant(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string | undefined {
+  const registry = target.userFunctions;
+  if (registry === undefined || registry.lowering) return undefined;
+  if (target.shapeDispatch === undefined) return undefined;
+  const sig = declaredUserSignature(engine, h);
+  if (sig === undefined || typeof sig !== 'object' || sig.kind !== 'signature')
+    return undefined;
+  const declared = sig.args ?? [];
+  if (declared.length !== args.length) return undefined;
+  const kinds: string[] = [];
+  for (let i = 0; i < declared.length; i++) {
+    const members = unionShapeMembers(declared[i].type);
+    if (members === undefined) continue;
+    const shape = shapeOfType(args[i].type.type);
+    if (shape === undefined) return undefined;
+    const matched = members.filter(
+      (m) => !shapesConflict(m.shape, shape, false)
+    );
+    if (matched.length !== 1) return undefined;
+    kinds.push(matched[0].label);
+  }
+  if (kinds.length === 0) return undefined;
+  // When the dispatch is not emitted, `ensureUserFunctionEmitted()` emits
+  // the ordinary definition, one body for all the members, which can
+  // decline where the call compiles by another route (a copy typed by the
+  // arguments, `trySpecializedUserCall()`). The call then takes that
+  // route.
+  const definedBefore = new Set(registry.defs.keys());
+  try {
+    if (core.ensureUserFunctionEmitted(engine, h, target) === undefined)
+      return undefined;
+  } catch (e) {
+    if (e instanceof Error && e.name === 'CancellationError') throw e;
+    for (const key of [...registry.defs.keys()])
+      if (!definedBefore.has(key)) registry.defs.delete(key);
+    return undefined;
+  }
+  const variant = userFunctionName(registry, unionMemberVariantKey(h, kinds));
+  return registry.defs.has(variant) ? variant : undefined;
+}
+
+/**
+ * The definition of the user function `h` when its DECLARED signature types
+ * a parameter with a union of shapes (`k: (number | list<number>) -> number`),
+ * or `undefined` when it does not.
+ *
+ * Such a declaration asks for both shapes. The function is compiled once
+ * per combination of members (`literalWithParameterTypes()`, keyed by
+ * `unionMemberVariantKey()`), so each body reads one shape and has no test
+ * of it. The ordinary name `_fn_k` is the dispatcher: it tests the shape of
+ * each such argument (`CompileTarget.shapeDispatch`) and calls the variant,
+ * `(z) => (Array.isArray(z) ? _fn_k$list(z) : _fn_k$scalar(z))`. A recursive
+ * call in a variant calls the dispatcher. A signature inferred from the
+ * literal, a target without the hook, or a target with its own definition
+ * lowering (the shader targets) keeps one definition. So does a signature
+ * with optional or rest parameters.
+ *
+ * The ordinary definition, one body for all the members, is emitted when
+ * no test tells the members of a parameter apart
+ * (`tuple<real, real> | list<real>`), or when the parameters need more than
+ * four variants. A variant whose body
+ * is an error for every argument of its member is left out
+ * (`isErrorForEveryValue()`). When another variant does not compile, the
+ * ordinary definition is emitted, with one body for all the members.
+ */
+function emitDeclaredUnionParameterDispatch(
+  engine: ComputeEngine,
+  h: string,
+  literal: Expression & FunctionInterface,
+  target: CompileTarget<Expression>,
+  registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+): string | undefined {
+  if (target.shapeDispatch === undefined || registry.lowering) return undefined;
+  const sig = declaredUserSignature(engine, h);
+  if (sig === undefined || typeof sig !== 'object' || sig.kind !== 'signature')
+    return undefined;
+  if ((sig.optArgs?.length ?? 0) > 0 || sig.variadicArg !== undefined)
+    return undefined;
+  const declared = sig.args ?? [];
+  if (declared.length !== literal.ops.length - 1) return undefined;
+  const unions = declared.map((a) => unionShapeMembers(a.type));
+  if (unions.every((u) => u === undefined)) return undefined;
+  const name = userFunctionName(registry, h);
+  if (registry.defs.has(name) || registry.compiling.has(name)) return name;
+  const decisions = unions.map((u) =>
+    u === undefined ? undefined : shapeDiscriminator(u)
+  );
+  // No test tells the members apart, or the variants would be more than
+  // four: the ordinary definition, one body for all the members. A call
+  // with an argument of a settled shape can still select its member at the
+  // call site.
+  const bodies = unions.reduce((n, u) => n * (u?.length ?? 1), 1);
+  if (
+    unions.some((u, i) => u !== undefined && decisions[i] === undefined) ||
+    bodies > MAX_UNION_DISPATCH_BODIES
+  )
+    return undefined;
+  const params = declared.map(() => tempVar(target));
+  let unbuilt = false;
+  type Variant = {
+    key: string;
+    copy: Expression & FunctionInterface;
+    types: Type[];
+  };
+  const tree = (
+    i: number,
+    types: (Type | undefined)[],
+    kinds: string[]
+  ): DispatchTree<Variant> | undefined => {
+    if (i === declared.length) {
+      const copy = literalWithParameterTypes(engine, literal, types);
+      // A variant whose copy cannot be built (`MatrixMultiply(z, z)` with
+      // `z: number`) is left out, as a variant whose body is an error for
+      // every value of its member is. When fewer than two variants remain,
+      // the ordinary definition is emitted (below).
+      if (copy === undefined) {
+        unbuilt = true;
+        return undefined;
+      }
+      // A variant whose body is an error for every argument of its member
+      // (`Length(z)` with `z: number`) is left out: the value of the call
+      // for such an argument is not specified (`isErrorForEveryValue()`).
+      if (isErrorForEveryValue(copy.op1, target)) return undefined;
+      return {
+        body: {
+          key: unionMemberVariantKey(h, kinds),
+          copy,
+          types: types.map((t, k) => t ?? declared[k].type),
+        },
+      };
+    }
+    const decision = decisions[i];
+    if (decision === undefined)
+      return tree(i + 1, [...types, undefined], kinds);
+    const walk = (d: ShapeDecision): DispatchTree<Variant> | undefined =>
+      'member' in d
+        ? tree(
+            i + 1,
+            [...types, memberType(d.member)],
+            [...kinds, d.member.label]
+          )
+        : joinDispatch(params[i], d.test, walk(d.ifTrue), walk(d.ifFalse));
+    return walk(decision);
+  };
+  // When every variant is an error, the ordinary definition is emitted, and
+  // its compilation declines.
+  const root = tree(0, [], []);
+  if (root === undefined) return undefined;
+  if (unbuilt && 'body' in root) return undefined;
+  // A variant that does not compile sends the function to its ordinary
+  // definition, one body for all the members, as before this dispatch
+  // existed. The definitions that the variants stored are then removed.
+  const definedBefore = new Set(registry.defs.keys());
+  registry.compiling.add(name);
+  try {
+    const body = emitDispatch(root, target, (v) => {
+      const variant = core.emitFunctionLiteralDefinition(
+        h,
+        v.copy,
+        target,
+        registry,
+        { key: v.key, types: v.types }
+      );
+      if (variant === undefined)
+        throw new Error(
+          `Could not compile \`${h}\`: its variant for the parameter ` +
+            `types (${v.types.map((t) => typeToString(t)).join(', ')}) ` +
+            `could not be emitted.`
+        );
+      return `${variant}(${params.join(', ')})`;
+    });
+    registry.defs.set(
+      name,
+      `const ${name} = (${params.join(', ')}) => ${body};`
+    );
+  } catch (e) {
+    if (e instanceof Error && e.name === 'CancellationError') throw e;
+    for (const key of [...registry.defs.keys()])
+      if (!definedBefore.has(key)) registry.defs.delete(key);
+    return undefined;
+  } finally {
+    registry.compiling.delete(name);
+  }
+  return name;
 }
 
 /**
@@ -6203,6 +7026,7 @@ export function compileWithCse(
 // Install the hubs (see compiler-core-hooks.ts).
 const hubs: CoreHooks = {
   compile,
+  compileDeclaredUnionDispatch,
   unsettledShapeIn,
   assertAdmitted,
   untypedInputsOf,
@@ -6224,6 +7048,9 @@ const hubs: CoreHooks = {
   kleeneConditionParts,
   emitFunctionLiteralDefinition,
   ensureUserFunctionEmitted,
+  declaredUnionMemberVariant,
+  staticTypeOf,
+  literalVariantResultType,
   aggregateComponentCount,
   withLocalShapeFrame,
   realOperandGuard,
@@ -6234,7 +7061,5 @@ const hubs: CoreHooks = {
   ensureSpecializedUserCallEmitted,
   pruneUnreferencedVariantBases,
   hasCodeOverride,
-  blockLocalOf,
-  topLocalValueFrame: () => _localValueFrames[_localValueFrames.length - 1],
 };
 Object.assign(core, hubs);

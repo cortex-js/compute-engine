@@ -1168,13 +1168,13 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
   );
 
   // A function with a parameter declared `expression`, passed as a VALUE to
-  // a callback consumer. The consumer checks the type of the element that
-  // reaches the parameter: an element that cannot be a collection (`L`
-  // declared `list<real>`) compiles, and an element that can be one (`rows`
-  // declared `list<list<real>>`) is declined, and the interpreter computes
-  // the value. Before, the named function compiled to a plain reference,
-  // and `Map(h, rows)` gave `[null, null]` where the interpreter gives
-  // `[[2, 4], [6, 8]]`.
+  // a callback consumer. The static type of the element that reaches the
+  // parameter selects the variant: over `L` declared `list<real>` the
+  // function itself, and over `rows` declared `list<list<real>>` the
+  // variant with the parameter typed `list<real>`, which binds each row
+  // whole as the interpreter does (CE-693). Before, the named function
+  // compiled to a plain reference, and `Map(h, rows)` gave `[null, null]`
+  // where the interpreter gives `[[2, 4], [6, 8]]`.
   describe('a function with a parameter declared `expression` as a callback', () => {
     const LITERAL = ['Function', ['Multiply', 2, 't'], ['Typed', 't', "'expression'"]];
     const setup = (route: string) => {
@@ -1224,15 +1224,17 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       ['named', 'h'],
       ['host', 'h'],
       ['named', 'literal'],
-    ])('%s %s over a list of lists is declined', (route, callee) => {
+    ])('%s %s over a list of lists is the variant typed by the row', (route, callee) => {
       const ce = setup(route);
       const e = ce.box(['Map', callee === 'h' ? 'h' : LITERAL, 'rows'] as never);
       expect(e.evaluate().toString()).toBe('[[2,4],[6,8]]');
       const result = compile(e, {
         to: 'javascript',
         constantFold: false,
+        fallback: false,
       } as never)!;
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
+      expect(result.code).not.toContain('Array.isArray');
       expect(result.run!(VARS)).toEqual([
         [2, 4],
         [6, 8],
@@ -1258,11 +1260,18 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       } as never)!;
       expect(ok.success).toBe(true);
       expect(ok.run!(VARS)).toBe(3);
-      const declined = compile(ce.box(['Reduce', 'rows', step, 0] as never), {
+      // Over `rows`, the parameter `t` takes the variant typed `list<real>`,
+      // and the accumulator, `0` then a row, is read by the operator
+      // broadcast of `a + t`.
+      const e = ce.box(['Reduce', 'rows', step, 0] as never);
+      expect(e.evaluate().toString()).toBe('[4,6]');
+      const rows = compile(e, {
         to: 'javascript',
         constantFold: false,
+        fallback: false,
       } as never)!;
-      expect(declined.success).toBe(false);
+      expect(rows.success).toBe(true);
+      expect(rows.run!(VARS)).toEqual([4, 6]);
     });
 
     // A function local to a block, used as the callback of a consumer. The
@@ -1495,18 +1504,43 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
     });
 
     test.each([['interval-js'], ['python']])(
-      'target %s compiles the literal over a list of reals, and declines it over a list of lists',
+      'target %s compiles the literal over a list of reals',
       (to) => {
         const ce = setup('named');
         const options = { to, constantFold: false } as never;
         expect(
           compile(ce.box(['Map', LITERAL, 'L'] as never), options)!.success
         ).toBe(true);
-        expect(
-          compile(ce.box(['Map', LITERAL, 'rows'] as never), options)!.success
-        ).toBe(false);
       }
     );
+
+    // Over a list of lists, interval-js compiles the variant typed by the
+    // row, and gives the interpreter's values as point intervals. Python
+    // declines (`assertPyCallbackWideParams` in `python-target.ts`): its
+    // lambda reads a parameter declared `expression` as a scalar.
+    test('the literal over a list of lists', () => {
+      const ce = setup('named');
+      const options = { constantFold: false } as never;
+      const interval = compile(ce.box(['Map', LITERAL, 'rows'] as never), {
+        ...(options as object),
+        to: 'interval-js',
+      } as never)!;
+      expect(interval.success).toBe(true);
+      const point = (v: number) => ({
+        kind: 'interval',
+        value: { lo: v, hi: v },
+      });
+      expect(interval.run!({})).toEqual([
+        [point(2), point(4)],
+        [point(6), point(8)],
+      ]);
+      expect(
+        compile(ce.box(['Map', LITERAL, 'rows'] as never), {
+          ...(options as object),
+          to: 'python',
+        } as never)!.success
+      ).toBe(false);
+    });
   });
 
   // An argument that can be a collection or a scalar (`M` declared

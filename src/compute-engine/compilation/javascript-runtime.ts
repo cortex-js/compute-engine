@@ -1875,7 +1875,7 @@ function oneDatumOk<T>(
 /**
  * Element-wise broadcast of a scalar function `f` over its arguments (the
  * runtime side of the compile target's list broadcasting — see
- * `tryCompileBroadcast` and `bcast`/`bcastFn` below). Any array argument makes
+ * `tryCompileBroadcast` and `bcast` below). Any array argument makes
  * the result an array; a length MISMATCH among the array arguments projects to
  * NaN (the real-target rendering of the interpreter's
  * `incompatible-dimensions` — no truncation to the shortest), a scalar
@@ -2011,18 +2011,74 @@ function bcastAbsent(
 }
 
 /**
- * `bcast` for a USER-FUNCTION application (`q(L)` — see
- * `tryCompileUserFunction`). An operator position and a function application
- * follow the same element-wise rule, including at an empty position, where
- * both answer the empty list. The two names are kept apart because the
- * emitter picks between them by what it is lowering, and a future divergence
- * would otherwise have to re-introduce the split at every call site.
+ * The map of a USER-FUNCTION application over its list arguments, with the
+ * depth of each map fixed by the compiler from the static types (`f(L)`
+ * with `L: list<real>` is `mapFn(f, [1], L)`). `ranks[j]` is the number of
+ * list levels of argument `j` to map over; an argument of rank 0 is reused
+ * whole at every element, and is never read as an array (a point beside a
+ * list reaches `f` as the point).
+ *
+ * At each level, the arguments of rank > 0 are mapped in step. They must
+ * have one length; a mismatch gives NaN, which projects the interpreter's
+ * `incompatible-dimensions` error, as `bcast` does. An empty level gives
+ * the empty list, as the interpreter does for a function applied to an
+ * empty list. The helper reads no shape of a value.
+ *
+ * An absent value (`undefined`) at a mapped position, the whole argument
+ * (`L` with `L: list<real> | missing`) or an element of it at a deeper
+ * level, is not a list: it reaches `f` as it is, as an argument of rank 0
+ * does. The interpreter applies the function to the absent value there
+ * (`f(Missing)` with `f: (real) -> real` reads it as `NaN`). Without this,
+ * the map read the length of `undefined` and threw.
  */
-function bcastFn(
+function mapFn(
   f: (...xs: BcastValue[]) => BcastValue,
+  ranks: ReadonlyArray<number>,
   ...args: unknown[]
 ): BcastValue {
-  return bcastWith(f, args);
+  return mapWith(f, ranks, args);
+}
+
+function mapWith(
+  f: (...xs: BcastValue[]) => BcastValue,
+  ranks: ReadonlyArray<number>,
+  args: unknown[]
+): BcastValue {
+  const k = args.length;
+  // The rank of each argument at this level: an argument that is not a
+  // list is not mapped. That is an absent argument (`undefined` or `null`,
+  // see `mapFn`), or the `NaN` of a length mismatch of an inner map: in
+  // `f(h(L, M))` with `h := (a, b) ↦ a + b`, `L = [1, 2]`, `M = [1, 2, 3]`,
+  // `h(L, M)` is `NaN`, and `f := t ↦ 2t` gives `NaN` for it. Without this
+  // test, the map read the length of `NaN` as `undefined` and gave
+  // `[undefined]`.
+  const at = ranks.map((r, j) =>
+    r > 0 && (Array.isArray(args[j]) || args[j] instanceof RotView) ? r : 0
+  );
+  let n = -1;
+  for (let j = 0; j < k; j++) {
+    if (!(at[j] > 0)) continue;
+    const a = args[j];
+    const len = a instanceof RotView ? a.base.length : (a as unknown[]).length;
+    if (n < 0) n = len;
+    else if (len !== n) return NaN;
+  }
+  if (n < 0) return f(...(args as BcastValue[]));
+  if (n === 0) return [];
+  const inner = at.map((r) => (r > 0 ? r - 1 : 0));
+  const deeper = inner.some((r) => r > 0);
+  const out: BcastValue[] = new Array(n);
+  const cell: unknown[] = new Array(k);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < k; j++) {
+      const a = args[j];
+      cell[j] = at[j] > 0 ? bcastCell(a as BcastValue[] | RotView, i) : a;
+    }
+    out[i] = deeper
+      ? mapWith(f, inner, cell.slice())
+      : f(...(cell as BcastValue[]));
+  }
+  return out;
 }
 
 /**
@@ -2221,7 +2277,7 @@ function bcastKernel(signature: string): BcastKernel | undefined {
 }
 
 /**
- * Shared implementation of `bcast`/`bcastFn`.
+ * Shared implementation of `bcast` and `mapFn`.
  *
  * An operand is a scalar, an array, or a rotation view (`RotView`, read in
  * place — see `rotv`). The array and view operands must share one length;
@@ -4568,7 +4624,7 @@ export const SYS_HELPERS = {
   bcastPlain,
   bcastAbsent,
   bcastScalarAbsent,
-  bcastFn,
+  mapFn,
   bcastColor,
   // `At` with a scalar index over elements that may be numbers or lists: the
   // absence marker is picked from the value (`atWithValueMarker`).

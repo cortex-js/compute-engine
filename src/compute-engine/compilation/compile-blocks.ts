@@ -79,7 +79,6 @@ import {
   reboundLocalNames,
 } from './compile-loops.js';
 import { CompilerState } from './compiler-state.js';
-import { _blockStatements } from './compile-user-functions.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import {
   callOnlyLocalFunctionLiterals,
@@ -507,11 +506,6 @@ export function compileBlock(
   // bound outside it on a shader target (see `spelled` below). They are
   // removed from `_freshLocalNames` in the `finally` below.
   const shadowSpellings: string[] = [];
-  // The statements of the block, for the proof of the type of a local by
-  // its assignments (`assignmentsProveType`).
-  const blockScope = node?.localScope;
-  if (blockScope !== undefined)
-    _blockStatements.push({ scope: blockScope, args });
   let localValueFrame: LocalValueFrame | undefined;
   try {
     // The locals that only an assignment in a nested block gives a value
@@ -660,9 +654,10 @@ export function compileBlock(
     // expressions are separate, bindable child regions (§5.1(c)).
     const stmts = args.filter((a) => !isSymbol(a, 'Nothing'));
     // The function literals that this list binds to a local that is only
-    // ever called (`callOnlyLocalFunctionLiterals`) are compiled without
-    // the broadcast wrapper: each call site broadcasts by itself. The
-    // marks are removed in the `finally` below.
+    // ever called (`callOnlyLocalFunctionLiterals`) receive scalars at
+    // every call, and their bodies read each parameter as a scalar: each
+    // call site maps over a list argument by itself. The marks are removed
+    // in the `finally` below.
     if (target.language === 'javascript')
       unmarkFed = markScalarFedLiterals(
         callOnlyLocalFunctionLiterals(args, locals, reboundLocals)
@@ -1069,7 +1064,6 @@ export function compileBlock(
     CompilerState._localVector.pop();
     if (pushedEnforced) CompilerState._enforcedTargets.pop();
     if (checkedFrame !== undefined) CompilerState._checkedLocals.pop();
-    if (blockScope !== undefined) _blockStatements.pop();
     if (localValueFrame !== undefined) _localValueFrames.pop();
     unmarkFed?.();
     unmarkChecked?.();

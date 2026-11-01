@@ -26,6 +26,17 @@ export const UNTYPED_INPUT_CODE = 'untyped-input';
 export const UNSETTLED_SHAPE_CODE = 'unsettled-shape';
 
 /**
+ * The `code` of the decline of an expression with an input declared with a
+ * union of shapes (`tuple<real, real> | list<real>`) that the compiled code
+ * cannot read with one body per member: no run-time test tells the members
+ * apart, or the inputs declared this way would need more than four bodies.
+ * `value`
+ * holds the names of the inputs, separated by commas, and the interpreter
+ * fallback puts each name in `unsupported`.
+ */
+export const UNION_DISPATCH_CODE = 'union-dispatch';
+
+/**
  * A compile DECLINE carrying a structured `CompileDiagnostic` (see
  * `CompilationResult.diagnostic`). Thrown by the compiler where a plain
  * `Error` would lose the decline's `code`/`kind`; the target's `compile()`

@@ -61,11 +61,26 @@ describe('COMPILE an index into the tuple a block-local function returns', () =>
     expect(compiled(source, 'javascript', {})).toBe(6);
   });
 
-  it('JavaScript still declines for an argument that can be a list', () => {
-    // The compiled call maps over a list argument, and the interpreter binds
-    // it whole, so the two values differ when `x` is a list.
-    expect(() => compiled(F + 'f(x)[1]', 'javascript', { x: 3 })).toThrow(
-      /first operand is not an indexed collection/
-    );
+  it('JavaScript compiles an argument declared as a number or a list', () => {
+    // `x` is declared `real | list<real>`, so the compiled code tests the
+    // shape of `x` once and holds one body for each shape. A number goes to
+    // `f` directly; a list maps `f` over its elements, and `[1]` then reads
+    // the first element of the resulting list of points. The interpreter does
+    // the same, so the compiled value equals the interpreter's for a value of
+    // each shape.
+    const index1 = F + 'f(x)[1]';
+    const index2 = F + 'f(x)[2]';
+    const interp = (source: string, x: string) =>
+      program(new ComputeEngine(), `let x = ${x}\n${source}`)
+        .evaluate()
+        .toString();
+    expect(compiled(index1, 'javascript', { x: 3 })).toBe(4);
+    expect(interp(index1, '3')).toBe('4');
+    expect(compiled(index1, 'javascript', { x: [1, 2] })).toEqual([2, 2]);
+    expect(interp(index1, '[1, 2]')).toBe('(2, 2)');
+    expect(compiled(index2, 'javascript', { x: 3 })).toBe(2);
+    expect(interp(index2, '3')).toBe('2');
+    expect(compiled(index2, 'javascript', { x: [1, 2] })).toEqual([3, 2]);
+    expect(interp(index2, '[1, 2]')).toBe('(3, 2)');
   });
 });

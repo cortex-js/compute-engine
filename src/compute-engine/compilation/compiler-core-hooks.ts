@@ -16,7 +16,6 @@ import type {
   ConditionNode,
   DeclineNote,
   ElementLane,
-  LocalEntry,
   FoldCostContext,
   UnsettledShape,
   UserFunctionRegistry,
@@ -37,6 +36,16 @@ export interface CoreHooks {
     target: CompileTarget<Expression>,
     staticTypeErrors?: boolean
   ): UnsettledShape | undefined;
+  /** The code of a root that reads an input declared with a union of
+   * shapes: one body per member, each compiled by `emit` (by default
+   * `compile()`), joined by the run-time tests of the shapes of the
+   * inputs. `undefined` when no such input is read, or when a member body
+   * declines. */
+  compileDeclaredUnionDispatch(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    emit?: (body: Expression) => TargetSource
+  ): TargetSource | undefined;
   /** The admission check of the root of a compilation that runs after the
    * code was generated: it throws a decline for the value with no settled
    * shape that `unsettledShapeIn()` gave, or for an input with no type. */
@@ -143,6 +152,27 @@ export interface CoreHooks {
     target: CompileTarget<Expression>,
     decline?: DeclineNote
   ): string | undefined;
+  /** The local name of the member variant of a function whose declared
+   * signature has a union of shapes, for arguments whose static shapes
+   * select one member at each such parameter. */
+  declaredUnionMemberVariant(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): string | undefined;
+  /** The static type of `a` for a consumer that reads its shape or its
+   * rank: the type of `a`, or for a call of a user function whose type does
+   * not settle a rank, the result type of its variant (`staticTypeOf()` in
+   * `compiler-core.ts`). */
+  staticTypeOf(a: Expression, target: CompileTarget<Expression>): Type;
+  /** The result type of the variant of the function literal `literal`
+   * for arguments of the types `argTypes`. */
+  literalVariantResultType(
+    literal: Expression & FunctionInterface,
+    argTypes: ReadonlyArray<Type>,
+    scalarParams: boolean
+  ): Type | undefined;
   aggregateComponentCount(
     expr: Expression | null,
     memo?: Map<Expression, number | undefined>
@@ -191,6 +221,7 @@ export interface CoreHooks {
         bindsListsWhole: boolean;
         /** The specialization key, for a range specialization only. */
         rangeKey?: string;
+        absentPointAt: number;
       }
     | undefined;
   pruneUnreferencedVariantBases(
@@ -198,10 +229,6 @@ export interface CoreHooks {
     rootCode: string
   ): void;
   hasCodeOverride(expr: Expression): boolean;
-  blockLocalOf(e: Expression): LocalEntry | undefined;
-  /** The innermost frame of block locals (`_localValueFrames`), or
-   * `undefined` when no block is being compiled. */
-  topLocalValueFrame(): object | undefined;
 }
 
 /**
@@ -213,6 +240,7 @@ export interface CoreHooks {
  */
 export const core: CoreHooks = {
   compile: notInstalled('compile'),
+  compileDeclaredUnionDispatch: notInstalled('compileDeclaredUnionDispatch'),
   isComplexValued: notInstalled('isComplexValued'),
   foldCostEstimate: notInstalled('foldCostEstimate'),
   linearAlgebraOperandLane: notInstalled('linearAlgebraOperandLane'),
@@ -231,6 +259,9 @@ export const core: CoreHooks = {
   kleeneConditionParts: notInstalled('kleeneConditionParts'),
   emitFunctionLiteralDefinition: notInstalled('emitFunctionLiteralDefinition'),
   ensureUserFunctionEmitted: notInstalled('ensureUserFunctionEmitted'),
+  declaredUnionMemberVariant: notInstalled('declaredUnionMemberVariant'),
+  staticTypeOf: notInstalled('staticTypeOf'),
+  literalVariantResultType: notInstalled('literalVariantResultType'),
   aggregateComponentCount: notInstalled('aggregateComponentCount'),
   withLocalShapeFrame: notInstalled('withLocalShapeFrame'),
   realOperandGuard: notInstalled('realOperandGuard'),
@@ -243,8 +274,6 @@ export const core: CoreHooks = {
   ),
   pruneUnreferencedVariantBases: notInstalled('pruneUnreferencedVariantBases'),
   hasCodeOverride: notInstalled('hasCodeOverride'),
-  blockLocalOf: notInstalled('blockLocalOf'),
-  topLocalValueFrame: notInstalled('topLocalValueFrame'),
 } as unknown as CoreHooks;
 
 function notInstalled(name: string): never {

@@ -312,12 +312,10 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     // `cs`'s assigned value is a compound pure value, so the JS-family
     // targets bind it once in the preamble (`const _val_cs = …`) and the
     // code reads it by name (the Tycho item 225 shared-value emission).
-    // The predicate is a scalar-parameter literal, so it reaches the filter
-    // through the broadcast-aware wrapper: the arrow bound once, then
-    // dispatched per element (`_SYS.bcastFn` when the element is a collection).
+    // The predicate is a scalar-parameter literal and the elements are
+    // scalars, so it reaches the filter as the arrow itself.
     expect(r.code).toBe(
-      '((_f) => (_val_cs).filter((_x) => _f(_x)).length)(((_tv1) => (_tv2) => ' +
-        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((n = NaN) => 1 < n)))'
+      '((_f) => (_val_cs).filter((_x) => _f(_x)).length)(((n = NaN) => 1 < n))'
     );
     expect(r.preamble).toContain('const _val_cs = [1, 2, 3];');
     expect((r.run as () => unknown)()).toBe(2);
@@ -1034,23 +1032,48 @@ describe('positive evidence only', () => {
     ]);
   });
 
-  test('the codegen of an Filter over explicitly non-omitted elements is unchanged', () => {
+  test('a Filter over elements of type `expression` declines', () => {
+    // An element of type `expression` can be a number or a list, and the
+    // interpreter applies the predicate to a number and maps it over a
+    // list. The shape is not settled, so the compilation declines with the
+    // code `unsettled-shape` (rule R3 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`).
     const ce = new ComputeEngine();
     ce.declare('us', 'list<expression>');
-    const r = compile(
-      ce.box(['Filter', 'us', ['Function', ['Greater', 'x', 1], 'x']]),
-      { fallback: false }
-    );
+    const expr = ce.box([
+      'Filter',
+      'us',
+      ['Function', ['Greater', 'x', 1], 'x'],
+    ]);
+    const r = compile(expr);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.unsupported).toContain('us');
+    expect((r.run as (s: unknown) => unknown)({ us: [1, 2, 3] })).toEqual([
+      2, 3,
+    ]);
+  });
+
+  test('the codegen of a Filter over real elements keeps the predicate', () => {
+    const ce = new ComputeEngine();
+    ce.declare('us', 'list<real>');
+    const expr = ce.box([
+      'Filter',
+      'us',
+      ['Function', ['Greater', 'x', 1], 'x'],
+    ]);
+    const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
-    // The predicate keeps its lowering; only the broadcast-aware wrapper the
-    // literal is handed out under stands between it and the filter.
+    // The predicate keeps its lowering, and the filter calls the arrow
+    // itself. The default `NaN` is the value of an absent element.
     expect(r.code).toBe(
-      '((_f) => (_.us).filter((_x) => _f(_x)))(((_tv1) => (_tv2) => ' +
-        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x) => 1 < x)))'
+      '((_f) => (_.us).filter((_x) => _f(_x)))(((x = NaN) => 1 < x))'
     );
     expect((r.run as (s: unknown) => unknown)({ us: [1, 2, 3] })).toEqual([
       2, 3,
     ]);
+    ce.assign('us', ce.box(['List', 1, 2, 3]));
+    expect(expr.evaluate().toString()).toBe('[2,3]');
   });
 
   test('the vectorization default holds: an evidence-free lambda broadcasts', () => {

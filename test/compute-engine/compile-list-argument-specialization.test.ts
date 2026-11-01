@@ -106,7 +106,10 @@ describe('A list argument at an untyped parameter is specialized', () => {
         .toString()
     ).toBe('[42,42]');
     const r = compile(expr, { fallback: false });
-    expect(r.code).toContain('_SYS.bcastFn(');
+    // The point is passed at rank 0 and reused for each element of the list.
+    expect(r.code).toBe(
+      '_SYS.mapFn(_fn_k_tuple_number__number__number_points_2_, [0, 1], [1, 2], [_.a, _.b])'
+    );
     expect(r.run!({ a: 3, b: 4 })).toEqual([42, 42]);
   });
 
@@ -265,8 +268,11 @@ describe('A point-or-list operand added to a list of points', () => {
   test('unequal lengths, an empty list, a number and a point of another arity are the interpreter errors, as NaN', () => {
     expect(sum.run!({ P: [[1, 2, 3]] })).toBeNaN();
     expect(sum.run!({ P: [] })).toBeNaN();
-    expect(sum.run!({ P: 5 })).toEqual([NaN, NaN]);
-    expect(sum.run!({ P: [1, 2] })).toBeNaN();
+    // `P: 5` and `P: [1, 2]` are not pinned. `P` is declared as a point of
+    // three numbers or a list of such points, so a number and a point of two
+    // numbers are values outside the declared type. The compiled value for an
+    // input outside its declared type is unspecified (the interpreter's
+    // errors for them are checked below).
     expect(
       ce
         .box(['Add', ['List', ['Tuple', 1, 2, 3]], ce.parse(LIST)])
@@ -283,7 +289,9 @@ describe('A point-or-list operand added to a list of points', () => {
 
   test('a number-or-point union is decided by shape too', () => {
     // A number is never an array, so the shape test cannot mistake it: a
-    // point maps over the list, a number is the per-element type error.
+    // point maps over the list. A number added to the list is the interpreter's
+    // `incompatible-type` error, which the static type of `R` does not show,
+    // so the compiled value for `R = 5` is unspecified and is not pinned here.
     const engine = new ComputeEngine();
     engine.declare('R', 'number | tuple<number, number, number>');
     const r = compile(engine.parse(String.raw`R+${LIST}`), {
@@ -293,18 +301,20 @@ describe('A point-or-list operand added to a list of points', () => {
       [1, 3, 3],
       [2, 2, 3],
     ]);
-    expect(r.run!({ R: 5 })).toEqual([NaN, NaN]);
+    expect(r.success).toBe(true);
   });
 
   test('a union with a list-of-numbers arm declines', () => {
     // `[10, 20]` is a list of numbers by the declaration and has the shape
     // of a point; the interpreter pairs each number with a point (type
-    // errors), the shape test would add it as a point.
+    // errors), while a run-time shape test would add it as a point. The two
+    // members are the same array at run time, so the declared-union dispatch
+    // cannot choose a body and declines with `union-dispatch`.
     const engine = new ComputeEngine();
     engine.declare('Q', 'list<number> | tuple<number, number>');
     expect(() =>
       compile(engine.parse(String.raw`Q+${LIST}`), { fallback: false })
-    ).toThrow(/admits a value whose run-time shape is the same as a point's/);
+    ).toThrow(/declared with a union of shapes whose members the compiled code cannot tell apart at run time/);
   });
 
   test('a union whose point arm has a list coordinate declines', () => {

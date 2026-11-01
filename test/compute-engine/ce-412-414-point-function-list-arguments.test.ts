@@ -30,13 +30,10 @@ type Json = unknown;
 
 /** The compiled value of `latex` for the values `vars` of its inputs.
  *
- * A free input of type `unknown` or `any` is refused: the compiled code must
- * know the shape of each input from its type. When an input of `vars` has
- * such a type, `latex` is compiled as the body of the function whose
- * parameters are the names of `vars`, with their types, and the function is
- * called with the values. The run-time test of an argument whose shape the
- * type does not settle is still reachable for such a parameter of the root
- * function. */
+ * A free input of type `unknown` or `any` is refused. When an input of
+ * `vars` has such a type, `latex` is compiled as the body of the function
+ * whose parameters are the names of `vars`, with their types, and the
+ * function is called with the values. */
 function compiled(
   ce: ComputeEngine,
   latex: string,
@@ -77,6 +74,28 @@ function compileRoot(
     run?: (v: Record<string, unknown>) => unknown;
   };
   return { ...r, success: r.success, code: r.code, run: r.run, root };
+}
+
+/** Expect the compilation of `latex`, as the body of the function of the
+ * parameters `names` with the types that `ce` declares for them, to decline
+ * because one of those types does not settle the shape of an argument: the
+ * code is `unsettled-shape` and `unsupported` names each of `names`. */
+function expectUnsettledDecline(
+  ce: ComputeEngine,
+  latex: string,
+  names: string[]
+): void {
+  const r = compile(
+    ce.box([
+      'Function',
+      ce.parse(latex).json,
+      ...names.map((n) => ['Typed', n, { str: ce.box(n).type.toString() }]),
+    ] as never),
+    {} as never
+  );
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+  for (const n of names) expect(r.unsupported).toContain(n);
 }
 
 function declines(ce: ComputeEngine, latex: string): void {
@@ -329,8 +348,27 @@ describe('CE-414.1: A LIST AT A SCALAR SLOT BESIDE A POINT PARAMETER MAPS', () =
     expect(ce.parse('g([[0,1],[2,3]])').evaluate().toString()).toBe(
       '[[1,2],[3,4]]'
     );
-    // The compiled map goes one rank down only.
-    declines(ce, 'h((1,2),[[0,1],[2,3]])');
+    // The static type `list<list<number>>` gives the rank 2, and the
+    // compiled call is the static map over both levels.
+    expect(compiled(ce, 'h((1,2),[[0,1],[2,3]])')).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    ce.declare('M', 'list<list<real>>');
+    const r = compileRoot(ce, 'h((1,2),M)', ['M']);
+    expect(r.code).toContain('_SYS.mapFn(');
+    expect(r.code).not.toContain('Array.isArray');
+    expect(
+      compiled(ce, 'h((1,2),M)', {
+        M: [
+          [0, 1],
+          [2, 3],
+        ],
+      })
+    ).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
   });
 
   test('a list of points and a list of scalars are paired', () => {
@@ -344,11 +382,21 @@ describe('CE-414.1: A LIST AT A SCALAR SLOT BESIDE A POINT PARAMETER MAPS', () =
     ).toBe('[1,4]');
     // With literal arguments the compiler folds the call to its value.
     expect(compiled(ce, 'h([(1,2),(3,4)],[0,1])')).toEqual([1, 4]);
-    // With two list inputs the compiled call is declined: it maps over one
-    // list only.
+    // With two list inputs, the compiled call is the static map that pairs
+    // point `i` with element `i` of `L`, as the interpreter does.
     ce.declare('Q', `list<${POINT}>`);
     ce.declare('L', 'list<real>');
-    declines(ce, 'h(Q,L)');
+    const r = compileRoot(ce, 'h(Q,L)', ['Q', 'L']);
+    expect(r.code).toContain('_SYS.mapFn(');
+    expect(
+      compiled(ce, 'h(Q,L)', {
+        Q: [
+          [1, 2],
+          [3, 4],
+        ],
+        L: [0, 1],
+      })
+    ).toEqual([1, 4]);
   });
 
   test('an argument that may be a list is typed R | list<R>', () => {
@@ -358,7 +406,16 @@ describe('CE-414.1: A LIST AT A SCALAR SLOT BESIDE A POINT PARAMETER MAPS', () =
       'list<number> | number'
     );
     expect(ce.parse('g(U)').type.toString()).toBe('list<real> | real');
-    declines(ce, 'h((1,2),U)');
+    // `U` is declared with two shapes, so the compiled call tests the shape
+    // of `U` once and holds one body for each: a number is one call, a list
+    // is one call per element. Each value equals the interpreter's.
+    const call = ce.parse('h((1,2),U)');
+    expect(compiled(ce, 'h((1,2),U)', { U: 5 })).toBe(6);
+    expect(call.subs({ U: ce.number(5) }).evaluate().toString()).toBe('6');
+    expect(compiled(ce, 'h((1,2),U)', { U: [0, 1, 2] })).toEqual([1, 2, 3]);
+    expect(
+      call.subs({ U: ce.box(['List', 0, 1, 2]) }).evaluate().toString()
+    ).toBe('[1,2,3]');
   });
 
   test('beside a broadcastable<tuple<…>> parameter, a list of points and a scalar list are paired, and the compiled call declines', () => {
@@ -503,27 +560,63 @@ describe('CE-414.2: AN unknown SLOT BESIDE A POINT PARAMETER', () => {
     expect(compiled(ce, 'm((1,2),[0,1,2])')).toBe(3);
   });
 
-  test('an argument of unknown type is tested at run time when compiled', () => {
+  test('an argument of type any declines when compiled', () => {
     // The interpreter maps the call when the value is a list and binds the
-    // value whole otherwise; the compiled call does the same with
-    // `_SYS.bcastFn`, as for a one-parameter function. A free input of type
-    // `unknown` is refused, so `x` is a parameter of the root function.
+    // value whole otherwise. The compiler settles that choice from the
+    // type of the argument, so an argument whose type does not settle a
+    // shape declines. A free input of that type is refused, so `x` is a
+    // parameter of the root function.
     const ce = engine();
+    ce.declare('x', 'any');
+    expectUnsettledDecline(ce, 'f((1,2), x)', ['x']);
+  });
+
+  test('an argument of type unknown at the root function is a scalar', () => {
+    // `x` is the only parameter of the root function `x ↦ f((1, 2), x)`,
+    // and it has no type annotation (`unknown`). Such a root function is
+    // compiled for a scalar argument: a parameter with no type of a root
+    // function whose parameters are all scalar holds a scalar, and a host
+    // that passes a list gives an unspecified result (design decision D3
+    // in `docs/scratch/2026-10-31-ce712-2-design.md`, and the decision of
+    // ROADMAP CE-706 for a root lambda). So the call is the direct call of
+    // the function, with no map and no run-time test of the value, and
+    // its value for a number equals the interpreter's.
+    const ce = engine();
+    ce.declare('x', 'unknown');
     const r = compileRoot(ce, 'f((1,2), x)', ['x']);
-    expect(r.root).toBe(true);
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.bcastFn(');
-    const run = r.run as unknown as (x: unknown) => unknown;
-    expect(run([0, 1, 2])).toEqual([
+    expect(r.root).toBe(true);
+    expect(r.code).toContain('_fn_f(');
+    expect(r.code).not.toContain('mapFn');
+    expect(r.code).not.toContain('.map(');
+    expect(r.code).not.toContain('Array.isArray');
+    expect(compiled(ce, 'f((1,2), x)', { x: 3 })).toEqual([4, 2]);
+    expect(routes(ce, 'f((1,2),3)', ['f', ['Tuple', 1, 2], 3])).toBe('(4, 2)');
+  });
+
+  test('an argument with a declared shape maps or binds whole when compiled', () => {
+    // With `x: list<real>` the compiled call maps over the list with a
+    // static map; with `x: real` it calls the function once.
+    const list = engine();
+    list.declare('x', 'list<real>');
+    const r = compileRoot(list, 'f((1,2), x)', ['x']);
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('.map(');
+    expect(r.code).not.toContain('bcastFn');
+    expect(compiled(list, 'f((1,2), x)', { x: [0, 1, 2] })).toEqual([
       [1, 2],
       [2, 2],
       [3, 2],
     ]);
-    expect(run(5)).toEqual([6, 2]);
-    ce.assign('x', ce.box(['List', 0, 1, 2]));
-    expect(ce.parse('f((1,2), x)').evaluate().toString()).toBe(
+    list.assign('x', list.box(['List', 0, 1, 2]));
+    expect(list.parse('f((1,2), x)').evaluate().toString()).toBe(
       '[(1, 2),(2, 2),(3, 2)]'
     );
+    const scalar = engine();
+    scalar.declare('x', 'real');
+    expect(compiled(scalar, 'f((1,2), x)', { x: 5 })).toEqual([6, 2]);
+    scalar.assign('x', 5);
+    expect(scalar.parse('f((1,2), x)').evaluate().toString()).toBe('(6, 2)');
   });
 });
 
@@ -1000,11 +1093,13 @@ describe('review round 3 (compiler)', () => {
   // `f(Ps, t)` with `t` free and typed `unknown`, at an `unknown` slot
   // beside a list of points. The interpreter pairs `t` with the points when
   // its value is a list (ROADMAP CE-414.2) and passes it whole otherwise.
-  // The compiled call tests the value at run time. Before, it declined. A
-  // free input of type `unknown` is refused, so `t` is a parameter, of type
-  // `unknown`, of the root function (`compiled()`).
-  function engine(): ComputeEngine {
+  // The compiler settles that choice from the type of `t`: with `t:
+  // unknown` the compilation declines, and with `t` declared `real`,
+  // `list<real>` or `list<list<real>>` it compiles a direct call or a
+  // static map (`compiled()`).
+  function engine(tType = 'unknown'): ComputeEngine {
     const ce = new ComputeEngine();
+    if (tType !== 'unknown') ce.declare('t', tType);
     ce.declare('Ps', `list<${POINT}>`);
     ce.declare('f', { signature: `(${POINT}, unknown) -> unknown` });
     ce.assign('f', ce.parse('(P, t) \\mapsto (P.x + t, P.y)'));
@@ -1020,8 +1115,30 @@ describe('review round 3 (compiler)', () => {
     return ce.parse('f(\\mathrm{Ps}, t)').evaluate().toString();
   }
 
-  test('a number is passed whole to each call', () => {
+  test.each(['unknown', 'any'])('an argument of type %s declines', (type) => {
+    // `Ps` and `t` are both parameters of the root function: a root
+    // function literal reads no free input, so with `Ps` free the
+    // compilation failed on `Ps` (`compile-error`) before the call was
+    // reached. The root function has a list parameter, so its parameter
+    // `t` is not known to hold a scalar, and the type of `t` settles no
+    // shape: the call declines and names `t`.
     const ce = engine();
+    const r = compile(
+      ce.box([
+        'Function',
+        ce.parse('f(\\mathrm{Ps}, t)').json,
+        ['Typed', 'Ps', { str: `list<${POINT}>` }],
+        ['Typed', 't', { str: type }],
+      ] as never),
+      {} as never
+    );
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.unsupported).toContain('t');
+  });
+
+  test('a number is passed whole to each call', () => {
+    const ce = engine('real');
     expect(compiled(ce, 'f(\\mathrm{Ps}, t)', { Ps, t: 10 })).toEqual([
       [11, 2],
       [13, 4],
@@ -1030,7 +1147,7 @@ describe('review round 3 (compiler)', () => {
   });
 
   test('a list is paired with the points', () => {
-    const ce = engine();
+    const ce = engine('list<real>');
     expect(compiled(ce, 'f(\\mathrm{Ps}, t)', { Ps, t: [10, 20] })).toEqual([
       [11, 2],
       [23, 4],
@@ -1039,7 +1156,7 @@ describe('review round 3 (compiler)', () => {
   });
 
   test('an element that is a list maps the call again', () => {
-    const ce = engine();
+    const ce = engine('list<list<real>>');
     expect(
       compiled(ce, 'f(\\mathrm{Ps}, t)', {
         Ps,
@@ -1064,7 +1181,7 @@ describe('review round 3 (compiler)', () => {
   });
 
   test('a length mismatch is NaN, the compiled incompatible-dimensions', () => {
-    const ce = engine();
+    const ce = engine('list<real>');
     expect(
       compiled(ce, 'f(\\mathrm{Ps}, t)', { Ps, t: [10, 20, 30] })
     ).toBeNaN();

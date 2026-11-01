@@ -232,11 +232,17 @@ describe('PointList zip — the opaque-slot guard (D1)', () => {
 describe('PointList zip — retained declines and their diagnostics (D1, D2)', () => {
   const js = new JavaScriptTarget();
 
-  it('a union component declines with the revised per-component message', () => {
+  it('a component declared as a number or a list compiles with one body for each shape', () => {
+    // `U` is declared `number | list<number>`. The compiled code tests the
+    // shape of `U` once: a list zips against the other components, a number
+    // is a scalar slot. Each result equals the interpreter's.
     const ce = zipEngine();
-    expect(() => js.compile(ce.box(['PointList', 'k', 'U']))).toThrow(
-      /Could not compile `PointList`: component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\./
-    );
+    const r = js.compile(ce.box(['PointList', 'k', 'U']));
+    expect(r.success).toBe(true);
+    for (const U of [2, [1, 2, 3]])
+      expect((r.run as (s: any) => unknown)({ k: -6, U })).toEqual(
+        interpret(['PointList', 'k', 'U'], { k: -6, U })
+      );
   });
 
   it('a tuple component is refused when the call is boxed (a point, not a per-point value)', () => {
@@ -266,10 +272,13 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
   it('a union whose members ALL match indexed_collection declines', () => {
     // `list<number> | tuple<number, number>` matches `indexed_collection` as a
     // whole, so the whole-type test read it as a source — but its per-point
-    // role is statically ambiguous (list ⇒ zip, tuple ⇒ point).
+    // role is statically ambiguous (list ⇒ zip, tuple ⇒ point). A list of two
+    // numbers and a point of two numbers are the same array at run time, so
+    // the declared-union dispatch cannot choose a body and declines with the
+    // `union-dispatch` code, naming the input `lt`.
     const ce = zipEngine();
     expect(() => js.compile(ce.box(['PointList', 'k', 'lt']))).toThrow(
-      /component 2 \(type `list<number> \| tuple<number, number>`\) is neither a scalar slot nor a list source/
+      /the input `lt` is declared with a union of shapes whose members the compiled code cannot tell apart at run time/
     );
   });
 
@@ -287,13 +296,16 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
     );
   });
 
-  it('the union decline falls back to the interpreter with { fallback: true }', () => {
+  it('a union that cannot be dispatched falls back to the interpreter with { fallback: true }', () => {
+    // `lt` is a list of two numbers or a point of two numbers: the same array
+    // at run time, so the compilation declines and the fallback runs the
+    // interpreter.
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'k', 'U']), { fallback: true });
+    const r = js.compile(ce.box(['PointList', 'k', 'lt']), { fallback: true });
     expect(r.success).toBe(false);
     // The fallback answers what the interpreter answers for the same binding.
-    expect((r.run as (s: any) => unknown)({ k: -6, U: 2 })).toEqual(
-      interpret(['PointList', 'k', 'U'], { k: -6, U: 2 })
+    expect((r.run as (s: any) => unknown)({ k: -6, lt: [1, 2] })).toEqual(
+      interpret(['PointList', 'k', 'lt'], { k: -6, lt: [1, 2] })
     );
   });
 
@@ -753,15 +765,22 @@ describe('PointList — GPU construction and the other targets are unchanged', (
     );
     expect(r.success).toBe(true);
     expect(r.code).toBe("(_.n === undefined ? { kind: 'empty' } : _IA.pointList('sl', _k1, _.n))");
-    // A component whose role the type does not state (`number | list`) is
-    // not guessed: the node declines, as before.
-    const wide = new IntervalJavaScriptTarget().compile(
-      ce.box(['PointList', 'U', 'n'])
-    );
-    expect(wide.success).toBe(false);
-    expect(wide.error).toMatch(
-      /Could not compile `PointList`: the operator's compile handler has no lowering/
-    );
+  });
+
+  it('interval-js: a component declared `number | list<number>` gives the interpreter value for each member', () => {
+    // The input `U` is declared with a union of shapes, so the code tests
+    // its shape once at the input and compiles one body per member: a
+    // scalar component (`'sl'`) and a list component (`'ll'`).
+    const ce = zipEngine();
+    const expr = ['PointList', 'U', 'n'];
+    const r = new IntervalJavaScriptTarget().compile(ce.box(expr as any));
+    expect(r.success).toBe(true);
+    const point = (v: any): unknown =>
+      Array.isArray(v) ? v.map(point) : v.value.lo === v.value.hi ? v.value.lo : v;
+    for (const U of [3, [5, 6]])
+      expect(point(r.run!({ U, n: [1, 2] } as any))).toEqual(
+        interpret(expr, { U, n: [1, 2] })
+      );
   });
 });
 
@@ -775,13 +794,28 @@ describe('PointList — the source predicate agrees across the two compile route
   // A `refused` row is a component that the boxing refuses (a point or a set
   // is not a coordinate), so the compiler sees an invalid expression on both
   // routes.
-  const table: { type: string; source: boolean; refused?: boolean }[] = [
+  // On the JavaScript route, a union row has a `jsUnion` outcome: `dispatch`
+  // when the declared-union dispatch compiles one body for each member shape
+  // (checked against the interpreter for a value of each shape), `decline`
+  // when two members are the same array at run time and the compilation
+  // declines with the `union-dispatch` code. The shader route has no union
+  // dispatch, so the `source` column still decides there.
+  const table: {
+    type: string;
+    source: boolean;
+    refused?: boolean;
+    jsUnion?: 'dispatch' | 'decline';
+  }[] = [
     { type: 'tuple', source: false, refused: true }, // a point, bare spelling
     { type: 'tuple<number, number>', source: false, refused: true }, // node
     { type: 'list<number>', source: true },
     { type: 'set<number>', source: false, refused: true }, // not INDEXED
-    { type: 'number | list<number>', source: false }, // union: ambiguous
-    { type: 'list<number> | tuple<number, number>', source: false }, // ditto
+    { type: 'number | list<number>', source: false, jsUnion: 'dispatch' }, // union: ambiguous
+    {
+      type: 'list<number> | tuple<number, number>',
+      source: false,
+      jsUnion: 'decline',
+    }, // ditto
     { type: 'vector<3>', source: true },
   ];
 
@@ -798,12 +832,29 @@ describe('PointList — the source predicate agrees across the two compile route
 
   it.each(table)(
     'JS: a `$type` component is source=$source',
-    ({ type, source, refused }) => {
+    ({ type, source, refused, jsUnion }) => {
       const ce = tableEngine(type);
       const build = () =>
         new JavaScriptTarget().compile(ce.box(['PointList', 'v3', 'c']));
       if (refused) {
         expect(build).toThrow(/Could not compile invalid expression/);
+        return;
+      }
+      if (jsUnion === 'dispatch') {
+        const r = build();
+        expect(r.success).toBe(true);
+        for (const c of [5, [4, 5, 6]]) {
+          const bindings = { v3: [1, 2, 3], c };
+          expect((r.run as (s: any) => unknown)(bindings)).toEqual(
+            interpret(['PointList', 'v3', 'c'], bindings)
+          );
+        }
+        return;
+      }
+      if (jsUnion === 'decline') {
+        expect(build).toThrow(
+          /the input `c` is declared with a union of shapes whose members the compiled code cannot tell apart at run time/
+        );
         return;
       }
       // A source zips; a non-source has no per-point value and throws D1.

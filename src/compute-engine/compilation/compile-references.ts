@@ -30,7 +30,11 @@ import {
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import { STATIC_TYPE_ERROR_CODE } from './compile-static-type-error.js';
-import { UNSETTLED_SHAPE_CODE, UNTYPED_INPUT_CODE } from './diagnostics.js';
+import {
+  UNION_DISPATCH_CODE,
+  UNSETTLED_SHAPE_CODE,
+  UNTYPED_INPUT_CODE,
+} from './diagnostics.js';
 import { protocolOfSymbol } from '../engine-protocols.js';
 import { planProtocolDispatch } from './protocol-dispatch.js';
 import {
@@ -1720,7 +1724,9 @@ export function buildInterpreterFallback<T extends string>(
   // `compile-admission.ts`), applied to the reference analysis above. Like
   // the analysis, it never breaks the fallback. The decline of a value with
   // no settled shape (`assertAdmitted()`, code `'unsettled-shape'`) also
-  // names the node, as `toString()` writes it.
+  // names the node, as `toString()` writes it. The decline of an input
+  // declared with a union of shapes that the code cannot dispatch on (code
+  // `'union-dispatch'`) names the inputs.
   const named: string[] = [];
   if (
     diagnostic.value !== undefined &&
@@ -1732,7 +1738,11 @@ export function buildInterpreterFallback<T extends string>(
   // the compilation reads it: with `functions: { Which: 'myWhich' }`,
   // `Which(True, 0, True, M)` declines for `M`. The names of the decline
   // itself are always listed.
-  if (diagnostic.value !== undefined && diagnostic.code === UNTYPED_INPUT_CODE)
+  if (
+    diagnostic.value !== undefined &&
+    (diagnostic.code === UNTYPED_INPUT_CODE ||
+      diagnostic.code === UNION_DISPATCH_CODE)
+  )
     named.push(...diagnostic.value.split(','));
   if (compileTarget) {
     try {

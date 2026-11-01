@@ -90,8 +90,8 @@ describe.each([
   });
 
   test('a local whose assigned values are integers is not tested', () => {
-    // Only the compiled code writes the local, and each value that it
-    // assigns is an integer (`assignmentsProveType`).
+    // The static type of the local is `integer`, which is the contract
+    // (rule R1 of `docs/plans/2026-10-31-static-shape-compilation.md`).
     for (const [source, value] of [
       [head + 'let n = 3\ng(n)', 4],
       [head + 'let n = 3\nn = 5\ng(n)', 6],
@@ -313,21 +313,20 @@ describe('A FUNCTION DECLARED IN THE ENGINE', () => {
       run: (vars?: Record<string, Value>) => Value;
     };
 
-  test('an undeclared input is tested at run time', () => {
+  test('an undeclared input has the type inferred from the call', () => {
+    // The engine infers the type `integer` for the free `x` from the call
+    // `g(x)`. The static type is the contract (rules R1 and R5 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`): the host
+    // supplies an integer, and the call is not tested. A value outside
+    // the type (`1.5`) gives an unspecified result.
     const ce = engine('(integer) -> integer');
-    expect(build(ce, ['g', 'x'], 'javascript').run({ x: 1.5 })).toBeNaN();
     expect(build(ce, ['g', 'x'], 'javascript').run({ x: 2 })).toBe(3);
-    expect(build(ce, ['g', 'x'], 'interval-js').run({ x: 1.5 })).toEqual({
-      kind: 'empty',
+    expect(build(ce, ['g', 'x'], 'interval-js').run({ x: 2 })).toEqual({
+      kind: 'interval',
+      value: { lo: 3, hi: 3 },
     });
-  });
-
-  test('a target with no test refuses the call', () => {
-    const ce = engine('(integer) -> integer');
-    for (const to of ['glsl', 'wgsl', 'python'])
-      expect(() => build(ce, ['g', 'x'], to)).toThrow(
-        /Could not compile a call of `g`.*`integer`.*no run-time test/
-      );
+    for (const to of ['glsl', 'wgsl'])
+      expect(build(ce, ['g', 'x'], to).success).toBe(true);
   });
 
   test('a declared argument that proves the type still compiles on a shader', () => {

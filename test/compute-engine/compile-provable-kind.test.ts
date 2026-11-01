@@ -304,30 +304,58 @@ describe('a literal in a reduction body keeps the compiled row scalar', () => {
     return ce;
   }
 
-  // A parameter `x` declared `any` can hold a list, so the compiled call
-  // `f(x)` maps `f` over a list value of `x` (`_SYS.bcastFn`), as the
-  // interpreter does. The comparison then tests the result of the call at
-  // run time: a number takes the straight comparison, and a list takes the
-  // broadcast, so `f([0.3, 2]) < 5` is `[false, false]`, the interpreter's
-  // value. (An INPUT `x` with no type is refused, ROADMAP CE-712.1, so the
-  // test is read on a parameter of the root function.)
-  test('the comparison is straight for a number, and broadcast for a list', () => {
+  // The comparison `f(x) < y` is compiled for three declarations of `x`.
+  // Declared `any`, `x` can hold a number or a list, the shape of the
+  // argument of `f(x)` is not settled, and the compilation declines. (An
+  // INPUT `x` with no type is refused, ROADMAP CE-712.1, so the decline is
+  // read on a parameter of the root function.) Declared `real`, the call is
+  // direct and the comparison is straight. Declared `list<real>`, the call
+  // maps `f` over the list with a static map and the comparison broadcasts,
+  // so `f([0.3, 2]) < 5` is `[false, false]`, the interpreter's value.
+  const comparison = (ce: ComputeEngine, xType: string) =>
+    ce.box([
+      'Function',
+      ce.parse('f(x) < y').json,
+      ['Typed', 'x', { str: xType }],
+      ['Typed', 'y', "'real'"],
+    ] as never);
+
+  test('the comparison declines for an argument of type any', () => {
     const ce = engine();
-    const r = compile(
-      ce.box([
-        'Function',
-        ce.parse('f(x) < y').json,
-        ['Typed', 'x', "'any'"],
-        ['Typed', 'y', "'real'"],
-      ] as never),
-      { to: 'javascript' } as never
-    );
+    const r = compile(comparison(ce, 'any'), { to: 'javascript' } as never);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.unsupported).toContain('x');
+  });
+
+  test('the comparison is straight for a number', () => {
+    const ce = engine();
+    const r = compile(comparison(ce, 'real'), { to: 'javascript' } as never);
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.bcastFn(_fn_f, x)');
-    expect(r.code).toMatch(/: \(\(_tv\d+\) < \(y\)\)/);
+    expect(r.code).toContain('_fn_f(x)');
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.code).not.toContain('Array.isArray');
     const run = r.run as unknown as (x: unknown, y: unknown) => unknown;
     expect(run(0.3, 5)).toBe(false);
+    expect(ce.box(['Less', ['f', 0.3], 5]).evaluate().symbol).toBe('False');
+  });
+
+  test('the comparison is broadcast for a list', () => {
+    const ce = engine();
+    const r = compile(comparison(ce, 'list<real>'), {
+      to: 'javascript',
+    } as never);
+    expect(r.success).toBe(true);
+    expect(r.code).not.toContain('bcastFn');
+    const run = r.run as unknown as (x: unknown, y: unknown) => unknown;
     expect(run([0.3, 2], 5)).toEqual([false, false]);
+    expect(
+      ce
+        .box(['Less', ['f', ['List', 0.3, 2]], 5])
+        .evaluate()
+        .toString()
+        .replace(/"/g, '')
+    ).toBe('[False,False]');
   });
 
   test('the compiled row agrees with the interpreter', () => {

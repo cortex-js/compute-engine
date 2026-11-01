@@ -5,6 +5,7 @@
 
 import type { ReferencesMemo } from '../boxed-expression/abstract-boxed-expression.js';
 import type { Expression } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
 import type { KindLowering } from './kind-lowering.js';
 import type { CompileMode, CompileTarget } from './types.js';
 import type {
@@ -103,14 +104,6 @@ export class CompilerState {
    * other check is emitted.
    */
   static declaredTopMode: 'scalar' | 'list' | undefined = undefined;
-  /**
-   * The nodes that `mayHoldCallBroadcastResult` reads as scalar while the
-   * scalar branch of a run-time check of a call result is compiled
-   * (`callResultGuard` in `compile-expr-handlers.ts`): the calls whose values
-   * the check tested, and the operator nodes between them and the site. Empty
-   * outside such a branch.
-   */
-  static scalarCallResults: Set<unknown> = new Set();
   /**
    * The kind lowering of the compilation in progress (`kind-lowering.ts`):
    * set at the compile boundary when the expression holds a kind value and
@@ -349,6 +342,18 @@ export class CompilerState {
   static _unsafeOperandsMemo = new WeakMap<
     object,
     Map<Expression, ReadonlyArray<UnsafeIntegerOperand>>
+  >();
+  /**
+   * Per-compilation memo of `variantResultType()`, keyed per target, then
+   * per call (`null`: no result type). The answer reads the current
+   * function literal of the callee, the block-local functions and the bound
+   * variables of the target, so it is emptied when the outermost
+   * compilation starts and when it ends: a later compilation of the same
+   * call after `g := t ↦ t + 1` reads the new literal of `g`.
+   */
+  static _variantResultTypeMemo = new WeakMap<
+    object,
+    WeakMap<Expression, Type | null>
   >();
   /** See `emitFoldedValue`: folding is off while a folded value is emitted. */
   static _emittingFoldedValue = false;

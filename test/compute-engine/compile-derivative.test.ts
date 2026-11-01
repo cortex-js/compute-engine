@@ -47,22 +47,19 @@ describe('COMPILE DERIVATIVE — closed-form lowering', () => {
   test("Derivative-spelled \\sin'(x) compiles on javascript", () => {
     const result = compile(ce.parse("\\sin'(x)"));
     expect(result.success).toBe(true);
-    // The derivative's closed form is a function literal, which a
-    // scalar-parameter literal's broadcast-aware wrapper binds before the
-    // application.
-    expect(result.code).toBe(
-      '(((_tv1) => (_tv2) => Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : ' +
-        '_tv1(_tv2))(((x) => Math.cos(x))))(_.x)'
-    );
+    // The derivative's closed form is a function literal with a scalar
+    // parameter. It is applied to the scalar `x`, so it is applied directly,
+    // with no wrapper and no run-time shape test.
+    expect(result.code).toBe('(((x) => Math.cos(x)))(_.x)');
+    expect(result.run!({ x: 0.5 })).toBeCloseTo(Math.cos(0.5), 12);
   });
 
   test('a bare Derivative(Sin) compiles to a callable on javascript', () => {
     const result = compile(ce.box(['Derivative', 'Sin']));
     expect(result.success).toBe(true);
-    expect(result.code).toBe(
-      '((_tv1) => (_tv2) => Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : ' +
-        '_tv1(_tv2))(((x) => Math.cos(x)))'
-    );
+    // A function value with no consumer is the scalar variant: the literal
+    // itself.
+    expect(result.code).toBe('((x) => Math.cos(x))');
   });
 
   test('ND at a numeric point compiles to its value', () => {

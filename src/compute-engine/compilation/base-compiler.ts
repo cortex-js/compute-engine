@@ -143,8 +143,6 @@ import {
   withTruthOnly,
 } from './compile-absence.js';
 import {
-  _blockStatements,
-  _provingLocals,
   absentCollectionOperandGuard,
   appliedLiteralCheckedCall,
   argumentProvesParameterType,
@@ -152,7 +150,6 @@ import {
   assertCallbackLaneMatch,
   assertCapturedCallableBindings,
   assertUserFunctionFreeBindings,
-  assignmentsProveType,
   beginRootPreprocessing,
   bodyWithArguments,
   checkUserCallArity,
@@ -168,7 +165,6 @@ import {
   mayBeAbsentCollectionNode,
   parameterCheckNeeded,
   registryHelperName,
-  staticTypeIsEvidence,
   tryCompileLocalFunctionCall,
   tryCompileUserFunction,
   uncheckedParameterError,
@@ -364,7 +360,6 @@ import {
   appliedDerivativeDeclineReason,
   appliedDerivativeLiteral,
   appliedDerivativeTooLarge,
-  broadcastingWrapper,
   cachedLiteralWithParameterTypes,
   callOnlyLocalFunctionLiterals,
   checkedParameterType,
@@ -396,6 +391,8 @@ import {
   withCheckedCallback,
   withDerivativeArgument,
   withScalarFedLiteral,
+  appliedLiteralNamedPointCall,
+  appliedLiteralPointListCall,
 } from './compile-callbacks.js';
 import {
   assertNoAmbiguousComplexElementRead,
@@ -722,7 +719,6 @@ import {
   groundSignature,
   isElementCall,
   localCallWithResultType,
-  provablyScalarArg,
   signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
@@ -776,7 +772,6 @@ import {
   absentArgumentChecks,
   assertExtraParamsRead,
   bakedTupleValueType,
-  certainlyScalarArg,
   checkDeclaredBroadcast,
   checkDeclaredBroadcastAgainst,
   complexCoordinateArgumentAt,
@@ -795,6 +790,7 @@ import {
   isRealListArg,
   isShaderVectorListArg,
   isUnionOfPoints,
+  isScalarShapedArg,
   isUntypedFreeInput,
   listArgumentAtOpenWholeParameter,
   multiClauseLaneMismatchAt,
@@ -1947,10 +1943,6 @@ export class BaseCompiler {
   static readonly intervalCheckingCallee = intervalCheckingCallee;
   static readonly localCheckingCallee = localCheckingCallee;
   static readonly argumentProvesParameterType = argumentProvesParameterType;
-  static readonly staticTypeIsEvidence = staticTypeIsEvidence;
-  static readonly _blockStatements = _blockStatements;
-  static readonly _provingLocals = _provingLocals;
-  static readonly assignmentsProveType = assignmentsProveType;
   static readonly checkingShimName = checkingShimName;
   static readonly failedCheckMarker = failedCheckMarker;
   static readonly ABSENCE_DISCHARGING_HEADS = ABSENCE_DISCHARGING_HEADS;
@@ -2001,8 +1993,6 @@ export class BaseCompiler {
   static readonly isExpressionDeclaredInput = isExpressionDeclaredInput;
   static readonly expressionInputDecline = expressionInputDecline;
   static readonly isElementWiseOperand = isElementWiseOperand;
-  static readonly provablyScalarArg = provablyScalarArg;
-  static readonly certainlyScalarArg = certainlyScalarArg;
   static readonly checkDeclaredBroadcast = checkDeclaredBroadcast;
   static readonly bakedTupleValueType = bakedTupleValueType;
   static readonly checkDeclaredBroadcastAgainst = checkDeclaredBroadcastAgainst;
@@ -2032,6 +2022,7 @@ export class BaseCompiler {
     readsAsScalarThroughFreeInputs;
   static readonly operandTypeInContext = operandTypeInContext;
   static readonly isUnionOfPoints = isUnionOfPoints;
+  static readonly isScalarShapedArg = isScalarShapedArg;
   static readonly pointOrPointListUnion = pointOrPointListUnion;
   static readonly declaredPointAdmitsListCoordinate =
     declaredPointAdmitsListCoordinate;
@@ -2086,10 +2077,11 @@ export class BaseCompiler {
   static readonly multiClauseValueRef = multiClauseValueRef;
   static readonly scalarFedLiterals = scalarFedLiterals;
   static readonly withScalarFedLiteral = withScalarFedLiteral;
+  static readonly appliedLiteralNamedPointCall = appliedLiteralNamedPointCall;
+  static readonly appliedLiteralPointListCall = appliedLiteralPointListCall;
   static readonly withCheckedCallback = withCheckedCallback;
   static readonly markScalarFedLiterals = markScalarFedLiterals;
   static readonly callOnlyLocalFunctionLiterals = callOnlyLocalFunctionLiterals;
-  static readonly broadcastingWrapper = broadcastingWrapper;
   static readonly complexCoercingWrapper = complexCoercingWrapper;
   static readonly lastCallMemoEligible = lastCallMemoEligible;
   static get emitFunctionLiteralDefinition() {
@@ -2168,6 +2160,10 @@ export class BaseCompiler {
   static readonly hasObservableEffect = hasObservableEffect;
   static readonly operandAt = operandAt;
   static readonly compileCseRoot = compileCseRoot;
+  /** See `CoreHooks.compileDeclaredUnionDispatch`. */
+  static readonly compileDeclaredUnionDispatch: CoreHooks['compileDeclaredUnionDispatch'] =
+    (expr, target, emit) =>
+      core.compileDeclaredUnionDispatch(expr, target, emit);
   static readonly hoistLoopInvariants = hoistLoopInvariants;
   static readonly cseAdmission = cseAdmission;
   static readonly isEmissionSkippable = isEmissionSkippable;

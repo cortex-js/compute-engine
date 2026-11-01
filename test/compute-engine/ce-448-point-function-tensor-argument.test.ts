@@ -325,54 +325,69 @@ describe('CE-448: a compiled call that maps one level only fails closed', () => 
     ).toBe('[[6,8],[10,12]]');
   });
 
-  test('a list of points at an unknown-paired call still compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', `list<${POINT}>`);
-    ce.declare('u', 'unknown');
-    ce.assign(
-      'h',
-      ce.box([
-        'Function',
-        ['Add', ['At', 'p', 1], 's'],
-        ['Typed', 'p', `'${POINT}'`],
-        's',
-      ])
-    );
-    // A free input of type `unknown` is refused, so `L` and `u` are
-    // parameters of the root function, with their declared types.
-    const r = compile(
-      ce.box([
+  test('a list of points at an unknown-paired call declines; a typed pair compiles', () => {
+    const engine = (): ComputeEngine => {
+      const ce = new ComputeEngine();
+      ce.assign(
+        'h',
+        ce.box([
+          'Function',
+          ['Add', ['At', 'p', 1], 's'],
+          ['Typed', 'p', `'${POINT}'`],
+          's',
+        ])
+      );
+      return ce;
+    };
+    // `L` and `u` are parameters of the root function, with their declared
+    // types. With `u: unknown`, the call pairs the points of `L` with a
+    // value whose shape is known only at run time: the call declines, and
+    // names `u`.
+    const root = (uType: string) =>
+      engine().box([
         'Function',
         ['h', 'L', 'u'],
         ['Typed', 'L', { str: `list<${POINT}>` }],
-        ['Typed', 'u', { str: 'unknown' }],
-      ]),
-      { fallback: false } as any
-    ) as any;
-    expect(r.success).toBe(true);
+        ['Typed', 'u', { str: uType }],
+      ]);
+    const unknown = compile(root('unknown'), {} as any) as any;
+    expect(unknown.success).toBe(false);
+    expect(unknown.unsupported).toContain('u');
+    // With `u: real`, the call compiles and agrees with the interpreter: the
+    // number is reused for each point. With `u: list<real>`, the call is
+    // the static map that pairs point `i` with element `i` of `u`, as the
+    // interpreter does; a length mismatch gives `NaN`, the compiled value
+    // of the interpreter's `incompatible-dimensions` error.
+    const points = [
+      [1, 2],
+      [3, 4],
+    ];
+    const scalar = compile(root('real'), { fallback: false } as any) as any;
+    expect(scalar.run(points, 5)).toEqual([6, 8]);
+    const list = compile(root('list<real>'), { fallback: false } as any) as any;
+    expect(list.success).toBe(true);
+    expect(list.code).toContain('_SYS.mapFn(');
+    expect(list.code).not.toContain('Array.isArray');
+    expect(list.run(points, [10, 20])).toEqual([11, 23]);
+    expect(list.run(points, [10, 20, 30])).toBeNaN();
+    const v = engine();
+    const P = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
     expect(
-      r.run(
-        [
-          [1, 2],
-          [3, 4],
-        ],
-        [10, 20]
-      )
-    ).toEqual([11, 23]);
+      v
+        .box(['h', P, ['List', 10, 20]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[11,23]');
     expect(
-      r.run(
-        [
-          [1, 2],
-          [3, 4],
-        ],
-        5
-      )
-    ).toEqual([6, 8]);
+      v
+        .box(['h', P, 5] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[6,8]');
   });
 
   /** `g` declared with the bare type `function`, whose literal declares
-   * its parameter as a point: the signature does not give the point
-   * parameter, so the call does not reach the point mapping. */
+   * its parameter as a point. */
   function bareFunctionEngine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('g', 'function');
@@ -395,14 +410,26 @@ describe('CE-448: a compiled call that maps one level only fails closed', () => 
     [`tensor<${POINT}>`, RANK2, '[[3,7],[11,15]]'],
     [`list<${POINT}>`, RANK2[0], '[3,7]'],
   ])(
-    'a user function declared `function`, argument %s, fails closed',
+    'a user function declared `function`, argument %s, maps over the points',
     (decl, value, interpreted) => {
+      // The call maps `g` over the points at every depth, as the
+      // interpreter does.
       const ce = bareFunctionEngine();
       ce.declare('B', decl);
       const e = ce.box(['g', 'B']);
-      expect(() => compile(e, { fallback: false } as any)).toThrow(
-        /The interpreter maps the call over the points, and the compiled application binds the argument whole/
+      const r = compile(e, { fallback: false } as any) as any;
+      expect(r.success).toBe(true);
+      expect(JSON.stringify(r.run({ B: value }))).toBe(
+        interpreted.replace(/\s/g, '')
       );
+      // When the declared type gives the rank of the tensor of points
+      // (`list<list<P>>`, `matrix<P^(2x2)>`), the call is the static map
+      // over that rank, with no run-time test of the value. A type that
+      // does not give the rank (`broadcastable<P>`, `tensor<P>`) keeps the
+      // run-time walk over the levels.
+      if (decl.startsWith('list<list<') || decl.startsWith('matrix<')) {
+        expect(r.code).toBe('_SYS.mapFn(_fn_g, [2], _.B)');
+      }
 
       const v = bareFunctionEngine();
       v.declare('B', decl);

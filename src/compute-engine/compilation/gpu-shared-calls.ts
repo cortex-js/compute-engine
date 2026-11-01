@@ -290,8 +290,8 @@ class SharedCallsPass {
 
   /**
    * Is `arg` lowered to a scalar float by this shader target? A free symbol
-   * whose type is open (`unknown`) is not a scalar to
-   * `BaseCompiler.provablyScalarArg`, but the shader targets read it as a
+   * whose type is open (`unknown`) is not a scalar by its static type
+   * (`isScalarShaped()`), but the shader targets read it as a
    * `float`/`f32` input, which is also what an emitted definition would
    * receive. Substituting it for a parameter therefore reads the same value.
    */

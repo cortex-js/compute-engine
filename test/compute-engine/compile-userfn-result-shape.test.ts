@@ -198,15 +198,19 @@ describe('a body that builds a collection keeps its element-wise lowering', () =
 
   test('an argument declared as a union of shapes broadcasts', () => {
     // An input with no type is refused (ROADMAP CE-712.1), so `y` is
-    // declared as a number or a list. Each call maps over a list value of
-    // `y` through `_SYS.bcastFn`; there is no other shape test of the
-    // nested call's result.
+    // declared as a number or a list. Because `y` is declared with two
+    // shapes, the compiled code tests `Array.isArray(_.y)` once and holds
+    // one body per shape: in the list body each call is a static map over
+    // the list (`_SYS.mapFn`), in the scalar body each call is direct. There
+    // is no other shape test of the nested call's result.
     const ce = new ComputeEngine();
     ce.declare('y', 'real | list<real>');
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 's'], 's']));
     ce.assign('f', ce.box(['Function', ['Add', 'x', 1], 'x']));
     const r = build(ce, ['f', ['g', 'y']]);
-    expect(r.code).toBe('_SYS.bcastFn(_fn_f, _SYS.bcastFn(_fn_g, _.y))');
+    expect(r.code).toBe(
+      '(Array.isArray(_.y) ? _SYS.mapFn(_fn_f, [1], _SYS.mapFn(_fn_g, [1], _.y)) : _fn_f(_fn_g(_.y)))'
+    );
     expect(r.run({ y: 3 })).toBe(7);
     expect(ce.box(['f', ['g', 3]]).evaluate().toString()).toBe('7');
     expect(r.run({ y: [1, 2] })).toEqual([3, 5]);
@@ -218,13 +222,17 @@ describe('a body that builds a collection keeps its element-wise lowering', () =
     ).toBe('[3,5]');
   });
 
-  test('a `vars`-mapped function name stays dispatched', () => {
+  test('a `vars`-mapped function name is called with the code the host gives', () => {
     const ce = engineWithF();
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 's'], 's']));
     // The caller claims `g` as a variable it supplies, so the compiler may not
-    // read the engine's literal as the callee's body.
+    // read the engine's literal as the callee's body: the call uses the
+    // host's code. The static type of `g(u)` is still the engine's (`number`),
+    // and the host's function must give a value of that type, so the
+    // enclosing call of `f` is a direct call with no shape test.
     const r = build(ce, ['f', ['g', 'u']], { vars: { g: '((z) => 3 * z)' } });
-    expect(r.code).toContain('Array.isArray');
+    expect(r.code).toBe('_fn_f((((z) => 3 * z))(_.u))');
+    expect(r.run({ u: 2 })).toBe(7);
   });
 });
 
@@ -241,20 +249,34 @@ describe('a symbol a body CAPTURES carries its own evidence', () => {
     return ce;
   }
 
-  test('an INFERRED captured symbol keeps the enclosing guard', () => {
-    // `y` is free and its numeric type was inferred from the body, so the
-    // caller may still hand it a list. The body then answers a list, and the
-    // enclosing call must map over it.
+  test('a captured symbol declared with a union of shapes declines the enclosing call', () => {
+    // `y` is declared `real | list<real>` and only the body of `f` reads it.
+    // The dispatch on the shape of a declared union is made only for an
+    // input that the root expression reads itself (`declaredUnionInputsOf()`),
+    // so the body of `f` is compiled once, and the result of `f(1)` has the
+    // type `list<number> | number`. That type does not settle one shape, so
+    // the call of `g` over it declines.
     const ce = captured(false);
     const r = build(ce, ['g', ['f', 1]]);
-    // The signature of `f` admits a list result,
-    // `(t: unknown) -> broadcastable<number>` (ROADMAP CE-478), so the
-    // enclosing call takes the run-time broadcast.
-    expect(r.code).toBe('_SYS.bcastFn(_fn_g, _fn_f(1))');
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/does not settle one shape/);
+    expect(r.unsupported).toContain('f(1)');
+  });
+
+  test('a captured symbol declared as a list maps the enclosing call', () => {
+    const declaredList = (): ComputeEngine => {
+      const ce = new ComputeEngine();
+      ce.declare('y', 'list<real>');
+      ce.assign('g', ce.box(['Function', ['Multiply', 2, 's'], 's'] as any));
+      ce.assign('f', ce.box(['Function', ['g', 'y'], 't'] as any));
+      return ce;
+    };
+    const r = build(declaredList(), ['g', ['f', 1]]);
+    expect(r.code).toBe('_SYS.mapFn(_fn_g, [1], _fn_f(1))');
     expect(r.run({ y: [1, 2, 3] })).toEqual([4, 8, 12]);
     // The interpreter's own answer for the same list, on a separate engine so
     // that assigning `y` a value cannot change what the compiler above sees.
-    const interp = captured(false);
+    const interp = declaredList();
     interp.assign('y', interp.box(['List', 1, 2, 3]));
     expect(
       interp
@@ -271,16 +293,25 @@ describe('a symbol a body CAPTURES carries its own evidence', () => {
     expect(r.run({ y: 5 })).toBe(20);
   });
 
-  test('a BUILT-IN broadcastable head over an inferred symbol keeps it', () => {
-    // Only the emitted GUARD is pinned here. The `Multiply` lowering itself
-    // does not map over a captured symbol that holds a list at run time, so
-    // the value the body computes for a list is not comparable with the
-    // interpreter's.
+  test('a BUILT-IN broadcastable head over an inferred scalar symbol is a scalar', () => {
+    // The type of the captured `y` is inferred from `Multiply` (`number`),
+    // so the result of `k(1)` is a scalar and the call of `f` is direct. A
+    // host that gives a list for `y` gives a value outside its type, and the
+    // result is not specified.
     const ce = new ComputeEngine();
     ce.assign('f', ce.box(['Function', ['Add', 'x', 1], 'x'] as any));
     ce.assign('k', ce.box(['Function', ['Multiply', 2, 'y'], 't'] as any));
     const r = build(ce, ['f', ['k', 1]]);
-    expect(r.code).toContain('Array.isArray');
+    expect(r.code).toBe('_fn_f(_fn_k(1))');
+    expect(r.run({ y: 5 })).toBe(11);
+    const interp = new ComputeEngine();
+    interp.assign('f', interp.box(['Function', ['Add', 'x', 1], 'x'] as any));
+    interp.assign(
+      'k',
+      interp.box(['Function', ['Multiply', 2, 'y'], 't'] as any)
+    );
+    interp.assign('y', 5);
+    expect(interp.box(['f', ['k', 1]]).evaluate().toString()).toBe('11');
   });
 
   test('a REDUCING body over a captured list is still a scalar', () => {
@@ -306,7 +337,11 @@ describe('the runtime broadcast takes the callee itself', () => {
     ce.declare('y', 'real | list<real>');
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 's'], 's']));
     const r = build(ce, ['g', 'y']);
-    expect(r.code).toBe('_SYS.bcastFn(_fn_g, _.y)');
+    // `y` is declared with two shapes, so the code tests the shape once and
+    // holds a list body (a static map) and a scalar body (a direct call).
+    expect(r.code).toBe(
+      '(Array.isArray(_.y) ? _SYS.mapFn(_fn_g, [1], _.y) : _fn_g(_.y))'
+    );
     expect(r.run({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
     expect(r.run({ y: 4 })).toBe(8);
     expect(
@@ -323,9 +358,22 @@ describe('the runtime broadcast takes the callee itself', () => {
       'c',
       ce.box(['Function', ['Add', 'x', 1], ['Typed', 'x', "'complex'"]])
     );
+    // A scalar argument is coerced at the direct call.
     const r = build(ce, ['c', 'y']);
-    expect(r.code).toContain('=>');
-    expect(r.code).toContain('_SYS.cplx');
+    expect(r.code).toBe('_fn_c(_SYS.cplx(_.y))');
+    // A list argument maps a closure that coerces each element.
+    ce.declare('L', 'list<real>');
+    const rl = build(ce, ['c', 'L']);
+    expect(rl.code).toContain('=>');
+    expect(rl.code).toContain('_SYS.cplx');
+    expect(rl.code).toContain('_SYS.mapFn(');
+    expect(rl.run({ L: [1, 2] })).toEqual([2, 3]);
+    expect(
+      ce
+        .box(['c', ['List', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,3]');
   });
 });
 
@@ -394,9 +442,10 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
     const r = build(ce, ['q', 'u', 2]);
     expect(r.preamble).toContain('const _fn_q = (x, y) => _fn_r_e(x, y) + 1;');
     // The direct call is still safe for a list argument, because the CALL
-    // SITE broadcasts: `u` is a free symbol here, so the whole call is
-    // dispatched element-wise and the body sees one element at a time.
-    expect(r.code).toContain('_SYS.bcastFn(_fn_q, _.u, 2)');
+    // SITE maps: `u` is declared `real | list<real>`, so the list body of the
+    // dispatch maps `q` over the list and the body of `q` sees one element
+    // at a time.
+    expect(r.code).toContain('_SYS.mapFn(_fn_q, [1, 0], _.u, 2)');
     expect(r.run({ u: [1, 2, 3] })).toEqual([4, 5, 6]);
     expect(r.run({ u: 5 })).toBe(8);
     expect(
@@ -450,7 +499,7 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
       ] as any)
     );
     const r = build(ce, ['qL', ['List', 1, 2, 3]]);
-    expect(r.preamble).toContain('_SYS.bcastFn(_fn_r_e, L, 2)');
+    expect(r.preamble).toContain('_SYS.mapFn(_fn_r_e, [1, 0], L, 2)');
     expect(r.run({})).toBe(13);
     expect(
       ce
@@ -462,11 +511,15 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
 
   test('a list still broadcasts through a scalar-parameter body', () => {
     const ce = nested('signature');
+    // `u` is declared as a list: the call site maps the body over the list,
+    // so the body itself never sees an array.
+    ce.declare('u', 'list<real>');
     const r = build(ce, ['q', 'u', 2]);
-    // The CALLER's guard is what maps the body over the list, so the body
-    // itself never sees an array.
+    expect(r.code).toBe('_SYS.mapFn(_fn_q, [1, 0], _.u, 2)');
     expect(r.run({ u: [1, 2, 3] })).toEqual([4, 5, 6]);
-    expect(r.run({ u: 5 })).toBe(8);
+    const scalar = nested('signature');
+    scalar.declare('u', 'real');
+    expect(build(scalar, ['q', 'u', 2]).run({ u: 5 })).toBe(8);
     expect(
       ce
         .box(['q', ['List', 1, 2, 3], 2])
@@ -487,17 +540,17 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
   });
 });
 
-describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', () => {
-  /** The consumer of a function value hands the callee whatever element the
-   * source holds, and an element can itself be a collection — a row of a
-   * matrix. What the wrapper does with such an element is what the
-   * INTERPRETER does at that callback: a function whose parameters are typed
-   * `unknown` (every signature the engine infers) is applied element-wise, so
-   * the wrapper broadcasts; a function whose parameters are typed as definite
-   * scalars (a declared `(number) -> number`) is refused with an
-   * incompatible-type error, so the wrapper answers NaN, the compiled
-   * spelling of an error value. Without either, the whole row went into
-   * scalar arithmetic behind `success: true`. */
+describe('a user function REFERENCED AS A VALUE takes the variant for the element shape', () => {
+  /** The consumer of a function value hands the callee each element of the
+   * source, and an element can itself be a collection — a row of a matrix.
+   * The interpreter applies a function with scalar parameters element-wise
+   * to such a row. The compiled reference is chosen from the STATIC element
+   * type of the source: the function itself for a scalar element, and a
+   * static map of it (`_fn_f$m1 = (_tv1) => _SYS.mapFn(_fn_f, [1], _tv1)`)
+   * for an element that is a list. No code tests the shape of an element at
+   * run time. An element type that does not settle one shape
+   * (`expression`) declines with the code `unsettled-shape`, and the
+   * interpreter evaluates the expression. */
 
   test('an INFERRED signature leaves the parameter open, and broadcasts', () => {
     const ce = new ComputeEngine();
@@ -508,15 +561,22 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
     const def = (ce as any).lookupDefinition('f');
     expect(def.operator.signature.toString()).toBe('(x: unknown) -> number');
 
-    // The source is a caller input, so its element shape is unknown to the
-    // emission — the run-time test in the wrapper is what decides.
-    ce.declare('xs', 'list<expression>');
+    // A source whose element type is `expression` does not settle the shape
+    // of an element, so the compilation declines.
+    ce.declare('ys', 'list<expression>');
+    const open = build(ce, ['Map', 'f', 'ys']);
+    expect(open.success).toBe(false);
+    expect(open.diagnostic?.code).toBe('unsettled-shape');
+    expect(open.unsupported).toContain('ys');
+
+    // A source declared as a list of rows maps `f` over each row.
+    ce.declare('xs', 'list<list<number>>');
     const r = build(ce, ['Map', 'f', 'xs']);
-    expect(r.code).toContain('_fn_f$b');
+    expect(r.code).toContain('(_fn_f$m1)');
     expect(r.preamble).toContain(
-      'const _fn_f$b = (_tv1) => Array.isArray(_tv1) ? ' +
-        '_SYS.bcastFn(_fn_f, _tv1) : _fn_f(_tv1);'
+      'const _fn_f$m1 = ((_tv1) => _SYS.mapFn(_fn_f, [1], _tv1));'
     );
+    expect(r.code).not.toContain('Array.isArray');
     expect(
       r.run({
         xs: [
@@ -565,15 +625,13 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
       [6, 8],
     ]);
 
-    // A caller-supplied source has no static element shape, so the broadcast
-    // is spelled at run time: the value reference tests each element and takes
-    // `_SYS.bcastFn` for one that is an array.
-    ce.declare('xs', 'list<expression>');
+    // A caller-supplied source of rows maps `f` over each row with a static
+    // map; a source of scalars passes `f` itself.
+    ce.declare('xs', 'list<list<number>>');
     const r = build(ce, ['Map', 'f', 'xs']);
-    expect(r.code).toContain('_fn_f$b');
+    expect(r.code).toContain('(_fn_f$m1)');
     expect(r.preamble).toContain(
-      'const _fn_f$b = (_tv1) => Array.isArray(_tv1) ? ' +
-        '_SYS.bcastFn(_fn_f, _tv1) : _fn_f(_tv1);'
+      'const _fn_f$m1 = ((_tv1) => _SYS.mapFn(_fn_f, [1], _tv1));'
     );
     expect(
       r.run({
@@ -586,7 +644,16 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
       [2, 4],
       [6, 8],
     ]);
-    expect(r.run({ xs: [1, 2] })).toEqual([2, 4]);
+    ce.declare('zs', 'list<number>');
+    const s = build(ce, ['Map', 'f', 'zs']);
+    expect(s.code).toContain('(_fn_f)');
+    expect(s.run({ zs: [1, 2] })).toEqual([2, 4]);
+    expect(
+      ce
+        .box(['Map', 'f', ['List', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4]');
 
     // The DIRECT application answers the same, which is the behavior the
     // callback position was made to match.
@@ -633,8 +700,9 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
   test('an EMPTY element zips to an empty list, as applying the function does', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
-    ce.declare('xs', 'list<expression>');
+    ce.declare('xs', 'list<list<number>>');
     const r = build(ce, ['Map', 'f', 'xs']);
+    expect(r.success).toBe(true);
     expect(r.run({ xs: [[], [1, 2]] })).toEqual([[], [2, 4]]);
     expect(
       ce
@@ -644,12 +712,19 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
     ).toBe('[]');
   });
 
-  test('a Filter predicate and a Reduce combiner take the wrapper too', () => {
+  test('a Filter predicate and a Reduce combiner over scalars take the function itself', () => {
     const ce = new ComputeEngine();
     ce.assign('p_1', ce.box(['Function', ['Greater', 'x', 1], 'x'] as any));
     const f = build(ce, ['Filter', ['List', 1, 2, 3], 'p_1']);
-    expect(f.code).toContain('_fn_p_1$b');
+    expect(f.code).toContain('(_fn_p_1)');
+    expect(f.code).not.toContain('Array.isArray');
     expect(f.run({})).toEqual([2, 3]);
+    expect(
+      ce
+        .box(['Filter', ['List', 1, 2, 3], 'p_1'])
+        .evaluate()
+        .toString()
+    ).toBe('[2,3]');
 
     const ce2 = new ComputeEngine();
     ce2.assign(
@@ -657,12 +732,15 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
       ce2.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any)
     );
     const r = build(ce2, ['Reduce', ['List', 1, 2, 3], 'r_c', 0]);
-    expect(r.preamble).toContain(
-      'const _fn_r_c$b = (_tv1, _tv2) => ' +
-        'Array.isArray(_tv1) || Array.isArray(_tv2) ? ' +
-        '_SYS.bcastFn(_fn_r_c, _tv1, _tv2) : _fn_r_c(_tv1, _tv2);'
-    );
+    expect(r.code).toContain('(_fn_r_c)');
+    expect(r.code).not.toContain('Array.isArray');
     expect(r.run({})).toBe(6);
+    expect(
+      ce2
+        .box(['Reduce', ['List', 1, 2, 3], 'r_c', 0])
+        .evaluate()
+        .toString()
+    ).toBe('6');
   });
 
   test('a COLLECTION-parameter function keeps the bare reference', () => {
@@ -689,24 +767,32 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
 describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
   // `Map(Sin, xs)` eta-expands the operator into the shared local
   // `_fn_Sin = (_tv1) => Math.sin(_tv1)`, a SCALAR kernel, while the consumer
-  // of that value hands it whatever element the collection holds. An element
-  // that is itself a collection reached `Math.sin` whole, which coerces
-  // through `Number` and answers NaN for `[1, 2]` and `0` for `[]`. The
-  // interpreter applies the operator's own broadcast to such an element.
+  // of that value hands it each element of the collection. An element that
+  // is itself a collection must not reach `Math.sin` whole: `Number` coerces
+  // `[1, 2]` to NaN and `[]` to `0`. The interpreter applies the operator's
+  // own broadcast to such an element.
   //
-  // The wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast. An
-  // empty operator position answers the EMPTY LIST (`Sin([])` evaluates to
-  // `[]`), the same answer a function literal applied to `[]` gives.
+  // For a source whose static element type is a list, the reference is a
+  // static map of the kernel, `_fn_Sin$m1`. A static map over an empty
+  // element gives the EMPTY LIST, as `Sin([])` evaluates to `[]`. A source
+  // with an element type of `expression` does not settle the shape and
+  // declines.
 
   test('an element that is a collection is broadcast, not coerced', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<expression>');
+    ce.declare('ys', 'list<expression>');
+    const open = build(ce, ['Map', 'Sin', 'ys']);
+    expect(open.success).toBe(false);
+    expect(open.diagnostic?.code).toBe('unsettled-shape');
+    expect(open.unsupported).toContain('ys');
+
+    ce.declare('xs', 'list<list<number>>');
     const r = build(ce, ['Map', 'Sin', 'xs']);
-    expect(r.code).toContain('_fn_Sin$b');
+    expect(r.code).toContain('(_fn_Sin$m1)');
     expect(r.preamble).toContain(
-      'const _fn_Sin$b = (_tv2) => Array.isArray(_tv2) ? ' +
-        '_SYS.bcast(_fn_Sin, _tv2) : _fn_Sin(_tv2);'
+      'const _fn_Sin$m1 = ((_tv2) => _SYS.mapFn(_fn_Sin, [1], _tv2));'
     );
+    expect(r.code).not.toContain('Array.isArray');
     const out = r.run({ xs: [[1, 2], [3]] }) as number[][];
     expect(out[0][0]).toBeCloseTo(Math.sin(1), 12);
     expect(out[0][1]).toBeCloseTo(Math.sin(2), 12);
@@ -722,7 +808,7 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
 
   test('an EMPTY element answers the empty list, as the empty operator position does', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<expression>');
+    ce.declare('xs', 'list<list<number>>');
     const r = build(ce, ['Map', 'Sin', 'xs']);
     expect(r.run({ xs: [[]] })).toEqual([[]]);
     expect(
@@ -735,8 +821,9 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
 
   test('a SCALAR element is unchanged', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<expression>');
+    ce.declare('xs', 'list<number>');
     const r = build(ce, ['Map', 'Sin', 'xs']);
+    expect(r.code).toContain('(_fn_Sin)');
     const out = r.run({ xs: [1, 2, 3] }) as number[];
     expect(out[0]).toBeCloseTo(Math.sin(1), 12);
     expect(out[1]).toBeCloseTo(Math.sin(2), 12);
@@ -766,17 +853,26 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
 });
 
 describe('an INLINE function literal in value position broadcasts', () => {
-  // The spliced arrow's body is emitted for scalars only, so `Map((x) ↦ 2x,
-  // xs)` multiplied a whole row as a number. The literal is bound to a name
-  // once and handed out through the same `_SYS.bcastFn` wrapper a NAMED
-  // scalar-parameter function gets, so the two spellings agree.
+  // The spliced arrow is compiled with its parameter typed by the static
+  // element type of the source. Over a source of rows, `x` is a list in the
+  // body, and `2x` is compiled as the list arithmetic it is: `Map((x) ↦ 2x,
+  // xs)` doubles each entry of each row, as the interpreter does. Over a
+  // source of scalars, `x` is a number. No code tests the shape of an element
+  // at run time. A source with an element type of `expression` declines.
   const DOUBLE = ['Function', ['Multiply', 2, 'x'], 'x'];
 
   test('an element that is a collection is broadcast, not coerced', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<expression>');
+    ce.declare('ys', 'list<expression>');
+    const open = build(ce, ['Map', DOUBLE, 'ys']);
+    expect(open.success).toBe(false);
+    expect(open.diagnostic?.code).toBe('unsettled-shape');
+    expect(open.unsupported).toContain('ys');
+
+    ce.declare('xs', 'list<list<number>>');
     const r = build(ce, ['Map', DOUBLE, 'xs']);
-    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.success).toBe(true);
+    expect(r.code).not.toContain('Array.isArray');
     expect(r.run({ xs: [[1, 2], [], [3]] })).toEqual([[2, 4], [], [6]]);
     expect(
       ce
@@ -788,15 +884,16 @@ describe('an INLINE function literal in value position broadcasts', () => {
 
   test('the arrow is bound ONCE, not rebuilt per element', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<expression>');
+    ce.declare('xs', 'list<list<number>>');
     const r = build(ce, ['Map', DOUBLE, 'xs']);
-    expect(r.code.split('2 * x').length - 1).toBe(1);
+    expect(r.code.split('(x) =>').length - 1).toBe(1);
   });
 
   test('a SCALAR element is unchanged', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<expression>');
+    ce.declare('xs', 'list<number>');
     const r = build(ce, ['Map', DOUBLE, 'xs']);
+    expect(r.code).toContain('2 * x');
     expect(r.run({ xs: [1, 2, 3] })).toEqual([2, 4, 6]);
     expect(
       ce
@@ -808,14 +905,15 @@ describe('an INLINE function literal in value position broadcasts', () => {
 
   test('a COLLECTION-parameter literal keeps the bare arrow', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<expression>');
+    ce.declare('xs', 'list<list<number>>');
     const literal = [
       'Function',
       ['Sum', 'L'],
       ['Typed', 'L', { str: 'list<number>' }],
     ];
     const r = build(ce, ['Map', literal, 'xs']);
-    expect(r.code).not.toContain('_SYS.bcastFn');
+    expect(r.success).toBe(true);
+    expect(r.code).not.toContain('_SYS.mapFn');
     expect(
       r.run({
         xs: [

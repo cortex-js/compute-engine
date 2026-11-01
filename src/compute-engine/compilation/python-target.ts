@@ -1,4 +1,6 @@
 import type { Expression, RoundingTies } from '../global-types.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
+import { callArgumentMapRank } from './compile-user-calls.js';
 import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -105,6 +107,7 @@ import {
   leafwardElementType,
 } from '../collection-utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import { core } from './compiler-core-hooks.js';
 import {
   collectionElementType,
   containsBroadcastableType,
@@ -136,6 +139,7 @@ import {
   stringRefusedEntryType,
   countMayBeNaN,
 } from './javascript-target.js';
+import { isOpenScalarRankType, pythonShapeDispatch } from './static-shape.js';
 
 /**
  * The boolean literals, which Python spells exactly as MathJSON does.
@@ -5871,7 +5875,8 @@ function assertPyAppliedLiteralBindsScalars(
 function pyApply(
   args: ReadonlyArray<Expression>,
   compile: (e: Expression) => string,
-  whole: boolean
+  whole: boolean,
+  target: CompileTarget<Expression>
 ): string {
   const head = whole ? 'ApplyWhole' : 'Apply';
   if (args[0] == null)
@@ -5884,6 +5889,62 @@ function pyApply(
       args.slice(1),
       compile
     );
+    // A literal with scalar parameters applied to a list: the interpreter
+    // maps the function over the elements, and the static type of each
+    // argument gives the depth of the map, a comprehension
+    // (`emitUserFunctionCall`). `[2 * t for t in L]` for
+    // `Apply(t ↦ 2t, L)` with `L: list<real>`. An argument declared
+    // `broadcastable<T>` has no settled rank, and this target has no map
+    // over a list of any depth, so the call declines there: the direct
+    // call applied `t + 1` to the list, which raises a `TypeError`.
+    const literal = args[0];
+    // One point named through an alias, a union with `missing` or a
+    // nominal type, at a parameter with no declared type: the literal
+    // typed by the point (`appliedLiteralNamedPointCall()`).
+    const named = whole
+      ? undefined
+      : BaseCompiler.appliedLiteralNamedPointCall(
+          literal,
+          args.slice(1),
+          args.slice(1).map((a) => compile(a)),
+          compile,
+          () => compile(literal),
+          target
+        );
+    if (named !== undefined) return named;
+    // A list of points, or a list of lists of points, at a parameter with
+    // no declared type: the map over the list levels of the literal for
+    // one point (`appliedLiteralPointListCall()`).
+    const points = whole
+      ? undefined
+      : BaseCompiler.appliedLiteralPointListCall(
+          literal,
+          args.slice(1),
+          args.slice(1).map((a) => compile(a)),
+          compile,
+          () => compile(literal),
+          target
+        );
+    if (points !== undefined) return points;
+    if (
+      !whole &&
+      literal.nops === args.length &&
+      paramsAreScalar(literal.type.type) &&
+      args
+        .slice(1)
+        .some(
+          (a) =>
+            (callArgumentMapRank(a, target) ?? 0) > 0 ||
+            isOpenScalarRankType(a.type.type)
+        )
+    )
+      return BaseCompiler.emitUserFunctionCall(
+        `(${compile(literal)})`,
+        args.slice(1),
+        target,
+        args.slice(1).map(() => false),
+        true
+      );
     assertPyAppliedLiteralBindsScalars(args[0], args.slice(1), whole);
   }
   return `(${compile(args[0])})(${args
@@ -7185,7 +7246,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   IsEmpty: (args, compile) =>
     `(len(${pyCollArg('IsEmpty', args[0], compile)}) == 0)`,
-  At: (args, compile) => {
+  At: (args, compile, target) => {
     const base = args[0];
     const index = args[1];
     if (base == null || index == null || args.length !== 2)
@@ -7207,10 +7268,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // an indexed lambda parameter carries) — the latter only with a provably
     // numeric index, since the other arm is a dictionary and a keyed lookup has
     // no compiled equivalent.
+    // A call of a user function whose type does not settle a shape is read
+    // with the result type of its variant (`staticTypeOf()`, rule R2 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`).
+    const baseType = core.staticTypeOf(base, target);
     const provablyIndexed =
-      !base.type.matches('string') &&
-      (base.type.matches('list<any>') ||
-        base.type.matches('indexed_collection<any>'));
+      !isSubtype(baseType, 'string') &&
+      isSubtype(baseType, INDEXED_COLLECTION_SHAPE_TYPE);
     if (!provablyIndexed) {
       if (!pyCouldBeIndexedCollectionOperand(base))
         throw new Error(
@@ -7778,7 +7842,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `Identity`: missing argument');
     return pyIdentityPassthrough(args[0], compile(args[0]), target);
   },
-  Apply: (args, compile) => {
+  Apply: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
     // A partial application of a function literal applied to more arguments
@@ -7818,7 +7882,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // literal over, or binds whole at a parameter that the Python operators
     // read as a scalar (`pyApply`); otherwise the literal is compiled as a
     // checked callee.
-    return pyApply(args, compile, false);
+    return pyApply(args, compile, false, target);
   },
   // --- Linear algebra (numpy; regular arrays only) ---------------------------
   Flatten: (args, compile) => {
@@ -7872,7 +7936,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
 // `broadcastable<T>` map builds its per-element call with it. A collection
 // argument whose parameter the body reads as a scalar is declined, as for
 // `Apply` (`assertPyAppliedLiteralBindsScalars`).
-PYTHON_FUNCTIONS.ApplyWhole = (args, compile) => pyApply(args, compile, true);
+PYTHON_FUNCTIONS.ApplyWhole = (args, compile, target) =>
+  pyApply(args, compile, true, target);
 
 /**
  * Python/NumPy language target implementation
@@ -8108,6 +8173,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     return {
       language: 'python',
+      // See `CompileTarget.shapeDispatch`.
+      shapeDispatch: pythonShapeDispatch,
       isRealOnlyLowering: pythonIsRealOnlyLowering,
       // The compile modes this target offers (`CompileMode`) and the two
       // lowering hooks the complex discipline is emitted through: Python's

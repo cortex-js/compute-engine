@@ -2,17 +2,16 @@
  * Two call-boundary defects on the JavaScript emission lane, both of which
  * answered a wrong value behind `success: true`.
  *
- * 1. A user-function call site whose arguments are all STATICALLY scalar used
- *    to emit a bare direct call. That static reading is usually an INFERENCE
- *    from the callee's own declared parameter, not a fact about the value:
- *    `f(x: number) = 2x + 1` types the free `y` in `f(y)` as `number`, and
- *    `run({ y: [1, 2, 3] })` hands the call an array all the same. The bare
- *    `_fn_f(_.y)` computed NaN where the interpreter broadcasts to `[3, 5, 7]`
- *    (auto-broadcast is documented, pinned design — `doc/08-guide-types.md`
- *    §Broadcasting). The call now emits a runtime `Array.isArray` guard that
- *    keeps the direct call in its taken branch and dispatches through
- *    `_SYS.bcastFn` otherwise. A LITERAL argument cannot be an array at run
- *    time and is neither tested nor bound.
+ * 1. The form of a user-function call follows the static type of each
+ *    argument. An argument with a scalar static type (declared, or inferred:
+ *    `f(x: number) = 2x + 1` types the free `y` in `f(y)` as `number`) gives a
+ *    direct call `_fn_f(_.y)`, with no run-time test of its shape. A host
+ *    that gives a list to an input whose type is a scalar gives a value
+ *    outside the type of the input, and the result is not specified. An
+ *    argument declared as a list gives a static map of the scalar function,
+ *    `_SYS.mapFn(_fn_f, [1], _.y)`, which agrees with the interpreter's
+ *    broadcast (`doc/08-guide-types.md` §Broadcasting). The rule is in
+ *    `docs/plans/2026-10-31-static-shape-compilation.md` (R3 and R5).
  *
  * 2. A function LITERAL with a complex-declared parameter, spliced in VALUE
  *    position (`Map((x: complex) ↦ 2x, [1, 2, 3])`), compiles its body in the
@@ -49,24 +48,29 @@ function build(ce: ComputeEngine, expr: any) {
   return compile(ce.box(expr), { constantFold: false });
 }
 
-describe('runtime broadcast guard at a user-function call site', () => {
-  test('a run()-supplied argument answers BOTH shapes, agreeing with the interpreter', () => {
+describe('the call form at a user-function call site follows the static type', () => {
+  test('an argument with a scalar static type is a direct call; a declared list maps', () => {
     const ce = incDoubler('(x: number) -> number');
     const r = build(ce, ['f', 'y']);
-    // The guard, and the direct call it keeps in the taken branch.
-    expect(r?.code).toContain('Array.isArray');
-    expect(r?.code).toContain('_SYS.bcastFn');
-    expect(r?.code).toContain('_fn_f(');
+    // `y` is not declared: its type is inferred from the parameter of `f`
+    // (`number`). The call is a direct call of the scalar function, with no
+    // run-time test of the shape of `y`.
+    expect(r?.code).toBe('_fn_f(_.y)');
     expect(r?.run?.({ y: 21 })).toBe(43);
-    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([3, 5, 7]);
-    // The interpreter broadcasts the same call over the same collection.
+    expect(ce.box(['f', 21] as any).evaluate().re).toBe(43);
+    // A list is given only to an input that is declared as a list. The call
+    // then maps the scalar function over the list, as the interpreter does.
+    const ce2 = incDoubler('(x: number) -> number');
+    ce2.declare('y', 'list<number>');
+    const r2 = build(ce2, ['f', 'y']);
+    expect(r2?.code).toBe('_SYS.mapFn(_fn_f, [1], _.y)');
+    expect(r2?.run?.({ y: [1, 2, 3] })).toEqual([3, 5, 7]);
     expect(
-      ce
+      ce2
         .box(['f', ['List', 1, 2, 3]] as any)
         .evaluate()
         .toString()
     ).toBe('[3,5,7]');
-    expect(ce.box(['f', 21] as any).evaluate().re).toBe(43);
   });
 
   test('a LITERAL argument keeps the bare direct call', () => {
@@ -87,76 +91,129 @@ describe('runtime broadcast guard at a user-function call site', () => {
     expect(r?.run?.({})).toBe(false);
   });
 
-  test('each argument of a MULTI-ARGUMENT call is tested independently', () => {
+  test('each argument of a MULTI-ARGUMENT call has its own map rank', () => {
+    const declared = (u: string, v: string) => {
+      const ce = fresh();
+      ce.declare('g', '(a: number, b: number) -> number');
+      ce.assign('g', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any));
+      ce.declare('u', u);
+      ce.declare('v', v);
+      return build(ce, ['g', 'u', 'v']);
+    };
+    const r = declared('number', 'number');
+    expect(r?.code).toBe('_fn_g(_.u, _.v)');
+    expect(r?.run?.({ u: 1, v: 2 })).toBe(3);
+    // A list in EITHER position maps (rank 1); the scalar is reused (rank 0).
+    const r1 = declared('list<number>', 'number');
+    expect(r1?.code).toBe('_SYS.mapFn(_fn_g, [1, 0], _.u, _.v)');
+    expect(r1?.run?.({ u: [1, 2, 3], v: 10 })).toEqual([11, 12, 13]);
+    const r2 = declared('number', 'list<number>');
+    expect(r2?.code).toBe('_SYS.mapFn(_fn_g, [0, 1], _.u, _.v)');
+    expect(r2?.run?.({ u: 10, v: [1, 2, 3] })).toEqual([11, 12, 13]);
+    // …and both at once zip.
+    const r3 = declared('list<number>', 'list<number>');
+    expect(r3?.code).toBe('_SYS.mapFn(_fn_g, [1, 1], _.u, _.v)');
+    expect(r3?.run?.({ u: [1, 2, 3], v: [10, 20, 30] })).toEqual([
+      11, 22, 33,
+    ]);
     const ce = fresh();
     ce.declare('g', '(a: number, b: number) -> number');
     ce.assign('g', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any));
-    const r = build(ce, ['g', 'u', 'v']);
-    expect(r?.code).toContain('Array.isArray');
-    expect(r?.run?.({ u: 1, v: 2 })).toBe(3);
-    // An array in EITHER position broadcasts; the scalar is reused.
-    expect(r?.run?.({ u: [1, 2, 3], v: 10 })).toEqual([11, 12, 13]);
-    expect(r?.run?.({ u: 10, v: [1, 2, 3] })).toEqual([11, 12, 13]);
-    // …and both at once zip.
-    expect(r?.run?.({ u: [1, 2, 3], v: [10, 20, 30] })).toEqual([11, 22, 33]);
     expect(
       ce
         .box(['g', ['List', 1, 2, 3], 10] as any)
         .evaluate()
         .toString()
     ).toBe('[11,12,13]');
+    expect(
+      ce
+        .box(['g', 10, ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[11,12,13]');
+    expect(
+      ce
+        .box(['g', ['List', 1, 2, 3], ['List', 10, 20, 30]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[11,22,33]');
   });
 
-  test('a MIXED call tests only the non-literal argument', () => {
+  test('a MIXED call reuses the literal at rank 0', () => {
     const ce = fresh();
     ce.declare('g', '(a: number, b: number) -> number');
     ce.assign('g', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any));
+    ce.declare('u', 'list<number>');
     const r = build(ce, ['g', 'u', 10]);
-    // One test, for `u` alone — the literal `10` is neither tested nor bound.
-    expect(r?.code?.match(/Array\.isArray/g)?.length).toBe(1);
-    expect(r?.run?.({ u: 1 })).toBe(11);
+    expect(r?.code).toBe('_SYS.mapFn(_fn_g, [1, 0], _.u, 10)');
     expect(r?.run?.({ u: [1, 2, 3] })).toEqual([11, 12, 13]);
   });
 
-  test('the guarded argument expression is evaluated exactly ONCE', () => {
+  test('the mapped argument expression is evaluated exactly ONCE', () => {
     const ce = incDoubler('(x: number) -> number');
+    ce.declare('y', 'list<number>');
     const r = build(ce, ['f', ['Add', 'y', 1]]);
-    // The argument is bound to a temporary and the branches read that
-    // temporary, so the expression appears once in the emitted code.
-    expect(r?.code).toContain('Array.isArray');
+    // The argument is computed once and passed to the map, so the
+    // expression appears once in the emitted code.
+    expect(r?.code).toContain('_SYS.mapFn(_fn_f, [1], ');
     expect(r?.code?.match(/_\.y/g)?.length).toBe(1);
-    expect(r?.run?.({ y: 20 })).toBe(43);
+    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([5, 7, 9]);
+    expect(
+      ce
+        .box(['f', ['Add', ['List', 1, 2, 3], 1]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[5,7,9]');
   });
 
-  test('a COMPLEX-declared parameter is coerced on both branches', () => {
+  test('a COMPLEX-declared parameter is coerced, for a scalar and for each element', () => {
     const ce = fresh();
     ce.declare('Q', '(x: complex) -> complex');
     ce.assign('Q', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     const r = build(ce, ['Q', 'y']);
-    expect(r?.code).toContain('Array.isArray');
+    expect(r?.code).toBe('_fn_Q(_SYS.cplx(_.y))');
     expect(r?.run?.({ y: 3 })).toBe(6);
-    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
     expect(r?.run?.({ y: { re: 3, im: 4 } })).toEqual({ re: 6, im: 8 });
+    const ce2 = fresh();
+    ce2.declare('Q', '(x: complex) -> complex');
+    ce2.assign('Q', ce2.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    ce2.declare('y', 'list<number>');
+    const r2 = build(ce2, ['Q', 'y']);
+    // The coercion is inside the mapped closure, around the element.
+    expect(r2?.code).toMatch(
+      /^_SYS\.mapFn\(\(\((\w+)\) => _fn_Q\(_SYS\.cplx\(\1\)\)\), \[1\], _\.y\)$/
+    );
+    expect(r2?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
     expect(
-      ce
+      ce2
         .box(['Q', ['List', 1, 2, 3]] as any)
         .evaluate()
         .toString()
     ).toBe('[2,4,6]');
   });
 
-  test('a GENERIC callee keeps its unconditional dispatch — no double wrap', () => {
-    // The generic lane already dispatches, because a generic parameter's
-    // static type is inferred from the bound rather than declared by the
-    // caller. The guard must not wrap that a second time.
+  test('a GENERIC callee takes the same call forms at its bound', () => {
+    // A scalar-bounded generic is compiled at its bound (`number`), so it
+    // takes the same call forms as a non-generic function.
     const ce = fresh();
     ce.declare('gd', '(x: T) -> T where T: number');
     ce.assign('gd', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     const r = build(ce, ['gd', 'y']);
-    expect(r?.code).toContain('_SYS.bcastFn');
-    expect(r?.code).not.toContain('Array.isArray');
+    expect(r?.code).toBe('_fn_gd(_.y)');
     expect(r?.run?.({ y: 21 })).toBe(42);
-    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
+    const ce2 = fresh();
+    ce2.declare('gd', '(x: T) -> T where T: number');
+    ce2.assign('gd', ce2.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    ce2.declare('y', 'list<number>');
+    const r2 = build(ce2, ['gd', 'y']);
+    expect(r2?.code).toBe('_SYS.mapFn(_fn_gd, [1], _.y)');
+    expect(r2?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
+    expect(
+      ce2
+        .box(['gd', ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
   });
 });
 
@@ -209,12 +266,12 @@ describe('the guard is NOT emitted where a broadcast would be wrong', () => {
     ce.declare('p', 'tuple<number, number>');
     for (const arg of ['p', 'q']) {
       const r = build(ce, ['mid', arg]);
-      // The undeclared `q` can hold any value at run time, so the call goes
-      // through the checking shim, which tests that the value is an array of
-      // two elements (CE-226.2). The declared `p` needs no test.
-      expect(r?.code).toBe(
-        arg === 'p' ? `_fn_mid(_.${arg})` : `_fn_mid$t(_.${arg})`
-      );
+      // The undeclared `q` has the type that the engine infers from the
+      // call, the point type of the parameter. The static type is the
+      // contract (rules R1 and R5 of
+      // `docs/plans/2026-10-31-static-shape-compilation.md`), so neither
+      // call is tested: the host supplies a point for `q`.
+      expect(r?.code).toBe(`_fn_mid(_.${arg})`);
       expect(r?.code).not.toContain('Array.isArray');
       expect(r?.code).not.toContain('_SYS.bcastFn');
       expect(r?.run?.({ [arg]: [3, 5] })).toBe(4);
@@ -258,42 +315,31 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
 
   test('a REAL-declared literal takes no complex coercion', () => {
     const r = compile(mapOver('(x: real) -> real'), { constantFold: false });
-    // The arrow itself is unwrapped — no `_SYS.cplx`, no `.re` — but the
-    // parameter is scalar, so the literal is still handed out through the
-    // broadcast-aware wrapper that an element which is a collection needs.
+    // The arrow itself is unwrapped — no `_SYS.cplx`, no `.re` — and the
+    // elements of the source are scalars, so the literal is passed as it is.
     expect(r?.code).toBe(
-      '((_f) => (_lit_1).map((_x) => _f(_x)))(((_tv1) => (_tv2) => ' +
-        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x = NaN) => 2 * x)))'
+      '((_f) => (_lit_1).map((_x) => _f(_x)))(((x = NaN) => 2 * x))'
     );
     expect(r?.code).not.toContain('_SYS.cplx');
     expect(r?.run?.({})).toEqual([2, 4, 6]);
   });
 
-  test('the NAMED path: the coercion rides on the `$v` shim, under the shape wrapper', () => {
+  test('the NAMED path: the coercion rides on the `$v` shim, under the static map', () => {
     const ce = fresh();
     ce.declare('Q', '(x: complex) -> complex');
     ce.assign('Q', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     const r = compile(ce.box(['Map', 'Q', ['List', 1, 2, 3]] as any), {
       constantFold: false,
     });
-    // The consumer of a function value may hand the callee a nested element,
-    // so the value reference is shape-aware. `complex` is a DECLARED scalar
-    // parameter, and since the user ruling of 2026-09-22 the interpreter
-    // BROADCASTS such a callback over a nested element (`Map(Q, [[1, 2],
-    // [3, 4]])` maps `Q` over each row), so the reference takes the
-    // broadcasting form `$b`. It wraps the coercing shim, so a scalar element
-    // still reaches the body coerced.
-    expect(r?.code).toBe('((_f) => (_lit_1).map((_x) => _f(_x)))(_fn_Q$b)');
+    // The elements of the source are scalars, so the value reference is the
+    // coercing shim `$v`, which lifts each element into a complex value.
+    expect(r?.code).toBe('((_f) => (_lit_1).map((_x) => _f(_x)))(_fn_Q$v)');
     // The shim temporaries are numbered after the two the complex product in
     // `Q`'s own body takes (`2x` binds each factor to a hygienic temporary).
     expect(r?.preamble).toContain(
       // An absent argument is read as `NaN` before the complex coercion, as
       // the interpreter reads an absent value at a numeric parameter.
       'const _fn_Q$v = (_tv3) => _fn_Q(_SYS.cplx(_tv3 === undefined ? NaN : _tv3));'
-    );
-    expect(r?.preamble).toContain(
-      'const _fn_Q$b = (_tv4) => Array.isArray(_tv4) ? ' +
-        '_SYS.bcastFn(_fn_Q$v, _tv4) : _fn_Q$v(_tv4);'
     );
     expect(r?.run?.({})).toEqual([2, 4, 6]);
     expect(
@@ -302,5 +348,27 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
         .evaluate()
         .toString()
     ).toBe('[2,4,6]');
+
+    // `complex` is a DECLARED scalar parameter, and the interpreter maps such
+    // a callback over an element that is a list (`Map(Q, [[1, 2], [3, 4]])`
+    // maps `Q` over each row). Over a source of rows the reference is a
+    // static map of the coercing shim, so each entry of a row reaches the
+    // body coerced.
+    const rows = ['Map', 'Q', ['List', ['List', 1, 2], ['List', 3, 4]]];
+    const m = compile(ce.box(rows as any), { constantFold: false });
+    expect(m?.code).toBe('((_f) => (_lit_1).map((_x) => _f(_x)))(_fn_Q$m1)');
+    expect(m?.preamble).toContain(
+      'const _fn_Q$m1 = ((_tv4) => _SYS.mapFn(_fn_Q$v, [1], _tv4));'
+    );
+    expect(m?.run?.({})).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+    expect(
+      ce
+        .box(rows as any)
+        .evaluate()
+        .toString()
+    ).toBe('[[2,4],[6,8]]');
   });
 });
