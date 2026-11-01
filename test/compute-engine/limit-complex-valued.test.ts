@@ -333,6 +333,32 @@ describe('LIMIT AT INFINITY: THE GROWTH OF AN EXPONENTIAL', () => {
     expect(isUnevaluated(lim(['Root', 't', 'a']).evaluate())).toBe(true);
   });
 
+  test('a root with a negative degree of a radicand that decays', () => {
+    // With `n < 0`, `Root(1/t, n) = t^{-1/n}` grows like a power of `t`, so
+    // `Root(1/t, n)/ln t` → `+∞`. A negative degree was ranked as bounded
+    // whatever the radicand, and the limit was `0`. The canonical form
+    // rewrites a numeric negative degree (`Root(1/t, -2)` is
+    // `1/√(1/t)`), so only a symbolic degree reaches this case. The limit
+    // is now unevaluated, not `+∞`: the growth rank of the root is not
+    // known, and the numeric fallback has no value for a symbolic `n`.
+    const neg = new ComputeEngine();
+    neg.declare('n', 'real');
+    neg.assume(neg.parse('n < 0'));
+    const limIn = (body: unknown) =>
+      neg.box(['Limit', ['Function', body, 't'], 'PositiveInfinity'] as any);
+    const r = limIn([
+      'Divide',
+      ['Root', ['Divide', 1, 't'], 'n'],
+      ['Ln', 't'],
+    ]).evaluate();
+    expect(isUnevaluated(r)).toBe(true);
+    // A radicand that grows: `Root(t, n) = t^{1/n}` decays, and
+    // `Root(t, n)·ln t` → 0.
+    expect(
+      limIn(['Multiply', ['Root', 't', 'n'], ['Ln', 't']]).evaluate().json
+    ).toBe(0);
+  });
+
   test('an exponent that is real at the first probe only', () => {
     // `√(200 − t)` is real at `t = 120` and imaginary for `t > 200`, so
     // `e^{√(200−t)}` is not positive for large `t`: `t/e^{√(200−t)}` has

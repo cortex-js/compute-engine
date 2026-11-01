@@ -276,6 +276,15 @@
 
 ### Bug Fixes
 
+- **`Limit` at infinity: a root with a negative degree and a radicand that
+  decays.** The growth ranking gave every root with a constant negative
+  degree the rank of a bounded term, whatever the radicand. With `n < 0`,
+  `Root(1/x, n) = x^{-1/n}` grows like a power of `x`, so
+  `Limit(Root(1/x, n)/ln(x), x, +∞)` returned `0`. A negative degree now
+  gives the bounded rank only when the radicand tends to infinity; otherwise
+  the rank is not known, and the limit stays unevaluated instead of giving a
+  wrong value.
+
 - **The product of a scalar and a list with a failed cell gives the same
   result on every route** (CE-671). The failed cell is the error with one
   `Multiply` frame, as `3·Error("missing")` is: `3·[Error("missing"), 2]`

@@ -1902,14 +1902,22 @@ function growthLevel(
   // constant dominates, and `(√x − 50)/ln x` gave `0` instead of `+∞`.
   // This is true only for a degree that is a constant known to be positive
   // (`Sqrt` has degree 2). A constant negative degree gives a root that
-  // decays (level 0). Any other degree has no level here: `Root(x, x)` is
-  // `x^{1/x}`, which tends to 1, and is not polynomial.
+  // decays (level 0) only when the radicand tends to infinity. When the
+  // radicand decays, the root grows: `Root(1/x, -2) = (1/x)^{-1/2} = √x`.
+  // Level 0 then ranked it below `ln x`, and a dominant term was dropped. So
+  // in every other case the level is not known, and the numeric fallback
+  // decides. This includes a radicand with a non-zero finite limit
+  // (`Root(2 + 1/x, -2)` tends to `2^{-1/2}`): its level is 0, but this
+  // code does not show that the limit is not 0. Any other degree has no
+  // level here: `Root(x, x)` is `x^{1/x}`, which tends to 1, and is not
+  // polynomial.
   if (op === 'Sqrt') return growthLevel(o1(e), x, ce, depth + 1);
   if (op === 'Root') {
     const n = o2(e);
     if (n.has(x)) return undefined;
     if (n.isPositive === true) return growthLevel(o1(e), x, ce, depth + 1);
-    if (n.isNegative === true) return 0;
+    if (n.isNegative === true && tendsToInfinity(o1(e), x, ce) === true)
+      return 0;
     return undefined;
   }
 
