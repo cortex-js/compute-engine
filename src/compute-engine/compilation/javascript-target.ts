@@ -97,6 +97,7 @@ import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { operandMayBeAbsent } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
+import { reservedNameSpelling } from './compile-loops.js';
 import {
   tryGetConstant,
   negativeBaseRealPow,
@@ -849,6 +850,10 @@ const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
   // `false` (`BaseCompiler.exactSelect`). A user parameter of the same name
   // inside an arm would be shadowed by it, so it is renamed on the way in.
   '_CND',
+  // The loop of a `Sum` or `Product` (`emitSumProduct`) declares its upper
+  // bound as `_upper` around the body. A user name `_upper` in the body
+  // would read that bound instead of its own value.
+  '_upper',
 ]);
 
 /**
@@ -12266,10 +12271,18 @@ function compileToTarget(
       );
     BaseCompiler.assertNoDestructuringParams(args.slice(1));
     BaseCompiler.assertNoRestParams(args.slice(1));
-    const params = args
+    const declared = args
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
-    const lambdaScope = BaseCompiler.withBoundScope(target, params);
+    // A parameter with the name of an identifier that the emitted code uses
+    // (`_SYS`, the runtime helper object) is emitted under a generated name,
+    // as in a nested literal (`lambdaParamBinding`). Otherwise the parameter
+    // hides that identifier in the body. The parameters are positional, so
+    // the caller of the compiled function sees no change. `params` holds the
+    // emitted names; `declared` holds the names that the body binds.
+    const binding = BaseCompiler.lambdaParamBinding(declared, args[0], target);
+    const params = binding.emitted;
+    const lambdaScope = BaseCompiler.withBoundScope(target, declared);
     const defaults = lambdaDefaultFill(args.slice(1), params, (e) =>
       BaseCompiler.compileValueOperand(e, target)
     );
@@ -12282,7 +12295,7 @@ function compileToTarget(
     });
     const lambdaTarget: CompileTarget<Expression> = {
       ...target,
-      var: (id) => (params.includes(id) ? id : target.var(id)),
+      var: binding.varOf,
       ...lambdaScope,
       ...(textParams.size > 0 ? { omittableParams: textParams } : {}),
       declaredVarTypes: {
@@ -12304,11 +12317,24 @@ function compileToTarget(
     // too — without the frame, `(x: integer, y: integer) ↦ do { (x, y) :=
     // (7, 4.5); … }` compiled and wrote both leaves where the interpreter
     // atomically declines.
-    const body = BaseCompiler.withEnforcedParams(
-      expr as Expression & FunctionInterface,
+    //
+    // A write to a parameter with a generated name writes that name
+    // (`withWritableLoopIndices` makes `assignLValue` accept it).
+    const body = BaseCompiler.withWritableLoopIndices(
+      params.filter((p, i) => p !== declared[i]),
       () =>
-        BaseCompiler.compileCseRoot(expr, target, 0, () =>
-          BaseCompiler.compileOp(expr, 0, lambdaTarget, 0, args[0].canonical)
+        BaseCompiler.withEnforcedParams(
+          expr as Expression & FunctionInterface,
+          () =>
+            BaseCompiler.compileCseRoot(expr, target, 0, () =>
+              BaseCompiler.compileOp(
+                expr,
+                0,
+                lambdaTarget,
+                0,
+                args[0].canonical
+              )
+            )
         )
     );
     // The value kinds whose compile contracts the code reads or makes: the
@@ -17179,9 +17205,12 @@ function emitSumProduct(
   // an error it raises would be new. The nested clause hoists for itself,
   // once per outer iteration; an expression invariant in every index is then
   // recomputed once per outer iteration, never per innermost one.
+  // The emitted name of the index: a fresh name when the index has the name
+  // of an identifier that the emitted code uses (`_SYS`).
+  const indexCode = reservedNameSpelling([index], target)(index);
   const innerTarget: CompileTarget<Expression> = {
     ...target,
-    var: (id) => (id === index ? index : target.var(id)),
+    var: (id) => (id === index ? indexCode : target.var(id)),
     ...BaseCompiler.withBoundScope(target, [index]),
   };
 
@@ -17230,7 +17259,7 @@ function emitSumProduct(
   ): string =>
     hoistedBindings.length === 0
       ? ''
-      : `if (!(${index} <= _upper)) ${exit(empty)} ` +
+      : `if (!(${indexCode} <= _upper)) ${exit(empty)} ` +
         hoistedBindings
           .map(([name, code]) => `${initialize(name, code)} `)
           .join('');
@@ -17268,9 +17297,10 @@ function emitSumProduct(
         : `(Number.isFinite(${b}) && !Number.isSafeInteger(${b}))`;
     const checks = [
       ...(upperNum === undefined ? [unsafe('_upper')] : []),
-      ...(lowerNum === undefined ? [unsafe(index)] : []),
+      ...(lowerNum === undefined ? [unsafe(indexCode)] : []),
     ];
-    if (budget !== undefined) checks.push(`!(_upper - ${index} < ${budget})`);
+    if (budget !== undefined)
+      checks.push(`!(_upper - ${indexCode} < ${budget})`);
     return checks.length > 0 ? `if (${checks.join(' || ')}) ${exit(nan)} ` : '';
   };
 
@@ -17325,7 +17355,7 @@ function emitSumProduct(
     if (elementwiseExit)
       return expression(
         (exit) =>
-          `let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${exit('NaN')} ${index}++; } ${exit(`${acc} === null ? ${identity} : ${acc}`)}`
+          `let ${acc} = null; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${exit('NaN')} ${indexCode}++; } ${exit(`${acc} === null ? ${identity} : ${acc}`)}`
       );
     // The flag, not the accumulator, carries the verdict to the end: once the
     // fold has collapsed to a scalar NaN the following iteration broadcasts it
@@ -17334,7 +17364,7 @@ function emitSumProduct(
     const latched = BaseCompiler.tempVar(target);
     return expression(
       (exit) =>
-        `let ${acc} = null; let ${latched} = false; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${latched} = true; ${index}++; } ${exit(`${latched} ? NaN : (${acc} === null ? ${identity} : ${acc})`)}`
+        `let ${acc} = null; let ${latched} = false; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${latched} = true; ${indexCode}++; } ${exit(`${latched} ? NaN : (${acc} === null ? ${identity} : ${acc})`)}`
     );
   }
 
@@ -17343,12 +17373,12 @@ function emitSumProduct(
     if (isSum) {
       return expression(
         (exit) =>
-          `let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 0, im: 0 }', exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } ${exit(acc)}`
+          `let ${acc} = { re: 0, im: 0 }; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 0, im: 0 }', exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${indexCode}++; } ${exit(acc)}`
       );
     }
     return expression(
       (exit) =>
-        `let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 1, im: 0 }', exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } ${exit(acc)}`
+        `let ${acc} = { re: 1, im: 0 }; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 1, im: 0 }', exit)}while (${indexCode} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${indexCode}++; } ${exit(acc)}`
     );
   }
 
@@ -17378,7 +17408,7 @@ function emitSumProduct(
     const term =
       statements?.consume(bodyCode, (value) => `${acc} ${op}= ${value};`) ??
       `${acc} ${op}= ${bodyCode};`;
-    return `let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${index} <= _upper) { ${term} ${loopExit ? `if (${acc} !== ${acc}) ${exit('NaN')} ` : ''}${index}++; } ${exit(acc)}`;
+    return `let ${acc} = ${identity}; let ${indexCode} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${indexCode} <= _upper) { ${term} ${loopExit ? `if (${acc} !== ${acc}) ${exit('NaN')} ` : ''}${indexCode}++; } ${exit(acc)}`;
   });
 }
 

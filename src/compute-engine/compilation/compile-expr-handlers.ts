@@ -100,7 +100,7 @@ import {
 import { tryCompileProtocolDispatch } from './compile-protocol-dispatch.js';
 import { readsAsScalarThroughFreeInputs } from './compile-user-calls.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
-import { assignLValue } from './compile-locals.js';
+import { _reservedDeclareNames, assignLValue } from './compile-locals.js';
 import { mayHoldComplexElement } from './compile-complexness.js';
 
 /**
@@ -611,7 +611,28 @@ export function compileExprDeclare(
           `It is desugared to per-leaf declares only in STATEMENT ` +
           `position (a block's non-final statement, or a loop body).`
       );
-    const name = isSymbol(args[0]) ? args[0].symbol : '_';
+    const symbol = isSymbol(args[0]) ? args[0].symbol : '_';
+    // A local with the name of an identifier that the emitted code uses
+    // (`_SYS`) is never declared with that name: the declaration would hide
+    // the identifier, and each helper call in its scope would fail at run
+    // time. A `Declare` statement of a block or of a loop body uses the
+    // fresh name that `compileBlock` or `compileLoopBody` gave the local
+    // (`_reservedDeclareNames`), so the reads in its scope use the same
+    // name. A `Declare` that has no such record is not compiled: its reads
+    // would not use the fresh name.
+    let name = symbol;
+    if (target.reservedEmittedNames?.has(symbol) === true) {
+      const fresh =
+        node !== undefined ? _reservedDeclareNames.get(node) : undefined;
+      if (fresh === undefined)
+        throw new Error(
+          `Could not compile the declaration of '${symbol}': the code of ` +
+            `the ${target.language ?? 'unknown'} target uses this name, ` +
+            `and a local with this name can be compiled only as a ` +
+            `statement of a block or of a loop body.`
+        );
+      name = fresh;
+    }
     // Targets with a `declare` hook handle any initial value at the block
     // level (as a separate assignment statement — see `compileBlock`). For
     // the default path (no hook), emit a combined initializer so a

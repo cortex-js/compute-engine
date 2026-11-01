@@ -120,6 +120,7 @@ import {
 } from './fixed-width-unroll.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { cseSharingOff } from './compile-cse.js';
+import { reservedNameSpelling } from './compile-loops.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
 import type {
@@ -4754,6 +4755,9 @@ function compileIntervalSumProduct(
   const upperCode = compileIntervalBound(upperExpr, upperNum, target);
 
   const acc = BaseCompiler.tempVar(target);
+  // The emitted name of the index: a fresh name when the index has the name
+  // of an identifier that the emitted code uses (`_IA`, `_SYS`).
+  const indexCode = reservedNameSpelling([index], target)(index);
   const { bindings, result: bodyCode } = BaseCompiler.hoistLoopInvariants(
     body,
     [index],
@@ -4761,7 +4765,8 @@ function compileIntervalSumProduct(
     () =>
       compileTerm({
         ...target,
-        var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
+        var: (id) =>
+          id === index ? `_IA.point(${indexCode})` : target.var(id),
         ...BaseCompiler.withBoundScope(target, [index]),
       })
   );
@@ -4788,10 +4793,10 @@ function compileIntervalSumProduct(
   // 2^53 − 1 a floored bound is finite, but `k++` does not change `k` there
   // and the loop would never end. The interpreter answers `out-of-range`.
   if (lowerNum === undefined || upperNum === undefined) {
-    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isSafeInteger(_upper) || !Number.isSafeInteger(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${index} = _lower; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isSafeInteger(_upper) || !Number.isSafeInteger(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${indexCode} = _lower; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
   }
 
-  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${prelude(undefined)}for (let ${index} = ${lowerCode}; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${prelude(undefined)}for (let ${indexCode} = ${lowerCode}; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
 }
 
 /**
@@ -6338,9 +6343,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // object.
       varsObjectName: '_',
       // `_IA` is baked as a literal token by every interval lowering; `_SYS`
-      // by the helpers it shares with the JavaScript target. See
-      // `CompileTarget.reservedEmittedNames`.
-      reservedEmittedNames: new Set(['_IA', '_SYS']),
+      // by the helpers it shares with the JavaScript target. The loop of a
+      // `Sum` or `Product` declares `_upper` and `_lower` around its body.
+      // See `CompileTarget.reservedEmittedNames`.
+      reservedEmittedNames: new Set(['_IA', '_SYS', '_upper', '_lower']),
       // Only a function-LITERAL callee compiles here (see the `Apply` entry
       // of the function table below, and `CompileTarget`): the reference
       // analysis must stop at such an application rather than walk into a

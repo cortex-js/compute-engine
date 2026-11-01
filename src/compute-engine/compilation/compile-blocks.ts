@@ -26,7 +26,9 @@ import {
   needsStartValue,
   nestedAssignmentsTo,
   nestedOnlyLocals,
+  noteReservedDeclares,
   refuseEffectContractViolations,
+  spellReservedLocals,
   splitChainedAssignments,
   withDefineFunctionDeclares,
   withFreshBlockLocals,
@@ -494,6 +496,8 @@ export function compileBlock(
   let unmarkFed: (() => void) | undefined;
   // Removes the marks of `markCheckedLiteralApplications`.
   let unmarkChecked: (() => void) | undefined;
+  // Removes the records of `noteReservedDeclares` when the block ends.
+  let unnoteReserved: (() => void) | undefined;
   // The list updates of this block that write in place, and the
   // temporaries that hold the arrays the block owns
   // (`ownedLocalUpdateChains`).
@@ -618,7 +622,14 @@ export function compileBlock(
           shadowSpellings.push(fresh);
         }
       }
+    // A local with the name of an identifier that the emitted code uses
+    // (`_SYS`, the runtime helper object of the JavaScript target) gets a
+    // fresh name too. Otherwise its declaration hides that identifier in
+    // the block, and each helper call in the block fails at run time.
+    spellReservedLocals(locals, target, spelled, shadowSpellings);
     const spellLocal = (name: string): string => spelled.get(name) ?? name;
+    // The `Declare` of such a local declares its fresh name.
+    unnoteReserved = noteReservedDeclares(args, target, spellLocal);
     const localTarget: CompileTarget<Expression> = {
       ...target,
       var: (id) => {
@@ -1062,6 +1073,7 @@ export function compileBlock(
     if (localValueFrame !== undefined) _localValueFrames.pop();
     unmarkFed?.();
     unmarkChecked?.();
+    unnoteReserved?.();
     for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
     for (const name of shadowSpellings) _freshLocalNames.delete(name);
   }

@@ -412,6 +412,8 @@ import {
   hideCheckedLocals,
   readsBlockLocal,
   refuseEffectContractViolations,
+  _reservedDeclareNames,
+  reservedLoopLocals,
   splitChainedAssignments,
   withDefineFunctionDeclares,
   withImplicitLocalDeclares,
@@ -4128,17 +4130,29 @@ export function compileLoopBody(
     // only this routine writes it.
     const bodyLocalFunctions = newLocalFunctionScope(target);
     const bodyRebound = reboundLocalNames(withDecls);
+    // A local with the name of an identifier that the emitted code uses
+    // (`_SYS`) gets a fresh name, as in `compileBlock`, at its `Declare`
+    // and at each read and write in the body.
+    const reserved = reservedLoopLocals(withDecls, target);
+    const tempTarget = loopBodyTempTarget(withDecls, target);
     const bodyTarget: CompileTarget<Expression> = {
-      ...loopBodyTempTarget(withDecls, target),
+      ...tempTarget,
+      var: (id) => reserved.spell(id) ?? tempTarget.var(id),
       localFunctions: bodyLocalFunctions,
       lexicalFunctions: lexicalFunctionScope(withDecls, target, bodyRebound),
       reboundFunctions: reboundFunctionScope(withDecls, target, bodyRebound),
     };
-    const checkedFrame = checkedLocalReads(
-      readClasses,
-      target,
-      (name) => bodyTarget.var(name) ?? name
-    );
+    let checkedFrame: ReturnType<typeof checkedLocalReads>;
+    try {
+      checkedFrame = checkedLocalReads(
+        readClasses,
+        target,
+        (name) => bodyTarget.var(name) ?? name
+      );
+    } catch (e) {
+      reserved.done();
+      throw e;
+    }
     const complexFrame = new Map<string, boolean>();
     for (const s of withDecls)
       if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
@@ -4181,6 +4195,7 @@ export function compileLoopBody(
     } finally {
       _popLocalComplex();
       if (checkedFrame !== undefined) CompilerState._checkedLocals.pop();
+      reserved.done();
     }
   }
 
@@ -4198,10 +4213,7 @@ export function compileLoopBody(
       h === 'Declare'
         ? desugarPatternDeclare(expr, target)
         : desugarPatternAssign(expr, target);
-    if (stmts !== null) {
-      const bodyTarget = loopBodyTempTarget(stmts, target);
-      return stmts.map((s) => core.compileLoopBody(s, bodyTarget)).join('; ');
-    }
+    if (stmts !== null) return compileLoopBodyStatements(stmts, target);
   }
 
   // A loop body that is one chained assignment (`t ≔ (u ≔ t + i)`) is
@@ -4214,12 +4226,52 @@ export function compileLoopBody(
         ...chainedLocalDeclares(split.args, split.chained, target),
         ...split.args,
       ];
-      const bodyTarget = loopBodyTempTarget(stmts, target);
-      return stmts.map((s) => core.compileLoopBody(s, bodyTarget)).join('; ');
+      return compileLoopBodyStatements(stmts, target);
+    }
+  }
+
+  // A loop body that is one `Declare` of a local with the name of an
+  // identifier that the emitted code uses declares a fresh name. A `Declare`
+  // that is a statement of a longer loop body has its fresh name already.
+  if (
+    h === 'Declare' &&
+    isSymbol(expr.ops[0]) &&
+    target.reservedEmittedNames?.has(expr.ops[0].symbol) === true &&
+    !_reservedDeclareNames.has(expr)
+  ) {
+    const reserved = reservedLoopLocals([expr], target);
+    try {
+      return compileOp(expr, -1, target, 0, expr);
+    } finally {
+      reserved.done();
     }
   }
 
   return compileOp(expr, -1, target, 0, expr);
+}
+
+/**
+ * Compile `stmts`, the statements of a loop body that is not a `Block` (a
+ * destructuring declare or assign, or a chained assignment, split into
+ * statements), in one scope. A local with the name of an identifier that
+ * the emitted code uses (`_SYS`) gets a fresh name, as in `compileBlock`,
+ * at its `Declare` and at each read and write.
+ */
+function compileLoopBodyStatements(
+  stmts: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string {
+  const reserved = reservedLoopLocals(stmts, target);
+  const tempTarget = loopBodyTempTarget(stmts, target);
+  const bodyTarget: CompileTarget<Expression> = {
+    ...tempTarget,
+    var: (id) => reserved.spell(id) ?? tempTarget.var(id),
+  };
+  try {
+    return stmts.map((s) => core.compileLoopBody(s, bodyTarget)).join('; ');
+  } finally {
+    reserved.done();
+  }
 }
 
 /**

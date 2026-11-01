@@ -1862,6 +1862,108 @@ export function needsStartValue(
  * `withFreshBlockLocals` runs, which `assignLValue` accepts as the
  * spelling of a write. Cleared when the outermost call ends. */
 export const _freshLocalNames = new Set<string>();
+/** The emitted name of a `Declare` statement whose local has the name of an
+ * identifier that the emitted code uses (`_SYS`). The routine that compiles
+ * the statement list of the `Declare` (`compileBlock`, or `compileLoopBody`
+ * for a loop body) gives such a local a fresh name and records it here,
+ * keyed by the `Declare` node, before it compiles the statements
+ * (`noteReservedDeclares`). It removes the record when the statements are
+ * compiled. The `Declare` handler reads it, so the declaration and the
+ * reads in the list use the same name. */
+export const _reservedDeclareNames = new WeakMap<object, string>();
+
+/**
+ * Give a fresh name to each local in `locals` that has the name of an
+ * identifier that the emitted code uses (`CompileTarget.reservedEmittedNames`,
+ * for example `_SYS`, the runtime helper object of the JavaScript target).
+ * Otherwise the declaration of the local hides that identifier in its
+ * scope, and each helper call in the scope fails at run time. A local that
+ * has an entry in `spelled` already keeps it. Each fresh name goes into
+ * `spelled` and into `_freshLocalNames`, so that `assignLValue` accepts a
+ * write of it. Each name that this call adds to `_freshLocalNames` is also
+ * pushed to `added`: the caller removes these names when the scope ends.
+ */
+export function spellReservedLocals(
+  locals: ReadonlyArray<string>,
+  target: CompileTarget<Expression>,
+  spelled: Map<string, string>,
+  added: string[]
+): void {
+  for (const local of locals) {
+    if (spelled.has(local)) continue;
+    if (target.reservedEmittedNames?.has(local) !== true) continue;
+    const fresh = tempVar(target);
+    spelled.set(local, fresh);
+    if (!_freshLocalNames.has(fresh)) {
+      _freshLocalNames.add(fresh);
+      added.push(fresh);
+    }
+  }
+}
+
+/**
+ * Record in `_reservedDeclareNames` the emitted name (`spell`) of each
+ * `Declare` statement in `stmts` whose local has the name of an identifier
+ * that the emitted code uses. Returns the function that removes the
+ * records (and puts back a record that a statement had before). Call it
+ * when the statements are compiled, also when the compilation fails.
+ */
+export function noteReservedDeclares(
+  stmts: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  spell: (name: string) => string
+): () => void {
+  const previous = new Map<object, string | undefined>();
+  for (const s of stmts) {
+    if (!isFunction(s, 'Declare') || !isSymbol(s.ops[0])) continue;
+    const name = s.ops[0].symbol;
+    if (target.reservedEmittedNames?.has(name) !== true) continue;
+    if (!previous.has(s)) previous.set(s, _reservedDeclareNames.get(s));
+    _reservedDeclareNames.set(s, spell(name));
+  }
+  return () => {
+    for (const [s, name] of previous)
+      if (name === undefined) _reservedDeclareNames.delete(s);
+      else _reservedDeclareNames.set(s, name);
+  };
+}
+
+/**
+ * The fresh names of the locals of the statement list `stmts` of a loop
+ * body that have the name of an identifier that the emitted code uses
+ * (`spellReservedLocals`). The `Declare` statements of the list are
+ * recorded (`noteReservedDeclares`). `spell` gives the fresh name of such a
+ * local, or `undefined` for each other name: the target of the body reads
+ * it before its own `var`. Call `done` when the statements are compiled,
+ * also when the compilation fails.
+ */
+export function reservedLoopLocals(
+  stmts: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): { spell: (name: string) => string | undefined; done: () => void } {
+  const spelled = new Map<string, string>();
+  const added: string[] = [];
+  spellReservedLocals(
+    stmts.flatMap((s) =>
+      isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
+    ),
+    target,
+    spelled,
+    added
+  );
+  const unnote = noteReservedDeclares(
+    stmts,
+    target,
+    (name) => spelled.get(name) ?? name
+  );
+  return {
+    spell: (name) => spelled.get(name),
+    done: () => {
+      unnote();
+      for (const name of added) _freshLocalNames.delete(name);
+    },
+  };
+}
 /** The fresh names of loop indices that a target spells itself while the
  * loop body compiles (`withWritableLoopIndices`), which `assignLValue`
  * accepts as the spelling of a write. Kept apart from `_freshLocalNames`,

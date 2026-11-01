@@ -151,6 +151,9 @@ export function compileForLoop(
       throw new Error('Could not compile `Loop`: expected Range(lo, hi)');
 
     const index = indexExpr.symbol;
+    // The emitted name of the index: a fresh name when the index has the
+    // name of an identifier that the emitted code uses (`_SYS`).
+    const indexCode = reservedNameSpelling([index], target)(index);
 
     // Use raw numeric values for the for-loop counter (not target-wrapped).
     // This ensures `for (let i = 1; i <= 5; i++)` uses plain numbers even
@@ -173,8 +176,8 @@ export function compileForLoop(
       var: (id: string) =>
         id === index
           ? needsWrap
-            ? target.number(0).replace('0', index)
-            : index
+            ? target.number(0).replace('0', indexCode)
+            : indexCode
           : target.var(id),
       ...withBoundScope(target, [index]),
     };
@@ -185,7 +188,7 @@ export function compileForLoop(
 
     return `(() => {${target.ws(
       '\n'
-    )}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws(
+    )}for (let ${indexCode} = ${lower}; ${indexCode} <= ${upper}; ${indexCode}++) {${target.ws(
       '\n'
     )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
   }
@@ -565,6 +568,25 @@ export function elementBinderLane(
 }
 
 /**
+ * The emitted name of each loop variable in `names`. A name that the
+ * emitted code uses as an identifier (`CompileTarget.reservedEmittedNames`,
+ * for example `_SYS`, the runtime helper object of the JavaScript target)
+ * gets a fresh name. Otherwise the loop variable hides that identifier in
+ * the loop body, and each helper call in the body fails at run time. Each
+ * other name is its own emitted name.
+ */
+export function reservedNameSpelling(
+  names: ReadonlyArray<string>,
+  target: CompileTarget<Expression>
+): (name: string) => string {
+  const spelled = new Map<string, string>();
+  for (const name of names)
+    if (target.reservedEmittedNames?.has(name) === true && !spelled.has(name))
+      spelled.set(name, tempVar(target));
+  return (name) => spelled.get(name) ?? name;
+}
+
+/**
  * Build nested `for (const name of collection) { … }` loops from a list of
  * `Element` clauses. `makeInner` produces the innermost statement given the
  * loop-variable-aware `bodyTarget`. `prelude` is emitted at the top of the
@@ -604,6 +626,7 @@ export function compileElementLoops(
   // wrapped only when it is a number, as the `Sum` lowering of
   // interval-js does.
   const loopVarSet = new Set(binders.flatMap((b) => b.names));
+  const spell = reservedNameSpelling([...loopVarSet], target);
   const needsWrap = target.number(0) !== '0';
   // A name can be bound by more than one clause (`k ∈ Range(1, 2)`, then
   // `k ∈ Range(1, n)`), and this rule applies to every use of the name.
@@ -638,9 +661,9 @@ export function compileElementLoops(
       loopVarSet.has(id)
         ? needsWrap
           ? wrappedVars.has(id)
-            ? target.number(0).replace('0', id)
-            : `(typeof ${id} === 'number' ? ${target.number(0).replace('0', id)} : ${id})`
-          : id
+            ? target.number(0).replace('0', spell(id))
+            : `(typeof ${spell(id)} === 'number' ? ${target.number(0).replace('0', spell(id))} : ${spell(id)})`
+          : spell(id)
         : target.var(id),
     ...withBoundScope(target, [...loopVarSet]),
   };
@@ -717,7 +740,10 @@ export function compileElementLoops(
   try {
     return emitElementLoops(
       narrowedElements,
-      binders,
+      binders.map((b) => ({
+        ...b,
+        jsPattern: b.jsPattern.replace(/[A-Za-z_$][\w$]*/g, spell),
+      })),
       target,
       bodyTarget,
       makeInner,
@@ -791,7 +817,8 @@ export function emitElementLoops(
       const visible = new Set(binders.slice(0, i + 1).flatMap((b) => b.names));
       const guardTarget: CompileTarget<Expression> = {
         ...target,
-        var: (id: string) => (visible.has(id) ? id : target.var(id)),
+        var: (id: string) =>
+          visible.has(id) ? bodyTarget.var(id) : target.var(id),
         ...withBoundScope(target, [...visible]),
       };
       inner = `if (${compileGuardTest(guard, guardTarget)}) { ${inner} }`;
