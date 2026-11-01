@@ -1344,7 +1344,11 @@ export function tryCompileUserFunction(
   // targets) checks the argument shapes against its static signature.
   if (strictLanes() && !target.userFunctions?.lowering) {
     if (literal !== undefined) {
-      const i = laneMismatchAt(engine, h, literal, args);
+      // A call with a point argument that has a complex coordinate is
+      // inlined below, or declines there with its own reason. The
+      // position-by-position test of a point does not apply to it.
+      const inlined = complexCoordinateArgumentAt(engine, args, target) >= 0;
+      const i = laneMismatchAt(engine, h, literal, args, inlined);
       if (i >= 0)
         laneMismatch(
           'user-function parameter',
@@ -1368,6 +1372,31 @@ export function tryCompileUserFunction(
         );
     }
   }
+  // An argument whose type, or element type, cannot match the declared type
+  // of its parameter (`u: real` given the point `(a, b)`) is declined, as
+  // the `Apply` of a function literal is: in a strict engine the
+  // interpreter gives an `incompatible-type` error for this call, while the
+  // emitted code gives a value (a specialization that maps over the
+  // point, or a scalar body that computes `NaN` from the array of the
+  // point). The test comes before the inlined call of a point with a
+  // complex coordinate (below), because an inlined body gives a value too.
+  // The test compares static types only. A mismatch that depends on the
+  // value at run time is not checked, because the compilation contract
+  // leaves it unspecified (`docs/COMPILATION-MODEL.md`, "Fail closed"):
+  // in `hr((i·x, x))` with `hr = (p: tuple<real, real>) ↦ p[1] + p[2]`,
+  // the static type of `i·x` is `number`, which can match `real`, so the
+  // call compiles and gives `2 + 2i` at `x = 2`, where the interpreter
+  // gives an `incompatible-type` error.
+  if (literal !== undefined) {
+    const mismatch = appliedArgumentTypeMismatch(
+      literal,
+      args,
+      userFunctionParamsAreScalar(engine, h)
+    );
+    if (mismatch !== undefined)
+      throw new Error(`Could not compile a call of \`${h}\`: ${mismatch}`);
+  }
+
   // A point argument with a complex-shaped coordinate — `(x / 1, y / √(1 −
   // e²))`, where the second coordinate lowers through the complex kernels
   // — cannot reach an emitted definition: the definition reads a point
@@ -1402,23 +1431,6 @@ export function tryCompileUserFunction(
           `call could not be inlined instead.`
       );
     }
-  }
-
-  // An argument whose type, or element type, cannot match the declared type
-  // of its parameter (`u: real` given the point `(a, b)`) is declined, as
-  // the `Apply` of a function literal is: in a strict engine the
-  // interpreter gives an `incompatible-type` error for this call, while the
-  // emitted code gives a value (a specialization that maps over the
-  // point, or a scalar body that computes `NaN` from the array of the
-  // point).
-  if (literal !== undefined) {
-    const mismatch = appliedArgumentTypeMismatch(
-      literal,
-      args,
-      userFunctionParamsAreScalar(engine, h)
-    );
-    if (mismatch !== undefined)
-      throw new Error(`Could not compile a call of \`${h}\`: ${mismatch}`);
   }
 
   // An argument whose static type does not prove the declared type of its

@@ -114,11 +114,12 @@ function parts(v: unknown): [number, number] {
 function expectSameValue(
   json: unknown,
   value: unknown = P,
-  jsValue: unknown = jsP
+  jsValue: unknown = jsP,
+  mode?: 'strict'
 ) {
   const interp = ce.box(['Apply', json, value] as any).evaluate();
   const expected = interp.isCollection ? [...interp.each()] : [interp];
-  const r = compile(ce.box(json as any), { fallback: false })!;
+  const r = compile(ce.box(json as any), { fallback: false, mode })!;
   expect(r.success).toBe(true);
   const out = r.run!(jsValue);
   const actual = Array.isArray(out) ? out : [out];
@@ -137,7 +138,13 @@ function expectStrictDecline(json: unknown, message: RegExp) {
 }
 
 describe('A complex point given to an engine-level function', () => {
-  const cases: [string, unknown, string?, unknown?, unknown?][] = [
+  // The last entry of a case is true when the call is inlined: the body of
+  // `h` is compiled at the call site with the point itself, which reads
+  // each coordinate in its own lane. Strict mode then compiles the call
+  // and gives the value of the interpreter. A call that is not inlined
+  // gives the point to the emitted definition of `h`, which reads the
+  // first coordinate as real, so strict mode declines it.
+  const cases: [string, unknown, string?, unknown?, unknown?, boolean?][] = [
     ['an element of a list of points', ['h', ['At', 'P', 1]]],
     [
       'a nested element',
@@ -157,14 +164,20 @@ describe('A complex point given to an engine-level function', () => {
       'tuple<complex, real>',
       ['Tuple', ['Complex', 1, 1], 2],
       [{ re: 1, im: 1 }, 2],
+      true,
     ],
     ['two coordinates', ['h2', ['At', 'P', 1]]],
   ];
-  for (const [name, body, type, value, jsValue] of cases) {
+  for (const [name, body, type, value, jsValue, inlined] of cases) {
     test(`auto: ${name}`, () =>
       expectSameValue(fn(body, type), value, jsValue));
     test(`strict: ${name}`, () =>
-      expectStrictDecline(fn(body, type), /Lane mismatch.*parameter `p`/));
+      inlined
+        ? expectSameValue(fn(body, type), value, jsValue, 'strict')
+        : expectStrictDecline(
+            fn(body, type),
+            /Lane mismatch.*parameter `p`/
+          ));
   }
 
   test('a point with real coordinates compiles in strict mode', () => {
@@ -397,4 +410,33 @@ describe('The decline message of an engine-level Map callback with no type', () 
       fn(['Map', 'g3', 'P']),
       /an element of `P` reaches the parameter `p` of `g3`/
     ));
+});
+
+describe('A written complex point at a parameter declared with a real position', () => {
+  // A call with a written point that has a complex coordinate is compiled
+  // with the body of the function at the call site, which reads each
+  // coordinate in its own lane. The interpreter accepts a coordinate with a
+  // real part and an imaginary part at a position declared `real`, and the
+  // compiled call gives the same value in each mode.
+  ce.assign(
+    'hr',
+    ce.box([
+      'Function',
+      ['Add', ['At', 'p', 1], ['At', 'p', 2]],
+      ['Typed', 'p', "'tuple<real, real>'"],
+    ] as any)
+  );
+  const json = [
+    'Function',
+    ['hr', ['Tuple', ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'x']], 'x']],
+    'x',
+  ];
+  test('the interpreter: hr((x + i·x, x))', () => {
+    const v = ce.box(['Apply', json, 2] as any).evaluate();
+    expect(v.re).toBe(4);
+    expect(v.im).toBe(2);
+  });
+  test('auto: hr((x + i·x, x))', () => expectSameValue(json, 2, 2));
+  test('strict: hr((x + i·x, x))', () =>
+    expectSameValue(json, 2, 2, 'strict'));
 });

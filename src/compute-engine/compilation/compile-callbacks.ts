@@ -397,19 +397,30 @@ export function checkingShimTests(
  * added `1` to a `{re, im}` object and gave the string "[object
  * Object]1". The block-local route applies the same test
  * (`localLaneMismatchAt()` in `compile-user-functions.ts`).
+ *
+ * When `inlined` is true, the position-by-position test is not applied.
+ * The caller sets it when the call is compiled with the body of `h` at the
+ * call site, or else declines: a call with a point argument that has a
+ * complex coordinate (`complexCoordinateArgumentAt()`), written out or
+ * not. The inlined body reads each coordinate of the point in its own
+ * lane, so a complex coordinate at a position typed `number` or `real`
+ * gives the value of the interpreter: `a((x, i·x))` with
+ * `a: (tuple<real, number>) -> unknown`, or `h(P)` with
+ * `P: tuple<complex, real>` and `h = (p) ↦ p[1] + 1`.
  */
 export function laneMismatchAt(
   engine: ComputeEngine,
   h: string,
   literal: Expression & FunctionInterface,
-  args: ReadonlyArray<Expression>
+  args: ReadonlyArray<Expression>,
+  inlined = false
 ): number {
   const nParams = literal.ops.length - 1;
   for (let i = 0; i < nParams; i++) {
     const a = args[i];
     if (a === undefined) continue;
     const declared = userFunctionParamType(engine, h, i);
-    const point = pointLaneMismatch(a, declared);
+    const point = inlined ? undefined : pointLaneMismatch(a, declared);
     if (point === true) return i;
     if (point === false) continue;
     let complex: boolean;

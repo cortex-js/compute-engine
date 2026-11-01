@@ -1465,10 +1465,17 @@ export function multiClauseLaneMismatchAt(
  * arithmetic, the shader targets) can compile.
  *
  * A `Typed` parameter's annotation is not re-validated at the inline call
- * site: the strict lane-mismatch check above already compared the
- * arguments against the declared parameter types before either route was
- * chosen, and the by-reference definition enforces nothing further at run
- * time either.
+ * site. Before any call of this function, the caller
+ * (`tryCompileUserFunction()`) compares the static type of each argument
+ * with the type that the literal declares for its parameter
+ * (`appliedArgumentTypeMismatch()`, in a strict engine), and declines a
+ * call where they cannot match. A mismatch that depends on the value at
+ * run time is not checked: the compilation contract leaves that case
+ * unspecified. `hr((i·x, x))` with `hr = (p: tuple<real, real>) ↦ p[1] +
+ * p[2]` gives `2 + 2i` at `x = 2` where the interpreter gives an
+ * `incompatible-type` error, because the static type of `i·x` is
+ * `number`, which can match `real`. The by-reference definition enforces
+ * nothing further at run time either.
  */
 export function tryInlineUserFunctionCall(
   engine: ComputeEngine,
