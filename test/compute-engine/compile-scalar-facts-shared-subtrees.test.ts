@@ -14,6 +14,14 @@
 // seconds, so the test fails at that step instead of running for an hour at
 // depth 30.
 //
+// One wall-clock measurement can exceed the limit on a loaded machine (a full
+// test run with many workers, a garbage-collection pause): a full run once
+// measured 1176 ms for a compilation that takes under 20 ms alone. So
+// `fastestCompile()` compiles a new copy of the expression again, up to three
+// times, while the time is over the limit, and keeps the fastest time. An
+// exponential compilation is slow at every attempt, so the retries do not
+// hide it.
+//
 // Constant folding is off: with folding on, other walks of the compiler
 // (in `base-compiler.ts`) still follow every path of the folded value.
 
@@ -30,10 +38,28 @@ function doubled(base: Expression, d: number): Expression {
   return e;
 }
 
+const TIME_LIMIT_MS = 1000;
+
 function timedCompile(expr: Expression) {
   const start = performance.now();
   const result = compile(expr, { constantFold: false });
   return { result, ms: performance.now() - start };
+}
+
+/**
+ * Compile `make()` and return the result with the fastest time of at most
+ * three attempts. A new attempt runs only while the time is at or over
+ * `TIME_LIMIT_MS`. Each attempt compiles a new expression from `make()`, so
+ * a value that an earlier compilation stored on the node objects cannot make
+ * a later attempt fast.
+ */
+function fastestCompile(make: () => Expression) {
+  let best = timedCompile(make());
+  for (let i = 1; i < 3 && best.ms >= TIME_LIMIT_MS; i++) {
+    const next = timedCompile(make());
+    if (next.ms < best.ms) best = next;
+  }
+  return best;
 }
 
 describe('COMPILE: SCALAR FACTS OF AN EXPRESSION WITH SHARED SUBTREES', () => {
@@ -45,8 +71,8 @@ describe('COMPILE: SCALAR FACTS OF AN EXPRESSION WITH SHARED SUBTREES', () => {
     for (const d of [22, 30]) {
       const e = doubled(base, d);
       expect(e.ops![0]).toBe(e.ops![1]);
-      const { result, ms } = timedCompile(e);
-      expect(ms).toBeLessThan(1000);
+      const { result, ms } = fastestCompile(() => doubled(base, d));
+      expect(ms).toBeLessThan(TIME_LIMIT_MS);
       expect(result.success).toBe(true);
       // (2 + √3)·2^d
       const expected = (2 + Math.sqrt(3)) * 2 ** d;
@@ -60,14 +86,14 @@ describe('COMPILE: SCALAR FACTS OF AN EXPRESSION WITH SHARED SUBTREES', () => {
     const x = ce.symbol('x');
     const a = ce.symbol('a');
     for (const d of [22, 30]) {
-      const e = doubled(ce.function('Add', [x, ce.One]), d);
-      const block = ce._fn('Block', [
-        ce._fn('Declare', [a, ce.string('real')]),
-        ce._fn('Assign', [a, e]),
-        ce._fn('Multiply', [a, ce.number(2)]),
-      ]);
-      const { result, ms } = timedCompile(block);
-      expect(ms).toBeLessThan(1000);
+      const makeBlock = () =>
+        ce._fn('Block', [
+          ce._fn('Declare', [a, ce.string('real')]),
+          ce._fn('Assign', [a, doubled(ce.function('Add', [x, ce.One]), d)]),
+          ce._fn('Multiply', [a, ce.number(2)]),
+        ]);
+      const { result, ms } = fastestCompile(makeBlock);
+      expect(ms).toBeLessThan(TIME_LIMIT_MS);
       expect(result.success).toBe(true);
       // At x = 1: (1 + 1)·2^d·2
       expect(result.run!({ x: 1 })).toBe(2 ** (d + 2));
