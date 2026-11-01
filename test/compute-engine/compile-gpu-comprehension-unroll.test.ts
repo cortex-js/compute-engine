@@ -239,9 +239,12 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
     ],
     ['a copy of a tuple of points', ['Block', ['Assign', 'Q', 'T'], ['At', 'Q', 'k']]],
   ])('a block local holding %s fails closed', (_, json) => {
+    // The nested-block case assigns `Q` in one branch of an `If` only, so the
+    // read of `Q` after it can also decline because the local may have no
+    // value; either reason declines.
     const r = shader(json, to);
     expect(r.declined).toMatch(
-      /list of points has no static shader declaration/
+      /list of points has no static shader declaration|can read the block local "Q" when no assignment gave it a value/
     );
   });
 

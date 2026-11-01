@@ -384,7 +384,10 @@ describe('a block local replaced element by element is written in place (CE-329)
     const json = [
       'Block',
       declare,
-      ['Declare', 'ys', "'list<real>'"],
+      // `ys` gets a value before the loop: a local that only the loop body
+      // assigns may have no value after a loop that runs zero times, and
+      // such a read declines.
+      ['Declare', 'ys', "'list<real>'", ['List']],
       ['Assign', 'xs', 'L'],
       ['Loop', ['Block', update, ['Assign', 'ys', 'xs']], range],
       ['Add', ['Sum', 'xs'], ['Multiply', 100, ['Sum', 'ys']]],
