@@ -670,7 +670,7 @@ function delimitedOperands(
  * this to treat a value of such a type as present even when it still carries
  * free variables, since no substitution of those variables makes it absent.
  */
-function typeCannotBeAbsent(t: Type): boolean {
+export function typeCannotBeAbsent(t: Type): boolean {
   return !isSubtype('missing', t) && !isSubtype('nan', t);
 }
 

@@ -325,6 +325,24 @@ filled: the call reports `missing` for the required slot as it does today,
 and the default is never shifted into a required slot. The fill does not
 change an operand that is present.
 
+**Amendment of 2026-11-01 (R6 of
+`docs/plans/2026-11-01-absent-value-contract.md`, decided by the user): a
+default also fills a supplied ABSENT argument.** A defaulted slot whose
+operand is absent, or evaluates to an absent value, takes its default, at
+canonicalization when the operand is the written symbol and at evaluation
+otherwise. The test of absence is the one of `Coalesce` (`Missing`,
+`Undefined`, `NaN` and `Indeterminate`; `Nothing` passes through). A
+default parameter is then a discharge of absence, as `Coalesce` is:
+`(k: real | missing = 2) ↦ k` gives 2 for `f()`, `f(Missing)` and
+`f(At(L, 100))` with `L` a list of two points, and `(k: real = 2) ↦ k`
+gives 2 for `f(0/0)`. A caller that needs to pass an absent value through a
+parameter declares no default for it. A lazy operator receives its operands
+unevaluated, so it fills only a written absent operand. Compiled code fills
+the default with the target's own `Coalesce` test (R8), and the fill by
+argument count is removed.
+Before this amendment, a supplied `Missing` stayed `Missing` and only an
+argument left out took the default.
+
 `makeCanonicalFunction` (`src/compute-engine/boxed-expression/box.ts`) has
 several routes, and the fill runs on each of them at the point where the
 positional operand list is final:
@@ -521,25 +539,29 @@ let h = (x, k: number = 2) => x * k
 - A call of a declared operator needs no compiler change: its canonical form
   is saturated (R5).
 - A compiled function literal or user function with `Optional` parameters,
-  JavaScript target: a native default parameter (`function (x, k = 2)`) is
-  emitted when the parameter's type cannot hold `missing`. A native default
-  also fires for a supplied `undefined`, and `undefined` is the run-time
-  spelling of `Missing` (`javascript-target.ts` near its line 3020), so for
-  a parameter typed `number | missing = 2` a supplied `Missing` must stay:
-  the emitted function then takes its parameters without a native default
-  and fills from the argument count (`if (arguments.length < 2) k = …`, a
-  `function` expression, not an arrow). The default expression itself: a
+  JavaScript target: the function fills each defaulted parameter with the
+  test of `Coalesce` (`((_c) => Number.isNaN(_c ?? Number.NaN) ? 2 : _c)(k)`,
+  which reads `undefined`, `null` and `NaN`), not with a native default
+  parameter (`function (x, k = 2)`), which fills only `undefined`: a read
+  past the end of a numeric list passes `NaN`. This is the rule since the
+  amendment of R5 (2026-11-01): a supplied absent value takes the default
+  too. A call of an engine user function wraps an argument whose static
+  type can be absent in `Coalesce(arg, default)` at the call site. Before
+  the amendment a parameter typed `number | missing = 2` kept a supplied
+  `Missing`, and the emitted function filled from the argument count
+  (`if (arguments.length < 2) k = …`); that code is removed. The default
+  expression itself: a
   value default is emitted through the target's own compilation of that
   value (a plain number on the JavaScript target, the interval constant on
   the interval target), never as a raw literal; a symbol default is emitted
   as the read of the symbol (a native default expression is evaluated at
   each call, so the read happens at the call, as the interpreter's does); a
   collection default is `[]` or `{}`, a fresh object per call.
-- Python target: a value default stays native (`k=2`). A symbol or a
-  collection default uses a private omission sentinel, `def f(x, k=_OMITTED)`
-  and `if k is _OMITTED: k = <default>` at the top of the body, because a
-  native Python default is evaluated once when the function is defined and a
-  mutable default is shared between calls.
+- Python target: every defaulted parameter takes `None` as its sentinel
+  and is filled with the test of `Coalesce` (`None`, or a float or complex
+  `NaN`): `lambda k=None: (lambda k: k)(2 if <absent test of k> else k)`.
+  The default is evaluated at each call, so a mutable default is not shared
+  between calls.
 - GLSL, WGSL and interval-JavaScript targets: no default parameters. The
   function is emitted with its full arity, and a call site with fewer
   arguments is completed by the compiler with the default operand, compiled
@@ -783,10 +805,10 @@ files, L: many files or a design question inside).
    optional-parameter diagnostic; a `hold` definition with a default works.
 9. Compilation: `ce.compile(literal)` on the JavaScript target gives a
    function that returns 6 for one argument and 15 for two;
-   `(k: number | missing = 2) => k` compiled keeps a supplied `Missing`
-   (`undefined`) and gives 2 only when the argument is omitted, for an
-   omitted argument, an explicit `Missing` and an expression that evaluates
-   to `Missing`; the Python target emits `k=2` for a value default and the
+   `(k: number | missing = 2) => k` compiled gives 2 for an omitted
+   argument, an explicit `Missing` and an expression that evaluates to
+   `Missing` (the amendment of R5, 2026-11-01; before it, a supplied
+   `Missing` stayed); the Python target emits `k=2` for a value default and the
    sentinel form for a symbol default, and a Python test changes the
    symbol's binding between the definition and an omitted-argument call and
    reads the new value; a collection default gives a fresh empty list per

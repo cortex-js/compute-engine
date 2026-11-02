@@ -1840,11 +1840,16 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
     expect(ce.box(['Apply', lit, q]).N().toString()).toBe('24');
   });
 
-  test('a numeric parameter with a default accepts NaN, and Missing is read as NaN', () => {
+  test('a numeric parameter with a default fills NaN and Missing with the default', () => {
+    // A default fills an absent argument as it fills an argument that the
+    // call leaves out, with the absence test of `Coalesce`, for which `NaN`
+    // is absent (R6 of docs/plans/2026-11-01-absent-value-contract.md).
+    // Before R6, `NaN` was accepted and `Missing` was read as `NaN`.
     const ce = new ComputeEngine();
     const lit = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 0]];
-    expect(ce.box(['Apply', lit, 'NaN']).evaluate().toString()).toBe('NaN');
-    expect(ce.box(['Apply', lit, 'Missing']).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['Apply', lit, 'NaN']).evaluate().toString()).toBe('0');
+    expect(ce.box(['Apply', lit, 'Missing']).evaluate().toString()).toBe('0');
+    expect(ce.box(['Apply', lit, 5]).evaluate().toString()).toBe('5');
   });
 
   test('a bare parameter with a default imposes no constraint, as without the default', () => {
@@ -1863,8 +1868,13 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
     ];
     const a = ce.box(['Apply', withDefault, 1, 'Missing']).evaluate();
     const b = ce.box(['Apply', without, 1, 'Missing']).evaluate();
-    expect(a.toString()).toBe(b.toString());
+    // A default fills a supplied `Missing` (R6 of
+    // docs/plans/2026-11-01-absent-value-contract.md), so the values differ;
+    // neither call refuses its argument.
+    expect(a.toString()).toBe('2');
+    expect(b.toString()).toBe('NaN');
     expect(a.operator).not.toBe('Error');
+    expect(b.operator).not.toBe('Error');
   });
 
   test('the callback compatibility rule widens a bare parameter with a default', () => {

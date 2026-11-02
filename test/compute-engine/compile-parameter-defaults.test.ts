@@ -3,6 +3,16 @@
 // `["Function", body, "x", ["Optional", "k", 2]]` (GitHub issue #490).
 //
 // Spec: docs/plans/2026-10-31-parameter-default-values.md, R8 and §7 item 9.
+//
+// A default fills an absent argument as it fills an argument that the call
+// leaves out: `(k: real | missing = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
+// and `f(At(L, 100))`. The test of absence is the one of `Coalesce`:
+// `Missing`, `Undefined`, `NaN` and `Indeterminate` in the interpreter;
+// `undefined`, `null` and `NaN` in compiled JavaScript; `None` and a float or
+// complex `NaN` in compiled Python. So the compiled code fills a default in
+// the body, not with a native default parameter, which fills only an
+// argument that is left out (R6 of
+// docs/plans/2026-11-01-absent-value-contract.md).
 
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -21,7 +31,7 @@ function defaulted(d: Json, body: Json = ['Multiply', 'x', 'k']): Json {
 }
 
 /** `(x, k: number | missing = 2) => k`: `k` can hold `Missing`. */
-const KEEPS_MISSING: Json = [
+const MAYBE_MISSING: Json = [
   'Function',
   'k',
   'x',
@@ -78,7 +88,7 @@ describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
     expect(interpreted(ce, ['Apply', defaulted(2), 3, 5])).toBe(15);
   });
 
-  test('a parameter whose type cannot hold `Missing` takes a JavaScript default parameter', () => {
+  test('a parameter whose type cannot hold `Missing` is filled in the body', () => {
     const lit = [
       'Function',
       ['Multiply', 'x', 'k'],
@@ -86,36 +96,42 @@ describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
       ['Optional', ['Typed', 'k', "'number'"], 2],
     ];
     const fn: any = jsFunction(ce, lit);
-    expect(fn.code).toBe('(x, k = 2) => { return k * x; }');
+    expect(fn.code).toBe(
+      '(x, k) => { if (Number.isNaN((k) ?? Number.NaN)) k = 2; return k * x; }'
+    );
     expect(fn.run(3)).toBe(6);
     expect(fn.run(3, 5)).toBe(15);
+    // `NaN` is absent for the default as for `Coalesce`.
+    expect(fn.run(3, NaN)).toBe(6);
   });
 
-  test('`(x, k: number | missing = 2) => k` keeps a supplied `Missing`', () => {
-    const fn: any = jsFunction(ce, KEEPS_MISSING);
+  test('`(x, k: number | missing = 2) => k` fills a supplied `Missing`', () => {
+    // A default fills an absent argument as it fills an argument that the
+    // call leaves out (R6 of docs/plans/2026-11-01-absent-value-contract.md).
+    // Before R6, a supplied `Missing` was kept.
+    const fn: any = jsFunction(ce, MAYBE_MISSING);
     expect(fn.success).toBe(true);
     // An omitted argument: the default.
     expect(fn.run(3)).toBe(2);
-    expect(interpreted(ce, ['Apply', KEEPS_MISSING, 3])).toBe(2);
-    // An explicit `Missing` (`undefined` at run time) is kept.
-    expect(fn.run(3, undefined)).toBeUndefined();
-    expect(interpreted(ce, ['Apply', KEEPS_MISSING, 3, 'Missing'])).toBe(
-      'Missing'
-    );
+    expect(interpreted(ce, ['Apply', MAYBE_MISSING, 3])).toBe(2);
+    // An explicit `Missing` (`undefined` at run time): the default.
+    expect(fn.run(3, undefined)).toBe(2);
+    expect(interpreted(ce, ['Apply', MAYBE_MISSING, 3, 'Missing'])).toBe(2);
     // An expression that evaluates to `Missing`.
-    const firstOfEmpty = ['Apply', KEEPS_MISSING, 'y', ['First', ['List']]];
-    expect(interpreted(ce, firstOfEmpty, { y: 1 })).toBe('Missing');
-    expect(run(ce, firstOfEmpty, 'javascript', { y: 1 }).value).toBeUndefined();
-    const written = ['Apply', KEEPS_MISSING, 'y', 'Missing'];
-    expect(run(ce, written, 'javascript', { y: 1 }).value).toBeUndefined();
+    const firstOfEmpty = ['Apply', MAYBE_MISSING, 'y', ['First', ['List']]];
+    expect(interpreted(ce, firstOfEmpty, { y: 1 })).toBe(2);
+    expect(run(ce, firstOfEmpty, 'javascript', { y: 1 }).value).toBe(2);
+    const written = ['Apply', MAYBE_MISSING, 'y', 'Missing'];
+    expect(run(ce, written, 'javascript', { y: 1 }).value).toBe(2);
   });
 
-  test('a function value with a default whose type can hold `Missing` is filled from the argument count', () => {
-    // `Map` calls the value with one argument; a bare `k` has the type
-    // `unknown`, which can hold `Missing`.
+  test('a function value with a default is filled by a wrapper that tests the absence of the argument', () => {
+    // `Map` calls the value with one argument.
     const expr = ['Map', defaulted(2), ['List', 'y', 2]];
     const { code, value } = run(ce, expr, 'javascript', { y: 1 });
-    expect(code).toMatch(/\.length < 2\) _tv\d+ = 2;/);
+    expect(code).toMatch(
+      /\(\(_c\) => Number\.isNaN\(_c \?\? Number\.NaN\) \? 2 : _c\)\(_tv\d+\)/
+    );
     expect(value).toEqual([2, 4]);
     expect(interpreted(ce, expr, { y: 1 })).toEqual(['List', 2, 4]);
   });
@@ -166,7 +182,9 @@ describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
     ];
     const fn: any = jsFunction(ce, lit);
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('(m = ({})) => { return m; }');
+    expect(fn.code).toBe(
+      '(m) => { if (Number.isNaN((m) ?? Number.NaN)) m = ({}); return m; }'
+    );
     const a = fn.run();
     const b = fn.run();
     expect(a).toEqual({});
@@ -248,20 +266,27 @@ describe('COMPILED PARAMETER DEFAULTS: PYTHON', () => {
   const ce = new ComputeEngine();
   ce.declare('d', 'real');
 
-  test('a value default is a Python default parameter', () => {
-    expect(run(ce, defaulted(2), 'python').code).toBe('(lambda x, k=2: k * x)');
+  // The absence test of the discharges on the Python target
+  // (`PY_ABSENT_TEST`, `python-target.ts`), applied to `k`.
+  const absent = (k: string) =>
+    `(lambda _c: _c is None or (isinstance(_c, (float, complex, np.floating, np.complexfloating)) and cmath.isnan(_c)))(${k})`;
+
+  test('a value default fills `None` and an absent argument', () => {
+    expect(run(ce, defaulted(2), 'python').code).toBe(
+      `(lambda x, k=None: (lambda k: k * x)(2 if ${absent('k')} else k))`
+    );
   });
 
-  test('a symbol default and a collection default take the omission marker', () => {
+  test('a symbol default and a collection default are evaluated at each call', () => {
     expect(run(ce, defaulted('d'), 'python').code).toBe(
-      '((lambda _tv1: (lambda x, k=_tv1: (lambda k: k * x)(d if k is _tv1 else k)))(object()))'
+      `(lambda x, k=None: (lambda k: k * x)(d if ${absent('k')} else k))`
     );
     const lit = [
       'Function',
       'xs',
       ['Optional', ['Typed', 'xs', "'list<number>'"], ['List']],
     ];
-    expect(run(ce, lit, 'python').code).toContain('[] if xs is _tv1');
+    expect(run(ce, lit, 'python').code).toContain(`[] if ${absent('xs')}`);
   });
 
   const python = TEST_PYTHON ?? '';
@@ -283,6 +308,8 @@ describe('COMPILED PARAMETER DEFAULTS: PYTHON', () => {
     // a call that leaves out `k`: the call reads the new value.
     const program = [
       'import json',
+      'import cmath',
+      'import numpy as np',
       `f = ${value}`,
       'd = 1',
       `g = ${symbol}`,
@@ -312,6 +339,8 @@ describe('COMPILED PARAMETER DEFAULTS: PYTHON', () => {
     ];
     const program = [
       'import json',
+      'import cmath',
+      'import numpy as np',
       `h = ${run(ce, lit, 'python').code}`,
       'a = h()',
       'b = h()',
@@ -345,8 +374,13 @@ describe('COMPILED PARAMETER DEFAULTS: INTERVAL, GLSL AND WGSL', () => {
     expect(point(run(ce, saturated, 'interval-js', { y: 3 }).value)).toBe(15);
     const { code, value } = run(ce, completed, 'interval-js', { y: 3 });
     expect(point(value)).toBe(6);
-    // The default is an interval constant, passed at the call site.
-    expect(code).toBe('(((x, k) => _IA.mul(k, x)))(_.y, _k1)');
+    // The default is an interval constant, passed at the call site. The
+    // literal also fills an argument that a consumer leaves out, with a
+    // JavaScript default parameter (`defaultFillingWrapper()`): the interval
+    // target does not fill a supplied absent argument.
+    expect(code).toBe(
+      '(((_tv1) => ((_tv2, _tv3 = _k1) => _tv1(_tv2, _tv3)))(((x, k) => _IA.mul(k, x))))(_.y, _k1)'
+    );
   });
 
   test('interval: a `Map` callback and a block-local call', () => {
@@ -678,3 +712,457 @@ function runPython(python: string, lines: string[]): unknown {
     fs.unlinkSync(file);
   }
 }
+
+// A default fills an absent argument, supplied or left out: the default is a
+// discharge of absence, with the absence test of `Coalesce` (`Missing`,
+// `Undefined`, `NaN`, `Indeterminate` in the interpreter; `undefined`, `null`,
+// `NaN` in JavaScript; `None` and a float `NaN` in Python). A read past the
+// end of a list of numbers gives `NaN` in compiled code. `Nothing` is not an
+// argument: it is removed from the call, so the parameter is left out (R6 of
+// docs/plans/2026-11-01-absent-value-contract.md).
+describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () => {
+  const ce = new ComputeEngine();
+  ce.declare('L', 'list<real>');
+  ce.declare('P', 'list<tuple<real, real>>');
+  ce.declare('M', 'list<real | missing>');
+  // A default value is a number, a string, a boolean, a symbol, `[]` or
+  // `{}`: a point default is a symbol whose value is the point.
+  ce.declare('O', {
+    type: 'tuple<real, real>',
+    value: ['Tuple', 0, 0],
+    constant: true,
+  } as any);
+
+  /** `(k: real | missing = 2) ↦ k` */
+  const K: Json = [
+    'Function',
+    'k',
+    ['Optional', ['Typed', 'k', "'real | missing'"], 2],
+  ];
+  /** `(k: real = 2) ↦ k` */
+  const KR: Json = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 2]];
+  /** `(q: tuple<real, real> | missing = O) ↦ q`, with `O` = (0, 0) */
+  const Q: Json = [
+    'Function',
+    'q',
+    ['Optional', ['Typed', 'q', "'tuple<real, real> | missing'"], 'O'],
+  ];
+  const MAP: Json = [
+    'Map',
+    [
+      'Function',
+      ['Coalesce', 'k', 0],
+      ['Optional', ['Typed', 'k', "'real | missing'"], 2],
+    ],
+    'M',
+  ];
+
+  // Each program, and its value on every route.
+  const programs: [string, Json, unknown][] = [
+    ['f()', ['Apply', K], 2],
+    ['f(Missing)', ['Apply', K, 'Missing'], 2],
+    ['f(At(L, 100))', ['Apply', K, ['At', 'L', 100]], 2],
+    ['f(Nothing)', ['Apply', K, 'Nothing'], 2],
+    ['g(0/0) with k: real', ['Apply', KR, ['Divide', 0, 0]], 2],
+    ['g(NaN) with k: real', ['Apply', KR, 'NaN'], 2],
+    ['g(5) with k: real', ['Apply', KR, 5], 5],
+    ['q()', ['Apply', Q], [0, 0]],
+    ['q(Missing)', ['Apply', Q, 'Missing'], [0, 0]],
+    ['q(At(P, 5))', ['Apply', Q, ['At', 'P', 5]], [0, 0]],
+    ['q(At(P, 1))', ['Apply', Q, ['At', 'P', 1]], [1, 2]],
+    ['Map((k = 2) ↦ Coalesce(k, 0), M)', MAP, [2, 3]],
+    [
+      'a block-local function',
+      ['Block', ['Assign', 'h', K], ['h', ['At', 'L', 100]]],
+      2,
+    ],
+  ];
+
+  const values = {
+    L: ['List', 1, 2],
+    P: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+    M: ['List', 'Missing', 3],
+  };
+
+  /** The interpreter's value as a number or a list of numbers. */
+  function interpreterValue(expr: Json): unknown {
+    const sub = Object.fromEntries(
+      Object.entries(values).map(([k, v]) => [k, ce.box(v)])
+    );
+    const v = ce.box(expr).subs(sub).evaluate();
+    if (v.isCollection || v.operator === 'Tuple')
+      return [...(v.each() as any)].map((x: any) => x.re);
+    return v.re;
+  }
+
+  test.each(programs)('interpreter: %s', (_, expr, expected) => {
+    expect(interpreterValue(expr)).toEqual(expected);
+  });
+
+  test.each(programs)('JavaScript: %s', (_, expr, expected) => {
+    const vars = { L: [1, 2], P: [[1, 2], [3, 4]], M: [undefined, 3] };
+    expect(run(ce, expr, 'javascript', vars).value).toEqual(expected);
+  });
+
+  test('a call of a user function fills an argument that is absent at run time', () => {
+    // The emitted definition takes every argument from the call, so the
+    // call site fills the argument (`absentFilledArguments()`).
+    const ce2 = new ComputeEngine();
+    const r = executeEpsil(ce2, 'function f(x, k: real | missing = 2) { k }');
+    expect(r.diagnostics).toEqual([]);
+    ce2.declare('L', 'list<real>');
+    for (const [expr, expected] of [
+      [['f', 1, ['At', 'L', 100]], 2],
+      [['f', 1, ['At', 'L', 1]], 1],
+      [['f', 1, 'Missing'], 2],
+      [['f', 1], 2],
+      [['Map', 'f', 'L'], [2, 2]],
+    ] as [Json, unknown][]) {
+      const v = ce2.box(expr).subs({ L: ce2.box(['List', 1, 2]) }).evaluate();
+      expect(
+        v.isCollection ? [...(v.each() as any)].map((x: any) => x.re) : v.re
+      ).toEqual(expected);
+      expect(run(ce2, expr, 'javascript', { L: [1, 2] }).value).toEqual(
+        expected
+      );
+    }
+  });
+
+  test('the root function literal fills a supplied absent argument', () => {
+    const fn: any = jsFunction(ce, K);
+    expect([fn.run(), fn.run(undefined), fn.run(null), fn.run(NaN)]).toEqual(
+      [2, 2, 2, 2]
+    );
+    expect(fn.run(5)).toBe(5);
+  });
+
+  const python = TEST_PYTHON ?? '';
+  const pythonTest = fs.existsSync(python) ? test : test.skip;
+
+  pythonTest('Python', () => {
+    const lines = [
+      'import json',
+      'import cmath',
+      'import numpy as np',
+      'L = [1.0, 2.0]',
+      'P = [(1.0, 2.0), (3.0, 4.0)]',
+      'M = [None, 3.0]',
+      'out = []',
+    ];
+    for (const [, expr] of programs) {
+      const { code } = run(ce, expr, 'python');
+      // A block compiles to statements that end with a `return`.
+      if (code.includes('\n')) {
+        lines.push(
+          `def _block():\n${code
+            .split('\n')
+            .map((l) => `    ${l}`)
+            .join('\n')}`
+        );
+        lines.push('out.append(_block())');
+      } else lines.push(`out.append(${code})`);
+    }
+    lines.push(
+      'print(json.dumps([list(v) if isinstance(v, (list, tuple)) else v for v in out]))'
+    );
+    const file = path.join(os.tmpdir(), `ce-py-absent-default-${process.pid}.py`);
+    fs.writeFileSync(file, lines.join('\n'));
+    let out = '';
+    try {
+      out = execFileSync(python, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    expect(JSON.parse(out)).toEqual(programs.map(([, , expected]) => expected));
+  });
+});
+
+// Review fixes of the fill of an absent argument (R6 of
+// docs/plans/2026-11-01-absent-value-contract.md).
+describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY ROUTE', () => {
+  /** The interpreter's value: a number, or a list of numbers. */
+  function value(ce: ComputeEngine, expr: Json, vals: Record<string, Json> = {}) {
+    const sub = Object.fromEntries(
+      Object.entries(vals).map(([k, v]) => [k, ce.box(v)])
+    );
+    const v = ce.box(expr).subs(sub).evaluate();
+    if (v.isCollection || v.operator === 'Tuple')
+      return [...(v.each() as any)].map((x: any) => x.re);
+    return v.re;
+  }
+
+  test('a present list or point argument of a user function is passed whole', () => {
+    // Only an argument whose type can hold an absent value is filled at the
+    // call: a list or a point is present, and keeps its shape.
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'function hu(x, k = 2) { k }\nfunction hr(x, k: real = 2) { k + x }'
+    );
+    expect(r.diagnostics).toEqual([]);
+    ce.declare('L', 'list<real>');
+    ce.declare('T', 'tuple<real, real>');
+    const vals = { L: ['List', 1, 2], T: ['Tuple', 1, 2] };
+    const vars = { L: [1, 2], T: [1, 2] };
+    for (const [expr, expected] of [
+      [['hu', 1, 'L'], [1, 2]],
+      [['hu', 1, 'T'], [1, 2]],
+      [['hr', 1, 'L'], [2, 3]],
+    ] as [Json, unknown][]) {
+      expect(value(ce, expr, vals)).toEqual(expected);
+      expect(run(ce, expr, 'javascript', vars).value).toEqual(expected);
+    }
+  });
+
+  test('an absent argument at a typed parameter is filled before its type is tested', () => {
+    const ce = new ComputeEngine();
+    ce.declare('M', 'list<real | missing>');
+    const KR = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 2]];
+    for (const expr of [
+      ['Apply', KR, ['At', 'M', 1]],
+      ['Block', ['Assign', 'g', KR], ['g', ['At', 'M', 1]]],
+    ]) {
+      expect(value(ce, expr, { M: ['List', 'Missing', 3] })).toBe(2);
+      expect(run(ce, expr, 'javascript', { M: [undefined, 3] }).value).toBe(2);
+    }
+  });
+
+  test('a call of a user function fills an argument whose `real` value is NaN at run time', () => {
+    // A `real` value can be `NaN` in compiled code (`0/0`), so an argument
+    // of a numeric type is filled at the call site.
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'function h(x, k: real = 2) { x + k }\nfunction hu(x, k = 2) { k }'
+    );
+    expect(r.diagnostics).toEqual([]);
+    ce.declare('M', 'list<real | missing>');
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    const vals = { M: ['List', 'Missing', 3], x: 0, y: 0 };
+    const vars = { M: [undefined, 3], x: 0, y: 0 };
+    const overM = ['Map', ['Function', ['h', 1, 'z'], 'z'], 'M'];
+    expect(value(ce, overM, vals)).toEqual([3, 4]);
+    expect(run(ce, overM, 'javascript', vars).value).toEqual([3, 4]);
+    const quotient = [
+      'Map',
+      ['Function', ['h', 1, 'z'], 'z'],
+      ['List', ['Divide', 'x', 'y'], 1],
+    ];
+    expect(value(ce, quotient, vals)).toEqual([3, 2]);
+    expect(run(ce, quotient, 'javascript', vars).value).toEqual([3, 2]);
+    // An argument typed `unknown` at an untyped parameter: the call
+    // declines, and the interpreter gives the value.
+    const untyped = ['Map', ['Function', ['hu', 1, 'z'], 'z'], 'M'];
+    expect(value(ce, untyped, vals)).toEqual([2, 3]);
+    const options = { to: 'javascript', fallback: false } as any;
+    expect(() => compile(ce.box(untyped) as any, options)).toThrow();
+  });
+
+  describe('interval-js: a supplied argument that can be absent declines', () => {
+    // On the interval target, the absent value (`empty`) is also the value
+    // of a pole or a domain error, so a run-time fill would replace a
+    // present value by the default. The compilation declines, and the
+    // interpreter fills the argument.
+    const ce = new ComputeEngine();
+    const r = executeEpsil(ce, 'function hr(x, k: real = 2) { k + x }');
+    expect(r.diagnostics).toEqual([]);
+    ce.declare('y', 'real');
+    ce.declare('L', 'list<real>');
+    const K = ['Function', 'k', ['Optional', 'k', 2]];
+    const declines = (expr: Json) => {
+      const result: any = compile(ce.box(expr) as any, {
+        to: 'interval-js',
+        fallback: false,
+      } as any);
+      return result.success !== true;
+    };
+
+    test.each([
+      ['a pole', ['Apply', K, ['Divide', 1, ['Subtract', 'y', 3]]]],
+      ['a domain error', ['Sqrt', ['Subtract', 'y', 5]]],
+      ['a user function call', ['hr', 1, ['At', 'L', 9]]],
+    ])('%s', (_, expr) => {
+      const e = expr[0] === 'Sqrt' ? ['Apply', K, expr] : expr;
+      expect(declines(e)).toBe(true);
+    });
+
+    test('a present argument and a left-out argument compile', () => {
+      expect(point(run(ce, ['Apply', K, 5], 'interval-js').value)).toBe(5);
+      expect(point(run(ce, ['Apply', K], 'interval-js').value)).toBe(2);
+      const mapped = [
+        'Map',
+        ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 2]],
+        ['List', 'y', 2],
+      ];
+      const values = run(ce, mapped, 'interval-js', { y: 3 }).value as unknown[];
+      expect(values.map(point)).toEqual([6, 4]);
+    });
+  });
+
+  test('evaluateAsync: a symbol default reads the scope of the call', async () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'real');
+    ce.assign('d', 1);
+    ce.declare('F5', {
+      signature: '(k: real | missing = d) -> real',
+      evaluate: ([k]) => k,
+    });
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'd', "'real'"],
+      ['Assign', 'd', 7],
+      ['F5', ['First', ['List']]],
+    ]);
+    expect(expr.evaluate().toString()).toBe('7');
+    expect((await expr.evaluateAsync()).toString()).toBe('7');
+  });
+
+  test('under `.N()`, a default filled at run time is read exactly at an integer parameter', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Big', 'integer');
+    ce.assign('Big', ce.parse('10^{30}+1'));
+    ce.declare('F6', {
+      signature: '(n: integer = Big) -> integer',
+      evaluate: ([n]) => n,
+    });
+    const leftOut = ce.box(['F6']).N().toString();
+    const absent = ce.box(['F6', ['First', ['List']]]).N().toString();
+    expect(leftOut).toBe('1000000000000000000000000000001');
+    expect(absent).toBe(leftOut);
+  });
+
+  test('a default of the signature declared for a variable fills an absent argument', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<real>');
+    ce.declare('fv', '(real, real = 2) -> real');
+    ce.assign('fv', ce.box(['Function', ['Add', 'x', 'k'], 'x', 'k']));
+    ce.declare('fl', '(list<real> = []) -> list<real>');
+    ce.assign('fl', ce.box(['Function', 'v', 'v']));
+    const vals = { L: ['List', 1, 2] };
+    const call = ['fv', 1, ['At', 'L', 9]];
+    expect(value(ce, call, vals)).toBe(3);
+    expect(run(ce, call, 'javascript', { L: [1, 2] }).value).toBe(3);
+    expect(value(ce, ['fl', ['At', ['List', 'L'], 5]], vals)).toEqual([]);
+  });
+});
+
+describe('COMPILED PARAMETER DEFAULTS: DECLARED DEFAULTS AND BROADCASTS', () => {
+  test('the default of the declared signature comes before the default of the literal', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<real>');
+    ce.declare('g', '(number, number = 2) -> number');
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 3]])
+    );
+    const expr = ['g', 3, ['At', 'L', 9]];
+    expect(
+      ce.box(expr).subs({ L: ce.box(['List', 1, 2]) }).evaluate().re
+    ).toBe(6);
+    expect(run(ce, expr, 'javascript', { L: [1, 2] }).value).toBe(6);
+  });
+
+  test('an absent cell of a broadcast takes the declared default', async () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(real | missing = 2) -> real');
+    ce.assign('g', ce.box(['Function', ['Coalesce', 'k', 0], 'k']));
+    const expr = ce.box(['g', ['List', 'Missing', 3]]);
+    expect(expr.evaluate().toString()).toBe('[2,3]');
+    expect((await expr.evaluateAsync()).toString()).toBe('[2,3]');
+  });
+
+  test('a named callback mapped over rows fills each absent element', () => {
+    const ce = new ComputeEngine();
+    ce.declare('rows', 'list<list<number>>');
+    ce.assign(
+      'f',
+      ce.box(['Function', ['Coalesce', 'k', 0], ['Optional', 'k', 2]])
+    );
+    const expr = ['Map', 'f', 'rows'];
+    const v = ce
+      .box(expr)
+      .subs({ rows: ce.box(['List', ['List', 'NaN', 3]]) })
+      .evaluate();
+    expect(v.toString()).toBe('[[2,3]]');
+    expect(run(ce, expr, 'javascript', { rows: [[NaN, 3]] }).value).toEqual([
+      [2, 3],
+    ]);
+  });
+});
+
+describe('COMPILED PARAMETER DEFAULTS: A CALL THAT MAPS OVER A LIST', () => {
+  // A call of a user function with scalar parameters maps it over a list
+  // argument. The list is present, but each absent cell takes the default,
+  // as in the interpreter: the mapped function fills it.
+  const ce = new ComputeEngine();
+  const r = executeEpsil(
+    ce,
+    [
+      'function hu(a, k = 2) { a + k }',
+      'function hr(a, k: real = 2) { a + k }',
+      'function f(k: real | missing = 2) { k ?? 0 }',
+    ].join('\n')
+  );
+  expect(r.diagnostics).toEqual([]);
+  ce.declare('fv', '(real, real = 2) -> real');
+  ce.assign('fv', ce.box(['Function', ['Add', 'a', 'k'], 'a', 'k']));
+  ce.declare('N', 'list<real | missing>');
+  ce.declare('LM', 'list<real | missing>');
+  ce.declare('L', 'list<real>');
+  const vals: Record<string, Json> = {
+    N: ['List', 'NaN', 'Missing', 0, 4],
+    LM: ['List', 'Missing', 3],
+    L: ['List', 1, 2],
+  };
+  const vars = { N: [NaN, undefined, 0, 4], LM: [undefined, 3], L: [1, 2] };
+
+  test.each([
+    ['fv(1, N)', ['fv', 1, 'N'], [3, 3, 1, 5]],
+    ['hu(1, N)', ['hu', 1, 'N'], [3, 3, 1, 5]],
+    ['hr(1, N)', ['hr', 1, 'N'], [3, 3, 1, 5]],
+    ['f(LM)', ['f', 'LM'], [2, 3]],
+    ['hr(1, L), present cells', ['hr', 1, 'L'], [2, 3]],
+  ] as [string, Json, number[]][])('%s', (_, expr, expected) => {
+    const sub = Object.fromEntries(
+      Object.entries(vals).map(([k, v]) => [k, ce.box(v)])
+    );
+    const v = ce.box(expr).subs(sub).evaluate();
+    expect([...(v.each() as any)].map((x: any) => x.re)).toEqual(expected);
+    expect(run(ce, expr, 'javascript', vars).value).toEqual(expected);
+  });
+});
+
+describe('COMPILED PARAMETER DEFAULTS: A CALL THAT MAPS OVER A LIST OF POINTS', () => {
+  // A list of points paired with a list at a scalar parameter with a
+  // default: each absent element takes the default.
+  const ce = new ComputeEngine();
+  const r = executeEpsil(
+    ce,
+    'function hp(p: tuple<real, real>, k = 2) { p[1] * k }'
+  );
+  expect(r.diagnostics).toEqual([]);
+  ce.declare('P', 'list<tuple<real, real>>');
+  ce.declare('V', 'list<real>');
+  ce.declare('N2', 'list<real>');
+  const vals: Record<string, Json> = {
+    P: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+    V: ['List', 'NaN', 3],
+    N2: ['List', 1, 'NaN', 7],
+  };
+  const vars = { P: [[1, 2], [3, 4]], V: [NaN, 3], N2: [1, NaN, 7] };
+
+  test.each([
+    ['hp(P, [NaN, 3])', ['hp', 'P', 'V'], [2, 9]],
+    ['hp(P, Take(N2, 2))', ['hp', 'P', ['Take', 'N2', 2]], [1, 6]],
+    ['hp(P), left out', ['hp', 'P'], [2, 6]],
+    ['hp(P, [5, 3]), present', ['hp', 'P', ['List', 5, 3]], [5, 9]],
+  ] as [string, Json, number[]][])('%s', (_, expr, expected) => {
+    const sub = Object.fromEntries(
+      Object.entries(vals).map(([k, v]) => [k, ce.box(v)])
+    );
+    const v = ce.box(expr).subs(sub).evaluate();
+    expect([...(v.each() as any)].map((x: any) => x.re)).toEqual(expected);
+    expect(run(ce, expr, 'javascript', vars).value).toEqual(expected);
+  });
+});

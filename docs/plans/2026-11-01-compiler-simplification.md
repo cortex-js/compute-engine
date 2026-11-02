@@ -198,3 +198,16 @@ in the interval `pointComponent`, so that a present point next to an absent
 one keeps its coordinates. One case now declines: `Equal(s, t)` with both
 operands `string | missing` on JavaScript. Corpus: 0 new declines, 0
 changed values, 51 throws became `NaN` in 7 expressions `W(C_{ube}…)`.
+
+**Candidate 10 with R6 (2026-11-01).** The user decided R6: a default fills
+an argument that is left out and one that is absent, with the absence test
+of `Coalesce` (`Missing`, `Undefined`, `NaN`, `Indeterminate`). The fill by
+argument count is removed. This is not a net removal: the interpreter fills
+at canonicalization and at evaluation, and compiled code fills each
+defaulted parameter with the target's `Coalesce` test, at function entry,
+inside a static map, and per cell of a broadcast call (source +925 −355).
+On `interval-js`, where an empty interval is either an absent value or a
+pole, a supplied numeric argument at a defaulted position declines. Four
+review rounds (the third and fourth because fixes of the round before
+introduced or left a wrong value). Corpus: 0 new declines, 0 changed
+values.

@@ -846,6 +846,10 @@ each of them where it reports the plain read:
   and fails with an `expected-present` error when it is not. Use it where
   absence is a violated precondition rather than a case to handle.
 
+A default parameter is a fourth discharge: `(k: real | missing = 2) => k`
+gives 2 when the argument is left out, when it is `missing`, and when it is
+`NaN`, as `??` would.
+
 Discharge before you compute. The interpreter carries `missing` through
 other operators as a convenience (`missing + 1` is `NaN`, `missing > 0` is
 `missing`), but compiled code promises only the discharges above and the

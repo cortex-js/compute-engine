@@ -33,6 +33,7 @@ import {
   isCharacter,
   isDictionary,
   isFunction,
+  isMissingValue,
   isNumber,
   isString,
   isSymbol,
@@ -686,9 +687,12 @@ export function signatureDefaultOperands(
  *   `(x: number, factor: number = 2)`), nothing is inserted: the call reports
  *   `missing` for the required parameter as it does without defaults, and a
  *   default is never moved into a required position.
- * - An operand that is present is never changed.
+ * - An operand that is absent (`Missing`, `Undefined`, `NaN`,
+ *   `Indeterminate`: the absence test of `Coalesce`, `isMissingValue()`) at
+ *   a parameter with a default is replaced by the default too
+ *   (`withAbsentDefaults()`). An operand that is present is never changed.
  *
- * Returns `ops` itself when nothing is inserted.
+ * Returns `ops` itself when nothing is inserted or replaced.
  */
 export function fillParameterDefaults(
   ops: ReadonlyArray<Expression>,
@@ -700,6 +704,7 @@ export function fillParameterDefaults(
     return ops;
   const required = signature.args?.length ?? 0;
   if (supplied < required) return ops;
+  ops = withAbsentDefaults(ops, required, defaults, callSiteDefault);
   const added: Expression[] = [];
   for (let i = supplied - required; i < defaults.length; i++) {
     const d = defaults[i];
@@ -707,6 +712,58 @@ export function fillParameterDefaults(
     added.push(callSiteDefault(d));
   }
   return added.length === 0 ? ops : [...ops, ...added];
+}
+
+/**
+ * The operands `ops` of a call, with each operand that is absent at a
+ * parameter with a default replaced by `read(d)`, where `d` is the default
+ * operand of that parameter. Returns `ops` itself when nothing is replaced.
+ *
+ * A default fills an absent argument as it fills an argument that the call
+ * leaves out: `(k: real | missing = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
+ * and `f(At(L, 100))` with `L` a list of two elements. The default is then a
+ * discharge of absence, as `Coalesce` is, and it uses the same absence test
+ * (`isMissingValue()`): `Missing`, `Undefined`, `NaN` and `Indeterminate` are
+ * absent. `Nothing` is not: a written `Nothing` operand is removed before the
+ * fill, so the parameter is left out and takes its default that way. A
+ * caller that needs to pass an absent value through a parameter declares no
+ * default for it. (R6 of `docs/plans/2026-11-01-absent-value-contract.md`.)
+ *
+ * The operand at position `i` is the argument of the parameter at position
+ * `i`: `ops` is flat. A top-level `Sequence` operand (a list of operands
+ * that is not flattened yet) stands for several positions; its elements are
+ * not replaced, and the positions after it are counted past it. `required`
+ * is the number of parameters without a default before the first one with
+ * a default, and `defaults` is aligned with the parameters after them.
+ *
+ * At canonicalization `read` is `callSiteDefault`, and only an operand that
+ * is written absent is replaced (`f(Missing)`). At evaluation `read` also
+ * evaluates the default, and the operands are the evaluated arguments, so an
+ * argument that evaluates to an absent value is replaced (`f(At(L, 100))`).
+ * `read` receives the index of the operand in `ops` too, so that it can
+ * evaluate the default as it evaluates an operand at that position.
+ */
+export function withAbsentDefaults(
+  ops: ReadonlyArray<Expression>,
+  required: number,
+  defaults: ReadonlyArray<Expression | undefined>,
+  read: (d: Expression, index: number) => Expression
+): ReadonlyArray<Expression> {
+  let result: Expression[] | undefined;
+  let position = 0;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (isFunction(op, 'Sequence')) {
+      position += op.nops;
+      continue;
+    }
+    const d = defaults[position - required];
+    position += 1;
+    if (d === undefined || !isMissingValue(op)) continue;
+    result ??= [...ops];
+    result[i] = read(d, i);
+  }
+  return result ?? ops;
 }
 
 /**

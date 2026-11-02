@@ -20,6 +20,19 @@
   an absent input. The rule and its record: `docs/COMPILATION-MODEL.md`,
   "Caveats of compiled code", and
   `docs/plans/2026-11-01-absent-value-contract.md`.
+- **A default parameter fills a supplied absent value as well as an
+  argument left out.** `(k: real | missing = 2) ↦ k` gives 2 for `f()`,
+  `f(Missing)` and `f(At(L, 100))` with `L` a list of two elements; in
+  0.176.0 the second gave `Missing` and the third an `incompatible-type`
+  error. The test of absence is the one of `Coalesce`, so `NaN` and
+  `Indeterminate` take the default too: `(k: real = 2) ↦ k` gives 2 for
+  `f(0/0)`. A caller that needs to pass an absent value through a parameter
+  declares no default for it. Compiled code fills the default in the
+  function with the same absence test as `Coalesce` (`undefined`, `null` or
+  `NaN` in JavaScript; `None` or a float or complex `NaN` in Python; an
+  empty interval on `interval-js`), not with a native default parameter,
+  which fills only an argument that is left out.
+
 - **Compiled code no longer guards an absent operand of an operator that is
   not a discharge.** The three-valued comparisons and connectives, the
   absence levels of broadcasts and point arithmetic, and the `missing` flag

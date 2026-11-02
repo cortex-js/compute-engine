@@ -37,6 +37,7 @@ import {
 } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import {
+  jsIsAbsent,
   literalAcceptsArgumentCount,
   literalDefaultFills,
   literalHasParameterDefaults,
@@ -11011,15 +11012,17 @@ export class ComputeEngineFunctionLiteral extends Function {
     reconstructionDigits?: number,
     /** As for `ComputeEngineFunction` (`runResult()`). */
     rawResult: boolean | 'keyed' = false,
-    /** The fill of each parameter with a default value that a call leaves
-     * out: `run(count)` gives one `if (count < i + 1) p = …;` per such
+    /** The fill of each parameter with a default value whose argument is
+     * absent: `run()` gives one `if (<p is absent>) p = …;` per such
      * parameter (`lambdaDefaultFill()`), and `before` and `after` are the
      * definitions of `perCall` split around the fill
      * (`splitAroundDefaultFill()`). The fill runs after `hoisted` and
      * `before`, which hold every definition a default reads, and before
      * `after`. */
     defaultFill?: {
-      run: (count: string) => string;
+      run: () => string;
+      /** The positions of the parameters with a default value. */
+      positions: number[];
       before: string;
       after: string;
     }
@@ -11033,9 +11036,7 @@ export class ComputeEngineFunctionLiteral extends Function {
     let inner: ((...args: unknown[]) => unknown) | undefined;
     // The fill runs in a function of its own, with the definitions that
     // the defaults read, and gives the completed argument list: the entry
-    // checks then read a default as they read an argument. Its first
-    // parameter is the number of arguments of the call, under a name with a
-    // `$`, which no parameter of the literal has.
+    // checks then read a default as they read an argument.
     let fill: ((...args: unknown[]) => unknown[]) | undefined;
     if (hoisted || defaultFill !== undefined) {
       const previous = setReconstructionDigits(reconstructionDigits);
@@ -11046,8 +11047,8 @@ export class ComputeEngineFunctionLiteral extends Function {
           fill = twoStageRunner(
             this.SYS,
             hoisted,
-            ['$count', ...args],
-            `${defaultFill.before}${defaultFill.run('$count')}return [${args.join(', ')}];`
+            args,
+            `${defaultFill.before}${defaultFill.run()}return [${args.join(', ')}];`
           ) as (...args: unknown[]) => unknown[];
       } finally {
         setReconstructionDigits(previous);
@@ -11058,13 +11059,25 @@ export class ComputeEngineFunctionLiteral extends Function {
     const preamble = hoisted + perCall;
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
-        // A parameter with a default value that the call leaves out is
-        // filled first, so that the entry checks read the default as they
-        // read an argument.
-        if (fill !== undefined && argumentsList.length < args.length) {
+        // A parameter with a default value whose argument is absent (left
+        // out, or supplied absent: `undefined`, `null` or `NaN`, the test
+        // of `jsIsAbsent()`) is filled first, so that the entry checks read
+        // the default as they read an argument. The arguments after the
+        // parameters are kept. The fill runs the definitions of `before`
+        // again, so it runs only when an argument at such a parameter is
+        // absent.
+        if (
+          fill !== undefined &&
+          defaultFill!.positions.some((i) =>
+            Number.isNaN(argumentsList[i] ?? Number.NaN)
+          )
+        ) {
           const previous = setReconstructionDigits(reconstructionDigits);
           try {
-            argumentsList = fill(argumentsList.length, ...argumentsList);
+            argumentsList = [
+              ...fill(...argumentsList),
+              ...argumentsList.slice(args.length),
+            ];
           } finally {
             setReconstructionDigits(previous);
           }
@@ -11095,11 +11108,10 @@ export class ComputeEngineFunctionLiteral extends Function {
         if (prop === 'toString')
           return (): string =>
             defaultFill !== undefined
-              ? `((...$args) => { let [${args
-                  .map((p, i) => (args.indexOf(p, i + 1) >= 0 ? '' : p))
-                  .join(
-                    ', '
-                  )}] = $args; ${hoisted}${defaultFill.before}${defaultFill.run('$args.length')}${defaultFill.after}${statementBody ?? `return ${body};`} })`
+              ? defaultFillFunction(
+                  args,
+                  `${hoisted}${defaultFill.before}${defaultFill.run()}${defaultFill.after}${statementBody ?? `return ${body};`}`
+                )
               : statementBody
                 ? `(${args.join(', ')}) => { ${preamble}${statementBody} }`
                 : preamble
@@ -11111,20 +11123,6 @@ export class ComputeEngineFunctionLiteral extends Function {
     });
   }
 }
-
-/**
- * The run-time absence test of every discharge (`IsMissing`, `Coalesce`,
- * `AssertPresent`) on this target, for a position of any domain: `NaN`,
- * `undefined` and `null` are absent, the spellings an absent value has in
- * compiled code (R1 and R3 of
- * `docs/plans/2026-11-01-absent-value-contract.md`).
- * `Number.isNaN(undefined)` is `false`, so the operand is coalesced to `NaN`
- * before the test; the operand is parenthesized because `??` may not be
- * mixed with an unparenthesized `&&`/`||` and it is spliced from arbitrary
- * code.
- */
-const jsIsAbsent = (x: TargetSource): TargetSource =>
-  `Number.isNaN((${x}) ?? Number.NaN)`;
 
 /** `x` unless `jsIsAbsent` reads it as absent, else `d`. The operand is
  * bound to a parameter so it is evaluated once, and `d` is evaluated only on
@@ -12296,30 +12294,24 @@ function broadcastStrideOfType(t: Type): number {
  * literal compiled as the root of a compilation (the lambda route), or
  * `undefined` when no parameter has a default.
  *
- * `run(count)` is the code that `ComputeEngineFunctionLiteral` runs before
- * each call with fewer arguments than parameters: one `if (count < i + 1)
- * p = …;` per parameter with a default, where `count` is the code of the
- * number of arguments of the call. A supplied argument is never replaced,
- * also when it is `undefined` (the run-time value of `Missing`), as the
- * interpreter keeps a `Missing` that a call supplies. A default can read a
- * definition of the preamble (`_val_D` for a constant list `D`, `_fn_g` for
- * a user function), so `run` comes after the definitions that the defaults
- * reference (`splitAroundDefaultFill()`). `defaults` is the compiled default
- * code, which the passes that look for references to definitions must also
- * scan.
+ * `run()` is the code that `ComputeEngineFunctionLiteral` runs before each
+ * call: one `if (<p is absent>) p = …;` per parameter with a default, with
+ * the absence test of the discharges (`jsIsAbsent()`). An argument that the
+ * call leaves out (`undefined`) and an argument that is supplied absent
+ * (`undefined`, `null`, or `NaN` as `At(L, 100)` gives for a list of
+ * numbers) take the default, as in the interpreter
+ * (`withAbsentDefaults()`, `parameter-defaults.ts`). A JavaScript default
+ * parameter (`(x, k = 2) => …`) fills only `undefined`, so it is not used.
+ * A default can read a definition of the preamble (`_val_D` for a constant
+ * list `D`, `_fn_g` for a user function), so `run` comes after the
+ * definitions that the defaults reference (`splitAroundDefaultFill()`).
+ * `defaults` is the compiled default code, which the passes that look for
+ * references to definitions must also scan.
  *
  * `code(before, after, body)` is the function of the `code` field, with the
  * preamble definitions `before` and `after` (`splitAroundDefaultFill()`) and
- * the body statements `body`. When `before` is empty, it is an arrow with
- * JavaScript default parameters (`(x, k = 2) => { return k * x; }`) when no
- * parameter with a default can hold `Missing`. Otherwise it is an arrow
- * with a rest parameter, which tests the number of arguments
- * (`parameterCanBeMissing()`) after the definitions of `before`: a
- * JavaScript default parameter is evaluated before the body declares them.
- * The count is the length of the rest parameter, not `arguments.length`,
- * because a parameter of the literal can have the name `arguments`. The
- * name of the rest parameter, `$args`, contains a `$`, which no MathJSON
- * symbol and so no emitted name contains.
+ * the body statements `body` (`defaultFillFunction()`):
+ * `(x, k) => { if (Number.isNaN((k) ?? Number.NaN)) k = 2; return k * x; }`.
  *
  * A default of a parameter annotated with a non-real number type is lifted
  * to the `{ re, im }` value that the body reads (`_SYS.cplx`).
@@ -12330,45 +12322,55 @@ function lambdaDefaultFill(
   compile: (e: Expression) => string
 ):
   | {
-      run: (count: string) => string;
+      run: () => string;
+      positions: number[];
       defaults: string;
       code: (before: string, after: string, body: string) => string;
     }
   | undefined {
-  const fills = literalDefaultFills(literalParams, compile, () => undefined);
+  const fills = literalDefaultFills(literalParams, compile);
   if (!fills.some((f) => f !== undefined)) return undefined;
   const value = (i: number): string => {
     const t = functionLiteralParameterType(literalParams[i]);
-    const code = fills[i]!.code;
+    const code = fills[i]!;
     return t !== undefined && isNonRealNumber(t) ? `_SYS.cplx(${code})` : code;
   };
-  const run = (count: string): string =>
+  const run = (): string =>
     fills
       .map((f, i) =>
         f === undefined
           ? ''
-          : `if (${count} < ${i + 1}) ${params[i]} = ${value(i)}; `
+          : `if (${jsIsAbsent(params[i])}) ${params[i]} = ${value(i)}; `
       )
       .join('');
   const defaults = fills
     .map((f, i) => (f === undefined ? '' : value(i)))
     .join(' ');
-  const byCount = fills.some((f) => f?.byCount === true);
-  const code = (before: string, after: string, body: string): string => {
-    if (!byCount && before === '')
-      return `(${params
-        .map((p, i) => (fills[i] === undefined ? p : `${p} = ${value(i)}`))
-        .join(', ')}) => { ${after}${body} }`;
-    // A name that two parameters share (`_` for each parameter without a
-    // name) is bound once, to the last of them, as in a `function` with
-    // duplicate parameters: a destructuring declaration refuses a name
-    // twice.
-    const bound = params.map((p, i) =>
-      params.indexOf(p, i + 1) >= 0 ? '' : p
-    );
-    return `((...$args) => { let [${bound.join(', ')}] = $args; ${before}${run('$args.length')}${after}${body} })`;
-  };
-  return { run, defaults, code };
+  const code = (before: string, after: string, body: string): string =>
+    defaultFillFunction(params, `${before}${run()}${after}${body}`);
+  const positions = fills.flatMap((f, i) => (f === undefined ? [] : [i]));
+  return { run, positions, defaults, code };
+}
+
+/**
+ * A compiled function literal with the parameters `params` and the body
+ * statements `body`, which fill the parameters with a default value
+ * (`lambdaDefaultFill()`): `(x, k) => { body }`. When two parameters share a
+ * name (`_` for each parameter without a name), the name is bound once, to
+ * the last of them, as in a `function` with duplicate parameters: an arrow
+ * refuses a name twice, so the function takes a rest parameter and
+ * destructures it, `((...$args) => { let [, k] = $args; body })`. The name
+ * `$args` contains a `$`, which no MathJSON symbol and so no emitted name
+ * contains.
+ */
+function defaultFillFunction(
+  params: ReadonlyArray<string>,
+  body: string
+): string {
+  if (params.every((p, i) => params.indexOf(p, i + 1) < 0))
+    return `(${params.join(', ')}) => { ${body} }`;
+  const bound = params.map((p, i) => (params.indexOf(p, i + 1) >= 0 ? '' : p));
+  return `((...$args) => { let [${bound.join(', ')}] = $args; ${body} })`;
 }
 
 function compileToTarget(
@@ -12569,7 +12571,7 @@ function compileToTarget(
       reconstructionDigits,
       kinds !== undefined || keyedResult(args[0].canonical),
       defaults !== undefined
-        ? { run: defaults.run, ...perCallAround }
+        ? { run: defaults.run, positions: defaults.positions, ...perCallAround }
         : undefined
     );
     return {

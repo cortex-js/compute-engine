@@ -60,6 +60,7 @@ import {
   isDestructuringParameter,
   isRestParameter,
   isScalarType,
+  optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { CompileTarget, TargetSource } from './types.js';
@@ -68,8 +69,13 @@ import {
   builtinOperatorDefinition,
 } from './builtin-callback.js';
 import {
+  absentFilledArguments,
+  argumentMayBeAbsent,
   completedLiteralArguments,
+  declineIntervalAbsentDefault,
+  jsIsAbsent,
   literalTakesArgumentCount,
+  userFunctionDefaults,
 } from './compile-parameter-defaults.js';
 import { isCompileBoundName } from './compiler-names.js';
 import {
@@ -97,6 +103,7 @@ import {
 import { core } from './compiler-core-hooks.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import { compileValueOperand } from './compile-statements.js';
+import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
 import { collectionElementTypeOf, typedTemp } from './compile-declarations.js';
 import { CompilerState } from './compiler-state.js';
 import { resetCompilationMemos, tryConstantFold } from './compile-folding.js';
@@ -1291,6 +1298,37 @@ export function tryCompileUserFunction(
   // end all need it.
   const literal = userFunctionLiteral(engine, h);
   checkUserCallArity(h, literal, args);
+  // An argument at a parameter with a default is filled when it is absent
+  // at run time (`absentFilledArguments`), on the JavaScript target, whose
+  // emitted definitions take every argument from the call. The interval
+  // target declines such an argument (`declineIntervalAbsentDefault`).
+  // The compiled defaults for the map of a call that broadcasts over a
+  // list argument (`emitUserFunctionCall`): each absent cell is filled.
+  let mapDefaults: (() => ReadonlyArray<string | undefined>) | undefined;
+  if (
+    target.language === 'javascript' ||
+    target.language === 'interval-javascript'
+  ) {
+    const defaults = userFunctionDefaults(engine, h, literal);
+    const supplied = args;
+    declineIntervalAbsentDefault(
+      target,
+      defaults,
+      args.length,
+      (i) => argumentMayBeAbsent(supplied[i], defaults[i]!),
+      `a call of \`${h}\``
+    );
+    if (target.language === 'javascript') {
+      args = absentFilledArguments(defaults, args);
+      if (defaults.some((d) => d !== undefined))
+        mapDefaults = () =>
+          defaults.map((d) =>
+            d === undefined
+              ? undefined
+              : compileValueOperand(callSiteDefault(d), target)
+          );
+    }
+  }
 
   // An argument that can be a collection, at a parameter declared
   // `expression` that the body reads, is bound whole by the interpreter,
@@ -1314,7 +1352,13 @@ export function tryCompileUserFunction(
 
   // A list of points at a parameter declared as a point maps over the
   // points, as the interpreter does (`pointListParamSlots`).
-  const pointList = tryCompilePointListCall(engine, h, args, target);
+  const pointList = tryCompilePointListCall(
+    engine,
+    h,
+    args,
+    target,
+    mapDefaults
+  );
   if (pointList !== undefined) return pointList;
   checkListCoordinateTupleArgs(engine, h, args);
   checkPointListAtMatrixUnionArgs(engine, h, args);
@@ -1552,7 +1596,8 @@ export function tryCompileUserFunction(
         literal,
         args,
         target,
-        node === undefined ? undefined : _prefixCallOverrides.get(node)
+        node === undefined ? undefined : _prefixCallOverrides.get(node),
+        mapDefaults
       );
     } catch (e) {
       if (e instanceof Error && e.name === 'CancellationError') throw e;
@@ -1741,7 +1786,8 @@ export function tryCompileUserFunction(
         coerceToComplex,
         paramsAreScalar,
         prefixed.values.map((v) => core.compile(v, target)),
-        absentArgumentChecks(h, literal, args, target)
+        absentArgumentChecks(h, literal, args, target),
+        mapDefaults
       );
   }
 
@@ -1807,7 +1853,8 @@ export function tryCompileUserFunction(
     coerceToComplex,
     paramsAreScalar,
     [],
-    absentArgumentChecks(h, literal, args, target)
+    absentArgumentChecks(h, literal, args, target),
+    mapDefaults
   );
 }
 
@@ -2026,7 +2073,7 @@ export function appliedLiteralCheckedCall(
   );
   return (
     `((${callee}) => ${call})` +
-    `(${localCheckingCallee(`(${literalCode})`, checks, target, signature)})`
+    `(${localCheckingCallee(`(${literalCode})`, checks, target, signature, literal)})`
   );
 }
 
@@ -2066,12 +2113,18 @@ export function intervalCheckingCallee(
  * where the interpreter answers an error. The shim is written at the
  * call, since the value of a block local is read where the call runs.
  * `callee` itself when no parameter is tested.
+ *
+ * An absent argument (`jsIsAbsent()`) at a parameter of `literal` with a
+ * default value passes the test: `callee` fills it with the default
+ * (`defaultFillingWrapper()`), and the default fits the declared type. So
+ * the default is filled before the type is tested, as in the interpreter.
  */
 export function localCheckingCallee(
   callee: string,
   types: ReadonlyArray<ReadonlyArray<Type>>,
   target: CompileTarget<Expression>,
-  signature: Type | undefined
+  signature: Type | undefined,
+  literal?: Expression
 ): string {
   if (types.every((t) => t.length === 0)) return callee;
   const params = types.map(() => tempVar(target));
@@ -2079,7 +2132,14 @@ export function localCheckingCallee(
   const passed = params.map((p, i) => {
     if (types[i].length === 0) return p;
     const projected = `_SYS.creal(${p})`;
-    for (const t of types[i]) tests.push(jsParameterGuard(t, projected)!);
+    const defaulted =
+      literal !== undefined &&
+      isFunction(literal, 'Function') &&
+      optionalParameterDefault(literal.ops[i + 1]) !== undefined;
+    for (const t of types[i]) {
+      const test = jsParameterGuard(t, projected)!;
+      tests.push(defaulted ? `(${jsIsAbsent(p)} || ${test})` : test);
+    }
     return projected;
   });
   return (
@@ -2364,6 +2424,21 @@ export function tryCompileLocalFunctionCall(
       for (const a of completed.slice(args.length)) argTypes.push(a.type.type);
       args = completed;
     }
+  }
+  // The interval target does not fill a supplied absent argument
+  // (`declineIntervalAbsentDefault`).
+  {
+    const defaults = literal.ops
+      .slice(1)
+      .map((p) => optionalParameterDefault(p));
+    const supplied = args;
+    declineIntervalAbsentDefault(
+      target,
+      defaults,
+      args.length,
+      (i) => argumentMayBeAbsent(supplied[i], defaults[i]!),
+      `a call of \`${h}\``
+    );
   }
 
   // A rebound local is compiled on the JavaScript target only. The interval
@@ -3007,7 +3082,13 @@ export function tryCompileLocalFunctionCall(
       ? local
       : target.language === 'interval-javascript'
         ? intervalCheckingCallee(local, parameterChecks, target)
-        : localCheckingCallee(local, parameterChecks, target, signature),
+        : localCheckingCallee(
+            local,
+            parameterChecks,
+            target,
+            signature,
+            literal
+          ),
     args,
     target,
     coerceToComplex,

@@ -1,5 +1,6 @@
 // Calls over points and point lists, and the checks on their arguments.
 
+import { targetCoalesce } from './compile-parameter-defaults.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import type {
   Expression,
@@ -98,7 +99,10 @@ export function tryCompilePointListCall(
   engine: ComputeEngine,
   h: string,
   args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  /** The compiled defaults for a call that maps over a list argument
+   * (`emitUserFunctionCall`, `mapDefaults`). */
+  mapDefaults?: () => ReadonlyArray<string | undefined>
 ): TargetSource | undefined {
   // A parameter declared `broadcastable<P>`, with `P` a point type, maps
   // to the cells of its argument, and a point is a cell: a tuple is not a
@@ -205,7 +209,8 @@ export function tryCompilePointListCall(
           args,
           params,
           scalarLists,
-          target
+          target,
+          mapDefaults
         );
       at = scalarLists.indexOf('list');
       scalarList = true;
@@ -596,14 +601,29 @@ export function tryCompilePointListCall(
             `and the compiled map does not check them.`
         );
     });
-    // With no absent-argument check, the mapped function is the callee
+    // An element that is absent at a parameter with a default takes the
+    // default (`mapDefaults`, filled with the target's `Coalesce`), as the
+    // interpreter fills each cell of a broadcast. With no absent-argument
+    // check and no default to fill, the mapped function is the callee
     // itself, not an arrow that only calls it.
+    const coalesce = targetCoalesce(target);
+    const fills =
+      target.language === 'javascript' && coalesce !== undefined
+        ? (mapDefaults?.() ?? [])
+        : [];
     const cellArgs = temps.map((t, i) =>
-      i === at ? t : presentCheckedCode(t, checks[i])
+      i === at
+        ? t
+        : presentCheckedCode(
+            fills[i] === undefined ? t : coalesce!(t, fills[i]!),
+            checks[i]
+          )
     );
-    const fn = checks.every((c, i) => i === at || c === undefined)
-      ? name
-      : `((${temps.join(', ')}) => ${name}(${cellArgs.join(', ')}))`;
+    const fn =
+      checks.every((c, i) => i === at || c === undefined) &&
+      fills.every((f, i) => i === at || f === undefined)
+        ? name
+        : `((${temps.join(', ')}) => ${name}(${cellArgs.join(', ')}))`;
     return `_SYS.mapFn(${fn}, [${ranks.join(', ')}], ${codes.join(', ')})`;
   }
   // The argument at the parameter typed `unknown` is passed whole to each
@@ -846,7 +866,8 @@ export function compileUntypedScalarSlotCall(
   args: ReadonlyArray<Expression>,
   params: ReadonlyArray<Type | undefined>,
   scalarLists: ReadonlyArray<'list' | 'maybe' | 'untyped' | false>,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  mapDefaults?: () => ReadonlyArray<string | undefined>
 ): TargetSource | undefined {
   const at = scalarLists.indexOf('untyped');
   const reason =
@@ -906,7 +927,8 @@ export function compileUntypedScalarSlotCall(
     args.map(() => false),
     true,
     [],
-    checks
+    checks,
+    mapDefaults
   );
 }
 

@@ -119,6 +119,7 @@ import {
   literalParameterDefault,
   literalParameterDefaultFits,
   typeHasParameterDefault,
+  withAbsentDefaults,
 } from './boxed-expression/parameter-defaults.js';
 import {
   errorValue,
@@ -3123,26 +3124,48 @@ export function apply(
 }
 
 /**
+ * The default operand of each parameter of a function literal after its
+ * required parameters (`requiredParameterCount()`), `undefined` for a
+ * parameter without a default: the `defaults` argument of
+ * `withAbsentDefaults()`.
+ */
+function literalDefaultOperands(
+  params: ReadonlyArray<Expression>
+): (Expression | undefined)[] {
+  return params
+    .slice(requiredParameterCount(params))
+    .map((p) => optionalParameterDefault(p));
+}
+
+/**
  * The arguments `args` of a call of a function literal whose parameter
  * operands are `params`, with the default operand of each parameter with a
  * default value (`["Optional", k, 2]`) that the call leaves out appended.
  *
  * Only a full call is completed: one whose arguments cover every parameter
  * before the first parameter with a default. A call with fewer arguments is
- * a partial application, and is returned unchanged, as is a call that
- * supplies every parameter. A symbol default is the symbol boxed again in
- * the current scope, so it reads the binding that the same symbol written in
- * the call reads (`callSiteDefault()`).
+ * a partial application, and is returned unchanged. A symbol default is the
+ * symbol boxed again in the current scope, so it reads the binding that the
+ * same symbol written in the call reads (`callSiteDefault()`).
+ *
+ * In a full call, an argument that is absent (`Missing`, `NaN`, ...) at a
+ * parameter with a default is replaced by the default as well
+ * (`withAbsentDefaults()`): a default fills an absent argument as it fills
+ * an argument that the call leaves out.
  */
 export function literalArgumentsWithDefaults(
   params: ReadonlyArray<Expression>,
   args: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
-  if (
-    args.length >= params.length ||
-    args.length < requiredParameterCount(params)
-  )
-    return args;
+  const required = requiredParameterCount(params);
+  if (args.length < required) return args;
+  args = withAbsentDefaults(
+    args,
+    required,
+    literalDefaultOperands(params),
+    callSiteDefault
+  );
+  if (args.length >= params.length) return args;
   const added: Expression[] = [];
   for (let i = args.length; i < params.length; i++) {
     const d = optionalParameterDefault(params[i]);
@@ -9018,6 +9041,11 @@ function makeLambda(
   const withDefaults = (
     args: ReadonlyArray<Expression>
   ): ReadonlyArray<Expression> => literalArgumentsWithDefaults(params, args);
+  // The default operands of the parameters after the required ones
+  // (`literalDefaultOperands()`), for the fill of an argument that
+  // evaluates to an absent value (step 4 of `invoke`).
+  const parameterDefaults = literalDefaultOperands(params);
+  const hasParameterDefaults = parameterDefaults.some((d) => d !== undefined);
 
   // A GENERIC literal has no annotated parameter to gate on — erasure removed
   // them — yet its polytype marker IS a contract, and an ANONYMOUS application
@@ -9952,7 +9980,24 @@ function makeLambda(
     //
     // 4/ Evaluate arguments in the calling scope before switching context
     //
-    let evaluatedArgs = absorbAbsenceAtNumericParams(args.map(argValue));
+    // An argument that evaluates to an absent value (`At(L, 100)`) at a
+    // parameter with a default takes the default, evaluated as a written
+    // argument is (`withAbsentDefaults()`). The written absent arguments
+    // were replaced before (`withDefaults`). This runs before the absent
+    // value becomes `NaN` at a numeric parameter, and before the
+    // validation, which refuses `NaN` at a parameter typed `real | missing`.
+    let evaluatedArgs = absorbAbsenceAtNumericParams(
+      options?.holdArguments || !hasParameterDefaults
+        ? args.map(argValue)
+        : [
+            ...withAbsentDefaults(
+              args.map(argValue),
+              requiredParameterCount(params),
+              parameterDefaults,
+              (d) => argValue(callSiteDefault(d))
+            ),
+          ]
+    );
 
     // An argument that only became an error when EVALUATED (`f(g(1))` with
     // `g(1)` failing) bubbles like a literal one — see step 2.

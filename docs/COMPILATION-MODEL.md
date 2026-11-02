@@ -133,6 +133,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   one `empty` result (the empty row is skipped when the reading of the list
   is decided, so the list is read as one point); the interpreter gives
   `[Missing, Missing]`.
+- `javascript`, `Z: list<complex>` of two elements: `Apply((k = 2) ↦ k,
+  At(Z, 9))` gives `NaN` (the argument is converted to a complex value before
+  the default's absence test reads it); the interpreter gives 2.
+- `interval-js`, `y: real` at `y = 3`: `Coalesce(1/(y - 3), 2)` gives the
+  interval `[2, 2]` (`_IA.coalesce` reads the `empty` result of a pole as
+  absent); the interpreter gives `~∞`.
 
 ## Fail closed
 

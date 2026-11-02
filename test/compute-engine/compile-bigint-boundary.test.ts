@@ -284,8 +284,14 @@ describe('the Function literal at the root: the closure returned to the host', (
       expect(fn(3)).toBe(5n);
       expect(fn(3, 4)).toBe(7n);
       expect(fn(3n, 4n)).toBe(7n);
-      // An explicit `undefined` is not an omitted argument: it is checked.
-      expect(() => fn(3, undefined)).toThrow(/argument 2.*mode 'bigint'/);
+      // A default fills an absent argument as it fills an argument that the
+      // call leaves out: an explicit `undefined` (`Missing`) and a `NaN`
+      // take the default too (R6 of
+      // `docs/plans/2026-11-01-absent-value-contract.md`).
+      expect(fn(3, undefined)).toBe(5n);
+      expect(fn(3, NaN)).toBe(5n);
+      // A present argument that is not an integer is still checked.
+      expect(() => fn(3, 4.5)).toThrow(/argument 2.*mode 'bigint'/);
     }
   });
 

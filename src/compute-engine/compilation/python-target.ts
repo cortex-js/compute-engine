@@ -84,10 +84,7 @@ import {
   isWideParameterType,
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
-import {
-  callSiteDefault,
-  literalParameterDefault,
-} from '../boxed-expression/parameter-defaults.js';
+import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
 import {
   literalAcceptsArgumentCount,
   literalTakesArgumentCount,
@@ -7005,41 +7002,39 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     });
     // A parameter with a default value (`(x, k = 2) => x * k`). The default
     // is compiled as an operand written at the call site (`callSiteDefault`),
-    // outside the scope of the parameters. A number, string or boolean
-    // default is a Python default parameter, `lambda x, k=2: …`. A Python
-    // default is evaluated once, when the lambda is made, so a symbol
-    // default (whose value is read at each call, as the interpreter reads
-    // it) and an empty list or dictionary (a new value at each call, as in
-    // the interpreter) take an omission marker instead: a fresh `object()`
-    // that no caller can pass, bound once around the lambda, and the body
-    // runs with the default in place of the marker:
-    // `(lambda _tv1: (lambda x, k=_tv1: (lambda k: …)(d if k is _tv1 else
-    // k)))(object())`. The marker has a fresh name, which no parameter,
-    // symbol or other emitted name uses, so nothing can shadow it.
-    let marker: string | undefined;
+    // outside the scope of the parameters. The parameter is declared with
+    // the default `None`, and the body runs with the default in place of an
+    // absent argument: left out (`None`), or supplied absent (`None`, or a
+    // float or complex `NaN`, as a read past the end of a list of numbers
+    // gives), with the absence test of the discharges (`PY_ABSENT_TEST`):
+    // `(lambda x, k=None: (lambda k: …)(2 if (lambda _c: <test>)(k) else
+    // k))`. The interpreter fills the same arguments
+    // (`withAbsentDefaults()`, `parameter-defaults.ts`). The default is
+    // evaluated at each call that fills it, so a symbol default reads its
+    // value at the call, and an empty list or dictionary is a new value at
+    // each call, as in the interpreter. A native Python default (`k=2`) is
+    // not used: it does not fill a supplied absent value.
     const declared: string[] = [];
-    const marked: [string, string][] = [];
+    const filled: [string, string][] = [];
     args.slice(1).forEach((p, i) => {
       const d = optionalParameterDefault(p);
       if (d === undefined) {
         declared.push(params[i]);
         return;
       }
-      const code = compile(callSiteDefault(d));
-      if (literalParameterDefault(d)?.kind === 'value') {
-        declared.push(`${params[i]}=${code}`);
-        return;
-      }
-      marker ??= BaseCompiler.tempVar(target);
-      declared.push(`${params[i]}=${marker}`);
-      marked.push([params[i], code]);
+      declared.push(`${params[i]}=None`);
+      filled.push([params[i], compile(callSiteDefault(d))]);
     });
-    if (marker === undefined)
+    if (filled.length === 0)
       return `(lambda ${declared.join(', ')}: ${bodyCode})`;
-    const filled = `(lambda ${marked.map(([n]) => n).join(', ')}: ${bodyCode})(${marked
-      .map(([n, code]) => `${code} if ${n} is ${marker} else ${n}`)
-      .join(', ')})`;
-    return `((lambda ${marker}: (lambda ${declared.join(', ')}: ${filled}))(object()))`;
+    return `(lambda ${declared.join(', ')}: (lambda ${filled
+      .map(([n]) => n)
+      .join(', ')}: ${bodyCode})(${filled
+      .map(
+        ([n, code]) =>
+          `${code} if (lambda _c: ${PY_ABSENT_TEST})(${n}) else ${n}`
+      )
+      .join(', ')}))`;
   },
 
   // --- List-shaped collection operators -------------------------------------

@@ -243,6 +243,12 @@ import {
   integerRangeElements,
   kindValueIsNaN,
 } from './type-guards.js';
+import {
+  callSiteDefault,
+  parameterDefaultOperands,
+  signatureDefaultOperands,
+  withAbsentDefaults,
+} from './parameter-defaults.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
 import {
@@ -8139,15 +8145,26 @@ export class BoxedFunction
       const exactIntegerAt = numericApproximation
         ? integerParameterPositions(def)
         : undefined;
-      const tail = holdMap(this, (x, index) =>
+      // A default that fills an absent operand is evaluated as an operand
+      // at its position is (`withAbsentOperandDefaults`).
+      const operandValue = (x: Expression, index: number): Expression =>
         (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
         (exactExponent && index === 1)
           ? exactIntegerOperand(x, options)
-          : // A value that the finiteness read of this evaluation computed
-            // for the operand (`_isMemoizableLazyCollection()`); such a read
-            // happens under a plain `evaluate()` only.
-            (takeEagerSourceValue(this, x) ??
-            x.evaluate(operandOptions(options)))
+          : x.evaluate(operandOptions(options));
+      const tail = withAbsentOperandDefaults(
+        this.engine,
+        def,
+        holdMap(this, (x, index) =>
+          // A value that the finiteness read of this evaluation computed
+          // for the operand (`_isMemoizableLazyCollection()`); such a read
+          // happens under a plain `evaluate()` only.
+          (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
+          (exactExponent && index === 1)
+            ? operandValue(x, index)
+            : (takeEagerSourceValue(this, x) ?? operandValue(x, index))
+        ),
+        operandValue
       );
 
       //
@@ -9598,7 +9615,7 @@ export class BoxedFunction
           : undefined;
       // The walk gives the event loop a turn about every 8 ms, and an abort
       // of the signal stops it there (`holdMapAsync`).
-      const tail = await holdMapAsync(
+      const evaluated = await holdMapAsync(
         this,
         async (x, index) =>
           (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
@@ -9607,6 +9624,19 @@ export class BoxedFunction
             : (readValue(x) ??
               (await x.evaluateAsync(operandOptions(options)))),
         options?.signal
+      );
+      // A default value is a number, a string, a boolean, a symbol or an
+      // empty collection, so it is evaluated synchronously, as an operand at
+      // its position is on the sync route. After the `await`, the context of
+      // this evaluation (the scope of the call, which a symbol default reads)
+      // is put in place again.
+      const tail = this.engine.withEvaluationContext(options, () =>
+        withAbsentOperandDefaults(this.engine, def, evaluated, (d, index) =>
+          (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
+          (exactExponent && index === 1)
+            ? exactIntegerOperand(d, options)
+            : d.evaluate(operandOptions(options))
+        )
       );
 
       //
@@ -15600,6 +15630,33 @@ function declaredScalarConformance(
 }
 
 /**
+ * The evaluated operands `ops` of a call of the operator `def`, with each
+ * operand that is absent (`Missing`, `NaN`, ...) at a parameter with a
+ * default value replaced by that default, read with `value`
+ * (`withAbsentDefaults()`). A default fills an absent argument as it fills
+ * an argument that the call leaves out: `F(At(L, 100))` with `F` declared
+ * `(k: real | missing = 2) -> real` gives the handler the operand 2. The
+ * operands of a lazy operator are not evaluated here, so they are left as
+ * they are: only an operand written absent is replaced, at
+ * canonicalization (`fillParameterDefaults()`).
+ */
+function withAbsentOperandDefaults(
+  ce: ComputeEngine,
+  def: BoxedOperatorDefinition,
+  ops: ReadonlyArray<Expression>,
+  value: (d: Expression, index: number) => Expression
+): ReadonlyArray<Expression> {
+  if (def.lazy) return ops;
+  const t = def.signature.type;
+  if (typeof t !== 'object' || t.kind !== 'signature') return ops;
+  const defaults = parameterDefaultOperands(ce, def);
+  if (defaults === undefined) return ops;
+  return withAbsentDefaults(ops, t.args?.length ?? 0, defaults, (d, i) =>
+    value(callSiteDefault(d), i)
+  );
+}
+
+/**
  * The evaluated arguments `ops` of a user function, with an absent value
  * (`Missing`, `Undefined`) at a parameter whose DECLARED type is numeric
  * replaced by `NaN`, or `ops` itself when there is none.
@@ -16087,8 +16144,37 @@ function applyFunctionLiteralWith(
   // (`operandOptions`), so a body that reads a lazy argument as a collection
   // reads the whole collection, not its display preview. The body itself
   // keeps the caller's options, since it produces the result.
-  const ops =
-    evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
+  //
+  // An argument that is absent at a parameter with a default in the
+  // DECLARED signature of the variable (`fv: (real, real = 2) -> real`)
+  // takes the default (`withAbsentDefaults()`). Canonicalization reads
+  // the same defaults for an argument that the call leaves out (the
+  // `valueDefaults` of `makeCanonicalFunction`, `box.ts`); the literal the
+  // variable holds need not have them (`fv := (x, k) ↦ x + k`).
+  const declaredSignature = def.inferredType ? undefined : def.type?.type;
+  const declaredDefaults =
+    declaredSignature === undefined
+      ? undefined
+      : signatureDefaultOperands(expr.engine, def, declaredSignature);
+  // The fill runs on the arguments of the call, and again on each cell of a
+  // broadcast (below): a list argument is present, but a cell of it can be
+  // absent, and the scalar parameter receives the cell.
+  const withDeclaredDefaults = (
+    args: ReadonlyArray<Expression>
+  ): ReadonlyArray<Expression> =>
+    declaredDefaults === undefined ||
+    typeof declaredSignature !== 'object' ||
+    declaredSignature.kind !== 'signature'
+      ? args
+      : withAbsentDefaults(
+          args,
+          declaredSignature.args?.length ?? 0,
+          declaredDefaults,
+          (d) => callSiteDefault(d).evaluate(operandOptions(options))
+        );
+  const ops = withDeclaredDefaults(
+    evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)))
+  );
   // The breadcrumb of a surplus argument (`ApplyOptions.arityFrame`): this
   // call's head, whose first argument is its first operand.
   const arityFrame = { operator: expr.operator, firstArgumentIndex: 1 };
@@ -16263,8 +16349,9 @@ function applyFunctionLiteralWith(
             expr.engine.withEvaluationContext(options, fn);
           try {
             while (true) {
-              const { done, value: zipped } = inContext(() => items.next());
+              const { done, value: cell } = inContext(() => items.next());
               if (done) break;
+              const zipped = inContext(() => withDeclaredDefaults(cell));
               const applied = await inContext(() =>
                 zipped.some(
                   (x, i) =>
@@ -16309,8 +16396,9 @@ function applyFunctionLiteralWith(
       }
       try {
         while (true) {
-          const { done, value: zipped } = items.next();
+          const { done, value: cell } = items.next();
           if (done) break;
+          const zipped = withDeclaredDefaults(cell);
           // A broadcast maps to the scalar LEAVES: when a zipped row is itself
           // a broadcast-admitted collection (a rank≥2 source), re-dispatch
           // through the operator name so this arm applies again, exactly as the

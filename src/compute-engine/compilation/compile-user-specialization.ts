@@ -65,7 +65,10 @@ export function trySpecializedUserCall(
   prefixed?: {
     prefixes: ReadonlyArray<number>;
     values: ReadonlyArray<Expression>;
-  }
+  },
+  /** The compiled defaults for a call that maps over a list argument: each
+   * absent cell is filled (`emitUserFunctionCall`, `mapDefaults`). */
+  mapDefaults?: () => ReadonlyArray<string | undefined>
 ): TargetSource | undefined {
   const emitted = core.ensureSpecializedUserCallEmitted(
     engine,
@@ -113,7 +116,8 @@ export function trySpecializedUserCall(
         args.map(() => false),
         userFunctionParamsAreScalar(engine, h),
         prefixed.values.map((v) => core.compile(v, target)),
-        absentArgumentChecks(h, literal, args, target)
+        absentArgumentChecks(h, literal, args, target),
+        mapDefaults
       );
   }
   // A list argument the interpreter broadcasts is mapped over at the call
@@ -131,7 +135,8 @@ export function trySpecializedUserCall(
       args.map(() => false),
       true,
       [],
-      absentChecks
+      absentChecks,
+      mapDefaults
     );
   const registry = target.userFunctions;
   if (registry?.lowering)
