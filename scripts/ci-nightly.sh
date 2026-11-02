@@ -35,11 +35,23 @@
 #      typecheck`, the declaration build that the declaration test reads
 #      (`dist/types/compute-engine.d.ts`), and `bash scripts/test.sh` (the
 #      declaration test, the whole jest suite and the checkpoint canary).
+#      Then `scripts/compiler-growth.mjs` measures the two numbers of the
+#      compiler growth guard: the code lines of
+#      `src/compute-engine/compilation` and the compile depth limit (a
+#      first compile in a warm Jest worker). It takes about 5 s when the
+#      limit did not change, and about 35 s otherwise.
 #   4. Records the result in STATE_DIR, in the format of Tycho's nightly job
 #      so that `~/.claude/scripts/suite-status.mjs` reads both:
 #      - `last.json`: the last COMPLETE run: the commit, the times, the exit
 #        code, `passed` or `failed`, and what failed (`typecheck`,
-#        `declarations`, or the path of each failing test file).
+#        `declarations`, or the path of each failing test file). Also
+#        `metrics`, the two growth numbers of this run, and
+#        `previousMetrics`, the same numbers of the earlier run, on the
+#        nearest ancestor commit (or the same commit), that measured them,
+#        with its commit. `suite-status.mjs` reports a rise
+#        of the code lines or a fall of the depth limit between the two.
+#      - `metrics.jsonl`: the growth numbers of every complete run, one
+#        JSON line per run.
 #      - `attempt.json`: the last attempt of any kind. Its result can also
 #        be `unchanged` (nothing to run), `skipped` (no box lock) or `error`
 #        (the worktree could not be made, or the run was interrupted). Such
@@ -63,6 +75,13 @@ REPO="$(dirname "$COMMON_DIR")"
 export REPO
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/compute-engine-ci-nightly"
+# The compiler growth numbers: one JSON line per complete run, and the
+# output of the run in progress. The history is written only by the run that
+# owns the worktree (see claim_worktree). The output file is one file per
+# run, named with the pid, because the run reads it after it releases the
+# lock, when the next run can already be started.
+METRICS_HISTORY="$STATE_DIR/metrics.jsonl"
+RUN_METRICS="$STATE_DIR/run-metrics-$$.json"
 LABEL="local.compute-engine.ci-nightly"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 BOX_LOCK="$HOME/.claude/scripts/box-lock.mjs"
@@ -98,14 +117,84 @@ usage() {
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # write_state <file> <sha> <started> <ended> <exit> <result> <log> [failed...]
+#
+# When METRICS_FILE names the output of `scripts/compiler-growth.mjs`, the
+# state also gets `metrics` (the two numbers of this run) and
+# `previousMetrics` (for each number, the value, commit and end time of the
+# earlier run on the nearest ancestor commit (or on this commit) that
+# measured it, from METRICS_HISTORY), and this run
+# is added to METRICS_HISTORY. suite-status.mjs compares the two.
 write_state() {
   mkdir -p "$STATE_DIR"
-  node -e '
+  METRICS_HISTORY="$METRICS_HISTORY" node -e '
+    const fs = require("node:fs");
     const [file, sha, startedAt, endedAt, exit, result, log, ...failedJobs] = process.argv.slice(1);
     // `repo` lets suite-status.mjs find the repo of this state directory.
     const state = { sha, startedAt, endedAt, exit: Number(exit), result, failedJobs, log, leftOut: [], repo: process.env.REPO };
-    require("node:fs").writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
+    const metricsFile = process.env.METRICS_FILE, historyFile = process.env.METRICS_HISTORY;
+    let metrics;
+    try { metrics = metricsFile && JSON.parse(fs.readFileSync(metricsFile, "utf8")); } catch {}
+    if (metrics) {
+      state.metrics = metrics;
+      let history = [];
+      try {
+        for (const line of fs.readFileSync(historyFile, "utf8").split("\n")) {
+          try { if (line) history.push(JSON.parse(line)); } catch {}
+        }
+      } catch {}
+      // A run on an older commit must not be compared with a newer one: that
+      // would show a false rise or fall. Only an earlier run on this commit
+      // or on one of its ancestors counts.
+      const isAncestor = (h) => {
+        try {
+          require("node:child_process").execFileSync("git", ["-C", process.env.REPO, "merge-base", "--is-ancestor", h.sha, sha], { stdio: "ignore" });
+          return true;
+        } catch { return false; }
+      };
+      // Of those runs, the nearest ancestor counts, not the latest in time: a
+      // `run --commit` on an old commit after a run on a newer one would
+      // otherwise move the comparison back to the old commit. The history is
+      // read from the end, so of two runs on the same commit the later one
+      // counts.
+      const descends = (a, b) => {
+        try {
+          require("node:child_process").execFileSync("git", ["-C", process.env.REPO, "merge-base", "--is-ancestor", a, b], { stdio: "ignore" });
+          return true;
+        } catch { return false; }
+      };
+      state.previousMetrics = {};
+      for (const key of ["compilerCodeLines", "compileDepthLimit"]) {
+        let before;
+        for (const h of [...history].reverse()) {
+          if (!Number.isFinite(h[key]) || !isAncestor(h)) continue;
+          if (!before || (h.sha !== before.sha && descends(before.sha, h.sha))) before = h;
+        }
+        if (before) state.previousMetrics[key] = { value: before[key], sha: before.sha, endedAt: before.endedAt };
+      }
+      try {
+        fs.appendFileSync(historyFile, JSON.stringify({ sha, endedAt, ...metrics }) + "\n");
+      } catch (e) {
+        console.error("ci-nightly: the growth history was not written: " + e.message);
+      }
+    }
+    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
   ' "$@"
+}
+
+# The compile depth limit of the latest run that measured it, or nothing.
+# compiler-growth.mjs starts its search there.
+last_depth_limit() {
+  node -e '
+    let h = [];
+    // Each line is read on its own, so that one bad line does not lose the hint.
+    try {
+      for (const l of require("node:fs").readFileSync(process.argv[1], "utf8").split("\n")) {
+        try { if (l) h.push(JSON.parse(l)); } catch {}
+      }
+    } catch {}
+    const v = h.findLast((e) => Number.isFinite(e.compileDepthLimit))?.compileDepthLimit;
+    if (v) console.log(v);
+  ' "$METRICS_HISTORY"
 }
 
 # covered <sha>: true when a passing full run already covers the commit, by
@@ -228,11 +317,12 @@ on_interrupt() {
     echo "ci-nightly: interrupted" >> "$RUN_LOG"
     write_state "$STATE_DIR/attempt.json" "$RUN_SHA" "$RUN_STARTED" "$(now)" 130 error "$RUN_LOG"
   fi
+  rm -f "$RUN_METRICS"
   exit 130
 }
 
 cmd_run() {
-  local force="" commit="" sha started log rc result failed=()
+  local force="" commit="" sha started log rc result depth_hint="" failed=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --force) force="--force" ;;
@@ -307,6 +397,7 @@ cmd_run() {
     return 1
   fi
   RUN_WT="$WT"
+  depth_hint="$(last_depth_limit)"
   if ! git -C "$REPO" worktree add --detach "$WT" "$sha" >> "$log" 2>&1 ||
     ! ln -s "$REPO/node_modules" "$WT/node_modules"; then
     finish_run
@@ -335,6 +426,16 @@ cmd_run() {
     fi
     npm run test:python || echo "ci-nightly: failed job: python"
     CE_NIGHTLY=1 bash scripts/test.sh || echo "ci-nightly: failed job: tests"
+    # The growth guard of the compiler
+    # (docs/plans/2026-11-02-compiler-contraction-plan.md §5): its code
+    # lines and its compile depth limit. A measure that fails is not a
+    # failed job: the number is null and the reason is in this log.
+    echo "=== compiler growth"
+    if node scripts/compiler-growth.mjs ${depth_hint:+--depth-hint "$depth_hint"} > "$RUN_METRICS"; then
+      cat "$RUN_METRICS"
+    else
+      echo "ci-nightly: the compiler growth measure failed (status $?)"
+    fi
   ) >> "$log" 2>&1 &
   # In the background with `wait`: bash runs a trap only after a foreground
   # command ends, which would be after the whole suite.
@@ -360,6 +461,7 @@ cmd_run() {
   if [ "$rc" -ne 0 ]; then
     echo "ci-nightly: the checks stopped with status $rc before they ended" >> "$log"
     write_state "$STATE_DIR/attempt.json" "$sha" "$started" "$(now)" "$rc" error "$log"
+    rm -f "$RUN_METRICS"
     echo "ci-nightly: ${sha:0:9} did not complete (status $rc; see $log)"
     node "$SUITE_STATUS" notify >/dev/null 2>&1
     return 1
@@ -381,7 +483,8 @@ cmd_run() {
     result=passed
     rc=0
   fi
-  write_state "$STATE_DIR/last.json" "$sha" "$started" "$(now)" "$rc" "$result" "$log" "${failed[@]}"
+  METRICS_FILE="$RUN_METRICS" write_state "$STATE_DIR/last.json" "$sha" "$started" "$(now)" "$rc" "$result" "$log" "${failed[@]}"
+  rm -f "$RUN_METRICS"
   cp "$STATE_DIR/last.json" "$STATE_DIR/attempt.json"
   prune_logs
   echo "ci-nightly: ${sha:0:9} $result${failed:+ (${failed[*]})}"

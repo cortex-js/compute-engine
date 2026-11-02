@@ -168,6 +168,15 @@ lines of `src/compute-engine/compilation` and the compile depth limit of
 the first or a fall of the second between two nightly runs is reported with
 the run, like a failed test, with the commits in between. Small; any time.
 
+Implemented 2026-11-02: `scripts/ci-nightly.sh` runs
+`scripts/compiler-growth.mjs` after the full suite and keeps the two numbers
+in `last.json` (`metrics`, `previousMetrics`) and in `metrics.jsonl` of its
+state directory; `~/.claude/scripts/suite-status.mjs` reports the change.
+The depth limit is that of a `Sin`/`Cos` chain only (the Horner form is not
+measured). At d83338f66 it was 95,413 code lines and a depth of 344. The
+measure takes about 5 s when the limit did not change, about 35 s otherwise.
+A rise or a fall does not make the run fail, so it does not block a release.
+
 ## 6. What is still open
 
 - The decisions of step 2 (the user, one sitting).
