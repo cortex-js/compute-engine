@@ -1,0 +1,341 @@
+axis	witness	hash	added	removed	net	subject
+FN	unknown	f9c63f9c1	698	329	369	2026-11-01 R6: a default parameter fills an argument that is left out 
+MIS	unknown	d77c632d7	143	1224	-1081	2026-11-01 Absent-value contract, option (a): compiled code no longer 
+MIS	unknown	2ffbfc07a	131	44	87	2026-11-01 Discharges read every absent spelling: IsMissing, Coalesce 
+OPT	corpus	99e4e420f	118	7	111	2026-11-01 Row 485: the copies of a handler-lowered node that CSE serv
+MIX	corpus	8ad234805	373	40	333	2026-11-01 Fix Tycho rows 481-488: latex read and recursive type, exte
+TYP	corpus	3ba729792	145	263	-118	2026-11-01 Compiler simplification, step 3: arithmetic over a symbol d
+MIS	corpus	4c55bdbee	44	162	-118	2026-11-01 Compiler simplification, step 2: Take/Drop NaN count and ab
+BLK	unknown	15fc32706	141	874	-733	2026-11-01 fix: resolve compilation errors related to local variable a
+IVL	unknown	2dd7fb55c	22	1	21	2026-11-01 Fix CE-755: interval-js loop condition reads True/False as 
+FN	unknown	aaccfcf04	1009	41	968	2026-11-01 CE-725: Sort with a callback, Iterate and Pipe compile on J
+COL	unknown	4d4ae1926	262	22	240	2026-11-01 Compile: a point at a parameter with an open inferred type 
+TST	unknown	03210915e	40	0	40	2026-11-01 CE-139: D and Integrate over a list binding; CE-670: a list
+BLK	unknown	d1f28962f	136	22	114	2026-11-01 Compile: a Loop whose value is used declines on every targe
+FN	unknown	532df8add	54	24	30	2026-11-01 Compile: the lane check of a user-function call runs after 
+COL	unknown	1dc24d9de	154	22	132	2026-11-01 Compile: a multi-index At compiles as nested reads; a destr
+BLK	unknown	de3e6a689	104	15	89	2026-11-01 fix: a compiled Sum or Product reads a bound that names its
+BLK	unknown	a200686b7	166	15	151	2026-11-01 fix: the generic Sum/Product loop of a custom target compil
+CPX	unknown	c4e0a3bdb	627	61	566	2026-11-01 Compile: a complex value that reaches a parameter compiled 
+HYG	unknown	5d517c4af	71	1	70	2026-11-01 fix: Python compilation declines an operator name used as a
+TYP	corpus	450e1ad49	5076	1978	3098	2026-11-01 CE-712.2: a compiled call selects the variant from the stat
+BLK	unknown	c67baf167	38	1	37	2026-11-01 Compile: a destructuring Declare whose pattern repeats a na
+BLK	unknown	e3cea713d	253	47	206	2026-11-01 fix: a compiled Sum or Product whose body writes its index 
+HYG	unknown	d62a7698f	36	2	34	2026-11-01 Compile: the fixed names _f, _v, _c, _pt, result and _r of 
+BIG	corpus	783efd4f4	32	9	23	2026-10-31 CE-715 step 6: documentation and spec test cases of the big
+HYG	unknown	caa2192c3	224	25	199	2026-10-31 CE-732: a binding with a JavaScript reserved name is rename
+TYP	unknown	eccfec7a8	77	11	66	2026-10-31 CE-712.1 review fixes: dictionary values, Which handlers, P
+HYG	unknown	75116a0d8	294	44	250	2026-10-31 fix: a user name equal to a reserved name of the emitted co
+FN	unknown	4d746e6b7	374	14	360	2026-10-31 CE-726: a function-valued root compiled for interval-js can
+BIG	unknown	8ce5abc8b	120	11	109	2026-10-31 CE-715 step 5: constant folding in the bigint compile mode
+COL	unknown	9dcd0a9aa	191	12	179	2026-10-31 CE-727: dictionaries compile on the JavaScript and Python t
+COL	unknown	fed5b1762	14	0	14	2026-10-31 CE-727: the dictionary hook of CompileTarget
+TYP	unknown	5b60e6081	2703	86	2617	2026-10-31 CE-712.1: R1 untyped-input and R3 settled-shape admission
+BIG	unknown	26c2714e2	312	16	296	2026-10-31 CE-715 step 4: the boundary of the bigint compile mode
+BIG	unknown	39e19ff3b	9	61	-52	2026-10-31 fix: exact size estimates for integer powers and binomials,
+BIG	unknown	e6bff856b	1310	39	1271	2026-10-31 CE-715 step 3: bigint emission
+FN	corpus	4d6479dee	889	78	811	2026-10-31 CE-717.6, CE-717.7: compiled code fills parameter default v
+BIG	corpus	df8ea31ad	2222	37	2185	2026-10-31 CE-715 step 2: the bigint lane analysis
+BIG	corpus	8c94c065f	290	31	259	2026-10-31 CE-715 step 1: the bigint compile mode is accepted on the J
+FN	corpus	5f44931f4	165	1	164	2026-10-31 Compile: an applied function literal's bare parameter takes
+ERR	unknown	6195cec92	295	4	291	2026-10-31 Compiled code: an expression with a sub-expression of stati
+FN	unknown	a13a1e08d	22	116	-94	2026-10-31 CE-708: a curried function is the deferred call of the orig
+TYP	corpus	ba174fb6c	1116	40	1076	2026-10-31 Fix #488 follow-ups: compiled values for collections at ope
+BLK	corpus	1a95a7f6d	36	8	28	2026-10-31 Fix #488 follow-ups: block-local list join, Product of a re
+GPU	corpus	545deb5e0	935	65	870	2026-10-31 GLSL/WGSL: prove loop indexes, user calls and cos divisors 
+FN	unknown	16b688765	701	13	688	2026-10-31 A partial application of a function literal compiles where 
+BLK	unknown	afbcdfc3e	2141	268	1873	2026-10-31 Fix the CE-684..688 follow-ups and the defects found with t
+TYP	corpus	de18aed06	908	91	817	2026-10-30 Fix #488: a parameter declared any, expression or value rec
+FN	corpus	c95da4d96	83	5	78	2026-10-30 Add Composition(f, g, h), the composition of functions (#49
+BLK	unknown	00e6b2c56	120	41	79	2026-10-30 Caller code counts as an effect through symbol values, func
+OPT	corpus	b7c343f07	29	4	25	2026-10-30 Fix #497: CSE and the loop-invariant hoist admit a Function
+GPU	unknown	9a96a4028	431	53	378	2026-10-30 Fix CE-684..688: GPU splat reductions, GPU point-list freeS
+REF	unknown	5404acb3f	54659	51515	3144	2026-10-30 Split base-compiler.ts into 44 topic modules; BaseCompiler 
+REF	unknown	97bb4cc71	24313	23624	689	2026-10-30 Split gpu-target.ts into 19 topic modules behind a re-expor
+GPU	unknown	0c1adc21a	1006	535	471	2026-10-30 Implement CE-658 and CE-661: Enhance handling of point coor
+BAT	unknown	aac429bdd	206	80	126	2026-10-30 feat: enable shared list inputs for interval-js broadcast
+IVL	corpus	5bece6167	146	20	126	2026-10-30 interval-js: Linspace compiles (count known at compile time
+IVL	unknown	70f7d9554	50	5	45	2026-10-30 interval-js: a loop over a literal List, Tuple or Map compi
+IVL	unknown	66b32751f	5	6	-1	2026-10-30 interval-js: a Range with a computed bound has a value when
+MIS	unknown	d4e28ec11	14	2	12	2026-10-30 JavaScript: a vars entry that is the default spelling _.<na
+IVL	unknown	524bfb81c	55	14	41	2026-10-30 interval-js: a loop over a Range with an input bound gives 
+IVL	unknown	46a00171a	63	7	56	2026-10-30 interval-js: a loop over a list input gives the interpreter
+MIS	unknown	797aa8b3f	596	12	584	2026-10-30 Compiled code: an unsupplied collection input gives no valu
+BLK	unknown	33651c6b1	1119	224	895	2026-10-30 Block-local comparisons use the simple sound rule; absent-l
+GPU	corpus	32096f0bd	45	13	32	2026-10-30 GLSL/WGSL: inline a call that returns a coordinate of a poi
+BLK	unknown	17ba3b407	712	204	508	2026-10-30 Refactor Python compilation to classify local reads and enf
+MIS	unknown	f169546e9	2963	280	2683	2026-10-30 CE-579 list-recursion loop; CE-588/589/631-634 unsupplied v
+TST	corpus	f80301037	3	1	2	2026-10-30 Move durable rules from local agent memory into the repo do
+GPU	unknown	3431204f2	2683	135	2548	2026-10-30 CE-583/CE-593/CE-595: WGSL indexes block-local lists in pla
+COL	corpus	783683901	55	21	34	2026-10-30 Fix review findings for f2c053f1e (#499): dictionary values
+COL	corpus	f2c053f1e	325	45	280	2026-10-30 Compile Contains, Unique and Element over lists of lists (#
+GPU	unknown	d7e8b101d	79	30	49	2026-10-30 CE-565.6: a small power of a scaled bounded value is proven
+TST	unknown	ec330b8cc	145	9	136	2026-10-30 CE-614/CE-623: integrals keep the function a call was writt
+OPT	unknown	28f74e381	9	6	3	2026-10-30 CE-601: evaluate a shared subexpression once; cache host co
+GPU	unknown	a48bf6b49	151	18	133	2026-10-30 CE-565.6: GLSL/WGSL prove a small power of a bounded value 
+GPU	unknown	21d3daf55	145	4	141	2026-10-28 CE-605: GLSL/WGSL compile a Map inside the lambda of anothe
+REF	unknown	a48dd298f	25	14	11	2026-10-28 chore lint
+GPU	unknown	f87ea242d	2064	158	1906	2026-10-28 CE-580 compileShader target/type checks, CE-584 shared-sube
+ERR	unknown	75d84fbfd	215	13	202	2026-10-28 CE-569: compiled When gives no value unless its condition i
+GPU	unknown	5eca150d7	78	20	58	2026-10-28 CE-565.2: on GLSL and WGSL, Clamp/ElementMax/ElementMin of 
+TST	unknown	aae30478d	5	1	4	2026-10-28 CE-586: a symbol bound to a definition created in a rewound
+GPU	unknown	4d235c8a2	2895	122	2773	2026-10-28 CE-571 compileFieldFunction, CE-572 storage-buffer kind, CE
+GPU	unknown	df6edc26b	536	12	524	2026-10-27 CE-577: Factor/Together/Cancel collect like terms; CE-565.4
+IVL	unknown	5eca8afa7	197	18	179	2026-10-27 CE-564, CE-578: interval-js per-call copies, GPU element-wi
+GPU	unknown	ce55cd2f3	99	12	87	2026-10-27 CE-570: shader root inlining accepts the voronoi row; a sha
+GPU	unknown	9f6a0491a	695	55	640	2026-10-27 CE-562/563/564/565 and widen order: codegen batch from the 
+IVL	unknown	7905a1b1e	61	0	61	2026-10-27 CE-252: interval-js reads a subtracted invariant prefix fro
+GPU	unknown	bdbc0a015	23	4	19	2026-10-27 Enhance GPU finite checks to allow self-mapped uniforms and
+NUM	unknown	9bf78427f	253	15	238	2026-10-27 Implement Smoothstep function in Python target and arithmet
+BLK	unknown	4815ac793	789	24	765	2026-10-27 Refactor subs() to preserve bound variables and improve han
+GPU	unknown	d8f99b572	413	47	366	2026-10-27 Implement recompileStatement for handling statement compila
+IVL	unknown	47c949ce5	5	3	2	2026-10-27 Refactor interval functions and enhance error handling for 
+IVL	unknown	eb20e4063	19	6	13	2026-10-27 CE-528: interval-js runners throw a ReferenceError instead 
+VK	corpus	22d77a2ea	400	80	320	2026-10-27 feat: value kinds, phase 3 (CE-507, #477, #416): the Enclos
+GPU	unknown	f5d991902	274	50	224	2026-10-27 Enhance GPU compilation to ensure correct order of random d
+REF	unknown	a23be5735	4	68	-64	2026-10-26 chore lint
+GPU	unknown	30d37c4e3	46	1	45	2026-10-26 Implement GPU handling for random draws and improve perform
+GPU	unknown	32b663a55	233	67	166	2026-10-26 Refactor shader function calls to use GPU-specific function
+GPU	corpus	61cb3c14b	244	40	204	2026-10-26 fix: CE-519 NaN-safe Max, Min, Clamp, ElementMax, ElementMi
+COL	unknown	0a2357234	30	0	30	2026-10-26 CE-514: PointList compiles a coordinate of a possible list 
+BAT	unknown	21d9d30a4	237	10	227	2026-10-26 CE-518/CE-507.1: caller compile handler output not shippabl
+GPU	unknown	140ad66f5	375	68	307	2026-10-26 Refactor modulus handling in GLSL and WGSL compilation to u
+VK	corpus	0be912cef	821	36	785	2026-10-26 feat: value kinds, phase 1 (CE-507, #477): the arithmetic f
+COL	unknown	7972b850c	31	5	26	2026-10-26 fix: CE-505, CE-506 point parameters accept lists that can 
+COL	unknown	b33c90a1c	122	0	122	2026-10-26 fix(types): CE-504 a point beside an operand that may be a 
+TST	unknown	1531783ca	9	5	4	2026-10-26 feat: add support for registering custom compilation target
+TYP	unknown	b6531824f	37	11	26	2026-10-26 fix(types): CE-502, CE-503, CE-490, CE-491, CE-498, CE-38
+TYP	unknown	d96a6ac11	4	4	0	2026-10-26 fix: CE-462, CE-464, CE-493, CE-494.1, CE-496, CE-497, CE-5
+TYP	unknown	65b557902	107	29	78	2026-10-25 fix(types): CE-3.5, CE-4, CE-10, CE-30, CE-38, CE-42, CE-43
+TYP	corpus	ef654075b	21	9	12	2026-10-25 fix(box): the structural form keeps a constant name as writ
+REF	unknown	9dcc2cf0b	59	416	-357	2026-10-25 arch: cleanup deprecated symbols
+REF	unknown	e1f342625	11	21	-10	2026-10-25 chore lint
+TYP	unknown	d963d1b4f	84	6	78	2026-10-25 fix(types): CE-473 captured free symbols; CE-468..471; a ca
+TYP	unknown	9fb196715	259	7	252	2026-10-25 Implement type narrowing for juxtaposed products in Compute
+TYP	unknown	825303791	64	24	40	2026-10-25 feat(types): items CE-60, CE-45.2, CE-39.4, CE-39.6, CE-448
+OPT	unknown	472df47ee	524	63	461	2026-10-25 perf(compile): CE-333 coordinate projection over typed poin
+TYP	unknown	0baeb44b6	35	13	22	2026-10-25 Refactor input handling for Python target to differentiate 
+BAT	unknown	888f5f777	44	9	35	2026-10-25 feat: Implement batch body compilation on request for `broa
+MIS	unknown	7b6b73f5a	335	26	309	2026-10-25 feat: Implement handling of absent tuple base markers in Ja
+MIX	unknown	0903f3107	113	22	91	2026-10-25 fix: open ROADMAP defects that need no decision
+MIS	unknown	cd704b6b8	436	15	421	2026-10-25 Implement handling of absent inputs in Python compilation t
+MIX	unknown	fd47fdca4	3066	230	2836	2026-10-25 fix(compile): open items of the ROADMAP Compilation section
+OPT	unknown	fe4424bda	682	43	639	2026-10-25 perf: open items of the ROADMAP Performance section
+OPT	unknown	e181a868a	1763	1347	416	2026-10-24 perf: the compiler uses less stack per level of a nested ex
+OPT	unknown	0c3e359f1	48	10	38	2026-10-24 perf: the constant-fold checks of the compiler visit a shar
+BAT	corpus	ff1daaabf	124	7	117	2026-10-24 feat: a worker pool for a kernel loaded with the runtime en
+BAT	unknown	ca73f9207	124	18	106	2026-10-24 feat: implement cooperative yielding in linear scan solve a
+BAT	corpus	c3778c25a	109	8	101	2026-10-24 Tycho CE-314 feedback: time limit and event-loop turns on a
+ERR	unknown	f13b6f46f	1608	109	1499	2026-10-24 Implement changes to comparison handling in the engine to t
+BC	corpus	7cc75ad90	142	3	139	2026-10-24 fix: a call over one point or a list of points is typed and
+REF	unknown	42b97e637	5	7	-2	2026-10-24 chore lint
+MIS	unknown	a3fcd993d	102	10	92	2026-10-24 fix: ensure absent operands with unknown types keep their a
+BC	corpus	497e46c21	65	9	56	2026-10-24 feat(broadcast): a declared broadcastable<T> parameter maps
+MIX	unknown	2c4ad70ac	195	41	154	2026-10-24 fix: resolve about 80 ROADMAP entries across all sections
+IVL	unknown	bbfafc6aa	84	26	58	2026-10-24 Enhance interval-js handling for boolean expressions and wi
+BC	unknown	d04090ec1	19	18	1	2026-10-23 fix(types,arithmetic): CE-397 couldMatch nonEmpty, CE-398 e
+REF	unknown	d638b0dcb	3	1	2	2026-10-23 chore lint
+TYP	corpus	9d2e794e0	26	0	26	2026-10-23 feat(types): residue classes have a type of their own, resi
+TST	unknown	ca4114a49	99	0	99	2026-10-23 fix(integrate): a product that overflows against itself is 
+ERR	unknown	cc72330ea	82	67	15	2026-10-23 fix(compare): a NaN pair makes a chained comparison False; 
+TST	unknown	05c2ea270	10	2	8	2026-10-23 fix(integrate): .N() of a divergent integral whose integran
+ERR	unknown	799cc9d3a	35	32	3	2026-10-23 fix(branch): a NotEqual with a NaN operand is True in a bra
+MIS	unknown	27e093bcf	210	2	208	2026-10-23 fix(compare): a comparison with an absent number is absent,
+ERR	unknown	5f605ec53	80	18	62	2026-10-23 fix(compile): a NaN operand of a compiled Equal compares as
+TST	unknown	d4dc5a26f	15	2	13	2026-10-23 perf+fix: indefinite integrals skip the residue method; .N(
+BC	unknown	84b20932f	80	23	57	2026-10-23 fix(compile): a compiled product of a fold and a matrix is 
+TYP	unknown	f5b7e8f8e	238	55	183	2026-10-23 fix(compile): a call of a user function over an untyped fre
+MIS	unknown	8c76cb6b8	233	16	217	2026-10-23 fix(compile): compiled folds over elements of unknown type,
+MIS	unknown	93d3c376d	119	6	113	2026-10-23 fix(compile): an absent element of unknown type stays absen
+REF	unknown	8dfe4b888	0	1	-1	2026-10-23 chore lint
+BC	unknown	7008b8bd6	44	67	-23	2026-10-23 fix(compile): a compiled Multiply fold over elements of sev
+TYP	unknown	557743738	130	9	121	2026-10-23 feat!(types): the signature of a function literal says only
+BC	unknown	046402a55	178	14	164	2026-10-23 fix(compile): a ragged list or a rank-3 tensor in a compile
+BC	unknown	8843c9522	413	4	409	2026-10-23 feat!: Multiply of two matrices is the matrix product howev
+TYP	unknown	940fc95d4	25	1	24	2026-10-23 fix(types): Sum over possible lists, unknown-cell arithmeti
+CPX	unknown	4916e3f7f	836	12	824	2026-10-22 refactor: update complex statistics handling in reducers
+BC	unknown	36c24fa23	97	12	85	2026-10-22 fix(types): index into a tuple or string held in broadcasta
+BC	unknown	903e2af7c	4	4	0	2026-10-22 feat(types)!: one cell rule for vector, matrix and tensor; 
+BC	corpus	556ca8d7e	819	25	794	2026-10-22 fix: type an index into a broadcastable<T> call by what it 
+BC	unknown	636a62e17	397	34	363	2026-10-22 fix: element-wise If/Which over masks of any rank; compiled
+MIX	corpus	cc468eb4f	670	7	663	2026-10-22 fix: NaN-region early exit for numerical integrals (Tycho r
+TST	corpus	ece7ba4ba	19	1	18	2026-10-22 fix: FindRoot converged only at a checked root, steep equat
+BC	unknown	4e66aed34	648	50	598	2026-10-22 feat(types)!: read list<T> by its elements and tensor<U> by
+MIS	unknown	41240b5e9	92	4	88	2026-10-21 Implement presence contracts and assertion handling in the 
+REF	unknown	0c82b225c	0	0	0	2026-10-21 Merge branch 'main' of https://github.com/cortex-js/compute
+NUM	corpus	a32d9c0b2	37	6	31	2026-10-21 Complex `GammaLn` is the principal log of Γ(z) everywhere;
+TYP	unknown	7cbbd3a50	13	9	4	2026-10-21 refactor: replace isSubtype checks with provablyAdmits for 
+MIX	unknown	97ef4064d	87	15	72	2026-10-21 fix: land the ROADMAP follow-ups of 2026-10-20/21 (hoisting
+BLK	unknown	dc5a242ec	11	1	10	2026-10-21 Implement sticky evaluation rules for unresolved calls in C
+BAT	unknown	b9016e19b	329	52	277	2026-10-21 feat: enhance JavaScript result handling with shared inputs
+ERR	corpus	8fd9f7394	23	4	19	2026-10-21 fix: a value with no order (a pole, a non-real complex numb
+TYP	unknown	780a7d39f	22	34	-12	2026-10-21 Fix type handling in various functions and improve test cov
+ERR	unknown	30aecfc0a	23	14	9	2026-10-21 fix: preserve omitted positions in raw producers and enhanc
+BC	unknown	b76ca1055	36	30	6	2026-10-21 fix(types): broadcastable<T> means T | list<T>; meet of col
+ERR	corpus	c240193f0	291	51	240	2026-10-21 fix: Tycho rows 407 (FindFit global grid: basin-aware spaci
+FN	unknown	6d77ae830	111	0	111	2026-10-20 Implement call-head inference and forward call reference ha
+BLK	unknown	69b8d4cc0	265	62	203	2026-10-20 Refactor Python compilation to improve bound variable handl
+ERR	unknown	2081e5469	24	104	-80	2026-10-20 Refactor tuple handling to preserve positions of Nothing co
+ERR	unknown	2f76a67a0	41	12	29	2026-10-20 Enhance numeric aggregate functions to handle immediate Not
+ERR	unknown	8cd835712	56	25	31	2026-10-20 feat(Filter): drop immediate Nothing inputs without invokin
+ERR	unknown	eb7a56f25	44	0	44	2026-10-20 Implement handling of 'Nothing' elements in Map and statist
+REF	unknown	a608320ca	2	2	0	2026-10-20 chore(lint): fix the oxlint results in four files
+BAT	unknown	315e6fc41	1009	125	884	2026-10-20 feat(compile): broadcast()/broadcastAsync() batch evaluatio
+MIS	unknown	92f424f3e	25	18	7	2026-10-20 Implement coalesce functionality to handle whole-value abse
+NUM	corpus	9a3677801	286	22	264	2026-10-20 fix: compiled GammaRegularized at a non-positive order, on 
+IVL	unknown	623af5a3e	25	17	8	2026-10-20 fix: Implement support for real powers with odd denominator
+TST	unknown	508b22038	14	4	10	2026-10-20 feat: a sum or product with no bounds runs over 1..∞ on e
+TST	unknown	45719a95e	5	1	4	2026-10-20 doc: compiled real parameters accept an infinite argument o
+BLK	unknown	1efbbe884	961	28	933	2026-10-20 Refactor function body local assignment handling and improv
+MIS	unknown	85e4ca049	37	1	36	2026-10-20 fix: arithmetic over a list whose element can be a list or 
+CPX	unknown	e8934c2c3	457	33	424	2026-10-19 Implement handling for NaN and infinite entries in index ev
+MIX	unknown	75196dd8f	209	11	198	2026-10-19 feat: dimensionless quantities compare with numbers, a nume
+MIS	unknown	7e1cfd1a9	7	3	4	2026-10-19 fix: an absence-slotted tuple is a tuple (spread, Join, equ
+IVL	unknown	5922e2129	14	9	5	2026-10-19 feat: expose literalHasNoDoubleValue function and update in
+REF	unknown	232ab3776	10	10	0	2026-10-19 chore lint
+TST	unknown	6ed142f0a	7	1	6	2026-10-19 feat: sets are unordered (canonical element order, order-fr
+MIX	unknown	f43af0ee1	551	46	505	2026-10-18 fix: generator facets (contains, at by unranking, rank) for
+BLK	unknown	0c398a278	546	50	496	2026-10-18 fix: block-local functions read written arguments under .N(
+MIX	unknown	f395dd074	186	16	170	2026-10-18 fix: direct application under .N() by route parity, FlatMap
+IVL	unknown	3bdee13b3	217	11	206	2026-10-18 fix: enhance interval narrowing in `Which` compilation and 
+MIX	unknown	dd2813809	855	87	768	2026-10-18 fix: trigonometric Solve families, guard digits for element
+REF	unknown	110c3b060	1	2	-1	2026-10-18 chore lint
+MIX	unknown	930b9cedc	484	45	439	2026-10-18 fix: compiled assignment shapes, interval-js result shape a
+MIX	unknown	63bfbabb9	317	29	288	2026-10-18 fix:  positional operators refuse a set, integer functions 
+GPU	corpus	b5fe0371e	1159	171	988	2026-10-18 feat(glsl): exact sine hash for Mod/Fract of an amplified s
+MIX	unknown	114db120a	853	70	783	2026-10-18 fix: .N() to the last statement, compiled jump with a loop 
+GPU	unknown	2fd45d32e	218	15	203	2026-10-18 feat: reduce large constant terms in trigonometric argument
+MIX	unknown	d0f64aa92	159	3	156	2026-10-18 Implement handling for complex infinity in rounding operati
+BLK	unknown	7d1fa629e	106	10	96	2026-10-17 feat: implement value tail selections for block-ending If s
+OPT	unknown	68aec0f22	123	20	103	2026-10-17 feat: enhance constant folding and CSE with new power helpe
+NUM	unknown	b426d66ba	5	2	3	2026-10-17 feat: enhance handling of inverse trigonometric functions a
+REF	unknown	697836ca1	6	4	2	2026-10-17 chore lint
+MIX	unknown	f79d28422	674	107	567	2026-10-17 Add extensive tests for rounding behavior, NaN handling, an
+TYP	unknown	54d69e7f3	22	4	18	2026-10-17 Refactor type handling for `any` and `value` symbols in ari
+NUM	corpus	38e5d18a6	55	2	53	2026-10-17 fix #446: Gamma(s, z) for s < −1 at small z, exact √(�
+TST	unknown	c239f12f4	109	17	92	2026-10-16 Add tests for sequence scope behavior and type disjointness
+TST	unknown	6b4cc5050	169	48	121	2026-10-16 Add tests for undeclare functionality in ComputeEngine
+TST	unknown	5d6535e96	9	0	9	2026-10-15 Enhance matrix power error handling and type validation
+GPU	unknown	beabe22ad	40	3	37	2026-10-15 feat: enhance shader loop compilation and sequence declarat
+TYP	unknown	a0260c995	15	2	13	2026-10-15 Refine parameter indexing and type inference in Compute Eng
+TST	unknown	05a27e8d6	8	1	7	2026-10-15 Fix the symbolic integrator for a non-radian angular unit
+CPX	corpus	403a2167a	409	29	380	2026-10-15 Land PRs #436, #440 and #441: compiled complex continuation
+TYP	unknown	5f337c584	28	0	28	2026-10-15 Enhance type error diagnostics and refine function handling
+FN	unknown	2793af9d1	148	15	133	2026-10-14 Add tests for operator re-declaration and inferred signatur
+MIS	unknown	48744d152	64	3	61	2026-10-14 Enhance handling of absent tuples and their evaluation
+CPX	unknown	3dd306909	36	8	28	2026-10-14 fix: improve handling of complex factors in product computa
+CPX	unknown	018e42231	318	24	294	2026-10-14 feat: add complex gamma function and improve handling of co
+BC	unknown	54fb0a06a	25	7	18	2026-10-13 Enhance type inference and handling for function calls and 
+TYP	unknown	2c1c2dc86	137	494	-357	2026-10-13 Refactor entry checks and runtime behavior for complex and 
+MIX	unknown	19dc0f028	356	33	323	2026-10-12 Add regression tests for asynchronous evaluation and collec
+BC	unknown	1f3ddabe2	265	10	255	2026-10-12 feat: implement SYS.atMask for boolean-mask based array acc
+TST	unknown	5edb958df	89	11	78	2026-10-08 Enhance lazy evaluation of literals and improve error repor
+TYP	unknown	6fa03133f	1184	103	1081	2026-10-08 Enhance type handling and performance in Compute Engine tes
+TST	unknown	e94126190	14	9	5	2026-10-08 Refactor tests for materialization, modular arithmetic, and
+GPU	unknown	ed3c20228	66	22	44	2026-10-08 feat: enforce shader array element limit and improve radica
+IVL	unknown	fc076676d	108	26	82	2026-10-08 feat: implement compact spelling for constant lists in inte
+COL	unknown	b3055b8ae	269	29	240	2026-10-07 Refactor lazy argument handling and improve collection beha
+MIX	unknown	a69077e3d	531	35	496	2026-10-07 Refactor rounding behavior in Python lambda and enhance typ
+TYP	unknown	8a5fdcfc9	13	12	1	2026-10-07 Refactor entry refusal logic for strings in inferred collec
+TYP	unknown	173ec2e7d	179	27	152	2026-10-07 Add tests for entry refusal of strings in collection types 
+MIX	unknown	ace38cb95	180	38	142	2026-10-06 Refactor Epsil corpus examples for performance and clarity
+NUM	unknown	965e6884c	314	161	153	2026-10-06 Refactor rounding functions to use step instead of precisio
+CPX	unknown	9b5a08750	148	37	111	2026-10-06 Switch from complex-esm to complex.js 2.4; correct results 
+NUM	unknown	f25218674	190	8	182	2026-10-06 feat: add step argument to floor, ceil, and truncate functi
+NUM	corpus	27f9bf23d	245	51	194	2026-10-06 fix #417: add rounding tie rule as an engine setting
+MIX	corpus	2278a7d82	180	45	135	2026-10-06 Fix #412, Fix #414, Fix #415, Fix #416: PolyLog at a large 
+REF	unknown	c6067dc11	21	15	6	2026-10-06 Refactor code for improved readability and maintainability
+REF	corpus	c71298d52	6725	6226	499	2026-10-05 Add an engine-free runtime for compiled JavaScript (@cortex
+COL	unknown	dfaff5e2b	46	0	46	2026-10-04 |S| of a set or a string is its number of elements; set cou
+MIX	corpus	ab0530520	2494	117	2377	2026-10-04 Tycho rows 359–364, Solve completeness, and review fixes
+TST	unknown	4a0b1edd2	85	2	83	2026-10-04 Add comprehensive tests for the Solve function in ComputeEn
+NUM	unknown	e2347f406	10	4	6	2026-10-03 Add tests for Lambert W function and implement trigonometri
+NUM	unknown	d449e2d72	666	88	578	2026-10-02 Remove numeric dust at its source: exact multiples of π re
+NUM	unknown	381519bfe	5	3	2	2026-10-02 Inverse trig/hyperbolic functions of arguments beyond the d
+NUM	unknown	b1dfb8a46	17	11	6	2026-10-02 Update inverse trigonometric functions to ensure arctan and
+TST	unknown	8b5bcb01b	55	4	51	2026-10-02 Add tests for sum and product operators with one bound
+CPX	unknown	4e963bcb7	681	130	551	2026-10-02 Accurate GLSL/WGSL complex inverse trig kernels in 32-bit f
+NUM	corpus	584f293a3	35	1	34	2026-10-01 Add LogGamma, BarnesG, DirichletEta/Beta, StieltjesGamma, C
+CPX	unknown	a184e8397	104	75	29	2026-10-01 Accurate complex inverse trig and hyperbolic functions at l
+MIX	unknown	8bf9283e5	353	70	283	2026-10-01 Add comprehensive tests for ComputeEngine library operators
+HYG	unknown	eab2f8652	382	72	310	2026-10-01 Add tests for reserved word handling in GLSL, WGSL, Python,
+TST	unknown	3bdf44548	4	1	3	2026-10-01 Add tests for operator derivatives and redeclaration of ari
+MIX	corpus	5015d5c72	278	27	251	2026-10-01 fix #387, fix #388, fix #398:
+CPX	unknown	f67e60dca	6	1	5	2026-10-01 Fix complex arithmetic in Sum and Product: correct handling
+COL	unknown	2f7ee8a86	590	26	564	2026-10-01 Implement list update helpers for Python target: ReplaceAt,
+CPX	unknown	77d41b02d	236	42	194	2026-10-01 feat: implement scalar addition and multiplication for comp
+MIS	unknown	70bed4e6b	149	13	136	2026-10-01 Enhance error handling for absent arguments in function cal
+COL	corpus	fa251e333	77	0	77	2026-10-01 fix #386: Enhance array manipulation functions: implement `
+COL	unknown	204e2e901	210	9	201	2026-10-01 Enhance handling of abstract collections in operators: supp
+NUM	unknown	1d0d26995	735	31	704	2026-09-30 Refactor LerchPhi and Zeta tests for improved accuracy and 
+NUM	corpus	4cf33158d	6	2	4	2026-09-30 fix #384: Update Binomial function to handle negative and n
+NUM	unknown	420e06e37	1527	199	1328	2026-09-30 Add extensive tests for PolyLog and Zeta functions, enhanci
+MIS	corpus	eb721ea30	203	4	199	2026-09-30 Enhance handling of absent collection operands in JavaScrip
+TYP	unknown	bdb3c9689	96	0	96	2026-09-30 Enhance type handling for function parameters and collectio
+OPT	unknown	6754cb906	309	5	304	2026-09-29 feat: implement counted loop for predicate consumers over f
+ERR	unknown	3a8baff37	19	6	13	2026-09-29 Refactor arithmetic tests to clarify indeterminate forms an
+FN	corpus	c1008ed67	211	33	178	2026-09-29 fix #369: implement support for annotated accumulators in f
+FN	corpus	eebafa727	24	28	-4	2026-09-29 fix: #367 JavaScript Range compilation to prevent variable 
+BC	unknown	30b89dc1e	197	97	100	2026-09-29 Add tests for whole-collection parameter handling in Epsil 
+REF	unknown	d7da10d6a	14	24	-10	2026-09-29 chore lint
+MIX	corpus	d76542723	360	29	331	2026-09-29 Add tests for Tycho items 334, 335, 336 and update type han
+TST	unknown	99def6ef9	6	0	6	2026-09-29 fix: update constant language regex to include 'Indetermina
+TST	unknown	e7249dc55	6	0	6	2026-09-28 feat(cli): add --compile option to compile Epsil programs t
+NUM	unknown	e582fffdd	1	4	-3	2026-09-28 Refactor LerchPhi and PolyLog tests for improved clarity an
+FN	unknown	3e1685101	158	23	135	2026-09-28 Enhance compile-time handling of vars-mapped inputs and use
+NUM	corpus	145cdaed0	83	14	69	2026-09-28 Review corrections for #358 (PolyLog at a non-integer or co
+REF	unknown	db9a93019	0	0	0	2026-09-28 Merge branch 'main' into polylog-order
+NUM	corpus	f20b2faad	164	37	127	2026-09-28 Review corrections for #356 (LerchPhi)
+REF	unknown	e9ca20d9f	0	0	0	2026-09-28 Merge branch 'main' into lerch-phi
+REF	unknown	4c8e6a197	0	0	0	2026-09-28 Merge branch 'main' into polygamma-complex
+NUM	corpus	e89b6a348	44	2	42	2026-09-28 Widen PolyLog(s, z) to a non-integer or complex order s via
+NUM	corpus	5a29e421b	203	6	197	2026-09-27 Implement LerchPhi, the Lerch transcendent Φ(z,s,a), by di
+NUM	corpus	653e9a406	6	0	6	2026-09-28 Widen PolyGamma to a complex z, reusing HurwitzZeta for m >
+MIS	unknown	529b5fafd	377	65	312	2026-09-27 Refactor tests for compute engine to improve clarity and co
+CPX	unknown	1270b8444	76	66	10	2026-09-27 Refactor complex number handling in symbolic computations
+COL	unknown	865085ef9	366	120	246	2026-09-27 - Add comprehensive tests for integration with list bounds 
+BLK	unknown	5e0f0f22b	44	27	17	2026-09-27 Refactor binding site handling for comprehensions and claus
+COL	unknown	1bf77c0f9	121	12	109	2026-09-27 feat: add support for comprehensions with guards in Epsil
+NUM	corpus	0f9f7c9c7	341	5	336	2026-09-27 Implement complex zeta functions and enhance special functi
+NUM	corpus	9f0e16649	5	8	-3	2026-09-27 Enhance hyperbolic function evaluations and simplify rules;
+MIS	unknown	a5363341f	215	101	114	2026-09-26 Implement tests for handling absent values in collection op
+CPX	unknown	ba5bbcc13	21	23	-2	2026-09-26 Refine type handling for complex numbers and infinite serie
+MIS	unknown	09293e23f	100	97	3	2026-09-26 Refactor handling of absent values in collection operations
+MIS	unknown	eedab2e0d	733	145	588	2026-09-26 Refactor tests to handle NaN and Missing values consistentl
+TYP	unknown	7713654e2	7	0	7	2026-09-26 feat: enhance type inference for declared parameter results
+MIS	unknown	214a8dba7	251	27	224	2026-09-25 Refactor numeric tests and enhance error handling for arith
+IVL	unknown	54abd1dde	5	1	4	2026-09-25 Refactor interval-js handling in tests and improve type ass
+MIX	corpus	e5766b668	189	36	153	2026-09-25 Implement Tycho items 319, 321, 323, and 325: Enhance handl
+MIS	unknown	9a6200db3	8	0	8	2026-09-25 Refactor handling of missing and undefined values in numeri
+TST	unknown	2ce0f18db	73	5	68	2026-09-25 Add comprehensive tests for precision handling, large integ
+COL	unknown	9919f2f10	261	60	201	2026-09-25 Implement range counting with tolerance adjustments and enh
+COL	unknown	cc6cf215a	24	6	18	2026-09-25 feat: update behavior of error functions and tuple operatio
+COL	unknown	2fb211500	378	4	374	2026-09-25 Refactor tests for handling tuples and lists in Compute Eng
+ERR	unknown	7b08719f9	95	13	82	2026-09-25 Refactor linear algebra operations to handle conditional va
+COL	unknown	bdf44a494	131	15	116	2026-09-25 Refactor tests for restricted points and arithmetic operati
+BC	unknown	5907f0c0c	210	3	207	2026-09-25 Fix broadcast typing for restricted points and handle absen
+REF	unknown	521209f2c	1429	1287	142	2026-09-24 Refactor error messages in tests to standardize failure rep
+CPX	unknown	5e29489a6	3987	855	3132	2026-09-24 Add comprehensive tests for statistics with real constants 
+MIX	unknown	168de97d5	890	233	657	2026-09-23 Add tests for linear algebra operations and color handling 
+TST	unknown	9b651e7dc	110	46	64	2026-09-23 feat: introduce step budget management in compute engine
+TST	unknown	47ed2d719	26	6	20	2026-09-23 feat: propagate caller's cancellation through compiler catc
+NUM	unknown	4f712cabb	64	28	36	2026-09-23 feat: implement pole handling for trigonometric functions i
+TST	unknown	a072035cb	102	6	96	2026-09-22 Add tests for dictionary structural equality and integratio
+MIS	unknown	458389f6c	442	116	326	2026-09-22 Add tests for RandomChoice behavior and Undefined handling 
+BC	unknown	29b7ac9c2	334	89	245	2026-09-22 Refactor broadcast behavior for empty collections and undef
+BC	unknown	e78a56247	76	34	42	2026-09-20 feat: enhance Max/Min handling for scalar and collection op
+TST	unknown	3d7e01ca5	70	15	55	2026-09-20 feat: enhance symbolic integration timeout handling and add
+TST	unknown	afc8d7172	28	9	19	2026-09-20 feat: improve handling of symbolic integration timeout reco
+CPX	unknown	d7153a9f3	309	35	274	2026-09-19 Enhance complex number handling and integration timeout beh
+COL	unknown	0ce30d368	185	20	165	2026-09-19 feat: enhance point arithmetic handling and add tests for w
+REF	unknown	d43174964	21	19	2	2026-09-18 chore lint
+IVL	unknown	bf15bcf30	99	3	96	2026-09-18 feat: enhance handling of 'Which' operator in interval comp
+BLK	unknown	f3f300758	38	6	32	2026-09-18 feat: introduce entropy handler for randomness operations
+IVL	unknown	56e903bfc	184	11	173	2026-09-18 Refactor interval-js tests and enhance rename functionality
+IVL	unknown	61edbdb27	331	81	250	2026-09-18 feat: enhance interval target with point component handling
+MIS	unknown	00aa62f50	126	8	118	2026-09-17 Refactor interval target absence handling and introduce com
+COL	unknown	543467a6d	13	8	5	2026-09-17 feat: implement handling for provably non-integer indices i
+OPT	unknown	82941c3ed	141	11	130	2026-09-17 feat: optimize callback lowerings to share loop-invariant c
+IVL	unknown	849b22f02	132	20	112	2026-09-17 feat: optimize interval target array handling to bind const
+OPT	unknown	6a2b78ef8	173	22	151	2026-09-16 feat: enhance reference analysis to prevent out-of-memory e
+IVL	unknown	c5a6272e2	26	3	23	2026-09-16 feat: support lazy Map and Range values in interval target 

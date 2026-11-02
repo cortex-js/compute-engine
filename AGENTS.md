@@ -88,6 +88,18 @@ nightly run, tell the user; do not take over that investigation unless asked.
   `corpus` or `plausible` witness. A `crafted` witness is resolved with a
   decline or a known-limitations line, and an allowed difference with no entry
   at all.
+- A case with only a `crafted` witness is never a question for the user, in a
+  report, a ROADMAP entry or a review finding: each answer to such a question
+  adds a handler for a case that no real expression reaches. The agent gives the
+  case a decline, or leaves its value unspecified where the caveats allow,
+  writes the known-limitations line, and continues. A question to the user names
+  its `corpus` or `plausible` witness; a question without one is not asked, and
+  an unanswered question means "decline". A reviewer's finding with a `crafted`
+  witness is answered with the decline or the known-limitations line, not with a
+  handler. When the agent cannot tell `plausible` from `crafted` (the header of
+  `ROADMAP.md` defines both), it records the case as a known-limitations line
+  marked `plausible?`, with the one-or-two-line program; the user sweeps those
+  lines and promotes any of them to a ROADMAP entry.
 - Judge a design change first by correctness within the caveats (a wrong finite
   value or shape is never acceptable; an expression whose static type is `error`
   declines), then by the code it removes or adds: a change that gives the same
