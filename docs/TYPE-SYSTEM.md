@@ -187,10 +187,12 @@ collection must allow for these facts:
   (`L^2` or `|L - 1|` with `L` assigned a list), although its type is a list
   type. Use the type for such a node.
 
-Because declared types are often wider than the values that reach them, the
-compiled targets prefer a run-time test that copies the interpreter (such as
-projecting an index to its real part) over a static "is this operand provably
-X" check, which refuses ordinary working code.
+Compiled code reads each value in the shape that its declared or inferred
+static type gives, and emits no run-time test of a type: a value outside its
+type gives an undefined result, and a value with no settled shape declines
+(`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time"). So
+declare an input with the narrowest type that holds every value it will
+receive.
 
 `string` and `range` are subtypes of `collection<any>` (a string is an
 indexed collection of characters, `STRING_STRUCTURAL_TYPE` in

@@ -57,11 +57,13 @@ wrote**, not by the operand shapes:
    `test/compute-engine/apply-literal-maps.test.ts` ("A PARAMETER DECLARED
    WITH A WIDE TYPE").
 
-   Compiled code tests a parameter declared `any` or `value` at run time,
-   and maps the body over a collection argument as the interpreter does.
-   It does not test a parameter declared `expression`, so it declines (falls
-   back to the interpreter) a call where an argument that can be a
-   collection reaches such a parameter:
+   Compiled code does not test the shape of a value at run time. It
+   declines (falls back to the interpreter) arithmetic over a parameter
+   declared `any` or `value`, with the code `'unsettled-shape'`: with
+   `M: list<list<real>>`, `((t: any) ↦ 2t)(M)` declines, and the interpreter
+   gives `[[2, 4], [6, 8]]` for `M = [[1, 2], [3, 4]]`. It also declines a
+   call where an argument that can be a collection reaches a parameter
+   declared `expression`:
    `((t: expression) ↦ 2t)([[1, 2], [3, 4]])` is computed by the
    interpreter as `[[2, 4], [6, 8]]`, and `((t: expression) ↦ 2t)(5)` still
    compiles. The rule is the same for a function literal and for a named
@@ -73,8 +75,7 @@ wrote**, not by the operand shapes:
    passes values whose type cannot be a collection: with `h := (t:
    expression) ↦ 2t`, `Map(h, L)` compiles when `L` is declared
    `list<real>`, and `Map(h, rows)` declines when `rows` is declared
-   `list<list<real>>`. A more precise version, with a run-time test as for
-   `any` and `value`, is available on request (ROADMAP CE-693). The tests are
+   `list<list<real>>`. The tests are
    `collectionAtExpressionParameter()` (`compilation/compile-user-calls.ts`)
    and `withCheckedCallback()` (`compilation/compile-callbacks.ts`).
 
@@ -187,10 +188,10 @@ Corollary rules for the strict regime:
   (`library/collections.ts`) is the only opt-out.
 - Compiled lowering: `_SYS.bcast` on the JavaScript target mirrors the
   interpreter per POSITION — an empty position answers the empty list and a
-  mismatched one projects to NaN, neither poisoning a sibling. The operator
-  form (`_SYS.bcast`) and the user-function form (`_SYS.bcastFn`) answer
-  alike; the two names stay apart so the emitter keeps saying which form it
-  lowers. The fused emitter (`emitFusedBroadcast`, `base-compiler.ts`) folds
+  mismatched one projects to NaN, neither poisoning a sibling. A call of a
+  user function over a list argument maps the function with `_SYS.mapFn`,
+  over the number of list levels that the static type of the argument
+  gives. The fused emitter (`emitFusedBroadcast`, `base-compiler.ts`) folds
   a chain of heads into ONE call, so `Sin(N) + M` with `N = []` and
   `M = [1, 2]` reaches the helper as one length mismatch and answers NaN,
   where the interpreter answers the `incompatible-dimensions` error. The

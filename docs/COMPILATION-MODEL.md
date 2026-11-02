@@ -52,7 +52,8 @@ when it compiles. A difference that this list does not name is a defect.
   `docs/plans/2026-11-01-absent-value-contract.md`.
 - A value for an input that holds a value outside its declared type, for an
   input left out, or for an error that the static type does not show.
-  "Fail closed" below lists these cases; they were never specified.
+  "Shapes are settled at compile time" (R5) and "Fail closed" below list
+  these cases.
 
 **Not allowed.** For a program with inputs of their declared types, a finite
 number that differs from the interpreter's by more than the precision of the
@@ -155,6 +156,137 @@ interpreter's value. A line is removed when the case declines or is fixed.
   the declared width): `Sum(vector(x))` at `W = [1, 2, 3]` gives 3 (the sum
   is written for two terms); the interpreter gives 6.
 
+## Shapes are settled at compile time
+
+Compiled code settles the shape of every value at compile time, and emits no
+run-time test of a type. The shape of a value is the form of its
+representation: a number, a complex number, a string, a list, a point (a
+tuple) or a matrix. It comes from the declared or inferred static type of the
+value and from the literal structure of its operands. The compiler does not
+follow the paths of control flow to find a shape. The rule has six parts.
+
+**R1. Every input has a type.** An input is a free symbol of the compiled
+code, as `freeSymbols` lists it. An input whose static type is `unknown` or
+`any` declines on every target, with the diagnostic code `'untyped-input'`
+and the name of the input in `unsupported`: with `m` undeclared,
+`If(m < 3, m, 0)` declines, and `unsupported` is `["m"]`. A declared union of
+shapes (`real | list<real>`) is a type, and compiles (R4). "An input with no
+type declines", under "Fail closed", gives the details.
+
+**R2. The static type of an argument selects the code of a call.** A
+function is compiled once for each argument shape that the program gives
+it. With `f := t ↦ 2t`:
+
+- with `u: real`, `f(u)` compiles to `_fn_f(_.u)`;
+- with `L: list<real>`, `f(L)` compiles to `_SYS.mapFn(_fn_f, [1], _.L)`, the
+  scalar code mapped over one list level, as the interpreter maps it;
+- with `M: list<list<real>>`, `Map(f, M)` gives the callback the code
+  compiled for one element of `M` (`_fn_f$m1`, which maps over one level);
+- with `P: tuple<real, real>`, `f(P)` calls a function compiled for one
+  point (`_fn_f_tuple_real__real_`).
+
+No test of a shape runs in these calls. A parameter or an input that the
+host declares with a union of shapes is a request for a test: the code tests
+the value once, where it is bound, and has one body for each member of the
+union, with no test inside the body. This test is the only run-time test of
+a shape in compiled code, and the host selects it by its declaration.
+
+**R3. A value with no settled shape declines.** When the program makes a
+value whose shape depends on a run-time value, the compilation declines with
+the code `'unsettled-shape'`, and `unsupported` holds the node: with
+`x: real`, `If(x > 0, [1, 2], 3) + 1` declines, and `unsupported` is
+`["If(0 < x, [1,2], 3)"]`. This is the simple, sound version: it can decline
+where the interpreter has a value, but it never gives a different value. "A
+value with no settled shape declines", under "Fail closed", gives the
+details.
+
+**R4. A declared union at an input follows R2.** With
+`y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` compiles to
+`(Array.isArray(_.y) ? _fn_f_tuple_real__real_(_.y) : _fn_f(_.y))`, and gives
+`6` for `y = 3` and `[2, 4]` for `y = [1, 2]`. The host pays one test for
+each run.
+
+**R5. The compiler assumes that every value holds its static type.** It
+emits no test of it, for the values of the program and for the values of the
+host.
+
+- A value of the program: where the static type of an assigned value, or of
+  the result of a call, does not prove the declared type, the compilation
+  declines. With `x: real`, `Block(Declare(p, "real"); p ≔ (x, 2); p)`
+  declines with `'unsettled-shape'`. With `h` declared `(number) -> number`
+  and `h := t ↦ [t, t]`, every call of `h` declines; the interpreter gives
+  an `incompatible-type` error for `h(3)`. An argument whose static type
+  does not prove a parameter type that admits only some real numbers
+  (`integer`, `real<0..>`) is assumed to hold it: with `g` declared
+  `(integer) -> integer`, `g := t ↦ 2t` and `y: real`, `g(y)` compiles to
+  `_fn_g(_.y)` and gives `5` at `y = 2.5`, where the interpreter gives an
+  `incompatible-type` error. Only an argument whose static type has no value
+  of the parameter type declines.
+- A value that the host gives outside the declared type of an input: the
+  result is undefined. It can equal the value of the interpreter, differ
+  from it, throw or not end, and it can differ between targets. With
+  `x: real`, `x + 1` gives `2` for `x = true` and `"ab1"` for `x = "ab"` on
+  `javascript`.
+- An input that the host leaves out: the result is undefined in the same
+  way. On `javascript`, `x > 0` compiles to `0 < _.x` and gives `false` for
+  `run({})`, and `If(x > 0, 1, -1)` compiles to `((0 < _.x) ? (1) : (-1))`
+  and gives `-1`. With `L: list<real>`, `Sum(L)` compiles to
+  `(_.L).reduce((_a, _b) => _a + _b, 0)`: `run({})` throws a `TypeError` on
+  `javascript`, and gives `undefined` on `interval-js`.
+- A non-finite value (`NaN`, `±Infinity`) for an input declared `real` is a
+  value outside its type (`real` holds only finite values). Today the
+  `javascript` target computes with the IEEE value (`x + 1` gives `Infinity`
+  for `x = Infinity`), and a GPU target can assume a finite value (it can
+  fold `a - a` to `0`). This is an observation of the current code, not a
+  guarantee. A host that needs a defined result for such a value declares
+  the input `real | signed_infinity | nan`, where `NaN` and `±Infinity` are
+  values of the type.
+
+**R6. The runner converts few values, and checks few.** The checks that R5
+makes unnecessary are removed: compiled code does not test an input for
+absence, an argument against the declared type of its parameter, or the
+width of a point. On `javascript`, `run()` and `runtime.load()` keep these
+entry steps, one constant-time step for each binding:
+
+- a number given for a binding read as complex is lifted to `{re, im: 0}`;
+- the unsigned pole `~oo` (a `{re, im}` value with a nonzero imaginary part
+  and an infinite part) given for a binding read as real is projected to
+  `Infinity`;
+- any other `{re, im}` value given for a binding read as real is refused with
+  a `TypeError` that names the binding;
+- a string or a typed array (`Float64Array`, …) given for a binding that the
+  code reads as an array is refused with a `TypeError` that names the
+  binding.
+
+The two refusals are kept because the refused values are values of some
+declared types (`number`, `indexed_collection`) that compiled code cannot
+read correctly: it would read a string as UTF-16 code units, not as
+characters. Each other value outside its type gives an undefined result.
+`broadcast()` does not refuse a boolean for a number binding, or any value
+for a `string` binding. The entry check of a value kind (see "Value kinds")
+and the integer checks of the `bigint` mode (see "Compile modes") are
+separate, and stay. `compile(expr, { entryChecks: false })` turns the entry
+steps off.
+
+**Guidance to hosts.**
+
+- Declare the type and the shape of each input that you will pass:
+  `ce.declare("x", "real")`, `ce.declare("L", "list<real>")`,
+  `ce.declare("P", "tuple<real, real>")`. An input with no type declines
+  (R1).
+- When an input can have two shapes, compile one function for each shape,
+  or declare the union (`real | tuple<real, real>`). The first has no
+  run-time test. The second costs one test for each run, where the input is
+  bound (R4).
+- Supply every input that `freeSymbols` lists, with a value of its declared
+  type. `freeSymbolTypes` gives the type and the form that the code reads
+  for each one. When a value can be missing, test it before the run: the
+  compiled code does not test it, and the result for an input left out is
+  undefined (R5).
+- A value outside its type gives an undefined result. To get a defined
+  result for `NaN` or `±Infinity`, declare the input
+  `real | signed_infinity | nan`.
+
 ## Fail closed
 
 Compilation is an optional acceleration route. A target emits code only when
@@ -207,14 +339,17 @@ Every other case is unspecified: the compiled code can give any value,
 - An input value outside its declared type: `"ab"`, `true`, `[1, 2]` or
   `{re, im}` for an input declared `real`.
 - A non-finite value for an input declared `real` (`real` holds only finite
-  values): the `javascript` target computes as for an input declared
-  `real | signed_infinity | nan`; a GPU target can assume a finite value
-  (`a - a` is `0`, `a/a` is `1`). `NaN` and `±Infinity` keep their meaning
+  values). Today the `javascript` target computes with the IEEE value, as it
+  would for an input declared `real | signed_infinity | nan`, and a GPU
+  target can assume a finite value (`a - a` is `0`, `a/a` is `1`). This is
+  an observation, not a guarantee. `NaN` and `±Infinity` keep their meaning
   in an input declared `real | signed_infinity | nan`.
-- A value outside a declared range (`7` for `real<0..5>`): the `javascript`
-  target computes with the value; a GPU target can use the range (it can
-  drop `|x|` for `x` in `real<0..5>`).
-- An input left out (see `docs/ERROR-MODEL.md`, "An unsupplied variable").
+- A value outside a declared range (`7` for `real<0..5>`): today the
+  `javascript` target computes with the value; a GPU target can use the
+  range (it can drop `|x|` for `x` in `real<0..5>`).
+- An input left out: with `x: real`, `x > 0` gives `false` on `javascript`
+  for `run({})` (see R5 in "Shapes are settled at compile time", and
+  `docs/ERROR-MODEL.md`, "An unsupplied variable").
 
 **One exception: a `number` result of the `bigint` mode.** In the `bigint`
 compile mode of the JavaScript target, a `bigint` or a `boolean` result is
@@ -289,8 +424,8 @@ nested function literal belongs to that literal: with `M: list<real>`,
 `At(Apply(a ↦ Block(If(Length(a) > 1, Return(First(a))), Reverse(a)), M), 1)`
 declines, because the body gives a number or a list. This simple version
 compares only the branches whose type settles a shape: a branch of type
-`unknown`, `any`, `broadcastable<T>` or a union of shapes (the result of a
-user-function call that the code tests at run time) is not compared, and a
+`unknown`, `any`, `broadcastable<T>` or a union of shapes is not compared,
+and a
 conditional over a collection condition, which selects element by element,
 is not checked when its branches change nothing. When a branch of such a
 conditional assigns a name or has a `Return`, a `Break` or a `Continue`, it
@@ -460,14 +595,17 @@ dropped branch. The conditional is found before the code is generated
 (`unsettledShapeIn()`), and the decline is thrown after the code was
 generated with no other decline (`assertAdmitted()`), so a more specific
 reason of the target stays the reason: `If(x > 0, [1, 2], 3) + 1` on `glsl`
-declines because a shader array has no arithmetic. Design:
-`docs/plans/2026-10-31-static-shape-compilation.md`, rules R1 and R3.
+declines because a shader array has no arithmetic. These are rules R1 and R3
+of "Shapes are settled at compile time" above; the design record is
+`docs/plans/2026-10-31-static-shape-compilation.md`.
 
 A typed array for a `list` input and a string for a bare
-`indexed_collection` input are values of their types and keep the
-guarantee. Checks that exist only for the unspecified cases can be removed;
-the decision and the survey of these checks are in
-`docs/plans/2026-10-31-compiled-code-contract-for-errors.md`.
+`indexed_collection` input are values of their types. Compiled code cannot
+read them correctly, so the JavaScript runner refuses them with a
+`TypeError` that names the binding (see "Target boundaries"). The other
+checks, which existed only for the unspecified cases, are removed (R6 in
+"Shapes are settled at compile time"); the decision and the survey of these
+checks are in `docs/plans/2026-10-31-compiled-code-contract-for-errors.md`.
 
 One value carve-out is ruled (pole-encoding ruling, 2026-08-28): where the
 interpreter answers the projective infinity `~oo` — a division pole, a Gamma
@@ -626,32 +764,19 @@ graphing calculators give. The same rule covers `KroneckerDelta`, the
 element-wise and whole-collection equality helpers (`_SYS.eq`, `_ce_eqcoll`),
 and the `IndexOf` element test, which was already exact. `NotEqual` is the
 negation of the `Equal` test, so it answers `true` on a `NaN` operand, as the
-interpreter does. Two absent operands (`undefined` on JavaScript, `None` on
-Python) are not equal in the SCALAR lowering: the interpreter answers `Missing`
-for `Equal(Missing, Missing)`, and the emitted test guards the left operand when
-both sides may be absent.
+interpreter does. The value of a comparison over an absent operand is not
+specified in compiled code (see "Caveats of compiled code"): with `x, y: real`,
+`x = y` compiles to `((_.x) === (_.y))`, which is `true` when the caller
+leaves out both, where the interpreter has no value.
 
-A comparison whose VALUE is the result (not a branch condition) has no value
-when it reads a variable that the caller leaves out of the vars object (user
-decision 2026-10-30). The JavaScript target answers `undefined` there, as the
-interpreter has no value for `x > 0` while `x` has none. The emission runs the
-plain comparison first, so its `true` costs nothing more:
-`((0 < _.x) || ((_.x !== undefined) ? false : undefined))`. `NotEqual` uses the
-`&&` form with `true` and `false` exchanged. The comparison runs first only when
-each operand reads an absent value as `NaN` or `undefined` (a variable,
-arithmetic, an elementary function). Otherwise it could be `true` for an absent
-read (`Boole(x > 0) = 0`), so the tests come first:
-`((_.x !== undefined) ? (cmp) : undefined)`; a string or boolean comparison
-also takes this form. A variable with no declared type is tested too, since it
-compiles to the same scalar comparison. A `NaN` operand still decides the
-comparison (`false`, or `true` for `NotEqual`), as in the interpreter: a `NaN`
-literal with no test at all, a computed or local operand when its own inputs
-are present, and, for an ordering, a complex operand that is not real. A
-consumer that reads only the truth of the comparison (`Boole`, the predicate of
-`Filter`, `Count` and the other selecting operators) gets the plain comparison
-with no test when it is numeric and its operands read an absent value as `NaN`,
-because there `false` and `undefined` select alike. See `docs/ERROR-MODEL.md`,
-the "An unsupplied variable" item.
+A comparison whose value is the result (not a branch condition) is the plain
+comparison, with no test for an input that the caller leaves out: with
+`x: real`, `x > 0` compiles to `0 < _.x`, which gives `false` for `run({})`.
+The interpreter has no value for `x > 0` while `x` has none, and the compiled
+result for an input left out is undefined (R5 in "Shapes are settled at
+compile time"). A `NaN` operand decides the comparison (`false`, or `true`
+for `NotEqual`), as in the interpreter. See `docs/ERROR-MODEL.md`, the "An
+unsupplied variable" item.
 
 The ELEMENT-WISE runtime is three-valued, and that is where an absence shows.
 An absent CELL makes its comparison undecided, so the runtime marks exactly that
@@ -743,9 +868,13 @@ and `runtimeVersion`;
 the helper table is internal and may change in any release. `load()` evaluates
 the definitions that read nothing per call (`preambleOnce`) once, as `run()`
 does, and the rest (`preamblePerCall`) on every call, and applies the input
-conversions of `run()` from `entryPlan` (a real given to a complex-declared
-symbol is lifted, a complex value for a real symbol is refused, a string or a
-typed array for a symbol read as an array is refused). The
+conversions of `run()` from `entryPlan`: a number given for a symbol read as
+complex is lifted, the unsigned pole `~oo` given for a symbol read as real is
+projected to `Infinity`, any other `{re, im}` value given for a symbol read
+as real is refused, and a string or a typed array given for a symbol read as
+an array is refused. Any other value outside the type of its symbol gives an
+undefined result, as with `run()` (R6 in "Shapes are settled at compile
+time"). The
 engine-bound helpers take their state as options: `random` (draws outside a
 `WithRandomSeed` frame and the integrals' Monte-Carlo samples; `null` denies),
 `frame` (the enclosing frame, set with `setFrame()` and read back from
@@ -789,8 +918,11 @@ cross-target promise.
 
 Values crossing the compiled boundary use the target ABI. Complex values use
 the documented scalar-or-`{re, im}` convention; nested collections retain
-their shape. Target entry checks reject values incompatible with the compiled
-lane assumptions.
+their shape. The entry steps of the JavaScript runner refuse only two kinds of
+value, which compiled code cannot read correctly: a `{re, im}` value other
+than `~oo` at a binding read as real, and a string or a typed array at a
+binding read as an array. Every other value outside its type gives an
+undefined result (R5 and R6 in "Shapes are settled at compile time").
 
 The list carrier of the JavaScript target is the plain `Array`, in both
 directions, and the contract of `run()` is: **inputs of the shape the
@@ -810,11 +942,13 @@ computes with that value, as it would in plain JavaScript; the interpreter
 is the route that validates. The `strict` mode, and the default `auto` mode
 when it does not escalate, read the entries of a `list<number>` on the real
 lane; the `complex` mode reads them on the complex lane (see "Complex
-modes"). Any other value passes untouched and the
-lowerings dispatch on its runtime shape: a scalar there is not an error,
-because a declared type is routinely wider than the value a caller binds and
-several lowerings project on the runtime shape — a `list`-typed summand of
-an element-wise big operator bound to a number gives the scalar sum. A
+modes"). Any other value passes untouched, and the code reads it in the
+shape of its declared type: a value of another shape (a number for a
+binding declared `list<real>`) gives an undefined result. When the code then
+throws, and a binding read as an array holds a number, the runner throws a
+`TypeError` that names the binding and keeps the error of the code as its
+`cause`: with `S: list<number>`, `Sum(S)` at `S = 5` throws
+``"S" (type `list<number>`) received a number …``. A
 collection or a `{re, im}` result comes back as the code built it, with no
 copy: it may be a value the runner keeps for every later call (a hoisted
 constant list literal, a bound symbol value), so a caller that writes to a
@@ -1671,50 +1805,8 @@ Two analyses decide whether an operand can be an array at run time on the
 JavaScript target, and they are separate code. The comparison and connective
 lowerings ask `isPossiblyCollectionTypedJS` in `javascript-target.ts`. The
 arithmetic broadcast (`Add`, `Multiply`, … through `tryCompileBroadcast`) asks
-`isBoundPossiblyCollectionTyped` in `base-compiler.ts`, which reads the
-"scalar by construction" facts of `javascript-value-facts.ts`
-(`isConstructedScalar`). A change to one does not change the other: when an
-arithmetic broadcast does not go away, look at `javascript-value-facts.ts`.
-
-Both analyses read one more source of arrays, which a static type does not
-show: a call of a user function that maps over a list argument at run time
-(`mayHoldCallBroadcastResult` in `compiler-type-facts.ts`). With
-`q(t) := 2t` and a free input `u` that nothing types, the engine types
-`q(u)` as `number`, but the call is `_SYS.bcastFn(_fn_q, _.u)`, and
-`run({ u: [1, 2, 3] })` gives `[2, 4, 6]`. So an operator over the call maps
-over its result too: `1 + q(u)` compiles to `_SYS.bcast(…)` and gives the
-interpreter's `[3, 5, 7]`. The rule reaches through the arguments of nested
-calls (`1 + p(q(u))`), through library operators that broadcast
-(`1 + sin(q(u))`), through the branches of `If` and `Which`, the last
-statement of a `Block`, and the locals of a block that are assigned such a
-value (`z := q(u); 1 + z`). It is not applied to an argument whose static
-type is a scalar: a symbol declared `number`, or narrowed to `number` by a
-use such as `u + 1`, makes a list there a break of the host's input
-contract, and the scalar code stays. The rule can also flag a call that the
-emitter compiles as a direct call (an argument that is a scalar by
-construction but not by its static type); the operator then takes
-`_SYS.bcast`, which applies its closure directly to scalar operands. Only
-the JavaScript target maps a call over a list argument, so the rule does not
-apply on the other targets.
-
-This rule agrees with the rule that only a symbol declared `any` or `value`
-is read as a possible list (user decision 2026-10-17, Tycho ledger row 379;
-`isPossiblyCollectionTyped()` in `collection-utils.ts`): the run-time test is
-on the result of the call, not on the undeclared symbol `u`, and the compiled
-call already maps over a list `u` (user decision 2026-10-31). The other
-choice, a decline of every operator over such a call, would send expressions
-such as `q(x) + 1` with an untyped plot variable `x` to the interpreter.
-
-The value of such a call is a number at almost every evaluation (a plot
-variable), and `_SYS.bcast` costs a closure call per evaluation. So when the
-calls are reached from the operator through library operators only
-(`1 + q(u)`, `1 + 2 q(u)`, `Sin(q(u)) + q(u)`), the code evaluates each call
-once, into a temporary, and tests it at run time (`callResultGuard` in
-`compile-expr-handlers.ts`): an array or an absent value takes the
-`_SYS.bcast` code, any other value takes the scalar code compiled with the
-call read as a scalar. A call in a branch of an `If` or a `Which`, the last
-statement of a `Block`, or a block local keeps the `_SYS.bcast` code with no
-test, because the test would evaluate the call before its branch is taken.
+`isBoundPossiblyCollectionTyped` in `compiler-type-facts.ts`, which reads
+the static type of the operand. A change to one does not change the other.
 
 A symbol declared `any` or `value` can hold a number or a list, and compiled
 code does not test the shape of a value at run time. The JavaScript target
@@ -1733,32 +1825,48 @@ gives `[2, 4]`. A symbol declared `expression` with an assigned value is not
 an input: its value is folded, and the expression compiles. A parameter
 declared `expression` declines in the shapes that ROADMAP CE-693 lists.
 
-A compiled user-function call whose parameters are all scalar carries a
-runtime `Array.isArray` guard around each argument that is not a literal, so
-a `run()` caller that supplies a list gets the interpreter's broadcast instead
-of a silent wrong answer (user ruling 2026-08-30). The guard is not emitted
-for an argument whose scalar type is an explicit declaration or is constructed
-from such values by scalar arithmetic (user ruling 2026-09-07): the
-declaration is the caller's input contract, and the interpreter itself refuses
-a list for a `number`-declared symbol. A symbol whose scalar type was inferred
-from its use in a scalar parameter keeps the guard, because that inference is
-not a promise about the value the caller passes.
+**Calls.** A compiled call of a user function, a block-local function or a
+function literal selects its code from the static types of its arguments,
+and emits no run-time test of their shape (R2 in "Shapes are settled at
+compile time"). With `f := t ↦ 2t`:
 
-Two values inherit that same "scalar by construction" standing. A call of an
-engine-defined function whose every argument is such a value is one, when the
-callee's body yields a single scalar under scalar parameters — the body's
-static type says so, or its `Block`, `If`/`Which` arms and nested calls all
-do. And inside an emitted body, a parameter whose type in the function's
-signature is a scalar one — `number` and its subtypes, `boolean`, `string`,
-whether the author wrote that type or the engine inferred it (user ruling
-2026-09-08) — is one. Every emitted call site of such a function hands that
-parameter a scalar, because a call whose argument is not provably scalar is
-dispatched element-wise or guarded, and the only form that passes an argument
-straight through is the one an explicit caller declaration already exempts —
-a caller that hands that form a list has broken its own declared contract.
-The inference is trusted here, unlike at a top-level input, because the body
-never chooses what reaches it: the call sites do, and they are all
-broadcast-aware.
+- An argument of a scalar type calls the scalar code: with `a: real`,
+  `1 + f(a)` compiles to `_fn_f(_.a) + 1`.
+- An argument of a list type, at a parameter that the body reads as a
+  scalar, maps the scalar code over the levels of the list, as the
+  interpreter maps it: with `L: list<real>`, `f(L)` compiles to
+  `_SYS.mapFn(_fn_f, [1], _.L)`. The second operand of `_SYS.mapFn` gives,
+  for each argument, the number of list levels that are mapped.
+- A point (a tuple) is bound whole, as the interpreter binds it, and the
+  call uses a function compiled for that point type. With
+  `P: tuple<real, real>` and `g := (p, x) ↦ x + 1`, `g(P, L)` compiles to
+  `_SYS.mapFn(_fn_g_tuple_real__real__number, [0, 1], _.P, _.L)`: the code
+  maps over `L` and gives `P` whole to each call, so it gives `[2, 3]` for
+  `L = [1, 2]`.
+- A parameter whose type is a collection type (`k := (L: list<real>) ↦
+  Sum(L)`) takes the list whole, with no map.
+
+The engine types `f(L)` from the variant that the call uses, so an operator
+over the call reads the shape of its value from that type: `1 + f(L)`
+compiles to an element-wise sum (`_SYS.bcast`) over `_SYS.mapFn(_fn_f, [1],
+_.L)`, and gives `[3, 5]` for `L = [1, 2]`.
+
+**Callbacks.** A function given as a value to a consumer (`Map`, `Filter`,
+`Reduce`, a comparator, a `PointList` role) is given as the code for the
+static type of the elements of the source. With `L: list<real>`, `Map(f, L)`
+gives the callback `_fn_f`. With `M: list<list<real>>`, `Map(f, M)` gives
+`_fn_f$m1`, which maps the scalar code over one level, so `Map(f, M)` gives
+`[[2, 4], [6]]` for `M = [[1, 2], [3]]`, as the interpreter does. A built-in
+operator name is given in the same way: `Map(Sin, M)` gives `_fn_Sin$m1`. A
+function whose parameter takes a collection whole is given as it is. A
+source whose element type is a union of shapes
+(`list<real | tuple<real, real>>`) declines with `'unsettled-shape'`.
+
+An argument on the complex lane at a parameter read as real is given as its
+real part (`_SYS.creal`): with `p` declared `(real) -> real`, `p(√y)` at
+`y = 4` gives the value of `p(2)`. A function value that a consumer would
+give such elements declines: with `h` declared `(real) -> real`,
+`Map(h, [√y, 1])` declines.
 
 A compiled array carries no tuple-versus-list tag, and the compiled norm of
 a point reads each coordinate by its static type: a scalar as is, a `tuple`
@@ -1773,97 +1881,7 @@ broadcasts. Declining the shape instead would refuse every untyped point
 parameter whose body takes a norm, the commonest shape a document function
 has, and the nested point is not a value the plotting consumers produce.
 
-A parameter typed `unknown` or `any` has the same standing (user ruling
-2026-09-09). The argument for it is the one above, and it does not depend on
-the parameter's own type at all: what makes the parameter a run-time scalar is
-that every emitted call site of its function is broadcast-aware, which is a
-property of the FUNCTION — none of its parameters binds an argument whole — not
-of the type inference. So `f(x) := g(x) + 1` emits the bare `_fn_g(x)`, the
-same call an explicitly annotated `f(x: number)` emits, and a caller that
-passes a list is broadcast element-wise at its own call site, so the body runs
-once per element with a scalar bound. The body's own arithmetic already assumes
-this: `x * x` is written for a product, not for a Hadamard product. This
-matters because a whole class of consumer input cannot be annotated — a Desmos
-macro chain is a chain of small untyped functions of one or two variables — and
-each dispatch it used to emit cost roughly a factor of two in run time.
-
-A COLLECTION parameter is the exception and keeps its dispatch: such a body
-legitimately receives a list whole, the way `k(L) := Sum(L)` does, so its call
-sites emit a bare call that could hand a list to a scalar sibling parameter. A
-tuple- or point-typed parameter is excluded for the same reason.
-
-The runtime broadcast of a user-function call is handed the emitted function
-itself (`_SYS.bcastFn(_fn_f, …)`). A closure is emitted only when an argument
-needs the `{ re, im }` coercion inside it; otherwise the closure would be an
-eta-expansion of the callee.
-
-An ATOMIC argument — a tuple (a point) or a nominal value — is bound whole by
-the interpreter and never mapped over, yet it lowers to a JS array the runtime
-broadcast would descend into. Such an argument is therefore HELD: it is bound
-to a temporary once, and the broadcast closes over that temporary and maps the
-other arguments only. So `f((a, b), [u, v])` with `f(p, x) := g(x)` runs the
-body once per element of the list with the point bound whole, which is what the
-interpreter does. Every argument that is not a literal is bound in the same
-outer call, so an argument is evaluated exactly once and in source order — a
-random draw in a coordinate draws one number. When every argument that is not
-atomic is provably scalar, there is nothing to map over and the call is the
-bare direct one.
-
-A function REFERENCED AS A VALUE — the callback of `Map`, `Filter`, `Reduce`,
-a comparator, a `PointList` role — is a call site too, and it is shape-aware
-for the same reason the others are. The consumer of a function value hands the
-callee whatever element the source holds, and an element can itself be a
-collection: a row of a matrix. So a function whose parameters are all scalar
-is handed out as a wrapper instead of the bare name — one closure per
-function, emitted next to the function itself, which tests its arguments with
-`Array.isArray`. Whether a function gets that wrapper follows what the
-INTERPRETER does with a collection element at that callback:
-
-- A function whose parameters are all scalar is applied ELEMENT-WISE by the
-  interpreter: `Map(f, [[1, 2], [3, 4]])` over `f(x) := 2x` answers
-  `[[2, 4], [6, 8]]`. It is handed out as a broadcasting wrapper (`_fn_f$b`)
-  that dispatches through `_SYS.bcastFn`. The parameter TYPES make no
-  difference here: a declared signature such as `(number) -> number`
-  broadcasts exactly as an inferred `unknown` one does, which is the user
-  ruling of 2026-09-22. Before that ruling the interpreter refused a
-  declared-scalar callback at a callback position, and such a function was
-  handed out as a second, guarding wrapper (`_fn_f$s`) that projected an array
-  argument to NaN. Both halves now broadcast, so the two routes also agree on
-  a source only SOME of whose elements are collections: `[[1, 2], 3]` answers
-  `[[2, 4], 6]` compiled and interpreted alike.
-- A function with a parameter that is not scalar at all keeps the bare
-  reference, because the interpreter binds its arguments whole as well.
-
-A MULTI-CLAUSE function is handed out through the same wrapper, under the same
-rule read over the whole clause set: a clause that binds a collection, a tuple
-or a nominal value whole keeps the bare dispatcher, and every other clause set
-broadcasts. Its wrapper takes a REST parameter, where a single-clause one takes
-a fixed parameter list, because the dispatcher selects its clause on the number
-of arguments. That is safe because every consumer this compiler emits applies a
-function value through an arrow of the arity it means to pass — `(_x) => _f(_x)`
-for `Map`, `(_a, _b) => _f(_a, _b)` for a `Reduce` combiner — so none of them
-supplies the extra index and source arguments `Array.prototype.map` would.
-
-Where a parameter also needs the `{ re, im }` coercion, the wrapper takes the
-coercing shim as its callee, so an element reaches the body coerced.
-
-The other two things that can stand in a callback position both broadcast, and
-take a wrapper of the first kind. A bare BUILT-IN operator name
-(`Map(Sin, xs)`) is eta-expanded into a scalar kernel, so an element-wise
-operator is handed out as `_fn_Sin$b`; its
-wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast; a function
-literal takes `_SYS.bcastFn`. The two follow the same element-wise rule,
-empty operand included — a broadcast over a lone empty operand answers the
-empty list (`Sin([])` is `[]`). A built-in that consumes its argument whole,
-such as `Length` or `First`, is not broadcast by the interpreter either and
-keeps the bare name. An INLINE function literal (`Map((x) ↦ 2x, xs)`) takes
-the `_SYS.bcastFn` wrapper a named user function gets; having no name of its
-own, the arrow is bound once — a `const` where a statement sink exists, an
-immediately applied arrow otherwise — so the wrapper's two mentions of its
-callee do not build a fresh closure per element. A literal with a
-collection-typed parameter keeps the bare arrow.
-
-The Python target has none of these run-time tests, and its arithmetic
+The Python target maps no function over a list argument, and its arithmetic
 operators do not map over a list (`2 * [[1, 2], [3, 4]]` repeats the list). It
 reads a parameter that is not declared with a collection type as a scalar. So
 an application of a function literal (`Apply`, `ApplyWhole`) declines when an

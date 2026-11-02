@@ -179,163 +179,32 @@ What the decision does NOT change:
   declared type (`"ab"`, `NaN` or `7` for an input declared `real`, `real`,
   `real<0..5>`). The full statement is in `docs/COMPILATION-MODEL.md`, "Fail
   closed".
-- **An unsupplied variable** of a compiled JavaScript function (a variable
-  the caller leaves out of the vars object, which reads as `undefined`).
-  *Contract* (user decision 2026-10-31): the caller must supply every input
-  of a compiled function. When an input is left out, the result is not
-  specified, and it can differ from the value of the interpreter. The tests
-  that this item describes are kept, but they are not a promise, and a later
-  change can remove them. An example of a result that differs: with `z`
-  declared `real`, `TakeWhile([6, 7], y ↦ y > z)` stays unevaluated in the
-  interpreter, and its compiled function run with no `z` gives `[]`, because
-  a predicate of `Filter`, `TakeWhile` or `DropWhile` reads its comparison
-  with no test for an unsupplied variable (`withTruthOnly`,
-  `compilation/javascript-target.ts`). A host that cannot supply every input
-  checks the inputs before it runs the function.
-  *Current behavior:* an unsupplied variable makes a branch on a comparison
-  that reads it take no arm (`NaN`),
-  whether the comparison reads it directly (`x > 0`) or through arithmetic
-  (`2x > 0`, `\sin x > 0`). The compiled guard tests each variable the
-  comparison reads for `undefined` (`_.x !== undefined`) instead of testing
-  each operand for NaN (`_.x === _.x`). The test applies to a variable of
-  any type (`p.x > 0` tests `_.p`), and to a variable the comparison reads
-  through an assigned value (`a := \sin x`, then `\cos a > 0` tests `_.x`)
-  or through the body of a user function it calls. A comparison that reads
-  a local of a `Block`, or a variable outside the block that the block
-  assigns (`c := n + 1` with `c` declared in the engine writes `_.c`),
-  tests every caller input that the whole block reads (user decision
-  2026-10-30): `Block(a := n + 1, a < m)` at `{m: 5}` has no value, and so
-  has the `If` over it. This applies only to a local that could depend on a
-  caller input: one of its values reads an input, a variable outside the
-  block, or a local or a loop index that could, calls a function whose body
-  could, calls an operator the engine does not define, or has effects (a
-  `Random` draw). The flag is one yes/no per local, over all its values,
-  found as a least fixpoint over the locals of the block. A loop counter
-  (`k := k + 1`) or a constant compares as it is, with no test
-  (`BaseCompiler.localDependsOnInputs`). The rule does not follow which assignment gives the
-  value read, so it is too strict where that value does not use an input,
-  which is accepted: `a := 5; If(x > 0, a := n + 1); a < 1` at `x = -1`,
-  `n` absent, has no value, where the interpreter gives `False`. It never
-  gives a value where the interpreter has none. A local of a block that
-  holds NaN does not escape the test (`a := n + 1; a < m` at `{n: NaN}` has
-  no value; the interpreter gives `False`). In a branch condition such a
-  comparison is read by its value, as is a condition with effects: it runs
-  first, and is tested only when it is `false`; the first arm is taken for
-  `true`, the next one for `false`, and no arm when it has no value. So
-  `a := 0; If(a < 1, a := n); a` takes the branch, and its result is `n`,
-  with no value, as in the interpreter. When the comparison is `false` and
-  the test of the inputs of the block fails, there are two cases. If a
-  read of the comparison itself has no value (`a < m` with `m` absent), the
-  interpreter has no value for it either, and no arm is taken, as for any
-  undecided condition. Otherwise the interpreter may decide it (in `a := 5;
-  If(x > 0, a := n + 1); b := 0; If(a < 1, b := 1, b := 2); b` at `x = -1`,
-  `n` absent, it takes the second arm and gives 2), so taking no arm could
-  give a definite value that the interpreter does not give (here 0): the
-  whole run gives the absence marker of its result instead (NaN for a
-  number, `undefined` otherwise), user decision 2026-10-30. The comparison
-  throws a marker object, `_SYS.noValue`, which the compiled result catches
-  at its top, so no later statement, inner or outer, gives a value (a later
-  write `c := 9` to an outer local is not kept). This is too strict where
-  the interpreter has no value for the condition and goes on: a local that
-  is NaN because an input is absent cannot be told apart from a NaN
-  computed from present inputs. A result is emitted with the catch only
-  when a comparison can throw the marker; one whose block inputs are all
-  read by the comparison itself needs none. A function literal called
-  during the run is covered by the same catch; a condition in a function
-  literal that the run can return declines, since the function could run
-  after the run has returned (`BaseCompiler.poisonSlot`). The interval and Python targets
-  do not test the inputs of a block, and are not affected. A local that no statement before the read assigns at the
-  top level of the block (it is assigned only in a branch or a loop) is
-  tested for `undefined` too. A local of a scope nested in the block (a
-  local of a loop body) and the variable of a binder inside the block are
-  never inputs, so a loop condition always decides. Locals are matched by
-  their binding, not their name, so a nested binder of the same name
-  (`Sum(2n, (n, 1, 3))`) does not hide the free `n`, and a call of a
-  function that the block assigns (`g := t ↦ t + n`, then `g(1)`), to a
-  local or to a function declared in the engine, tests the inputs of the
-  block (`blockLocalValueFrame`, `blockInputs`). The value of a `Block`
-  operand is its last statement: `Block(a := n, 1) > 0` reads no input.
-  A variable read only by
-  an ARM of a nested `If`, `Which` or `When`, or by a later condition of a
-  `Which`, is not tested, since it is read only when that arm is selected:
-  `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = -1` is `1` with `y` unsupplied, as
-  in the interpreter. The operands of `Coalesce` and `IsMissing` are not
-  tested either. What remains: when such an arm IS selected and reads an
-  unsupplied variable, its value is `NaN` (or `undefined`), and the branch
-  takes no arm only when the nested conditional's result may be absent (no
-  else arm, no default; see the `Missing` item above); otherwise the
-  comparison decides false, as for any NaN operand
-  (`BaseCompiler.operandInputNodes`, `compilation/base-compiler.ts`).
-
-  A comparison that is not a branch condition, but whose value is the result,
-  has no value when it reads an unsupplied variable (user decision
-  2026-10-30). For `x > 0` with `x` declared `real`, input `{}`: before, the
-  compiled function returned `false` (`0 < undefined`); now it returns
-  `undefined`, as the interpreter has no value. `x ≠ 0` at `{}` returned
-  `true` and now returns `undefined`. A supplied `NaN` still decides:
-  `x = y` at `{x: NaN}` with `y` unsupplied is `false`. A chain is the
-  three-valued `And` of its links, so one decided `false` link decides it:
-  `x < y + 1 < 2` at `{y: 2}` is `false`, and so is `NaN < x` at `{}`. The
-  rule applies to a variable of any declared type, `unknown` included. An
-  operand that reads an absent value as a number (`Boole(x > 0) = 0`) cannot
-  let the comparison run first, since `0 = 0` is `true`: the tests come
-  first there, also when the operand is a local or a symbol whose value is
-  such an expression (`a := Boole(x > 0)`, then `a = 0`), and when an
-  operand of a top type compiles to the run-time dispatch (`g(1) < m` with
-  `g` a block-local function). A chain with an operand that has effects
-  after its first pair is evaluated pair by pair: `x < 1 < Random()` with
-  `x` absent draws once and is `false`, as in the interpreter. The
-  interpreter evaluates a chain in a branch condition in the same way:
-  `If(x < 0.5 < Random(), 1, 2)` at `x = 5` does not draw
-  (`evaluateCondition`, `library/control-structures.ts`). A connective
-  with an operand that has effects is not read for truth only:
-  `Boole(x > 0 ∧ Random() < 0.5)` at `x` absent draws, as in the
-  interpreter. Where only the truth of a numeric comparison is read (`Boole`,
-  a `Filter` predicate), the plain comparison is emitted with no test,
-  because `false` and `undefined` give the same result there; not for a
-  string comparison (`Boole(s = t)` at `{}` is `0`)
-  (`BaseCompiler.unsuppliedComparisonGuard`, `compilation/base-compiler.ts`).
-- **An unsupplied collection input** that the compiled code iterates or reads
-  as a collection (a `Loop` over `L`, `Sum(L)`, `Length(L)`, `Map(f, L)`) makes
-  the whole run have no value. The interpreter has no value for `Sum(L)` with
-  `L` declared `list<number>` and no value; the compiled code threw
-  `_.L is not iterable` or a `TypeError` on `.reduce`. The JavaScript runner
-  now tests these inputs at entry, before any code runs, and returns the
-  absence marker of the result (`NaN` for a number, `undefined` otherwise).
-  The test also covers an input read through the body of a user function that
-  the code calls or passes as a value, through a block-local function, through
-  a symbol value that the compiler folds into the code, and through a
-  block-local copy (`M ≔ L`, then `Length(M)`). A name bound by a parameter or
-  a loop index is matched by its scope, so `f := L ↦ Length(L)` does not hide
-  a free `L` in `f([1]) + Sum(L)`. `broadcast()` makes the same test once for
-  the shared inputs: the cells are `NaN` and are not counted as failures. Only
-  `undefined` is an absent value in JavaScript: `run({L: null})` still throws.
-  The test is too strict, which is accepted: it requires every such input
-  that the code may read, also where the run does not reach the read. So
-  `If(c, Sum(L), 0)` at `c` false and `Map(u ↦ Sum(L), [])` have no value
-  with `L` absent, where the interpreter gives `0` and `[]`. A name that the
-  code both tests for absence and iterates is required:
-  `If(IsMissing(L), 0, Sum(L))` has no value with `L` absent, where the
-  interpreter gives `0` for `L = Missing`. A name that the code only tests for
-  absence (`IsMissing(L)`, `Coalesce(L, …)`) and never iterates is not
-  required. It never gives a value where the interpreter has none
-  (`collectionReadInputs`, `compilation/base-compiler.ts`; `checkEntry`,
-  `compilation/javascript-runtime.ts`). In Python, a function from
-  `compileFunction()` or `compileVectorized()` and a lambda from
-  `compileLambda()` make the same test (`L is None`, the only absent value in
-  Python) and return `float('nan')` or `None`. The code of `compile()` and
-  `compileToSource()` has no entry of its own (the host places it), so it has
-  no test, and an absent input there still raises a `TypeError`
-  (`pythonNoValueGuard`, `compilation/python-target.ts`). On `interval-js`
-  the test is the first part of the code itself, so `run()` and a stored copy
-  of the code both make it, and the run answers `empty`, the
-  value of that target that has no value (`compileToIntervalTarget`,
-  `compilation/interval-javascript-target.ts`). A name that the caller maps to
-  its own source through `vars` is not tested, on either JavaScript target; a
-  mapping to the spelling `_.<name>` still reads the vars object, so it is
-  tested. The interpreter
-  rule for a `Loop` over such an input (it runs zero times today) is ROADMAP
-  CE-660.
+- **An unsupplied variable** of compiled code (a variable that the caller
+  leaves out of the vars object, which reads as `undefined` on JavaScript).
+  *Contract* (user decision 2026-10-31): the host supplies every input with
+  a value of its declared type. For an input left out, the result is
+  undefined: it can differ from the value of the interpreter, and it can
+  differ between targets. Compiled code has no test for an input left out.
+  With `x` declared `real` and `run({})` on `javascript`, `x > 0` compiles
+  to `0 < _.x` and gives `false`, where the interpreter has no value;
+  `If(x > 0, 1, -1)` compiles to `((0 < _.x) ? (1) : (-1))` and gives `-1`;
+  `x = y`, with `y` declared `real` too, compiles to `((_.x) === (_.y))`
+  and gives `true`. A host that can leave an input out tests each name of
+  `freeSymbols` before it runs the code. The rule is R5 of
+  `docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time".
+- **An unsupplied collection input** that the compiled code iterates or
+  reads as a collection (`Sum(L)`, `Length(L)`, a `Loop` over `L`) follows
+  the same contract: the result is undefined. With `L` declared
+  `list<real>` and left out, `Sum(L)` compiles to
+  `(_.L).reduce((_a, _b) => _a + _b, 0)`, which throws a `TypeError` on
+  `javascript`; the `interval-js` code gives `undefined`. The interpreter has
+  no value. `run()`, `broadcast()` and the `interval-js` runner do not test
+  such an input before the run, and the Python functions of
+  `compileFunction()` and `compileLambda()` do not test it either. An input
+  declared with a `missing` arm (`L: list<real> | missing`) is not left out
+  when the caller passes `undefined` for it: it holds the absent value,
+  which `IsMissing` and `Coalesce` discharge. The interpreter rule for a
+  `Loop` over such an input (it runs zero times today) is ROADMAP CE-660.
 - **A `partial` operand** on `interval-js` (undefined over part of the cell
   only) gives at most `'maybe'`: where it is undefined the comparison is
   false, so it cannot hold over the whole cell. Before 2026-10-20 the
@@ -1728,8 +1597,17 @@ argument typed `missing` alone (the literal `Missing`) is absent on every
 route and is refused at boxing. The Epsil static pre-pass is stricter and
 also reports the argument that may be absent (`refusesAbsentArgument`,
 `boxed-expression/validate.ts`), because an Epsil author can write
-`first(xs) ?? fallback`. What remains open (a declared scalar parameter on
-the declare-then-assign route, compiled code) is in `ROADMAP.md`.
+`first(xs) ?? fallback`. What remains open for a declared scalar parameter
+on the declare-then-assign route is in `ROADMAP.md`.
+
+Compiled code does not follow this rule. A function applied to an absent
+value has no specified value in compiled code (`docs/COMPILATION-MODEL.md`,
+"Caveats of compiled code"), and the code does not test the argument: the
+run does not stop with an error that names the parameter. With `f` assigned
+`(p: tuple<real, real>) ↦ p[1] + 1` and `S` declared
+`tuple<real, real> | missing`, the compiled `f(S)` gives `null` on
+`javascript` for `S` absent, where the interpreter gives the
+`incompatible-type` error above.
 
 **A user function accepts `NaN` at a numeric parameter — RULED
 2026-09-30.** `NaN` is what a numeric computation answers when it has no
@@ -2799,8 +2677,9 @@ document's history):
   makes a comparison false, in a branch too"): a NaN operand of `<`, `≤`,
   `>`, `≥` or `=` now decides the comparison `False` on every route, and
   the branch takes its next arm; what follows is the history, and it still
-  holds for `≠`, for an absent (`Missing`) operand, and for an unsupplied
-  variable. The compiled JavaScript picked a
+  holds for `≠` and for an absent (`Missing`) operand. (For an unsupplied
+  variable it no longer holds in compiled code: the result is undefined, see
+  the item "An unsupplied variable" at the top of this document.) The compiled JavaScript picked a
   branch by JavaScript truthiness — `If(x > 0, 1, -1)` at `x = NaN`
   returned `-1`, an unset boolean parameter returned the else arm — while
   the interpreter holds such an application inert. A compiled condition
@@ -2871,9 +2750,9 @@ document's history):
   is `-1` again and the two lanes now agree on the IEEE answer instead of
   on no arm. REVERSED for `NotEqual` too on 2026-10-23 by the user: a NaN
   operand decides it `True`, so `If(NaN ≠ 0, 1, -1)` is `1`. The compiled
-  operand test keeps no NaN conjunct (it tests each variable the comparison
-  reads for an unsupplied value, so the 2026-09-02 rule for an unsupplied
-  variable holds). A link of a chain with an absent operand kept the NaN
+  operand test keeps no NaN conjunct. (The test of each variable for an
+  unsupplied value was removed later: an unsupplied variable gives an
+  undefined result, see the item "An unsupplied variable" at the top of this document.) A link of a chain with an absent operand kept the NaN
   conjunct until the user decision of 2026-10-23 that `Less(0, NaN,
   Missing)` is `False`. Consequences for the companion rulings above:
   `If(Random() > 0.5 ∧ x > 0, a, b)` at `x = NaN` answers `b`; a desugared

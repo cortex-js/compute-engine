@@ -72,8 +72,7 @@ nightly run, tell the user; do not take over that investigation unless asked.
   declaring one shape or by compiling one function per shape. The host supplies
   every input with a value of its declared type; otherwise the result is
   undefined and can differ between targets. The rule is in
-  `docs/plans/2026-10-31-static-shape-compilation.md` (R1 to R6) until
-  `docs/COMPILATION-MODEL.md` carries it (ROADMAP CE-712.5).
+  `docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time" (R1 to R6).
 - A decline that the rule above requires is not a defect, and no analysis is
   added to remove it: the remedy is a declaration by the host or a change to the
   program, and the case is documented with an example. When another rule that
