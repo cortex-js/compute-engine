@@ -651,7 +651,7 @@ export function absentCollectionOperandGuard(
       else _codeAliases.set(a, old);
     }
   }
-  const absent = names.map((n) => absence.object!.isAbsent(n)).join(' || ');
+  const absent = names.map((n) => absence.object!.isNull(n)).join(' || ');
   return target.bindExpr(bindings, `(${absent} ? ${marker} : ${body})`);
 }
 

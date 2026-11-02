@@ -2,6 +2,20 @@
 
 ### Behavior Changes
 
+- **`IsMissing`, `Coalesce` and `AssertPresent` read every spelling of an
+  absent value in compiled code.** On JavaScript they read `NaN`, `undefined`
+  and `null` as absent for a value of any type; before, the test for a
+  point, a string or a boolean read only `undefined`. On Python they read
+  `None` and a float or complex `NaN` (NumPy scalars included) as absent and
+  every other value as present; before, `IsMissing(u)` with
+  `u: real | string | missing` holding `"ab"` raised a `TypeError`, and
+  `IsMissing(At(["a", Missing], 2))` gave `False`. The unmatched cell of an
+  element-wise `When` with a complex value is now a plain `NaN`, as `Which`
+  gives it: with `z: complex` and `v = [1, -1]`,
+  `IsMissing(At(When(z, v > 0), 2))` is now `true` (before: `false`), and
+  `Coalesce(At(When(z, v > 0), 2), 0)` is now `0`. An unmatched point or
+  string cell stays `undefined`.
+
 - **A destructuring `Declare` whose pattern repeats a name declines in
   compiled code.** In 0.176.0, the MathJSON
   `["Block", ["Declare", ["Tuple", "a", "a"], "'unknown'", ["Tuple", 1, 2]], "a"]`

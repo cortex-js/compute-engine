@@ -4,6 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { resolveTypeForCompilation } from '../../src/common/type/utils';
 import { typeToString } from '../../src/common/type/serialize';
+import { absenceAxisForType } from '../../src/compute-engine/compilation/compile-absence';
 
 //
 // Phase 2 of the nominal-types design
@@ -35,6 +36,18 @@ import { typeToString } from '../../src/common/type/serialize';
 /** A `CompilationResult` that declined reports empty code. */
 function jsCode(ce: ComputeEngine, expr: unknown): string {
   return compile(ce.box(expr as never))?.code ?? '';
+}
+
+/** The absence axis that a discharge of the symbol `name` takes on the
+ * JavaScript target: `'object'` when it is the axis with the null literal.
+ * The JavaScript and Python targets spell the test of both axes alike (a
+ * discharge reads an absent operand whatever its spelling, R3 of
+ * `docs/plans/2026-11-01-absent-value-contract.md`), so the axis chosen is
+ * read from `absenceAxisForType`, not from the emitted code. */
+function axisOf(ce: ComputeEngine, name: string): 'object' | 'numeric' {
+  const target = (ce as any)._getCompilationTarget('javascript').createTarget();
+  const axis = absenceAxisForType(ce.box(name).type.type, target, 'IsMissing');
+  return 'nullLiteral' in axis ? 'object' : 'numeric';
 }
 
 /** GLSL source, or `'DECLINE'` when the target failed closed. A fresh target
@@ -353,6 +366,7 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
     expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
       'Number.isNaN((_.x) ?? Number.NaN)'
     );
+    expect(axisOf(ce, 'x')).toBe('numeric');
     expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
       jsCode(ce, ['IsMissing', 'y']).replace(/_\.y/g, '_.x')
     );
@@ -373,10 +387,9 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
     expect(jsCode(ce, ['Coalesce', 'x', 0])).toBe(
       jsCode(ce, ['Coalesce', 'y', 0]).replace(/_\.y/g, '_.x')
     );
-    // NOT the object axis, whose whole form is `(x ?? 0)`: that answers `NaN`
-    // for a `NaN` operand, which would disagree. The numeric axis is the one
-    // that tests `Number.isNaN` (it coalesces an ABSENT read to `NaN` first,
-    // so it carries a `??` of its own).
+    // The discharge tests `Number.isNaN` (it coalesces an ABSENT read to
+    // `NaN` first, so it carries a `??` of its own), and a `NaN` operand is
+    // absent.
     expect(jsCode(ce, ['Coalesce', 'x', 0])).toContain('Number.isNaN');
     const coalesce = compile(ce.box(['Coalesce', 'x', 0])).run!;
     expect(coalesce({ x: NaN })).toBe(0);
@@ -388,7 +401,10 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
     ce.declareType('maybe_s', 'string | missing', { alias: true });
     ce.declare('s', 'maybe_s');
     ce.declare('t', 'string | missing');
-    expect(jsCode(ce, ['IsMissing', 's'])).toBe('(_.s === undefined)');
+    expect(jsCode(ce, ['IsMissing', 's'])).toBe(
+      'Number.isNaN((_.s) ?? Number.NaN)'
+    );
+    expect(axisOf(ce, 's')).toBe('object');
     expect(jsCode(ce, ['IsMissing', 's'])).toBe(
       jsCode(ce, ['IsMissing', 't']).replace(/_\.t/g, '_.s')
     );
@@ -479,12 +495,16 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
     expect(jsCode(ce, ['IsMissing', 'a'])).toBe(
       'Number.isNaN((_.a) ?? Number.NaN)'
     );
+    expect(axisOf(ce, 'a')).toBe('numeric');
     // The SAME declaration, instantiated at an object-domain argument, takes
     // the other axis — exactly as the inline spelling does.
     expect(jsCode(ce, ['IsMissing', 'b'])).toBe(
       jsCode(ce, ['IsMissing', 's']).replace(/_\.s/g, '_.b')
     );
-    expect(jsCode(ce, ['IsMissing', 'b'])).toBe('(_.b === undefined)');
+    expect(jsCode(ce, ['IsMissing', 'b'])).toBe(
+      'Number.isNaN((_.b) ?? Number.NaN)'
+    );
+    expect(axisOf(ce, 'b')).toBe('object');
 
     const isMissing = compile(ce.box(['IsMissing', 'a'])).run!;
     expect(isMissing({ a: NaN })).toBe(true);
@@ -499,10 +519,9 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
     expect(jsCode(ce, ['Coalesce', 'a', 0])).toBe(
       jsCode(ce, ['Coalesce', 'n', 0]).replace(/_\.n/g, '_.a')
     );
-    // NOT the object axis, whose whole form is `(x ?? 0)`: that answers `NaN`
-    // for a `NaN` operand, which would disagree. The numeric axis is the one
-    // that tests `Number.isNaN` (it coalesces an ABSENT read to `NaN` first,
-    // so it carries a `??` of its own).
+    // The discharge tests `Number.isNaN` (it coalesces an ABSENT read to
+    // `NaN` first, so it carries a `??` of its own), and a `NaN` operand is
+    // absent.
     expect(jsCode(ce, ['Coalesce', 'a', 0])).toContain('Number.isNaN');
     const coalesce = compile(ce.box(['Coalesce', 'a', 0])).run!;
     expect(coalesce({ a: NaN })).toBe(0);
@@ -520,7 +539,10 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
     expect(jsCode(ce, ['IsMissing', 't'])).toBe(
       jsCode(ce, ['IsMissing', 'u']).replace(/_\.u/g, '_.t')
     );
-    expect(jsCode(ce, ['IsMissing', 't'])).toBe('(_.t === undefined)');
+    expect(jsCode(ce, ['IsMissing', 't'])).toBe(
+      'Number.isNaN((_.t) ?? Number.NaN)'
+    );
+    expect(axisOf(ce, 't')).toBe('object');
   });
 
   test('a construction at a parameterized nominal compiles like the plain value', () => {

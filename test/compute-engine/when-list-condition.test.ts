@@ -90,16 +90,20 @@ describe('a restriction with a list of conditions', () => {
     expect(run(allFalse)).toEqual([NaN, NaN]);
   });
 
-  test('a complex-valued value is masked with the complex absence', () => {
+  test('a complex-valued value is masked with plain NaN', () => {
+    // Plain `NaN`, as the element-wise `Which` gives it: `IsMissing` and
+    // `Coalesce` test `Number.isNaN`, which reads the complex value
+    // `{ re: NaN, im: NaN }` as present, and they must read the masked cell
+    // as absent (R3 of `docs/plans/2026-11-01-absent-value-contract.md`).
     const json = [
       'When',
       ['Add', 'u', ['Multiply', ['Complex', 0, 1], 'v']],
       ['Less', ['Multiply', 'v', ['List', 1, 2]], 2],
     ];
     expect(interp(json)).toBe('[(5 + i),NaN]');
-    const out = run(json) as { re: number; im: number }[];
+    const out = run(json) as unknown[];
     expect(out[0]).toEqual({ re: 5, im: 1 });
-    expect(out[1].re).toBeNaN();
+    expect(out[1]).toBeNaN();
   });
 
   test('a string is one value, repeated, with the object null as its absence', () => {

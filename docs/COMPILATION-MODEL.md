@@ -90,6 +90,16 @@ interpreter's value. A line is removed when the case declines or is fixed.
   and `p: any` assigned `2L`, `compile(p + 1, { constantFold: false })`
   declines and `run({ L: [1, 2] })` gives `null` (the fallback does not pass
   the input `L` to the value of `p`); the interpreter gives `[3, 5]`.
+- `javascript`, `z: complex`, `v: list<real>` at `z = 1+2i`, `v = [1, 2]`:
+  `Map((p) ↦ Real(p), When(z, v > 0))` gives `[{re: 1, im: 2}, {re: 1, im: 2}]`
+  (the type of the `When` is `list<number>`, so the parameter compiles as a
+  real number and `Real(p)` as `p`); the interpreter gives `[1, 1]`. Over a
+  declared `list<complex>` the same `Map` agrees.
+- `javascript`, a `vars` entry whose caller code names `_c`: with
+  `s: string | missing`, `t: string`, `vars: { t: '_c' }` and the preamble
+  `const _c = "ok";`, `IsMissing(Coalesce(s, t))` at `s = undefined` gives
+  `true` (the `Coalesce` lowering binds its operand to `_c`, and caller code
+  is not renamed); the interpreter gives `false`.
 
 ## Fail closed
 
@@ -1554,9 +1564,10 @@ compiles on the JavaScript target through `_SYS.restrict`, one position for
 each condition (user decision 2026-09-15). A list value is aligned with the
 conditions and truncated to the shorter of the two, as the interpreter aligns
 them; a number or a point is one value, repeated at each position. A position
-whose condition is not true holds the absence value: `NaN` (or its complex
-form) for a number, `undefined` for a point or a string. A value that may be
-either a list or a point at run time declines.
+whose condition is not true holds the absence value: `NaN` for a number,
+real or complex (a plain `NaN`, not `{ re: NaN, im: NaN }`, so that
+`IsMissing` reads the cell as absent), `undefined` for a point or a string.
+A value that may be either a list or a point at run time declines.
 
 An infinite collection compiles on the JavaScript target only under a
 bounding consumer: `Take`, `TakeWhile`, or `First` and `At` with a constant

@@ -7990,6 +7990,25 @@ function pythonAbsentInputTest(
   return `__import__("builtins").globals().get(${JSON.stringify(spelled.normalize('NFKC'))}) is None`;
 }
 
+/**
+ * The Python test of absence for the lambda parameter `_c`, shared by the
+ * discharges (`IsMissing`, `Coalesce`, `AssertPresent`) of both absence
+ * axes: `None` and a `NaN` are absent, the spellings an absent value has in
+ * compiled Python (R1 and R3 of
+ * `docs/plans/2026-11-01-absent-value-contract.md`: a discharge reads an
+ * absent operand whatever its spelling). `cmath.isnan` reads a float, a
+ * complex number and their NumPy scalar types, and raises a `TypeError` for
+ * a string or a list, which are present values: the `isinstance` test comes
+ * first and reads every other value as present (an integer is never `NaN`).
+ * With it, `IsMissing(u)` for `u` declared `real | string | missing` and
+ * holding `"ab"` is `False`, as in the interpreter. The code that this
+ * target emits imports `numpy as np` and `cmath` (`withImports`,
+ * `compileFunction`).
+ */
+const PY_ABSENT_TEST =
+  '_c is None or (isinstance(_c, (float, complex, np.floating, ' +
+  'np.complexfloating)) and cmath.isnan(_c))';
+
 export class PythonTarget implements LanguageTarget<Expression> {
   /** Whether to include 'import numpy as np' in generated code */
   private includeImports: boolean;
@@ -8133,15 +8152,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // The numeric test reads `None` as absent as well as `math.nan`
       // (2026-09-22). A WRITTEN absence symbol (`Missing`, `Undefined`) lowers
       // to the object null `None` — see the absence-symbol branch of
-      // `BaseCompiler._compileInner` — and `math.isnan(None)` raises a
-      // `TypeError`, so the `is None` test comes first and short-circuits. The
-      // operand is bound to a lambda parameter so it is evaluated once.
+      // `BaseCompiler._compileInner` — and `cmath.isnan(None)` raises a
+      // `TypeError`, so the `is None` test comes first and short-circuits
+      // (`PY_ABSENT_TEST`, shared by both axes). The operand is bound to a
+      // lambda parameter so it is evaluated once.
       absence: {
         numeric: {
           make: () => 'math.nan',
-          isAbsent: (x) => `(lambda _c: _c is None or math.isnan(_c))(${x})`,
+          isAbsent: (x) => `(lambda _c: ${PY_ABSENT_TEST})(${x})`,
           coalesce: (x, d) =>
-            `(lambda _c: ${d} if (_c is None or math.isnan(_c)) else _c)(${x})`,
+            `(lambda _c: ${d} if (${PY_ABSENT_TEST}) else _c)(${x})`,
           // A caller passes `None` for an absent input, and `None + 1` and
           // `np.sin(None)` raise a `TypeError`, where the interpreter answers
           // `NaN`. The read gives `float('nan')` for `None` and passes any
@@ -8161,11 +8181,19 @@ export class PythonTarget implements LanguageTarget<Expression> {
         },
         object: {
           nullLiteral: 'None',
-          isAbsent: (x) => `(${x} is None)`,
-          // The operand is bound to a lambda parameter so it is evaluated
-          // once, as on the numeric axis: an operand with an effect or a
-          // random value must not run twice.
-          coalesce: (x, d) => `(lambda _c: ${d} if _c is None else _c)(${x})`,
+          // The object null only, for the Kleene guards of a comparison,
+          // where a `NaN` operand is a number.
+          isNull: (x) => `(${x} is None)`,
+          // A discharge (`IsMissing`, `Coalesce`, `AssertPresent`) reads
+          // `None` and `NaN` as absent with the numeric axis's test
+          // (`PY_ABSENT_TEST`): an object-domain position can hold `NaN`,
+          // because a written `Missing` is `math.nan` on this target (see
+          // `writtenSymbol` below). The operand is bound to a lambda
+          // parameter so it is evaluated once, as on the numeric axis: an
+          // operand with an effect or a random value must not run twice.
+          isAbsent: (x) => `(lambda _c: ${PY_ABSENT_TEST})(${x})`,
+          coalesce: (x, d) =>
+            `(lambda _c: ${d} if (${PY_ABSENT_TEST}) else _c)(${x})`,
         },
         // A raised `ValueError`, as an expression: the generator-throw
         // idiom this target already uses for its integer-operand checks

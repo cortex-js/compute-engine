@@ -446,20 +446,27 @@ export function compileExprWhen(
       // own type, the list of results. A missing number is the numeric
       // absence (`NaN`); a missing POINT and a missing string are the
       // object null (`undefined` on JavaScript), as a single missing point
-      // is. The element-wise `Which` gives the same cells (its selection
-      // helper takes the absence of the cell type, `_SYS.selectAbsent`), so
-      // the two forms of the same selection agree.
+      // is (R1 of `docs/plans/2026-11-01-absent-value-contract.md`: a
+      // producer gives the absence marker of its result type). The
+      // element-wise `Which` gives the same cells (its selection helper
+      // takes the absence of the cell type, `_SYS.selectAbsent`), so the
+      // two forms of the same selection agree.
+      //
+      // A missing COMPLEX number is plain `NaN`, as the element-wise
+      // `Which` gives it, not the complex value `{ re: NaN, im: NaN }`: a
+      // discharge (`IsMissing`, `Coalesce`) tests `Number.isNaN`, which
+      // reads an object as present, and must read this cell as absent
+      // (R3 of the same plan).
       const held: Type = list
         ? (collectionElementType(valueType.type) ?? 'unknown')
         : valueType.type;
       const nullLiteral = target.absence?.object?.nullLiteral;
       const absent =
-        coerce !== undefined
-          ? '({ re: NaN, im: NaN })'
-          : nullLiteral !== undefined &&
-              absenceKind([held], target) === 'object'
-            ? nullLiteral
-            : 'NaN';
+        coerce === undefined &&
+        nullLiteral !== undefined &&
+        absenceKind([held], target) === 'object'
+          ? nullLiteral
+          : 'NaN';
       const zip = runtimeZip ? 'null' : String(list);
       if (maskRank === 1)
         return `_SYS.restrict(${conds}, ${val}, ${zip}, ${absent})`;
@@ -753,13 +760,9 @@ export function compileExprMissingEquality(
     // `g(x)[5] = 1` where the interpreter answers `False` (ROADMAP CE-386,
     // landed 2026-10-23); at `x = "a"` the value is `undefined` and both
     // routes answer `Missing`.
-    const objectAxis = target.absence.object;
-    if (objectAxis.isAbsent === undefined)
-      throw new Error(
-        `Could not compile \`${h}\`: target '${target.language ?? 'unknown'}' cannot test ` +
-          `absence (no 'isAbsent' capability).`
-      );
-    const isAbsent = objectAxis.isAbsent;
+    // The object axis's discharge test (`isAbsent`) reads `NaN` as absent
+    // too, so the guard uses its test of the object null (`isNull`).
+    const isNull = target.absence.object.isNull;
     // Each operand is compiled once, here. An operand that is an
     // application (a call, an element read) or that is impure (`Random()`)
     // is BOUND to a temporary that the absence tests and the inner
@@ -780,7 +783,7 @@ export function compileExprMissingEquality(
       return name;
     });
     const operandCode = (i: number): TargetSource => operandCodes[i];
-    const guardOf = (i: number): TargetSource => isAbsent(operandCode(i));
+    const guardOf = (i: number): TargetSource => isNull(operandCode(i));
     // The inner (both-present) comparison. For operands whose stripped
     // type is wholly STRING, the target's `Equal` codegen is the numeric
     // tolerance kernel — silently `false` for any pair of present strings

@@ -876,9 +876,13 @@ const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
   // operand or the point instead of its own value.
   '_v',
   '_pt',
-  // A `Coalesce` of a number (`absence.numeric.coalesce`) binds the first
-  // operand to `_c` around the code of the default value. A user name `_c`
-  // in that code would read the first operand instead of its own value.
+  // A `Coalesce` (`jsCoalesce`, used by both the numeric and the object
+  // `absence.coalesce`) binds the first operand to `_c` around the code of
+  // the default value. A user name `_c` in that code would read the first
+  // operand instead of its own value. Code that the caller supplies in
+  // `vars` is not renamed, so a `vars` entry whose code names `_c` has the
+  // same problem; `docs/COMPILATION-MODEL.md` lists it under the known
+  // limitations.
   '_c',
   // A `Comprehension` (`compileComprehension`) collects its values in the
   // array `result` around the code of its term. A user name `result` in
@@ -11174,6 +11178,26 @@ export class ComputeEngineFunctionLiteral extends Function {
 }
 
 /**
+ * The run-time absence test of every discharge (`IsMissing`, `Coalesce`,
+ * `AssertPresent`) on this target, for a position of any domain: `NaN`,
+ * `undefined` and `null` are absent, the spellings an absent value has in
+ * compiled code (R1 and R3 of
+ * `docs/plans/2026-11-01-absent-value-contract.md`).
+ * `Number.isNaN(undefined)` is `false`, so the operand is coalesced to `NaN`
+ * before the test; the operand is parenthesized because `??` may not be
+ * mixed with an unparenthesized `&&`/`||` and it is spliced from arbitrary
+ * code.
+ */
+const jsIsAbsent = (x: TargetSource): TargetSource =>
+  `Number.isNaN((${x}) ?? Number.NaN)`;
+
+/** `x` unless `jsIsAbsent` reads it as absent, else `d`. The operand is
+ * bound to a parameter so it is evaluated once, and `d` is evaluated only on
+ * the absent branch. */
+const jsCoalesce = (x: TargetSource, d: TargetSource): TargetSource =>
+  `((_c) => Number.isNaN(_c ?? Number.NaN) ? ${d} : _c)(${x})`;
+
+/**
  * JavaScript language target implementation
  */
 export class JavaScriptTarget implements LanguageTarget<Expression> {
@@ -11283,20 +11307,33 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // list cell stays distinct from a `NaN` cell (see the absence-symbol
       // branch of `BaseCompiler._compileInner`), and a `vars` key the caller
       // left out, which reads `undefined` too. `Number.isNaN(undefined)` is
-      // `false`, so the operand is coalesced to `NaN` before the test; the
-      // operand is parenthesized because `??` may not be mixed with an
-      // unparenthesized `&&`/`||` and it is spliced from arbitrary code.
+      // `false`, so the operand is coalesced to `NaN` before the test
+      // (`jsIsAbsent`).
+      //
+      // The object axis discharges with the SAME test. A discharge
+      // (`IsMissing`, `Coalesce`, `AssertPresent`) reads an absent operand
+      // whatever its spelling (R3 of
+      // `docs/plans/2026-11-01-absent-value-contract.md`), and an
+      // object-domain position can hold `NaN` at run time: a producer that
+      // picks its marker from a wider type gives `NaN` (an element read by
+      // `_SYS.atWithValueMarker` is returned as it is). A present
+      // object-domain value (a string, an array, a record) is never `NaN`,
+      // so the test reads it as present. `isNull` tests the object null
+      // only, for the Kleene guards of a comparison, where a `NaN` operand is
+      // a number that compares as IEEE says; their value on an absent operand
+      // is unspecified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled
+      // code"), and they keep their former test.
       absence: {
         numeric: {
           make: () => 'Number.NaN',
-          isAbsent: (x) => `Number.isNaN((${x}) ?? Number.NaN)`,
-          coalesce: (x, d) =>
-            `((_c) => Number.isNaN(_c ?? Number.NaN) ? ${d} : _c)(${x})`,
+          isAbsent: jsIsAbsent,
+          coalesce: jsCoalesce,
         },
         object: {
           nullLiteral: 'undefined',
-          isAbsent: (x) => `(${x} === undefined)`,
-          coalesce: (x, d) => `(${x} ?? ${d})`,
+          isNull: (x) => `(${x} === undefined)`,
+          isAbsent: jsIsAbsent,
+          coalesce: jsCoalesce,
         },
         // A thrown `Error`, as an expression: an arrow function that throws,
         // called at once. `AssertPresent` (`x?!`) uses it for the absent branch.

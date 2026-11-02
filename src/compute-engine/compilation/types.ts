@@ -1942,6 +1942,18 @@ export interface CompileTarget<Expr = unknown> {
    * - `object` — the analogous operations for an object-domain (non-numeric)
    *   position, keyed on the target's null literal. A target without this axis
    *   rejects (compile error) any `missing`-typed object-domain position.
+   *   `isAbsent` and `coalesce` are the tests of a discharge (`IsMissing`,
+   *   `Coalesce`, `AssertPresent`): they read the null literal AND the
+   *   numeric marker as absent: a discharge reads an absent operand
+   *   whatever its spelling (R3 of
+   *   `docs/plans/2026-11-01-absent-value-contract.md`), and an
+   *   object-domain position can hold the numeric marker at run time (an
+   *   element that `_SYS.atWithValueMarker` returns as it is, a written
+   *   `Missing` on the Python target). `isNull` reads the null literal only:
+   *   the Kleene guards of a comparison use it, because there a `NaN`
+   *   operand is a number that compares as IEEE says, and their value on an
+   *   absent operand is unspecified (`docs/COMPILATION-MODEL.md`, "Caveats
+   *   of compiled code").
    */
   absence?: {
     numeric: {
@@ -1982,6 +1994,7 @@ export interface CompileTarget<Expr = unknown> {
     };
     object?: {
       nullLiteral: TargetSource;
+      isNull: (x: TargetSource) => TargetSource;
       isAbsent: (x: TargetSource) => TargetSource;
       coalesce: (x: TargetSource, d: TargetSource) => TargetSource;
     };

@@ -1314,7 +1314,7 @@ export function tryCompileBroadcast(
   const body =
     absentParams.length === 0
       ? connectiveBody
-      : `((${absentParams.map((p) => object!.isAbsent(p)).join(' || ')}) ? ${object!.nullLiteral} : (${connectiveBody}))`;
+      : `((${absentParams.map((p) => object!.isNull(p)).join(' || ')}) ? ${object!.nullLiteral} : (${connectiveBody}))`;
   const closure = `(${params.join(', ')}) => ${body}`;
   // Every operand's width is known: emit one expression per component and
   // drop the run-time dispatch altogether. An operand whose compiled source

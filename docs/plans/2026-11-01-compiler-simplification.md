@@ -172,3 +172,15 @@ HEAD: 1), and `Coalesce(First(Rest(Which(v > 0, (1, 2)))), (9, 9))` would give
 `NaN` (interpreter: `(9, 9)`). Making every such reader accept `NaN` would add
 code in an unknown number of places, so the absence value chosen by the cell
 type stays, and the decision of 2026-10-18 stays in force.
+
+**The shared absence test (2026-11-01).** After the user adopted option (a)
+of `docs/plans/2026-11-01-absent-value-contract.md`, every discharge
+(`IsMissing`, `Coalesce`, `AssertPresent`) reads every spelling of an absent
+value: `NaN`, `undefined` and `null` on JavaScript, `None` and a float or
+complex `NaN` on Python. This is an addition, not a removal (source +124
+−41). An unmatched point or string cell of an element-wise selection stays
+`undefined`, as R1 of that plan requires: with `NaN` cells,
+`PointY(Which(v < 0, (1, 2)))` at `v = [1, -1]` gave `[1, 2]` (interpreter
+`[Missing, 2]`) and `Distance(Which(v < 0, (3, 4)), (0, 0))` threw. The
+complex cell of `When` became a plain `NaN`, which the test reads as absent.
+Corpus: 0 new declines, 0 changed values.

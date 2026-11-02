@@ -159,8 +159,14 @@ function absenceCallerCode(
  * mixes numbers with objects; a position provably outside the numbers (a
  * string, a list) uses `absence.object`. The predicate is
  * `absentDomainIsObject`, the same one the selection lowerings use to
- * PRODUCE an absent value (`absenceKind`), so what `Which`/`If`/`When`
- * emit for no selection is what `IsMissing`/`Coalesce` test for. Throws
+ * PRODUCE an absent value (`absenceKind`). On the JavaScript and Python
+ * targets both axes read the object null AND the numeric marker as absent:
+ * a discharge reads an absent operand whatever its spelling (R3 of
+ * `docs/plans/2026-11-01-absent-value-contract.md`), and an object-domain
+ * position can hold the numeric marker at run time, from a producer that
+ * picks its marker from a wider type (`_SYS.atWithValueMarker` returns a
+ * `NaN` element as it is) or, on Python, from a written `Missing`, which is
+ * `math.nan` there. Throws
  * (fail closed) when the target declares no absence capability at all, or
  * lacks the required object axis.
  */
@@ -2476,9 +2482,9 @@ export function absentComparisonGuard(
   // is not told apart.
   const tests = operands.flatMap((a, i) => {
     if (!mayBeAbsent(a)) return [];
-    if (isSymbol(a)) return [object.isAbsent(temps[i])];
+    if (isSymbol(a)) return [object.isNull(temps[i])];
     const numeric = target.absence?.numeric.isAbsent;
-    return [numeric ? numeric(temps[i]) : object.isAbsent(temps[i])];
+    return [numeric ? numeric(temps[i]) : object.isNull(temps[i])];
   });
   try {
     // An alias (not an override): the analyses still read the operand as
