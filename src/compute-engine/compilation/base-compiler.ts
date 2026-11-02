@@ -104,7 +104,6 @@ import {
 } from './compile-absence.js';
 import {
   absentCollectionOperandGuard,
-  appliedLiteralCheckedCall,
   argumentProvesParameterType,
   assertBuiltinCallbackUsable,
   assertCallbackLaneMatch,
@@ -113,17 +112,12 @@ import {
   beginRootPreprocessing,
   bodyWithArguments,
   checkUserCallArity,
-  checkedCallMayBeAbsent,
   complexElementCallbackEta,
   declaredParameterCheck,
   declaredScalarTupleCall,
-  intervalCheckingCallee,
-  intervalParameterDomain,
-  localCheckingCallee,
   localParameterChecks,
   mayBeAbsentCollection,
   mayBeAbsentCollectionNode,
-  parameterCheckNeeded,
   registryHelperName,
   tryCompileLocalFunctionCall,
   tryCompileUserFunction,
@@ -319,20 +313,14 @@ import {
   appliedDerivativeTooLarge,
   cachedLiteralWithParameterTypes,
   callOnlyLocalFunctionLiterals,
-  checkedParameterType,
-  checkingShimName,
-  checkingShimTests,
   combinerPlan,
   compileCombinerLiteral,
   complexCoercingWrapper,
   declaredParamType,
   ensureUserFunctionValueRef,
-  failedCheckMarker,
   foldLaneIsComplex,
   hasUniformComplexScalarElements,
   jsClauseParamGuard,
-  jsCollectionShapeGuard,
-  jsParameterGuard,
   laneMismatchAt,
   laneRequestParamType,
   lastCallMemoEligible,
@@ -1795,25 +1783,15 @@ export class BaseCompiler {
   static readonly addDeclaredComplexParams = addDeclaredComplexParams;
   static readonly checkUserCallArity = checkUserCallArity;
   static readonly tryCompileUserFunction = tryCompileUserFunction;
-  static readonly checkedParameterType = checkedParameterType;
   static readonly userFunctionSignatureIsInferred =
     userFunctionSignatureIsInferred;
-  static readonly parameterCheckNeeded = parameterCheckNeeded;
   static readonly declaredParameterCheck = declaredParameterCheck;
   static readonly uncheckedParameterError = uncheckedParameterError;
-  static readonly intervalParameterDomain = intervalParameterDomain;
   static readonly localParameterChecks = localParameterChecks;
-  static readonly appliedLiteralCheckedCall = appliedLiteralCheckedCall;
-  static readonly intervalCheckingCallee = intervalCheckingCallee;
-  static readonly localCheckingCallee = localCheckingCallee;
   static readonly argumentProvesParameterType = argumentProvesParameterType;
-  static readonly checkingShimName = checkingShimName;
-  static readonly failedCheckMarker = failedCheckMarker;
   static readonly ABSENCE_DISCHARGING_HEADS = ABSENCE_DISCHARGING_HEADS;
   static readonly mayBeAbsentCollection = mayBeAbsentCollection;
   static readonly mayBeAbsentCollectionNode = mayBeAbsentCollectionNode;
-  static readonly checkedCallMayBeAbsent = checkedCallMayBeAbsent;
-  static readonly checkingShimTests = checkingShimTests;
   static readonly tryCompilePointListCall = tryCompilePointListCall;
   static readonly scalarSlotListArgs = scalarSlotListArgs;
   static readonly compileUntypedScalarSlotCall = compileUntypedScalarSlotCall;
@@ -1963,8 +1941,6 @@ export class BaseCompiler {
   static readonly literalDeclaredParamTypes = literalDeclaredParamTypes;
   static readonly declaredParamType = declaredParamType;
   static readonly tryEmitMultiClauseFunction = tryEmitMultiClauseFunction;
-  static readonly jsParameterGuard = jsParameterGuard;
-  static readonly jsCollectionShapeGuard = jsCollectionShapeGuard;
   static readonly jsClauseParamGuard = jsClauseParamGuard;
   static readonly compileDefinitionBody = compileDefinitionBody;
   static readonly recordCallerHandlerCode = recordCallerHandlerCode;

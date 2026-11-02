@@ -47,6 +47,68 @@
   static type `vector<real^3>`. The interpreter gives the scalar `0` (`1`)
   for this case. Inside a broadcast both give the same value:
   `0.5 * Sum(…) + [x, y, z]` is `[x, y, z]` on both.
+- **Compiled code tests no value against its declared type.** The compiler
+  assumes that every value holds its static type, a value given by the host
+  included, and a value outside that type gives an undefined result. These
+  run-time tests are removed:
+  - the test of an argument against the declared type of its parameter, for
+    a user function, a block-local function and an annotated function
+    literal applied directly, on `javascript` (the `_fn_f$t` shim, which
+    gave `NaN` or `undefined`) and on `interval-js` (`_IA.checkedCall`,
+    which clipped an interval to a bounded type; `checkedCall` is no longer
+    exported from the interval library). With `f` declared
+    `(real) -> number`, `f(y)` compiled to `_fn_f$t(_.y)` and now compiles
+    to `_fn_f(_.y)`. An argument whose static type does not prove a
+    parameter type that admits only some real numbers (`integer`,
+    `real<0..>`, `rational`) is assumed to hold it: with `g` declared
+    `(integer) -> integer` and `y: real`, `g(y)` declined on Python and
+    GLSL and now compiles on every target, with no test, and a recursive
+    call such as `f(n - 1)` at an `integer` parameter compiles. Only an
+    argument whose static type has no value of the parameter type declines.
+    A complex-lane argument at a real parameter is still passed as its real
+    part (`_SYS.creal`), so `p(√y)` at `y = 4` gives the value of `p(2)`;
+    a function value that a consumer gives such elements declines: with
+    `h` declared `(real) -> real`, `Map(h, [√y, 1])` compiled and now
+    declines;
+  - the refusals of `run()` and `load()`: an array, a boolean or a string
+    for a binding declared with a number type, and any value but a string
+    for a binding declared `string`. A `{re, im}` value other than `~oo`
+    for a binding read as real, and a string and a typed array for a
+    binding read as a list, are still refused: they are values of some
+    types (`number`, some collection types) that compiled code cannot
+    read. `broadcast()` no longer refuses a boolean for a number
+    binding, or any input for a `string` binding. The stored entry plan has
+    no `scalars` and no `texts` field (a stored plan that has them still
+    loads, and the fields are ignored);
+  - the shape test of a reduction or an inner product over a declared
+    width: `\sum(V)` with `V: list<real^3>` compiled to
+    `((_tv1) => Array.isArray(_tv1) && _tv1.length === 3 ? (0 + _tv1[0] + _tv1[1] + _tv1[2]) : (_tv1).reduce((_a, _b) => _a + _b, 0))(_.V)`
+    and now compiles to the term-by-term fold alone, and `Dot` of two
+    points whose width the type states has no `_SYS.matmul` fallback;
+  - on JavaScript, the test that a list of points is an array, in its sum
+    with a point and its product with a list of numbers: with
+    `P: list<tuple<real, real>>`, `P + (1, 2)` compiled to
+    `((_tv3, _tv4) => (Array.isArray(_tv3) ? _tv3.map((_tv5) => …) : NaN))(_.P, [1, 2])`
+    and now compiles to `((_tv3, _tv4) => _tv3.map((_tv5) => …))(_.P, [1, 2])`.
+    In the product, the other operand is tested only when it is typed
+    `broadcastable<…>`;
+  - on JavaScript, the `RangeError` "PointList: source component … is not
+    an array at run time" for a `PointList` source typed as a list (or as a
+    list or `missing`);
+  - on JavaScript, the test that the source of a counted reduction over a
+    range of positions (`Sum(At(L, 2..5))`) is an array, when its type has
+    no `missing` arm. The test of the `Repeat` count and of the `Slice` span
+    no longer tests the type of the value; they give the same values.
+- **A declared scalar result binds the body of the function.** With `h`
+  declared `(number) -> number` and `h := t ↦ [t, t]`, `h(3)` evaluated to
+  `[3, 3]`, typed `number`, and now gives an `incompatible-type` error, as
+  does `(t ↦ Typed([t, t], number))(5)`. A function computed once per
+  element of a list argument still returns the list of its results: with
+  `d` declared `(point | list<point>) -> number`, `d([(1, 2), (4, 6)])` is
+  a list of numbers. The compiler declines every call of such a function on
+  `javascript`, `interval-js` and Python, a bare call `h(u)` included, which
+  compiled and returned the list before, and a function value of such a
+  function given to a consumer (`Map(h, xs)`). (GitHub issue #488.)
 
 ## 0.177.0 _2026-11-01_
 

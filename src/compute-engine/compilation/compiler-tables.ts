@@ -681,8 +681,6 @@ export const ELEMENTWISE_WIDTH_OPERATORS: ReadonlySet<string> = new Set([
  * arm, can still be the absent collection (`undefined`) at run time on
  * the JavaScript target, so a consumer that reads it as an array must
  * test it first (`absentCollectionOperandGuard`):
- * - a checked call whose failed check gives `undefined`
- *   (`checkedCallMayBeAbsent`);
  * - a `Take` or a `Drop` whose count is not a compile-time number: the
  *   slice gives `undefined` for a `NaN` count, as the interpreter has no
  *   value;

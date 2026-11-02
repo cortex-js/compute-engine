@@ -108,18 +108,12 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
     expect(r.run!({ x: 0, y: 1, P: [] })).toEqual([]);
   });
 
-  test('a caller override cannot inherit the helper body proof', () => {
+  test('a caller override gives its own values', () => {
     // The static type of `point(x)` is derived from the body, which a
-    // `functions` override replaces, so the inner product must not read the
-    // override's value by the body's width: it tests the run-time shape and
-    // falls back to `_SYS.matmul`, which answers a width mismatch as the
-    // interpreter does (NaN), and the override's own values otherwise.
+    // `functions` override replaces. The inner product reads the value of
+    // the override, which must have the width of that type: an override
+    // whose value has another width gives an undefined result.
     const { expr } = fixture();
-    const wide = compile(expr, { functions: { point: '(u => [1, 2, 3])' } });
-    expect(wide.success).toBe(true);
-    expect(source(wide)).toContain('Array.isArray');
-    expect(source(wide)).toContain('_SYS.matmul');
-    expect(wide.run!({ x: 0, y: -2 })).toBeNaN();
     const same = compile(expr, { functions: { point: '(u => [u + 10, 3])' } });
     // `(10, 3) · (1, 2)` with `x = 0`, `y = -2`.
     expect(same.run!({ x: 0, y: -2 })).toBe(16);
@@ -190,16 +184,13 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
     ).toEqual([5, 11]);
   });
 
-  test('declared runtime points keep width checks and matrix fallback', () => {
+  test('declared runtime points broadcast their coordinates', () => {
     const { ce } = fixture();
     ce.declare('a', 'tuple<broadcastable<real>, broadcastable<real>>');
     ce.declare('b', 'tuple<broadcastable<real>, broadcastable<real>>');
     const r = compile(ce.box(['Dot', 'a', 'b']));
     expect(r.success).toBe(true);
-    expect(source(r)).toContain('Array.isArray');
-    expect(source(r)).toContain('_SYS.matmul');
     expect(r.run!({ a: [1, [1, 2]], b: [3, 4] })).toEqual([7, 11]);
-    expect(r.run!({ a: [1, 2, 3], b: [4, 5, 6] })).toBe(32);
   });
 
   test('an impure operand does not reorder the reads of a pure one', () => {

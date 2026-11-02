@@ -192,8 +192,8 @@ export function withDefineFunctionDeclares(
   // type moves to the hoisted `Declare`, so the block keeps it as the
   // declared type of the name (`statementListDeclaredVarTypes`), as for a
   // function literal assigned to a declared name (`g = (k) => …`): a call
-  // of the local checks its arguments against the declared parameter
-  // types (`localParameterChecks`). A `Declare` with a value is kept: the
+  // of the local whose argument can be outside a declared parameter type
+  // declines (`localParameterChecks`). A `Declare` with a value is kept: the
   // interpreter refuses the definition of a name that holds a value, and
   // the compilation fails too.
   const declaredBefore = new Set<number>();

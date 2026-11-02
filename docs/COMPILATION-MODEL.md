@@ -131,6 +131,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
   the interpreter gives the scalar `0` (`1`), a value outside that type
   (CE-786). A consumer that reads the shape sees the difference:
   `Norm(Product(i * [x, y, z], i, 1, n))` gives `√3`, the interpreter `1`.
+- `javascript`, `h: (broadcastable<integer>) -> broadcastable<integer>`,
+  `h := n ↦ n + 1`, `S: list<string>` at `S = ["a", "b"]`: `h(S)` gives
+  `["a1", "b1"]` (a collection argument at a `broadcastable<T>` parameter
+  compiles without a test of its cells); the interpreter gives an
+  `incompatible-type` error for each cell.
 - `javascript`, a `vars` entry whose code is not a primary expression: with
   `p: real` and `vars: { p: '2+3' }`, `2p` compiles to `2 * 2+3` and gives 7
   (the code is spliced without parentheses); the interpreter, with `p = 5`,
@@ -145,6 +150,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `interval-js`, `y: real` at `y = 3`: `Coalesce(1/(y - 3), 2)` gives the
   interval `[2, 2]` (`_IA.coalesce` reads the `empty` result of a pole as
   absent); the interpreter gives `~∞`.
+- `javascript`, `x: real`, `W: list<real>`, `vector` declared
+  `(real) -> list<real^2>` with the body `t ↦ W` (crafted: the body breaks
+  the declared width): `Sum(vector(x))` at `W = [1, 2, 3]` gives 3 (the sum
+  is written for two terms); the interpreter gives 6.
 
 ## Fail closed
 

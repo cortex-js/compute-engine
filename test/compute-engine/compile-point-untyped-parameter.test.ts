@@ -291,13 +291,6 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     // The generic definition, compiled for a collection, would receive
     // the absent value.
     ['Map(gm, LM)', ['Map', 'gm', 'LM'], /the point may be absent/],
-    // The declared parameter type is tested by a wrapper, which the
-    // definition for one point does not have.
-    [
-      'Reduce(P, ghd, (0, 0))',
-      ['Reduce', 'P', 'ghd', ['Tuple', 0, 0]],
-      /called through a wrapper/,
-    ],
   ];
   for (const [label, json, message] of declines)
     for (const mode of ['auto', 'strict'] as const)
@@ -305,6 +298,12 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
         expect(() =>
           compile(ce.box(json as any), { fallback: false, mode })
         ).toThrow(message));
+
+  // No declared parameter type of `ghd` is tested at run time, so the
+  // definition for one point takes each call.
+  for (const mode of ['auto', 'strict'] as const)
+    test(`Reduce(P, ghd, (0, 0)) (${mode})`, () =>
+      expectSameValue(['Reduce', 'P', 'ghd', ['Tuple', 0, 0]], mode));
 
   // Only the parameter that receives the point is typed in the literal
   // compiled for one point. A complex argument at the other parameter is a

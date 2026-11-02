@@ -423,15 +423,6 @@ describe('load() applies the input conversions of run()', () => {
     expect(() => createJavaScriptRuntime().load(result)(vars)).toThrow(refusal);
   });
 
-  test('a complex value for a real symbol is refused by load() as by run()', () => {
-    const result = compile(ce.box(['Add', 'q', 1]), { fallback: false })!;
-    const vars = { q: { re: 1, im: 1 } };
-    expect(() => result.run!(vars as any)).toThrow(TypeError);
-    expect(() => createJavaScriptRuntime().load(result)(vars)).toThrow(
-      TypeError
-    );
-  });
-
   test('a call with no vars object throws from load() as from run() when the code reads a symbol', () => {
     const result = compile(ce.box(['Add', 'q', 1]), { fallback: false })!;
     expect(() => (result.run as any)()).toThrow(TypeError);
@@ -519,7 +510,7 @@ describe('the reconstruction digits of a negative base travel with the result', 
       test(`${name}: an inner call that throws`, () => {
         const vars = {
           get x() {
-            expect(() => throwing({ q: { re: 1, im: 1 } })).toThrow(TypeError);
+            expect(() => throwing(undefined)).toThrow(TypeError);
             return x;
           },
         };

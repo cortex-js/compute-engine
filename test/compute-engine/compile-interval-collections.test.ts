@@ -683,8 +683,8 @@ describe('Interval target — the 2026-08-22 decisions that stay', () => {
     );
     declines(ce, ['Add', ['s', 'u'], 1], /contradicted/);
     declines(ce, ['Less', ['s', 'u'], 1], /contradicted/);
-    // Its bare call gets no array spelling for its body either.
-    declines(ce, ['s', 'u'], /List/);
+    // Its bare call declines too: the declaration says it returns a scalar.
+    declines(ce, ['s', 'u'], /says it returns a scalar/);
   });
 
   test('a list-of-booleans helper declines in every position', () => {
@@ -1598,7 +1598,7 @@ describe('Interval target — point arithmetic', () => {
       'g',
       ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
     );
-    declines(ce, ['g', 'u'], /List/);
+    declines(ce, ['g', 'u'], /says it returns a scalar/);
   });
 
   test('a helper chain that rotates, translates and measures a point', () => {

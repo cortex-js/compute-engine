@@ -259,7 +259,10 @@ export function isProvablyCollectionValuedBody(
       fnBody = fnBody.ops[0];
     else break;
   }
-  if (fnBody.type.matches('collection<any>')) return true;
+  // The type `never` (a body that only fails, or whose type is not yet
+  // known) matches every type, and is no evidence of a collection.
+  if (fnBody.type.type !== 'never' && fnBody.type.matches('collection<any>'))
+    return true;
   return isProvablyCollectionValuedApplication(fnBody, visited);
 }
 

@@ -1309,12 +1309,17 @@ export function tryCompileBroadcast(
   // element that is an array is walked to its numbers, and the point is
   // applied whole to each one: `f` keeps the point and descends into the
   // element, where the flat `_SYS.bcast` would pair the components of the
-  // point with the entries of the element. A list operand that is not an
-  // array at run time is NaN, as in the other point-list plans.
+  // point with the entries of the element. The list of points is an array
+  // by its static type, and is not tested. The other operand is tested only
+  // when it is typed `broadcastable<E>`, a number or an array: a list or
+  // tensor type settles it as an array.
   if (pointListOverNumbers !== undefined) {
     const bound = args.map(() => tempVar(target));
     const list = bound[1 - pointListOverNumbers];
     const other = bound[pointListOverNumbers];
+    const otherType = compilationType(args[pointListOverNumbers]);
+    const otherMayBeScalar =
+      typeof otherType !== 'string' && otherType.kind === 'broadcastable';
     const f = tempVar(target);
     const p = tempVar(target);
     const x = tempVar(target);
@@ -1325,8 +1330,10 @@ export function tryCompileBroadcast(
       `((${bound.join(', ')}) => { ` +
       `const ${f} = (${p}, ${x}) => Array.isArray(${x}) ? ` +
       `${x}.map((${y}) => ${f}(${p}, ${y})) : _SYS.bcast(${closure}, ${ordered}); ` +
-      `return !Array.isArray(${list}) ? NaN : ` +
-      `!Array.isArray(${other}) ? ${list}.map((${p}) => ${f}(${p}, ${other})) : ` +
+      `return ` +
+      (otherMayBeScalar
+        ? `!Array.isArray(${other}) ? ${list}.map((${p}) => ${f}(${p}, ${other})) : `
+        : '') +
       `${list}.length !== ${other}.length ? NaN : ` +
       `${list}.map((${p}, ${k}) => ${f}(${p}, ${other}[${k}])); })` +
       `(${compiledArgs.join(', ')})`
@@ -1343,7 +1350,7 @@ export function tryCompileBroadcast(
       // error projected to NaN. A flat array is a point, added to every
       // point of the list. A number is the interpreter's per-element
       // `incompatible-type` error, NaN at every position. The list operand
-      // that is not an array at run time is NaN, as in the static plan.
+      // is an array by its static type, and is not tested.
       const m = args.indexOf(runtimePointOperand!);
       const src = bound[m];
       const list = bound[1 - m];
@@ -1364,8 +1371,7 @@ export function tryCompileBroadcast(
         arity === undefined ? '' : `${src}.length !== ${arity} ? NaN : `;
       return (
         `((${bound.join(', ')}) => ` +
-        `(!Array.isArray(${list}) ? NaN : ` +
-        `!Array.isArray(${src}) ? ${list}.map(() => NaN) : ` +
+        `(!Array.isArray(${src}) ? ${list}.map(() => NaN) : ` +
         `(${src}.length === 0 || Array.isArray(${src}[0])) ? ` +
         `(${src}.length !== ${list}.length ? NaN : ` +
         `${src}.map((${p}, ${k}) => _SYS.bcast(${closure}, ${zipped.join(', ')}))) : ` +
@@ -1408,14 +1414,12 @@ export function tryCompileBroadcast(
     // sources of the `Multiply` shape — would recurse INTO each point and
     // add the whole atomic point to every COMPONENT (`[[1, 2], [1, 2]]`
     // for the element `(0, 0)`). Exactly one list source reaches here
-    // (the decision above declines more). A non-array source is the
-    // interpreter's inert result, projected to NaN as `_SYS.bcast` does.
+    // (the decision above declines more). The list is an array by its
+    // static type (`isProvablyPointList`), and is not tested.
     if (atomicTupleOverPoints === 'static') {
       return (
         `((${bound.join(', ')}) => ` +
-        `(Array.isArray(${outerSources[0]}) ? ` +
-        `${outerSources[0]}.map((${outerParams[0]}) => ${innerCall}) : ` +
-        `NaN))` +
+        `${outerSources[0]}.map((${outerParams[0]}) => ${innerCall}))` +
         `(${compiledArgs.join(', ')})`
       );
     }

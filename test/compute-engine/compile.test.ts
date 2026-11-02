@@ -2551,9 +2551,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     for (const k of [1.5, NaN])
       for (const f of [replaceAt, deleteAt, insert])
         expect(() => f({ s, k })).toThrow(RangeError);
-    // A complex index is refused before the body runs, by the entry check
-    // of the `integer` argument.
-    expect(() => replaceAt({ s, k: { re: 2, im: 3 } })).toThrow(TypeError);
     // An empty list has no element to replace or delete, and one gap.
     expect(() => deleteAt({ s: [], k: 1 })).toThrow(RangeError);
     expect(insert({ s: [], k: 1 })).toEqual([9]);

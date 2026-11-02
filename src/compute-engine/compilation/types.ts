@@ -2677,15 +2677,10 @@ export interface CompilationOptions<Expr = unknown> {
    * and a string bound to one declared with a list or collection type whose
    * elements are not text (`indexed_collection`, `list<number>`) throws a
    * `TypeError` naming it, because the compiled code reads it as an array.
-   * An array, a boolean or a string bound to a symbol or parameter that the
-   * host declared with a number type (`x: real`) throws a `TypeError` naming
-   * it, and so does any value but a string (or `undefined`, an unsupplied
-   * variable) bound to one declared `string`: JavaScript would convert the
-   * value silently (`x + 1` gives `2` for `x = true`). A symbol whose type
-   * the engine inferred, one declared with a wider type (`real | boolean`,
-   * `any`), an unannotated parameter, and a `boolean` one are not checked
-   * this way; a value that is not a boolean leaves a condition on a
-   * `boolean` symbol undecided (the result is `NaN`).
+   * No other value is tested against its declared type: the host supplies
+   * every input with a value of its declared type, and the result for any
+   * other value is undefined (`x + 1` gives `2` for `x = true` with
+   * `x: real`).
    * The entries of a list are never read and a returned collection is never
    * copied: the compiled route requires inputs of the shape the code reads
    * (plain arrays, not typed arrays) and its results are read-only by
@@ -3090,13 +3085,10 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * the compiled code reads as a list.
  *
  * The type does not relate a value to the declared type of its symbol: it
- * admits `true` for a symbol declared `real`. On the `javascript` target,
- * the entry guards (the default `entryChecks`) refuse such a value at run
- * time with a message that names the variable: an array, a boolean or a
- * string for a symbol declared with a number type, and any value but a
- * string for a symbol declared `string`. A symbol declared
- * `boolean` accepts any value: a value that is not a boolean leaves a
- * condition on it undecided, and the result is NaN.
+ * admits `true` for a symbol declared `real`. The host supplies every input
+ * with a value of its declared type; the result for any other value is
+ * undefined, and compiled code does not test it (`x + 1` gives `2` for
+ * `x = true`).
  *
  * Deliberately keyed on the TARGET and not on the compilation MODE, even
  * though a complex variable is only meaningful under `mode: 'complex'`. On the
@@ -3205,15 +3197,6 @@ export type StoredEntryPlan = {
    * of the host, which stored data cannot carry, so a runtime refuses to
    * load a plan that lists one. */
   kinds?: (string | number)[];
-  /** The bindings that refuse an array, a boolean and a string: those that
-   * the host declared with a number type, which the compiled code reads as a
-   * scalar. */
-  scalars?: (string | number)[];
-  /** The bindings that refuse any value but a string (and `undefined`, a
-   * binding the caller left out): those that the host declared `string`.
-   * They are not in `real` or `complex`. A plan stored without the field
-   * refuses nothing at such a binding. */
-  texts?: (string | number)[];
   /** The symbols declared `boolean` (`vars` plans only). `broadcast()`
    * reads an empty array for one as an empty column. */
   booleans?: (string | number)[];
@@ -3509,17 +3492,17 @@ export type CompilationResult<
   runtimeVersion?: string;
 
   /**
-   * JavaScript only. How `run()` checks and converts its inputs before the
-   * code reads them, at a constant cost per binding: a complex-declared
-   * symbol given a real is lifted to `{re, im: 0}`, a complex value bound to
-   * a real symbol is refused, a string bound to a symbol the code reads as an
-   * array is refused, an array, a boolean or a string bound to a symbol
-   * declared with a number type is refused, and a value that is not a string
-   * bound to a symbol declared `string` is refused. Each refusal is a
-   * `TypeError` that names the binding. The entries of a list are never read, and a typed
-   * array is not converted: the caller passes plain arrays. A runtime that
-   * loads the stored code applies the same plan. Absent when there is
-   * nothing to check.
+   * JavaScript only. How `run()` converts and checks its inputs before the
+   * code reads them, at a constant cost per binding: a number bound to a
+   * symbol read as complex is lifted to `{re, im: 0}`, the unsigned pole
+   * `~oo` bound to a symbol read as real is projected to `Infinity`, any
+   * other `{re, im}` value bound to a symbol read as real is refused, and a
+   * string or a typed array bound to a symbol the code reads as an array is
+   * refused. Each refusal is a `TypeError` that names the binding. The
+   * entries of a list are never read. Any other value outside the declared
+   * type of its binding gives an undefined result. A runtime that loads the
+   * stored code applies the same plan. Absent when there is nothing to
+   * convert or check.
    */
   entryPlan?: StoredEntryPlan;
 

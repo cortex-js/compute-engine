@@ -26,15 +26,6 @@ describe('CE-581 a list argument of run() type-checks', () => {
     expect(r.run!({ P: [[1, 2], [3, 4]] })).toEqual([3, 4]);
   });
 
-  test('an array at a scalar binding is refused, with a message', () => {
-    // Before, JavaScript converted the array to a string: `x + 1` with
-    // `x = [1, 2]` gave `"1,21"`.
-    const x = compile(ce.parse('x + 1'));
-    expect(() => x.run!({ x: [1, 2] })).toThrow(
-      /"x" was compiled as a real number but received an array/
-    );
-  });
-
   test('an undeclared symbol still broadcasts over an array', () => {
     // Only a symbol that the host declared with a number type refuses an
     // array: the compiled code can broadcast a call over an array bound to

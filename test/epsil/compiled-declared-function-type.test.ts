@@ -11,11 +11,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // a value there:
 //
 // - an argument that cannot be of the type fails the compilation;
-// - an argument whose static type proves the type is not tested;
-// - any other argument is tested at run time on the JavaScript target (the
-//   call answers `NaN`, the value compiled code has where the interpreter
-//   answers an error) and on the interval target (the call is `empty`);
-// - a target with no test for the type refuses the call.
+// - any other argument is not tested: compiled code assumes that the value
+//   holds the parameter type (rule R5 of
+//   `docs/plans/2026-10-31-static-shape-compilation.md`). A value outside
+//   the type gives an unspecified result: the interpreter gives an error
+//   that the static type of the call does not show.
 //
 // The declared RESULT type is not checked, as before: it is a promise of
 // the host.
@@ -104,18 +104,19 @@ describe.each([
     }
   });
 
-  test('a local with an assigned value that is not an integer is tested', () => {
+  test('a local with an assigned value that is not an integer is not tested', () => {
+    // The static type of `n` is real, which holds integers: the call
+    // compiles with no test. The interpreter gives an error for `1.5`,
+    // which the static type of the call does not show, so the compiled
+    // value is unspecified there.
     for (const source of [
       head + 'let n = 3\nn = 1.5\ng(n)',
       head + 'let n = 3\nfor k in 1..2 { n = n + 0.5 }\ng(n)',
-      head + 'let n = x\ng(n)',
-    ]) {
-      const c = compileProgram(source);
-      expect(c.code).toContain('Number.isInteger');
-    }
+    ])
+      expect(compileProgram(source).success).toBe(true);
+    expect(js(head + 'let n = x\ng(n)', { x: 2 })).toBe(3);
     // A function that the code calls and that assigns a name outside it
-    // declines, whatever its effects (the `unsettled-shape` decline of a
-    // function that writes a name of an enclosing scope).
+    // declines with the `unsettled-shape` decline.
     expect(() =>
       compileProgram(
         head + 'let n = 3\nfunction w() scope { n = 1.5 }\nw()\ng(n)'
@@ -124,113 +125,65 @@ describe.each([
       /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/
     );
     expect(interpret(head + 'let n = 3\nn = 1.5\ng(n)').errors).toBe(1);
-    expect(js(head + 'let n = 3\nn = 1.5\ng(n)')).toBeNaN();
   });
 
-  test('an input is tested at run time', () => {
+  test('a real input is not tested', () => {
     // The interpreter, given the value of the input.
     expect(interpret('let x = 1.5\n' + head + 'g(x)').errors).toBe(1);
     expect(interpret('let x = 2\n' + head + 'g(x)').value).toBe(3);
-    const c = compileProgram(head + 'g(x)');
-    expect(c.code).toContain('Number.isInteger');
-    expect(c.run({ x: 1.5 })).toBeNaN();
-    expect(c.run({ x: 2 })).toBe(3);
-    expect(interval(head + 'g(x)', { x: 1.5 })).toEqual({ kind: 'empty' });
+    expect(js(head + 'g(x)', { x: 2 })).toBe(3);
     expect(interval(head + 'g(x)', { x: 2 })).toEqual({
       kind: 'interval',
       value: { lo: 3, hi: 3 },
     });
   });
 
-  test('a list argument is tested element by element', () => {
+  test('a list of reals is not tested', () => {
     const run = interpret('let xs = [1, 1.5]\n' + head + 'g(xs)');
     expect(run.errors).toBe(1);
     expect((run.value as Value[])[1]).toBe(2);
-    expect(js(head + 'g(xs)', { xs: [1, 1.5] })).toEqual([2, NaN]);
     expect(js(head + 'g(xs)', { xs: [1, 2] })).toEqual([2, 3]);
   });
 
-  test('a real parameter of an enclosing function is tested', () => {
+  test('a real parameter of an enclosing function is not tested', () => {
     const source = head + 'function h(y: real) { g(y) }\nh(x)';
     expect(
       interpret('let x = 1.5\n' + head + 'function h(y: real) { g(y) }\nh(x)')
         .errors
     ).toBe(1);
-    expect(js(source, { x: 1.5 })).toBeNaN();
-    expect(js(source, { x: 4 })).toBe(5);
+    expect(js(source, { x: 2 })).toBe(3);
   });
 });
 
 describe('OTHER DECLARED PARAMETER TYPES', () => {
-  test('a ranged integer type is tested with its bounds', () => {
+  test('a ranged integer type is not tested', () => {
     const head = 'let g: (integer<0..>) -> integer\nfunction g(k) { k + 1 }\n';
     expect(interpret('let x = -1\n' + head + 'g(x)').errors).toBe(1);
-    expect(js(head + 'g(x)', { x: -1 })).toBeNaN();
-    expect(js(head + 'g(x)', { x: 2.5 })).toBeNaN();
-    expect(js(head + 'g(x)', { x: 4 })).toBe(5);
-    expect(interval(head + 'g(x)', { x: -1 })).toEqual({ kind: 'empty' });
-    // An interval argument is restricted to the values of the type:
-    // `[-2.5, 3.5]` holds the admitted values 0, 1, 2 and 3. The function
-    // has a value at these values only, so the result is `partial`.
-    expect(interval(head + 'g(x)', { x: { lo: -2.5, hi: 3.5 } })).toEqual({
-      kind: 'partial',
-      value: { lo: 1, hi: 4 },
-      domainClipped: 'both',
-    });
-    // An interval that the bounds hold whole is still `partial`: there is
-    // no value between two integers.
-    expect(interval(head + 'g(x)', { x: { lo: 1, hi: 3 } })).toEqual({
-      kind: 'partial',
-      value: { lo: 2, hi: 4 },
-      domainClipped: 'both',
+    expect(js(head + 'g(x)', { x: 1 })).toBe(2);
+    expect(interval(head + 'g(x)', { x: 1 })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 2 },
     });
   });
 
-  test('a bounded real type is tested with its bounds', () => {
+  test('a bounded real type is not tested', () => {
     const head = 'let g: (real<0..>) -> real\nfunction g(k) { k + 1 }\n';
     expect(interpret('let x = -0.5\n' + head + 'g(x)').errors).toBe(1);
-    expect(js(head + 'g(x)', { x: -0.5 })).toBeNaN();
     expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
-    expect(interval(head + 'g(x)', { x: -0.5 })).toEqual({ kind: 'empty' });
-    // The function has a value on `[0, 2]` only: the result is `partial`.
-    expect(interval(head + 'g(x)', { x: { lo: -1, hi: 2 } })).toEqual({
-      kind: 'partial',
-      value: { lo: 1, hi: 3 },
-      domainClipped: 'both',
-    });
-    // An interval that the bounds hold whole has a value everywhere.
-    expect(interval(head + 'g(x)', { x: { lo: 0.5, hi: 2 } })).toEqual({
+    expect(interval(head + 'g(x)', { x: 0.5 })).toEqual({
       kind: 'interval',
-      value: { lo: 1.5, hi: 3 },
+      value: { lo: 1.5, hi: 1.5 },
     });
   });
 
-  test('a clipped argument makes a constant result partial', () => {
-    // The result does not read the argument, but the function has no value
-    // on the part of the input box that the type excludes.
+  test('an annotated bounded real parameter is not tested', () => {
     const head = 'function g(x: real<0..>) { 1 }\n';
-    expect(interval(head + 'g(x)', { x: { lo: -1, hi: 1 } })).toEqual({
-      kind: 'partial',
-      value: { lo: 1, hi: 1 },
-      domainClipped: 'both',
-    });
-    expect(interval(head + 'g(x)', { x: { lo: 0.5, hi: 1 } })).toEqual({
-      kind: 'interval',
-      value: { lo: 1, hi: 1 },
-    });
-  });
-
-  test('a clipped argument makes each element of a list result partial', () => {
-    const head = 'function g(x: real<0..>) { [x, 1] }\n';
-    expect(interval(head + 'g(x)', { x: { lo: -1, hi: 1 } })).toEqual([
-      { kind: 'partial', value: { lo: 0, hi: 1 }, domainClipped: 'both' },
-      { kind: 'partial', value: { lo: 1, hi: 1 }, domainClipped: 'both' },
-    ]);
+    expect(compileProgram(head + 'g(x)', 'interval-js').success).toBe(true);
   });
 
   // `real<0<..>` is x > 0 and `real<..<3>` is x < 3: the bound itself is not
-  // a value of the type. Before 2026-10-19 the interpreter and the compiled
-  // JavaScript test admitted it (`g(0)` gave a value).
+  // a value of the type. Before 2026-10-19 the interpreter admitted it
+  // (`g(0)` gave a value).
   test.each([
     ['let g: (real<0<..>) -> real\nfunction g(k) { k + 1 }\n', 0, 0.5],
     ['function g(k: real<0<..>) { k + 1 }\n', 0, 0.5],
@@ -239,27 +192,9 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
     expect(interpret(head + `g(${bound})`).errors).toBe(1);
     expect(interpret(`let x = ${bound}\n` + head + 'g(x)').errors).toBe(1);
     expect(interpret(head + `g(${inside})`).value).toBe(inside + 1);
-    expect(js(head + 'g(x)', { x: bound })).toBeNaN();
+    // The compiled call is not tested: a value of the type gives the
+    // interpreter's value.
     expect(js(head + 'g(x)', { x: inside })).toBe(inside + 1);
-    expect(interval(head + 'g(x)', { x: bound })).toEqual({ kind: 'empty' });
-    expect(interval(head + 'g(x)', { x: inside })).toEqual({
-      kind: 'interval',
-      value: { lo: inside + 1, hi: inside + 1 },
-    });
-  });
-
-  test('an interval that reaches an excluded bound only at the bound is empty', () => {
-    const head = 'let g: (real<0<..>) -> real\nfunction g(k) { k + 1 }\n';
-    expect(interval(head + 'g(x)', { x: { lo: -1, hi: 0 } })).toEqual({
-      kind: 'empty',
-    });
-    // A wider interval keeps the bound as its endpoint: a closed interval
-    // that encloses every admitted value. The result is `partial`.
-    expect(interval(head + 'g(x)', { x: { lo: -1, hi: 2 } })).toEqual({
-      kind: 'partial',
-      value: { lo: 1, hi: 3 },
-      domainClipped: 'both',
-    });
   });
 
   test('an excluded bound is refused by the interpreter on every route', () => {
@@ -273,13 +208,10 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
     expect(ce.box(['g', 'x']).evaluate().operator).toBe('Error');
   });
 
-  test('a type with no run-time test is refused when an argument can break it', () => {
+  test('a rational parameter is not tested', () => {
     const head = 'let g: (rational) -> real\nfunction g(k) { k + 1 }\n';
-    expect(() => compileProgram(head + 'g(x)')).toThrow(
-      /Could not compile a call of `g`.*`rational`.*no run-time test/
-    );
-    expect(compileProgram(head + 'g(x)', 'interval-js').success).toBe(false);
-    // An argument whose type proves it still compiles.
+    expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
+    expect(compileProgram(head + 'g(x)', 'interval-js').success).toBe(true);
     expect(js(head + 'g(1)')).toBe(2);
   });
 

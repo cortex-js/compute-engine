@@ -7,7 +7,6 @@ import {
   isNumber,
   isSymbol,
 } from '../../src/compute-engine/boxed-expression/type-guards';
-import { createJavaScriptRuntime } from '../../src/runtime';
 import { INTERVAL_KIND } from '../../src/compute-engine/compilation/broadcast';
 import { createIntervalRuntime } from '../../src/compute-engine/compilation/interval-runtime';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -311,12 +310,6 @@ describe('CE-633 broadcast() with a boolean variable', () => {
   });
 
   test('the refusals of a wrong input are kept', () => {
-    expect(() => r.broadcast!({ x: true })).toThrow(
-      /"x" was compiled as a real number but received a boolean/
-    );
-    expect(() => r.broadcast!({ x: [true, false] })).toThrow(
-      /"x" was compiled as a real number but received a boolean/
-    );
     expect(() =>
       r.broadcast!({ x: 1, c: [true, 1] as unknown as boolean[] })
     ).toThrow(/a plain array is accepted only for a shared input/);
@@ -326,11 +319,6 @@ describe('CE-633 broadcast() with a boolean variable', () => {
     expect(() =>
       r.broadcast!({ x: new Float64Array([1, 2]), c: [true] })
     ).toThrow(/holds 1 cells, the first array 2/);
-    const z = new ComputeEngine();
-    z.declare('z', 'complex');
-    expect(() =>
-      compile(z.parse('z + 1'), { mode: 'complex' }).broadcast!({ z: true })
-    ).toThrow(/"z" was compiled as a complex number but received a boolean/);
     // A `Uint8Array` is not a boolean column on interval-js either.
     const iv = compile(ce.box(['If', 'c', 1, 2]), { to: 'interval-js' });
     expect(() =>
@@ -339,10 +327,9 @@ describe('CE-633 broadcast() with a boolean variable', () => {
   });
 });
 
-// CE-634 (user decision 2026-10-30): a value that is not a string, for a
-// variable declared `string`, throws a `TypeError` that names it. Before,
-// `If(s = "a", 1, 2)` gave `2` for `s = 3`.
-describe('CE-634 a value that is not a string for a string variable', () => {
+// CE-634: a variable declared `string` takes a string. A value that is not a
+// string gives an undefined result in `run()` and in `broadcast()`.
+describe('CE-634 a string for a string variable', () => {
   const ce = new ComputeEngine();
   ce.declare('s', 'string');
   ce.declare('c', 'boolean');
@@ -352,34 +339,6 @@ describe('CE-634 a value that is not a string for a string variable', () => {
   test('a string is accepted', () => {
     expect(r.run!({ s: 'a' })).toBe(1);
     expect(r.run!({ s: 'b' })).toBe(2);
-    expect(r.entryPlan?.texts).toEqual(['s']);
-  });
-
-  test('a number, a boolean, null or an array throws', () => {
-    expect(() => r.run!({ s: 3 })).toThrow(
-      new TypeError(
-        '"s" was compiled as a string but received 3. Pass a string.'
-      )
-    );
-    expect(() => r.run!({ s: true })).toThrow(
-      /"s" was compiled as a string but received true/
-    );
-    expect(() => r.run!({ s: null as unknown as string })).toThrow(
-      /"s" was compiled as a string but received null/
-    );
-    expect(() => r.run!({ s: [1] })).toThrow(
-      /"s" was compiled as a string but received an array/
-    );
-  });
-
-  test('a lambda parameter annotated string', () => {
-    const f = compile(
-      ce.parse('(t: string) \\mapsto \\operatorname{If}(t = "a", 1, 2)')
-    );
-    expect(f.run!('a')).toBe(1);
-    expect(() => f.run!(3)).toThrow(
-      /argument 1 was compiled as a string but received 3/
-    );
   });
 
   test('the cells of a list of strings are not read', () => {
@@ -387,13 +346,6 @@ describe('CE-634 a value that is not a string for a string variable', () => {
     // constant per binding), so a cell that is not a string is not refused.
     const l = compile(ce.box(['At', 'L', 2]));
     expect(() => l.run!({ L: ['a', 3] })).not.toThrow();
-  });
-
-  test('entryChecks: false keeps the unchecked behavior', () => {
-    const u = compile(ce.parse('\\operatorname{If}(s = "a", 1, 2)'), {
-      entryChecks: false,
-    });
-    expect(u.run!({ s: 3 })).toBe(2);
   });
 });
 
@@ -542,37 +494,11 @@ describe('interval-js broadcast() with a boolean variable', () => {
   });
 });
 
-describe('broadcast() and a variable declared string (CE-634)', () => {
-  const ce = new ComputeEngine();
-  ce.declare('s', 'string');
-  ce.declare('x', 'real');
-  const r = compile(ce.parse('\\operatorname{If}(s = "a", x, 2)'));
-  const message = /"s" was compiled as a string but received/;
-
-  test('every batch input is refused, on each route', async () => {
-    const x = new Float64Array([1, 2]);
-    expect(() => r.broadcast!({ s: 3, x })).toThrow(
-      new TypeError(
-        '"s" was compiled as a string but received 3. Pass a string.'
-      )
-    );
-    expect(() => r.broadcast!({ s: true, x })).toThrow(message);
-    expect(() => r.broadcast!({ s: [true, false], x })).toThrow(message);
-    expect(() => r.broadcast!({ s: new Float64Array([1, 2]), x })).toThrow(
-      /received an array/
-    );
-    await expect(r.broadcastAsync!({ s: 3, x })).rejects.toThrow(message);
-    const stored = createJavaScriptRuntime({}).loadBroadcast(r as never);
-    expect(() => stored({ s: 3, x })).toThrow(message);
-  });
-
-  test('a variable declared `string | missing` refuses a number too', () => {
+describe('a variable declared string (CE-634)', () => {
+  test('a variable declared `string | missing` accepts a string', () => {
     const o = new ComputeEngine();
     o.declare('t', 'string | missing');
     const f = compile(o.parse('\\operatorname{If}(t = "a", 1, 2)'));
-    expect(() => f.run!({ t: 3 })).toThrow(
-      /"t" was compiled as a string but received 3/
-    );
     expect(f.run!({ t: 'a' })).toBe(1);
   });
 });
@@ -670,25 +596,6 @@ describe('a variable declared `boolean | missing`', () => {
     const i = compile(expr, { to: 'interval-js' });
     expect(i.booleanInputs).toEqual(['c']);
     expect(i.broadcast!({ x: new Float64Array(0), c: [] }).length).toBe(0);
-  });
-});
-
-describe('an index axis for a variable declared string', () => {
-  test('the refusal shows the axis length', () => {
-    const ce = new ComputeEngine();
-    ce.declare('s', 'string');
-    ce.declare('x', 'real');
-    const r = compile(ce.parse('\\operatorname{If}(s = "a", x, 2)'));
-    expect(() =>
-      r.broadcast!(
-        { x: new Float64Array([1, 2]), s: 4 },
-        { layout: 'grid', indexes: ['s'] }
-      )
-    ).toThrow(
-      new TypeError(
-        '"s" was compiled as a string but received 4. Pass a string.'
-      )
-    );
   });
 });
 

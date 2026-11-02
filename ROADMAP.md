@@ -155,46 +155,6 @@ because a composition applies its steps one after another. A sound fix types the
 when that value is a function literal (the result of `mk(1)` is
 `x ↦ x + 1`), and keeps the old type otherwise.
 
-### CE-707. A list value is accepted for a scalar declared result when no argument is a list
-
-**Status:** decision needed; defect. GitHub issue #488.
-**Witness:** corpus; GitHub #488; list value for scalar declared result.
-
-```
-ce.declare('h', '(number) -> number');  h := t ↦ [t, t]
-h(3)                         → [3,3], typed number
-(t ↦ Typed([t, t], number))(5)  → [5,5], typed number
-```
-
-The type of each call does not hold its value. `conformsUnderBroadcast()`
-(`src/compute-engine/library/core.ts`) accepts a list whose elements conform
-to a scalar ascribed type. That allowance is for a function computed once per
-element of a list argument (`(point | list<point>) -> number` applied to a
-list of points gives a list of numbers, and compiled code returns the same).
-Here no argument is a list. The 2026-08-12 ruling on a declaration that its
-body contradicts (Tycho item 171) says the compiler declines when it can prove
-the contradiction, and two tests of
-`test/compute-engine/list-valued-summand-compile.test.ts` require that the
-interpreter returns the list (`a: (number) -> number`, `a := t ↦ [cos t, sin
-t]`, `a(0.3)` gives `[cos 0.3, sin 0.3]`), and that a bare compiled `a(u)`
-returns the list too.
-
-Options:
-
-- (a) The interpreter refuses such a value with `incompatible-type`, and the
-  compiler declines a bare `a(u)` so that both agree. The two interpreter
-  tests and about 20 compile tests of the 2026-08-12 ruling change. The value
-  check must then know whether the call received a collection argument (for
-  example, a flag on the call frame that the `Typed` handler reads).
-- (b) Keep the value (the list), and type the call from the body when the
-  body can contradict a scalar declared result, so the type holds the value.
-  The declared result then no longer sets the type of such a call.
-- (c) Keep everything, and document that the type of such a call does not
-  hold its value.
-
-If nothing is decided, the calls above keep a type that does not hold their
-value.
-
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
 **Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row 468.
@@ -2375,11 +2335,6 @@ corpus audit and a report of the declines per target and the `code` changes):
   `unknown` signature of a Tycho document function, not its
   `broadcastable<number | tuple>` body binding. Closes CE-222, CE-706 (option
   (c)), CE-463.
-- **CE-712.4** Declared types: reduce the CE-662 check to its decline (no
-  run-time class); CE-673 and CE-681 decline-only; CE-707 option (a) (the
-  declared result binds the body; the interpreter refuses with
-  `incompatible-type`); CE-276 closes (no check-emission table); CE-676 keeps
-  only its out-of-range question.
 - **CE-712.5** Documents: `docs/COMPILATION-MODEL.md` ("Fail closed"; the
   `Array.isArray` guard paragraph; the callback wrapper paragraph; the
   collections entry check), `docs/ERROR-MODEL.md` ("An unsupplied variable"),
@@ -2394,28 +2349,6 @@ refused input names in its warning (about a day), declare its deferred-gate
 symbols (one line), call `hasUnresolvedInput` before a run, and optionally
 narrow the point-or-point-list union in the plot sampler route (one to two days)
 to avoid the entry dispatch.
-
-### CE-662. Compiled code adds no run-time check of a value against a declared type; remove the checks that exist
-
-**Status:** ready; task, M. Approved 2026-11-01.
-**Witness:** plausible; `Block(Declare(p, "integer"), Assign(p, 0.5), p)` compiled.
-for `javascript` gives 0.5 where the interpreter gives `incompatible-type`;
-the caveats allow that difference.
-
-The host respects what the program declares or implies about a value (user
-decision 2026-10-30, restated 2026-11-01). When it does not, the compiled
-result is undefined: it may differ from the interpreter, give a wrong value,
-throw or hang (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). So
-the compiler adds no run-time test of a value against a declared or inferred
-type: not at an `Assign` to a declared local, not at a parameter, not at an
-input. The first version of such a check was taken out of the main tree on
-2026-10-30 and stays out. The work that remains is the reverse: find each run-time type test
-that compiled code still emits on `javascript` and `python` (an
-`incompatible-type` throw or raise, a test of a value whose static type is
-already settled), and remove each one whose only purpose is to validate a
-value against its type. A test that selects a shape at a declared union of
-shapes (the dispatch of the static-shape rule) is not validation and stays.
-Report each removed test with the emitted code before and after.
 
 ### CE-646. Compiled `Contains`/`Unique` over lists of lists decline in any program that holds a lazy collection
 

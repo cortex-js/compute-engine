@@ -172,14 +172,16 @@ export function complexWrapCode(
  * copies (`trySpecializedUserCall`), which differ only in where they read
  * the callee's signature from, never in how the call is spelled.
  *
- * `coerceToComplex[i]` marks an argument to wrap in the `{ re, im }`
- * convention; `paramsAreScalar` says no parameter binds a collection whole.
+ * `coerceToComplex[i]` is `true` for an argument to wrap in the `{ re, im }`
+ * convention, and `'real'` for an argument whose real projection the
+ * callee receives (`realProjection()`); `paramsAreScalar` says no
+ * parameter binds a collection whole.
  */
 export function emitUserFunctionCall(
   name: string,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  coerceToComplex: ReadonlyArray<boolean>,
+  coerceToComplex: ReadonlyArray<boolean | 'real'>,
   paramsAreScalar: boolean,
   /**
    * Compiled arguments appended after `args` in EVERY call form, and
@@ -248,7 +250,11 @@ export function emitUserFunctionCall(
   // three forms the argument's static shape already settles
   // (`complexWrapCode`). In a map, the wrap applies to the element.
   const coerce = (code: string, i: number) =>
-    coerceToComplex[i] ? complexWrapCode(code, args[i], target) : code;
+    coerceToComplex[i] === 'real'
+      ? `_SYS.creal(${code})`
+      : coerceToComplex[i]
+        ? complexWrapCode(code, args[i], target)
+        : code;
 
   if (!ranks.some((r) => r! > 0))
     return `${name}(${[...compiledArgs.map(coerce), ...held].join(', ')})`;
@@ -320,7 +326,7 @@ function openRankCall(
   name: string,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  coerceToComplex: ReadonlyArray<boolean>,
+  coerceToComplex: ReadonlyArray<boolean | 'real'>,
   held: ReadonlyArray<string>
 ): TargetSource | undefined {
   const helper =

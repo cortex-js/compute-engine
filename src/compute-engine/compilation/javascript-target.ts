@@ -3733,13 +3733,11 @@ function compileJSPointList(
       continue;
     }
     if (absentableSource) {
+      // A present value is a list by the static type: only the absent value
+      // is tested.
       const name = BaseCompiler.tempVar(target);
       bindings.push(`const ${name} = ${compile(a)};`);
       bindings.push(`if (${name} === undefined) return undefined;`);
-      bindings.push(
-        `if (!Array.isArray(${name})) throw new RangeError('PointList: ` +
-          `source component ${i + 1} is not an array at run time');`
-      );
       widths.push(undefined);
       sources.push(name);
       parts.push(`${name}[${idx}]`);
@@ -3754,13 +3752,8 @@ function compileJSPointList(
       const name = BaseCompiler.tempVar(target);
       bindings.push(`const ${name} = ${compile(a)};`);
       const width = provenPointWidth(a, target);
-      // Constructed arrays need no type check. Runtime sources still fail
-      // loudly rather than letting a string or array-like object zip as data.
-      if (width === undefined)
-        bindings.push(
-          `if (!Array.isArray(${name})) throw new RangeError('PointList: ` +
-            `source component ${i + 1} is not an array at run time');`
-        );
+      // A source is an array by its static type (an indexed collection that
+      // is not a string or a tuple), and is not tested.
       widths.push(width);
       sources.push(name);
       parts.push(`${name}[${idx}]`);
@@ -6646,9 +6639,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`incompatible-type`, or `unexpected-argument` for `NaN`), and
     // `Math.round` of such a value gave `[]` or a rounded count: the emitted
     // code throws instead. An integer count needs no check.
+    // `Number.isInteger` is false for a value that is not a number, so the
+    // check needs no test of the type of the value.
     const check = isSubtype(args[1]!.type.type, 'integer')
       ? ''
-      : `if (typeof _n !== 'number' || !Number.isInteger(_n)) throw new TypeError('Repeat: the count is not an integer at run time'); `;
+      : `if (!Number.isInteger(_n)) throw new TypeError('Repeat: the count is not an integer at run time'); `;
     return `((_v, _n) => { ${check}_n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compileRealOperand(args[1]!, compile)})`;
   },
   // Add one or more elements at the end. `Append` is variadic
@@ -6716,10 +6711,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // validated, so it cannot reach here; fail closed anyway rather than
     // reading `_r[0]` off an arbitrary array as a bound.
     //
-    // The static type does NOT vouch for the VALUE a `range` symbol receives
-    // at run time (`run({ r: [5, 2] })` hands the compiled function an
-    // arbitrary array), so the emitted code re-checks the span invariant —
-    // every position holds `first + k`, `first ≥ 1` — exactly as the
+    // A stepped or a descending range (`[2, 4]`, `[5, 2]`) is a value of
+    // the type `range`, but not an index span, so the emitted code checks
+    // the span invariant — every position holds `first + k`, `first ≥ 1`
+    // — exactly as the
     // interpreter's `spanBounds` (`library/collections.ts`) does, and fails
     // LOUDLY on a violation (the `PointList` precedent above: a `RangeError`
     // at run time) rather than silently slicing a stepped `[2, 4]` as `2..4`
@@ -6734,7 +6729,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         );
       return joinIfString(
         args[0],
-        `((_l, _r) => { if (!Array.isArray(_r) || _r.length === 0 || !Number.isInteger(_r[0]) || _r[0] < 1) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); for (let _k = 1; _k < _r.length; _k++) if (_r[_k] !== _r[0] + _k) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); return _l.slice(_r[0] - 1, _r[_r.length - 1]); })(${coll}, ${compile(args[1])})`
+        `((_l, _r) => { if (_r.length === 0 || !Number.isInteger(_r[0]) || _r[0] < 1) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); for (let _k = 1; _k < _r.length; _k++) if (_r[_k] !== _r[0] + _k) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); return _l.slice(_r[0] - 1, _r[_r.length - 1]); })(${coll}, ${compile(args[1])})`
       );
     }
     if (args[1] == null || args[2] == null)
@@ -7363,16 +7358,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         );
     }
     const literal = args[0];
-    // An argument that an annotation of the literal does not prove is
-    // tested at run time.
+    // An argument that can be outside a type that an annotation of the
+    // literal declares (`localParameterChecks`) declines: compiled code
+    // tests no argument against its parameter type.
     if (isFunction(literal, 'Function')) {
-      const checked = BaseCompiler.appliedLiteralCheckedCall(
+      BaseCompiler.localParameterChecks(
+        '(function)',
         literal,
-        () => compile(literal),
         args.slice(1),
         target
       );
-      if (checked !== undefined) return checked;
       // One point named through an alias, a union with `missing` or a
       // nominal type, at a parameter with no declared type: the literal
       // typed by the point (`appliedLiteralNamedPointCall()`).
@@ -11912,8 +11907,6 @@ function lambdaEntryPlan(
   const lists: number[] = [];
   const strings = new Map<number, string>();
   const kinds = new Map<number, KindEntry>();
-  const scalars: number[] = [];
-  const texts: number[] = [];
   const bigints: number[] = [];
   const bigintLists: number[] = [];
   const bigintDefaults: number[] = [];
@@ -11958,12 +11951,9 @@ function lambdaEntryPlan(
       lists.push(i);
       return;
     }
-    // A parameter annotated `string` refuses any other value
-    // (`throwNonStringAtText`), and no number rule applies to it.
-    if (t !== undefined && isTextEntryType(t)) {
-      texts.push(i);
-      return;
-    }
+    // A parameter annotated `string` is read as text, and no number rule
+    // applies to it.
+    if (t !== undefined && isTextEntryType(t)) return;
     if (t !== undefined && isKeyedEntryType(t)) return;
     // Under the complex discipline an unannotated (wide) parameter is
     // complex-shaped too — a number is lifted at entry, an object accepted.
@@ -11973,10 +11963,6 @@ function lambdaEntryPlan(
           (mode === 'complex' && BaseCompiler.wideNumericType(t))
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
-    // An annotation with a number type makes the parameter a scalar: an
-    // array, a boolean or a string for it is refused at entry
-    // (`refuseNonNumberAtScalar`).
-    if (t !== undefined && isSubtype(t, 'number')) scalars.push(i);
   });
   return {
     kind: 'args',
@@ -11985,8 +11971,6 @@ function lambdaEntryPlan(
     lists,
     strings,
     ...(kinds.size > 0 ? { kinds } : {}),
-    ...(scalars.length > 0 ? { scalars } : {}),
-    ...(texts.length > 0 ? { texts } : {}),
     ...(bigints.length > 0 ? { bigints } : {}),
     ...(bigintLists.length > 0 ? { bigintLists } : {}),
     ...(bigintDefaults.length > 0 ? { bigintDefaults } : {}),
@@ -12015,8 +11999,6 @@ function varsEntryPlan(
   const lists: string[] = [];
   const strings = new Map<string, string>();
   const kinds = new Map<string, KindEntry>();
-  const scalars: string[] = [];
-  const texts: string[] = [];
   const booleans: string[] = [];
   const bigints: string[] = [];
   const bigintLists: string[] = [];
@@ -12064,17 +12046,15 @@ function varsEntryPlan(
       lists.push(id);
       continue;
     }
-    // A symbol that the host declared `string` refuses any other value
-    // (`throwNonStringAtText`), and no number rule applies to it. A type
-    // the engine inferred is not a declaration, as for `scalars` below.
+    // A symbol that the host declared `string` is read as text, and no
+    // number rule applies to it. A type the engine inferred is not a
+    // declaration.
     if (
       declared !== undefined &&
       sym.valueDefinition?.inferredType !== true &&
       isTextEntryType(declared)
-    ) {
-      texts.push(id);
+    )
       continue;
-    }
     if (declared !== undefined && isKeyedEntryType(declared)) continue;
     // Built OUTSIDE the compilation (the mode latch has been restored), so
     // the complex discipline's wide rule is applied here explicitly.
@@ -12084,17 +12064,6 @@ function varsEntryPlan(
     (isComplex ? complex : real).push(id);
     if (declared !== undefined && isBooleanEntryType(declared))
       booleans.push(id);
-    // A symbol that the host declared with a number type is a scalar: an
-    // array, a boolean or a string for it is refused at entry
-    // (`refuseNonNumberAtScalar`). A type the engine inferred is not a
-    // declaration: the compiled code can broadcast over an array bound to
-    // such a symbol at run time.
-    if (
-      declared !== undefined &&
-      sym.valueDefinition?.inferredType !== true &&
-      isSubtype(declared, 'number')
-    )
-      scalars.push(id);
   }
   return {
     kind: 'vars',
@@ -12103,8 +12072,6 @@ function varsEntryPlan(
     lists,
     strings,
     ...(kinds.size > 0 ? { kinds } : {}),
-    ...(scalars.length > 0 ? { scalars } : {}),
-    ...(texts.length > 0 ? { texts } : {}),
     ...(booleans.length > 0 ? { booleans } : {}),
     ...(bigints.length > 0 ? { bigints } : {}),
     ...(bigintLists.length > 0 ? { bigintLists } : {}),
@@ -16579,20 +16546,25 @@ function emitRangeGatherReduction(
     piece.kind === 'range' ? [piece.lo, piece.hi] : piece.indices
   );
 
-  // The run-time facts the loop rests on, tested once. A non-array source
-  // has no elements to read (`_SYS.at`'s own rule), and a bound or a listed
-  // index that is not an integer at run time — which the declared type does
-  // not guarantee, since a caller's `vars` object is not type-checked — is a
-  // gather the interpreter refuses outright, so both answer NaN for the whole
-  // reduction rather than per element. The integer test also rejects `±∞` and
-  // NaN, so every counted loop below terminates.
+  // The run-time facts the loop rests on, tested once. A source that may be
+  // absent (a `missing` arm, or the `NaN` of a broadcast whose operand
+  // lengths differ) has no elements to read (`_SYS.at`'s own rule); any
+  // other source is an array by its static type and is not tested. A bound
+  // or a listed index that is not an integer at run time (a fraction, `±∞`
+  // or `NaN`, which an integer-valued expression can still give) is a
+  // gather the interpreter refuses outright, so both answer NaN for the
+  // whole reduction rather than per element. The integer test also rejects
+  // `±∞` and NaN, so every counted loop below terminates.
   // Two occurrences of one bound expression get a temporary each (a bound
   // is compiled once per occurrence, which is what the common-subexpression
   // accounting expects), but the integer test is a pure re-test of the same
   // value, so it runs once per distinct expression text.
   const seen = new Set<string>();
+  const mayBeAbsent =
+    typeContainsMissing(jsType(source.base)) ||
+    mayAnswerAbsenceAtRunTime(source.base);
   const guard = [
-    `!Array.isArray(${arr})`,
+    ...(mayBeAbsent ? [`!Array.isArray(${arr})`] : []),
     ...bounds
       .filter((b) => !seen.has(b.code) && seen.add(b.code))
       .map((b) => `!Number.isInteger(${b.name})`),
@@ -17004,22 +16976,10 @@ function emitCollectionReduce(
           for (let k = 0; k < width; k++) parts.push(`${read}[${k}]`);
           return `(${parts.join(` ${op} `)})`;
         };
-        // Constructors, helper bodies, and arithmetic can prove the emitted
-        // width. Declared runtime inputs still need the fallback below.
-        if (provenPointWidth(coll, target) === width)
-          return BaseCompiler.withRepeatableSource(code, target, terms);
-        // Every other source takes the width from its DECLARED type, which
-        // constrains what the ENGINE may assign, not what a caller may put in
-        // the kernel's `vars` object: a `list<real^3>` input can arrive
-        // absent, shorter, longer, or as a plain number. Test the shape once
-        // and hand every other shape to the `reduce` fold, which answers it
-        // the way the same reduction over a width-less `list<real>` does.
-        const source = BaseCompiler.tempVar(target);
-        return (
-          `((${source}) => Array.isArray(${source}) && ` +
-          `${source}.length === ${width} ? ${terms(source)} : ` +
-          `${reduce(source)})(${code})`
-        );
+        // The width comes from the static type, which every value holds,
+        // a host input included: compiled code tests no shape of a value
+        // whose static shape is settled.
+        return BaseCompiler.withRepeatableSource(code, target, terms);
       }
       return reduce(code);
     }

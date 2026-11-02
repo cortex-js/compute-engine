@@ -27,11 +27,7 @@ import {
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
-import {
-  cannotHoldAList as typeCannotHoldAList,
-  couldMatch,
-  isSubtype,
-} from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   typeToIdentityKey,
   typeToString,
@@ -109,6 +105,10 @@ import { foldValueImpure, parametersCanBeTyped } from './compile-folding.js';
 import { tempVar } from './compiler-naming.js';
 import { isEmissionSkippable } from './compile-cse.js';
 import { jsComplexObjectTest } from './compiler-type-facts.js';
+import {
+  isProvablyCollectionValuedBody,
+  isProvablyCollectionValuedClauseSet,
+} from './compile-conditions.js';
 import {
   bindsOnePointAsUndeclared,
   isScalarShaped,
@@ -225,51 +225,6 @@ export function laneRequestParamType(
 }
 
 /**
- * The declared type of parameter `i` of the user function `h` that a
- * compiled call or a function value must test at run time, or `undefined`
- * when there is nothing to test: no declared type; `number`, which every
- * number a compiled value holds satisfies (a plain number or a `{re, im}`
- * object); a complex type, whose argument is coerced instead
- * (`coerceToComplex`); or a type with no faithful JavaScript test
- * (`jsClauseParamGuard`). Only on the JavaScript target, for a function
- * with a single literal: a multi-clause function guards each clause in
- * its dispatcher.
- */
-export function checkedParameterType(
-  engine: ComputeEngine,
-  h: string,
-  i: number,
-  target: CompileTarget<Expression>
-): Type | undefined {
-  if (target.language !== 'javascript') return undefined;
-  if (userFunctionLiteral(engine, h) === undefined) return undefined;
-  let declared = userFunctionParamType(engine, h, i);
-  if (declared === undefined) return undefined;
-  // A parameter declared `broadcastable<T>` whose `T` cannot hold a list
-  // maps to the cells (ROADMAP CE-405): each cell reaches the body, so it
-  // is checked against `T`, as the interpreter checks it.
-  if (
-    typeof declared === 'object' &&
-    declared.kind === 'broadcastable' &&
-    typeCannotHoldAList(declared.elements)
-  )
-    declared = declared.elements;
-  if (declared === 'number' || isNonRealNumber(declared)) return undefined;
-  // The shape test of a `list` or `tuple` parameter applies to a DECLARED
-  // signature only. A signature inferred from the body is not a contract:
-  // `h := v ↦ v[1] + 1` is inferred `(tuple<number>) -> number`, and the
-  // interpreter applies it to the list `[1, 2, 3]` (the answer is 2), while
-  // the same parameter declared `tuple<number>` refuses that list.
-  if (
-    jsClauseParamGuard(declared, '_$v') === undefined &&
-    userFunctionSignatureIsInferred(engine, h)
-  )
-    return undefined;
-  const test = jsParameterGuard(declared, '_$v');
-  return test === null || test === undefined ? undefined : declared;
-}
-
-/**
  * Whether the signature of the user function `h` was inferred from its
  * value, not declared: `inferredSignature` of an operator definition (a
  * function assigned with no declaration), or `inferredType` of a value
@@ -283,135 +238,6 @@ export function userFunctionSignatureIsInferred(
   if (def === undefined) return false;
   if ('operator' in def) return def.operator.inferredSignature === true;
   return 'value' in def && def.value.inferredType === true;
-}
-
-/**
- * The name of the CHECKING SHIM of the user function `h` emitted as
- * `name`, emitted once next to it, or `undefined` when no parameter needs
- * a test (`checkedParameterType`). The shim tests each such parameter and
- * calls the function when every test passes:
- *
- *     const _fn_h$t = (_$0) =>
- *       Number.isInteger(_SYS.creal(_$0)) ? _fn_h(_$0) : NaN;
- *
- * `NaN` is the value compiled code has for an element the interpreter
- * answers with an error (the convention of the lowered `Map`,
- * `library/map-lowering.ts`). The test reads the REAL PROJECTION of the
- * argument (`_SYS.creal`), and the function receives that projection: a
- * value the complex lane carries is a `{re, im}` object, with `im: 0`
- * when it is real (`h(√y)` at `y = 4` hands the shim `{re: 2, im: 0}`),
- * and the body of a function whose parameter is declared `real` or
- * `integer` is compiled for a plain number (`2 * x` over the object is
- * `NaN`, `x + 1` is a string), so the projected `2` is what it must
- * receive, and `h(√y)` answers `4` as the interpreter does. A genuinely
- * complex value projects to itself, so it fails a `real` or `integer`
- * test as the interpreter's check does. A parameter with no test receives
- * its argument as it was handed in.
- *
- * Shared by the call route (`tryCompileUserFunction`, which emits a
- * checked call through the shim in every form the call takes) and the
- * value route (`ensureUserFunctionValueRef`, whose static map over list
- * elements wraps the shim, so an element of a collection is checked after
- * the descent to it).
- */
-export function checkingShimName(
-  engine: ComputeEngine,
-  h: string,
-  name: string,
-  target: CompileTarget<Expression>
-): string | undefined {
-  const registry = target.userFunctions;
-  if (!registry || target.language !== 'javascript') return undefined;
-  const literal = userFunctionLiteral(engine, h);
-  if (literal === undefined) return undefined;
-  const { params, passed, tests } = checkingShimTests(
-    engine,
-    h,
-    literal.ops.length - 1,
-    target
-  );
-  if (tests.length === 0) return undefined;
-  const shim = `${name}$t`;
-  const marker = failedCheckMarker(
-    userFunctionSignature(engine, h),
-    literal.type.type
-  );
-  if (!registry.defs.has(shim))
-    registry.defs.set(
-      shim,
-      `const ${shim} = (${params.join(', ')}) => ` +
-        `(${tests.join(' && ')}) ? ${name}(${passed.join(', ')}) : ${marker};`
-    );
-  return shim;
-}
-
-/**
- * The value that a checking shim (`checkingShimName`,
- * `localCheckingCallee`) gives when an argument fails the test of its
- * declared parameter type, where the interpreter answers an
- * `incompatible-type` error: the absence marker of the declared result
- * type of the function, chosen as `absentCollectionOperandGuard` chooses
- * it, after the `missing` arm of the result is removed (a result typed
- * `list<real> | missing` is a collection). `undefined`, the value
- * compiled code has for an absent collection or an absent boolean, when
- * the result is a collection (`list`, `list<real>`, …) or a boolean, and
- * `NaN`, the numeric marker, when the result is a number.
- *
- * A declared result that does not decide it (`unknown`, `any`, a union of
- * a collection and a number such as `list | number`, no declared
- * signature) is decided by the result type of the literal itself,
- * `literal`. That is the type a call of the function carries: the type
- * of the call is narrowed to the type of the body, so with
- * `f: (real) -> list | number` and `f := x ↦ [x, 1]`, `f(w)` is typed
- * `vector<2>`, and a `Join` reads it as a collection. The marker must be
- * the one that consumer tests (`absentCollectionOperandGuard`), or the
- * consumer spreads a `NaN`. When neither type decides it, the marker is
- * `NaN`.
- */
-export function failedCheckMarker(
-  signature: Type | undefined,
-  literal?: Type
-): 'undefined' | 'NaN' {
-  const markerOf = (t: Type | undefined): 'undefined' | 'NaN' | undefined => {
-    const declared = functionResult(t);
-    if (declared === undefined) return undefined;
-    const result = stripMissingFromType(declared);
-    if (result === 'unknown' || result === 'any' || result === 'never')
-      return undefined;
-    if (isSubtype(result, 'collection') || isSubtype(result, 'boolean'))
-      return 'undefined';
-    if (isSubtype(result, 'number')) return 'NaN';
-    return undefined;
-  };
-  return markerOf(signature) ?? markerOf(literal) ?? 'NaN';
-}
-
-/**
- * The parameter tests of the checking shim of `h` (`checkingShimName`):
- * the shim's parameter names (`_$0`, `_$1`, …), the value it passes for
- * each one (the real projection `_SYS.creal(_$i)` of a tested parameter,
- * the parameter itself otherwise), and one JavaScript test for each tested
- * parameter. `tests` is empty when no parameter needs a test.
- */
-export function checkingShimTests(
-  engine: ComputeEngine,
-  h: string,
-  nParams: number,
-  target: CompileTarget<Expression>
-): { params: string[]; passed: string[]; tests: string[] } {
-  const params = Array.from({ length: nParams }, (_, i) => `_$${i}`);
-  const passed = [...params];
-  const tests: string[] = [];
-  for (let i = 0; i < nParams; i++) {
-    const pt = checkedParameterType(engine, h, i, target);
-    if (pt === undefined) continue;
-    const projected = `_SYS.creal(${params[i]})`;
-    const test = jsParameterGuard(pt, projected);
-    if (test === null || test === undefined) continue;
-    tests.push(test);
-    passed[i] = projected;
-  }
-  return { params, passed, tests };
 }
 
 /**
@@ -1650,6 +1476,34 @@ function valueDefaultsRef(
   return wrapperName;
 }
 
+/**
+ * The declared result of the user function `h` when it is a scalar (a
+ * number or a boolean) that the body contradicts by constructing a
+ * collection (`isProvablyCollectionValuedBody`), or `undefined`. The
+ * interpreter refuses with an `incompatible-type` error each application
+ * of such a function that receives no collection argument (option (a) of
+ * CE-707). The test reads the signature and the body, and builds no call:
+ * the construction of a call can narrow the type of a free symbol among
+ * its arguments.
+ */
+export function contradictedScalarResult(
+  engine: ComputeEngine,
+  h: string
+): Type | undefined {
+  const result = functionResult(userFunctionSignature(engine, h));
+  if (result === undefined) return undefined;
+  if (!isSubtype(result, 'number') && !isSubtype(result, 'boolean'))
+    return undefined;
+  const literal = userFunctionLiteral(engine, h);
+  const body = literal?.ops[0];
+  const contradicted =
+    literal === undefined
+      ? isProvablyCollectionValuedClauseSet(engine, h, new Set([h]))
+      : body !== undefined &&
+        isProvablyCollectionValuedBody(body, new Set([h]));
+  return contradicted ? result : undefined;
+}
+
 /** `userFunctionValueRef` without the wrapper that fills the parameters
  * with a default value. `passed` is what the consumer of the value passes
  * to it (`callbackArguments`), `undefined` for a value with no consumer.
@@ -1670,6 +1524,53 @@ function userFunctionValueRefWithoutDefaults(
   // (`expressionParameterVariantRef`).
   const variant = expressionParameterVariantRef(engine, h, target, passed);
   if (variant !== undefined) return variant;
+  // A function declared with a scalar result whose body constructs a
+  // collection declines as a value, as its call does
+  // (`tryCompileUserFunction`): the consumer applies the value to scalar
+  // elements, and the interpreter refuses each such application with an
+  // `incompatible-type` error (option (a) of CE-707). With `h` declared
+  // `(number) -> number` and the body `[t, t]`, `Map(h, [1, 2])` gives an
+  // error for each element. A target with its own definition lowering (the
+  // shader targets) declines when it emits the definition.
+  // A consumer applies a function value with scalar parameters to scalars
+  // only.
+  if (
+    !target.userFunctions?.lowering &&
+    userFunctionParamsAreScalar(engine, h) &&
+    contradictedScalarResult(engine, h) !== undefined
+  )
+    throw new Error(
+      `Could not compile the function value \`${h}\`: the declaration of ` +
+        `'${h}' says it returns a scalar, but its body constructs a ` +
+        `collection. The interpreter gives an \`incompatible-type\` error ` +
+        `for each application. Fix the declaration (e.g. ` +
+        `'-> list<number>') or evaluate instead.`
+    );
+  // A value of the complex lane at a parameter declared real: the lane
+  // carries the value as a `{re, im}` object, also when it is real
+  // (`√y` at `y = 4` is `{re: 2, im: 0}`), and the body is compiled for a
+  // plain number. A call passes the real projection of such an argument
+  // (`realProjection()` in `compile-user-functions.ts`); a function value
+  // receives the element as the consumer holds it, so it declines.
+  if (target.language === 'javascript' && passed?.sources !== undefined) {
+    const at = passed.sources.findIndex((source, i) => {
+      if (source === undefined) return false;
+      const pt = userFunctionParamType(engine, h, i);
+      if (pt === undefined) return false;
+      const cell =
+        typeof pt === 'object' && pt.kind === 'broadcastable'
+          ? pt.elements
+          : pt;
+      return isSubtype(cell, 'real') && core.isComplexValued(source);
+    });
+    if (at >= 0)
+      throw new Error(
+        `Could not compile the function value \`${h}\`: its consumer ` +
+          `passes it values of the complex lane at parameter ${at + 1}, ` +
+          `which is declared real, and the function value does not take ` +
+          `their real part.`
+      );
+  }
   const name = core.ensureUserFunctionEmitted(engine, h, target, decline);
   if (name === undefined) return undefined;
   if (target.language !== 'javascript') {
@@ -1747,13 +1648,6 @@ function userFunctionValueRefWithoutDefaults(
         )};`
       );
   }
-
-  // A parameter with a DECLARED type takes the checking shim
-  // (`checkingShimName`): the consumer of a value reference hands the body
-  // a raw element, which the interpreter would have checked against the
-  // annotation. The static map below wraps the shim, so an element of a
-  // collection argument is checked after the descent to it.
-  callee = checkingShimName(engine, h, callee, target) ?? callee;
 
   // A parameterless function has no argument that could be a collection.
   if (nParams === 0) return callee;
@@ -3558,8 +3452,7 @@ export function declaredParamType(p: Expression): Type | undefined {
  * `NaN` at a numeric parameter: no clause is the correct one for it (user
  * decision 2026-10-17, which amends the ruling "A user function accepts
  * `NaN` at a numeric parameter — RULED 2026-09-30" in
- * `docs/ERROR-MODEL.md`). The parameter check of a function with ONE
- * clause accepts `NaN` (`jsParameterGuard`). The `+oo | -oo`, `infinity`
+ * `docs/ERROR-MODEL.md`). The `+oo | -oo`, `infinity`
  * and `nan` primitives, and the NON-FINITE numeric value types `NaN`,
  * `oo` and `-oo`, have no faithful JS test and therefore decline; see the
  * comment on those cases below.
@@ -3568,75 +3461,6 @@ export function declaredParamType(p: Expression): Type | undefined {
  * `number`): those two guards accept either shape, so a complex-valued
  * clause set dispatches as the interpreter does.
  */
-/**
- * The JavaScript test of a call argument `a` against the declared type `t`
- * of a parameter: the test of `jsClauseParamGuard`, or, for a type it has
- * no test for, the SHAPE test of `jsCollectionShapeGuard`. `null` when no
- * test is needed, `undefined` when the type has no test.
- *
- * The shape test is used for parameter checks only, not for the dispatch
- * of a multi-clause function: there a test that does not tell a tuple
- * from a list would select a clause that the interpreter does not select.
- *
- * At a parameter whose type is numeric (a subtype of `number`: `real`,
- * `integer`, `real<0..>`, …) the test also accepts `NaN`. A user function
- * with one clause accepts `NaN` at every parameter typed with a numeric
- * type, and its body runs with `NaN`: `f := x ↦ 7` declared
- * `(real) -> number` gives `f(NaN) = 7`. `NaN` is what a numeric
- * computation gives when it has no value, so `f(n: integer)` must not
- * refuse an argument that `f(n: number)` accepts. `Indeterminate` is
- * accepted in the same way, and compiled code holds it as `NaN` too. A
- * number that is not `NaN` is still tested (`1.5` at `integer` is
- * refused). The ruling is "A user function accepts `NaN` at a numeric
- * parameter — RULED 2026-09-30" in `docs/ERROR-MODEL.md`, and the
- * interpreter applies it in `acceptNaNAtNumericParams`
- * (`function-utils.ts`) and `declaredScalarConformance`
- * (`boxed-expression/boxed-function.ts`). The dispatch of a multi-clause
- * function keeps refusing `NaN` (`jsClauseParamGuard`).
- */
-export function jsParameterGuard(
-  t: Type,
-  a: string
-): string | null | undefined {
-  const test = jsClauseParamGuard(t, a);
-  if (typeof test === 'string' && isSubtype(t, 'number'))
-    return `(Number.isNaN(${a}) || ${test})`;
-  return test !== undefined ? test : jsCollectionShapeGuard(t, a);
-}
-
-/**
- * The JavaScript test that the argument `a` has the shape of the
- * collection type `t`, for a parameter check (`jsParameterGuard`): an
- * array (or a typed array) for a `list` with no dimensions, an array of
- * the right length for a `tuple` and for a `list` with one known
- * dimension. `undefined` for any other type.
- *
- * The interpreter checks an argument against such a parameter at each
- * application, and gives an `incompatible-type` error for a number at a
- * `list<number>` parameter or for a tuple of three numbers at a
- * `tuple<number, number>` parameter. It does not check the elements
- * (`[1.5, 2]` at a `list<integer>` parameter is accepted, measured
- * 2026-10-24), so the test does not read them. A JavaScript array stands
- * for a list and for a tuple alike, so the test cannot refuse a tuple at
- * a list parameter. CE-226.2.
- */
-export function jsCollectionShapeGuard(t: Type, a: string): string | undefined {
-  const r = resolveTypeAlias(t);
-  if (typeof r !== 'object') return undefined;
-  if (r.kind === 'tuple')
-    return `(Array.isArray(${a}) && ${a}.length === ${r.elements.length})`;
-  if (r.kind !== 'list') return undefined;
-  const dims = r.dimensions;
-  if (dims === undefined)
-    return `(Array.isArray(${a}) || ArrayBuffer.isView(${a}))`;
-  if (Array.isArray(dims) && dims.length === 1 && dims[0] > 0)
-    return (
-      `((Array.isArray(${a}) || ArrayBuffer.isView(${a})) && ` +
-      `${a}.length === ${dims[0]})`
-    );
-  return undefined;
-}
-
 export function jsClauseParamGuard(
   t: Type,
   a: string

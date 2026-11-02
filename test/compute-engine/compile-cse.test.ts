@@ -2540,7 +2540,7 @@ describe('COMPILE CSE — emission purity (G1b), built-in compile handlers', () 
     const off = compile(expr, { fallback: false, cse: false });
 
     // The whole `PointList` construction is bound once…
-    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*PointList:/);
+    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*new Array\(/);
     // …so exactly ONE zip loop is emitted instead of three.
     expect(occurrences(on.code, 'new Array(')).toBe(1);
     expect(occurrences(off.code, 'new Array(')).toBe(3);
@@ -2655,7 +2655,7 @@ describe('COMPILE CSE — emission purity (G1b), caller-supplied libraries', () 
       fallback: false,
     });
 
-    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*PointList:/);
+    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*new Array\(/);
     expect(occurrences(on.code, 'new Array(')).toBe(1);
   });
 });

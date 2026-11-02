@@ -48,7 +48,6 @@ import {
   callbackArgumentsOf,
   mapWrapperSuffix,
   staticMapCallback,
-  checkingShimTests,
   declaredParamType,
   jsClauseParamGuard,
   laneRequestParamType,
@@ -613,23 +612,8 @@ export function builtinCallbackValueRef(
  *    elementwise (`_SYS.select`), whose result is an array of control
  *    records the loop cannot read as one.
  *
- * A parameter declared `real` or `integer` (or another type with a
- * run-time test, `checkedParameterType`) is tested at each step, as the
- * recursive call tests it through the checking shim (`checkingShimName`).
- * The first step is tested too, also when the call site did not test the
- * argument because its static type proves the parameter type: the step
- * cannot tell the first arguments from the next ones. For an argument
- * that has its static type the test passes, so the first step gives the
- * value the call gives without it. An argument that breaks its own
- * static type (a `run()` value `Infinity` for a symbol declared `real`,
- * which the interpreter refuses to assign) gives `NaN` where the
- * recursive arrow ran the body. The step receives the real projection of
- * each tested argument, and a step whose arguments fail a test gives
- * `NaN`, the value the shim gives (`NaN` itself passes the test of a
- * numeric parameter, `jsParameterGuard`). The runtime loop then gives
- * `undefined` for the whole call, at the first step and at a later one:
- * the value compiled code has for a list with no value, where the
- * interpreter answers the `incompatible-type` error.
+ * No step tests an argument against the declared type of its parameter:
+ * compiled code assumes that each value holds its static type.
  *
  * Returns `'declined-variant'` when the requested emission is an
  * invariant-prefix VARIANT of a recognized recursion: no variant is
@@ -670,6 +654,41 @@ export function emitListRecursionLoop(
   for (let i = 0; i < step.nops; i += 2)
     if (!step.ops[i].type.matches('boolean')) return undefined;
   const engine = literal.engine as unknown as ComputeEngine;
+  // A next argument on the complex lane at a parameter declared real: the
+  // lane carries the value as a `{re, im}` object, also when it is real,
+  // and the body is compiled for a plain number. A call site passes the
+  // real projection of such an argument (`realProjection()` in
+  // `compile-user-functions.ts`), but the loop hands the next arguments to
+  // the step with no call site in between, so the ordinary recursive arrow
+  // is emitted instead.
+  const nextArgsComplex = core.withLocalShapeFrame(
+    frames.complex,
+    frames.vector,
+    () =>
+      step.ops.some((arm, k) => {
+        if (k % 2 === 0 || !isFunction(arm, 'Tuple') || arm.nops !== 3)
+          return false;
+        const next = arm.ops[2];
+        if (!isFunction(next, 'Tuple')) return false;
+        return next.ops.some((a, i) => {
+          // Read a `broadcastable<T>` parameter through `T`, as
+          // `realProjection()` does (it is not imported here:
+          // `compile-user-functions.ts` imports this module).
+          const pt = laneRequestParamType(engine, h, i);
+          const cell =
+            typeof pt === 'object' && pt.kind === 'broadcastable'
+              ? pt.elements
+              : pt;
+          return (
+            cell !== undefined &&
+            isSubtype(cell, 'real') &&
+            core.isComplexValued(a)
+          );
+        });
+      }),
+    true
+  );
+  if (nextArgsComplex) return undefined;
   const stepLiteral = engine._fn('Function', [
     engine._fn('Block', [step]),
     ...literal.ops.slice(1),
@@ -697,23 +716,11 @@ export function emitListRecursionLoop(
   const stepArrow = statements?.has(stepBody)
     ? `(${params}) => { ${statements.functionBody(stepBody)} }`
     : `(${params}) => ${stepBody}`;
-  const {
-    params: tested,
-    passed,
-    tests,
-  } = checkingShimTests(engine, h, prepared.params.length, target);
-  const stepName = `${name}$s`;
-  const checkedStep =
-    tests.length === 0
-      ? stepArrow
-      : `(${tested.join(', ')}) => (${tests.join(' && ')}) ? ` +
-        `${stepName}(${passed.join(', ')}) : NaN`;
   (registry.literals ??= new Map()).set(name, literal);
   registry.defs.set(
     name,
-    (tests.length === 0 ? '' : `const ${stepName} = ${stepArrow};\n`) +
-      `const ${name} = (${params}) => _SYS.listRecursion(` +
-      `${JSON.stringify(h)}, [${params}], ${checkedStep});`
+    `const ${name} = (${params}) => _SYS.listRecursion(` +
+      `${JSON.stringify(h)}, [${params}], ${stepArrow});`
   );
   return name;
 }

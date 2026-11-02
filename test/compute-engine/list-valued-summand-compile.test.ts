@@ -735,39 +735,21 @@ describe('a contradicted scalar declaration declines in every scalar position (2
     expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
   });
 
-  // The one shape the ruling protects: the application as the WHOLE compiled
-  // expression is CORRECT on JavaScript today (the result coercion hands the
-  // array back), so declining it would be a regression.
-  test('bare `a(u)` still compiles and runs to the correct array on JS', () => {
-    const ce = withDeclaration('(number) -> number');
-    const expr = ce.box(['a', 'u']);
-    const r = compile(expr, { fallback: true });
-    expect(r?.success).toBe(true);
-    // No runtime broadcast guard around the call: `u` is EXPLICITLY declared
-    // `number` (every engine in this file declares it), and an explicit scalar
-    // declaration is the caller's input contract (user ruling 2026-09-07,
-    // amending the 2026-08-30 guard ruling). A symbol whose scalar type was
-    // INFERRED from use keeps the `Array.isArray` guard.
-    expect((r as any).code).toEqual('_fn_a(_.u)');
-    const v = (r as any).run({ u: 0.3 });
-    expect(v[0]).toBeCloseTo(Math.cos(0.3), 10);
-    expect(v[1]).toBeCloseTo(Math.sin(0.3), 10);
-  });
-
-  // Container / access positions do NOT consume their operand as a scalar and
-  // are not in the head classification the gate uses. Probed correct today, so
-  // they must keep compiling — this pins the gate's narrowness.
+  // The declared result binds the body (CE-707): the interpreter refuses a
+  // call of `a` with an `incompatible-type` error, so the compiler declines
+  // every call of `a`, the bare application and the container positions
+  // included.
   test.each([
+    ['a(u)', ['a', 'u']],
     ['[a(u), 1]', ['List', ['a', 'u'], 1]],
     ['Block(a(u))', ['Block', ['a', 'u']]],
-  ] as [string, any][])('`%s` keeps compiling on JS', (_name, mathjson) => {
+  ] as [string, any][])('`%s` declines on JS', (_name, mathjson) => {
     const ce = withDeclaration('(number) -> number');
     const r = compile(ce.box(mathjson), { fallback: true });
-    expect(r?.success).toBe(true);
-    const v = (r as any).run({ u: 0.3 });
-    const point = Array.isArray(v[0]) ? v[0] : v;
-    expect(point[0]).toBeCloseTo(Math.cos(0.3), 10);
-    expect(point[1]).toBeCloseTo(Math.sin(0.3), 10);
+    expect(r?.success ?? false).toBe(false);
+    expect((r as any).error).toMatch(
+      /says it returns a scalar .* but its body constructs a collection/
+    );
   });
 
   // CONTROL: the honest `(unknown) -> unknown` spelling of the SAME body keeps
@@ -810,8 +792,10 @@ describe('a contradicted scalar declaration declines in every scalar position (2
 // Tycho item 171, wave 3 — the DEFINITION-SITE hole waves 1–2 could not reach.
 // Waves 1–2 gate CONSUMING positions, so the one shape left was the bare
 // application as the WHOLE compiled expression: no head consumes it, so nothing
-// fired. On JavaScript that is CORRECT and ruled KEPT (the result coercion hands
-// the array back). On the shader targets it was not: the definition is still
+// fired. Since CE-707 (the declared result binds the body) JavaScript, Python
+// and interval-js decline that call too, because the interpreter refuses it with
+// an `incompatible-type` error. The shader targets keep the definition-emission
+// gate below, because: the definition is still
 // emitted, and its return type is synthesized from the body's DECLARED type
 // while its `return` emits what the body actually builds. Measured BEFORE this
 // gate, `compile(a(u))` reported `success: true` with the preamble
@@ -867,16 +851,15 @@ describe('a contradicted scalar declaration declines at DEFINITION emission (202
     }
   );
 
-  // INVARIANT (ruled KEPT): the same bare shape on JavaScript compiles and runs
-  // to the correct array — byte-identical to before the gate.
-  test('bare `a(u)` is untouched on JavaScript', () => {
+  // The bare shape on JavaScript declines too (CE-707: the declared result
+  // binds the body).
+  test('bare `a(u)` declines on JavaScript', () => {
     const ce = withDeclaration('(number) -> number');
     const r = compile(ce.box(['a', 'u']), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u)');
-    const v = (r as any).run({ u: 0.3 });
-    expect(v[0]).toBeCloseTo(Math.cos(0.3), 10);
-    expect(v[1]).toBeCloseTo(Math.sin(0.3), 10);
+    expect(r?.success ?? false).toBe(false);
+    expect((r as any).error).toMatch(
+      /says it returns a scalar .* but its body constructs a collection/
+    );
   });
 
   // CONTROL: the HONEST `-> unknown` spelling of the SAME body. Its type is not
@@ -1083,37 +1066,30 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
     });
   });
 
-  // INVARIANT (the wave-3 carve-out, unchanged here): the BARE application has
-  // no consuming head, the JS result coercion hands the array back, and it runs
-  // correctly — on BOTH branches of a mixed clause set.
-  test('bare `a(u)` still compiles and dispatches correctly on JavaScript', () => {
+  // The declared result binds the body (CE-707): the bare application declines
+  // on JavaScript for a mixed clause set. The interpreter still answers the
+  // truthful `integer` clause and refuses the list-constructing clause.
+  test('bare `a(u)` declines on JavaScript', () => {
     const ce = withClauses('(number) -> number', 'mixed');
     const r = compile(ce.box(['a', 'u']), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u)');
-    // Integer branch: the truthful scalar clause.
-    expect((r as any).run({ u: 3 })).toBe(7);
-    // Real branch: the list-constructing clause, returned intact.
-    const v = (r as any).run({ u: 0.3 });
-    expect(v[0]).toBeCloseTo(Math.sin(0.3), 10);
-    expect(v[1]).toBeCloseTo(Math.cos(0.3), 10);
-    // The INTERPRETER agrees on both branches (USER RULING 2026-08-12: a
-    // fully-known value never keeps dispatch inert — `a(0.3)` used to stay
-    // inert because `0.3` against the `integer` clause was undecidable, so
-    // this row could only be asserted compiled).
+    expect(r?.success ?? false).toBe(false);
+    expect((r as any).error).toMatch(
+      /says it returns a scalar .* but its body constructs a collection/
+    );
     expect(ce.box(['a', 3]).evaluate().re).toBe(7);
-    const iv = [...ce.box(['a', 0.3]).N().each()].map((e) => e.re);
-    expect(iv[0]).toBeCloseTo(Math.sin(0.3), 10);
-    expect(iv[1]).toBeCloseTo(Math.cos(0.3), 10);
+    expect(ce.box(['a', 0.3]).evaluate().toString()).toMatch(
+      /incompatible-type/
+    );
   });
 
-  // INVARIANT: a CONTAINER position is not a scalar position (wave 2's ruled
-  // carve-out), so it keeps compiling for a clause set too.
-  test('a container position `[a(u), 1]` still compiles on JavaScript', () => {
+  // A container position declines for a clause set too.
+  test('a container position `[a(u), 1]` declines on JavaScript', () => {
     const ce = withClauses('(number) -> number', 'lying');
     const r = compile(ce.box(['List', ['a', 'u'], 1]), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('[_fn_a(_.u), 1]');
+    expect(r?.success ?? false).toBe(false);
+    expect((r as any).error).toMatch(
+      /says it returns a scalar .* but its body constructs a collection/
+    );
   });
 
   // CONTROL: a TRUTHFUL `-> number` clause set — no contradiction, so every
@@ -1220,10 +1196,10 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
     // The declaration's ascription wraps the LAST statement, not the block.
     expect(literal.ops[0].ops[1].operator).toEqual('Typed');
     expect(literal.ops[0].ops[1].ops[0].operator).toEqual('List');
-    // The interpreter does not coerce: `a` really answers a 2-list.
-    const v = [...ce.box(['a', 0.3]).N().each()].map((e) => e.re);
-    expect(v[0]).toBeCloseTo(Math.cos(0.3), 10);
-    expect(v[1]).toBeCloseTo(Math.sin(0.3), 10);
+    // The declared result binds the body: the interpreter refuses the call.
+    expect(ce.box(['a', 0.3]).evaluate().toString()).toMatch(
+      /incompatible-type/
+    );
   });
 
   // The wave-2 shape matrix, now over the multi-statement body.
@@ -1282,13 +1258,15 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
     }
   );
 
-  // INVARIANT (the ruled wave-3 carve-out): bare `a(u)` on JavaScript has no
-  // consuming head and keeps compiling.
-  test('bare `a(u)` still compiles on JavaScript', () => {
+  // The declared result binds the body (CE-707): bare `a(u)` declines on
+  // JavaScript too.
+  test('bare `a(u)` declines on JavaScript', () => {
     const ce = withDeclaration('(number) -> number');
     const r = compile(ce.box(['a', 'u']), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u)');
+    expect(r?.success ?? false).toBe(false);
+    expect((r as any).error).toMatch(
+      /says it returns a scalar .* but its body constructs a collection/
+    );
   });
 
   // POSITIVE-EVIDENCE-ONLY: a `Return` in an EARLIER statement means the last
@@ -1503,17 +1481,15 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
     );
   });
 
-  // INVARIANT (the ruled carve-out, measured): bare `b(u)` on JavaScript has no
-  // consuming head, the result coercion hands the array back, and it is correct
-  // today — so it must keep compiling.
-  test('bare `b(u)` still compiles and runs to the array on JavaScript', () => {
+  // The declared result binds the body (CE-707): bare `b(u)` declines on
+  // JavaScript too.
+  test('bare `b(u)` declines on JavaScript', () => {
     const ce = withBody(['List', ['Cos', 't'], ['Sin', 't']]);
     const r = compile(ce.box(['b', 'u']), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_b(_.u)');
-    const v = (r as any).run({ u: 0.3 });
-    expect(v[0]).toBeCloseTo(Math.cos(0.3), 10);
-    expect(v[1]).toBeCloseTo(Math.sin(0.3), 10);
+    expect(r?.success ?? false).toBe(false);
+    expect((r as any).error).toMatch(
+      /says it returns a scalar .* but its body constructs a collection/
+    );
   });
 
   // EXEMPTION-SAFETY, the load-bearing control: a GENUINE boolean body produces

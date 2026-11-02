@@ -117,7 +117,7 @@ describe('point arithmetic fans out by the width of the tuple type', () => {
   test('a sum over a declared point is folded term by term', () => {
     const ce = newEngine({ P: 'tuple<number, number>' });
     const { code, run } = compiled(ce, '\\operatorname{Sum}(P)');
-    expect(code).toContain('(0 + _tv1[0] + _tv1[1])');
+    expect(code).toContain('(0 + _.P[0] + _.P[1])');
     expect(run({ P: [1, 2] })).toBe(3);
   });
 });
@@ -126,16 +126,8 @@ describe('the inner product of two static-width points is written out', () => {
   test('a declared point against a literal point', () => {
     const ce = newEngine({ P: 'tuple<number, number>' });
     const { code, run } = compiled(ce, '\\operatorname{Dot}(P,(1,2))');
-    expect(code).toBe(
-      '((_tv1, _tv2) => Array.isArray(_tv1) && _tv1.length === 2 && ' +
-        '!Array.isArray(_tv1[0]) ? ' +
-        '(_tv1[0] * _tv2[0] + _tv1[1] * _tv2[1]) : ' +
-        '_SYS.matmul(_tv1, _tv2))(_.P, [1, 2])'
-    );
+    expect(code).toBe('(_.P[0] * 1 + _.P[1] * 2)');
     expect(run({ P: [1, 2] })).toBe(5);
-    // The fallback answers a shape the type did not promise as `_SYS.matmul`
-    // does: two vectors of differing length have no inner product.
-    expect(run({ P: [1, 2, 3] })).toBeNaN();
   });
 
   test('two literal points need no temporary at all', () => {
@@ -176,7 +168,7 @@ describe('the inner product of two static-width points is written out', () => {
     const ce = newEngine({ V: 'vector<3>', W: 'vector<3>' });
     const { code, run } = compiled(ce, '\\operatorname{Dot}(V, W)');
     expect(code).toContain(
-      '_tv1[0] * _tv2[0] + _tv1[1] * _tv2[1] + _tv1[2] * _tv2[2]'
+      '_.V[0] * _.W[0] + _.V[1] * _.W[1] + _.V[2] * _.W[2]'
     );
     expect(run({ V: [1, 2, 3], W: [4, 5, 6] })).toBe(32);
   });
@@ -273,22 +265,5 @@ describe('a component read is spliced only where it stays sound', () => {
         '\\operatorname{Dot}((\\lfloor x\\rfloor,\\lfloor y\\rfloor,s),(1,2,3))'
       ).code
     ).toBe('(Math.floor(_.x) * 1 + Math.floor(_.y) * 2 + 2.41 * 3)');
-  });
-});
-
-describe('a caller may put a shape the declared type did not promise in `vars`', () => {
-  // A declared type constrains what the ENGINE assigns, never what a caller
-  // supplies. A MATRIX passes a length test, so both fast paths must claim
-  // the rank as well and hand every other shape to the run-time helper.
-  test('a matrix reaches `_SYS.matmul`, not the written-out inner product', () => {
-    const ce = newEngine({ P: 'tuple<number, number>' });
-    const { code, run } = compiled(ce, '\\operatorname{Dot}(P,(1,2))');
-    expect(code).toContain('!Array.isArray(_tv1[0])');
-    // The inner product read each row as a scalar and answered NaN.
-    expect(run({ P: [[1, 2] as any, [3, 4] as any] })).toEqual([5, 11]);
-    const interpreted = ce
-      .box(['Dot', ['List', ['List', 1, 2], ['List', 3, 4]], ['List', 1, 2]])
-      .N();
-    expect(interpreted.ops!.map((op) => op.re)).toEqual([5, 11]);
   });
 });

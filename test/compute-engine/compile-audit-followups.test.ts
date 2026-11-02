@@ -173,7 +173,7 @@ describe('Dot with declared broadcastable coordinates', () => {
       compile(ce.box(['Dot', 'a', 'b']), { constantFold: false }).success
     ).toBe(false);
   });
-  test('each operand is evaluated once and wrong widths retain the runtime fallback', () => {
+  test('each operand is evaluated once', () => {
     const result = compile(engine().box(['Dot', 'a', 'b']), {
       constantFold: false,
     });
@@ -189,7 +189,6 @@ describe('Dot with declared broadcastable coordinates', () => {
     ).toEqual([7, 11]);
     // The runner validates the input once, then the kernel reads it once.
     expect(reads).toBe(2);
-    expect(result.run!({ a: [1, 2, 3], b: [4, 5, 6] })).toBe(32);
   });
 });
 

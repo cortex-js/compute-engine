@@ -2229,42 +2229,6 @@ describeMaybe(
       expect(got[0]).toBeCloseTo(Math.PI, 12);
     });
 
-    // CE-231. Python reads a string as a sequence of code points: `len` of
-    // `"e" + U+0301 + "x"` is 3 where the interpreter counts 2 characters. A
-    // parameter of a list type refuses a string at entry; a list still runs.
-    it.each([false, true])(
-      'a string argument for a list parameter raises (lambda: %s)',
-      (lambda) => {
-        for (const type of ['list<integer>', 'list', 'indexed_collection']) {
-          const got = runPython({
-            expr: ['Length', 's'],
-            decl: { s: type },
-            args: [['éx'], [[1, 2]]],
-            lambda,
-          });
-          expect([type, got]).toEqual([type, ['TypeError', 2]]);
-        }
-      }
-    );
-
-    // The string test must not use the bare names `isinstance` and `str`: a
-    // parameter with one of these names hides the builtin, and a valid list
-    // then raised `TypeError`.
-    it.each([false, true])(
-      'a list parameter named like a builtin accepts a list (lambda: %s)',
-      (lambda) => {
-        for (const name of ['str', 'isinstance', 'TypeError']) {
-          const got = runPython({
-            expr: ['Length', name],
-            decl: { [name]: 'list<integer>' },
-            args: [['éx'], [[1, 2, 3]]],
-            lambda,
-          });
-          expect([name, got]).toEqual([name, ['TypeError', 3]]);
-        }
-      }
-    );
-
     // The generated code calls builtins by their names (`isinstance(b, (bool,
     // np.bool_))` for the condition of an `If`, `isinstance(_q, str)` for the
     // order of a `Norm`). A user name that hides one of them made the code

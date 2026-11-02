@@ -75,6 +75,7 @@ import {
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
   captureAtCreation,
+  callFrameReceivedCollection,
   exactArgumentSources,
   inlineCallParameters,
   isStatementListScope,
@@ -3261,7 +3262,12 @@ const ASCRIBED_TYPES = new WeakMap<Expression, Type>();
  * returns a list of numbers for a list of points, and a body that reads the
  * coordinates of a list of points returns a tuple of lists where a point is
  * declared: the compiled code returns these shapes too, and the interpreter
- * must agree with it (`conformsUnderBroadcast`).
+ * must agree with it (`conformsUnderBroadcast`). The allowance holds only
+ * in a call that received a collection argument
+ * (`callFrameReceivedCollection()`): with `h` declared `(number) -> number`
+ * and the body `[t, t]`, `h(3)` is an `incompatible-type` error, since no
+ * element of a list argument was computed. (Option (a) of CE-707: the
+ * declared result binds the body.)
  */
 function ascriptionViolation(
   ce: ComputeEngine,
@@ -3291,7 +3297,10 @@ function ascriptionViolation(
     !isGroupedTypeText(typeOperand.string)
   )
     return undefined;
-  if (conformsUnderBroadcast(ce, value, ascribed)) return undefined;
+  if (
+    conformsUnderBroadcast(ce, value, ascribed, callFrameReceivedCollection(ce))
+  )
+    return undefined;
   return ce.typeError(ascribed, value.type, value);
 }
 
@@ -3304,12 +3313,15 @@ function ascriptionViolation(
  * conforms when some tuple of the same length in `type` has components that
  * the tuple's components conform to under broadcast (a point whose
  * coordinates were computed over a list of points is a tuple of lists). The
- * recursion stops at the leaves, which are scalars.
+ * recursion stops at the leaves, which are scalars. When `broadcast` is
+ * false, a list conforms only through the element type of a list type in
+ * `type`, and a tuple only through its components, with no broadcast.
  */
 function conformsUnderBroadcast(
   ce: ComputeEngine,
   value: Expression,
-  type: Type
+  type: Type,
+  broadcast: boolean
 ): boolean {
   if (admissionOf(value, type) !== 'refute') return true;
   // A real float stands for the exact real number the ascription promised
@@ -3335,8 +3347,10 @@ function conformsUnderBroadcast(
     });
     return value.ops.every(
       (op) =>
-        elementTypes.some((et) => conformsUnderBroadcast(ce, op, et)) ||
-        conformsUnderBroadcast(ce, op, type)
+        elementTypes.some((et) =>
+          conformsUnderBroadcast(ce, op, et, broadcast)
+        ) ||
+        (broadcast && conformsUnderBroadcast(ce, op, type, broadcast))
     );
   }
   if (isFunction(value, 'Tuple')) {
@@ -3346,7 +3360,7 @@ function conformsUnderBroadcast(
       if (typeof t === 'string' || t.kind !== 'tuple') return false;
       if (t.elements.length !== arity) return false;
       return value.ops.every((op, i) =>
-        conformsUnderBroadcast(ce, op, t.elements[i].type)
+        conformsUnderBroadcast(ce, op, t.elements[i].type, broadcast)
       );
     });
   }

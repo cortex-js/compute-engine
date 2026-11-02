@@ -35,7 +35,11 @@ import {
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
-import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import {
+  cannotHoldAList,
+  couldMatch,
+  isSubtype,
+} from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
   boundVariableNames,
@@ -73,7 +77,6 @@ import {
   argumentMayBeAbsent,
   completedLiteralArguments,
   declineIntervalAbsentDefault,
-  jsIsAbsent,
   literalTakesArgumentCount,
   userFunctionDefaults,
 } from './compile-parameter-defaults.js';
@@ -110,16 +113,13 @@ import { resetCompilationMemos, tryConstantFold } from './compile-folding.js';
 import {
   absentPointType,
   appliedArgumentTypeMismatch,
+  contradictedScalarResult,
   appliedLiteralNamedPointCall,
-  checkedParameterType,
-  checkingShimName,
-  failedCheckMarker,
   hasUniformComplexScalarElements,
   describedLaneMismatch,
   elementLaneMismatch,
   elementOf,
   pointLaneMismatch,
-  jsParameterGuard,
   laneMismatchAt,
   laneRequestParamType,
   namedPointArgumentAtUntypedParameter,
@@ -153,7 +153,6 @@ import {
 } from './compile-user-calls.js';
 import { trySpecializedUserCall } from './compile-user-specialization.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
-import { userFunctionSignature } from './compile-absence.js';
 import {
   bindsOnePointAsUndeclared,
   isScalarShaped,
@@ -528,12 +527,8 @@ export function absentCollectionOperandGuard(
   )
     return undefined;
   // An operand is guarded when its type has a `missing` arm, or when it
-  // is a checked call of a user function with a collection result
-  // (`checkedCallMayBeAbsent`), or another operand that can be the absent
-  // collection at run time (`mayBeAbsentCollection`): the checking shim
-  // gives `undefined` when
-  // an argument fails its test, while the type of the call is the
-  // collection type.
+  // is another operand that can be the absent collection at run time
+  // (`mayBeAbsentCollection`).
   const presentArms = args.map((a) =>
     _codeOverrides.has(a) ? undefined : gatedCollectionArms(a)
   );
@@ -1296,6 +1291,29 @@ export function tryCompileUserFunction(
   // end all need it.
   const literal = userFunctionLiteral(engine, h);
   checkUserCallArity(h, literal, args);
+  // The declared result binds the body: a call of a function declared with
+  // a scalar result whose body constructs a collection declines in every
+  // position, a bare call included. The interpreter refuses the value of
+  // such a call with an `incompatible-type` error when no argument is a
+  // collection (with `h` declared `(number) -> number` and the body
+  // `[t, t]`, `h(3)` is an error). (Option (a) of CE-707.) A target with
+  // its own definition lowering (the shader targets) declines the same call
+  // when it emits the definition.
+  // A call with a collection argument broadcasts, and is not refused.
+  const contradicted =
+    args.length > 0 &&
+    !target.userFunctions?.lowering &&
+    args.every((a) => isScalarShaped(a.type.type))
+      ? contradictedScalarResult(engine, h)
+      : undefined;
+  if (contradicted !== undefined)
+    throw new Error(
+      `Could not compile \`${h}\`: the declaration of '${h}' says it ` +
+        `returns a scalar ('${typeToString(contradicted)}'), but its body ` +
+        `constructs a collection. The ` +
+        `interpreter gives an \`incompatible-type\` error for such a call. ` +
+        `Fix the declaration (e.g. '-> list<number>') or evaluate instead.`
+    );
   // An argument at a parameter with a default is filled when it is absent
   // at run time (`absentFilledArguments`), on the JavaScript target, whose
   // emitted definitions take every argument from the call. The interval
@@ -1480,32 +1498,23 @@ export function tryCompileUserFunction(
     }
   }
 
-  // An argument whose static type does not prove the declared type of its
-  // parameter is tested at run time where the target has a test
-  // (`declaredParameterCheck`): on JavaScript by the checking shim of the
-  // function (`checkingShimName`), on the interval target by
-  // `_IA.checkedCall`. Where the target has no test for a type that admits
-  // only some real numbers (`integer`, `real<0..>`, `rational`), the
-  // compilation fails: the interpreter gives an `incompatible-type` error
-  // for a value outside the type, and the compiled call would give a value.
-  const intervalChecks = args.map((a, i) => {
+  // Compiled code tests no argument against the declared type of its
+  // parameter: it assumes that the value holds the parameter type. Only an
+  // argument whose static type has no value in a declared type that admits
+  // some real numbers only (`integer`, `real<0..>`, `rational`) declines
+  // (`declaredParameterCheck`): each such call is the `incompatible-type`
+  // error of the interpreter.
+  args.forEach((a, i) => {
     const declared = userFunctionParamType(engine, h, i);
-    const check = declaredParameterCheck(declared, a, target);
-    if (check === 'refuse')
+    if (declaredParameterCheck(declared, a) === 'refuse')
       throw uncheckedParameterError(
         h,
         (literal === undefined
           ? ''
           : functionLiteralParameterName(literal.ops[i + 1])) || `#${i + 1}`,
         declared!,
-        a,
-        target
+        a
       );
-    return check === 'guard' &&
-      declared !== undefined &&
-      target.language === 'interval-javascript'
-      ? [declared]
-      : [];
   });
 
   // A LIST OF POINTS at a parameter with no declared type, whose type the
@@ -1557,11 +1566,6 @@ export function tryCompileUserFunction(
     );
   }
 
-  // A copy typed by the arguments has no run-time test of a declared
-  // parameter type. On interval-js the test is `_IA.checkedCall`, emitted
-  // only on the ordinary route below, so a call that needs it does not
-  // take a copy.
-  //
   // On interval-js, a copy whose body does not compile with the parameter
   // typed by the argument does not end the compilation of the call: the
   // definitions added by the attempt are removed, and the call takes the
@@ -1577,11 +1581,7 @@ export function tryCompileUserFunction(
       ? undefined
       : core.declaredUnionMemberVariant(engine, h, args, target);
   let specialized: TargetSource | undefined;
-  if (
-    literal !== undefined &&
-    memberVariant === undefined &&
-    !intervalChecks.some((checks) => checks.length > 0)
-  ) {
+  if (literal !== undefined && memberVariant === undefined) {
     const registry = target.userFunctions;
     const definedBefore =
       target.language === 'interval-javascript' && registry !== undefined
@@ -1698,10 +1698,10 @@ export function tryCompileUserFunction(
   // other arguments unwrapped against a complex-lane body — the
   // `'[object Object]0'` class. `emitUserFunctionCall` picks the static wrap
   // or the runtime `_SYS.cplx` per argument from its realness.
-  const coerceToComplex = args.map((_a, i) => {
+  const coerceToComplex = args.map((a, i): boolean | 'real' => {
     if (target.language !== 'javascript') return false;
     const pt = userFunctionParamType(engine, h, i);
-    if (pt !== undefined) return isNonRealNumber(pt);
+    if (pt !== undefined) return isNonRealNumber(pt) || realProjection(a, pt);
     // A multi-clause function has an INTERSECTION signature, from which
     // `userFunctionParamType` reads no single parameter type — ask the
     // clause set instead.
@@ -1731,18 +1731,8 @@ export function tryCompileUserFunction(
   // exactly as it would have.
   const prefixed =
     node === undefined ? undefined : _prefixCallOverrides.get(node);
-  // Whether an argument must be checked against its parameter's declared
-  // type at run time (`parameterCheckNeeded`): the call is then emitted
-  // through the checking shim of the function, in every form the call
-  // takes (the direct call, the broadcast dispatch over a list argument).
-  // The invariant-prefix variant below has no shim (its extra parameters
-  // are held values): a checked call takes the ordinary definition.
-  const checked =
-    args.some((a, i) => parameterCheckNeeded(engine, h, a, i, target)) ||
-    intervalChecks.some((t) => t.length > 0);
   if (
     prefixed !== undefined &&
-    !checked &&
     prefixed.values.every((v) => _codeOverrides.has(v))
   ) {
     let variant: string | undefined;
@@ -1802,8 +1792,6 @@ export function tryCompileUserFunction(
     // the engine, so a `CancellationError` crossing a bundle boundary is
     // not an instance of the host's class (the `box.ts` convention).
     if (e instanceof Error && e.name === 'CancellationError') throw e;
-    // An inlined call does not test the declared parameter types.
-    if (checked) throw e;
     // A list of real numbers at a parameter typed as a tuple only by
     // index reads in the body is substituted whole too. Such a tuple is
     // not a contract (`isIndexReadTuple()`, index-read-tuple.ts): the
@@ -1838,13 +1826,8 @@ export function tryCompileUserFunction(
   const lowering = target.userFunctions?.lowering;
   if (lowering) return lowering.call({ id: h, name, args, target });
 
-  const callee = !checked
-    ? (memberVariant ?? name)
-    : target.language === 'interval-javascript'
-      ? intervalCheckingCallee(name, intervalChecks, target)
-      : (checkingShimName(engine, h, name, target) ?? name);
   return emitUserFunctionCall(
-    callee,
+    memberVariant ?? name,
     args,
     target,
     coerceToComplex,
@@ -1855,125 +1838,114 @@ export function tryCompileUserFunction(
 }
 
 /**
- * Whether the argument `a` at position `i` of a call of `h` must be
- * checked against the parameter's declared type at run time: the type is
- * one `checkedParameterType` tests, and the argument's static type does
- * not prove it. A list argument is checked through its ELEMENT type, since
- * the call maps over it and each element reaches the body; an element
- * type that is not known counts as unproven.
- *
- * The interpreter checks an argument against the parameter's annotation
- * at every application: `h(2.5)` with `h` declared `(x: integer) -> …` is
- * an `incompatible-type` error, and so is the second element of
- * `h([1, 2.5])` and of `Map(k ↦ h(k), [1, 2.5])`. The compiled call ran
- * the body on the value (`5`).
+ * `'real'` when the argument `a` at a parameter declared with the real
+ * type `declared` (`real`, `integer`, a `broadcastable<real>`, …) is a
+ * value of the complex lane, and `false` otherwise. The complex lane
+ * carries a value as a `{re, im}` object, also when the value is real
+ * (`√y` at `y = 4` is `{re: 2, im: 0}`), and the body of the function is
+ * compiled for a plain number, so the call passes the real projection of
+ * the argument (`_SYS.creal`, `emitUserFunctionCall`). This is a
+ * conversion of a value of the declared type, not a test: a value with an
+ * imaginary part is outside the type, and its result is undefined.
  */
-export function parameterCheckNeeded(
-  engine: ComputeEngine,
-  h: string,
-  a: Expression,
-  i: number,
-  target: CompileTarget<Expression>
-): boolean {
-  const declared = checkedParameterType(engine, h, i, target);
-  if (declared === undefined) return false;
-  return !argumentProvesParameterType(a, declared);
+export function realProjection(a: Expression, declared: Type): 'real' | false {
+  const cell =
+    typeof declared === 'object' && declared.kind === 'broadcastable'
+      ? declared.elements
+      : declared;
+  return isSubtype(cell, 'real') && core.isComplexValued(a) ? 'real' : false;
 }
 
 /**
- * How a compiled call treats the declared type `declared` of a parameter
- * whose argument is `a`:
+ * Whether a compiled call must decline because the argument `a` cannot be
+ * of the declared type `declared` of its parameter:
  *
- * - `'none'`: no test. There is no declared type; the type is `number` or
- *   a complex type (whose argument is coerced, `coerceToComplex`); the
- *   static type of the argument proves it
- *   (`argumentProvesParameterType`); or the target does not test it, as
- *   before: a type that admits every real number (`real`, a union with a
- *   non-numeric member) on a target other than JavaScript. So on GLSL,
- *   WGSL, Python and interval-js, an infinite argument at a `real`
- *   parameter gives a value, where the interpreter refuses `±∞`. This is
- *   intended: it is part of the rule that a float target writes `~oo` as
- *   `Infinity`, and a test would refuse many shader programs.
- * - `'guard'`: the call tests the argument at run time. On JavaScript, a
- *   type with a test (`jsClauseParamGuard`). On the interval target, an
- *   integer type or a real type with bounds (`intervalParameterDomain`).
+ * - `'none'`: the call compiles. There is no declared type; the type is
+ *   `number` or a complex type (whose argument is coerced,
+ *   `coerceToComplex`); the type admits every real number (`real`, a
+ *   collection type, a union with a non-numeric member); or the static type
+ *   of the argument can hold a value of the declared type. In the last case
+ *   compiled code assumes that the value holds the parameter type, and
+ *   tests nothing: `n - 1` at a parameter declared `integer` (a recursive
+ *   factorial) compiles, and a value outside the type gives an undefined
+ *   result.
  * - `'refuse'`: the compilation fails. The type admits only some real
- *   numbers (an integer type, a bounded real type, `rational`), the
- *   argument can be a real number outside of it, and the target has no
- *   test for it. The interpreter gives an `incompatible-type` error for
- *   such a value, and compiled code with no test would give a value.
+ *   numbers (an integer type, a bounded real type, `rational`), and no value
+ *   of the static type of the argument is of it
+ *   (`argumentCanHaveParameterType`). Each call is then the
+ *   `incompatible-type` error of the interpreter.
+ *
+ * A parameter declared `broadcastable<T>` whose `T` cannot hold a list
+ * maps to the cells. A scalar argument is read against `T`, as
+ * `realProjection()` reads it; a collection argument (a list, a matrix)
+ * compiles, because its cells can sit at any depth.
+ *
+ * Compiled code tests no value against its type at run time: the static
+ * type of each value is assumed to hold (rule R5 of
+ * `docs/plans/2026-10-31-static-shape-compilation.md`).
  */
 export function declaredParameterCheck(
   declared: Type | undefined,
-  a: Expression,
-  target: CompileTarget<Expression>
-): 'none' | 'guard' | 'refuse' {
+  a: Expression
+): 'none' | 'refuse' {
   if (declared === undefined) return 'none';
-  if (declared === 'number' || isNonRealNumber(declared)) return 'none';
-  if (argumentProvesParameterType(a, declared)) return 'none';
-  const restrictsReals =
-    isSubtype(declared, 'real') && !isSubtype('real', declared);
-  if (target.language === 'javascript') {
-    const test = jsParameterGuard(declared, '_');
-    if (test === null) return 'none';
-    if (test !== undefined) return 'guard';
-  } else if (target.language === 'interval-javascript') {
-    if (intervalParameterDomain(declared) !== undefined) return 'guard';
+  if (
+    typeof declared === 'object' &&
+    declared.kind === 'broadcastable' &&
+    cannotHoldAList(declared.elements)
+  ) {
+    // A collection argument at a `broadcastable<T>` parameter can be a
+    // tensor of any rank, so its cells sit at an unknown depth: the call
+    // compiles, and only a scalar argument is read against `T`.
+    if (!isScalarShaped(a.type.type)) return 'none';
+    declared = declared.elements;
   }
-  return restrictsReals ? 'refuse' : 'none';
+  if (declared === 'number' || isNonRealNumber(declared)) return 'none';
+  if (!isSubtype(declared, 'real') || isSubtype('real', declared))
+    return 'none';
+  if (argumentProvesParameterType(a, declared)) return 'none';
+  return argumentCanHaveParameterType(a, declared) ? 'none' : 'refuse';
 }
 
 /**
- * The error of a call of `h` whose argument `a` can break the declared
- * type `declared` of the parameter `param` (`declaredParameterCheck`
- * answers `'refuse'`).
+ * Whether some value of the static type of the argument `a` is of the
+ * declared parameter type `declared`. A list argument at a SCALAR
+ * parameter is read through its ELEMENT type, as in
+ * `argumentProvesParameterType`. A type that is not known can hold any
+ * value.
+ */
+function argumentCanHaveParameterType(a: Expression, declared: Type): boolean {
+  const t = stripMissingFromType(a.type.type);
+  if (couldMatch(t, declared)) return true;
+  if (isScalarShaped(a.type.type) || !isScalarType(declared)) return false;
+  const element = collectionElementType(resolveTypeForCompilation(t));
+  if (element === undefined) return true;
+  return couldMatch(stripMissingFromType(element), declared);
+}
+
+/**
+ * The error of a call of `h` whose argument `a` cannot have a value of the
+ * declared type `declared` of the parameter `param`
+ * (`declaredParameterCheck` answers `'refuse'`).
  */
 export function uncheckedParameterError(
   h: string,
   param: string,
   declared: Type,
-  a: Expression,
-  target: CompileTarget<Expression>
+  a: Expression
 ): Error {
   return new Error(
     `Could not compile a call of \`${h}\`: the argument ` +
-      `\`${a.toString()}\` can have a value that is not of the type ` +
+      `\`${a.toString()}\` cannot have a value of the type ` +
       `\`${typeToString(declared)}\` declared for the parameter ` +
-      `\`${param}\`. The interpreter gives an \`incompatible-type\` error ` +
-      `for such a value, and target '${target.language ?? 'unknown'}' ` +
-      `has no run-time test for this type.`
+      `\`${param}\`, so each call is an \`incompatible-type\` error in ` +
+      `the interpreter.`
   );
 }
 
 /**
- * The source of the `ParameterDomain` (`interval/util.ts`) of the
- * declared parameter type `t` on the interval target, or `undefined` when
- * the target has no test for `t`: an integer type, or a real type with
- * bounds. A bound that the type excludes (`real<0<..>`) is marked as
- * excluded, so a point interval at the bound is refused, as the
- * interpreter refuses `g(0)` for `g: (real<0<..>) -> real`.
- */
-export function intervalParameterDomain(t: Type): string | undefined {
-  if (t === 'integer') return '{ integer: true }';
-  if (typeof t !== 'object' || t.kind !== 'numeric') return undefined;
-  if (t.type !== 'integer' && t.type !== 'real') return undefined;
-  const parts: string[] = [];
-  if (t.type === 'integer') parts.push('integer: true');
-  if (typeof t.lower === 'number' && Number.isFinite(t.lower)) {
-    parts.push(`lower: ${String(t.lower)}`);
-    if (t.lowerOpen === true) parts.push('lowerOpen: true');
-  }
-  if (typeof t.upper === 'number' && Number.isFinite(t.upper)) {
-    parts.push(`upper: ${String(t.upper)}`);
-    if (t.upperOpen === true) parts.push('upperOpen: true');
-  }
-  return `{ ${parts.join(', ')} }`;
-}
-
-/**
- * Per argument of a call of the block-local function `h` (its literal
- * `literal`), the declared parameter types that the call tests at run
- * time (`declaredParameterCheck`).
+ * Decline a call of the block-local function `h` (its literal `literal`)
+ * whose argument can have a value outside a declared type of its parameter.
  *
  * A parameter is declared by an annotation of the literal (`function g(k:
  * integer) { … }`) and by a `Declare` statement of the name in an
@@ -1982,17 +1954,16 @@ export function intervalParameterDomain(t: Type): string | undefined {
  * against both at each call: `g(1.5)` is an `incompatible-type` error.
  *
  * Throws when a number literal argument is not a value of a declared
- * type (`g(1.5)`), and when the call would need a test that the target
- * does not have.
+ * type (`g(1.5)`), and when `declaredParameterCheck` answers `'refuse'`.
  */
 export function localParameterChecks(
   h: string,
   literal: Expression & FunctionInterface,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
-): Type[][] {
+): void {
   const declaredSignature = target.declaredVarTypes?.[h];
-  return args.map((a, i) => {
+  args.forEach((a, i) => {
     const param = literal.ops[i + 1];
     const declared = [
       param === undefined ? undefined : functionLiteralParameterType(param),
@@ -2001,11 +1972,7 @@ export function localParameterChecks(
     const name =
       (param === undefined ? '' : functionLiteralParameterName(param)) ||
       `#${i + 1}`;
-    const tested: Type[] = [];
     for (const t of declared) {
-      // Only a number literal is refused here: the type of any other
-      // argument can rest on an inference from its use, and the run-time
-      // test below decides it.
       if (isNumber(a) && !couldMatch(a.type.type, t))
         throw new Error(
           `Could not compile a call of \`${h}\`: the argument ` +
@@ -2015,132 +1982,10 @@ export function localParameterChecks(
             `The interpreter gives an \`incompatible-type\` error for ` +
             `this call.`
         );
-      const check = declaredParameterCheck(t, a, target);
-      if (check === 'refuse')
-        throw uncheckedParameterError(h, name, t, a, target);
-      if (check === 'guard') tested.push(t);
+      if (declaredParameterCheck(t, a) === 'refuse')
+        throw uncheckedParameterError(h, name, t, a);
     }
-    return tested;
   });
-}
-
-/**
- * The JavaScript call `Apply(literal, …args)` of an annotated function
- * literal, compiled by `code`, with the arguments tested against the
- * annotations at run time, or `undefined` when no argument needs a test
- * (`localParameterChecks`). A failed test answers `NaN`, as a checked
- * call of a block-local function does (`localCheckingCallee`).
- *
- * The interpreter checks the argument of such an application against
- * the annotation: `Apply((k: integer) ↦ k + 1, v)` is an
- * `incompatible-type` error for `v = 1.5`. The compiled application gave
- * 2.5: only an argument whose static type cannot match was refused
- * (`appliedArgumentTypeMismatch`). CE-226.3.
- *
- * `code` compiles the literal. It is called only when an argument needs a
- * test, so that the caller does not compile the literal twice and does
- * not register temporaries that the emitted code never reads.
- */
-export function appliedLiteralCheckedCall(
-  literal: Expression & FunctionInterface,
-  code: () => string,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): TargetSource | undefined {
-  if (target.language !== 'javascript') return undefined;
-  const checks = localParameterChecks('(function)', literal, args, target);
-  if (checks.every((t) => t.length === 0)) return undefined;
-  const literalCode = code();
-  const signature = literal.type.type;
-  // The checking callee is bound once: the call form can name its callee
-  // twice (the broadcast and the direct call).
-  const callee = tempVar(target);
-  const call = emitUserFunctionCall(
-    callee,
-    args,
-    target,
-    args.map((_a, i) => {
-      const pt = signatureParamType(signature, i);
-      return pt !== undefined && isNonRealNumber(pt);
-    }),
-    paramsAreScalar(signature)
-  );
-  return (
-    `((${callee}) => ${call})` +
-    `(${localCheckingCallee(`(${literalCode})`, checks, target, signature, literal)})`
-  );
-}
-
-/**
- * The callee that tests the arguments of a call of `callee` on the
- * interval target before the call (`_IA.checkedCall`): `domains[i]` lists
- * the declared types of parameter `i` that the call tests, empty for a
- * parameter with no test. `callee` itself when no parameter is tested.
- */
-export function intervalCheckingCallee(
-  callee: string,
-  domains: ReadonlyArray<ReadonlyArray<Type>>,
-  target: CompileTarget<Expression>
-): string {
-  if (domains.every((d) => d.length === 0)) return callee;
-  const specs = domains.map((ds) =>
-    ds.length === 0
-      ? 'null'
-      : `[${ds.map((t) => intervalParameterDomain(t)!).join(', ')}]`
-  );
-  const rest = tempVar(target);
-  return (
-    `((...${rest}) => _IA.checkedCall(${callee}, ` +
-    `[${specs.join(', ')}], ...${rest}))`
-  );
-}
-
-/**
- * The callee that tests the arguments of a call of the block-local
- * function `callee` on the JavaScript target: `types[i]` lists the
- * declared types of parameter `i` that the call tests. As the checking
- * shim of an engine-level function (`checkingShimName`), the test reads
- * the real projection of the argument, the function receives that
- * projection, and the call answers the marker of the declared result
- * type of `signature` when a test fails (`failedCheckMarker`: `undefined`
- * for a collection result, `NaN` otherwise), the value compiled code has
- * where the interpreter answers an error. The shim is written at the
- * call, since the value of a block local is read where the call runs.
- * `callee` itself when no parameter is tested.
- *
- * An absent argument (`jsIsAbsent()`) at a parameter of `literal` with a
- * default value passes the test: `callee` fills it with the default
- * (`defaultFillingWrapper()`), and the default fits the declared type. So
- * the default is filled before the type is tested, as in the interpreter.
- */
-export function localCheckingCallee(
-  callee: string,
-  types: ReadonlyArray<ReadonlyArray<Type>>,
-  target: CompileTarget<Expression>,
-  signature: Type | undefined,
-  literal?: Expression
-): string {
-  if (types.every((t) => t.length === 0)) return callee;
-  const params = types.map(() => tempVar(target));
-  const tests: string[] = [];
-  const passed = params.map((p, i) => {
-    if (types[i].length === 0) return p;
-    const projected = `_SYS.creal(${p})`;
-    const defaulted =
-      literal !== undefined &&
-      isFunction(literal, 'Function') &&
-      optionalParameterDefault(literal.ops[i + 1]) !== undefined;
-    for (const t of types[i]) {
-      const test = jsParameterGuard(t, projected)!;
-      tests.push(defaulted ? `(${jsIsAbsent(p)} || ${test})` : test);
-    }
-    return projected;
-  });
-  return (
-    `((${params.join(', ')}) => (${tests.join(' && ')}) ? ` +
-    `${callee}(${passed.join(', ')}) : ` +
-    `${failedCheckMarker(signature)})`
-  );
 }
 
 /**
@@ -2210,7 +2055,6 @@ export function mayBeAbsentCollectionNode(
   target: CompileTarget<Expression>,
   operand: (x: Expression) => boolean
 ): boolean {
-  if (checkedCallMayBeAbsent(engine, a, target)) return true;
   if (target.language !== 'javascript' || !isFunction(a)) return false;
   // A `Take` or `Drop` whose count is not a compile-time number gives
   // `undefined` for a `NaN` count (`takeDropSlice`, `javascript-target.ts`),
@@ -2257,57 +2101,6 @@ export function mayBeAbsentCollectionNode(
       !core.hasCodeOverride(x) &&
       (gatedCollectionArms(x) !== undefined || operand(x))
   );
-}
-
-/**
- * True when the operand `a` compiles to a call through the checking shim
- * of an engine-defined user function whose failed check gives `undefined`
- * (`failedCheckMarker`): a call on the JavaScript target with an argument
- * that `parameterCheckNeeded` must test, of a function whose declared
- * result is a collection. The call then has no value at run time when the
- * test fails, although its type is the collection type, so a consumer
- * that reads it as an array must test it first
- * (`absentCollectionOperandGuard`). A call whose arguments are all proven
- * has no shim and is not affected.
- */
-export function checkedCallMayBeAbsent(
-  engine: ComputeEngine,
-  a: Expression,
-  target: CompileTarget<Expression>
-): boolean {
-  if (target.language !== 'javascript' || !isFunction(a)) return false;
-  const h = a.operator;
-  // A block-local function (`tryCompileLocalFunctionCall`) is tested by
-  // `localCheckingCallee`, with the marker of the signature of its
-  // literal, read at the ground bounds of a generic signature as there.
-  const local = target.localFunctions?.get(h);
-  if (local !== undefined) {
-    if (!isFunction(local, 'Function')) return false;
-    const declared = local.type?.type;
-    const signature =
-      declared !== undefined && isPolymorphicType(declared)
-        ? groundSignature(declared)
-        : declared;
-    if (failedCheckMarker(signature) !== 'undefined') return false;
-    try {
-      return localParameterChecks(h, local, a.ops, target).some(
-        (t) => t.length > 0
-      );
-    } catch (e) {
-      // The call compiles to its own error (a number literal that cannot
-      // be of the declared type), which is not this guard's business.
-      if (e instanceof Error && e.name === 'CancellationError') throw e;
-      return false;
-    }
-  }
-  const literal = userFunctionLiteral(engine, h);
-  if (literal === undefined) return false;
-  if (
-    failedCheckMarker(userFunctionSignature(engine, h), literal.type.type) !==
-    'undefined'
-  )
-    return false;
-  return a.ops.some((x, i) => parameterCheckNeeded(engine, h, x, i, target));
 }
 
 /**
@@ -2492,16 +2285,14 @@ export function tryCompileLocalFunctionCall(
   // A rebound local does not fold: the literal in the scope is one of its
   // values, not necessarily the one it holds at this call.
   //
-  // A call that tests a declared parameter type at run time does not fold
-  // either: the fold applies the literal, which does not carry a type
-  // declared by a `Declare` statement, so `g(√2)` with `g` declared
-  // `(integer) -> integer` would fold to a value where the interpreter
-  // gives an error. An argument that cannot be of the declared type
-  // (`g(1.5)`) fails the compilation here.
-  const parameterChecks = localParameterChecks(h, literal, args, target);
-  const checked = parameterChecks.some((t) => t.length > 0);
+  // An argument that can be outside a declared parameter type fails the
+  // compilation here, before the fold: the fold applies the literal, which
+  // does not carry a type declared by a `Declare` statement, so `g(√2)`
+  // with `g` declared `(integer) -> integer` would fold to a value where
+  // the interpreter gives an error.
+  localParameterChecks(h, literal, args, target);
   const folded =
-    rebound === undefined && !checked
+    rebound === undefined
       ? tryConstantFold(
           literal.engine.function('Apply', [literal, ...args]),
           target,
@@ -2573,7 +2364,7 @@ export function tryCompileLocalFunctionCall(
     // `const g = (p) => h(p)`, `h(xs)` is then compiled for a list of
     // points. CE-238.
     const inlined =
-      rebound === undefined && !checked
+      rebound === undefined
         ? bodyWithArguments(h, literal, args, target)
         : undefined;
     if (inlined !== undefined) return `(${core.compile(inlined, target)})`;
@@ -2587,15 +2378,6 @@ export function tryCompileLocalFunctionCall(
     );
   }
   const at = mapped.indexOf(true);
-  // The two calls written below without the ordinary call form (the map
-  // over a list of points, and the call written with the body of the
-  // function) do not test the declared parameter types.
-  if (checked && at >= 0)
-    throw new Error(
-      `Could not compile \`${h}\`: argument ${at + 1} is a list of points, ` +
-        `and the compiled call over it does not test the declared ` +
-        `parameter types at run time.`
-    );
   if (at >= 0) {
     const reason =
       `Could not compile \`${h}\`: argument ${at + 1} is a list of points ` +
@@ -2752,13 +2534,12 @@ export function tryCompileLocalFunctionCall(
         `${reason}. The '${target.language ?? 'unknown'}' target does not ` +
           `compile the function for one point.`
       );
-    // The call applies the literal, not the run-time value of the local,
-    // and the literal does not test the declared parameter types.
-    if (rebound !== undefined || checked)
+    // The call applies the literal, not the run-time value of the local.
+    if (rebound !== undefined)
       throw new Error(
-        `${reason}. The function is assigned more than once, or a ` +
-          `declared parameter type is tested at run time, and the call of ` +
-          `the function compiled for one point does not do it.`
+        `${reason}. The function is assigned more than once, and the ` +
+          `call of the function compiled for one point applies one of its ` +
+          `values.`
       );
     // The literal is compiled at the call, not where the local is
     // defined. A binder that encloses the call can bind a name that the
@@ -2843,11 +2624,6 @@ export function tryCompileLocalFunctionCall(
         `Could not compile \`${h}\`: a tuple argument at a parameter of ` +
         `the block-local function with no declared type is bound whole, ` +
         `and the compiled function maps over any array at run time`;
-      if (checked)
-        throw new Error(
-          `${reason}. The call is written with the body of the function, ` +
-            `which does not test the declared parameter types at run time.`
-        );
       // The value of a rebound local is known only at run time, so its
       // body cannot be written at the call.
       if (rebound !== undefined)
@@ -2967,11 +2743,6 @@ export function tryCompileLocalFunctionCall(
         `Could not compile a call of the block-local function \`${h}\` ` +
           `on the Python target: ${why} The interpreter evaluates it instead.`
       );
-    if (checked)
-      throw reason(
-        `a declared parameter type is not proved by the type of its ` +
-          `argument, and the Python call does not test it at run time.`
-      );
     const scalarParams =
       signature === undefined ? true : paramsAreScalar(signature);
     const notScalar = args.findIndex((a) => {
@@ -3015,15 +2786,13 @@ export function tryCompileLocalFunctionCall(
   // value splice (see the `Function` case of `compileExpr`), so the two
   // halves of the boundary agree and the local compiles as the engine-level
   // spelling of the same function does.
-  const coerceToComplex = args.map((_a, i) => {
+  const coerceToComplex = args.map((a, i): boolean | 'real' => {
     if (target.language !== 'javascript') return false;
     const pt = signatureParamType(signature, i);
-    return pt !== undefined && isNonRealNumber(pt);
+    if (pt === undefined) return false;
+    return isNonRealNumber(pt) || realProjection(a, pt);
   });
 
-  // A declared parameter type that the static type of its argument does
-  // not prove is tested at run time (`localParameterChecks`), by a callee
-  // that tests the arguments and then calls the local.
   const local = target.var(h) ?? h;
   // A tuple argument at a parameter declared as a scalar: the interpreter
   // maps the function over the components of the tuple (`g(p)` with
@@ -3032,7 +2801,7 @@ export function tryCompileLocalFunctionCall(
   // rewrite of the call (`declaredScalarTupleCall`); the call of a local whose
   // value is known only at run time maps the local over the tuple with a
   // static map, one level deep. The other arguments must be scalars.
-  if (target.language === 'javascript' && !checked) {
+  if (target.language === 'javascript') {
     const overTuple = args.map((a, i) => {
       const pt = annotations[i];
       if (pt === undefined || !isSubtype(pt, 'number')) return false;
@@ -3052,17 +2821,7 @@ export function tryCompileLocalFunctionCall(
         .join(', ')})`;
   }
   return emitUserFunctionCall(
-    !checked
-      ? local
-      : target.language === 'interval-javascript'
-        ? intervalCheckingCallee(local, parameterChecks, target)
-        : localCheckingCallee(
-            local,
-            parameterChecks,
-            target,
-            signature,
-            literal
-          ),
+    local,
     args,
     target,
     coerceToComplex,

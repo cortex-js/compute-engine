@@ -91,10 +91,11 @@
  * (`processInput`). A `Uint8Array` of `0`/`1` is not accepted, because each
  * cell would read a number, which leaves a condition on the variable
  * undecided, and a conversion would cost a test per cell in every loop or a
- * copy of the column per slice. A boolean for a variable that the compiled
- * code reads as a number (declared with a number type, or complex) throws,
- * as `run()` refuses it, and so does any input for a variable declared
- * `string` (a batch input is never a string).
+ * copy of the column per slice. The inputs are not tested against the
+ * declared types of their variables: a boolean for a variable declared with
+ * a number type, or any input for a variable declared `string` (a batch
+ * input is never a string), gives an undefined result, as it does for
+ * `run()`.
  *
  * **Parity.** For each cell, the value is the one `run()` gives for that
  * cell's inputs (`javascript`), or the encoding of the `IntervalResult` that
@@ -143,18 +144,15 @@ export interface BroadcastBatchBody {
  * What `broadcastNumbers` reads of a `javascript` result's entry plan (the
  * `EntryPlan` of `javascript-runtime.ts`, which imports this module, so the
  * shape is restated here instead of imported): which vars-object keys the
- * code reads as complex values, which as lists, and which the host declared
- * with a number type (`scalars`, which refuse a boolean input). A positional
- * (`args`) plan belongs to a lambda result, which has no `broadcast`.
+ * code reads as complex values, which as lists, and which are declared
+ * `boolean`. A positional (`args`) plan belongs to a lambda result, which
+ * has no `broadcast`.
  */
 export type BroadcastEntryPlan =
   | {
       kind: 'vars';
       complex: readonly string[];
       lists: readonly string[];
-      scalars?: readonly string[];
-      /** The variables declared `string`, which refuse every batch input. */
-      texts?: readonly string[];
       /** The variables declared `boolean`, for which an empty array is an
        * empty column. */
       booleans?: readonly string[];
@@ -409,69 +407,6 @@ function isBooleanColumn(
 }
 
 /**
- * The message of the `TypeError` for a value that is not a string, given for
- * a binding declared `string` (`label`): `run()` throws it at entry
- * (`throwNonStringAtText` in `javascript-runtime.ts`), and `broadcast()`
- * for any input of such a binding.
- */
-export function nonStringAtTextMessage(label: string, x: unknown): string {
-  const shown =
-    typeof x === 'number' || typeof x === 'boolean' || typeof x === 'bigint'
-      ? String(x)
-      : x === null
-        ? 'null'
-        : Array.isArray(x) || ArrayBuffer.isView(x)
-          ? 'an array'
-          : `a value of type ${typeof x}`;
-  return `${label} was compiled as a string but received ${shown}. Pass a string.`;
-}
-
-/**
- * Throw when a boolean input (a scalar or a column) is given for a variable
- * that the compiled code reads as a number: one that the host declared with
- * a number type (`scalars` of the entry plan), or a complex one. `run()`
- * refuses such a value (`refuseNonNumberAtScalar` in
- * `javascript-runtime.ts`), and the batch must not compute with it: `x + 1`
- * would give `2` for `true`.
- */
-function refuseBooleanAtNumber(
-  shape: BroadcastShape,
-  entry: BroadcastEntryPlan | undefined
-): void {
-  if (entry?.kind !== 'vars') return;
-  shape.names.forEach((name, k) => {
-    const a = shape.arrays[k];
-    // A variable declared `string`: a batch input is a number, a boolean,
-    // an array or an index axis, never a string, so it is always refused,
-    // with the message of `run()`.
-    if (entry.texts?.includes(name))
-      throw new TypeError(
-        nonStringAtTextMessage(
-          `"${name}"`,
-          // An index axis is given by its length, which the message shows.
-          shape.indexes[k]
-            ? shape.grid?.[k]?.length
-            : a !== null
-              ? []
-              : shape.scalars[k]
-        )
-      );
-    const isBoolean =
-      typeof shape.scalars[k] === 'boolean' ||
-      (a !== null && !(a instanceof Float64Array));
-    if (!isBoolean) return;
-    if (entry.complex.includes(name))
-      throw new TypeError(
-        `broadcast: "${name}" was compiled as a complex number but received a boolean`
-      );
-    if (entry.scalars?.includes(name))
-      throw new TypeError(
-        `broadcast: "${name}" was compiled as a real number but received a boolean`
-      );
-  });
-}
-
-/**
  * Validate the inputs and compute the cell count. `perCell` is 1 for a
  * `javascript` input and 2 for an interval (`lo, hi` pair). `lists` are the
  * variables the compiled code reads as lists (the `lists` of a `javascript`
@@ -674,7 +609,6 @@ export function broadcastNumbers(
     listsOf(entry),
     booleansOf(entry)
   );
-  refuseBooleanAtNumber(shape, entry);
   const stride = broadcastStride(options, defaultOutputs);
   const out = outputArray(options?.out, stride * shape.count);
   broadcastNumbersRange(
@@ -788,7 +722,6 @@ export function broadcastNumbersSlice(
     slice.validated
   );
   rescanBooleanSlice(shape, slice);
-  refuseBooleanAtNumber(shape, entry);
   return broadcastNumbersRange(
     call,
     entry,
@@ -1155,7 +1088,8 @@ function broadcastNumbersRange(
   // cell; `null` for a real input.
   const complexSlots: ({ re: number; im: number } | null)[] = shape.names.map(
     (name, k) =>
-      // `refuseBooleanAtNumber` refused a boolean for a complex input.
+      // A boolean for a complex input is outside its declared type, and
+      // gives an undefined result.
       complexNames.has(name) ? { re: shape.scalars[k] as number, im: 0 } : null
   );
   const arrays = unaliasedInputs(shape.arrays, out);
@@ -1235,7 +1169,8 @@ function broadcastNumbersRange(
       if (a === null && !shape.indexes[k]) continue;
       const v = a === null ? axisIndex(shape, k, i) : a[axisIndex(shape, k, i)];
       const slot = complexSlots[k];
-      // `refuseBooleanAtNumber` refused a boolean for a complex input.
+      // A boolean for a complex input is outside its declared type, and
+      // gives an undefined result.
       if (slot !== null) slot.re = v as number;
       else vars[shape.names[k]] = v;
     }

@@ -129,59 +129,12 @@ describe('CE-579: a list-building recursion compiles to a loop', () => {
     });
   }
 
-  it('a parameter declared real is tested at each step, as the checking shim tests it', () => {
-    // `G(n) = Which(n > 5, [n], True, Join([n], G(n + 1/(n - 1))))`. From
-    // `n = 1` the next argument is `1 + 1/0`, which is `Infinity` in
-    // JavaScript, not a finite real. The loop tests the next argument with
-    // the test of the checking shim, and the step that fails it has no
-    // value: the whole call is `undefined`, the value compiled code has for
-    // a list with no value (the recursive arrow threw a `TypeError` when it
-    // spread the `NaN` of the shim).
-    const ce = new ComputeEngine();
-    ce.declare('G', '(real) -> list');
-    ce.assign(
-      'G',
-      ce.box([
-        'Function',
-        [
-          'Block',
-          [
-            'Which',
-            ['Greater', 'n', 5],
-            ['List', 'n'],
-            'True',
-            [
-              'Join',
-              ['List', 'n'],
-              ['G', ['Add', 'n', ['Divide', 1, ['Subtract', 'n', 1]]]],
-            ],
-          ],
-        ],
-        'n',
-      ] as any)
-    );
-    const ok = compile(ce.box(['G', 2]), { to: 'javascript', fallback: false });
-    const preamble = String(ok.preamble);
-    expect(preamble).toContain('_SYS.listRecursion("G"');
-    expect(preamble).toContain('Number.isFinite(_SYS.creal(_$0))');
-    const expected = [...ce.box(['G', 2]).evaluate().each()].map((x) => x.re);
-    const out = ok.run!({}) as number[];
-    expect(out).toHaveLength(expected.length);
-    out.forEach((x, i) => expect(x).toBeCloseTo(expected[i], 12));
-    const bad = compile(ce.box(['G', 1]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(bad.run!({})).toBeUndefined();
-  });
-
   it('declare (real) -> list: F(NaN) runs the body with NaN on both routes', () => {
     // A user function with one clause accepts `NaN` at a numeric parameter,
     // `real` included, and its body runs with it (`docs/ERROR-MODEL.md`, "A
     // user function accepts `NaN` at a numeric parameter — RULED
     // 2026-09-30"). The guard `n = D - 1` is never true for `NaN`, so both
-    // routes stop at the iteration limit. The checking shim of compiled
-    // code answered `NaN` without running the body.
+    // routes stop at the iteration limit.
     const ce = setup('declare (real) -> list', 5);
     ce.iterationLimit = 500;
     ce.declare('y', 'number');
@@ -245,7 +198,7 @@ describe('CE-579: a list-building recursion compiles to a loop', () => {
       return ce;
     }
 
-    it('(real) -> list with x = Infinity: no value on either route', () => {
+    it('(real) -> list with x = Infinity: the interpreter refuses it', () => {
       // The interpreter refuses `+oo` at a `real` parameter. A symbol
       // declared `real` cannot hold it; a symbol declared `number` can, and
       // the call is then an `incompatible-type` error.
@@ -257,17 +210,7 @@ describe('CE-579: a list-building recursion compiles to a loop', () => {
         fallback: false,
       });
       expect(String(r.code)).toBe('_fn_F(_.x)');
-      // The first step of the loop tests the argument and has no value.
-      expect(r.run!({ x: Infinity })).toBeUndefined();
       ce.declare('w', 'number');
-      const rw = compile(ce.box(['F', 'w']), {
-        to: 'javascript',
-        fallback: false,
-      });
-      // The checking shim at the call site fails before the loop starts. It
-      // gives `undefined`, the marker of the collection result.
-      expect(String(rw.code)).toBe('_fn_F$t(_.w)');
-      expect(rw.run!({ w: Infinity })).toBeUndefined();
       ce.assign('w', Infinity);
       expect(ce.box(['F', 'w']).evaluate().toString()).toMatch(
         /^Error\(ErrorCode\("incompatible-type", "real"/
@@ -286,7 +229,7 @@ describe('CE-579: a list-building recursion compiles to a loop', () => {
       expect(() => ce.box(['F', 'x']).evaluate()).toThrow(limitError(300));
     });
 
-    it('(integer) -> list with k = 0.5: no value on either route', () => {
+    it('(integer) -> list with k = 0.5: the interpreter refuses it', () => {
       const ce = declared('(integer) -> list');
       ce.declare('k', 'integer');
       expect(() => ce.assign('k', 0.5)).toThrow();
@@ -295,13 +238,15 @@ describe('CE-579: a list-building recursion compiles to a loop', () => {
         fallback: false,
       });
       expect(String(r.code)).toBe('_fn_F(_.k)');
-      expect(r.run!({ k: 0.5 })).toBeUndefined();
       ce.declare('w', 'number');
+      // The argument can have a value that is not an integer, and compiled
+      // code does not test it: it assumes that the value is an integer.
       const rw = compile(ce.box(['F', 'w']), {
         to: 'javascript',
         fallback: false,
       });
-      expect(rw.run!({ w: 0.5 })).toBeUndefined();
+      expect(rw.success).toBe(true);
+      expect(rw.run!({ w: 3 })).toEqual(r.run!({ k: 3 }));
       ce.assign('w', 0.5);
       expect(ce.box(['F', 'w']).evaluate().toString()).toMatch(
         /^Error\(ErrorCode\("incompatible-type", "integer"/
@@ -339,52 +284,8 @@ describe('CE-579: a list-building recursion compiles to a loop', () => {
       .toString();
     expect(direct).toMatch(/^Error\(ErrorCode\("incompatible-type", "integer"/);
     expect(ce.box(['F', 0]).evaluate().toString()).toBe(direct);
-    // Compiled code: the step at `1/2` fails the test of the checking shim
-    // and has no value, so the call is `undefined`.
-    const r = compile(ce.box(['F', 0]), { to: 'javascript', fallback: false });
-    expect(String(r.preamble)).toContain('_SYS.listRecursion("F"');
-    expect(r.run!({})).toBeUndefined();
     // NaN at the numeric parameter is accepted: `F(NaN)` runs the body.
     ce.iterationLimit = 50;
     expect(() => ce.box(['F', 'NaN']).evaluate()).toThrow(limitError(50));
-  });
-
-  it('the recursive arrow gives undefined when its recursive call fails the check', () => {
-    // `F: (integer) -> list`, `F(n) = Which(n >= 2, [n], True,
-    // Join(F(n + 1/2), [n]))`. The recursive call is the first operand of
-    // `Join`, so the loop declines and `F` compiles to the recursive arrow.
-    // The checking shim refuses `1/2` and gives `undefined`, the marker of
-    // the collection result, and the `Join` tests its operand before the
-    // spread (`absentCollectionOperandGuard`). It threw a `TypeError` when
-    // it spread the `NaN` the shim gave before. The interpreter answers the
-    // `incompatible-type` error.
-    const ce = new ComputeEngine();
-    ce.declare('F', '(integer) -> list');
-    ce.assign(
-      'F',
-      ce.box([
-        'Function',
-        [
-          'Block',
-          [
-            'Which',
-            ['GreaterEqual', 'n', 2],
-            ['List', 'n'],
-            'True',
-            ['Join', ['F', ['Add', 'n', ['Rational', 1, 2]]], ['List', 'n']],
-          ],
-        ],
-        'n',
-      ] as any)
-    );
-    expect(ce.box(['F', 0]).evaluate().toString()).toMatch(
-      /^Error\(ErrorCode\("incompatible-type", "integer"/
-    );
-    const r = compile(ce.box(['F', 0]), { to: 'javascript', fallback: false });
-    const preamble = String(r.preamble);
-    expect(preamble).not.toContain('_SYS.listRecursion');
-    expect(preamble).toContain(': undefined;');
-    expect(preamble).toContain('(_tv1 === undefined) ? undefined :');
-    expect(r.run!({})).toBeUndefined();
   });
 });

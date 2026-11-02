@@ -187,7 +187,6 @@ import { BIGINT_HELPERS } from './bigint-runtime.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
-  nonStringAtTextMessage,
   type BroadcastBatchBody,
   type BroadcastSlice,
 } from './broadcast.js';
@@ -7087,12 +7086,9 @@ export function makeLazyStreamHelpers(
     // builder.ts`) under the same cap, so a definition with no reachable base
     // case reports the iteration-limit error on both routes instead of
     // spinning. A step that gives no control record has no value: no arm of
-    // the `Which` matches (`undefined`), or the arguments fail the test of a
-    // declared parameter type (`NaN`, the value the checking shim gives for
-    // the interpreter's `incompatible-type` error). The result of the whole
-    // call is then `undefined`, the value compiled code has for a list with
-    // no value, at the first step and at any later one. The interpreter
-    // answers the error as the value of the whole call there too.
+    // the `Which` matches (`undefined`). The result of the whole call is
+    // then `undefined`, the value compiled code has for a list with no
+    // value, at the first step and at any later one.
     listRecursion: (op, args, step) => {
       const chunks: unknown[][] = [];
       let current = args;
@@ -7332,57 +7328,34 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  * each free symbol (expression route) or positional parameter (lambda route)
  * is checked against the SHAPE the compilation analyzed it as:
  *
- * - analyzed REAL: a `{re, im}` object THROWS a `TypeError` naming the symbol
- *   — the compiled code reads it as a number, and every arithmetic on it
- *   would be silently wrong (`NaN`, or `"[object Object]1"` under `+`). The
- *   one exception is the unsigned pole `~oo`, which is PROJECTED to
- *   `Infinity` instead of throwing (see `isUnsignedPole` below);
+ * The plan CONVERTS some values and tests no value against its type: the
+ * host supplies every input with a value of its declared type, and the
+ * result for a value outside that type (an array or a string for a number
+ * binding, a number for a `string` binding) is undefined
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). The
+ * conversions and refusals:
+ *
+ * - analyzed REAL: the unsigned pole `~oo` is PROJECTED to `Infinity` (see
+ *   `isUnsignedPole` below), the spelling compiled code gives a pole it
+ *   computes itself. Any other `{re, im}` object THROWS a `TypeError` that
+ *   names the binding: a real binding can have the static type `number`
+ *   (an undeclared free symbol), where a complex value is a value of its
+ *   type, and the compiled code would read it as a number;
  * - analyzed COMPLEX (a `complex`-typed symbol or annotated parameter): a
  *   plain number is LIFTED to `{re, im: 0}` — a real IS a complex, and the
  *   compiled code reads `.re`/`.im` off it;
  * - analyzed as a LIST (a binding whose declared type proves a JS array): the
- *   value passes as it is, with no copy and no read of its entries. The
- *   compiled body reads plain arrays only, so a numeric typed array
- *   (`Float64Array`, `Int32Array`, ...) THROWS a `TypeError` that names the
- *   binding (one brand check, `refuseTypedArrayEntry`): a host converts it
- *   to a plain `Array` once, on its side, not the runner on every call. A
- *   typed array nested as a row is an entry, and is not read. The entries
- *   are the host's responsibility: a `{re, im}` object or a string at an
- *   entry of a list the code reads on the real lane computes with that
- *   value, as it would in plain JavaScript. Any other value passes
- *   UNTOUCHED and the lowerings dispatch on its runtime shape: a scalar there
- *   is not an error, because the declared type is routinely wider than the
- *   value a caller binds and several lowerings project on the runtime shape.
- *   The element-wise big-operator lane is the witness — a `list`-typed
- *   summand bound to a number gives the scalar sum, not `NaN` (see
- *   `test/compute-engine/compile-elementwise-bigop.test.ts`). The plain-array
- *   carrier, and the earlier design in which the entry copied a typed array
- *   on every call (replaced by this refusal), are in
- *   `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`;
- * - declared with a collection type that the compiled code reads as a
- *   JavaScript array, and whose elements are not text (`strings`, built by
- *   `stringRefusedEntryType` in `javascript-target.ts`): a string THROWS a
- *   `TypeError` that names the binding. The engine reads a string as an
- *   indexed collection of grapheme clusters, so a bare `indexed_collection`
- *   or `collection` type admits one, but the compiled code would read it as
- *   an array of UTF-16 code units: `Length` of `"😀a"` would be 3, not 2;
- * - DECLARED with a number type by the host (`scalars`, `x: real`): an
- *   array, a boolean or a string THROWS a `TypeError` that names the binding
- *   (`refuseNonNumberAtScalar`). The compiled code reads the binding as a
- *   number, and JavaScript would convert the value silently: `x + 1` gave
- *   `"1,21"` for `[1, 2]`, `2` for `true` and `"a1"` for `"a"`;
- * - DECLARED `string` by the host (`texts`, `s: string`): any value but a
- *   string or `undefined` THROWS a `TypeError` that names the binding
- *   (`throwNonStringAtText`). Such a binding is in neither `real` nor
- *   `complex`. Without the check, `If(s = "a", 1, 2)` gave `2` for `s = 3`;
- * - anything else (a string or a boolean for a binding of another type, an
- *   array for a binding that is not declared with a number type,
- *   `undefined`) is left to today's behavior. In particular a binding
- *   declared `boolean` accepts any value: a condition tests it with
- *   `=== true` and `=== false`, so a value that is not a boolean leaves the
- *   condition undecided and the result is NaN, as the interpreter holds
- *   `When(x, 1)` unevaluated (see
- *   `test/compute-engine/ce-569-when-defects.test.ts`).
+ *   value passes as it is, with no copy and no read of its entries. A
+ *   numeric typed array and a string are values of some collection types
+ *   that the compiled code cannot read, and are refused with a `TypeError`
+ *   that names the binding (`refuseTypedArrayEntry`, `refuseStringEntry`).
+ *   The plain-array carrier is described in
+ *   `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
+ *
+ * `strings` (built by `stringRefusedEntryType` in `javascript-target.ts`)
+ * names the bindings that the compiled code reads as JavaScript arrays;
+ * `namedEntryError` reads it to name such a binding when the body fails on
+ * a value that is not an array.
  *
  * The plan has no test for an input that the caller leaves out: the host
  * supplies every input with a value of its declared type, and the result for
@@ -7417,8 +7390,6 @@ export type EntryPlan =
       lists: string[];
       strings: Map<string, string>;
       kinds?: Map<string, KindEntry>;
-      scalars?: string[];
-      texts?: string[];
       /** The symbols declared `boolean` (also in `real`); read only by
        * `broadcast()`, for which an empty array is an empty column. */
       booleans?: string[];
@@ -7435,8 +7406,6 @@ export type EntryPlan =
       lists: number[];
       strings: Map<number, string>;
       kinds?: Map<number, KindEntry>;
-      scalars?: number[];
-      texts?: number[];
       bigints?: number[];
       bigintLists?: number[];
       /** `mode: 'bigint'`: the integer parameters (also in `bigints`) that
@@ -7466,41 +7435,6 @@ export type KindEntry = {
 export function kindEntryError(label: string): TypeError {
   return new TypeError(
     `${label} is compiled as a value of its kind type, and the value given for it is not one: the entry check of the kind refused it.`
-  );
-}
-
-/**
- * Throw when the binding `key` is in `strings`, the bindings of an entry plan
- * that refuse a string. The caller has already found that the value of the
- * binding is a string, so a binding that is not a string costs no map read.
- * The value of `strings` is the label of the binding and its declared type,
- * as the diagnostic shows them.
- */
-function refuseStringEntry<K>(strings: Map<K, string>, key: K): void {
-  const label = strings.get(key);
-  if (label === undefined) return;
-  throw new TypeError(
-    `${label} is compiled as a JavaScript array, and compiled code does not accept a string for it: it would read the string as UTF-16 code units, not as characters. Pass an array, or declare the binding \`string\` to compile text.`
-  );
-}
-
-/**
- * Throw for a numeric typed array bound to a binding the compiled code reads
- * as a JavaScript array. The compiled code reads plain arrays only, and the
- * runner does not convert the value (a copy on every call cost as much as
- * the array): the host converts it once, on its side. One brand check per
- * list binding per call (`isNumericTypedArray`). `label` names the binding
- * as the diagnostic shows it.
- */
-function refuseTypedArrayEntry(label: string): never {
-  throw new TypeError(
-    `${label} is compiled as a JavaScript array, and compiled code does not accept a typed array for it: it reads plain arrays only. Convert it once with Array.from(…) and pass the plain array.`
-  );
-}
-
-function entryCheckError(binding: string): TypeError {
-  return new TypeError(
-    `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
   );
 }
 
@@ -7564,59 +7498,6 @@ function liftBigintList(binding: string, x: unknown, path = ''): unknown {
 }
 
 /**
- * Throw for an array, a boolean or a string bound to a binding of `scalars`:
- * a symbol or a parameter that the host DECLARED with a number type
- * (`x: real`), which the compiled code reads as a scalar. Without this check
- * the value reaches the arithmetic of the body, and JavaScript converts it:
- * `x + 1` gave `"1,21"` for `x = [1, 2]`, `2` for `x = true` and `"a1"` for
- * `x = "a"`. A binding whose type the engine inferred, or that has no type,
- * is not in `scalars`: the compiled code can broadcast a call over an array
- * bound to it at run time (`q(u)` with `u = [1, 2, 3]`). The caller tests
- * `typeof x === 'number'` first and runs the lookup only when the value is
- * one of these three kinds (`isNonNumberScalarValue`), so a number pays one
- * comparison. `kind` names the scalar kind in the message.
- */
-function refuseNonNumberAtScalar<K>(
-  scalars: readonly K[] | undefined,
-  key: K,
-  label: string,
-  kind: 'real' | 'complex',
-  x: unknown
-): void {
-  if (scalars === undefined || !scalars.includes(key)) return;
-  if (Array.isArray(x))
-    throw new TypeError(
-      `${label} was compiled as a ${kind} number but received an array. Declare it as a list (for example \`list<real>\`) to pass a list.`
-    );
-  throw new TypeError(
-    `${label} was compiled as a ${kind} number but received a ${typeof x}. Pass a number, or declare it \`${typeof x}\`.`
-  );
-}
-
-/** True for a value that `refuseNonNumberAtScalar` refuses at a binding
- * declared with a number type. The caller has already found that `x` is not
- * a number. */
-function isNonNumberScalarValue(x: unknown): boolean {
-  return typeof x === 'boolean' || typeof x === 'string' || Array.isArray(x);
-}
-
-/**
- * Throw for a value that is not a string bound to a binding of `texts`: a
- * symbol or a parameter that the host DECLARED `string`. Without this check
- * the compiled code compared the value with a string and answered from it:
- * with `s = 3`, `If(s = "a", 1, 2)` gave `2`, where the interpreter refuses
- * the value at assignment. `undefined` (a variable the caller left out) is
- * not refused: it is the absent value, as for every other binding. The
- * caller has already found that `x` is neither a string nor `undefined`.
- * The bindings of `texts` are not in `real`, so a number bound to another
- * binding is not tested here.
- */
-function throwNonStringAtText(label: string, x: unknown): never {
-  // The message is shared with `broadcast()` (`nonStringAtTextMessage`).
-  throw new TypeError(nonStringAtTextMessage(label, x));
-}
-
-/**
  * The error that the compiled body threw, with the bindings that may
  * explain it named, or the error unchanged.
  *
@@ -7673,6 +7554,48 @@ export function namedEntryError(
 }
 
 /**
+ * Throw when the binding `key` is in `strings`, the bindings that the
+ * compiled code reads as JavaScript arrays. A string is a value of a bare
+ * `indexed_collection` or `collection` type, but the compiled code would
+ * read it as UTF-16 code units, not as characters (`Length` of `"😀a"`
+ * would be 3, not 2), so the value is refused rather than given a wrong
+ * value. The value of `strings` is the label of the binding and its
+ * declared type.
+ */
+function refuseStringEntry<K>(strings: Map<K, string>, key: K): void {
+  const label = strings.get(key);
+  if (label === undefined) return;
+  throw new TypeError(
+    `${label} is compiled as a JavaScript array, and compiled code does not accept a string for it: it would read the string as UTF-16 code units, not as characters. Pass an array, or declare the binding \`string\` to compile text.`
+  );
+}
+
+/**
+ * Throw for a numeric typed array bound to a binding the compiled code reads
+ * as a JavaScript array. A typed array is a value of a `list` type, but the
+ * compiled code reads plain arrays only, and the runner does not convert the
+ * value (a copy on every call cost as much as the array): the host converts
+ * it once, on its side. One brand check per list binding per call
+ * (`isNumericTypedArray`).
+ */
+function refuseTypedArrayEntry(label: string): never {
+  throw new TypeError(
+    `${label} is compiled as a JavaScript array, and compiled code does not accept a typed array for it: it reads plain arrays only. Convert it once with Array.from(…) and pass the plain array.`
+  );
+}
+
+/**
+ * The error for a `{re, im}` value, other than `~oo`, bound to a binding
+ * that the compiled code reads as a real number. `binding` names the
+ * binding as the diagnostic shows it.
+ */
+function entryCheckError(binding: string): TypeError {
+  return new TypeError(
+    `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
+  );
+}
+
+/**
  * The checked arguments of a call: the arguments, or a copy in which some
  * values are converted (a number for a complex binding, `~oo`, the cells of
  * a `list<integer>` in `mode: 'bigint'`).
@@ -7692,9 +7615,13 @@ export function checkEntry(
     // gives one pole one spelling on both routes. The projection keeps the
     // magnitude and drops the direction `~oo` never had — the same trade the
     // constant-folding path makes for an embedded `~oo` literal. Every other
-    // complex value still throws: reading `3 + 4i` as a number would be
-    // silently wrong, while reading `~oo` as `Infinity` is the documented
-    // float encoding of it.
+    // `{re, im}` value THROWS at a real binding: such a binding can have the
+    // static type `number` (an undeclared free symbol, an unannotated lambda
+    // parameter in the default mode), where the complex value is a value of
+    // its type, and reading `3 + 4i` as a number would be silently wrong
+    // (`"[object Object]1"` under `+`). Any other value is passed as it
+    // is: a value outside the declared type of the binding gives an
+    // undefined result.
     // A binding of a kind type is checked by the kind's own `entry`, and by
     // no other rule.
     if (plan.kinds !== undefined)
@@ -7702,11 +7629,8 @@ export function checkEntry(
         if (!k.check(v[id])) throw kindEntryError(k.label);
     for (const id of plan.real) {
       const x = v[id];
-      // A number needs no other test: one comparison per binding.
       if (typeof x === 'number') continue;
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
-      if (isNonNumberScalarValue(x))
-        refuseNonNumberAtScalar(plan.scalars, id, `"${id}"`, 'real', x);
       if (!isComplexObject(x)) continue;
       if (!isUnsignedPole(x)) throw entryCheckError(`"${id}"`);
       lifted ??= { ...v };
@@ -7714,22 +7638,11 @@ export function checkEntry(
     }
     for (const id of plan.complex) {
       const x = v[id];
-      if (typeof x === 'number') {
-        lifted ??= { ...v };
-        lifted[id] = { re: x, im: 0 };
-        continue;
-      }
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
-      if (isNonNumberScalarValue(x))
-        refuseNonNumberAtScalar(plan.scalars, id, `"${id}"`, 'complex', x);
+      if (typeof x !== 'number') continue;
+      lifted ??= { ...v };
+      lifted[id] = { re: x, im: 0 };
     }
-    // A binding declared `string` refuses any other value but `undefined`.
-    if (plan.texts !== undefined)
-      for (const id of plan.texts) {
-        const x = v[id];
-        if (typeof x !== 'string' && x !== undefined)
-          throwNonStringAtText(`"${id}"`, x);
-      }
     // `mode: 'bigint'`: the integer inputs, and the cells of the
     // `list<integer>` inputs, which are converted in a copy.
     if (plan.bigints !== undefined)
@@ -7742,11 +7655,8 @@ export function checkEntry(
         lifted ??= { ...v };
         lifted[id] = y;
       }
-    // A list-declared binding is read as it is: one `typeof` refuses a
-    // string, one brand check refuses a typed array, and nothing else is
-    // read or converted (see the plan's description above). A scalar passes
-    // on purpose: the declared type is often wider than the value a caller
-    // binds, and the lowerings dispatch on the run-time shape.
+    // A list binding refuses a string and a typed array, which are values
+    // of some collection types that the compiled code cannot read.
     for (const id of plan.lists) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
@@ -7763,11 +7673,8 @@ export function checkEntry(
   // free-symbol route above.
   for (const i of plan.real) {
     const x = argumentsList[i];
-    // A number needs no other test: one comparison per binding.
     if (typeof x === 'number') continue;
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
-    if (isNonNumberScalarValue(x))
-      refuseNonNumberAtScalar(plan.scalars, i, `argument ${i + 1}`, 'real', x);
     if (!isComplexObject(x)) continue;
     if (!isUnsignedPole(x)) throw entryCheckError(`argument ${i + 1}`);
     lifted ??= [...argumentsList];
@@ -7775,29 +7682,11 @@ export function checkEntry(
   }
   for (const i of plan.complex) {
     const x = argumentsList[i];
-    if (typeof x === 'number') {
-      lifted ??= [...argumentsList];
-      lifted[i] = { re: x, im: 0 };
-      continue;
-    }
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
-    if (isNonNumberScalarValue(x))
-      refuseNonNumberAtScalar(
-        plan.scalars,
-        i,
-        `argument ${i + 1}`,
-        'complex',
-        x
-      );
+    if (typeof x !== 'number') continue;
+    lifted ??= [...argumentsList];
+    lifted[i] = { re: x, im: 0 };
   }
-  // The positional-parameter route applies the same `string` and list rules
-  // as the free-symbol route above.
-  if (plan.texts !== undefined)
-    for (const i of plan.texts) {
-      const x = argumentsList[i];
-      if (typeof x !== 'string' && x !== undefined)
-        throwNonStringAtText(`argument ${i + 1}`, x);
-    }
   // The `mode: 'bigint'` rules of the free-symbol route above.
   if (plan.bigints !== undefined)
     for (const i of plan.bigints) {
@@ -7843,12 +7732,6 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
     ...(plan.kinds !== undefined && plan.kinds.size > 0
       ? { kinds: [...plan.kinds.keys()] }
       : {}),
-    ...(plan.scalars !== undefined && plan.scalars.length > 0
-      ? { scalars: [...plan.scalars] }
-      : {}),
-    ...(plan.texts !== undefined && plan.texts.length > 0
-      ? { texts: [...plan.texts] }
-      : {}),
     ...(plan.kind === 'vars' &&
     plan.booleans !== undefined &&
     plan.booleans.length > 0
@@ -7883,11 +7766,6 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
     lists: [...stored.lists],
     // A plan stored without the field refuses no string.
     strings: new Map(stored.strings ?? []),
-    // A plan stored without the field refuses no array.
-    ...(stored.scalars !== undefined ? { scalars: [...stored.scalars] } : {}),
-    // A plan stored without the field refuses no value at a `string`
-    // binding.
-    ...(stored.texts !== undefined ? { texts: [...stored.texts] } : {}),
     ...(stored.booleans !== undefined
       ? { booleans: [...stored.booleans] }
       : {}),

@@ -4,10 +4,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import {
-  provenPointWidth,
-  provenScalarPointWidth,
-} from './javascript-value-facts.js';
+import { provenScalarPointWidth } from './javascript-value-facts.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
   couldBeNumericTuple,
@@ -694,10 +691,7 @@ export function compileBroadcastInnerProduct(
     { length: n },
     (_, k) => `${params[k]} * ${params[n + k]}`
   ).join(' + ');
-  const guard = values
-    .map((v) => `Array.isArray(${v}) && ${v}.length === ${n}`)
-    .join(' && ');
-  return `((${values.join(', ')}) => ${guard} ? _SYS.bcast((${params.join(', ')}) => ${sum}, ${coords.join(', ')}) : _SYS.matmul(${values.join(', ')}))(${args.map((a) => core.compile(a, target)).join(', ')})`;
+  return `((${values.join(', ')}) => _SYS.bcast((${params.join(', ')}) => ${sum}, ${coords.join(', ')}))(${args.map((a) => core.compile(a, target)).join(', ')})`;
 }
 
 /**
@@ -716,12 +710,10 @@ export function compileBroadcastInnerProduct(
  * {@link MIN_UNROLLED_WIDTH} ({@link staticCollectionWidth} — a numeric
  * tuple type or a dimensioned numeric list type), no operand of unprovable
  * run-time shape, and no complex component, since the scalar `*` and `+`
- * written here are the real lowering. As in the fan-out, a source that is
- * not an array literal of the right width is bound once and tested at run
- * time, because a declared width constrains what the ENGINE assigns and not
- * what a caller puts in `vars`; the failing shapes go to `_SYS.matmul`,
- * which answers them the way the interpreter does. Without a test, a
- * literal is read component by component from its text. An IMPURE operand
+ * written here are the real lowering. The width comes from the static
+ * type, which every value holds, a host input included, so no shape is
+ * tested at run time. A literal is read component by component from its
+ * text. An IMPURE operand
  * (a point whose coordinates draw a random number) is always bound once,
  * in operand order, never read from its text or repeated: it is evaluated
  * exactly once per call, as the interpreter evaluates it.
@@ -757,20 +749,8 @@ export function compileStaticInnerProduct(
   }
   const codes = args.map((a) => core.compile(a, target));
   const texts = codes.map((code) => hoistedListLiteralText(target, code));
-  // A point whose coordinates a user function builds from scalars is
-  // proved by `provenScalarPointWidth` (the proof that admits an impure
-  // body, read through its helper locals); `provenPointWidth` adds the
-  // constructed-list sources.
-  const needsGuard = texts.map(
-    (text, i) =>
-      arrayLiteralWidth(text) !== n &&
-      provenPointWidth(args[i], target) !== n &&
-      provenScalarPointWidth(args[i], target) !== n
-  );
-  const anyGuard = needsGuard.some((g) => g);
   const bindings: string[] = [];
   const bound: string[] = [];
-  const guarded: string[] = [];
   // With an impure operand, BOTH operands are bound once, in operand
   // order, before the sum reads them: an operand read from its literal
   // text or repeated inline would be evaluated after the bound one, and
@@ -779,16 +759,14 @@ export function compileStaticInnerProduct(
   // in order.
   const anyImpure = args.some((a) => a.isPure !== true);
   const parts: (string | string[])[] = codes.map((code, i) => {
-    if (!anyGuard && !anyImpure) {
+    if (!anyImpure) {
       const elements = arrayLiteralElements(texts[i], n);
       if (elements !== undefined) return elements;
     }
-    if (!needsGuard[i] && !anyImpure && REPEATABLE_SOURCE.test(code))
-      return code;
+    if (!anyImpure && REPEATABLE_SOURCE.test(code)) return code;
     const v = tempVar(target);
     bindings.push(v);
     bound.push(code);
-    if (needsGuard[i]) guarded.push(v);
     return v;
   });
   const read = (i: number, k: number): string => {
@@ -798,34 +776,6 @@ export function compileStaticInnerProduct(
   const terms: string[] = [];
   for (let k = 0; k < n; k++) terms.push(`${read(0, k)} * ${read(1, k)}`);
   const sum = `(${terms.join(' + ')})`;
-  if (guarded.length > 0) {
-    // The test claims RANK 1 as well as the length, because the sum below
-    // multiplies the components as scalars. A declared type constrains what
-    // the ENGINE assigns, never what a caller puts in the kernel's `vars`
-    // object: a `tuple<number, number>` input may arrive as the matrix
-    // `[[1, 2], [3, 4]]`, which has length two and passes a length test
-    // alone, and the scalar sum then answers NaN where `_SYS.matmul` — and
-    // the interpreter — answer `[5, 11]`. The first element decides the
-    // rank, which is the test `_SYS.matmul` itself applies
-    // (`Array.isArray(a?.[0])`, `javascript-target.ts`), so a shape this
-    // refuses is one the fallback still answers the way the interpreter
-    // does.
-    const test = guarded
-      .map(
-        (v) =>
-          `Array.isArray(${v}) && ${v}.length === ${n} && ` +
-          `!Array.isArray(${v}[0])`
-      )
-      .join(' && ');
-    // Every part is one source text here: a part is the element ARRAY of a
-    // literal only when no operand needs the run-time test, and this branch
-    // runs only when one does.
-    const whole = parts as string[];
-    return (
-      `((${bindings.join(', ')}) => ${test} ? ${sum} : ` +
-      `_SYS.matmul(${whole[0]}, ${whole[1]}))(${bound.join(', ')})`
-    );
-  }
   return bindings.length === 0
     ? sum
     : `((${bindings.join(', ')}) => ${sum})(${bound.join(', ')})`;

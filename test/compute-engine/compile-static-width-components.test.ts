@@ -117,19 +117,11 @@ describe('a static width is emitted component by component', () => {
   });
 
   test('a narrow reduction over a known width is folded term by term', () => {
-    // The terms sit in the THEN branch of a shape test, for the same reason
-    // the component fan-out carries one: a declared width constrains what the
-    // ENGINE may assign, not what a caller may put in the `vars` object.
     const ce = newEngine({ V: 'list<real^3>' });
     const { code, run } = compiled(ce, '\\sum(V)');
-    const then = code.slice(code.indexOf('? '), code.indexOf(' : '));
-    expect(then).toContain('0 + _tv1[0] + _tv1[1] + _tv1[2]');
-    expect(then).not.toContain('.reduce(');
-    expect(code).toBe(
-      '((_tv1) => Array.isArray(_tv1) && _tv1.length === 3 ? ' +
-        '(0 + _tv1[0] + _tv1[1] + _tv1[2]) : ' +
-        '(_tv1).reduce((_a, _b) => _a + _b, 0))(_.V)'
-    );
+    expect(code).toContain('0 + _.V[0] + _.V[1] + _.V[2]');
+    expect(code).not.toContain('.reduce(');
+    expect(code).not.toContain('Array.isArray');
     expect(run({ V: [2, 5, -1] })).toBe(6);
     expect(run({ V: [2, 5, -1] })).toBe(
       interpreted('\\sum(V)', { V: [2, 5, -1] })

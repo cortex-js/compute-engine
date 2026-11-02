@@ -679,10 +679,12 @@ export function tryCompilePointListCall(
     `${p}.map((${point}) => ${pointGuard}${go}(${point})) : ` +
     `${name}(${pointArgs.join(', ')}); })(${v})`;
   // A recursive alias whose lists can hold both points and lists
-  // (`type B = list<B> | P`): the interpreter refuses a value where one
-  // list holds a point and a list with an `incompatible-type` error.
-  // The compiled call gives `NaN` for such a value, as the compiled
-  // broadcast does for an error of the interpreter (ROADMAP CE-505).
+  // (`type B = list<B> | P`): a list that holds a point and a list is a
+  // value of the type, which the interpreter refuses with an
+  // `incompatible-type` error. The compiled call tests each list for one
+  // kind of element and gives `NaN` for such a value, as the compiled
+  // broadcast does for an error of the interpreter (ROADMAP CE-505). This
+  // test serves a value of the static type, not a value outside it.
   if (pointArgumentMayMixDepths(args[at].type.type, params[at]!)) {
     const ok = tempVar(target);
     const q = tempVar(target);

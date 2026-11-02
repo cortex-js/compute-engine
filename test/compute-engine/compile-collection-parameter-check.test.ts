@@ -1,13 +1,10 @@
 /**
- * Compiled code tests at run time an argument at a parameter declared with
- * a list or tuple type (CE-226.2). The interpreter gives an
- * `incompatible-type` error for a number at a `list<number>` parameter and
- * for a tuple of three numbers at a `tuple<number, number>` parameter; the
- * compiled call ran the body on the value. It now answers `NaN`, the value
- * compiled code has where the interpreter answers an error (as for a value
- * outside an `integer` parameter). The interpreter does not check the
- * elements (`[1.5, 2]` at `list<integer>` is accepted), and neither does the
- * test.
+ * Compiled code does not test at run time an argument at a parameter
+ * declared with a list or tuple type: a value outside the type gives an
+ * undefined result, where the interpreter gives an `incompatible-type`
+ * error. A value of the declared type gives the interpreter's value. The
+ * interpreter does not check the elements (`[1.5, 2]` at `list<integer>` is
+ * accepted), and neither does compiled code.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -45,29 +42,7 @@ function both(fn: string, literal: string, value: unknown) {
   return { interpreted, compiled: runWithAnyV(ce2, a2, value) };
 }
 
-describe('COMPILE a run-time check of a collection parameter', () => {
-  it('a number at a `list<number>` parameter', () => {
-    const r = both('function f(xs: list<number>) { 7 }', '5', 5);
-    expect(r.interpreted).toMatch(/incompatible-type/);
-    expect(r.compiled).toBeNaN();
-  });
-
-  it('a number at a `tuple<number, number>` parameter', () => {
-    const r = both('function f(p: tuple<number, number>) { 7 }', '5', 5);
-    expect(r.interpreted).toMatch(/incompatible-type/);
-    expect(r.compiled).toBeNaN();
-  });
-
-  it('a tuple of three numbers at a `tuple<number, number>` parameter', () => {
-    const r = both(
-      'function f(p: tuple<number, number>) { p[1] + 1 }',
-      '(1, 2, 3)',
-      [1, 2, 3]
-    );
-    expect(r.interpreted).toMatch(/incompatible-type/);
-    expect(r.compiled).toBeNaN();
-  });
-
+describe('COMPILE a collection parameter', () => {
   it('a list and a tuple of the right shape pass', () => {
     const list = both(
       'function f(xs: list<number>) { xs[1] + 1 }',
@@ -95,23 +70,22 @@ describe('COMPILE a run-time check of a collection parameter', () => {
     expect(r.compiled).toBe(2.5);
   });
 
-  it('an engine-level function is checked through its shim', () => {
+  it('an engine-level function called with a tuple', () => {
     const ce = new ComputeEngine();
     ce.declare('g', '(tuple<number, number>) -> number');
     ce.assign('g', ce.box(['Function', ['At', 'p', 1], 'p']));
     ce.declare('v', 'any');
     const expr = ce.box(['g', 'v']);
-    expect(runWithAnyV(ce, ['g', 'v'], 5)).toBeNaN();
     expect(runWithAnyV(ce, ['g', 'v'], [3, 4])).toBe(3);
     ce.assign('v', 5);
     expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
   });
 });
 
-// An annotated function literal applied directly is tested at run time
-// (CE-226.3). Before, only an argument whose static type cannot match was
-// refused, and `Apply((k: integer) ↦ k + 1, v)` gave 2.5 at `v = 1.5`.
-describe('COMPILE a run-time check of an annotated literal applied directly', () => {
+// An annotated function literal applied directly is not tested at run time:
+// a value outside the annotation gives an undefined result, and an argument
+// whose static type does not prove an `integer` annotation declines.
+describe('COMPILE an annotated literal applied directly', () => {
   function apply(fn: unknown, value: unknown, json: unknown) {
     const ce1 = new ComputeEngine();
     ce1.declare('v', 'any');
@@ -163,7 +137,8 @@ describe('COMPILE a run-time check of an annotated literal applied directly', ()
     // `k: integer` is a scalar parameter: the call maps over a list and
     // binds a number. A value of `any` can be either, so the shape of the
     // call is not settled, and the compilation declines (rule R3 of
-    // `docs/plans/2026-10-31-static-shape-compilation.md`).
+    // `docs/plans/2026-10-31-static-shape-compilation.md`). The argument
+    // does not prove the `integer` annotation either.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Function',
@@ -172,32 +147,21 @@ describe('COMPILE a run-time check of an annotated literal applied directly', ()
     ] as never);
     expect(() =>
       compile(expr, { to: 'javascript', fallback: false })
-    ).toThrow(/does not settle one shape/);
+    ).toThrow(/Could not compile a call of/);
     const r = compile(expr, { to: 'javascript' });
     expect(r.success).toBe(false);
-    expect(r.unsupported).toContain('v');
   });
 
-  it('a value outside an `integer` annotation', () => {
-    const r = applyTyped('real', K, 1.5, 1.5);
-    expect(r.interpreted).toMatch(/incompatible-type/);
-    expect(r.compiled).toBeNaN();
-    const ok = applyTyped('real', K, 2, 2);
+  it('an `integer` annotation', () => {
+    const ok = applyTyped('integer', K, 2, 2);
     expect(ok.interpreted).toBe('3');
     expect(ok.compiled).toBe(3);
+    // A `real` argument is not tested: compiled code assumes that it holds
+    // the `integer` annotation.
+    expect(applyTyped('real', K, 2, 2).compiled).toBe(3);
   });
 
-  it('a list maps, and each element is tested', () => {
-    const r = applyTyped('list<real>', K, [1, 2.5], ['List', 1, 2.5]);
-    expect(r.interpreted).toMatch(/^\[2,Error/);
-    expect((r.compiled as number[])[0]).toBe(2);
-    expect((r.compiled as number[])[1]).toBeNaN();
-  });
-
-  it('a tuple of the wrong length at a tuple annotation', () => {
-    const r = apply(P, [1, 2, 3], ['Tuple', 1, 2, 3]);
-    expect(r.interpreted).toMatch(/incompatible-type/);
-    expect(r.compiled).toBeNaN();
+  it('a tuple of the right length at a tuple annotation', () => {
     const ok = apply(P, [4, 5], ['Tuple', 4, 5]);
     expect(ok.interpreted).toBe('5');
     expect(ok.compiled).toBe(5);
@@ -224,5 +188,37 @@ describe('COMPILE a run-time check of an annotated literal applied directly', ()
     );
     expect(result.code).toContain('let _tv1 = 0;');
     expect(result.run!({ x: 2, n: 3 } as never)).toBe(12);
+  });
+});
+
+describe('a parameter declared broadcastable<integer>', () => {
+  // The cells of a collection argument sit at any depth, so a list or a
+  // matrix argument compiles; only a scalar argument is read against
+  // `integer`, and only one that cannot be an integer declines.
+  const ce = new ComputeEngine();
+  ce.declare('h', '(broadcastable<integer>) -> broadcastable<integer>');
+  ce.box(['Assign', 'h', ['Function', ['Add', 'n', 1], 'n']]).evaluate();
+  ce.declare('L', 'list<list<integer>>');
+  ce.declare('y', 'real');
+
+  test('a matrix argument compiles and gives the value of the interpreter', () => {
+    const result = compile(ce.box(['h', 'L']), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.run!({ L: [[1, 2], [3, 4]] })).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
+  });
+
+  test('a real argument compiles (the value is assumed to be an integer)', () => {
+    const result = compile(ce.box(['h', 'y']), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.run!({ y: 3 })).toBe(4);
   });
 });

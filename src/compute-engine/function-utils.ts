@@ -5137,6 +5137,31 @@ const FROZEN_CHAIN_SCOPES = new WeakSet<Scope>();
 const ACTIVE_FRAMES = new WeakSet<Scope>();
 
 /**
+ * The call frames of an application that received a collection argument (a
+ * list, a tuple, a range, …, not a string). A declared result of the called
+ * function is judged with the broadcast allowance only in such a frame
+ * (`callFrameReceivedCollection()`, read by the `Typed` evaluate handler):
+ * a function computed once per element of a list argument returns a list
+ * of results, while a function with no collection argument whose body
+ * builds a list breaks its declared scalar result.
+ */
+const COLLECTION_ARGUMENT_FRAMES = new WeakSet<Scope>();
+
+/**
+ * Whether the innermost function-application frame of `ce` received a
+ * collection argument (`COLLECTION_ARGUMENT_FRAMES`). `true` outside any
+ * application, where no call can say otherwise.
+ */
+export function callFrameReceivedCollection(ce: ComputeEngine): boolean {
+  const stack = ce._evalContextStack;
+  for (let i = stack.length - 1; i >= 0; i--) {
+    if (stack[i].name !== 'call') continue;
+    return COLLECTION_ARGUMENT_FRAMES.has(stack[i].lexicalScope);
+  }
+  return true;
+}
+
+/**
  * The call frames of the applications of function literals (`makeLambda`):
  * the scope that holds the parameters and the assignment locals of one
  * application, with the serial number of its creation. A frame stays in
@@ -10263,6 +10288,8 @@ function makeLambda(
     // The views that this call makes are counted: when none was made, the
     // end of the call does not walk the rebuilds of its result.
     const viewSerial = lazyViewRecordSerial();
+    if (args.some((a) => a.isCollection === true && !isString(a)))
+      COLLECTION_ARGUMENT_FRAMES.add(freshScope);
     ce.pushScope(freshScope, 'call');
     // The scope holds the values of the parameters: its pop must advance the
     // cache version (see `_bindsValues`).

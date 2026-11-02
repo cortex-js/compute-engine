@@ -71,7 +71,7 @@ describe('THE WRITTEN-OUT INNER PRODUCT FOLLOWS THE LANE OF ITS OPERANDS', () =>
       it(`${mode}, ${route} route: Dot(p, q) + 1 is written out`, () => {
         const result = js(build(engine()), mode);
         expect(result.code).not.toContain('_SYS.complexMatmul(');
-        expect(result.code).toContain('_tv1[0] * _tv2[0]');
+        expect(result.code).toContain('_.p[0] * _.q[0]');
         expect(result.run({ p: [2, 1], q: [3, 1] })).toBe(8);
       });
   }

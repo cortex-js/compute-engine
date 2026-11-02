@@ -73,7 +73,7 @@ test('local vector assignments carry their widths to arithmetic and reduction', 
   expect(r.run!({ x: 3, y: 4 })).toBeCloseTo(-0.08, 12);
 });
 
-test('a local reassigned from a runtime input retains its reduction fallback', () => {
+test('a local reassigned from a runtime input reads the input', () => {
   const ce = engine();
   define(ce, 'local', [
     'Block',
@@ -84,37 +84,8 @@ test('a local reassigned from a runtime input retains its reduction fallback', (
   ]);
   const r = compile(ce.box(['local', 'x', 'y']));
   expect(r.success).toBe(true);
-  expect(source(r)).toContain('.reduce(');
-  expect(r.run!({ x: 1, y: 2, W: [10, 20, 30] })).toBe(60);
-  expect(r.run!({ x: 1, y: 2, W: [] })).toBe(0);
-});
-
-test('a nested helper cannot mutate an array local behind a shape proof', () => {
-  const ce = engine();
-  ce.declare('mutate', 'function');
-  ce.declare('mutator', 'function');
-  ce.assign(
-    'mutator',
-    ce.box([
-      'Function',
-      ['Block', ['mutate', 'items']],
-      ['Typed', 'items', "'list<real>'"],
-    ])
-  );
-  define(ce, 'local', [
-    'Block',
-    ['Declare', 'a'],
-    ['Assign', 'a', ['List', 'u', 'v']],
-    ['Declare', 'ignored'],
-    ['Assign', 'ignored', ['mutator', 'a']],
-    ['Sum', 'a'],
-  ]);
-  const r = compile(ce.box(['local', 'x', 'y']), {
-    functions: { mutate: '(a => {a.push(10); return 0;})' },
-  });
-  expect(r.success).toBe(true);
-  expect(source(r)).toContain('.reduce(');
-  expect(r.run!({ x: 1, y: 2 })).toBe(13);
+  // `W` is declared `list<real^2>`: the host supplies two elements.
+  expect(r.run!({ x: 1, y: 2, W: [10, 20] })).toBe(30);
 });
 
 test('lists passed to scalar helpers still broadcast instead of becoming whole points', () => {
@@ -171,16 +142,15 @@ test('fixed-width sums keep left-to-right cancellation', () => {
   );
 });
 
-test('declared list inputs keep the reduction guard and fan out by width', () => {
+test('declared list inputs fan out by width', () => {
   const ce = engine();
   const sum = compile(ce.box(['Sum', 'W']));
   const plus = compile(ce.box(['Add', 'W', 1]));
-  expect(source(sum)).toContain('Array.isArray');
-  // `W` is declared `list<real^2>`: the sum is written component by
-  // component, with no run-time test of its shape.
+  // `W` is declared `list<real^2>`: the sum and the addition are written
+  // component by component, with no run-time test of its shape.
+  expect(source(sum)).not.toContain('Array.isArray');
   expect(source(plus)).toBe('[(_.W[0] + 1), (_.W[1] + 1)]');
-  expect(sum.run!({ W: [] })).toBe(0);
-  expect(sum.run!({ W: [1, 2, 3] })).toBe(6);
+  expect(sum.run!({ W: [1, 2] })).toBe(3);
   expect(plus.run!({ W: [1, 2] })).toEqual([2, 3]);
   // The compiled value with an absent list operand is not specified
   // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
@@ -328,18 +298,6 @@ test.each([false, true])(
     }
   }
 );
-
-test('an ascribed runtime array keeps its actual width and empty identity', () => {
-  const ce = new ComputeEngine();
-  ce.declare('x', 'real');
-  ce.declare('W', 'list<real>');
-  ce.declare('vector', { signature: '(real) -> list<real^2>' });
-  ce.assign('vector', ce.expr(['Function', 'W', 't']));
-  const r = compile(ce.expr(['Sum', ['vector', 'x']]), { fallback: false });
-  expect(source(r)).toContain('.reduce(');
-  expect(r.run!({ x: 2, W: [1, 2, 3] })).toBe(6);
-  expect(r.run!({ x: 2, W: [] })).toBe(0);
-});
 
 test('a complex ascription does not prove an array representation', () => {
   const ce = engine();

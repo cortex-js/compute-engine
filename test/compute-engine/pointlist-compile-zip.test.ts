@@ -282,20 +282,6 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
     );
   });
 
-  it('a source that is not an array at run time throws a loud RangeError', () => {
-    // A string (or any array-like) has a `.length`, so `Math.min` alone would
-    // zip it into garbage: the contract breach must fail fast instead.
-    const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', -6, 'n']), {
-      vars: { n: '"abc"' },
-    } as any);
-    expect(r.success).toBe(true);
-    expect(() => (r.run as (s: any) => unknown)({})).toThrow(RangeError);
-    expect(() => (r.run as (s: any) => unknown)({})).toThrow(
-      /PointList: source component 2 is not an array at run time/
-    );
-  });
-
   it('a union that cannot be dispatched falls back to the interpreter with { fallback: true }', () => {
     // `lt` is a list of two numbers or a point of two numbers: the same array
     // at run time, so the compilation declines and the fallback runs the
@@ -1032,7 +1018,7 @@ describe('PointList — CSE now reaches a point-list-bearing artifact', () => {
     // is engine-authored emission — the same trust class as the built-in
     // TABLE mappings, which were never under-mapped. G1 (`isPure`) still
     // excludes impure heads. See the design doc §5.2 (2026-08-01).
-    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*PointList:/);
+    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[^;]*;[\s\S]*new Array\(/);
 
     // One zip loop emitted instead of three.
     expect(on.code.split('new Array(').length - 1).toBe(1);
@@ -1124,14 +1110,12 @@ describe('PointList zip — constructed source widths', () => {
     expect(r.run!({ k: 1 })).toEqual([]);
   });
 
-  it('keeps runtime validation and actual lengths for declared fixed-width inputs', () => {
+  it('keeps actual lengths for declared fixed-width inputs', () => {
     const ce = zipEngine();
     ce.declare('fixed', 'list<real^3>');
     const r = compile(ce.expr(['PointList', ['List', 'k', 2, 3], 'fixed']), {
       fallback: false,
     });
-    expect(r.code?.match(/source component/g)).toHaveLength(1);
-    expect(r.code).toContain('source component 2');
     expect(r.code).toContain('Math.min');
     expect(r.run!({ k: 1, fixed: [10] })).toEqual([[1, 10]]);
     expect(r.run!({ k: 1, fixed: [10, 20, 30, 40] })).toEqual([
@@ -1140,10 +1124,6 @@ describe('PointList zip — constructed source widths', () => {
       [3, 30],
     ]);
     expect(r.run!({ k: 1, fixed: [] })).toEqual([]);
-    for (const fixed of [null, 3, { length: 3 }])
-      expect(() => r.run!({ k: 1, fixed })).toThrow(
-        /source component 2 is not an array/
-      );
     // A string is refused at entry, before the body reads it
     // (`compile-entry-string-refusal.test.ts`).
     expect(() => r.run!({ k: 1, fixed: 'abc' })).toThrow(

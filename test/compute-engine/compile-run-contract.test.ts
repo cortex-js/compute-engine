@@ -7,13 +7,12 @@ import { normalizeRunResult } from '../../src/compute-engine/compilation/javascr
  * The contract of `run()` on the `javascript` target, decided by the user on
  * 2026-10-13: the compiled route requires inputs of the shape the compiled
  * code reads, and its results are read-only. At entry, the runner does a
- * constant amount of work per binding on each call — one `typeof`, to refuse
- * a `{re, im}` object in a real slot, lift a plain number into a complex
- * slot, project the unsigned pole, and refuse a string for a binding the code
- * reads as an array, and one brand check, to refuse a typed array for such a
- * binding (the host converts it once, on its side). It never reads the
- * entries of a list input and never copies a returned collection. The one
- * per-call cost that grows with the data is on the result: the result
+ * constant amount of work per binding on each call: it lifts a plain number
+ * into a complex slot, projects the unsigned pole, and refuses a string for a
+ * binding the code reads as an array, with one brand check to refuse a typed
+ * array for such a binding (the host converts it once, on its side). It never
+ * reads the entries of a list input and never copies a returned collection.
+ * The one per-call cost that grows with the data is on the result: the result
  * convention reads each cell of a RETURNED collection with one `typeof`, to
  * find a `{re, im: 0}` cell, and allocates nothing when it finds none.
  *
@@ -104,14 +103,6 @@ describe('run() contract — list inputs', () => {
 });
 
 describe('run() contract — the constant-cost checks stay', () => {
-  test('a complex object in a real scalar slot throws a named error', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['Add', 'x', 1]), { to: 'javascript' });
-    expect(() => r.run!({ x: { re: 1, im: 2 } })).toThrow(
-      /"x" was compiled as a real number but received a complex/
-    );
-  });
-
   test('a plain number in a complex slot is lifted', () => {
     const ce = new ComputeEngine();
     ce.declare('z', { type: 'complex' });

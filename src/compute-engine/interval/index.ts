@@ -27,7 +27,6 @@ import {
   getValue as _getValue,
   unwrap as _unwrap,
   unwrapOrPropagate as _unwrapOrPropagate,
-  checkedCall as _checkedCall,
   enclose as _enclose,
   stripEnclosure as _stripEnclosure,
   finiteOperand as _finiteOperand,
@@ -170,7 +169,6 @@ export {
   getValue,
   unwrap,
   unwrapOrPropagate,
-  checkedCall,
   enclose,
   stripEnclosure,
   finiteOperand,
@@ -336,9 +334,6 @@ export const IntervalArithmetic = {
   getValue: _getValue,
   unwrap: _unwrap,
   unwrapOrPropagate: _unwrapOrPropagate,
-  // The call of a user function whose declared parameter types are tested
-  // at run time (`checkedCall`, `util.ts`).
-  checkedCall: _checkedCall,
   // The value of a result as the `Enclosure` value kind reads it: the
   // compiled code of an expression with an enclosure maps each result of the
   // library through these (`enclose`, `stripEnclosure`, `finiteOperand`,

@@ -146,15 +146,11 @@ describe('AN UNDECLARED COLLECTION OPERAND IS READ AS REAL', () => {
 
 // A collection read on the real lane is passed to the compiled code as it
 // is: the runner does not read its entries and does not copy a typed array
-// into a plain array (a typed array bound to the collection itself is
-// refused; a typed-array row is an entry, and is not read). Until the user's
-// decision of 2026-10-13 the runner walked every entry on each call and threw
-// a diagnostic that named the binding and the complex or non-numeric entry;
-// the walk was removed because its cost grew with the data (Tycho ledger row
-// 371). The caller now supplies plain arrays with real entries, or declares
-// the entries `complex`. The checks that stay are constant per binding; the
-// one tested here is that a `{re, im}` object bound to a real SCALAR binding
-// throws.
+// into a plain array. Until the user's decision of 2026-10-13 the runner
+// walked every entry on each call and threw a diagnostic that named the
+// binding and the complex or non-numeric entry; the walk was removed because
+// its cost grew with the data (Tycho ledger row 371). The caller now supplies
+// plain arrays with real entries, or declares the entries `complex`.
 describe('A COLLECTION READ ON THE REAL LANE IS NOT CHECKED ENTRY BY ENTRY', () => {
   const COMPLEX_M = [
     [2, 1],
@@ -301,25 +297,5 @@ describe('A COLLECTION READ ON THE REAL LANE IS NOT CHECKED ENTRY BY ENTRY', () 
       }).not.toThrow();
       expect(value).not.toBe(-2);
     }
-  });
-
-  it('a complex value bound to a real scalar is refused; entryChecks: false turns that off', () => {
-    // The check that stays costs one `typeof` per binding: a `{re, im}`
-    // object bound to a binding read as a real scalar throws.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    expect(() => js(ce.parse('x + 1')).run({ x: { re: 0, im: 1 } })).toThrow(
-      /"x" was compiled as a real number but received a complex \{re, im\} value/
-    );
-    const result = compile(ce.parse('x + 1'), {
-      to: 'javascript',
-      fallback: false,
-      entryChecks: false,
-    } as any) as any;
-    let value: any;
-    expect(() => {
-      value = result.run({ x: { re: 0, im: 1 } });
-    }).not.toThrow();
-    expect(typeof value).not.toBe('number');
   });
 });
