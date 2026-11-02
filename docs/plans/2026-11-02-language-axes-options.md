@@ -1,6 +1,7 @@
 # The undecided axes: options for the user
 
-**Status:** options, 2026-11-02, for the decisions of step 2 of
+**Status:** decided, 2026-11-02: every row of the decision table in §8 is
+filled in. Written as options, 2026-11-02, for the decisions of step 2 of
 `docs/plans/2026-11-02-compiler-contraction-plan.md`. One page per axis.
 Each page states what the language does today, what Tycho uses (the census,
 `docs/plans/2026-11-01-language-axes-survey/census.md`: counts are real
@@ -36,14 +37,41 @@ match (46 states with a list operand) and the out-of-range accessor.
 **Option A, recommended: a result only, never a declared type.** `missing`
 cannot be written in a declared type of an input, a parameter, a local or an
 element; a declaration that names it is a static error. `Missing` is
-produced only by a selection with no match, an accessor out of range and an
-input left out, and its position-preserving value follows the domain: `NaN`
-for a number, a point with `NaN` coordinates for a point (the rule of
+produced only by a selection with no match, an accessor out of range, and
+the written symbol, and its position-preserving value follows the domain:
+`NaN` for a number, a point with `NaN` coordinates for a point (the rule of
 survey §6.3 item 3, extended from selection cells to accessors), `Missing`
-for anything else. The readers stay (`IsMissing`, `Coalesce`, a branch). Any
-other operator over `Missing` gives `Missing` in the interpreter, and a
-comparison gives `False` (page 3); compiled code keeps option (a). `Undefined`
-is removed as a spelling; `Missing` is the one symbol.
+for anything else. (An input the host leaves out is not a producer: under
+the host rule of CE-712.3 its result is unspecified.) The readers stay
+(`IsMissing`, `Coalesce`, a branch). Any other operator over `Missing` gives
+`Missing` in the interpreter, and a comparison gives `False` (page 3);
+compiled code keeps option (a). `Undefined` is removed as a spelling;
+`Missing` is the one symbol.
+
+*Typing.* `Missing` keeps the type `missing`, a marker type below `unknown`
+and `any` and disjoint from `value` and `expression`, as `error` and
+`nothing` are. It is handled in signatures as `error` is: the declared
+result type describes the successful values and the marker is implicit
+(the error model's rule of 2026-09-01: `| nan` or `| missing` is in a
+result type only where the author declares a partiality or the operands
+prove it). So `At` is `(indexed_collection<T>, integer+) -> T`, `First` and
+`Last` are `(indexed_collection<T>) -> T`, `If(c, e)` with no else is
+`(boolean, T) -> T`, and their run-time value out of range or with no match
+(`NaN`, a `NaN` point, `Missing`) sits outside the declared type, as `NaN`
+sits outside `real` today. `IsMissing` is `(any) -> boolean` and reads all
+three; `Coalesce` is `(any, T) -> T`. A constructed value can hold the
+marker, `Map(i ↦ At(names, i), [1, 99])` is `["a", Missing]`, and inference
+gives it the type `list<string | missing>`, which can be inferred but not
+declared, like a type with an `error` arm. The rule is about signatures and
+declarations, not about the type of a value: a value that holds the marker
+does not match the declared type (`matches` stays strict, as it is for an
+`Error` value); a site that must accept "a value of the type, or an absent
+value" makes a marker-tolerant check of its own (decided with the 3.1
+implementer, 2026-11-02; the `ce.assign` of an evaluated `Missing` into a
+declared non-numeric type is the likely site, settled when it arises). The
+difference from `error` is propagation only: `Missing` is a value that
+readers test and accessors preserve by position, and any other operator
+absorbs it, where an `Error` invalidates the tree above it.
 
 | Input                                                  | Today                                | Option A                                   |
 | ------------------------------------------------------ | ------------------------------------ | ------------------------------------------ |
@@ -95,11 +123,18 @@ domain, `Nothing` only as the value of an empty block.** `Indeterminate` is
 removed: the exact route answers `NaN` for a form with no value, as `.N()`
 and every compiled target already do; exact propagation of the marker
 (`Mean([1, Indeterminate])`) is lost, and `Max(1, 0/0)` is `NaN`. `Nothing`
-remains the value of an empty block or a statement with no value, and
-nothing else: it is never a collection element, a callback result or a
-coordinate, so the boundary policy (views, `Map` bypass, `Filter` drop, the
-aggregates' skip, the covariance row skip) is removed, and a callback that
-returns `Nothing` is a static error. `Error` and `NaN` stay as they are.
+remains the value of an empty block or a statement with no value, and it
+loses its erasure policy: it is kept as an element wherever it appears,
+with no splice at construction, no `Map` bypass, no `Filter` drop, no
+aggregate skip, no covariance row skip and no view policy, and no static
+error either (no rule is less code than a rule). The TYPE `nothing` is
+untouched: a `To` action keeps it, and a tuple of `To` or a piecewise with
+`To` arms stays as it is (Tycho's 4 Desmos rows typed `nothing` are such
+action rows, run by Tycho's interpreter path). The parser outputs that
+produce `Nothing` today, decided with Tycho on 2026-11-02: an empty slot
+`(3,,4)` is a parse error; a trailing comma in a piecewise `\{c: v,\}`
+parses as `If(c, v)`, as with no default; a big operator with no index
+keeps its internal form. `Error` and `NaN` stay as they are.
 
 | Input                              | Today                               | Option A                |
 | ---------------------------------- | ----------------------------------- | ----------------------- |
@@ -113,6 +148,23 @@ omission checks in `Map`, `Filter`, the statistics and the raw views; in the
 compiler the refusals "when source element types admit omission" and the
 omission tests of callback results. Mostly an interpreter and documentation
 removal; the compiler gain is the omission checks only.
+
+*`Indeterminate`, the user's view of 2026-11-02 ("Option A could work").*
+It came from GitHub issue #355 (enumeratio, 2026-09-28): a host that
+cross-checks against a Wolfram kernel wanted an exact indeterminate form to
+differ from a float failure, at low priority; the reporter closed by saying
+they map both values to Wolfram's `Indeterminate` anyway. The design chose
+a second marked `NaN` literal with `isExact` false and a float rule, threaded
+through every exact producer by hand: 487 occurrences in 74 source files
+(the arithmetic library, multiplication and division, power, the
+statistics, the type guards, the boxed number, the Epsil parser), an
+861-line design, a forwarding rule in the folds and a final map under
+`.N()`. Under option A, `Indeterminate` stays an input spelling only: the
+MathJSON symbol, `\operatorname{Indeterminate}` and the Epsil name parse to
+`NaN`, so no document breaks, and the serializer writes `NaN`. Issue #355
+gets a comment at the release that says the two values merged back and
+why. An exactness bit on the one `NaN` was considered and is not taken: it
+is what the design rejected, because an exact value keeps forms inert.
 
 **Option B: keep `Indeterminate`, narrow `Nothing` as in A.** Keeps the
 exact-route distinction for a consumer that needs it (none known).
@@ -139,7 +191,10 @@ by survey §6.3).
 order) gives `False`, in the interpreter and in every compiled target. A
 connective over booleans is two-valued. `Not(x < 1)` with `x` absent is
 `True`, as IEEE and Desmos give. The element-wise form is a list of
-booleans.
+booleans. Measured live in Desmos by Tycho on 2026-11-02: `\{u<1:5,7\}` is
+7 when `u` is undefined (`0/0` or `[1,2][5]`), `\{u<1:5\}` is undefined,
+`\{L<2:5,7\}` with `L=[1,0/0,3]` is `[5,7,7]`, and `5\{u<1\}` is undefined:
+the undecided comparison takes the else branch, as option A gives.
 
 | Input                          | Today                | Option A |
 | ------------------------------ | -------------------- | -------- |
@@ -175,30 +230,127 @@ lowering, and declines for the rest.
 straight-line order; assignment in a branch, read before assignment, any
 loop, a loop whose value is used, code in `vars`: 0 / 0.
 
-**This page narrows compiled code only.** The interpreter keeps Epsil as it
-is: loops, reassignment and effects are the language. The question is which
-programs compile.
+**Why reassignment is costly today: five assumptions.** Reassigning a
+local is not what costs; the emitted `let x = v; if (c) x = w;` is what
+every target does natively. The cost is in five assumptions of the current
+model, each of which forces an analysis (read from `compile-locals.ts`,
+`compile-blocks.ts`, `compiler-core.ts` and `compile-cse.ts` on
+2026-11-02):
 
-**Option A, recommended: compiled code accepts straight-line locals.** A
-block compiles when every local is declared with its value, or assigned
-exactly once, at the block's own level, before any read, and never inside a
-branch or a loop body; `Sum`, `Product`, `Map` and `Fold` bodies compile
-when they are pure; a `Loop` or `While` compiles only as a statement whose
-value is not used; a `vars` entry is a value read once at entry, never code
-with an effect; a function reassigned in a block declines. Everything else
-declines.
+1. **A local can exist without a value.** `Declare(n, integer)` has no
+   value, and a bare first `Assign` makes an implicit `Declare` at the top
+   of the block (`withImplicitLocalDeclares`), also without a value. The
+   interpreter answers a read of such a local with `read-before-declaration`
+   in a function body and keeps it symbolic at top level; no target has that
+   value (JavaScript reads `undefined`, Python the previous pass of a loop,
+   WGSL the zero of a `var`). So the compiler proves, for every read, that
+   the local is assigned on every path before it: `classifyLocalReads`
+   walks `If`, `Which`, `And`, `Or`, loops with `Break` and `Continue`,
+   function literals and operand order, with three classes of read; it was
+   rebuilt three times (1efbbe884, 17ba3b407, 15fc32706) and has a Python
+   `_ce_unset` marker beside it.
+2. **A local's type and shape can change across assignments.** The sources
+   of a local's complexness are "an explicit type, a `Declare` value, or the
+   FIRST `Assign` right side; a local already known complex is never
+   demoted", kept in `_localComplex` and `_localVector` frames that are
+   pushed and popped around blocks, loop bodies and function literals, with
+   owner and shadowing rules (`withLocalShapeFrame`). R1 to R6 add that a
+   local assigned values of two shapes declines.
+3. **An assignment can sit inside an expression.** `Assign(t, Assign(u, v))`
+   is split (`splitChainedAssignments`), assignments nested in operands are
+   collected (`nestedAssignmentsTo`), and the read analysis has a rule for
+   "the operands of any other operator, whose order of evaluation is not
+   known".
+4. **A block can write a symbol outside the compiled expression.** `c := n +
+   1` with `c` declared in the engine compiles to a write of the vars
+   object or of a local copy of the input (`chainedAmbientWrite`,
+   `inputWrites`, `inputLocals`), and a shader cannot write a uniform.
+5. **A block and a loop have a value.** A `Block` in operand position is
+   lowered to a value (a `return` of its last statement or the target's
+   block hook), and a `Loop` whose value is used needs a result variable and
+   a proof that the body runs at least once (`loopRunsOnce`).
 
-| Input                                                       | Today               | Option A |
-| ----------------------------------------------------------- | ------------------- | -------- |
-| `Block(Declare(a, 1), Assign(b, a + 1), b)`                 | compiles            | compiles |
-| `Block(Declare(a), If(c, Assign(a, 1)), a)`                 | run-time check      | declines |
-| `Sum(Block(Assign(j, j + 1), j), Limits(j, 1, n))`          | declines            | declines |
-| `vars: {W: 'nextValue()'}` read twice in the body            | the effect runs once | declines |
+Two more costs are decided elsewhere: caller code in `vars` as an effect
+(`reachesCallerCode`, about 600 lines; the user agrees it goes) and
+function-valued locals (`bindsLocalFunctions`,
+`withDefineFunctionDeclares`, `refuseEffectContractViolations`; page 5
+option B declines them).
 
-Removes: the definite-assignment analysis and the read-before-assignment
-check (`compile-locals.ts` 1,238, most of it), the effects contract and
-`reachesCallerCode` (about 600 lines), the loop-value lowering of
-`compile-loops.ts`, the Python `_ce_unset` machinery.
+**Option A′, recommended: reassignment stays, the five assumptions go.**
+In a compiled block:
+
+- a local is declared with a value: `Declare(x, type, v)`, or a first
+  `Assign(x, v)` at the block's own level, which is its declaration; a
+  `Declare` without a value, or a first assignment inside a branch or a loop
+  body, is a static error ("declare `x` with a value before the branch");
+  `Declare(x)` followed by `Assign(x, v)` is not accepted as a pair (decided
+  with Tycho on 2026-11-02: the `where` clause and the `;` parse emit the
+  three-operand `Declare(x, "unknown", v)`, the type slot holding the
+  inference marker, since the second operand of `Declare` is a type;
+  Tycho changes its two builders that emit the pair, and its
+  `Block(Assign(a, 1), b)` stays valid as a first assignment);
+- a local can be assigned again anywhere after that, in a branch, a loop
+  body or a nested block, with a value whose static type is a subtype of
+  the local's type (the declared type, or the static type of the first
+  value); another type is a static error;
+- an assignment is a statement of a block, never an operand; `a := b := v`
+  is two statements;
+- a block never writes a symbol it does not declare, except an enclosing
+  compiled block's local; a write to an engine symbol declines;
+- a `Block` with an assignment is a statement or the whole body of a
+  function or of the compiled expression; a `Loop` or `While` is a
+  statement with no value;
+- a `vars` entry is a value read once at entry.
+
+| Input                                                         | Today                  | Option A′                                  |
+| ------------------------------------------------------------- | ---------------------- | ------------------------------------------ |
+| `Block(Declare(a, 1), Assign(b, a + 1), b)`                   | compiles               | compiles                                   |
+| `Block(Assign(s, 0), Loop(Assign(s, s + f(i)), i ∈ 1..n), s)` | compiles with analysis | compiles, no analysis                      |
+| `Block(Assign(a, 1), If(c, Assign(a, 2)), a)`                 | compiles with analysis | compiles, no analysis                      |
+| `Block(Declare(a), If(c, Assign(a, 1)), a)`                   | run-time check         | static error: `a` has no value             |
+| `Block(Assign(a, 1), Assign(a, "x"), a)`                      | declines (two shapes)  | static error: `"x"` is not a `real`        |
+| `f(a := 2) + a`                                               | analysis of the order  | static error: an assignment is a statement |
+| `c := n + 1` with `c` an engine symbol                        | writes the vars object | declines                                   |
+| `y := Loop(…)`                                                | result variable, proof | static error: a loop has no value          |
+| `vars: {W: 'nextValue()'}` read twice                         | the effect runs once   | declines                                   |
+
+Removes: `classifyLocalReads`, `assertLocalsAssignedBeforeRead`,
+`localReadWithNoWrite`, `localReadOnSomePaths`, `loopRunsOnce`, the Python
+`_ce_unset` marker (assumption 1); the `_localComplex` and `_localVector`
+frames and `withLocalShapeFrame`, replaced by the static type of the symbol
+(assumption 2; the complex half also follows from page 6);
+`splitChainedAssignments`, `nestedAssignmentsTo` and the operand-order rule
+(assumption 3); `chainedAmbientWrite`, `inputWrites`, `inputLocals` and the
+vars-object write (assumption 4); the loop-value lowering and the
+block-as-value lowering outside a body (assumption 5); `reachesCallerCode`
+and the effects contract; the function-local code (page 5). Keeps:
+`withImplicitLocalDeclares` in a reduced form (the first assignment is the
+declaration), `assertNoUseBeforeDeclare`, the reserved-name spelling
+(`spellReservedLocals`, cheap and needed), `compileBlock` and the statement
+dispatchers. The interpreter keeps every form; the rules above apply to
+compiled code only, except where the user also adopts them for the
+language (below).
+
+**For the language too, decided by the user on 2026-11-02.** Assumptions 1
+and 3 are also what give the interpreter its `read-before-declaration`
+channel and its symbolic unset read. Epsil adopts the two rules: a
+declaration has a value (`let x: integer` with no value is a static error;
+a first assignment at the block's own level is the declaration), and an
+assignment is a statement of a block, never an operand (`a := b := v` is two
+statements; `f(a := 2)` is a static error). The interpreter loses the
+`read-before-declaration` channel and the symbolic unset read, and the
+interpreter and compiled code agree by construction. The Epsil documents
+(`src/epsil/docs/`, which the site copies) and `docs/ERROR-MODEL.md` change
+with the implementation; the parser rejects the two forms at parse time.
+
+To check in the census: an `Assign` whose target is not declared in its
+block (assumption 4, Tycho's 44 documents with `Assign`), since the
+census did not count it.
+
+**Option A: straight-line locals only.** No reassignment at all; a block
+compiles when every local is assigned exactly once, at the block's own
+level, before any read. Removes the same code as A′ and nothing more; it
+only declines more programs (every accumulator, counter and swap).
 
 **Option B: keep today's analysis.** Nothing removed; the three rebuilds
 stay.
@@ -221,8 +373,12 @@ function); `Sort` with a callback, `Iterate`, `Pipe`, `Fold`: 0 / 0;
 currying, partial application, defaults, a function returned: 0 / 0; a
 function passed as an argument to a document function: 1 / 3.
 
-**This page narrows compiled code only.** The interpreter keeps first-class
-functions.
+**This page narrows compiled code, with one change to the interpreter.**
+The interpreter keeps first-class functions: lambdas, closures, currying,
+partial application, function values. The one interpreter change is in the
+defaults, below: a default fills an argument the call leaves out, at
+canonicalization, and no longer an argument whose value is absent at
+evaluation.
 
 **Option A, recommended: compiled code calls what it can see.** A call
 compiles when the callee is a defined function, a declared function with a
@@ -248,48 +404,145 @@ Removes: `compile-callbacks.ts` 2,316 (most), the default fill of
 user of the bigint mode is not known to use any of these; confirm before
 step 4.
 
-**Option B: A, but keep parameter defaults.** Keeps the R6 fill (about 570
-lines net) for Epsil programs that compile with defaults.
+**Option B, decided by the user on 2026-11-02: A, but keep parameter
+defaults**, because Epsil programs use them (and GitHub issue #490 asked for
+them in compiled code: a `corpus` witness).
 
-**Option C: keep today's support.**
+**How the defaults are implemented today, and what simplifies them.** Two
+mechanisms exist, both in `compile-parameter-defaults.ts` (337 lines) and
+their callers:
 
-**No decision:** C.
+1. **Static completion** (`completedLiteralArguments`, commit 4d6479dee,
+   2026-10-31): a call that leaves arguments out is completed at compile
+   time with the default operands, and compiled as a full call. It is one
+   function, it has no run-time cost, and every target uses it, the shaders
+   and interval-js included.
+2. **The run-time absent fill** (R6, commit f9c63f9c1, 2026-11-01, +925
+   −355 lines, four review rounds): each argument at a defaulted position is
+   wrapped in the target's `Coalesce` test, so that an argument that is
+   absent when the call runs (`f(At(L, 100))`) takes the default. The wrap
+   happens at function entry, in the callback wrappers of `Map` and the
+   like (`defaultFillingWrapper`), in function literals, and per cell of a
+   broadcast call; interval-js declines a supplied number at a defaulted
+   position; a default that is a symbol is read at the call site
+   (`callSiteDefault`).
+
+The simplification is to keep mechanism 1 and remove mechanism 2: a default
+fills an argument that the call leaves out, and nothing else. An absent
+value supplied at a defaulted position is passed through as the value. This
+reverses the "or absent" half of R6, a user decision of 2026-11-01; the user
+confirmed the reversal on 2026-11-02, for the interpreter as well as for
+compiled code: the interpreter fills a default at canonicalization, for an
+argument the call leaves out, and no longer at evaluation for an argument
+whose value is absent (`f(At(L, 100))` passes the absent value to `f`). The
+documents that state R6 (`docs/COMPILATION-MODEL.md`, `docs/ERROR-MODEL.md`,
+`src/epsil/docs/types.md`, the simplification plan's §5) change with the
+implementation. Under page 1 option A the case that R6
+answered disappears: `Map((k: real | missing = 2) => Coalesce(k, 0), L)`
+with `L` holding `Missing` cannot be declared, and a `NaN` at a `real`
+parameter is a value outside its type, so its result is unspecified. With
+the static completion alone, no target restriction is needed: the shaders
+and interval-js already complete a call at compile time, so reducing the
+support to JavaScript and Python buys nothing. Two constraints make it
+smaller still: a default is a constant (a number, a boolean, a string, or
+an expression with no free symbol), so no `callSiteDefault` scoping rule; a
+literal with a rest parameter has no defaults.
+
+| Input                                                     | Today (R6)                             | Simplified                              |
+| --------------------------------------------------------- | -------------------------------------- | --------------------------------------- |
+| `g = (k: real = 2) ↦ k + 1`, `g()`                        | `3`, completed at compile time         | `3`, unchanged                          |
+| `g(At(L, 100))` with `L: list<real>`                      | `3` (the `NaN` takes the default)      | `NaN + 1`, unspecified (outside `real`) |
+| `g(x)` with `x: real` supplied as `NaN` by the host       | `3`                                    | unspecified                             |
+| `Map((k = 2) ↦ k * 2, [1, 2])`                            | `[2, 4]` through a filling wrapper     | `[2, 4]`, the literal takes one argument |
+| `(k = n) ↦ k` with `n` a symbol                           | `n` read at the call site              | declines (the default is not constant)  |
+| a defaulted call on GLSL or interval-js                   | completed; interval declines a `NaN`   | completed, no decline                   |
+
+Removes: `absentFilledArguments`, `literalDefaultFills`,
+`defaultFillingWrapper`, `targetCoalesce`, `jsIsAbsent`,
+`mayBeAbsentAtRunTime`, `argumentMayBeAbsent`,
+`declineIntervalAbsentDefault`, `callSiteDefault`, the callback wrappers of
+`compile-callbacks.ts` that fill, the per-cell fill of broadcast calls, and
+the interpreter's fill at evaluation (the fill at canonicalization stays).
+Keeps: `literalHasParameterDefaults`, `completedLiteralArguments`,
+`literalAcceptsArgumentCount`, `literalTakesArgumentCount`.
+
+**Option C: keep today's support.** Not taken.
 
 ## 6. The complex lane
 
-**Today.** A function's real-or-complex lane is inferred from the types of
-its inputs and literals. A complex value that reaches a parameter compiled
-as real is recorded per definition (`5e29489a6`, +3,132 lines) and the
-compilation restarts in complex mode (`c4e0a3bdb`); a complex statistics
-lane exists for the aggregates.
+**Today.** Four compile modes (`src/compute-engine/compilation/types.ts`):
+`strict` (every lane follows the static types; a complex literal or a
+declared complex input is complex, everything else real, and `Sqrt(x)` with
+`x: real` gives `NaN` at `x = -4`), `complex` (every wide numeric value is
+lifted to complex, unknown-sign radicals promote), `auto` (the default of
+the JavaScript and Python targets: `strict` plus the promotion of
+unknown-sign radicals, and on a `LaneMismatch` the compilation is redone
+once in `complex` mode; with `x: real`, `Sqrt(x)` compiles in complex mode
+with `promoted: true` and returns the complex object `{re: 0, im: 2}` at
+`x = -4`), and `bigint` (JavaScript only, opt-in, no promotion and no
+escalation). A complex value that reaches a parameter compiled as real is
+recorded per definition (`5e29489a6`, +3,132 lines) and the compilation
+restarts in complex mode (`c4e0a3bdb`); a complex statistics lane exists
+for the aggregates. Measured on the current source, 2026-11-02.
 
 **Tycho.** A node typed `complex`: 88 / 87 documents; a document in complex
 mode: 32 / 32; a complex argument to a document function: 4 / 10; a compile
 result in `mode: complex` or `promoted`: 9 documents; `escalation`: 0.
 
-**Option A, recommended: the lane is decided once from the declared
-types.** The lane of a compiled function is `complex` when a declared input,
-a declared parameter or a literal is complex, or when the host compiles in
-complex mode; otherwise it is real. A complex value that reaches a real
-input or parameter is a value outside its declared type, so its result is
-unspecified (the host rule, R1 to R6). No recording, no restart. A document
-in complex mode declares its inputs complex, or compiles in complex mode.
+**Option A, decided by the user on 2026-11-02, in its strict form: the
+lane follows the static types, and the host opts in to complex.** `strict`
+becomes the only discipline and the default of every target; `auto` is
+removed. The lane of a value is complex when its static type is complex (a
+declared complex input or parameter, a complex literal, an operation whose
+result type is complex), and real otherwise; the host asks for the
+`complex` mode when it wants unknown-sign radicals and logarithms promoted.
+No promotion, no `LaneMismatch` redo, no recording per definition, no
+restart. A complex value that reaches a real input or parameter is a value
+outside its declared type, so its result is unspecified (the host rule, R1
+to R6). A new caveat of compiled code records that in the real lane an
+operation whose exact value is complex gives the target's `NaN` (`Sqrt(x)`
+with `x: real` at `x = -4`), which is the shader model applied to every
+target.
 
-| Input                                                           | Today                        | Option A                                   |
-| --------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
-| `h = (p) ↦ p[1] + 1`, `P: list<tuple<complex, real>>`, `h(P[1])` | lane recorded, restart       | `p` is inferred from `P`: complex, compiles |
-| `f = (x) ↦ x^2` compiled real, called with `2i` by the host      | restart in complex mode      | outside the type, unspecified              |
-| `compile(e, {mode: 'complex'})`                                  | complex                      | complex, unchanged                         |
+| Input                                                            | Today (`auto`)                     | Decided                                    |
+| ---------------------------------------------------------------- | ---------------------------------- | ------------------------------------------ |
+| `Sqrt(x)`, `x: real`, at `x = -4`                                | promoted; `{re: 0, im: 2}`         | `NaN`; `{re: 0, im: 2}` with `mode: 'complex'` |
+| `x + 2i`, `x: real`                                              | complex, static                    | complex, static, unchanged                 |
+| `h = (p) ↦ p[1] + 1`, `P: list<tuple<complex, real>>`, `h(P[1])` | lane recorded, restart             | `p` is inferred from `P`: complex, compiles |
+| `f = (x) ↦ x^2` compiled real, called with `2i` by the host      | restart in complex mode            | outside the type, unspecified              |
+| `compile(e, {mode: 'complex'})`                                  | complex                            | complex, unchanged                         |
+| `compile(e, {mode: 'auto'})`                                     | `strict` plus promotion and redo   | `unsupported-mode` decline                 |
 
-Removes: the lane recording per definition and the restart (`compile-complexness.ts`
-635, `compile-lanes.ts` in part, the restart in the JavaScript and Python
-targets). To confirm with Tycho: a document in complex mode compiles in
-complex mode or declares its inputs complex, so that no value crosses a real
-lane at run time.
+Removes: the `auto` mode, the promotion of unknown-sign radicals, the
+`LaneMismatch` redo (`compileWithAutoEscalation`), the `promoted` and
+`escalation` fields of the result, the lane recording per definition and
+the restart (`compile-complexness.ts` 635, `compile-lanes.ts` in part,
+`compiler-mode.ts` in part, the restart in the JavaScript and Python
+targets).
 
-**Option B: keep the restart.**
+*Tycho's review, 2026-11-02.* Tycho passes `mode: 'auto'` explicitly in two
+routes: every compile of a complex-mode document (`samplingModeOptions`,
+chosen 2026-10-08 for "complex intermediates allowed, a real final value
+returned": `\sqrt{x}^2` at `x = -4` samples as `-4`), and the colour lane of
+every document (a domain colouring passes a complex value through a
+document function). Its 9 `promoted` documents are those complex-mode
+documents; real-mode documents already use `'strict'`. Its per-sample check
+is `typeof v === "number"`. Measured on the current source the same day:
+under `mode: 'complex'` a kernel whose value is real returns a JavaScript
+`number`, and a complex object only when the imaginary part is nonzero
+(`Sqrt(x)^2` at `-4` is the number `-4`; `Arg(x + iy)` and `Abs(x + iy)` are
+numbers; `Sqrt(x)` at `-4` is `{re: 0, im: 2}`). So both routes move from
+`'auto'` to `'complex'` with no change to Tycho's consumers and today's
+values; under `'strict'` they would get `NaN` where an intermediate is
+complex. The release note names `'auto'` as removed and `'complex'` as its
+replacement. Nothing is left to confirm on this page.
 
-**No decision:** B.
+**The same rule for `bigint`** (user, 2026-11-02): the bigint lane is used
+only when the host asks for `mode: 'bigint'`, which is already the case; no
+detection of a value past `2^53` and no escalation, ever. ROADMAP CE-715.6
+(escalation to `bigint` on a run-time value) is dropped.
+
+**Option B: keep the restart and `auto`.** Not taken.
 
 ## 7. Features kept or dropped by name
 
@@ -304,19 +557,58 @@ No census can decide these; the npm users are not measured.
 | Value kinds (Enclosure, residue) | about 1,100                                          | phase 1 of CE-507; later phases not scheduled | Drop if the later phases are not wanted this quarter; otherwise keep          |
 | `broadcast()` API, kernel pool  | about 1,900                                           | Tycho, throughout                            | Keep (decided)                                                                 |
 
+**Decided by the user on 2026-11-02: WGSL, Python and value kinds are
+kept.** Every feature of this table stays.
+
+**Separate packages for the targets: not now.** The user asked whether the
+targets other than JavaScript (GLSL, WGSL, Python, interval-js) and value
+kinds should become separate packages in a sister project, loaded on
+demand. The facts, measured on 2026-11-02:
+
+- The on-demand split exists today at the entry-point level.
+  `src/compute-engine/engine-compilation-targets.ts` builds only
+  `javascript` and `interval-js` into the engine; the `./core` entry carries
+  neither the GPU targets nor Python (316 KB and 93 KB minified on 0.169.2),
+  the full entry registers them with `addDefaultCompilationTarget()`, and a
+  host of `./core` registers a target itself. So a consumer already pays
+  only for the targets it loads.
+- `javascript` is needed by the engine itself (the `Map` auto-compile, the
+  quadrature, derivative and limit kernels, `NDSolve`, the fit, the kernel
+  pool) and cannot leave. `interval-js` is asked for by the solver's domain
+  enumeration (`intervalFunction` in `solve-domain.ts`); the call has a
+  `null` fallback, so the solver runs without it, with less exclusion.
+- The targets are not behind a stable interface. The Python and GPU targets
+  import 46 distinct compiler-internal modules (`compiler-core.ts`, the
+  `compile-*.ts` helpers, `core` hooks). A separate package would make that
+  surface a public API that must stay stable across releases, and it is the
+  surface that changed in 340 commits since September. Code lines on
+  2026-11-01: `gpu-*` 18,430, `python-target.ts` 5,054, `interval-*` 4,336,
+  `wgsl-*` 1,549, `glsl-*` 203, `javascript-*` 16,680, the shared compiler
+  core about 49,000.
+
+So a package boundary drawn now would freeze the wrong interface, and the
+contraction of step 4 changes it in every step. The order is: contract
+first; then, if the GPU family is still large, make it a workspace package
+in this repository (one release train, one version, one test run with
+lanes, and a package boundary that forbids the target from importing
+compiler internals), not a sister repository with its own releases. The
+benefits a split would give now, a smaller core test suite and a release of
+the core that a target cannot break, are had more cheaply by test lanes
+and by the entry-point separation that exists.
+
 ## 8. The decision table
 
 | Page | Axis                | Options            | Recommended | Your decision |
 | ---- | ------------------- | ------------------ | ----------- | ------------- |
-| 1    | `Missing`           | A, B, C            | A           |               |
-| 2    | Error model         | A, B, C            | A           |               |
-| 3    | Comparisons         | A, B               | A           |               |
-| 4    | Block locals        | A, B               | A           |               |
-| 5    | Function values     | A, B, C            | A           |               |
-| 6    | Complex lane        | A, B               | A           |               |
-| 7    | WGSL target         | keep, drop         | drop        |               |
-| 7    | Python target       | keep, drop         | keep        |               |
-| 7    | Value kinds         | keep, drop         | drop        |               |
+| 1    | `Missing`           | A, B, C            | A           | A (2026-11-02): a result only, never a declared type; typed as a marker like `error`, implicit in signatures; `Undefined` removed |
+| 2    | Error model         | A, B, C            | A           | A (2026-11-02): `Indeterminate` folded into `NaN` with its spellings kept as input; `Nothing` only as the value of an empty block; issue #355 gets a comment at the release |
+| 3    | Comparisons         | A, B               | A           | A (2026-11-02): two-valued everywhere; an undecided operand gives `False` |
+| 4    | Block locals        | A′, A, B           | A′          | A′ with the two language rules (2026-11-02): a declaration has a value, an assignment is a statement, in Epsil and in compiled code; reassignment stays |
+| 5    | Function values     | A, B, C            | A           | B (2026-11-02), with the defaults simplified: static completion of a left-out argument only, constant defaults, in the interpreter and in compiled code; the "or absent" half of R6 is reversed |
+| 6    | Complex lane        | A, B               | A           | A, strict form: `strict` is the only discipline, `auto` removed, complex by static type or `mode: 'complex'`; bigint stays opt-in with no escalation (2026-11-02) |
+| 7    | WGSL target         | keep, drop         | drop        | keep (2026-11-02) |
+| 7    | Python target       | keep, drop         | keep        | keep (2026-11-02) |
+| 7    | Value kinds         | keep, drop         | drop        | keep (2026-11-02); separate packages for the targets: not before the contraction, then a workspace package in this repository if the GPU family is still large |
 
 The decided options go into step 3 of the contraction plan (the language
 release) and step 4 (the compiler contraction), and each becomes a page of

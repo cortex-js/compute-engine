@@ -44,15 +44,33 @@ an error, and the pair is written `((a \text{ where } a \coloneq 1), 2)`.
 Tycho's importer reads every comma this way, and its 56 rows that parse do
 too. A `let` with no value is a parse error.
 
-**MathJSON.** One `Block`: a `Declare` and an `Assign` for each binding in
-written order, then the body. The conditions, joined with `And` in written
-order, wrap the body in `If(c, e)`, the form of the restriction `e\{c\}`:
+**MathJSON.** One `Block`: a `Declare` with its value,
+`Declare(a, "unknown", v)`, for each binding in written order, then the
+body. The second operand of `Declare` is a type, so the value is the third
+operand and the type is the inference marker `"unknown"` (a binding written
+with a type keeps it in that slot). The conditions, joined with `And` in
+written order, wrap the body in `If(c, e)`, the form of the restriction
+`e\{c\}`:
 
 ```
 e \text{ where } a \coloneq v_a, b = v_b, 0\le t\le 1
-  → Block(Declare(a), Assign(a, v_a), Declare(b), Assign(b, v_b),
+  → Block(Declare(a, "unknown", v_a), Declare(b, "unknown", v_b),
           If(LessEqual(0, t, 1), e))
 ```
+
+The declaration carries its value in one statement (user decision
+2026-11-02, block locals A′ in `docs/plans/2026-11-02-language-axes-options.md`
+page 4: a declaration has a value, and `Declare(a)` followed by
+`Assign(a, v)` is not accepted as a pair; a `Declare` without a value is a
+static error). Verified on the source of 2026-11-02:
+`Block(Declare(p, "unknown", x^2), p + 1)` evaluates and compiles with no
+library change, while the two-operand `Declare(p, x^2)` is read as a
+malformed type. The `;` parse of `a \coloneq v; e` emits the same form.
+Tycho changes its two builders that emit the pair
+(`desmos-import/with-dictionary.ts`, `graph/surface-argument-staging.ts`) to
+this form, one line each; its `plot-core/classification-entry-fold.ts`
+builds `Block(Assign(a, 1), b)`, a first assignment at the block's own
+level, which is a declaration under A′ and stays valid.
 
 A later value sees an earlier binding, and a condition can read a bound
 name: `b \text{ where } a \coloneq 5, b \coloneq a+1` is 6, as today. This is
@@ -79,13 +97,13 @@ body of the definition, as it does today.
 
 | LaTeX                                                            | Parse                                                                          |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `y=p \text{ where } p \coloneq x^2`                              | `Block(Declare(p), Assign(p, x^2), Equal(y, p))`                               |
-| `\|d \text{ where } x \coloneq \lfloor x+0.5\rfloor\| < 1`       | `Less(Abs(Block(Declare(x), Assign(x, Floor(x+0.5)), d)), 1)`                  |
-| `[R \text{ where } d \coloneq … \operatorname{for} n=[1...225]]` | `Comprehension(Block(Declare(d), Assign(d, …), R), Element(n, …))`: `d` reads `n`, 24 rows |
+| `y=p \text{ where } p \coloneq x^2`                              | `Block(Declare(p, "unknown", x^2), Equal(y, p))`                               |
+| `\|d \text{ where } x \coloneq \lfloor x+0.5\rfloor\| < 1`       | `Less(Abs(Block(Declare(x, "unknown", Floor(x+0.5)), d)), 1)`                  |
+| `[R \text{ where } d \coloneq … \operatorname{for} n=[1...225]]` | `Comprehension(Block(Declare(d, "unknown", …), R), Element(n, …))`: `d` reads `n`, 24 rows |
 | `(\cos t,\sin t) \text{ where } 0\le t\le\pi`                    | `If(LessEqual(0, t, Pi), Tuple(Cos(t), Sin(t)))`                               |
 
-**Serialization.** A `Block` whose statements are `Declare(a)` and
-`Assign(a, v)` pairs followed by one expression is written
+**Serialization.** A `Block` whose statements are `Declare(a, "unknown", v)`
+declarations with a value followed by one expression is written
 `e \text{ where } a \coloneq v_a, b \coloneq v_b`. When that expression is
 `If(c, e)`, the condition is the last item:
 `e \text{ where } a \coloneq v, 0\le t\le\pi`. The clause is in parentheses
@@ -104,6 +122,18 @@ restriction plan (step 3.2) gave for it. The brace still parses to the same
 brace a spelling for import only, so stored rows must not contain one, and
 one spelling is also the one inside a `where` `Block`. CE's other users see
 `where`, not the brace.
+
+Three exceptions, where the `where` text would not read back (the
+implementer, 2026-11-02, accepted): the serializer keeps `\mathrm{If}(c, e)`
+when `c` is not a relation, when `c` is `a = v` with a bare symbol on the
+left (the `where` reader would take it as a binding), and when `e` is an
+`Assign`, a `Declare` or a `Function` (`a \coloneq 5 \text{ where } x>0`
+reads back as `Assign(a, If(x>0, 5))`).
+
+A binding whose value is a function literal emits
+`Declare(f, "function", v)`, not `"unknown"`: with `"unknown"`, `f(3)` after
+`f(u) \coloneq u^2` was read as a juxtaposition (`3(u) => u^2`) instead of
+a call.
 
 ## What changes for existing users of `where`
 

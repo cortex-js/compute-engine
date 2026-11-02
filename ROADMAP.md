@@ -2124,7 +2124,10 @@ the user.
 - **CE-715.4** (low) A binding typed `integer | infinity` as a lane input.
 - **CE-715.5** (medium) A `bigint` output form for `broadcast()`,
   `broadcastAsync()` and the stored batch loaders.
-- **CE-715.6** (low) Escalation to `bigint` on a run-time value past `2^53`.
+- **CE-715.6** Dropped (user decision 2026-11-02): no escalation to `bigint`
+  on a run-time value, ever; the bigint lane is used only on `mode: 'bigint'`,
+  as the complex lane is used only by static type or on `mode: 'complex'`
+  (`docs/plans/2026-11-02-language-axes-options.md`, page 6).
 - **CE-715.7** (low) The Python target's `Rational` lowering as an exact
   `fractions.Fraction`.
 - **CE-715.8** (medium) Control and comparison shapes that the lane analysis

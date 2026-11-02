@@ -377,15 +377,17 @@ in principle by the user the same day): a trailing restriction `e\{c\}` binds
 to the whole of the smallest group that holds it, not to the nearest
 operand. The rule, Tycho's full boundary table with corpus counts, and what
 it closes are in `docs/plans/2026-11-02-restriction-binding.md`. In short:
-`\{c\}` binds looser than arithmetic and tighter than a relation, `\to`,
-`for`, `with` and the comma; the parse is `If(c, e)` with no `When` alias;
-stacked restrictions merge into `If(And(c_1, c_2), e)`. A relation keeps the
-`If` in its operand, `y=x\{c\}` is `Equal(y, If(c, x))`, so that a
-definition and a relation parse alike; Tycho's first message had the `If`
-outside the relation, and its table replaces that. Tycho then removes its
-restriction-moving walk (its roadmap entry IL) and reads the root or the last
-relation operand. `\operatorname{with}` must be parsed for one row of the
-table, a separate item.
+`\{c\}` binds looser than arithmetic and than a relation, and tighter than
+`where`, `\to`, `for` and the comma; the parse is `If(c, e)` with no `When`
+alias; stacked restrictions merge into `If(And(c_1, c_2), e)`. A restriction
+at the top of a statement covers the whole statement, `y=x\{c\}` is
+`If(c, Equal(y, x))`: Tycho's table of 2026-11-02 first put the `If` inside
+the relation operand and later the same day reversed that, so that the
+brace, the `where` clause and a future `if` keyword share one scope and
+Tycho finds a row restriction in one place, the root of the row. Tycho then
+removes its restriction-moving walk (its roadmap entry IL). The `where`
+clause is `docs/plans/2026-11-02-where-binding.md`; Compute Engine adds no
+`with` keyword.
 
 ## 7. The census (the next step; a new session)
 
