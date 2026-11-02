@@ -226,7 +226,15 @@ host.
   result is undefined. It can equal the value of the interpreter, differ
   from it, throw or not end, and it can differ between targets. With
   `x: real`, `x + 1` gives `2` for `x = true` and `"ab1"` for `x = "ab"` on
-  `javascript`.
+  `javascript`. A throw is one of these undefined results, so one run-time
+  check stays (user decision 2026-11-02): an `At` read of a list from
+  outside the compiled code whose static element type is numeric, declared
+  or inferred, goes through `_SYS.atNumeric`, which throws when the element
+  is a list. With `h := v ↦ v[1] + 1`, `h(xs)` throws for
+  `xs = [[1, 2], [3, 4]]`, where JavaScript would give the string `"1,21"`.
+  The check costs nothing on the common read: each compiled function has its
+  own copy of the helper, which returns a number element at an integer index
+  in range before the check runs.
 - An input that the host leaves out: the result is undefined in the same
   way. On `javascript`, `x > 0` compiles to `0 < _.x` and gives `false` for
   `run({})`, and `If(x > 0, 1, -1)` compiles to `((0 < _.x) ? (1) : (-1))`
