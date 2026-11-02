@@ -1302,3 +1302,78 @@ describe('review round 3 (interpreter)', () => {
     }
   });
 });
+
+describe('A LIST OF POINTS AT A POINT PARAMETER BESIDE unknown SLOTS THAT ANOTHER CALL READS', () => {
+  // The map over the list calls, for each point, the definition that the
+  // call on one point takes: the one with each parameter typed by its
+  // argument. With the definition typed by the declaration, `D2` and `d2`
+  // are `unknown`, and the call `C(D2, d2)` in the body declined, because
+  // the interpreter maps `C` over a list argument.
+  function engine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('C', 'function');
+    ce.assign(
+      'C',
+      ce.box([
+        'Function',
+        ['Tuple', ['Divide', ['Subtract', 'D', 'd'], 2], 0],
+        'D',
+        'd',
+      ])
+    );
+    ce.declare('n', {
+      signature: `(${POINT}, unknown, unknown) -> ${POINT}`,
+    });
+    ce.assign(
+      'n',
+      ce.box([
+        'Function',
+        ['Add', 'q', ['C', 'D2', 'd2']],
+        ['Typed', 'q', `'${POINT}'`],
+        'D2',
+        'd2',
+      ])
+    );
+    return ce;
+  }
+
+  test('the call on one point (control)', () => {
+    const ce = engine();
+    const expr = ce.box(['n', ['Tuple', 1, 2], 4, 2]);
+    expect(expr.evaluate().toString()).toBe('(2, 2)');
+    const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
+    expect(r.run!({} as never)).toEqual([2, 2]);
+  });
+
+  test('the call over a list of points', () => {
+    const ce = engine();
+    const expr = ce.box([
+      'n',
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      4,
+      2,
+    ]);
+    expect(expr.evaluate().toString()).toBe('[(2, 2),(4, 4)]');
+    const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
+    expect(r.run!({} as never)).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+  });
+
+  test('a declared input at an unknown slot', () => {
+    const ce = engine();
+    ce.declare('x', 'real');
+    const expr = ce.box([
+      'n',
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      'x',
+      2,
+    ]);
+    const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
+    expect(r.run!({ x: 6 } as never)).toEqual([
+      [3, 2],
+      [5, 4],
+    ]);
+  });
+});

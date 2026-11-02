@@ -122,15 +122,16 @@ describe('INTERVAL DIVISION — headline claims', () => {
     expect(e.box(['Power', 'g', -2]).type.matches('real')).toBe(true);
   });
 
-  it('a numerator of unproven finiteness widens the quotient to the pole tier', () => {
+  it('a numerator of unproven finiteness widens the quotient to the extended reals', () => {
     // `x: real | signed_infinity` may be `+oo`; `x / p` is then `+oo`, not
     // a `real`. The non-finite arm handles a PROVABLY infinite numerator;
-    // this is the unknown-finiteness residue (pre-existing, found by the
-    // review of this round).
+    // this is the unknown-finiteness residue. The divisor is a finite real
+    // that is not zero, so the quotient is never `~oo` or `NaN`: it has the
+    // type of the numerator, as `(1/2)·x` does.
     const e = new ComputeEngine();
     e.declare('x', 'real | signed_infinity');
     e.declare('p', 'real<1..2>');
-    expect(e.box(['Divide', 'x', 'p']).type.toString()).toBe('infinity | nan | real');
+    expect(e.box(['Divide', 'x', 'p']).type.toString()).toBe('real | signed_infinity');
     e.declare('f', 'real<0..1>');
     expect(e.box(['Divide', 'f', 'p']).type.toString()).toBe('real<0..1>');
   });

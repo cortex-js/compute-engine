@@ -37,6 +37,7 @@ import {
   absentArgumentChecks,
   callArgumentMapRank,
   emitUserFunctionCall,
+  isScalarShapedArg,
   presentCheckedCode,
   unsettledArgumentDecline,
   userFunctionParamType,
@@ -405,29 +406,57 @@ export function tryCompilePointListCall(
       `${reason} Another argument is bound to a complex-typed parameter, ` +
         `which the compiled map does not convert.`
     );
-  let name: string | undefined;
-  if (untypedElement === undefined)
-    name = core.ensureUserFunctionEmitted(engine, h, target);
-  else {
-    // The specialization is chosen from the argument shapes of one call:
-    // the list argument is replaced by its first point, ascribed the
-    // list's element type (`At` alone is typed `missing | tuple<…>`). The
-    // replacement is only read for its type and shape, never compiled.
-    const literal = userFunctionLiteral(engine, h);
+  // The definition of `h` for one call of the map: the call-shape
+  // specialization (`ensureSpecializedUserCallEmitted`) for the arguments
+  // of one call, where the list argument is replaced by its first point,
+  // ascribed the type `element` (`At` alone is typed `missing | tuple<…>`).
+  // The replacement is only read for its type and shape, never compiled.
+  const onePointDefinition = (element: Type) => {
     const onePoint = engine.function('Typed', [
       engine.function('At', [args[at], engine.number(1)]),
-      engine.box({ str: typeToString(untypedElement) }),
+      engine.box({ str: typeToString(element) }),
     ]);
-    const emitted =
-      literal === undefined || !isTupleShapedType(onePoint.type.type)
-        ? undefined
-        : core.ensureSpecializedUserCallEmitted(
-            engine,
-            h,
-            literal,
-            args.map((a, i) => (i === at ? onePoint : a)),
-            target
-          );
+    return literal === undefined || !isTupleShapedType(onePoint.type.type)
+      ? undefined
+      : core.ensureSpecializedUserCallEmitted(
+          engine,
+          h,
+          literal,
+          args.map((a, i) => (i === at ? onePoint : a)),
+          target
+        );
+  };
+  let name: string | undefined;
+  if (untypedElement === undefined) {
+    // A list of points at a parameter declared as a point, mapped one
+    // point per call, with every other argument one scalar or one point:
+    // each call of the map receives the same values as the call on one
+    // point. That call takes the specialization typed by its arguments, so
+    // the map takes it too. The generic definition types a parameter
+    // declared `unknown` as `unknown`, and a call in the body that maps
+    // over a list argument then declines (rule R3 of
+    // `docs/plans/2026-10-31-static-shape-compilation.md`): with
+    // `C := (D, d) ↦ ((D − d)/2, 0)` and `n := (q, D2, d2) ↦ q + C(D2, d2)`
+    // declared `(tuple<number, number>, unknown, unknown) -> …`, the map of
+    // `n([(1, 2), (3, 4)], 4, 2)` compiled `C(D2, d2)` with `D2: unknown`.
+    // When no specialization applies, or the call maps in another form
+    // (at run time, recursively, or paired with another list), the call
+    // keeps the generic definition.
+    const element =
+      !scalarList && !dispatch && !deep && !paired && untypedSlot < 0
+        ? collectionElementType(resolveTypeForCompilation(args[at].type.type))
+        : undefined;
+    if (
+      element !== undefined &&
+      args.every(
+        (a, i) =>
+          i === at || isSinglePointArg(a) || isScalarShapedArg(a, target)
+      )
+    )
+      name = onePointDefinition(element)?.name;
+    name ??= core.ensureUserFunctionEmitted(engine, h, target);
+  } else {
+    const emitted = onePointDefinition(untypedElement);
     if (emitted === undefined)
       throw new Error(
         `${reason} No definition of \`${h}\` for one point of type ` +

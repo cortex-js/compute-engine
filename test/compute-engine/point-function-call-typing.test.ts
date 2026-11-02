@@ -1,8 +1,9 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
- * Two cases of a call of a user function whose parameter is declared as a
+ * Three cases of a call of a user function whose parameter is declared as a
  * point (`tuple<real, real>`).
  *
  * - CE-469: with `f: (broadcastable<tuple<real, real>>, tuple<real, real>)
@@ -13,6 +14,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  * - CE-468: with `g: (tuple<real, real>) -> real` and a symbol typed as a
  *   list or a tensor of points that has no value, `g(L)` stays `g(L)` until
  *   `L` has a value. Before, it was an `incompatible-type` error.
+ * - With `E = real | signed_infinity | nan` and `k: (tuple<E, E>) -> unknown`,
+ *   a list of points whose components are typed `number` gives a call per
+ *   point, as one such point is accepted as the whole argument. Before,
+ *   `k(T)` was accepted for `T: tuple<number, number>`, and `k(L)` was an
+ *   `incompatible-type` error for `L: list<tuple<number, number>>`.
  */
 
 const POINT = 'tuple<real, real>';
@@ -152,5 +158,59 @@ describe('CE-468: the held call keeps its binding', () => {
     ce.popScope();
     expect(v.toString()).toBe('g(L)');
     expect(v.baseDefinition).toBe(call.baseDefinition);
+  });
+});
+
+describe('a list of points accepted by the rule for one point', () => {
+  const E = 'real | signed_infinity | nan';
+  const NUMBER_POINT = 'tuple<number, number>';
+
+  /** `k(p) = p.x + p.y`, declared with an extended-real point parameter,
+   * and symbols for one point, a list and a matrix of points, and a point
+   * or a list of points, all with `number` components. */
+  function engineK(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('k', `(tuple<${E}, ${E}>) -> unknown`);
+    ce.assign('k', ce.parse('p \\mapsto p.x + p.y'));
+    ce.declare('T', NUMBER_POINT);
+    ce.declare('L', `list<${NUMBER_POINT}>`);
+    ce.declare('M', `matrix<${NUMBER_POINT}>`);
+    ce.declare('U', `${NUMBER_POINT} | list<${NUMBER_POINT}>`);
+    return ce;
+  }
+
+  test('the call over a list or a matrix of points is a call per point', () => {
+    const ce = engineK();
+    expect(ce.box(['k', 'T']).type.toString()).toBe(
+      'nan | real | signed_infinity'
+    );
+    expect(ce.box(['k', 'L']).type.toString()).toBe(
+      'list<nan | real | signed_infinity>'
+    );
+    expect(ce.box(['k', 'M']).type.toString()).toBe(
+      'list<list<nan | real | signed_infinity>>'
+    );
+    expect(ce.box(['k', 'U']).type.toString()).toBe(
+      'list<nan | real | signed_infinity> | nan | real | signed_infinity'
+    );
+  });
+
+  test('a point type the parameter refuses is refused in a list', () => {
+    const ce = engineK();
+    ce.declare('S', 'list<tuple<integer, string>>');
+    expect(ce.box(['k', 'S']).type.toString()).toBe('error');
+  });
+
+  test('the evaluation maps over the points', () => {
+    const ce = engineK();
+    ce.assign('L', ce.box(['List', P(1, 2), P(3, 4)]));
+    expect(ce.box(['k', 'L']).evaluate().toString()).toBe('[3,7]');
+  });
+
+  test('the compiled call maps over the points', () => {
+    const ce = engineK();
+    const r = compile(ce.box(['k', 'L']));
+    expect(r.success).toBe(true);
+    expect(r.run!({ L: [[1, 2], [3, Infinity]] })).toEqual([3, Infinity]);
   });
 });

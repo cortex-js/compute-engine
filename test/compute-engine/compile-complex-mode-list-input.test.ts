@@ -1162,6 +1162,30 @@ describe('Power of a base whose rank is not known', () => {
     expect(codes('matrix<number>')).toBe('_SYS.matpow(_.p, 2)');
     expect(codes('real')).toBe('(_.p * _.p)');
   });
+
+  it('a list of extended reals is a vector, with no shape test', () => {
+    // `signed_infinity` is a union of the literal value types `Infinity`
+    // and `-Infinity`. A literal value type is a scalar, so a list whose
+    // cells are `real | signed_infinity | nan` is a list of numbers, as a
+    // list of `real` is.
+    const code = (type: string, expr: MathJsonExpression): string => {
+      const ce = new ComputeEngine();
+      ce.declare('p', type);
+      return compile(ce.box(expr), { to: 'javascript', fallback: false })
+        .code!;
+    };
+    const C = 'real | signed_infinity | nan';
+    expect(code(`list<${C}>`, ['Power', 'p', 2])).toBe(
+      code('list<real>', ['Power', 'p', 2])
+    );
+    const y: MathJsonExpression = ['Power', ['PointY', 'p'], 2];
+    expect(code(`list<tuple<${C}, ${C}>>`, y)).toBe(
+      code('list<tuple<real, real>>', y)
+    );
+    expect(code(`list<tuple<${C}, ${C}>>`, y)).not.toContain(
+      'matrixPowerShape'
+    );
+  });
 });
 
 describe('complex mode: the auto mode after it escalates', () => {

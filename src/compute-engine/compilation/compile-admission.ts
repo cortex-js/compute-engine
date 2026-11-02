@@ -20,6 +20,7 @@ import {
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import type { CompileTarget } from './types.js';
 import type { UnsettledShape } from './compiler-types.js';
+import { CompilerState } from './compiler-state.js';
 import {
   CompileDeclineError,
   isCompileDeclineError,
@@ -643,6 +644,17 @@ function isShaderTarget(target: CompileTarget<Expression>): boolean {
  * GLSL and WGSL targets): on JavaScript, `Which(2 < 3, [1, 2], True, 0)`
  * has one branch, the list. `unknownIsScalar` is as in
  * `hasScalarCondition()`.
+ *
+ * A node whose code a caller's `compile` handler wrote, in each of its
+ * lowerings (`CompilerState._callerLowered`), is not a conditional here:
+ * the handler takes precedence over the stock lowering, and its code is
+ * not the stock code that tests a condition and gives one branch. Such a
+ * node is one value, of its static type. A handler of `Which` can
+ * broadcast a scalar branch to the length of a list branch: with
+ * `x: real`, its code for `Which(x > 0, 0, True, [1, 2])` can be
+ * `x > 0 ? [0, 0] : [1, 2]`. The static type of such a node can still
+ * admit several shapes (`integer | list<integer>` for that `Which`), and
+ * `unsettledShapeIn()` declines when the stock code of a consumer reads it.
  */
 function conditionalBranches(
   node: Expression,
@@ -650,6 +662,7 @@ function conditionalBranches(
   unknownIsScalar = false
 ): Expression[] | undefined {
   if (!isFunction(node)) return undefined;
+  if (CompilerState._callerLowered.get(node) === true) return undefined;
   const kept = (operator: 'If' | 'Which', first: number): Expression[] => {
     const dropped = droppedOperands(operator, node.ops, shader);
     const branches: Expression[] = [];
@@ -889,6 +902,35 @@ function haveConflictingTypes(
     shapes.push(s);
   }
   return false;
+}
+
+/**
+ * True when `t` admits values of shapes that conflict, as the branches of a
+ * conditional conflict (`haveConflictingTypes()`): `broadcastable<T>`, a
+ * union with a member that is such a type (`broadcastable<real> |
+ * missing`), or a union with two members whose shapes conflict
+ * (`integer | list<integer>`). The members `missing` and `nothing` are not
+ * compared, as a branch with no value is not, and neither is a member that
+ * settles no shape (`unknown`, a string): `integer | missing`, the type of
+ * `Which(x > 0, 1, x < 0, 2)`, is not such a type. `arity` is as in
+ * `haveConflictingTypes()`: two points of different arities conflict only
+ * on the shader targets. `depth` stops the search in a type that refers to
+ * itself, as in `shapeOfType()`; such a type is then read as one that
+ * admits shapes that conflict, so the result is a decline.
+ */
+function hasNoSettledShape(
+  t: Readonly<Type>,
+  arity: boolean,
+  depth = 0
+): boolean {
+  if (depth > 16) return true;
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string') return false;
+  if (r.kind === 'broadcastable') return true;
+  if (r.kind !== 'union') return false;
+  const members = r.types.filter((m) => m !== 'missing' && m !== 'nothing');
+  if (members.some((m) => hasNoSettledShape(m, arity, depth + 1))) return true;
+  return haveConflictingTypes(members, arity);
 }
 
 /**
@@ -1954,6 +1996,37 @@ function isUnrepresentableLoopValue(
  * of `t ↦ Block(If(x > 0, p ≔ [1, 2], p ≔ 3), 2p)` declines, and so does
  * `Block(p ≔ 0, p ≔ [1, 2], p)`. The diagnostic names an `Assign`.
  *
+ * A node whose code a caller's `compile` handler wrote
+ * (`CompilerState._callerLowered`) is one value, not a conditional
+ * (`conditionalBranches()`). When its static type admits shapes that
+ * conflict (`hasNoSettledShape()`), it is a candidate with the reason
+ * `'handler-value'`, which declines when its value is used (`isUsed()`,
+ * also on a shader target) and the stock code of a consumer reads it: a
+ * parent whose code no handler wrote uses it as a value, or it is the
+ * value of such a parent (the last statement of a `Block`, a branch of an
+ * `If`, the body of a function literal) that the stock code of a consumer
+ * reads in the same way. It compiles as the root of the compilation (the
+ * host reads its value), as the value of the root (with `x: real`,
+ * `Block(a ≔ x, Which(a > 0, 0, True, [1, 2]))`), and as an operand of
+ * another node whose code a handler wrote. With `x: real` and a handler on
+ * `Which`, `Which(x > 0, 0, True, [1, 2])` compiles to the code of the
+ * handler, and `Which(x > 0, 0, True, [1, 2]) + 1` declines: the type of
+ * the `Which` is `integer | list<integer>`, and the stock code of `Add`
+ * would decide the shape at run time with a broadcast. As the body of a
+ * user function that the code calls, or in a `Return`, it declines also
+ * when the call or the `Return` gives the value of the root: the walk does
+ * not record which nodes read the value of a call. In a case of a `Match`,
+ * whose parts the check makes canonical again (so they are not the nodes
+ * that `_callerLowered` holds), a part whose operator has a handler that
+ * wrote the code of a node, and whose static type admits shapes that
+ * conflict, declines when its value is used at all, also by the host:
+ * `Match(x, MatchCase(1, H(x)), MatchCase(_, 3)) + 1` declines for a
+ * handler operator `H` of type `integer | list<integer>`. This is the simple,
+ * sound version: it can decline where the code of the handler would give
+ * the value, and never compiles a run-time test of a shape. The nodes whose
+ * code a handler wrote are known only after the code is generated, so
+ * `assertAdmitted()` runs the search again whenever there is one.
+ *
  * The walk that finds such a conditional is the one of the decline of a
  * sub-expression of static type `error` (`compiledNodeWhere()`): it goes
  * into every operand and into the bodies of the user functions that the
@@ -1988,6 +2061,9 @@ export function unsettledShapeIn(
   const usedAsValue = new Set<Expression>();
   const isOperand = new Set<Expression>();
   const endParents = new Map<Expression, Expression[]>();
+  // The parents that use the value of each operand (`'value'`), for the
+  // check of a node whose code a caller's `compile` handler wrote.
+  const valueParents = new Map<Expression, Expression[]>();
   // The user-function bodies and stored values that the walk reaches from
   // the code that is kept: each is the root of a body, whose value is used,
   // also when the same node is a discarded statement elsewhere.
@@ -2023,8 +2099,12 @@ export function unsettledShapeIn(
           if (dropped?.has(i) === true) return;
           isOperand.add(op);
           const use = operandUse(node, i);
-          if (use === 'value') usedAsValue.add(op);
-          else if (use === 'end') {
+          if (use === 'value') {
+            usedAsValue.add(op);
+            const users = valueParents.get(op);
+            if (users === undefined) valueParents.set(op, [node]);
+            else users.push(node);
+          } else if (use === 'end') {
             const parents = endParents.get(op);
             if (parents === undefined) endParents.set(op, [node]);
             else parents.push(node);
@@ -2036,6 +2116,11 @@ export function unsettledShapeIn(
           candidates.push({ node, reason: 'branches' });
         else if (hasConflictingValues(node, target, arity))
           candidates.push({ node, reason: 'values' });
+        else if (
+          CompilerState._callerLowered.get(node) === true &&
+          hasNoSettledShape(node.type.type, arity)
+        )
+          candidates.push({ node, reason: 'handler-value' });
       }
       // The walk goes on, to find a sub-expression of type `error` anywhere,
       // and to record how each operand is used.
@@ -2065,7 +2150,41 @@ export function unsettledShapeIn(
     used.set(node, result);
     return result;
   };
-  const unsettled = candidates.find((c) => arity || isUsed(c.node));
+  // Whether the stock code of a consumer reads the value of `node`: a
+  // parent whose code a caller's `compile` handler did not write uses it as
+  // a value (`operandUse()`), or it is the value of such a parent (the last
+  // statement of a `Block`, a branch of an `If`) whose value the stock code
+  // of a consumer reads in the same way. A body or a stored value that the
+  // walk reached (`roots`), other than `root`, counts as read: the walk
+  // does not record the calls of a user function. The root of the
+  // compilation has no consumer: the host reads its value. A node on the
+  // stack of the search counts as not read, which ends a cycle.
+  const stockRead = new Map<Expression, boolean>();
+  const readByStockCode = (node: Expression): boolean => {
+    const known = stockRead.get(node);
+    if (known !== undefined) return known;
+    stockRead.set(node, false);
+    const stock = (p: Expression): boolean =>
+      CompilerState._callerLowered.get(p) !== true;
+    // The body of a function literal is its value too: it is read when
+    // the literal is read (a callback of `Map`), and not when the literal
+    // is the root.
+    const passes = (p: Expression): boolean =>
+      isFunction(p, 'Function') && p.ops[0] === node;
+    const result =
+      (node !== root && roots.has(node)) ||
+      (valueParents.get(node) ?? []).some((p) =>
+        passes(p) ? stock(p) && readByStockCode(p) : stock(p)
+      ) ||
+      (endParents.get(node) ?? []).some((p) => stock(p) && readByStockCode(p));
+    stockRead.set(node, result);
+    return result;
+  };
+  const unsettled = candidates.find((c) =>
+    c.reason === 'handler-value'
+      ? isUsed(c.node) && readByStockCode(c.node)
+      : arity || isUsed(c.node)
+  );
   if (unsettled !== undefined) return unsettled;
 
   // The cases of a `Match` are held raw, and the type of a raw expression
@@ -2083,6 +2202,11 @@ export function unsettledShapeIn(
   // The walk above does not reach them: the cases are held raw.
   const caseLoops: Expression[] = [];
   if (matches.length > 0) {
+    // The operators of the nodes whose code a caller's `compile` handler
+    // wrote.
+    const handlerOperators = new Set<string>();
+    for (const [node, lowered] of CompilerState._callerLowered)
+      if (lowered) handlerOperators.add(node.operator);
     const scopes = localScopesOf([root, ...roots]);
     // Each `Match` with its scope, whether its branches are compared, and
     // whether its value is used (for the check of a `Loop` in a case).
@@ -2134,6 +2258,19 @@ export function unsettledShapeIn(
           return { node: e, reason: 'branches' };
         if (hasConflictingValues(e, target, arity))
           return { node: e, reason: 'values' };
+        // The parts are made canonical again here, so they are not the
+        // nodes that `CompilerState._callerLowered` holds. A used part
+        // whose operator has a caller's `compile` handler that wrote the
+        // code of a node, and whose static type admits shapes that
+        // conflict, declines: this is the simple, sound version, which
+        // also declines when the value is read by the host or by the code
+        // of a handler.
+        if (
+          partUsed &&
+          handlerOperators.has(e.operator) &&
+          hasNoSettledShape(e.type.type, arity)
+        )
+          return { node: e, reason: 'handler-value' };
         if (partUsed && isFunction(e, 'Loop')) caseLoops.push(e);
         const useOf = (op: Expression): boolean => {
           const i = e.ops.indexOf(op);
@@ -2221,6 +2358,17 @@ export function assertAdmitted(
   target: CompileTarget<Expression>,
   unsettled: UnsettledShape | undefined
 ): void {
+  // `unsettled` was found before the code was generated, when it was not
+  // known which nodes a caller's `compile` handler would lower. When a
+  // handler wrote the code of a node, the search runs again: a conditional
+  // whose code the handler wrote is then one value (`conditionalBranches()`),
+  // and a node whose code the handler wrote, conditional or not, declines
+  // when its static type admits several shapes and the stock code of a
+  // consumer reads its value (reason `'handler-value'`). So the search runs
+  // again whenever a handler wrote the code of a node, whatever the first
+  // search found.
+  if ([...CompilerState._callerLowered.values()].includes(true))
+    unsettled = unsettledShapeIn(root, target);
   if (unsettled !== undefined) throwUnsettledShape(unsettled);
   const analysis = inputsOf(root, target);
   const names = untypedInputsOf(
@@ -2332,6 +2480,20 @@ function throwUnsettledShape(unsettled: UnsettledShape): never {
         `a \`Break\` or a \`Continue\`. The compiled code cannot run a ` +
         `branch for some ` +
         `elements only.`,
+      value,
+    });
+  if (unsettled.reason === 'handler-value')
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": a \`compile\` handler wrote its ` +
+        `code, but its type, ${unsettled.node.type.toString()}, admits ` +
+        `values of different shapes (for example a number and a list), and ` +
+        `the code of its consumer, which no handler wrote, would know its ` +
+        `shape only at run time. Give the node a type of one shape (for ` +
+        `example with a type handler on the definition of its operator), ` +
+        `or write the code of the consumer with a \`compile\` handler too.`,
       value,
     });
   const parts =

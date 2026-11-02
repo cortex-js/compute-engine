@@ -16,6 +16,7 @@ import {
 import { boundVariableNames } from '../boxed-expression/binders.js';
 import { gpuOperandShape } from './gpu-shapes.js';
 import { exactRationalDivisor } from './compiler-type-facts.js';
+import { isAmplifiedTrig } from './gpu-exact-trig.js';
 import {
   absCompilesToPointNorm,
   absCompilesToPointListNorm,
@@ -146,10 +147,13 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   shader reads as the host's input with a declared finite range
  *   (`k: real<0..10>`; the range in the static type of a compound
  *   expression is not read), a product of such values, a sum, difference
- *   or negation of such values (the sum of the bounds of the operands), or
+ *   or negation of such values (the sum of the bounds of the operands),
  *   `abs`, `min` or `max` of real scalar operands of known magnitude (the
  *   largest bound of the operands; `|(x, x)|` is a Euclidean norm and has
- *   no bound from this rule). Each head is in
+ *   no bound from this rule), `floor`, `ceil`, `round` or `trunc` of such a
+ *   value (its bound plus 1), a fractional part (`fract`, at most 1), or a
+ *   floored modulo `mod(a, d)` of such values (about the bound of `d`; at
+ *   most 1 for `d = 1`, whatever `a`). Each head is in
  *   `GPU_F32_BOUNDED_HEADS`, or is one of these:
  *   - a product whose factors all have a known magnitude, and whose
  *     magnitudes multiply to at most half the largest f32, or a product of
@@ -479,7 +483,9 @@ function gpuFiniteProof(
   // the factors of a product when each factor has one; the magnitude of the
   // literal that the emitter folds a constant subtree into (`2π`); the sum of the bounds
   // of the operands of a sum, a difference or a negation; the largest bound
-  // of the real scalar operands of `abs`, `min` and `max`; else the bounds
+  // of the real scalar operands of `abs`, `min` and `max`; the bound of the
+  // operand plus 1 for `floor`, `ceil`, `round` and `trunc`; 1 for `fract`;
+  // about the bound of the divisor for `mod`; else the bounds
   // of the declared range of a
   // symbol that the shader reads as the host's input (`k: real<0..10>`). A
   // declared range is a promise of the host, as a declared `real` is (see
@@ -568,6 +574,59 @@ function gpuFiniteProof(
         bound *= m;
       }
       if (Number.isFinite(bound)) return bound;
+    }
+    // `floor`, `ceil`, `round` and `trunc` of a real operand of bound `m`
+    // (one operand: the step form `Floor(x, step)` is a quotient and a
+    // product, `gpuRoundToStep`): at most `m + 1`. The shader computes them
+    // exactly from the f32 value of the operand, and every form of `Round`
+    // (`gpuRoundToInteger`) gives an integer next to that value.
+    else if (
+      isFunction(e) &&
+      e.nops === 1 &&
+      (e.operator === 'Floor' ||
+        e.operator === 'Ceil' ||
+        e.operator === 'Round' ||
+        e.operator === 'Truncate') &&
+      !BaseCompiler.isComplexValued(e.op1)
+    ) {
+      const m = magnitude(e.op1, depth + 1);
+      if (m !== undefined) return m + 1;
+    }
+    // The fractional part of a finite real operand: `fract(x)` is in
+    // [0, 1] in f32 (`fract(-1e-20)` rounds to 1). The exact form of a
+    // sine hash (`isAmplifiedTrig`, `gpuAmplifiedTrigMod`) can be NaN, so
+    // it gets no bound.
+    else if (
+      isFunction(e) &&
+      e.operator === 'Fract' &&
+      e.nops === 1 &&
+      !BaseCompiler.isComplexValued(e.op1) &&
+      !isAmplifiedTrig(e.op1) &&
+      finite(e)
+    )
+      return 1;
+    // A floored modulo `Mod(a, d)` that the modulo rule accepts
+    // (`modStaysFinite`). With the divisor 1 the shader computes
+    // `fract(fract(a))`, in [0, 1]. Otherwise the `_gpu_fmod` helper
+    // (`gpuFloorModLibrary`) gives a value in the range of `d`, of
+    // magnitude at most the bound `M` of `d`, except for the rounding of
+    // the quotient `a / d` in f32: a quotient that rounds past an integer
+    // moves the result by `d` times its error, which is at most a few ulp
+    // of `|a| / |d|`. So the bound is `M + (m + M)·2⁻¹⁶` for the bound `m`
+    // of `a`. The sine hash has no bound, as for `Fract`.
+    else if (
+      isFunction(e) &&
+      e.operator === 'Mod' &&
+      e.nops === 2 &&
+      !BaseCompiler.isComplexValued(e.op1) &&
+      !BaseCompiler.isComplexValued(e.op2) &&
+      !isAmplifiedTrig(e.op1) &&
+      finite(e)
+    ) {
+      if (isNumber(e.op2) && e.op2.im === 0 && e.op2.re === 1) return 1;
+      const m = magnitude(e.op1, depth + 1);
+      const M = magnitude(e.op2, depth + 1);
+      if (m !== undefined && M !== undefined) return M + (m + M) * 2 ** -16;
     }
     // A call of a user function that `finite` accepts: the bound of its body
     // for the arguments of this call (`userCall`).

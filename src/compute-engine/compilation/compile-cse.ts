@@ -1106,16 +1106,26 @@ export function compileCseRoot(
   const emit = fn ?? (() => core.compile(root, target, prec));
   const session = target.cse;
   let code: TargetSource;
-  if (admit) CompilerState._rootAdmission = true;
-  try {
-    code =
-      session === undefined || !session.enabled || session.harvest === undefined
-        ? emit()
-        : withCseRegion(target, cseHarvestOf(target)!.root, emit);
-  } finally {
-    if (admit) CompilerState._rootAdmission = false;
+  const callerLowered = CompilerState._callerLowered;
+  if (admit) {
+    CompilerState._rootAdmission = true;
+    CompilerState._callerLowered = new Map();
   }
-  if (admit) core.assertAdmitted(expr, target, unsettled);
+  try {
+    try {
+      code =
+        session === undefined ||
+        !session.enabled ||
+        session.harvest === undefined
+          ? emit()
+          : withCseRegion(target, cseHarvestOf(target)!.root, emit);
+    } finally {
+      if (admit) CompilerState._rootAdmission = false;
+    }
+    if (admit) core.assertAdmitted(expr, target, unsettled);
+  } finally {
+    if (admit) CompilerState._callerLowered = callerLowered;
+  }
   return code;
 }
 

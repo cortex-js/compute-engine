@@ -728,6 +728,14 @@ export function analyzeReferences(
             throwIfCallerCancellation(e, engine._deadlineFrame);
             hasCustomCompile = e === OPERAND_READ;
           }
+        } else if (CompilerState._callerLowered.has(e)) {
+          // The compilation in progress already called the handler on this
+          // node (`compileExpr()`), and recorded whether it wrote the code
+          // of the node: that is the answer, and the handler, which is
+          // caller code, is not called again for it. The admission checks
+          // run this analysis after the code was generated
+          // (`assertAdmitted()`).
+          hasCustomCompile = CompilerState._callerLowered.get(e) === true;
         } else {
           try {
             // The probe asks one question — does the handler CLAIM this
@@ -847,6 +855,30 @@ export function analyzeReferences(
       // leaves analysed as free ambient symbols.
       const params = functionLiteralBoundNames(ops.slice(1));
       visit(ops[0], params.length ? union(bound, params) : bound);
+      return;
+    }
+    if (h === 'D') {
+      // The variables of a derivative (`D(f(x), x)`) are bound in the scope
+      // of the `D`, where their type is inferred from the body, or is
+      // `unknown`. The compiled code computes the derivative at the value
+      // of the input of that name (`_.x`), which is the symbol outside the
+      // `D`, so a declaration of that symbol gives the type of the input:
+      // with `x` declared `real`, the input `x` of `D(F(x), x)` is `real`.
+      // The outer symbol is recorded before the body is visited, because
+      // the first occurrence of a name gives the type that
+      // `freeSymbolTypes()` reports. When the outer symbol has no declared
+      // type (no definition, or a definition with an inferred type), the
+      // occurrence in the `D` gives the type: an undeclared `x` is read
+      // with the type inferred in the `D`, and not with the type `unknown`
+      // of the automatic outer definition.
+      for (const variable of ops.slice(1)) {
+        if (!isSymbol(variable) || bound.has(variable.symbol)) continue;
+        const def = engine.lookupDefinition(variable.symbol);
+        if (!isValueDef(def) || def.value.inferredType) continue;
+        const outer = engine.symbol(variable.symbol);
+        if (isSymbol(outer)) addFree(outer);
+      }
+      for (const op of ops) visit(op, bound);
       return;
     }
     if (h === 'Pipe' && ops.length === 2 && isFunction(ops[1])) {

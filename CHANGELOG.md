@@ -99,8 +99,24 @@
   check of the shapes of the branches applies to the stock lowering of a
   conditional, and a handler takes precedence over that lowering, so the
   compilation now uses the code of the handler, as it did in 0.175.0. The
-  node then has its static type (here `integer | vector<integer^2>`). A
-  handler that returns no code gives the stock lowering, which still
+  node then has its static type (here `integer | vector<integer^2>`). The
+  same rule applies to every node whose code a `compile` handler wrote,
+  conditional or not: when its type admits values of shapes that conflict
+  (a number and a list), the node compiles only where no code of the stock
+  lowering reads its value. It compiles as the whole expression, as the
+  value of the whole expression (the last statement of a root `Block`, a
+  branch of a root `If`, the body of a root function literal), and as an
+  operand of another node whose code a handler wrote. Under a stock
+  consumer, such as `Which(x > 0, 0, True, [1, 2]) + 1`, the compilation
+  declines with `unsettled-shape`: give the node a type of one shape (for
+  example with a type handler on the definition) or write the code of the
+  consumer with a handler too. As the body of a user function that the
+  code calls, such a node also declines, and so does a case of a `Match`
+  whose value is used. A type `broadcastable<T>`, alone or in a union
+  (`broadcastable<real> | missing`), admits several shapes. A handler node
+  whose type has one shape compiles anywhere; a `missing` member does not
+  count as a shape, so `Which(x > 0, 1, x < 0, 2) + 1`, of type
+  `integer | missing`, compiles. A handler that returns no code gives the stock lowering, which still
   declines. The admission check also no longer calls the handler a second
   time for a node that the compilation already gave to it.
 - **Shader targets: `floor`, `fract` and `mod` of a bounded value no longer

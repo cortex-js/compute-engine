@@ -102,6 +102,7 @@ import {
   unionAdmitsFlatNumericList,
 } from './compiler-type-facts.js';
 import { CompilerState } from './compiler-state.js';
+import { isEngineCompileHandler } from './engine-compile-handlers.js';
 import {
   absentCollectionOperandGuard,
   assertCapturedCallableBindings,
@@ -491,9 +492,15 @@ export function compile(
   // checked in `compileCseRoot()`, and a call at depth 0 inside the emission
   // of such a root does not check again (`CompilerState._rootAdmission`).
   const admission: { unsettled?: UnsettledShape } = {};
-  const code = compileExpression(expr, target, prec, admission);
-  assertAdmitted(expr, target, admission.unsettled);
-  return code;
+  const callerLowered = CompilerState._callerLowered;
+  CompilerState._callerLowered = new Map();
+  try {
+    const code = compileExpression(expr, target, prec, admission);
+    assertAdmitted(expr, target, admission.unsettled);
+    return code;
+  } finally {
+    CompilerState._callerLowered = callerLowered;
+  }
 }
 
 /**
@@ -3446,7 +3453,18 @@ export function compileExpr(
           typeOf: (x) => operandTypeInContext(x, target),
         }
       );
-      if (custom !== undefined && custom !== null && custom !== '') {
+      const wrote = custom !== undefined && custom !== null && custom !== '';
+      // A caller's handler takes precedence over the stock lowering, so the
+      // admission rules of the stock lowering of this node do not apply to
+      // the code that the handler wrote (`CompilerState._callerLowered`).
+      // One lowering of the node by the stock code keeps those rules.
+      if (
+        node !== undefined &&
+        !isEngineCompileHandler(customDef.operator.compile) &&
+        CompilerState._callerLowered.get(node) !== false
+      )
+        CompilerState._callerLowered.set(node, wrote);
+      if (wrote) {
         recordCallerHandlerCode(h, customDef.operator, target);
         return custom;
       }

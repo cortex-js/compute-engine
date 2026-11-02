@@ -479,7 +479,7 @@ function hasLargeFactor(e: Expression): boolean {
  * constant in a term that does not hold the call (`Mod(1000x + sin y, 1)`),
  * or behind another function (`Floor(1000 sin x)`), is not flagged.
  */
-function isAmplifiedTrig(u: Expression): boolean {
+export function isAmplifiedTrig(u: Expression): boolean {
   // `onChain`: `e` is reached from `u` through `Multiply`, `Negate`, `Add`,
   // `Subtract`, `Abs` and numerators only, so a large factor met here
   // multiplies whatever trigonometric value lies below it. `amplified`: such

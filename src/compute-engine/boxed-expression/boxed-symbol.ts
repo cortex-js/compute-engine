@@ -1,5 +1,5 @@
 import { isDeclaredLocal } from './declared-local.js';
-import { isScratchBinding } from '../scratch-scopes.js';
+import { isScratchBinding, scratchRootOf } from '../scratch-scopes.js';
 import { noteKindTypeDeclaration } from './residue-class.js';
 import type {
   MathJsonExpression,
@@ -740,7 +740,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
     // serialization) a read must not write inference onto a definition —
     // every call site is fire-and-forget, so declining is safe.
-    if (this.engine._resolveOnlyDepth > 0) return false;
+    //
+    // A binding declared under a scratch scope (`scratch-scopes.ts`) is the
+    // exception: no cache that outlives the computation can read it, so the
+    // write changes nothing that the region protects. The computation that
+    // owns the scratch scope must give the same answer inside and outside
+    // the region, because its caller memoizes it. The derivation of the
+    // result of a function under its declared parameter types boxes a copy
+    // of the literal in a scratch scope (`resultUnderDeclaredParameters`,
+    // `declared-parameter-result.ts`). When a serialization read a type that
+    // started that derivation, the parameters of the copy were not narrowed
+    // by their uses: with `F := n ↦ If(n = 9, [(0, 0, −n)], ListJoin(
+    // [(0, 0, −n)], F(n + 1)))`, the result of `F` was memoized as
+    // `list<tuple<integer, integer, unknown>>` instead of
+    // `list<tuple<integer, integer, number>>`, and a compile of a function
+    // of `F(0)` declined after a read of its `.latex`.
+    if (
+      this.engine._resolveOnlyDepth > 0 &&
+      !isScratchBinding(this.engine, this._def)
+    )
+      return false;
 
     // A use of the variable of a binder operator (the index `k` of
     // `Sum(2k, Limits(k, 1, 3))`) may reach this symbol while it still
@@ -890,6 +909,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       ce._bindingSymbol(name, s)?._infer(() => t, 'narrow');
       return;
     }
+    // Inside a resolve-only region (serialization), `_infer()` narrows a
+    // binding declared under a scratch scope, and reaches this function. A
+    // declaration in `outerScope` lasts after the region unless that scope
+    // is under a registered scratch scope, so it is made only in that case.
+    if (ce._resolveOnlyDepth > 0 && scratchRootOf(ce, outerScope) === undefined)
+      return;
     ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope);
   }
 

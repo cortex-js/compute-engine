@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-785.
+Next free reference: CE-786.
 
 **Entry format.**
 
@@ -2091,6 +2091,25 @@ Also `Series(exp x).N()`; a one-line program. Found during the work of 2026-10-3
 reproduction above is the record.
 
 ## Compilation
+
+### CE-785. The compiler's stack limit for a nested expression fell from about 420 to about 370 levels
+
+**Status:** ready; defect, S.
+**Witness:** plausible; `test/compute-engine/compile-deep-nesting.test.ts` › "a chain of 350 sines and cosines compiles" fails in the full Jest suite (`success: false`) and passes when the file runs alone.
+
+The compiler is recursive, so an expression nested deeply enough overflows
+the stack and the compilation falls back to the interpreter. The test file
+records limits of about 420 levels for a `Sin`/`Cos` chain after CE-320.2,
+and sets the test depth at 350, about 20% below. At commit `4c55bdbee`
+(and at `3ba729792`), a bisection with `npx tsx` outside Jest gives a limit
+of about 370 levels. In a Jest worker that has run other test files, the
+stack left is smaller, and 350 levels no longer compile. A polynomial in
+Horner form nests two levels per degree, so a realistic expression reaches
+this limit. Find which commit after CE-320.2 added frames on the path of
+every operand (`compileExpr`, `_compileInner` and the reference analysis of
+`compile-references.ts` are the recursive functions), and make those frames
+smaller again, as CE-320.2 did, or change the recursion of the deep cases to
+a loop. Then measure both limits again and update the comment of the test.
 
 ### CE-751. A `number` value that holds a complex number reaches code compiled for `real`
 

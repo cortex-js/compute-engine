@@ -147,7 +147,7 @@ describe('A NUMERATOR THAT MAY BE INFINITE', () => {
     // A coordinate that may be infinite: `+∞ / 2` is `+∞`.
     [
       ['Divide', 'p', 2],
-      'tuple<infinity | nan | real, real>',
+      'tuple<real | signed_infinity, real>',
       ['Tuple', 'PositiveInfinity', ['Rational', 1, 2]],
     ],
   ])('%j', (json, type, value) => {

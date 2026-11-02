@@ -428,19 +428,20 @@ describe('GENERIC SUM/PRODUCT LOOP OF A CUSTOM TARGET', () => {
     expect(product.value).toBe(product.expected);
   });
 
-  it('compiles a symbolic bound with a body that writes its index', () => {
-    // Each iteration binds `j` to the next value of the counter, whatever the
-    // body wrote: 11 + 12 + 13 for n = 3.
-    const { value, expected } = runLoop(
-      [
-        'Sum',
-        ['Block', ['Assign', 'j', ['Add', 'j', 10]], 'j'],
-        ['Limits', 'j', 1, 'n'],
-      ],
-      { n: 3 }
-    );
-    expect(value).toBe(36);
-    expect(value).toBe(expected);
+  it('declines a symbolic bound with a body that writes its index', () => {
+    // A compiled `Sum` or `Product` whose body writes its index declines on
+    // every target, the custom ones too: the generic loop would otherwise
+    // have to choose whether the write changes the next value of the counter.
+    // The interpreter evaluates the expression instead.
+    const engine = loopEngine();
+    const expr = engine.box([
+      'Sum',
+      ['Block', ['Assign', 'j', ['Add', 'j', 10]], 'j'],
+      ['Limits', 'j', 1, 'n'],
+    ]);
+    expect(() =>
+      compile(expr, { target: loopTarget, fallback: false })
+    ).toThrow(/writes the index `j`/);
   });
 
   it('reads an outer variable with the name of the index in a bound', () => {

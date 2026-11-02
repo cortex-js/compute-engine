@@ -1926,8 +1926,11 @@ function negativeBaseIsComplexBranch(exp: OperandDescriptor): boolean {
  * divisor that is not proven non-zero (by its range or by its sign) is
  * `real | infinity | nan`: `(1, 2) / x` with `x = 0` is `(~oo, ~oo)`, and
  * `(0, 1) / x` has a `NaN` coordinate. A real component that is not proven
- * finite gets the same type, because `∞ / 2` is `∞`. A divisor proven
- * non-zero keeps the finite tier. The component type is not echoed:
+ * finite gets the same type, because `∞ / 2` is `∞`, except over a finite
+ * real divisor proven non-zero, where it is `real | +oo | -oo` (`∞ / 2` is
+ * `+∞`, never `~oo` or `NaN`). A `nan` arm of the component is kept in the
+ * quotient. A divisor proven non-zero keeps the finite tier of a finite
+ * component. The component type is not echoed:
  * `tuple<integer, integer> / 4` has rational components, because
  * `[6, 2] / 4` is `[3/2, 1/2]`. The user decided this rule for scalar
  * quotients on 2026-08-29 (`docs/plans/2026-08-29-interval-division.md`),
@@ -1955,6 +1958,22 @@ function quotientComponentType(
   // call order.
   if (provablyNaNOperand(den) || operandLiteralValueOnTypes(den) === 0)
     return 'number';
+  // A component that is NaN or a number (`nan | real`): the quotient is NaN
+  // when the component is, and otherwise the quotient of the number. So it
+  // is typed without its `nan` arm, and the arm is added back, as the
+  // `Multiply` handler does for a factor of that type.
+  const present = withoutNanArm(el);
+  if (present !== undefined) {
+    const q = quotientComponentType(
+      present,
+      den,
+      floatNumerator,
+      zeroTypedByCaller
+    );
+    return q === 'number'
+      ? q
+      : reduceType({ kind: 'union', types: [q, 'nan'] });
+  }
   if (operandNonFiniteNumberOnTypes(den)) {
     // The scalar path's symmetric claim: a provably finite real component
     // over a provably non-finite REAL denominator is exactly 0.
@@ -1967,7 +1986,17 @@ function quotientComponentType(
     (isExtendedRealOperand(den) && factsOf(el).extendedReal)
   ) {
     // A divisor that may be zero gives `~oo` (`1/0`) or `NaN` (`0/0`), and a
-    // component that may be infinite gives `±∞` or `NaN`.
+    // component that may be infinite gives `±∞` or `NaN`. Over a finite
+    // real divisor that is not zero, a component that may be infinite gives
+    // a finite real or `±∞` (`∞ / 2` is `+∞`), never `~oo` or `NaN`: the
+    // type of `(1/2)·y`, the canonical form of a scalar `y / 2`.
+    if (
+      factsOf(el).finite !== true &&
+      den.facts.finite === true &&
+      isExtendedRealOperand(den) &&
+      (zeroTypedByCaller || divisorProvablyNonZero(den))
+    )
+      return EXTENDED_REAL_PRODUCT_TYPE;
     if (
       factsOf(el).finite !== true ||
       (!zeroTypedByCaller && !divisorProvablyNonZero(den))
@@ -3966,9 +3995,18 @@ function tupleComponentwiseAddType(
       // `1 + i` is neither real nor imaginary): each imaginary member of the
       // join is `complex` — the same repair the scalar tail of
       // `addTypeOnTypes` applies, and `absorbScalarsIntoCells` applies to a
-      // cell.
+      // cell. Components on the extended real line that may be infinite are
+      // then typed as a scalar sum of them is (`signedInfinitySum`): the
+      // join (and `stripNumericRanges` before it) widens `+oo | -oo` to
+      // `infinity`, which admits the complex infinity, so a sum of two
+      // `tuple<real | signed_infinity | nan, …>` points was not a
+      // `tuple<real | signed_infinity | nan, …>`. The rule reads the
+      // component types as declared, before the strip.
       elements.push({
-        type: closeImaginaryUnderArithmetic(widen(...components) as Type),
+        type: signedInfinitySum(
+          tuples.map((t) => describeType(t.elements[i].type)),
+          closeImaginaryUnderArithmetic(widen(...components) as Type)
+        ),
       });
       continue;
     }
@@ -7427,6 +7465,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
         if (operandLiteralValueOnTypes(den) === 0)
           return BoxedType.forResult('number', context.engine._typeResolver);
+        // A numerator that is NaN or a number (`nan | real`): the quotient is
+        // NaN when the numerator is, and otherwise the quotient of the
+        // number. So it is typed without its `nan` arm, and the arm is added
+        // back, as the `Multiply` handler does for a factor of that type and
+        // `quotientComponentType` does for a component of a point.
+        if (ops.length === 2) {
+          const present = withoutNanArm(num.type);
+          if (present !== undefined) {
+            const q = context.derive('Divide', [
+              {
+                ...describeType(present, num.facts.closed),
+                structureOf: num.structureOf,
+              },
+              den,
+            ]);
+            if (q !== undefined && q !== 'number' && isSubtype(q, 'number'))
+              return BoxedType.forResult(
+                reduceType({ kind: 'union', types: [q, 'nan'] }),
+                context.engine._typeResolver
+              );
+          }
+        }
         // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
         // `∞/i`, `i/∞` give NaN/~oo. Operands like `Ln(0)`, or a symbol
         // declared `+oo | -oo`, have no value to probe: the descriptor's
@@ -7504,7 +7564,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // `∞ / ∞` NaN — neither in the finite tier. A PROVABLY infinite
           // numerator was answered by the non-finite arm above; this is
           // the unknown-finiteness residue (pre-existing: this rung
-          // claimed `real` for it before the interval round too).
+          // claimed `real` for it before the interval round too). Over a
+          // finite real divisor that is not zero, such a numerator gives a
+          // finite real or `±∞`, never `~oo` or `NaN`, as the product
+          // `(1/2)·y` (the canonical form of `y / 2`) is typed; the
+          // components of a point quotient follow the same rule
+          // (`quotientComponentType`).
+          if (
+            num.facts.finite !== true &&
+            den.facts.finite === true &&
+            divisorProvablyNonZero(den)
+          )
+            return BoxedType.forResult(
+              EXTENDED_REAL_PRODUCT_TYPE,
+              context.engine._typeResolver
+            );
           if (num.facts.finite !== true)
             return BoxedType.forResult(
               POSSIBLY_ZERO_QUOTIENT_TYPE,
@@ -10218,6 +10292,50 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // `q` is `0.5`), so it scales the numeric components as a factor
           // typed `number` does.
           const others = ops.filter((x) => x !== tupleOps[0]);
+          // A point whose components and declared factors are all on the
+          // extended real line, with or without NaN, and one of which may be
+          // infinite: each component is typed as the scalar product of that
+          // component and the factors, by this handler. The join in
+          // `scaleTupleComponents` widens `+oo | -oo` to `infinity`, which
+          // admits the complex infinity, so `2P` for
+          // `P: tuple<real | signed_infinity | nan, …>` was not a
+          // `tuple<real | signed_infinity | nan, …>`, while `2a` for a scalar
+          // `a` of that type keeps the type. As in the branch below, a float
+          // literal that holds an integer makes a rational component `real`.
+          {
+            const point = resolveTypeAlias(tupleOps[0].type);
+            const extended = (t: Type) =>
+              isSubtype(t, EXTENDED_REAL_OR_NAN_PRODUCT_TYPE);
+            const types =
+              typeof point === 'object' && point.kind === 'tuple'
+                ? [
+                    ...point.elements.map((e) => e.type),
+                    ...others.map((x) => x.type),
+                  ]
+                : [];
+            if (
+              typeof point === 'object' &&
+              point.kind === 'tuple' &&
+              others.every((x) => isDeclaredScalarNumberOperand(x, engine)) &&
+              types.every(extended) &&
+              types.some(
+                (t) => !isSubtype(t, { kind: 'union', types: ['real', 'nan'] })
+              )
+            ) {
+              const elements = point.elements.map((e) => ({
+                ...e,
+                type: derive('Multiply', [describeType(e.type), ...others]),
+              }));
+              if (elements.every((e) => e.type !== undefined))
+                return BoxedType.forResult(
+                  withFloatRationalCellsAsReal(ops, {
+                    kind: 'tuple',
+                    elements: elements as NamedElement[],
+                  }),
+                  engine._typeResolver
+                );
+            }
+          }
           if (
             others.every(
               (x) =>

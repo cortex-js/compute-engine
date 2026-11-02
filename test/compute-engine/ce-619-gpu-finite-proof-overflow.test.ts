@@ -322,4 +322,79 @@ describe.each(['glsl', 'wgsl'] as const)('CE-619 on %s', (to) => {
       ).toBe('sin(H * min(x, y) * max(x, y))');
     });
   });
+
+  describe('rounding, fractional part and modulo have a known size', () => {
+    // `floor`, `ceil`, `round` and `trunc` of an operand of size `m` have
+    // the size `m + 1`; `fract` and `mod(a, 1)` the size 1; `mod(a, d)`
+    // about the size of `d`. The sine-hash noise of Desmos art,
+    // `sin(10000(51.1·floor(t) − 3.9))`, then calls the built-in.
+    const ce = new ComputeEngine();
+    ce.declare('t', 'real<-5.5..5.5>');
+    ce.declare('T', 'real<0..120>');
+    ce.declare('x', 'real');
+    ce.declare('s', 'real<-1..1>');
+    ce.declare('H', 'real<0..1e38>');
+    ce.declare('u', 'real<-1.5..1.5>');
+    ce.declare('G', 'real<0..2e38>');
+
+    it('uses the built-in', () => {
+      // Control: the same formula without `floor`.
+      expect(shader(ce, '\\sin(10000(51.1 t-3.9))', to).code).toMatch(
+        /^sin\(/
+      );
+      expect(
+        shader(ce, '\\sin(10000(51.1\\lfloor t\\rfloor-3.9))', to).code
+      ).toMatch(/^sin\(10000\.0 \* \(51\.1 \* floor\(t\)/);
+      expect(shader(ce, '\\sin(1000(t-\\lfloor t\\rfloor))', to).code).toBe(
+        'sin(1000.0 * (t + -floor(t)))'
+      );
+      expect(
+        shader(
+          ce,
+          '\\cos(\\frac{T}{40}+\\frac{\\pi\\lfloor T\\bmod 7\\rfloor}{7})',
+          to
+        ).code
+      ).toBe(
+        'cos(T / 40.0 + (3.14159265359 * floor(_gpu_fmod(T, 7.0))) / 7.0)'
+      );
+      for (const [head, fn] of [
+        ['Ceil', 'ceil'],
+        ['Truncate', 'trunc'],
+        ['Round', '_gpu_round'],
+      ])
+        expect(
+          shader(ce, ['Sin', ['Multiply', 1000, [head, 't']]], to).code
+        ).toBe(`sin(1000.0 * ${fn}(t))`);
+      // A fractional part is at most 1 for any finite operand.
+      expect(
+        shader(ce, ['Sin', ['Multiply', 1000, ['Fract', 'x']]], to).code
+      ).toBe('sin(1000.0 * fract(x))');
+      expect(
+        shader(ce, ['Sin', ['Multiply', 1000, ['Mod', 'x', 1]]], to).code
+      ).toBe('sin(1000.0 * fract(fract(x)))');
+    });
+
+    it('keeps the helper when the size can overflow f32', () => {
+      // `floor(u)` is -2 at `u = -1.5`, and `G·floor(u)` is `-4·10³⁸`,
+      // `-∞` in f32, at `G = 2·10³⁸`. `H·mod(s, 2)` is about `2·10³⁸`
+      // there, past half the largest f32.
+      expect(
+        shader(ce, ['Sin', ['Multiply', 'G', ['Floor', 'u']]], to).code
+      ).toBe('_gpu_sin(G * floor(u))');
+      expect(
+        shader(ce, ['Sin', ['Multiply', 'H', ['Mod', 's', 2]]], to).code
+      ).toBe('_gpu_sin(H * _gpu_fmod(s, 2.0))');
+      // An operand of unknown size gives `floor` and `mod` no size.
+      expect(
+        shader(ce, ['Sin', ['Multiply', 1000, ['Floor', 'x']]], to).code
+      ).toBe('_gpu_sin(1000.0 * floor(x))');
+      expect(
+        shader(ce, ['Sin', ['Multiply', 1000, ['Mod', 'x', 7]]], to).code
+      ).toBe('_gpu_sin(1000.0 * _gpu_fmod(x, 7.0))');
+      // The step form `Floor(x, step)` is not bounded by this rule.
+      expect(
+        shader(ce, ['Sin', ['Multiply', 1000, ['Floor', 't', 0.5]]], to).code
+      ).toMatch(/^_gpu_sin\(/);
+    });
+  });
 });

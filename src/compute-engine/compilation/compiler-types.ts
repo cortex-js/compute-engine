@@ -111,7 +111,10 @@ export type DeclineNote = { reason?: string };
  * `'return-in-loop'` when a `Return` is inside a `Loop` whose compiled code
  * would end only the loop (`node` is then the `Return`), and `'loop-value'`
  * when the value of a `Loop` is used and the compiled code cannot give it
- * (`node` is then the `Loop`).
+ * (`node` is then the `Loop`), and `'handler-value'` when a caller's
+ * `compile` handler wrote the code of a node whose static type admits
+ * shapes that conflict and the stock code of a consumer reads its value
+ * (`node` is then the node of the handler).
  * `assertAdmitted()` reads the reason to write the message of the decline.
  */
 export type UnsettledShape = {
@@ -124,7 +127,8 @@ export type UnsettledShape = {
     | 'elementwise'
     | 'scoped-assignment'
     | 'return-in-loop'
-    | 'loop-value';
+    | 'loop-value'
+    | 'handler-value';
 };
 
 /**

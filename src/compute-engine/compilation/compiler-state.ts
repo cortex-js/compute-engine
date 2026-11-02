@@ -504,6 +504,20 @@ export class CompilerState {
    */
   static _rootAdmission = false;
   /**
+   * The nodes of the outermost compilation in progress whose operator has
+   * a caller-supplied `compile` handler (a handler on the definition that
+   * is not one of the engine's own), mapped to `true` when that handler
+   * wrote the code of every lowering of the node, and to `false` when it
+   * returned no code for one of them, so that the stock lowering wrote
+   * that code. `compileExpr()` fills it. The admission rule that a
+   * conditional has branches of one shape (`unsettledShapeIn()`,
+   * `compile-admission.ts`) is a rule of the stock lowering, so it does
+   * not apply to a node mapped to `true`. It is reset where the admission
+   * checks of an outermost compilation start (`compile()`,
+   * `compileCseRoot()`).
+   */
+  static _callerLowered = new Map<Expression, boolean>();
+  /**
    * Lexical frames of `Block` locals, innermost last, each mapping a local's
    * name to its inferred aggregate width. The vector analog of
    * `_localComplex`: pushed and popped by `compileBlock`, consulted by

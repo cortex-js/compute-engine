@@ -34,7 +34,7 @@ import {
 } from '../common/type/subtype.js';
 import { declarationOf } from '../common/type/reference.js';
 import { parseType } from '../common/type/parse.js';
-import { reduceType } from '../common/type/reduce.js';
+import { reduceType, typesOverlap } from '../common/type/reduce.js';
 import {
   BARE_SET_STRUCTURAL_TYPE,
   COLLECTION_SHAPE_TYPE,
@@ -6519,12 +6519,45 @@ export function isPointParameterType(param: Type): boolean {
 }
 
 /**
+ * Whether a point of type `t` is accepted at the user-function parameter
+ * declared as the point type `param`, by the rule that the argument check
+ * uses for one point given as the whole argument: `t` is a subtype of
+ * `param`, or `t` is a tuple type that shares a value with `param`
+ * (`typesOverlap`). In the second case the evaluation checks the value of
+ * each point when it binds it to the parameter.
+ *
+ * For example, with `E = real | signed_infinity | nan`, a point typed
+ * `tuple<number, number>` is accepted at `tuple<E, E>`: a component typed
+ * `number` can hold a real value. A point typed `tuple<integer, string>`
+ * is not: no string is a member of `E`.
+ *
+ * The functions that recognize a list or a tensor of points use this rule
+ * for each point, so that a list of points is accepted exactly when one of
+ * its points is accepted as the whole argument. Before, they required a
+ * subtype, and with `g: (tuple<E, E>) -> unknown`, `g(T)` was accepted for
+ * `T: tuple<number, number>` while `g(L)` was an `incompatible-type` error
+ * for `L: list<tuple<number, number>>`.
+ */
+function pointFitsParameter(t: Type, param: Type): boolean {
+  // `never` is a subtype of every type, but it is not a point. A union of
+  // tuple types that is a subtype of `param` is accepted.
+  if (t === 'never') return false;
+  if (isSubtype(t, param)) return true;
+  const r = resolveTypeAlias(t);
+  return (
+    (r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple')) &&
+    typesOverlap(r, param)
+  );
+}
+
+/**
  * Whether an argument of type `arg` is a LIST OF POINTS that a user function
  * whose parameter is declared as the point type `param` maps over: `arg` is a
  * finite-shaped indexed collection (a list, not a tuple) whose element type is
- * a subtype of `param`. For example, `list<tuple<real, real>>` (the type of
- * `PointList(x, y)` with `x` a list of reals and `y` a real) conforms to the
- * parameter `tuple<real, real>`.
+ * a point accepted at `param` (`pointFitsParameter`). For example,
+ * `list<tuple<real, real>>` (the type of `PointList(x, y)` with `x` a list of
+ * reals and `y` a real) conforms to the parameter `tuple<real, real>`, and so
+ * does `list<tuple<number, number>>`.
  *
  * Such a call answers the list of the function's values at each point: the
  * application maps over the points, and each point is bound whole to the
@@ -6592,7 +6625,7 @@ export function isPointListArgumentType(
   if (element === undefined) return false;
   const e = stripMissingFromType(element);
   if (e === 'never') return hasOnlyAbsentElements(arg);
-  return isSubtype(e, param);
+  return pointFitsParameter(e, param);
 }
 
 /**
@@ -6620,9 +6653,9 @@ export function isEmptyListArgumentType(arg: Type, param: Type): boolean {
  * declared as the point type `param`: a matrix of points
  * (`matrix<tuple<real, real>^(2x2)>`), a list of lists of points
  * (`list<list<tuple<real, real>>>`), or a tensor of points of unknown rank
- * (`tensor<tuple<real, real>>`). The point cells must be subtypes of
- * `param`. A list of points of rank 1 is `isPointListArgumentType`, and this
- * predicate answers `false` for it.
+ * (`tensor<tuple<real, real>>`). The point cells must be accepted at
+ * `param` (`pointFitsParameter`). A list of points of rank 1 is
+ * `isPointListArgumentType`, and this predicate answers `false` for it.
  *
  * Such a call maps to the points at every depth and answers a collection of
  * the same shape (user decision 2026-10-25, ROADMAP CE-448), as `PointX` and
@@ -6801,8 +6834,7 @@ function pointArmsOfMixedRanks(
     }
     // One point: the call binds it whole.
     const r = resolveTypeAlias(x);
-    if (typeof r !== 'string' && r.kind === 'tuple' && isSubtype(r, param))
-      continue;
+    if (pointFitsParameter(r, param)) continue;
     if (
       isPointListArgumentType(x, param) ||
       isPointOrPointListArgumentType(x, param)
@@ -6890,7 +6922,7 @@ function recursivePointNesting(
   // walk sets `state.mixed`, and the type of the call gets an `error` arm
   // (ROADMAP CE-505). Before, such a type was refused, though its values
   // whose elements do not mix depths map.
-  if (a.kind === 'tuple' && isSubtype(a, param)) {
+  if (a.kind === 'tuple' && pointFitsParameter(a, param)) {
     state.leaf = true;
     if (depth > 0) state.mixed = true;
     return true;
@@ -6901,7 +6933,7 @@ function recursivePointNesting(
   // descent guard meets it and the walk stops there.
   const e = withoutMissingArms(a.elements);
   if (e === 'never') return true;
-  const point = isSubtype(e, param);
+  const point = pointFitsParameter(e, param);
   if (point) state.leaf = true;
   if (point || a.dimensions !== undefined) return point;
   return (
@@ -6916,11 +6948,11 @@ function recursivePointNesting(
 }
 
 /**
- * Whether an argument of type `arg` is `broadcastable<P>`, with `P` a subtype
- * of the point type `param`: one point, or a tensor of points of any rank. A
- * call of a user function whose parameter is declared as the point `param`
- * maps over such a value at every depth when it is a list, and binds it whole
- * when it is one point (user decision 2026-10-25, ROADMAP CE-448). The
+ * Whether an argument of type `arg` is `broadcastable<P>`, with `P` a point
+ * accepted at the point type `param` (`pointFitsParameter`): one point, or a
+ * tensor of points of any rank. A call of a user function whose parameter is
+ * declared as the point `param` maps over such a value at every depth when it
+ * is a list, and binds it whole when it is one point (user decision 2026-10-25, ROADMAP CE-448). The
  * `missing` arms are removed from `arg` first.
  */
 export function isBroadcastablePointArgumentType(
@@ -6932,7 +6964,7 @@ export function isBroadcastablePointArgumentType(
   const a = resolveTypeAlias(stripped);
   if (typeof a === 'string' || a.kind !== 'broadcastable') return false;
   const e = stripMissingFromType(a.elements);
-  return e !== 'never' && isSubtype(e, param);
+  return e !== 'never' && pointFitsParameter(e, param);
 }
 
 function pointTensorOf(
@@ -6979,7 +7011,7 @@ function pointTensorOf(
         a.elements === 'missing' ||
         (a.elements === 'never' && dims !== null && dims.includes(0))
       );
-    return isSubtype(cell, param);
+    return pointFitsParameter(cell, param);
   }
   // A list with one dimension (`list<P^3>`) holds its cells as elements: it
   // is a list of points of rank 1, not a tensor of points.
@@ -7020,11 +7052,11 @@ function hasOnlyAbsentElements(arg: Type): boolean {
  * user-function parameter declared as the point type `param`, and the type
  * does not say which. Two spellings give such a type:
  *
- * - a union whose arms are points (tuple types that are subtypes of
- *   `param`) and lists of points (`isPointListArgumentType`), with at least
- *   one arm of each kind: `tuple<number, number> | list<tuple<number,
- *   number>>`;
- * - `broadcastable<P>` with `P` a subtype of `param`. It is `P` or a tensor
+ * - a union whose arms are points (tuple types accepted at `param`,
+ *   `pointFitsParameter`) and lists of points (`isPointListArgumentType`),
+ *   with at least one arm of each kind: `tuple<number, number> |
+ *   list<tuple<number, number>>`;
+ * - `broadcastable<P>` with `P` accepted at `param`. It is `P` or a tensor
  *   of `P` cells.
  *
  * The interpreter decides at the value: it binds a point whole and maps the
@@ -7047,15 +7079,14 @@ export function isPointOrPointListArgumentType(
   if (typeof a === 'string') return false;
   if (a.kind === 'broadcastable') {
     const e = stripMissingFromType(a.elements);
-    return e !== 'never' && isSubtype(e, param);
+    return e !== 'never' && pointFitsParameter(e, param);
   }
   if (a.kind !== 'union') return false;
   let point = false;
   let list = false;
   for (const arm of a.types) {
     const r = resolveTypeAlias(arm);
-    if (typeof r !== 'string' && r.kind === 'tuple' && isSubtype(r, param))
-      point = true;
+    if (pointFitsParameter(r, param)) point = true;
     else if (isPointListArgumentType(r, param)) list = true;
     else return false;
   }

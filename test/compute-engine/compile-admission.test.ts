@@ -167,6 +167,35 @@ describe('An input with no type is refused (R1)', () => {
     }
   );
 
+  // The variable of a derivative is bound in the scope of the `D`, and the
+  // compiled code computes the derivative at the input of that name
+  // (`_.x`): the type of the input is the type of the declaration outside
+  // the `D`. With an untyped parameter `t` in `F`, the compilation declined
+  // with `untyped-input`, and the type of `x` was `unknown`.
+  // The target `interval-js` has no numeric derivative, and declines `D`
+  // of a user function for that reason.
+  test('the variable of a derivative has its declared type', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('F', 'function');
+    ce.assign(
+      'F',
+      ce.box([
+        'Function',
+        ['Max', ['Abs', 't'], ['Abs', ['Subtract', 't', 1]]],
+        't',
+      ])
+    );
+    const r = compile(ce.box(['D', ['F', 'x'], 'x']));
+    expect(r.success).toBe(true);
+    expect(r.freeSymbolTypes?.x).toMatchObject({
+      type: 'real',
+      provenance: 'declared',
+    });
+    // d/dx max(|x|, |x - 1|) is 1 at x = 2.
+    expect(r.run!({ x: 2 })).toBeCloseTo(1, 6);
+  });
+
   // The bound of a later limit reads the variable of an earlier one: the
   // compiled code nests the integrals.
   test('the bound of an inner integral is not an input', () => {

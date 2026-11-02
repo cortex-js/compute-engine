@@ -1449,6 +1449,11 @@ export function mayHoldNumericArrayOfRank(
     // A numeric range type (`real<0..1>`) is a number.
     case 'numeric':
       return rank <= 0;
+    // A literal value type is a scalar: `signed_infinity` is the union of
+    // the value types `Infinity` and `-Infinity`, so a `list<real |
+    // signed_infinity>` is a list of numbers, not a matrix.
+    case 'value':
+      return rank <= 0 && typeof r.value === 'number';
     case 'list': {
       if (rank <= 0) return false;
       const dims = r.dimensions;
