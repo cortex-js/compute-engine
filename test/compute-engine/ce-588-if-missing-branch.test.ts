@@ -190,14 +190,6 @@ describe('CE-588 — javascript', () => {
       r.run!({ x: X, y: Y, d: true, ...vars } as never);
     expect(run({ c: presentWhen })).toEqual(presentValue(shape));
     expect(isAbsent(run({ c: !presentWhen }), shape, nan === true)).toBe(true);
-    // `c` not supplied: the interpreter has no value (the `If` stays
-    // unevaluated), and the compiled value is the absence marker.
-    const unsupplied = run({});
-    expect(
-      unsupplied === undefined ||
-        (typeof unsupplied === 'number' && Number.isNaN(unsupplied)) ||
-        isAbsent(unsupplied, shape, false)
-    ).toBe(true);
   });
 
   it('Which(c, (x, y), d, Missing) with d false selects no value', () => {
@@ -445,12 +437,12 @@ describe('CE-588 — python', () => {
   };
 
   it('the emitted code', () => {
-    const isBool = (v: string) => `isinstance(${v}, (bool, np.bool_))`;
+    // A `boolean` input is read by its truthiness.
     expect(py(['If', 'c', POINT, 'Missing'])).toBe(
-      `(((x, y)) if (${isBool('c')} and c) else ((None) if ${isBool('c')} else None))`
+      '(((x, y)) if (c) else (None))'
     );
     expect(py(['If', 'c', 'Missing', POINT])).toBe(
-      `((None) if (${isBool('c')} and c) else (((x, y)) if ${isBool('c')} else None))`
+      '((None) if (c) else ((x, y)))'
     );
     expect(py(['If', ['Greater', 'x', 0], POINT, 'Missing'])).toBe(
       '(((x, y)) if (0 < x) else (None))'
@@ -466,9 +458,8 @@ describe('CE-588 — python', () => {
   const run = TEST_PYTHON === undefined ? it.skip : it;
   run('the compiled code agrees with the interpreter', () => {
     // `None` for an absent point or list; `nan` for an absent complex value.
-    // A written `NaN` beside a point declines. The value of `c` that is not a boolean (`1`)
-    // selects no value: the interpreter has none there either.
-    const expected = (k: Case, c: 'True' | 'False' | '1'): string => {
+    // A written `NaN` beside a point declines.
+    const expected = (k: Case, c: 'True' | 'False'): string => {
       const present = c === (k.presentWhen ? 'True' : 'False');
       if (present)
         return k.shape === 'point'
@@ -487,7 +478,7 @@ describe('CE-588 — python', () => {
         continue;
       }
       const code = py(k.json);
-      for (const c of ['True', 'False', '1'] as const)
+      for (const c of ['True', 'False'] as const)
         for (const d of ['True', 'False']) {
           const out = execFileSync(TEST_PYTHON!, [
             '-c',

@@ -256,7 +256,7 @@ describe('a branch over a chain with an input that may be absent', () => {
   // The branch decides a chain link by link, as the interpreter does: one
   // false link decides it, whatever an absent operand of another link holds.
   // Before, the chain was tested for all its operands at once, and an absent
-  // `w` (or an input the caller leaves out) made the branch take no arm,
+  // `w` made the branch take no arm,
   // where `If(And(x < 0, 0 < w), 1, 2)` already gave `2`.
   const e = new ComputeEngine();
   e.declare('x', 'number');
@@ -307,10 +307,10 @@ describe('a branch over a chain with an input that may be absent', () => {
     ).toThrow(/chained \(n-ary\) comparison/);
   });
 
-  test('an unsupplied input in one link does not hide a false link', () => {
+  test('a chain over two inputs', () => {
     const json = ['If', ['Less', 'x', 0, 'y'], 1, 2];
-    expect(compiled(json, { x: 1 })).toBe(2);
-    expect(compiled(json, { x: -1 })).toBeNaN();
+    expect(compiled(json, { x: 1, y: 5 })).toBe(2);
+    expect(compiled(json, { x: -1, y: -5 })).toBe(2);
     expect(compiled(json, { x: -1, y: 5 })).toBe(1);
   });
 });

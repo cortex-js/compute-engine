@@ -51,12 +51,12 @@ describe('an else-less If as a block statement', () => {
     ]);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
-    // The guard tests only for an unsupplied `x`: a NaN `x` decides `x > 0`
-    // false (user decision 2026-10-20), so it has no `_.x === _.x` test.
+    // A NaN `x` decides `x > 0` false (user decision 2026-10-20), and the
+    // host supplies every input, so the condition has no test.
     expect(r.code).toMatchInlineSnapshot(`
       "(() => {
       let s = 1;
-      if (_.x !== undefined && (0 < _.x)) { s = -1 };
+      if (0 < _.x) { s = -1 };
       return s
       })()"
     `);
@@ -228,9 +228,11 @@ describe('an else-less If as a block statement', () => {
     // `TypeError` instead of a propagated NaN. Before this `Which` and the
     // else-less `If` emitted `undefined` for an unknown arm while `When`
     // emitted `NaN`.
-    ce.declare('x', 'real');
-    ce.declare('c', 'boolean');
-    const js = (e: unknown) => compile(ce.box(e as any), { fallback: false });
+    // `c` may be absent, so the selections test it by its value.
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('c', 'boolean | missing');
+    const js = (j: unknown) => compile(e.box(j as any), { fallback: false });
     expect(js(['Which', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
     expect(js(['If', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
     expect(js(['When', 'x', 'c']).code).toMatch(/: NaN\)$/);
@@ -260,10 +262,8 @@ describe('an else-less If as a block statement', () => {
 
   // The `If` still lowers to the expression-position TERNARY, not to the
   // `if (…) { … }` statement the else-less shape gets — that is what this case
-  // pins. The ternary now sits inside the undecided-condition guard (ruling
-  // 2026-09-02): an unsupplied `x` leaves `x > 0` undecided and neither
-  // assignment may run. A NaN `x` decides `x > 0` false (user decision
-  // 2026-10-20), so the else assignment runs there.
+  // pins. A NaN `x` decides `x > 0` false (user decision 2026-10-20), so
+  // the else assignment runs there.
   test('an If WITH an else stays the ternary', () => {
     ce.declare('x', 'number');
     const expr = ce.box([
@@ -277,15 +277,13 @@ describe('an else-less If as a block statement', () => {
     expect(r.code).toMatchInlineSnapshot(`
       "(() => {
       let s = 1;
-      ((_.x !== undefined) ? ((0 < _.x) ? (s = -1) : (s = 2)) : NaN);
+      ((0 < _.x) ? (s = -1) : (s = 2));
       return s
       })()"
     `);
     expect(r.run!({ x: 3 })).toBe(-1);
     expect(r.run!({ x: -3 })).toBe(2);
     expect(r.run!({ x: NaN })).toBe(2);
-    // Undecided: neither assignment runs, so `s` keeps its initial value.
-    expect(r.run!({} as any)).toBe(1);
   });
 });
 
@@ -497,14 +495,12 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
     // Decided: the assignment runs on each of the three iterations, or none.
     expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
     expect((r.run as any)({ x: -3 })).toEqual([0, 3]);
-    // A NaN `x` decides `x > 0` false (user decision 2026-10-20), and an
-    // unsupplied `x` decides nothing: in both, `s` is untouched and the loop
-    // still completes its 3 rounds.
+    // A NaN `x` decides `x > 0` false (user decision 2026-10-20): `s` is
+    // untouched and the loop still completes its 3 rounds.
     expect((r.run as any)({ x: NaN })).toEqual([0, 3]);
-    expect((r.run as any)({})).toEqual([0, 3]);
   });
 
-  test('an else-FUL assignment in a Loop runs NEITHER branch', () => {
+  test('an else-FUL assignment in a Loop', () => {
     ce.declare('x', 'number');
     const expr = loopOver(ce, [
       'If',
@@ -514,13 +510,12 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
     ]);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
-    // Only an unsupplied `x` is undecided: a NaN `x` decides `x > 0` false
-    // and runs the else branch (user decision 2026-10-20).
-    expect(r.code).toContain('if (_.x !== undefined) { if (0 < _.x)');
+    // A NaN `x` decides `x > 0` false and runs the else branch (user
+    // decision 2026-10-20).
+    expect(r.code).toContain('if (0 < _.x)');
     expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
     expect((r.run as any)({ x: -3 })).toEqual([-3, 3]);
     expect((r.run as any)({ x: NaN })).toEqual([-3, 3]);
-    expect((r.run as any)({})).toEqual([0, 3]);
   });
 
   test('a Break under an undecided condition does not fire', () => {
@@ -543,17 +538,17 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
     expect(r.success).toBe(true);
     // Decided true: the guarded `Break` fires on the first round.
     expect((r.run as any)({ x: 3 })).toBe(1);
-    // Decided false, and undecided: only the counting exit at k = 5 fires.
+    // Decided false: only the counting exit at k = 5 fires.
     expect((r.run as any)({ x: -3 })).toBe(5);
     expect((r.run as any)({ x: NaN })).toBe(5);
-    expect((r.run as any)({})).toBe(5);
   });
 
-  test('a statement If over a non-boolean condition value runs neither branch', () => {
+  test('a statement If over an absent condition value runs neither branch', () => {
     // The `'value'` shape in statement position: the condition is bound to a
     // block-scoped constant, so an application is evaluated once.
-    ce.declare('b', 'boolean');
-    const expr = ce.box([
+    const e = new ComputeEngine();
+    e.declare('b', 'boolean | missing');
+    const expr = e.box([
       'Block',
       ['Declare', 's', { str: 'unknown' }, 1],
       ['If', 'b', ['Assign', 's', -1]],
@@ -563,7 +558,6 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
     expect(r.success).toBe(true);
     expect((r.run as any)({ b: true })).toBe(-1);
     expect((r.run as any)({ b: false })).toBe(1);
-    expect((r.run as any)({})).toBe(1);
-    expect((r.run as any)({ b: 'a' })).toBe(1);
+    expect((r.run as any)({ b: undefined })).toBe(1);
   });
 });

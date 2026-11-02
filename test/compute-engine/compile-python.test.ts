@@ -910,9 +910,10 @@ describe('PYTHON TARGET', () => {
     it('a condition whose VALUE may not be a boolean is tested for its kind', () => {
       // A Python `1` is not a condition, and `1 == True` is true in Python —
       // so the test is on the value's KIND, not on `== True`. A NumPy boolean
-      // (what a relation lowers to) counts as a boolean.
+      // (what a relation lowers to) counts as a boolean. `b` may be absent;
+      // a symbol declared `boolean` is read by its truthiness.
       const e = new ComputeEngine();
-      e.declare('b', 'boolean');
+      e.declare('b', 'boolean | missing');
       expect(python.compile(e.box(['If', 'b', 1, -1])).code).toBe(
         "((1) if (isinstance(b, (bool, np.bool_)) and b) else ((-1) if isinstance(b, (bool, np.bool_)) else float('nan')))"
       );
@@ -923,7 +924,7 @@ describe('PYTHON TARGET', () => {
       // which is the answer the ruling forbids. The `Not` is lowered by
       // exchanging the arms of the decided test instead, so it is not emitted.
       const e = new ComputeEngine();
-      e.declare('b', 'boolean');
+      e.declare('b', 'boolean | missing');
       e.declare('x', 'number');
       const notB = python.compile(e.box(['If', ['Not', 'b'], 1, 2])).code!;
       expect(notB).toBe(
@@ -1020,23 +1021,25 @@ describe('PYTHON TARGET', () => {
       const e = new ComputeEngine();
       e.declare('x', 'real');
       e.declare('c', 'boolean');
-      // Unknown arm type: numeric until proven otherwise. A value of `c`
-      // that is not a boolean selects nothing (ROADMAP CE-569).
+      // Unknown arm type: numeric until proven otherwise.
       expect(python.compile(e.box(['When', 'x', 'c'])).code).toBe(
-        "((x) if (isinstance(c, (bool, np.bool_)) and c) else float('nan'))"
+        "((x) if (c) else float('nan'))"
       );
       expect(python.compile(e.box(['Which', 'c', 'x'])).code).toContain(
         "float('nan')"
       );
       // A string arm: the object null.
       expect(python.compile(e.box(['When', { str: 's' }, 'c'])).code).toBe(
-        '(("s") if (isinstance(c, (bool, np.bool_)) and c) else None)'
+        '(("s") if (c) else None)'
       );
       const which = python.compile(e.box(['Which', 'c', { str: 's' }])).code;
       expect(which).toContain('None');
       expect(which).not.toContain("float('nan')");
+      // An `If` with an else arm has no value only for a condition that may
+      // be absent.
+      e.declare('m', 'boolean | missing');
       const ifElse = python.compile(
-        e.box(['If', 'c', { str: 's' }, { str: 't' }])
+        e.box(['If', 'm', { str: 's' }, { str: 't' }])
       ).code;
       expect(ifElse).toContain('else None');
       // Mixed string and number arms stay numeric.

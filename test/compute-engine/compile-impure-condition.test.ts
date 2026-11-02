@@ -30,22 +30,18 @@ const draws = (code: string): number =>
 
 describe('an impure branch condition is lowered three-valued', () => {
   // Since the user decision of 2026-10-20 (Tycho rows 411 and 413), a NaN
-  // operand decides an ordered comparison `false` in a branch condition, so
-  // the cases below take an UNSUPPLIED `x` (`{}`) as the undecided operand,
-  // and check that a NaN `x` is decided `false`.
-  test('a lone impure relation: one draw per call, absence marker when unsupplied', () => {
+  // operand decides an ordered comparison `false` in a branch condition.
+  test('a lone impure relation: one draw per call', () => {
     const c = js(['If', ['Greater', ['Random'], 'x'], 1, -1]);
     expect(draws(c.code)).toBe(1);
     expect(c.run({ x: NaN })).toBe(-1);
-    expect(c.run({})).toBeNaN(); // an unsupplied `x`
     expect(c.run({ x: -1 })).toBe(1); // every draw is above -1
     expect(c.run({ x: 2 })).toBe(-1); // every draw is below 2
   });
 
-  test('an impure connective: one draw, Kleene when unsupplied, short circuit kept', () => {
+  test('an impure connective: one draw, short circuit kept', () => {
     // Every draw is below 2, so the first conjunct is decided `true` and the
-    // `And` is decided by `x > 0` alone: undecided for an unsupplied `x`,
-    // `false` at NaN.
+    // `And` is decided by `x > 0` alone: `false` at NaN.
     const c = js([
       'If',
       ['And', ['Less', ['Random'], 2], ['Greater', 'x', 0]],
@@ -53,38 +49,33 @@ describe('an impure branch condition is lowered three-valued', () => {
       -1,
     ]);
     expect(draws(c.code)).toBe(1);
-    expect(c.run({})).toBeNaN();
     expect(c.run({ x: NaN })).toBe(-1);
     expect(c.run({ x: -1 })).toBe(-1);
     expect(c.run({ x: 1 })).toBe(1);
     // A draw that is decided `false` (never above 2) short-circuits the
-    // `And` whatever `x` is, unsupplied included.
+    // `And` whatever `x` is.
     const c0 = js([
       'If',
       ['And', ['Greater', ['Random'], 2], ['Greater', 'x', 0]],
       1,
       -1,
     ]);
-    expect(c0.run({})).toBe(-1);
-    // `And(undecided, false)` is `false`: the decided second conjunct wins.
-    // The draw happens here although the plain `&&` would have stopped at
-    // the first conjunct's ordinary `false` — the Kleene table needs it.
+    expect(c0.run({ x: 1 })).toBe(-1);
     const c2 = js([
       'If',
       ['And', ['Greater', 'x', 0], ['Greater', ['Random'], 2]],
       1,
       -1,
     ]);
-    expect(c2.run({})).toBe(-1);
-    // `And(undecided, true)` stays undecided.
+    expect(c2.run({ x: 1 })).toBe(-1);
     const c3 = js([
       'If',
       ['And', ['Greater', 'x', 0], ['Less', ['Random'], 2]],
       1,
       -1,
     ]);
-    expect(c3.run({})).toBeNaN();
     expect(c3.run({ x: NaN })).toBe(-1);
+    expect(c3.run({ x: 1 })).toBe(1);
     // A decided-false first conjunct never reaches the draw.
     const c4 = js([
       'If',
@@ -98,7 +89,6 @@ describe('an impure branch condition is lowered three-valued', () => {
   test('Which and the statement form take the same lowering', () => {
     const w = js(['Which', ['Greater', ['Random'], 'x'], 1, 'True', -1]);
     expect(draws(w.code)).toBe(1);
-    expect(w.run({})).toBeNaN();
     expect(w.run({ x: NaN })).toBe(-1);
     expect(w.run({ x: -1 })).toBe(1);
     const s = js([
@@ -113,8 +103,6 @@ describe('an impure branch condition is lowered three-valued', () => {
       'k',
     ]);
     expect(draws(s.code)).toBe(1);
-    // Neither branch runs on an undecided condition; the block continues.
-    expect(s.run({})).toBe(0);
     // A NaN `x` decides the condition `false`: the else branch runs.
     expect(s.run({ x: NaN })).toBe(2);
     expect(s.run({ x: -1 })).toBe(1);

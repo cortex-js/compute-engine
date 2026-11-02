@@ -85,7 +85,7 @@ describe('interval-js: a loop over a list input', () => {
     expect(fn.run!({})).toEqual(point(11));
   });
 
-  test('a mapping to the vars-object spelling is still tested', () => {
+  test('a mapping to the vars-object spelling reads the vars object', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number>');
     const fn = compile(ce.box(['Sum', 'L']), {
@@ -93,7 +93,6 @@ describe('interval-js: a loop over a list input', () => {
       vars: { L: '_.L' },
     });
     expect(fn.success).toBe(true);
-    expect(fn.run!({})).toEqual({ kind: 'empty' });
     expect(fn.run!({ L: [1, 2, 3] })).toEqual(point(6));
   });
 
@@ -109,14 +108,6 @@ describe('interval-js: a loop over a list input', () => {
       'c',
     ];
     expect(compiled(json).run!({})).toEqual(point(6));
-  });
-
-  test.each([
-    ['Loop', LOOP],
-    ['Comprehension', COMPREHENSION],
-    ['Sum', ['Sum', 'L']],
-  ])('%s with L absent has no value', (_name, json) => {
-    expect(compiled(json).run!({})).toEqual({ kind: 'empty' });
   });
 });
 

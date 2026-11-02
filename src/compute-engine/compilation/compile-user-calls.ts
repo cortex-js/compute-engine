@@ -47,7 +47,6 @@ import {
 import {
   functionLiteralParameterName,
   functionLiteralParameterType,
-  isScalarType,
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
@@ -63,10 +62,7 @@ import {
   localShapeFrameOf,
 } from './compile-shapes.js';
 import { LOCAL_SCALAR } from './compile-declarations.js';
-import type {
-  AbsentArgumentCheck,
-  EnclosingDefinition,
-} from './compiler-types.js';
+import type { EnclosingDefinition } from './compiler-types.js';
 import {
   compilationType,
   isNominalAtomicType,
@@ -150,92 +146,6 @@ export function complexWrapCode(
 }
 
 /**
- * Per argument of a call of the function literal `literal`, the message of
- * a run-time check that the argument is present, or `undefined` for no
- * check.
- *
- * At evaluation, an absent value (`Missing`) at a parameter annotated with
- * a type that has no `missing` member and is not numeric is an
- * `incompatible-type` error (user decision of 2026-09-30, pinned by
- * `test/compute-engine/absent-argument-annotated-parameter.test.ts`); a
- * numeric annotation reads it as `NaN`. Boxing admits an argument typed
- * `missing | T` at such a parameter, because its value is usually present,
- * so the compiled call ran the body with `undefined` (the compiled form of
- * an absent value) and answered `NaN`, threw a `TypeError` from inside the
- * body, or answered a wrong value. Compiled code has no error value, so
- * the call stops the run instead, with a `TypeError` that names the
- * parameter and its type (`_SYS.present`), as an operand of the wrong kind
- * stops it with a `RangeError` (`_SYS.arr`).
- *
- * A check is emitted only where it can fire: on the JavaScript target (the
- * only one whose run-time library has the check), for an argument whose
- * static type admits `missing`, at a parameter so annotated. When a call
- * maps over a list of points (`tryCompilePointListCall`, the point-list
- * branch of `tryCompileLocalFunctionCall`), the mapped argument is exempt:
- * the map answers `undefined` for an absent point without calling the
- * function, as the interpreter answers `Missing` for that cell; the other
- * arguments are checked inside the map, once per point, so that an empty
- * list answers the empty list without a check, as the interpreter does.
- * The JavaScript `Apply` of a function literal (`javascript-target.ts`)
- * uses this too.
- *
- * A list argument at a SCALAR parameter (`isScalarType`) is mapped: the
- * function is applied to each element, at any depth, and the interpreter
- * gives the `incompatible-type` error for an absent element. So when the
- * type of such an argument has an absent member at any depth
- * (`typeContainsMissing`), the check is made on each element of the list,
- * nested lists included (`elements: true`).
- *
- * At a NUMERIC annotation the argument is not checked: a function applied
- * to an absent value is unspecified in compiled code.
- */
-export function absentArgumentChecks(
-  calleeName: string,
-  literal: Expression | undefined,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): Array<AbsentArgumentCheck | undefined> {
-  if (target.language !== 'javascript') return [];
-  if (literal === undefined || !isFunction(literal, 'Function')) return [];
-  const params = literal.ops.slice(1);
-  return args.map((a, i) => {
-    const param = params[i];
-    if (param === undefined) return undefined;
-    const declared = functionLiteralParameterType(param);
-    if (declared === undefined) return undefined;
-    if (isSubtype('missing', declared)) return undefined;
-    const t = a.type.type;
-    const elements =
-      isScalarType(declared) && !isTupleShapedType(t) && typeContainsMissing(t);
-    if (!elements && !isSubtype('missing', t)) return undefined;
-    if (isSubtype(declared, 'number')) return undefined;
-    const name = functionLiteralParameterName(param) || `#${i + 1}`;
-    return {
-      message:
-        `${calleeName}: the argument of the parameter '${name}' is absent, ` +
-        `and the parameter is annotated '${typeToString(declared)}'`,
-      elements,
-    };
-  });
-}
-
-/**
- * `code` wrapped in the run-time absent-argument check `check`
- * (`_SYS.present`, see `absentArgumentChecks`), or `code` as it is when
- * `check` is `undefined`.
- */
-export function presentCheckedCode(
-  code: string,
-  check: AbsentArgumentCheck | undefined
-): string {
-  if (check === undefined) return code;
-  const message = JSON.stringify(check.message);
-  return check.elements
-    ? `_SYS.present(${code}, ${message}, true)`
-    : `_SYS.present(${code}, ${message})`;
-}
-
-/**
  * The call site of an already-emitted user function `name`, in one of three
  * forms that the static types of the arguments select at compile time
  * (rule R2 of `docs/plans/2026-10-31-static-shape-compilation.md`):
@@ -281,11 +191,6 @@ export function emitUserFunctionCall(
    */
   held: ReadonlyArray<string> = [],
   /**
-   * Per argument, the run-time check that the argument is present, or
-   * `undefined` for no check (`absentArgumentChecks`).
-   */
-  absentChecks: ReadonlyArray<AbsentArgumentCheck | undefined> = [],
-  /**
    * The compiled default of each parameter with a default value, by
    * position (`undefined` for a parameter without one), read only when the
    * call maps the function over a list on the JavaScript target. The
@@ -316,14 +221,7 @@ export function emitUserFunctionCall(
   if (nominal >= 0) throw unsettledArgumentDecline(name, args[nominal]);
   const unsettled = ranks.findIndex((r) => r === undefined);
   if (unsettled >= 0) {
-    const open = openRankCall(
-      name,
-      args,
-      target,
-      coerceToComplex,
-      held,
-      absentChecks
-    );
+    const open = openRankCall(name, args, target, coerceToComplex, held);
     if (open !== undefined) return open;
     throw unsettledArgumentDecline(name, args[unsettled]);
   }
@@ -343,7 +241,7 @@ export function emitUserFunctionCall(
   };
   const compiledArgs = args.map((a, i) => {
     const code = spellCollection(a, i) ?? compileValueOperand(a, target);
-    return presentCheckedCode(code, absentChecks[i]);
+    return code;
   });
 
   // Deliver a `{ re, im }` to a declared-complex parameter, in whichever of
@@ -423,8 +321,7 @@ function openRankCall(
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
   coerceToComplex: ReadonlyArray<boolean>,
-  held: ReadonlyArray<string>,
-  absentChecks: ReadonlyArray<AbsentArgumentCheck | undefined>
+  held: ReadonlyArray<string>
 ): TargetSource | undefined {
   const helper =
     target.language === 'javascript'
@@ -438,9 +335,7 @@ function openRankCall(
   if (!types.some((t) => isOpenScalarRankType(t))) return undefined;
   if (!types.every((t) => isOpenScalarRankType(t) || isScalarShaped(t)))
     return undefined;
-  const codes = args.map((a, i) =>
-    presentCheckedCode(compileValueOperand(a, target), absentChecks[i])
-  );
+  const codes = args.map((a) => compileValueOperand(a, target));
   return `${helper}(${name}, ${codes.join(', ')})`;
 }
 

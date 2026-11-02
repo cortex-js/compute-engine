@@ -149,7 +149,7 @@ describe('COMPILE', () => {
     it('should compile an if statement', () => {
       const expr = ce.expr(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
-        `((_.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
+        `((0 < _.x) ? (_.x) : (-_.x))`
       );
     });
 
@@ -161,7 +161,7 @@ describe('COMPILE', () => {
         ['Block', ['Negate', 'x']],
       ]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
-        `((_.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
+        `((0 < _.x) ? (_.x) : (-_.x))`
       );
     });
   });

@@ -34,14 +34,14 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
  * must gain no code.
  *
  * Since the user decision of 2026-10-20 (Tycho rows 411 and 413) a NaN operand
- * decides an ordered comparison `false`, so `x > 0` is undecided only for an
- * UNSUPPLIED `x` (a key left out of the vars object). The JavaScript cases
- * below use an unsupplied variable as the undecided operand; before the
- * decision they used NaN. The Python target has no unsupplied variable, so its
- * cases read symbols declared `number | missing`, whose absent value (`None`,
- * or NaN, the numeric spelling of the same marker) leaves a relation
- * undecided. Until the user decision of 2026-10-23 they used a `NotEqual` with
- * a NaN operand; that relation is now decided `true`.
+ * decides an ordered comparison `false`. The host supplies every input with a
+ * value of its declared type, so an input that the caller leaves out is not
+ * tested. The undecided operand of these cases is therefore a symbol declared
+ * `real | missing` (`absentEngine`) that holds `Missing`: on JavaScript a key
+ * of the vars object that holds `undefined`, or is left out, which reads the
+ * same. Its absent value (`undefined`, `None`, or NaN, the numeric spelling
+ * of the same marker) leaves a relation undecided. The cases where a NaN
+ * operand decides a relation read symbols declared `real` (`realEngine`).
  */
 
 /** `Greater(name, 0)`, the relation these suites build their conditions from. */
@@ -64,6 +64,15 @@ function realEngine(): ComputeEngine {
   return engine;
 }
 
+/** A fresh engine where `x`, `y` and `z` may hold `Missing`. */
+function absentEngine(): ComputeEngine {
+  const engine = new ComputeEngine();
+  engine.declare('x', 'real | missing');
+  engine.declare('y', 'real | missing');
+  engine.declare('z', 'real | missing');
+  return engine;
+}
+
 /** Compile for the JavaScript target with no fold and no interpreter fallback. */
 function js(
   engine: ComputeEngine,
@@ -81,7 +90,7 @@ function js(
 }
 
 describe('COMPILE three-valued And in condition position', () => {
-  const ce = realEngine();
+  const ce = absentEngine();
   const expr = ['If', ['And', gt('x'), gt('y')], 1, -1];
 
   it('answers NaN when one operand is undecided and the other is true', () => {
@@ -89,8 +98,8 @@ describe('COMPILE three-valued And in condition position', () => {
   });
 
   it('takes the else arm when an operand is NaN (decided false)', () => {
-    expect(js(ce, expr).run({ x: 1, y: NaN })).toBe(-1);
-    expect(js(ce, expr).run({ x: NaN, y: 1 })).toBe(-1);
+    expect(js(realEngine(), expr).run({ x: 1, y: NaN })).toBe(-1);
+    expect(js(realEngine(), expr).run({ x: NaN, y: 1 })).toBe(-1);
   });
 
   it('takes the then arm when both operands are decided true', () => {
@@ -143,7 +152,7 @@ describe('COMPILE three-valued And in condition position', () => {
 });
 
 describe('COMPILE three-valued Or in condition position', () => {
-  const ce = realEngine();
+  const ce = absentEngine();
   const expr = ['If', ['Or', gt('x'), gt('y')], 1, -1];
 
   it('takes the then arm when a DECIDED TRUE operand settles it', () => {
@@ -154,7 +163,7 @@ describe('COMPILE three-valued Or in condition position', () => {
   it('answers NaN when one operand is undecided and the other is false', () => {
     expect(js(ce, expr).run({ x: -1 })).toBeNaN();
     // A NaN operand is decided false (user decision 2026-10-20).
-    expect(js(ce, expr).run({ x: -1, y: NaN })).toBe(-1);
+    expect(js(realEngine(), expr).run({ x: -1, y: NaN })).toBe(-1);
   });
 
   it('takes the else arm when both operands are decided false', () => {
@@ -171,7 +180,7 @@ describe('COMPILE three-valued Or in condition position', () => {
 });
 
 describe('COMPILE three-valued Not in condition position', () => {
-  const ce = realEngine();
+  const ce = absentEngine();
 
   it('leaves an undecided operand undecided', () => {
     const expr = ['If', ['Not', ['And', gt('x'), gt('y')]], 1, -1];
@@ -186,7 +195,7 @@ describe('COMPILE three-valued Not in condition position', () => {
     expect(js(ce, expr).run({})).toBeNaN();
     expect(js(ce, expr).run({ x: -1 })).toBe(1);
     // `NaN > 0` is decided false, so its negation is true.
-    expect(js(ce, expr).run({ x: NaN })).toBe(1);
+    expect(js(realEngine(), expr).run({ x: NaN })).toBe(1);
   });
 
   it('negates a decided operand INSIDE a connective', () => {
@@ -209,7 +218,7 @@ describe('COMPILE three-valued Not in condition position', () => {
 });
 
 describe('COMPILE three-valued connectives — nesting', () => {
-  const ce = realEngine();
+  const ce = absentEngine();
   // `(x > 0 ∧ y > 0) ∨ z > 0`.
   const expr = ['If', ['Or', ['And', gt('x'), gt('y')], gt('z')], 1, -1];
 
@@ -261,11 +270,11 @@ describe('COMPILE three-valued connectives — nesting', () => {
 });
 
 describe('COMPILE three-valued connectives — a value-shaped leaf', () => {
-  const ce = realEngine();
-  ce.declare('b', 'boolean');
+  const ce = absentEngine();
+  ce.declare('b', 'boolean | missing');
   const expr = ['If', ['And', 'b', gt('x')], 1, -1];
 
-  it('answers NaN for an unsupplied boolean', () => {
+  it('answers NaN for an absent boolean', () => {
     // `_.b` reads as `undefined`, which is neither `true` nor `false`.
     expect(js(ce, expr).run({ x: 1 })).toBeNaN();
   });
@@ -278,7 +287,9 @@ describe('COMPILE three-valued connectives — a value-shaped leaf', () => {
   it('answers NaN for a true boolean beside an undecided relation', () => {
     expect(js(ce, expr).run({ b: true })).toBeNaN();
     // A NaN `x` decides `x > 0` false (user decision 2026-10-20).
-    expect(js(ce, expr).run({ x: NaN, b: true })).toBe(-1);
+    const real = realEngine();
+    real.declare('b', 'boolean | missing');
+    expect(js(real, expr).run({ x: NaN, b: true })).toBe(-1);
   });
 
   it('decides the ordinary points', () => {
@@ -291,20 +302,24 @@ describe('COMPILE three-valued connectives — a value-shaped leaf', () => {
     expect(code).toContain(
       '(_.b === true ? true : _.b === false ? false : undefined)'
     );
-    // A truthy non-boolean decides nothing.
-    expect(js(ce, expr).run({ x: 1, b: 'yes' })).toBeNaN();
-    expect(js(ce, expr).run({ x: 1, b: 1 })).toBeNaN();
+  });
+
+  it('reads a symbol declared boolean by its truthiness', () => {
+    const real = realEngine();
+    real.declare('b', 'boolean');
+    const { code, run } = js(real, expr);
+    expect(code).not.toContain('_.b === true');
+    expect(run({ x: 1, b: true })).toBe(1);
+    expect(run({ x: 1, b: false })).toBe(-1);
   });
 });
 
-describe('COMPILE three-valued connectives — unsupplied numeric variable', () => {
-  const ce = realEngine();
+describe('COMPILE three-valued connectives — absent numeric variable', () => {
+  const ce = absentEngine();
 
-  it('treats a missing variable as undecided, not as false', () => {
-    // An absent entry of the vars object reads as `undefined`, and every
-    // comparison against it is `false` — which is why the test carries a
-    // `!== undefined` conjunct (the only one since the user decision of
-    // 2026-10-20 removed the NaN conjunct of an ordered comparison).
+  it('treats an absent variable as undecided, not as false', () => {
+    // An absent value reads as `undefined`, and every comparison against it
+    // is `false`, which is why the test carries an absence conjunct.
     const expr = ['If', ['And', gt('x'), gt('y')], 1, -1];
     expect(js(ce, expr).run({ y: 2 })).toBeNaN();
     // …and a decided false sibling still settles it.
@@ -313,7 +328,7 @@ describe('COMPILE three-valued connectives — unsupplied numeric variable', () 
 });
 
 describe('COMPILE three-valued connectives — Which clause chains', () => {
-  const ce = realEngine();
+  const ce = absentEngine();
   const expr = ['Which', ['And', gt('x'), gt('y')], 1, gt('z'), 2, 'True', -1];
 
   it('ends the search on an undecided clause', () => {
@@ -326,7 +341,7 @@ describe('COMPILE three-valued connectives — Which clause chains', () => {
     expect(js(ce, expr).run({ x: -1, z: 5 })).toBe(2);
     expect(js(ce, expr).run({ x: -1, z: -5 })).toBe(-1);
     // A NaN `y` decides `y > 0` false (user decision 2026-10-20).
-    expect(js(ce, expr).run({ x: 1, y: NaN, z: 5 })).toBe(2);
+    expect(js(realEngine(), expr).run({ x: 1, y: NaN, z: 5 })).toBe(2);
   });
 
   it('takes a decided clause', () => {
@@ -335,7 +350,7 @@ describe('COMPILE three-valued connectives — Which clause chains', () => {
 });
 
 describe('COMPILE three-valued connectives — statement-form If', () => {
-  const ce = realEngine();
+  const ce = absentEngine();
   // `r := 0; if (x > 0 ∧ y > 0) r := 1; r := r + 10; r`
   const block = [
     'Block',
@@ -404,10 +419,9 @@ describe('COMPILE three-valued connectives — the guard idiom', () => {
       entryChecks: false,
     });
     expect(result.success).toBe(true);
-    // The comparison embeds the operand once (since the user decision of
-    // 2026-10-20 its decidedness test names the variables `u` and `x`, not
-    // the operand), and common-subexpression elimination folds the three
-    // `sin` calls into one binding INSIDE the guarded position.
+    // The comparison embeds the operand once, and common-subexpression
+    // elimination folds the three `sin` calls into one binding INSIDE the
+    // guarded position.
     expect(occurrences(result.code, 'Math.sin')).toBe(1);
     expect(result.code).toContain('const _cse');
     expect(result.code.indexOf('_tv1 === false')).toBeLessThan(
@@ -427,20 +441,17 @@ describe('COMPILE three-valued connectives — the guard idiom', () => {
     });
     expect(run(vars(0))).toBe(-1);
     expect(reads).toBe(0);
-    // Past the guard it runs, once. `u` is read twice: once by the operand
-    // and once by the test for an unsupplied `u` (`_.u !== undefined`) that
-    // replaced the NaN test of the operand (user decision 2026-10-20). A
-    // repeated vars-object read is free under the compiled contract.
+    // Past the guard it runs, once.
     reads = 0;
     expect(run(vars(1))).toBe(1);
-    expect(reads).toBe(2);
+    expect(reads).toBe(1);
     // An UNDECIDED guard (`NaN ≠ 0`) must still reach it: `And(undecided,
     // false)` is `false`, so the second operand cannot be skipped. At
     // `x = NaN` the second operand is `0 < NaN`, decided false, so the `And`
     // is false.
     reads = 0;
     expect(run(vars(NaN))).toBe(-1);
-    expect(reads).toBe(2);
+    expect(reads).toBe(1);
   });
 
   it('calls a registered function only when the guard lets it through', () => {
@@ -492,21 +503,14 @@ describe('COMPILE three-valued connectives — no new code on the common path', 
   ce.declare('s', 'string');
   ce.declare('t', 'string');
 
-  it('tests an unsupplied string input, as it tests a number input', () => {
-    // A string comparison has no NaN value to guard against, but a string
-    // INPUT the caller did not supply is undecided, as an unsupplied number
-    // is: the interpreter has no value there. So the connective takes the
-    // three-valued lowering, with an absence test of each input (ROADMAP
-    // CE-569; before, it was the plain conditional expression
-    // `(((_SYS.ct(_.s) < _SYS.ct(_.t)) && …) ? (1) : (-1))`, which answered
-    // -1 for unsupplied inputs).
+  it('keeps the plain conditional expression for string inputs', () => {
+    // A string comparison has no NaN value, and the host supplies every
+    // input, so the connective needs no test.
     const and = js(ce, ['If', ['And', ['Less', 's', 't'], ['Less', 't', 's']], 1, -1]);
-    expect(and.code).toContain('_.s !== undefined && _.t !== undefined');
-    expect(and.run!({})).toBeNaN();
+    expect(and.code).not.toContain('undefined');
     expect(and.run!({ s: 'a', t: 'b' })).toBe(-1);
     const or = js(ce, ['If', ['Or', ['Less', 's', 't'], ['Less', 't', 's']], 1, -1]);
-    expect(or.code).toContain('_.s !== undefined && _.t !== undefined');
-    expect(or.run!({})).toBeNaN();
+    expect(or.code).not.toContain('undefined');
     expect(or.run!({ s: 'a', t: 'b' })).toBe(1);
     expect(or.run!({ s: 'a', t: 'a' })).toBe(-1);
   });
@@ -514,7 +518,7 @@ describe('COMPILE three-valued connectives — no new code on the common path', 
 
 describe('COMPILE three-valued connectives — Python target', () => {
   const ce = realEngine();
-  ce.declare('b', 'boolean');
+  ce.declare('b', 'boolean | missing');
   ce.declare('p', 'number | missing');
   ce.declare('q', 'number | missing');
   const python = new PythonTarget();
@@ -849,32 +853,25 @@ describe('COMPILE three-valued connectives — value position', () => {
     ).toBe('(t) => 0 < t || !(t < 1)');
   });
 
-  it('a comparison over a variable the caller can leave out is three-valued', () => {
-    // The interpreter keeps `x > 0` unevaluated while `x` has no value. The
-    // plain comparison runs first; its `false` stands only when `x`, read
-    // off the vars object, is not `undefined` (user decision 2026-10-30).
+  it('a comparison over a variable is the plain comparison', () => {
+    // The host supplies every input, so the comparison has no test for an
+    // input left out.
     const and = js(ce, ['And', ['Greater', 'x', 0], ['Less', 'x', 1]]);
-    expect(and.code).toContain(
-      '((0 < _.x) || ((_.x !== undefined) ? false : undefined))'
-    );
-    expect(and.run({})).toBeUndefined();
+    expect(and.code).toBe('0 < _.x && _.x < 1');
     expect(and.run({ x: 0.5 })).toBe(true);
     expect(and.run({ x: 2 })).toBe(false);
   });
 
-  it('a symbol declared boolean takes the Kleene lowering (CE-631)', () => {
-    // The caller can leave `p` out, or pass a value that is not a boolean:
-    // the plain `_.p && _.q` gave `undefined` for `p` unsupplied and `q`
-    // false, where the interpreter answers `False`.
+  it('a symbol declared boolean keeps the plain infix spelling', () => {
+    // The host supplies every input with a value of its declared type, so
+    // a `boolean` symbol is `true` or `false`.
     const and = js(ce, ['And', 'p', 'q']);
-    expect(and.code).toContain('_tv1 === false ? false');
-    expect(and.run({ q: false })).toBe(false);
-    expect(and.run({ p: true })).toBeUndefined();
+    expect(and.code).toBe('_.p && _.q');
+    expect(and.run({ p: true, q: false })).toBe(false);
     expect(and.run({ p: true, q: true })).toBe(true);
     const not = js(ce, ['Not', 'p']);
-    expect(not.run({})).toBeUndefined();
-    expect(not.run({ p: 1 })).toBeUndefined();
     expect(not.run({ p: false })).toBe(true);
+    expect(not.run({ p: true })).toBe(false);
   });
 
   it('spells the Python And table with lambdas and None', () => {

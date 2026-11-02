@@ -13,15 +13,12 @@
 import type { Expression } from '../global-types.js';
 import type { Type, TupleType } from '../../common/type/types.js';
 import {
-  collectionElementType,
   // The compiled lanes read the open form of a broadcast over an operand
   // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
-import { isOperatorDef } from '../boxed-expression/definition-guards.js';
 
 /**
  * The type of the slot at the 1-based `position` (a negative position counts
@@ -104,32 +101,12 @@ function absentTupleReadIsNumeric(t: TupleType, position: number): boolean {
  * answer as the marker of an absent base (`float('nan')` or `None`).
  *
  * The interpreter takes the marker of a read of an absent base from the
- * type of the read: `NaN` for a number, `Missing` otherwise.
- *
- * - A base typed by one tuple, with or without a `missing` arm
- *   (`missing | tuple<number, string>`, the row read `At(b, 1)` for
- *   `b: list<tuple<number, string>>`): the type of the read comes from the
- *   slots of that tuple (`absentTupleReadIsNumeric`).
- * - A base whose collection comes from a symbol typed `any` or `unknown`
- *   (through element reads and calls of functions defined by the user): the
- *   interpreter computes the type of the read from the values, since such a
- *   symbol has the type of its value. So with `tup := t ↦ (t, 2t)` (typed
- *   `(unknown) -> tuple<number, number>`), `x: any` and `x = []`, the
- *   interpreter types `At(tup(x), 1)` as `missing | tuple<number, number>`
- *   (`tup(x)` is an empty list of tuples) and `At(At(tup(x), 1), 2)` as
- *   `number`: it answers `NaN`. The compiled code only has the static type
- *   of `x`, `any`, which types the base `list<any> | missing | number |
- *   tuple<number, number>`. The base is absent only when `tup(x)` is an
- *   empty list, and the interpreter then reads the slot of the tuple. So
- *   the compiled code reads the tuples in the type of the base (user
- *   decision 2026-10-25, option (c) of ROADMAP CE-214.4): `NaN` when there
- *   is at least one tuple and each tuple gives `NaN`. An arm that is a
- *   number is skipped (an index into a number is an error), and so is a
- *   list whose element type is `any` or `unknown`, which says nothing. A
- *   list whose elements are not numbers keeps the marker `Missing`.
- * - Any other base keeps the marker `Missing`. A base typed by declarations
- *   only (`b: list<list<any> | tuple<number, number>>`) keeps that type in
- *   the interpreter too, which answers `Missing` for a read typed `any`.
+ * type of the read: `NaN` for a number, `Missing` otherwise. Only a base
+ * typed by one tuple, with or without a `missing` arm
+ * (`missing | tuple<number, string>`, the row read `At(b, 1)` for
+ * `b: list<tuple<number, string>>`), decides the type of the read: it comes
+ * from the slots of that tuple (`absentTupleReadIsNumeric`). Any other base
+ * keeps the marker `Missing`.
  */
 export function absentBaseReadIsNumeric(
   coll: Expression,
@@ -138,56 +115,9 @@ export function absentBaseReadIsNumeric(
   if (position === undefined || !Number.isInteger(position) || position === 0)
     return false;
   const r = resolveTypeForCompilation(stripMissingFromType(coll.type.type));
-  if (typeof r !== 'string' && r.kind === 'tuple')
-    return absentTupleReadIsNumeric(r, position);
-  const isTop = (t: Type): boolean => t === 'any' || t === 'unknown';
-  // Whether the value of the base can come from a symbol typed `any` or
-  // `unknown`. Only the operands that give the collection are read: the
-  // collection of an element read (`At(tup(x), 1)` reads `tup(x)`), and the
-  // arguments of a call of a function defined by the user (`tup(x)` reads
-  // `x`). An index (`i` in `At(b, i)`) and the body of a function literal
-  // do not give the collection, so a symbol typed `any` there does not
-  // change the type of the base in the interpreter: `At(b, i)` for
-  // `b: list<list<any> | tuple<number, number>>` and `i: any` keeps the
-  // declared type of `b`. Any other expression gives no answer here, and
-  // the read keeps the marker `Missing`.
-  const isUserFunctionCall = (e: Expression): boolean => {
-    const def = e.engine.lookupDefinition(e.operator);
-    if (isOperatorDef(def) && def.operator._lambdaLiteral !== undefined)
-      return true;
-    const value = e.engine._getSymbolValue(e.operator);
-    return value !== undefined && isFunction(value, 'Function');
-  };
-  const mentionsTopTypedSymbol = (e: Expression): boolean => {
-    if (isSymbol(e))
-      return isTop(
-        resolveTypeForCompilation(stripMissingFromType(e.type.type))
-      );
-    if (!isFunction(e)) return false;
-    if (
-      ['At', 'First', 'Second', 'Third', 'Last'].includes(e.operator) &&
-      e.ops.length > 0
-    )
-      return mentionsTopTypedSymbol(e.ops[0]);
-    return isUserFunctionCall(e) && e.ops.some(mentionsTopTypedSymbol);
-  };
-  if (!mentionsTopTypedSymbol(coll)) return false;
-  const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
-  let tupleArm = false;
-  for (const arm of arms) {
-    const a = resolveTypeForCompilation(arm);
-    if (a === 'missing' || a === 'nothing' || a === 'never') continue;
-    if (isSubtype(a, 'number')) continue;
-    if (typeof a !== 'string' && a.kind === 'tuple') {
-      if (!absentTupleReadIsNumeric(a, position)) return false;
-      tupleArm = true;
-      continue;
-    }
-    const elt = collectionElementType(a);
-    if (elt === undefined) return false;
-    const e = resolveTypeForCompilation(stripMissingFromType(elt));
-    if (isTop(e) || e === 'never') continue;
-    if (!isSubtype(e, 'number')) return false;
-  }
-  return tupleArm;
+  return (
+    typeof r !== 'string' &&
+    r.kind === 'tuple' &&
+    absentTupleReadIsNumeric(r, position)
+  );
 }

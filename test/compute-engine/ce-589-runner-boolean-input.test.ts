@@ -11,9 +11,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // the entry guards check part of that at run time: a symbol declared with a
 // number type refuses a boolean and a string. Before, JavaScript converted
 // the value silently: `x + 1` gave 2 for `x = true` and "a1" for `x = "a"`.
-// A symbol declared `boolean` accepts any value: a condition on a value that
-// is not a boolean is undecided, and the result is NaN
-// (`ce-569-when-defects.test.ts`).
+// The value of a symbol declared `boolean` is not checked: a value that is
+// not a boolean is outside the declared type, and the result is unspecified.
 describe('CE-589 a boolean or a string argument of run()', () => {
   const ce = new ComputeEngine();
   ce.declare('c', 'boolean');
@@ -99,18 +98,10 @@ describe('CE-589 a boolean or a string argument of run()', () => {
     expect(() => f.run!('a')).not.toThrow();
   });
 
-  test('a symbol declared boolean accepts any value', () => {
-    // A value that is not a boolean leaves the condition undecided.
-    const r = compile(ce.box(['When', 'x', 'c']));
-    expect(r.run!({ x: 2, c: 1 })).toBeNaN();
-    expect(r.run!({ x: 2, c: 'true' })).toBeNaN();
-  });
-
   test('the parameters of a lambda are checked the same way', () => {
     const r = compile(
       ce.parse('(c: boolean, y: real) \\mapsto \\operatorname{If}(c, y, 0)')
     );
-    expect(r.run!(1, 3)).toBeNaN();
     expect(() => r.run!(true, false)).toThrow(
       /argument 2 was compiled as a real number but received a boolean/
     );

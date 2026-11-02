@@ -493,7 +493,6 @@ export function tryConstantFold(
  */
 export function resetCompilationMemos(): void {
   _invalidateComplexMemo();
-  CompilerState._poisonConditions = new WeakSet();
   CompilerState._foldValueMemo = new WeakMap();
   CompilerState._foldValueBlockedMemo = new Map();
   CompilerState._unknownsMemo = new WeakMap();

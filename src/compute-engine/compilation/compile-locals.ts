@@ -8,7 +8,6 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { signatureEffects } from '../../common/type/utils.js';
-import { boundVariableNames } from '../boxed-expression/binders.js';
 import { parseType } from '../../common/type/parse.js';
 import type { EffectSet } from '../../common/type/types.js';
 import { isFunctionDeclarationStatement } from '../library/control-structures.js';
@@ -42,10 +41,7 @@ import type {
 import {
   _localNameKeys,
   _localValueFrames,
-  blockLocalOf,
-  blockLocalsNamed,
   conditionDecidability,
-  localDependsOnInputs,
   operandMayBeAbsent,
 } from './compile-absence.js';
 import { STRICT_OPERATORS } from './compiler-tables.js';
@@ -575,78 +571,29 @@ export function withImplicitLocalDeclares(
 }
 
 /**
- * The locals of a block, the values assigned to each of them, and the
- * locals that a statement at the top level of the block gives a value
- * before each statement, for the reads that a comparison of a local must
- * test.
- *
- * A comparison that reads a local (`a2 < m` after `a2 := n + 1`) has no
- * value in the interpreter while `n` has none, since `a2` is then `n + 1`
- * with no value. The rule is simple (user decision 2026-10-30): a
- * comparison that reads a local of the block, or a variable outside the
- * block that the block assigns, tests every caller input that the whole
- * block reads (`blockInputs`), before it compares. It is too strict where
- * the value read at run time does not use an input: `a := 5; If(x > 0,
- * a := n + 1); a < 1` at `x = -1`, `n` absent, has no value, where the
- * interpreter gives `False`. That is accepted. It never gives a value
- * where the interpreter has none, whatever the order of the assignments,
- * the branches and the loops of the block.
- *
- * A local that no top-level statement before the read assigns (it is
- * assigned only in a branch, in a loop body, or in a nested block) may
- * still hold `undefined` at the read, where the interpreter has no value
- * for it. Such a read is tested itself (`isOmittableRead`):
- * `a2 !== undefined`.
+ * The locals of a block and the values assigned to each of them, for the
+ * callback analysis that reads the element type of a local collection
+ * (`untrustedCallbackSource` in `compile-callbacks.ts`).
  *
  * A variable outside the block that the block assigns (`c := n + 1` with
- * `c` declared in the engine compiles to `_.c = _.n + 1`, and so does a
- * function `gg := t ↦ t + c`) is a local for this rule: after the write,
- * `_.c !== undefined` is true while `n` has no value.
+ * `c` declared in the engine compiles to `_.c = _.n + 1`) is a local for
+ * this purpose too.
  *
  * The locals are keyed by their definition (the binding of the scope
  * that declares them), not by their name, and so are the reads
  * (`blockLocalOf`): a binder nested in the block that uses the name of a
  * free variable (`Sum(2n, (n, 1, 3))`, `n ↦ 2n`, a `Loop` over `n`) is
- * neither the local nor a reason to skip that variable. A local of a
- * scope nested in the block (a local of a loop body: `n := n + a` in
- * `while n < 4 { let a = 2; … }`) and the variable of a binder inside the
- * block are never inputs: at the loop condition they would compile to
- * the vars read `_.a`, never present, and the loop would never end.
+ * not the local.
  */
 export function blockLocalValueFrame(
   stmts: ReadonlyArray<Expression>,
   locals: ReadonlyArray<string>,
-  spell: (name: string) => string,
-  scope: Scope | undefined,
-  node: Expression | undefined
+  scope: Scope | undefined
 ): LocalValueFrame {
   const byDef = new Map<object, LocalEntry>();
-  const byName = new Map<string, LocalEntry[]>();
-  // The definitions that a binder inside the block creates: a loop index
-  // (`for k in …`), a parameter, a `Sum` index. A `Block` is not counted:
-  // its scope also declares the free variables of its body.
-  const binderDefs = new Set<object>();
-  // The free variables of the block. Without the block node, those of
-  // its statements, less its locals.
-  const names = new Set<string>(
-    node !== undefined
-      ? node.unknowns
-      : stmts.flatMap((s) => s.unknowns).filter((n) => !locals.includes(n))
-  );
-  const frame: LocalValueFrame = {
-    byDef,
-    byName,
-    binderDefs,
-    stmts,
-    node,
-    loopIndices: new Map(),
-    names,
-    assignedBefore: [],
-    current: 0,
-    bySpelling: new Map(),
-  };
+  const frame: LocalValueFrame = { byDef };
   // The definition that `name` resolves to in the innermost of `scopes`
-  // that binds it, and whether that scope is the block's own. When no
+  // that binds it. When no
   // scope binds it: a local of a block with no scope, or a temporary
   // that a desugar added (`_tv1` of a destructuring assignment), is keyed
   // by name; a variable outside the block that an assignment writes
@@ -656,20 +603,13 @@ export function blockLocalValueFrame(
     name: string,
     scopes: ReadonlyArray<Scope>,
     target?: Expression
-  ): { def: object; own: boolean; outer: boolean } | undefined => {
+  ): object | undefined => {
     for (let i = scopes.length - 1; i >= 0; i--) {
       const binding = scopes[i].bindings.get(name);
       if (binding === undefined) continue;
-      const def: object =
-        'value' in binding ? (binding.value as object) : binding;
-      return { def, own: i === 0, outer: false };
+      return 'value' in binding ? (binding.value as object) : binding;
     }
-    if (locals.includes(name))
-      return {
-        def: localNameKey(name),
-        own: true,
-        outer: false,
-      };
+    if (locals.includes(name)) return localNameKey(name);
     if (target === undefined) return undefined;
     // The target of an assignment is held, not bound, so its definition
     // is looked up: in the scopes that enclose the block (a parameter of
@@ -679,26 +619,21 @@ export function blockLocalValueFrame(
       binding = sc.bindings.get(name);
     binding ??= target.engine.lookupDefinition(name);
     if (binding === undefined || binding === null) return undefined;
-    const def: object =
-      typeof binding === 'object' && 'value' in binding
-        ? (binding.value as object)
-        : (binding as object);
-    return { def, own: true, outer: true };
+    return typeof binding === 'object' && 'value' in binding
+      ? (binding.value as object)
+      : (binding as object);
   };
   const entryOf = (
     name: string,
     scopes: ReadonlyArray<Scope>,
     target?: Expression
   ): LocalEntry | undefined => {
-    const r = resolve(name, scopes, target);
-    if (r === undefined) return undefined;
-    let entry = byDef.get(r.def);
+    const def = resolve(name, scopes, target);
+    if (def === undefined) return undefined;
+    let entry = byDef.get(def);
     if (entry === undefined) {
-      entry = { name, frame, values: [], own: r.own, outer: r.outer };
-      byDef.set(r.def, entry);
-      const list = byName.get(name);
-      if (list === undefined) byName.set(name, [entry]);
-      else list.push(entry);
+      entry = { values: [] };
+      byDef.set(def, entry);
     }
     return entry;
   };
@@ -725,14 +660,6 @@ export function blockLocalValueFrame(
       e.localScope !== undefined && scope !== undefined
         ? [...scopes, e.localScope]
         : scopes;
-    if (e.operator !== 'Block' && e.localScope !== undefined)
-      for (const name of boundVariableNames(e)) {
-        const binding = e.localScope.bindings.get(name);
-        if (binding !== undefined)
-          binderDefs.add(
-            'value' in binding ? (binding.value as object) : binding
-          );
-      }
     if (e.operator === 'Assign' || e.operator === 'Declare') {
       const value =
         e.operator === 'Assign' ? e.ops[1] : declareValueOperand(e.ops);
@@ -742,75 +669,12 @@ export function blockLocalValueFrame(
           entryOf(t.symbol, inner, t)?.values.push(value);
         }
     }
-    // The index of a `Loop` clause holds an element of its collection
-    // (each leaf of a destructuring pattern, the whole element).
-    if (e.operator === 'Loop' && e.localScope !== undefined)
-      for (const clause of e.ops.slice(1)) {
-        if (!isFunction(clause, 'Element') || clause.nops < 2) continue;
-        for (const t of targetSymbols(clause.ops[0])) {
-          if (!isSymbol(t)) continue;
-          const binding = e.localScope.bindings.get(t.symbol);
-          if (binding === undefined) continue;
-          const def: object =
-            'value' in binding ? (binding.value as object) : binding;
-          frame.loopIndices.set(def, {
-            name: t.symbol,
-            frame,
-            values: [clause.ops[1]],
-            own: false,
-            outer: false,
-          });
-        }
-      }
     for (const op of e.ops) visit(op, inner);
   };
   for (const stmt of stmts) visit(stmt, rootScopes);
-  // `assignedBefore[i]`: the locals that a top-level `Assign`, or a
-  // `Declare` with a value, among the statements before statement `i`
-  // gives a value.
-  let assigned = new Set<string>();
-  for (const stmt of stmts) {
-    frame.assignedBefore.push(assigned);
-    if (
-      isFunction(stmt) &&
-      isSymbol(stmt.ops[0]) &&
-      locals.includes(stmt.ops[0].symbol) &&
-      (stmt.operator === 'Assign' ||
-        (stmt.operator === 'Declare' &&
-          declareValueOperand(stmt.ops) !== undefined))
-    ) {
-      assigned = new Set(assigned);
-      assigned.add(stmt.ops[0].symbol);
-    }
-  }
-  for (const name of locals) frame.bySpelling.set(spell(name), name);
   return frame;
 }
 
-/** True when `expr` reads a local of a block being compiled that could
- * depend on a caller input (`localDependsOnInputs`), or a variable
- * outside the block that the block assigns, or calls a function that the
- * block assigns and that could (`blockLocalOf`, `blockLocalsNamed`). */
-export function readsBlockLocal(
-  expr: Expression,
-  target?: CompileTarget<Expression>
-): boolean {
-  if (_localValueFrames.length === 0) return false;
-  const dependent = (l: LocalEntry) => localDependsOnInputs(l, target);
-  const seen = new Set<Expression>();
-  const visit = (e: Expression): boolean => {
-    if (seen.has(e)) return false;
-    seen.add(e);
-    if (isSymbol(e)) {
-      const local = blockLocalOf(e);
-      return local !== undefined && dependent(local);
-    }
-    if (!isFunction(e)) return false;
-    if (blockLocalsNamed(e.operator).some(dependent)) return true;
-    return e.ops.some(visit);
-  };
-  return visit(expr);
-}
 export function localNameKey(name: string): object {
   let key = _localNameKeys.get(name);
   if (key === undefined) {

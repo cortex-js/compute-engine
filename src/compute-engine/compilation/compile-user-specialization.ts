@@ -30,10 +30,8 @@ import {
   rangeVerdictMemos,
 } from './compiler-mode.js';
 import {
-  absentArgumentChecks,
   emitUserFunctionCall,
   ensureUserFunctionVariantEmitted,
-  presentCheckedCode,
   userFunctionParamType,
 } from './compile-user-calls.js';
 import { userFunctionParamsAreScalar } from './compile-assignment-checks.js';
@@ -116,7 +114,6 @@ export function trySpecializedUserCall(
         args.map(() => false),
         userFunctionParamsAreScalar(engine, h),
         prefixed.values.map((v) => core.compile(v, target)),
-        absentArgumentChecks(h, literal, args, target),
         mapDefaults
       );
   }
@@ -126,7 +123,6 @@ export function trySpecializedUserCall(
   // specialized helper once per element. The helper's mapped parameters
   // are scalars, which is what `paramsAreScalar` states there. A list the
   // interpreter binds whole takes the direct call below.
-  const absentChecks = absentArgumentChecks(h, literal, args, target);
   if (listArgument && !bindsListsWhole)
     return emitUserFunctionCall(
       name,
@@ -135,7 +131,6 @@ export function trySpecializedUserCall(
       args.map(() => false),
       true,
       [],
-      absentChecks,
       mapDefaults
     );
   const registry = target.userFunctions;
@@ -152,13 +147,9 @@ export function trySpecializedUserCall(
       args,
       target,
       args.map(() => false),
-      false,
-      [],
-      absentChecks
+      false
     );
-  const codes = args.map((a, i) =>
-    presentCheckedCode(compileValueOperand(a, target), absentChecks[i])
-  );
+  const codes = args.map((a) => compileValueOperand(a, target));
   // One point that may be absent: the absent value goes to the generic
   // definition, which reads the parameter as a scalar, as the interpreter
   // runs the body with `Missing` (`absentPointFork()`).

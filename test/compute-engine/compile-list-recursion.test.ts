@@ -177,13 +177,10 @@ describe('list-building recursion compiles to a loop', () => {
     expect(() => r!.run!({})).toThrow(/Iteration limit of 1024/);
   });
 
-  it('an undecided guard at depth zero answers undefined, as the recursive arrow did', () => {
-    // `D` is not supplied, so `n = D - 1` is undecided and the compiled
-    // `Which` answers `undefined` on its first step; nothing was collected,
-    // so that is the result, on the loop as on the recursive arrow. Until
-    // the user decision of 2026-10-20 the case was run with `D = NaN`; a
-    // NaN operand now decides `n = D - 1` false, and the recursion runs to
-    // the iteration limit, as it does for any `D` it never reaches.
+  it('a NaN operand of the guard at depth zero runs to the iteration limit', () => {
+    // A NaN operand decides `n = D - 1` false (user decision 2026-10-20),
+    // and the recursion runs to the iteration limit, as it does for any `D`
+    // it never reaches.
     const ce = new ComputeEngine();
     ce.declare('D', 'number');
     ce.declare('F', '(number) -> list<number>');
@@ -195,45 +192,7 @@ describe('list-building recursion compiles to a loop', () => {
     );
     const r = compile(ce.box(['F', 0]), { fallback: false });
     expect(String(r!.preamble)).toContain('_SYS.listRecursion');
-    expect(r!.run!({})).toBeUndefined();
     expect(() => r!.run!({ D: NaN })).toThrow(/Iteration limit of 1024/);
-  });
-
-  it('an undecided guard after a collected prefix gives undefined', () => {
-    // The guard `n < 1 ∨ m ≠ 5` is decided `True` by its first disjunct at
-    // the first step, and undecided at the second when the caller leaves `m`
-    // out of the vars object. A NaN operand cannot leave a guard undecided
-    // any more: it decides every relation (user decisions 2026-10-20 and
-    // 2026-10-23; the case used `NaN ≠ 5` before). The second step then has
-    // no value (no arm of the `Which` matches), and the whole call is
-    // `undefined`, the value compiled code has for a list with no value. The
-    // recursive arrow spread `undefined` into the collected prefix
-    // (`[...[n], ...undefined]`) and threw a `TypeError`; the loop gave that
-    // `TypeError` too before CE-579.
-    const ce = new ComputeEngine();
-    ce.declare('m', 'number');
-    ce.declare('F', '(number) -> list<number>');
-    ce.assign(
-      'F',
-      ce.box([
-        'Function',
-        [
-          'Block',
-          [
-            'Which',
-            ['Or', ['Less', 'n', 1], ['NotEqual', 'm', 5]],
-            ['Join', ['List', 'n'], ['F', ['Add', 'n', 1]]],
-            'True',
-            ['List', 'n'],
-          ],
-        ],
-        'n',
-      ])
-    );
-    const r = compile(ce.box(['F', 0]), { fallback: false });
-    expect(String(r!.preamble)).toContain('_SYS.listRecursion');
-    expect(r!.run!({})).toBeUndefined();
-    expect(r!.run!({ m: 5 })).toEqual([0, 1]);
   });
 
   it('a call at a repetition site still reaches the loop definition', () => {

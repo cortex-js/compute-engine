@@ -171,25 +171,17 @@ test('fixed-width sums keep left-to-right cancellation', () => {
   );
 });
 
-test('declared list inputs retain broadcasting and reduction guards', () => {
+test('declared list inputs keep the reduction guard and fan out by width', () => {
   const ce = engine();
   const sum = compile(ce.box(['Sum', 'W']));
   const plus = compile(ce.box(['Add', 'W', 1]));
   expect(source(sum)).toContain('Array.isArray');
-  expect(source(plus)).toContain('_SYS.bcast');
+  // `W` is declared `list<real^2>`: the sum is written component by
+  // component, with no run-time test of its shape.
+  expect(source(plus)).toBe('[(_.W[0] + 1), (_.W[1] + 1)]');
   expect(sum.run!({ W: [] })).toBe(0);
   expect(sum.run!({ W: [1, 2, 3] })).toBe(6);
-  expect(
-    plus.run!({
-      W: [
-        [1, 2],
-        [3, 4],
-      ],
-    })
-  ).toEqual([
-    [2, 3],
-    [4, 5],
-  ]);
+  expect(plus.run!({ W: [1, 2] })).toEqual([2, 3]);
   // The compiled value with an absent list operand is not specified
   // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
   // "Everything computed from an absent value, except at a discharge"; R4 of

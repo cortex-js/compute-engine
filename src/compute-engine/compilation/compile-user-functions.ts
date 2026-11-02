@@ -134,7 +134,6 @@ import {
   tryCompilePointListCall,
 } from './compile-point-calls.js';
 import {
-  absentArgumentChecks,
   callArgumentMapRank,
   checkDeclaredBroadcast,
   checkDeclaredBroadcastAgainst,
@@ -148,7 +147,6 @@ import {
   multiClauseLaneMismatchAt,
   multiClauseParamIsComplex,
   pointArgumentAtUntypedParameter,
-  presentCheckedCode,
   provablyScalarOrFramedScalar,
   tryInlineUserFunctionCall,
   userFunctionParamType,
@@ -1786,7 +1784,6 @@ export function tryCompileUserFunction(
         coerceToComplex,
         paramsAreScalar,
         prefixed.values.map((v) => core.compile(v, target)),
-        absentArgumentChecks(h, literal, args, target),
         mapDefaults
       );
   }
@@ -1853,7 +1850,6 @@ export function tryCompileUserFunction(
     coerceToComplex,
     paramsAreScalar,
     [],
-    absentArgumentChecks(h, literal, args, target),
     mapDefaults
   );
 }
@@ -2067,9 +2063,7 @@ export function appliedLiteralCheckedCall(
       const pt = signatureParamType(signature, i);
       return pt !== undefined && isNonRealNumber(pt);
     }),
-    paramsAreScalar(signature),
-    [],
-    absentArgumentChecks('(function)', literal, args, target)
+    paramsAreScalar(signature)
   );
   return (
     `((${callee}) => ${call})` +
@@ -2167,8 +2161,8 @@ export function argumentProvesParameterType(
   a: Expression,
   declared: Type
 ): boolean {
-  // An absent value is the business of the absent-argument check
-  // (`absentArgumentChecks`), which runs first.
+  // An argument that is absent at run time gives an unspecified value: the
+  // type without its `missing` arm is read.
   const t = stripMissingFromType(a.type.type);
   // A list of points at a parameter declared as a point: the call maps
   // over the list (`tryCompilePointListCall`), and each point reaches the
@@ -2627,17 +2621,10 @@ export function tryCompileLocalFunctionCall(
           `which the compiled map does not convert.`
       );
     const callee = target.var(h) ?? h;
-    // The mapped list is exempt from the absent-argument check (an absent
-    // point is an absent cell); every other argument is checked inside the
-    // map, when a point is given to the function, as in
-    // `tryCompilePointListCall`.
-    const checks = absentArgumentChecks(h, literal, args, target);
     const codes = args.map((a) => compileValueOperand(a, target));
     const temps = args.map(() => tempVar(target));
     const point = tempVar(target);
-    const callArgs = temps.map((t, i) =>
-      i === at ? point : presentCheckedCode(t, checks[i])
-    );
+    const callArgs = temps.map((t, i) => (i === at ? point : t));
     // A list that may be absent, or whose points may be absent: `Missing`
     // lowers to `undefined`, and the interpreter answers `Missing` for an
     // absent list and for the cell of an absent point, so the map does
@@ -2808,13 +2795,10 @@ export function tryCompileLocalFunctionCall(
           args[i]
         );
     }
-    const checks = absentArgumentChecks(h, literal, args, target);
     const named = appliedLiteralNamedPointCall(
       literal,
       args,
-      args.map((a, i) =>
-        presentCheckedCode(compileValueOperand(a, target), checks[i])
-      ),
+      args.map((a) => compileValueOperand(a, target)),
       (e) => core.compile(e, target),
       () => target.var(h) ?? h,
       target,
@@ -3008,16 +2992,6 @@ export function tryCompileLocalFunctionCall(
           `a function over a list argument, and the Python call passes ` +
           `the argument whole.`
       );
-    if (
-      absentArgumentChecks(h, literal, args, target).some(
-        (c) => c !== undefined
-      )
-    )
-      throw reason(
-        `an argument may be absent at a parameter whose declared type ` +
-          `refuses an absent value, and the Python call does not test it ` +
-          `at run time.`
-      );
     return emitUserFunctionCall(
       target.var(h) ?? h,
       args,
@@ -3092,8 +3066,6 @@ export function tryCompileLocalFunctionCall(
     args,
     target,
     coerceToComplex,
-    signature === undefined ? true : paramsAreScalar(signature),
-    [],
-    absentArgumentChecks(h, literal, args, target)
+    signature === undefined ? true : paramsAreScalar(signature)
   );
 }

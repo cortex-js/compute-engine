@@ -49,41 +49,28 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     ce.declare('nqs', 'real');
   });
 
-  // A comparison whose value is the result has no value for a variable the
-  // caller left out, as in the interpreter (user decision 2026-10-30): the
-  // exact test runs first, and its `false` (`true` for `NotEqual`) stands
-  // only when each vars-object read is not `undefined`
-  // (`BaseCompiler.unsuppliedComparisonGuard`). Two variables that may both
-  // be `undefined` keep the absence test of the exact comparison itself.
+  // The host supplies every input, so a comparison whose value is the
+  // result has no test for an input left out.
   test('the scalar emission is the exact test', () => {
-    expect(js(ce.box(['Equal', 'nqr', 3])).code).toBe(
-      '((((_.nqr) === (3))) || ((_.nqr !== undefined) ? false : undefined))'
-    );
-    // With two variables, a NaN in one decides the pair while the other is
-    // left out, as in the interpreter (`NaN = y` is `False`).
+    expect(js(ce.box(['Equal', 'nqr', 3])).code).toBe('((_.nqr) === (3))');
     expect(js(ce.box(['Equal', 'nqr', 'nqs'])).code).toBe(
-      '((((_.nqr) !== undefined && (_.nqr) === (_.nqs))) || (((_.nqr !== undefined && _.nqs !== undefined) || _.nqr !== _.nqr || _.nqs !== _.nqs) ? false : undefined))'
+      '((_.nqr) === (_.nqs))'
     );
   });
 
   test('NotEqual is the negation of the whole Equal test', () => {
-    expect(js(ce.box(['NotEqual', 'nqr', 3])).code).toBe(
-      '((((_.nqr) !== (3))) && ((_.nqr !== undefined) ? true : undefined))'
-    );
+    expect(js(ce.box(['NotEqual', 'nqr', 3])).code).toBe('((_.nqr) !== (3))');
     expect(js(ce.box(['NotEqual', 'nqr', 'nqs'])).code).toBe(
-      '(((!((_.nqr) !== undefined && (_.nqr) === (_.nqs)))) && (((_.nqr !== undefined && _.nqs !== undefined) || _.nqr !== _.nqr || _.nqs !== _.nqs) ? true : undefined))'
+      '((_.nqr) !== (_.nqs))'
     );
     expect(js(ce.box(['NotEqual', 'nqr', 'nqs'])).run({ nqr: NaN })).toBe(
       true
     );
   });
 
-  test('an absent operand gives no value; a NaN operand answers true', () => {
-    // `run({})` leaves `nqr` `undefined`: the interpreter keeps `nqr ≠ 3`
-    // unevaluated, and the compiled value is `undefined`. A NaN operand is
-    // a value, and `NotEqual` is `true` for it.
+  test('a NaN operand answers true', () => {
+    // A NaN operand is a value, and `NotEqual` is `true` for it.
     const r = js(ce.box(['NotEqual', 'nqr', 3]));
-    expect(r.run({})).toBeUndefined();
     expect(r.run({ nqr: NaN })).toBe(true);
   });
 
@@ -134,17 +121,7 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
   test('a chained NotEqual conjoins the negated pairs', () => {
     ce.declare('nqt', 'real');
     const r = js(ce.box(['NotEqual', 'nqr', 'nqs', 'nqt']));
-    // Each pair is a comparison with its own reads tested, and the pairs are
-    // joined by the three-valued `And`: a pair that is `false` decides the
-    // chain even when a variable of the other pair is left out.
-    expect(r.code).toContain(
-      '(((!((_.nqr) !== undefined && (_.nqr) === (_.nqs)))) && (((_.nqr !== undefined && _.nqs !== undefined) || _.nqr !== _.nqr || _.nqs !== _.nqs) ? true : undefined))'
-    );
-    expect(r.code).toContain(
-      '(((!((_.nqs) !== undefined && (_.nqs) === (_.nqt)))) && (((_.nqs !== undefined && _.nqt !== undefined) || _.nqs !== _.nqs || _.nqt !== _.nqt) ? true : undefined))'
-    );
-    expect(r.run({ nqr: 2, nqs: 2 })).toBe(false);
-    expect(r.run({ nqr: 1, nqs: 2 })).toBeUndefined();
+    expect(r.code).toBe('((_.nqr) !== (_.nqs)) && ((_.nqs) !== (_.nqt))');
     expect(r.run({ nqr: NaN, nqs: 1, nqt: 2 })).toBe(true);
     expect(r.run({ nqr: 1, nqs: NaN, nqt: 2 })).toBe(true);
     expect(r.run({ nqr: 1, nqs: 2, nqt: 2 })).toBe(false);
@@ -156,9 +133,7 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     // `true` — the answer the tolerance path now gives as well.
     ce.declare('nqi', 'integer');
     const r = js(ce.box(['NotEqual', 'nqi', 3]));
-    expect(r.code).toBe(
-      '((((_.nqi) !== (3))) && ((_.nqi !== undefined) ? true : undefined))'
-    );
+    expect(r.code).toBe('((_.nqi) !== (3))');
     expect(r.run({ nqi: NaN })).toBe(true);
     expect(r.run({ nqi: 3 })).toBe(false);
     expect(r.run({ nqi: 4 })).toBe(true);
@@ -294,27 +269,6 @@ describe('compiled equality on NaN and on infinities — Python target', () => {
 });
 
 describe('two absent operands are not equal', () => {
-  // A caller variable that is absent reads `undefined`; `undefined ===
-  // undefined` must not make two unknown values equal. The interpreter has
-  // no value for `x = y` while `x` or `y` has none, so the compiled
-  // comparison answers `undefined` there (user decision 2026-10-30), and a
-  // supplied `NaN` operand still decides it (`false` for `Equal`).
-  test('javascript: Equal and NotEqual have no value when an operand is absent', () => {
-    // The interpreter keeps `x = y` unevaluated while `x` or `y` has no
-    // value; the compiled value is `undefined`.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    const eq = compile(ce.parse('x = y'), { to: 'javascript' });
-    const ne = compile(ce.parse('x \\ne y'), { to: 'javascript' });
-    expect(eq.run!({})).toBeUndefined();
-    expect(ne.run!({})).toBeUndefined();
-    expect(eq.run!({ x: 2 })).toBeUndefined();
-    expect(eq.run!({ x: 2, y: 2 })).toBe(true);
-    expect(ne.run!({ x: 2, y: 3 })).toBe(true);
-    expect(eq.code).toContain('_.x !== undefined && _.y !== undefined');
-  });
-
   test('python: the exact test excludes None where both sides may be absent', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');

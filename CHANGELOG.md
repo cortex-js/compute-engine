@@ -1,3 +1,53 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **Compiled code no longer tests for an input that the caller leaves out.**
+  The host supplies every input with a value of its declared type; the
+  result for an input left out is undefined and can differ per target
+  (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). So `run()`,
+  `broadcast()` and the `interval-js` runner no longer refuse a run that
+  leaves out a collection input that the code reads: with `L: list<real>`
+  left out, `Sum(L)` gave `NaN` on JavaScript and the empty interval on
+  `interval-js` in 0.177.0; it now throws a `TypeError` on JavaScript and
+  gives `undefined` on `interval-js`. The functions that `compileFunction()` and
+  `compileLambda()` emit for Python no longer start with a test of such an
+  input. A comparison whose value is the result is the plain comparison:
+  `x > 0` compiles to `0 < _.x`, which is `false` for an `x` left out, where
+  0.177.0 gave `undefined`. A branch over a comparison is the plain
+  comparison too: `If(x > 0, 1, -1)` compiles to `((0 < _.x) ? (1) : (-1))`
+  and takes the else arm for an `x` left out, where 0.177.0 gave `NaN`. An
+  `Equal` of two variables is the plain `===` (`(_.a) === (_.b)`), with no
+  test for `undefined`. A symbol declared `boolean` is read by its
+  truthiness in a branch condition and in `And`, `Or` and `Not`:
+  `And(p, q)` compiles to `_.p && _.q`; a symbol declared `boolean |
+  missing` keeps the three-valued test. The stored entry plan of a result has no
+  `required` field, and the `interval-js` `listInputs` are the inputs
+  declared with a collection type that has no `missing` arm.
+- **Compiled code no longer tests an absent argument of a function, or the
+  shape of a point input.** A function applied to an absent value has no
+  specified value in compiled code. So a call of a function whose parameter
+  is annotated with a type that is not numeric and has no `missing` arm no
+  longer stops the run with a `TypeError` that names the parameter (the
+  `_SYS.present` helper is removed). An absent point in a list of points
+  (`list<tuple<real, real> | missing>`) given to a function, by a call, by
+  `Map`, `Filter` or another callback, or by `Apply` of a literal, goes to
+  the definition compiled for one point: with `f := t ↦ 2t` and
+  `L = [(1, 2), Missing]`, `Map(f, L)` gave the interpreter's value
+  `[(2, 4), Missing]` in 0.177.0 and now throws a `TypeError` on
+  JavaScript. Some of these programs declined
+  before and now compile. The arithmetic of a point input (`P + (1, 2)`
+  with `P: tuple<real, real>`) is written component by component,
+  `[(_.P[0] + 1), (_.P[1] + 2)]`, with no run-time test that `P` is an
+  array of two numbers.
+- **A compiled `Sum` or `Product` over an empty range of a body of known
+  vector width gives the identity of that shape.** With `x, y, z: real` and
+  `n: integer<0..10>`, `Sum(i * [x, y, z], i, 1, n)` at `n = 0` compiles to
+  `[0, 0, 0]` on JavaScript (`[1, 1, 1]` for `Product`), the zero of its
+  static type `vector<real^3>`. The interpreter gives the scalar `0` (`1`)
+  for this case. Inside a broadcast both give the same value:
+  `0.5 * Sum(…) + [x, y, z]` is `[x, y, z]` on both.
+
 ## 0.177.0 _2026-11-01_
 
 ### Behavior Changes

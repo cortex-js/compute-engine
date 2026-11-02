@@ -187,7 +187,13 @@ test('a nested list-valued sum keeps elementwise accumulation and empty-range id
     [20100, 200],
     [20100, 400],
   ]);
-  expect(r.run!({ n: 0 })).toEqual([0, 0]);
+  // Over an empty range each sum is the identity of its body's static type,
+  // `vector<integer^2>`, in each component. The interpreter gives the scalar
+  // `0` for each sum.
+  expect(r.run!({ n: 0 })).toEqual([
+    [0, 0],
+    [0, 0],
+  ]);
 });
 
 test('an unselected conditional sum never calls its effectful body', () => {

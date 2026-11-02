@@ -35,11 +35,9 @@ import type { Type } from '../../common/type/types.js';
 import { isScalarType } from '../boxed-expression/function-literal.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
-  absentArgumentChecks,
   callArgumentMapRank,
   emitUserFunctionCall,
   isScalarShapedArg,
-  presentCheckedCode,
   unsettledArgumentDecline,
   userFunctionParamType,
 } from './compile-user-calls.js';
@@ -52,10 +50,7 @@ import { core } from './compiler-core-hooks.js';
 import { compileValueOperand } from './compile-statements.js';
 import { tempVar } from './compiler-naming.js';
 import { isSinglePointArg } from './compile-cse.js';
-import {
-  absentArgumentFork,
-  userFunctionSignatureIsInferred,
-} from './compile-callbacks.js';
+import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
 import { hasBroadcastableCoordinate } from './compiler-type-facts.js';
 import {
   isScalarShaped,
@@ -470,23 +465,10 @@ export function tryCompilePointListCall(
     name = emitted.name;
   }
   if (name === undefined) return undefined;
-  // The mapped list is exempt from the absent-argument check (an absent
-  // point is an absent cell); every other argument is checked inside the
-  // map, when a point is given to the function. So an empty list, and an
-  // absent list, answer as the interpreter does (the empty list, and an
-  // absent value), without a check.
-  const checks = absentArgumentChecks(
-    h,
-    userFunctionLiteral(engine, h),
-    args,
-    target
-  );
   const codes = args.map((a) => compileValueOperand(a, target));
   const temps = args.map(() => tempVar(target));
   const point = tempVar(target);
-  const callArgs = temps.map((t, i) =>
-    i === at ? point : presentCheckedCode(t, checks[i])
-  );
+  const callArgs = temps.map((t, i) => (i === at ? point : t));
   // A list that may be absent (`(A, B)\{0 < t\}`), or whose points may be
   // absent (`[(3, 4)\{0 < t\}, (6, 8)]`): `Missing` lowers to
   // `undefined`, and the interpreter answers `Missing` for an absent list
@@ -542,9 +524,7 @@ export function tryCompilePointListCall(
   }
   const absentListCall =
     wholeDef !== undefined && mayBeAbsentWhole(args[at].type.type)
-      ? `${wholeDef}(${temps
-          .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
-          .join(', ')})`
+      ? `${wholeDef}(${temps.join(', ')})`
       : undefined;
   const listGuard = absent
     ? `${temps[at]} === undefined ? ${absentListCall ?? 'undefined'} : `
@@ -603,27 +583,20 @@ export function tryCompilePointListCall(
     });
     // An element that is absent at a parameter with a default takes the
     // default (`mapDefaults`, filled with the target's `Coalesce`), as the
-    // interpreter fills each cell of a broadcast. With no absent-argument
-    // check and no default to fill, the mapped function is the callee
-    // itself, not an arrow that only calls it.
+    // interpreter fills each cell of a broadcast. With no default to fill,
+    // the mapped function is the callee itself, not an arrow that only
+    // calls it.
     const coalesce = targetCoalesce(target);
     const fills =
       target.language === 'javascript' && coalesce !== undefined
         ? (mapDefaults?.() ?? [])
         : [];
     const cellArgs = temps.map((t, i) =>
-      i === at
-        ? t
-        : presentCheckedCode(
-            fills[i] === undefined ? t : coalesce!(t, fills[i]!),
-            checks[i]
-          )
+      i === at || fills[i] === undefined ? t : coalesce!(t, fills[i]!)
     );
-    const fn =
-      checks.every((c, i) => i === at || c === undefined) &&
-      fills.every((f, i) => i === at || f === undefined)
-        ? name
-        : `((${temps.join(', ')}) => ${name}(${cellArgs.join(', ')}))`;
+    const fn = fills.every((f, i) => i === at || f === undefined)
+      ? name
+      : `((${temps.join(', ')}) => ${name}(${cellArgs.join(', ')}))`;
     return `_SYS.mapFn(${fn}, [${ranks.join(', ')}], ${codes.join(', ')})`;
   }
   // The argument at the parameter typed `unknown` is passed whole to each
@@ -644,43 +617,19 @@ export function tryCompilePointListCall(
       ? undefined
       : pointsBelowLists(args[at].type.type)?.rank;
   if (untypedRank !== undefined && untypedRank > 1) {
-    const checked = checks.every((c, i) => i === at || c === undefined)
-      ? name
-      : `((${temps.join(', ')}) => ${name}(${temps
-          .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
-          .join(', ')}))`;
-    // An argument that may be absent or hold an absent value, as a point
-    // or as a list level: `_SYS.mapFn` passes the absent value to the
-    // function as it is, and the interpreter binds `Missing` to the
-    // parameter and runs the body, so the absent value goes to the
-    // definition for any argument (`absentArgumentFork()`).
-    const checkedWhole =
-      wholeDef === undefined
-        ? undefined
-        : checks.every((c, i) => i === at || c === undefined)
-          ? wholeDef
-          : `((${temps.join(', ')}) => ${wholeDef}(${temps
-              .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
-              .join(', ')}))`;
-    const fn =
-      checkedWhole !== undefined
-        ? absentArgumentFork(
-            checked,
-            checkedWhole,
-            args.map((_a, i) => i === at),
-            target
-          )
-        : checked;
+    // An absent point, or an absent list level, is passed to the function
+    // as it is (`_SYS.mapFn`): a function applied to an absent value has no
+    // specified value in compiled code.
     const ranksCode = `[${args.map((_a, i) => (i === at ? untypedRank : 0)).join(', ')}]`;
     // A list that may be absent as a whole is bound whole to the
     // parameter (`absentListCall` above), not given `Missing`.
     if (absentListCall !== undefined)
       return (
         `((${temps.join(', ')}) => ${temps[at]} === undefined ? ` +
-        `${absentListCall} : _SYS.mapFn(${fn}, ${ranksCode}, ` +
+        `${absentListCall} : _SYS.mapFn(${name}, ${ranksCode}, ` +
         `${temps.join(', ')}))(${codes.join(', ')})`
       );
-    return `_SYS.mapFn(${fn}, ${ranksCode}, ${codes.join(', ')})`;
+    return `_SYS.mapFn(${name}, ${ranksCode}, ${codes.join(', ')})`;
   }
   if (!dispatch && !deep) return `(${head}${map})(${codes.join(', ')})`;
   // An argument whose type is one point or a list of points, which the
@@ -701,13 +650,8 @@ export function tryCompilePointListCall(
       ? undefined
       : pointTensorRank(args[at].type.type, params[at]!);
   if (rank !== undefined) {
-    const fn = checks.every((c, i) => i === at || c === undefined)
-      ? name
-      : `((${temps.join(', ')}) => ${name}(${temps
-          .map((t, i) => (i === at ? t : presentCheckedCode(t, checks[i])))
-          .join(', ')}))`;
     return (
-      `_SYS.mapFn(${fn}, [${args.map((_a, i) => (i === at ? rank : 0)).join(', ')}], ` +
+      `_SYS.mapFn(${name}, [${args.map((_a, i) => (i === at ? rank : 0)).join(', ')}], ` +
       `${codes.join(', ')})`
     );
   }
@@ -715,7 +659,6 @@ export function tryCompilePointListCall(
   // whose first element is an array, is a list of points (see the
   // coordinate check above); any other value is one point, given whole to
   // the function.
-  const onePointArgs = temps.map((t, i) => presentCheckedCode(t, checks[i]));
   const v = temps[at];
   // An absent point lowers to `undefined` (`[undefined, [3, 4]]`), so the
   // test reads the first PRESENT element. A list whose points are all
@@ -730,9 +673,7 @@ export function tryCompilePointListCall(
   // maps again over a list, and calls the function on a point.
   const go = tempVar(target);
   const p = tempVar(target);
-  const pointArgs = onePointArgs.map((c, i) =>
-    i === at ? presentCheckedCode(p, checks[at]) : c
-  );
+  const pointArgs = temps.map((c, i) => (i === at ? p : c));
   const walk =
     `(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
     `${p}.map((${point}) => ${pointGuard}${go}(${point})) : ` +
@@ -911,12 +852,6 @@ export function compileUntypedScalarSlotCall(
     );
   const name = core.ensureUserFunctionEmitted(engine, h, target);
   if (name === undefined) return undefined;
-  const checks = absentArgumentChecks(
-    h,
-    userFunctionLiteral(engine, h),
-    args,
-    target
-  );
   // The static type of each argument typed `unknown` there selects the
   // direct call or the static map (`emitUserFunctionCall`), or declines
   // when it does not settle a shape.
@@ -927,7 +862,6 @@ export function compileUntypedScalarSlotCall(
     args.map(() => false),
     true,
     [],
-    checks,
     mapDefaults
   );
 }

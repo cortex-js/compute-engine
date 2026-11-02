@@ -109,7 +109,7 @@ describe('COMPILE deterministic naming', () => {
     expect(second).toBe(first);
     expect(third).toBe(first);
     expect(first).toMatchInlineSnapshot(
-      `((((_tv1) => (0 < _tv1) && (_tv1 < 10))(_.x + 1)) || ((_.x !== undefined) ? false : undefined))`
+      `((_tv1) => (0 < _tv1) && (_tv1 < 10))(_.x + 1)`
     );
   });
 
@@ -295,7 +295,7 @@ describe('COMPILE CSE — conditionality', () => {
     // ternary and binds no temporary of its own, so the arm-only CSE binding
     // this test is about is unaffected.
     expect(result.code).toMatchInlineSnapshot(
-      `((_.x !== undefined) ? ((0 < _.x) ? ((() => { const _cse1 = Math.sin(6 * _.u); return _SYS.pow2(_cse1) + _cse1 / (_cse1 + 2); })()) : (0)) : NaN)`
+      `((0 < _.x) ? ((() => { const _cse1 = Math.sin(6 * _.u); return _SYS.pow2(_cse1) + _cse1 / (_cse1 + 2); })()) : (0))`
     );
 
     // The unselected arm evaluates NOTHING: a getter on the vars object counts
@@ -636,7 +636,7 @@ describe('COMPILE CSE — determinism', () => {
 
     expect(second).toBe(first);
     expect(first).toMatchInlineSnapshot(
-      `(() => { const _cse1 = Math.sin(6 * _.u); return ((((_tv2) => (0 < _tv2) && (_tv2 < 10))(_SYS.pow2(_cse1) + _cse1 / (_cse1 + 2))) || ((_.u !== undefined) ? false : undefined)); })()`
+      `(() => { const _cse1 = Math.sin(6 * _.u); return ((_tv2) => (0 < _tv2) && (_tv2 < 10))(_SYS.pow2(_cse1) + _cse1 / (_cse1 + 2)); })()`
     );
   });
 });
@@ -878,15 +878,9 @@ describe('COMPILE CSE — statement regions', () => {
     ]);
     const result = compile(expr, { fallback: false });
 
-    // The early exit carries the undecided-condition guard (ruling
-    // 2026-09-02): `u` may be absent from the vars object, and a `Return`
-    // must not fire on a condition that decided nothing. A NaN `u` decides
-    // `u < 0` false (user decision 2026-10-20), so the guard has no NaN test.
-    // What this case is about is unchanged — the guarded exit still precedes
-    // the candidate's binding, so nothing was hoisted past it.
-    expect(result.code).toContain(
-      'if (_.u !== undefined && (_.u < 0)) { return 0 }'
-    );
+    // The guarded exit precedes the candidate's binding, so nothing was
+    // hoisted past it.
+    expect(result.code).toContain('if (_.u < 0) { return 0 }');
     expect(result.code.indexOf('(_.u < 0)')).toBeLessThan(
       result.code.indexOf('const _cse1')
     );
@@ -2325,18 +2319,18 @@ describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
       ce.box(['When', probe3('u'), ['Less', 'x', 0]]),
       '?',
     ],
-    // A comparison over a variable the caller can leave out has no value
-    // then, so the connective takes the three-valued lowering: the marker
-    // is the test of the first operand's value.
+    // A comparison of two reals always has a boolean value, so the
+    // connective takes the two-valued lowering: the marker is the
+    // short-circuit operator after the first operand.
     [
       'And (operands after the first)',
       ce.box(['And', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
-      '_tv1 === false ? false',
+      '&&',
     ],
     [
       'Or (operands after the first)',
       ce.box(['Or', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
-      '_tv1 === true ? true',
+      '||',
     ],
     [
       'Coalesce (the default)',

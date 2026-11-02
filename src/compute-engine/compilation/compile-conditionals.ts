@@ -14,11 +14,7 @@ import {
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
-import {
-  isSymbol,
-  isNumber,
-  isFunction,
-} from '../boxed-expression/type-guards.js';
+import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
 import type { CompileTarget, OperandCompiler, TargetSource } from './types.js';
 import {
   assertNoStatementOperand,
@@ -44,25 +40,20 @@ import {
 import { branchComplexCoercion } from './compile-shapes.js';
 import { core } from './compiler-core-hooks.js';
 import {
-  _truthOnly,
   absenceAxisForType,
   absenceKind,
   compileExactCondition,
   compileGuardTest,
   conditionDecidability,
   exactSelect,
-  isVarsObjectRead,
   noBranchValue,
-  unsuppliedReads,
-  withNanEscape,
 } from './compile-absence.js';
-import { _codeAliases, withPresentReads } from './compiler-mode.js';
+import { _codeAliases } from './compiler-mode.js';
 import {
   compilationType,
   isProvablyStringOperand,
 } from './compiler-type-facts.js';
 import { tempVar } from './compiler-naming.js';
-import type { ConditionNode } from './compiler-types.js';
 
 /**
  * An `If` in statement form. A case of `compileExpr`: it returns the code, or
@@ -149,14 +140,10 @@ export function compileExprIf(
         target
       )}) ? (${arm(args[1], 1)}) : (${arm(args[2], 2)}))`;
     const compiledCond = compileExactCondition(args[0], decidability, target);
-    // An arm runs only after the condition tested its vars-object reads
-    // for `undefined`, so a comparison in the arm does not test them
-    // again (`unsuppliedComparisonGuard`).
-    const tested = testedReadsOf(decidability, target);
     return exactSelect(
       compiledCond,
-      `(${withPresentReads(target, tested, () => arm(args[1], 1))})`,
-      `(${withPresentReads(target, tested, () => arm(args[2], 2))})`,
+      `(${arm(args[1], 1)})`,
+      `(${arm(args[2], 2)})`,
       noBranchValue(node, target, coerce !== undefined),
       target
     );
@@ -416,10 +403,7 @@ export function compileExprWhen(
       //
       // A literal list of scalar conditions compiles each cell to `true`
       // exactly when that condition is decided true (`compileGuardTest`),
-      // as the scalar case below selects. Its plain code answered `true`
-      // for an input the caller did not supply (`undefined !== 0`), so
-      // `When(5, [x ≠ 0, ¬(x > 0)])` gave `[5, 5]` where the interpreter
-      // has no value in either cell (ROADMAP CE-569).
+      // as the scalar case below selects.
       const conds =
         isFunction(args[1], 'List') &&
         args[1].ops.every(
@@ -428,14 +412,7 @@ export function compileExprWhen(
             !mayBeCollectionCondition(cell.type.type)
         )
           ? `[${args[1].ops
-              .map((cell) => {
-                // An ordering relation over symbols and number literals
-                // keeps its plain code: it is `false` when undecided.
-                const d = conditionDecidability(cell, true, target);
-                return d === null || isFalsyWhenUndecided(d, target)
-                  ? core.compile(cell, target)
-                  : compileGuardTest(cell, target);
-              })
+              .map((cell) => compileGuardTest(cell, target))
               .join(', ')}]`
           : core.compile(args[1], target);
       const val = compileOp(node, 0, target, 0, args[0]);
@@ -514,14 +491,8 @@ export function compileExprWhen(
     // "Branch conditions that cannot be decided"). A condition read by its
     // value (a boolean input `c`, a call) must be exactly `true`: before,
     // `When(x, c)` with `c = 1` selected `x`. A condition that is false
-    // or undecided gives the same masked value, so the plain conditional
-    // expression is enough when the plain code of the condition is falsy
-    // whenever the condition is undecided (`isFalsyWhenUndecided`): an
-    // ordering relation between symbols and number literals, or an
-    // `And`/`Or` of them. Any other condition is tested for being decided
-    // first. Before, `When(5, x ≠ 0)` answered `5` for an `x` the caller
-    // did not supply (`undefined !== 0` is `true`), where the interpreter
-    // has no value (ROADMAP CE-569).
+    // or undecided gives the same masked value. A condition that is
+    // decided by construction keeps the plain conditional expression.
     //
     // A condition read by its value that is not provably boolean-valued
     // (an undeclared `b`, `x/y`) takes the same strict test: a value that
@@ -533,16 +504,8 @@ export function compileExprWhen(
       target.bindExpr !== undefined,
       target
     );
-    if (decidability === null || isFalsyWhenUndecided(decidability, target)) {
-      // An undecided comparison here reads as `false`, which masks the
-      // value as the undecided answer does, so the comparisons of the
-      // condition need no test of their own for an unsupplied variable
-      // (`unsuppliedComparisonGuard`).
-      const cond = withPresentReads(
-        target,
-        decidability === null ? [] : falsyReadsOf(decidability, target),
-        () => guardCondition(args[1], target)
-      );
+    if (decidability === null) {
+      const cond = guardCondition(args[1], target);
       const val = compileOp(node, 0, target, 0, args[0]);
       return `((${cond}) ? (${val}) : ${nan})`;
     }
@@ -559,110 +522,6 @@ export function compileExprWhen(
     return exactSelect(compiledCond, `(${val})`, nan, nan, target);
   }
   return undefined;
-}
-
-/**
- * Is the plain JavaScript code of the branch condition `node` falsy
- * whenever the condition is undecided?
- *
- * An ordering relation (`<`, `≤`, `>`, `≥`) whose operands are number
- * literals and NUMERIC inputs that compile to a bare read of the vars
- * object (`_.x`) is `false` when an operand is `undefined` (an input the
- * caller did not supply): `undefined < 1` is `false`. Other operands do
- * not qualify:
- * - an operand computed from an input: arithmetic can turn `undefined`
- *   into a number (`_SYS.pow(undefined, 0)` and
- *   `_SYS.heaviside(undefined)` are `1`). An ASSIGNED symbol, and a
- *   symbol that the `vars` option maps to code, compile to such a
- *   computation, so the compiled code of each symbol is checked;
- * - a string input: the comparison reads `_SYS.ct(_.s)`, and an
- *   unsupplied `s` becomes the string `'undefined'`, which compares like
- *   any other string;
- * - a boolean input, or an input of unknown type, which can be a string.
- *
- * A NaN operand gives the IEEE value,
- * which is the decided answer. An `And` or an `Or` of such relations,
- * compiled to `&&` and `||`, is then falsy when its Kleene value is
- * undecided: an undecided operand reads as `false`, which only a `true`
- * operand of an `Or` overrides, and the Kleene `Or` is `true` then too.
- *
- * Not such a condition: a negation (`!undefined` is `true`), `Equal` and
- * `NotEqual` (`undefined !== 0` is `true`, `undefined === undefined` is
- * `true`), and a condition read by its VALUE (a boolean input, a call): a
- * caller can supply a value that is not a boolean, such as `1`, which is
- * truthy, where the interpreter has no value.
- */
-/**
- * The vars-object reads (`_.x`) that the decidedness test of a lone
- * relation `node` tests for `undefined` (`withConditionOperands`). The
- * arms of the selection run only when the test passed. Empty for a
- * connective or a value-shaped condition, whose arms can run with such a
- * read undecided.
- */
-export function testedReadsOf(
-  node: ConditionNode,
-  target: CompileTarget<Expression>
-): string[] {
-  if (node.test.kind !== 'operands') return [];
-  const reads: string[] = [];
-  for (const op of node.test.operands) {
-    if (!isSymbol(op)) continue;
-    const code = core.compile(op, target);
-    if (isVarsObjectRead(code, target)) reads.push(code);
-  }
-  // With the NaN escape (`withNanEscape`), the arms can run while a read
-  // is unsupplied: nothing is proven present.
-  const expr = node.test.expr;
-  if (
-    isFunction(expr) &&
-    withNanEscape(
-      expr.ops,
-      reads.map((r) => `${r} !== undefined`),
-      target
-    ).some((t) => t.includes(' || '))
-  )
-    return [];
-  return reads;
-}
-
-/**
- * The vars-object reads of the relations of a condition that
- * `isFalsyWhenUndecided` admits: there an unsupplied variable makes the
- * comparison `false`, which the selection reads as it reads the undecided
- * answer.
- */
-export function falsyReadsOf(
-  node: ConditionNode,
-  target: CompileTarget<Expression>
-): string[] {
-  if (node.test.kind === 'connective')
-    return node.test.operands.flatMap((n) => falsyReadsOf(n, target));
-  return testedReadsOf(node, target);
-}
-
-export function isFalsyWhenUndecided(
-  node: ConditionNode,
-  target: CompileTarget<Expression>
-): boolean {
-  if (node.negate) return false;
-  const t = node.test;
-  if (t.kind === 'operands')
-    return (
-      isFunction(t.expr) &&
-      ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(
-        t.expr.operator
-      ) &&
-      t.expr.ops.every(
-        (op) =>
-          isNumber(op) ||
-          (isSymbol(op) &&
-            op.type.matches('number') &&
-            isVarsObjectRead(core.compile(op, target), target))
-      )
-    );
-  if (t.kind === 'connective')
-    return t.operands.every((n) => isFalsyWhenUndecided(n, target));
-  return false;
 }
 
 /**
@@ -741,14 +600,7 @@ export function compileExprAssertPresent(
  *
  * - an operand's static type has a `missing` arm;
  * - on JavaScript, an operand is not proven a DECIDED boolean
- *   (`isDecidedBooleanValue`). A symbol declared `boolean` is not: the
- *   caller can leave it out (`undefined`) or pass a value that is not a
- *   boolean (`1`). The plain `!_.c` gave `true` for an unsupplied `c` and
- *   `false` for `c = 1`, where the interpreter keeps `¬c` unevaluated; the
- *   Kleene value is `undefined`, the absence marker of a boolean result.
- *   (Python keeps the plain lowering for such an operand: its variables
- *   are the parameters of the compiled function, and there is no
- *   unsupplied value to read.)
+ *   (`isDecidedBooleanValue`): an element read out of a list, a call.
  *
  * A connective whose every operand is proven a decided boolean keeps the
  * plain infix lowering, with no extra code.
@@ -851,22 +703,20 @@ export function kleeneValueConnective(
  * JavaScript target, whatever the caller passes. Proven for:
  *
  * - the symbols `True` and `False`;
+ * - a symbol of type `boolean`: the host supplies every input with a value
+ *   of its declared type;
  * - a comparison (`Less`, `LessEqual`, `Greater`, `GreaterEqual`, `Equal`,
  *   `NotEqual`) whose operands have no `missing` arm, are not an
  *   application of a top type (`any` or `unknown`: its value can be a
  *   collection, and `Equal` over it lowers to a run-time dispatch whose
- *   value is not always a boolean), and read
- *   no variable that the caller can leave out (`unsuppliedReads`: a
- *   literal, a local, a loop index, or a read already tested around the
- *   code). Its compiled value is a JavaScript comparison, which is a
- *   boolean: a NaN operand gives `false` (`true` for `NotEqual`). A
- *   comparison with an operand that the caller can leave out compiles to
- *   `undefined` when it is left out (`unsuppliedComparisonGuard`), so it is
- *   not proven;
+ *   value is not always a boolean). Its compiled value is a JavaScript
+ *   comparison, which is a boolean: a NaN operand gives `false` (`true`
+ *   for `NotEqual`). The host supplies every input, so an input that the
+ *   caller leaves out is not considered;
  * - an `And`, `Or` or `Not` whose every operand is proven.
  *
- * Anything else is not proven: a symbol (the caller can leave it out or
- * pass any value), an element read out of a list (`undefined` past the
+ * Anything else is not proven: a symbol of another type, an element read
+ * out of a list (`undefined` past the
  * end), a call. A connective over such an operand takes the Kleene
  * lowering of `kleeneValueConnective`. Being wrong here in the cautious
  * direction costs only code size: the Kleene value of a decided boolean
@@ -876,23 +726,18 @@ export function isDecidedBooleanValue(
   a: Expression,
   target: CompileTarget<Expression>
 ): boolean {
-  // Read only by a truth test (`withTruthOnly`): its plain value is
-  // `false` where the three-valued one has no value, which that test
-  // reads alike.
-  if (_truthOnly.has(a)) return true;
   if (isSymbol(a, 'True') || isSymbol(a, 'False')) return true;
+  if (isSymbol(a)) return isSubtype(a.type.type, 'boolean');
   if (!isFunction(a)) return false;
   const h = a.operator;
   if (BRANCH_RELATIONS.has(h))
-    return (
-      a.ops.every((x) => {
-        const t = compilationType(x);
-        return (
-          !typeContainsMissing(t) &&
-          !((t === 'any' || t === 'unknown') && isFunction(x))
-        );
-      }) && unsuppliedReads(a.ops, target).length === 0
-    );
+    return a.ops.every((x) => {
+      const t = compilationType(x);
+      return (
+        !typeContainsMissing(t) &&
+        !((t === 'any' || t === 'unknown') && isFunction(x))
+      );
+    });
   if (h === 'And' || h === 'Or' || h === 'Not')
     return a.ops.every((x) => isDecidedBooleanValue(x, target));
   return false;

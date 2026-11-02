@@ -359,8 +359,8 @@ describe('CE-595: below the region budget, the code does not change', () => {
 
   test('A, JavaScript', () => {
     expect(compile(graphA(ce2()), { to: 'javascript' }).code).toBe(
-      '(() => { const _cse1 = ((_.x !== undefined) ? ((0 < Math.sin(_.x)) ? (Math.cos(_.y)) : (Math.exp(_.x))) : NaN); ' +
-        'return _cse1 + ((_.x !== undefined) ? ((0 < _.x) ? ((() => { const _cse2 = Math.cos(_.y); return _cse2 * _cse1; })()) : (0)) : NaN); })()'
+      '(() => { const _cse1 = ((0 < Math.sin(_.x)) ? (Math.cos(_.y)) : (Math.exp(_.x))); ' +
+        'return _cse1 + ((0 < _.x) ? ((() => { const _cse2 = Math.cos(_.y); return _cse2 * _cse1; })()) : (0)); })()'
     );
   });
 
@@ -586,9 +586,9 @@ describe('CE-595: the emitted code does not change', () => {
   test('If arm, JavaScript', () => {
     expect(compile(ifArmGraph(engine(), 3), { to: 'javascript' }).code).toBe(
       '(() => { const _cse1 = Math.sin(_.x); ' +
-        'const _cse2 = Math.atan2(_cse1, ((_.x !== undefined) ? ((0 < _.x) ? (_cse1) : (0)) : NaN)); ' +
-        'const _cse3 = Math.atan2(_cse2, ((_.x !== undefined) ? ((1 < _.x) ? (_cse2) : (0)) : NaN)); ' +
-        'return Math.atan2(_cse3, ((_.x !== undefined) ? ((2 < _.x) ? (_cse3) : (0)) : NaN)); })()'
+        'const _cse2 = Math.atan2(_cse1, ((0 < _.x) ? (_cse1) : (0))); ' +
+        'const _cse3 = Math.atan2(_cse2, ((1 < _.x) ? (_cse2) : (0))); ' +
+        'return Math.atan2(_cse3, ((2 < _.x) ? (_cse3) : (0))); })()'
     );
   });
 
@@ -641,9 +641,9 @@ describe('CE-595: the emitted code does not change', () => {
   test('When value, JavaScript', () => {
     expect(compile(whenArmGraph(engine(), 3), { to: 'javascript' }).code).toBe(
       '(() => { const _cse1 = Math.sin(_.x); ' +
-        'const _cse2 = ((_.x !== undefined) ? ((0 < _cse1) ? (Math.sin(_cse1)) : NaN) : NaN); ' +
-        'const _cse3 = ((_.x !== undefined) ? ((1 < _cse2) ? (Math.sin(_cse2)) : NaN) : NaN); ' +
-        'return ((_.x !== undefined) ? ((2 < _cse3) ? (Math.sin(_cse3)) : NaN) : NaN); })()'
+        'const _cse2 = ((0 < _cse1) ? (Math.sin(_cse1)) : NaN); ' +
+        'const _cse3 = ((1 < _cse2) ? (Math.sin(_cse2)) : NaN); ' +
+        'return ((2 < _cse3) ? (Math.sin(_cse3)) : NaN); })()'
     );
   });
 });

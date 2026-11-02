@@ -4414,14 +4414,6 @@ function stepMultiple(
   return round(q) * k;
 }
 
-/** `_SYS.present`: see the comment at its entry in `SYS_HELPERS`. */
-function presentArgument<T>(x: T, message: string, elements?: boolean): T {
-  if (x === undefined) throw new TypeError(message);
-  if (elements === true && Array.isArray(x))
-    for (const element of x) presentArgument(element, message, true);
-  return x;
-}
-
 /**
  * The iteration count of `_SYS.mandelbrot` and `_SYS.julia`, rounded to an
  * integer. A count on the complex lane (`Mandelbrot(c, √x)` with `x` real)
@@ -4455,11 +4447,6 @@ export const SYS_HELPERS = {
   // emitted code calls it through `_SYS`, as it calls every helper, and not
   // as the global `BigInt`, which a parameter named `BigInt` shadows.
   toBigint: (x: number): bigint => BigInt(x),
-  // The marker object that a comparison of a block local throws when the
-  // test of the inputs of its block fails where the interpreter may decide
-  // the comparison: the compiled result catches it at its top and gives no
-  // value (`BaseCompiler.catchNoValue`).
-  noValue: Object.freeze({ noValue: true }) as object,
   // The element count of an arithmetic `Range`, shared with the interpreter
   // (`numerics/range-count.ts`), so the compiled length agrees with the
   // interpreter's `count`.
@@ -5768,14 +5755,6 @@ export const SYS_HELPERS = {
           : `${kind} predicate must return "True" or "False"`
       );
     },
-  // An argument of a user function at a parameter annotated with a type that
-  // is not numeric and has no `missing` member, whose static type admits an
-  // absent value (`absentArgumentChecks`, `base-compiler.ts`): the value as
-  // it is, or a `TypeError` for an absent value (`undefined`), where the
-  // interpreter answers an `incompatible-type` error. When `elements` is
-  // true, the parameter is a scalar and a list argument is mapped, so each
-  // element of an array, at any depth, is checked too.
-  present: presentArgument,
   // The operand of an operator that only visits each element once, in any
   // order (`iterableCollectionCode`): an array as it is, the elements of a
   // JavaScript `Set` as an array, or a `RangeError` for any other value.
@@ -7396,10 +7375,6 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  *   string or `undefined` THROWS a `TypeError` that names the binding
  *   (`throwNonStringAtText`). Such a binding is in neither `real` nor
  *   `complex`. Without the check, `If(s = "a", 1, 2)` gave `2` for `s = 3`;
- * - a collection input that the code iterates, spreads, reduces or indexes
- *   (`required`), left out by the caller (`undefined`): the run has no value,
- *   and `checkEntry` gives `undefined` instead of the arguments. The runner
- *   then returns `entryNoValue(plan)` and runs no code;
  * - anything else (a string or a boolean for a binding of another type, an
  *   array for a binding that is not declared with a number type,
  *   `undefined`) is left to today's behavior. In particular a binding
@@ -7408,6 +7383,11 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  *   condition undecided and the result is NaN, as the interpreter holds
  *   `When(x, 1)` unevaluated (see
  *   `test/compute-engine/ce-569-when-defects.test.ts`).
+ *
+ * The plan has no test for an input that the caller leaves out: the host
+ * supplies every input with a value of its declared type, and the result for
+ * an input left out is undefined (`docs/COMPILATION-MODEL.md`, "Caveats of
+ * compiled code").
  *
  * In `mode: 'bigint'` an integer input (`bigints`) accepts a `bigint` and a
  * `number` that is a safe integer, which the emitted code converts with
@@ -7442,10 +7422,6 @@ export type EntryPlan =
       /** The symbols declared `boolean` (also in `real`); read only by
        * `broadcast()`, for which an empty array is an empty column. */
       booleans?: string[];
-      /** The collection inputs that the code iterates, spreads, reduces or
-       * indexes, and the value of a run that has no value for one of them
-       * (`checkEntry`, `entryNoValue`). */
-      required?: { names: string[]; noValue: 'NaN' | 'undefined' };
       /** `mode: 'bigint'`: the integer inputs (`checkBigintEntry`). */
       bigints?: string[];
       /** `mode: 'bigint'`: the `list<integer>` inputs, also in `lists`
@@ -7697,19 +7673,17 @@ export function namedEntryError(
 }
 
 /**
- * The checked arguments of a call, or `undefined` when the run has no value
- * because the caller left out a required collection input (`required` of a
- * `vars` plan, see `entryNoValue`). The runner then returns
- * `entryNoValue(plan)` and runs no code.
+ * The checked arguments of a call: the arguments, or a copy in which some
+ * values are converted (a number for a complex binding, `~oo`, the cells of
+ * a `list<integer>` in `mode: 'bigint'`).
  */
 export function checkEntry(
   plan: EntryPlan,
   argumentsList: unknown[]
-): unknown[] | undefined {
+): unknown[] {
   if (plan.kind === 'vars') {
     const vars = argumentsList[0];
-    if (typeof vars !== 'object' || vars === null)
-      return plan.required !== undefined ? undefined : argumentsList;
+    if (typeof vars !== 'object' || vars === null) return argumentsList;
     const v = vars as Record<string, unknown>;
     let lifted: Record<string, unknown> | undefined;
     // A `~oo` argument is PROJECTED to `Infinity` rather than refused: the
@@ -7773,19 +7747,12 @@ export function checkEntry(
     // read or converted (see the plan's description above). A scalar passes
     // on purpose: the declared type is often wider than the value a caller
     // binds, and the lowerings dispatch on the run-time shape.
-    // A required input is tested where its value is read for the checks of
-    // a list, so that the value is read once per call.
-    const required = plan.required?.names;
     for (const id of plan.lists) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
       else if (isNumericTypedArray(x))
         refuseTypedArrayEntry(plan.strings.get(id) ?? `"${id}"`);
-      else if (x === undefined && required?.includes(id)) return undefined;
     }
-    if (required !== undefined)
-      for (const id of required)
-        if (!plan.lists.includes(id) && v[id] === undefined) return undefined;
     return lifted === undefined ? argumentsList : [lifted];
   }
   let lifted: unknown[] | undefined;
@@ -7861,38 +7828,6 @@ export function checkEntry(
   return lifted ?? argumentsList;
 }
 
-/**
- * The value of a run that has no value: `checkEntry` gave `undefined`.
- *
- * A run has no value when the caller leaves out a collection input that the
- * code iterates, spreads, reduces or indexes (`required` of a `vars` plan):
- * `Sum(L)`, `Map(f, L)`, a `Loop` or a `Comprehension` over `L`. The
- * interpreter has no value for these when `L` has no value: `Sum(L)` stays
- * `Sum(L)`. The compiled code read `undefined` as an array and threw a
- * `TypeError`. The run then gives the absence marker of its result (`NaN`
- * for a number, `undefined` otherwise) before any of its code runs, so
- * before any effect (a `Random` draw).
- *
- * The test is stricter than the interpreter whenever the run may not reach
- * the read: a branch that the run does not take, a callback or a loop body
- * that runs zero times, a function that is passed but never called, an
- * operand that an operator holds, or a read that the conservative copy rule
- * of `collectionReadInputs` counts. With `c: boolean` and no `L`,
- * `If(c, Sum(L), 0)` at `c = false` gives `NaN`, and `Map(u ↦ Sum(L), [])`
- * gives `undefined`, where the interpreter gives 0 and `[]`. A compiled
- * result is never a definite value that the interpreter does not give, and
- * a run with no value is allowed where the interpreter has one (user
- * decision 2026-10-30).
- *
- * `checkEntry` tests a required input where it reads the value for its
- * other checks, so the value of a list input is read once per call.
- */
-export function entryNoValue(plan: EntryPlan): number | undefined {
-  return plan.kind === 'vars' && plan.required?.noValue === 'NaN'
-    ? NaN
-    : undefined;
-}
-
 /** The plan as plain data, for a compilation result that is stored. */
 export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
   return {
@@ -7918,14 +7853,6 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
     plan.booleans !== undefined &&
     plan.booleans.length > 0
       ? { booleans: [...plan.booleans] }
-      : {}),
-    ...(plan.kind === 'vars' && plan.required !== undefined
-      ? {
-          required: {
-            names: [...plan.required.names],
-            noValue: plan.required.noValue,
-          },
-        }
       : {}),
     ...(plan.bigints !== undefined && plan.bigints.length > 0
       ? { bigints: [...plan.bigints] }
@@ -7963,15 +7890,6 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
     ...(stored.texts !== undefined ? { texts: [...stored.texts] } : {}),
     ...(stored.booleans !== undefined
       ? { booleans: [...stored.booleans] }
-      : {}),
-    // A plan stored without the field requires no input.
-    ...(stored.required !== undefined
-      ? {
-          required: {
-            names: [...stored.required.names],
-            noValue: stored.required.noValue === 'NaN' ? 'NaN' : 'undefined',
-          },
-        }
       : {}),
     // A plan stored without the fields checks no input of `mode: 'bigint'`.
     ...(stored.bigints !== undefined ? { bigints: [...stored.bigints] } : {}),
@@ -8378,8 +8296,6 @@ export function createSysRuntime(
           );
           return (...args) => {
             const checked = plan ? checkEntry(plan, args) : args;
-            if (checked === undefined)
-              return normalizeRunResult(entryNoValue(plan!));
             const previous = setReconstructionDigits(digits);
             try {
               return normalizeRunResult(fn(...checked));
@@ -8403,11 +8319,7 @@ export function createSysRuntime(
         // The arguments are passed as they are given, as `run()` does: a call
         // with no vars object throws when the code reads a free symbol.
         return (...args) => {
-          // A required collection input that the caller left out: the run
-          // has no value (`entryNoValue`).
           const checked = plan ? checkEntry(plan, args) : args;
-          if (checked === undefined)
-            return normalizeRunResult(entryNoValue(plan!));
           const previous = setReconstructionDigits(digits);
           try {
             return normalizeRunResult(fn(...checked));

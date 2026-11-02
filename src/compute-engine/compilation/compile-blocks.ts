@@ -692,19 +692,12 @@ export function compileBlock(
       }
     // The locals of the block, for the reads that a comparison of a local
     // tests (`blockLocalValueFrame`).
-    localValueFrame = blockLocalValueFrame(
-      stmts,
-      locals,
-      spellLocal,
-      node?.localScope,
-      node
-    );
+    localValueFrame = blockLocalValueFrame(stmts, locals, node?.localScope);
     _localValueFrames.push(localValueFrame);
     const result = withCseScope(node, -1, localTarget, () =>
       stmts
         .flatMap((arg, i) =>
           compileListStatement(localTarget, arg, (stmtTarget) => {
-            localValueFrame!.current = i;
             // Bring this statement's own function-valued binding into scope
             // before compiling it (see `localFunctions` above).
             noteLocalFunction(arg, localFunctions, reboundLocals);

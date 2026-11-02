@@ -125,6 +125,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `const _c = "ok";`, `IsMissing(Coalesce(s, t))` at `s = undefined` gives
   `true` (the `Coalesce` lowering binds its operand to `_c`, and caller code
   is not renamed); the interpreter gives `false`.
+- `javascript`, `x, y, z: real`, `n: integer<0..10>` at `n = 0`:
+  `Sum(i * [x, y, z], i, 1, n)` gives `[0, 0, 0]`, and `Product` of the same
+  body gives `[1, 1, 1]`, the identity of the static type `vector<real^3>`;
+  the interpreter gives the scalar `0` (`1`), a value outside that type
+  (CE-786). A consumer that reads the shape sees the difference:
+  `Norm(Product(i * [x, y, z], i, 1, n))` gives `√3`, the interpreter `1`.
 - `javascript`, a `vars` entry whose code is not a primary expression: with
   `p: real` and `vars: { p: '2+3' }`, `2p` compiles to `2 * 2+3` and gives 7
   (the code is spliced without parentheses); the interpreter, with `p = 5`,

@@ -764,7 +764,7 @@ describe('PointList — GPU construction and the other targets are unchanged', (
       ce.box(['PointList', -6, 'n'])
     );
     expect(r.success).toBe(true);
-    expect(r.code).toBe("(_.n === undefined ? { kind: 'empty' } : _IA.pointList('sl', _k1, _.n))");
+    expect(r.code).toBe("_IA.pointList('sl', _k1, _.n)");
   });
 
   it('interval-js: a component declared `number | list<number>` gives the interpreter value for each member', () => {
@@ -1144,9 +1144,6 @@ describe('PointList zip — constructed source widths', () => {
       expect(() => r.run!({ k: 1, fixed })).toThrow(
         /source component 2 is not an array/
       );
-    // An absent input is a run with no value, tested at entry
-    // (`compile-absent-collection-input.test.ts`).
-    expect(r.run!({ k: 1, fixed: undefined })).toBeUndefined();
     // A string is refused at entry, before the body reads it
     // (`compile-entry-string-refusal.test.ts`).
     expect(() => r.run!({ k: 1, fixed: 'abc' })).toThrow(

@@ -285,21 +285,6 @@ describe('CE-410: a connective of decided comparisons', () => {
     ])
   );
 
-  test('tests the variables that the local reads', () => {
-    // `v0` holds `F[i + 1]`, which has no value while `F` or `i` has none,
-    // so each comparison of `v0` tests them, as a comparison of `F[i + 1]`
-    // itself does (`BaseCompiler.blockLocalValueFrame`).
-    expect(decided.success).toBe(true);
-    expect(decided.code).toContain('_.F !== undefined && _.i !== undefined');
-    // With `i` absent, the conditions read the local `v0`, which depends on
-    // `i` (`BaseCompiler.localDependsOnInputs`). The test of `F` and `i`
-    // fails while the comparisons read no other variable, and the compiled
-    // code cannot tell an absent `i` from a NaN element: the whole run
-    // gives no value (`BaseCompiler.poisonSlot`), where each component had
-    // none before.
-    expect(decided.run!({ F: [0, -0.5] } as never)).toBeUndefined();
-  });
-
   test('the same values as the interpreter, NaN included', () => {
     const F = [-0.5, 0, 0.5, -1, -2, 2, NaN, Infinity, -Infinity];
     for (let i = 0; i < F.length; i++) {
@@ -329,15 +314,14 @@ describe('CE-410: a connective of decided comparisons', () => {
     expect(r.run!({ i: 0, F: [3] } as never)).toBe(1);
   });
 
-  test('a comparison of a free variable stays three-valued', () => {
-    // `x` and `y` may be absent: the condition is undecided, and `If` takes
-    // no branch (NaN).
+  test('a comparison of a free variable is the plain comparison', () => {
+    // The host supplies every input, and a NaN operand decides a
+    // comparison, so the condition is always decided.
     const s = compile(
       ce.box(['If', ['And', ['Less', 'x', 0], ['Less', 'y', 0]], 1, 2])
     );
-    expect(s.code).toContain('_CND');
+    expect(s.code).toBe('((_.x < 0 && _.y < 0) ? (1) : (2))');
     expect(s.run!({ x: -1, y: -1 } as never)).toBe(1);
-    expect(s.run!({ x: 1 } as never)).toBe(2);
-    expect(s.run!({ x: -1 } as never)).toBeNaN();
+    expect(s.run!({ x: 1, y: -1 } as never)).toBe(2);
   });
 });

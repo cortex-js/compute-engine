@@ -83,13 +83,9 @@ describe('SCALAR NEWTYPE — pure erasure (D11 step A)', () => {
     ];
     const plain = ['If', ['Greater', 'x', 0], 'x', 'y'];
     expect(jsCode(ce, tagged)).toBe(jsCode(ce, plain));
-    // The condition operand is guarded against an unsupplied binding
-    // (compiled `If` takes no branch on an undecided condition, ruling
-    // 2026-09-02; a NaN operand decides `x > 0` false since the user decision
-    // of 2026-10-20, so there is no NaN test); the erasure of `meters` is
-    // what this pin is about.
+    // The erasure of `meters` is what this pin is about.
     expect(jsCode(ce, tagged)).toBe(
-      '((_.x !== undefined) ? ((0 < _.x) ? (_.x) : (_.y)) : NaN)'
+      '((0 < _.x) ? (_.x) : (_.y))'
     );
     expect(glslCode(ce, tagged)).toBe(glslCode(ce, plain));
     expect(glslCode(ce, tagged)).toBe('((0.0 < x) ? (x) : (y))');

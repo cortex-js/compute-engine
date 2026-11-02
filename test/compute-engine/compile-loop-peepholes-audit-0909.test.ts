@@ -105,15 +105,13 @@ describe('a comparison against a compiled loop index', () => {
     expect(r.run!()).toEqual([1, 1, 1, 1, 1, 1, 0, 0, 0, 0]);
   });
 
-  test('a FREE symbol keeps the decidedness tests', () => {
+  test('a FREE symbol takes the exact comparison and no test', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    // `x` is supplied by the caller, so it can be absent: the decidedness
-    // test and the per-term exit both earn their place. A NaN `x` decides
-    // `n = x` false (user decision 2026-10-20), so the decidedness test
-    // checks only for an unsupplied `x` (`_.x !== undefined`), not for NaN
-    // (`_.x === _.x`, before the decision). The comparison itself is exact
-    // (compiled equality carries no tolerance).
+    // A NaN `x` decides `n = x` false (user decision 2026-10-20), and the
+    // host supplies every input, so `x` has no test, and no term is NaN, so
+    // the sum has no per-term exit. The comparison itself is exact (compiled
+    // equality carries no tolerance).
     const code = js(
       ce,
       ce.box([
@@ -122,11 +120,10 @@ describe('a comparison against a compiled loop index', () => {
         ['Limits', 'n', 1, 6],
       ])
     );
-    expect(code).toContain('_.x !== undefined');
+    expect(code).not.toContain('_.x !== undefined');
     expect(code).not.toContain('_.x === _.x');
     expect(code).toContain('((1) === (_.x))');
     expect(code).not.toContain('1e-10');
-    expect(code).toMatch(/!== _tv\d/);
   });
 });
 

@@ -199,12 +199,11 @@ describe('boolean value types — compiler consumption', () => {
   });
 
   test('an unproven If keeps the runtime test', () => {
-    // The test is kept, and the operand it reads is guarded against an
-    // unsupplied binding (a compiled `If` takes no branch on an undecided
-    // condition, ruling 2026-09-02). A NaN `a` decides `a < 3` false since
-    // the user decision of 2026-10-20, so there is no NaN test.
+    // The test is kept. A NaN `a` decides `a < 3` false since the user
+    // decision of 2026-10-20, and the host supplies every input, so the
+    // operand has no test of its own.
     expect(code(fn('If', [ce.parse('a<3'), sym('x'), sym('y')]))).toBe(
-      '((_.a !== undefined) ? ((_.a < 3) ? (_.x) : (_.y)) : NaN)'
+      '((_.a < 3) ? (_.x) : (_.y))'
     );
   });
 

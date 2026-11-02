@@ -127,18 +127,6 @@ describe('CE-579: a list-building recursion compiles to a loop', () => {
         expect(() => r.run!({})).toThrow(limitError(500));
       }
     });
-
-    it(`${variant}: with D unassigned, the compiled call is undefined`, () => {
-      // `D` has no value: the guard reads it as absent, and the compiled
-      // body is `undefined`, as the recursive arrow gave before.
-      const ce = setup(variant);
-      const r = compile(ce.box(['F', 0]), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(String(r.preamble)).toContain('_SYS.listRecursion');
-      expect(r.run!({})).toBeUndefined();
-    });
   }
 
   it('a parameter declared real is tested at each step, as the checking shim tests it', () => {

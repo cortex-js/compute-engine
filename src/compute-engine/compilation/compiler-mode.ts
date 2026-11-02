@@ -431,54 +431,6 @@ export const _codeOverrides = new Map<Expression, string>();
  */
 export const _codeAliases = new Map<Expression, string>();
 
-/**
- * The reads of the vars object (`_.x`) that the code being emitted has
- * already tested for `undefined`, for each target object: the code is
- * inside the branch of such a test (the condition of an `If` that tests
- * `_.x !== undefined`, or the guard of `unsuppliedComparisonGuard`
- * itself). A comparison over such a read needs no test of its own. Keyed
- * by the target object, so that a definition compiled with another
- * target (a user function, a nested scope) does not see the marks: such
- * code can run where the test did not happen. A derived target that does
- * not see a mark emits one more test, which costs a comparison but is
- * never wrong. Each entry counts its nested marks.
- */
-export const _presentReads = new WeakMap<object, Map<string, number>>();
-
-/** Run `fn` with the vars-object reads `reads` marked as tested for
- * `undefined` on `target` (see `_presentReads`). */
-export function withPresentReads<T>(
-  target: CompileTarget<Expression>,
-  reads: ReadonlyArray<string>,
-  fn: () => T
-): T {
-  if (reads.length === 0) return fn();
-  let marks = _presentReads.get(target);
-  if (marks === undefined) {
-    marks = new Map();
-    _presentReads.set(target, marks);
-  }
-  for (const r of reads) marks.set(r, (marks.get(r) ?? 0) + 1);
-  try {
-    return fn();
-  } finally {
-    for (const r of reads) {
-      const n = marks.get(r)! - 1;
-      if (n === 0) marks.delete(r);
-      else marks.set(r, n);
-    }
-  }
-}
-
-/** True when the vars-object read `code` is marked as tested for
- * `undefined` on `target` (see `_presentReads`). */
-export function isPresentRead(
-  code: string,
-  target: CompileTarget<Expression>
-): boolean {
-  return _presentReads.get(target)?.has(code) === true;
-}
-
 /** The `Power` nodes whose base `compileRuntimeMatrixPower` is emitting,
  * so that its element-wise branch does not dispatch a second time. */
 export const _runtimeMatrixPowerBases = new Set<Expression>();

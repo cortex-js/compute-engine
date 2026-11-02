@@ -7,22 +7,15 @@ import { TEST_PYTHON } from './test-python';
  * ROADMAP CE-569: defects of the compiled `When(e, c)`, which selected the
  * value `e` from a condition that was not decided `True`.
  *
- * - JavaScript: the condition was read by its truthiness. A condition that is
- *   `true` for an input the caller did not supply (`undefined !== 0` is
- *   `true`, `!(0 < undefined)` is `true`, `_SYS.heaviside(undefined)` is
- *   `1`) selected the value, and so did a boolean input with a truthy value
- *   that is not a boolean (`c = 1`). The interpreter has no value there. The
- *   condition is now tested for being decided first. Only an ordering
- *   relation between symbols and number literals, or an `And`/`Or` of them,
- *   keeps the plain conditional expression, because its plain code is
- *   falsy when it is undecided. A condition read by its value must be
- *   exactly `true`; a value that is not a boolean no longer raises.
- *   The same holds for each cell of a literal list of conditions.
+ * - JavaScript: a condition read by its value that is not provably boolean
+ *   (`b: boolean | real`) must be exactly `true`; a value that is not a
+ *   boolean selects nothing and does not raise.
  * - JavaScript: `c = True` for a boolean `c` was always `false`: the
  *   absence guard of the equality tested `typeof c === 'number'`.
- * - Python: a condition read by its value (a boolean input) was read by its
- *   truthiness, so `c = 1` selected the value. The value is now selected only
- *   for a boolean `True`, as in `If`.
+ *
+ * The host supplies every input with a value of its declared type, so an
+ * input left out, and a value outside the declared type (`c = 1` for a
+ * `boolean` `c`), are not tested: the result is not specified.
  *
  * The other tests check that the cases the fixes do not change still agree
  * with the interpreter.
@@ -49,13 +42,12 @@ function js(ce: ComputeEngine, json: unknown) {
 
 const SAMPLES = [-2, -0.5, 0, 0.25, 1, 3, NaN];
 
-describe('CE-569 — javascript: an input that is not supplied', () => {
+describe('CE-569 — javascript: When over a condition', () => {
   it('When(5, x ≠ 0) has no value', () => {
     const ce = engine();
     const f = js(ce, ['When', 5, ['NotEqual', 'x', 0]]);
     expect(f.run!({ x: 1 })).toBe(5);
     expect(f.run!({ x: 0 })).toBeNaN();
-    expect(f.run!({})).toBeNaN();
   });
 
   it('When(5, ¬(x > 0)) has no value', () => {
@@ -63,7 +55,6 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
     const f = js(ce, ['When', 5, ['Not', ['Greater', 'x', 0]]]);
     expect(f.run!({ x: -1 })).toBe(5);
     expect(f.run!({ x: 1 })).toBeNaN();
-    expect(f.run!({})).toBeNaN();
   });
 
   it('When(5, ¬c) has no value', () => {
@@ -71,17 +62,10 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
     const f = js(ce, ['When', 5, ['Not', 'c']]);
     expect(f.run!({ c: false })).toBe(5);
     expect(f.run!({ c: true })).toBeNaN();
-    expect(f.run!({})).toBeNaN();
   });
 
   it('When(x, c) and When(x, c ∧ x > 0) select x only for c = true', () => {
-    // The interpreter holds `When(x, 1)` and `When(x, 0)` unevaluated: a
-    // condition that is not a boolean gives no value.
     const ce = engine();
-    for (const v of [1, 0]) {
-      const held = ce.box(['When', 'x', v]).subs({ x: 2 }).N();
-      expect(held.operator).toBe('When');
-    }
     for (const json of [
       ['When', 'x', 'c'],
       ['When', 'x', ['And', 'c', ['Greater', 'x', 0]]],
@@ -89,13 +73,9 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
       const f = js(ce, json);
       expect(f.run!({ x: 2, c: true })).toBe(2);
       expect(f.run!({ x: 2, c: false })).toBeNaN();
-      expect(f.run!({ x: 2, c: 1 })).toBeNaN();
-      expect(f.run!({ x: 2, c: 0 })).toBeNaN();
-      expect(f.run!({ x: 2 })).toBeNaN();
     }
-    expect(js(ce, ['When', 'x', 'c']).code).toBe(
-      '((_.c) === true ? (_.x) : NaN)'
-    );
+    // A `boolean` input is tested by its truthiness.
+    expect(js(ce, ['When', 'x', 'c']).code).toBe('((_.c) ? (_.x) : NaN)');
   });
 
   it('When(x, ¬c) selects x only for c = false', () => {
@@ -103,15 +83,12 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
     const f = js(ce, ['When', 'x', ['Not', 'c']]);
     expect(f.run!({ x: 2, c: false })).toBe(2);
     expect(f.run!({ x: 2, c: true })).toBeNaN();
-    expect(f.run!({ x: 2, c: 0 })).toBeNaN();
-    expect(f.run!({ x: 2, c: 1 })).toBeNaN();
   });
 
   it('an ordering relation keeps the plain conditional expression', () => {
     const ce = engine();
     const f = js(ce, ['When', ['Power', 'x', 2], ['Greater', 'x', 0]]);
     expect(f.code).toBe('((0 < _.x) ? ((_.x * _.x)) : NaN)');
-    expect(f.run!({})).toBeNaN();
   });
 
   it('an And of ordering relations keeps the plain conditional expression', () => {
@@ -124,19 +101,15 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
     expect(f.code).toBe('((0 < _.x && _.y < 1) ? (_.x) : NaN)');
     expect(f.run!({ x: 0.5, y: 0 })).toBe(0.5);
     expect(f.run!({ x: 0.5, y: 2 })).toBeNaN();
-    expect(f.run!({ y: 0 })).toBeNaN();
   });
 
-  it('a relation over a computed operand tests the input first', () => {
-    // `_SYS.heaviside(undefined)` and `_SYS.pow(undefined, 0)` are `1`.
+  it('a relation over a computed operand', () => {
     const ce = engine();
     const h = js(ce, ['When', 5, ['Greater', ['Heaviside', 'x'], 0]]);
     expect(h.run!({ x: 1 })).toBe(5);
     expect(h.run!({ x: -1 })).toBeNaN();
-    expect(h.run!({})).toBeNaN();
     const p = js(ce, ['When', 5, ['Greater', ['Power', 'x', 'y'], 0]]);
     expect(p.run!({ x: 2, y: 1 })).toBe(5);
-    expect(p.run!({ y: 0 })).toBeNaN();
   });
 
   it('a condition that is not provably boolean selects nothing, without raising', () => {
@@ -148,10 +121,9 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
     expect(f.run!({ b: true })).toBe(5);
     expect(f.run!({ b: false })).toBeNaN();
     expect(f.run!({ b: 1 })).toBeNaN();
-    expect(f.run!({})).toBeNaN();
     // The same answer as `If(b, 5)`.
     const g = js(ce, ['If', 'b', 5]);
-    for (const b of [true, false, 1, undefined]) {
+    for (const b of [true, false, 1]) {
       const w = f.run!({ b } as never) as number;
       const i = g.run!({ b } as never) as number;
       if (Number.isNaN(i)) expect(w).toBeNaN();
@@ -159,7 +131,7 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
     }
   });
 
-  it('a literal list of conditions tests each cell for being decided', () => {
+  it('a literal list of conditions agrees with the interpreter in each cell', () => {
     const ce = engine();
     const json = [
       'When',
@@ -168,14 +140,6 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
     ];
     const expr = ce.box(json as never);
     const f = js(ce, json);
-    // No value in either cell for an `x` that is not supplied: the
-    // interpreter keeps both cells as held restrictions.
-    const held = Array.from(expr.evaluate().each());
-    expect(held.map((cell) => cell.operator)).toEqual(['When', 'When']);
-    const none = f.run!({}) as number[];
-    expect(none.length).toBe(2);
-    expect(none[0]).toBeNaN();
-    expect(none[1]).toBeNaN();
     for (const x of SAMPLES) {
       const cells = Array.from(expr.subs({ x }).N().each());
       const actual = f.run!({ x }) as number[];
@@ -207,26 +171,26 @@ describe('CE-569 — javascript: an input that is not supplied', () => {
   });
 });
 
-describe('CE-569 — python: a condition read by its value', () => {
-  it('When(x, c) selects the value only for a boolean True', () => {
+describe('CE-569 — python: a boolean condition', () => {
+  it('When(x, c) reads a boolean input by its truthiness', () => {
     const ce = engine();
     const r = compile(ce.box(['When', 'x', 'c']), {
       to: 'python',
       fallback: false,
     } as never);
     expect(r.code).toBe(
-      "((x) if (isinstance(c, (bool, np.bool_)) and c) else float('nan'))"
+      "((x) if (c) else float('nan'))"
     );
   });
 
-  it('When(x, ¬c) selects the value only for a boolean False', () => {
+  it('When(x, ¬c) reads a boolean input by its truthiness', () => {
     const ce = engine();
     const r = compile(ce.box(['When', 'x', ['Not', 'c']]), {
       to: 'python',
       fallback: false,
     } as never);
     expect(r.code).toBe(
-      "((x) if (isinstance(c, (bool, np.bool_)) and not c) else float('nan'))"
+      "((x) if (not c) else float('nan'))"
     );
   });
 
@@ -243,7 +207,7 @@ describe('CE-569 — python: a condition read by its value', () => {
   });
 
   const run = TEST_PYTHON === undefined ? it.skip : it;
-  run('the compiled code runs: a value of c that is not a boolean', () => {
+  run('the compiled code runs', () => {
     const ce = engine();
     // An input must have a type (`untyped-input` otherwise): the input
     // named like the generated parameter is declared.
@@ -251,13 +215,7 @@ describe('CE-569 — python: a condition read by its value', () => {
     const cases: Array<[unknown, Record<string, string>, string]> = [
       [['When', 'x', 'c'], { x: '2.0', c: 'True' }, '2.0'],
       [['When', 'x', 'c'], { x: '2.0', c: 'False' }, 'nan'],
-      [['When', 'x', 'c'], { x: '2.0', c: '1' }, 'nan'],
-      [['When', 'x', ['Not', 'c']], { x: '2.0', c: '0' }, 'nan'],
-      [
-        ['When', 'x', ['And', 'c', ['Greater', 'x', 0]]],
-        { x: '2.0', c: '1' },
-        'nan',
-      ],
+      [['When', 'x', ['Not', 'c']], { x: '2.0', c: 'False' }, '2.0'],
       [
         ['When', 'x', ['And', 'c', ['Greater', 'x', 0]]],
         { x: '2.0', c: 'True' },
@@ -333,29 +291,27 @@ describe('CE-569 — javascript: an equality over booleans', () => {
   });
 });
 
-describe('CE-569 — javascript: an unsupplied boolean or string input', () => {
-  // A comparison with an input the caller did not supply is undecided,
-  // whatever the type of the input: the interpreter keeps it unevaluated.
+describe('CE-569 — javascript: a comparison of a boolean or string input', () => {
   const CASES: Array<[string, unknown, Array<Record<string, unknown>>]> = [
     [
       'If(c = True, 5, -1)',
       ['If', ['Equal', 'c', 'True'], 5, -1],
-      [{}, { c: true }, { c: false }],
+      [{ c: true }, { c: false }],
     ],
     [
       'When(5, c ≠ True)',
       ['When', 5, ['NotEqual', 'c', 'True']],
-      [{}, { c: true }, { c: false }],
+      [{ c: true }, { c: false }],
     ],
     [
       'If(s = "a", 5, -1)',
       ['If', ['Equal', 's', { str: 'a' }], 5, -1],
-      [{}, { s: 'a' }, { s: 'b' }],
+      [{ s: 'a' }, { s: 'b' }],
     ],
     [
       'When(5, s ≠ "a")',
       ['When', 5, ['NotEqual', 's', { str: 'a' }]],
-      [{}, { s: 'a' }, { s: 'b' }],
+      [{ s: 'a' }, { s: 'b' }],
     ],
   ];
   it.each(CASES)('%s agrees with the interpreter', (_label, json, inputs) => {
@@ -385,28 +341,22 @@ describe('CE-569 — javascript: an unsupplied boolean or string input', () => {
 });
 
 describe('CE-569 — javascript: an operand that is not a bare numeric read', () => {
-  it('When(5, s < t) with one string input missing has no value', () => {
-    // An unsupplied `s` would compare as the string 'undefined'.
+  it('When(5, s < t) over two string inputs', () => {
     const ce = engine();
     ce.declare('s', 'string');
     ce.declare('t', 'string');
     const json = ['When', 5, ['Less', 's', 't']];
-    const expr = ce.box(json as never);
     const f = js(ce, json);
-    expect(expr.subs({ t: ce.string('z') }).evaluate().operator).toBe('When');
-    expect(f.run!({ t: 'z' })).toBeNaN();
     expect(f.run!({ s: 'a', t: 'b' })).toBe(5);
     expect(f.run!({ s: 'b', t: 'a' })).toBeNaN();
   });
 
   it('an assigned symbol whose value reads an input', () => {
-    // `a` compiles to its value, `Heaviside(x)`, which is `1` for an
-    // unsupplied `x`.
+    // `a` compiles to its value, `Heaviside(x)`.
     const ce = engine();
     ce.assign('a', ce.box(['Heaviside', 'x']));
     const json = ['When', 5, ['Greater', 'a', 0]];
     const f = js(ce, json);
-    expect(f.run!({})).toBeNaN();
     expect(f.run!({ x: 1 })).toBe(5);
     expect(f.run!({ x: -1 })).toBeNaN();
     // The interpreter, with `x` assigned: 5 for x = 1, NaN for x = -1.
@@ -418,9 +368,7 @@ describe('CE-569 — javascript: an operand that is not a bare numeric read', ()
   });
 
   it('a draw in the condition: When counts the draws as If does', () => {
-    // With `x` omitted, the condition is undecided and the comparison is
-    // not evaluated, so `Random()` does not draw, for `If` and for `When`.
-    // With `x` supplied, each draws once.
+    // Each draws once.
     const ce = engine();
     const draws = (json: unknown, input: Record<string, number>): number => {
       const f = js(ce, json);
@@ -439,7 +387,6 @@ describe('CE-569 — javascript: an operand that is not a bare numeric read', ()
     };
     const w = ['When', 5, ['Less', ['Random'], 'x']];
     const i = ['If', ['Less', ['Random'], 'x'], 5, -1];
-    expect(draws(w, {})).toBe(draws(i, {}));
     expect(draws(w, { x: 2 })).toBe(1);
     expect(draws(i, { x: 2 })).toBe(1);
   });
@@ -450,12 +397,7 @@ describe('CE-569 — the cases the fixes do not change', () => {
     const ce = engine();
     const json = ['When', 'x', ['List', ['Greater', 'x', 0], ['Less', 'x', 1]]];
     const f = js(ce, json);
-    // Each condition is a value with no value for an unsupplied `x`
-    // (`unsuppliedComparisonGuard`), so every cell is masked then.
-    expect(f.code).toBe(
-      '_SYS.restrict([((0 < _.x) || ((_.x !== undefined) ? false : undefined)), ((_.x < 1) || ((_.x !== undefined) ? false : undefined))], _.x, false, NaN)'
-    );
-    expect((f.run!({}) as number[]).every((v) => Number.isNaN(v))).toBe(true);
+    expect(f.code).toBe('_SYS.restrict([0 < _.x, _.x < 1], _.x, false, NaN)');
     for (const x of [-1, 0.5, 2]) {
       const cells = Array.from(
         ce

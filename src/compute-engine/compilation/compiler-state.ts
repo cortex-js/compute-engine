@@ -547,17 +547,4 @@ export class CompilerState {
   /** How many antiderivative-first attempts have RUN, as opposed to being
    *  skipped. Read by tests, before and after a compilation. */
   static antiderivativeAttemptCount = 0;
-  /**
-   * The relations that a branch condition reads by value and that read a
-   * local of a block being compiled (`conditionNode`), and the links of
-   * such a chain.
-   */
-  static _poisonConditions = new WeakSet<Expression>();
-  /** While true, `operandInputNodes` gives a block local only its own read,
-   * not the caller inputs of its block (`poisonSlot`). */
-  static _directInputsOnly = false;
-  /** True when a comparison of the compilation emitted the throw of
-   * `_SYS.noValue` (`poisonSlot`). Set by the compilation, read and cleared
-   * by `catchNoValue`. */
-  static _noValueUsed = false;
 }

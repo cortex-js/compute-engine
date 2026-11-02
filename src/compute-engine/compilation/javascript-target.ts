@@ -7,7 +7,6 @@ import {
   twoStageRunner,
   loadBatchBody,
   checkEntry,
-  entryNoValue,
   namedEntryError,
   storeEntryPlan,
   type EntryPlan,
@@ -48,7 +47,6 @@ import {
   provenPointWidth,
   canIndexArrayDirectly,
   isScalarValue,
-  isDecidedLoopIndex,
   numericArrayCells,
   recordIntegerRange,
   recordScalarParams,
@@ -1438,94 +1436,6 @@ function assertNoMixedStringOrdering(
 }
 
 /**
- * Operator heads whose JavaScript lowering always produces a NUMBER (a `NaN`
- * included) and never the absent value `undefined`. A free symbol read
- * (`_.x`) answers `undefined` when the caller omits it, and so may a user
- * function whose body returns a bare parameter, or an element read over a
- * generic list; an arithmetic or elementary head applied to such an operand
- * still answers a number, because JavaScript arithmetic on `undefined` is
- * `NaN`. `compileJSEquality` uses this to decide whether an exact `===`
- * needs an absence guard: two absent operands are `===` to each other, and
- * the interpreter answers `Missing` for `Equal(Missing, Missing)`, not `True`.
- */
-const JS_ALWAYS_NUMBER_HEADS = new Set([
-  'Add',
-  'Subtract',
-  'Multiply',
-  'Divide',
-  'Negate',
-  'Power',
-  'Square',
-  'Sqrt',
-  'Root',
-  'Abs',
-  'Floor',
-  'Ceil',
-  'Round',
-  'Sign',
-  'Mod',
-  'Min',
-  'Max',
-  'Sum',
-  'Product',
-  'Length',
-  'Exp',
-  'Ln',
-  'Log',
-  'Sin',
-  'Cos',
-  'Tan',
-  'Arctan',
-  'Arctan2',
-  'Arcsin',
-  'Arccos',
-  'Sinh',
-  'Cosh',
-  'Tanh',
-  'Dot',
-  'Norm',
-  'Hypot',
-  'Gamma',
-  'Factorial',
-  'Random',
-  'RandomInteger',
-]);
-
-/** A JavaScript numeric literal as the compiler spells one (`3`, `-0.5`,
- * `1e-7`, `Infinity`, `NaN`). */
-const JS_NUMERIC_LITERAL =
-  /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$|^-?Infinity$|^NaN$/i;
-
-/**
- * May this operand read the absent value `undefined` at run time? Never for:
- * a number literal; an application of a head in `JS_ALWAYS_NUMBER_HEADS`;
- * an operand whose EMITTED code is a numeric literal (an unrolled `Sum`
- * substitutes its index at the emitted-code level, so the node is still the
- * index symbol while the code is `1`); and a loop index the emitted loop
- * itself binds (`isDecidedLoopIndex`). Every other shape — a free symbol read
- * `_.x`, a user function call, an element read, a `Which` arm — is treated as
- * possibly absent. The answer only decides whether an equality carries the
- * `typeof` guard, so a conservative `true` costs one type test and never a
- * wrong value.
- */
-function mayReadUndefinedJS(
-  e: Expression,
-  code: string,
-  target: CompileTarget<Expression>
-): boolean {
-  if (isNumber(e)) return false;
-  if (JS_NUMERIC_LITERAL.test(code)) return false;
-  if (isSymbol(e) && isDecidedLoopIndex(e.symbol, target.boundVars))
-    return false;
-  // A vars-object read that the code around this one already tested for
-  // `undefined` (`BaseCompiler.unsuppliedComparisonGuard`) holds a value.
-  if (BaseCompiler.isPresentRead(code, target)) return false;
-  if (isFunction(e) && typeof e.operator === 'string')
-    return !JS_ALWAYS_NUMBER_HEADS.has(e.operator);
-  return true;
-}
-
-/**
  * Emit a JavaScript equality test. Compiled `Equal`/`NotEqual` on numeric
  * operands is EXACT (`===`/`!==`), the IEEE 754 comparison: `0.1 + 0.2 = 0.3`
  * compiles to `false`, two infinities of the same sign are equal, and `NaN`
@@ -1541,15 +1451,13 @@ function mayReadUndefinedJS(
  * Complex operands compare component-wise. Chained (N-ary) forms conjoin
  * pairwise with `&&`.
  *
- * One guard survives: an absent operand reads `undefined`, and two absent
- * operands are `===` to each other, where the interpreter answers `Missing`
- * (never `True`) for `Equal(Missing, Missing)`. When BOTH operands may read
- * `undefined` (`mayReadUndefinedJS`), the left operand is tested with
- * `typeof … === 'number'` first, so the pair answers `false` for `Equal`
- * and `true` for `NotEqual`. A pair with a literal or an arithmetic result
- * on either side needs no guard: `undefined === 5` is already `false`.
+ * An absent operand reads `undefined`, and two absent operands are `===` to
+ * each other, where the interpreter answers `Missing` for
+ * `Equal(Missing, Missing)`. The pair is not tested for it: the value of a
+ * comparison with an absent operand is not specified in compiled code
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
  *
- * The SCALAR answer is therefore always a genuine boolean, which the branch
+ * The SCALAR answer is always a genuine boolean, which the branch
  * machinery depends on (`BRANCH_RELATIONS` in `base-compiler.ts`, and the
  * negation inside `kleeneRelationLeaf`). Only the ELEMENT-WISE runtime is
  * three-valued: `eqTensor` marks an absent CELL with `NaN`, which the
@@ -1677,13 +1585,8 @@ function compileJSEquality(
     );
   }
   // Each operand is compiled exactly once, here: the direct emission is what
-  // the absence predicate reads, and what the pair splices or binds below.
+  // the pair splices or binds below.
   const direct = args.map((a) => compile(a));
-  // Does the pair (i, j) carry the absence guard? Only when both operands may
-  // read `undefined` — see `mayReadUndefinedJS`.
-  const guardedPair = (i: number, j: number): boolean =>
-    mayReadUndefinedJS(args[i], direct[i], target) &&
-    mayReadUndefinedJS(args[j], direct[j], target);
   // The pairs of a chain are joined with `&&`, so a compiled pair that is
   // `false` stops the evaluation of the operands after it. That is the
   // interpreter's order only when the pair is also `False` in the
@@ -1711,14 +1614,7 @@ function compileJSEquality(
     // LAST impure operand counts (`Equal(Random(), a, Random())` with `a`
     // absent skips the second draw).
     const lastImpure = impure.lastIndexOf(true);
-    // The test reads the TYPE (a `missing` option, `operandMayBeAbsent`),
-    // not `mayReadUndefinedJS`, which also counts `True` and a comparison
-    // operand: that answer is safe for the choice of a type test, but here
-    // it would decline `Equal(True, True, Less(Random(), 0.5))`. An input
-    // that the caller leaves out (`c: boolean` not supplied) does not reach
-    // this code: the comparison absence guard compiles such a chain as the
-    // Kleene `And` of its pairs, which evaluates the later pairs when a pair
-    // reads `undefined`, as the interpreter does.
+    // The test reads the TYPE (a `missing` option, `operandMayBeAbsent`).
     for (let j = 1; j < lastImpure; j++)
       if (operandMayBeAbsent(args[j - 1]) || operandMayBeAbsent(args[j]))
         throw new Error(
@@ -1728,9 +1624,8 @@ function compileJSEquality(
         );
   }
   // An IMPURE operand (the Random family) must be evaluated exactly once — the
-  // interpreter evaluates each operand once. Three positions splice an operand
-  // MORE than once: the LEFT operand of a guarded pair appears in the absence
-  // test and in the comparison, a COMPLEX operand is spliced twice by
+  // interpreter evaluates each operand once. Two positions splice an operand
+  // MORE than once: a COMPLEX operand is spliced twice by
   // `part()` (once for `.re`, once for `.im`), and a MIDDLE operand of a
   // chained (n-ary) form appears in the two comparisons that straddle it. So
   // `Equal(Random()·i, …)` and `Equal(0.1, Random(), 0.9)` each consumed TWO
@@ -1739,21 +1634,8 @@ function compileJSEquality(
   // to an IIFE const, and splice the const instead. Pure operands keep the
   // direct emission byte-identical.
   const multiSpliced = (i: number): boolean =>
-    (i >= 1 && i <= args.length - 2) ||
-    BaseCompiler.isComplexValued(args[i]) ||
-    (i < args.length - 1 && guardedPair(i, i + 1));
-  // An operand can also be spliced where it is CONDITIONALLY evaluated, which
-  // costs a draw just as surely as splicing it twice. The absence guard of a
-  // pair tests the left operand against `undefined` and joins it with `&&`, so the
-  // RIGHT operand of a guarded pair is never evaluated when the left one
-  // reads `undefined`. The interpreter evaluates both operands whatever they
-  // hold, so a skipped draw of the Random family would move every later draw
-  // of a seeded sequence.
-  const conditionallySpliced = (i: number): boolean =>
-    i >= 1 && guardedPair(i - 1, i);
-  const bind = args.some(
-    (_a, i) => impure[i] && (multiSpliced(i) || conditionallySpliced(i))
-  );
+    (i >= 1 && i <= args.length - 2) || BaseCompiler.isComplexValued(args[i]);
+  const bind = args.some((_a, i) => impure[i] && multiSpliced(i));
   // Caller code can also write a value that an earlier operand reads (a
   // global read by `y + 1` in `Equal(0, y + 1, W)`). A pair after the
   // binding of `W` reads the earlier operand there, after `W` has run,
@@ -1790,14 +1672,6 @@ function compileJSEquality(
       const pa = part(args[i], code(i));
       const pb = part(args[j], code(j));
       const equal = `(${pa.re} === ${pb.re} && ${pa.im} === ${pb.im})`;
-      return kind === 'Equal' ? equal : `(!${equal})`;
-    }
-    if (guardedPair(i, j)) {
-      // The test is for absence, not for a number: a boolean or a string
-      // operand compares by `===` too (`c = True` with `c = true` is
-      // `true`). A `typeof … === 'number'` test answered `false` for every
-      // operand that is not a number (ROADMAP CE-569).
-      const equal = `((${code(i)}) !== undefined && (${code(i)}) === (${code(j)}))`;
       return kind === 'Equal' ? equal : `(!${equal})`;
     }
     return `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`;
@@ -7318,10 +7192,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Boole: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Boole`: missing argument');
-    // Only the truth of the operand is read: a comparison over an
-    // unsupplied variable is `false` with no test, and gives 0, as its
-    // `undefined` would (`BaseCompiler.withTruthOnly`).
-    const c = BaseCompiler.withTruthOnly(args[0], () => compile(args[0]));
+    const c = compile(args[0]);
     if (BaseCompiler.isBooleanValued(args[0])) return `((${c}) ? 1 : 0)`;
     return `(_SYS.cond(${c}) ? 1 : 0)`;
   },
@@ -7491,17 +7362,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
             'literal would read as one number.'
         );
     }
-    // A function literal with an annotated parameter checks an argument that
-    // may be absent, as a call of a named function does
-    // (`BaseCompiler.absentArgumentChecks`).
-    const checks = isFunction(args[0], 'Function')
-      ? BaseCompiler.absentArgumentChecks(
-          '(function)',
-          args[0],
-          args.slice(1),
-          target
-        )
-      : [];
     const literal = args[0];
     // An argument that an annotation of the literal does not prove is
     // tested at run time.
@@ -7519,11 +7379,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const named = BaseCompiler.appliedLiteralNamedPointCall(
         literal,
         args.slice(1),
-        args
-          .slice(1)
-          .map((a, i) =>
-            BaseCompiler.presentCheckedCode(compile(a), checks[i])
-          ),
+        args.slice(1).map((a) => compile(a)),
         compile,
         () =>
           BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
@@ -7538,11 +7394,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const points = BaseCompiler.appliedLiteralPointListCall(
         literal,
         args.slice(1),
-        args
-          .slice(1)
-          .map((a, i) =>
-            BaseCompiler.presentCheckedCode(compile(a), checks[i])
-          ),
+        args.slice(1).map((a) => compile(a)),
         compile,
         () =>
           BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
@@ -7570,15 +7422,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args.slice(1),
         target,
         args.slice(1).map(() => false),
-        true,
-        [],
-        checks
+        true
       );
     }
     const callee = compile(args[0]);
     return `(${callee})(${args
       .slice(1)
-      .map((a, i) => BaseCompiler.presentCheckedCode(compile(a), checks[i]))
+      .map((a) => compile(a))
       .join(', ')})`;
   },
   // --- Linear algebra ------------------------------------------------------
@@ -10966,9 +10816,6 @@ export class ComputeEngineFunction extends Function {
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
         const args = entry ? checkEntry(entry, argumentsList) : argumentsList;
-        // A required collection input that the caller left out: the run has
-        // no value, and no code runs (`entryNoValue`).
-        if (args === undefined) return entryNoValue(entry!);
         const previous = setReconstructionDigits(reconstructionDigits);
         try {
           try {
@@ -11085,9 +10932,6 @@ export class ComputeEngineFunctionLiteral extends Function {
         const callArgs = entry
           ? checkEntry(entry, argumentsList)
           : argumentsList;
-        // A positional plan requires no input, so `checkEntry` gives
-        // arguments here (`entryNoValue`).
-        if (callArgs === undefined) return entryNoValue(entry!);
         const previous = setReconstructionDigits(reconstructionDigits);
         try {
           try {
@@ -11702,9 +11546,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // A string that is the spelling this target emits anyway (`'_.L'`,
         // `opaqueVar` is false) still reads the vars object, so it is
         // recorded as such a read. The checks at entry (`varsEntryPlan`) then
-        // apply to it as to an unmapped free symbol: the type checks, and the
-        // test for an absent collection input (`collectionReadInputs`), so
-        // `Sum(L)` with `vars: { L: '_.L' }` and no `L` has no value. On the
+        // apply to it as to an unmapped free symbol. On the
         // lambda route every string is caller source, so nothing is recorded
         // there.
         // A symbol declared `expression` can hold a collection, and compiled
@@ -12412,19 +12254,11 @@ function compileToTarget(
     const defaults = lambdaDefaultFill(args.slice(1), params, (e) =>
       BaseCompiler.compileValueOperand(e, target)
     );
-    // The parameters annotated `string`: a comparison over one has no value
-    // when the caller omits it (`CompileTarget.omittableParams`).
-    const textParams = new Set<string>();
-    args.slice(1).forEach((p, i) => {
-      const t = functionLiteralParameterType(p);
-      if (t !== undefined && isTextEntryType(t)) textParams.add(params[i]);
-    });
     const lambdaTarget: CompileTarget<Expression> = {
       ...target,
       var: binding.varOf,
       renamedWritables: binding.renamedWritables,
       ...lambdaScope,
-      ...(textParams.size > 0 ? { omittableParams: textParams } : {}),
       declaredVarTypes: {
         ...lambdaScope.declaredVarTypes,
         ...BaseCompiler.literalDeclaredParamTypes(expr),
@@ -12651,13 +12485,7 @@ function compileToTarget(
     }
   }
 
-  BaseCompiler.clearNoValue();
-  // A comparison of a block local that throws `_SYS.noValue` makes the
-  // whole run give no value (`BaseCompiler.catchNoValue`).
-  const js = BaseCompiler.catchNoValue(
-    expr,
-    BaseCompiler.compileCseRoot(expr, target)
-  );
+  const js = BaseCompiler.compileCseRoot(expr, target);
   // The value kinds whose compile contracts the code reads or makes: the
   // value of a call is then returned raw, the code cannot be stored, and it
   // is shippable only when every contract says so (below).
@@ -12702,29 +12530,6 @@ function compileToTarget(
   const entryPlan = entryChecks
     ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
     : undefined;
-  // The collection inputs that the code iterates, spreads, reduces or
-  // indexes: when the caller leaves one out, the run has no value, and the
-  // runner gives the absence marker of the result before any code runs
-  // (`checkEntry` and `entryNoValue`).
-  if (entryPlan?.kind === 'vars') {
-    const names = BaseCompiler.collectionReadInputs(
-      expr,
-      target.varsObjectRefs
-    );
-    if (names.length > 0) {
-      const r = resolveTypeForCompilation(stripMissingFromType(expr.type.type));
-      entryPlan.required = {
-        names,
-        noValue:
-          r !== 'never' &&
-          r !== 'unknown' &&
-          r !== 'any' &&
-          isSubtype(r, 'number')
-            ? 'NaN'
-            : 'undefined',
-      };
-    }
-  }
   const broadcastOutputs = broadcastStrideOfType(expr.type.type);
   const reconstructionDigits = realPowerReconstructionDigits();
   // A body that writes an input first makes the vars object a local copy, so
@@ -12764,11 +12569,7 @@ function compileToTarget(
     target.hostNames !== true
   ) {
     try {
-      BaseCompiler.clearNoValue();
       batch = batchBody(candidates);
-      // The batch body has no catch of `_SYS.noValue`: the batches then run
-      // the ordinary body, which has one.
-      if (BaseCompiler.catchNoValue(expr, '') !== '') batch = undefined;
     } catch (e) {
       throwIfCallerCancellation(e, expr.engine._deadlineFrame);
       batch = undefined;
@@ -14923,17 +14724,13 @@ function fnArg(
   // A predicate whose result type cannot be a boolean (`x ↦ 1`) is refused
   // before its body is compiled.
   const check = predicateResultCheck(kind, callback);
-  // A selecting predicate (`Filter`, `Count`, …) and a prefix predicate
-  // (`TakeWhile`) read only whether the result is `true`: a `false` and an
-  // absent value select nothing alike. So a comparison that is the body of
-  // a predicate literal needs no test for an unsupplied variable
-  // (`BaseCompiler.withTruthOnly`).
-  const truthOnly =
-    (mode === 'select' || mode === 'prefix') && isFunction(callback, 'Function')
-      ? callback.ops[0]
-      : undefined;
-  const code = BaseCompiler.withTruthOnly(truthOnly, () =>
-    callbackArg(kind, callback, source, compile, extraArgTypes, target)
+  const code = callbackArg(
+    kind,
+    callback,
+    source,
+    compile,
+    extraArgTypes,
+    target
   );
   return check
     ? `_SYS.predicateResult(${code}, ${JSON.stringify(kind)}, "${mode}")`
@@ -17516,6 +17313,25 @@ function elementwiseFoldCombiner(
 }
 
 /**
+ * The number of components of a `Sum`/`Product` body whose static type is
+ * a vector of numbers with a known length (`list<real^3>`, a literal
+ * `[x, y, z]`), or `undefined` for any other body (a scalar, a matrix, a
+ * list of unknown length). Called only for a body that
+ * `isElementwiseBigOpBody` accepts, which excludes tuples.
+ */
+function vectorBodyWidth(body: Expression): number | undefined {
+  if (body.type.matches('list<list<any>>')) return undefined;
+  const t = jsType(body);
+  const elementsAreNumbers =
+    typeof t !== 'string' &&
+    t.kind === 'list' &&
+    isSubtype(t.elements, 'number');
+  if (!elementsAreNumbers) return undefined;
+  const width = BaseCompiler.aggregateComponentCount(body);
+  return width !== undefined && width > 0 ? width : undefined;
+}
+
+/**
  * Emit one indexing-set clause of a Sum/Product, recursing into the remaining
  * clauses for the innermost body. The "term" accumulated by this clause is the
  * body itself for the last clause, or the nested sum/product over the remaining
@@ -17705,9 +17521,11 @@ function emitSumProduct(
   // zip-broadcast big op — `Σ_k (L + k)` over a 3-list is a 3-list). The body
   // is evaluated WHOLE each iteration and folded through `_SYS.bcast`, so a
   // scalar-at-runtime body stays scalar, cells zip position-wise, and a
-  // length mismatch projects to NaN. An empty range answers the scalar
-  // identity (0 / 1), matching the interpreter; a BARE collection body never
-  // reaches here (it canonicalizes to the `Reduce` collection-reduce form).
+  // length mismatch projects to NaN. An empty range answers the identity
+  // (0 / 1): in each component when the body's static type is a list of
+  // numbers of known width, otherwise as a scalar (see `empty` below). A
+  // BARE collection body never reaches here (it canonicalizes to the
+  // `Reduce` collection-reduce form).
   // Everything else keeps the fail-closed assert (Tycho item 45).
   // The body is analyzed with every clause's index bound (Tycho item 252):
   // this emitter runs before the index is bound in the compile target, and
@@ -17739,6 +17557,20 @@ function emitSumProduct(
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
   const identity = isSum ? '0' : '1';
+  // The value of an empty range. Compiled code takes the shape of a value
+  // from its static type. The code around a body whose static type is a
+  // vector of a known length (`list<real^3>`) reads the result by component
+  // (`_tv[0]`), so the empty value is the identity in every component:
+  // `0.5·Σ_{i=1}^{0} [x, y, z]·i + [x, y, z]` is `0.5·[0, 0, 0] + [x, y, z]`.
+  // The interpreter differs there: it answers the scalar `0` for an empty
+  // range although the static type is `vector<real^3>`, and adds it to the
+  // terms around the `Sum` by broadcast. Any other element-wise body answers
+  // the scalar identity.
+  const emptyWidth = elementwiseBody ? vectorBodyWidth(body) : undefined;
+  const empty =
+    emptyWidth === undefined
+      ? identity
+      : `[${Array(emptyWidth).fill(identity).join(', ')}]`;
   // Complexity is a property of the innermost body — a nested inner sum of a
   // complex body is itself complex, so this stays consistent at every level.
   const bodyIsComplex = BaseCompiler.isComplexValuedUnderIndices(body, indices);
@@ -17773,7 +17605,7 @@ function emitSumProduct(
     budget === undefined || (bothConstant && upperNum - lowerNum < budget);
 
   // Empty range (only knowable when both bounds are constant)
-  if (bothConstant && withinBudget && lowerNum > upperNum) return identity;
+  if (bothConstant && withinBudget && lowerNum > upperNum) return empty;
 
   // Unroll when both bounds are constant and range is small. The element-wise
   // arm never unrolls: joining array terms with the bare scalar operator
@@ -18110,7 +17942,7 @@ function emitSumProduct(
     // single-iteration loop does not hand the caller's own array object back;
     // later iterations allocate fresh arrays through `_SYS.bcast` anyway. A
     // runtime-empty range leaves the accumulator unseeded and answers the
-    // scalar identity, like the interpreter.
+    // identity given by `empty`.
     //
     // The scalar-NaN LATCH: a length mismatch collapses the `bcast` fold to a
     // scalar NaN; without the latch the NEXT iteration would broadcast that
@@ -18154,7 +17986,7 @@ function emitSumProduct(
     if (elementwiseExit)
       return expression(
         (exit) =>
-          `let ${acc} = null; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${exit('NaN')} ${counter}++; } ${exit(`${acc} === null ? ${identity} : ${acc}`)}`
+          `let ${acc} = null; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(empty, exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${exit('NaN')} ${counter}++; } ${exit(`${acc} === null ? ${empty} : ${acc}`)}`
       );
     // The flag, not the accumulator, carries the verdict to the end: once the
     // fold has collapsed to a scalar NaN the following iteration broadcasts it
@@ -18163,7 +17995,7 @@ function emitSumProduct(
     const latched = BaseCompiler.tempVar(target);
     return expression(
       (exit) =>
-        `let ${acc} = null; let ${latched} = false; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${latched} = true; ${counter}++; } ${exit(`${latched} ? NaN : (${acc} === null ? ${identity} : ${acc})`)}`
+        `let ${acc} = null; let ${latched} = false; let ${counter} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(empty, exit)}while (${counter} <= _upper) { ${iterationPrelude}${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${latched} = true; ${counter}++; } ${exit(`${latched} ? NaN : (${acc} === null ? ${empty} : ${acc})`)}`
     );
   }
 

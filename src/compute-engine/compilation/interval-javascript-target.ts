@@ -49,7 +49,9 @@ import {
   collectionElementType,
   kindArmNames,
   resolveTypeAlias,
+  resolveTypeForCompiledLanes,
   stripMissingFromType,
+  typeContainsMissing,
   withoutKindArms,
 } from '../../common/type/utils.js';
 import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
@@ -7228,6 +7230,31 @@ function assertCallableFunctionRoot(expr: Expression): void {
 }
 
 /**
+ * The names of `refs` whose declared type is a collection with no `missing`
+ * arm, in the order of `refs`.
+ */
+function collectionInputNames(
+  expr: Expression,
+  refs: ReadonlySet<string> | undefined
+): string[] {
+  if (refs === undefined) return [];
+  const names: string[] = [];
+  for (const id of refs) {
+    const t = expr.engine.symbol(id).type.type;
+    if (typeContainsMissing(t)) continue;
+    const r = resolveTypeForCompiledLanes(t);
+    if (
+      r !== 'never' &&
+      r !== 'unknown' &&
+      r !== 'any' &&
+      isSubtype(r, 'collection')
+    )
+      names.push(id);
+  }
+  return names;
+}
+
+/**
  * Compile expression to interval JavaScript executable.
  */
 function compileToIntervalTarget(
@@ -7412,27 +7439,13 @@ function compileToIntervalTarget(
   // hosts that pass their own object.
   const localVars = BaseCompiler.localVarsObjectStatement(target);
   const withLocals = localVars ? `(${localVars}, ${hoistedJs})` : hoistedJs;
-  // A collection input that the code iterates, spreads, reduces or indexes
-  // (`BaseCompiler.collectionReadInputs`) and that the caller leaves out
-  // makes the run have no value, as on the JavaScript target: the body
-  // answers `empty`, the value of this target that has no value, before any
-  // other code runs. Without the test a `Loop` over an absent `L` threw a
-  // `TypeError`, which `run()` answers `entire`, and `Sum(L)` gave
-  // `undefined`, which is not an interval value. The test is part of the
-  // body, so `run()` and a stored copy of the code both make it.
-  // Only a name that the code reads off the vars object (`varsObjectRefs`)
-  // is tested: a name that the caller maps to its own source is not read
-  // from it.
-  const required = BaseCompiler.collectionReadInputs(
-    expr,
-    target.varsObjectRefs
-  );
-  const body =
-    required.length === 0
-      ? withLocals
-      : `(${required
-          .map((name) => `${intervalVarsAccess(name)} === undefined`)
-          .join(' || ')} ? { kind: 'empty' } : ${withLocals})`;
+  const body = withLocals;
+  // The inputs that the code reads off the vars object (`varsObjectRefs`)
+  // and whose declared type is a collection with no `missing` arm: the code
+  // reads each one as a list, so `broadcast()` binds it once for the whole
+  // batch, as a shared input. A name that the caller maps to its own source
+  // is not read from the vars object.
+  const required = collectionInputNames(expr, target.varsObjectRefs);
   // The value kinds whose compile contracts the code reads or makes (the
   // enclosure), and the run-time checks of the host values of the free
   // symbols of a kind. The checks are functions of this host: the result is
@@ -7471,7 +7484,7 @@ function compileToIntervalTarget(
   // The variables declared `boolean`: for them an empty array is an empty
   // column of `broadcast()`.
   const booleans = declaredBooleanNames(expr);
-  // The list inputs that the code reads (`required` above) are the shared
+  // The list inputs (`required` above) are the shared
   // inputs of `broadcast()`: each is bound once for the batch, after the
   // conversion `run()` applies to it (`processInput`).
   const sharedLists: IntervalSharedLists = {

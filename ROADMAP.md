@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-786.
+Next free reference: CE-787.
 
 **Entry format.**
 
@@ -645,6 +645,21 @@ Sorting an empty list is a one-line program; expected `[]`. Found during the wor
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-786. A `Sum` or `Product` over an empty range of a vector body gives a scalar, outside its static type
+
+**Status:** ready; wrong value, S.
+**Witness:** plausible; with `x, y, z: real` and `n: integer<0..10>`, `Sum(i * [x, y, z], i, 1, n)` has the static type `vector<real^3>`, and at `n = 0` `evaluate()` gives the scalar `0`; it should give `[0, 0, 0]`. `Product` gives `1` and should give `[1, 1, 1]`.
+
+The interpreter seeds the accumulator of `Sum` with `ce.Zero` and of
+`Product` with `ce.One` (`src/compute-engine/library/arithmetic.ts`), so an
+empty range returns that scalar whatever the type of the body. Compiled code
+takes the shape from the static type and returns `[0, 0, 0]` (`[1, 1, 1]`);
+the difference is a known-limitations line of `docs/COMPILATION-MODEL.md`. A
+consumer that reads the shape sees it: `Norm(Product(i * [x, y, z], i, 1, n))`
+gives `1` in the interpreter and `√3` in compiled code. Fix: when the static
+type of the body is a vector or a list of known width, seed the accumulator
+with the identity of that shape; then remove the known-limitations line.
 
 ### CE-766. `0^x` is folded with the value that `x` has when it is boxed
 
@@ -2312,7 +2327,7 @@ variable after the loop.
 **Status:** ready; design decided, large. User decision 2026-10-31: option (A) of
 `docs/plans/2026-10-31-static-shape-compilation.md`, rules R1 to R6 there.
 Replaces CE-683 and CE-711, whose scope it widens.
-**Witness:** corpus; User decision 2026-10-31 option (A); steps CE-712.3 to .5 remain; corpus audit counts cited.
+**Witness:** corpus; User decision 2026-10-31 option (A); steps CE-712.4 and .5 remain; corpus audit counts cited.
 
 The compiler resolves every shape (scalar, list, point, list of points) from the
 static types at compile time, as the GLSL and WGSL targets already do, and emits
@@ -2360,18 +2375,6 @@ corpus audit and a report of the declines per target and the `code` changes):
   `unknown` signature of a Tycho document function, not its
   `broadcastable<number | tuple>` body binding. Closes CE-222, CE-706 (option
   (c)), CE-463.
-- **CE-712.3** Host values: remove the `run()`, `broadcast()` and
-  interval-runner entry refusals, the unsupplied-input guards
-  (`unsuppliedComparisonGuard`, `collectionReadInputs`, `withTruthOnly`),
-  `declaredTopGuard` and `jsCollectionShapeGuard`, after
-  Tycho has `hasUnresolvedInput` at its five sites. Keep the `RangeError` of
-  `Mod`/`Remainder`/`GCD`/`LCM` beyond ±(2^53 − 1), the complete `freeSymbols`
-  list and the `unbound` decline (Tycho depends on them). CE-712.2 deleted
-  `callResultGuard` and `_SYS.bcastFn`. A run-time point test remains in the
-  point arithmetic lowering: `2 * tp` with `tp: tuple<real, real>` emits
-  `Array.isArray(...) && ... ? [...] : _SYS.bcast(...)` (`compile-broadcast.ts`,
-  about line 1444); remove it with the other run-time tests of this step. Closes CE-212, CE-242,
-  CE-259, CE-656, CE-677, CE-216.2/.4, CE-279.7; changes CE-660, CE-507.12.
 - **CE-712.4** Declared types: reduce the CE-662 check to its decline (no
   run-time class); CE-673 and CE-681 decline-only; CE-707 option (a) (the
   declared result binds the body; the interpreter refuses with
@@ -2503,7 +2506,7 @@ including the captured-type snapshots of the checkpoint journal, on every exit
 ### CE-216. A compiled power of a list that may hold points squares each entry of a square matrix
 
 **Status:** ready; defect.
-**Witness:** plausible; `p: list` (or `any`) holding `[[1,2],[3,-4]]`: compiled `p^2` is entry-wise, interpreter gives matrix power `[[7,-6],[-9,22]]`; wrong finite values (also .1, .2, .4).
+**Witness:** plausible; `p: list` (or `any`) holding `[[1,2],[3,-4]]`: compiled `p^2` is entry-wise, interpreter gives matrix power `[[7,-6],[-9,22]]`; wrong finite values (also .1, .2).
 
 For a base typed bare `list`, `list<unknown>` or `any` (a type that may hold
 points), compiled `p^2` gives the power of each entry. When the value is a
@@ -2520,15 +2523,10 @@ representation of points that differs from a row.
   operands typed bare `list`, `list<unknown>` or `any`, compiled `p·q` keeps the
   entry-wise product, while the interpreter gives the matrix product when both
   values are matrices. The same representation fixes both.
-- **CE-216.2** With `g := t ↦ [t, 2t]` and `x: any`, `g(x)[1]^2` at
-  `x = [[1, 2], [3]]` squares each cell, where the interpreter gives the matrix
-  power: the element may be a matrix or a list of points. With an annotated
-  `h := (t: number) ↦ [t, 2t]`, the same failure follows the type of CE-371.
-- **CE-216.4** With `p, q: any` holding two matrices, compiled `p·q` and `p^2`
-  are entry-wise, where the interpreter gives the matrix product and the matrix
-  power. The run-time check of an `any` operand (2026-10-25) sends a list to the
-  entry-wise code, as for a bare `list`, because a list of points and a matrix
-  are the same array at run time.
+- **CE-216.2** With an annotated `h := (t: number) ↦ [t, 2t]`, `h(x)[1]^2`
+  squares each cell where the interpreter gives the matrix power, following
+  the type of CE-371. (The form with `x: any` declines since CE-712.1: an
+  input typed `any` is refused.)
 - **CE-216.3** `Dot(g(x)[1], [1, 1])` with `x: any` declines: the element may be
   a matrix or a list of points, which compiled code cannot tell apart (the
   interpreter leaves `[(1, 2), (2, 4)]·[1, 1]` unevaluated).

@@ -49,10 +49,9 @@ describe('a callback fed a literal-start range', () => {
     expect(code).not.toContain('Array.isArray');
     expect(code).not.toContain('q === q');
     expect(code).not.toContain('typeof (q)');
-    // The free input `m` keeps its test: the caller may leave it out. A NaN
-    // `m` decides `q = m` false (user decision 2026-10-20), so the test is
-    // for an unsupplied value only (`_.m === _.m` before the decision).
-    expect(code).toContain('_.m !== undefined');
+    // A NaN `m` decides `q = m` false (user decision 2026-10-20), and the
+    // host supplies every input, so `m` has no test either.
+    expect(code).not.toContain('_.m !== undefined');
   });
 
   test('computes what the interpreter computes', () => {
@@ -76,10 +75,9 @@ describe('a callback fed a literal-start range', () => {
     }
   });
 
-  test('a range with a symbolic start keeps its tests', () => {
+  test('a range with a symbolic start', () => {
     // A relation with a NaN operand is decided (user decisions 2026-10-20
-    // and 2026-10-23), so the parameter takes no NaN test; the test that
-    // remains is the one on the unsupplied input `m`.
+    // and 2026-10-23), so the parameter takes no NaN test.
     const r = js([
       'Map',
       ['Function', ['If', ['NotEqual', 'q', 'm'], 0, 1], 'q'],
@@ -87,7 +85,6 @@ describe('a callback fed a literal-start range', () => {
     ]);
     expect(r.code).not.toContain('bcastFn');
     expect(r.code).not.toContain('Array.isArray');
-    expect(r.code).toContain('_.m !== undefined');
     expect(r.run!({ m: 2 })).toEqual([1, 0, 0, 0]);
   });
 

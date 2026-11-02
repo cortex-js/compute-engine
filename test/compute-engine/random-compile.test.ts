@@ -823,10 +823,8 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   });
 
   test('JS: Equal keeps the pure emission (byte-identical pins)', () => {
-    // `x` has no declared type here; the chain still compiles to the scalar
-    // test, so an unsupplied `x` gives no value (user decision 2026-10-30).
     expect(jsCode(['Equal', 0.1, 'x', 0.9])).toBe(
-      '(((((0.1) === (_.x)) && ((_.x) === (0.9)))) || ((_.x !== undefined) ? false : undefined))'
+      '(((0.1) === (_.x)) && ((_.x) === (0.9)))'
     );
     // A PURE complex operand is spliced twice, once per component. `x·i` is
     // a real operand scaled by the two constants of the imaginary unit, so
@@ -1126,20 +1124,16 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     const i = withRandomSeedFrame(ce, 7, () => ce.box(probe).evaluate().re);
     expect(c).toBe(i);
     expect(c).toBe(draw(7, 0));
-    // A chain of PURE operands that reads variables the caller can leave
-    // out is the three-valued `And` of its links
-    // (`BaseCompiler.unsuppliedComparisonGuard`), so a link that decides
-    // `false` decides the chain while another variable has no value. Each
-    // computed operand is bound once, around the whole chain: it is pure,
-    // so evaluating it before the first link is decided changes no value.
+    // A chain of PURE operands binds each computed operand behind the pairs
+    // before it, as for an impure operand.
     const pure = ['Less', 'a', ['Add', 'b', 1], 'c', ['Add', 'd', 1], 'x'];
-    const code = jsCode(pure);
-    expect(code.startsWith('((_tv1, _tv2) => ')).toBe(true);
-    expect(code.endsWith(')(_.b + 1, _.d + 1)')).toBe(true);
+    expect(jsCode(pure)).toBe(
+      '((_tv1) => (_.a < _tv1) && (_tv1 < _.c) && ' +
+        '((_tv2) => (_.c < _tv2) && (_tv2 < _.x))(_.d + 1))(_.b + 1)'
+    );
     const chain = compiled(ce, pure);
-    // `a < b + 1` is false, so the chain is false with `x` unsupplied.
-    expect(chain.run!({ a: 5, b: 1, c: 0, d: 0 })).toBe(false);
-    expect(chain.run!({ a: 0, b: 1, c: 3, d: 3 })).toBeUndefined();
+    expect(chain.run!({ a: 5, b: 1, c: 0, d: 0, x: 0 })).toBe(false);
+    expect(chain.run!({ a: 0, b: 1, c: 3, d: 3, x: 4 })).toBe(false);
     expect(chain.run!({ a: 0, b: 1, c: 3, d: 3, x: 5 })).toBe(true);
   });
 
@@ -1241,11 +1235,9 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(gpuCode(matchJSON('x'), 'wgsl')).toBe(
       'select(select(-1.0, 30.0, x == 3.0), 10.0, (x == 1.0 || x == 2.0))'
     );
-    // The JS chain (a `bindExpr` target) is untouched by the GPU arm. Each
-    // link reads `x`, so the plain chain runs first, and its `false` stands
-    // only when `x` has a value.
+    // The JS chain (a `bindExpr` target) is untouched by the GPU arm.
     expect(jsCode(['Less', 0.1, ['Add', 'x', 1], 0.9])).toBe(
-      '((((_tv1) => (0.1 < _tv1) && (_tv1 < 0.9))(_.x + 1)) || ((_.x !== undefined) ? false : undefined))'
+      '((_tv1) => (0.1 < _tv1) && (_tv1 < 0.9))(_.x + 1)'
     );
   });
 });
@@ -1529,21 +1521,6 @@ describe('a comparison chain evaluates the operands the interpreter evaluates', 
       expect(() =>
         compile(ce.box(json), { fallback: false, constantFold: false })
       ).toThrow(/may be absent before an operand with an effect/);
-    // A symbol the caller leaves out reads `undefined`. The interpreter
-    // reads that pair as undecided and draws; the compiled chain (the Kleene
-    // `And` of its pairs) draws too.
-    const ce3 = new ComputeEngine();
-    ce3.declare('c', 'boolean');
-    ce3.declare('xr', 'real');
-    for (const [json, draws] of [
-      [['Equal', 'c', 'True', ['Less', ['Random'], 0.5]], 1],
-      [['Equal', ['Random'], 'xr', ['Random']], 2],
-    ] as const) {
-      const run = compiled(ce3, json).run!;
-      expect(withRandomSeedFrame(ce3, 7, () => (run({}), ce3._random()))).toBe(
-        draw(7, draws)
-      );
-    }
     // Operands whose type has no `missing` option compile.
     const r = compiled(new ComputeEngine(), [
       'Equal',
@@ -2090,34 +2067,10 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     expect(run.value).toBe(interpreted(json, { x: 1, y: 1 }, w));
   });
 
-  test('an absent input does not repeat or skip caller code', () => {
-    for (const json of [
-      ['Less', 'x', 'W'],
-      ['Less', 'x', 'W', 3],
-      ['Equal', 'x', 'W', 3],
-    ]) {
-      expect(calls(json, {}, 2)).toEqual({
-        value: json[0] === 'Equal' ? false : undefined,
-        log: 'w',
-      });
-      // A NaN operand decides the comparison while `x` has no value.
-      expect(calls(json, {}, NaN)).toEqual({ value: false, log: 'w' });
-    }
-    // The pair `W = 3` holds, and the pair with the absent `x` has no
-    // value.
-    expect(calls(['Equal', 'x', 'W', 3], {}, 3)).toEqual({
-      value: undefined,
-      log: 'w',
-    });
-  });
-
   test('caller code after a false pair does not run', () => {
     const json = ['Less', 'x', 1, 'W'];
     expect(calls(json, { x: 5 }, 2)).toEqual({ value: false, log: '' });
     expect(calls(json, { x: 0 }, 2)).toEqual({ value: true, log: 'w' });
-    // A pair with an absent operand has no value, which is not `False`:
-    // the interpreter goes on to the next operand.
-    expect(calls(json, {}, 2)).toEqual({ value: undefined, log: 'w' });
     expect(calls(['Less', 'x', 'W', 'V'], { x: 5 }, 1, 2)).toEqual({
       value: false,
       log: 'w',
@@ -2133,10 +2086,6 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
       value: true,
       log: 'w,v',
     });
-    expect(calls(['Less', 'x', 'W', 'V'], {}, 1, 2)).toEqual({
-      value: undefined,
-      log: 'w,v',
-    });
   });
 
   test('a branch condition calls the caller code once', () => {
@@ -2147,12 +2096,6 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     });
     expect(calls(If(['Less', 'x', 'W', 3]), { x: 1 }, 2)).toEqual({
       value: 10,
-      log: 'w',
-    });
-    // `x` absent: no branch is taken, and `W` is read as in the
-    // interpreter.
-    expect(calls(If(['Less', 'x', 'W']), {}, 2)).toEqual({
-      value: NaN,
       log: 'w',
     });
     expect(calls(If(['Less', 'x', 1, 'W']), { x: 5 }, 2)).toEqual({
@@ -2214,7 +2157,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
         functions: { f: { source: '_.f', pure: true } },
       } as any)!.code
     ).toBe(
-      '((_tv1) => ((_.y !== undefined) ? _tv1 : undefined))(_SYS.bcast((_tv2, _tv3, _tv4) => ((_tv2 < _tv3) && (_tv3 < _tv4)), (_.y), (0), (_.f(_.y))))'
+      '_SYS.bcast((_tv1, _tv2, _tv3) => ((_tv1 < _tv2) && (_tv2 < _tv3)), (_.y), (0), (_.f(_.y)))'
     );
   });
 
@@ -2336,10 +2279,9 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     );
   });
 
-  test('a `vars` entry that reads another input is tested for absence like an input', () => {
+  test('a `vars` entry that reads another input compiles to its value', () => {
     // `W: '_.z'` differs from the default spelling of `W`, so it counts as
-    // caller code, and it is also a read that the caller can leave out. The
-    // presence tests read it; the comparison compiles and terminates.
+    // caller code.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
@@ -2363,22 +2305,18 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
       })!;
       expect(r.success).toBe(true);
       for (const inputs of [
-        {},
-        { x: 1 },
-        { z: 2 },
-        { x: 1, z: 2 },
+        { x: 1, y: 0, z: 2 },
         { x: 2, y: 2, z: 2 },
         { x: 1, y: 1, z: 1 },
-        { x: 1, z: NaN },
-        { z: NaN },
+        { x: 1, y: 1, z: NaN },
       ])
         expect(r.run!({ ...inputs } as any)).toBe(interp(json, inputs));
     }
   });
 
   test('a symbol with caller code whose stored value reads an input is still bound', () => {
-    // `W := y` makes `_.y` a read of `W` for the presence tests, but the
-    // emitted code of `W` is `_.nextValue()`, which runs once.
+    // `W := y` gives `W` a stored value that reads `y`, but the emitted
+    // code of `W` is `_.nextValue()`, which runs once.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
@@ -2392,8 +2330,6 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
         vars: { W: '_.nextValue()' },
       })!;
       for (const [inputs, w, expected, count] of [
-        [{ y: 1 }, 2, json[0] === 'Less' ? undefined : false, 1],
-        [{ y: 1 }, NaN, false, 1],
         [{ x: 2, y: 2 }, 2, json[0] === 'Less' ? false : true, 1],
         [{ x: 0, y: 1 }, 2, json[0] === 'Less', json[0] === 'Less' ? 1 : 0],
       ] as const) {
@@ -2418,7 +2354,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     expect(
       compile(ce.box(['Less', 1, 'y', 3]), { fallback: false })!.code
     ).toMatchInlineSnapshot(
-      `"(((1 < _.y) && (_.y < 3)) || ((_.y !== undefined) ? false : undefined))"`
+      `"(1 < _.y) && (_.y < 3)"`
     );
     expect(
       compile(ce.box(['Less', 1, 'W', 3]), {
@@ -2426,7 +2362,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
         vars: { W: '_.W' },
       })!.code
     ).toMatchInlineSnapshot(
-      `"(((1 < _.W) && (_.W < 3)) || ((_.W !== undefined) ? false : undefined))"`
+      `"(1 < _.W) && (_.W < 3)"`
     );
   });
 });

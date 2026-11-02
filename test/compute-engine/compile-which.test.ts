@@ -195,10 +195,7 @@ describe('COMPILE Which', () => {
       ).not.toBe('Number');
     });
 
-    it('a boolean-typed condition that is undecided at run time answers NaN', () => {
-      // `b` is declared `boolean`, so the boxing check passes; the VALUE the
-      // caller supplies still need not be a boolean, and an unsupplied one is
-      // `undefined`.
+    it('a boolean-typed condition selects by its value', () => {
       const engine = new ComputeEngine();
       engine.declare('b', 'boolean');
       const expr = engine.expr(['Which', 'b', 5, 'True', 9]);
@@ -206,21 +203,24 @@ describe('COMPILE Which', () => {
       expect(result.success).toBe(true);
       expect(result.run!({ b: true })).toBe(5);
       expect(result.run!({ b: false })).toBe(9);
-      expect(result.run!({} as any)).toBeNaN();
-      expect(result.run!({ b: 'a' } as any)).toBeNaN();
     });
 
-    it('needs no `_SYS.cond` guard, and answers NaN for an unsupplied operand', () => {
+    it('a condition of type `boolean | missing` that is absent answers NaN', () => {
+      const engine = new ComputeEngine();
+      engine.declare('b', 'boolean | missing');
+      const expr = engine.expr(['Which', 'b', 5, 'True', 9]);
+      const result = compile(expr, { fallback: false })!;
+      expect(result.success).toBe(true);
+      expect(result.run!({ b: true })).toBe(5);
+      expect(result.run!({ b: false })).toBe(9);
+      expect(result.run!({ b: undefined } as any)).toBeNaN();
+    });
+
+    it('needs no `_SYS.cond` guard and no operand test', () => {
       // A relation is boolean-valued, so it never needed the throwing
-      // `_SYS.cond` guard; what it needs is the operand test, because an
-      // absent operand makes the comparison answer an ordinary `false`.
-      // `2r` is `real`-typed and the type says it is never NaN, but that
-      // promise does not survive an absent `r`: `2 * undefined` IS NaN.
-      // A NaN operand decides the comparison `false` (user decision
-      // 2026-10-20), so the test is on the variable the operand reads,
-      // `_.r !== undefined`, and the product is computed once, in the
-      // comparison. Before the decision the product was bound to a temporary
-      // and tested for NaN.
+      // `_SYS.cond` guard. A NaN operand decides the comparison `false`
+      // (user decision 2026-10-20), and the host supplies every input, so
+      // the comparison has no test.
       const engine = new ComputeEngine();
       engine.declare('r', 'real');
       const expr = engine.expr([
@@ -232,21 +232,15 @@ describe('COMPILE Which', () => {
       ]);
       const result = compile(expr, { fallback: false })!;
       expect(result.code).not.toContain('_SYS.cond');
-      expect(result.code).toBe(
-        '((_.r !== undefined) ? ((0 < 2 * _.r) ? (1) : (-1)) : NaN)'
-      );
+      expect(result.code).toBe('((0 < 2 * _.r) ? (1) : (-1))');
       expect(result.run!({ r: 5 })).toBe(1);
       expect(result.run!({ r: -3 })).toBe(-1);
-      expect(result.run!({} as any)).toBeNaN();
       expect(result.run!({ r: NaN })).toBe(-1);
     });
 
-    it('a name bound by a Sum or a parameter is not an input, even when a global of that name holds a value', () => {
-      // The operand test lists the variables the condition reads. A `Sum`
-      // index named `k` is not a read of the global `k`, so the inputs of
-      // the global's value (`m`) are not tested: before, the walk followed
-      // the global's value through the bound name, and `m` unsupplied made
-      // the branch take no arm (ROADMAP, Tycho row 413, found 2026-10-21).
+    it('a name bound by a Sum or a parameter is not a read of a global of that name', () => {
+      // A `Sum` index named `k` is not a read of the global `k`, so the
+      // value of the global (which reads `m`) is not compiled.
       const engine = new ComputeEngine();
       engine.declare('m', 'real');
       engine.assign('k', engine.parse('2m'));
@@ -265,42 +259,6 @@ describe('COMPILE Which', () => {
       const compiledCall = compile(call, { fallback: false })!;
       expect(compiledCall.code).not.toContain('_.m');
       expect(compiledCall.run!({} as any)).toBe(1);
-
-      // A free global read by a called function's body is still an input:
-      // the body's block declares its free symbols in its own scope, which
-      // must not hide them.
-      engine.assign('h', engine.parse('k \\mapsto k + m'));
-      const body = engine.parse(
-        '\\begin{cases} 1 & h(2) > 0 \\\\ 0 & \\text{otherwise} \\end{cases}'
-      );
-      const compiledBody = compile(body, { fallback: false })!;
-      expect(compiledBody.code).toContain('_.m !== undefined');
-      expect(compiledBody.run!({} as any)).toBeNaN();
-      expect(compiledBody.run!({ m: 1 })).toBe(1);
-
-      // The variable of `D`, the coefficient of an integral and a free symbol
-      // of a `Limit` body are inputs, although each operator scopes a name.
-      for (const [latex, name] of [
-        ['\\frac{d}{dx} x^2 > 0', 'x'],
-        ['\\int_0^1 a t\\,dt > 0', 'a'],
-        ['\\lim_{t \\to 0} (q + t) > 0', 'q'],
-      ] as const) {
-        const scoped = engine.parse(
-          '\\begin{cases} 1 & ' + latex + ' \\\\ 0 & \\text{otherwise} \\end{cases}'
-        );
-        const compiledScoped = compile(scoped, { fallback: false })!;
-        expect(compiledScoped.code).toContain('_.' + name + ' !== undefined');
-        expect(compiledScoped.run!({} as any)).toBeNaN();
-      }
-
-      // A read of the global itself still tests the input of its value.
-      const read = engine.parse(
-        '\\begin{cases} 1 & k > 0 \\\\ 0 & \\text{otherwise} \\end{cases}'
-      );
-      const compiledRead = compile(read, { fallback: false })!;
-      expect(compiledRead.code).toContain('_.m !== undefined');
-      expect(compiledRead.run!({} as any)).toBeNaN();
-      expect(compiledRead.run!({ m: 1 })).toBe(1);
     });
   });
 });

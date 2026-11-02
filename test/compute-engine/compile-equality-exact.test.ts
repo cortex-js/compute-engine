@@ -12,10 +12,10 @@
  * What the exact form keeps from the earlier tolerance form:
  *  - matching infinities are equal; `NaN` equals nothing;
  *  - `NotEqual` is the negation of `Equal`, so it answers `true` on `NaN`;
- *  - two ABSENT operands are not equal (`undefined === undefined` would say
- *    otherwise), because the interpreter answers `Missing`, never `True`, for
- *    `Equal(Missing, Missing)` — the `!== undefined` test survives only where
- *    BOTH operands may read `undefined`;
+ *  - two ABSENT operands are not tested: `undefined === undefined` is
+ *    `true`, where the interpreter answers `Missing` for
+ *    `Equal(Missing, Missing)`, and the value of a comparison with an absent
+ *    operand is not specified in compiled code;
  *  - an `Equal`/`NotEqual` whose value is the result, and which reads a
  *    variable the caller leaves out of the vars object, answers `undefined`
  *    (no value), as the interpreter does (user decision 2026-10-30). The
@@ -47,49 +47,28 @@ function js(ce: ComputeEngine, expr: unknown) {
 describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
   const ce = engine();
 
-  // A comparison whose value is the result has no value while a variable
-  // it reads has none, as in the interpreter (user decisions 2026-10-20 and
-  // 2026-10-30): the exact test runs first, and its `false` (`true` for
-  // `NotEqual`) stands only when each variable read is not `undefined`
-  // (`BaseCompiler.unsuppliedComparisonGuard`). With two variables, a NaN
-  // in one still decides the pair. Two variables that may both be
-  // `undefined` keep the absence test of the exact comparison itself, since
-  // `undefined === undefined` is `true`.
-  test('two free symbols are tested for a value, no tolerance', () => {
-    expect(js(ce, ['Equal', 'a', 'b']).code).toBe(
-      '((((_.a) !== undefined && (_.a) === (_.b))) || (((_.a !== undefined && _.b !== undefined) || _.a !== _.a || _.b !== _.b) ? false : undefined))'
-    );
-    expect(js(ce, ['NotEqual', 'a', 'b']).code).toBe(
-      '(((!((_.a) !== undefined && (_.a) === (_.b)))) && (((_.a !== undefined && _.b !== undefined) || _.a !== _.a || _.b !== _.b) ? true : undefined))'
-    );
+  // The host supplies every input, so the comparison has no test for an
+  // input left out.
+  test('two free symbols: the exact test, no tolerance', () => {
+    expect(js(ce, ['Equal', 'a', 'b']).code).toBe('((_.a) === (_.b))');
+    expect(js(ce, ['NotEqual', 'a', 'b']).code).toBe('((_.a) !== (_.b))');
   });
 
   test('a literal or an arithmetic result on either side needs no absence test of its own', () => {
-    expect(js(ce, ['Equal', 'a', 3]).code).toBe(
-      '((((_.a) === (3))) || ((_.a !== undefined) ? false : undefined))'
-    );
-    expect(js(ce, ['NotEqual', 'a', 3]).code).toBe(
-      '((((_.a) !== (3))) && ((_.a !== undefined) ? true : undefined))'
-    );
+    expect(js(ce, ['Equal', 'a', 3]).code).toBe('((_.a) === (3))');
+    expect(js(ce, ['NotEqual', 'a', 3]).code).toBe('((_.a) !== (3))');
     expect(js(ce, ['Equal', ['Add', 'a', 1], ['Multiply', 'b', 2]]).code).toBe(
-      '((((_.a + 1) === (2 * _.b))) || (((_.a !== undefined && _.b !== undefined) || (_.a !== undefined && (_.a + 1) !== (_.a + 1)) || (_.b !== undefined && (2 * _.b) !== (2 * _.b))) ? false : undefined))'
+      '((_.a + 1) === (2 * _.b))'
     );
     expect(js(ce, ['Equal', ['Floor', 'a'], ['Sign', 'b']]).code).toBe(
-      '((((Math.floor(_.a)) === (Math.sign(_.b)))) || (((_.a !== undefined && _.b !== undefined) || (_.a !== undefined && (Math.floor(_.a)) !== (Math.floor(_.a))) || (_.b !== undefined && (Math.sign(_.b)) !== (Math.sign(_.b)))) ? false : undefined))'
+      '((Math.floor(_.a)) === (Math.sign(_.b)))'
     );
   });
 
-  test('the chained form is the three-valued And of exact pairs', () => {
+  test('the chained form is the And of exact pairs', () => {
     const r = js(ce, ['Equal', 'a', 'b', 'c']);
-    expect(r.code).toContain(
-      '((((_.a) !== undefined && (_.a) === (_.b))) || (((_.a !== undefined && _.b !== undefined) || _.a !== _.a || _.b !== _.b) ? false : undefined))'
-    );
-    expect(r.code).toContain(
-      '((((_.b) !== undefined && (_.b) === (_.c))) || (((_.b !== undefined && _.c !== undefined) || _.b !== _.b || _.c !== _.c) ? false : undefined))'
-    );
-    // A pair that is false decides the chain while `c` has no value.
-    expect(r.run({ a: 1, b: 2 })).toBe(false);
-    expect(r.run({ a: 1, b: 1 })).toBeUndefined();
+    expect(r.code).toBe('(((_.a) === (_.b)) && ((_.b) === (_.c)))');
+    expect(r.run({ a: 1, b: 2, c: 2 })).toBe(false);
     expect(r.run({ a: 1, b: 1, c: 1 })).toBe(true);
   });
 
@@ -121,20 +100,12 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     expect(eq.run({ a: NaN, b: NaN })).toBe(false);
     expect(neq.run({ a: NaN, b: 1 })).toBe(true);
     expect(eq.run({ a: -0, b: 0 })).toBe(true);
-    // An absent operand: no value, as the interpreter keeps `a = b`
-    // unevaluated, except that a NaN on the other side decides the pair.
-    expect(eq.run({})).toBeUndefined();
-    expect(neq.run({})).toBeUndefined();
-    expect(eq.run({ a: 1 })).toBeUndefined();
-    expect(eq.run({ a: NaN })).toBe(false);
-    expect(neq.run({ a: NaN })).toBe(true);
-    expect(js(ce, ['Equal', 'a', 3]).run({})).toBeUndefined();
   });
 
   test('a complex pair compares component-wise, exactly', () => {
     const r = js(ce, ['Equal', ['Complex', 1, 2], 'a']);
     expect(r.code).toBe(
-      '((((({ re: 1, im: 2 })).re === (_.a) && (({ re: 1, im: 2 })).im === 0)) || ((_.a !== undefined) ? false : undefined))'
+      '((({ re: 1, im: 2 })).re === (_.a) && (({ re: 1, im: 2 })).im === 0)'
     );
     expect(r.run({ a: 1 })).toBe(false);
   });
@@ -156,8 +127,6 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     expect(d.run({})).toBe(0);
     expect(d.run({ a: 2 })).toBe(0);
     expect(d.run({ b: 2 })).toBe(0);
-    // `Equal` itself has no value for absent operands.
-    expect(js(ce, ['Equal', 'a', 'b']).run({})).toBeUndefined();
     // Present arguments are unaffected.
     expect(d.run({ a: 2, b: 2 })).toBe(1);
     expect(js(ce, ['KroneckerDelta', 'a', 'b', 'c']).run({ a: 2, b: 2 })).toBe(
@@ -204,21 +173,15 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
       draws++;
       return draw();
     };
-    // The left operand is absent: the comparison has no value, but the
-    // draw still happens.
-    expect(r.run({ flag: true })).toBeUndefined();
-    expect(draws).toBe(1);
     expect(r.run({ u: 0.5, flag: true })).toBe(false);
-    expect(draws).toBe(2);
+    expect(draws).toBe(1);
   });
 
   test('a NaN operand of a piecewise equality takes the default arm', () => {
     // Until the user decision of 2026-10-20 (Tycho rows 411 and 413) a NaN
     // operand of the `Equal` made the piecewise answer NaN (the interpreter:
     // `Missing`). Now `NaN = 5` is `false` in the condition as everywhere
-    // else, on both routes, and the default arm is taken. The guard that is
-    // left tests each variable the operand reads, the list `P` and the index
-    // `k`, for an unsupplied value.
+    // else, on both routes, and the default arm is taken.
     const c = new ComputeEngine();
     c.declare('P', 'list<number^5>');
     c.declare('k', 'integer');
@@ -228,9 +191,8 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     );
     if (!r.success) throw new Error(r.error?.message);
     expect(r.code).toBe(
-      '((_.P !== undefined && _.k !== undefined) ? ((((_SYS.atNumeric(_.P, _.k, "number")) === (5))) ? (1) : (0)) : NaN)'
+      '((((_SYS.atNumeric(_.P, _.k, "number")) === (5))) ? (1) : (0))'
     );
-    expect(r.run({ k: 2 })).toBeNaN();
     expect(r.run({ P: [1, 2, 3, 4, 5], k: 5 })).toBe(1);
     expect(r.run({ P: [1, 2, 3, 4, 5], k: 2 })).toBe(0);
     // Out of range reads NaN, and `NaN = 5` is false on both routes.
@@ -238,8 +200,6 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     expect(
       c.box(['Which', ['Equal', 'NaN', 5], 1, 'True', 0]).evaluate().re
     ).toBe(0);
-    // An unsupplied `k` is still undecided.
-    expect(r.run({ P: [1, 2, 3, 4, 5] } as any)).toBeNaN();
   });
 
   test('the collection helpers compare exactly', () => {
@@ -369,10 +329,6 @@ describe('an absent cell makes an element-wise comparison undecided', () => {
     // comparison is a boolean result, whose absence marker is `undefined`.
     // A scalar piecewise tests its condition's operands itself, and compiles
     // the comparison inside that test, with no test of its own.
-    // An absent operand gives no value (`undefined`, the absence marker of
-    // a boolean result), as the interpreter keeps `u = v` unevaluated.
-    expect(js(c, ['Equal', 'u', 'v']).run({})).toBeUndefined();
-    expect(js(c, ['NotEqual', 'u', 'v']).run({})).toBeUndefined();
     expect(js(c, ['Equal', 'u', 'v']).run({ u: 1, v: 1 })).toBe(true);
   });
 });

@@ -151,16 +151,13 @@ import {
   absentOnlyThroughNumericSlots,
   conditionDecidability,
   connectiveNode,
-  guardTakesOperands,
   isNanLiteral,
   isNumericOrVerdictShaped,
   kleeneRelationLeaf,
   kleeneValueLeaf,
   mayBeUndecided,
-  operandInputNodes,
   operandMayBeAbsent,
   peelNegations,
-  unsuppliedComparisonGuard,
   userFunctionSignature,
   withConditionOperands,
 } from './compile-absence.js';
@@ -414,7 +411,6 @@ import {
   assertNoUseBeforeDeclare,
   chainedLocalDeclares,
   classifyLocalReads,
-  readsBlockLocal,
   refuseEffectContractViolations,
   _reservedDeclareNames,
   reservedLoopLocals,
@@ -3769,20 +3765,6 @@ export function compileExpr(
   sub = compileExprBroadcastPython(engine, h, args, target);
   if (sub !== undefined) return sub;
 
-  // A comparison over a variable the caller can leave out (`x > 0`, read
-  // as `_.x`) has no value when it is left out, as in the interpreter and
-  // as in a branch condition (`unsuppliedComparisonGuard`).
-  {
-    const guarded = unsuppliedComparisonGuard(
-      h,
-      args,
-      target,
-      () => core.compileExpr(engine, h, args, prec, target, node),
-      node
-    );
-    if (guarded !== undefined) return guarded;
-  }
-
   // GPU shader targets: a comparison or logical connective over a non-scalar
   // operand must not lower through the scalar infix operators — GLSL rejects
   // `vecN < float` outright, and where an infix form IS legal it means the
@@ -5076,6 +5058,15 @@ export function conditionNode(
       negate: false,
       test: { kind: 'operands', expr: cond, operands: [] },
     };
+  // A symbol of type `boolean` holds `true` or `false`: the caller supplies
+  // every input with a value of its declared type, so the plain truthiness
+  // test decides it. A symbol of another type (`boolean | missing`, a
+  // number) is read by its value: only `true` and `false` select an arm.
+  if (isSymbol(cond) && isSubtype(cond.type.type, 'boolean'))
+    return {
+      negate: false,
+      test: { kind: 'operands', expr: cond, operands: [] },
+    };
   if (!isFunction(cond))
     return { negate: false, test: { kind: 'value', expr: cond } };
   const h = cond.operator;
@@ -5163,26 +5154,6 @@ export function conditionNode(
   // - the SAME impure node in two positions (`Less(d, d)` built from one
   //   boxed `d`): the binding is keyed on the node (`_codeOverrides`), so
   //   one draw would stand for the two evaluations that were written.
-  // On the JavaScript target, a relation that has effects, or that reads
-  // a local of a block being compiled, is read by its VALUE: the
-  // comparison lowering (`unsuppliedComparisonGuard`) evaluates the
-  // operands first, compares, and gives `undefined` when the comparison
-  // has no value, and the selection takes the first arm only for `true`,
-  // the next one only for `false`, and no arm otherwise. A test placed
-  // before the comparison would skip an operand with effects (`If(Block(a
-  // := n, 1) > 0, …)` assigns `a` in the interpreter), and the test of a
-  // local is too strict (every caller input of its block,
-  // `blockInputs`): placed first, it would make a comparison that is
-  // `true` in the interpreter (`a < 1` after `a := 0`) take no arm.
-  if (
-    target?.language === 'javascript' &&
-    target.bindExpr !== undefined &&
-    (condEffect || readsBlockLocal(cond, target)) &&
-    guardTakesOperands(cond.ops)
-  ) {
-    CompilerState._poisonConditions.add(cond);
-    return { negate: false, test: { kind: 'value', expr: cond } };
-  }
   if (condEffect) {
     if (!canBind || cond.nops > 2) return null;
     if (cond.nops === 2 && cond.op1 === cond.op2 && hasEffect(cond.op1))
@@ -5191,8 +5162,8 @@ export function conditionNode(
   // A CHAIN (`Less(x, 0, w)`) is the Kleene conjunction of its links, as in
   // the interpreter, where a chain stops at the first pair that is `False`:
   // one decidedly false link decides the chain whatever an absent operand
-  // of another link holds. So with `x = 1` and `w` absent (or an unsupplied
-  // input), `If(x < 0 < w, 1, 2)` is `2`. Read as one relation, the chain
+  // of another link holds. So with `x = 1` and `w` absent,
+  // `If(x < 0 < w, 1, 2)` is `2`. Read as one relation, the chain
   // was tested for every operand at once, and the absent `w` made it take
   // no arm. Every link is pure here (an impure chain is declined above), so
   // a middle operand compiled in two links is evaluated twice with no
@@ -5235,24 +5206,13 @@ export function conditionNode(
   // or `true` for `NotEqual`, so it takes its first arm (user decisions
   // 2026-10-20, Tycho rows 411 and 413, and 2026-10-23). The relation
   // is tested only for an ABSENT value: an operand typed with a `missing` arm
-  // (`operandMayBeAbsent`) is tested itself, and, on a target that reads
-  // its variables off a vars object, every variable the operand reads on
-  // every evaluation is tested for `undefined` (`operandInputNodes`,
-  // `operandDecidedConjuncts`): an unsupplied variable leaves the branch
-  // undecided whatever arithmetic surrounds it (ruled 2026-09-02). `2r > 0`
-  // therefore tests `_.r !== undefined`, not the product, and a comparison
-  // that reads no variable (`Random() < 0.5`) is decided by construction.
-  const readsVarsObject = target?.varsObjectName !== undefined;
+  // (`operandMayBeAbsent`). An input that the caller leaves out is not
+  // tested: the caller supplies every input with a value of its declared
+  // type, and the result of a call that leaves one out is not specified.
   const operands: Expression[] = [];
   for (const op of cond.ops) {
     if (!mayBeUndecided(op, target)) continue;
-    if (operandMayBeAbsent(op)) {
-      operands.push(op);
-      continue;
-    }
-    if (!readsVarsObject) continue;
-    for (const s of operandInputNodes(op, target))
-      if (!operands.some((o) => o.isSame(s))) operands.push(s);
+    if (operandMayBeAbsent(op)) operands.push(op);
   }
   return {
     negate: false,

@@ -1688,7 +1688,7 @@ function userFunctionValueRefWithoutDefaults(
             `interpreter binds whole, and the target has no definition of ` +
             `the function for one point.`
         );
-      return absentGuardedValueRef(engine, h, name, passed);
+      return name;
     }
     // The interpreter binds a point whole at a parameter with no declared
     // type, and this target has no definition compiled for one point.
@@ -1770,20 +1770,17 @@ function userFunctionValueRefWithoutDefaults(
       target,
       passed
     );
-    return absentGuardedValueRef(
-      engine,
-      h,
+    return (
       pointRef ??
-        listSpecializedValueRef(engine, h, literal, target, passed) ??
-        callee,
-      passed
+      listSpecializedValueRef(engine, h, literal, target, passed) ??
+      callee
     );
   }
   // A parameter that lowers to an array or object (a tuple, a record, a
   // nominal value) must reach the body whole — see
   // `signatureParamsLowerToScalars`.
   if (!signatureParamsLowerToScalars(userFunctionSignature(engine, h)))
-    return absentGuardedValueRef(engine, h, callee, passed);
+    return callee;
 
   // A value with no consumer is the scalar variant.
   if (passed === undefined) return callee;
@@ -1832,56 +1829,6 @@ function userFunctionValueRefWithoutDefaults(
 }
 
 /**
- * The function value `ref` of the user function `h`, whose parameters are
- * not all scalars. Throws (the consumer declines) when the consumer passes
- * a value that may be absent at a parameter of `h` with no declared type.
- *
- * The interpreter binds `Missing` to the parameter and runs the body: with
- * `fl := t ↦ Length(t)`, `Map(fl, [(1, 2), Missing])` is `[2, NaN]`. The
- * compiled definition is compiled for a collection, and its body can fail
- * on an absent value (the compiled `Length` of `undefined` throws), so the
- * value is not compiled.
- */
-function absentGuardedValueRef(
-  engine: ComputeEngine,
-  h: string,
-  ref: string,
-  passed: CallbackArguments | undefined
-): string {
-  if (passed === undefined) return ref;
-  const literal = userFunctionLiteral(engine, h);
-  if (literal === undefined) return ref;
-  const params = literal.ops.slice(1);
-  // A consumer that fills fewer parameters than the function has (a
-  // trailing parameter with a default value, `fl := (t, k = 0) ↦
-  // Length(t)`): the parameters that receive the values are not known
-  // here, so a value that may be absent declines as well.
-  if (passed.types.length !== params.length) {
-    if (passed.types.some((t) => t !== undefined && isSubtype('missing', t)))
-      throw new Error(
-        `Could not compile the function value \`${h}\`: its consumer ` +
-          `passes it a value that may be absent, and fills ` +
-          `${passed.types.length} of its ${params.length} parameters.`
-      );
-    return ref;
-  }
-  const absent = passed.types.map((t, i) => {
-    if (t === undefined) return false;
-    const declared = declaredParamType(params[i]);
-    if (declared !== undefined && declared !== 'unknown') return false;
-    return isSubtype('missing', t);
-  });
-  if (!absent.some((a) => a)) return ref;
-  throw new Error(
-    `Could not compile the function value \`${h}\`: its consumer passes ` +
-      `it a value that may be absent, at a parameter with no declared ` +
-      `type, and the definition of \`${h}\`, compiled for a collection, ` +
-      `may fail on an absent value where the interpreter runs the body ` +
-      `with \`Missing\`.`
-  );
-}
-
-/**
  * The position of the first value that a consumer passes (`passed`) that
  * is one point (not a list of points) at a parameter whose type
  * `paramType(i)` is open (`bindsOnePointAsUndeclared()`), or -1. A
@@ -1917,10 +1864,7 @@ function onePointAtUndeclaredSlot(
  *
  * Throws (the consumer declines) when a point may be absent, when the
  * function is called through a wrapper, or when the definition for one
- * point cannot be emitted. An absent value does not go to the generic
- * definition, as it does for a function with scalar parameters
- * (`absentArgumentFork()`): that definition is compiled for a collection,
- * and can fail on an absent value (`absentGuardedValueRef()`).
+ * point cannot be emitted.
  */
 function onePointValueRef(
   engine: ComputeEngine,
@@ -2061,92 +2005,10 @@ function pointListValueRef(
   const ranks = callbackArgumentRanks(h, passed, nParams).map(
     (r, i) => found[i]?.rank ?? r
   );
-  // A value that holds points may also hold an absent value, as a point
-  // (`list<tuple<real, real> | missing>`) or as a list level above the
-  // points. The interpreter binds `Missing` to the parameter and runs the
-  // body: with `f := t ↦ 2t`, `Map(f, [(1, 2), Missing])` is
-  // `[(2, 4), NaN]`. The definition for one point reads its coordinates,
-  // so an absent argument at a position that receives points goes to the
-  // definition compiled for any argument (`absentArgumentFork()`), as a
-  // call `f(Missing)` does. `_SYS.mapFn` passes an absent value at any
-  // list level to the function as it is, so an absent list level goes
-  // there too. A `missing` inside a coordinate
-  // (`list<tuple<real | missing, real>>`) does not make the point absent,
-  // so it needs no guard: `stripMissingFromType(t, 'keep')` keeps the
-  // coordinates and removes only a `missing` at a point or list level.
-  const absent = found.map((x, i) => {
-    if (x === undefined || x === null) return false;
-    const t = passed.types[i]!;
-    return typeToString(stripMissingFromType(t, 'keep')) !== typeToString(t);
-  });
-  let fn = point;
-  if (absent.some((a) => a)) {
-    // The generic definition receives every argument of the call, so the
-    // fork is sound only when no other argument may hold a point: with
-    // `f := (a, x) ↦ 2a`, `Reduce([Missing], f, (1, 2))` passes the point
-    // `(1, 2)` to `a` and `Missing` to `x`, and the definition for any
-    // argument gave `NaN` where the interpreter gives `(2, 4)`.
-    if (
-      passed.types.some(
-        (t, i) => !absent[i] && (t === undefined || !isScalarShaped(t))
-      )
-    )
-      throw fail(
-        `a value may be absent beside an argument that is not a scalar, ` +
-          `and the definition for any argument would receive that argument.`
-      );
-    fn = `${point}$a${absent.map((a) => (a ? '1' : '0')).join('')}`;
-    if (!registry.defs.has(fn))
-      registry.defs.set(
-        fn,
-        `const ${fn} = ${absentArgumentFork(point, name, absent, target)};`
-      );
-  }
-  return mappedValueRef(fn, fn, ranks, registry, target, passed.types);
-}
-
-/**
- * The function value that calls `point`, the definition compiled for one
- * point, with its arguments, or `generic`, the definition compiled for any
- * argument, when one of the arguments at a position where `absent` is true
- * is absent (`undefined` on JavaScript, `None` on Python):
- * `((_p, _g) => (_t) => _t === undefined ? _g(_t) : _p(_t))(point, generic)`.
- * `point` and `generic` are expressions of functions; each is evaluated
- * once.
- *
- * At a parameter with no declared type, the interpreter binds `Missing` to
- * the parameter and runs the body: with `f2 := t ↦ 2t`,
- * `f2([(1, 2), Missing])` is `[(2, 4), NaN]`. The definition for one point
- * reads the coordinates of its argument, so an absent argument goes to the
- * definition for any argument, as the call `f2(Missing)` does.
- *
- * Throws on another target, which has no test of an absent value.
- */
-export function absentArgumentFork(
-  point: string,
-  generic: string,
-  absent: ReadonlyArray<boolean>,
-  target: CompileTarget<Expression>
-): string {
-  const p = tempVar(target);
-  const g = tempVar(target);
-  const params = absent.map(() => tempVar(target));
-  const tested = params.filter((_x, i) => absent[i]);
-  const list = params.join(', ');
-  if (target.language === 'javascript') {
-    const test = tested.map((x) => `${x} === undefined`).join(' || ');
-    return `((${p}, ${g}) => (${list}) => ${test} ? ${g}(${list}) : ${p}(${list}))(${point}, ${generic})`;
-  }
-  if (target.language === 'python') {
-    const test = tested.map((x) => `${x} is None`).join(' or ');
-    return `(lambda ${p}, ${g}: lambda ${list}: ${g}(${list}) if ${test} else ${p}(${list}))(${point}, ${generic})`;
-  }
-  throw new Error(
-    `Could not compile the call: an argument is a point that may be ` +
-      `absent, at a parameter with no declared type, and the ` +
-      `'${target.language ?? 'unknown'}' target has no test of an absent ` +
-      `value.`
-  );
+  // A point that is absent (`list<tuple<real, real> | missing>`) is passed
+  // to the definition for one point as it is: a function applied to an
+  // absent value has no specified value in compiled code.
+  return mappedValueRef(point, point, ranks, registry, target, passed.types);
 }
 
 /**
@@ -2338,13 +2200,12 @@ export function appliedLiteralNamedPointCall(
  * `[[7, 7], [7, 7]]`.
  *
  * The call is the static map over the list levels (`staticMapCallback()`)
- * of the literal with the parameter typed as the point. When a point or a
- * list level may be absent, the absent value goes to the literal compiled
- * for any argument, which `scalarCallee` compiles (`absentArgumentFork()`):
- * the interpreter binds `Missing` to the parameter and runs the body. When
- * the list may be absent as a whole, a test gives the absent list to that
- * literal too, as a call of a user function does
- * (`untypedPointListElement()`).
+ * of the literal with the parameter typed as the point. An absent point is
+ * passed to that literal as it is: a function applied to an absent value
+ * has no specified value in compiled code. When the list may be absent as
+ * a whole, a test gives the absent list to the literal compiled for any
+ * argument, which `scalarCallee` compiles, as a call of a user function
+ * does (`untypedPointListElement()`).
  *
  * `codes` are the compiled arguments. Throws (the `Apply` declines) when
  * the list levels do not lead to one point type, when another argument is
@@ -2395,39 +2256,24 @@ export function appliedLiteralPointListCall(
       `the literal with the parameter typed as the point is not valid.`
     );
   const t = args[at].type.type;
-  // A `missing` at a point or at a list level below the top (a `missing`
-  // inside a coordinate does not make the point absent).
-  const absentInside =
-    typeToString(stripMissingFromType(t, 'keep')) !== typeToString(t);
   // On Python, the literal compiled for any argument raises a `TypeError`
   // for `None` when its body reads the parameter (`max(None, 0)`,
   // `abs(None)`, `np.sin(None)`), where the interpreter runs the body with
-  // `Missing`: `Apply(t ↦ Max(t, 0), [(1, 2), Missing])` is `[2, NaN]`. So
-  // a point or a list that may be absent declines there, unless the body
-  // does not read the parameter (`t ↦ 7`).
-  if (
-    target.language === 'python' &&
-    (absentInside || isSubtype('missing', t))
-  ) {
+  // `Missing`: `Apply(t ↦ Max(t, 0), L)` with `L` absent is `NaN`. So a
+  // list that may be absent declines there, unless the body does not read
+  // the parameter (`t ↦ 7`).
+  if (target.language === 'python' && isSubtype('missing', t)) {
     const name = functionLiteralParameterName(params[at]);
     if (name === '' || literal.ops[0].symbols.includes(name))
       throw decline(
-        `the list may hold an absent point, and on Python the body, which ` +
-          `reads the parameter, fails on \`None\`.`
+        `the list may be absent, and on Python the body, which reads the ` +
+          `parameter, fails on \`None\`.`
       );
   }
   const point = `(${compile(typed)})`;
   const scalar = `(${scalarCallee()})`;
-  const fn = absentInside
-    ? absentArgumentFork(
-        point,
-        scalar,
-        args.map((_a, i) => i === at),
-        target
-      )
-    : point;
   const mapped = staticMapCallback(
-    fn,
+    point,
     args.map((_a, i) => (i === at ? below.rank : 0)),
     target,
     args.map((a) => a.type.type)

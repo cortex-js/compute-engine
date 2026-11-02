@@ -484,14 +484,12 @@ describe('A BARE PARAMETER UNDER A DECLARED `T | missing` PARAMETER', () => {
   });
 });
 
-// The compiled call checks the argument where the interpreter answers an
-// `incompatible-type` error: an annotated parameter whose type is not
-// numeric and has no `missing` member, given an argument whose static type
-// admits an absent value. Compiled code has no error value, so the run stops
-// with a `TypeError` that names the parameter (`_SYS.present`). Before
-// 2026-10-01 the point parameter answered `NaN`, the list parameter threw
-// from inside the body, and the string parameter failed to compile at run
-// time.
+// An absent argument at an annotated parameter whose type is not numeric and
+// has no `missing` member is an `incompatible-type` error in the
+// interpreter. In compiled code, a function applied to an absent argument
+// has no specified value (`docs/COMPILATION-MODEL.md`, "Caveats of compiled
+// code"), so the compiled call does not test the argument. The tests below
+// pin the values for present arguments.
 describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', () => {
   const compileRun = (src: string) => {
     const { expr } = box(src);
@@ -511,18 +509,6 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
     expect(result.success).toBe(true);
     return result.run!;
   };
-
-  test.each([
-    ['p', 'tuple<number, number>', 'function f(p: tuple<number, number>) { p[1] + 1 }', `f(${ABSENT})`],
-    ['xs', 'list<number>', 'function f(xs: list<number>) { length(xs) }', 'f(first(filter([[1, 2]], c => c[1] > 9)))'],
-    ['s', 'string', 'function f(s: string) { length(s) }', 'f(first(filter(["a"], c => c == "z")))'],
-  ])('a parameter annotated %s %s stops the run', (name, type, fn, call) => {
-    expect(compileRun(`${fn}\n${call}`)).toThrow(
-      new TypeError(
-        `f: the argument of the parameter '${name}' is absent, and the parameter is annotated '${type}'`
-      )
-    );
-  });
 
   test('a present value is computed', () => {
     const run = compileRun(
@@ -675,7 +661,7 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
     expect(compileRun(`function f(p) { p }\nf(${ABSENT})`)()).toBeUndefined();
   });
 
-  test('a function literal applied directly checks its argument', () => {
+  test('a function literal applied directly computes a present argument', () => {
     const ce = new ComputeEngine();
     ce.declare('v', 'real');
     const expr = ce.box([
@@ -696,22 +682,12 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
     ]);
     const result = compile(expr, { to: 'javascript' });
     expect(result.success).toBe(true);
-    expect(() => result.run({ v: 9 })).toThrow(TypeError);
     expect(result.run({ v: 0 })).toBe(2);
   });
 
-  test('a call mapped over a list of points checks the other arguments', () => {
+  test('a call mapped over a list of points passes the other arguments', () => {
     const fn =
       'function f(p: tuple<number, number>, s: string) { p[1] + length(s) }';
-    expect(
-      compileRun(
-        `${fn}\nf([(1, 2), (3, 4)], first(filter(["a"], c => c == "z")))`
-      )
-    ).toThrow(
-      new TypeError(
-        "f: the argument of the parameter 's' is absent, and the parameter is annotated 'string'"
-      )
-    );
     expect(
       compileRun(
         `${fn}\nf([(1, 2), (3, 4)], first(filter(["ab"], c => c == "ab")))`
@@ -719,35 +695,26 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
     ).toEqual([3, 5]);
   });
 
-  // The interpreter maps the function over the list and gives the
-  // `incompatible-type` error for the absent element. Before 2026-10-16 the
-  // check was made only when the list itself could be absent, so the body
-  // ran with `undefined` and answered `1` for that element.
+  // The interpreter maps the function over the list.
   test.each([
-    ['a list', 'list<string | missing>', ['a', undefined], ['a', 'b'], [1, 1]],
+    ['a list', 'list<string | missing>', ['a', 'b'], [1, 1]],
     [
       'a nested list',
       'list<list<string | missing>>',
-      [['a'], ['b', undefined]],
       [['a'], ['b', 'c']],
       [[1], [1, 1]],
     ],
   ])(
-    'an absent element of %s at a scalar parameter stops the run',
-    (_label, type, absent, present, expected) => {
+    'a list of present elements at a scalar parameter is mapped (%s)',
+    (_label, type, present, expected) => {
       const run = compileWith('function f(s: string) { 1 }\nf(xs)', {
         xs: type,
       });
-      expect(() => run({ xs: absent })).toThrow(
-        new TypeError(
-          "f: the argument of the parameter 's' is absent, and the parameter is annotated 'string'"
-        )
-      );
       expect(run({ xs: present })).toEqual(expected);
     }
   );
 
-  test('a function literal applied to such a list checks each element', () => {
+  test('a function literal applied to such a list maps over it', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<string | missing>');
     const result = compile(
@@ -759,32 +726,7 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
       { to: 'javascript' }
     );
     expect(result.success).toBe(true);
-    expect(() => result.run!({ xs: ['a', undefined] })).toThrow(TypeError);
     expect(result.run!({ xs: ['a', 'b'] })).toEqual([1, 1]);
-  });
-
-  // The other arguments are checked when a point is given to the function.
-  // Before 2026-10-16 they were checked before the map, so an empty list of
-  // points stopped the run, where the interpreter answers the empty list,
-  // and so did an absent list, where the interpreter answers an absent
-  // value.
-  test('a call mapped over an empty or absent list of points makes no check', () => {
-    const fn =
-      'function f(p: tuple<number, number>, s: string) { p[1] + length(s) }';
-    const ABSENT_STRING = 'first(filter(["a"], c => c == "z"))';
-    const types = {
-      xs: 'list<tuple<number, number>>',
-      ys: 'list<tuple<number, number>> | missing',
-    };
-    const run = compileWith(`${fn}\nf(xs, ${ABSENT_STRING})`, types);
-    expect(run({ xs: [] })).toEqual([]);
-    expect(() => run({ xs: [[1, 2]] })).toThrow(TypeError);
-    const runAbsent = compileWith(`${fn}\nf(ys, ${ABSENT_STRING})`, types);
-    expect(runAbsent({ ys: undefined })).toBeUndefined();
-    expect(() => runAbsent({ ys: [[1, 2]] })).toThrow(TypeError);
-    // The interpreter.
-    const { expr } = box(`${fn}\nf([], ${ABSENT_STRING})`);
-    expect(expr.evaluate().toString()).toBe('[]');
   });
 });
 

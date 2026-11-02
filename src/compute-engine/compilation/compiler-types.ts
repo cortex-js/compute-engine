@@ -132,19 +132,6 @@ export type UnsettledShape = {
 };
 
 /**
- * A run-time check that an argument of a user function is present
- * (`BaseCompiler.absentArgumentChecks`): the message of the `TypeError` the
- * check throws, and whether the check is also made on each element of a
- * list argument, at any depth (`elements`). A numeric parameter has no
- * check: the compiled value of its body over an absent argument is not
- * specified.
- */
-export type AbsentArgumentCheck = {
-  message: string;
-  elements: boolean;
-};
-
-/**
  * How a target spells "the numeric fragment `x` holds a value a comparison can
  * DECIDE" — equivalently, "`x` is not this target's NaN".
  *
@@ -242,10 +229,10 @@ export interface ConditionNode {
 
 type ConditionTest =
   /**
-   * The compiled value is not necessarily a boolean at all: a
-   * `boolean`-declared symbol the caller left unsupplied is `undefined`, and
-   * a caller may pass any value. Inspect `expr` — the sub-expression with its
-   * `Not`s stripped off — for being exactly a boolean.
+   * The compiled value is not necessarily a boolean: a call, or a value
+   * whose type has a `missing` arm, can give `undefined` or another value.
+   * Inspect `expr` — the sub-expression with its `Not`s stripped off — for
+   * being exactly a boolean.
    */
   | { readonly kind: 'value'; readonly expr: Expression }
   /**
@@ -256,8 +243,9 @@ type ConditionTest =
    *
    * A relation with a NaN operand has its IEEE value — `false`, or `true`
    * for `NotEqual` (user decisions 2026-10-20 and 2026-10-23) — so its
-   * operands are tested only for an absent value: a `missing`-typed operand
-   * and an unsupplied variable.
+   * operands are tested only for an absent value: an operand whose type has
+   * a `missing` arm. The host supplies every input with a value of its
+   * declared type, so an input left out is not tested.
    */
   | {
       readonly kind: 'operands';
@@ -515,54 +503,12 @@ export type ReboundFunctionLocals = {
 
 /** See `BaseCompiler.blockLocalValueFrame`. */
 export type LocalEntry = {
-  name: string;
-  /** The frame that holds the local. */
-  frame: LocalValueFrame;
   /** The values assigned to the local, anywhere in the block. */
   values: Expression[];
-  /** A local of the block itself, not of a scope nested in it, or a
-   * variable outside the block that the block assigns. Its read is in
-   * scope everywhere in the block. */
-  own: boolean;
-  /** A variable outside the block that the block assigns: a variable of
-   * the vars object (`_.c = …`), or a parameter of the enclosing function. */
-  outer: boolean;
-  /** Whether every value of the local reads an absent value as NaN
-   * (`readsAbsenceAsNaN`), once it is known. */
-  absenceAsNaN?: boolean;
-  /** Whether a value of the local could depend on a caller input
-   * (`localDependsOnInputs`), once it is known. */
-  dependent?: boolean;
 };
 
 export type LocalValueFrame = {
   /** The locals of the block, of the scopes nested in it, and the
    * variables outside it that it assigns, keyed by their definition. */
   byDef: Map<object, LocalEntry>;
-  /** The same locals, by name (`blockLocalsNamed`). */
-  byName: Map<string, LocalEntry[]>;
-  /** The definitions that the binders inside the block create. */
-  binderDefs: Set<object>;
-  /** The statements of the block. */
-  stmts: ReadonlyArray<Expression>;
-  /** The block node, when there is one. */
-  node: Expression | undefined;
-  /** The free variables of the block (`unknowns`). */
-  names: ReadonlySet<string>;
-  /** The caller inputs that the block reads (`blockInputs`), once known. */
-  inputs?: Expression[];
-  /** The index of each `Loop` clause of the block (`Element(k, xs)`),
-   * by its definition, with the collection it ranges over as its value
-   * (`localDependsOnInputs`). */
-  loopIndices: Map<object, LocalEntry>;
-  /** True once `localDependsOnInputs` has set `dependent` on every local
-   * of the frame. */
-  dependenceKnown?: boolean;
-  /** For each statement, the locals assigned by a top-level statement
-   * before it. */
-  assignedBefore: Set<string>[];
-  /** The index of the statement being compiled. */
-  current: number;
-  /** The local of each emitted name. */
-  bySpelling: Map<string, string>;
 };

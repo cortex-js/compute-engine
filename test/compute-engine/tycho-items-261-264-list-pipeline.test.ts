@@ -545,10 +545,7 @@ describe('TYCHO 261 — the CSE dominance rule', () => {
 
   test('a served arm evaluates nothing new: the root occurrence already forced it', () => {
     // A getter counts every read of `u`. With the binding, the computation
-    // reads `u` in the definition only (D3 entry checks off). The guard of
-    // the condition reads `u` once more: since the user decision of
-    // 2026-10-20 it tests for an unsupplied `u` (`_.u !== undefined`) instead
-    // of testing the bound operand for NaN.
+    // reads `u` in the definition only (D3 entry checks off).
     const expr = ce.box([
       'Which',
       ['Less', heavy('u'), 0],
@@ -566,8 +563,8 @@ describe('TYCHO 261 — the CSE dominance rule', () => {
         return 0.3;
       },
     });
-    // sin(6u) and cos(7u), once each, and the guard.
-    expect(reads).toBe(3);
+    // sin(6u) and cos(7u), once each.
+    expect(reads).toBe(2);
   });
 
   test('a lambda that rebinds a name the candidate mentions is not served across', () => {

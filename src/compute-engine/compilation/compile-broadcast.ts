@@ -7,7 +7,6 @@ import type {
   Scope,
 } from '../global-types.js';
 import { withScratchScope } from '../scratch-scopes.js';
-import { provenPointWidth } from './javascript-value-facts.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
   couldBeNumericTuple,
@@ -73,7 +72,6 @@ import {
 } from './compile-operators.js';
 import {
   arrayLiteralElements,
-  arrayLiteralWidth,
   hoistedListLiteralText,
   mayHoldPoint,
   staticBroadcastWidth,
@@ -90,7 +88,6 @@ import {
 import { _popLocalComplex, _pushLocalComplex } from './compile-loops.js';
 import { compileValueOperand } from './compile-statements.js';
 import { cseAdmission } from './compile-cse.js';
-import { mapRankOfType, shapeOfType } from './static-shape.js';
 
 /**
  * Run `f` with the element parameters `names` boxed as symbols.
@@ -1251,47 +1248,14 @@ export function tryCompileBroadcast(
     const bindings: string[] = [];
     const bound: string[] = [];
     // A collection operand is read component by component, which trusts its
-    // DECLARED width. A declared type constrains what the ENGINE may assign,
-    // not what a caller may put in the kernel's `vars` object, so a
-    // `list<number^4>` input can arrive absent, shorter, longer, or as a
-    // plain number. Only a source that is provably an array of exactly the
-    // right length may be read by index without checking; every other one
-    // is tested at run time and, when the test fails, handed to the
-    // broadcast helper below, which answers those shapes the way the
-    // interpreter does (a missing operand gives NaN, a shorter list gives
-    // the shorter result, a scalar gives a scalar).
-    const guarded: string[] = [];
-    // An operand whose emitted code is an array of the width BY
-    // CONSTRUCTION — a constructor the common-subexpression pass has
-    // named, a sum of points, a point-valued call — needs no test either
-    // (`provenPointWidth`); a declared input read from `vars` keeps it.
-    //
-    // Neither does a name that the emitted body binds (a parameter, a
-    // local) whose static type is a point of `componentWidth` scalars: the
-    // value of the name has that type (rule R1 of
-    // `docs/plans/2026-10-31-static-shape-compilation.md`). The parameter
-    // `z` of the member variant of `g: (tuple<real, real> |
-    // list<tuple<real, real>>) -> any` is one: `z + z` is written
-    // `[z[0] + z[0], z[1] + z[1]]`. An input of the compilation keeps its
-    // test.
-    const needsGuard = compiledArgs.map(
-      (code, i) =>
-        isArrayOperand(args[i]) &&
-        arrayLiteralWidth(hoistedListLiteralText(target, code)) !==
-          componentWidth &&
-        provenPointWidth(args[i], target) !== componentWidth &&
-        !isBoundScalarPoint(args[i], componentWidth, target)
-    );
-    // When no source needs the run-time test, a source that is one array
-    // literal of the right width is read component by component from its
-    // TEXT: a `Tuple`/`List` node compiles to exactly that, so `(a, b) +
-    // (c, d)` is written `[a + c, b + d]` rather than binding `[a, b]` to a
-    // temporary only to index it. Under a test the literal is bound as
-    // before: the fallback closure must receive it whole, and repeating a
-    // component's text in both branches would double the emitted code.
-    const anyGuard = needsGuard.some((g) => g);
+    // declared width: the host supplies each input with a value of its
+    // declared type, so no shape is tested at run time. A source that is
+    // one array literal of the right width is read component by component
+    // from its TEXT: a `Tuple`/`List` node compiles to exactly that, so
+    // `(a, b) + (c, d)` is written `[a + c, b + d]` rather than binding
+    // `[a, b]` to a temporary only to index it.
     const literalParts = compiledArgs.map((code, i) =>
-      !anyGuard && isArrayOperand(args[i])
+      isArrayOperand(args[i])
         ? arrayLiteralElements(
             hoistedListLiteralText(target, code),
             componentWidth
@@ -1300,11 +1264,10 @@ export function tryCompileBroadcast(
     );
     const sources = compiledArgs.map((code, i) => {
       if (literalParts[i] !== undefined) return code;
-      if (!needsGuard[i] && REPEATABLE_SOURCE.test(code)) return code;
+      if (REPEATABLE_SOURCE.test(code)) return code;
       const v = tempVar(target);
       bindings.push(v);
       bound.push(code);
-      if (needsGuard[i]) guarded.push(v);
       return v;
     });
     const components: string[] = [];
@@ -1317,30 +1280,6 @@ export function tryCompileBroadcast(
       components.push(buildScalarBody(cell));
     }
     const literal = `[${components.join(', ')}]`;
-    if (guarded.length > 0) {
-      // The test claims RANK 1 as well as the length, because a component
-      // read is spliced into the head's SCALAR codegen. A declared width
-      // constrains what the engine assigns, not what a caller supplies, so
-      // a `tuple<number, number>` input may arrive as the matrix
-      // `[[1, 2], [3, 4]]`, which has length two: `P + (1, 2)` then read
-      // each ROW as a scalar and ran to the JavaScript string concatenation
-      // `['1,21', '3,42']`, where `_SYS.bcast` maps over the nested arrays
-      // and answers `[[2, 3], [5, 6]]`. The first element decides the rank,
-      // the same test `_SYS.matmul` applies (`javascript-target.ts`), so a
-      // shape this refuses falls to the helper that answered it before.
-      const test = guarded
-        .map(
-          (v) =>
-            `Array.isArray(${v}) && ${v}.length === ${componentWidth} && ` +
-            `!Array.isArray(${v}[0])`
-        )
-        .join(' && ');
-      const fallback = `_SYS.bcast(${closure}, ${sources.join(', ')})`;
-      return (
-        `((${bindings.join(', ')}) => ${test} ? ${literal} : ${fallback})` +
-        `(${bound.join(', ')})`
-      );
-    }
     return bindings.length === 0
       ? literal
       : `((${bindings.join(', ')}) => ${literal})(${bound.join(', ')})`;
@@ -1805,23 +1744,4 @@ export function tryCompilePythonElementwise(
     target
   );
   return out === undefined || out === '' ? undefined : out;
-}
-
-/**
- * True when `a` is a name that the emitted body binds (`boundVars`: a
- * parameter or a local) and whose static type is a point of `width`
- * coordinates that are scalars.
- */
-function isBoundScalarPoint(
-  a: Expression,
-  width: number,
-  target: CompileTarget<Expression>
-): boolean {
-  if (!isSymbol(a) || target.boundVars?.has(a.symbol) !== true) return false;
-  const shape = shapeOfType(a.type.type);
-  return (
-    shape?.kind === 'tuple' &&
-    shape.arity === width &&
-    mapRankOfType(a.type.type) === 0
-  );
 }

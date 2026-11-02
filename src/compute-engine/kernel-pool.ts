@@ -1157,7 +1157,7 @@ export interface BroadcastAsyncSpec {
   stored: StoredResult;
   /** The variables the compiled code reads as lists (`javascript`: the
    * `lists` of the result's entry plan; `interval-js`: its
-   * `collectionReadInputs`). Each is a shared input of a batch, with the
+   * `listInputs`). Each is a shared input of a batch, with the
    * variables the `shared` option names. */
   lists?: readonly string[];
   /** The variables declared `boolean`: for them an empty array is an empty

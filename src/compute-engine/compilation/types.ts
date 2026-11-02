@@ -1851,19 +1851,6 @@ export interface CompileTarget<Expr = unknown> {
   varsObjectName?: string;
 
   /**
-   * The parameters of a compiled lambda that a caller can omit and that a
-   * comparison must then read as having no value: those annotated `string`
-   * (or `string | missing`). An omitted argument is `undefined`, and
-   * `_SYS.eqt(undefined, "a")` is an ordinary `false`, so
-   * `(t: string) ↦ If(t = "a", 1, 2)` called with no argument took the
-   * else arm. A comparison over such a parameter tests it for `undefined`,
-   * as it tests a read of the vars object. A parameter of another type is
-   * not listed: a number parameter that is omitted reads as NaN, and its
-   * comparisons are decided by the IEEE rules.
-   */
-  omittableParams?: ReadonlySet<string>;
-
-  /**
    * Identifiers that the emitted code must not use as the name of a binding
    * (a function parameter, a block local, a loop index, an integration
    * variable). A binding with one of these names is emitted under a fresh
@@ -3230,11 +3217,6 @@ export type StoredEntryPlan = {
   /** The symbols declared `boolean` (`vars` plans only). `broadcast()`
    * reads an empty array for one as an empty column. */
   booleans?: (string | number)[];
-  /** The collection inputs that the code iterates, spreads, reduces or
-   * indexes (`vars` plans only). When the caller leaves one out, the run
-   * gives `noValue` before any of its code runs (`entryNoValue` in
-   * `javascript-runtime.ts`). */
-  required?: { names: string[]; noValue: 'NaN' | 'undefined' };
   /** `mode: 'bigint'`: the integer inputs. Each accepts a `bigint`, and a
    * `number` that is a safe integer, which the compiled code converts with
    * `BigInt(x)`; any other value is refused with a `TypeError`. */
@@ -3551,8 +3533,9 @@ export type CompilationResult<
   booleanInputs?: string[];
 
   /**
-   * `interval-js` only. The free variables that the code reads as lists (it
-   * iterates, reduces or indexes them). `broadcast()` binds each one once
+   * `interval-js` only. The free variables that the code reads as lists:
+   * those declared with a collection type that has no `missing` arm.
+   * `broadcast()` binds each one once
    * for the whole batch, as a shared input, and a runtime that loads the
    * stored code (`createIntervalRuntime().loadBroadcast`) does the same.
    * Absent when there is none.

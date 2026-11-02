@@ -20,8 +20,9 @@
  *    (`isPossiblyCollectionTypedJS`, `isBoundPossiblyCollectionTyped`) admit
  *    such a union through the shared `unionAdmitsIndexedCollection`, so the
  *    operand takes the run-time-dispatching lowerings: the `Array.isArray`
- *    guarded reduce for `Sum`/`Product`, `_SYS.bcast` for arithmetic and
- *    comparisons, the element-wise fold for an indexed big op whose body is
+ *    guarded reduce for `Sum`/`Product`, one `Array.isArray` test of the
+ *    union symbol for arithmetic and comparisons, with one body for each
+ *    member of the union, the element-wise fold for an indexed big op whose body is
  *    such a union. A scalar at run time answers as a scalar, an array
  *    element-wise, as the interpreter does.
  * 2. The TYPING of arithmetic over a union whose collection branch is a
@@ -161,7 +162,9 @@ describe('Tycho item 249 — arithmetic and comparison over the union', () => {
       JSON.parse(JSON.stringify(body).split(JSON.stringify(w)).join('"v"'))
     );
     const { code, run } = js(expr);
-    expect(code).toContain('_SYS.bcast(');
+    // One dispatch at the binding of `v`, and one body for each member of
+    // the union.
+    expect(code).toMatch(/^\(Array\.isArray\(_\.v\) \? \[/);
     expect(run(branch(true))).toEqual(onList);
     expect(run(branch(false))).toEqual(onScalar);
   });

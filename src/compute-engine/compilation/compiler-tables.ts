@@ -709,22 +709,6 @@ export const ABSENCE_DISCHARGING_HEADS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The heads that hold their operands as values without reading them as a
- * collection: a collection input at their operand is not iterated
- * (`collectionReadInputs`). `Tuple(L, 1)` holds the array `L`.
- */
-export const COLLECTION_HOLDING_HEADS: ReadonlySet<string> = new Set([
-  'List',
-  'Tuple',
-  'Pair',
-  'Single',
-  'Triple',
-  'Sequence',
-  'Hold',
-  'Apply',
-]);
-
-/**
  * The compile plan for a CUSTOM `(accumulator, element)` combiner of a
  * `Reduce`/`Scan`: which lanes its two parameters run in, whether the seed
  * must be lifted, and the combiner expression to compile.

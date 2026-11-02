@@ -234,7 +234,7 @@ describe('an operator over a call that maps over a list argument', () => {
       u: 'list<real>',
     });
     expect(text).toBe(
-      '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), ((_.w !== undefined) ? ((0 < _.w) ? (_SYS.mapFn(_fn_q, [1], _.u)) : (_.u)) : undefined), 1)'
+      '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), ((0 < _.w) ? (_SYS.mapFn(_fn_q, [1], _.u)) : (_.u)), 1)'
     );
   });
 
@@ -284,15 +284,11 @@ describe('an operator over a call that maps over a list argument', () => {
   test('a call in an operand of And is not evaluated before the And', () => {
     // `And` does not evaluate its second operand when the first one is
     // false, so the call must not be evaluated before the `And`: the call
-    // (and its run-time test, on the comparison) comes after the test of the
-    // first operand.
-    // The parameters `b` and `u` have no type.
+    // is in the second operand of the `&&`.
+    // The parameters `b` and `u` have no type; `b` is inferred `boolean`.
     const json = ['Not', ['And', 'b', ['Greater', ['q', 'u'], 0]]];
     const text = String(compileFn(json, ['b', 'u']).code);
-    expect(text.indexOf('=== false ? false')).toBeGreaterThanOrEqual(0);
-    expect(text.indexOf('=== false ? false')).toBeLessThan(
-      text.indexOf('_fn_q(u)')
-    );
+    expect(text).toContain('!(b && 0 < _fn_q(u))');
     expect(compileFn(json, ['b', 'u']).run(false, 2)).toBe(true);
     // With the first operand `False`, the code maps the `And` over its
     // operands (`_SYS.bcast`), which evaluates the call first. The call is

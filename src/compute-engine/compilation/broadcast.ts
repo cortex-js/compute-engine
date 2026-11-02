@@ -36,8 +36,8 @@
  *
  * **Shared inputs.** A variable that the compiled code reads as a list
  * (`javascript`: the `lists` of the entry plan, from a declared list type;
- * `interval-js`: the inputs that the code iterates, reduces or indexes,
- * `BaseCompiler.collectionReadInputs`), or that `options.shared` names, is
+ * `interval-js`: the inputs declared with a collection type that has no
+ * `missing` arm, `listInputs`), or that `options.shared` names, is
  * bound once for the whole batch: every cell reads the same list. It is not
  * a column of the `cells` layout and not an axis of the `grid` layout.
  *
@@ -158,29 +158,8 @@ export type BroadcastEntryPlan =
       /** The variables declared `boolean`, for which an empty array is an
        * empty column. */
       booleans?: readonly string[];
-      /** The collection inputs that the code iterates, spreads, reduces or
-       * indexes: when `inputs` gives no value for one, no cell has a value
-       * (`requiredInputAbsent`). */
-      required?: { names: readonly string[] };
     }
   | { kind: 'args' };
-
-/**
- * True when `inputs` gives no value for an input of `entry.required` (see
- * `checkEntry` in `javascript-runtime.ts`, the same test that `run()`
- * makes). The run then has no value for every cell: the cells are `NaN`,
- * and none of them is counted as a failure, since no evaluation threw. The
- * test is made once per batch, not once per cell.
- */
-function requiredInputAbsent(
-  entry: BroadcastEntryPlan | undefined,
-  shape: BroadcastShape
-): boolean {
-  if (entry?.kind !== 'vars' || entry.required === undefined) return false;
-  return entry.required.names.some(
-    (n) => !shape.names.includes(n) && !shape.shared.some((s) => s.name === n)
-  );
-}
 
 /**
  * The `kind` codes of an `interval-js` broadcast, one per cell at offset
@@ -247,7 +226,7 @@ interface BroadcastShape {
 
 /**
  * The shared lists of an `interval-js` batch. `lists` are the variables that
- * the compiled code reads as lists (`BaseCompiler.collectionReadInputs`):
+ * the compiled code reads as lists (`CompilationResult.listInputs`):
  * each is a shared input, with the variables that the `shared` option
  * names. `convert` is the conversion that `run()` applies to its inputs
  * (`processInput` in `interval/run-support.ts`), applied to each shared
@@ -268,7 +247,7 @@ const hasOwn = (o: object, key: string): boolean =>
  * The names of the shared inputs of a batch, in key order of `inputs`: each
  * key of `inputs` that `lists` holds (the variables the compiled code reads
  * as lists: the entry plan of a `javascript` result, the
- * `collectionReadInputs` of an `interval-js` result) or that
+ * `listInputs` of an `interval-js` result) or that
  * `options.shared` names. A name in `options.shared` that is not a key of
  * `inputs` throws, and so does a `shared` option that is not an array of
  * strings.
@@ -496,7 +475,7 @@ function refuseBooleanAtNumber(
  * Validate the inputs and compute the cell count. `perCell` is 1 for a
  * `javascript` input and 2 for an interval (`lo, hi` pair). `lists` are the
  * variables the compiled code reads as lists (the `lists` of a `javascript`
- * entry plan, the `collectionReadInputs` of an `interval-js` result): those
+ * entry plan, the `listInputs` of an `interval-js` result): those
  * variables are shared inputs, with the ones the `shared` option names (see
  * `broadcastSharedNames`). An interval batch does not take the `outputs`
  * option: its loop writes a `lo, hi, kind` triple per cell. A shared input
@@ -1170,24 +1149,6 @@ function broadcastNumbersRange(
     throw new TypeError(
       `broadcast: the output array holds ${out.length} values, ${stride * (to - from)} are needed`
     );
-  if (requiredInputAbsent(entry, shape)) {
-    // The cells are written in blocks of `STOP_CHECK_EVERY`, with the
-    // checks of the cell loop below before each block, so that a slice that
-    // is stopped or past its deadline writes and reports only the cells it
-    // wrote.
-    for (let i = from; i < to; i += STOP_CHECK_EVERY) {
-      if (
-        deadline !== undefined &&
-        (i - from) % DEADLINE_CHECK_EVERY === 0 &&
-        Date.now() > deadline
-      )
-        return i - from;
-      if (stop !== undefined && stop()) return i - from;
-      const end = Math.min(to, i + STOP_CHECK_EVERY);
-      out.fill(NaN, stride * (i - from), stride * (end - from));
-    }
-    return to - from;
-  }
   const complexNames =
     entry?.kind === 'vars' ? new Set(entry.complex) : new Set<string>();
   // The `{ re, im }` slot that each complex input reads, reused from cell to

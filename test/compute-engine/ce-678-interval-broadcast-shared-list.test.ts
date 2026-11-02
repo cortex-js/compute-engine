@@ -99,14 +99,6 @@ describe('CE-678: interval-js broadcast() reads a shared list input', () => {
     expect(triples(out)[1]).toEqual([14, 21, INTERVAL_KIND.interval]);
   });
 
-  test('an absent list: each cell is empty, as run() gives', () => {
-    const r = compiled(SUM);
-    expect(r.run!({ x: 1 })).toEqual({ kind: 'empty' });
-    const out = r.broadcast!({ x: new Float64Array([1, 1, 2, 2]) });
-    expect(out[2]).toBe(INTERVAL_KIND.empty);
-    expect(out[5]).toBe(INTERVAL_KIND.empty);
-  });
-
   test('an empty list', () => {
     const r = compiled(SUM);
     const out = r.broadcast!({ x: new Float64Array([1, 1, 2, 3]), L: [] });

@@ -29,7 +29,6 @@ import {
 } from './compile-parameter-defaults.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { descendantRegionAt } from './cse.js';
-import { isScalarShaped } from './static-shape.js';
 import { compileValueOperand } from './compile-statements.js';
 import {
   assertParameterWritesMatchTypes,
@@ -63,8 +62,6 @@ import {
   literalDeclaredParamTypes,
   scalarFedLiterals,
   absentPointType,
-  absentArgumentFork,
-  withoutCallbackArguments,
 } from './compile-callbacks.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import {
@@ -177,16 +174,8 @@ export function compileExprFunctionLiteral(
       // (`(t) => 2 * t`) and gave `[NaN, NaN]`. The literal is compiled
       // with the parameter typed as the point.
       //
-      // When the point may be absent, the interpreter binds `Missing` to the
-      // parameter and runs the body. The value it gives then depends on the
-      // body, and can differ from the literal compiled for any argument:
-      // `Map(t ↦ 2t, [(1, 2), Missing])` is `[(2, 4), Missing]` for the
-      // literal (the compiled `2 * undefined` is `NaN`), where the named
-      // `f2 := t ↦ 2t` gives `[(2, 4), NaN]`, and `Map(t ↦ Length(t), …)`
-      // gives `NaN` (the compiled `Length` of `undefined` throws). So the
-      // absent point goes to the literal compiled for any argument
-      // (`absentArgumentFork()`) only when the body does not read the
-      // parameter (`t ↦ 7`), and the literal declines otherwise.
+      // An absent point is passed to the literal as it is: a function
+      // applied to an absent value has no specified value in compiled code.
       const params = node.ops.slice(1);
       const points = passed.types.map((t, i) => {
         if (t === undefined || params[i] === undefined) return undefined;
@@ -194,19 +183,6 @@ export function compileExprFunctionLiteral(
         if (declared !== undefined && declared !== 'unknown') return undefined;
         return absentPointType(t)?.point;
       });
-      // A consumer that fills fewer parameters than the literal has (a
-      // trailing parameter with a default value): the parameters that
-      // receive an absent point are not known here, so the literal
-      // declines.
-      if (
-        passed.types.length !== params.length &&
-        passed.types.some((t) => t !== undefined && absentPointType(t)?.absent)
-      )
-        throw new Error(
-          'Could not compile a `Function` literal: its consumer passes it ' +
-            'points that may be absent, and fills fewer parameters than ' +
-            'the literal has.'
-        );
       if (
         passed.types.length === params.length &&
         points.some((t) => t !== undefined)
@@ -218,50 +194,7 @@ export function compileExprFunctionLiteral(
               'it points that may be absent, and the literal with the ' +
               'parameter typed as the point is not valid.'
           );
-        const code = compileExprFunctionLiteral(
-          engine,
-          h,
-          typed.ops,
-          target,
-          typed
-        );
-        if (code === undefined) return undefined;
-        const absent = passed.types.map(
-          (t, i) =>
-            points[i] !== undefined && absentPointType(t!)?.absent === true
-        );
-        if (!absent.some((a) => a)) return code;
-        // The literal for any argument receives every argument, so another
-        // argument that may hold a point declines (`pointListValueRef()`).
-        if (
-          passed.types.some(
-            (t, i) => !absent[i] && (t === undefined || !isScalarShaped(t))
-          )
-        )
-          throw new Error(
-            'Could not compile a `Function` literal: its consumer passes ' +
-              'it a point that may be absent beside an argument that is ' +
-              'not a scalar.'
-          );
-        const body = node.ops[0];
-        if (
-          absent.some((a, i) => {
-            if (!a) return false;
-            const name = functionLiteralParameterName(params[i]);
-            return name === '' || body.symbols.includes(name);
-          })
-        )
-          throw new Error(
-            'Could not compile a `Function` literal: its consumer passes ' +
-              'it points that may be absent, at a parameter with no ' +
-              'declared type that the body reads, and the value that the ' +
-              'interpreter gives for an absent point depends on the body.'
-          );
-        const generic = withoutCallbackArguments(node, () =>
-          compileExprFunctionLiteral(engine, h, node.ops, target, node)
-        );
-        if (generic === undefined) return undefined;
-        return absentArgumentFork(code, generic, absent, target);
+        return compileExprFunctionLiteral(engine, h, typed.ops, target, typed);
       }
     }
     // A literal with a parameter declared `expression` that the body reads
@@ -630,10 +563,10 @@ export function compileExprFunctionLiteral(
     // JavaScript default value, which applies exactly when the argument is
     // `undefined`. The literal is also a function VALUE, and a consumer of
     // a function value (`Map`, `Filter`, …) hands it the elements as they
-    // are, so the call sites cannot do it (`absentArgumentChecks`). A
-    // complex-lane parameter is left out: its wrapper
-    // (`complexCoercingWrapper`) converts the argument, and reads an absent
-    // one as `NaN`, before the arrow receives it.
+    // are, so the call sites cannot do it. A complex-lane parameter is
+    // left out: its wrapper (`complexCoercingWrapper`) converts the
+    // argument, and reads an absent one as `NaN`, before the arrow
+    // receives it.
     // A parameter with a default value (`(x, k = 2) => x * k`) is filled
     // when its argument is absent: left out, or supplied absent. The default
     // is compiled as an operand written at the call site, by this target,

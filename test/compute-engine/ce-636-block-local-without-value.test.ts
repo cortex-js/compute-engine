@@ -462,10 +462,12 @@ describe('CE-636: a branch statement that can run no branch', () => {
   });
 
   test('a loop pass where the condition is undecided after a pass that assigned', () => {
-    // `b` is a `boolean` input. The condition `Or(i = 1, b)` is read by its
-    // value, which the analysis takes as one that can be undecided, so the
-    // read of `n` is of class 3 on the targets that can run no branch.
-    // GLSL and WGSL always run one branch.
+    // `b` is a `boolean | missing` input. The condition `Or(i = 1, b)` is
+    // read by its value, which the analysis takes as one that can be
+    // undecided, so the read of `n` is of class 3 on the targets that can
+    // run no branch. GLSL and WGSL always run one branch. (A `boolean` input
+    // holds `true` or `false`, so the condition is decided and the block
+    // compiles.)
     const json = [
       'Block',
       ['Assign', 's', 0],
@@ -488,7 +490,7 @@ describe('CE-636: a branch statement that can run no branch', () => {
     ];
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    ce.declare('b', 'boolean');
+    ce.declare('b', 'boolean | missing');
     const expr = ce.box(json as any);
     for (const to of ['javascript', 'python'])
       expect(() => compile(expr, { to, fallback: false })).toThrow(SOME_PATHS);

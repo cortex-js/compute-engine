@@ -17,7 +17,6 @@ import {
   ARITHMETIC_HEADS,
   BINARY_INFIX_VALUE_OPERATORS,
   BUILTIN_FOLD_HEADS,
-  COLLECTION_HOLDING_HEADS,
   COMPLEX_PROPAGATING_HEADS,
   COMPLEX_TRANSPARENT_HEADS,
   CONTROL_FLOW_HEADS,
@@ -74,70 +73,34 @@ import {
   withVarsMappedUserFunctionHeads,
 } from './compile-statements.js';
 import {
-  ABSENCE_AS_NAN_OPERATORS,
   ATOMIC_FRAGMENT,
-  _guardEmitting,
   _localNameKeys,
   _localValueFrames,
-  _truthOnly,
   absenceAxisForType,
   absenceKind,
   absentDomainIsObject,
   absentOnlyThroughNumericSlots,
-  blockInputs,
   blockLocalOf,
-  blockLocalsNamed,
-  catchNoValue,
-  clearNoValue,
-  collectionReadInputs,
   compileExactCondition,
   compileGuardTest,
   conditionDecidability,
   connectiveNode,
   exactSelect,
-  findDependentLocals,
-  guardTakesOperands,
-  hasEffectNode,
   isAbsenceSymbol,
   isBooleanBindingType,
   isDecidedByConstruction,
-  isInnerBinderRead,
   isNanLiteral,
   isNumericOrVerdictShaped,
   isNumericShaped,
-  isOmittableRead,
-  isTopTypedOperand,
-  isUnsetLocalRead,
-  isVarsObjectRead,
   kleeneRelationLeaf,
   kleeneValueLeaf,
-  lazyChain,
-  localDependsOnInputs,
-  markTruthOnlyNode,
   mayBeUndecided,
-  mayHoldFunctionType,
-  mayReturnFunction,
-  nanCanDecide,
-  nanEscapeTerms,
   noBranchValue,
   operandDecidedConjuncts,
-  operandInputNodes,
   operandMayBeAbsent,
   peelNegations,
-  poisonSlot,
-  presenceTest,
-  readsAbsenceAsNaN,
-  scalarOperandKind,
-  testsFirst,
-  truthOnlyEligible,
-  unsuppliedComparisonGuard,
-  unsuppliedReads,
   userFunctionSignature,
-  withBoundOperands,
   withConditionOperands,
-  withNanEscape,
-  withNanTerms,
-  withTruthOnly,
 } from './compile-absence.js';
 import {
   absentCollectionOperandGuard,
@@ -184,12 +147,10 @@ import {
   _codeAliases,
   _codeOverrides,
   _prefixCallOverrides,
-  _presentReads,
   _pushComplexMemoLayer,
   _runtimeMatrixPowerBases,
   _withFoldedRealOverride,
   hasPromotedDefinition,
-  isPresentRead,
   isRealOnlyLowering,
   isRealOnlyLoweringHead,
   liftPromotionSuppression,
@@ -207,7 +168,6 @@ import {
   unrolledIndexValueFold,
   wideIsComplex,
   wideNumericType,
-  withPresentReads,
   withPromotionSuppressed,
   withPromotionUnsuppressed,
 } from './compiler-mode.js';
@@ -514,11 +474,8 @@ import {
   compileExprIf,
   compileExprWhen,
   compileExprWhich,
-  falsyReadsOf,
   isDecidedBooleanValue,
-  isFalsyWhenUndecided,
   kleeneValueConnective,
-  testedReadsOf,
 } from './compile-conditionals.js';
 import {
   _runtimeMatrixProducts,
@@ -564,7 +521,6 @@ import {
   loopRunsOnce,
   nestedAssignmentsTo,
   nestedOnlyLocals,
-  readsBlockLocal,
   refuseEffectContractViolations,
   scopeChainBinds,
   splitChainedAssignments,
@@ -757,7 +713,6 @@ import {
   withoutNodeCodeOverrides,
 } from './compile-cse.js';
 import {
-  absentArgumentChecks,
   assertExtraParamsRead,
   bakedTupleValueType,
   checkDeclaredBroadcast,
@@ -787,7 +742,6 @@ import {
   paramElementTypeIsOpen,
   pointArgumentAtUntypedParameter,
   pointOrPointListUnion,
-  presentCheckedCode,
   provablyScalarOrFramedScalar,
   readsAsScalarThroughFreeInputs,
   signatureParamsLowerToScalars,
@@ -1015,9 +969,6 @@ export class BaseCompiler {
   static readonly wideNumericType = wideNumericType;
   static readonly _codeOverrides = _codeOverrides;
   static readonly _codeAliases = _codeAliases;
-  static readonly _presentReads = _presentReads;
-  static readonly withPresentReads = withPresentReads;
-  static readonly isPresentRead = isPresentRead;
   static get hasCodeOverride() {
     return core.hasCodeOverride;
   }
@@ -1363,9 +1314,6 @@ export class BaseCompiler {
   static readonly compileExprIf = compileExprIf;
   static readonly compileExprWhich = compileExprWhich;
   static readonly compileExprWhen = compileExprWhen;
-  static readonly testedReadsOf = testedReadsOf;
-  static readonly falsyReadsOf = falsyReadsOf;
-  static readonly isFalsyWhenUndecided = isFalsyWhenUndecided;
   static readonly compileExprAssertPresent = compileExprAssertPresent;
   static readonly compileExprTyped = compileExprTyped;
   static readonly noLoweringMessage = noLoweringMessage;
@@ -1464,16 +1412,9 @@ export class BaseCompiler {
   static readonly withImplicitLocalDeclares = withImplicitLocalDeclares;
   static readonly _localValueFrames = _localValueFrames;
   static readonly blockLocalValueFrame = blockLocalValueFrame;
-  static readonly blockInputs = blockInputs;
-  static readonly readsBlockLocal = readsBlockLocal;
-  static readonly localDependsOnInputs = localDependsOnInputs;
-  static readonly findDependentLocals = findDependentLocals;
   static readonly _localNameKeys = _localNameKeys;
   static readonly localNameKey = localNameKey;
   static readonly blockLocalOf = blockLocalOf;
-  static readonly isInnerBinderRead = isInnerBinderRead;
-  static readonly blockLocalsNamed = blockLocalsNamed;
-  static readonly isUnsetLocalRead = isUnsetLocalRead;
   static readonly classifyLocalReads = classifyLocalReads;
   static readonly loopRunsOnce = loopRunsOnce;
   static readonly localReadWithNoWrite = localReadWithNoWrite;
@@ -1748,60 +1689,13 @@ export class BaseCompiler {
   static set conditionNode(f: CoreHooks['conditionNode']) {
     core.conditionNode = f;
   }
-  static readonly operandInputNodes = operandInputNodes;
   static readonly connectiveNode = connectiveNode;
   static readonly isDecidedByConstruction = isDecidedByConstruction;
   static readonly operandDecidedConjuncts = operandDecidedConjuncts;
-  static readonly isOmittableRead = isOmittableRead;
-  static readonly presenceTest = presenceTest;
-  static readonly isVarsObjectRead = isVarsObjectRead;
   static readonly noBranchValue = noBranchValue;
   static readonly absenceKind = absenceKind;
-  static readonly unsuppliedReads = unsuppliedReads;
-  static readonly withNanEscape = withNanEscape;
-  static readonly _guardEmitting = _guardEmitting;
-  static readonly _truthOnly = _truthOnly;
-  static readonly withTruthOnly = withTruthOnly;
   static readonly isBooleanBindingType = isBooleanBindingType;
-  static readonly markTruthOnlyNode = markTruthOnlyNode;
-  static readonly truthOnlyEligible = truthOnlyEligible;
-  static readonly unsuppliedComparisonGuard = unsuppliedComparisonGuard;
-  static get _poisonConditions() {
-    return CompilerState._poisonConditions;
-  }
-  static set _poisonConditions(v: (typeof CompilerState)['_poisonConditions']) {
-    CompilerState._poisonConditions = v;
-  }
-  static get _directInputsOnly() {
-    return CompilerState._directInputsOnly;
-  }
-  static set _directInputsOnly(v: (typeof CompilerState)['_directInputsOnly']) {
-    CompilerState._directInputsOnly = v;
-  }
-  static readonly poisonSlot = poisonSlot;
-  static readonly mayReturnFunction = mayReturnFunction;
-  static readonly mayHoldFunctionType = mayHoldFunctionType;
-  static readonly hasEffectNode = hasEffectNode;
-  static get _noValueUsed() {
-    return CompilerState._noValueUsed;
-  }
-  static set _noValueUsed(v: (typeof CompilerState)['_noValueUsed']) {
-    CompilerState._noValueUsed = v;
-  }
-  static readonly catchNoValue = catchNoValue;
-  static readonly clearNoValue = clearNoValue;
-  static readonly guardTakesOperands = guardTakesOperands;
-  static readonly lazyChain = lazyChain;
-  static readonly testsFirst = testsFirst;
-  static readonly isTopTypedOperand = isTopTypedOperand;
   static readonly isNanLiteral = isNanLiteral;
-  static readonly scalarOperandKind = scalarOperandKind;
-  static readonly ABSENCE_AS_NAN_OPERATORS = ABSENCE_AS_NAN_OPERATORS;
-  static readonly readsAbsenceAsNaN = readsAbsenceAsNaN;
-  static readonly withBoundOperands = withBoundOperands;
-  static readonly nanCanDecide = nanCanDecide;
-  static readonly withNanTerms = withNanTerms;
-  static readonly nanEscapeTerms = nanEscapeTerms;
   static readonly absentOnlyThroughNumericSlots = absentOnlyThroughNumericSlots;
   static readonly isNumericOrVerdictShaped = isNumericOrVerdictShaped;
   static readonly isNumericShaped = isNumericShaped;
@@ -1916,8 +1810,6 @@ export class BaseCompiler {
   static readonly checkingShimName = checkingShimName;
   static readonly failedCheckMarker = failedCheckMarker;
   static readonly ABSENCE_DISCHARGING_HEADS = ABSENCE_DISCHARGING_HEADS;
-  static readonly COLLECTION_HOLDING_HEADS = COLLECTION_HOLDING_HEADS;
-  static readonly collectionReadInputs = collectionReadInputs;
   static readonly mayBeAbsentCollection = mayBeAbsentCollection;
   static readonly mayBeAbsentCollectionNode = mayBeAbsentCollectionNode;
   static readonly checkedCallMayBeAbsent = checkedCallMayBeAbsent;
@@ -1936,8 +1828,6 @@ export class BaseCompiler {
   static readonly checkListCoordinateTupleArgs = checkListCoordinateTupleArgs;
   static readonly tryCompileLocalFunctionCall = tryCompileLocalFunctionCall;
   static readonly complexWrapCode = complexWrapCode;
-  static readonly absentArgumentChecks = absentArgumentChecks;
-  static readonly presentCheckedCode = presentCheckedCode;
   static readonly emitUserFunctionCall = emitUserFunctionCall;
   static readonly isNominalAtomicArg = isNominalAtomicArg;
   static readonly isNominalAtomicType = isNominalAtomicType;

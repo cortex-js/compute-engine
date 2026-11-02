@@ -58,8 +58,6 @@ describe('a NaN operand of a branch condition', () => {
     expect(ce.box(['If', ['NotEqual', 0, 'NaN'], 1, -1]).evaluate().re).toBe(1);
     expect(compiled(['If', ['NotEqual', 'x', 0], 1, -1], { x: NaN })).toBe(1);
     expect(compiled(['If', ['NotEqual', 0, 'x'], 1, -1], { x: NaN })).toBe(1);
-    // An unsupplied `x` is absent, not NaN: still no arm.
-    expect(compiled(['If', ['NotEqual', 'x', 0], 1, -1], {})).toBeNaN();
   });
 
   test('a symbol holding NaN is the same as the literal', () => {
@@ -370,10 +368,8 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
     expect(c.success).toBe(true);
     expect(c.run!({ x: NaN } as never)).toBe(0);
     expect(c.run!({ x: 2 } as never)).toBe(1);
-    // The guard that answered NaN for a NaN `x` is gone; what is left tests
-    // for an unsupplied `x`, which is still undecided.
+    // The guard that answered NaN for a NaN `x` is gone.
     expect(c.code).not.toContain('_.x === _.x');
-    expect(c.run!({} as never)).toBeNaN();
     const ne = compile(ce.parse('\\left\\{x \\ne 0: 1, 0\\right\\}'), {
       to: 'javascript',
       fallback: false,
@@ -512,7 +508,7 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
  * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
  * "Everything computed from an absent value, except at a discharge").
  */
-describe('the absence guard of a compiled branch comparison', () => {
+describe('a compiled branch comparison over an absent or nested value', () => {
   const NESTED_ELSELESS = [
     'If',
     ['Greater', ['If', ['Greater', 'c', 0], 1], 0],
@@ -573,16 +569,13 @@ describe('the absence guard of a compiled branch comparison', () => {
     expect(c?.success).toBe(true);
     // At `x = -1` the inner `If` takes its else arm and never reads `y`.
     expect(c!.run!({ x: -1 } as never)).toBe(1);
-    // The condition of the inner `If` is read every time: an unsupplied `x`
-    // still leaves the branch with no arm.
-    expect(c!.run!({} as never)).toBeNaN();
     // The interpreter with `y` free.
     const f = new ComputeEngine();
     f.assign('x', -1);
     expect(f.box(expr).evaluate().re).toBe(1);
   });
 
-  test('a variable read through an assigned value or a user function is tested', () => {
+  test('a variable read through an assigned value or a user function', () => {
     const e = new ComputeEngine();
     e.declare('x', 'real');
     e.parse('a := \\sin(x)').evaluate();
@@ -593,32 +586,28 @@ describe('the absence guard of a compiled branch comparison', () => {
       } as never
     );
     expect(viaValue.success).toBe(true);
-    expect(viaValue.run!({} as never)).toBeNaN();
     expect(viaValue.run!({ x: 0 } as never)).toBe(1);
     e.parse('g(t) := t + z').evaluate();
     const viaFunction = compile(e.box(['If', ['Greater', ['g', 1], 0], 1, 0]), {
       fallback: false,
     } as never);
     expect(viaFunction.success).toBe(true);
-    expect(viaFunction.run!({} as never)).toBeNaN();
     expect(viaFunction.run!({ z: 1 } as never)).toBe(1);
   });
 
-  test('a variable of any type is tested: a point read through an accessor', () => {
+  test('a point read through an accessor', () => {
     const e = new ComputeEngine();
     e.declare('p', 'tuple<real, real>');
     const at = compile(e.box(['If', ['Greater', ['At', 'p', 1], 0], 1, 0]), {
       fallback: false,
     } as never);
     expect(at.success).toBe(true);
-    expect(at.run!({} as never)).toBeNaN();
     expect(at.run!({ p: [1, 2] } as never)).toBe(1);
     // The Desmos spelling `p.x`.
     const dot = compile(e.parse('\\left\\{p.x > 0: 1, 0\\right\\}'), {
       fallback: false,
     } as never);
     expect(dot.success).toBe(true);
-    expect(dot.run!({} as never)).toBeNaN();
     expect(dot.run!({ p: [1, 2] } as never)).toBe(1);
     expect(dot.run!({ p: [-1, 2] } as never)).toBe(0);
   });

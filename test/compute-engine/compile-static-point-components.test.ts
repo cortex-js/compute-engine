@@ -88,19 +88,13 @@ describe('point arithmetic fans out by the width of the tuple type', () => {
     expect(run({ a: 1, b: 2, c: 10, d: 20 })).toEqual([11, 22]);
   });
 
-  test('a declared point input takes the shape test and its fallback', () => {
+  test('a declared point input fans out with no shape test', () => {
+    // The host supplies `P` with a value of its declared type, so the code
+    // reads its components with no run-time test of its shape.
     const ce = newEngine({ P: 'tuple<number, number>' });
     const { code, run } = compiled(ce, 'P+(1,2)');
-    expect(code).toBe(
-      '((_tv3, _tv4) => Array.isArray(_tv3) && _tv3.length === 2 && ' +
-        '!Array.isArray(_tv3[0]) ? ' +
-        '[(_tv3[0] + _tv4[0]), (_tv3[1] + _tv4[1])] : ' +
-        '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _tv3, _tv4))(_.P, [1, 2])'
-    );
+    expect(code).toBe('[(_.P[0] + 1), (_.P[1] + 2)]');
     expect(run({ P: [1, 2] })).toEqual([2, 4]);
-    // A `vars` entry of another shape reaches the run-time helper, which
-    // answers it the way the interpreter answers a scalar plus a list.
-    expect(run({ P: 5 })).toEqual([6, 7]);
   });
 
   test('a point summed with a scalar fails closed', () => {
@@ -296,17 +290,5 @@ describe('a caller may put a shape the declared type did not promise in `vars`',
       .box(['Dot', ['List', ['List', 1, 2], ['List', 3, 4]], ['List', 1, 2]])
       .N();
     expect(interpreted.ops!.map((op) => op.re)).toEqual([5, 11]);
-  });
-
-  test('a matrix reaches `_SYS.bcast`, not the component fan-out', () => {
-    const ce = newEngine({ P: 'tuple<number, number>' });
-    const { code, run } = compiled(ce, 'P+(1,2)');
-    expect(code).toContain('!Array.isArray(_tv3[0])');
-    // The fan-out added a ROW to a number, which is JavaScript string
-    // concatenation: the compiled function answered `['1,21', '3,42']`.
-    expect(run({ P: [[1, 2] as any, [3, 4] as any] })).toEqual([
-      [2, 3],
-      [5, 6],
-    ]);
   });
 });
