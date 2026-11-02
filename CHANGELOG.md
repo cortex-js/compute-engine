@@ -29,9 +29,11 @@
   `f(0/0)`. A caller that needs to pass an absent value through a parameter
   declares no default for it. Compiled code fills the default in the
   function with the same absence test as `Coalesce` (`undefined`, `null` or
-  `NaN` in JavaScript; `None` or a float or complex `NaN` in Python; an
-  empty interval on `interval-js`), not with a native default parameter,
-  which fills only an argument that is left out.
+  `NaN` in JavaScript; `None` or a float or complex `NaN` in Python), not
+  with a native default parameter, which fills only an argument that is
+  left out. On `interval-js`, where an empty interval is either an absent
+  value or a pole, a call that supplies a number at a defaulted parameter
+  declines.
 
 - **Compiled code no longer guards an absent operand of an operator that is
   not a discharge.** The three-valued comparisons and connectives, the
