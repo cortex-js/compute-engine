@@ -130,16 +130,10 @@ describe('connectives over an operand whose shape is only known at run time', ()
     expect(parity(expr)).toEqual([false, true, true]);
   });
 
-  test('an absent position stays absent through a connective', () => {
-    // `_SYS.bcast` renders a mismatched position as NaN; `guardConnectiveAbsence`
-    // keeps `!`/`&&`/`||` from coercing it into a plain (and wrong) truth
-    // value.
-    const ce = make();
-    ce.assign('K', ce.parse('[1, 2]').evaluate());
-    expect(parity(ce.box(['Not', ['Less', ['q', 'L'], 'K']] as any))).toEqual(
-      NaN
-    );
-  });
+  // A connective over an absent position (`_SYS.bcast` renders a mismatched
+  // position as NaN) has no specified compiled value (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`).
 });
 
 describe('the shapes that must keep failing closed', () => {

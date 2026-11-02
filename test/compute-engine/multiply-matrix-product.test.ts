@@ -1953,22 +1953,24 @@ describe('a matrix with an absent cell', () => {
       to: 'javascript',
       fallback: false,
     });
-    expect(
-      r.run!({
-        P: [
-          [
-            [2, null],
-            [3, 4],
-          ],
-          [
-            [1, 0],
-            [0, 1],
-          ],
+    // The cells of the first row are computed from the absent cell, so their
+    // compiled value is not specified (`docs/COMPILATION-MODEL.md`, "Caveats
+    // of compiled code", the bullet "Everything computed from an absent value,
+    // except at a discharge"). The second row has no absent operand and must
+    // agree. A host passes `undefined` for an absent cell.
+    const out = r.run!({
+      P: [
+        [
+          [2, undefined],
+          [3, 4],
         ],
-      } as never)
-    ).toEqual([
-      [NaN, NaN],
-      [3, 4],
-    ]);
+        [
+          [1, 0],
+          [0, 1],
+        ],
+      ],
+    } as never) as number[][];
+    expect(out).toHaveLength(2);
+    expect(out[1]).toEqual([3, 4]);
   });
 });

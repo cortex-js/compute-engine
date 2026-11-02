@@ -1324,24 +1324,28 @@ describe('tier 2: scalar string equality lowers to exact content equality', () =
     expect(r.error).toMatch(/dictionary participant/);
   });
 
-  test('the §3.F Kleene guard is unaffected (no double handling)', () => {
-    // `string | missing` on BOTH sides is emitted by the base compiler's
-    // guarded form, which computes its own all-string inner — it never reaches
-    // this target's `Equal` codegen. Byte-identical to before tier 2.
+  test('two `string | missing` operands decline, and the fallback answers', () => {
+    // Neither operand is provably a string, so the scalar text admission
+    // does not apply and the string gate declines. Until 2026-11-01 a
+    // guarded (Kleene) form with its own strict `===` compiled the pair; the
+    // compiled value of a comparison with an absent operand is no longer
+    // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
+    // the bullet "Everything computed from an absent value, except at a
+    // discharge"), and that form was removed.
     const e = new ComputeEngine();
     e.declare('sk', 'string | missing');
     e.declare('tk', 'string | missing');
-    const r = compile(e.box(['Equal', 'sk', 'tk']), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/===/);
-    expect(r.code).not.toMatch(/Math\.abs/);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const r = compile(e.box(['Equal', 'sk', 'tk']));
+    warn.mockRestore();
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/string-valued operands/);
     const run = r.run as unknown as (v: {
       sk: string | undefined;
       tk: string | undefined;
     }) => boolean | undefined;
     expect(run({ sk: 'x', tk: 'x' })).toBe(true);
     expect(run({ sk: 'x', tk: 'y' })).toBe(false);
-    expect(run({ sk: undefined, tk: 'x' })).toBeUndefined();
   });
 
   test('a non-NFC runtime string IS normalized, on both sides', () => {
@@ -1511,15 +1515,17 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
   });
 });
 
-describe('tier 2: NotEqual over `string | missing` keeps the Kleene guard', () => {
-  // REGRESSION (2026-08-08). The §3.F object-domain guard covered `Equal`
-  // only, because every string-bearing `NotEqual` used to fail closed on the
-  // string gate. Once the tier-2 scalar admission started accepting
-  // `NotEqual(s, "x")` for `s: string | missing` (the LITERAL supplies the
-  // string evidence, and the union is neither provably numeric nor a
-  // collection), the unguarded lowering emitted `undefined !== "x"` — a bare
-  // `true` where the interpreter answers `Missing`. The guard now covers both
-  // heads.
+describe('tier 2: NotEqual over `string | missing`', () => {
+  // REGRESSION (2026-08-08). Once the tier-2 scalar admission started
+  // accepting `NotEqual(s, "x")` for `s: string | missing` (the LITERAL
+  // supplies the string evidence, and the union is neither provably numeric
+  // nor a collection), the lowering had to compare text, not numbers. Until
+  // 2026-11-01 a guard also made the compiled value absent for an absent
+  // `s`. The compiled value with an absent operand is no longer specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`): only present operands
+  // are checked in compiled code.
 
   test('the interpreter is Kleene for BOTH heads', () => {
     expect(ce.box(['Equal', 'Missing', { str: 'x' }]).evaluate().symbol).toBe(
@@ -1530,25 +1536,21 @@ describe('tier 2: NotEqual over `string | missing` keeps the Kleene guard', () =
     ).toBe('Missing');
   });
 
-  test('the compiled NotEqual is guarded, and answers absent for an absent operand', () => {
+  test('the compiled NotEqual is the text equality, negated', () => {
     const e = new ComputeEngine();
     e.declare('s', 'string | missing');
     const r = compile(e.box(['NotEqual', 's', { str: 'x' }]), {
       fallback: false,
     });
     expect(r.success).toBe(true);
-    // The guard, the object null, and the STRICT (not tolerance) inner.
-    expect(r.code).toMatchInlineSnapshot(
-      `"(((_.s === undefined) || ("x" === undefined)) ? undefined : (_.s) !== ("x"))"`
-    );
+    // The text equality, with no tolerance.
+    expect(r.code).toMatchInlineSnapshot(`"(!_SYS.eqt(_.s, "x"))"`);
     expect(r.code).not.toMatch(/Math\.abs/);
     const run = r.run as unknown as (v: {
       s: string | undefined;
     }) => boolean | undefined;
     expect(run({ s: 'y' })).toBe(true);
     expect(run({ s: 'x' })).toBe(false);
-    // NOT a bare `true` — the Kleene hole, as `Equal` already did.
-    expect(run({ s: undefined })).toBeUndefined();
   });
 
   test('a Missing-free NotEqual is not pessimized', () => {

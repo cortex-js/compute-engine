@@ -181,11 +181,14 @@ describe('Python: a UNION arm that is a collection disqualifies the scalar ==', 
   });
 });
 
-describe('Python: NotEqual over `string | missing` keeps the Kleene guard', () => {
-  // REGRESSION (2026-08-08). The §3.F object-domain guard covered `Equal`
-  // only; with the tier-2 admission accepting `NotEqual(s, "x")` the emission
-  // became a bare `(s) != ("x")`, i.e. `True` for an absent `s`, where the
-  // interpreter answers `Missing`. Guarded on both heads now.
+describe('Python: NotEqual over `string | missing`', () => {
+  // Until 2026-11-01 a guard made the compiled value `None` for an absent
+  // `s`, as the interpreter answers `Missing`. The compiled value with an
+  // absent operand is no longer specified (`docs/COMPILATION-MODEL.md`,
+  // "Caveats of compiled code", the bullet "Everything computed from an
+  // absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`), and the emission is
+  // the plain `!=`.
 
   test('the interpreter is Kleene for both heads', () => {
     expect(ce.box(['Equal', 'Missing', { str: 'x' }]).evaluate().symbol).toBe(
@@ -196,15 +199,14 @@ describe('Python: NotEqual over `string | missing` keeps the Kleene guard', () =
     ).toBe('Missing');
   });
 
-  test('the emitted NotEqual is the None-guarded conditional, not a bare !=', () => {
+  test('the emitted NotEqual is the plain !=, with no tolerance', () => {
     ce.declare('s', 'string | missing');
     const out = python.compileFunction(
       ce.box(['NotEqual', 's', { str: 'x' }]),
       'f',
       ['s']
     );
-    expect(out).toContain('None if');
-    expect(out).toContain('(s is None)');
+    expect(out).not.toContain('None if');
     expect(out).toContain('(s) != ("x")');
     expect(out).not.toContain('abs(');
   });

@@ -82,7 +82,6 @@ import {
   _truthOnly,
   absenceAxisForType,
   absenceKind,
-  absentComparisonGuard,
   absentDomainIsObject,
   absentOnlyThroughNumericSlots,
   blockInputs,
@@ -91,7 +90,6 @@ import {
   catchNoValue,
   clearNoValue,
   collectionReadInputs,
-  compileAbsentRelation,
   compileExactCondition,
   compileGuardTest,
   conditionDecidability,
@@ -107,7 +105,6 @@ import {
   isNanLiteral,
   isNumericOrVerdictShaped,
   isNumericShaped,
-  isObjectDomainMissingOperand,
   isOmittableRead,
   isTopTypedOperand,
   isUnsetLocalRead,
@@ -489,7 +486,6 @@ import {
   cseParentNode,
   isElementReadWithoutNothing,
   liftWideResult,
-  readAbsentInput,
 } from './compile-inner.js';
 import {
   compileExprApplyField,
@@ -516,11 +512,9 @@ import {
 import {
   compileExprAssertPresent,
   compileExprIf,
-  compileExprMissingEquality,
   compileExprWhen,
   compileExprWhich,
   falsyReadsOf,
-  guardConnectiveAbsence,
   isDecidedBooleanValue,
   isFalsyWhenUndecided,
   kleeneValueConnective,
@@ -1315,7 +1309,6 @@ export class BaseCompiler {
   }
   static readonly compileInnerSymbol = compileInnerSymbol;
   static readonly assertHeldValueType = assertHeldValueType;
-  static readonly readAbsentInput = readAbsentInput;
   static readonly liftWideResult = liftWideResult;
   static readonly complexShapedEmission = complexShapedEmission;
   static get _cseParent() {
@@ -1374,7 +1367,6 @@ export class BaseCompiler {
   static readonly falsyReadsOf = falsyReadsOf;
   static readonly isFalsyWhenUndecided = isFalsyWhenUndecided;
   static readonly compileExprAssertPresent = compileExprAssertPresent;
-  static readonly compileExprMissingEquality = compileExprMissingEquality;
   static readonly compileExprTyped = compileExprTyped;
   static readonly noLoweringMessage = noLoweringMessage;
   static readonly COMPLEX_TRANSPARENT_HEADS = COMPLEX_TRANSPARENT_HEADS;
@@ -1424,7 +1416,6 @@ export class BaseCompiler {
   static readonly tryCompilePythonElementwise = tryCompilePythonElementwise;
   static readonly kleeneValueConnective = kleeneValueConnective;
   static readonly isDecidedBooleanValue = isDecidedBooleanValue;
-  static readonly guardConnectiveAbsence = guardConnectiveAbsence;
   static readonly declareValueOperand = declareValueOperand;
   static readonly declareTypeOperand = declareTypeOperand;
   static readonly declaredTypeSource = declaredTypeSource;
@@ -1745,9 +1736,7 @@ export class BaseCompiler {
   static readonly BRANCH_RELATIONS = BRANCH_RELATIONS;
   static readonly conditionDialects = conditionDialects;
   static readonly conditionDialectOf = conditionDialectOf;
-  static readonly compileAbsentRelation = compileAbsentRelation;
   static readonly isAbsenceSymbol = isAbsenceSymbol;
-  static readonly isObjectDomainMissingOperand = isObjectDomainMissingOperand;
   static readonly operandMayBeAbsent = operandMayBeAbsent;
   static readonly ATOMIC_FRAGMENT = ATOMIC_FRAGMENT;
   static readonly mayBeUndecided = mayBeUndecided;
@@ -1813,7 +1802,6 @@ export class BaseCompiler {
   static readonly nanCanDecide = nanCanDecide;
   static readonly withNanTerms = withNanTerms;
   static readonly nanEscapeTerms = nanEscapeTerms;
-  static readonly absentComparisonGuard = absentComparisonGuard;
   static readonly absentOnlyThroughNumericSlots = absentOnlyThroughNumericSlots;
   static readonly isNumericOrVerdictShaped = isNumericOrVerdictShaped;
   static readonly isNumericShaped = isNumericShaped;

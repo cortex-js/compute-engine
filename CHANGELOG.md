@@ -2,6 +2,35 @@
 
 ### Behavior Changes
 
+- **Compiled code guarantees an absent value only where it is produced,
+  moved or discharged.** An absent value (`Missing`, the `NaN` of a read
+  past the end of a numeric list, the `undefined` a host passes for an input
+  declared `real | missing`) keeps the interpreter's value in compiled code
+  at its producers (`At`, `First`, `Last` past the end, an unmatched `Which`
+  cell), through the accessors that move it without computing on it (`At`,
+  `First`, `Last`, `Rest`, `Length`, a `Map` binding), and at a discharge
+  (`IsMissing`, `Coalesce`, `AssertPresent`, a default parameter). Every
+  other operator applied to an absent operand gives the target's own value
+  in compiled code, and nothing computed from it is specified: with
+  `w: real | missing` absent, `If(IsMissing(w), 1, 0)` is 1 on every route,
+  while `If(IsMissing(w > 0), 1, 0)` is 1 in the interpreter and 0 on
+  JavaScript (`undefined > 0` is `false`). In 0.176.0 the compiler carried
+  the three-valued comparison to the `IsMissing`, so both gave 1. The
+  interpreter does not change. A host passes `undefined`, never `null`, for
+  an absent input. The rule and its record: `docs/COMPILATION-MODEL.md`,
+  "Caveats of compiled code", and
+  `docs/plans/2026-11-01-absent-value-contract.md`.
+- **Compiled code no longer guards an absent operand of an operator that is
+  not a discharge.** The three-valued comparisons and connectives, the
+  absence levels of broadcasts and point arithmetic, and the `missing` flag
+  of `interval-js` results are removed, as the rule above allows. With
+  `w: real | missing` absent, `If(IsMissing(w > 0), 1, 0)` is now 0 on
+  JavaScript. On JavaScript, `Equal(s, t)` with `s` and `t` both declared
+  `string | missing` now declines, and the interpreter fallback gives its
+  value. The public `CompileTarget.absence.numeric` has no `readInput`
+  member any more: compiled Python reads an input as it is, so an input of
+  `None` in arithmetic raises a `TypeError` where it gave `nan`.
+
 - **`IsMissing`, `Coalesce` and `AssertPresent` read every spelling of an
   absent value in compiled code.** On JavaScript they read `NaN`, `undefined`
   and `null` as absent for a value of any type; before, the test for a
@@ -70,6 +99,17 @@
   is still refused with `untyped-input`.
 
 ### Resolved Issues
+
+- **Compiled Python groups a `vars` source that is not a primary
+  expression.** With `p: real` and `vars: { p: '2+3' }`, `2p` compiled to
+  `2 * 2+3`, which is 7; it is now `2 * (2+3)`, which is 10. A negative
+  constant is grouped too: `p^2` with `vars: { p: -3 }` is `(-3) ** 2`, which
+  is 9 (before: −9).
+- **On `interval-js`, `PointX` and `PointY` of a list whose every point is
+  absent keep the list.** `PointX([Missing, Missing])` gave one `empty`
+  result; it now gives a list of two, as the interpreter gives
+  `[Missing, Missing]`. The same applies to a list of restricted points
+  whose conditions are all false.
 
 - **On the `interval-js` target, a `Break` condition in a `Loop` that is
   always false no longer stops the loop.** With `k ∈ 1..5`,

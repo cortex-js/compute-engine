@@ -1475,9 +1475,10 @@ export function buildInterpreterFallback<T extends string>(
   // tuple, a list, a colour, a boolean, a string — and wherever the position
   // admits `missing` itself, since a written absence symbol lowers to the
   // object null so that an absent cell stays distinct from a `NaN` cell. The
-  // fallback spells it the same way, so a host cannot tell from the value
-  // which route ran. Without this rule every absent result was `NaN`, where
-  // the compiled code answers `undefined` for the same absent point.
+  // fallback spells it the same way as a producer of compiled code (a
+  // written `Missing`, a read past the end), so a host cannot tell from the
+  // value which route ran. Without this rule every absent result was `NaN`,
+  // where a compiled producer of an absent point answers `undefined`.
   //
   // The kind is read from the static type `t` of the position. When that
   // type says nothing (`unknown`, `any`, or no type), `hint` gives the kind

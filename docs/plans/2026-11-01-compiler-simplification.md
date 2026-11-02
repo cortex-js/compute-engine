@@ -184,3 +184,17 @@ complex `NaN` on Python. This is an addition, not a removal (source +124
 `[Missing, 2]`) and `Distance(Which(v < 0, (3, 4)), (0, 0))` threw. The
 complex cell of `When` became a plain `NaN`, which the test reads as absent.
 Corpus: 0 new declines, 0 changed values.
+
+**Candidate 7 and the rest of candidate 8 (2026-11-01).** Under option (a)
+of the absent-value contract, the two candidates that were dropped above
+are applied: the three-valued comparisons and connectives, the interval
+`missing` flag, the absence levels of broadcasts and point arithmetic, and
+the Python `readInput`. Source −1,109 net (+171 −1,280, with the review
+fixes). The dropped witnesses are now allowed: `If(IsMissing(w > 0), 1, 0)`
+is 0 on JavaScript, and the caveats specify no value for it. Kept: the
+`NaN` leaf of an element-wise `Equal` (it also serves an input left out),
+the skip of a `missing` arm in the guard of an input left out, and one test
+in the interval `pointComponent`, so that a present point next to an absent
+one keeps its coordinates. One case now declines: `Equal(s, t)` with both
+operands `string | missing` on JavaScript. Corpus: 0 new declines, 0
+changed values, 51 throws became `NaN` in 7 expressions `W(C_{ube}…)`.

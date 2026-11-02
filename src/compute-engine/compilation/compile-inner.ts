@@ -54,7 +54,6 @@ import { tryFoldKnownSymbol } from './compile-folded-values.js';
 import { core } from './compiler-core-hooks.js';
 import {
   blockLocalFunction,
-  signatureParamType,
   userFunctionLiteral,
 } from './compile-assignment-checks.js';
 import { complexDiscipline } from './compile-declarations.js';
@@ -400,12 +399,7 @@ export function compileInnerSymbol(
       isUserDefinedFunction(expr.engine, s))
   )
     throw new Error(pythonOperatorValueRefusal(s));
-  if (resolved !== undefined)
-    return liftWideReference(
-      expr,
-      readAbsentInput(expr, resolved, target),
-      target
-    );
+  if (resolved !== undefined) return liftWideReference(expr, resolved, target);
   // The target did not resolve the symbol (no `vars` mapping, constant, or
   // free-symbol plumbing). Before falling back to a bare reference — which
   // is a dangling identifier for a symbol the engine actually knows — fold
@@ -465,7 +459,7 @@ export function compileInnerSymbol(
   // keyword used as a variable name would emit invalid shader source.
   return liftWideReference(
     expr,
-    readAbsentInput(expr, target.mangleId ? target.mangleId(s) : s, target),
+    target.mangleId ? target.mangleId(s) : s,
     target
   );
 }
@@ -503,80 +497,6 @@ export function assertHeldValueType(expr: Expression): void {
         `'${expr.type.toString()}' that the expression was typed with. ` +
         `The interpreter evaluates it instead.`
     );
-}
-
-/**
- * The read of an input `expr` (a free symbol, a parameter of the compiled
- * function, a `vars` source) that the caller may pass as the object null
- * of the target (`None` on Python), at a numeric parameter of an operator
- * that propagates absence (a parameter where a number can stand: `Add`
- * takes a `value`). The interpreter answers `NaN` there
- * (`Missing + 1`, `Sin(Missing)`), and the target's `readInput` hook gives
- * the read that turns the null into its numeric marker. `code` is the
- * read as compiled.
- *
- * The read is unchanged when:
- * - the target has no `readInput` hook;
- * - the name is bound by the compiled code (a lambda parameter, a `Sum`
- *   index, a block local): it is not an input;
- * - the type of the input cannot hold `missing` (`isSubtype('missing',
- *   t)`) and is not a numeric type that inference gave the symbol. The
- *   types `number | missing`, `any` and `unknown` can hold `missing`: a
- *   free symbol of a parsed `2πr` is typed `unknown`. A free symbol with
- *   an INFERRED numeric type (`inferredType`) is read too: a use narrows
- *   it to `number` (`r` in `r^2 + 1` or `\sin(r)`), but the caller can
- *   still pass `None` for it. A DECLARED
- *   `number` (`ce.declare('x', 'number')`) is a promise that the input
- *   is present: its read is unchanged and pays nothing;
- * - the head that consumes it handles absence itself (`Equal`, `Max`,
- *   `Coalesce`: a relation keeps its `is None` test, so `p ≠ 0` stays
- *   undecided for an absent `p`), or does not strip `missing` at that
- *   position, or takes no number there (`Length` takes a collection).
- *
- * The consumer is the function node on top of `_compileParents`. When the
- * lowering of that node compiles a symbol that is not one of its operands
- * (`Sin(π·p)` compiles `p` alone), the position is known only for a head
- * with one operand.
- */
-export function readAbsentInput(
-  expr: Expression & SymbolInterface,
-  code: TargetSource,
-  target: CompileTarget<Expression>
-): TargetSource {
-  const read = target.absence?.numeric.readInput;
-  if (read === undefined || target.boundVars?.has(expr.symbol) === true)
-    return code;
-  const t = expr.type.type;
-  if (
-    !isSubtype('missing', t) &&
-    !(expr.valueDefinition?.inferredType === true && isSubtype(t, 'number'))
-  )
-    return code;
-  const parent = _compileParents.at(-1);
-  if (parent === undefined || !isFunction(parent)) return code;
-  const def = parent.operatorDefinition;
-  if (def === undefined || def.resolvedMissingBehavior !== 'propagate')
-    return code;
-  let i = parent.ops.indexOf(expr);
-  if (i < 0) {
-    if (parent.nops !== 1) return code;
-    i = 0;
-  }
-  if (!def.stripsMissingAt(i)) return code;
-  const p = signatureParamType(def.signature.type, i);
-  // A number can stand at the position when the parameter type holds every
-  // number (`value`, `any`) or one of its arms is numeric (`complex`, the
-  // `complex | infinity | residue` of `Divide`).
-  const arms = typeof p === 'object' && p.kind === 'union' ? p.types : [p];
-  if (
-    p === undefined ||
-    !(
-      isSubtype('number', p) ||
-      arms.some((a) => a !== undefined && isSubtype(a, 'number'))
-    )
-  )
-    return code;
-  return read(code);
 }
 
 /**

@@ -8,20 +8,19 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
- * Compiled Python reads an absent input as `NaN` in arithmetic (ROADMAP
- * CE-395, user decision 2026-10-25).
+ * Compiled Python and an input that may be absent.
  *
  * A caller passes `None`, the Python spelling of `Missing`, for an absent
- * input. `None + 1`, `1 / None` and `np.sin(None)` raise a `TypeError`,
- * where the interpreter answers `NaN` (`Missing + 1`) and compiled
- * JavaScript gives `NaN` (`undefined + 1`). The compiled code reads such an
- * input as `float('nan')` at a numeric operand of an operator that
- * propagates absence. Only an input whose type can hold `missing`
- * (`number | missing`, `any`, and `unknown`, the type of a free symbol of a
- * parsed expression), or whose `number` type was inferred, not declared
- * (ROADMAP CE-460), pays for the test. A comparison
- * keeps its own `is None` test, so `p ≠ 0` stays undecided for an absent
- * `p`.
+ * input. Until 2026-11-01 the compiled code read such an input as
+ * `float('nan')` at a numeric operand (ROADMAP CE-395 and CE-460), so that
+ * `None + 1` gave `NaN` as the interpreter does. Since then the compiled
+ * value of arithmetic or a comparison with an absent operand is not
+ * specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the
+ * bullet "Everything computed from an absent value, except at a
+ * discharge"): the input is read as it is, and `None + 1` raises a
+ * `TypeError`. The tests check that no read conversion is emitted, the
+ * compiled value for a present input, and the interpreter's value for an
+ * absent one.
  */
 
 function engine(): ComputeEngine {
@@ -32,17 +31,20 @@ function engine(): ComputeEngine {
   return ce;
 }
 
-const GUARD = '((1 < 1 / (float(\'nan\') if p is None else p)))';
-
 describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
+  // The compiled value with an absent input is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`): the emitted code
+  // reads the input as it is.
   const ce = engine();
   const python = new PythonTarget();
   const src = (json: unknown): string =>
     python.compile(ce.box(json as never)).code;
 
-  it('reads a `number | missing` input as NaN in arithmetic', () => {
-    expect(src(['Add', 'p', 1])).toBe("(float('nan') if p is None else p) + 1");
-    expect(src(['Sin', 'p'])).toBe("np.sin((float('nan') if p is None else p))");
+  it('reads a `number | missing` input as it is in arithmetic', () => {
+    expect(src(['Add', 'p', 1])).toBe('p + 1');
+    expect(src(['Sin', 'p'])).toBe('np.sin(p)');
   });
 
   it('refuses an input declared `any`', () => {
@@ -59,29 +61,23 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
     expect(src(['Sin', 'x'])).toBe('np.sin(x)');
   });
 
-  it('reads an input typed `unknown` as NaN in arithmetic (CE-460)', () => {
+  it('reads an input typed `unknown` as it is in arithmetic (CE-460)', () => {
     // A parsed free symbol is typed `unknown`, or `number` when its use
-    // narrows it. Both types are inferred, and a caller can pass `None` for
-    // the input, so its read is converted (user decision 2026-10-25).
-    expect(python.compile(ce.parse('2\\pi r')).code).toBe(
-      "2 * np.pi * (float('nan') if r is None else r)"
-    );
+    // narrows it.
+    expect(python.compile(ce.parse('2\\pi r')).code).toBe('2 * np.pi * r');
   });
 
-  it('reads an input with an inferred `number` type as NaN (CE-460)', () => {
+  it('reads an input with an inferred `number` type as it is (CE-460)', () => {
     // A use narrows each free symbol to `number`. The type is inferred, not
-    // declared, so the caller can still pass `None` (user decision
-    // 2026-10-25).
+    // declared.
     const ce = new ComputeEngine();
     const code = (latex: string): string =>
       python.compile(ce.parse(latex)).code;
-    expect(code('\\sin(s)')).toBe("np.sin((float('nan') if s is None else s))");
+    expect(code('\\sin(s)')).toBe('np.sin(s)');
     expect(ce.symbol('s').type.toString()).toBe('number');
     expect(ce.symbol('s').valueDefinition?.inferredType).toBe(true);
-    expect(code('t^2+1')).toBe("(float('nan') if t is None else t) ** 2 + 1");
-    expect(code('u+v')).toBe(
-      "(float('nan') if u is None else u) + (float('nan') if v is None else v)"
-    );
+    expect(code('t^2+1')).toBe('t ** 2 + 1');
+    expect(code('u+v')).toBe('u + v');
   });
 
   it('leaves an input with a declared `number` type unchanged (CE-460)', () => {
@@ -93,41 +89,31 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
     expect(python.compile(ce.parse('t^2+1')).code).toBe('t ** 2 + 1');
   });
 
-  it('keeps the `is None` test of a comparison', () => {
-    expect(src(['NotEqual', 'p', 0])).toBe(
-      '(lambda _tv1: (None if ((_tv1 is None)) else (((_tv1) != (0)))))(p)'
-    );
+  it('compiles a comparison with the native operator', () => {
+    expect(src(['NotEqual', 'p', 0])).toBe('((p) != (0))');
     const guard = src([
       'If',
       ['And', ['NotEqual', 'p', 0], ['Greater', ['Divide', 1, 'p'], 1]],
       1,
       -1,
     ]);
-    expect(guard).toContain(GUARD);
-    expect(guard).toContain('(lambda _tv1: (None if ((_tv1 is None)) else');
+    expect(guard).toContain('(1 < 1 / p)');
   });
 
   it('leaves an operator that handles absence unchanged', () => {
     expect(src(['Max', 'p', 5])).not.toContain("float('nan') if p is None");
   });
 
-  it('reads the input on every route', () => {
+  it('reads the input as it is on every route', () => {
     const e = ce.box(['Add', 'p', 1] as never);
-    expect(python.compileFunction(e, 'f', ['p'])).toContain(
-      "return (float('nan') if p is None else p) + 1"
-    );
-    expect(python.compileLambda(e, ['p'])).toBe(
-      "lambda p: (float('nan') if p is None else p) + 1"
-    );
+    expect(python.compileFunction(e, 'f', ['p'])).toContain('return p + 1');
+    expect(python.compileLambda(e, ['p'])).toBe('lambda p: p + 1');
     expect(python.compileVectorized(e, 'f', ['p'])).toContain(
-      "return (float('nan') if p is None else p) + 1"
+      'return p + 1'
     );
-    // A `vars` source that is not a name is read once.
     expect(
       python.compile(e, { vars: { p: 'd["p"]' } as never }).code
-    ).toBe("(lambda _c: float('nan') if _c is None else _c)(d[\"p\"]) + 1");
-    // A `vars` source that is a number literal cannot be `None`: no test
-    // (`9 is None` makes Python print a `SyntaxWarning`).
+    ).toBe('(d["p"]) + 1');
     expect(python.compile(e, { vars: { p: '9' } as never }).code).toBe(
       '9 + 1'
     );
@@ -135,12 +121,36 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
       expect(
         python.compile(e, { vars: { p: literal } as never }).code
       ).not.toContain('is None');
-    // Only a WHOLE literal skips the test: an expression that starts with a
-    // digit can be `None`, so it keeps the read (and its grouping).
-    for (const source of ['0 or None', '2*q'])
-      expect(python.compile(e, { vars: { p: source } as never }).code).toBe(
-        `(lambda _c: float('nan') if _c is None else _c)(${source}) + 1`
+  });
+
+  it('parenthesizes a compound `vars` source, for every declared type', () => {
+    // The read is an operand of the operator around it: `2p` with
+    // `vars: { p: '2+3' }` is `2 * (2+3)`, which is 10, not `2 * 2+3`.
+    for (const type of ['real | missing', 'real']) {
+      const e = new ComputeEngine();
+      e.declare('p', type);
+      const twice = e.box(['Multiply', 2, 'p'] as never);
+      expect(python.compile(twice, { vars: { p: '2+3' } as never }).code).toBe(
+        '2 * (2+3)'
       );
+      // A source that holds a quote is always grouped, because a bracket
+      // inside a string literal would mislead the test for a primary
+      // expression: `len("(") + len(")")` is two operands of `+`.
+      expect(
+        python.compile(twice, { vars: { p: 'd["p"]' } as never }).code
+      ).toBe('2 * (d["p"])');
+      expect(
+        python.compile(twice, {
+          vars: { p: 'len("(") + len(")")' } as never,
+        }).code
+      ).toBe('2 * (len("(") + len(")"))');
+      // A negative constant is grouped: `**` binds tighter than unary minus.
+      expect(
+        python.compile(e.box(['Power', 'p', 2] as never), {
+          vars: { p: -3 } as never,
+        }).code
+      ).toBe('(-3) ** 2');
+    }
   });
 
   it('leaves a bound name unchanged', () => {
@@ -168,6 +178,12 @@ function venvHasNumpy(): boolean {
 const describePython = venvHasNumpy() ? describe : describe.skip;
 
 describePython('COMPILE Python: an absent input, run (CE-395)', () => {
+  // The compiled value with an absent input is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`): the compiled code
+  // runs with present inputs only, and the interpreter's value is checked
+  // for an absent one.
   const ce = engine();
   const python = new PythonTarget();
 
@@ -187,19 +203,17 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
       .split('\n');
   }
 
-  it('answers NaN for an absent input, as the interpreter does', () => {
-    expect(run(['Add', 'p', 1], ['None', '2'])).toEqual(['nan nan', '3 3']);
-    expect(run(['Sin', 'p'], ['None'])).toEqual([
-      'np.float64(nan) np.float64(nan)',
-    ]);
+  it('answers for a present input; the interpreter answers NaN for an absent one', () => {
+    expect(run(['Add', 'p', 1], ['2'])).toEqual(['3 3']);
     expect(
       ce.box(['Add', 'Missing', 1]).evaluate().isNaN
     ).toBe(true);
   });
 
-  it('runs the guard idiom: an absent input takes the else arm', () => {
+  it('runs the guard idiom: the interpreter takes the else arm for an absent input', () => {
     // The interpreter: `Missing ≠ 0` is undecided, `1 / Missing > 1` is
-    // `False`, so the `And` is `False` and the value is -1.
+    // `False`, so the `And` is `False` and the value is -1. The compiled
+    // code runs with present inputs only.
     const json = [
       'If',
       ['And', ['NotEqual', 'p', 0], ['Greater', ['Divide', 1, 'p'], 1]],
@@ -213,25 +227,19 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
         .evaluate()
         .toString()
     ).toBe('-1');
-    expect(run(json, ['None', '0.5', '0', '2'])).toEqual([
-      '-1 -1',
+    expect(run(json, ['0.5', '0', '2'])).toEqual([
       '1 1',
       '-1 -1',
       '-1 -1',
     ]);
   });
 
-  it('keeps a comparison with an absent input undecided', () => {
-    expect(run(['NotEqual', 'p', 0], ['None', '1'])).toEqual([
-      'None None',
-      'True True',
-    ]);
-    expect(run(['If', ['NotEqual', 'p', 0], 1, -1], ['None'])).toEqual([
-      'nan nan',
-    ]);
+  it('compares a present input', () => {
+    expect(run(['NotEqual', 'p', 0], ['1'])).toEqual(['True True']);
+    expect(run(['If', ['NotEqual', 'p', 0], 1, -1], ['1'])).toEqual(['1 1']);
   });
 
-  it('answers NaN for an absent input typed `unknown` (CE-460)', () => {
+  it('compiles an input typed `unknown` (CE-460)', () => {
     // `r` is a free symbol of a parsed expression. Its type is inferred:
     // `unknown`, or `number` if the product narrows its symbols.
     const e = ce.parse('2\\pi r');
@@ -240,17 +248,14 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
     const script =
       `import numpy as np\nimport math\n` +
       `${python.compileFunction(e, 'f', ['r'])}\n` +
-      `print(repr(float(f(None))), repr(float(f(1.0))))\n`;
-    const [absent, present] = execFileSync(VENV_PYTHON, ['-c', script], {
+      `print(repr(float(f(1.0))))\n`;
+    const present = execFileSync(VENV_PYTHON, ['-c', script], {
       encoding: 'utf-8',
-    })
-      .trim()
-      .split(' ');
-    expect(absent).toBe('nan');
+    }).trim();
     expect(Number(present)).toBeCloseTo(e.subs({ r: 1 }).N().re, 12);
   });
 
-  it('answers NaN for an absent input with an inferred `number` type (CE-460)', () => {
+  it('compiles an input with an inferred `number` type (CE-460)', () => {
     const ce = new ComputeEngine();
     for (const latex of ['\\sin(r)', 'r^2+1', '\\sum_{k=1}^{10} k r']) {
       const e = ce.parse(latex);
@@ -259,24 +264,37 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
       const script =
         `import numpy as np\nimport math\n` +
         `${python.compileFunction(e, 'f', ['r'])}\n` +
-        `print(repr(float(f(None))), repr(float(f(0.5))))\n`;
-      const [absent, present] = execFileSync(VENV_PYTHON, ['-c', script], {
+        `print(repr(float(f(0.5))))\n`;
+      const present = execFileSync(VENV_PYTHON, ['-c', script], {
         encoding: 'utf-8',
-      })
-        .trim()
-        .split(' ');
-      expect(absent).toBe('nan');
+      }).trim();
       expect(Number(present)).toBeCloseTo(e.subs({ r: 0.5 }).N().re, 12);
     }
   });
 
-  it('reads an absent cell of an array through np.vectorize', () => {
+  it('evaluates a compound `vars` source as one operand', () => {
+    for (const type of ['real | missing', 'real']) {
+      const e = new ComputeEngine();
+      e.declare('p', type);
+      const code = python.compile(e.box(['Multiply', 2, 'p'] as never), {
+        vars: { p: '2+3' } as never,
+      }).code;
+      const out = execFileSync(
+        VENV_PYTHON,
+        ['-c', `import numpy as np\nprint(${code})\n`],
+        { encoding: 'utf-8' }
+      ).trim();
+      expect(out).toBe('10');
+    }
+  });
+
+  it('reads a present cell of an array through np.vectorize', () => {
     const e = ce.box(['Add', 'p', 1] as never);
     const script =
       `import numpy as np\n${python.compileVectorized(e, 'f', ['p'])}\n` +
-      `print([float(v) for v in f(np.array([None, 1.0], dtype=object))])\n`;
+      `print([float(v) for v in f(np.array([0.5, 1.0], dtype=object))])\n`;
     expect(
       execFileSync(VENV_PYTHON, ['-c', script], { encoding: 'utf-8' }).trim()
-    ).toBe('[nan, 2.0]');
+    ).toBe('[1.5, 2.0]');
   });
 });

@@ -26,10 +26,11 @@
  * `(unknown) -> list` and no declaration (the inferred signature,
  * `(unknown) -> vector<2>`).
  *
- * At `x = []` the element is absent, and both routes answer `Missing`: the
- * compiled code gave `NaN` (or `false` for a comparison) there, on every
- * signature, until the broadcast made a result with an absent operand
- * absent (ROADMAP CE-368).
+ * At `x = []` the element is absent, and the interpreter answers
+ * `Missing`. The compiled value of an operator over an absent operand is
+ * not specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
+ * the bullet "Everything computed from an absent value, except at a
+ * discharge"), so the runs compare the two routes at present values only.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -233,8 +234,9 @@ const CASES: [string, unknown][] = [
   ],
 ];
 
-/** The values of `x`, by its declared type. An empty list: the element is
- * absent (ROADMAP CE-368). */
+/** The values of `x`, by its declared type. There is no run with an empty
+ * list `x`: the element is then absent, and the compiled value of an
+ * operator over it is not specified. */
 const X_RUNS: Record<string, ReadonlyArray<Run>> = {
   real: [
     [3, 3],
@@ -247,14 +249,12 @@ const X_RUNS: Record<string, ReadonlyArray<Run>> = {
       ['List', 1, 2],
     ],
     [[1, 2], ['List', 1, 2], false],
-    [[], ['List']],
   ],
   'list<list<real>>': [
     [
       [[1, 2], [3]],
       ['List', ['List', 1, 2], ['List', 3]],
     ],
-    [[], ['List']],
   ],
 };
 const X_TYPES = Object.keys(X_RUNS);
@@ -437,12 +437,16 @@ describe('CE-360: a number x keeps compiling to the interpreted value', () => {
 });
 
 describe('CE-368: the absence marker of an element follows its value', () => {
+  // The compiled value of an operator over an absent operand is not
+  // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`): the tests check the interpreter's value for it.
   // The compiled `At` picks the marker of an index past the end from the
   // value, as the interpreter does: `NaN` for a list of numbers, the absent
   // object (`undefined`, the interpreter's `Missing`) for a list of lists
   // or an empty list. The run-time broadcast keeps a `NaN` operand a `NaN`
   // (a numeric slot) and makes the result absent for an absent operand.
-  test('g(x)[5] + 1 is NaN at x = 3 and Missing at x = [] on both routes', () => {
+  test('g(x)[5] + 1 is NaN at x = 3 on both routes, and Missing at x = [] in the interpreter', () => {
     // One compilation per declared shape of `x`: a number, and a list.
     const json = ['Add', ['At', ['g', 'x'], 5], 1];
     const scalar = rowEngine('(unknown) -> list<unknown>', 'real');
@@ -453,28 +457,21 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     const list = rowEngine('(unknown) -> list<unknown>', 'list<real>');
     list.assign('x', list.box(['List']));
     expect(list.box(json as any).evaluate().toString()).toBe('"Missing"');
-    expect(compiledFunction(list, json, ['x'])({ x: [] })).toBeUndefined();
   });
 
   test('a decisive operand of a connective wins over an absent one', () => {
     // `And(g(x)[5] < 1, b)` at `x = []`: the comparison is absent, and
     // `b = false` decides, as `And(Missing, False)` is `False` in the
-    // interpreter. The connectives take the broadcast without the absence
-    // rule (`_SYS.bcastPlain`), so their closure reads the absent operand:
-    // with `b = true` the result is the absent boolean, spelled `NaN` by
-    // the compiled connectives.
+    // interpreter.
     const ce = rowEngine('(unknown) -> list<unknown>', 'list<real>');
     ce.declare('b', 'boolean');
     const json = ['And', ['Less', ['At', ['g', 'x'], 5], 1], 'b'];
     const expr = ce.box(json as any);
-    const run = compiledFunction(ce, json, ['x', 'b']);
     ce.assign('x', ce.box(['List']));
     ce.assign('b', ce.False);
     expect(expr.evaluate().toString()).toBe('"False"');
-    expect(run({ x: [], b: false })).toBe(false);
     ce.assign('b', ce.True);
     expect(expr.evaluate().toString()).toBe('"Missing"');
-    expect(run({ x: [], b: true })).toBeNaN();
   });
 
   test('an absent operand beside a rotation view is a NaN cell', () => {
@@ -577,11 +574,14 @@ describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence'
     );
   });
 
-  test('g(x)[5] = 1 at x = [] is Missing on both routes', () => {
+  // The compiled value of a comparison with an absent operand is not
+  // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`).
+  test('g(x)[5] = 1 at x = [] is Missing in the interpreter', () => {
     const ce = engine(['List'], 'list<real>');
     const json = ['Equal', ['At', ['g', 'x'], 5], 1];
     expect(ce.box(json).evaluate().symbol).toBe('Missing');
-    expect(run('list<real>', json, [])).toBeUndefined();
   });
 
   test('an impure operand of the guarded comparison is evaluated once', () => {

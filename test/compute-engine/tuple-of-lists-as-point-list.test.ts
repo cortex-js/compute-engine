@@ -1261,6 +1261,10 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
     ],
   ];
 
+  // The compiled value of arithmetic on an absent list of points is not
+  // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`): the compiled code runs with a present list only.
   test.each(cases)('%s', (_, make, expected) => {
     const ce = restrictedEngine(true);
     const e = make(ce);
@@ -1276,6 +1280,5 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
     } as any);
     expect(r.success).toBe(true);
     close((r.run as any)({ ...values, t: 1 }), expected);
-    expect((r.run as any)({ ...values, t: -1 })).toBeUndefined();
   });
 });

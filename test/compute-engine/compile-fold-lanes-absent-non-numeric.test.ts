@@ -151,8 +151,12 @@ describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
 });
 
 describe('A FOLD OVER ELEMENTS THAT MAY BE ABSENT (CE-381)', () => {
-  // JavaScript reads `null` as 0 in `+`, `*` and `Math.min`. The
-  // interpreter reads an absent element as `NaN`, from that step on.
+  // The interpreter reads an absent element as `NaN`, from that step on.
+  // The compiled value of a fold over an absent element is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`): only the
+  // interpreter's value is checked for it.
   const SCALARS = [2, null, 3];
   test.each([
     ['Scan(Multiply)', ['Scan', 'L', 'Multiply', 1], [2, NaN, NaN]],
@@ -164,20 +168,12 @@ describe('A FOLD OVER ELEMENTS THAT MAY BE ABSENT (CE-381)', () => {
     ['Product', ['Product', 'L'], NaN],
     ['Sum', ['Sum', 'L'], NaN],
   ])('%s over [2, absent, 3]', (_, expr, expected) => {
-    expect(run('list<number | missing>', expr, SCALARS)).toEqual(expected);
     expect(evaluate('list<number | missing>', expr, SCALARS)).toBe(
       JSON.stringify(expected).replace(/null/g, 'NaN')
     );
   });
 
   test('a complex seed over an absent element', () => {
-    const r = run(
-      'list<number | missing>',
-      ['Reduce', 'L', 'Multiply', 'ImaginaryUnit'],
-      SCALARS
-    ) as C;
-    expect(r.re).toBeNaN();
-    expect(r.im).toBeNaN();
     expect(
       evaluate(
         'list<number | missing>',
@@ -196,45 +192,9 @@ describe('A FOLD OVER ELEMENTS THAT MAY BE ABSENT (CE-381)', () => {
     ['Sum', ['Sum', 'L'], [5, NaN]],
     ['Reduce(Multiply)', ['Reduce', 'L', 'Multiply', 1], [6, NaN]],
   ])('%s over rows with an absent entry', (_, expr, expected) => {
-    expect(run('list<list<number | missing>>', expr, NESTED)).toEqual(expected);
     expect(evaluate('list<list<number | missing>>', expr, NESTED)).toBe(
       JSON.stringify(expected).replace(/null/g, 'NaN')
     );
-  });
-
-  // In the complex lane, an absent element is `{re: NaN, im: NaN}`: a sum
-  // does not keep the finite imaginary part of the seed.
-  test('a complex seed of an Add fold over an absent element', () => {
-    const r = run(
-      'list<number | missing>',
-      ['Reduce', 'L', 'Add', 'ImaginaryUnit'],
-      SCALARS
-    ) as C;
-    expect(r.re).toBeNaN();
-    expect(r.im).toBeNaN();
-  });
-
-  // The matrix product reads an absent cell as `NaN`, not as 0, so the
-  // row that holds it is `NaN`. (The interpreter types a literal with an
-  // absent cell as a plain list of lists, not as a matrix, and multiplies
-  // it element-wise: ROADMAP CE-389.)
-  test('the product of matrices with an absent cell', () => {
-    const value = [
-      [
-        [2, null],
-        [3, 4],
-      ],
-      [
-        [1, 0],
-        [0, 1],
-      ],
-    ];
-    expect(
-      run('list<matrix<(number | missing)^(2x2)>>', ['Product', 'L'], value)
-    ).toEqual([
-      [NaN, NaN],
-      [3, 4],
-    ]);
   });
 
   test('a list without absent elements keeps the plain operators', () => {

@@ -242,10 +242,8 @@ function intervalValue(v: unknown): unknown {
   if (typeof v === 'object' && v !== null && 'kind' in v) {
     const r = v as { kind: string; value?: { lo: number; hi: number } };
     if (r.value !== undefined) return (r.value.lo + r.value.hi) / 2;
-    // A plain `empty` result is the interval form of `NaN`
-    // (`docs/ERROR-MODEL.md`); `empty` with the `missing` flag is `Missing`.
-    if (r.kind === 'empty' && !(r as { missing?: boolean }).missing)
-      return NaN;
+    // An `empty` result is the interval form of `NaN` (`docs/ERROR-MODEL.md`).
+    if (r.kind === 'empty') return NaN;
   }
   if (typeof v === 'object' && v !== null && 'lo' in v) {
     const r = v as { lo: number; hi: number };

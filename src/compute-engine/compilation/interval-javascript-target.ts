@@ -1079,7 +1079,7 @@ function compileIntervalSelectionValue(
   const compileArm = (i: number): string =>
     BaseCompiler.compileOpValue(which, operand(i), target, 0, args[i]);
   const build = (k: number, bounds: IntervalArmBounds): string => {
-    if (k >= live.length) return `(${INTERVAL_MISSING})`;
+    if (k >= live.length) return `(${INTERVAL_EMPTY})`;
     const { at: i, always } = live[k];
     const cond = args[i];
     const region = always ? undefined : intervalConditionRegion(cond);
@@ -1220,38 +1220,20 @@ function literalRootPointOps(
  * interval, for a position whose interpreter value is `NaN` (`Max` of an
  * empty list) or that reads past the end of a point. `_IA.isAbsent` reads it
  * as absent. An absent value proper (a written `Missing`, an `At` that
- * selects nothing) is `INTERVAL_MISSING` or `INTERVAL_EMPTY` instead.
+ * selects nothing) is `INTERVAL_EMPTY` instead.
  */
 const INTERVAL_ABSENCE = '{ lo: NaN, hi: NaN }';
 
 /**
  * The emitted spelling of an ABSENT value on this target: the `empty`
  * result, the value a restriction whose condition fails (`_IA.restrict`)
- * gives. An `At` whose index selects nothing compiles to it, and a written
- * absence symbol (`Missing`, `Undefined`) compiles to the same result with
- * the `missing` flag (`INTERVAL_MISSING`), so that a host reads one spelling of
- * "no value" (the interpreter fallback gives `empty` too). The whole-NaN bare
+ * gives. An `At` whose index selects nothing compiles to it, and so does a
+ * written absence symbol (`Missing`, `Undefined`), so that a host reads one
+ * spelling of "no value" (the interpreter fallback gives `empty` too). The whole-NaN bare
  * interval `INTERVAL_ABSENCE` has no `kind`, and so is not an interval result.
  * `_IA.isAbsent` and `_IA.coalesce` read both as absent.
  */
 const INTERVAL_EMPTY = "{ kind: 'empty' }";
-
-/**
- * The emitted spelling of an absent value whose interpreter value is
- * `Missing`: a written absence symbol (`Missing`, `Undefined`, also the
- * missing else arm of an `If`) and the tail of a `Which` with no default arm
- * that selects no clause. It is the `empty` result with the `missing` flag
- * (`IntervalResult`). The flag tells a comparison that the operand is
- * absent, so the comparison gives `'maybe'` (the Kleene reading of
- * `Missing`), where an `empty` without the flag, a value undefined over the
- * whole cell (`\sqrt{x}` over `[-1, -1]`), makes it `'false'`
- * (`hasEmptyOperand`, `interval/comparison.ts`). An `At` that selects
- * nothing keeps `INTERVAL_EMPTY`: the interpreter answers a numeric
- * undefined value there, and a comparison with it is `False`. Every other
- * consumer reads the two spellings alike: `_IA.isAbsent` and `_IA.coalesce`
- * read both as absent, and the runner gives both as `{ kind: 'empty' }`.
- */
-const INTERVAL_MISSING = "{ kind: 'empty', missing: true }";
 
 /**
  * The type of the coordinate `k` (0-based) that a point accessor reads out of
@@ -2488,7 +2470,7 @@ function isIntervalResultCode(
 ): boolean {
   // The exhausted tail of a `Which` with no default arm, written by the
   // `Which` entry of the function table.
-  if (code === `(${INTERVAL_MISSING})`) return true;
+  if (code === `(${INTERVAL_EMPTY})`) return true;
   const codes = INTERVAL_RESULT_CODES.get(BaseCompiler.namingContext(target));
   return codes !== undefined && codes.has(code);
 }
@@ -2556,7 +2538,7 @@ function compileIntervalConditional(
   target: CompileTarget<Expression> | undefined
 ): string {
   // Each arm is parenthesized: an arm that is an object literal (the
-  // absence result `{ kind: 'empty', missing: true }` of a written
+  // absence result `{ kind: 'empty' }` of a written
   // `Missing`) would otherwise be read as the BLOCK body of the arrow
   // function, a syntax error.
   const lazy = `_IA.piecewise(
@@ -3816,7 +3798,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // reached: each arm is compiled over the inputs narrowed to the part of
     // the interval where it can be selected (`compileNarrowedIntervalArm`).
     const buildPiecewise = (i: number, bounds: IntervalArmBounds): string => {
-      if (i >= args.length) return `(${INTERVAL_MISSING})`;
+      if (i >= args.length) return `(${INTERVAL_EMPTY})`;
       const cond = args[i];
       const val = args[i + 1];
       // A clause whose condition is written `False` is never selected, and
@@ -6252,12 +6234,7 @@ function toIntervalValue(value: unknown, wide = false): IntervalValue {
   // absent value as `NaN` in a numeric position and as `Missing` elsewhere, and
   // the generic fallback gives `NaN` for both on this target, since it has no
   // object null. Without this the fallback answered `{ lo: NaN, hi: NaN }`, so
-  // a host could tell from the value which route ran. The value has no
-  // `missing` flag, also for an interpreter `Missing`: the runner of compiled
-  // code removes the flag from every `empty` it returns (`freshIntervalValue`,
-  // `interval/run-support.ts`), and a comparison in the expression was
-  // already decided by the interpreter, so no code of this target reads the
-  // flag of this value.
+  // a host could tell from the value which route ran.
   if (value === undefined || (typeof value === 'number' && Number.isNaN(value)))
     return wide ? { kind: 'entire' } : { kind: 'empty' };
   // A present number is the interval result of a point, the value compiled
@@ -6506,12 +6483,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // `'false'` (`_IA.restrict` over a relation), so the object-domain
       // gate does not apply (`coversValueModel`). No object axis. A written
       // absence symbol is spelled by `make`, and is the `empty` result, as an
-      // absent value of this target is wherever it arises at run time, with
-      // the `missing` flag (`INTERVAL_MISSING`): a comparison with it has no
-      // value, as a comparison with `Missing` has none in the interpreter.
+      // absent value of this target is wherever it arises at run time.
       absence: {
         numeric: {
-          make: () => INTERVAL_MISSING,
+          make: () => INTERVAL_EMPTY,
           isAbsent: (x) => `_IA.isAbsent(${x})`,
           coalesce: (x, d) => `_IA.coalesce(${x}, () => ${d})`,
           coversValueModel: true,

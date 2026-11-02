@@ -299,28 +299,34 @@ export function pointComponent(
   // `library/collections.ts`): an empty row passes the row test, and when it
   // decided, `[[], [(1, 2), (3, 4)]]` was read as a list of points where the
   // interpreter maps down to the points, `[[], [1, 3]]`. An absent element
-  // (a hole, `null`, or the `missing` empty result this target spells
-  // `Missing` with) does not decide either, as in the interpreter
-  // (`firstPresentElement`): when it decided, `[Missing, (1, 2), (3, 4)]`
-  // was element-indexed.
-  const isAbsent = (e: unknown): boolean =>
-    e === undefined ||
-    e === null ||
-    (typeof e === 'object' &&
-      'kind' in e &&
-      e.kind === 'empty' &&
-      'missing' in e &&
-      e.missing === true);
+  // (a hole or `null`) does not decide either, as in the interpreter
+  // (`firstPresentElement`).
+  //
+  // An `empty` result (the spelling of a written `Missing` on this target,
+  // and also of a coordinate with no value, `\sqrt{x}` over `[-2, -1]`)
+  // decides only when no other element can: when it decided,
+  // `[Missing, (1, 2), (3, 4)]` was read as one point, and the coordinates
+  // 1 and 3 of the present points were lost. A collection of `empty`
+  // results and scalars keeps the point reading.
+  const isAbsent = (e: unknown): boolean => e === undefined || e === null;
+  const isEmptyResult = (e: unknown): boolean =>
+    typeof e === 'object' && e !== null && 'kind' in e && e.kind === 'empty';
+  const isEmptyRow = (e: unknown): boolean =>
+    Array.isArray(e) && e.length === 0;
   const deciding = (a: unknown[]): unknown =>
-    a.find((e) => !isAbsent(e) && !(Array.isArray(e) && e.length === 0)) ??
+    a.find((e) => !isAbsent(e) && !isEmptyRow(e) && !isEmptyResult(e)) ??
+    a.find((e) => !isAbsent(e) && !isEmptyRow(e)) ??
     a.find((e) => !isAbsent(e)) ??
     a[0];
   const first: unknown = deciding(coll);
   // Every element is absent: no element decides the reading, and the
   // caller's reading of an empty array (`emptyBroadcasts`, read from the
   // declared element type) decides, as in the interpreter. A broadcast gives
-  // the absence marker for each element.
-  if (isAbsent(first))
+  // the absence marker for each element, so the list keeps its length:
+  // `PointX([Missing, Missing])` is `[Missing, Missing]`. An `empty` result
+  // counts as absent here, since this target spells a written `Missing`
+  // with it.
+  if (isAbsent(first) || coll.every((e) => isAbsent(e) || isEmptyResult(e)))
     return emptyBroadcasts ? coll.map(() => absent()) : absent();
   // Every element is an empty array, and the caller states that the static
   // type is a collection of points at more than one level (`nested`): each

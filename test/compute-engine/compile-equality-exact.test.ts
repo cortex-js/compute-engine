@@ -351,13 +351,13 @@ describe('an absent cell makes an element-wise comparison undecided', () => {
     expect(r.run({ L: [1, 2, 3], t: 2 })).toEqual([0, 1, 0]);
   });
 
-  test('a marked cell combines three-valued with a connective', () => {
-    // `And(Missing, True)` is `Missing` and `And(Missing, False)` is `False`:
-    // a decided `false` absorbs an undecided cell. The element-wise connective
-    // guard reads the marker because it tests absence as `x !== x`.
+  test('a connective over the element-wise comparison', () => {
+    // The compiled value of a connective over a marked (absent) cell is not
+    // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the
+    // bullet "Everything computed from an absent value, except at a
+    // discharge"; R4 of `docs/plans/2026-11-01-absent-value-contract.md`):
+    // only the bound pair is checked.
     const r = js(ce, ['And', ['Equal', 'L', 't'], ['Greater', 'L', 0]]);
-    expect(r.run({ L: [1, 2, 3] })).toEqual([NaN, NaN, NaN]);
-    expect(r.run({ L: [-1, -2, -3] })).toEqual([false, false, false]);
     expect(r.run({ L: [1, 2, 3], t: 2 })).toEqual([false, true, false]);
   });
 

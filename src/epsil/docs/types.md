@@ -846,6 +846,15 @@ each of them where it reports the plain read:
   and fails with an `expected-present` error when it is not. Use it where
   absence is a violated precondition rather than a case to handle.
 
+Discharge before you compute. The interpreter carries `missing` through
+other operators as a convenience (`missing + 1` is `NaN`, `missing > 0` is
+`missing`), but compiled code promises only the discharges above and the
+accessors that move a value without computing on it (`xs[i]`, `first`,
+`last`, `rest`, `length`). Any other operator applied to a possibly absent
+value gives the target's own answer when the program is compiled
+(`undefined > 0` is `false` in JavaScript), so `isMissing(w > 0)` can differ
+between the interpreter and compiled code, and `isMissing(w)` cannot.
+
 **A declared type is a contract on every value the symbol takes.** `let s:
 string = missing` is an error, as `let s: string = 5` is, and so is a later
 `s := missing`; `let xs: list<string> = ["a", missing]` is an error too,

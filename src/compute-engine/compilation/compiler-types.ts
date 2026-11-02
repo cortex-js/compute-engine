@@ -134,12 +134,13 @@ export type UnsettledShape = {
 /**
  * A run-time check that an argument of a user function is present
  * (`BaseCompiler.absentArgumentChecks`): the message of the `TypeError` the
- * check throws, or `undefined` when an absent value is replaced by `NaN`
- * instead (a numeric parameter), and whether the check is also made on each
- * element of a list argument, at any depth (`elements`).
+ * check throws, and whether the check is also made on each element of a
+ * list argument, at any depth (`elements`). A numeric parameter has no
+ * check: the compiled value of its body over an absent argument is not
+ * specified.
  */
 export type AbsentArgumentCheck = {
-  message: string | undefined;
+  message: string;
   elements: boolean;
 };
 

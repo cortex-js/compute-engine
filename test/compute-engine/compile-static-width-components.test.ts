@@ -184,13 +184,10 @@ describe('a run-time shape that contradicts the declared width', () => {
   /** `W+1` with `W` a list of unstated width: the `_SYS.bcast` lowering. */
   const wide = () => compiled(newEngine({ W: 'list<number>' }), 'W+1');
 
-  test('an absent operand answers the absent value, as the broadcast helper does', () => {
-    // An absent list operand makes the sum absent (`docs/ERROR-MODEL.md`
-    // §3, user decision of 2026-09-27; `_SYS.bcast` since ROADMAP CE-368).
-    // It answered `NaN` before.
-    expect(wide().run({})).toBeUndefined();
-    expect(fixed().run({})).toBeUndefined();
-  });
+  // The compiled value with an absent operand is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`), so there is no test of it.
 
   test('a SHORTER list answers the shorter result', () => {
     expect(fixed().run({ W: [1, 2] })).toEqual(wide().run({ W: [1, 2] }));

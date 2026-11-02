@@ -25,7 +25,6 @@ import {
   resolveTypeForCompilation as resolveDeclaredTypeForCompilation,
   signatureArms,
   stripMissingFromType,
-  topTypeBesideAbsence,
   typeElementCount,
   kindArmNames,
 } from '../../common/type/utils.js';
@@ -805,10 +804,7 @@ export function isRuntimePointShaped(a: Expression): boolean {
  * restricted point `P` compiled to the scalar `_.t * [0, 1]`, which runs to
  * `NaN` where the interpreter answers the point `(0, t)`. The interpreter
  * answers `Missing` (the absent point) for the product of a number and an
- * absent point, and the broadcast lowering answers `undefined`, the
- * JavaScript spelling of an absent object (user decision of 2026-09-27,
- * which replaces the `NaN` of the decision of 2026-09-09; see
- * `objectAbsenceLevels`).
+ * absent point; the compiled value for an absent point is unspecified.
  *
  * A NOMINAL value is atomic whatever its representation, as for
  * `unionAdmitsIndexedCollection` above.
@@ -946,104 +942,6 @@ function gatedCollectionArmsOfType(raw: Type): Type[] | undefined {
 }
 
 /**
- * The collection arms of a union of `missing`, number arms and at least one
- * indexed collection arm (`missing | number | vector<2>`, the type of an
- * index into a `broadcastable<vector<2>>`), or `undefined` for another
- * type. A value of such a type is a number, a collection, or the absent
- * object. An absent number is the numeric marker `NaN`, so `undefined` at
- * run time is always the absent collection, which the interpreter answers
- * as `Missing`: the value can hold an absent object at level 0, as a gated
- * indexed collection can (`gatedCollectionArmsOfType`). A number arm is
- * read by `bcastAbsent` as by `bcast`.
- */
-function numberOrGatedCollectionArms(raw: Type): Type[] | undefined {
-  if (isNominalAtomicType(raw)) return undefined;
-  const r = resolveTypeForCompilation(raw);
-  if (typeof r === 'string' || r.kind !== 'union') return undefined;
-  const present: Type[] = [];
-  let absent = false;
-  let numeric = false;
-  for (const branch of r.types) {
-    const b = resolveTypeForCompilation(branch);
-    if (b === 'missing') absent = true;
-    else if (isSubtype(b, 'number')) numeric = true;
-    else present.push(branch);
-  }
-  if (!absent || !numeric || present.length === 0) return undefined;
-  return gatedCollectionArmsOfType({
-    kind: 'union',
-    types: ['missing', ...present],
-  });
-}
-
-/** True when `t` is a union with a `missing` arm. */
-function hasMissingArm(t: Type): boolean {
-  const r = resolveTypeForCompilation(t);
-  return (
-    typeof r !== 'string' &&
-    r.kind === 'union' &&
-    r.types.some((b) => resolveTypeForCompilation(b) === 'missing')
-  );
-}
-
-/**
- * The array levels at which a value of type `raw` can hold an ABSENT OBJECT
- * (a point, a list, or another indexed collection that may be `undefined`
- * at run time), as a bit set: bit `k` is set when level `k` can hold one.
- * `0` (no bit set) means the value cannot hold an absent object.
- *
- * - Level `0`: the value itself can be absent. Its type is a gated indexed
- *   collection (`gatedCollectionArms`), such as the restricted point
- *   `When((0, 1), c)`, typed `missing | tuple<integer, integer>`.
- * - Level `k + 1`: the value is a list (not a tuple) whose elements can hold
- *   an absent object at level `k`, such as `[P{c}, Q]`, typed
- *   `list<missing | tuple<…>>`, at level 1.
- *
- * A value can have more than one level. The restricted list of points
- * `[P{c}, Q]{d}`, typed `missing | list<missing | tuple<…>>`, is absent
- * when `d` fails (level 0), and when it is present its first element is
- * absent when `c` fails (level 1): its set is `0b11`. The present arm of a
- * gated type is read for its own levels for this reason.
- *
- * A tuple has no level of its own: its components are numeric slots, where
- * an absent value is `NaN`. Read by `tryCompileBroadcast`, which routes an
- * operand with a level through `_SYS.bcastAbsent`, so that arithmetic on an
- * absent point answers `undefined` for the whole point, as the interpreter
- * answers `Missing` (`docs/ERROR-MODEL.md` §3).
- *
- * A top type beside a `missing` arm (`missing | unknown`, the type of an
- * index into a `list<unknown>`) is a value of any kind that can be absent:
- * level 0 (ROADMAP CE-368).
- */
-export function objectAbsenceLevels(raw: Type, depth = 0): number {
-  if (depth > 4 || isNominalAtomicType(raw)) return 0;
-  // A top type beside absence markers (`missing | unknown`, the type of an
-  // index into a `list<unknown>`: `g(x)[5]` with `g := t ↦ [t, 2t]` and
-  // `x: any`) is a value of any kind, or absent. The compiled `At` spells
-  // the absent element `undefined`, and the plain `bcast` applied the
-  // scalar function to it: `g(x)[5] + 1` gave `NaN` and `g(x)[5] < 1` gave
-  // `false`, where the interpreter answers `Missing` (ROADMAP CE-368). The
-  // value can be absent at level 0; its elements, when it is a list, are
-  // read by the rules of `bcast`.
-  if (topTypeBesideAbsence(raw) !== undefined && hasMissingArm(raw)) return 1;
-  const arms =
-    gatedCollectionArmsOfType(raw) ?? numberOrGatedCollectionArms(raw);
-  if (arms !== undefined) {
-    // Level 0, and the levels a present arm can hold.
-    let levels = 1;
-    for (const arm of arms) levels |= objectAbsenceLevels(arm, depth + 1);
-    return levels;
-  }
-  const r = resolveTypeForCompilation(raw);
-  if (typeof r === 'string' || r.kind === 'tuple') return 0;
-  if (isSubtype(r, 'string') || !isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE))
-    return 0;
-  const elt = collectionElementType(r);
-  if (elt === undefined) return 0;
-  return objectAbsenceLevels(elt, depth + 1) << 1;
-}
-
-/**
  * The compilation type of `a` without its absence: for a GATED indexed
  * collection with one present arm (`isGatedIndexedCollection`, such as the
  * restricted list of points `PointList(When(A, 0 < t), B)`, typed
@@ -1053,10 +951,7 @@ export function objectAbsenceLevels(raw: Type, depth = 0): number {
  * `tryCompileBroadcast` read an operand's element type to prove that it is
  * a list of points, and the `missing` arm hid it: `(A\{0<t\}, B) + (1, 1)`
  * declined to compile where the interpreter answers the shifted points.
- * Those plans emit `NaN` for a source that is not an array at run time, or
- * `undefined` for an absent source when the result can be absent
- * (`A\{0<t\} + 1` runs to `undefined` when `t` is negative; see
- * `objectAbsenceLevels`).
+ * Those plans emit `NaN` for a source that is not an array at run time.
  */
 export function presentCompilationType(a: Expression): Type {
   const arms = gatedCollectionArms(a);

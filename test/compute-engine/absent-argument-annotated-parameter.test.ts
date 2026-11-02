@@ -651,14 +651,18 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
     ).toThrow(/the callback parameter 'x' is annotated 'string'/);
   });
 
-  test('a function declared on the engine reads an absent argument as NaN', () => {
+  // The compiled value of a user function body over an absent argument is
+  // not specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
+  // the bullet "Everything computed from an absent value, except at a
+  // discharge"; R4 of `docs/plans/2026-11-01-absent-value-contract.md`):
+  // only the call with a present argument is checked.
+  test('a function declared on the engine compiles a call with a present argument', () => {
     const ce = new ComputeEngine();
     ce.declare('y', 'number | missing');
     ce.declare('g', { signature: '(number) -> unknown' });
     ce.assign('g', ce.box(['Function', 'x', ['Typed', 'x', "'number'"]]));
     const result = compile(ce.box(['g', 'y']), { to: 'javascript' });
     expect(result.success).toBe(true);
-    expect(result.run({ y: undefined })).toBeNaN();
     expect(result.run({ y: 3 })).toBe(3);
   });
 

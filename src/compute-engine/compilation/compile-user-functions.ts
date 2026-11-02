@@ -476,8 +476,8 @@ export function assertUserFunctionFreeBindings(
  *   the evaluate handler, and their array lowering returned a non-array
  *   operand unchanged, so the compiled sum of an absent collection was
  *   `undefined`.
- * - the operator is broadcastable. Its element-wise lowering already
- *   answers the absent value for an absent operand (`_SYS.bcastAbsent`).
+ * - the operator is broadcastable. Its element-wise lowering of an absent
+ *   operand is unspecified in compiled code.
  *
  * An operand that is not pure (a `Random` draw) is bound to a temporary
  * too, and tested for absence like a guarded one. The interpreter

@@ -2193,11 +2193,16 @@ and runs the body (user decision of 2026-09-22; the test "an absent element
 in a callback map" in `test/compute-engine/ce-712-2-call-site-variants.test.ts`).
 So the literal must give `[(2, 4), NaN]`. Find where the `Map` evaluation of
 a `Function` literal skips the body for an absent element, and make it run
-the body. When this is fixed, the compiled literal route
+the body. This is an interpreter defect only. In compiled code the body of
+a callback over an absent element is unspecified since the decision of
+2026-11-01 (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code":
+`Map` binds the hole, and every operator of the body other than a discharge
+is unspecified on it), so the compiled literal route
 (`compileExprFunctionLiteral()` in
 `src/compute-engine/compilation/compile-function-literals.ts`) can stop
 declining a literal whose body reads its parameter over a list with absent
-points (`Map(t ↦ 2t, PM)`, `Map(t ↦ t[1], PM)`).
+points (`Map(t ↦ 2t, PM)`, `Map(t ↦ t[1], PM)`) without waiting for this
+fix.
 
 ### CE-743. Python: a block-local function called with a point repeats the tuple
 

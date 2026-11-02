@@ -9,7 +9,6 @@ import { hasTupleOrStringArm, isTupleShapedType } from '../collection-utils.js';
 import {
   collectionElementType,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
-  stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
@@ -52,7 +51,6 @@ import {
   compileGuardTest,
   conditionDecidability,
   exactSelect,
-  isObjectDomainMissingOperand,
   isVarsObjectRead,
   noBranchValue,
   unsuppliedReads,
@@ -715,132 +713,6 @@ export function compileExprAssertPresent(
 }
 
 /**
- * An `Equal` or `NotEqual` with an operand that may be absent. A case of
- * `compileExpr`: it returns the code, or `undefined` when `compileExpr`
- * continues with its next case.
- */
-export function compileExprMissingEquality(
-  h: string,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): TargetSource | undefined {
-  const isObjectDomainMissing = isObjectDomainMissingOperand;
-  if (
-    (h === 'Equal' || h === 'NotEqual') &&
-    target.absence !== undefined &&
-    args.length === 2 &&
-    args.some(isObjectDomainMissing) &&
-    // A STRING participant is not a collection FOR THIS PURPOSE: it matches
-    // `collection` in the lattice (its elements are its grapheme clusters)
-    // but compares as ONE value on both the interpreter and the compiled
-    // side, which is exactly the shape this scalar Kleene guard handles.
-    args.every(
-      (a) =>
-        isProvablyStringOperand(a) ||
-        (!a.isCollection && !a.type.matches('collection<any>'))
-    )
-  ) {
-    if (target.absence.object === undefined)
-      throw new Error(
-        `Could not compile \`${h}\`: an absent (Kleene) boolean has no object representation on ` +
-          `target '${target.language ?? 'unknown'}'. Discharge the operands ` +
-          `with 'Coalesce' first.`
-      );
-    // The absent operand of this guard is the OBJECT null (`undefined`):
-    // the absent value of a slot whose type admits an object. A NUMERIC
-    // absence, `NaN` (an index past the end of a list of numbers), is a
-    // number that compares as IEEE says, `False` for `Equal` and `True`
-    // for `NotEqual`, on both routes. The test is therefore the object
-    // axis's, whatever the operand's domain: the numeric axis's test
-    // (`absenceAxisForType`) reads `NaN` as absent too, which is right for
-    // `IsMissing` and `Coalesce` and wrong here. With `g := t ↦ [t, 2t]`
-    // and `x: any`, the operand `g(x)[5]` is typed
-    // `missing | number | vector<2>`, a mixed domain, and at `x = 3` its
-    // value is `NaN`: the numeric test answered `Missing` for
-    // `g(x)[5] = 1` where the interpreter answers `False` (ROADMAP CE-386,
-    // landed 2026-10-23); at `x = "a"` the value is `undefined` and both
-    // routes answer `Missing`.
-    // The object axis's discharge test (`isAbsent`) reads `NaN` as absent
-    // too, so the guard uses its test of the object null (`isNull`).
-    const isNull = target.absence.object.isNull;
-    // Each operand is compiled once, here. An operand that is an
-    // application (a call, an element read) or that is impure (`Random()`)
-    // is BOUND to a temporary that the absence tests and the inner
-    // comparison read, as the parameter of a function called at once with
-    // the operand's code. Without the binding the operand's code was
-    // spliced into each test and into the comparison: an impure operand
-    // drew twice, an operand after an absent one was not evaluated at all
-    // (the interpreter evaluates both operands, and a skipped draw moves
-    // every later draw of a seeded sequence), and an element read was
-    // computed twice. A symbol or a literal is spliced as it is, so the
-    // code of the common case does not change.
-    const codes = args.map((a) => compileValueOperand(a, target));
-    const bindings: { name: string; code: TargetSource }[] = [];
-    const operandCodes = args.map((a, i) => {
-      if (a.isPure !== false && !isFunction(a)) return codes[i];
-      const name = tempVar(target);
-      bindings.push({ name, code: codes[i] });
-      return name;
-    });
-    const operandCode = (i: number): TargetSource => operandCodes[i];
-    const guardOf = (i: number): TargetSource => isNull(operandCode(i));
-    // The inner (both-present) comparison. For operands whose stripped
-    // type is wholly STRING, the target's `Equal` codegen is the numeric
-    // tolerance kernel — silently `false` for any pair of present strings
-    // (`Math.abs("x" - "y")` is NaN), and now declined by the string gate.
-    // The faithful inner for strings is STRICT equality: the interpreter
-    // compares strings exactly (no tolerance), so `===` (`==` on word-chain
-    // targets, i.e. Python) is the interpreter's own semantics. Everything
-    // not wholly-string keeps the target's `Equal` codegen, with its gates.
-    const strippedOf = (a: Expression): Type =>
-      resolveTypeForCompilation(stripMissingFromType(compilationType(a)));
-    const allString = args.every((a) => isSubtype(strippedOf(a), 'string'));
-    let inner: TargetSource;
-    if (allString) {
-      const [a, b] = args.map((_e, i) => operandCode(i));
-      const pyOp = h === 'Equal' ? '==' : '!=';
-      const jsOp = h === 'Equal' ? '===' : '!==';
-      inner =
-        target.chainOp === 'and'
-          ? `(${a}) ${pyOp} (${b})`
-          : `(${a}) ${jsOp} (${b})`;
-    } else {
-      const eqFn = target.functions?.(h);
-      if (typeof eqFn !== 'function')
-        throw new Error(
-          `Could not compile \`${h}\`: target '${target.language ?? 'unknown'}' has no equality ` +
-            `codegen for the guarded (Kleene) form.`
-        );
-      // The target's equality codegen compiles each operand through this
-      // function: an operand of the pair reads its bound code.
-      inner = eqFn(
-        args,
-        (e) => {
-          const i = args.indexOf(e);
-          return i >= 0 ? operandCode(i) : compileValueOperand(e, target);
-        },
-        target
-      );
-    }
-    const nullLit = target.absence.object.nullLiteral;
-    // A word-`chainOp` target (Python: `and`) spells logical-or `or` and the
-    // conditional `X if C else Y`; a C-style target uses `||` and `C ? X : Y`.
-    const pythonic = target.chainOp === 'and';
-    const guard = `${guardOf(0)} ${pythonic ? 'or' : '||'} ${guardOf(1)}`;
-    const guarded = pythonic
-      ? `(${nullLit} if (${guard}) else ${inner})`
-      : `((${guard}) ? ${nullLit} : ${inner})`;
-    if (bindings.length === 0) return guarded;
-    const names = bindings.map((b) => b.name).join(', ');
-    const values = bindings.map((b) => b.code).join(', ');
-    return pythonic
-      ? `(lambda ${names}: ${guarded})(${values})`
-      : `((${names}) => ${guarded})(${values})`;
-  }
-  return undefined;
-}
-
-/**
  * The three-valued (Kleene) value of an `And`, `Or` or `Not` in VALUE
  * position, or `undefined` when the plain infix lowering applies.
  *
@@ -981,14 +853,16 @@ export function kleeneValueConnective(
  * - the symbols `True` and `False`;
  * - a comparison (`Less`, `LessEqual`, `Greater`, `GreaterEqual`, `Equal`,
  *   `NotEqual`) whose operands have no `missing` arm, are not an
- *   application of a top type (`isObjectDomainMissingOperand`), and read
+ *   application of a top type (`any` or `unknown`: its value can be a
+ *   collection, and `Equal` over it lowers to a run-time dispatch whose
+ *   value is not always a boolean), and read
  *   no variable that the caller can leave out (`unsuppliedReads`: a
  *   literal, a local, a loop index, or a read already tested around the
  *   code). Its compiled value is a JavaScript comparison, which is a
  *   boolean: a NaN operand gives `false` (`true` for `NotEqual`). A
- *   comparison with an operand that may be absent compiles to `undefined`
- *   when it is absent (`absentComparisonGuard`,
- *   `unsuppliedComparisonGuard`), so it is not proven;
+ *   comparison with an operand that the caller can leave out compiles to
+ *   `undefined` when it is left out (`unsuppliedComparisonGuard`), so it is
+ *   not proven;
  * - an `And`, `Or` or `Not` whose every operand is proven.
  *
  * Anything else is not proven: a symbol (the caller can leave it out or
@@ -1011,52 +885,15 @@ export function isDecidedBooleanValue(
   const h = a.operator;
   if (BRANCH_RELATIONS.has(h))
     return (
-      a.ops.every(
-        (x) =>
-          !typeContainsMissing(compilationType(x)) &&
-          !isObjectDomainMissingOperand(x)
-      ) && unsuppliedReads(a.ops, target).length === 0
+      a.ops.every((x) => {
+        const t = compilationType(x);
+        return (
+          !typeContainsMissing(t) &&
+          !((t === 'any' || t === 'unknown') && isFunction(x))
+        );
+      }) && unsuppliedReads(a.ops, target).length === 0
     );
   if (h === 'And' || h === 'Or' || h === 'Not')
     return a.ops.every((x) => isDecidedBooleanValue(x, target));
   return false;
-}
-
-/**
- * Make a broadcast connective's scalar body absence-aware.
- *
- * `_SYS.bcast` represents an empty or mismatched position as NaN, but the
- * connectives lower to raw JavaScript `!`, `&&` and `||`, which coerce it:
- * `!NaN` is `true` and `NaN || false` is `false`, so an error position came
- * back out as an ordinary — and wrong — truth value once a second connective
- * consumed it. The interpreter instead ABSORBS (`And(False, <error>)` is
- * `False`, `Or(True, <error>)` is `True`) and otherwise propagates the error.
- * This reproduces both halves: a dominant operand wins, else any absent
- * operand makes the result absent, else the head's own codegen runs.
- *
- * Only the connectives need it. An ordering already agrees — `NaN < 3` is
- * `false`, which is how the interpreter reads a NaN operand (IEEE). What it
- * cannot distinguish is a NaN that stands for an ERROR rather than a numeric
- * NaN; separating those needs a sentinel carried through nested broadcasts,
- * recorded as residue in ROADMAP.md rather than papered over here.
- *
- * Also used by the JavaScript target's own connective lowering
- * (`compileJSCollectionBoolean`), which builds the same closure by hand.
- */
-export function guardConnectiveAbsence(
-  h: string,
-  params: ReadonlyArray<string>,
-  body: string
-): string {
-  if (h !== 'And' && h !== 'Or' && h !== 'Not') return body;
-  // An absent operand is `NaN` (a numeric slot) or `undefined` (the
-  // absent object: an element of unknown type read out of a list, or an
-  // ordering on one, ROADMAP CE-368).
-  const absent = params
-    .map((p) => `(${p} !== ${p} || ${p} === undefined)`)
-    .join(' || ');
-  if (h === 'Not') return `((${absent}) ? NaN : ${body})`;
-  const dominant = h === 'And' ? 'false' : 'true';
-  const wins = params.map((p) => `${p} === ${dominant}`).join(' || ');
-  return `((${wins}) ? ${dominant} : ((${absent}) ? NaN : ${body}))`;
 }

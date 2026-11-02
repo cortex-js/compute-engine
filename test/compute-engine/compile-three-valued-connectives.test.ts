@@ -530,10 +530,14 @@ describe('COMPILE three-valued connectives — Python target', () => {
   /** `NotEqual(name, 0)`: an absent operand leaves it undecided. */
   const ne = (name: string): unknown[] => ['NotEqual', name, 0];
 
-  /** The three-valued leaf of `ne(name)` over a `number | missing` symbol. */
-  const neLeaf = (name: string, tv: string): string =>
-    `((((lambda ${tv}: (None if ((${tv} is None)) else (((${tv}) != (0)))))` +
-    `(${name})) if not (${name} is None) and ${name} == ${name} else None)`;
+  /** The three-valued leaf of `ne(name)` over a `number | missing` symbol.
+   * The comparison itself is the plain `!=`: its compiled value with an
+   * absent operand is not specified (`docs/COMPILATION-MODEL.md`, "Caveats
+   * of compiled code", the bullet "Everything computed from an absent
+   * value, except at a discharge"; R4 of
+   * `docs/plans/2026-11-01-absent-value-contract.md`). */
+  const neLeaf = (name: string): string =>
+    `((((${name}) != (0))) if not (${name} is None) and ${name} == ${name} else None)`;
 
   it('keeps the plain conditional when every leaf is an ordered comparison', () => {
     // A NaN operand decides `x > 0` false (user decision 2026-10-20), and
@@ -547,12 +551,12 @@ describe('COMPILE three-valued connectives — Python target', () => {
   it('spells the And table with lambdas, None and float NaN', () => {
     expect(code(['If', ['And', ne('p'), ne('q')], 1, -1])).toBe(
       selection('1', '-1') +
-        '((lambda _tv2: (False if _tv2 is not None and not _tv2 else ' +
-        '(lambda _tv4: (_tv4 if _tv2 is not None and _tv2 else ' +
-        '(False if _tv4 is not None and not _tv4 else None)))' +
-        neLeaf('q', '_tv3') +
-        ')))' +
-        neLeaf('p', '_tv1') +
+        '((lambda _tv1: (False if _tv1 is not None and not _tv1 else ' +
+        '(lambda _tv2: (_tv2 if _tv1 is not None and _tv1 else ' +
+        '(False if _tv2 is not None and not _tv2 else None)))(' +
+        neLeaf('q') +
+        ')))(' +
+        neLeaf('p') +
         '))'
     );
   });
@@ -560,12 +564,12 @@ describe('COMPILE three-valued connectives — Python target', () => {
   it('mirrors the Or table', () => {
     expect(code(['If', ['Or', ne('p'), ne('q')], 1, -1])).toBe(
       selection('1', '-1') +
-        '((lambda _tv2: (True if _tv2 is not None and _tv2 else ' +
-        '(lambda _tv4: (_tv4 if _tv2 is not None and not _tv2 else ' +
-        '(True if _tv4 is not None and _tv4 else None)))' +
-        neLeaf('q', '_tv3') +
-        ')))' +
-        neLeaf('p', '_tv1') +
+        '((lambda _tv1: (True if _tv1 is not None and _tv1 else ' +
+        '(lambda _tv2: (_tv2 if _tv1 is not None and not _tv1 else ' +
+        '(True if _tv2 is not None and _tv2 else None)))(' +
+        neLeaf('q') +
+        ')))(' +
+        neLeaf('p') +
         '))'
     );
   });
@@ -573,7 +577,7 @@ describe('COMPILE three-valued connectives — Python target', () => {
   it('negates only a decided value, never None', () => {
     const source = code(['If', ['Not', ['And', ne('p'), ne('q')]], 1, -1]);
     expect(source).toContain(
-      '(lambda _tv5: (None if _tv5 is None else not _tv5))'
+      '(lambda _tv3: (None if _tv3 is None else not _tv3))'
     );
     expect(source).not.toContain('logical_not');
   });
@@ -588,18 +592,18 @@ describe('COMPILE three-valued connectives — Python target', () => {
     // when `p != 0` has not already answered `False`. Since the user decision
     // of 2026-10-20 the second leaf takes no NaN test, so `1 / p` is no longer
     // bound to a parameter of its own: it is the comparison `(1 < 1 / p)`.
-    // `p` is declared `number | missing`, so the division reads a `None`
-    // input as `float('nan')` (user decision 2026-10-25), as the interpreter
-    // answers `NaN` for `1 / Missing`.
+    // `p` is declared `number | missing`. The division reads the input as it
+    // is: its compiled value with an absent `p` is not specified (R4 of
+    // `docs/plans/2026-11-01-absent-value-contract.md`).
     const source = code([
       'If',
       ['And', ['NotEqual', 'p', 0], ['Greater', ['Divide', 1, 'p'], 1]],
       1,
       -1,
     ]);
-    expect(source).toContain("((1 < 1 / (float('nan') if p is None else p)))");
-    expect(source.indexOf('_tv2 is not None and not _tv2')).toBeLessThan(
-      source.indexOf('1 / (')
+    expect(source).toContain('((1 < 1 / p))');
+    expect(source.indexOf('_tv1 is not None and not _tv1')).toBeLessThan(
+      source.indexOf('1 / p')
     );
     // Over a `real` symbol `NaN ≠ 0` is decided (`True`, user decision
     // 2026-10-23), so the condition keeps the plain `and`, which

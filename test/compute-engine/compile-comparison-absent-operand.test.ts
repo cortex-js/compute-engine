@@ -17,6 +17,12 @@
  * and so a branch over it takes the else arm (user decision 2026-10-20);
  * `NotEqual(NaN, 1)` is `True`, and a branch over it takes the then arm
  * (user decision 2026-10-23).
+ *
+ * Since 2026-11-01 the compiled value of a comparison with an absent
+ * operand is not specified (`docs/COMPILATION-MODEL.md`, "Caveats of
+ * compiled code", the bullet "Everything computed from an absent value,
+ * except at a discharge"). The tests below check the interpreter's value for
+ * it, and the compiled value for present operands only.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -50,27 +56,18 @@ function interpreted(json: unknown, t: number): unknown {
 }
 
 describe('a comparison with a written absence operand', () => {
+  // The compiled value of a comparison with an absent operand, and of a
+  // branch or a connective over it, is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4
+  // of `docs/plans/2026-11-01-absent-value-contract.md`). Only the
+  // interpreter's value is checked for it.
   for (const absent of ['Missing', 'Undefined']) {
     test.each(RELATIONS)(`%s(${absent}, t) is undecided`, (h) => {
       const json = [h, absent, 't'];
       expect(interpreted(json, 0)).toBe('Missing');
-      expect(run(json, 0)).toBeUndefined();
-      // With the absent operand second.
-      expect(run([h, 't', absent], 0)).toBeUndefined();
-    });
-
-    test.each(RELATIONS)(`If(%s(${absent}, t)) takes no arm`, (h) => {
-      expect(run(['If', [h, absent, 't'], 1, 2], 0)).toBeNaN();
-    });
-
-    test.each(RELATIONS)(`Which(%s(${absent}, t)) takes no arm`, (h) => {
-      expect(run(['Which', [h, absent, 't'], 1, 'True', 0], 0)).toBeNaN();
     });
   }
-
-  test('Not over it stays undecided', () => {
-    expect(run(['If', ['Not', ['Less', 'Missing', 't']], 1, 2], 0)).toBeNaN();
-  });
 
   test('a settling sibling still decides a connective', () => {
     // Kleene: `And(undecided, false)` is false, `Or(undecided, true)` true.
@@ -108,16 +105,20 @@ describe('a comparison with an operand that may be absent', () => {
     expect(run(['If', ['Less', G, 't'], 1, 2], 0)).toBe(2);
   });
 
+  // The compiled value of a comparison with an absent string, and of a
+  // branch over it, is not specified (`docs/COMPILATION-MODEL.md`, "Caveats
+  // of compiled code", the bullet "Everything computed from an absent value,
+  // except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`): the compiled branch is
+  // checked with a present string only.
   test.each([
     ['Equal', undefined],
     ['NotEqual', undefined],
   ])(
-    '%s over a restricted string is undecided, and so is a branch over it',
+    '%s over a restricted string is undecided in the interpreter',
     (h) => {
       const json = [h, ['When', { str: 'a' }, ['Less', 1, 't']], { str: 'b' }];
       expect(interpreted(json, 0)).toBe('Missing');
-      expect(run(json, 0)).toBeUndefined();
-      expect(run(['If', json, 1, 2], 0)).toBeNaN();
       expect(run(['If', json, 1, 2], 2)).toBe(h === 'Equal' ? 2 : 1);
     }
   );
@@ -141,12 +142,19 @@ describe('a restricted NUMBER keeps its IEEE comparison', () => {
 });
 
 describe('the Python target', () => {
-  test('a comparison with a written absence operand is None', () => {
+  // The compiled value of a comparison with an absent operand, and of a
+  // branch or a connective over it, is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4
+  // of `docs/plans/2026-11-01-absent-value-contract.md`). The
+  // written absence lowers to the `NaN` of its numeric slot, and the
+  // comparison is the target's own.
+  test('a comparison with a written absence operand compares NaN', () => {
     const r = compile(ce.box(['Less', 'Missing', 't'] as never), {
       to: 'python',
     } as never);
     expect(r.success).toBe(true);
-    expect(r.code).toBe('None');
+    expect(r.code).toBe('math.nan < t');
   });
 
   test('a branch over it tests the value, not the operands', () => {
@@ -154,9 +162,7 @@ describe('the Python target', () => {
       to: 'python',
     } as never);
     expect(r.success).toBe(true);
-    // The undecided value `None` selects neither arm: the else arm is taken
-    // only when the value is a boolean.
-    expect(r.code).toContain('isinstance(None, (bool, np.bool_))');
+    expect(r.code).toContain('(math.nan < t)');
     expect(r.code).toContain("float('nan')");
   });
 });
@@ -169,11 +175,12 @@ describe('the Python target', () => {
  * `Less(x, 5, Missing)` is `Missing`.
  */
 describe('a chained comparison with an absent operand', () => {
-  const run2 = (json: unknown, x: number): unknown => {
-    const r = compile(ce.box(json as never), { to: 'javascript' } as never);
-    expect(r.success).toBe(true);
-    return r.run!({ x } as never);
-  };
+  // The compiled value of a comparison with an absent operand, and of a
+  // branch or a connective over it, is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4
+  // of `docs/plans/2026-11-01-absent-value-contract.md`). Only the
+  // interpreter's value is checked for it.
   const interpretedAt = (json: unknown, x: number): unknown =>
     ce
       .box(json as never)
@@ -185,52 +192,36 @@ describe('a chained comparison with an absent operand', () => {
   const leading = ['LessEqual', 'Missing', 'x', 5];
 
   test.each([
-    ['Less(x, 0, Missing)', decidedFalse, 1, false, 'False'],
-    ['Less(x, 5, Missing)', undecided, 1, undefined, 'Missing'],
-    ['Less(x, 5, Missing)', undecided, 9, false, 'False'],
-    ['LessEqual(Missing, x, 5)', leading, 1, undefined, 'Missing'],
-    ['LessEqual(Missing, x, 5)', leading, 9, false, 'False'],
+    ['Less(x, 0, Missing)', decidedFalse, 1, 'False'],
+    ['Less(x, 5, Missing)', undecided, 1, 'Missing'],
+    ['Less(x, 5, Missing)', undecided, 9, 'False'],
+    ['LessEqual(Missing, x, 5)', leading, 1, 'Missing'],
+    ['LessEqual(Missing, x, 5)', leading, 9, 'False'],
     // A NaN link is `False` (user decision 2026-10-23): `NaN < 0` decides
     // the chain, wherever the absent operand sits. Before, the absent operand
     // won and the chain was `Missing`.
-    ['Less(x, 0, Missing)', decidedFalse, NaN, false, 'False'],
-    ['LessEqual(Missing, x, 5)', leading, NaN, false, 'False'],
-  ])('%s at x = %p', (_l, json, x, compiled, interp) => {
+    ['Less(x, 0, Missing)', decidedFalse, NaN, 'False'],
+    ['LessEqual(Missing, x, 5)', leading, NaN, 'False'],
+  ])('%s at x = %p', (_l, json, x, interp) => {
     expect(interpretedAt(json, x)).toBe(interp);
-    expect(run2(json, x)).toBe(compiled);
   });
 
   test.each([
     ['Less(x, 0, Missing)', decidedFalse, 1, 2],
-    ['Less(x, 5, Missing)', undecided, 1, NaN],
     ['Less(x, 5, Missing)', undecided, 9, 2],
-    ['LessEqual(Missing, x, 5)', leading, 1, NaN],
     ['LessEqual(Missing, x, 5)', leading, 9, 2],
     ['Less(x, 0, Missing)', decidedFalse, NaN, 2],
     ['LessEqual(Missing, x, 5)', leading, NaN, 2],
   ])('If over %s at x = %p', (_l, json, x, expected) => {
-    const r = run2(['If', json, 1, 2], x);
-    if (Number.isNaN(expected)) expect(r).toBeNaN();
-    else {
-      expect(interpretedAt(['If', json, 1, 2], x)).toBe(expected);
-      expect(r).toBe(expected);
-    }
+    expect(interpretedAt(['If', json, 1, 2], x)).toBe(expected);
   });
 
   test.each([
     ['Less(x, 0, Missing)', decidedFalse, 1, 0],
-    ['Less(x, 5, Missing)', undecided, 1, NaN],
-    ['LessEqual(Missing, x, 5)', leading, 1, NaN],
     ['LessEqual(Missing, x, 5)', leading, 9, 0],
     ['Less(x, 0, Missing)', decidedFalse, NaN, 0],
   ])('Which over %s at x = %p', (_l, json, x, expected) => {
-    const which = ['Which', json, 1, 'True', 0];
-    const r = run2(which, x);
-    if (Number.isNaN(expected)) expect(r).toBeNaN();
-    else {
-      expect(interpretedAt(which, x)).toBe(expected);
-      expect(r).toBe(expected);
-    }
+    expect(interpretedAt(['Which', json, 1, 'True', 0], x)).toBe(expected);
   });
 
   test.each([
@@ -241,9 +232,10 @@ describe('a chained comparison with an absent operand', () => {
     for (const j of [json, ['If', json, 1, 2]]) {
       const r = compile(ce.box(j as never), { to: 'python' } as never);
       expect(r.success).toBe(true);
-      // The present link is compared, not replaced by `None`.
+      // The present link is compared, and the written absence is the `NaN`
+      // of its numeric slot.
       expect(r.code).toMatch(/x <=? (0|5)|x >=? /);
-      expect(r.code).toContain('None');
+      expect(r.code).toContain('math.nan');
     }
   });
 
@@ -257,15 +249,6 @@ describe('a chained comparison with an absent operand', () => {
     [['Less', ['Complex', 0, 1], 'Undefined', 0], 'Missing'],
   ])('the interpreter reads %j as %s', (json, expected) => {
     expect(ce.box(json as never).evaluate().json).toBe(expected);
-  });
-
-  test('a chain with an operand that has effects is declined', () => {
-    const r = compile(
-      ce.box(['Less', 'x', 0, 'Missing', ['Random']] as never),
-      { to: 'javascript', fallback: true } as never
-    );
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/operand that has effects/);
   });
 });
 
@@ -333,6 +316,12 @@ describe('a branch over a chain with an input that may be absent', () => {
 });
 
 describe('a two-operand comparison with an absent operand and effects', () => {
+  // The compiled value of a comparison with an absent operand, and of a
+  // branch or a connective over it, is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4
+  // of `docs/plans/2026-11-01-absent-value-contract.md`). Only the
+  // emitted code is checked.
   test('the other operand is still evaluated', () => {
     const r = compile(
       ce.box(['Less', 'Missing', ['Add', 't', ['Random']]] as never),
@@ -341,6 +330,5 @@ describe('a two-operand comparison with an absent operand and effects', () => {
     expect(r.success).toBe(true);
     // The random draw is emitted, and its value is discarded.
     expect(r.code).toContain('drawNextRandomNumber');
-    expect(r.run!({ t: 0 } as never)).toBeUndefined();
   });
 });

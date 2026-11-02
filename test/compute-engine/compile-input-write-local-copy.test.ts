@@ -336,7 +336,7 @@ describe('PYTHON compile(): AN INPUT THAT THE BODY ASSIGNS', () => {
       py.compile(box(['Block', ['Assign', 'u', ['Add', 'u', 1]], 'u']), {
         vars: { u: 'p["u"]' },
       }).code
-    ).toBe('_tv1 = p["u"]\n_tv1 = _tv1 + 1\nreturn _tv1');
+    ).toBe('_tv1 = (p["u"])\n_tv1 = _tv1 + 1\nreturn _tv1');
   });
 
   (TEST_PYTHON === undefined ? it.skip : it)(

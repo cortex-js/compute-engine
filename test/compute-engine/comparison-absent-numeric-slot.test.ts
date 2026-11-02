@@ -34,6 +34,22 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
     ).toMatch(/condition is absent/);
   });
 
+  // The example of `docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
+  // the bullet "Everything computed from an absent value, except at a
+  // discharge": the interpreter gives 1. The compiled value is not
+  // specified, because `IsMissing` reads the comparison, not `w`.
+  test('IsMissing of a comparison with an absent operand, interpreted', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'real | missing');
+    ce.assign('w', ce.Missing);
+    expect(
+      ce
+        .box(['If', ['IsMissing', ['Greater', 'w', 0]], 1, 0])
+        .evaluate()
+        .toString()
+    ).toBe('1');
+  });
+
   test('the type of the comparison admits an absent value', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number | missing');
@@ -73,7 +89,12 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
     ).toBe('["Missing","Missing"]');
   });
 
-  test('compiled JavaScript reads an absent operand as absent', () => {
+  // The compiled value of a comparison with an absent operand is not
+  // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the
+  // bullet "Everything computed from an absent value, except at a
+  // discharge"; R4 of `docs/plans/2026-11-01-absent-value-contract.md`): the
+  // compiled tests below check present operands only.
+  test('compiled JavaScript compares a present operand', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number | missing');
     for (const [expr, present] of [
@@ -85,13 +106,12 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
         to: 'javascript',
         fallback: false,
       });
-      expect(r.run!({ w: undefined } as never)).toBeUndefined();
       expect(r.run!({ w: 0.5 } as never)).toBe(present);
       expect(r.run!({ w: NaN } as never)).toBe(false);
     }
   });
 
-  test('compiled Python tests for None', () => {
+  test('compiled Python compares with the native operator', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number | missing');
     const r = compile(ce.box(['Greater', 'w', 0]), {
@@ -99,7 +119,7 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toMatch(/is None/);
+    expect(r.code).toBe('0 < w');
   });
 
   test('the GPU targets keep the IEEE reading, with no guard', () => {
@@ -123,26 +143,7 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
       { w: undefined },
       false,
     ],
-    [
-      'a chain with an absent middle',
-      ['Less', 0, 'w', 2],
-      { w: undefined },
-      undefined,
-    ],
     ['a chain with a present middle', ['Less', 0, 'w', 2], { w: 1 }, true],
-    ['an operand twice', ['Equal', 'w', 'w'], { w: undefined }, undefined],
-    [
-      'an If with no else branch',
-      ['Less', ['If', ['Greater', 'x', 0], 1], 2],
-      { x: -1 },
-      undefined,
-    ],
-    [
-      'a broadcast',
-      ['Less', ['List', 1, 2], 'w'],
-      { w: undefined },
-      [undefined, undefined],
-    ],
   ])('compiled: %s', (_, expr, vars, expected) => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number | missing');
@@ -163,7 +164,6 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
       fallback: false,
     } as any);
     expect(r.run!({ w: 0.5 } as never)).toBe(true);
-    expect(r.run!({ w: undefined } as never)).toBeUndefined();
   });
   // Second review of CE-93.
   test('compiled Python reads a NaN input as a value', () => {
@@ -173,19 +173,7 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
       to: 'python',
       fallback: false,
     });
-    expect(r.code).toMatch(/is None/);
-    expect(r.code).not.toMatch(/isnan/);
-  });
-
-  test('a chain with an effect and an absent operand is not compiled', () => {
-    const ce = new ComputeEngine();
-    ce.declare('w', 'number | missing');
-    expect(() =>
-      compile(ce.box(['Less', 0, 'w', ['Random']]), {
-        to: 'javascript',
-        fallback: false,
-      })
-    ).toThrow(/Could not compile/);
+    expect(r.code).toBe('w < 1');
   });
 
   test('a chain of lists keeps its own lowering', () => {

@@ -188,7 +188,7 @@ export function compileExprElementwiseBroadcast(
 ): TargetSource | undefined {
   if (target.language === 'javascript') {
     declineElementwiseOverDeclaredTop(engine, h, args, target);
-    const broadcast = tryCompileBroadcast(engine, h, args, target, node);
+    const broadcast = tryCompileBroadcast(engine, h, args, target);
     if (broadcast !== null) return broadcast;
     // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,
     // `Erf`, …) whose array operand has a complex element lane, and the

@@ -185,11 +185,8 @@ export function complexWrapCode(
  * (`typeContainsMissing`), the check is made on each element of the list,
  * nested lists included (`elements: true`).
  *
- * At a NUMERIC annotation the interpreter reads an absent argument as
- * `NaN` (`makeLambda`, `function-utils.ts`), and the call site
- * does the same (`message: undefined`, `_SYS.absentNaN`). Without it, a
- * body that does not compute with the parameter (`(x: number) => x`)
- * answered `undefined` where the interpreter answers `NaN`.
+ * At a NUMERIC annotation the argument is not checked: a function applied
+ * to an absent value is unspecified in compiled code.
  */
 export function absentArgumentChecks(
   calleeName: string,
@@ -210,7 +207,7 @@ export function absentArgumentChecks(
     const elements =
       isScalarType(declared) && !isTupleShapedType(t) && typeContainsMissing(t);
     if (!elements && !isSubtype('missing', t)) return undefined;
-    if (isSubtype(declared, 'number')) return { message: undefined, elements };
+    if (isSubtype(declared, 'number')) return undefined;
     const name = functionLiteralParameterName(param) || `#${i + 1}`;
     return {
       message:
@@ -223,18 +220,14 @@ export function absentArgumentChecks(
 
 /**
  * `code` wrapped in the run-time absent-argument check `check`
- * (`_SYS.present`, or `_SYS.absentNaN` at a numeric parameter, see
- * `absentArgumentChecks`), or `code` as it is when `check` is `undefined`.
+ * (`_SYS.present`, see `absentArgumentChecks`), or `code` as it is when
+ * `check` is `undefined`.
  */
 export function presentCheckedCode(
   code: string,
   check: AbsentArgumentCheck | undefined
 ): string {
   if (check === undefined) return code;
-  if (check.message === undefined)
-    return check.elements
-      ? `_SYS.absentNaN(${code}, true)`
-      : `_SYS.absentNaN(${code})`;
   const message = JSON.stringify(check.message);
   return check.elements
     ? `_SYS.present(${code}, ${message}, true)`

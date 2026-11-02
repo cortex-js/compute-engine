@@ -7,7 +7,9 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * interpreter answers the marker of the application's codomain, `Missing`
  * there and `NaN` for a numeric application. Compiled JavaScript spells the
  * absence `undefined`, and now keeps it on the same applications (user
- * decision of 2026-10-23, ROADMAP CE-229).
+ * decision of 2026-10-23, ROADMAP CE-229). Since 2026-11-01 the compiled
+ * value of such arithmetic is not specified (`docs/COMPILATION-MODEL.md`,
+ * "Caveats of compiled code"); the interpreter's value does not change.
  */
 function setup(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -30,7 +32,12 @@ function setup(): ComputeEngine {
 }
 
 describe('the coordinates of an absent point in a user function body', () => {
-  test('both routes give a point of three absent coordinates', () => {
+  // The compiled value of the products over an absent coordinate is not
+  // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the
+  // bullet "Everything computed from an absent value, except at a
+  // discharge"; R4 of `docs/plans/2026-11-01-absent-value-contract.md`):
+  // only the interpreter value is checked for it.
+  test('the interpreter gives a point of three absent coordinates', () => {
     const ce = setup();
     const e = ce.box(['W', ['At', 'L', 5], 2]);
     expect(e.evaluate().json).toEqual([
@@ -41,7 +48,6 @@ describe('the coordinates of an absent point in a user function body', () => {
     ]);
     const r = compile(e);
     expect(r.success).toBe(true);
-    expect(r.run!({})).toEqual([undefined, undefined, undefined]);
   });
 
   test('a present point is unchanged', () => {
@@ -129,12 +135,14 @@ describe('an absent value that a symbol declared any holds is NaN in arithmetic'
 
   test('the coordinate read of an absent point stays absent', () => {
     // A READ is not a symbol: `s · PointX(p)` keeps the codomain marker
-    // (ROADMAP CE-229).
+    // (ROADMAP CE-229). The compiled value is not specified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+    // "Everything computed from an absent value, except at a discharge"; R4
+    // of `docs/plans/2026-11-01-absent-value-contract.md`).
     const ce = setup();
     const e = ce.box(['W', ['At', 'L', 5], 2]);
     const v = e.evaluate();
     expect(v.json).toEqual(['Tuple', 'Missing', 'Missing', 'Missing']);
     expect(v.type.matches(e.type)).toBe(true);
-    expect(compile(e).run!({})).toEqual([undefined, undefined, undefined]);
   });
 });

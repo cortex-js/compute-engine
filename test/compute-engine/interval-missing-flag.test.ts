@@ -2,23 +2,20 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
- * Where the `missing` flag of an `empty` interval result is kept, and where
- * it is not.
+ * An integral of an integrand with no value, on `interval-js`.
  *
- * On `interval-js`, an `empty` with the `missing` flag stands for a value
- * whose interpreter value is `Missing` (a `Which` with no default arm that
- * selects no clause, an `If` with no else arm that selects no arm, a written
- * `Missing`). A comparison with it is `'maybe'`, the Kleene reading of
- * `Missing`. A comparison with an `empty` without the flag, a value that is
- * undefined over the whole cell, is `'false'` (user decision of 2026-10-20,
- * `docs/ERROR-MODEL.md`).
+ * An integral is an accumulation, and an accumulation of absent values is
+ * `NaN` in the interpreter (`NIntegrate`, `Sum`, `Missing + 1`), so a
+ * comparison with it is `False`. On `interval-js` the integral is an
+ * `empty` result, and a comparison with it is `'false'`.
  *
- * The flag is not kept by an integral of a flagged integrand: an integral is
- * an accumulation, and an accumulation of absent values is `NaN` in the
- * interpreter (`NIntegrate`, `Sum`, `Missing + 1`), so a comparison with it
- * is `False` on every route. The interpreter fallback of the target gives a
- * plain `empty` for an interpreter `Missing`, as the runner of compiled code
- * gives every absent value.
+ * Until 2026-11-01 an `empty` result that stood for an interpreter
+ * `Missing` (a `Which` with no default arm that selects no clause) carried a
+ * `missing` flag, and a comparison with it was `'maybe'`. The compiled value
+ * of a comparison with an absent operand is no longer specified
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+ * "Everything computed from an absent value, except at a discharge"), and
+ * the flag was removed.
  */
 
 const X = { x: { lo: 0, hi: 1 } };
@@ -38,11 +35,11 @@ function intervalRun(expr: any, vars: object = X): unknown {
 }
 
 describe('interval-js: an integral of an integrand with no value', () => {
+  // The compiled value of a comparison with the integrand alone, an absent
+  // value, is not specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`).
   test('a comparison with it is false, as for a Sum and on javascript', () => {
-    // The integrand alone keeps the flag: `'maybe'`.
-    expect(intervalRun(['Greater', ['Which', ['Greater', 'x', 5], 1], 0])).toBe(
-      'maybe'
-    );
     // The integral is a plain `empty`: `'false'`.
     expect(intervalRun(INTEGRAL)).toEqual({ kind: 'empty' });
     expect(intervalRun(['Greater', INTEGRAL, 0])).toBe('false');

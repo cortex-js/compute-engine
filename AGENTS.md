@@ -43,13 +43,17 @@ nightly run, tell the user; do not take over that investigation unless asked.
   `docs/COMPILATION-MODEL.md`, "Caveats of compiled code": the precision of the
   target, and `NaN`, `0`, `±Infinity`, `undefined`, a throw or a decline where
   the interpreter gives `Missing`, `Nothing`, `Indeterminate`, an unevaluated
-  form or an error. A wrong finite number or a wrong shape for a program with
-  inputs of their declared types is a defect. A compilation declines when a
-  sub-expression is invalid or has the static type `error`. Every other case is
-  unspecified, and compiled code need not check for it: an error that the static
-  type does not show (`If(u > 1, "ab", 1) + 1`), an input value outside its type
-  (`"ab"` for an input declared `real`, `NaN` for `real`, `7` for `real<0..5>`),
-  an input left out. One exception: in the JavaScript `bigint` compile mode, a
+  form or an error; and an unspecified value for every operator other than a
+  discharge (`IsMissing`, `Coalesce`, `AssertPresent`, a default parameter) or a
+  position-preserving accessor (`At`, `First`, `Last`, `Rest`, `Length`, a `Map`
+  binding) applied to an absent operand, and for everything computed from that
+  value. A wrong finite number or a wrong shape for a program with inputs of
+  their declared types is a defect. A compilation declines when a sub-expression
+  is invalid or has the static type `error`. Every other case is unspecified,
+  and compiled code need not check for it: an error that the static type does
+  not show (`If(u > 1, "ab", 1) + 1`), an input value outside its type (`"ab"`
+  for an input declared `real`, `NaN` for `real`, `7` for `real<0..5>`), an
+  input left out. One exception: in the JavaScript `bigint` compile mode, a
   `number` result (`NaN` or `Infinity`) means that a sub-expression had no
   finite value, and it need not equal the interpreter's value; a `bigint` or
   `boolean` result must. A `bigint` cannot hold a non-finite value, and the one

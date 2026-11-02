@@ -84,14 +84,9 @@ describe('restricted point-list arithmetic with an untyped variable', () => {
     expect(r.run!({ t: 2 } as never)).toEqual([4, 3]);
   });
 
-  // Compiled arithmetic with an absent POINT answers `undefined`, the
-  // JavaScript spelling of the absent point, where the interpreter gives
-  // `Missing` (user decision of 2026-09-27, which replaces the point of
-  // `NaN` coordinates pinned here before; see
-  // `compile-absent-point-spelling.test.ts`).
-  test('the absent case gives the absent point', () => {
-    const r = compile(exprReal, { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.run!({ t: 0 } as never)).toBeUndefined();
-  });
+  // The compiled value of arithmetic with an absent point is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`), so there is no
+  // compiled test of the absent case.
 });

@@ -954,41 +954,45 @@ describe('P3 — compile discharge (§3.F)', () => {
       })
     ).toThrow(/Could not compile/);
 
-    // JavaScript: an absent operand (`undefined`) makes the comparison
-    // absent; a `NaN` is a value, and the comparison is `false`.
+    // JavaScript: a `NaN` is a value, and the comparison is `false`. The
+    // compiled value with an absent operand (`undefined`) is not specified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+    // "Everything computed from an absent value, except at a discharge"; R4
+    // of `docs/plans/2026-11-01-absent-value-contract.md`).
     const ce2 = new ComputeEngine();
     ce2.declare('a', 'number | missing');
     const js = compile(ce2.box(['Less', 'a', 1]), {
       to: 'javascript',
       fallback: false,
     });
-    expect(js.run!({ a: undefined } as never)).toBeUndefined();
     expect(js.run!({ a: 0.5 } as never)).toBe(true);
     expect(js.run!({ a: NaN } as never)).toBe(false);
   });
 
-  test('an object-domain (string|missing) Equal keeps the Kleene guard on JS', () => {
+  test('an object-domain (string|missing) Equal declines on JS, and the fallback answers', () => {
+    // Until 2026-11-01 a guarded (Kleene) form compiled the pair, with the
+    // object null for an absent side and a strict `===` for the present
+    // one. The compiled value with an absent operand is no longer specified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+    // "Everything computed from an absent value, except at a discharge"),
+    // and the form was removed. Neither operand is provably a string, so
+    // the string gate declines (never the numeric tolerance kernel, which
+    // answers `false` for every pair of present strings), and the
+    // interpreter fallback answers.
     const e = new ComputeEngine();
     e.declare('s', 'string | missing');
     e.declare('t', 'string | missing');
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const r = compile(e.box(['Equal', 's', 't']), { to: 'javascript' });
-    // The object hole (Missing) lowers to the target null; the guard stays.
-    expect(r.code).toMatch(/undefined/);
-    // The PRESENT side must be strict string equality, not the numeric
-    // tolerance kernel: `Math.abs("x" - "y")` is NaN, so the tolerance form
-    // answered `false` for every pair of present strings — the guard pinned
-    // above only ever protected the absent side. (This is what the string
-    // fail-closed gate rejects; the wholly-string guarded form is the one
-    // faithful inner, so it is emitted directly.)
-    expect(r.code).toMatch(/===/);
-    expect(r.code).not.toMatch(/Math\.abs/);
+    warn.mockRestore();
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/string-valued operands/);
     const run = r.run as unknown as (vars: {
       s: string | undefined;
       t: string | undefined;
     }) => boolean | undefined;
     expect(run({ s: 'x', t: 'x' })).toBe(true);
     expect(run({ s: 'x', t: 'y' })).toBe(false);
-    expect(run({ s: undefined, t: 'x' })).toBeUndefined();
   });
 
   test('a Missing-free Equal is NOT pessimized (no guard)', () => {

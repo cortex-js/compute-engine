@@ -58,7 +58,6 @@ import {
   CONDITION_DIALECT_JS,
   DECIDED_NUMBER_JS,
   assertScalarCondition,
-  conditionDialectOf,
   containsEarlyReturn,
   kleeneCondition,
   withCseOperand,
@@ -528,112 +527,9 @@ export function isUnsetLocalRead(code: TargetSource): boolean {
   return false;
 }
 
-/**
- * The value of a relation with a WRITTEN absence operand (`Missing`,
- * `Undefined`), on a target with an object null `nullLiteral`.
- *
- * With two operands the relation is undecided whatever the other operand
- * holds, so its value is the object null. The other operand is still
- * evaluated when it has effects: the interpreter evaluates it (a `Random`
- * draw is consumed), so the value is the object null bound after it.
- *
- * A CHAIN (`Less(x, 0, Missing)`) is the Kleene conjunction of its pairwise
- * links: a link with an absent operand is undecided, a link between two
- * present operands is an ordinary three-valued comparison (decided for a
- * NaN operand, which makes an ordered link `false`), and one link that is
- * decidedly false makes the whole chain false. So with `x = 1` or
- * `x = NaN`, `Less(x, 0, Missing)` is `false`, and with `x = 1`,
- * `Less(x, 5, Missing)` is undecided, as in the interpreter (user decision
- * 2026-10-23 for the NaN case; before it a NaN link was undecided). A
- * chain with an operand that has effects is declined: a middle operand
- * belongs to two links, and the lowering would evaluate it once per link.
- */
-export function compileAbsentRelation(
-  ce: ComputeEngine,
-  h: string,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  nullLiteral: TargetSource
-): TargetSource {
-  const dialect = conditionDialectOf(target);
-  if (args.length <= 2) {
-    const effects = args.filter(
-      (a) => !isAbsenceSymbol(a) && operandHasEffect(a, target)
-    );
-    if (effects.length === 0) return nullLiteral;
-    return dialect.bind(
-      effects.map(() => tempVar(target)),
-      nullLiteral,
-      effects.map((a) => compileValueOperand(a, target))
-    );
-  }
-  if (args.some((a) => operandHasEffect(a, target)))
-    throw new Error(
-      `Could not compile \`${h}\`: a chained comparison with an absent ` +
-        `operand and an operand that has effects. The chain is decided link ` +
-        `by link, and an operand shared by two links would be evaluated ` +
-        `twice.`
-    );
-  const links: Expression[] = [];
-  for (let i = 0; i + 1 < args.length; i++)
-    links.push(ce._fn(h, [args[i], args[i + 1]]));
-  const nodes: ConditionNode[] = [];
-  for (const link of links) {
-    const node = core.conditionNode(link, true, target);
-    if (node === null)
-      throw new Error(
-        `Could not compile \`${h}\`: a link of a chained comparison with ` +
-          `an absent operand has no three-valued lowering.`
-      );
-    nodes.push(node);
-  }
-  return kleeneCondition(
-    {
-      negate: false,
-      test: {
-        kind: 'connective',
-        expr: ce._fn('And', links),
-        op: 'And',
-        operands: nodes,
-      },
-    },
-    target,
-    dialect
-  );
-}
-
 /** True when `a` is a written absence symbol, `Missing` or `Undefined`. */
 export function isAbsenceSymbol(a: Expression): boolean {
   return isSymbol(a, 'Missing') || isSymbol(a, 'Undefined');
-}
-
-/**
- * True when the value of `a` may be absent in an OBJECT domain: its type
- * has a `missing` arm and, without it, is not a number (`string | missing`,
- * a restricted point), or it is an APPLICATION whose type is a top type,
- * `any` or `unknown`, which admits the absent value without an arm of its
- * own: the element of a bare `list`, `g(x)[1]` for `g: (unknown) -> list`,
- * is typed `any`, and at `x = []` its value is `undefined`; without the
- * guard, `_SYS.eq` answered `NaN` for `g(x)[1] = 1` where the interpreter
- * answers `Missing` (ROADMAP CE-386). A SYMBOL of a top type is not such
- * an operand: a declared `x: any` or `x: unknown` is read as the scalar
- * the host passes (user decisions of 2026-08-08 for `unknown` and
- * 2026-10-17 for `any`, Tycho ledger row 379), `Equal(u, 1)` keeps the
- * plain scalar form, and an `If` over it keeps its plain branches. The
- * Kleene `Equal`/`NotEqual` guard answers the target's object null for
- * such an operand when it is absent.
- */
-export function isObjectDomainMissingOperand(a: Expression): boolean {
-  const t = compilationType(a);
-  if ((t === 'any' || t === 'unknown') && isFunction(a)) return true;
-  if (!typeContainsMissing(t)) return false;
-  const stripped = resolveTypeForCompilation(stripMissingFromType(t));
-  // A bare absence type (`missing`, an element read whose every value is
-  // absent) is guarded too: its value is whichever absence its producer
-  // emits, and the guard reads only the object null as absent, so a
-  // numeric absence (`NaN`) still compares as IEEE says.
-  if (stripped === 'never') return true;
-  return !isSubtype(stripped, 'number');
 }
 
 /**
@@ -1195,8 +1091,11 @@ export function unsuppliedReads(
   for (const op of args) {
     if (isNumber(op) || isString(op)) continue;
     if (!mayBeUndecided(op, target)) continue;
-    // An operand with a `missing` arm has its own absence lowering
-    // (`absentComparisonGuard`, the Kleene `Equal`/`NotEqual` guard).
+    // An operand with a `missing` arm is not tested: its `undefined` is the
+    // absent value, which the host passes for an absent input, and a
+    // comparison with an absent operand is not specified in compiled code
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+    // "Everything computed from an absent value, except at a discharge").
     if (typeContainsMissing(compilationType(op))) continue;
     for (const s of operandInputNodes(op, target)) {
       const code = core.compile(s, target);
@@ -2039,8 +1938,7 @@ export function scalarOperandKind(
   if (isString(a)) return 'other';
   const t = resolveTypeForCompilation(stripMissingFromType(compilationType(a)));
   // A written absence (`Undefined`, `Missing`) or another constant symbol
-  // of a top type is not a variable: it keeps its own lowering
-  // (`absentComparisonGuard`).
+  // of a top type is not a variable.
   // An operand that may hold a list at run time (a top-typed application
   // such as `Sin(y)` with `y` a top-typed block local,
   // `isPossiblyCollectionTyped`) compiles to the element-wise broadcast,
@@ -2373,137 +2271,6 @@ export function nanEscapeTerms(
 }
 
 /**
- * The lowering of a scalar comparison `h(args)` (`<`, `≤`, `>`, `≥`, `=`,
- * `≠`, chained or not) with an operand that may be absent at run time, or
- * `undefined` when no operand may be absent, or the target has no object
- * absence (the GPU targets: there an absent number is `NaN`, and the
- * comparison reads it with IEEE arithmetic).
- *
- * A comparison with an absent operand is absent (`Missing`) in the
- * interpreter, in a numeric slot (`number | missing`) too (user decision
- * 2026-10-23, ROADMAP CE-93). The host passes an absent value as the
- * target's absent object (`undefined` in JavaScript, `None` in Python),
- * where the comparison operators would answer `false` (JavaScript) or
- * raise (Python). The operands are bound to temporaries, in operand order,
- * so each is evaluated once, and the comparison is the absent object when
- * one that may be absent is. Such an operand read from the host is absent
- * when it is the absent object: a `NaN` there is a value, and keeps the
- * IEEE reading (`false`), as in the interpreter (ROADMAP CE-386 reads it
- * so in `Equal`). A computed one (a nested `If` with no else branch) is
- * absent when it is `NaN`, the absence marker of compiled numeric code. A
- * chain is the `And` of its links, each guarded, so a link that is `false`
- * decides it, as in the interpreter; a chain with an impure operand keeps
- * the ordinary lowering.
- */
-export function absentComparisonGuard(
-  h: string,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  emit: () => string
-): string | undefined {
-  const object = target.absence?.object;
-  if (object === undefined || target.bindExpr === undefined) return undefined;
-  if (
-    h !== 'Less' &&
-    h !== 'LessEqual' &&
-    h !== 'Greater' &&
-    h !== 'GreaterEqual' &&
-    h !== 'Equal' &&
-    h !== 'NotEqual'
-  )
-    return undefined;
-  const mayBeAbsent = (a: Expression): boolean => {
-    if (_codeAliases.has(a)) return false;
-    const t = compilationType(a);
-    return typeContainsMissing(t) && numericMissingSlot(t);
-  };
-  if (!args.some(mayBeAbsent)) return undefined;
-  // Scalar numbers only: a collection operand keeps its own lowering
-  // (element-wise, or the whole-collection equality of a chain).
-  if (
-    !args.every(
-      (a) => isNumber(a) || isSubtype(compilationType(a), 'number | missing')
-    )
-  )
-    return undefined;
-  // A chain (`0 < w < 2`) is the `And` of its links, each guarded on its
-  // own: the interpreter stops at the first link that is `False`, so
-  // `Less(5, 0, w)` is `False` with `w` absent, and the connective reads
-  // an absent link by the Kleene rule (`guardConnectiveAbsence`). An
-  // operand shared by two links is read twice, so the chain is compiled
-  // this way only when every operand is pure. With an impure operand the
-  // chain does not compile: the interpreter evaluates the operands in
-  // order and goes on past an absent link, which neither this form nor the
-  // ordinary lowering reproduces.
-  if (args.length > 2) {
-    if (args.some((a) => operandHasEffect(a, target)))
-      throw new Error(
-        `Could not compile \`${h}\`: a chained comparison with an operand ` +
-          `that may be absent and an operand with an effect. The ` +
-          `interpreter evaluates it instead.`
-      );
-    const ce = args[0].engine;
-    const links = args.slice(1).map((b, i) => ce._fn(h, [args[i], b]));
-    return core.compile(ce._fn('And', links), target);
-  }
-  // Every operand that is not a literal is bound, in operand order, so each
-  // is evaluated once and in the interpreter's order, also when another one
-  // is absent. The initializers are compiled before any alias is installed:
-  // an alias in scope while a later initializer compiles would name a
-  // temporary that the initializer cannot see. A node that is both
-  // operands (`w = w`) is bound once, which is right for a pure one. An
-  // impure one is evaluated each time it appears in the interpreter, and
-  // the temporary of a node cannot stand for two evaluations of it, so
-  // that comparison does not compile.
-  const operands: Expression[] = [];
-  for (const a of args) {
-    if (isNumber(a)) continue;
-    if (operands.includes(a)) {
-      if (operandHasEffect(a, target))
-        throw new Error(
-          `Could not compile \`${h}\`: the same operand with an effect ` +
-            `appears twice beside an operand that may be absent. The ` +
-            `interpreter evaluates it instead.`
-        );
-      continue;
-    }
-    operands.push(a);
-  }
-  const codes = operands.map((a) => compileValueOperand(a, target));
-  const temps = operands.map(() => tempVar(target));
-  // A symbol (an input, a parameter, a local) is absent when it is the
-  // target's absent object (`undefined`, `None`): a `NaN` there is a
-  // value, and keeps the IEEE reading, as in the interpreter (ROADMAP
-  // CE-386 reads it so in `Equal`). A computed value that may be absent
-  // (an `If` with no else branch) is `NaN` in compiled numeric code when
-  // it is absent, so it is tested with the target's numeric absence test,
-  // as the condition of a branch tests it (`operandDecidedConjuncts`). A
-  // local that holds such a computed value is read as a symbol: that case
-  // is not told apart.
-  const tests = operands.flatMap((a, i) => {
-    if (!mayBeAbsent(a)) return [];
-    if (isSymbol(a)) return [object.isNull(temps[i])];
-    const numeric = target.absence?.numeric.isAbsent;
-    return [numeric ? numeric(temps[i]) : object.isNull(temps[i])];
-  });
-  try {
-    // An alias (not an override): the analyses still read the operand as
-    // it is, so a complex operand keeps the realness rule of the head.
-    operands.forEach((a, i) => _codeAliases.set(a, temps[i]));
-    const body = emit();
-    const absent = tests.join(target.language === 'python' ? ' or ' : ' || ');
-    return target.bindExpr(
-      operands.map((_, i) => [temps[i], codes[i]] as [string, string]),
-      target.language === 'python'
-        ? `(${object.nullLiteral} if (${absent}) else (${body}))`
-        : `((${absent}) ? ${object.nullLiteral} : (${body}))`
-    );
-  } finally {
-    for (const a of operands) _codeAliases.delete(a);
-  }
-}
-
-/**
  * Is the `missing` arm of the type of `expr` there only because an operand
  * is a number that may be absent (`number | missing`)? True for a
  * comparison whose operands with a `missing` arm are all such numbers, and
@@ -2511,10 +2278,12 @@ export function absentComparisonGuard(
  * comparison or have no `missing` arm.
  *
  * A comparison with an absent operand is `Missing` in the interpreter
- * (ROADMAP CE-93), so its type has a `missing` arm. On a target with no
- * object domain (the GPU targets), an absent number IS `NaN`, and the
- * comparison reads it with IEEE arithmetic (`false`), as it did before:
- * such a comparison still compiles there, with no guard.
+ * (ROADMAP CE-93), so its type has a `missing` arm. Such a comparison
+ * compiles with no guard on every target: on a target with no object
+ * domain (the GPU targets) an absent number IS `NaN`, which IEEE
+ * arithmetic compares `false`, and on every target the compiled value of a
+ * comparison with an absent operand is not specified
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
  */
 export function absentOnlyThroughNumericSlots(expr: Expression): boolean {
   if (!isFunction(expr)) return false;

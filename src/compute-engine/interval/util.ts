@@ -658,8 +658,7 @@ function enclosureOf(r: IntervalResult | Interval): IntervalResult | undefined {
  *
  * Three results have no value, and answer `empty` (the indeterminate value of
  * the interpreter):
- * - `empty` itself, without the `missing` flag: an operation over an absent
- *   value is a numeric undefined value, as `Missing + 1` is `NaN`;
+ * - `empty` itself;
  * - an interval with a `NaN` endpoint, which the arithmetic of an absent
  *   operand produces;
  * - an INFINITE SINGLETON (`lo === hi`, both `+∞` or both `-∞`). It encloses
@@ -685,11 +684,8 @@ export function enclose(result: IntervalResult | Interval): IntervalResult {
  * Unlike `enclose`, it KEEPS two results. An infinite singleton stays: a
  * comparison of an enclosure with a number that is `+∞` (`x < y` run with
  * `y: Infinity`) is decided by that value, and `Max(x, y)` with `y: Infinity`
- * is `+∞`, as the interpreter answers. `empty` stays with its `missing`
- * flag: a comparison with an ABSENT value is `'maybe'`, where a comparison
- * with a value that is undefined is `'false'`, and only the flag tells the
- * two apart. An interval with a `NaN` endpoint (the numeric absence marker)
- * is also returned as it is.
+ * is `+∞`, as the interpreter answers. `empty` stays. An interval with a
+ * `NaN` endpoint (the numeric absence marker) is also returned as it is.
  */
 export function stripEnclosure(
   result: IntervalResult | Interval

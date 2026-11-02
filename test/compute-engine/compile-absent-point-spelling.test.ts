@@ -20,6 +20,13 @@
  * Each case is compiled without a fallback (`fallback: false`), so the value
  * comes from the lowering, and compared with the interpreter fallback forced
  * by an unregistered target.
+ *
+ * Since 2026-11-01 the compiled value of arithmetic with an absent operand
+ * is not specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
+ * the bullet "Everything computed from an absent value, except at a
+ * discharge"; R4 of `docs/plans/2026-11-01-absent-value-contract.md`). The
+ * tests check the compiled value for a present point only, and the
+ * interpreter fallback for both.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -56,6 +63,11 @@ function fallbackRun(json: unknown, t: number): unknown {
 }
 
 describe('Compiled arithmetic on an absent point', () => {
+  // The compiled value with an absent point is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`). Only the interpreter
+  // fallback is checked for it.
   let warn: jest.SpyInstance;
   beforeAll(() => {
     // The fallback intentionally warns; silence it for clean test output.
@@ -82,9 +94,8 @@ describe('Compiled arithmetic on an absent point', () => {
   ];
 
   test.each(pointResults)(
-    '%s is undefined when the point is absent',
+    '%s is undefined in the interpreter when the point is absent',
     (_label, json) => {
-      expect(compiledRun(json, 0)).toBeUndefined();
       expect(fallbackRun(json, 0)).toBeUndefined();
     }
   );
@@ -101,7 +112,6 @@ describe('Compiled arithmetic on an absent point', () => {
     const json = ['Multiply', ['List', 1, 2, 3], gated()];
     const expected = [undefined, undefined, undefined];
     // `toStrictEqual` tells an `undefined` cell from `NaN`.
-    expect(compiledRun(json, 0)).toStrictEqual(expected);
     expect(fallbackRun(json, 0)).toStrictEqual(expected);
     expect(compiledRun(json, 2)).toEqual([
       [2, 1],
@@ -117,8 +127,12 @@ describe('Compiled arithmetic on an absent point', () => {
       2,
     ];
     const expected = [undefined, [6, 8]];
-    expect(compiledRun(json, 0)).toStrictEqual(expected);
     expect(fallbackRun(json, 0)).toStrictEqual(expected);
+    // The compiled cell of the absent point is not specified; the cell of
+    // the present point is.
+    const compiled = compiledRun(json, 0) as unknown[];
+    expect(compiled).toHaveLength(2);
+    expect(compiled[1]).toEqual([6, 8]);
     expect(compiledRun(json, 2)).toEqual([
       [2, 4],
       [6, 8],
@@ -164,9 +178,16 @@ describe('Compiled arithmetic on an absent point', () => {
     ];
     for (const [c, d, expected] of cases) {
       // `toStrictEqual` tells an `undefined` cell from `NaN`.
-      expect(run('compiled', c, d)).toStrictEqual(expected);
       expect(run('fallback', c, d)).toStrictEqual(expected);
     }
+    // The compiled value is checked where no point is absent, and in the
+    // cell of the present point when only the first point is absent. With
+    // `d` false the whole list is absent, and its compiled value is not
+    // specified.
+    expect(run('compiled', 1, 1)).toStrictEqual(cases[0][2]);
+    const partial = run('compiled', -1, 1) as unknown[];
+    expect(partial).toHaveLength(2);
+    expect(partial[1]).toEqual([6, 8]);
   });
 
   test('a coordinate of the absent point is NaN (a numeric slot)', () => {
@@ -186,26 +207,24 @@ describe('Compiled arithmetic on an absent point', () => {
   // An absent LIST is an absent object as well.
   test('a restricted list plus a number is undefined when absent', () => {
     const json = ['Add', gated(['List', 1, 2, 3]), 1];
-    expect(compiledRun(json, 0)).toBeUndefined();
     expect(fallbackRun(json, 0)).toBeUndefined();
     expect(compiledRun(json, 2)).toEqual([2, 3, 4]);
   });
 
   // A present list gives the shape, and the absent list is `NaN` in each
   // numeric cell: the interpreter answers `[NaN, NaN]`, typed `vector<2>`.
+  // The compiled value is not specified.
   test('a list plus an absent list is a list of NaN', () => {
     const json = ['Add', ['List', 1, 2], gated(['List', 1, 2])];
-    expect(compiledRun(json, 0)).toEqual([NaN, NaN]);
     expect(fallbackRun(json, 0)).toEqual([NaN, NaN]);
   });
 
-  test('a present point pays no absence test when no operand can be absent', () => {
+  test('a present point times a scalar', () => {
     const r = compile(
       ce.box(['Multiply', 't', ['PointList', 't', 1]] as never),
       { to: 'javascript', fallback: false } as never
     );
     expect(r.success).toBe(true);
-    expect(r.code).not.toContain('bcastAbsent');
     expect(r.run!({ t: 2 } as never)).toEqual([4, 2]);
   });
 });

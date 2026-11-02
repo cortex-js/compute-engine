@@ -137,7 +137,6 @@ import {
   broadcastCollectionArm,
   couldMatch,
   isSubtype,
-  provablyAdmits,
 } from '../../common/type/subtype.js';
 import {
   isBroadcastablePointType,
@@ -1872,9 +1871,8 @@ const JS_ORDERING_OPERATORS = {
  * per position otherwise
  * (so an empty or mismatched position never poisons a sibling), and projects a
  * length mismatch to NaN — the same substrate `tryCompileBroadcast` uses for
- * the provable-array case, which is what makes the two lowerings agree. The
- * connectives additionally get `guardConnectiveAbsence`, since `!`/`&&`/`||`
- * coerce an absent (NaN) position to a plain — and wrong — truth value.
+ * the provable-array case, which is what makes the two lowerings agree. A
+ * connective over an absent (NaN) position is unspecified in compiled code.
  *
  * Three shapes keep failing closed, each because no faithful runtime dispatch
  * exists (admission is the dangerous direction):
@@ -2052,51 +2050,18 @@ function compileJSCollectionBoolean(
     const realness =
       kind in JS_ORDERING_OPERATORS &&
       args.some((a) => BaseCompiler.isComplexValued(a));
-    // An operand of unknown type that may be absent (`g(x)[5]` with
-    // `g := t ↦ [t, 2t]` and `x: any`, typed `missing | unknown`) spells its
-    // absent value `undefined`, and an ordering on it is absent, as the
-    // interpreter answers `Missing` for `g(x)[5] < 1` and `[Missing,
-    // Missing]` for `g(x)[5] < [1, 2]` (ROADMAP CE-368): the JavaScript `<`
-    // on `undefined` gave `false`. The guard is emitted only for such an
-    // operand: an absent NUMERIC slot (an index past the end of a
-    // `list<number>`) is `NaN`, which the interpreter compares as `False`,
-    // and the JavaScript `<` gives `false` for it. A connective keeps its
-    // own absence rule (`guardConnectiveAbsence`).
-    const absentCells = args.map(
-      (a) => topTypeBesideAbsence(jsType(a)) !== undefined
-    );
     // The closure body over the parameters `ps`, which stand for the
-    // operands at `idx` (all of them, or one pair of the lazy chain below).
-    const bodyOf = (ps: string[], idx: number[]): string => {
-      const scalarBody = BaseCompiler.guardConnectiveAbsence(
-        kind,
-        ps,
-        realness
-          ? `(${ps.map((p) => `_SYS.cisreal(${p})`).join(' && ')} ? ` +
-              `${compileScalarBooleanBody(
-                kind,
-                ps.map((p) => `_SYS.creal(${p})`)
-              )} : false)`
-          : compileScalarBooleanBody(kind, ps)
-      );
-      return kind in JS_ORDERING_OPERATORS && idx.some((i) => absentCells[i])
-        ? `((${ps
-            .filter((_p, k) => absentCells[idx[k]])
-            .map((p) => `${p} === undefined`)
-            .join(' || ')}) ? undefined : ${scalarBody})`
-        : scalarBody;
-    };
-    const all = args.map((_a, i) => i);
-    const body = bodyOf(params, all);
-    // A connective reads an absent operand in its closure
-    // (`guardConnectiveAbsence`): a decisive operand wins over it,
-    // `And(absent, false)` is `false`. `_SYS.bcast` would make the result
-    // absent before the closure runs, so the connectives take the broadcast
-    // without the absence rule.
-    const helper =
-      kind === 'And' || kind === 'Or' || kind === 'Not'
-        ? '_SYS.bcastPlain'
-        : '_SYS.bcast';
+    // operands (all of them, or one pair of the lazy chain below).
+    const bodyOf = (ps: string[]): string =>
+      realness
+        ? `(${ps.map((p) => `_SYS.cisreal(${p})`).join(' && ')} ? ` +
+          `${compileScalarBooleanBody(
+            kind,
+            ps.map((p) => `_SYS.creal(${p})`)
+          )} : false)`
+        : compileScalarBooleanBody(kind, ps);
+    const body = bodyOf(params);
+    const helper = '_SYS.bcast';
     if (!lazyChain) {
       const operands = args.map((a, i) => `(${compile(a, i)})`).join(', ');
       return `${helper}((${params.join(', ')}) => ${body}, ${operands})`;
@@ -2114,7 +2079,7 @@ function compileJSCollectionBoolean(
     const codes = args.map((a, i) => compile(a, i));
     const pairFalse = (i: number): string =>
       `${helper}((${params[i - 1]}, ${params[i]}) => ` +
-      `${bodyOf([params[i - 1], params[i]], [i - 1, i])}, ` +
+      `${bodyOf([params[i - 1], params[i]])}, ` +
       `${temps[i - 1]}, ${temps[i]}) === false`;
     const scope = (i: number): string => {
       const rest =
@@ -3384,25 +3349,11 @@ function compilePointComponent(
     // into the helper. The broadcast reading is the helper's default, and is
     // left unspoken to keep the emitted call short.
     const emptyBroadcasts = elementTypeBroadcastsWhenEmpty(eltType);
-    // An absent operand (`undefined`) has no coordinate. When nothing is
-    // known about the coordinate (the accessor is typed `any` or `unknown`,
-    // as over `collection<any> | tuple`, the parameter type a function
-    // literal infers from a `PointX(p)` use), the interpreter keeps the
-    // absence, `Missing`, and the helper answers `undefined` (its sixth
-    // argument). A coordinate typed a number, or a number or a list of
-    // numbers, answers `NaN`, as `PointX(Missing)` does at the top level
-    // (ROADMAP CE-229).
-    const accessor = (['PointX', 'PointY', 'PointZ'] as const)[idx];
-    const keepsAbsence =
-      accessor !== undefined &&
-      isTopTypeForAbsence(arg.engine.function(accessor, [arg]).type.type);
-    const options = keepsAbsence
-      ? `, ${emptyBroadcasts}, false, ${undecidedNesting}, true`
-      : undecidedNesting
-        ? `, ${emptyBroadcasts}, false, true`
-        : emptyBroadcasts
-          ? ''
-          : ', false';
+    const options = undecidedNesting
+      ? `, ${emptyBroadcasts}, false, true`
+      : emptyBroadcasts
+        ? ''
+        : ', false';
     return `_SYS.pointComponent(${compiled()}, ${idx}${options})`;
   }
   const direct = pointConstructorComponent(arg, idx, compile, target, eltType);
@@ -3549,14 +3500,6 @@ export function mayBePointList(t: Type): boolean {
 export function tupleElementType(t: Type, idx: number): Type | undefined {
   if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
   return t.elements[idx]?.type;
-}
-
-/** Whether `t` states nothing about a value (`any` or `unknown`): an absent
- * value of such a type keeps its absence through a coordinate accessor and
- * through arithmetic, as in the interpreter (ROADMAP CE-229). */
-export function isTopTypeForAbsence(t: Type): boolean {
-  const r = resolveTypeAlias(t);
-  return r === 'any' || r === 'unknown';
 }
 
 /**
@@ -5700,11 +5643,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     let combiner = !library
       ? undefined
       : (nestedElementCombiner('Reduce', coll, op, init) ??
-        builtinCombiner(
-          op,
-          BaseCompiler.foldLaneIsComplex(coll, init),
-          elementsMayBeAbsent(coll)
-        ));
+        builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init)));
     // The seed's code when the accumulator lane is complex and the seed is
     // real (`combinerPlan.coerceSeed`); `undefined` = compile `init` as-is.
     let seed: string | undefined;
@@ -7311,11 +7250,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const builtin = !library
       ? undefined
       : (nestedElementCombiner('Scan', coll, op, init) ??
-        builtinCombiner(
-          op,
-          BaseCompiler.foldLaneIsComplex(coll, init),
-          elementsMayBeAbsent(coll)
-        ));
+        builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init)));
     // As `Reduce`: the accumulator's annotation is judged against the lane
     // `combinerPlan` chose, or else against the join of the seed's type (the
     // first element's, for a seedless scan) and the combiner's result type.
@@ -11299,7 +11234,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // condition off its value and every other one off its operands.
       collectionEqualityOperand: isCollectionEqualityOperandJS,
       // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
-      // `undefined`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
+      // `undefined`. Consumed by `IsMissing`, `Coalesce` and `AssertPresent`.
       //
       // The numeric test reads `undefined` as absent as well as `NaN`
       // (2026-09-22). Two kinds of absent read reach it: a WRITTEN absence
@@ -11319,10 +11254,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // `_SYS.atWithValueMarker` is returned as it is). A present
       // object-domain value (a string, an array, a record) is never `NaN`,
       // so the test reads it as present. `isNull` tests the object null
-      // only, for the Kleene guards of a comparison, where a `NaN` operand is
-      // a number that compares as IEEE says; their value on an absent operand
-      // is unspecified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled
-      // code"), and they keep their former test.
+      // only, for the guard of an absent whole collection operand
+      // (`absentCollectionOperandGuard`), which keeps its former test.
       absence: {
         numeric: {
           make: () => 'Number.NaN',
@@ -15527,21 +15460,11 @@ function builtinCombiner(
    * `success: true`. `Min`/`Max` have no meaning over complex values — the
    * interpreter declines them — so they fail closed here.
    */
-  complexLane = false,
-  /**
-   * An element may be absent (`elementsMayBeAbsent`). JavaScript reads
-   * `null` as 0 in arithmetic (`2 * null` is 0, `Math.min(2, null)` is 0),
-   * and `_SYS.cplx(null)` has no `re`. Each operand is then read as `NaN`
-   * when it is absent (`{re: NaN, im: NaN}` in the complex lane, so that a
-   * sum does not keep a finite imaginary part), and the fold gives `NaN`
-   * from that step on, as the interpreter does.
-   */
-  absent = false
+  complexLane = false
 ): string | undefined {
   if (!isSymbol(op)) return undefined;
-  const nan = complexLane ? '{ re: NaN, im: NaN }' : 'NaN';
-  const a = absent ? `(_a ?? ${nan})` : '_a';
-  const b = absent ? `(_b ?? ${nan})` : '_b';
+  const a = '_a';
+  const b = '_b';
   switch (op.symbol) {
     case 'Add':
       return complexLane
@@ -15589,34 +15512,6 @@ function refuseBuiltinFoldOfNonNumbers(
       `\`${typeToString(elt)}\` has no compiled form: the elements are not numbers. ` +
       `The interpreter evaluates it instead.`
   );
-}
-
-/**
- * Whether an element of the collection `coll` may be absent: its element
- * type admits `missing` (`list<number | missing>`). An element of
- * type `unknown` is not counted: it is not evidence of an absent value.
- */
-function elementsMayBeAbsent(coll: Expression): boolean {
-  const elt = BaseCompiler.collectionElementTypeOf(coll);
-  return elt !== undefined && provablyAdmits('missing', elt);
-}
-
-/**
- * Whether a cell of the type `t`, at any depth of its lists, may be absent:
- * `list<list<number | missing>>`, or a row that may be absent
- * (`list<vector<2> | missing>`). The real-only element-wise helpers
- * (`_SYS.add`, `_SYS.mul`) read an absent cell as 0; the dispatching
- * helpers (`_SYS.addAny`, `_SYS.mulAny`) read it as `NaN`.
- */
-function cellsMayBeAbsent(t: Type, depth = 0): boolean {
-  if (depth > 8) return false;
-  const r = resolveTypeForCompilation(t);
-  if (provablyAdmits('missing', r)) return true;
-  if (typeof r === 'string') return false;
-  if (r.kind === 'union')
-    return r.types.some((arm) => cellsMayBeAbsent(arm, depth + 1));
-  const elt = leafwardElementType(r);
-  return elt !== undefined && cellsMayBeAbsent(elt, depth + 1);
 }
 
 /**
@@ -17579,11 +17474,7 @@ function leafCellType(t: Type, seen?: AliasDescent): Type | undefined {
 function foldLane(coll: Expression): 'real' | 'complex' | 'wide' {
   if (!BaseCompiler.foldsCollectionElements(coll)) return 'wide';
   if (BaseCompiler.linearAlgebraLane([coll]) === 'complex') return 'complex';
-  // A cell that may be absent takes the dispatching helpers, which read it
-  // as `NaN`: with the real-only `_SYS.mul`, the product of the rows
-  // `[2, null]` and `[3, 4]` was `[6, 0]`, where the interpreter gives
-  // `[6, NaN]`.
-  return cellsMayBeAbsent(coll.type.type) ? 'wide' : 'real';
+  return 'real';
 }
 
 /**

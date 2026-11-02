@@ -588,8 +588,7 @@ export const PLAIN_BROADCAST_MEMO_LIMIT = 4096;
  * (IEEE propagation through the JavaScript operators and `Math` calls),
  * read by {@link emitFusedBroadcast}. `Power` is the exception among the
  * arithmetic heads (`Math.pow(NaN, 0)` is 1) and is handled there; the
- * relational and logical heads answer `false`/`true` for a NaN operand or
- * let a dominant operand absorb it (`guardConnectiveAbsence`).
+ * relational and logical heads answer `false`/`true` for a NaN operand.
  */
 export const NAN_PROPAGATING_BROADCAST_HEADS: ReadonlySet<string> = new Set([
   'Add',

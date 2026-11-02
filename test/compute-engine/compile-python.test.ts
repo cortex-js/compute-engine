@@ -154,7 +154,7 @@ describe('PYTHON TARGET', () => {
     it('should compile expression with constants', () => {
       const expr = ce.parse('2\\pi r');
       const code = python.compile(expr).code;
-      expect(code).toBe("2 * np.pi * (float('nan') if r is None else r)");
+      expect(code).toBe('2 * np.pi * r');
     });
   });
 
@@ -898,7 +898,7 @@ describe('PYTHON TARGET', () => {
         '((1) if (0 < x) else (-1))'
       );
       expect(code(['If', ['Greater', 'm', 0], 1, -1])).toBe(
-        '(((1) if ((lambda _tv1: (None if ((_tv1 is None)) else (0 < _tv1)))(m)) ' +
+        '(((1) if (0 < m) ' +
           "else (-1)) if (not (m is None) and m == m) else float('nan'))"
       );
       // A costly operand is computed ONCE.
@@ -982,10 +982,10 @@ describe('PYTHON TARGET', () => {
       ).toBe(
         '(lambda _CND: ((1) if (isinstance(_CND, (bool, np.bool_)) and _CND) ' +
           "else ((2) if isinstance(_CND, (bool, np.bool_)) else float('nan'))))" +
-          '((lambda _tv2: (False if _tv2 is not None and not _tv2 else ' +
-          '(lambda _tv3: (_tv3 if _tv2 is not None and _tv2 else ' +
-          '(False if _tv3 is not None and not _tv3 else None)))' +
-          '((x < 2))))((((lambda _tv1: (None if ((_tv1 is None)) else (0 < _tv1)))(m)) ' +
+          '((lambda _tv1: (False if _tv1 is not None and not _tv1 else ' +
+          '(lambda _tv2: (_tv2 if _tv1 is not None and _tv1 else ' +
+          '(False if _tv2 is not None and not _tv2 else None)))' +
+          '((x < 2))))(((0 < m) ' +
           'if not (m is None) and m == m else None)))'
       );
       // A `NotEqual` with a NaN operand is decided too (user decision
@@ -2028,7 +2028,7 @@ describe('PYTHON TARGET', () => {
         'def f(x):\n' +
           '    r = 0\n' +
           '    if not (x is None) and x == x:\n' +
-          '        if (lambda _tv1: (None if ((_tv1 is None)) else (0 < _tv1)))(x):\n' +
+          '        if 0 < x:\n' +
           '            r = 1\n' +
           '        else:\n' +
           '            r = 2\n' +

@@ -483,9 +483,6 @@ describe('The run-time helpers of the enclosure kind', () => {
     expect(IA.enclose({ kind: 'singular', at: 0 })).toEqual(whole);
     expect(IA.enclose({ kind: 'entire' })).toEqual(whole);
     expect(IA.enclose({ kind: 'empty' })).toEqual({ kind: 'empty' });
-    expect(IA.enclose({ kind: 'empty', missing: true })).toEqual({
-      kind: 'empty',
-    });
     expect(IA.enclose({ kind: 'interval', value: p(NaN) })).toEqual({
       kind: 'empty',
     });
@@ -504,7 +501,7 @@ describe('The run-time helpers of the enclosure kind', () => {
     expect(IA.enclose(p(3))).toEqual({ kind: 'interval', value: p(3) });
   });
 
-  test('stripEnclosure keeps an infinite singleton and the absence flag', () => {
+  test('stripEnclosure keeps an infinite singleton and an empty result', () => {
     expect(
       IA.stripEnclosure({
         kind: 'partial',
@@ -517,10 +514,6 @@ describe('The run-time helpers of the enclosure kind', () => {
     expect(IA.stripEnclosure({ kind: 'interval', value: p(Infinity) })).toEqual(
       { kind: 'interval', value: p(Infinity) }
     );
-    expect(IA.stripEnclosure({ kind: 'empty', missing: true })).toEqual({
-      kind: 'empty',
-      missing: true,
-    });
     expect(IA.stripEnclosure({ kind: 'empty' })).toEqual({ kind: 'empty' });
   });
 

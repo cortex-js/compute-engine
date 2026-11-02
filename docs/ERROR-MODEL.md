@@ -153,29 +153,20 @@ What the decision does NOT change:
   `javascript` and `python` targets, the same arm as `If(¬(NaN = 0), a, b)`.
   The GPU targets took the then arm before and still do. `interval-js`
   still answers `'maybe'` for `\sqrt{x} \ne 0` over an `empty` operand.
-- **`Missing`** keeps its Kleene reading: `Less(Missing, 1)` is `Missing`,
-  and an `If` on it is the absent-condition error (§3.D); compiled, a
-  `missing`-typed operand still makes the branch take no arm. On
-  `javascript` and `python` such an operand is tested both for the object
-  null and for NaN, because NaN is the value a nested else-less `If` or a
-  default-less `Which` with a numeric result answers when it selects no
-  arm: `If(If(c > 0, 1) > 0, 1, 0)` at `c = -1` is `NaN`, as the
-  interpreter gives the absent-condition error. A consequence: a NaN that
-  such an operand holds as a value (an arm that is itself NaN) also makes
-  the branch take no arm. Arithmetic over a `missing`-typed value is typed
-  `number` and is not tested: `Missing + 1` is `NaN` in the interpreter
-  too, and `If(If(c > 0, 1) + 1 > 0, 1, 0)` at `c = -1` is `0` in the
-  interpreter, on `javascript` and on `python`. On `interval-js` the no-selection value of a default-less `Which`
-  and a written `Missing` is the `empty` result with the `missing` flag,
-  and a comparison with it is `'maybe'`, not `'false'` (`hasEmptyOperand`,
-  `interval/comparison.ts`): `Which(x > 5, 1) > 0` over `x` = [0, 1] is
-  `'maybe'`. A `When` whose condition is false and an `At` that selects
-  nothing are numeric undefined values in the interpreter (`When(1, False)`
-  is `NaN`), so they keep the plain `empty` and a comparison with them is
-  `'false'`.
+- **`Missing`** keeps its Kleene reading in the interpreter:
+  `Less(Missing, 1)` is `Missing`, and an `If` on it is the absent-condition
+  error (§3.D). In compiled code a comparison, a connective or a branch
+  condition over an absent operand is unspecified (decision of 2026-11-01,
+  §6): the `javascript` and `python` targets give the IEEE answer for the
+  absent object (`false`), so `If(w > 0, 1, 0)` with `w: real | missing`
+  absent takes the else arm and gives 0; `interval-js` gives `'false'` for
+  a comparison with an `empty` operand, whatever produced the `empty`.
+  Arithmetic over a `missing`-typed value is typed `number`: `Missing + 1`
+  is `NaN` in the interpreter, and `undefined + 1` is `NaN` on `javascript`,
+  so `If(If(c > 0, 1) + 1 > 0, 1, 0)` at `c = -1` is `0` on every route.
 - **A comparison of two collections with an absent cell** keeps the
-  2026-09-21 marker ruling: the comparison is `Missing` and a branch on it
-  takes no arm.
+  2026-09-21 marker ruling in the interpreter: the comparison is `Missing`
+  and a branch on it takes no arm. Compiled, it is unspecified (§6).
 - **An error that the static type does not show, or an input value outside
   its declared type**, in compiled code. *Contract* (user decision
   2026-10-31, option (b) of
@@ -1194,13 +1185,13 @@ the condition of an `If` reads it. With `w: number | missing` holding
 `Missing`, `w > 0` is `Missing` (typed `boolean | missing`) and
 `If(w > 0, 1, 0)` has no value; before, the slot read its absent value as
 `NaN`, and `w > 0` was `False` while the `If` had no value. A `NaN` is a
-value, and a comparison with it keeps the IEEE answer. Compiled code reads
-the absent object the host passes (`undefined` in JavaScript, `None` in
-Python) the same way; on the GPU targets an absent number can only be `NaN`,
-so a comparison there keeps the IEEE answer. One case compiled numeric code
-cannot tell apart: a nested `If` with no else branch is `NaN` there and
-`Missing` in the interpreter, so a comparison on it is `false` in compiled
-code.
+value, and a comparison with it keeps the IEEE answer. This is the
+interpreter's rule. In compiled code a comparison with an absent operand is
+unspecified (decision of 2026-11-01, §6): the `javascript` and `python`
+targets give the IEEE answer for the absent object the host passes
+(`undefined > 0` is `false`), the GPU targets have only `NaN` and give the
+IEEE answer too. A program that must know whether `w` is absent asks
+`IsMissing(w)`, not `IsMissing(w > 0)`.
 
 The normalization is to the marker of the CODOMAIN, exactly as rule 4 of §2
 states. The codomain is read off the type of the application itself, with
@@ -1302,8 +1293,8 @@ each the answer the same expression gives for `Missing`.
 **A comparison of two COLLECTIONS asks about the collections as a whole, and
 one element pair with no answer leaves that whole question unanswered** (user
 ruling of 2026-09-21). `Equal` and `NotEqual` then answer the marker of this
-section — `Missing` in the interpreter, `NaN` in compiled code — and never a
-confident truth. An absent cell (`Missing` or `Undefined`) on either side is
+section — `Missing` in the interpreter; in compiled code the answer is
+unspecified (§6), `NaN` as of 2026-11-01 — and never a confident truth. An absent cell (`Missing` or `Undefined`) on either side is
 what makes a pair undecided: the cell can stand for any value, so no walk of
 the cells that ARE there can tell whether the two collections hold the same
 values. The rule holds even when another pair is decidedly unequal:
@@ -1337,31 +1328,16 @@ numeric marker, because the whole-collection rule above must keep an absent
 cell distinct from a `NaN` one, and each target's numeric absence test
 therefore reads the object null as absent too (2026-09-22).
 
-**A Python caller passes `None` for an absent INPUT, and compiled arithmetic
-reads it as `NaN`** (user decision 2026-10-25, ROADMAP CE-395). With
-`p: number | missing`, `p + 1`, `1 / p` and `np.sin(p)` raised a `TypeError`
-for `p = None`, where the interpreter answers `NaN` for `Missing + 1` and
-compiled JavaScript gives `NaN` (`undefined + 1`). The compiled code now
-reads such an input as `(float('nan') if p is None else p)` at a numeric
-parameter of an operator that propagates absence (`Add`, `Divide`, `Sin`:
-`resolvedMissingBehavior` is `propagate`). Only an input (a free symbol, a
-parameter of `compileFunction`/`compileLambda`, a `vars` source) whose type
-states that it admits `missing` (`number | missing`, `any`; not the inference
-marker `unknown`) pays for the test. An operator that handles absence keeps
-the `None`: a comparison keeps its `is None` test, so `p ≠ 0` stays undecided
-(`None`) for an absent `p`, and `Max(p, 5)` ignores it.
-
-**An absent OBJECT in compiled arithmetic is the object null too** (user
-decision of 2026-09-27). On the JavaScript target, arithmetic whose operand
-is an absent point, tuple or list (`2·P\{c\}`, `P\{c\} + Q`, `L\{c\} + 1`)
-answers `undefined` for the whole value, and a list of points answers
-`undefined` in each absent cell; before, the same static type gave three
-spellings (`undefined` for a read, `[NaN, NaN]` for point + point, `NaN` for
-scalar × point). A numeric read of an absent object (`PointX(P\{c\})`,
-`|P\{c\}|`) is a numeric slot and stays `NaN`. The interpreter fallback of a
-compiled function spells an absent result by the type of its position, so it
-gives the same answers. Code for operands that cannot be absent is unchanged
-(`_SYS.bcastAbsent` is emitted only when a static type admits `missing`).
+**Compiled arithmetic over an absent INPUT or an absent OBJECT is
+unspecified** (decision of 2026-11-01, §6; it replaces the decisions of
+2026-09-27 and 2026-10-25, ROADMAP CE-395). With `p: number | missing`
+passed as `None`, Python's `p + 1` is a `TypeError`; passed as `undefined`,
+JavaScript's `p + 1` is `NaN`. Arithmetic whose operand is an absent point,
+tuple or list (`2·P\{c\}`, `P\{c\} + Q`, `L\{c\} + 1`) gives the target's own
+value (`undefined`, `NaN`, a `TypeError`). A host that needs a value there
+writes `Coalesce(p, 0) + 1`, or declares `p: number` and passes a number.
+The interpreter still answers `NaN` for `Missing + 1` and `Missing` for an
+absent point in a point operation, as its own propagation.
 
 **Absent values in collection operators: five rules** (user decisions of
 2026-09-26; the design record with the precedent for each rule is
@@ -2108,7 +2084,21 @@ maps its channels onto it:
   reinterpret an `Error` as a throw, a `NaN`, or a plausible ordinary
   value.
 - Any native-semantics escape hatch must be an **explicitly named unsafe
-  mode**, chosen by the caller — never a silent default.
+  mode**, chosen by the caller — never a silent default. One exception,
+  decided 2026-11-01 (`docs/plans/2026-11-01-absent-value-contract.md`,
+  option (a)): an operator other than a discharge (`IsMissing`, `Coalesce`,
+  `AssertPresent`, a default parameter) or a position-preserving accessor
+  (`At`, `First`, `Last`, `Rest`, `Length`, the binding of a `Map`
+  parameter) applied to an ABSENT operand gives an unspecified value in
+  compiled code: the target's own value (`NaN`, `false`, `undefined`, a
+  throw) or a decline, and everything computed from it is unspecified too.
+  The interpreter's Kleene comparisons and its absorption of `Missing` into
+  `NaN` are its own behavior, not a contract that compiled code follows.
+  The host discharges a possibly absent value before computing on it. The
+  statement of the rule is in `docs/COMPILATION-MODEL.md`, "Caveats of
+  compiled code". Where a paragraph of §3 below says what compiled code
+  gives for an operator over an absent operand, it describes the interpreter
+  and the compiled code as they are, not a promise of the compiled value.
 - The compiled targets have only the IEEE `NaN`, so an `Indeterminate`
   constant and every exact indeterminate form compile to the target's
   `NaN` (`NaN` in JavaScript, `np.nan` in Python, `_gpu_nan()` in the

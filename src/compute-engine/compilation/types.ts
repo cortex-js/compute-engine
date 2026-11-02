@@ -1932,7 +1932,7 @@ export interface CompileTarget<Expr = unknown> {
    * domains at construction, numeric absence
    * reaches the compile boundary already as `NaN` — no conversion shim is
    * needed. The capability lets the discharge primitives (`IsMissing`,
-   * `Coalesce`) and Kleene `Equal` lower uniformly:
+   * `Coalesce`, `AssertPresent`) lower uniformly:
    *
    * - `numeric` — the absent-element operations for a numeric-domain position.
    *   `make()` emits the target's `NaN`; `isAbsent(x)` tests it; `coalesce(x,
@@ -1949,11 +1949,10 @@ export interface CompileTarget<Expr = unknown> {
    *   `docs/plans/2026-11-01-absent-value-contract.md`), and an
    *   object-domain position can hold the numeric marker at run time (an
    *   element that `_SYS.atWithValueMarker` returns as it is, a written
-   *   `Missing` on the Python target). `isNull` reads the null literal only:
-   *   the Kleene guards of a comparison use it, because there a `NaN`
-   *   operand is a number that compares as IEEE says, and their value on an
-   *   absent operand is unspecified (`docs/COMPILATION-MODEL.md`, "Caveats
-   *   of compiled code").
+   *   `Missing` on the Python target). `isNull` reads the null literal only.
+   *   Its one reader is the guard of an absent whole collection operand
+   *   (`absentCollectionOperandGuard`), which keeps the test it had before
+   *   the discharges read every spelling.
    */
   absence?: {
     numeric: {
@@ -1975,22 +1974,6 @@ export interface CompileTarget<Expr = unknown> {
        * and keeps the gate.
        */
       coversValueModel?: boolean;
-      /**
-       * How the code reads an INPUT (a free symbol, a parameter of the
-       * compiled function, a `vars` source) that the caller may pass as the
-       * object null of the target, at a numeric parameter of an operator
-       * that propagates absence (`Add`, `Sin`, …). The interpreter answers
-       * `NaN` there (`Missing + 1`). `x` is the source of the read, and the
-       * hook returns the source of a read that gives the numeric marker for
-       * the null. The base compiler calls it only for an input whose type
-       * can hold `missing` (`number | missing`, `any`, and `unknown`, the
-       * type of a free symbol of a parsed expression), so an input of
-       * another type (`number`) pays nothing. A target whose arithmetic already gives `NaN` for its
-       * null (JavaScript: `undefined + 1`) leaves it out. The Python target
-       * declares it, because `None + 1` and `np.sin(None)` raise a
-       * `TypeError`.
-       */
-      readInput?: (x: TargetSource) => TargetSource;
     };
     object?: {
       nullLiteral: TargetSource;

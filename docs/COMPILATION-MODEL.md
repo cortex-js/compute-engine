@@ -20,6 +20,36 @@ when it compiles. A difference that this list does not name is a defect.
   `null`, can throw, or can decline. With `q: real | missing` and `q`
   absent, `Sqrt(q)` can give `0` on `javascript` where the interpreter
   gives `NaN`.
+- **Everything computed from an absent value, except at a discharge.** An
+  absent value is specified at three kinds of places only. Its producers: a
+  read past the end (`At`, `First`, `Last`), a cell of an element-wise
+  `If`, `Which` or `When` that no clause selects, a scalar selection that
+  takes no arm, an input or an element whose declared type has a `missing`
+  arm and holds `Missing`; the producer gives `NaN` for a numeric type and
+  the target's absent object (`undefined` on `javascript`, `None` on
+  `python`) otherwise. The structure that moves it without computing on it:
+  `At`, `First`, `Last`, `Rest`, `Length`, `Reverse`, and the binding of a
+  callback parameter by `Map` and its relatives (`Length([1, Missing])` is 2
+  on every route). Its discharge: `IsMissing`, `Coalesce` (`??`),
+  `AssertPresent` (`?!`) and a default parameter, which give the
+  interpreter's value for an absent operand of any spelling (`Missing`,
+  `NaN`, `undefined`, `None`). Every other operator over an absent operand
+  (arithmetic, a point operation, a comparison, `Not`, `And`, `Or`, a branch
+  condition, a reducer, a string operation, the body of a user function) is
+  unspecified in compiled code: the value can be `NaN`, `false`,
+  `undefined`, a throw or a decline, and everything computed from that
+  value is unspecified too, `IsMissing` and `Coalesce` of it included. With
+  `w: real | missing` holding `Missing`, `If(IsMissing(w), 1, 0)` is 1 on
+  every route; `If(IsMissing(w > 0), 1, 0)` is 1 in the interpreter (the
+  comparison is `Missing` there, by Kleene) and 0 on `javascript` (the
+  comparison is `false`). The host discharges a possibly absent value
+  before it computes on it. The interpreter keeps its own propagation
+  (`Missing + 1` is `NaN`, `Less(Missing, 1)` is `Missing`) as a
+  convenience, not as a guarantee that compiled code follows. The only
+  absent object a host passes to compiled JavaScript is `undefined`; a
+  `null` input is a value outside the declared type (JavaScript reads
+  `null` as `0` in arithmetic). The decision record is
+  `docs/plans/2026-11-01-absent-value-contract.md`.
 - A value for an input that holds a value outside its declared type, for an
   input left out, or for an error that the static type does not show.
   "Fail closed" below lists these cases; they were never specified.
@@ -81,11 +111,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `c = true`, `w = y = 0`: `Unique(If(c, Take(xs, w/y), xs))` gives `[]` (the
   `If` hides the slice with no value from the guard of `Unique`); the
   interpreter leaves it unevaluated.
-- `javascript`: with `L := [(1, 2, 3), (4, 5, 6)]` and
-  `V := p ↦ PointX(p) < 1`, `Boole(IsMissing(V(At(L, 5))))` gives 0 (the
-  constant folding of the compiler reads the absent point as a number); the
-  interpreter gives 1. With `G := (p, s) ↦ s·PointX(p)`,
-  `Boole(IsMissing(G(At(L, 5), 2) < 1))` gives 0; the interpreter gives 1.
 - `javascript`, the interpreter fallback of a decline: with `L: list<real>`
   and `p: any` assigned `2L`, `compile(p + 1, { constantFold: false })`
   declines and `run({ L: [1, 2] })` gives `null` (the fallback does not pass
@@ -100,6 +125,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `const _c = "ok";`, `IsMissing(Coalesce(s, t))` at `s = undefined` gives
   `true` (the `Coalesce` lowering binds its operand to `_c`, and caller code
   is not renamed); the interpreter gives `false`.
+- `javascript`, a `vars` entry whose code is not a primary expression: with
+  `p: real` and `vars: { p: '2+3' }`, `2p` compiles to `2 * 2+3` and gives 7
+  (the code is spliced without parentheses); the interpreter, with `p = 5`,
+  gives 10. The `python` target groups such code.
+- `interval-js`, with `constantFold: false`: `PointX([Missing, []])` gives
+  one `empty` result (the empty row is skipped when the reading of the list
+  is decided, so the list is read as one point); the interpreter gives
+  `[Missing, Missing]`.
 
 ## Fail closed
 

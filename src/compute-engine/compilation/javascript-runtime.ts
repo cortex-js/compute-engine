@@ -1881,111 +1881,13 @@ function oneDatumOk<T>(
  * interpreter's `incompatible-dimensions` — no truncation to the
  * shortest), a scalar argument is reused for every element, and nested
  * arrays recurse. When no argument is an array, `f` is applied directly.
- * `f` therefore only ever sees scalar (or complex) operands. An absent
- * operand beside scalars only makes the result absent (see the body).
+ * `f` therefore only ever sees scalar (or complex) operands.
  */
 function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: unknown[]
-): BcastValue | undefined {
-  // An absent element read out of a list whose element type is not known
-  // (`g(x)[5]` with `g := t ↦ [t, 2t]` and `x: any`, typed
-  // `missing | unknown`) is spelled `undefined` (`atWithValueMarker`).
-  // Beside scalars only, it makes the result absent, as the interpreter
-  // answers `Missing` for `g(x)[5] + 1`, `Sin(g(x)[5])` and `g(x)[5] < 1`
-  // (ROADMAP CE-368): `f` applied to `undefined` gave `NaN`, or `false` for
-  // a comparison. Beside an array, the array gives the shape and the absent
-  // operand is `NaN` in each cell (`g(x)[5] + [1, 2]` is `[NaN, NaN]` in
-  // the interpreter), which `bcastWith` gives as before.
-  if (absentBesideScalars(args)) return undefined;
-  return bcastWith(f, args);
-}
-
-/**
- * True when an argument of a broadcast is the absent object `undefined`
- * and no argument is a collection (an array, or a rotation view, which
- * `bcastWith` reads as one): the result is then absent (see `bcast`).
- * Beside a collection the absent argument is a `NaN` cell.
- */
-function absentBesideScalars(args: ReadonlyArray<unknown>): boolean {
-  return (
-    args.some((a) => a === undefined) &&
-    !args.some((a) => Array.isArray(a) || a instanceof RotView)
-  );
-}
-
-/**
- * `bcast` without the absence rule: an `undefined` argument reaches `f`.
- * For a logical connective (`And`, `Or`, `Not`), whose closure reads an
- * absent operand itself (`guardConnectiveAbsence`, `base-compiler.ts`): a
- * decisive operand wins over an absent one, `And(absent, false)` is
- * `false`, where the absence rule of `bcast` gave `undefined`.
- */
-function bcastPlain(
-  f: (...xs: BcastValue[]) => BcastValue,
-  ...args: unknown[]
 ): BcastValue {
   return bcastWith(f, args);
-}
-
-/**
- * `bcast` for operands that may hold an ABSENT OBJECT: a restricted point or
- * list (`When((0, 1), c)` is `undefined` when `c` fails), or a list whose
- * elements may be absent points.
- *
- * The absent object is spelled `undefined` on the JavaScript target
- * (`docs/ERROR-MODEL.md` §3), and so is the result of arithmetic on it: the
- * interpreter answers `Missing` for `t·P`, `P + Q` or `−P` when the point `P`
- * is absent, so the whole point is absent, not a point of `NaN` coordinates
- * (user decision of 2026-09-27). The plain `bcast` cannot give this answer:
- * it applies its closure to an `undefined` operand as to a scalar, which
- * gives `NaN`.
- *
- * `depths[j]` is the set of array levels at which operand `j` can hold an
- * absent object, as a bit set: bit 0 when the operand itself can be absent,
- * bit 1 when its elements can be absent (a list of possibly absent points),
- * both for a restricted list of possibly absent points (`[P{c}, Q]{d}`),
- * and `0` when it cannot hold one (a number, a point, a list of numbers). An
- * operand that is `undefined` at a level where it can hold an absent object
- * makes that position of the result `undefined`: the whole result at level
- * 0, one cell of a list at level 1. Below the deepest such level, and for
- * the operands that cannot hold an absent object, the rules of `bcast` apply
- * unchanged, so a missing NUMBER still gives `NaN` (a numeric slot).
- *
- * The descent through the levels where an absent object can appear follows
- * `bcastWith`: array operands must share one length (a mismatch is `NaN`),
- * an empty position is the empty list, and a scalar operand is reused at
- * every position. A rotation view is never passed here.
- */
-function bcastAbsent(
-  depths: ReadonlyArray<number>,
-  f: (...xs: BcastValue[]) => BcastValue,
-  ...args: unknown[]
-): BcastValue | undefined {
-  let deeper = false;
-  for (let j = 0; j < args.length; j++) {
-    const d = depths[j] ?? 0;
-    if ((d & 1) !== 0 && args[j] === undefined) return undefined;
-    if (d > 1) deeper = true;
-  }
-  if (!deeper) return bcastWith(f, args);
-  let n = -1;
-  for (const a of args) {
-    if (!Array.isArray(a)) continue;
-    if (n < 0) n = a.length;
-    else if (a.length !== n) return NaN;
-  }
-  if (n < 0) return bcastWith(f, args);
-  if (n === 0) return [];
-  const inner = depths.map((d) => d >> 1);
-  const out: Array<BcastValue | undefined> = new Array(n);
-  for (let i = 0; i < n; i++)
-    out[i] = bcastAbsent(
-      inner,
-      f,
-      ...args.map((a) => (Array.isArray(a) ? a[i] : a))
-    );
-  return out as BcastValue;
 }
 
 /**
@@ -3043,28 +2945,9 @@ function complexMulTensor(...args: BcastValue[]): BcastValue {
  * the user kept on 2026-10-01: a lane not proved complex is real. Using
  * `complexMatmul` here would make every entry `{re, im}` and slow down a
  * real `list<number>` product.
- *
- * An absent entry (`null` or `undefined`) is `NaN` in both products, as in
- * the interpreter. `scalarMul` reads it so; the matrix product reads the
- * operands through `absentAsNaN` first, because `matmul` multiplies with
- * `*`, which reads `null` as 0. */
+ */
 function mulTensorAny(...args: BcastValue[]): BcastValue {
-  return mulTensorWith(
-    (a, b) => matmul(absentAsNaN(a), absentAsNaN(b)),
-    scalarMul,
-    args
-  );
-}
-
-/** `x` with each absent entry (`null` or `undefined`), at any depth, read
- * as `NaN`. An array with no absent entry and no row is returned as it is,
- * so the common case copies only the outer array of a matrix. */
-function absentAsNaN(x: unknown): unknown {
-  if (x === null || x === undefined) return NaN;
-  if (!Array.isArray(x)) return x;
-  return x.some((e) => e === null || e === undefined || Array.isArray(e))
-    ? x.map(absentAsNaN)
-    : x;
+  return mulTensorWith(matmul, scalarMul, args);
 }
 
 function mulTensorWith(
@@ -3370,10 +3253,8 @@ function eqTensor(
   // `[True, Missing]`, so the cell carries an absence marker, not a decided
   // `false`. The marker is `NaN`, which is how a real target renders `Missing`
   // in a cell: the selection runtime reads such a cell as undecided and
-  // consumes the position (see `select`), and the element-wise connective
-  // guard tests absence as `x !== x` (`guardConnectiveAbsence`), so a marked
-  // cell combines correctly with `And`/`Or` — a decided `false` still wins.
-  // An `undefined` cell would satisfy neither test.
+  // consumes the position (see `select`). An `undefined` cell would not be
+  // read as undecided there.
   //
   // A `NaN` OPERAND is not absent: it is a number that equals nothing, and it
   // keeps answering `false` below. Only a genuinely missing read is marked.
@@ -3708,10 +3589,6 @@ function matrixProductShapeWith(args: unknown[], complex: boolean): unknown {
  * matrix throws), then the product by rank of `mulTensor`.
  */
 function mulChecked(...args: unknown[]): unknown {
-  // An absent operand beside scalars only makes the product absent, as in
-  // `bcast` (ROADMAP CE-368): `g(x)[5] * g(x)[5]` is `Missing` in the
-  // interpreter when the element is absent.
-  if (absentBesideScalars(args)) return undefined;
   return matrixProductShape(...args) ?? mulTensor(...(args as BcastValue[]));
 }
 
@@ -3723,7 +3600,6 @@ function mulChecked(...args: unknown[]): unknown {
  * `.re`). `mulTensor` reads a complex entry as `NaN`.
  */
 function complexMulChecked(...args: unknown[]): unknown {
-  if (absentBesideScalars(args)) return undefined;
   return (
     matrixProductShapeWith(args, true) ??
     complexMulTensor(...(args as BcastValue[]))
@@ -4546,14 +4422,6 @@ function presentArgument<T>(x: T, message: string, elements?: boolean): T {
   return x;
 }
 
-/** `_SYS.absentNaN`: see the comment at its entry in `SYS_HELPERS`. */
-function absentArgumentAsNaN(x: unknown, elements?: boolean): unknown {
-  if (x === undefined) return NaN;
-  if (elements === true && Array.isArray(x))
-    return x.map((element) => absentArgumentAsNaN(element, true));
-  return x;
-}
-
 /**
  * The iteration count of `_SYS.mandelbrot` and `_SYS.julia`, rounded to an
  * integer. A count on the complex lane (`Mandelbrot(c, √x)` with `x` real)
@@ -4599,8 +4467,6 @@ export const SYS_HELPERS = {
   // The elements of an arithmetic `Range`, as an array.
   range: materializeRange,
   bcast,
-  bcastPlain,
-  bcastAbsent,
   mapFn,
   bcastColor,
   // `At` with a scalar index over elements that may be numbers or lists: the
@@ -4744,9 +4610,9 @@ export const SYS_HELPERS = {
   // array operand through this, so the real lowering that follows sees plain
   // numbers and answers NaN (or `false`, for an ordering) exactly at the
   // complex positions: `⌊√L⌋` at `L = [4, -1]` is `[2, NaN]`. An absent
-  // element (`undefined` or `null`, the absent object) stays absent, so the
-  // broadcast that follows makes its position absent, as it does without
-  // the projection (`p[2] < 1` with an absent `p[2]`, ROADMAP CE-368).
+  // element (`undefined` or `null`, the absent object) is passed through
+  // unchanged: reading `.im` of it would throw, and the compiled value of
+  // an operator over an absent element is not specified.
   crealElements: function crealElements(x: unknown): unknown {
     if (Array.isArray(x)) return x.map(crealElements);
     if (typeof x === 'number' || x === undefined || x === null) return x;
@@ -5728,27 +5594,23 @@ export const SYS_HELPERS = {
    *    is not a list (ROADMAP CE-214.2, user decision 2026-10-25). Before,
    *    it answered `NaN`, which a consumer could not tell from an absent
    *    coordinate;
-   *  - an absent operand (`undefined` or `null`) answers `NaN`, or
-   *    `undefined` when the caller states that the coordinate is not provably
-   *    a number (`keepsAbsence`): the interpreter then keeps the absence,
-   *    `Missing`, and answers `NaN` only for a coordinate that is a number
-   *    (ROADMAP CE-229). A `NaN` operand, the marker of an absent value or
-   *    of an error upstream, answers `NaN`.
+   *  - an absent operand (`undefined` or `null`) answers `NaN`. A `NaN`
+   *    operand, the marker of an absent value or of an error upstream,
+   *    answers `NaN`.
    */
   pointComponent: (
     v: unknown,
     k: number,
     emptyBroadcasts = true,
     nested = false,
-    undecidedNesting = false,
-    keepsAbsence = false
+    undecidedNesting = false
   ): unknown => {
     // A numeric typed array (`Float64Array`, ...) is a point, as a plain
     // array of numbers is: it is read as one, and only a number, a boolean
     // or a string is refused below.
     if (isNumericTypedArray(v)) v = copyToPlainArray(v);
     if (!Array.isArray(v)) {
-      if (v === undefined || v === null) return keepsAbsence ? undefined : NaN;
+      if (v === undefined || v === null) return NaN;
       // `NaN` is the marker of an absent value or of an error upstream (the
       // sum of two lists of points of different lengths), not a number the
       // host passed: it propagates.
@@ -5914,13 +5776,6 @@ export const SYS_HELPERS = {
   // true, the parameter is a scalar and a list argument is mapped, so each
   // element of an array, at any depth, is checked too.
   present: presentArgument,
-  // An argument of a user function at a parameter annotated with a numeric
-  // type, whose static type admits an absent value (`absentArgumentChecks`,
-  // `base-compiler.ts`): the value as it is, or `NaN` for an absent value
-  // (`undefined`), as the interpreter reads it. When `elements` is true, the
-  // parameter is a scalar and a list argument is mapped, so each element of
-  // an array, at any depth, is replaced too (in a copy of the array).
-  absentNaN: absentArgumentAsNaN,
   // The operand of an operator that only visits each element once, in any
   // order (`iterableCollectionCode`): an array as it is, the elements of a
   // JavaScript `Set` as an array, or a `RangeError` for any other value.

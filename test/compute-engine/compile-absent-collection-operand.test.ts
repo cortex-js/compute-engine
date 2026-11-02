@@ -306,9 +306,13 @@ describe('an operand that is not pure', () => {
 });
 
 describe('the rule stands aside', () => {
-  test('for a broadcastable operator, whose absence lands in each cell', () => {
-    // `[1, 2, 3] · P{c}` with the restricted point absent is a list of
-    // absent cells, not one absent value (user decision of 2026-09-27).
+  // The compiled value of arithmetic on an absent point is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4
+  // of `docs/plans/2026-11-01-absent-value-contract.md`): only the present
+  // point is checked.
+  test('for a broadcastable operator', () => {
+    // `[1, 2, 3] · P{c}` compiles to a broadcast over the restricted point.
     const ce = new ComputeEngine();
     ce.declare('t', 'real');
     const json = [
@@ -318,10 +322,10 @@ describe('the rule stands aside', () => {
     ];
     const r = compile(ce.box(json as never), { fallback: false } as never);
     expect(r.success).toBe(true);
-    expect(r.run!({ t: 0 } as never)).toStrictEqual([
-      undefined,
-      undefined,
-      undefined,
+    expect(r.run!({ t: 2 } as never)).toStrictEqual([
+      [2, 1],
+      [4, 2],
+      [6, 3],
     ]);
   });
 });

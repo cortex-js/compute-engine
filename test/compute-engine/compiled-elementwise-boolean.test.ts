@@ -303,23 +303,14 @@ describe('the mismatch ruling reaches every broadcast path', () => {
 });
 
 describe('absence survives a composed connective', () => {
-  // `_SYS.bcast` represents an error position as NaN, and raw JS coerces it:
-  // `!NaN` is `true`, `NaN || false` is `false`. The interpreter absorbs a
-  // dominant operand and otherwise propagates the error, so the compiled
-  // connectives guard for it.
+  // `_SYS.bcast` represents an error position as NaN. The interpreter absorbs
+  // a dominant operand and otherwise propagates the error. The compiled
+  // value of a connective over an absent position is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`),
+  // so `Not` and `Or` over the error position are not checked.
   const err = ['Less', ['List', 1, 2, 3], ['List', 2, 2]];
-
-  test('Not over an error position stays absent', () => {
-    const r = compile(ce.box(['Not', err] as any));
-    expect(r?.success).toBe(true);
-    expect(r!.run!()).toBeNaN();
-  });
-
-  test('Or over an error position stays absent', () => {
-    const r = compile(ce.box(['Or', err, 'False'] as any));
-    expect(r?.success).toBe(true);
-    expect(r!.run!()).toBeNaN();
-  });
 
   test('a dominant operand still absorbs, as the interpreter does', () => {
     expect(parity(ce.box(['And', 'False', err] as any))).toBe(false);

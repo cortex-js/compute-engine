@@ -130,13 +130,6 @@ export function hullValues(a: unknown, b: unknown): unknown {
  * (`holds`). `notEqual` is the negation of `equal`, so it answers `'true'`
  * for an `empty` operand, as the scalar targets answer `NaN ≠ 0` with `true`
  * (user decision 2026-10-25).
- *
- * An `empty` with the `missing` flag is not such a value: it stands for an
- * ABSENT value (a `Which` with no default arm that selects no clause, a
- * written `Missing`), whose interpreter value is `Missing`, and a comparison
- * with `Missing` has no value (Kleene). An absent operand wins over an
- * undefined one, as in the interpreter, so a comparison with either flagged
- * operand answers `false` here and the comparison gives `'maybe'`.
  */
 function hasEmptyOperand(
   a: Interval | IntervalResult,
@@ -144,9 +137,6 @@ function hasEmptyOperand(
 ): boolean {
   const empty = (x: Interval | IntervalResult): boolean =>
     'kind' in x && x.kind === 'empty';
-  const missing = (x: Interval | IntervalResult): boolean =>
-    'kind' in x && x.kind === 'empty' && x.missing === true;
-  if (missing(a) || missing(b)) return false;
   return empty(a) || empty(b);
 }
 
@@ -273,7 +263,6 @@ export function equal(
  * for `NaN ≠ 0` (user decision 2026-10-25). A `partial` operand gives
  * `'true'` only when the enclosures do not overlap: where the operand is
  * undefined `≠` holds too, so the verdict is the one of the defined part.
- * An absent operand (an `empty` with the `missing` flag) gives `'maybe'`.
  */
 export function notEqual(
   a: Interval | IntervalResult,

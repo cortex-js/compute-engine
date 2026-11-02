@@ -20,8 +20,6 @@ import {
   isPointElementType,
   resolveTypeAlias,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
-  typeContainsMissing,
-  numericMissingSlot,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -45,7 +43,6 @@ import {
   isProvablyStringComparisonParticipant,
   isProvablyStringOperand,
   isRuntimePointShaped,
-  objectAbsenceLevels,
   pointHasBroadcastComponent,
   presentCompilationType,
   runtimePointShapeIsUnambiguous,
@@ -94,7 +91,6 @@ import { _popLocalComplex, _pushLocalComplex } from './compile-loops.js';
 import { compileValueOperand } from './compile-statements.js';
 import { cseAdmission } from './compile-cse.js';
 import { mapRankOfType, shapeOfType } from './static-shape.js';
-import { guardConnectiveAbsence } from './compile-conditionals.js';
 
 /**
  * Run `f` with the element parameters `names` boxed as symbols.
@@ -128,10 +124,7 @@ export function tryCompileBroadcast(
   engine: ComputeEngine,
   h: string,
   args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  /** The node being lowered, when the caller has it: its type decides
-   * whether the result can be an absent object (see `absentMode`). */
-  node?: Expression
+  target: CompileTarget<Expression>
 ): string | null {
   const def = engine.lookupDefinition(h);
   if (!isOperatorDef(def) || def.operator.broadcastable !== true) return null;
@@ -497,8 +490,7 @@ export function tryCompileBroadcast(
     // the outer broadcast walks the list and the gated point is kept
     // whole. The other array operands must provably hold numbers
     // (`isScalarElementSource`), or the outer broadcast would descend into
-    // a point. When the point is absent, every element is `undefined`, as
-    // the interpreter answers `Missing` for each (`_SYS.bcastAbsent`).
+    // a point.
     if (otherArrays.length > 0) {
       if (
         h !== 'Multiply' ||
@@ -1097,61 +1089,14 @@ export function tryCompileBroadcast(
 
   // The number of components this application has when every operand's
   // width is known at compile time — the run-time dispatch is then replaced
-  // by one expression per component, further down.
-  //
-  // An operand that may hold an ABSENT OBJECT (`objectAbsenceLevels`: a
-  // restricted point or list, or a list of possibly absent points) is read
-  // by `_SYS.bcastAbsent` instead: the absent point is spelled `undefined`,
-  // and arithmetic on it answers `undefined` for the whole point (for one
-  // cell of a list of points), where the interpreter answers `Missing`
-  // (`docs/ERROR-MODEL.md` §3, user decision of 2026-09-27). The component
-  // fan-out and the rotation views would read the absent value as an
-  // array, so neither is used then. When no operand can hold an absent
-  // object, the emission is unchanged.
-  //
-  // The RESULT must be able to hold an absent object too. The interpreter
-  // answers `Missing` for `t·P` with an absent point (typed
-  // `missing | tuple<…>`), but `[1, 2] + L` with an absent list `L` is the
-  // list `[NaN, NaN]` (typed `vector<2>`): the present list gives the
-  // shape, and the absent operand is `NaN` in each numeric cell. The plain
-  // `_SYS.bcast` already answers that. An element type that admits
-  // `missing` counts as well: an ordering of a restricted list,
-  // `L{c} < 3`, is typed `list<boolean | missing>`, and the interpreter
-  // answers `Missing` for the whole list when `L` is absent.
-  // Each entry is a bit set of levels (`objectAbsenceLevels`); `0` is an
-  // operand that cannot hold an absent object.
-  let absentLevels = args.map((a) => objectAbsenceLevels(a.type.type));
-  if (absentLevels.some((d) => d !== 0)) {
-    const result = node?.type.type ?? engine.function(h, [...args]).type.type;
-    const resolved = resolveTypeForCompilation(result);
-    const elt =
-      typeof resolved !== 'string' && resolved.kind === 'list'
-        ? collectionElementType(resolved)
-        : undefined;
-    if (
-      objectAbsenceLevels(result) === 0 &&
-      !(
-        elt !== undefined &&
-        typeof elt !== 'string' &&
-        elt.kind === 'union' &&
-        elt.types.some((b) => resolveTypeForCompilation(b) === 'missing')
-      )
-    )
-      absentLevels = absentLevels.map(() => 0);
-  }
-  const absentMode = absentLevels.some((d) => d !== 0);
-  /** A `_SYS.bcast` call, or `_SYS.bcastAbsent` when one of the level sets
-   * in `levels` is not empty. */
-  const bcastCall = (
-    fnText: string,
-    levels: ReadonlyArray<number>,
-    sources: ReadonlyArray<string>
-  ): string =>
-    levels.some((d) => d !== 0)
-      ? `_SYS.bcastAbsent([${levels.join(', ')}], ${fnText}, ${sources.join(', ')})`
-      : `_SYS.bcast(${fnText}, ${sources.join(', ')})`;
+  // by one expression per component, further down. An operand that holds
+  // an absent object at run time is not told apart: arithmetic on it is
+  // unspecified in compiled code.
+  /** A `_SYS.bcast` call of `fnText` over `sources`. */
+  const bcastCall = (fnText: string, sources: ReadonlyArray<string>): string =>
+    `_SYS.bcast(${fnText}, ${sources.join(', ')})`;
   const componentWidth =
-    atomicTuple === undefined && !absentMode
+    atomicTuple === undefined
       ? staticBroadcastWidth(h, args, isArrayOperand)
       : undefined;
 
@@ -1283,7 +1228,6 @@ export function tryCompileBroadcast(
   // avoid on a forty-thousand-element board.
   const viewsAllowed =
     componentWidth === undefined &&
-    !absentMode &&
     admission !== undefined &&
     admission.isOverriddenOperator?.(h) !== true &&
     args.every((a) => a.isPure === true && !isCallerMapped(a, admission));
@@ -1292,29 +1236,7 @@ export function tryCompileBroadcast(
       (viewsAllowed ? rotationView(a, target, admission!) : undefined) ??
       core.compile(a, target)
   );
-  // A comparison with an operand that may be absent is absent at each
-  // position where that operand is the absent object (ROADMAP CE-93, the
-  // broadcast form of `absentComparisonGuard`): `[1, 2] < w` is
-  // `[Missing, Missing]` in the interpreter when `w` is absent.
-  const object = target.absence?.object;
-  const absentParams =
-    object !== undefined &&
-    (h === 'Less' ||
-      h === 'LessEqual' ||
-      h === 'Greater' ||
-      h === 'GreaterEqual' ||
-      h === 'Equal' ||
-      h === 'NotEqual')
-      ? params.filter((_p, i) => {
-          const t = compilationType(args[i]);
-          return typeContainsMissing(t) && numericMissingSlot(t);
-        })
-      : [];
-  const connectiveBody = guardConnectiveAbsence(h, params, scalarBody);
-  const body =
-    absentParams.length === 0
-      ? connectiveBody
-      : `((${absentParams.map((p) => object!.isNull(p)).join(' || ')}) ? ${object!.nullLiteral} : (${connectiveBody}))`;
+  const body = scalarBody;
   const closure = `(${params.join(', ')}) => ${body}`;
   // Every operand's width is known: emit one expression per component and
   // drop the run-time dispatch altogether. An operand whose compiled source
@@ -1392,7 +1314,7 @@ export function tryCompileBroadcast(
         if (parts !== undefined) return parts[k];
         return isArrayOperand(a) ? `${sources[i]}[${k}]` : sources[i];
       });
-      components.push(guardConnectiveAbsence(h, cell, buildScalarBody(cell)));
+      components.push(buildScalarBody(cell));
     }
     const literal = `[${components.join(', ')}]`;
     if (guarded.length > 0) {
@@ -1450,7 +1372,7 @@ export function tryCompileBroadcast(
   // element, where the flat `_SYS.bcast` would pair the components of the
   // point with the entries of the element. A list operand that is not an
   // array at run time is NaN, as in the other point-list plans.
-  if (pointListOverNumbers !== undefined && !absentMode) {
+  if (pointListOverNumbers !== undefined) {
     const bound = args.map(() => tempVar(target));
     const list = bound[1 - pointListOverNumbers];
     const other = bound[pointListOverNumbers];
@@ -1517,8 +1439,6 @@ export function tryCompileBroadcast(
       const src = bound[m];
       const p = tempVar(target);
       const inner = bound.map((b, i) => (i === m ? p : b));
-      // Each element of a list of points is one level below the list.
-      const innerLevels = absentLevels.map((d, i) => (i === m ? d >> 1 : d));
       // An EMPTY array takes the point-list branch and maps to the empty
       // list, the answer the provable point-list lane below also gives:
       // a point of the declared arity is never an empty array at run
@@ -1527,32 +1447,21 @@ export function tryCompileBroadcast(
         `((${bound.join(', ')}) => ` +
         `(Array.isArray(${src}) && ` +
         `(${src}.length === 0 || Array.isArray(${src}[0])) ? ` +
-        `${src}.map((${p}) => ${bcastCall(closure, innerLevels, inner)}) : ` +
-        `${bcastCall(closure, absentLevels, bound)}))` +
+        `${src}.map((${p}) => ${bcastCall(closure, inner)}) : ` +
+        `${bcastCall(closure, bound)}))` +
         `(${compiledArgs.join(', ')})`
       );
     }
     const outerParams: string[] = [];
     const outerSources: string[] = [];
-    // Whether each outer source can be absent itself (level `0`) — the
-    // outer level only walks the list — and, for the inner call, the
-    // levels of every operand as the inner call sees them: an element of a
-    // walked list is one level below the list.
-    const outerLevels: number[] = [];
-    const innerLevels: number[] = [];
     const innerArgs = args.map((a, i) => {
-      if (a === atomicTuple || !isArrayOperand(a)) {
-        innerLevels.push(absentLevels[i]);
-        return bound[i];
-      }
+      if (a === atomicTuple || !isArrayOperand(a)) return bound[i];
       const p = tempVar(target);
       outerParams.push(p);
       outerSources.push(bound[i]);
-      outerLevels.push(absentLevels[i] & 1);
-      innerLevels.push(absentLevels[i] >> 1);
       return p;
     });
-    const innerCall = bcastCall(closure, innerLevels, innerArgs);
+    const innerCall = bcastCall(closure, innerArgs);
     // A point added to a list of POINTS: the outer level walks the list
     // ONE level deep, handing each point whole to the inner `_SYS.bcast`,
     // which zips it against the atomic point (`[x, y] + [1, 2]` →
@@ -1567,13 +1476,13 @@ export function tryCompileBroadcast(
         `((${bound.join(', ')}) => ` +
         `(Array.isArray(${outerSources[0]}) ? ` +
         `${outerSources[0]}.map((${outerParams[0]}) => ${innerCall}) : ` +
-        `${(outerLevels[0] & 1) !== 0 ? `${outerSources[0]} === undefined ? undefined : ` : ''}NaN))` +
+        `NaN))` +
         `(${compiledArgs.join(', ')})`
       );
     }
     return (
       `((${bound.join(', ')}) => ` +
-      `${bcastCall(`(${outerParams.join(', ')}) => ${innerCall}`, outerLevels, outerSources)})` +
+      `${bcastCall(`(${outerParams.join(', ')}) => ${innerCall}`, outerSources)})` +
       `(${compiledArgs.join(', ')})`
     );
   }
@@ -1583,7 +1492,6 @@ export function tryCompileBroadcast(
   // when no source has an effect and none is caller-supplied code
   // (`isCallerMapped`: an emitter this compiler does not see may hand a
   // mutable array on) — the admission the rotation views ask for.
-  if (absentMode) return bcastCall(closure, absentLevels, compiledArgs);
   const fusionAllowed =
     admission !== undefined &&
     args.every((a) => a.isPure === true && !isCallerMapped(a, admission));

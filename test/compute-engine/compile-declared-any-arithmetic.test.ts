@@ -429,12 +429,8 @@ describe('CE-214.2: the coordinate of a number', () => {
     expect(result.unsupported).toContain('x');
   });
 
-  test('an absent parameter declared any is still absent, not an error', () => {
-    const ce = new ComputeEngine();
-    const result = compile(anyFunction(ce, ['PointX', 'x'], ['x']));
-    expect(result.success).toBe(true);
-    expect(
-      (result.run as unknown as (x: unknown) => unknown)(undefined)
-    ).toBeUndefined();
-  });
+  // The compiled coordinate of an absent parameter is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4 of
+  // `docs/plans/2026-11-01-absent-value-contract.md`).
 });

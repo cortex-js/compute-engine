@@ -22,18 +22,8 @@ export interface Interval {
  *
  * Operations return structured results that preserve information for plotting:
  * - `interval`: Normal computation with valid interval
- * - `empty`: No valid values (e.g., ln([-2, -1])). `missing: true` marks an
- *   `empty` that stands for an ABSENT value, whose interpreter value is
- *   `Missing`: a written `Missing` or `Undefined`, a `Which` with no default
- *   arm that selects no clause, an `If` with no else arm that selects no
- *   arm. A comparison with such an operand is `'maybe'` (the Kleene reading
- *   of `Missing`), where a comparison with a value that is undefined over
- *   the whole cell (no flag) is `'false'`. A `When` whose condition is false
- *   and an `At` that selects nothing have no flag: the interpreter answers
- *   `NaN` for them, a numeric undefined value. An operation over a flagged
- *   operand (arithmetic, a function, an integral) also gives an `empty`
- *   with no flag, as `Missing + 1` is `NaN` in the interpreter. The runner
- *   (`run()`) gives both as `{ kind: 'empty' }`.
+ * - `empty`: No valid values (e.g., ln([-2, -1])), or an absent value (a
+ *   written `Missing`, a `Which` with no default arm that selects no clause).
  * - `entire`: Result spans all reals (-Infinity, +Infinity)
  * - `singular`: Contains a discontinuity, needs subdivision. Two cases share
  *   the kind, told apart by the presence of `value`:
@@ -77,7 +67,7 @@ export interface Interval {
  */
 export type IntervalResult =
   | { kind: 'interval'; value: Interval }
-  | { kind: 'empty'; missing?: true }
+  | { kind: 'empty' }
   | { kind: 'entire' }
   | {
       kind: 'singular';

@@ -990,6 +990,43 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
     }
   });
 
+  // A list of points whose every point is absent keeps its length on
+  // `interval-js`: the list is present, and each coordinate is the `empty`
+  // result. The interpreter answers `[Missing, Missing]`.
+  test('interval-js: the coordinates of a list of absent points', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'real');
+    ce.declare('d', 'real');
+    const interval = (json: unknown, vars: object = {}): unknown =>
+      compile(ce.box(json as any), {
+        to: 'interval-js',
+        fallback: false,
+      }).run!(vars as any);
+    const empty = { kind: 'empty' };
+    for (const head of ['PointX', 'PointY']) {
+      const json = [head, ['List', 'Missing', 'Missing']];
+      expect(ce.box(json as any).evaluate().toString()).toBe(
+        '["Missing","Missing"]'
+      );
+      expect(interval(json)).toEqual([empty, empty]);
+    }
+    // `[P{c}, Q{d}]` with both conditions false.
+    const json = [
+      'PointX',
+      [
+        'List',
+        ['When', ['Tuple', 1, 2], ['Less', 0, 'c']],
+        ['When', ['Tuple', 3, 4], ['Less', 0, 'd']],
+      ],
+    ];
+    const cell = { lo: -1, hi: -1 };
+    expect(interval(json, { c: cell, d: cell })).toEqual([empty, empty]);
+    expect(interval(json, { c: { lo: 1, hi: 1 }, d: cell })).toEqual([
+      { kind: 'interval', value: { lo: 1, hi: 1 } },
+      empty,
+    ]);
+  });
+
   // An absent point does not decide the reading of a list, on any route and
   // in a lazy collection too. When every point is absent, the declared
   // element type decides, as for an empty list.

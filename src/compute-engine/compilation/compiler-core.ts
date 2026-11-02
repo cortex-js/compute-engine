@@ -148,16 +148,12 @@ import {
 import { namingContext, newNamingContext, tempVar } from './compiler-naming.js';
 import {
   absenceAxisForType,
-  absentComparisonGuard,
   absentOnlyThroughNumericSlots,
-  compileAbsentRelation,
   conditionDecidability,
   connectiveNode,
   guardTakesOperands,
-  isAbsenceSymbol,
   isNanLiteral,
   isNumericOrVerdictShaped,
-  isObjectDomainMissingOperand,
   kleeneRelationLeaf,
   kleeneValueLeaf,
   mayBeUndecided,
@@ -396,7 +392,6 @@ import {
 import {
   compileExprAssertPresent,
   compileExprIf,
-  compileExprMissingEquality,
   compileExprWhen,
   compileExprWhich,
   kleeneValueConnective,
@@ -1331,9 +1326,8 @@ function compileExpression(
   // `finally` below knows not to freeze a report for code that was never
   // emitted.
   let emitted = false;
-  // The read of an input that may be absent depends on the head that
-  // consumes it (`readAbsentInput`), so a function node stays on the stack
-  // while its operands compile.
+  // A function node stays on the stack while its operands compile
+  // (`_compileParents`).
   const isParent = isFunction(expr);
   if (isParent) _compileParents.push(expr);
   try {
@@ -3789,16 +3783,6 @@ export function compileExpr(
     if (guarded !== undefined) return guarded;
   }
 
-  // A comparison with an operand that may be absent (`w > 0` with
-  // `w: number | missing`) is absent when that operand is absent, on a
-  // target with object absence (ROADMAP CE-93, `absentComparisonGuard`).
-  {
-    const guarded = absentComparisonGuard(h, args, target, () =>
-      core.compileExpr(engine, h, args, prec, target, node)
-    );
-    if (guarded !== undefined) return guarded;
-  }
-
   // GPU shader targets: a comparison or logical connective over a non-scalar
   // operand must not lower through the scalar infix operators — GLSL rejects
   // `vecN < float` outright, and where an infix form IS legal it means the
@@ -3830,29 +3814,6 @@ export function compileExpr(
   // type), and not for `t + P` with an undeclared `t`. Fail closed instead.
   sub = compileExprGpuPoint(h, args, target);
   if (sub !== undefined) return sub;
-
-  // A comparison with a WRITTEN absence operand (`Missing`, `Undefined`) is
-  // undecided: the interpreter answers `Missing` for `Less(Missing, t)` and
-  // for `Equal(Undefined, 1)`, whatever the other operand holds (Kleene).
-  // The compiled value is the target's object null, which is also the
-  // undecided value of its three-valued conditions, so an `If`/`Which` over
-  // it takes no arm (`conditionNode` reads such a relation by its value).
-  // Before, the absence symbol lowered to `undefined` and the plain
-  // comparison answered a confident `false` (`true` for `NotEqual`), so an
-  // `If` over it took an arm. A target without an object axis keeps its
-  // plain lowering.
-  if (
-    BRANCH_RELATIONS.has(h) &&
-    target.absence?.object !== undefined &&
-    args.some(isAbsenceSymbol)
-  )
-    return compileAbsentRelation(
-      engine,
-      h,
-      args,
-      target,
-      target.absence.object.nullLiteral
-    );
 
   // An ORDERING comparison with an operand that is a constant pole (a
   // closed operand whose value is the complex infinity `~oo`: `1/0`,
@@ -4084,30 +4045,6 @@ export function compileExpr(
   if (sub !== undefined) return sub;
 
   sub = compileExprCoalesce(h, args, target, node);
-  if (sub !== undefined) return sub;
-
-  // Kleene/IEEE `Equal`/`NotEqual` guarded lowering (§3.D, amended
-  // 2026-07-24; extended to `NotEqual` 2026-08-08).
-  // Comparisons are IEEE over `NaN` and Kleene over the `Missing` symbol. For
-  // a NUMERIC-domain operand a raw `==`/tolerant-compare already IS the IEEE
-  // semantics (`NaN == NaN` is `false`), so no guard is emitted — the plain
-  // codegen below runs and interpreter/compiled agree by construction. The
-  // guard is kept ONLY when an operand can hold an OBJECT-domain hole (e.g.
-  // `string | missing`), where a `Missing` must lower to the target null:
-  // emit `isAbsent(a) || isAbsent(b) ? <object null> : <a == b>`. The absent
-  // boolean is an OBJECT-domain value, so a target without the object axis
-  // (GPU) fails closed.
-  //
-  // `NotEqual` is guarded on exactly the same terms, and for the same reason
-  // `Equal` is: the interpreter answers `Missing` for BOTH
-  // (`NotEqual(Missing, 1)` → `Missing`, pinned in `missing-value.test.ts`
-  // §P3). It was `Equal`-only while every string-bearing `NotEqual` failed
-  // closed on the string gate; once the tier-2 admissions started compiling
-  // `NotEqual(s, "x")` for `s: string | missing` (the literal supplies the
-  // string evidence, and the union is neither provably numeric nor a
-  // collection), the unguarded lowering emitted `undefined !== "x"` — a bare
-  // `true` where the interpreter answers `Missing`.
-  sub = compileExprMissingEquality(h, args, target);
   if (sub !== undefined) return sub;
 
   // `Typed(value, type)` is a transparent runtime ascription — it constrains
@@ -5226,21 +5163,6 @@ export function conditionNode(
   // - the SAME impure node in two positions (`Less(d, d)` built from one
   //   boxed `d`): the binding is keyed on the node (`_codeOverrides`), so
   //   one draw would stand for the two evaluations that were written.
-  // A relation whose compiled VALUE is the object null when an operand is
-  // absent — a written absence operand, or the Kleene `Equal`/`NotEqual`
-  // guard over an object-domain operand — is read by that value, which is
-  // the undecided one. The operand test below would see no numeric operand
-  // to test and call the relation decided, so the plain comparison took an
-  // arm (the else arm for `Less(Missing, t)`). A caller that passes no
-  // target is read as a target with an object null.
-  if (
-    (target === undefined || target.absence?.object !== undefined) &&
-    (cond.ops.some(isAbsenceSymbol) ||
-      ((h === 'Equal' || h === 'NotEqual') &&
-        cond.nops === 2 &&
-        cond.ops.some(isObjectDomainMissingOperand)))
-  )
-    return { negate: false, test: { kind: 'value', expr: cond } };
   // On the JavaScript target, a relation that has effects, or that reads
   // a local of a block being compiled, is read by its VALUE: the
   // comparison lowering (`unsuppliedComparisonGuard`) evaluates the
@@ -5311,8 +5233,7 @@ export function conditionNode(
   // A relation with a NaN operand is decided, with the value the compiled
   // comparison already answers: `false`, so the branch takes its next arm,
   // or `true` for `NotEqual`, so it takes its first arm (user decisions
-  // 2026-10-20, Tycho rows 411 and 413, and 2026-10-23), also as a link of
-  // a chain with an absent operand (`compileAbsentRelation`). The relation
+  // 2026-10-20, Tycho rows 411 and 413, and 2026-10-23). The relation
   // is tested only for an ABSENT value: an operand typed with a `missing` arm
   // (`operandMayBeAbsent`) is tested itself, and, on a target that reads
   // its variables off a vars object, every variable the operand reads on

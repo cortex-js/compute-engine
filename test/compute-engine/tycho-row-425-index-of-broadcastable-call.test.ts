@@ -47,8 +47,9 @@
  *   `Multiply`), and refuses the statistics (`Max`, `Mean`, `Median`).
  * - The compiled `At`, `First` and `Last` over such elements pick the
  *   absence marker from the value, as the interpreter does
- *   (`_SYS.atWithValueMarker`), and arithmetic on an absent read keeps it
- *   absent (`numberOrGatedCollectionArms`, `base-compiler.ts`).
+ *   (`_SYS.atWithValueMarker`). The compiled value of arithmetic on an
+ *   absent read is not specified (`docs/COMPILATION-MODEL.md`, "Caveats of
+ *   compiled code").
  *
  * The compiled tests compile `g(x)` for three declarations of `x`. With
  * `x: any` the compiler cannot settle the shape of the argument of the call
@@ -512,9 +513,13 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
   // compile since they are typed `number | vector<2>` (ROADMAP CE-361,
   // `test/compute-engine/sum-unknown-element-type.test.ts`).
   // An absent element (an index past the end, or into an empty list) makes
-  // `g(x)[5] + 1` and `Sin(g(x)[5])` absent on both routes: the compiled
-  // code gave `NaN` where the interpreter gives `Missing` (ROADMAP CE-368,
-  // fixed in the run-time broadcast).
+  // `g(x)[5] + 1` and `Sin(g(x)[5])` absent in the interpreter. The compiled
+  // value of arithmetic on an absent element is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+  // "Everything computed from an absent value, except at a discharge"; R4
+  // of `docs/plans/2026-11-01-absent-value-contract.md`), so a run whose
+  // interpreted value of such arithmetic is `Missing` is not compared
+  // (`ARITHMETIC_ON_A_READ`).
   const cases: [string, unknown, 'compiles' | 'declined'][] = [
     ['Sum(g(x))', ['Sum', ['g', 'x']], 'compiles'],
     ['Reduce(g(x), Add, 0)', ['Reduce', ['g', 'x'], 'Add', 0], 'compiles'],
@@ -534,13 +539,23 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
     ['Last(g(x))', ['Last', ['g', 'x']], 'compiles'],
   ];
 
+  const ARITHMETIC_ON_A_READ = new Set([
+    'g(x)[5] + 1',
+    'Sin(g(x)[5])',
+    'g(x)[1] + 1',
+  ]);
+
   function expectAgreement(
     result: [string, string][] | 'declined',
-    _expected: 'compiles'
+    _expected: 'compiles',
+    name = ''
   ): void {
     expect(result).not.toBe('declined');
-    for (const [interpreted, compiled] of result as [string, string][])
+    for (const [interpreted, compiled] of result as [string, string][]) {
+      if (ARITHMETIC_ON_A_READ.has(name) && interpreted === 'Missing')
+        continue;
       expect(compiled).toBe(interpreted);
+    }
   }
 
   test.each(cases)('x: any declines: %s', (_name, json, expected) => {
@@ -599,7 +614,7 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
         expect(result).toBe('declined');
         return;
       }
-      expectAgreement(result, expected);
+      expectAgreement(result, expected, name);
     });
   });
 
@@ -775,7 +790,7 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
       '\\lfloor m(x)[1] \\rfloor',
       'list<infinity | integer | list<any> | nan> | missing',
     ],
-  ])('%s', (_name, latex, type) => {
+  ])('%s', (name, latex, type) => {
     const ce = matrixEngine();
     const expr = ce.parse(latex);
     expect(expr.type.toString()).toBe(type);
@@ -795,6 +810,10 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
       for (const [i, [interpreted, compiled]] of (
         result as [string, string][]
       ).entries()) {
+        // At `x = []` the row is absent. The compiled value of arithmetic
+        // on it is not specified (`docs/COMPILATION-MODEL.md`, "Caveats of
+        // compiled code"); the read `m(x)[1]` itself is compared.
+        if (interpreted === 'Missing' && name !== 'm(x)[1]') continue;
         typed.assign('x', typed.box(values[i][1] as any));
         const numeric = typedExpr.N().toString().replace(/"/g, '');
         expect([
@@ -1081,7 +1100,11 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
       ],
       [undefined, 'Missing'],
     ] as const;
-    expectParity(compiledVsInterpreted(ce, expr, 'p', values));
+    // The compiled value over an absent `p` is not specified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+    // "Everything computed from an absent value, except at a discharge"):
+    // only the present values are compared.
+    expectParity(compiledVsInterpreted(ce, expr, 'p', values.slice(0, 3)));
     for (const [, json] of values) {
       ce.assign('p', ce.box(json as any));
       expect([

@@ -508,7 +508,9 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
  * reads on every evaluation, whatever its type and however it is reached, is
  * tested for `undefined`; a variable read only by a nested arm is not. On
  * `interval-js` the no-selection value of a default-less `Which` is an
- * `empty` with the `missing` flag, and a comparison with it is `'maybe'`.
+ * `empty` result; a comparison with it is not specified
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+ * "Everything computed from an absent value, except at a discharge").
  */
 describe('the absence guard of a compiled branch comparison', () => {
   const NESTED_ELSELESS = [
@@ -632,20 +634,18 @@ describe('the absence guard of a compiled branch comparison', () => {
     expect(c.run!({} as never)).toBe(1);
   });
 
-  test('interval-js: a default-less Which that selects no clause is maybe', () => {
+  test('interval-js: a default-less Which that selects no clause is empty', () => {
+    // The compiled value of a comparison with the absent value, and of a
+    // branch over it, is not specified (`docs/COMPILATION-MODEL.md`,
+    // "Caveats of compiled code", the bullet "Everything computed from an
+    // absent value, except at a discharge"; R4 of
+    // `docs/plans/2026-11-01-absent-value-contract.md`).
     const e = new ComputeEngine();
     e.declare('x', 'real');
     const X = { x: { lo: 0, hi: 1 } };
     const run = (expr: any): unknown =>
       compile(e.box(expr), { to: 'interval-js' } as never).run!(X as never);
     const which = ['Which', ['Greater', 'x', 5], 1];
-    expect(run(['Greater', which, 0])).toBe('maybe');
-    expect(run(['Greater', ['If', ['Greater', 'x', 5], 1], 0])).toBe('maybe');
-    // The branch over it cannot take one arm: the hull of both.
-    expect(run(['If', ['Greater', which, 0], 1, 2])).toEqual({
-      kind: 'interval',
-      value: { lo: 1, hi: 2 },
-    });
     // The runner gives the absent value as a plain `empty`.
     expect(run(which)).toEqual({ kind: 'empty' });
     // The interpreter at a point of the cell: `Missing`.

@@ -4880,14 +4880,6 @@ const pyOperand = (code: string): string =>
 const PYTHON_ATOM = /^[\w.]+$/;
 
 /**
- * A complete Python real number literal, with an optional sign: `9`, `-9`,
- * `2.5`, `.5`, `1e-3`, `1_000`. The whole string must match, so an
- * expression that starts with a digit (`0 or None`) does not.
- */
-const PYTHON_NUMBER_LITERAL =
-  /^[-+]?(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][-+]?\d[\d_]*)?$/;
-
-/**
  * Python’s test that a branch condition’s value is exactly a boolean.
  *
  * `is True` alone would be wrong: a comparison compiles to a NumPy call, whose
@@ -4929,9 +4921,8 @@ const PYTHON_CONDITION_DIALECT: ConditionDialect = {
     `(lambda ${params.join(', ')}: ${body})(${args.join(', ')})`,
 };
 
-// The value-position lowering of a comparison with an absent operand builds
-// a three-valued condition itself (`BaseCompiler.compileAbsentRelation`), so
-// it needs this target's spellings of the condition pieces.
+// The value-position lowering of a three-valued condition needs this
+// target's spellings of the condition pieces.
 BaseCompiler.conditionDialects.set('python', PYTHON_CONDITION_DIALECT);
 
 /**
@@ -8147,7 +8138,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ws: (s?: string) => s ?? '',
       preamble: '',
       // Absence capability (§3.F): numeric absence is `math.nan`; the object
-      // axis is `None`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
+      // axis is `None`. Consumed by `IsMissing`, `Coalesce` and `AssertPresent`.
       //
       // The numeric test reads `None` as absent as well as `math.nan`
       // (2026-09-22). A WRITTEN absence symbol (`Missing`, `Undefined`) lowers
@@ -8162,27 +8153,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
           isAbsent: (x) => `(lambda _c: ${PY_ABSENT_TEST})(${x})`,
           coalesce: (x, d) =>
             `(lambda _c: ${d} if (${PY_ABSENT_TEST}) else _c)(${x})`,
-          // A caller passes `None` for an absent input, and `None + 1` and
-          // `np.sin(None)` raise a `TypeError`, where the interpreter answers
-          // `NaN`. The read gives `float('nan')` for `None` and passes any
-          // other value (a NumPy array too) through unchanged. A read that is
-          // not a name is bound to a lambda parameter, so it is evaluated
-          // once. A complete number literal (a `vars` source such as `'9'`,
-          // `'-2.5e3'` or `'.5'`) cannot be `None`, and `9 is None` makes
-          // Python print a `SyntaxWarning`, so it is returned unchanged. Only
-          // the WHOLE source is tested: an expression that starts with a
-          // digit (`'0 or None'`, `'2*p'`) can be `None` and keeps the read.
-          readInput: (x) =>
-            PYTHON_NUMBER_LITERAL.test(x)
-              ? x
-              : PYTHON_ATOM.test(x)
-                ? `(float('nan') if ${x} is None else ${x})`
-                : `(lambda _c: float('nan') if _c is None else _c)(${x})`,
         },
         object: {
           nullLiteral: 'None',
-          // The object null only, for the Kleene guards of a comparison,
-          // where a `NaN` operand is a number.
+          // The object null only, for the guard of an absent whole
+          // collection operand (`absentCollectionOperandGuard`).
           isNull: (x) => `(${x} is None)`,
           // A discharge (`IsMissing`, `Coalesce`, `AssertPresent`) reads
           // `None` and `NaN` as absent with the numeric axis's test
@@ -8286,11 +8261,20 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // `in` finds `Object.prototype` members on a caller-supplied map.
       if (vars && Object.hasOwn(vars, id)) {
         const v = vars[id];
-        if (typeof v !== 'string') return JSON.stringify(v);
+        // The read is an operand of whatever surrounds the symbol, so a
+        // source that is not a primary expression is parenthesized
+        // (`pyOperand`): with `vars: { p: '2+3' }`, `2p` is `2 * (2+3)`,
+        // not `2 * 2+3`. A negative constant is parenthesized too, because
+        // `**` binds tighter than unary minus (`(-3) ** 2`, not `-3 ** 2`).
+        if (typeof v !== 'string') return pyOperand(JSON.stringify(v));
         // A mapping to a bare identifier is checked like a free symbol's own
-        // name (`mangleId`); other source (`p["a"]`) is spliced in unchanged.
+        // name (`mangleId`); other source (`p["a"]`) is spliced in, grouped.
         if (/^[A-Za-z_]\w*$/.test(v)) pythonCheckIdentifier(v);
-        return v;
+        // `isAtomicSource` counts brackets inside a string literal too, so it
+        // reads `len("(") + len(")")` as one group. A source that holds a
+        // quote is always parenthesized: the extra parentheses are harmless.
+        if (/["']/.test(v)) return `(${v})`;
+        return pyOperand(v);
       }
       return PYTHON_CONSTANTS[id];
     };

@@ -755,8 +755,7 @@ export function statementListDeclaredVarTypes(
 
 /**
  * The function nodes that `compile()` is compiling now, the innermost
- * last. A symbol compiles while the node that holds it is on top, so the
- * read of an input knows which head consumes it (`readAbsentInput`).
+ * last. A symbol compiles while the node that holds it is on top.
  */
 export const _compileParents: Expression[] = [];
 

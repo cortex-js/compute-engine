@@ -251,16 +251,10 @@ describe('complex mode: an ordering of an entry read out of a list', () => {
       expect(r.run!({ p: [0.5, 2] } as never)).toBe(true);
       expect(r.run!({ p: [1.5, 2] } as never)).toBe(false);
       expect(r.run!({ p: [{ re: 0.5, im: 1 }, 2] } as never)).toBe(false);
-      // A cell that the caller left absent (`undefined`, the absent object;
-      // the absent value of a numeric slot is `NaN`, which compares `false`)
-      // makes the comparison absent, as the interpreter answers `Missing`
-      // for `Less` of an absent element (ROADMAP CE-368). It was `false`.
-      const second = compile(ce.box(['Less', ['At', 'p', 2], 1]), {
-        to: 'javascript',
-        fallback: false,
-        mode: 'complex',
-      });
-      expect(second.run!({ p: [0.5, undefined, 2] } as never)).toBeUndefined();
+      // The compiled value of a comparison with a cell that the caller left
+      // absent (`undefined`) is not specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
+      // "Everything computed from an absent value, except at a discharge"; R4 of
+      // `docs/plans/2026-11-01-absent-value-contract.md`).
       expect(
         r.run!({
           p: [
@@ -273,30 +267,6 @@ describe('complex mode: an ordering of an entry read out of a list', () => {
   }
 });
 
-describe('an ordering of an absent cell', () => {
-  // `_SYS.cisreal(undefined)` read `.im` of `undefined` and threw. A cell
-  // that the caller left absent (`undefined`, the absent object; the absent
-  // value of a numeric slot is `NaN`, which compares `false`) makes the
-  // comparison absent where it goes through the run-time broadcast
-  // (`tensor<number>` and `list<unknown>`, whose element may be a list), as
-  // the interpreter answers `Missing` for `Less` of an absent element
-  // (ROADMAP CE-368); it was `false`. A `list<number>` read is scalar
-  // JavaScript, where the absent object compares `false`.
-  for (const type of ['tensor<number>', 'list<unknown>', 'list<number>'])
-    for (const mode of [undefined, 'complex'] as const)
-      it(`p[2] < 1 over ${type} in the ${mode ?? 'default'} mode`, () => {
-        const ce = new ComputeEngine();
-        ce.declare('p', type);
-        const r = compile(ce.box(['Less', ['At', 'p', 2], 1]), {
-          to: 'javascript',
-          fallback: false,
-          ...(mode === undefined ? {} : { mode }),
-        });
-        expect(r.run!({ p: [0.5, undefined, 2] } as never)).toBe(
-          type === 'list<number>' ? false : undefined
-        );
-      });
-});
 
 describe('complex mode: reductions of a list input', () => {
   for (const head of ['Sum', 'Product']) {

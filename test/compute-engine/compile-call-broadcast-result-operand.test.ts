@@ -295,8 +295,8 @@ describe('an operator over a call that maps over a list argument', () => {
     );
     expect(compileFn(json, ['b', 'u']).run(false, 2)).toBe(true);
     // With the first operand `False`, the code maps the `And` over its
-    // operands (`_SYS.bcastPlain`), which evaluates the call first. The
-    // call is pure, so the value is the interpreter's.
+    // operands (`_SYS.bcast`), which evaluates the call first. The call is
+    // pure, so the value is the interpreter's.
     expect(
       compileFn(['Not', ['And', 'False', ['Greater', ['q', 'u'], 0]]], ['u']).run(
         2
