@@ -106,7 +106,11 @@
   lowering reads its value. It compiles as the whole expression, as the
   value of the whole expression (the last statement of a root `Block`, a
   branch of a root `If`, the body of a root function literal), and as an
-  operand of another node whose code a handler wrote. Under a stock
+  operand of another node whose code a handler wrote. This holds for each
+  occurrence of a node that occurs more than once: the compilation writes
+  the code of one occurrence and uses it for the others, so
+  `At(W, 1) + At(W, 2)` with `W` that `Which` and a handler on `At` too
+  compiles. Under a stock
   consumer, such as `Which(x > 0, 0, True, [1, 2]) + 1`, the compilation
   declines with `unsettled-shape`: give the node a type of one shape (for
   example with a type handler on the definition) or write the code of the

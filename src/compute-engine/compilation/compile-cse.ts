@@ -15,7 +15,11 @@ import { isTupleShapedType } from '../collection-utils.js';
 import { boundVariableNames } from '../boxed-expression/binders.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
-import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
+import {
+  isSymbol,
+  isFunction,
+  isUnorderedSet,
+} from '../boxed-expression/type-guards.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import {
   functionLiteralParameterName,
@@ -1265,6 +1269,7 @@ export function hoistLoopInvariants<T>(
         for (const node of nodes) {
           _codeOverrides.set(node, code);
           installed.push(node);
+          copyCallerLowered(nodes[0], node);
         }
         continue;
       }
@@ -1287,6 +1292,7 @@ export function hoistLoopInvariants<T>(
       for (const node of nodes) {
         _codeOverrides.set(node, name);
         installed.push(node);
+        copyCallerLowered(nodes[0], node);
       }
     }
     return { bindings, result: emit(bindings) };
@@ -2355,11 +2361,15 @@ export function operandCompiler(
  * pass asks with `includeTop`, because it runs BEFORE the loop body's
  * instance is pushed and wants to know whether a body node will emit as a
  * name the current instance already holds.
+ *
+ * When `found` is given, the candidate whose name is returned is stored in
+ * `found.candidate`.
  */
 export function availableCseBinding(
   session: CseSession,
   expr: Expression,
-  includeTop = false
+  includeTop = false,
+  found?: { candidate?: CseCandidate }
 ): string | undefined {
   const instances = session.instances;
   const floor = session.availabilityFloor ?? 0;
@@ -2407,10 +2417,91 @@ export function availableCseBinding(
       // structure the wrong value, so stop rather than look further out.
       if (rebound.size > 0 && mentionsAnySymbol(expr, rebound))
         return undefined;
+      if (found !== undefined) found.candidate = candidate as CseCandidate;
       return name;
     }
   }
   return undefined;
+}
+
+/**
+ * The occurrence of each CSE candidate whose code `compileWithCse()`
+ * compiled for the binding of the candidate (the right-hand side of the
+ * temporary, or the code that is inlined at each occurrence). The other
+ * occurrences of the candidate are not compiled: their code is the name of
+ * the temporary, or the same inlined code.
+ */
+const cseDefiningOccurrence = new WeakMap<CseCandidate, Expression>();
+
+/** Record `expr` as the occurrence that gives the code of `candidate`. */
+export function recordCseDefiningOccurrence(
+  candidate: CseCandidate,
+  expr: Expression
+): void {
+  cseDefiningOccurrence.set(candidate, expr);
+}
+
+/**
+ * `to` is a node whose code is the code that the compilation wrote for
+ * `from`, a node that is structurally the same (`isSame()`), and `to` is
+ * not compiled: its code is the name of a temporary or the same code
+ * (a common subexpression, `compileWithCse()`, or a loop invariant,
+ * `hoistLoopInvariants()`). So `compileExpr()` does not record in
+ * `CompilerState._callerLowered` whether a caller's `compile` handler wrote
+ * the code of `to` and of its descendants. The code of each node of `to`
+ * is the code of the node at the same position in `from`, so each such
+ * record is copied to that node of `to`. A record `false` (the stock
+ * lowering wrote the code of one lowering of the node) is not replaced by
+ * `true`, as in `compileExpr()`. Without the copy, the admission checks
+ * (`unsettledShapeIn()`) would read a conditional whose code the handler
+ * wrote as a conditional of the stock lowering, and decline it when its
+ * branches have different shapes.
+ *
+ * The walk goes into the operands by position, so it stops (and copies
+ * nothing below) where two nodes may be the same with operands that do
+ * not correspond one to one: different operators (`isSame()` can match a
+ * `Range` with a `List`) or a set literal whose elements are not ordered
+ * (`isUnorderedSet()`). With no copy, such a node keeps the checks of the
+ * stock lowering, which can decline but never admit wrong code. It does
+ * not go into a list backed by a numeric store, whose elements are
+ * numbers. Each pair of nodes is visited once, so a DAG (`e_k = e_{k-1} +
+ * e_{k-1}`) costs the number of its distinct pairs, not of its paths.
+ */
+export function copyCallerLowered(from: Expression, to: Expression): void {
+  const lowered = CompilerState._callerLowered;
+  if (from === to || lowered.size === 0) return;
+  const visited = new Map<Expression, Set<Expression>>();
+  const copy = (from: Expression, to: Expression): void => {
+    if (from === to) return;
+    let sources = visited.get(to);
+    if (sources === undefined) visited.set(to, (sources = new Set()));
+    else if (sources.has(from)) return;
+    sources.add(from);
+    const mark = lowered.get(from);
+    if (mark !== undefined && lowered.get(to) !== false) lowered.set(to, mark);
+    if (!isFunction(from) || !isFunction(to)) return;
+    if (from.operator !== to.operator || from.nops !== to.nops) return;
+    if (from._numericStore !== undefined || to._numericStore !== undefined)
+      return;
+    if (isUnorderedSet(from.operator, from.ops)) return;
+    for (let i = 0; i < from.nops; i++) copy(from.ops[i], to.ops[i]);
+  };
+  copy(from, to);
+}
+
+/**
+ * `expr` is an occurrence of `candidate` whose code is the code of the
+ * occurrence that `compileWithCse()` compiled (`cseDefiningOccurrence`):
+ * the name of its temporary, or the same inlined code. The records of
+ * `CompilerState._callerLowered` are copied to it (`copyCallerLowered()`).
+ */
+export function copyCallerLoweredToCseOccurrence(
+  candidate: CseCandidate | undefined,
+  expr: Expression
+): void {
+  if (candidate === undefined) return;
+  const source = cseDefiningOccurrence.get(candidate);
+  if (source !== undefined) copyCallerLowered(source, expr);
 }
 
 /** Whether any symbol of `names` occurs anywhere in `expr` — including

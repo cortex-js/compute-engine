@@ -253,6 +253,14 @@ class BigintEmitter {
    *   construct that binds names, `scopes` is not empty) no node is
    *   shared: a node there can read a bound name with the same spelling as
    *   an input, and a binding at the root cannot read the bound name.
+   *
+   * A later occurrence gets the name of the temporary and is not emitted,
+   * but no record of `CompilerState._callerLowered` is copied to it
+   * (`copyCallerLowered()`, as `compileWithCse()` does): this emitter never
+   * calls a caller's `compile` handler (it calls `core.compile()` only for
+   * the read of an input symbol), so no node of this code has such a
+   * record. `bigintCseExclusion` does not exclude a node whose operator has
+   * a caller's handler, and it does not need to for this reason.
    */
   private shared(node: Expression, emit: () => string): string {
     const top = this.scopes.length === 0 ? cseTop(this.target) : undefined;

@@ -86,7 +86,7 @@ import { CompileDeclineError, UNION_DISPATCH_CODE } from './diagnostics.js';
 import { bigintLaneAnalysisFor } from './compile-bigint-lane.js';
 import { emitBigintLane } from './compile-bigint-emit.js';
 import { isColorValued } from './color-space-fact.js';
-import { candidateAt } from './cse.js';
+import { candidateAt, type CseCandidate } from './cse.js';
 import {
   arraysArePoints,
   compilationType,
@@ -254,6 +254,8 @@ import {
 } from './compile-real-analysis.js';
 import {
   availableCseBinding,
+  copyCallerLoweredToCseOccurrence,
+  recordCseDefiningOccurrence,
   compileOp,
   cseTempVar,
   foldEmitted,
@@ -7031,8 +7033,12 @@ export function compileWithCse(
   // is in scope here and already evaluated: referencing it evaluates
   // nothing new, so it is preferred over binding (or inlining) the
   // structure again in this instance.
-  const available = availableCseBinding(session, expr);
-  if (available !== undefined) return available;
+  const found: { candidate?: CseCandidate } = {};
+  const available = availableCseBinding(session, expr, false, found);
+  if (available !== undefined) {
+    copyCallerLoweredToCseOccurrence(found.candidate, expr);
+    return available;
+  }
 
   // A statement-declaring target cannot place a new declaration inside a
   // lazy expression that runs conditionally: a declaration hoisted out of
@@ -7054,14 +7060,20 @@ export function compileWithCse(
   if (candidate === undefined) return core._compileInner(expr, target, prec);
 
   const inlineCode = _cseInlineCode.get(top)?.get(candidate);
-  if (inlineCode !== undefined)
+  if (inlineCode !== undefined) {
+    copyCallerLoweredToCseOccurrence(candidate, expr);
     return prec === 0 ? inlineCode : `(${inlineCode})`;
+  }
 
   const state = top.state.get(candidate);
-  if (state === 'bound') return top.names.get(candidate)!;
+  if (state === 'bound') {
+    copyCallerLoweredToCseOccurrence(candidate, expr);
+    return top.names.get(candidate)!;
+  }
   if (state === 'defining') return core._compileInner(expr, target, prec);
 
   top.state.set(candidate, 'defining');
+  recordCseDefiningOccurrence(candidate, expr);
   // The right-hand side is folded like any other emission (`foldEmitted`):
   // `compile()` folds only what `compileWithCse` RETURNS, and for a bound
   // candidate that is the temporary's name, never its code.
