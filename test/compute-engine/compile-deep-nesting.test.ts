@@ -14,8 +14,28 @@
 // the compilation, so a deep node does not walk the rest of the tree on top
 // of the compiler's stack.
 //
-// The depths below are above the old limits and about 20% below the new
-// ones, so that the test does not depend on the exact size of the stack.
+// The limit is not one number. The size of a frame depends on the tier of
+// the V8 just-in-time compiler that runs the function: an interpreted frame
+// is larger than an optimized one. So the limit is lowest for the first
+// compile in a process, and it rises as the compiler functions get
+// optimized. The lowest case that the test suite exercises is the first
+// compile of this file in a Jest worker that has already run other test
+// files; in that worker the limit was lower than in a Jest process that runs
+// this file alone. Measured on 2026-11-01 at commit b889aeb06 (`npx jest
+// -w 2 -- test/compute-engine/compile-*.test.ts`, 277 files on two
+// workers): the first compile succeeded at a chain depth of 325 and failed
+// at 350, and succeeded at a Horner degree of 160 and failed at 175. In a
+// process that ran this file alone, the first search found 374 and 249,
+// and a second search in the same process 840 and 437.
+//
+// The depths below are about 20% below the first-compile limits in a warm
+// worker, so that the test does not depend on the exact size of the stack
+// or on which test files ran before it in the same worker. A failure of this
+// test means that the stack use per level of nesting grew by about a
+// quarter since 2026-11-01: between 2026-10-24 (commit e181a868a) and
+// 2026-11-01, the limits measured with `tsx` fell from 499 and 342 to 374
+// and 249, and the test's former depths of 350 and 150 lost their margin
+// (the full suite failed at the release commit b889aeb06).
 //
 // ROADMAP CE-320.2.
 
@@ -44,8 +64,8 @@ function chain(depth: number): Expression {
 }
 
 describe('compiling a deeply nested expression', () => {
-  test('a polynomial of degree 150 in Horner form compiles', () => {
-    const e = horner(150);
+  test('a polynomial of degree 125 in Horner form compiles', () => {
+    const e = horner(125);
     const result = compile(e);
     expect(result.success).toBe(true);
     expect(result.run!({ x: 0.5 }) as number).toBeCloseTo(
@@ -54,8 +74,8 @@ describe('compiling a deeply nested expression', () => {
     );
   });
 
-  test('a chain of 350 sines and cosines compiles', () => {
-    const e = chain(350);
+  test('a chain of 260 sines and cosines compiles', () => {
+    const e = chain(260);
     const result = compile(e);
     expect(result.success).toBe(true);
     expect(result.run!({ x: 0.5 }) as number).toBeCloseTo(
