@@ -161,3 +161,14 @@ caller leaves out, which is unspecified, and for a value outside its declared
 type. Candidates 1 to 4 and 6 must be split along this line before they
 start: the part for an input left out goes, the part for a declared
 `| missing` value stays.
+
+**Candidate 8, part 3 is dropped (2026-11-01).** The user accepted `NaN` in
+place of `undefined` for an unmatched point or string cell of an element-wise
+`Which`, `If` or `When` over a list (`Which(v > 0, (1, 2))` with
+`v = [1, -1]`), which reverses the decision of 2026-10-18. The implementation
+showed that readers of the cell test only `undefined`:
+`Boole(IsMissing(Last(Which(v > 0, (1, 2)))))` would give 0 (interpreter and
+HEAD: 1), and `Coalesce(First(Rest(Which(v > 0, (1, 2)))), (9, 9))` would give
+`NaN` (interpreter: `(9, 9)`). Making every such reader accept `NaN` would add
+code in an unknown number of places, so the absence value chosen by the cell
+type stays, and the decision of 2026-10-18 stays in force.
