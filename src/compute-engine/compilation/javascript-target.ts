@@ -17522,10 +17522,10 @@ function emitSumProduct(
   // vector of a known length (`list<real^3>`) reads the result by component
   // (`_tv[0]`), so the empty value is the identity in every component:
   // `0.5·Σ_{i=1}^{0} [x, y, z]·i + [x, y, z]` is `0.5·[0, 0, 0] + [x, y, z]`.
-  // The interpreter differs there: it answers the scalar `0` for an empty
-  // range although the static type is `vector<real^3>`, and adds it to the
-  // terms around the `Sum` by broadcast. Any other element-wise body answers
-  // the scalar identity.
+  // The interpreter gives the same value when the static type of the `Sum`
+  // is a vector of a known length (`emptyBigOpValue()` in
+  // `symbolic/big-op-identity.ts`). Any other element-wise body answers the
+  // scalar identity.
   const emptyWidth = elementwiseBody ? vectorBodyWidth(body) : undefined;
   const empty =
     emptyWidth === undefined

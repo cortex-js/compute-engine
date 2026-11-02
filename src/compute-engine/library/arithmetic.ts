@@ -229,6 +229,7 @@ import {
   pointNormType,
 } from './utils.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
+import { emptyBigOpValue } from '../symbolic/big-op-identity.js';
 import {
   pow,
   realPowerBranchTerms,
@@ -14064,6 +14065,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // below and report a wrong value, so the decline is carried out of
         // the closure by this flag instead.
         let captureUnsafe = false;
+        // The number of terms folded, or 1 for a list folded as a whole. A
+        // range with no term has the value of `emptyBigOpValue()`.
+        let terms = 0;
         const nonFinite = new NonFiniteTerm();
         // No fold of a whole list exists for a product, so the options that
         // `Sum` passes (the fold, and with it the numeric-route evaluation of
@@ -14083,6 +14087,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 noteNonFiniteTerm(nonFinite, options.expression, xe, () =>
                   evaluateBigOpTerm(x, bindings, false)
                 );
+              terms += 1;
               return productAccumulate(acc, xe, numeric);
             },
             ce.One
@@ -14098,6 +14103,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Bounds we cannot walk: surface an error rather than truncate.
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
+        // An indexing set that is not valid gives no result, and `NaN`. It folds
+        // no term too, so this test comes before the empty-range value.
+        if (result === undefined || result === null) return ce.NaN;
+        if (terms === 0 && options.expression !== undefined)
+          return emptyBigOpValue(options.expression, 'Product');
         // Evaluate the accumulated result to combine numeric factors
         // After the `await`: the evaluation of the product runs inside the
         // window, at the working precision.
@@ -14216,6 +14226,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        // The number of terms folded, or 1 for a list folded as a whole. A
+        // range with no term has the value of `emptyBigOpValue()`.
+        let terms = 0;
         // The first factor that is not finite: see the sync handler. The
         // factors of an asynchronous-only application are not recorded. A
         // recorded factor whose exact value is infinite decides the result
@@ -14230,6 +14243,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             captureUnsafe = true;
             return null;
           }
+          terms += 1;
           return productAccumulate(acc, xe, numeric);
         };
         const numericTerm = (
@@ -14292,6 +14306,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
+        // An indexing set that is not valid gives no result, and `NaN`. It folds
+        // no term too, so this test comes before the empty-range value.
+        if (result === undefined || result === null) return ce.NaN;
+        if (terms === 0 && options.expression !== undefined)
+          return emptyBigOpValue(options.expression, 'Product');
         // After the `await`: the evaluation of the product runs inside the
         // window, at the working precision.
         const product = runWithEvaluationEffects(
@@ -14535,6 +14554,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        // The number of terms folded, or 1 for a list folded as a whole. A
+        // range with no term has the value of `emptyBigOpValue()`.
+        let terms = 0;
         const nonFinite = new NonFiniteTerm();
         const result = run(
           reduceBigOp(
@@ -14550,6 +14572,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 noteNonFiniteTerm(nonFinite, expression, term, () =>
                   evaluateBigOpTerm(x, bindings, false)
                 );
+              terms += 1;
               return addSumTerm(acc, term, numeric);
             },
             new SumTerms(),
@@ -14558,9 +14581,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               // (`Sum(PointX(C))`) is summed on its doubles: `machineSum`.
               foldValue: (collection) => {
                 const total = machineListTotal(collection);
-                return total === undefined
-                  ? undefined
-                  : sumOf(boxMachineTotal(engine, total));
+                if (total === undefined) return undefined;
+                // The whole list is folded at once, and its elements are terms.
+                terms += 1;
+                return sumOf(boxMachineTotal(engine, total));
               },
               numericApproximation: numeric,
             }
@@ -14574,7 +14598,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Bounds we cannot walk: surface an error rather than truncate.
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
+        // An indexing set that is not valid gives no result, and `NaN`. It folds
+        // no term too, so this test comes before the empty-range value.
         if (result === undefined || result === null) return engine.NaN;
+        if (terms === 0 && expression !== undefined)
+          return emptyBigOpValue(expression, 'Sum');
         // Evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
         const sum = finishSum(engine, result, numeric);
         if (!numeric) return sum;
@@ -14824,6 +14852,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        // The number of terms folded, or 1 for a list folded as a whole. A
+        // range with no term has the value of `emptyBigOpValue()`.
+        let terms = 0;
         // The first term that is not finite: see the `Product` handler.
         const nonFinite = new NonFiniteTerm();
         const accumulate = (
@@ -14834,6 +14865,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             captureUnsafe = true;
             return null;
           }
+          terms += 1;
           return addSumTerm(acc, term, numeric);
         };
         const numericTerm = (
@@ -14887,9 +14919,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 // numbers.
                 foldValue: (collection) => {
                   const total = machineListTotal(collection);
-                  return total === undefined
-                    ? undefined
-                    : sumOf(boxMachineTotal(engine, total));
+                  if (total === undefined) return undefined;
+                  // The whole list is folded at once, and its elements are terms.
+                  terms += 1;
+                  return sumOf(boxMachineTotal(engine, total));
                 },
                 numericApproximation: numeric,
               }
@@ -14905,7 +14938,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
+        // An indexing set that is not valid gives no result, and `NaN`. It folds
+        // no term too, so this test comes before the empty-range value.
         if (result === undefined || result === null) return engine.NaN;
+        if (terms === 0 && expression !== undefined)
+          return emptyBigOpValue(expression, 'Sum');
         // After the `await`: the correction of the accumulator rounds at the
         // working precision, so it runs inside the window.
         const sum = runWithEvaluationEffects(

@@ -11,6 +11,7 @@ import {
 } from '../boxed-expression/rational-body.js';
 import { asFloat } from '../boxed-expression/float-result.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { emptyBigOpValue } from './big-op-identity.js';
 
 /**
  * Whether a bound of a `Sum` or `Product` is proved not to be an integer, so
@@ -355,9 +356,10 @@ function simplifySumRules(x: Expression): RuleStep | undefined {
       Number.isInteger(lowerVal) &&
       Number.isInteger(upperVal)
     ) {
-      // Empty range: upper < lower → return 0 (identity for addition)
+      // Empty range: upper < lower → the identity for addition, `0`, or a
+      // vector of `0` for a vector body (`emptyBigOpValue()`)
       if (upperVal < lowerVal) {
-        return { value: ce.Zero, because: 'empty sum' };
+        return { value: emptyBigOpValue(x, 'Sum'), because: 'empty sum' };
       }
       // Single iteration: upper == lower → substitute and return body
       if (upperVal === lowerVal) {
@@ -388,7 +390,7 @@ function simplifySumRules(x: Expression): RuleStep | undefined {
           ? count.numericValue
           : count.numericValue.re;
       if (countVal <= 0) {
-        return { value: ce.Zero, because: 'empty sum' };
+        return { value: emptyBigOpValue(x, 'Sum'), because: 'empty sum' };
       }
     }
     return {

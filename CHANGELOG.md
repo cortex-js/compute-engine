@@ -110,6 +110,18 @@
   compiled and returned the list before, and a function value of such a
   function given to a consumer (`Map(h, xs)`). (GitHub issue #488.)
 
+### Resolved Issues
+
+- **A `Sum` or `Product` over an empty range of a vector body gives a vector.**
+  With `x, y, z: real` and `n: integer<0..10>`, `Sum(i·[x, y, z], i, 1, n)`
+  has the type `vector<real^3>`. At `n = 0`, `evaluate()` gave the scalar
+  `0` and now gives `[0, 0, 0]`; the `Product` gave `1` and now gives
+  `[1, 1, 1]`, as compiled code does. `simplify()` of a range that is empty
+  by its numeric bounds gives the same vectors. So
+  `Norm(Product(i·[x, y, z], i, 1, n))` at `n = 0` is `√3` (before: `1`). A
+  body of another type, a matrix included, keeps the scalar identity.
+  (CE-786.)
+
 ## 0.177.0 _2026-11-01_
 
 ### Behavior Changes

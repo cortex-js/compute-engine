@@ -606,21 +606,6 @@ reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
 
-### CE-786. A `Sum` or `Product` over an empty range of a vector body gives a scalar, outside its static type
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; with `x, y, z: real` and `n: integer<0..10>`, `Sum(i * [x, y, z], i, 1, n)` has the static type `vector<real^3>`, and at `n = 0` `evaluate()` gives the scalar `0`; it should give `[0, 0, 0]`. `Product` gives `1` and should give `[1, 1, 1]`.
-
-The interpreter seeds the accumulator of `Sum` with `ce.Zero` and of
-`Product` with `ce.One` (`src/compute-engine/library/arithmetic.ts`), so an
-empty range returns that scalar whatever the type of the body. Compiled code
-takes the shape from the static type and returns `[0, 0, 0]` (`[1, 1, 1]`);
-the difference is a known-limitations line of `docs/COMPILATION-MODEL.md`. A
-consumer that reads the shape sees it: `Norm(Product(i * [x, y, z], i, 1, n))`
-gives `1` in the interpreter and `√3` in compiled code. Fix: when the static
-type of the body is a vector or a list of known width, seed the accumulator
-with the identity of that shape; then remove the known-limitations line.
-
 ### CE-766. `0^x` is folded with the value that `x` has when it is boxed
 
 **Status:** ready; wrong value, S.

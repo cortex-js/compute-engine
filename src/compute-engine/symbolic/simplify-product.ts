@@ -6,6 +6,7 @@ import {
   keepInfiniteRangeStep,
 } from './simplify-sum.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { emptyBigOpValue } from './big-op-identity.js';
 
 /**
  * The value of `Product(c, …)` over a range with infinitely many terms, for
@@ -146,9 +147,13 @@ function simplifyProductRules(x: Expression): RuleStep | undefined {
       Number.isInteger(lowerVal) &&
       Number.isInteger(upperVal)
     ) {
-      // Empty range: upper < lower → return 1 (identity for multiplication)
+      // Empty range: upper < lower → the identity for multiplication, `1`,
+      // or a vector of `1` for a vector body (`emptyBigOpValue()`)
       if (upperVal < lowerVal) {
-        return { value: ce.One, because: 'empty product' };
+        return {
+          value: emptyBigOpValue(x, 'Product'),
+          because: 'empty product',
+        };
       }
       // Single iteration: upper == lower → substitute and return body
       if (upperVal === lowerVal) {
@@ -181,7 +186,10 @@ function simplifyProductRules(x: Expression): RuleStep | undefined {
           ? count.numericValue
           : count.numericValue.re;
       if (countVal <= 0) {
-        return { value: ce.One, because: 'empty product' };
+        return {
+          value: emptyBigOpValue(x, 'Product'),
+          because: 'empty product',
+        };
       }
     }
     return {
