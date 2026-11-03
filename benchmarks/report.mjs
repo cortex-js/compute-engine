@@ -689,7 +689,7 @@ w();
 w();
 w('---');
 w();
-w('_Reproduce: `python benchmarks/gen_cases.py && node benchmarks/report.mjs`. Raw data in [`results.json`](./results.json)._');
+w('_Reproduce: `./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs`. Raw data in [`results.json`](./results.json)._');
 
 writeFileSync(join(__dirname, 'REPORT.md'), md);
 console.error('Wrote benchmarks/REPORT.md and benchmarks/results.json');
