@@ -4441,8 +4441,30 @@ function addTypeOnTypes(
       const siblings = shaped.map((x) =>
         stripNumericRanges(broadcastSiblingType(x.type))
       );
-      const collected =
+      let collected =
         nestedTensorSumType(siblings) ?? (widenAll(siblings) as Type);
+      // Lists of points of one rank are added point by point, and two points
+      // are added component by component (`tupleComponentwiseAddType`). The
+      // join of the lists joins their point types, and when neither point
+      // type holds the other the cell is their union, which no sum has: with
+      // `A: list<tuple<integer, integer, real>>` and
+      // `C: list<tuple<real, real, integer>^2>`, `A + C` was typed
+      // `list<tuple<integer, integer, real> | tuple<real, real, integer>>`,
+      // and its value is a list of `tuple<real, real, real>`. The cell is the
+      // component-wise sum of the point types instead. A point type that is
+      // a union of tuples is left to the join.
+      const nests = siblings.map((t) => pointNestOf(t));
+      const joined = pointNestOf(collected);
+      if (
+        shaped.length > 1 &&
+        joined !== undefined &&
+        nests.every((p) => p !== undefined && p.rank === joined.rank)
+      ) {
+        const cell = tupleComponentwiseAddType(
+          nests.map((p) => describeType(p!.cell))
+        );
+        if (cell !== undefined) collected = joined.withCell(cell);
+      }
       const scalars = args.filter((x) => !isBroadcastShaped(x));
       // Two or more collections are added cell by cell (`[i] + [-i]` is
       // `[0]`), so their joined cells are closed like a cell and a scalar.

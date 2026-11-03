@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-790.
+Next free reference: CE-791.
 
 **Entry format.**
 
@@ -349,34 +349,23 @@ reproduction above is the record.
 
 ## Collections, absence and broadcasting
 
-### CE-789. The sum of two point lists is typed as a list of lists when only one length is known
+### CE-790. The sum of a point-or-list union and a list that holds a value is typed as a list of lists
 
 **Status:** ready; wrong type, S.
-**Witness:** corpus; Tycho row 489 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`,
-filed 2026-11-02 on 0.176.0; still present on `4a00e7c32`), from row 83 of the
-Desmos document `art/lrfx01y3cv`,
-`(6cos(n_01), 6sin(n_01), 0) + n_02 (sin(360u), cos(360u), 5v)` with
-`n_01 = join([…], […] + 180)`, a list with no known length.
+**Witness:** plausible; with `U` declared `tuple<real, real> | list<real>`
+(the shape a host gives a Desmos parameter that holds a point or a list) and
+`W` declared `list<real>`, both assigned `[1, 2]` and `[10, 20]`,
+`Add(U, W)` is typed `list<list<real> | tuple<real, real>>`, and its value
+is `[11, 22]`, which that type does not hold. Found on `4274ac12a` during
+the work on CE-789.
 
-With `P` declared `list<tuple<real, real, real>>` and `Q` declared
-`list<tuple<real, real, real>^10>`, `P + Q` and `Q + P` are typed
-`list<list<tuple<real, real, real>>>`; `P + P` and `Q + R` (both lengths
-unknown, or both known) are typed a list of tuples, and the same pair of
-number lists, `list<real>` + `list<real^10>`, is typed `list<real>`. The value
-is a flat list of points in every case (`PointList(n, n, 0) +
-PointList(m, m, 0)` with `n = [1...10]` and `m` a literal of 10 evaluates to a
-`List` of 10 `Tuple`s), so the static type contradicts the value, and a
-compilation that settles the shape from the type (rule R1 of
-`docs/COMPILATION-MODEL.md`) sees the wrong shape. The same happens for the
-difference and for `n \cdot PointList(m, m, v)`. Where to look: the
-point-list branch of the broadcast type lift
-(`boxed-expression/broadcast-lift-type.ts`) when one operand's list type
-carries a length and the other does not; the number-list branch zips the two
-correctly. Tycho's workaround on its side is `couldBeNestedPointList3d` in
-`src/plot-core/classification-terminal.ts`, which it removes at adoption.
-Reply to Tycho in row 489 when fixed; its instrument is
-`scripts/repros/2026-11-02-ce489-point-list-sum-unknown-length-type-repro.mts`
-in the Tycho repository.
+With `W` a list literal (`Add(U, [10, 20])`) the type is
+`list<real> | tuple<real, real>`, which holds the value. The same happens
+with `W` declared `vector<2>` or `list<real^2>`. Where to look: the lift of
+a lone scalar-or-collection union beside a symbol that holds a list
+(`loneUnionBroadcastResultType` in
+`boxed-expression/broadcast-lift-type.ts`), which wraps the handler's
+answer for the whole union in one more list.
 
 ### CE-763. `Contains` of a list of valueless symbols gives `False` for a value that a symbol can hold
 

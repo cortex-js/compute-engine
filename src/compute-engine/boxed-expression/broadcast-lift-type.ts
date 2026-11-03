@@ -2082,6 +2082,16 @@ function pointListBesideCollectionType(
       cells.push({ kind: 'broadcastable', elements: 'unknown' });
       continue;
     }
+    // A `range` is a list of integers (`[1...10]`), so its element is an
+    // `integer`. Described to the handler as a whole, it gave the cell the
+    // union `range | tuple<…>`, and the result was typed as a list of lists
+    // of points: with `n := [1...10]`, `n · PointList(m, m, v)` was typed
+    // `list<list<tuple<integer, integer, real>>>`, and its value is a list
+    // of points.
+    if (t === 'range') {
+      cells.push('integer');
+      continue;
+    }
     if (typeof t === 'string') {
       cells.push(undefined);
       continue;
@@ -2585,6 +2595,32 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       types.every((t) => isPointOrPointListUnion(t))
     )
       return resolveTypeAlias(sigResult);
+    // A collection of a fixed shape beside the triggers that is not one of
+    // them: under a handler that owns its collection typing
+    // (`deferToHandler`), a list with dimensions is typed by the handler, not
+    // by this lift. The broadcast still maps it cell by cell. The two
+    // arm-by-arm typings below describe such an operand to the handler as
+    // the whole list, beside one cell of each trigger, and wrap the answer in
+    // the list arm of the trigger. The handler answers a list for a cell
+    // beside a list, so the wrap gave one list level too many: with
+    // `P: list<tuple<real, real, real>>` and
+    // `Q: list<tuple<real, real, real>^10>`, `P + Q` was typed
+    // `list<list<tuple<real, real, real>>>`, and its value is a list of 10
+    // points. The arm-by-arm typings are skipped then. A list trigger takes
+    // the handler's answer for the whole operands below. A trigger that is a
+    // lone scalar-or-collection union (`U: tuple<real, real> | list<real>`
+    // beside `W: vector<2>`) is typed by `loneUnionBroadcastResultType`,
+    // which wraps the handler's answer again: `U + W` is
+    // `list<list<number> | tuple<real, real>> | list<number> |
+    // tuple<real, real>`. That type holds the value (`list<number>` for a
+    // list `U`), but some of its arms hold no value. Without the skip it was
+    // `list<vector<2>>`, which does not hold the value.
+    const fixedShapeBesideTriggers = views.some(
+      (v, i) =>
+        mappable(i) &&
+        !broadcasting.includes(v) &&
+        isFixedShapeCollectionTypeOf(v.type)
+    );
     // Every trigger a lone scalar-or-collection union, and some trigger has
     // a TUPLE scalar arm beside a collection arm that does not hold points
     // (`tuple<number, number> | list<number>`; the Desmos parameter shape
@@ -2602,6 +2638,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // stands. A union with no tuple arm (a recursive alias
     // `list<json> | integer`) keeps the one-cell typing too.
     if (
+      !fixedShapeBesideTriggers &&
       input.armwiseTupleArms === true &&
       input.armCellResult !== undefined &&
       types.some((t) => hasTupleBranch(t)) &&
@@ -2633,7 +2670,11 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // rejected (`L + 1` for a list of points) the application is `error`,
     // as the one-cell typing already answered for such a list: the empty
     // list, whose sum is `[]`, is left out on purpose, as it was.
-    if (input.armwiseTupleArms === true && input.armCellResult !== undefined) {
+    if (
+      !fixedShapeBesideTriggers &&
+      input.armwiseTupleArms === true &&
+      input.armCellResult !== undefined
+    ) {
       // A `broadcastable<E>` trigger that holds a collection now holds the
       // collection arm of the broadcastable (`broadcastCollectionArm`):
       // `tensor<E>`, of any rank, when `E` cannot hold a list (a tuple, a

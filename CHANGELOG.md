@@ -92,6 +92,32 @@
   value. Every other `Block` keeps the `;` form. The text parses back to the
   same canonical expression.
 
+- **The `When` operator is removed.** A restriction is the single-branch
+  `If`: write `["If", c, e]` where you wrote `["When", e, c]` (the operands
+  are in the other order). `["When", …]` in a MathJSON document is now an
+  unknown operator: it has no type, does not evaluate and does not compile.
+  `\mathrm{When}(e, c)` parses to that unknown operator, not to a
+  restriction. Stacked restrictions written as nested `If`s are not merged
+  into one `And`; stacked braces `e\{c_1\}\{c_2\}` still parse to one
+  `If(And(c_1, c_2), e)`. A held restriction prints as `If(0 < t, 3)` in
+  the ASCII form, where it printed `3 {0 < t}`. Witness: the parser has
+  produced only `If` since the restriction rule above; Tycho, the only known
+  builder of `When`, builds `If` from its next release.
+- **A held restriction over a list is the list of its restricted elements.**
+  With `t` free, `If(0<t, [1, 2, 3])` is an indexed collection, and an
+  operation applied to each element applies to each restricted element:
+  `\sin([1,2,3]\{0<t\})` is `[\sin(1), \sin(2), \sin(3)]`, each restricted
+  by `0<t`, and with `t = -1` it is `[NaN, NaN, NaN]` (it was `Missing`:
+  the `When` form was typed with a `missing` arm, so the operation took the
+  list whole). With a `True` or `False` condition the value is unchanged.
+- **The type of a restriction has no `missing` or `nan` arm.** `If(c, e)` has
+  the type of `e`, and an accessor of it has the element type:
+  `At(If(0<t, (1, 2)), 1)` is `integer`, where `When` gave `integer | nan`.
+  The absent value (`NaN`, a `NaN` point, `Missing`) is outside the declared
+  type, as `NaN` is outside `real`. `Insert`, `ReplaceAt`, `Append`,
+  `Distance`, `Norm` and `Midpoint` of a restricted value lose the
+  `missing` arm that the restriction gave them.
+
 - **Compiled code no longer tests for an input that the caller leaves out.**
   The host supplies every input with a value of its declared type; the
   result for an input left out is undefined and can differ per target
@@ -211,6 +237,17 @@
   `Norm(Product(i·[x, y, z], i, 1, n))` at `n = 0` is `√3` (before: `1`). A
   body of another type, a matrix included, keeps the scalar identity.
   (CE-786.)
+- **The sum of two lists of points is typed as a list of points when only one
+  length is known.** With `P: list<tuple<real, real, real>>` and
+  `Q: list<tuple<real, real, real>^10>`, `P + Q` and `P - Q` were typed
+  `list<list<tuple<real, real, real>>>`; they are now typed
+  `list<tuple<real, real, real>>`, which is the shape of the value. With
+  `n := [1...10]`, `n · PointList(m, m, v)` is a list of points too. The point
+  type of such a sum is the component-wise sum of the two point types: with
+  `A: list<tuple<integer, integer, real>>` and
+  `C: list<tuple<real, real, integer>^2>`, `A + C` is
+  `list<tuple<real, real, real>>`, where its cell was the union of the two
+  point types. (CE-789.)
 
 ## 0.177.0 _2026-11-01_
 
