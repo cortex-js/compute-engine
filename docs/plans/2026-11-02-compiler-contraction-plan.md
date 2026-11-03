@@ -149,7 +149,10 @@ both change the same precedence table and the same serializer of `If`.
   `e \text{ where } c`), about ten test files, the guide page
   `13-guide-compile.md` and the CHANGELOG.
 
-3.2 **`When` is removed.** The library entry in `control-structures.ts`,
+3.2 **`When` is removed.** Done, commit `5a1ceb18a` (2026-11-02, session
+compute-engine-cc; 176 files, 2,434 insertions, 2,757 deletions; the
+measure and the choices are recorded at the end of this item). The library
+entry in `control-structures.ts`,
 its canonicalization rules (`When(When(e, c1), c2)`), its evaluation and
 type handlers, and the 32 source files that name it; the serializer writes
 every single-branch `If(c, e)` as `e \text{ where } c`, in parentheses when
@@ -230,7 +233,8 @@ condition is not decided is an indexed collection, mapped cell by cell
 `Missing`), the other option being a `missing` arm on the type of a
 collection-valued restriction; `isCollectionHead()` excludes an operator that
 selects its operands, so that a scalar `If` keeps its error propagation;
-`toString()` prints a restriction as `If(c, e)` (it printed `e {c}`); a
+`toString()` prints a restriction as `If(c, e)` (it printed `e {c}`; the
+user kept `If(c, e)` on 2026-11-02, so there is no short form); a
 condition declared `collection<boolean>` is not refused yet (item 3.3).
 
 3.3 **Selection.** The constraints of the survey's §6.3 in the interpreter:
