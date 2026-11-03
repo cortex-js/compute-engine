@@ -3863,16 +3863,6 @@ decline.
 
 ## Tests, tools, documentation and release tasks
 
-### CE-788. A test of `compile-elementwise-bigop.test.ts` still expects the scalar identity for an empty range of a vector body
-
-**Status:** ready; defect, S.
-**Witness:** corpus; `test/compute-engine/compile-elementwise-bigop.test.ts` line 66, "an empty constant range answers the scalar identity", fails on `main` at commit 9cca00073fd1: `Sum(Multiply(2, L), Limits(k, 1, 0))` expects `0` and gets `[0, 0, 0]`.
-
-Commit 0cbf41d09ffd (CE-786) made an empty-range `Sum` or `Product` of a
-vector body give the identity vector. This test was not changed with it. Change
-its expectations (and those of the `Product` case after it) to the identity
-vector, or remove the test if another test of CE-786 covers the same case.
-
 ### CE-540. The CI test job fails on `main` in four test files
 
 **Status:** ready; defect, small. Seen 2026-10-27 in the `main` run of commit

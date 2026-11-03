@@ -104,7 +104,21 @@ version and re-checks its rows (restriction binding: the 63 single-branch
 piecewise rows, the 76 stacked restrictions, the rows whose right side has
 several terms; selection: the 46 + 23 states with a list operand).
 
-3.1 **The parser: the restriction and the `where` clause.** One item, since
+3.1 **The parser: the restriction and the `where` clause.** Done, commit
+`7c4869ad1` (2026-11-02). What landed beyond the two specifications: a
+`where` binding whose value is a dictionary is `Declare(a, Dictionary(…))`,
+because the three-operand form reads a dictionary as the attributes of the
+declaration; the discharges (`IsMissing`, `Coalesce`, `AssertPresent`, a
+default parameter) find a restriction in the structure of the expression,
+every operand of `Coalesce` and a collection literal only at its root;
+`When` stays in the library, and every site that read `When` also reads a
+single-branch `If` (`restrictionParts()` in
+`boxed-expression/conditional-value.ts`). The corpus measure against Tycho
+`08419538f` (base `0cbf41d09`): no value changed; new declines javascript
++7, glsl +3, interval-js +5, all classified. Tycho's two adapter gaps are
+fixed in its detached commit `e87d293fc`, not yet on Tycho main. Code lines:
+the LaTeX dictionary grew from 15,967 to 16,149 and `compilation` from
+96,270 to 96,302, by design; 3.2 and step 4 remove code. One item, since
 both change the same precedence table and the same serializer of `If`.
 
 - The restriction rule of `docs/plans/2026-11-02-restriction-binding.md`:
@@ -148,6 +162,24 @@ meaning (the absent value when `c` is false), and a scalar condition
 accepts a non-value arm: a relation, a regression, an `Assign`, a point, a
 point list, the drawing heads (`Polygon`, `Triangle`, `Segment`,
 `GeometricVector`, `Sphere`, `Histogram`) and a `To` action.
+
+Since 3.1 made every `When` site also read a single-branch `If`, 3.2 deletes
+the `When` branch at each site and keeps the `If` branch. The measure is the
+same corpus audit with base `7c4869ad1`; expected: no changed value and no
+new decline. One behavior moves with the spelling: a held restriction over
+a collection, `[1,2,3]\{0\le t\le 6\}` with `t` free, presents as the
+collection of its restricted cells (`isCollection`, `count` and `each()`
+agree with its type; `whenCollectionHandlers()` in `control-structures.ts`,
+witness Tycho item 66, `corpus`). Today only `When` has these handlers, so
+`heldRestrictionAsIf()` keeps the `When` spelling for that one held form.
+3.2 gives `If` the same collection handlers, keyed on the two-operand form
+whose arm is a collection, so that a three-operand `If` and a scalar arm
+keep their behavior; the handlers' comment says that an `If` with collection
+handlers changes how it propagates the errors of its operands, and the
+implementer measures that on the tests of `when-collection-value.test.ts`,
+`restricted-list-lazy-operators.test.ts`, `absent-collection-operand.test.ts`
+and `threads-conditionals.test.ts` rewritten to `If`. Keeping an internal
+`When` for the held form is not an option: the item removes the operator.
 
 3.3 **Selection.** The constraints of the survey's §6.3 in the interpreter:
 the condition is a boolean or a flat list of booleans (a nested list, an

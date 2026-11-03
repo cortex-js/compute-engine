@@ -7,8 +7,8 @@
  * closed unconditionally (`assertScalarBigOpBody`, Tycho item 45). The JS
  * target now folds the body through `_SYS.bcast` — scalar-at-runtime bodies
  * stay scalar, cells zip position-wise, a length mismatch projects to NaN,
- * and an empty range answers the scalar identity (0 / 1), all matching the
- * interpreter. A BARE collection body never reaches the indexed form (it
+ * and an empty range answers the identity vector (`[0, 0, 0]` / `[1, 1, 1]`
+ * for a 3-list body, CE-786), all matching the interpreter. A BARE collection body never reaches the indexed form (it
  * canonicalizes to `Reduce`); tuple-shaped and complex bodies keep the
  * fail-closed assert, as do the GPU and interval-js targets.
  */
@@ -60,13 +60,13 @@ describe('element-wise Sum/Product: interpreter parity', () => {
     ).toEqual([6, 12, 20]);
   });
 
-  test('an empty constant range answers the scalar identity', () => {
+  test('an empty constant range answers the identity vector (CE-786)', () => {
     expect(
       parity(ce.box(['Sum', ['Multiply', 2, 'L'], ['Limits', 'k', 1, 0]]))
-    ).toBe(0);
+    ).toEqual([0, 0, 0]);
     expect(
       parity(ce.box(['Product', ['Multiply', 2, 'L'], ['Limits', 'k', 1, 0]]))
-    ).toBe(1);
+    ).toEqual([1, 1, 1]);
   });
 
   test('a multi-index Sum folds element-wise at every clause level', () => {
