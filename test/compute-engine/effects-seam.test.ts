@@ -99,6 +99,14 @@ describe('The Function-literal construction seam is the only builder', () => {
       // and builds `EffectContractError` for the message. It builds no
       // arrow.
       'compute-engine/compilation/compile-locals.ts',
+      // The compiler's check of a held value against the type the expression
+      // was typed with (`assertHeldValueType`): it READS the value's type
+      // through `presentedValueType`, the one rule that removes the implicit
+      // `missing` marker before a declared-type comparison (the same rule the
+      // `ce.assign` check applies), so that a value holding a `Missing` cell
+      // compiles under its declared type (ROADMAP CE-791). It builds no
+      // arrow.
+      'compute-engine/compilation/compile-inner.ts',
       'compute-engine/engine-declarations.ts',
       // The provisional re-derivation checks a rebuilt VALUE-bound literal
       // against its declared effects contract (`installRebuiltLiteral`): it
