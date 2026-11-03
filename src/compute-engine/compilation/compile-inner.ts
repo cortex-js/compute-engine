@@ -18,6 +18,7 @@ import {
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { boundVariableNames } from '../boxed-expression/binders.js';
+import { presentedValueType } from '../boxed-expression/effects-inference.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isSymbol,
@@ -477,11 +478,30 @@ export function compileInnerSymbol(
  * Only the value of a definition that is not a constant is checked: a
  * constant (`i`, `Pi`) has a library value that no host writes, and its
  * name can also be the variable of a binder in the expression.
+ *
+ * The `missing` arms of the held type are removed before the comparison,
+ * at the top and in every element or component. A declared type cannot
+ * name `missing`, and a value can still hold the marker: a selection with
+ * no match or a read out of range gives `Missing` whatever the type of the
+ * collection is. So a symbol declared `list<color>` whose value is
+ * `[Missing, Rgb(0, 1, 0)]` (type `list<color | missing>`) compiles, and a
+ * value that is wrong where it is present (`[5, Missing]` for a
+ * `list<string>` symbol) is still refused. This is the rule of the store
+ * check `matchesOrAbsent()` in `effects-inference.ts`, which removes the
+ * same arms before it compares. The type compared is the type the value
+ * presents (`presentedValueType()`): a value typed `missing` alone passes,
+ * and a number held through a restriction is read as the literal it holds.
+ * Compiled code gives an unspecified value
+ * for a `Missing` cell of a non-numeric collection (the caveats of
+ * `docs/COMPILATION-MODEL.md`), so this check need not refuse it.
+ * (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user decision of
+ * 2026-11-02", rule 5; ROADMAP CE-791.)
  */
 export function assertHeldValueType(expr: Expression): void {
   if (!isSymbol(expr)) return;
   const s = expr.symbol;
-  const heldDef = expr.engine.lookupDefinition(s);
+  const ce = expr.engine;
+  const heldDef = ce.lookupDefinition(s);
   const held =
     isValueDef(heldDef) && !heldDef.value.isConstant
       ? heldDef.value.value
@@ -490,7 +510,7 @@ export function assertHeldValueType(expr: Expression): void {
     held !== undefined &&
     !expr.type.isUnknown &&
     !held.type.isUnknown &&
-    !held.type.matches(expr.type)
+    !presentedValueType(ce, held).matches(expr.type)
   )
     throw new Error(
       `Could not compile the symbol '${s}': its value has the type ` +

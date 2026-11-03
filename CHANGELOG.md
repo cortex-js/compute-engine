@@ -57,6 +57,21 @@
     (it was `(collection<any>, (value | missing)+) -> collection`): an
     appended `Missing` is still kept as a cell (`Append([1], Missing)` is
     `[1, Missing]`).
+  - A symbol whose value holds `Missing` compiles under its declared type.
+    The declaration cannot name `missing`, so the compiler removes the
+    `missing` parts of the value's type before it compares it with the
+    declared type, as an assignment does. With `cd: list<color>` at
+    `[Missing, Rgb(0, 1, 0)]` (a selection with no match in the first cell),
+    `AsOklab(cd)` failed to compile ("its value has the type
+    'list<color | missing>', which is not the type 'list<color>'") and now
+    compiles to JavaScript: the second cell is the interpreter's Oklab
+    color, and the first cell is the `NaN` color (where the interpreter
+    gives an `incompatible-type` error). With `ss: list<string>` at
+    `[Missing, "b"]`, `At(ss, 2)` compiles to `"b"` and `At(ss, 1)` to
+    `undefined`. A function literal that reads such a symbol gets the same
+    reading in the interpreter: `((x) ↦ At(ss, 2))(1)` is `"b"` (it was an
+    `incompatible-type` error). A value that is wrong where it is present
+    (`[5, Missing]` for `ss`) is still refused, in both. (CE-791.)
   See `docs/ERROR-MODEL.md`, "`Missing` is a result only".
 - **A comparison is two-valued: `True` or `False`.** An operand that does
   not decide a comparison makes it `False` (`NotEqual`: `True`, since `≠`

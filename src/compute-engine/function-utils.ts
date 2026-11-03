@@ -158,6 +158,7 @@ import {
 import {
   EffectContractError,
   inferFunctionLiteralEffects,
+  presentedValueType,
 } from './boxed-expression/effects-inference.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { readsOtherBindings } from './boxed-expression/names-read.js';
@@ -8783,11 +8784,25 @@ function capturedValueMismatchEntry(
     // not compared: the type of a number value does not always carry its
     // value (the index `i` of `Sum(…, (i, 1, 3))` is typed `integer<1..3>`,
     // and the value `1` that it holds can be typed `integer`).
+    //
+    // The `missing` arms of the value's type are removed before the
+    // comparison, at the top and in every element or component: a declared
+    // type cannot name `missing`, and a value can still hold the marker (a
+    // selection with no match gives `Missing` in a cell of a non-numeric
+    // list). So `cd: list<color>` at `[Missing, Rgb(0, 1, 0)]` (type
+    // `list<color | missing>`) is read by a function literal, as the store
+    // check `matchesOrAbsent()` (`effects-inference.ts`) accepts it and as
+    // the compile check `assertHeldValueType()` (`compile-inner.ts`) reads
+    // it. The type compared is the type the value presents
+    // (`presentedValueType()`): a value typed `missing` alone passes, and a
+    // number held through a restriction is read as the literal it holds, as
+    // in the store check and the compile check. ROADMAP CE-791.
+    const present = presentedValueType(fnExpr.engine, value);
     if (
       expected.isUnknown ||
-      value.type.isUnknown ||
-      value.type.matches(expected) ||
-      value.type.matches(stripNumericRanges(expected.type))
+      present.isUnknown ||
+      present.matches(expected) ||
+      present.matches(stripNumericRanges(expected.type))
     )
       continue;
     if (derivedSignatureMatches(def, value, expected)) continue;

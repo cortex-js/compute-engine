@@ -460,6 +460,16 @@ function nonFiniteColor(
  * interpreter's per-position `incompatible-type` error projects to on this
  * target.
  *
+ * `undefined` is the compiled form of the marker `Missing`: a cell of a
+ * color list that holds no value (a selection with no match), in the value
+ * of a symbol or a read out of range. It answers the non-finite color too,
+ * so the other cells of a broadcast keep their values: `AsOklab(cd)` with
+ * `cd` at `[Missing, Rgb(0, 1, 0)]` gives `[NaN color, the Oklab of green]`,
+ * where the interpreter gives `[incompatible-type error, the same Oklab]`.
+ * The value of a `Missing` cell is unspecified in compiled code
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"); ROADMAP
+ * CE-791.
+ *
  * Anything else throws. A bare numeric array reaches here from a `vars` input
  * or from a consumer that still passes the pre-2026-09 array representation,
  * and reading it as a color would answer a plausible but wrong value, so it
@@ -472,7 +482,10 @@ function asCompiledColor(input: unknown): CompiledColor {
   if (typeof input === 'string')
     return packedToColor(parseColorStringOrThrow(input));
   if (isCompiledColor(input)) return input;
-  if (typeof input === 'number' && !Number.isFinite(input))
+  if (
+    input === undefined ||
+    (typeof input === 'number' && !Number.isFinite(input))
+  )
     return nonFiniteColor(undefined);
   if (
     typeof input === 'object' &&
