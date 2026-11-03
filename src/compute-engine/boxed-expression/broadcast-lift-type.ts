@@ -2153,6 +2153,52 @@ function pointListBesideCollectionType(
 }
 
 /**
+ * The plain list of the elements of `t` (`list<E>`) when `t` is a list of rank
+ * 1 with a length (`vector<2>`, `list<tuple<real, real>^10>`), or
+ * `undefined` for any other type. The plain list holds every value of `t`,
+ * and its arms can be read one by one (`isArmedOperandType`), which those of
+ * a list with dimensions cannot.
+ */
+function plainRankOneList(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  return typeof r !== 'string' && r.kind === 'list' && r.dimensions?.length === 1
+    ? { kind: 'list', elements: r.elements }
+    : undefined;
+}
+
+/** The length of `t` when it is a list of rank 1 with a known length
+ * (`vector<2>` gives 2), or `undefined` for any other type. */
+function rankOneLength(t: Type): number | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'list') return undefined;
+  if (r.dimensions?.length !== 1 || r.dimensions[0] < 0) return undefined;
+  return r.dimensions[0];
+}
+
+/**
+ * `t` with the length `n` on each arm that is a plain list of rank 1 whose
+ * elements may carry a dimension (`mayCarryDimensions`: a number, a tuple):
+ * `list<real> | tuple<real, real>` with `n = 2` is
+ * `vector<real^2> | tuple<real, real>`. Any other arm is kept.
+ */
+function withRankOneLength(t: Type, n: number): Type {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') return t;
+  if (r.kind === 'union')
+    return reduceType({
+      kind: 'union',
+      types: r.types.map((a) => withRankOneLength(a, n)),
+    });
+  if (
+    r.kind === 'list' &&
+    r.dimensions === undefined &&
+    mayCarryDimensions(r.elements)
+  )
+    return { kind: 'list', elements: r.elements, dimensions: [n] };
+  return t;
+}
+
+/**
  * The broadcast-lifted result type of an application, or `undefined` when no
  * lift applies and the caller's per-element result stands. The caller has
  * already decided that the operator is broadcastable (or declares
@@ -2598,29 +2644,53 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // A collection of a fixed shape beside the triggers that is not one of
     // them: under a handler that owns its collection typing
     // (`deferToHandler`), a list with dimensions is typed by the handler, not
-    // by this lift. The broadcast still maps it cell by cell. The two
-    // arm-by-arm typings below describe such an operand to the handler as
-    // the whole list, beside one cell of each trigger, and wrap the answer in
-    // the list arm of the trigger. The handler answers a list for a cell
-    // beside a list, so the wrap gave one list level too many: with
+    // by this lift, but the broadcast still maps it cell by cell. The two
+    // arm-by-arm typings below type each other operand as the whole operand.
+    // Such a list was then described to the handler as the whole list,
+    // beside one cell of each trigger, and the answer, a list, was wrapped in
+    // the list arm of the trigger: one list level too many. With
     // `P: list<tuple<real, real, real>>` and
     // `Q: list<tuple<real, real, real>^10>`, `P + Q` was typed
     // `list<list<tuple<real, real, real>>>`, and its value is a list of 10
-    // points. The arm-by-arm typings are skipped then. A list trigger takes
-    // the handler's answer for the whole operands below. A trigger that is a
-    // lone scalar-or-collection union (`U: tuple<real, real> | list<real>`
-    // beside `W: vector<2>`) is typed by `loneUnionBroadcastResultType`,
-    // which wraps the handler's answer again: `U + W` is
-    // `list<list<number> | tuple<real, real>> | list<number> |
-    // tuple<real, real>`. That type holds the value (`list<number>` for a
-    // list `U`), but some of its arms hold no value. Without the skip it was
-    // `list<vector<2>>`, which does not hold the value.
-    const fixedShapeBesideTriggers = views.some(
-      (v, i) =>
-        mappable(i) &&
-        !broadcasting.includes(v) &&
-        isFixedShapeCollectionTypeOf(v.type)
+    // points. So the two arm-by-arm typings are skipped beside such a list,
+    // and the handler's answer for the whole operands is the result below.
+    //
+    // One exception: a trigger with a point as a top-level arm (`U` declared
+    // `tuple<real, real> | list<real>`, the shape a host gives a Desmos
+    // parameter), under a head that does not map over the components of a
+    // point (`Add`, `Multiply`, `Divide`). The one-cell typing below would
+    // use the handler's answer for the whole operands,
+    // `tuple<real, real> | list<real>`, as the cell, and wrap it in one more
+    // list: `list<list<real> | tuple<real, real>>` does not hold the value
+    // `[11, 22]` of `U + W` for `U := [1, 2]`, `W := [10, 20]`. So the second
+    // arm-by-arm typing below types such a trigger arm by arm. Beside it, each
+    // list of rank 1 with a length (`vector<2>`), a trigger or not, is read
+    // as the plain list of its elements (`list<E>`, `plainRankOneList`),
+    // whose arms that typing reads one by one, and the length is put back on
+    // the answer when every such list states the same length (`U + W` is
+    // `vector<real^2>` for `W: vector<real^2>`): a value of another length
+    // is an error. A collection of a higher rank (a matrix) is not read
+    // (`null`), and the second typing is skipped then too. Under a head that
+    // maps over the components of a point (`Power`), the components of the
+    // point are paired with the elements of the list, which the arm-by-arm
+    // typing does not describe, and the typing below stands.
+    const fixedShapeLists: (Type | null | undefined)[] = views.map((v, i) => {
+      if (
+        !mappable(i) ||
+        broadcasting.includes(v) ||
+        !isFixedShapeCollectionTypeOf(v.type)
+      )
+        return undefined;
+      return plainRankOneList(v.type) ?? null;
+    });
+    const fixedShapeBesideTriggers = fixedShapeLists.some(
+      (t) => t !== undefined
     );
+    const pointArmTrigger = types.some((t) => hasTupleBranch(t));
+    const typesPointArmTrigger =
+      pointArmTrigger && input.broadcastsOverTuples !== true;
+    const readsFixedShape =
+      typesPointArmTrigger && !fixedShapeLists.some((t) => t === null);
     // Every trigger a lone scalar-or-collection union, and some trigger has
     // a TUPLE scalar arm beside a collection arm that does not hold points
     // (`tuple<number, number> | list<number>`; the Desmos parameter shape
@@ -2641,7 +2711,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       !fixedShapeBesideTriggers &&
       input.armwiseTupleArms === true &&
       input.armCellResult !== undefined &&
-      types.some((t) => hasTupleBranch(t)) &&
+      pointArmTrigger &&
       types.every((t) => scalarOrCollectionUnionBranches(t) !== undefined)
     ) {
       const armwise = armwiseUnionBroadcastResultType(
@@ -2670,8 +2740,15 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // rejected (`L + 1` for a list of points) the application is `error`,
     // as the one-cell typing already answered for such a list: the empty
     // list, whose sum is `[]`, is left out on purpose, as it was.
+    //
+    // The same typing takes a trigger with a point as a top-level arm
+    // (`U: tuple<real, real> | list<real>`) beside a trigger that is not a
+    // union (`W: list<real>`), which the typing above does not take (it
+    // needs every trigger to be a union), under the heads of
+    // `typesPointArmTrigger`. Typed arm by arm, the point arm beside a number
+    // cell has no sum and is left out, and `U + W` is `list<real>`.
     if (
-      !fixedShapeBesideTriggers &&
+      (!fixedShapeBesideTriggers || readsFixedShape) &&
       input.armwiseTupleArms === true &&
       input.armCellResult !== undefined
     ) {
@@ -2681,24 +2758,53 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       // number), so that `P` declared `broadcastable<tuple<number, number>>`
       // can hold `[[(3, 4)], [(6, 8)]]`. A rank-1 `list<E>` does not hold
       // that value.
+      //
+      // Beside a trigger with a point arm, a trigger that is a list of rank 1
+      // with a length (`vector<2>` that holds a value) is read as the plain
+      // list of its elements, as a collection of a fixed shape beside the
+      // triggers is (`readsFixedShape`).
       const armedTypes = types.map((t) => {
         const elements = broadcastableElementsOf(t);
-        return elements === undefined
-          ? t
-          : (broadcastCollectionArm(elements) as Type);
+        if (elements !== undefined)
+          return broadcastCollectionArm(elements) as Type;
+        return readsFixedShape ? (plainRankOneList(t) ?? t) : t;
       });
+      const fixedLists = readsFixedShape
+        ? fixedShapeLists.filter(
+            (t): t is Type => t !== undefined && t !== null
+          )
+        : [];
       if (
-        armedTypes.some((t) => hasTupleCell(t)) &&
-        armedTypes.every((t) => isArmedOperandType(t))
+        [...armedTypes, ...fixedLists].some(
+          (t) => hasTupleCell(t) || (typesPointArmTrigger && hasTupleBranch(t))
+        ) &&
+        [...armedTypes, ...fixedLists].every((t) => isArmedOperandType(t))
       ) {
         const armwise = armwiseUnionBroadcastResultType(
-          views.map((v) => {
+          views.map((v, i) => {
             const k = broadcasting.indexOf(v);
-            return k === -1 ? undefined : armedTypes[k];
+            if (k !== -1) return armedTypes[k];
+            return readsFixedShape ? (fixedShapeLists[i] ?? undefined) : undefined;
           }),
           input.armCellResult,
           { componentwise: input.broadcastsOverTuples }
         );
+        if (armwise !== undefined && readsFixedShape) {
+          // The length that every list read as a plain list states, if they
+          // agree (`readsFixedShape`).
+          const lengths = new Set(
+            [
+              ...types,
+              ...views
+                .filter((_, i) => fixedShapeLists[i] != null)
+                .map((v) => v.type),
+            ]
+              .map((t) => rankOneLength(t))
+              .filter((n): n is number => n !== undefined)
+          );
+          if (lengths.size === 1)
+            return withRankOneLength(armwise, [...lengths][0]);
+        }
         if (armwise !== undefined) return armwise;
       }
     }

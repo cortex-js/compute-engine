@@ -349,24 +349,6 @@ reproduction above is the record.
 
 ## Collections, absence and broadcasting
 
-### CE-790. The sum of a point-or-list union and a list that holds a value is typed as a list of lists
-
-**Status:** ready; wrong type, S.
-**Witness:** plausible; with `U` declared `tuple<real, real> | list<real>`
-(the shape a host gives a Desmos parameter that holds a point or a list) and
-`W` declared `list<real>`, both assigned `[1, 2]` and `[10, 20]`,
-`Add(U, W)` is typed `list<list<real> | tuple<real, real>>`, and its value
-is `[11, 22]`, which that type does not hold. Found on `4274ac12a` during
-the work on CE-789.
-
-With `W` a list literal (`Add(U, [10, 20])`) the type is
-`list<real> | tuple<real, real>`, which holds the value. The same happens
-with `W` declared `vector<2>` or `list<real^2>`. Where to look: the lift of
-a lone scalar-or-collection union beside a symbol that holds a list
-(`loneUnionBroadcastResultType` in
-`boxed-expression/broadcast-lift-type.ts`), which wraps the handler's
-answer for the whole union in one more list.
-
 ### CE-763. `Contains` of a list of valueless symbols gives `False` for a value that a symbol can hold
 
 **Status:** ready; wrong value, S.

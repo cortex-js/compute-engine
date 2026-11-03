@@ -138,6 +138,10 @@ nightly run, tell the user; do not take over that investigation unless asked.
   `~/dev/cortexjs.io/docs/epsil/`: the site build copies it from
   `src/epsil/docs/`, so edit the page in this repo instead. Run each example
   that a page shows against the current source before you write its result.
+- `~/dev/tycho/docs/COMPUTE_ENGINE.md` is how CE answers the Tycho team. Edit
+  it directly, without asking first, to answer a row (the fix, its cause, the
+  instrument reading, and the release or commit that ships it). Run no git
+  command in that repo, and say in the report that you edited it.
 - Follow BUILD.md and the shared-box specifics for completion checks; after-edit
   hooks do not replace them. Capture test exit codes
   directly rather than relying on the exit status of an output-filtering pipe.

@@ -248,6 +248,12 @@
   `C: list<tuple<real, real, integer>^2>`, `A + C` is
   `list<tuple<real, real, real>>`, where its cell was the union of the two
   point types. (CE-789.)
+- **The sum of a point-or-list operand and a list is typed as a list.** With
+  `U: tuple<real, real> | list<real>` and `W: list<real>`, `U + W` was typed
+  `list<list<real> | tuple<real, real>>`, a type that does not hold the value
+  `[11, 22]` of `U := [1, 2]`, `W := [10, 20]`. It is now typed `list<real>`.
+  The same holds for `U - W`; with `W` declared `vector<2>`, `U + W` is
+  `vector<2>`. (CE-790.)
 
 ## 0.177.0 _2026-11-01_
 
