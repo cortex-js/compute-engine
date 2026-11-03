@@ -75,15 +75,17 @@ describe('the evaluation default', () => {
 
   test('the declared behaviors are unchanged', () => {
     expect(ce.box(['Length', 'om']).evaluate().toString()).toBe('NaN');
-    expect(ce.box(['Equal', 'om', "'a'"]).evaluate().symbol).toBe('Missing');
+    // A comparison with an absent operand is `False` (user decision of
+    // 2026-11-02, two-valued comparisons).
+    expect(ce.box(['Equal', 'om', "'a'"]).evaluate().symbol).toBe('False');
     expect(ce.box(['Sin', 'Missing']).evaluate().toString()).toBe('NaN');
     expect(ce.box(['Coalesce', 'om', "'d'"]).evaluate().string).toBe('d');
   });
 
-  test('an absent condition keeps its own message', () => {
-    expect(ce.box(['If', 'ob', 1, 2]).evaluate().toString()).toContain(
-      'The condition is absent'
-    );
+  test('an absent condition is False', () => {
+    // User decision of 2026-11-02, two-valued comparisons. Before, it had
+    // its own error message.
+    expect(ce.box(['If', 'ob', 1, 2]).evaluate().toString()).toBe('2');
   });
 
   test('the refusal is at evaluation, not at boxing', () => {

@@ -121,7 +121,11 @@ describe('a restriction nested in an operand is not proved present', () => {
     expect((r as { code: string }).code).toMatch(/expected-present/);
   });
 
-  test('a compiled call fills the default of an absent nested argument', () => {
+  test('a nested boolean restriction is False, not absent, in a compiled call', () => {
+    // `If(d, True)` with `d` false is `False`: a restriction of a boolean
+    // by a false scalar condition is `False` (user decision of 2026-11-02,
+    // two-valued comparisons). So the argument is present and the default
+    // of `s` is not used. Before, the argument was absent and `f` gave 1.
     const ce = new ComputeEngine();
     ce.declare('c', 'boolean');
     ce.declare('d', 'boolean');
@@ -131,24 +135,24 @@ describe('a restriction nested in an operand is not proved present', () => {
       ['Function', ['If', 's', 1, 2], ['Optional', 's', 'True']],
     ]).evaluate();
     const json = ['f', ['If', 'c', ['If', 'd', 'True'], 'False']];
-    expect(run(ce, json, { c: true, d: false })).toBe(1);
+    expect(run(ce, json, { c: true, d: false })).toBe(2);
     expect(run(ce, json, { c: true, d: true })).toBe(1);
     expect(run(ce, json, { c: false, d: true })).toBe(2);
     ce.assign('c', true);
     ce.assign('d', false);
-    expect(ce.box(json).evaluate().json).toBe(1);
+    expect(ce.box(json).evaluate().json).toBe(2);
   });
 
   test('a Coalesce is absent when its last operand is absent', () => {
     // An absent first operand falls through to the second; the value of the
-    // `Coalesce` is absent when the second one is absent too.
+    // `Coalesce` is absent when the second one is absent too. The arms are
+    // numbers: a restriction of a boolean is `False` where its condition is
+    // false, not absent (user decision of 2026-11-02, two-valued
+    // comparisons).
     const ce = new ComputeEngine();
     ce.declare('c', 'boolean');
     ce.declare('d', 'boolean');
-    const json = [
-      'IsMissing',
-      ['Coalesce', ['If', 'c', 'True'], ['If', 'd', 'False']],
-    ];
+    const json = ['IsMissing', ['Coalesce', ['If', 'c', 1], ['If', 'd', 0]]];
     expect(ce.box(json).evaluate().json).toEqual(json);
     ce.assign('c', false);
     ce.assign('d', false);
@@ -170,22 +174,26 @@ describe('a restriction nested in an operand is not proved present', () => {
 
   test('a Coalesce whose fallback is absent stays undecided', () => {
     // The last operand `Missing` is absent, so the value of the `Coalesce`
-    // depends on the restriction in its first operand.
+    // depends on the restriction in its first operand (a number: see above).
     const ce = new ComputeEngine();
     ce.declare('c', 'boolean');
-    const json = ['IsMissing', ['Coalesce', ['If', 'c', 'True'], 'Missing']];
+    const json = ['IsMissing', ['Coalesce', ['If', 'c', 1], 'Missing']];
     expect(ce.box(json).evaluate().json).not.toBe('False');
     ce.assign('c', false);
     expect(ce.box(json).evaluate().json).toBe('True');
   });
 
   test('an accessor over a list literal can give its absent element', () => {
-    // `First` gives the element `If(c, True)`, which is absent where `c` is
-    // false, so compiled `AssertPresent` keeps its check.
+    // `First` gives the element `If(c, "a")`, which is absent where `c` is
+    // false, so compiled `AssertPresent` keeps its check. (A boolean element
+    // would be `False` there, not absent.)
     const ce = new ComputeEngine();
     ce.declare('c', 'boolean');
-    const json = ['AssertPresent', ['First', ['List', ['If', 'c', 'True'], 'False']]];
-    expect(run(ce, json, { c: true })).toBe(true);
+    const json = [
+      'AssertPresent',
+      ['First', ['List', ['If', 'c', { str: 'a' }], { str: 'b' }]],
+    ];
+    expect(run(ce, json, { c: true })).toBe('a');
     expect(() => run(ce, json, { c: false })).toThrow(/expected-present/);
   });
 });

@@ -248,14 +248,20 @@ Corollary rules for the strict regime:
     a drawing head) are accepted under a list condition, as before:
     `1 > 0 \text{ where } (x+2)^2 + y^2 \le (0..0.2..1.6)^2` is
     `If(… ≤ Range(0, 1.6, 0.2)^2, 0 < 1)`, a region of a plot. A position of
-    a boolean arm that is not selected is `Missing`
-    (`If([True, False], 1 > 0)` is `[True, Missing]`). An arm of another
-    kind that is not a string is accepted too, as a scalar arm or as a list
-    arm: a colour, a symbol, a tuple that is not a point, or a list of
-    these. A position of such an arm that is not selected is `Missing`: the
-    30×30 colour grid
+    a boolean arm that is not selected is `False`: the region is not drawn
+    there (`If([True, False], 1 > 0)` is `[True, False]`; user decision of
+    2026-11-02, two-valued comparisons; before, it was `Missing`). An arm of
+    another kind that is not a string is accepted too, as a scalar arm or as
+    a list arm: a colour, a symbol, a tuple that is not a point, or a list of
+    these. A position of a colour arm that is not selected is
+    `Rgb(NaN, NaN, NaN)`: a plotter reads a colour with a channel that is not
+    finite as "no colour here", and Tycho drops the whole colour list for a
+    `Missing`, `NaN` or `False` cell (Tycho item 189, the 30×30 colour grid
     `Which(Sqrt(X^2 + Y^2) <= 1, Hsv(0, 0, v), True, Hsv(0, 0, 0.8))` over
-    lists `X` and `Y` (Tycho item 189).
+    lists `X` and `Y`; user decision of 2026-11-02; before, the cell was
+    `Missing`). A position of an arm of another kind that is not selected
+    is `Missing`. A boolean or a colour position is the same on the
+    `javascript` target (`false`, a colour with `NaN` channels).
   - A position that is not selected is `NaN` for a number cell and a point
     whose coordinates are `NaN` for a point cell:
     `If([True, False, False], (1, 2))` is `[(1, 2), (NaN, NaN), (NaN, NaN)]`,
@@ -274,7 +280,14 @@ Corollary rules for the strict regime:
     (`If([0 < t], [(1, 2)])` read at position 1 is `If(0 < t, (1, 2))`).
     When this cell is evaluated alone after the condition becomes false, it
     is `Missing`, while the whole restriction gives the `NaN` point at that
-    position.
+    position. A colour cell does not have this limit: the cell read from a
+    held restriction carries the no-colour value as an else branch
+    (`If([C, True], [Rgb(1, 0, 0), Rgb(0, 1, 0)])` read at position 1 is
+    `If(C, Rgb(1, 0, 0), Rgb(NaN, NaN, NaN))`), so it gives
+    `Rgb(NaN, NaN, NaN)` when `C` becomes false, as the whole restriction
+    does. A relation cell does not have it either: the cell
+    `If(c, x > 0)` with `c` false is `False`, as the whole restriction
+    gives.
   - A scalar condition selects an arm whole, also when the arm is a list:
     `If(t > 0, [1, 2, 3])` at `t = -1` is `Missing`, the absent value of
     the whole list. Every reader keeps this: an operator that maps over its

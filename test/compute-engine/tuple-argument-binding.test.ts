@@ -145,19 +145,20 @@ const ROWS: Row[] = [
     name: 'Any',
     json: (s) => ['Any', s, POSITIVE],
     latex: '\\operatorname{Any}(%, x \\mapsto x > 0)',
-    // An absent element can leave the answer undecided (`Missing`).
-    absentSlot: ['boolean | missing', '"True"'],
+    // An absent element reads as `False` (user decision of 2026-11-02,
+    // two-valued comparisons), so the answer is a boolean.
+    absentSlot: ['boolean', '"True"'],
     values: 'boolean',
-    list: 'boolean | missing',
+    list: 'boolean',
   },
   {
     name: 'All',
     json: (s) => ['All', s, ABOVE_5],
     latex: '\\operatorname{All}(%, x \\mapsto x > 5)',
-    // An absent element can leave the answer undecided (`Missing`).
-    absentSlot: ['boolean | missing', '"False"'],
+    // An absent element reads as `False` (see `Any`).
+    absentSlot: ['boolean', '"False"'],
     values: 'boolean',
-    list: 'boolean | missing',
+    list: 'boolean',
   },
   {
     name: 'MaxBy',

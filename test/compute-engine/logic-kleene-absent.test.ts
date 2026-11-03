@@ -1,25 +1,22 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
-// The six binary connectives under Kleene three-valued logic, with an absent
-// operand (`Missing`, or `Undefined`, which is read the same way).
+// The binary connectives with an absent operand (`Missing`, or `Undefined`,
+// which is read the same way). The file name is from the time when the
+// connectives used Kleene three-valued logic; that rule is gone.
 //
-// An absent operand is an undecided truth value. The result is decided when
-// the other operand decides it (`Implies(Missing, True)` is `True`, as
-// `Or(Missing, True)` is). It is `Missing` when the other operand is a truth
-// value that does not decide it (`Nand(True, Missing)`). It stays symbolic
-// when the other operand is an unknown boolean symbol (`And(A, Missing)`
-// stays `And(A, Missing)`), with each absent operand spelled `Missing`.
+// The logic is two-valued: an absent operand is not a third truth value, and
+// a connective reads it as `False` (user decision of 2026-11-02, two-valued
+// comparisons, `docs/ERROR-MODEL.md`). So `And(True, Missing)` is `False`,
+// `Not(Missing)` is `True` and `Nand(True, Missing)` is `True`. Before it,
+// these were `Missing` (Kleene).
 //
-// User decision of 2026-09-27: `Implies`, `Nand` and `Nor` follow `And` and
-// `Or`. Before it, `Implies(Missing, True)` was `Missing` and
-// `Nand(A, Missing)` was `Missing`.
-//
-// The expected tables below are written by hand from the Kleene truth
-// tables. Rows are the first operand, columns the second, both in the order
-// True, False, A, Missing, Undefined. `T`/`F`/`M` are `True`/`False`/
-// `Missing`. `S` is a result that depends on the value of `A`: the test
-// checks that it stays symbolic, and that it gives the Kleene answer once
-// `A` is replaced by `True` and by `False`.
+// The expected tables below are written by hand: the `Missing` and
+// `Undefined` rows and columns are the `False` row and column. Rows are the
+// first operand, columns the second, both in the order True, False, A,
+// Missing, Undefined. `T`/`F` are `True`/`False`. `S` is a result that
+// depends on the value of `A`: the test checks that it stays symbolic, with
+// no absence symbol in it, and that it gives the table's answer once `A` is
+// replaced by `True` and by `False`.
 //
 // Boolean contexts use UPPERCASE symbols: evaluating a symbol as a boolean
 // operand retypes it `boolean` for the engine's lifetime.
@@ -29,65 +26,65 @@ ce.declare('A', 'boolean');
 
 const OPERANDS = ['True', 'False', 'A', 'Missing', 'Undefined'] as const;
 type Operand = (typeof OPERANDS)[number];
-type Cell = 'T' | 'F' | 'M' | 'S';
+type Cell = 'T' | 'F' | 'S';
 
 const TABLES: Record<string, Cell[][]> = {
   //         True  False   A    Missing Undefined
   And: [
-    ['T', 'F', 'S', 'M', 'M'], // True
+    ['T', 'F', 'S', 'F', 'F'], // True
     ['F', 'F', 'F', 'F', 'F'], // False
-    ['S', 'F', 'S', 'S', 'S'], // A
-    ['M', 'F', 'S', 'M', 'M'], // Missing
-    ['M', 'F', 'S', 'M', 'M'], // Undefined
+    ['S', 'F', 'S', 'F', 'F'], // A
+    ['F', 'F', 'F', 'F', 'F'], // Missing
+    ['F', 'F', 'F', 'F', 'F'], // Undefined
   ],
   Or: [
     ['T', 'T', 'T', 'T', 'T'],
-    ['T', 'F', 'S', 'M', 'M'],
+    ['T', 'F', 'S', 'F', 'F'],
     ['T', 'S', 'S', 'S', 'S'],
-    ['T', 'M', 'S', 'M', 'M'],
-    ['T', 'M', 'S', 'M', 'M'],
+    ['T', 'F', 'S', 'F', 'F'],
+    ['T', 'F', 'S', 'F', 'F'],
   ],
   Nand: [
-    ['F', 'T', 'S', 'M', 'M'],
+    ['F', 'T', 'S', 'T', 'T'],
     ['T', 'T', 'T', 'T', 'T'],
-    ['S', 'T', 'S', 'S', 'S'],
-    ['M', 'T', 'S', 'M', 'M'],
-    ['M', 'T', 'S', 'M', 'M'],
+    ['S', 'T', 'S', 'T', 'T'],
+    ['T', 'T', 'T', 'T', 'T'],
+    ['T', 'T', 'T', 'T', 'T'],
   ],
   Nor: [
     ['F', 'F', 'F', 'F', 'F'],
-    ['F', 'T', 'S', 'M', 'M'],
+    ['F', 'T', 'S', 'T', 'T'],
     ['F', 'S', 'S', 'S', 'S'],
-    ['F', 'M', 'S', 'M', 'M'],
-    ['F', 'M', 'S', 'M', 'M'],
+    ['F', 'T', 'S', 'T', 'T'],
+    ['F', 'T', 'S', 'T', 'T'],
   ],
   // `Implies(p, q)` is `Or(Not(p), q)`.
   Implies: [
-    ['T', 'F', 'S', 'M', 'M'],
+    ['T', 'F', 'S', 'F', 'F'],
     ['T', 'T', 'T', 'T', 'T'],
     ['T', 'S', 'T', 'S', 'S'],
-    ['T', 'M', 'S', 'M', 'M'],
-    ['T', 'M', 'S', 'M', 'M'],
+    ['T', 'T', 'T', 'T', 'T'],
+    ['T', 'T', 'T', 'T', 'T'],
   ],
   // No operand decides `Xor` or `Equivalent`. `Xor(A, A)` is `False` for
   // either value of `A`, and `Implies(A, A)` and `Equivalent(A, A)` are `True`.
   Xor: [
-    ['F', 'T', 'S', 'M', 'M'],
-    ['T', 'F', 'S', 'M', 'M'],
+    ['F', 'T', 'S', 'T', 'T'],
+    ['T', 'F', 'S', 'F', 'F'],
     ['S', 'S', 'F', 'S', 'S'],
-    ['M', 'M', 'S', 'M', 'M'],
-    ['M', 'M', 'S', 'M', 'M'],
+    ['T', 'F', 'S', 'F', 'F'],
+    ['T', 'F', 'S', 'F', 'F'],
   ],
   Equivalent: [
-    ['T', 'F', 'S', 'M', 'M'],
-    ['F', 'T', 'S', 'M', 'M'],
+    ['T', 'F', 'S', 'F', 'F'],
+    ['F', 'T', 'S', 'T', 'T'],
     ['S', 'S', 'T', 'S', 'S'],
-    ['M', 'M', 'S', 'M', 'M'],
-    ['M', 'M', 'S', 'M', 'M'],
+    ['F', 'T', 'S', 'T', 'T'],
+    ['F', 'T', 'S', 'T', 'T'],
   ],
 };
 
-const CELL_NAME = { T: 'True', F: 'False', M: 'Missing' } as const;
+const CELL_NAME = { T: 'True', F: 'False' } as const;
 
 function expectedCell(op: string, a: Operand, b: Operand): Cell {
   return TABLES[op][OPERANDS.indexOf(a)][OPERANDS.indexOf(b)];
@@ -98,7 +95,7 @@ for (const op of Object.keys(TABLES))
   for (const a of OPERANDS)
     for (const b of OPERANDS) cases.push([op, a, b, expectedCell(op, a, b)]);
 
-describe('KLEENE THREE-VALUED CONNECTIVES WITH AN ABSENT OPERAND', () => {
+describe('TWO-VALUED CONNECTIVES WITH AN ABSENT OPERAND', () => {
   test.each(cases)('%s(%s, %s) is %s', async (op, a, b, cell) => {
     const expr = ce.box([op, a, b]);
     expect(expr.isValid).toBe(true);
@@ -109,18 +106,19 @@ describe('KLEENE THREE-VALUED CONNECTIVES WITH AN ABSENT OPERAND', () => {
       expect((await expr.evaluateAsync()).json).toEqual(CELL_NAME[cell]);
       return;
     }
-    // The result depends on `A`: it stays symbolic, spells every absent
-    // operand `Missing`, and agrees with the table once `A` is decided.
+    // The result depends on `A`: it stays symbolic, keeps no absence
+    // symbol, and agrees with the table once `A` is decided.
     const text = JSON.stringify(result.json);
     expect(['True', 'False', 'Missing']).not.toContain(result.json);
     expect(text).toContain('"A"');
     expect(text).not.toContain('Undefined');
+    expect(text).not.toContain('Missing');
     for (const value of ['True', 'False'] as const) {
       const sub = (x: Operand): Operand => (x === 'A' ? value : x);
       const decided = expectedCell(op, sub(a), sub(b));
       expect(decided).not.toBe('S');
       expect(result.subs({ A: ce.symbol(value) }).evaluate().json).toEqual(
-        CELL_NAME[decided as 'T' | 'F' | 'M']
+        CELL_NAME[decided as 'T' | 'F']
       );
     }
   });

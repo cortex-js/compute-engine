@@ -40,17 +40,28 @@ describe('a collection operator over an absent collection', () => {
   });
 
   test.each([
+    ['GroupBy', ['GroupBy', 'Missing', f]],
+    ['Chunk', ['Chunk', 'Missing', 2]],
+    ['RandomShuffle', ['RandomShuffle', 'Missing']],
+  ])('%s answers Missing too', (_op, json) => {
+    const e = engine().box(json as never);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('"Missing"');
+  });
+
+  // A boolean predicate over an absent collection is `False`, as a
+  // comparison with an absent operand is (user decision of 2026-11-02,
+  // two-valued comparisons). Before, it was `Missing` (Kleene).
+  test.each([
     ['Any', ['Any', 'Missing', p]],
     ['All', ['All', 'Missing', p]],
     ['IsEmpty', ['IsEmpty', 'Missing']],
     ['Contains', ['Contains', 'Missing', 1]],
-    ['GroupBy', ['GroupBy', 'Missing', f]],
-    ['Chunk', ['Chunk', 'Missing', 2]],
-    ['RandomShuffle', ['RandomShuffle', 'Missing']],
-  ])('%s answers Missing too (a boolean result is Kleene)', (_op, json) => {
+  ])('%s answers False (a boolean result is two-valued)', (_op, json) => {
     const e = engine().box(json as never);
     expect(e.isValid).toBe(true);
-    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.type.toString()).toBe('boolean');
+    expect(e.evaluate().toString()).toBe('"False"');
   });
 
   test.each([
@@ -104,8 +115,7 @@ describe('a collection operator over a restricted collection', () => {
     ['Zip', ['Zip', RL, ['List', 3, 4]], 'If(0 < t, Zip([1,2], [3,4]))'],
     ['Map', ['Map', f, RL], 'If(0 < t, Map((_) => 2 * _, [1,2]))'],
     ['Filter', ['Filter', RL, p], 'If(0 < t, Filter([1,2], (_) => 1 < _))'],
-    // `Any` and `Chunk` are not lazy: their results are computed.
-    ['Any', ['Any', RL, p], 'If(0 < t, "True")'],
+    // `Chunk` is not lazy: its result is computed.
     ['Chunk', ['Chunk', RL, 1], 'If(0 < t, [[1,2]])'],
   ])('%s is threaded whole and both routes agree', (_op, json, free) => {
     const r = probe(json);
@@ -113,6 +123,18 @@ describe('a collection operator over a restricted collection', () => {
     expect(r.free).toBe(free);
     expect(r.twoStep).toBe('"Missing"');
     expect(r.fresh).toBe('"Missing"');
+  });
+
+  test('Any is threaded whole and both routes give False', () => {
+    // `Any` is not lazy: its result is computed, and the held result is the
+    // restriction of a boolean, `If(0 < t, True)`, which is `False` for a
+    // false scalar condition. The fresh route evaluates `Any(Missing, p)`,
+    // which is `False` too: a boolean predicate over an absent collection is
+    // `False` (user decision of 2026-11-02, two-valued comparisons).
+    const r = probe(['Any', RL, p]);
+    expect(r.free).toBe('If(0 < t, "True")');
+    expect(r.twoStep).toBe('"False"');
+    expect(r.fresh).toBe('"False"');
   });
 
   test('the held result is a collection of the present elements', () => {
@@ -335,10 +357,12 @@ describe('a search finds an absent value where the same marker sits', () => {
     ).toBe('2');
   });
 
-  test('an absent collection still makes the answer absent', () => {
+  test('an absent collection still makes the answer absent, or False', () => {
+    // `Contains` is a boolean predicate: over an absent collection it is
+    // `False` (user decision of 2026-11-02, two-valued comparisons).
     const ce = engine();
     expect(ce.box(['Contains', 'Missing', 2]).evaluate().toString()).toBe(
-      '"Missing"'
+      '"False"'
     );
     expect(ce.box(['IndexOf', 'Missing', 2]).evaluate().toString()).toBe('NaN');
     expect(ce.box(['Count', 'Missing', 2]).evaluate().toString()).toBe('NaN');
@@ -347,7 +371,7 @@ describe('a search finds an absent value where the same marker sits', () => {
         .box(['Contains', 'Missing', 'Missing'])
         .evaluate()
         .toString()
-    ).toBe('"Missing"');
+    ).toBe('"False"');
   });
 
   test('compiled to JavaScript', () => {
@@ -537,10 +561,10 @@ describe('Join and the set operators over an absent collection', () => {
 });
 
 describe('A set relation over an absent set', () => {
-  // A set relation computes on the whole collection, so an absent set makes
-  // the answer absent: the marker of a boolean codomain is `Missing`. Before,
-  // `Subset(Missing, {2,3})` was `False` and `NotSubset(Missing, {2,3})` was
-  // `True`, while `Contains(Missing, 2)` was already `Missing`.
+  // A set relation is two-valued, as a comparison is: an absent set makes
+  // it `False`, and its negated form (`NotSubset`, ...) `True` (user decision
+  // of 2026-11-02, two-valued comparisons). From 2026-09-25 to 2026-11-02 an
+  // absent set made the answer `Missing`.
   const relations = [
     'Subset',
     'SubsetEqual',
@@ -550,15 +574,17 @@ describe('A set relation over an absent set', () => {
     'NotSuperset',
     'NotSupersetEqual',
   ];
-  test.each(relations)('%s over an absent set is Missing', (op) => {
+  test.each(relations)('%s over an absent set is a boolean', (op) => {
     const ce = engine();
     for (const args of [
       ['Missing', ['Set', 2, 3]],
       [['Set', 2], 'Undefined'],
     ]) {
       const e = ce.box([op, ...args] as never);
-      expect(e.type.toString()).toBe('boolean | missing');
-      expect(e.evaluate().toString()).toBe('"Missing"');
+      expect(e.type.toString()).toBe('boolean');
+      expect(e.evaluate().toString()).toBe(
+        op.startsWith('Not') ? '"True"' : '"False"'
+      );
     }
   });
   test.each(relations)('%s over present sets is unchanged', (op) => {
@@ -599,26 +625,34 @@ describe('Membership that an unknown could still change', () => {
 });
 
 describe('Element over an absent or restricted collection', () => {
-  // `Element` threads a restricted collection whole, as `Contains` does,
-  // and an absent collection makes the answer `Missing`. An absent value is
-  // not a member.
-  test('an absent collection gives Missing', () => {
+  // `Element` threads a restricted collection whole, as `Contains` does.
+  // Nothing is a member of an absent collection: `Element` is `False` and
+  // `NotElement` is `True` (user decision of 2026-11-02, two-valued
+  // comparisons).
+  test('an absent collection gives False, and True for NotElement', () => {
     const ce = engine();
-    for (const op of ['Element', 'NotElement']) {
+    for (const [op, v] of [
+      ['Element', '"False"'],
+      ['NotElement', '"True"'],
+    ]) {
       const e = ce.box([op, 2, 'Missing'] as never);
-      expect(e.type.toString()).toBe('boolean | missing');
-      expect(e.evaluate().toString()).toBe('"Missing"');
+      expect(e.type.toString()).toBe('boolean');
+      expect(e.evaluate().toString()).toBe(v);
     }
   });
   test('a restricted collection is threaded, and held and fresh agree', () => {
+    // The held result is the restriction of a boolean, which is `False` for
+    // a false scalar condition, and the fresh route evaluates
+    // `Element(2, Missing)`, which is `False` too (user decision of
+    // 2026-11-02, two-valued comparisons). See `Any` above.
     const ce = engine();
     const W = ['If', ['Less', 0, 't'], ['List', 1, 2]];
     const held = ce.box(['Element', 2, W] as never).evaluate();
     expect(held.toString()).toBe('If(0 < t, "True")');
     ce.assign('t', -1);
-    expect(held.evaluate().toString()).toBe('"Missing"');
+    expect(held.evaluate().toString()).toBe('"False"');
     expect(ce.box(['Element', 2, W] as never).evaluate().toString()).toBe(
-      '"Missing"'
+      '"False"'
     );
   });
   test('a settled exclusion from a set that is not a literal list stays', () => {

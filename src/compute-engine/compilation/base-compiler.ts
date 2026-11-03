@@ -96,7 +96,7 @@ import {
   kleeneValueLeaf,
   mayBeUndecided,
   noBranchValue,
-  operandDecidedConjuncts,
+  operandPresenceConjuncts,
   operandMayBeAbsent,
   peelNegations,
   userFunctionSignature,
@@ -1677,7 +1677,7 @@ export class BaseCompiler {
   }
   static readonly connectiveNode = connectiveNode;
   static readonly isDecidedByConstruction = isDecidedByConstruction;
-  static readonly operandDecidedConjuncts = operandDecidedConjuncts;
+  static readonly operandPresenceConjuncts = operandPresenceConjuncts;
   static readonly noBranchValue = noBranchValue;
   static readonly absenceKind = absenceKind;
   static readonly isBooleanBindingType = isBooleanBindingType;

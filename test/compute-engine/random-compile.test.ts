@@ -1477,8 +1477,10 @@ describe('a comparison chain evaluates the operands the interpreter evaluates', 
 
   test('an Equal chain with an absent operand before a draw declines', () => {
     // A compiled `Equal` pair with an absent operand is `false`, and the
-    // `&&` after it skipped the draw. The interpreter reads that pair as
-    // `Missing`, which is not `False`, and draws.
+    // `&&` after it skips the draw. The compilation still declines. The
+    // interpreter reads that pair as `False` too (user decision of
+    // 2026-11-02, two-valued comparisons), so it does not draw either.
+    // Before, it read the pair as `Missing` and drew.
     const json = ['Equal', 'a', 'b', ['Random']];
     const ce = new ComputeEngine();
     ce.declare('a', 'boolean | missing');
@@ -1489,11 +1491,11 @@ describe('a comparison chain evaluates the operands the interpreter evaluates', 
     ce.assign('a', ce.Missing);
     ce.assign('b', ce.True);
     const next = withRandomSeedFrame(ce, 7, () => {
-      // The last pair, `True = r₀`, is `False`.
+      // The first pair, `Missing = True`, is `False`.
       expect(ce.box(json).evaluate().json).toBe('False');
       return ce._random();
     });
-    expect(next).toBe(draw(7, 1));
+    expect(next).toBe(draw(7, 0));
     // With both operands present the chain compiles. The first pair is
     // `false` in both engines, and neither draws.
     const ce2 = new ComputeEngine();

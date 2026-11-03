@@ -40,11 +40,12 @@ when it compiles. A difference that this list does not name is a defect.
   `undefined`, a throw or a decline, and everything computed from that
   value is unspecified too, `IsMissing` and `Coalesce` of it included. With
   `w: real | missing` holding `Missing`, `If(IsMissing(w), 1, 0)` is 1 on
-  every route; `If(IsMissing(w > 0), 1, 0)` is 1 in the interpreter (the
-  comparison is `Missing` there, by Kleene) and 0 on `javascript` (the
-  comparison is `false`). The host discharges a possibly absent value
-  before it computes on it. The interpreter keeps its own propagation
-  (`Missing + 1` is `NaN`, `Less(Missing, 1)` is `Missing`) as a
+  every route; `If(w > 0, 1, 0)` is 0 in the interpreter (a comparison with
+  an absent operand is `False`, user decision of 2026-11-02, two-valued
+  comparisons) and `NaN` on `javascript` (the compiled condition takes no
+  arm). The host discharges a possibly absent value before it computes on
+  it. The interpreter keeps its own rules (`Missing + 1` is `NaN`,
+  `Less(Missing, 1)` is `False`, `If(Missing, 1, 2)` is `2`) as a
   convenience, not as a guarantee that compiled code follows. The only
   absent object a host passes to compiled JavaScript is `undefined`; a
   `null` input is a value outside the declared type (JavaScript reads
@@ -789,6 +790,12 @@ for `NotEqual`), as in the interpreter. See `docs/ERROR-MODEL.md`, the "An
 unsupplied variable" item.
 
 The ELEMENT-WISE runtime is three-valued, and that is where an absence shows.
+(Since the user decision of 2026-11-02, two-valued comparisons, the
+interpreter answers `False` for such a cell and a branch takes its next arm;
+the compiled mark below is a value computed from an absent value, which the
+caveats of compiled code leave unspecified. The lowering is removed in step 4
+of `docs/plans/2026-11-02-compiler-contraction-plan.md`. The rest of this
+paragraph describes the interpreter before that decision.)
 An absent CELL makes its comparison undecided, so the runtime marks exactly that
 position with `NaN` — how a real target renders `Missing` in a cell — instead of
 answering a decided `false`: `Equal([1, 2, 3], Missing)` compiles to three marks

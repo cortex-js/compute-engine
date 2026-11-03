@@ -25,7 +25,6 @@ import { descendantRegionAt, type CseRegion } from './cse.js';
 import type {
   ConditionDialect,
   ConditionNode,
-  DecidedNumberTest,
 } from './compiler-types.js';
 import {
   LOGICAL_BROADCAST_HEADS,
@@ -44,12 +43,8 @@ import { tempVar } from './compiler-naming.js';
 // single-branch `If` as a restriction only when its arm is not a statement.
 export { isStatementArm };
 
-/** The JavaScript-family spelling of {@link DecidedNumberTest}. */
-export const DECIDED_NUMBER_JS: DecidedNumberTest = (x) => `${x} === ${x}`;
-
 /** The JavaScript-family spellings of {@link ConditionDialect}. */
 export const CONDITION_DIALECT_JS: ConditionDialect = {
-  decidedNumber: DECIDED_NUMBER_JS,
   and: '&&',
   not: '!',
   undecided: 'undefined',
@@ -646,8 +641,8 @@ export function guardCondition(
 //
 // Because every leaf is bound once and reached at most once, an IMPURE
 // condition takes the same lowering: `If(Random() < 2 ∧ x ≠ 0, a, b)`
-// draws once per call, and answers the absence marker at `x = NaN`
-// instead of the arm the plain `&&` chose. What is left of the old
+// draws once per call, and answers the absence marker where `x` is absent
+// (`undefined`) instead of the arm the plain `&&` chose. What is left of the old
 // exemption is listed at `conditionNode`: a target with no binding form,
 // an impure chain, and one impure node in two positions.
 //

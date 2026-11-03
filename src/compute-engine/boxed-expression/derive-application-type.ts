@@ -84,6 +84,7 @@ import {
   guardedTypeHandlerCall,
 } from './operand-descriptor.js';
 import {
+  absentPredicateAnswer,
   collectionCellsProvablyNonNumeric,
   numericOperandTypeRefused,
 } from './validate.js';
@@ -1030,6 +1031,10 @@ export function deriveApplicationType(
   const threadedAbsence =
     threadedPresence && def.resolvedMissingBehavior === 'handle';
   const absorbed = (t: Type): Type => {
+    // A boolean predicate that answers a boolean for an absent operand
+    // (`Contains(Missing, 3)` is `False`, `absentPredicateAnswer`) gains no
+    // `missing` arm, as at the call site.
+    if (absentPredicateAnswer(operator) !== undefined) return t;
     const r = absorbOperandAbsence(
       t,
       // A position that does not strip `missing` (`missingStrip`) takes no
@@ -1525,7 +1530,7 @@ export function actualOfDescriptor(d: OperandDescriptor): SolveActual {
  * (`missing | collection` for `Filter`), and the absorption reads it
  * correctly. A numeric codomain keeps the absorption's reading (`Negate` of an
  * absent operand is a `number`, its marker `NaN`), and a boolean one keeps the
- * handler's own answer (a comparison with `Missing` is `missing`, Kleene).
+ * handler's own answer.
  */
 export function withCodomainForAbsentAnswer(
   answered: Type,

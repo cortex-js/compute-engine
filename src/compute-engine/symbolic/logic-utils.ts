@@ -12,11 +12,10 @@ import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 
 /**
  * Is this the name of an absent truth value? The two symbols that name an
- * absent datum are `Missing` and `Undefined`, and the connectives read them
- * alike (user ruling of 2026-09-22): `Not(Undefined)` is the absence marker,
- * exactly as `Not(Missing)` is. The same two names are tested by
- * `isAbsentScalarSymbol` (`src/compute-engine/boxed-expression/validate.ts`),
- * which this module does not otherwise depend on.
+ * absent datum are `Missing` and `Undefined`. The same two names are tested
+ * by `isAbsentScalarSymbol`
+ * (`src/compute-engine/boxed-expression/validate.ts`), which this module
+ * does not otherwise depend on.
  *
  * The argument is the operand's symbol NAME, since every caller here already
  * holds one (`sym(arg)`).
@@ -26,45 +25,19 @@ function isAbsenceName(name: string | undefined): boolean {
 }
 
 /**
- * Replace each absent operand with the `Missing` symbol, so the reducers of
- * `And` and `Or` — which have no absence rule of their own, and answer an
- * absent operand because it is the one operand that survives the fold —
- * answer the one marker for both absence symbols.
+ * Replace each absent operand (`Missing` or `Undefined`) with `False`. The
+ * logic is two-valued: an absent value is not a third truth value, and a
+ * connective reads it as `False`, as the condition of an `If` or a `Which`
+ * does. So `Not(Missing)` is `True`, `And(Missing, True)` is `False` and
+ * `Or(Missing, True)` is `True` (user decision 2026-11-02, two-valued
+ * comparisons, `docs/ERROR-MODEL.md`).
  */
-function normalizeAbsentOperands(
+function absentAsFalse(
   args: ReadonlyArray<Expression>,
   ce: ComputeEngine
 ): ReadonlyArray<Expression> {
   if (!args.some((arg) => isAbsenceName(sym(arg)))) return args;
-  return args.map((arg) => (isAbsenceName(sym(arg)) ? ce.Missing : arg));
-}
-
-/**
- * Is this operand a decided truth value (`True` or `False`)?
- */
-function isTruthValue(arg: Expression): boolean {
-  const name = sym(arg);
-  return name === 'True' || name === 'False';
-}
-
-/**
- * The Kleene answer of a connective that no operand has decided, when some
- * operand is absent. If every other operand is a truth value, the absent
- * operand leaves the result undecided, so the result is `Missing`. If some
- * operand is an unknown (for example a free boolean symbol), the result stays
- * symbolic, with each absent operand spelled `Missing` — exactly as
- * `And(A, Missing)` stays `And(A, Missing)`. Returns `undefined` when no
- * operand is absent, so the caller continues with its ordinary reduction.
- */
-function undecidedWithAbsence(
-  name: string,
-  args: ReadonlyArray<Expression>,
-  ce: ComputeEngine
-): Expression | undefined {
-  if (!args.some((arg) => isAbsenceName(sym(arg)))) return undefined;
-  if (args.every((arg) => isTruthValue(arg) || isAbsenceName(sym(arg))))
-    return ce.Missing;
-  return ce._fn(name, normalizeAbsentOperands(args, ce));
+  return args.map((arg) => (isAbsenceName(sym(arg)) ? ce.False : arg));
 }
 
 /** Helper to get `.op1` from a function expression, or undefined. */
@@ -158,7 +131,7 @@ function flattenSame(
  * syntactic, and evaluation still short-circuits left to right.
  *
  * Soundness shape: both sides are EVALUATED first, by the real evaluator —
- * short-circuit, the Kleene treatment of `Missing`, and the
+ * short-circuit, the reading of `Missing` as `False`, and the
  * error-valued-operand decider are all order-sensitive, and only the
  * evaluator applies them correctly. Only when both sides remain a same-
  * operator residue of UNDECIDED operands is that residue AC-matched:
@@ -251,7 +224,7 @@ export function evaluateAnd(
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
   if (args.length === 0) return ce.True;
-  args = normalizeAbsentOperands(flattenSame(args, 'And'), ce);
+  args = absentAsFalse(flattenSame(args, 'And'), ce);
   const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an Or operand is a tautology (contains A and Not(A))
@@ -329,7 +302,7 @@ export function evaluateOr(
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
   if (args.length === 0) return ce.True;
-  args = normalizeAbsentOperands(flattenSame(args, 'Or'), ce);
+  args = absentAsFalse(flattenSame(args, 'Or'), ce);
   const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an And operand is a contradiction (contains A and Not(A))
@@ -408,9 +381,8 @@ export function evaluateNot(
 ): Expression | undefined {
   const op1 = sym(args[0]);
   if (op1 === 'True') return ce.False;
-  if (op1 === 'False') return ce.True;
-  // Kleene: the negation of an absent truth value is absent.
-  if (isAbsenceName(op1)) return ce.Missing;
+  // An absent operand reads as `False` (`absentAsFalse`).
+  if (op1 === 'False' || isAbsenceName(op1)) return ce.True;
   return undefined;
 }
 
@@ -418,6 +390,8 @@ export function evaluateEquivalent(
   args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
+  const written = args;
+  args = absentAsFalse(args, ce);
   const lhs = sym(args[0]);
   const rhs = sym(args[1]);
   if (
@@ -430,14 +404,13 @@ export function evaluateEquivalent(
     (lhs === 'False' && rhs === 'True')
   )
     return ce.False;
-  // Kleene over absence: flipping either operand flips the equivalence, so
-  // no value of the other operand decides it. An absent operand makes the
-  // equivalence absent, unless the other operand is an unknown: then the
-  // equivalence stays symbolic, as `And(A, Missing)` does.
-  const absent = undecidedWithAbsence('Equivalent', args, ce);
-  if (absent) return absent;
-  // `p ⇔ p` is `True` for every `p` (no operand is absent here).
+  // `p ⇔ p` is `True` for every `p`.
   if (args[0].isSame(args[1])) return ce.True;
+  // An equivalence that stays held beside an unknown operand is spelled
+  // with `False` in place of an absent operand, so that the held form
+  // does not keep an absence symbol: `Equivalent(A, Missing)` is
+  // `Equivalent(A, False)`.
+  if (args !== written) return ce._fn('Equivalent', args);
   return undefined;
 }
 
@@ -445,6 +418,7 @@ export function evaluateImplies(
   args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
+  args = absentAsFalse(args, ce);
   const lhs = sym(args[0]);
   const rhs = sym(args[1]);
   if (
@@ -455,17 +429,10 @@ export function evaluateImplies(
     return ce.True;
   if (lhs === 'True' && rhs === 'False') return ce.False;
   // `False ⇒ q` and `p ⇒ True` are `True` for every `q` and every `p`, so
-  // they are decided even when the other side is absent or unknown (Kleene
-  // three-valued logic, as `Or(Missing, True)` is `True`: `p ⇒ q` is
+  // they are decided even when the other side is unknown (`p ⇒ q` is
   // `¬p ∨ q`).
   if (lhs === 'False' || rhs === 'True') return ce.True;
-  // Kleene over absence: no side decided the implication, so an absent side
-  // makes it absent (`True ⇒ Missing`, `Missing ⇒ False`), unless the other
-  // side is an unknown: then it stays symbolic, as `And(A, Missing)` does.
-  const absent = undecidedWithAbsence('Implies', args, ce);
-  if (absent) return absent;
-  // No operand is absent here: `True ⇒ q` is `q`, `p ⇒ False` is `¬p` and
-  // `p ⇒ p` is `True`.
+  // `True ⇒ q` is `q`, `p ⇒ False` is `¬p` and `p ⇒ p` is `True`.
   if (lhs === 'True') return args[1];
   if (rhs === 'False') return ce.function('Not', [args[0]]);
   if (args[0].isSame(args[1])) return ce.True;
@@ -479,19 +446,13 @@ export function evaluateXor(
   // N-ary XOR is true when an odd number of operands are true
   // (equivalent to parity check)
   if (args.length === 0) return ce.False;
+  args = absentAsFalse(args, ce);
 
-  // Kleene over absence: flipping any one operand flips the parity, so no
-  // value of the other operands decides it. The absent operands are counted
-  // apart: two absent operands do not cancel, since each stands for its own
-  // undecided value.
-  let absentCount = 0;
   let trueCount = 0;
   const unknowns: Expression[] = [];
 
   for (const arg of args) {
-    if (isAbsenceName(sym(arg))) {
-      absentCount++;
-    } else if (sym(arg) === 'True') {
+    if (sym(arg) === 'True') {
       trueCount++;
     } else if (sym(arg) === 'False') {
       // False doesn't change parity
@@ -512,18 +473,6 @@ export function evaluateXor(
   }
 
   const oddTrue = trueCount % 2 === 1;
-
-  // An absent operand makes the exclusive or absent, unless an unknown
-  // survives the cancellation: then the exclusive or stays symbolic, with
-  // each absent operand spelled `Missing`, as `And(A, Missing)` does.
-  if (absentCount > 0) {
-    if (reduced.length === 0) return ce.Missing;
-    return ce._fn('Xor', [
-      ...(oddTrue ? [ce.True] : []),
-      ...reduced,
-      ...new Array<Expression>(absentCount).fill(ce.Missing),
-    ]);
-  }
 
   // All unknowns cancelled: the result is determined by the True parity alone.
   if (reduced.length === 0) return oddTrue ? ce.True : ce.False;
@@ -546,16 +495,12 @@ export function evaluateNand(
   // N-ary NAND is the negation of AND
   // NAND(a, b, c, ...) = NOT(AND(a, b, c, ...))
   if (args.length === 0) return ce.False; // NOT(True) = False
+  args = absentAsFalse(args, ce);
 
   // If any argument is False, AND is False, so NAND is True
   for (const arg of args) {
     if (sym(arg) === 'False') return ce.True;
   }
-  // Kleene over absence: no `False` decided it, so an absent operand makes
-  // the conjunction — and its negation — absent, unless an operand is an
-  // unknown: then the result stays symbolic, as `And(A, Missing)` does.
-  const absent = undecidedWithAbsence('Nand', args, ce);
-  if (absent) return absent;
 
   // Check if all are True
   let allTrue = true;
@@ -587,16 +532,12 @@ export function evaluateNor(
   // N-ary NOR is the negation of OR
   // NOR(a, b, c, ...) = NOT(OR(a, b, c, ...))
   if (args.length === 0) return ce.True; // NOT(False) = True
+  args = absentAsFalse(args, ce);
 
   // If any argument is True, OR is True, so NOR is False
   for (const arg of args) {
     if (sym(arg) === 'True') return ce.False;
   }
-  // Kleene over absence: no `True` decided it, so an absent operand makes
-  // the disjunction — and its negation — absent, unless an operand is an
-  // unknown: then the result stays symbolic, as `Or(A, Missing)` does.
-  const absent = undecidedWithAbsence('Nor', args, ce);
-  if (absent) return absent;
 
   // Check if all are False
   let allFalse = true;

@@ -379,6 +379,132 @@ block locals, function values, the complex lane. Each one is a step of its
 own in the same release branch, with the corpus measure and its listed
 expected changes.
 
+3.4.1 **Two-valued comparisons** (options page 3, option A). Staged
+2026-11-02, session compute-engine-16, base `e8a75b9c4`, not committed (the
+record is at the end of this item). A comparison is `True` or `False` in the
+interpreter and in every compiled target; an undecided operand (`NaN`,
+`Missing`, `Undefined`, a pole, a value with no order) gives `False`, and
+`≠` gives `True`. Connectives, the condition of `If` and `Which`, and the
+quantifiers read an absent value as `False`; the absent-condition error is
+gone. The 2026-10-20 decision (Tycho rows 411 and 413) and its 2026-10-21
+extension are extended to `Missing`, to the connectives and to the
+conditions, not reversed (`docs/ERROR-MODEL.md`, section "A comparison is
+two-valued — user decision of 2026-11-02").
+
+- **Tycho's answer** (tycho-f9, 2026-11-02, a reading of Tycho main, no
+  tests run). No Tycho reader depends on a comparison or a connective that
+  gives `Missing`, or on the absent-condition error. One reader changes
+  toward the Desmos result: the per-member gate of a relation family
+  (`relation-family.ts`, `gateVerdictsOf` and `deferredBoxedGateVerdicts`)
+  made the whole gate null on a non-boolean element and drew every member;
+  now only the member is hidden. Readers that already read `False`:
+  `at-index-semantics.ts`, `relation-family.ts` (suppress on `False`),
+  `classify-formula.ts`, the interval reader `evalTriNode` in
+  `plot/ce-compile.ts`. Kept: Tycho reads the scalar no-match `Missing` of
+  `Which` as a `NaN` slot (`at-index-semantics.ts`), so that value does not
+  change. Tycho updates its `docs/COMPUTE_ENGINE.md` (the `w > 0` example)
+  when it adopts the release. The census rows (1 document, 5 Desmos states
+  with a comparison over a `missing` operand) are not in Tycho's documents,
+  so they were not checked by name.
+- **The arms under a list condition, left to this item by 3.3.** A relation
+  cell with no match is `False` (Tycho: its compiled masks test `=== true`,
+  and its per-member gate needs a boolean). A colour cell with no match is
+  `Rgb(NaN, NaN, NaN)` in the interpreter, and the non-finite `oklch` colour
+  object in compiled JavaScript: Tycho reads a colour with a non-finite
+  channel as "no colour here" and fills the gap with the row colour
+  (`dynamic-color.ts`); `Missing`, `NaN` or `False` as a bare cell make it
+  drop the whole colour list. Witness: Tycho item 189 (`corpus`). The other
+  option was to keep `Missing`. A cell read while its condition is not yet
+  decided carries the same value as an explicit else arm.
+- **Choices beyond the rule, each reversible.** (1) A scalar `If(c, r)`
+  whose arm `r` is a relation (a boolean) gives `False` when `c` is false,
+  not `Missing`, as the relation cell does; its type is widened to
+  `boolean`. This makes the corpus row neyret/xhlkk7k9aq compile on GLSL.
+  (2) Boolean collection and set predicates over an absent COLLECTION
+  operand answer `False` (`Any`, `All`, `Contains`, `ContainsSequence`,
+  `StartsWith`, `EndsWith`, `IsEmpty`, `Element`, `Subset`, `SubsetEqual`,
+  `Superset`, `SupersetEqual`) or `True` (`NotElement`, `NotSubset`,
+  `NotSuperset`, `NotSupersetEqual`), so the held route
+  (`If(c, True)`) and the fresh route agree; the number-theory predicates
+  (`IsPrime`, …) and an absent ELEMENT operand of `Element` are unchanged
+  (the 2026-09-26 rule: `Element(Missing, [1, Missing])` is `True`). The
+  other option was to keep `Missing` there until 3.4.2. (3) A comparison or
+  a connective is typed without a `missing` arm. (4) `Not(Not(x))` is not
+  folded when `x` can be absent, so `Not(Not(Missing))` is `False`. (5)
+  `Equivalent(A, Missing)` is `Equivalent(A, False)`. (6)
+  `assume(x = 1 = Undefined)` answers `contradiction` (the link
+  `1 = Undefined` is `False`), not `not-a-predicate`.
+- **Compiled code.** The NaN "decided" test of a compiled comparison over
+  an operand typed with a `missing` arm is removed (`operandPresenceConjuncts`
+  in `compile-absence.ts`, renamed from `operandDecidedConjuncts`): the plain
+  IEEE comparison gives the interpreter's `False`, so `If(w > 0, 1, 0)` with
+  `w: number | missing` and `w = NaN` is `0` on javascript and python, where
+  it was `NaN`. The test for the absent object stays. `kleeneValueLeaf`,
+  `kleeneRelationLeaf`, `mayBeUndecided`, `conditionDecidability`,
+  `compileExactCondition` and the interval `missing` flag stay for step 4,
+  row 2: with an absent operand compiled code still gives `NaN` where the
+  interpreter gives `False` (`If(w > 0, 1, 0)` with `w` absent), which the
+  caveats of compiled code allow. `Any` and `All` over an element type with
+  a `missing` arm still decline.
+- **The corpus measure** (Tycho frozen at `44a25d4e3`, the tools of 3.3 with
+  records keyed by MathJSON; base run on `e8a75b9c4`): 17,690 records and 77,146 values in both runs.
+  Declines: javascript 66 and interval-js 90 in both runs; glsl 48 → 47,
+  no new decline. The decline that goes is the expected row
+  neyret/xhlkk7k9aq (`.7=c_3\{0<\{c_1<1\}\{c_2<1\}: …, …, 1\}`, whose
+  GLSL code declined on an absent `boolean` position). Values: 5 keys
+  changed (24 sampled values), each one of the expected kinds:
+  neyret/xhlkk7k9aq, 2 keys, `NaN` → the finite value of Desmos (the
+  condition `If(c_2<1, Less(0, If(c_1<1, 1)))` is `False` where `c_2 ≥ 1`,
+  so the else arm); neyret/3qkygakl9m, 2 keys
+  (`0<KT^{\lfloor x\rfloor}-… \text{ where } 0<x`), and neyret/akconkhexx,
+  1 key (`0<x\lor2<x \text{ where } x<1, x<3`), `undefined` → `false`
+  where the condition is false: a relation restricted by a scalar condition,
+  choice (1) above. Tycho's compiled masks test `=== true`, so the region
+  drawn does not change.
+- **Code lines** (not blank, `//` or `*`): `library` 78,095 → 77,903, `boxed-expression`
+  83,930 → 83,962, `compilation` 92,398 → 92,419 (the compiler kept its
+  Kleene helpers for step 4; it gained the unmatched relation and colour
+  cells and lost the NaN test). Source diff: 20 files, 703 insertions, 959
+  deletions; tests: 43 files changed (none deleted; one test removed, "the
+  evaluated result is typed missing"), one new file
+  `test/compute-engine/two-valued-comparisons.test.ts`; no snapshot
+  changed.
+- **Review**: Claude and Codex, three rounds (the Codex model was at
+  capacity twice; each retry ran). Fixed: round 1, the type of a false boolean restriction (Codex,
+  high), the negated predicates through a lifted condition, an `Undefined`
+  mask cell, the NaN test of compiled comparisons (Claude), the 4 old pins
+  of the full suite, the colour object, `ForAll`/`Exists` with a constant
+  body, unreachable `Undefined` tests; round 2, an element-wise connective
+  in a condition kept its list shape (Codex), `ExistsUnique`, comments;
+  round 3, `Not(Not(Missing))`, an error operand before a deciding absent
+  operand in a condition, a colour cell read before its condition is
+  decided (Codex), one comment (Claude). The round-3 fixes had no review
+  (the third round is the last); each witness is `crafted`.
+- **Checks** on the final tree: typecheck, lint, `check:deps`, the full suite (1,799
+  suites, 79,443 tests, 0 failed) and the corpus measure above, all on the
+  final tree in the worktree, whose files are byte for byte those staged.
+  `test:core` was not run separately: the full suite contains it.
+
+What 3.4.2 (`Missing` as a result only, options page 1) needs from this
+item: (1) every operator that is not a comparison, a connective
+or a boolean collection predicate still has its old reading of `Missing`
+(`Missing + 2` is `NaN`; the number-theory predicates such as `IsPrime`
+answer `Missing`; an absent element operand of `Element` follows the
+2026-09-26 rule): 3.4.2 decides these, under the rule that a comparison is
+`False`. (2) A declared type with a `missing` arm is still accepted, and
+146 test files name a type with a `missing` arm (a declaration such as
+`w: real | missing` or an expected type; counted with `grep -rlE` on
+`test/`); 3.4.2 makes that declaration a static error, so the tests that
+declare one move to a producer (a selection with no match, an accessor out of range). (3) With
+no declared absent input, the compiled presence test of
+`operandPresenceConjuncts` and the Kleene compile helpers serve only the
+absent value of a producer, which the caveats leave unspecified: step 4,
+row 2 can then delete them, and the decline of `Any`/`All` over an element
+type with a `missing` arm. (4) The values fixed here stay: the relation cell
+`False`, the colour cell `Rgb(NaN, NaN, NaN)`, a false `If(c, r)` over a
+relation `False`, and the scalar no-match `Missing` of `Which` (Tycho reads
+it).
+
 The compiler side of 3.1 to 3.4 in this release is the minimum that keeps
 compiled code equal to the interpreter: the new static errors decline, the
 `NaN` point cell replaces `undefined` in the JavaScript lowering, `When` is

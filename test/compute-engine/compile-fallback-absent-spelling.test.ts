@@ -56,7 +56,9 @@ describe('Compilation fallback: the spelling of an absent value', () => {
       undefined,
     ],
     ['a colour', gated(['Rgb', 't', 0.5, 0.5]), undefined],
-    ['a boolean', gated(['Less', 't', 1]), undefined],
+    // A restriction of a boolean is `False` where its condition fails (user
+    // decision of 2026-11-02, two-valued comparisons).
+    ['a boolean', gated(['Less', 't', 1]), false],
     ['a string', gated({ str: 'abc' }), undefined],
     ['the written symbol', 'Missing', undefined],
     // A bare `Undefined` is typed `unknown`, a type that says nothing about
@@ -178,7 +180,7 @@ describe('Python fallback: the spelling of an absent value', () => {
     ['a number (`float(nan)`)', gated(['Add', 't', 1]), NaN],
     ['a point (`None`)', gated(['Tuple', 't', 1]), undefined],
     ['a point read from a list of points (`None`)', ['At', 'P', 5], undefined],
-    ['a boolean (`None`)', gated(['Less', 't', 1]), undefined],
+    ['a boolean (`False`)', gated(['Less', 't', 1]), false],
     [
       'a list, written absence (`[1, math.nan]`)',
       ['List', 1, 'Missing'],

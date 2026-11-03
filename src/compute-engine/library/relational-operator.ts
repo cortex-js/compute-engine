@@ -43,7 +43,6 @@ import {
   resolveTypeAlias,
 } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
-import { parseType } from '../../common/type/parse.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   compareIntervals,
@@ -528,17 +527,12 @@ const CHAIN_PAIR_IS_FALSE = {
       b: Expression,
       written: readonly [Expression, Expression]
     ) => {
-      // The absence rules of the binary `NotEqual` come first, as in
-      // `decideNotEqual`: a pair with `Missing` is `Missing` and a pair with
-      // `NaN` is `True`, so neither is a `False` pair, also when the two
+      // The rule of the binary `NotEqual` comes first, as in
+      // `decideNotEqual`: a pair with `NaN` or an absent value (read as
+      // `NaN`) is `True`, so it is not a `False` pair, also when the two
       // values are the same (`Missing.isEqual(Missing)` is true).
       const vals = readComparisonAbsence(ce, [a, b]);
-      if (
-        vals.some(
-          (v) => isSymbol(v, 'Missing') || (isNumber(v) && v.isNaN === true)
-        )
-      )
-        return false;
+      if (vals.some((v) => isNumber(v) && v.isNaN === true)) return false;
       const k = kindEqual(
         a,
         b,
@@ -630,18 +624,12 @@ export function evaluateChainForCondition(
 
 /**
  * True when the adjacent pair `(a, b)` of a chain is `False` because an
- * operand is an undefined number (`NaN`, `Indeterminate`) or has a value
- * with no order (`nonRealKind()`; with `only: 'pole'`, only the pole, for
- * `Equal`). This is the rule of the verdict (`decideLess`,
- * `decideLessEqual`, `decideEqual`) applied to one pair, so that the chain
- * stops there: `0 < i < Missing` and `0 < NaN < Missing` are `False`, as
- * `(0 < NaN) ∧ (NaN < Missing)` is `False ∧ Missing`, and the operands after
- * the pair are not evaluated (user decision 2026-10-23; before it a NaN pair
- * was left to the verdict over all the operands, where the absent operand
- * made the chain `Missing`). A pair with a `Missing` operand is not decided
- * here: the verdict gives it the Kleene `Missing`, as it does for the pair
- * alone (`Less(i, Missing)` and `Less(NaN, Missing)` are `Missing`; the
- * same for `Undefined`). With
+ * operand is an undefined number (`NaN`, `Indeterminate`), an absent value
+ * (`Missing`, `Undefined`), or has a value with no order (`nonRealKind()`;
+ * with `only: 'pole'`, only the pole, for `Equal`). This is the rule of the
+ * verdict (`decideLess`, `decideLessEqual`, `decideEqual`) applied to one
+ * pair, so that the chain stops there: `0 < i < 1` and `0 < Missing < 1` are
+ * `False`, and the operands after the pair are not evaluated. With
  * `approximate`, a constant expression is approximated (`Ln(-1)`); the
  * callers ask for it only when the comparison methods did not decide the
  * pair.
@@ -652,9 +640,7 @@ function unorderedChainPair(
   approximate: boolean,
   only?: 'pole'
 ): boolean {
-  // `Undefined` is absent too (`readComparisonAbsence` reads it as
-  // `Missing`), so a pair with it is left to the verdict as well.
-  if (isAbsentScalarSymbol(a) || isAbsentScalarSymbol(b)) return false;
+  if (isAbsentScalarSymbol(a) || isAbsentScalarSymbol(b)) return true;
   if (isNumber(a) && a.isNaN === true) return true;
   if (isNumber(b) && b.isNaN === true) return true;
   return [a, b].some((x) => {
@@ -959,21 +945,15 @@ function decideEqual(
   const failed = failedCellComparison(ce, ops, false);
   if (failed === 'undecided') return inertRelation(ce, 'Equal', rawOps, ops);
   if (failed !== undefined) return failed;
-  // One element pair with no answer makes the WHOLE comparison undecided
-  // (user ruling of 2026-09-21): see `absentCollectionComparison`. The
-  // answer is the absent marker `Missing`, which compiled code spells
-  // `NaN`.
-  if (absentCollectionComparison(ops)) return ce.Missing;
-  // Absence semantics (§3.D, amended 2026-07-24): once broadcast has had
-  // its chance (so a list-vs-scalar operand comparison is per-cell), a
-  // SCALAR `Missing` operand makes the comparison `Missing` (Kleene), while
-  // a `NaN` operand makes it `False` (IEEE: `NaN == NaN` is `false`).
-  // `Missing` wins over `NaN` (Kleene propagation). Per-cell broadcast
-  // re-enters this handler on scalar cells, so the rule applies
-  // element-wise too. A `Missing` read from a numeric-domain slot
-  // (`number | missing`) is `NaN`, not Kleene (`readComparisonAbsence`).
+  // A pair of cells with an absent cell makes the WHOLE comparison `False`
+  // (see `absentCollectionComparison`).
+  if (absentCollectionComparison(ops)) return ce.False;
+  // Once broadcast has had its chance (so a list-vs-scalar comparison is
+  // per-cell), an undefined operand makes the comparison `False`: a `NaN`
+  // operand (IEEE: `NaN == NaN` is `false`), and an absent operand, which
+  // `readComparisonAbsence` reads as `NaN`. Per-cell broadcast re-enters
+  // this handler on scalar cells, so the rule applies element-wise too.
   const vals = readComparisonAbsence(ce, ops);
-  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
   // The pole `ComplexInfinity` (`1/0`) has no value, so an equality with it
   // is `False`, as with `NaN` (user decision of 2026-10-21). A complex
@@ -1076,17 +1056,13 @@ function decideNotEqual(
   const failed = failedCellComparison(ce, ops, true);
   if (failed === 'undecided') return inertRelation(ce, 'NotEqual', rawOps, ops);
   if (failed !== undefined) return failed;
-  // The same undecided marker as `Equal`, never its negation (user ruling
-  // of 2026-09-21): a comparison with no answer has no answer under
-  // negation either, so `NotEqual` must not report a confident `True`
-  // where `Equal` could not report `False`.
-  if (absentCollectionComparison(ops)) return ce.Missing;
-  // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`
-  // (`NotEqual(Missing, x) = Missing`), IEEE over `NaN` (`NotEqual(NaN, x)
-  // = True`). `Missing` wins over `NaN`; a numeric-domain slot's `Missing`
-  // reads as `NaN` (`readComparisonAbsence`).
+  // `NotEqual` is `Not(Equal)`: where `Equal` is `False` because a value
+  // is undefined, `NotEqual` is `True`. So a pair of cells with an absent
+  // cell makes a whole-collection `NotEqual` `True`, and an absent operand,
+  // read as `NaN` (`readComparisonAbsence`), makes it `True`, as IEEE
+  // `NaN != x` is `true`.
+  if (absentCollectionComparison(ops)) return ce.True;
   const vals = readComparisonAbsence(ce, ops);
-  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.True;
   let lhs: Expression | undefined = undefined;
   for (const [i, arg] of ops.entries()) {
@@ -1149,12 +1125,10 @@ function decideLess(
   // `|[1...5]-2| > 0`, canonical `Less(0, Abs(…))`). See `broadcastComparison`.
   const bc = broadcastComparison(ce, 'Less', ops, numericApproximation);
   if (bc) return bc;
-  // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
-  // IEEE over `NaN` (unordered ⇒ `False`). Applies per-cell too (broadcast
-  // re-enters this handler on scalar cells). A numeric-domain slot's
-  // `Missing` reads as `NaN` (`readComparisonAbsence`).
+  // An undefined operand makes the comparison `False`: `NaN` is unordered
+  // (IEEE), and an absent operand reads as `NaN` (`readComparisonAbsence`).
+  // Applies per-cell too (broadcast re-enters this handler on scalar cells).
   const vals = readComparisonAbsence(ce, ops);
-  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
   // A value that is not a real number (the pole `1/0`, a complex number
   // such as `i`) has no order: `False` (user decision of 2026-10-21, see
@@ -1240,10 +1214,9 @@ function decideLessEqual(
   // Element-wise broadcast when an operand evaluated to a collection.
   const bc = broadcastComparison(ce, 'LessEqual', ops, numericApproximation);
   if (bc) return bc;
-  // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
-  // IEEE over `NaN` (unordered ⇒ `False`). See `Less`.
+  // An undefined operand (`NaN`, or an absent value read as `NaN`) makes
+  // the comparison `False`. See `Less`.
   const vals = readComparisonAbsence(ce, ops);
-  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
   // A value that is not a real number has no order: `False`. See `Less`.
   if (vals.some((op) => nonRealKind(op) !== undefined)) return ce.False;
@@ -1362,15 +1335,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     lazy: true,
 
-    // Comparisons follow IEEE 754 for `NaN` and Kleene for the `Missing` symbol
-    // (the Julia model, §3.D amended 2026-07-24). A `Missing` operand makes the
-    // comparison `Missing` (Kleene); a `NaN` operand makes it `False` (IEEE:
-    // `NaN == NaN` is `false`). Declared `handle` so a `Missing` operand
-    // validates (its `missing` arm is stripped against the `any` parameter,
-    // which already admits it, but the handle declaration keeps the gate off the
-    // propagate path). Result type: `missing` when an operand is definitely
-    // absent, `boolean | missing` when only possibly (an operand's type carries
-    // the arm), `boolean` otherwise.
+    // A comparison is two-valued: `True` or `False`. A `NaN` operand makes it
+    // `False` (IEEE: `NaN == NaN` is `false`), and so does an absent operand
+    // (`Missing`), which is read as `NaN` (user decision 2026-11-02,
+    // two-valued comparisons, `docs/ERROR-MODEL.md`). Declared `handle` so a
+    // `Missing` operand validates and the propagate gate stays off.
     missingBehavior: 'handle',
 
     type: (ops, { engine }) =>
@@ -1505,15 +1474,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     lazy: true,
     evaluatesOperands: true,
 
-    // Same absence semantics as `Equal` (§3.D): a `Missing` operand makes the
-    // comparison `Missing` (Kleene), a `NaN` operand makes it `False` (IEEE).
+    // Same rule as `Equal`: a `NaN` or an absent operand makes the
+    // comparison `False`.
     missingBehavior: 'handle',
-
-    type: (ops, context) =>
-      BoxedType.forResult(
-        relationalAbsenceType(ops),
-        context.engine._typeResolver
-      ),
 
     // Deliberately NOT `broadcastable`: this is a PROVER (is this an identity
     // in all the free variables?), not an arithmetic comparison, so a list
@@ -1528,7 +1491,6 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // evaluate them here (see the `Equal` handler).
       const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
       const vals = readComparisonAbsence(ce, ops);
-      if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
       if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
       let lhs: Expression | undefined = undefined;
       for (const arg of ops) {
@@ -1620,11 +1582,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // `canonical` handler).
     signature: '(any, any*) -> boolean',
 
-    // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence
-    // with `Equal`, amended 2026-07-24): `NotEqual(Missing, x) = Missing`;
-    // `NotEqual(NaN, x) = True` (IEEE: `NaN != x` is `true`, incl. `NaN != NaN`).
-    // Declared `handle` so a `Missing` operand validates and the propagate gate
-    // stays off.
+    // `Not(Equal)`: a `NaN` or an absent operand makes it `True` (IEEE:
+    // `NaN != x` is `true`, incl. `NaN != NaN`). Declared `handle` so a
+    // `Missing` operand validates and the propagate gate stays off.
     missingBehavior: 'handle',
 
     type: (ops, { engine }) =>
@@ -1689,9 +1649,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any*) -> boolean',
 
-    // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence,
-    // amended 2026-07-24): a `Missing` operand makes the ordering `Missing`; a
-    // `NaN` operand makes it `False` (IEEE: `NaN` is unordered). `Greater`/
+    // A `NaN` or an absent operand makes the ordering `False` (IEEE: `NaN` is
+    // unordered; an absent value is read as `NaN`). `Greater`/
     // `GreaterEqual` canonicalize to `Less`/`LessEqual`, so this handler (and
     // `LessEqual`'s) covers all four orderings. Declared `handle` so a `Missing`
     // operand validates and the propagate gate stays off.
@@ -1709,7 +1668,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('Less', relationalAbsenceType, ops, engine.tolerance),
+        comparisonType('Less', () => 'boolean', ops, engine.tolerance),
         engine._typeResolver
       ),
 
@@ -1737,7 +1696,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   Greater: {
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('Greater', relationalAbsenceType, ops, engine.tolerance),
+        comparisonType('Greater', () => 'boolean', ops, engine.tolerance),
         engine._typeResolver
       ),
     description: 'Greater-than comparison (strictly greater than).',
@@ -1770,9 +1729,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any*) -> boolean',
 
-    // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence,
-    // amended 2026-07-24); see `Less`. Covers `GreaterEqual` too (canonicalizes
-    // here).
+    // A `NaN` or an absent operand makes it `False`; see `Less`. Covers
+    // `GreaterEqual` too (canonicalizes here).
     missingBehavior: 'handle',
     // See `Less`: the handler owns `NaN` (IEEE unordered → `False`), and
     // the wide chain carrier is deliberate.
@@ -1782,7 +1740,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       BoxedType.forResult(
         comparisonType(
           'LessEqual',
-          relationalAbsenceType,
+          () => 'boolean',
           ops,
           engine.tolerance
         ),
@@ -1815,7 +1773,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       BoxedType.forResult(
         comparisonType(
           'GreaterEqual',
-          relationalAbsenceType,
+          () => 'boolean',
           ops,
           engine.tolerance
         ),
@@ -2048,55 +2006,16 @@ function possiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
 }
 
 /**
- * Result-type handler for the absence-aware relational operators
- * (`IdenticallyEqual`, `Less`, `LessEqual`; `Equal` and `NotEqual` apply it
- * first, through `comparisonResultType`). Mirrors §3.D: a
- * definitely-absent operand (`missing`) makes the result `missing`; a
- * possibly-absent operand (an operand type carrying a `missing` arm) makes it
- * `boolean | missing`; otherwise `boolean` (unchanged). A `NaN` operand is not
- * visible at the type level (its static type is `number`), so it does not
- * widen the result type — the IEEE `False`/`True` is a runtime-only outcome.
+ * Can this operand be absent when it is evaluated: its type has a `missing`
+ * arm, or it is the `Undefined` symbol (typed `unknown`, but read as an
+ * absent operand by `readComparisonAbsence`)? A comparison with such an
+ * operand is `False` when the operand is absent, so no VALUE type (`true`
+ * or `false`) may be read from the other arms of its type
+ * (`comparisonType`). The result type itself is `boolean`: a comparison is
+ * two-valued (user decision 2026-11-02, two-valued comparisons).
  */
-function relationalAbsenceType(ops: ReadonlyArray<OperandDescriptor>) {
-  let definite = false;
-  let possible = false;
-  for (const op of ops) {
-    const absence = operandAbsence(op);
-    if (absence === 'definite') definite = true;
-    else if (absence === 'possible') possible = true;
-  }
-  if (definite) return 'missing';
-  if (possible) return parseType('boolean | missing');
-  return 'boolean';
-}
-
-/**
- * Can this operand be absent when it is evaluated? `'definite'` when its type
- * is exactly `missing`, `'possible'` when it may be absent, `undefined` when
- * it cannot be. The comparisons (`relationalAbsenceType`) and the logical
- * connectives (`connectiveType` in `library/logic.ts`) read an operand with
- * the same test, so that they agree on which operands make a `Missing`
- * result reachable.
- */
-export function operandAbsence(
-  op: OperandDescriptor
-): 'definite' | 'possible' | undefined {
-  const t = op.type;
-  if (t === 'missing') return 'definite';
-  // Any `missing` arm, a numeric one (`number | missing`) included, makes
-  // the Kleene `Missing` result reachable: a comparison with an absent
-  // operand is absent, in a numeric slot too (user decision 2026-10-23,
-  // ROADMAP CE-93). Before, a numeric slot read its absent value as `NaN`
-  // and the comparison was a plain boolean, so `w > 0` was `False` while
-  // `If(w > 0, 1, 0)` had no value.
-  if (typeContainsMissing(t)) return 'possible';
-  // The library `Undefined` symbol is typed `unknown`, which has no
-  // `missing` arm, but the evaluate handlers read it as an absent operand
-  // (`readComparisonAbsence`): `Less(Undefined, 3)` evaluates to `Missing`.
-  // Its type is read from the symbol itself, so that the result type admits
-  // that value.
-  if (isUndefinedSymbolOperand(op)) return 'possible';
-  return undefined;
+function mayBeAbsentOperand(op: OperandDescriptor): boolean {
+  return typeContainsMissing(op.type) || isUndefinedSymbolOperand(op);
 }
 
 /** Is the operand the `Undefined` symbol? The test is on the name only, as
@@ -2196,16 +2115,19 @@ function literalEquality(
   return undefined;
 }
 
-/** The head's existing absence/broadcast answer, refined to a VALUE type
- * when the proof exists. `base` is the head's own result-type function
- * (`comparisonResultType` for the equality heads, `relationalAbsenceType`
- * for the ordering heads), whose non-`boolean` answers are kept as is. */
+/** The head's broadcast answer, refined to a VALUE type when the proof
+ * exists. `base` is the head's own result-type function
+ * (`comparisonResultType` for the equality heads, `boolean` for the
+ * ordering heads), whose non-`boolean` answers are kept as is. An operand
+ * that may be absent (`mayBeAbsentOperand`) gives `boolean`: the
+ * comparison is `False` when it is absent, whatever its other arms say. */
 function comparisonType(
   head: ComparisonHead,
   base: (ops: ReadonlyArray<OperandDescriptor>) => Type,
   ops: ReadonlyArray<OperandDescriptor>,
   tolerance: number
 ): Type {
+  if (ops.some(mayBeAbsentOperand)) return 'boolean';
   const t = base(ops);
   if (t !== 'boolean') return t;
   return comparisonValueType(head, ops, tolerance) ?? 'boolean';
@@ -2245,10 +2167,6 @@ function comparisonType(
  * collection is present.
  */
 function comparisonResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
-  const absence = relationalAbsenceType(ops);
-  // An absent operand decides the result before broadcasting is even reached
-  // (`missing`/`boolean | missing` per §3.D), so leave those answers alone.
-  if (absence !== 'boolean') return absence;
   if (!ops.some((op) => possiblyCollectionTypedOperand(op))) return 'boolean';
   // The DEFINITE half of the operand count `skipBroadcastForVectorOps` and
   // `broadcastableComparisonOperands` share — an enumerable collection value,
@@ -2264,24 +2182,21 @@ function comparisonResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
 }
 
 /**
- * Absence read for comparison operands (§3.D).
+ * Absence read for comparison operands.
  *
- * An operand that EVALUATED to an absence symbol is Kleene, whatever the
- * type of the operand it evaluated from: in a numeric slot
- * (`number | missing`) too, the comparison is `Missing` (user decision
- * 2026-10-23, ROADMAP CE-93), as the condition of an `If` reads it. Before,
- * such a slot read its absent value as `NaN`, and `w > 0` was `False`.
- *
- * An `Undefined` operand is normalized to the `Missing` symbol here, so that
- * the one test each caller makes afterwards — "is an operand the `Missing`
- * symbol?" — decides for both absence symbols.
+ * An operand that EVALUATED to an absence symbol (`Missing`, `Undefined`)
+ * is read as `NaN`: a comparison is two-valued, and an undecided operand
+ * makes it `False` (`NotEqual`: `True`), as a `NaN` operand does (user
+ * decision 2026-11-02, two-valued comparisons, `docs/ERROR-MODEL.md`). So
+ * the one test each caller makes afterwards — "is an operand `NaN`?" —
+ * decides for both absence symbols and for `NaN`.
  */
 function readComparisonAbsence(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
   if (!ops.some(isAbsentScalarSymbol)) return ops;
-  return ops.map((op) => (isAbsentScalarSymbol(op) ? ce.Missing : op));
+  return ops.map((op) => (isAbsentScalarSymbol(op) ? ce.NaN : op));
 }
 
 /**
@@ -2341,20 +2256,17 @@ function broadcastableComparisonOperands(
 
 /**
  * Does the element recursion of a whole-collection comparison of `a` against
- * `b` meet a pair that has NO answer?
+ * `b` meet a pair with an absent cell?
  *
- * One undecided element pair makes the whole comparison undecided (user
- * ruling of 2026-09-21). An absent cell can stand for any value, so no walk
- * of the cells that ARE there can tell whether the two collections hold the
- * same values. The rule holds even when another pair is decidedly unequal:
- * `Equal([1, Missing, 3], [2, Missing, 3])` answers the absent marker, not
- * `False`, because equality asks about the two collections as a whole and
- * that question still has no answer. `NotEqual` answers the same marker, so
- * neither operator ever reports a confident truth it cannot support. The
- * marker is `Missing` here and `NaN` in compiled code, where `eqTensor`
- * (`compilation/javascript-target.ts`) applies the same fold.
+ * Such a pair makes the whole `Equal` `False` and the whole `NotEqual`
+ * `True`: a comparison is two-valued, and an absent cell is undefined, as
+ * a `NaN` cell is (user decision 2026-11-02, two-valued comparisons, which
+ * replaces the decision of 2026-09-21 that answered `Missing`). So
+ * `Equal([1, Missing], [1, Missing])` is `False`, as `Equal([1, NaN],
+ * [1, NaN])` is. The walk is needed because the structural comparison of
+ * the cells would find `Missing` equal to itself.
  *
- * Three shapes stay DECIDED, and the walk declines each of them:
+ * Three shapes are not concerned, and the walk declines each of them:
  * - a length mismatch (`ca !== cb`): no value in an absent cell can make 2
  *   elements equal 3, so the comparison is `False` as it always was;
  * - a cell pair of different SHAPE (a nested list against a scalar), which
@@ -2403,16 +2315,16 @@ function undecidedElementPair(a: Expression, b: Expression): boolean {
 }
 
 /**
- * Is a whole-collection `Equal`/`NotEqual` over these EVALUATED operands
- * undecided because its element recursion meets a pair with no answer?
+ * Does a whole-collection `Equal`/`NotEqual` over these EVALUATED operands
+ * meet a pair of cells with an absent cell (`undecidedElementPair`)? Then
+ * `Equal` is `False` and `NotEqual` is `True`.
  *
  * Only the whole-collection shape is concerned — two or more collection
  * operands. The ELEMENT-WISE shape (a collection against a scalar, such as
- * `Equal([1, Missing], 1)`) has already broadcast by the time this is asked,
- * and it marks exactly the absent POSITIONS, which is a different and
- * unchanged answer. Adjacent operands are paired the way the handlers'
- * own loops pair them, so a chain (`a = b = c`) is undecided as soon as one
- * of its adjacent pairs is.
+ * `Equal([1, Missing], 1)`) has already broadcast by the time this is asked:
+ * each cell is a scalar comparison, `[True, False]`. Adjacent operands are
+ * paired the way the handlers' own loops pair them, so a chain (`a = b = c`)
+ * is concerned as soon as one of its adjacent pairs is.
  */
 function absentCollectionComparison(ops: ReadonlyArray<Expression>): boolean {
   if (ops.filter((op) => op.isCollection).length < 2) return false;

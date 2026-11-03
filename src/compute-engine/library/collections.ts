@@ -1826,18 +1826,14 @@ function isPredicateShorthand(op: Expression): boolean {
  * `undefined` is anything else (an element-valued failure, a malformed
  * predicate, an undecided relation), which the caller reports as before.
  *
- * A predicate that answers `Missing` or `Undefined` — the Kleene answer a
- * comparison gives for an absent element, `Missing > 0` — does NOT select the
- * element: `Filter([1, Missing, 3], x ↦ x > 0)` is `[1, 3]` and
- * `Count([1, Missing, 3], x ↦ x > 0)` is `2`. This is the rule of a database
- * `WHERE` clause, which keeps only the rows whose predicate is decidedly true,
- * and of Mathematica's `Select`. A `NaN` element already takes this branch by
- * IEEE (`NaN > 0` is `False`). To select the absent elements, test for them:
- * `Filter(xs, IsMissing)`. (User decision 2026-09-26, rule D of
- * `docs/plans/2026-09-26-absent-values-in-collection-operators.md`.) The
- * quantifiers `Any` and `All` do NOT use this verdict: they combine the
- * predicate's answers by Kleene logic, as `Or` and `And` do
- * (`quantifierWalk`).
+ * A predicate that answers `Missing` or `Undefined` does NOT select the
+ * element: an absent value reads as `False`. A comparison with an absent
+ * element is already `False` (`Missing > 0`, user decision 2026-11-02,
+ * two-valued comparisons), so `Filter([1, Missing, 3], x ↦ x > 0)` is
+ * `[1, 3]` and `Count([1, Missing, 3], x ↦ x > 0)` is `2`; a predicate such
+ * as `x ↦ If(x > 0, Missing, False)` reaches this case. To select the absent
+ * elements, test for them: `Filter(xs, IsMissing)`. The quantifiers `Any`
+ * and `All` read an absent answer the same way (`quantifierWalk`).
  */
 function selectionVerdict(
   applied: Expression | undefined
@@ -13927,7 +13923,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
-    type: (ops, { engine }) => quantifierResultType(ops, engine),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
@@ -13979,7 +13974,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
-    type: (ops, { engine }) => quantifierResultType(ops, engine),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
@@ -22297,38 +22291,6 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
  * instead of hanging; `runWalkAsync` drives the same walk under
  * `evaluateAsync`.
  */
-/**
- * The result type of `Any` and `All`. The walk answers `Missing` when an
- * element, or the answer of the predicate for an element, is absent and no
- * other element decides (Kleene's third value): `Any([1, Missing], x ↦ x >
- * 2)` is `Missing`. So the result is `boolean | missing` when an element
- * can be absent (its type admits `missing`, or is `any`; an `unknown`
- * element is no evidence) or when the predicate's result type admits
- * `missing`, and `boolean` otherwise.
- */
-function quantifierResultType(
-  ops: ReadonlyArray<OperandDescriptor>,
-  engine: PureEngineView
-): BoxedType {
-  const source = ops[0];
-  const element =
-    source === undefined
-      ? undefined
-      : (source.facts.elementType ?? collectionElementType(source.type));
-  const absentElement =
-    element !== undefined &&
-    (typeContainsMissing(element) || provablyAdmits('missing', element));
-  const answer = callbackResultTypeD(ops[1], engine);
-  const absentAnswer =
-    answer !== undefined && provablyAdmits('missing', answer);
-  return BoxedType.forResult(
-    absentElement || absentAnswer
-      ? { kind: 'union', types: ['boolean', 'missing'] }
-      : 'boolean',
-    engine._typeResolver
-  );
-}
-
 function quantifierWalk(
   kind: 'Any' | 'All',
   collection: Expression,
@@ -22353,7 +22315,6 @@ function quantifierWalk(
   const defaultValue = kind === 'Any' ? ce.False : ce.True;
 
   let sawUndetermined = false;
-  let sawAbsent = false;
   // The error of the first element whose answer failed.
   let failed: Expression | undefined = undefined;
   // A source that is known to be finite is read to its end, however large.
@@ -22388,19 +22349,19 @@ function quantifierWalk(
         : route === undefined
           ? item.evaluate()
           : ((yield item.evaluateAsync(route)) as Expression);
-      const s = sym(result);
+      // An absent answer (`Missing`, `Undefined`) reads as `False`, as in
+      // `Or` and `And`: the logic is two-valued (user decision 2026-11-02).
+      const s =
+        result !== undefined && isAbsentSymbol(result) ? 'False' : sym(result);
       if (s === shortSym) return shortValue;
       if (s !== definiteSym) {
         // See `predicateErrorValue`: an element-valued predicate failure is
         // the operator's answer, not absorbed as "undetermined", unless an
         // element after it decides (`Any([1, err, 3], x ↦ x > 2)` is `True`).
-        // An absent answer is Kleene's third value; anything else is
-        // evidence that has not arrived yet.
+        // Anything else is evidence that has not arrived yet.
         const err = predicateErrorValue(result);
-        if (err === undefined) {
-          if (result !== undefined && isAbsentSymbol(result)) sawAbsent = true;
-          else sawUndetermined = true;
-        } else failed ??= err;
+        if (err === undefined) sawUndetermined = true;
+        else failed ??= err;
       }
       // To make an element of a lazy source runs code, which can have an
       // effect (`Map(H, Repeat(1))` calls `H`). So the walk checks the cap
@@ -22410,11 +22371,10 @@ function quantifierWalk(
       yield;
     }
     if (walk.missedElements) return undefined;
-    // A failed element outranks an undetermined or an absent answer, as a
-    // failed operand of `Or` outranks an unknown one (`Or(err, A)` is `err`).
+    // A failed element outranks an undetermined answer, as a failed operand
+    // of `Or` outranks an unknown one (`Or(err, A)` is `err`).
     if (failed !== undefined) return failed;
     if (sawUndetermined) return undefined;
-    if (sawAbsent) return ce.symbol('Missing');
     return defaultValue;
   })();
 }

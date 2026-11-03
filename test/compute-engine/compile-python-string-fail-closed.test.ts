@@ -190,13 +190,15 @@ describe('Python: NotEqual over `string | missing`', () => {
   // `docs/plans/2026-11-01-absent-value-contract.md`), and the emission is
   // the plain `!=`.
 
-  test('the interpreter is Kleene for both heads', () => {
+  test('the interpreter is two-valued for both heads', () => {
+    // An absent operand makes `Equal` `False` and `NotEqual` `True` (user
+    // decision of 2026-11-02, two-valued comparisons).
     expect(ce.box(['Equal', 'Missing', { str: 'x' }]).evaluate().symbol).toBe(
-      'Missing'
+      'False'
     );
     expect(
       ce.box(['NotEqual', 'Missing', { str: 'x' }]).evaluate().symbol
-    ).toBe('Missing');
+    ).toBe('True');
   });
 
   test('the emitted NotEqual is the plain !=, with no tolerance', () => {

@@ -184,10 +184,10 @@ describe('the operators and the functions give the values of the synchronous rou
     ['Less(1, 2, 3)', ['Less', 1, 2, 3], 'True'],
     ['Less(3, 2, Sum)', ['Less', 3, 2, SMALL_SUM], 'False'],
     ['Equal(1, 2, Sum)', ['Equal', 1, 2, SMALL_SUM], 'False'],
-    // Collections broadcast; absent operands are Kleene.
+    // Collections broadcast; an absent operand makes a comparison `False`.
     ['Less(List, 3)', ['Less', ['List', 1, 5], 3], '[True,False]'],
     ['Equal(List, List)', ['Equal', ['List', 1, 2], ['List', 1, 2]], 'True'],
-    ['Equal(Missing, 1)', ['Equal', 'Missing', 1], 'Missing'],
+    ['Equal(Missing, 1)', ['Equal', 'Missing', 1], 'False'],
     ['Less(NaN, 1)', ['Less', 'NaN', 1], 'False'],
   ];
   for (const [name, mj, expected] of relations)
@@ -304,7 +304,7 @@ describe('a chain stops where the synchronous route stops', () => {
   });
 
   // A `Missing` operand next to a long one: the long operand runs once, on
-  // the asynchronous route, and the comparison is `Missing`.
+  // the asynchronous route, and the comparison is `False`.
   test('an absent operand next to a long one still yields', async () => {
     const ce = new ComputeEngine();
     const ac = new AbortController();
@@ -314,12 +314,12 @@ describe('a chain stops where the synchronous route stops', () => {
     ).rejects.toMatchObject({ name: 'CancellationError' });
     expect(
       (await ce.box(['Less', 'Missing', SMALL_SUM]).evaluateAsync()).toString()
-    ).toBe('"Missing"');
+    ).toBe('"False"');
     expect(
       (
         await ce.box(['IdenticallyEqual', 'Missing', SMALL_SUM]).evaluateAsync()
       ).toString()
-    ).toBe('"Missing"');
+    ).toBe('"False"');
   });
 });
 

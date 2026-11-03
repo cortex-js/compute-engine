@@ -342,8 +342,12 @@ describe('CONTROL STRUCTURES', () => {
         }
       }
       // An error that an inner `If` gives for its condition keeps the frame
-      // of the inner and of the outer `If`.
-      const nested = ce.box(['If', ['If', 'Missing', 1], 'a', 'b']).evaluate();
+      // of the inner and of the outer `If`. (An absent condition is not an
+      // error since the user decision of 2026-11-02, two-valued comparisons:
+      // the condition here is an error expression.)
+      const nested = ce
+        .box(['If', ['If', ['Error', "'oops'"], 'True'], 'a', 'b'])
+        .evaluate();
       expect(nested.operator).toBe('Error');
       const nestedJson = nested.json as any[];
       expect(nestedJson[nestedJson.length - 1]).toEqual([

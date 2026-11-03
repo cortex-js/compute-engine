@@ -158,6 +158,7 @@ import {
   isFunction,
   isString,
   isSymbol,
+  isAbsentSymbol,
   adoptsForeignEngineObject,
   indeterminateFormAnswer,
 } from './type-guards.js';
@@ -4786,7 +4787,22 @@ function applyOperatorDefinition(
   //
   if (args.length === 1 && args[0].operator === name) {
     // f(f(x)) -> x
-    if (opDef.involution && isFunction(args[0])) return args[0].op1;
+    //
+    // `Not` reads an absent operand as `False`, so `Not(Not(Missing))` is
+    // `Not(True)`, which is `False`, not `Missing`. Do not fold `Not(Not(x))`
+    // when `x` is an absent symbol or when its type admits `missing`; a
+    // present boolean still folds (`docs/ERROR-MODEL.md`, "A comparison is
+    // two-valued").
+    if (
+      opDef.involution &&
+      isFunction(args[0]) &&
+      !(
+        name === 'Not' &&
+        (isAbsentSymbol(args[0].op1) ||
+          !args[0].op1.type.isDisjointFrom('missing'))
+      )
+    )
+      return args[0].op1;
 
     // f(f(x)) -> f(x)
     if (opDef.idempotent && isFunction(xs[0])) {

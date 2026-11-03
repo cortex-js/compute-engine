@@ -1,11 +1,14 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-// A comparison with an absent operand is absent, in a numeric slot
-// (`number | missing`) too, as the condition of an `If` reads it (user
-// decision 2026-10-23, ROADMAP CE-93, Tycho row 411). Before, the slot read
-// its absent value as `NaN`: `w > 0` was `False`, while `If(w > 0, 1, 0)`
-// had no value.
+// A comparison with an absent operand is `False` (`NotEqual`: `True`), in a
+// numeric slot (`number | missing`) too, and the condition of an `If` reads
+// it the same way (user decision 2026-11-02, two-valued comparisons). So the
+// standalone comparison and the condition agree: `w > 0` is `False` and
+// `If(w > 0, 1, 0)` is `0`. From 2026-10-23 (ROADMAP CE-93, Tycho row 411)
+// to 2026-11-02 the comparison was `Missing` and the `If` was the
+// absent-condition error. Before 2026-10-23 the slot read its absent value
+// as `NaN`: `w > 0` was `False`, while `If(w > 0, 1, 0)` had no value.
 
 describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
   test('the standalone comparison and the condition of an If agree', () => {
@@ -21,7 +24,7 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('"Missing"');
+    ).toBe('"False"');
     expect(
       ce
         .box([
@@ -31,13 +34,12 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
         ])
         .evaluate()
         .toString()
-    ).toMatch(/condition is absent/);
+    ).toBe('0');
   });
 
-  // The example of `docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
-  // the bullet "Everything computed from an absent value, except at a
-  // discharge": the interpreter gives 1. The compiled value is not
-  // specified, because `IsMissing` reads the comparison, not `w`.
+  // `IsMissing` reads the comparison, not `w`: the comparison is `False`, a
+  // value, so the interpreter gives 0. (From 2026-10-23 to 2026-11-02 the
+  // comparison was `Missing` and the interpreter gave 1.)
   test('IsMissing of a comparison with an absent operand, interpreted', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'real | missing');
@@ -47,18 +49,16 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
         .box(['If', ['IsMissing', ['Greater', 'w', 0]], 1, 0])
         .evaluate()
         .toString()
-    ).toBe('1');
+    ).toBe('0');
   });
 
-  test('the type of the comparison admits an absent value', () => {
+  test('the type of the comparison is boolean', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number | missing');
     for (const h of ['Less', 'LessEqual', 'Greater', 'GreaterEqual', 'Equal'])
-      expect(ce.box([h, 'w', 0]).type.toString()).toBe('boolean | missing');
+      expect(ce.box([h, 'w', 0]).type.toString()).toBe('boolean');
     // A chain, and an operand that cannot be absent.
-    expect(ce.box(['Less', 0, 'w', 2]).type.toString()).toBe(
-      'boolean | missing'
-    );
+    expect(ce.box(['Less', 0, 'w', 2]).type.toString()).toBe('boolean');
     ce.declare('r', 'real');
     expect(ce.box(['Less', 'r', 0]).type.toString()).toBe('boolean');
   });
@@ -80,13 +80,13 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number | missing');
     ce.assign('w', ce.Missing);
-    expect(ce.box(['Less', 1, 'w']).evaluate().toString()).toBe('"Missing"');
+    expect(ce.box(['Less', 1, 'w']).evaluate().toString()).toBe('"False"');
     expect(
       ce
         .box(['Less', ['List', 1, 2], 'w'])
         .evaluate()
         .toString()
-    ).toBe('["Missing","Missing"]');
+    ).toBe('["False","False"]');
   });
 
   // The compiled value of a comparison with an absent operand is not

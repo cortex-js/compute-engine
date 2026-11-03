@@ -306,9 +306,11 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('a boolean result over an absent cell of a `list<any>`', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Not', 'Lbs']),
-      'list<boolean | indexed_collection<any> | missing | nothing>'
+      'list<boolean | indexed_collection<any> | nothing>'
     );
-    expect(v.toString()).toBe('["False","Missing"]');
+    // `Not(Missing)` is `True` (user decision of 2026-11-02, two-valued
+    // comparisons).
+    expect(v.toString()).toBe('["False","True"]');
   });
 
   test('a boolean result over an absent cell of a declared list', () => {
@@ -506,32 +508,44 @@ describe('ZIP OF ABSENT CELLS, COMPILED AND WITH AN ERASED ITEM', () => {
 });
 
 describe('Absent whole collections and absent number cells (CE-44, CE-20)', () => {
-  test('a comparison of a list that may be absent is a list or Missing', () => {
+  test('a comparison of a list that may be absent is a list or a boolean', () => {
+    // An absent list makes the comparison `False` (user decision of
+    // 2026-11-02, two-valued comparisons), so the type has a `boolean` arm,
+    // not a `missing` arm.
     const c = new ComputeEngine();
     c.declare('L', 'list<integer> | missing');
     expect(c.box(['Less', 'L', 3]).type.toString()).toBe(
-      'list<boolean> | missing'
+      'boolean | list<boolean>'
     );
     expect(c.box(['Equal', 'L', 3]).type.toString()).toBe(
-      'list<boolean> | missing'
+      'boolean | list<boolean>'
     );
-    // An absent scalar gives an absent cell, not an absent list.
+    // An absent scalar gives a `False` cell (user decision of 2026-11-02,
+    // two-valued comparisons).
     c.declare('n', 'integer | missing');
     expect(c.box(['Less', 'n', ['List', 1, 2]]).type.toString()).toBe(
-      'list<boolean | missing^2>'
+      'list<boolean^2>'
     );
-    // The value is Missing for the whole list when L is absent.
-    expect(c.box(['Less', 'Missing', 3]).evaluate().json).toBe('Missing');
+    // The value is `False` when the operand is absent.
+    expect(c.box(['Less', 'Missing', 3]).evaluate().json).toBe('False');
   });
 
-  test('an operand typed unknown (Undefined) keeps the absent cells', () => {
+  test('the type of a comparison of an absent list holds its value', () => {
+    const c = new ComputeEngine();
+    c.declare('L', 'list<integer> | missing');
+    const e = c.box(['Less', 'L', 3]);
+    c.assign('L', c.Missing);
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
+  });
+
+  test('an operand typed unknown (Undefined) gives False cells', () => {
     const c = new ComputeEngine();
     c.declare('L', 'list<integer> | missing');
     const e = c.box(['Less', 'L', 'Undefined']);
-    expect(e.type.toString()).toBe('list<boolean | missing> | missing');
+    expect(e.type.toString()).toBe('boolean | list<boolean>');
     c.assign('L', c.box(['List', 1, 2]));
     const v = e.evaluate();
-    expect(v.toString()).toBe('["Missing","Missing"]');
+    expect(v.toString()).toBe('["False","False"]');
     expect(v.type.matches(e.type)).toBe(true);
   });
 

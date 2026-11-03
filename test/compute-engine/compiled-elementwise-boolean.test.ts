@@ -320,19 +320,20 @@ describe('absence survives a composed connective', () => {
 
 describe('a numeric missing slot is read as absent by a comparison, also under a broadcast', () => {
   // Substituting a lifted operand with its VALUE erases its declared type,
-  // so the broadcast must keep the `Missing` symbol for a comparison, as the
-  // scalar path does (user decision 2026-10-23, ROADMAP CE-93).
+  // so the broadcast must read the absent value as the scalar path does: a
+  // comparison with it is `False` (user decision 2026-11-02, two-valued
+  // comparisons; from 2026-10-23 to 2026-11-02 it was `Missing`).
   const engine = new ComputeEngine();
   engine.declare('x', 'number | missing');
   engine.assign('x', engine.symbol('Missing'));
 
   test('scalar and broadcast agree', () => {
     expect(engine.box(['Less', 1, 'x'] as any).evaluate().toString()).toBe(
-      '"Missing"'
+      '"False"'
     );
     expect(
       engine.box(['Less', ['List', 1, 2], 'x'] as any).evaluate().toString()
-    ).toBe('["Missing","Missing"]');
+    ).toBe('["False","False"]');
   });
 });
 

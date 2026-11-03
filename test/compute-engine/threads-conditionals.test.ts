@@ -692,8 +692,9 @@ describe('A search for a restricted value', () => {
       expect(value(['Count', ['List', x, x], x])).toBe('2');
       expect(value(['Contains', ['List', 1, 2], x])).toBe('"False"');
     }
-    // An absent collection is not changed by the rule.
-    expect(value(['Contains', 'Missing', 'Missing'])).toBe('"Missing"');
+    // An absent collection is not changed by the rule: nothing is found in
+    // it (user decision of 2026-11-02, two-valued comparisons).
+    expect(value(['Contains', 'Missing', 'Missing'])).toBe('"False"');
   });
 
   test('a searched value that is an undecided If is held', () => {
@@ -713,7 +714,7 @@ describe('A search for a restricted value', () => {
 
   test('a restricted collection is still threaded', () => {
     expect(value(['Contains', W(L), 2])).toBe('If(0 < t, "True")');
-    expect(value(['Contains', W(L), 2], -1)).toBe('"Missing"');
+    expect(value(['Contains', W(L), 2], -1)).toBe('"False"');
     expect(value(['IndexOf', W(L), 2], -1)).toBe('NaN');
   });
 

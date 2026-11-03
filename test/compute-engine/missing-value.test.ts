@@ -779,38 +779,39 @@ describe('P3 — Coalesce (§3.D)', () => {
   });
 });
 
-describe('P3 — relational absence: IEEE over NaN, Kleene over Missing (§3.D, amended 2026-07-24)', () => {
-  test('Equal: a Missing operand is Kleene (Missing), a NaN operand is IEEE (False)', () => {
-    // Kleene: the `Missing` symbol.
-    expect(ce.box(['Equal', 2, 'Missing']).evaluate().symbol).toBe('Missing');
+// A comparison is two-valued (user decision of 2026-11-02, two-valued
+// comparisons): a `Missing` operand is read as `NaN`, so the comparison is
+// `False` (`NotEqual`: `True`). From 2026-07-24 to 2026-11-02 a `Missing`
+// operand made the comparison `Missing` (Kleene).
+describe('P3 — relational absence: IEEE over NaN, and Missing is read as NaN', () => {
+  test('Equal: a Missing or a NaN operand makes it False', () => {
+    expect(ce.box(['Equal', 2, 'Missing']).evaluate().symbol).toBe('False');
     expect(ce.box(['Equal', 'Missing', 'Missing']).evaluate().symbol).toBe(
-      'Missing'
+      'False'
     );
     // IEEE: NaN (even NaN == NaN is False).
     expect(ce.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
     expect(ce.box(['Equal', 'NaN', 2]).evaluate().symbol).toBe('False');
   });
 
-  test('NotEqual: Missing is Kleene (Missing), NaN is IEEE (True)', () => {
-    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe(
-      'Missing'
-    );
+  test('NotEqual: a Missing or a NaN operand makes it True', () => {
+    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe('True');
     expect(ce.box(['NotEqual', 'NaN', 'NaN']).evaluate().symbol).toBe('True');
     expect(ce.box(['NotEqual', 'NaN', 2]).evaluate().symbol).toBe('True');
     expect(ce.box(['NotEqual', 2, 3]).evaluate().symbol).toBe('True');
   });
 
-  test('ordering comparisons: Missing is Kleene (Missing), NaN is IEEE (False, unordered)', () => {
+  test('ordering comparisons: a Missing or a NaN operand makes it False', () => {
     // Less / LessEqual directly.
     expect(ce.box(['Less', 'NaN', 1]).evaluate().symbol).toBe('False');
     expect(ce.box(['LessEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
-    expect(ce.box(['Less', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['Less', 'Missing', 1]).evaluate().symbol).toBe('False');
     // Greater / GreaterEqual canonicalize to Less / LessEqual — same outcome.
     expect(ce.box(['Greater', 'NaN', 1]).evaluate().symbol).toBe('False');
     expect(ce.box(['GreaterEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
-    expect(ce.box(['Greater', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['Greater', 'Missing', 1]).evaluate().symbol).toBe('False');
     expect(ce.box(['GreaterEqual', 'Missing', 1]).evaluate().symbol).toBe(
-      'Missing'
+      'False'
     );
   });
 
@@ -821,20 +822,16 @@ describe('P3 — relational absence: IEEE over NaN, Kleene over Missing (§3.D, 
     expect(ce.box(['NotEqual', 2, 3]).evaluate().symbol).toBe('True');
   });
 
-  test('result type: missing / boolean | missing / boolean (unchanged, family-wide)', () => {
+  test('result type: boolean, also with an absent operand (family-wide)', () => {
     const e = new ComputeEngine();
     e.declare('q', 'number | missing');
-    // Definite Missing operand → missing.
-    expect(e.box(['Equal', 'x', 'Missing']).type.toString()).toBe('missing');
-    expect(e.box(['Less', 'x', 'Missing']).type.toString()).toBe('missing');
-    expect(e.box(['NotEqual', 'x', 'Missing']).type.toString()).toBe('missing');
-    // A `missing`-arm operand → boolean | missing.
-    expect(e.box(['Equal', 'q', 2]).type.matches('boolean | missing')).toBe(
-      true
-    );
-    expect(e.box(['Less', 'q', 2]).type.matches('boolean | missing')).toBe(
-      true
-    );
+    // A definite Missing operand → boolean.
+    expect(e.box(['Equal', 'x', 'Missing']).type.toString()).toBe('boolean');
+    expect(e.box(['Less', 'x', 'Missing']).type.toString()).toBe('boolean');
+    expect(e.box(['NotEqual', 'x', 'Missing']).type.toString()).toBe('boolean');
+    // A `missing`-arm operand → boolean.
+    expect(e.box(['Equal', 'q', 2]).type.toString()).toBe('boolean');
+    expect(e.box(['Less', 'q', 2]).type.toString()).toBe('boolean');
     // Otherwise the comparison's own answer: a closed comparison over
     // literals is decided by its type (boolean value types), and an
     // undecided one keeps `boolean`.
@@ -843,13 +840,13 @@ describe('P3 — relational absence: IEEE over NaN, Kleene over Missing (§3.D, 
     expect(e.box(['Less', 'x', 3]).type.toString()).toBe('boolean');
   });
 
-  test('broadcast is per-cell (Kleene Missing / IEEE NaN)', () => {
+  test('broadcast is per-cell (a Missing or a NaN cell is False)', () => {
     const v = ce.box(['Equal', ['List', 1, 'Missing', 3], 1]).evaluate();
     expect(v.operator).toBe('List');
     expect(v.op1.symbol).toBe('True');
-    expect(v.op2.symbol).toBe('Missing');
+    expect(v.op2.symbol).toBe('False');
     expect(v.op3.symbol).toBe('False');
-    // A NaN cell is IEEE (False), not Missing.
+    // A NaN cell is IEEE (False).
     const w = ce.box(['Equal', ['List', 1, 'NaN', 3], 1]).evaluate();
     expect(w.op1.symbol).toBe('True');
     expect(w.op2.symbol).toBe('False');
@@ -907,33 +904,32 @@ describe('P3 — compile discharge (§3.F)', () => {
     expect(e.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
   });
 
-  test('a comparison with an absent numeric operand is absent, and compiles on GPU', () => {
-    // User decision 2026-10-23 (ROADMAP CE-93): a comparison with an absent
-    // operand is absent, in a numeric slot (`number | missing`) too, as the
-    // condition of an `If` reads it. Before, the slot read its absent value
-    // as `NaN` (I6), and `a < 1` was `False` while `If(a < 1, 1, 0)` had no
-    // value. On a GPU target an absent number is `NaN`, so the comparison
-    // still compiles there, guard-free, with the IEEE reading.
+  test('a comparison with an absent numeric operand is False, and compiles on GPU', () => {
+    // User decision 2026-11-02 (two-valued comparisons): a comparison with an
+    // absent operand is `False` (`NotEqual`: `True`), in a numeric slot
+    // (`number | missing`) and in an object slot, and the condition of an
+    // `If` reads it the same way. From 2026-10-23 (ROADMAP CE-93) to
+    // 2026-11-02 it was `Missing`. On a GPU target an absent number is
+    // `NaN`, so the comparison compiles there, guard-free, with the IEEE
+    // reading.
     const e = new ComputeEngine();
     e.declare('a', 'number | missing');
     e.declare('b', 'number | missing');
     e.declare('s', 'string | missing');
 
-    expect(e.box(['Equal', 'a', 'b']).type.toString()).toBe(
-      'boolean | missing'
-    );
-    expect(e.box(['Less', 'a', 1]).type.toString()).toBe('boolean | missing');
+    expect(e.box(['Equal', 'a', 'b']).type.toString()).toBe('boolean');
+    expect(e.box(['Less', 'a', 1]).type.toString()).toBe('boolean');
     expect(e.box(['Equal', 's', { str: 'x' }]).type.toString()).toBe(
-      'boolean | missing'
+      'boolean'
     );
 
     e.assign('a', e.Missing);
-    expect(e.box(['Equal', 'a', 1]).evaluate().symbol).toBe('Missing');
-    expect(e.box(['NotEqual', 'a', 1]).evaluate().symbol).toBe('Missing');
-    expect(e.box(['Less', 'a', 1]).evaluate().symbol).toBe('Missing');
+    expect(e.box(['Equal', 'a', 1]).evaluate().symbol).toBe('False');
+    expect(e.box(['NotEqual', 'a', 1]).evaluate().symbol).toBe('True');
+    expect(e.box(['Less', 'a', 1]).evaluate().symbol).toBe('False');
     e.assign('s', e.Missing);
     expect(e.box(['Equal', 's', { str: 'x' }]).evaluate().symbol).toBe(
-      'Missing'
+      'False'
     );
 
     // GPU: compiles guard-free.
@@ -1026,26 +1022,27 @@ describe('P3 — compile discharge (§3.F)', () => {
   });
 });
 
-describe('P3 — absent If/Which condition is a catchable error expression (resolved 2026-07-24)', () => {
-  test('a scalar Missing condition yields an error EXPRESSION, not a throw', () => {
-    // R's `if (NA)` stance, but catchable: absence is a runtime data state of
-    // a correct program, so it must not crash the host's .evaluate().
+// An absent condition of `If`/`Which` is `False` (user decision of
+// 2026-11-02, two-valued comparisons), as in Desmos, where `\{u<1:5,7\}` is
+// 7 when `u` is undefined. From 2026-07-24 to 2026-11-02 it was a catchable
+// error expression (the "absent-condition error").
+describe('P3 — an absent If/Which condition is False', () => {
+  test('a scalar Missing condition takes the else arm', () => {
     const r = ce.box(['If', 'Missing', 1, 2]).evaluate();
-    expect(r.operator).toBe('Error');
-    expect(r.toString()).toMatch(/absent/);
+    expect(r.re).toBe(2);
   });
 
-  test('reachable from ordinary data: an object-domain Kleene comparison as condition', () => {
+  test('from ordinary data: an object-domain comparison as condition', () => {
     const e = new ComputeEngine();
     e.declare('s', 'string | missing');
     e.assign('s', e.Missing);
     const r = e.box(['If', ['Equal', 's', { str: 'a' }], 1, 2]).evaluate();
-    expect(r.operator).toBe('Error');
+    expect(r.re).toBe(2);
   });
 
-  test('an absent Which guard errors — it cannot fall through (that would decide the undecidable)', () => {
+  test('an absent Which guard falls through to the next clause', () => {
     const r = ce.box(['Which', 'Missing', 1, 'True', 2]).evaluate();
-    expect(r.operator).toBe('Error');
+    expect(r.re).toBe(2);
   });
 
   test('discharge restores branching', () => {

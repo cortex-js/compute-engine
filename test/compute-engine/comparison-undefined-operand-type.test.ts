@@ -1,11 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
-// The comparisons read an `Undefined` operand as an absent operand: the value
-// of `Less(Undefined, 3)` is `Missing`, as for `Less(Missing, 3)`. The type
-// handlers read the operand TYPE, and the type of `Undefined` is `unknown`,
-// which has no `missing` arm, so the static type was `boolean` and excluded
-// the value. The type handlers now read the `Undefined` symbol itself, and
-// the type is `boolean | missing` (user decision of 2026-10-17).
+// The comparisons read an `Undefined` operand as an absent operand, as for
+// `Missing`. A comparison is two-valued (user decision of 2026-11-02,
+// two-valued comparisons): an absent operand makes it `False` (`NotEqual`:
+// `True`), and its type is `boolean`. The type handlers read the
+// `Undefined` symbol itself, so that no value type (`true`, `false`) is
+// read for it. From 2026-10-17 to 2026-11-02 the value was `Missing` and the
+// type `boolean | missing`.
 //
 // Boolean contexts use UPPERCASE symbols: evaluating a symbol as a boolean
 // operand retypes it `boolean` for the engine's lifetime.
@@ -32,13 +33,13 @@ describe('A COMPARISON WITH AN UNDEFINED OPERAND', () => {
       cases.push([head, args]);
 
   test.each(cases)(
-    '%s%j is typed boolean | missing and evaluates to Missing',
+    '%s%j is typed boolean and evaluates to False (NotEqual: True)',
     (head, args) => {
       const expr = ce.box([head, ...args]);
       expect(expr.isValid).toBe(true);
-      expect(expr.type.toString()).toBe('boolean | missing');
+      expect(expr.type.toString()).toBe('boolean');
       const value = expr.evaluate();
-      expect(value.json).toBe('Missing');
+      expect(value.json).toBe(head === 'NotEqual' ? 'True' : 'False');
       expect(value.type.matches(expr.type)).toBe(true);
     }
   );
@@ -53,13 +54,13 @@ describe('A COMPARISON WITH AN UNDEFINED OPERAND', () => {
       NotEqual: '\\operatorname{Undefined} \\ne 3',
     }[head]!;
     const expr = ce.parse(latex);
-    expect(expr.type.toString()).toBe('boolean | missing');
-    expect(expr.evaluate().json).toBe('Missing');
+    expect(expr.type.toString()).toBe('boolean');
+    expect(expr.evaluate().json).toBe(head === 'NotEqual' ? 'True' : 'False');
   });
 
-  test('a Missing operand keeps the type missing', () => {
+  test('a Missing operand gives the type boolean', () => {
     for (const head of HEADS)
-      expect(ce.box([head, 'Missing', 3]).type.toString()).toBe('missing');
+      expect(ce.box([head, 'Missing', 3]).type.toString()).toBe('boolean');
   });
 
   test('a comparison without an absent operand keeps its type', () => {
@@ -78,7 +79,8 @@ describe('NOTGREATER EVALUATES', () => {
     [['NotGreater', 1, 3], 'True'],
     [['NotGreater', 3, 1], 'False'],
     [['NotGreater', 3, 3], 'True'],
-    [['NotGreater', 'Undefined', 3], 'Missing'],
+    // `Not(Undefined > 3)` is `Not(False)`.
+    [['NotGreater', 'Undefined', 3], 'True'],
   ])('%j evaluates to %s', (expr, expected) => {
     expect(ce.box(expr).evaluate().json).toBe(expected);
   });

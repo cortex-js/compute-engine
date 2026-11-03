@@ -458,10 +458,12 @@ describe('The value of an element-wise If or Which matches its static type', () 
     expect(expr.type.toString()).toBe('vector<2>');
     expect(value.nops).toBe(2);
     expect(value.ops![0].toString()).toBe('1');
-    expect(value.ops![1].operator).toBe('Error');
-    expectErrorsKept(value, 1);
+    // An absent condition is `False` (user decision of 2026-11-02,
+    // two-valued comparisons): no clause selects the second position, which
+    // is `NaN`. Before, it was an absent-condition error cell.
+    expect(value.ops![1].isNaN).toBe(true);
     // Before: list<unknown>, which did not match vector<2>
-    expect(value.type.toString()).toBe('vector<integer^2>');
+    expect(value.type.toString()).toBe('list<integer | nan^2>');
     expect(value.type.matches(expr.type)).toBe(true);
   });
 });

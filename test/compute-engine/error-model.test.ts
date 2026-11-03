@@ -630,10 +630,13 @@ describe('ERROR-MODEL §3 — NaN propagates by IEEE', () => {
   });
 });
 
-describe('ERROR-MODEL §3 — Missing propagates by Kleene, and is absorbed into NaN in numeric slots', () => {
+describe('ERROR-MODEL §3 — a comparison with Missing is False, and Missing is absorbed into NaN in numeric slots', () => {
   const ce = new ComputeEngine();
 
-  describe('Less(Missing, 1) → Missing', () => {
+  // A comparison is two-valued (user decision of 2026-11-02, two-valued
+  // comparisons): an absent operand makes it `False`, as a `NaN` operand
+  // does. From 2026-07-24 to 2026-11-02 it was `Missing` (Kleene).
+  describe('Less(Missing, 1) → False', () => {
     for (const { route, expr } of routes(
       ce,
       ['Less', 'Missing', 1],
@@ -641,8 +644,8 @@ describe('ERROR-MODEL §3 — Missing propagates by Kleene, and is absorbed into
       'Less',
       () => [ce.box('Missing'), ce.box(1)]
     )) {
-      test(`[${route}] a comparison against an absent datum is absent, never False`, () => {
-        expect(isMissingValue(expr.evaluate())).toBe(true);
+      test(`[${route}] a comparison against an absent datum is False`, () => {
+        expect(symbolName(expr.evaluate())).toBe('False');
       });
     }
   });
@@ -2630,9 +2633,10 @@ describe('ERROR-MODEL §1 — an UNDECIDABLE condition is inert, never a host th
         .evaluate()
         .isSame(2)
     ).toBe(true);
-    // An ABSENT condition is a different channel: `Missing` is a decided data
-    // state that can never resolve, so it is a catchable Error, not inertness.
-    expect(isErrorValue(ce.box(['If', 'Missing', 1, 2]).evaluate())).toBe(true);
+    // An ABSENT condition is not inert either: it is read as `False` (user
+    // decision of 2026-11-02, two-valued comparisons), so the else arm is
+    // taken. Before, it was a catchable Error.
+    expect(ce.box(['If', 'Missing', 1, 2]).evaluate().isSame(2)).toBe(true);
   });
 });
 

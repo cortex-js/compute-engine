@@ -786,7 +786,7 @@ export function classifyLocalReads(
   // it runs selects no branch, as in the interpreter: the statement then
   // assigns nothing. The analysis is the one the targets use to emit that
   // test (`conditionDecidability`), read as the emitters read it
-  // (`withConditionOperands`, `operandDecidedConjuncts`):
+  // (`withConditionOperands`, `operandPresenceConjuncts`):
   // - a condition decided by construction runs one branch;
   // - a relation can be undecided only through an operand that may be
   //   absent: a `missing` value (`operandMayBeAbsent`). An input that the

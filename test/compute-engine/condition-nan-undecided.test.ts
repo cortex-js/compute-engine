@@ -637,9 +637,11 @@ describe('a compiled branch comparison over an absent or nested value', () => {
     const which = ['Which', ['Greater', 'x', 5], 1];
     // The runner gives the absent value as a plain `empty`.
     expect(run(which)).toEqual({ kind: 'empty' });
-    // The interpreter at a point of the cell: `Missing`.
+    // The interpreter at a point of the cell: the `Which` is `Missing`, and
+    // a comparison with it is `False` (user decision of 2026-11-02,
+    // two-valued comparisons).
     e.assign('x', 0.5);
-    expect(e.box(['Greater', which, 0]).evaluate().symbol).toBe('Missing');
+    expect(e.box(['Greater', which, 0]).evaluate().symbol).toBe('False');
     // A restriction whose condition is false is a numeric undefined value
     // (`NaN`) in the interpreter, so a comparison with it is false.
     expect(
@@ -776,7 +778,9 @@ describe('Tycho row 413 (a): a value with no order makes a comparison false', ()
     ).toBe('True');
   });
 
-  test('NotEqual and Missing keep their reading', () => {
+  test('NotEqual is True, and a Missing operand makes a comparison False', () => {
+    // A `Missing` operand: user decision of 2026-11-02, two-valued
+    // comparisons (before, the comparison was `Missing`).
     expect(ce.box(['NotEqual', ['Divide', 1, 0], 0]).evaluate().symbol).toBe(
       'True'
     );
@@ -784,11 +788,11 @@ describe('Tycho row 413 (a): a value with no order makes a comparison false', ()
       'True'
     );
     expect(ce.box(['Less', 'Missing', 'ImaginaryUnit']).evaluate().symbol).toBe(
-      'Missing'
+      'False'
     );
     expect(
       ce.box(['Equal', 'Missing', ['Divide', 1, 0]]).evaluate().symbol
-    ).toBe('Missing');
+    ).toBe('False');
   });
 
   test('a symbol holding such a value, and the asynchronous route', async () => {
@@ -919,7 +923,7 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
   });
 
   test('a chain stops at a pair with a value with no order', async () => {
-    // `(0 < i) ∧ (i < Missing)` is `False ∧ Missing`, which is `False`.
+    // `(0 < i) ∧ (i < Missing)` is `False ∧ False`, which is `False`.
     expect(
       ce.box(['Less', 0, 'ImaginaryUnit', 'Missing']).evaluate().symbol
     ).toBe('False');
@@ -934,9 +938,9 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
         .box(['Equal', ['Divide', 1, 0], ['Divide', 1, 0], 'Missing'])
         .evaluate().symbol
     ).toBe('False');
-    // A `Missing` in the same pair keeps the Kleene `Missing`.
+    // A `Missing` in the same pair makes it `False` too.
     expect(ce.box(['Less', 'ImaginaryUnit', 'Missing']).evaluate().symbol).toBe(
-      'Missing'
+      'False'
     );
     // The operands after the pair are not evaluated.
     const e = new ComputeEngine();

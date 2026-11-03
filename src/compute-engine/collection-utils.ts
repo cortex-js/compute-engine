@@ -2450,6 +2450,26 @@ export function pointArity(
 }
 
 /**
+ * `'boolean'` when every value of type `t` is a boolean (a relation, a
+ * region of a plot), `'color'` when every value is a colour, `undefined`
+ * otherwise. A position of a list that a selection or a restriction by a
+ * list of conditions does not select holds `False` for a boolean and
+ * `Rgb(NaN, NaN, NaN)` for a colour, not `Missing`. The interpreter
+ * (`unmatchedCell()` in `library/control-structures.ts`) and the compiler
+ * (`unmatchedCellLiteral()` in `compilation/compile-absence.ts`) both read
+ * the kind here, so they give the same cell. A type with no value (`never`,
+ * `nothing`) is neither.
+ */
+export function unmatchedCellKind(
+  t: Readonly<Type>
+): 'boolean' | 'color' | undefined {
+  if (t === 'never' || t === 'nothing') return undefined;
+  if (isSubtype(t as Type, 'boolean')) return 'boolean';
+  if (isSubtype(t as Type, 'color')) return 'color';
+  return undefined;
+}
+
+/**
  * The type `t` with each `range` element of a collection replaced by
  * `list<integer>`, at any depth; `t` itself (the same object) when it has no
  * such element. A `range` is a list of integers, but the name does not show

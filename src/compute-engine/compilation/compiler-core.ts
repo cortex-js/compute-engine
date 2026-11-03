@@ -38,6 +38,7 @@ import {
   isTextAtom,
   isTuple,
   isTupleWithListCoordinate,
+  unmatchedCellKind,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -829,6 +830,27 @@ function isErrorForEveryValue(
   );
 }
 
+/**
+ * True for a value-form single-branch `If(c, r)` whose arm `r` is a boolean
+ * (`unmatchedCellKind()`) and whose condition `c` is a scalar (its type
+ * cannot hold a list). Its value is `False` where `c` fails (`maskedValue()`
+ * in `library/control-structures.ts`), so it compiles as
+ * `If(c, r, False)`.
+ */
+function isBooleanScalarRestriction(
+  h: string,
+  args: ReadonlyArray<Expression>
+): boolean {
+  return (
+    h === 'If' &&
+    args.length === 2 &&
+    !isStatementArm(args[1]) &&
+    unmatchedCellKind(args[1].type.type) === 'boolean' &&
+    !args[0].type.matches('collection<any>') &&
+    !mayBeCollectionCondition(args[0].type.type)
+  );
+}
+
 function compileExpression(
   expr: Expression,
   target: CompileTarget<Expression>,
@@ -1034,8 +1056,13 @@ function compileExpression(
     // A single-branch `If(c, e)` (the parse of the restriction `e\{c\}`) is
     // typed as its arm `e`, with no `missing` arm, but its value is absent
     // where `c` fails, so the arm is added here.
+    // A restriction of a boolean by a scalar condition is `False` where
+    // the condition fails, not absent (`isBooleanScalarRestriction`).
     const t: Type =
-      isFunction(expr, 'If') && expr.nops === 2 && !isStatementArm(expr.op2)
+      isFunction(expr, 'If') &&
+      expr.nops === 2 &&
+      !isStatementArm(expr.op2) &&
+      !isBooleanScalarRestriction('If', expr.ops)
         ? { kind: 'union', types: [compilationType(expr), 'missing'] }
         : compilationType(expr);
     if (typeContainsMissing(t)) {
@@ -3972,6 +3999,23 @@ export function compileExpr(
     elementwiseMaskRank([args[0].type.type]) === 1
   )
     return compileExprRestriction([args[1], args[0]], target);
+  // A restriction of a boolean (a relation, a region of a plot) by a scalar
+  // condition, `If(c, r)`, is `False` where `c` fails, as in the
+  // interpreter (`maskedValue()`, `library/control-structures.ts`): the
+  // logic is two-valued, so the absent boolean is `False` (user decision
+  // 2026-11-02, two-valued comparisons). It compiles as `If(c, r, False)`,
+  // a plain boolean on every target, the GPU targets included, which have
+  // no value for an absent boolean. The node is not passed on: its operand
+  // indices do not name the synthesized `False`.
+  if (isBooleanScalarRestriction(h, args))
+    return compileExprIf(
+      engine,
+      h,
+      [args[0], args[1], engine.False],
+      target,
+      undefined,
+      'If'
+    )!;
   const selectionHead =
     h === 'If' && args.length === 2 && !isStatementArm(args[1]) ? 'Which' : h;
   if (h === 'If' && args.length === 2 && selectionHead === 'If')

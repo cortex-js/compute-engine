@@ -218,15 +218,20 @@ describe('Rule C: search is structural', () => {
     // `NaN = NaN` is IEEE `False`; `NaN ∈ [NaN]` is structural `True`.
     expect(value(['Equal', 'NaN', 'NaN'])).toBe('"False"');
     expect(value(['Contains', L('NaN'), 'NaN'])).toBe('"True"');
-    // `Missing = Missing` is Kleene `Missing`; `Missing ∈ [Missing]` is `True`.
-    expect(value(['Equal', 'Missing', 'Missing'])).toBe('"Missing"');
+    // `Missing = Missing` is `False`, as `NaN = NaN` is (user decision of
+    // 2026-11-02, two-valued comparisons); `Missing ∈ [Missing]` is `True`.
+    expect(value(['Equal', 'Missing', 'Missing'])).toBe('"False"');
     expect(value(['Contains', L('Missing'), 'Missing'])).toBe('"True"');
-    // Whole-collection equality stays Kleene (ruling of 2026-09-21).
-    expect(value(['Equal', L(1, 'Missing'), L(1, 5)])).toBe('"Missing"');
+    // A whole-collection equality with an absent cell is `False` too.
+    expect(value(['Equal', L(1, 'Missing'), L(1, 5)])).toBe('"False"');
   });
 });
 
-describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () => {
+// The quantifiers `Any` and `All` read an absent answer as `False`, as `Or`
+// and `And` do (user decision of 2026-11-02, two-valued comparisons). From
+// 2026-09-26 to 2026-11-02 they were Kleene: `Any([1, Missing], x ↦ x > 2)`
+// was `Missing`.
+describe('Rule D: selection keeps a decided True, quantifiers are two-valued', () => {
   test.each([
     // Selection: a `Missing` predicate answer is "not selected".
     [['Filter', L(1, 'Missing', 3), gt0], '[1,3]'],
@@ -242,21 +247,20 @@ describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () =>
     [['Find', L('Missing', 3), gt0], '3'],
     [['Find', L('Missing'), gt0], '"Nothing"'],
     [['Partition', L(1, 'Missing', -1), gt0], '[[1],["Missing",-1]]'],
-    // Quantifiers: Kleene, the table of `Or` and `And`.
+    // Quantifiers: the table of `Or` and `And`, an absent answer `False`.
     [['Any', L(1, 'Missing', 3), gt2], '"True"'],
-    [['Any', L(1, 'Missing'), gt2], '"Missing"'],
-    [['Any', L('Undefined'), gt2], '"Missing"'],
-    [['All', L(1, 'Missing', 3), gt0], '"Missing"'],
+    [['Any', L(1, 'Missing'), gt2], '"False"'],
+    [['Any', L('Undefined'), gt2], '"False"'],
+    [['All', L(1, 'Missing', 3), gt0], '"False"'],
     [['All', L(1, 'Missing', -1), gt0], '"False"'],
     [['Any', L()], '"False"'],
     [['All', L()], '"True"'],
     // Without a predicate, the elements are the answers.
-    [['Any', L('False', 'Missing')], '"Missing"'],
+    [['Any', L('False', 'Missing')], '"False"'],
     [['Any', L('True', 'Missing')], '"True"'],
-    [['All', L('True', 'Missing')], '"Missing"'],
+    [['All', L('True', 'Missing')], '"False"'],
     [['All', L('False', 'Missing')], '"False"'],
-    // A `NaN` cell compares `False` by IEEE and never makes a quantifier
-    // undecided.
+    // A `NaN` cell compares `False` by IEEE.
     [['Any', L(1, 'NaN'), gt2], '"False"'],
     [['All', L(1, 'NaN', 3), gt0], '"False"'],
     // A predicate that answers `True` on the marker selects it.
@@ -281,16 +285,16 @@ describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () =>
       parsed(
         '\\operatorname{Any}([1, \\operatorname{Missing}], x \\mapsto x > 2)'
       )
-    ).toBe('"Missing"');
+    ).toBe('"False"');
     expect(
       parsed(
         '\\operatorname{All}([1, \\operatorname{Missing}, 3], x \\mapsto x > 0)'
       )
-    ).toBe('"Missing"');
+    ).toBe('"False"');
   });
 
-  test('a quantifier over cells that can be absent is typed boolean | missing', () => {
-    // The static type must hold the `Missing` answer of Kleene logic.
+  test('a quantifier over cells that can be absent is typed boolean', () => {
+    // An absent answer reads as `False`, so the answer is never `Missing`.
     const ce = new ComputeEngine();
     for (const json of [
       ['Any', L(1, 'Missing'), gt2],
@@ -299,7 +303,7 @@ describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () =>
       ['All', ['Tuple', 1, 'Missing'], gt0],
     ]) {
       const e = ce.box(json as never);
-      expect(e.type.toString()).toBe('boolean | missing');
+      expect(e.type.toString()).toBe('boolean');
       expect(e.evaluate().type.matches(e.type)).toBe(true);
     }
     // No cell can be absent: the answer is a boolean.
@@ -312,11 +316,12 @@ describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () =>
           '\\operatorname{Any}([1, \\operatorname{Missing}], x \\mapsto x > 2)'
         )
         .type.toString()
-    ).toBe('boolean | missing');
+    ).toBe('boolean');
   });
 
   test('a symbolic predicate answer still keeps the quantifier inert', () => {
-    // Inert outranks `Missing`: evidence may still arrive for `n`.
+    // The answer for the absent cell is `False`; the answer for `1` is
+    // held: evidence may still arrive for `n`.
     const ce = new ComputeEngine();
     const e = ce.box([
       'Any',
@@ -327,7 +332,7 @@ describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () =>
     ce.assign('n', 0);
     expect(e.evaluate().toString()).toBe('"True"');
     ce.assign('n', 5);
-    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.evaluate().toString()).toBe('"False"');
   });
 
   test('a genuine non-boolean predicate is still rejected', () => {
@@ -341,6 +346,9 @@ describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () =>
 });
 
 describe('Rule E: an absent collection makes the result absent', () => {
+  // A boolean predicate (`Contains`, `Element`, `Any`, `All`) is `False`
+  // over an absent collection, as a comparison with an absent operand is
+  // (user decision of 2026-11-02, two-valued comparisons).
   test.each([
     [['Length', 'Missing'], 'NaN'],
     [['Length', 'Undefined'], 'NaN'],
@@ -350,12 +358,12 @@ describe('Rule E: an absent collection makes the result absent', () => {
     [['First', 'Missing'], '"Missing"'],
     [['Join', L(1), 'Missing'], '"Missing"'],
     [['Join', L(1), 'Undefined'], '"Missing"'],
-    [['Contains', 'Missing', 3], '"Missing"'],
+    [['Contains', 'Missing', 3], '"False"'],
     [['IndexOf', 'Missing', 3], 'NaN'],
-    [['Element', 3, 'Missing'], '"Missing"'],
+    [['Element', 3, 'Missing'], '"False"'],
     [['Filter', 'Missing', gt0], '"Missing"'],
-    [['Any', 'Missing', gt0], '"Missing"'],
-    [['All', 'Missing', gt0], '"Missing"'],
+    [['Any', 'Missing', gt0], '"False"'],
+    [['All', 'Missing', gt0], '"False"'],
     // `NaN` in a collection slot is a number, not an absent collection.
     [['Join', L(1), 'NaN'], '[1,NaN]'],
   ])('%j', (json, expected) => {

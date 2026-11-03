@@ -4860,13 +4860,6 @@ function pyCallbackArg(
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
-/**
- * Python’s way of asking whether a fragment holds a value a comparison can
- * decide — that is, whether it is not NaN. `x == x` is false for exactly one
- * value in Python, as `x === x` is in JavaScript.
- */
-const PYTHON_DECIDED_NUMBER = (x: string): string => `${x} == ${x}`;
-
 /** `code`, parenthesized unless it is a primary expression
  * (`BaseCompiler.isAtomicSource`), for an operand of a binary operator. */
 const pyOperand = (code: string): string =>
@@ -4898,7 +4891,6 @@ const pythonIsBoolean = (x: string): string =>
  * identifier.
  */
 const PYTHON_CONDITION_DIALECT: ConditionDialect = {
-  decidedNumber: PYTHON_DECIDED_NUMBER,
   and: 'and',
   not: 'not ',
   // `None` is the undecided value. Every three-valued fragment this lowering
@@ -5086,7 +5078,8 @@ function compilePythonBranch(
   // A comparison always produces a real boolean, so whether it could be
   // decided has to be read off its operands. An operand that costs something
   // to compute is bound to a name, which the condition then reads: the
-  // condition contains the operand once and the tests name it twice more.
+  // condition contains the operand once and the presence test names it once
+  // more.
   const { value, bindings } = BaseCompiler.withConditionOperands(
     decidability.test.operands,
     target,

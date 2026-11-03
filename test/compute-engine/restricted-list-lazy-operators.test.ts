@@ -124,7 +124,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     '\\operatorname{ContainsSequence}(L, [3,5])',
     'If(0 < t, "True")',
     '"True"',
-    '"Missing"',
+    '"False"',
   ],
   [
     'StartsWith',
@@ -132,7 +132,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     '\\operatorname{StartsWith}(L, [1])',
     'If(0 < t, "True")',
     '"True"',
-    '"Missing"',
+    '"False"',
   ],
   [
     'EndsWith',
@@ -140,7 +140,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     '\\operatorname{EndsWith}(L, [5])',
     'If(0 < t, "True")',
     '"True"',
-    '"Missing"',
+    '"False"',
   ],
   [
     'ListFrom',

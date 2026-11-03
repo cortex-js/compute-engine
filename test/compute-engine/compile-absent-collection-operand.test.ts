@@ -173,6 +173,13 @@ describe('compiled and interpreted values agree for a row that can be absent', (
     const present = compiled(json, PRESENT);
     expect(present.error).toBeUndefined();
     expect(spell(present.value)).toEqual(interpreted(json, { i: 1 }));
+    // A boolean predicate over an absent operand is `False` in the
+    // interpreter (two-valued comparisons, user decision 2026-11-02), and
+    // the compiled value over an absent operand is not specified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"): the
+    // compiled code gives `Missing` (`undefined`). Only the present row is
+    // compared for these heads.
+    if (['IsEmpty', 'Contains', 'Any'].includes(head as string)) return;
     const absent = compiled(json, ABSENT);
     expect(spell(absent.value)).toEqual(interpreted(json, { i: 7 }));
   });
@@ -454,7 +461,7 @@ describe('interpreter: lazy operators over an operand that can be absent', () =>
     [['Map', F, ['At', 'x', 'i']], ['List', 6, 2, 4], 'Missing'],
     [['Reduce', ['At', 'x', 'i'], 'Add', 0], 6, 'NaN'],
     [['Reduce', ['At', 'x', 'i'], ADD2, 0], 6, 'NaN'],
-    [['Any', ['At', 'x', 'i'], P], 'True', 'Missing'],
+    [['Any', ['At', 'x', 'i'], P], 'True', 'False'],
     [['Scan', ['At', 'x', 'i'], 'Add'], ['List', 3, 4, 6], 'Missing'],
     [['Differences', ['At', 'x', 'i']], ['List', -2, 1], 'Missing'],
     [['Sum', ['Map', F, ['At', 'x', 'i']]], 12, 'NaN'],

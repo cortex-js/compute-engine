@@ -1,25 +1,27 @@
 /**
  * A whole-collection `Equal`/`NotEqual` whose element recursion meets a pair
- * with no answer is UNDECIDED (user ruling of 2026-09-21).
+ * with an absent cell (`Missing`, `Undefined`).
  *
- * The marker is the one the absence contract already uses: `Missing` in the
- * interpreter, `NaN` in compiled code. `NotEqual` answers the SAME marker, so
- * neither operator reports a confident truth it cannot support.
+ * A comparison is two-valued (user decision of 2026-11-02, two-valued
+ * comparisons, `docs/ERROR-MODEL.md`): an absent cell is undefined, as a
+ * `NaN` cell is, so such a pair makes the whole `Equal` `False` and the
+ * whole `NotEqual` `True`. As a branch condition, the comparison takes its
+ * arm like any other boolean.
  *
- * What the ruling changed:
- *  - `Equal([1, Missing], [1, Missing])` answered `True` and compiled to
- *    `false`; it now answers the marker on both lanes.
- *  - `Equal([1, Missing], [1, 2])` stayed unevaluated in the interpreter and
- *    compiled to `false`; it now answers the marker on both lanes.
- *  - An undecided pair wins over a decidedly unequal one:
- *    `Equal([1, Missing, 3], [2, Missing, 3])` is the marker, not `False`.
+ * From the user ruling of 2026-09-21 to 2026-11-02 such a comparison was
+ * UNDECIDED: the interpreter answered `Missing`, the branch took no arm.
  *
- * What it left alone:
+ * The compiled JavaScript kernel still answers `NaN` for such a comparison
+ * (`eqTensor`, `compilation/javascript-runtime.ts`). A compiled value
+ * computed from an absent value is not specified
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"), so the compiled
+ * assertions below record the current output and are not a contract.
+ *
+ * What did not change:
  *  - two collections whose element pairs are ALL decided keep their answer;
- *  - a length mismatch is `False`, because no value an absent cell could hold
- *    makes 2 elements equal 3;
- *  - the ELEMENT-WISE shape (a collection against a scalar) still marks
- *    exactly the absent positions;
+ *  - a length mismatch is `False`;
+ *  - the ELEMENT-WISE shape (a collection against a scalar) compares each
+ *    cell: the absent cells are `False`;
  *  - a pair left undecided by FREE VARIABLES is not absence: `[x] = [y]`
  *    stays inert, exactly as the scalar `x = y` does.
  */
@@ -51,68 +53,69 @@ function js(ce: ComputeEngine, expr: unknown): unknown {
 }
 
 describe('whole-collection Equal with an absent cell', () => {
-  test('two absent cells at the same position are undecided', () => {
+  test('two absent cells at the same position make it False', () => {
     const ce = engine();
     const e = ['Equal', ['List', 1, 'Missing'], ['List', 1, 'Missing']];
-    expect(ev(ce, e)).toBe('"Missing"');
-    expect(nv(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('"False"');
+    expect(nv(ce, e)).toBe('"False"');
     expect(js(ce, e)).toBeNaN();
   });
 
-  test('an absent cell against a present one is undecided', () => {
+  test('an absent cell against a present one makes it False', () => {
     const ce = engine();
     const e = ['Equal', ['List', 1, 'Missing'], ['List', 1, 2]];
-    expect(ev(ce, e)).toBe('"Missing"');
-    expect(nv(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('"False"');
+    expect(nv(ce, e)).toBe('"False"');
     expect(js(ce, e)).toBeNaN();
   });
 
-  test('an undecided pair wins over a decidedly unequal pair', () => {
+  test('a pair with an absent cell is False, as an unequal pair is', () => {
     const ce = engine();
     const e = ['Equal', ['List', 1, 'Missing', 3], ['List', 2, 'Missing', 3]];
-    expect(ev(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('"False"');
     expect(js(ce, e)).toBeNaN();
   });
 
   test('`Undefined` is an absent cell too', () => {
     const ce = engine();
     const e = ['Equal', ['List', 1, 'Undefined'], ['List', 1, 'Undefined']];
-    expect(ev(ce, e)).toBe('"Missing"');
-    expect(js(ce, e)).toBeNaN();
+    expect(ev(ce, e)).toBe('"False"');
+    // The compiler folds this constant comparison with the interpreter.
+    expect(js(ce, e)).toBe(false);
   });
 
-  test('a nested collection carries the marker up', () => {
+  test('a nested collection with an absent cell is False', () => {
     const ce = engine();
     const e = [
       'Equal',
       ['List', ['List', 1, 'Missing']],
       ['List', ['List', 1, 2]],
     ];
-    expect(ev(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('"False"');
     expect(js(ce, e)).toBeNaN();
   });
 
-  test('an absent cell opposite a nested collection is undecided', () => {
+  test('an absent cell opposite a nested collection is False', () => {
     const ce = engine();
     const e = ['Equal', ['List', ['List', 1, 2]], ['List', 'Missing']];
-    expect(ev(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('"False"');
     expect(js(ce, e)).toBeNaN();
   });
 });
 
 describe('whole-collection NotEqual with an absent cell', () => {
-  test('the same marker, never a confident `True`', () => {
+  test('the negation of Equal: True', () => {
     const ce = engine();
     const e = ['NotEqual', ['List', 1, 'Missing'], ['List', 1, 'Missing']];
-    expect(ev(ce, e)).toBe('"Missing"');
-    expect(nv(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('"True"');
+    expect(nv(ce, e)).toBe('"True"');
     expect(js(ce, e)).toBeNaN();
   });
 
   test('an absent cell against a present one', () => {
     const ce = engine();
     const e = ['NotEqual', ['List', 1, 'Missing'], ['List', 1, 2]];
-    expect(ev(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('"True"');
     expect(js(ce, e)).toBeNaN();
   });
 });
@@ -167,12 +170,13 @@ describe('collections whose element pairs are all decided', () => {
   });
 });
 
-describe('the element-wise shape is unchanged', () => {
-  test('a collection against a scalar marks exactly the absent positions', () => {
+describe('the element-wise shape', () => {
+  test('a collection against a scalar is False at the absent positions', () => {
     const ce = engine();
     const e = ['Equal', ['List', 1, 'Missing'], 1];
-    expect(ev(ce, e)).toBe('["True","Missing"]');
-    expect(nv(ce, e)).toBe('["True","Missing"]');
+    expect(ev(ce, e)).toBe('["True","False"]');
+    expect(nv(ce, e)).toBe('["True","False"]');
+    // The compiled cell is `NaN`: not specified (see the header).
     const compiled = js(ce, e) as unknown[];
     expect(compiled).toHaveLength(2);
     expect(compiled[0]).toBe(true);
@@ -180,8 +184,10 @@ describe('the element-wise shape is unchanged', () => {
   });
 });
 
-describe('the marker as a branch condition', () => {
-  test('`Which` takes no arm', () => {
+// In each test below, the compiled value is `NaN` where the interpreter
+// takes an arm: the compiled value is not specified (see the header).
+describe('a comparison with an absent cell as a branch condition', () => {
+  test('`Which` takes the default arm', () => {
     const ce = engine();
     const e = [
       'Which',
@@ -190,13 +196,12 @@ describe('the marker as a branch condition', () => {
       'True',
       0,
     ];
-    expect(ev(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('0');
     expect(js(ce, e)).toBeNaN();
-    // A relation with a NaN operand is decided, and the absent-cell marker
-    // of a whole-collection comparison (ruling of 2026-09-21) is not: a
-    // `NotEqual` with a NaN operand is `True` and takes its arm since the user
-    // decision of 2026-10-23, an `Equal` with a NaN operand is `False` and
-    // takes the default arm since the user decision of 2026-10-20.
+    // A relation with a NaN operand is decided the same way: a `NotEqual`
+    // with a NaN operand is `True` and takes its arm (user decision of
+    // 2026-10-23), an `Equal` with a NaN operand is `False` and takes the
+    // default arm (user decision of 2026-10-20).
     const nan = ['Which', ['NotEqual', 'NaN', 5], 1, 'True', 0];
     expect(ev(ce, nan)).toBe('1');
     expect(js(ce, nan)).toBe(1);
@@ -205,7 +210,7 @@ describe('the marker as a branch condition', () => {
     expect(js(ce, eq)).toBe(0);
   });
 
-  test('`If` takes no arm either', () => {
+  test('`If` over `NotEqual` takes the then arm', () => {
     const ce = engine();
     const e = [
       'If',
@@ -213,11 +218,11 @@ describe('the marker as a branch condition', () => {
       1,
       0,
     ];
-    expect(ev(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('1');
     expect(js(ce, e)).toBeNaN();
   });
 
-  test('`Not` of the marker takes no arm either', () => {
+  test('`Not` of the comparison is True', () => {
     const ce = engine();
     const e = [
       'Which',
@@ -226,20 +231,19 @@ describe('the marker as a branch condition', () => {
       'True',
       0,
     ];
-    expect(ev(ce, e)).toBe('"Missing"');
+    expect(ev(ce, e)).toBe('1');
     expect(js(ce, e)).toBeNaN();
   });
 
-  test('a connective folds the marker by the Kleene table', () => {
+  test('a connective reads the comparison as False', () => {
     const ce = engine();
     const marked = ['Equal', ['List', 1, 'Missing'], ['List', 1, 'Missing']];
     const which = (cond: unknown) => ['Which', cond, 1, 'True', 0];
-    // Nothing settles the connective, so no arm is taken.
-    expect(ev(ce, which(['And', marked, 'True']))).toBe('"Missing"');
+    // The comparison is `False`: `And` is `False`, `Or` is its other operand.
+    expect(ev(ce, which(['And', marked, 'True']))).toBe('0');
     expect(js(ce, which(['And', marked, 'True']))).toBeNaN();
-    expect(ev(ce, which(['Or', marked, 'False']))).toBe('"Missing"');
+    expect(ev(ce, which(['Or', marked, 'False']))).toBe('0');
     expect(js(ce, which(['Or', marked, 'False']))).toBeNaN();
-    // A settling sibling decides the connective whatever the marker says.
     expect(ev(ce, which(['And', marked, 'False']))).toBe('0');
     expect(js(ce, which(['And', marked, 'False']))).toBe(0);
     expect(ev(ce, which(['Or', marked, 'True']))).toBe('1');
@@ -251,13 +255,15 @@ describe('the marker as a branch condition', () => {
     // equality emitter does (`CompileTarget.collectionEqualityOperand`): one
     // operand that MAY be an array at run time — an opaque `-> unknown`
     // application, a scalar-or-list union — is enough to send the pair to
-    // `_SYS.eq`, whose answer is the marker. Read off the operands instead,
-    // the array `h(x)` tested as a decided value and the marker's falsiness
-    // took the else arm.
+    // `_SYS.eq`, whose answer is the marker `NaN`. Read off the operands
+    // instead, the array `h(x)` tested as a decided value and the marker's
+    // falsiness took the else arm.
     //
     // The statement form of `If` is where this shows: the expression forms
     // go through the element-wise selection helper, which reads the marker
-    // correctly already.
+    // correctly already. The compiled program takes no arm for an absent
+    // cell, where the interpreter takes the else arm: the compiled value is
+    // not specified there (see the header).
     const loop = (cond: unknown) => [
       'Block',
       ['Declare', 'y', 'number'],
@@ -306,7 +312,7 @@ describe('the marker as a branch condition', () => {
     expect(jsLoop(withUnion, { u: [1, 3], L: [1, 2] })).toBe(2);
     expect(jsLoop(withUnion, { u: [1, 2], L: [1, 2] })).toBe(1);
     // The interpreter's own answers, with the values assigned instead of
-    // supplied at run time: no arm, else arm, then arm.
+    // supplied at run time: else arm, else arm, then arm.
     const interpreted = (u: unknown, L: unknown): string => {
       const ce = engine();
       ce.assign('u', ce.box(u as any));
@@ -316,7 +322,7 @@ describe('the marker as a branch condition', () => {
         .evaluate()
         .toString();
     };
-    expect(interpreted(['List', 1, 'Missing'], ['List', 1, 2])).toBe('0');
+    expect(interpreted(['List', 1, 'Missing'], ['List', 1, 2])).toBe('2');
     expect(interpreted(['List', 1, 3], ['List', 1, 2])).toBe('2');
     expect(interpreted(['List', 1, 2], ['List', 1, 2])).toBe('1');
   });

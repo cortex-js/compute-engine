@@ -883,10 +883,12 @@ describe('PYTHON TARGET', () => {
       // `Equal` is false, a `NotEqual` is true (`nan != 0` is `True` in
       // Python, as IEEE answers), so neither takes a test. Only an ABSENT
       // operand leaves a relation undecided: a symbol declared
-      // `number | missing`, whose absent value is `None` or NaN, the numeric
-      // spelling of the same marker. There is no Python execution harness in
-      // this suite, so the pins are on the emitted SOURCE; its behavior was
-      // checked by running the emitted shapes under CPython.
+      // `number | missing` whose value is `None`. Its NaN value is a present
+      // value and decides the relation (two-valued comparisons, user decision
+      // 2026-11-02), so the test is for `None` only. There is no Python
+      // execution harness in this suite, so the pins are on the emitted
+      // SOURCE; its behavior was checked by running the emitted shapes under
+      // CPython.
       const e = new ComputeEngine();
       e.declare('x', 'number');
       e.declare('m', 'number | missing');
@@ -899,7 +901,7 @@ describe('PYTHON TARGET', () => {
       );
       expect(code(['If', ['Greater', 'm', 0], 1, -1])).toBe(
         '(((1) if (0 < m) ' +
-          "else (-1)) if (not (m is None) and m == m) else float('nan'))"
+          "else (-1)) if (not (m is None)) else float('nan'))"
       );
       // A costly operand is computed ONCE.
       const sin = code(['If', ['NotEqual', ['Sin', 'x'], 0], 1, -1]);
@@ -942,7 +944,7 @@ describe('PYTHON TARGET', () => {
       ).toBe('((1) if (not ((x) != (0))) else (2))');
       expect(
         python.compile(e.box(['If', ['Not', ['Greater', 'm', 0]], 1, 2])).code
-      ).toContain("if (not (m is None) and m == m) else float('nan'))");
+      ).toContain("if (not (m is None)) else float('nan'))");
       expect(
         python.compile(e.box(['If', ['Not', ['Greater', 'x', 0]], 1, 2])).code
       ).toBe('((1) if (not (0 < x)) else (2))');
@@ -987,7 +989,7 @@ describe('PYTHON TARGET', () => {
           '(lambda _tv2: (_tv2 if _tv1 is not None and _tv1 else ' +
           '(False if _tv2 is not None and not _tv2 else None)))' +
           '((x < 2))))(((0 < m) ' +
-          'if not (m is None) and m == m else None)))'
+          'if not (m is None) else None)))'
       );
       // A `NotEqual` with a NaN operand is decided too (user decision
       // 2026-10-23): the plain conditional.
@@ -2017,8 +2019,9 @@ describe('PYTHON TARGET', () => {
         ] as any);
         return python.compileFunction(expr, 'f', ['x']);
       };
-      // `not (x is None) and x == x` is the decidedness test of an operand
-      // declared `number | missing`: a condition that is not exactly `True`
+      // `not (x is None)` is the decidedness test of an operand declared
+      // `number | missing` (its NaN value decides the relation, two-valued
+      // comparisons, user decision 2026-11-02): a condition that is not exactly `True`
       // or `False` when the function runs takes NEITHER branch, so `r` keeps
       // its initial 0. With an else branch that test guards both arms, so it
       // is a second `if` wrapped around the selection — the shape the
@@ -2030,7 +2033,7 @@ describe('PYTHON TARGET', () => {
       expect(code).toBe(
         'def f(x):\n' +
           '    r = 0\n' +
-          '    if not (x is None) and x == x:\n' +
+          '    if not (x is None):\n' +
           '        if 0 < x:\n' +
           '            r = 1\n' +
           '        else:\n' +

@@ -435,7 +435,7 @@ describe('R4 — the no-match cell follows the type of its position', () => {
   });
 });
 
-describe('R4′ — a Missing condition cell is an error cell at that position', () => {
+describe('R4′ — a Missing condition', () => {
   test('a written Missing cell in a list condition is a static error', () => {
     // Selection rule of 2026-11-02: a condition is a boolean or a flat list
     // of booleans, so a list condition whose type admits a `Missing` cell is
@@ -452,22 +452,23 @@ describe('R4′ — a Missing condition cell is an error cell at that position',
     }
   });
 
-  test('a lifted SCALAR Missing condition is an all-Missing condition row', () => {
+  test('a lifted SCALAR Missing condition is False at every position', () => {
     const ce = engine();
-    // A scalar condition lifts to every position (R1) and absence is
-    // position-local (R4′): the selection already made at position 0 stands,
-    // and only the still-undecided position becomes an error cell — the whole
-    // element-wise result is NOT collapsed to one scalar error.
+    // A scalar condition lifts to every position (R1). An absent condition
+    // is `False` (user decision of 2026-11-02, two-valued comparisons), so
+    // its clause selects no position, and a position that no clause selects
+    // is `NaN` for a number. Before, the position was an absent-condition
+    // error cell.
     const r = ce
       .box(['Which', ['List', 'True', 'False'], 1, 'Missing', 2])
       .evaluate();
     const c = cells(r);
     expect(c).toHaveLength(2);
     expect(c[0]).toBe('1');
-    expect(c[1]).toMatch(/absent/);
+    expect(c[1]).toBe('NaN');
   });
 
-  test('positions absent at a scalar Missing row are not rescued by a later clause', () => {
+  test('a later clause selects the positions that a scalar Missing row leaves', () => {
     const ce = engine();
     const r = ce
       .box([
@@ -481,16 +482,14 @@ describe('R4′ — a Missing condition cell is an error cell at that position',
       ])
       .evaluate();
     const c = cells(r);
-    expect(c[0]).toBe('1');
-    expect(c[1]).toMatch(/absent/);
-    expect(c[2]).toMatch(/absent/);
+    expect(c).toEqual(['1', '3', '3']);
   });
 
-  test('the all-scalar form is unchanged: one scalar error', () => {
+  test('the all-scalar form: no clause is selected', () => {
+    // A scalar `Which` with no selected clause is `Missing`.
     const ce = engine();
     const r = ce.box(['Which', 'Missing', 1]).evaluate();
-    expect(r.operator).toBe('Error');
-    expect(r.toString()).toMatch(/absent/);
+    expect(r.symbol).toBe('Missing');
   });
 });
 
@@ -650,11 +649,13 @@ describe('scalar behavior is unchanged', () => {
     );
   });
 
-  test('scalar Missing condition is the catchable error', () => {
+  test('a scalar Missing condition is False', () => {
+    // User decision of 2026-11-02, two-valued comparisons. Before, it was
+    // the catchable absent-condition error.
     const ce = engine();
-    expect(ce.box(['If', 'Missing', 1, 2]).evaluate().operator).toBe('Error');
-    expect(ce.box(['Which', 'Missing', 1, 'True', 2]).evaluate().operator).toBe(
-      'Error'
+    expect(ce.box(['If', 'Missing', 1, 2]).evaluate().toString()).toBe('2');
+    expect(ce.box(['Which', 'Missing', 1, 'True', 2]).evaluate().toString()).toBe(
+      '2'
     );
   });
 
@@ -1051,14 +1052,15 @@ describe('the selection rule of 2026-11-02: what is a static error', () => {
   test('a boolean arm is accepted, as a relation is', () => {
     // A relation under a list condition is a region of a plot
     // (`1 > 0 where (x+2)^2 + y^2 <= (0..0.2..1.6)^2`); a position that is
-    // not selected is `Missing`, as before the rule.
+    // not selected is `False`: the region is not drawn there (user decision
+    // of 2026-11-02, two-valued comparisons; before, it was `Missing`).
     const ce = engine();
     expect(ce.box(['If', C, 'True', 'False']).evaluate().toString()).toBe(
       '["True","False","True"]'
     );
     const e = ce.box(['If', C, ['Greater', 1, 0]]);
     expect(e.isValid).toBe(true);
-    expect(e.evaluate().toString()).toBe('["True","Missing","True"]');
+    expect(e.evaluate().toString()).toBe('["True","False","True"]');
   });
 
   test('a declared condition whose type cannot be a flat list', () => {
@@ -1392,18 +1394,21 @@ describe('a condition whose type cannot be read (CE-22)', () => {
     );
   });
 
-  test('an undecided whole-collection comparison adds a missing arm', () => {
+  test('a whole-collection comparison with an absent cell is False', () => {
+    // User decision of 2026-11-02, two-valued comparisons. Before, the
+    // comparison was undecided, the selection was `Missing`, and its type
+    // had a `missing` arm.
     const ce = engine();
     ce.assign('L', ce.box(['List', 1, 2]));
     const cond = ['Equal', 'L', ['List', 1, 'Missing']];
-    for (const json of [
-      ['If', cond, 5, 0],
-      ['Which', cond, 5, 'True', 0],
-      ['Which', cond, 5, ['List', 'True', 'False'], 1, 'True', 0],
-    ]) {
+    for (const [json, expected] of [
+      [['If', cond, 5, 0], '0'],
+      [['Which', cond, 5, 'True', 0], '0'],
+      [['Which', cond, 5, ['List', 'True', 'False'], 1, 'True', 0], '[1,0]'],
+    ] as const) {
       const e = ce.box(json as any);
       const v = e.evaluate();
-      expect(v.toString()).toBe('"Missing"');
+      expect(v.toString()).toBe(expected);
       expect(v.type.matches(e.type)).toBe(true);
     }
   });

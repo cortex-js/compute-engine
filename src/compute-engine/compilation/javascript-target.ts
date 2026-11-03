@@ -99,7 +99,11 @@ import { Complex } from 'complex.js';
 import { realPowerReconstructionDigits } from '../numerics/real-power.js';
 import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import { nanPointLiteral, operandMayBeAbsent } from './compile-absence.js';
+import {
+  nanPointLiteral,
+  operandMayBeAbsent,
+  unmatchedCellLiteral,
+} from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { reservedNameSpelling } from './compile-loops.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
@@ -2062,10 +2066,13 @@ function compileJSSelection(
     };
     const nullLiteral = target.absence?.object?.nullLiteral;
     // A position that no clause selects is `NaN` for a number cell, a
-    // point of `NaN` coordinates for a point cell (`nanPointLiteral`), and
-    // the object null for any other cell.
+    // point of `NaN` coordinates for a point cell (`nanPointLiteral`),
+    // `false` for a boolean cell and a colour of `NaN` channels for a
+    // colour cell (`unmatchedCellLiteral`), and the object null for any
+    // other cell.
     const absentOf = (cellTypes: ReadonlyArray<Type>): string =>
       nanPointLiteral(cellTypes) ??
+      unmatchedCellLiteral(cellTypes) ??
       (nullLiteral !== undefined &&
       BaseCompiler.absenceKind(cellTypes, target) === 'object'
         ? nullLiteral

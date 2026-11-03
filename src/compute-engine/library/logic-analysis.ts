@@ -380,14 +380,14 @@ export function getInnermostBody(body: Expression): Expression {
 
 /**
  * Combine the answers of a finite quantifier (`ForAll`, `Exists`) over its
- * domain, by three-valued (Kleene) logic, as `All` and `Any` do over a
- * collection (`quantifierWalk`, `library/collections.ts`):
+ * domain, as `All` and `Any` do over a collection (`quantifierWalk`,
+ * `library/collections.ts`). An absent answer (`Missing`) reads as `False`.
  *
  * - an answer that decides (`False` for `ForAll`, `True` for `Exists`) is the
  *   result wherever it is, and the walk stops there;
  * - otherwise, the error of the FIRST answer that failed is the result;
  * - otherwise, when an answer is neither `True` nor `False` (a body with a
- *   free symbol, `x > n`, or an absent value), the result is `undefined` and
+ *   free symbol, `x > n`), the result is `undefined` and
  *   the quantifier stays unevaluated, since a value of the free symbol could
  *   still decide it;
  * - otherwise the result is the answer of a walk that met no decision (`True`
@@ -405,7 +405,10 @@ export function foldQuantifierAnswers(
   let failed: Expression | undefined = undefined;
   let undetermined = false;
   for (const result of answers) {
-    const s = sym(result);
+    // An absent answer (`Missing`, `Undefined`) reads as `False`: the logic
+    // is two-valued (user decision 2026-11-02, two-valued comparisons).
+    const s0 = sym(result);
+    const s = s0 === 'Missing' || s0 === 'Undefined' ? 'False' : s0;
     if (s === decisive) return kind === 'ForAll' ? ce.False : ce.True;
     if (s === definite) continue;
     if (!result.isValid)

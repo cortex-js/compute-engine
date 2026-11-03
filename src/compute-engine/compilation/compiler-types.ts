@@ -132,20 +132,8 @@ export type UnsettledShape = {
 };
 
 /**
- * How a target spells "the numeric fragment `x` holds a value a comparison can
- * DECIDE" — equivalently, "`x` is not this target's NaN".
- *
- * The default is the JavaScript family's `x === x`, which is false for exactly
- * one value. A target whose equality does not have that property, or which
- * spells it differently, passes its own (Python's `x == x`). The fragment
- * arrives already parenthesized when it needs to be.
- */
-export type DecidedNumberTest = (x: TargetSource) => TargetSource;
-
-/**
  * How a target spells the pieces a branch condition's decidedness analysis is
- * built from: whether a numeric fragment holds a value a comparison can
- * decide, the three-valued constants and the tests against them, and the two
+ * built from: the three-valued constants and the tests against them, and the two
  * forms — a conditional expression and a binding of one value to a name — the
  * three-valued lowering of the connectives is assembled out of.
  *
@@ -158,8 +146,6 @@ export type DecidedNumberTest = (x: TargetSource) => TargetSource;
  * rather than an arrow.
  */
 export interface ConditionDialect {
-  /** "`x` holds a value a comparison can DECIDE": `x` is not this target's NaN. */
-  readonly decidedNumber: DecidedNumberTest;
   /** The infix conjunction, between two already-parenthesized fragments. */
   readonly and: string;
   /**

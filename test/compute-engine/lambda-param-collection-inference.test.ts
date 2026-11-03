@@ -215,7 +215,7 @@ describe('nullary block functions sweep stale canonicalization bindings', () => 
   });
 });
 
-describe('Kleene absence in loop conditions', () => {
+describe('absence in loop conditions: an absent operand reads as False', () => {
   test('guarded out-of-range read: And(False, Missing) is False', () => {
     expect(
       run(
@@ -227,9 +227,10 @@ describe('Kleene absence in loop conditions', () => {
     ).toBe('3');
   });
 
-  test('Not(Missing) is Missing', () => {
+  test('Not(Missing) is True', () => {
+    // User decision of 2026-11-02, two-valued comparisons.
     const ce = new ComputeEngine();
-    expect(ce.box(['Not', 'Missing']).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['Not', 'Missing']).evaluate().symbol).toBe('True');
   });
 
   test('And short-circuits False over a possibly-missing operand', () => {

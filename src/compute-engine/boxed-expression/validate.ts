@@ -1977,6 +1977,60 @@ export function isAbsentScalarSymbol(x: Expression): boolean {
 }
 
 /**
+ * The boolean predicates of the collection and set libraries, each with the
+ * value it answers when an operand is absent (`Missing`, `Undefined`, or a
+ * restriction whose condition is false). Such a predicate is two-valued, as a
+ * comparison is: an absent operand makes it `False`, and its negated form
+ * (`NotElement`, `NotSubset`, ...) is `True`, as `NotEqual` is `Not(Equal)`.
+ * `IsEmpty(Missing)` is `False` (an absent value is not an empty collection),
+ * `Element(2, Missing)` is `False` (nothing is a member of an absent value),
+ * and `All(Missing, p)` is `False` (an absent value is not a collection in
+ * which every element holds). User decision 2026-11-02, two-valued
+ * comparisons (`docs/ERROR-MODEL.md`).
+ *
+ * The answer is for an absent COLLECTION (or set) operand only. The value
+ * that `Element` and `NotElement` search for is not covered: an absent value
+ * is an ordinary element to search for, a member where the same marker sits
+ * (user decision 2026-09-26, `SEARCHED_VALUE_POLICY` in
+ * `library/collections.ts`). So `Element(Missing, [1, Missing])` is `True`,
+ * `Element(Missing, Integers)` is `False`, and a membership that the search
+ * cannot decide stays held: `Element(Missing, Set(7))` and
+ * `Element(Undefined, Integers)`.
+ *
+ * The other boolean operators that propagate absence (the number-theory
+ * predicates `IsPrime`, `IsEven`, `Divides`, ..., and `Congruent`) still
+ * answer `Missing`.
+ */
+const ABSENT_PREDICATE_ANSWERS: ReadonlyMap<string, boolean> = new Map([
+  ['Any', false],
+  ['All', false],
+  ['Contains', false],
+  ['ContainsSequence', false],
+  ['StartsWith', false],
+  ['EndsWith', false],
+  ['IsEmpty', false],
+  ['Element', false],
+  ['NotElement', true],
+  ['Subset', false],
+  ['SubsetEqual', false],
+  ['Superset', false],
+  ['SupersetEqual', false],
+  ['NotSubset', true],
+  ['NotSuperset', true],
+  ['NotSupersetEqual', true],
+]);
+
+/**
+ * The boolean that the predicate `operator` answers when an operand is
+ * absent (`true` or `false`), or `undefined` when `operator` is not such a
+ * predicate (`ABSENT_PREDICATE_ANSWERS`): its absent marker is then the one
+ * of its codomain, `NaN` or `Missing`.
+ */
+export function absentPredicateAnswer(operator: string): boolean | undefined {
+  return ABSENT_PREDICATE_ANSWERS.get(operator);
+}
+
+/**
  * The value an operator with missing behavior `propagate` answers when
  * {@link hasAbsentScalarOperand} is true for its operands. The marker speaks
  * the codomain's vocabulary (`docs/ERROR-MODEL.md` §2 rule 4): `NaN` when the
@@ -2006,12 +2060,17 @@ export function isAbsentScalarSymbol(x: Expression): boolean {
  * `Sort(Missing)` is typed `missing`, which strips to `never` as well, and
  * its marker is `Missing`. The arm reads the operator's declared result to
  * tell the two apart.
+ *
+ * A boolean predicate of the collection and set libraries
+ * ({@link absentPredicateAnswer}) answers a boolean, not `Missing`.
  */
 export function absentScalarMarker(
   ce: ComputeEngine,
   expression: Expression | undefined
 ): Expression {
   if (expression === undefined) return ce.NaN;
+  const answer = absentPredicateAnswer(expression.operator);
+  if (answer !== undefined) return answer ? ce.True : ce.False;
   return absentMarkerIsNumeric(
     expression.type.type,
     expression.operatorDefinition?.signature.type

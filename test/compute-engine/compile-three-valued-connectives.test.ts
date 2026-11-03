@@ -40,8 +40,19 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
  * `real | missing` (`absentEngine`) that holds `Missing`: on JavaScript a key
  * of the vars object that holds `undefined`, or is left out, which reads the
  * same. Its absent value (`undefined`, `None`, or NaN, the numeric spelling
- * of the same marker) leaves a relation undecided. The cases where a NaN
+ * The cases where a NaN
  * operand decides a relation read symbols declared `real` (`realEngine`).
+ *
+ * Since the user decision of 2026-11-02 (two-valued comparisons,
+ * `docs/ERROR-MODEL.md`) the INTERPRETER is two-valued: a comparison with an
+ * absent operand is `False`, a connective reads an absent operand as
+ * `False`, and a branch over it takes its arm. The compiled lowering pinned
+ * in this file is still the three-valued one, which takes no arm. The
+ * compiled value computed from an absent value is not specified
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"), so this
+ * difference is allowed. The lowering is to be removed in step 4 of
+ * `docs/plans/2026-11-02-compiler-contraction-plan.md`. The tests compare the
+ * compiled value with the interpreter's only where no operand is absent.
  */
 
 /** `Greater(name, 0)`, the relation these suites build their conditions from. */
@@ -539,9 +550,11 @@ describe('COMPILE three-valued connectives — Python target', () => {
    * absent operand is not specified (`docs/COMPILATION-MODEL.md`, "Caveats
    * of compiled code", the bullet "Everything computed from an absent
    * value, except at a discharge"; R4 of
-   * `docs/plans/2026-11-01-absent-value-contract.md`). */
+   * `docs/plans/2026-11-01-absent-value-contract.md`). A NaN operand is a
+   * present value and decides the comparison (two-valued comparisons, user
+   * decision 2026-11-02), so the leaf tests the operand for `None` only. */
   const neLeaf = (name: string): string =>
-    `((((${name}) != (0))) if not (${name} is None) and ${name} == ${name} else None)`;
+    `((((${name}) != (0))) if not (${name} is None) else None)`;
 
   it('keeps the plain conditional when every leaf is an ordered comparison', () => {
     // A NaN operand decides `x > 0` false (user decision 2026-10-20), and
@@ -793,23 +806,27 @@ describe('COMPILE three-valued connectives — value position', () => {
     values.map(([b, bs]) => [a, as, b, bs] as const)
   );
 
+  // The interpreter is two-valued: its answer is always a boolean. The
+  // compiled value is compared with it only where no operand is absent (see
+  // the header).
   for (const head of ['And', 'Or']) {
     test.each(pairs)(
       `${head}(%s, %s) matches the interpreter`,
       (a, as, b, bs) => {
         const json = [head, 'M', 'N'];
         const expected = interpreted(json, { M: as, N: bs });
-        expect(expected === undefined || typeof expected === 'boolean').toBe(
-          true
-        );
-        expect(js(ce, json).run({ M: a, N: b })).toBe(expected);
+        expect(typeof expected).toBe('boolean');
+        if (a !== undefined && b !== undefined)
+          expect(js(ce, json).run({ M: a, N: b })).toBe(expected);
       }
     );
   }
 
   test.each(values)('Not(%s) matches the interpreter', (a, as) => {
     const json = ['Not', 'M'];
-    expect(js(ce, json).run({ M: a })).toBe(interpreted(json, { M: as }));
+    const expected = interpreted(json, { M: as });
+    expect(typeof expected).toBe('boolean');
+    if (a !== undefined) expect(js(ce, json).run({ M: a })).toBe(expected);
   });
 
   it('a false operand settles an And whose other operand is absent', () => {

@@ -116,6 +116,110 @@ existing exact arithmetic propagation: `Mean([1, Indeterminate])` and
 policies; this does not prescribe a helper name or mechanically broaden
 every absence gate, nor decide field omission or tuple normalization.
 
+### A comparison is two-valued — user decision of 2026-11-02
+
+**Settled, implemented 2026-11-02** (option A of page 3 of
+`docs/plans/2026-11-02-language-axes-options.md`). A comparison is `True`
+or `False`, in the interpreter and in every compiled target. An operand
+that does not decide it makes it `False`: `NaN`, `Indeterminate`, an
+absent value (`Missing`, `Undefined`), a pole, a value with no order.
+`NotEqual` is `Not(Equal)`, so it is `True` there. A connective
+(`And`, `Or`, `Not`, `Xor`, `Equivalent`, `Implies`, `Nand`, `Nor`) and
+a quantifier (`Any`, `All`, `Exists`, `ForAll`) read an absent value as
+`False`. The element-wise form of a comparison is a list of booleans. A
+chain stays the conjunction of its adjacent pairs. A comparison over
+symbols with no value stays held. The condition of an `If` or a `Which`
+reads an absent value as `False`, so the branch takes its next arm: the
+absent-condition error is gone.
+
+This EXTENDS the decision of 2026-10-20 (Tycho ledger rows 411 and 413)
+and its extension of 2026-10-21 to `Missing`, to the connectives and to the
+condition of `If`/`Which`. It does not reverse them: a `NaN` operand
+already made a comparison `False`, and the branch already took its next
+arm.
+
+Under a LIST of conditions, a position that no condition selects holds:
+`NaN` for a number, the `NaN` point for a point (unchanged), `False` for a
+relation (a boolean: the region of a plot is not drawn there), and
+`Rgb(NaN, NaN, NaN)` for a colour. Tycho reads a colour with a channel that
+is not finite as "no colour here", and it drops the whole colour list for a
+`Missing`, `NaN` or `False` cell (Tycho item 189, a corpus witness; the
+other option was to keep `Missing`). A restriction of a relation by a
+SCALAR condition, `If(c, r)`, is `False` where `c` is false. A scalar
+`Which` with no selected clause stays `Missing` (Tycho reads it), and a
+restriction of a number stays `NaN`.
+
+| Input | Before 2026-11-02 | Now |
+| --- | --- | --- |
+| `Missing > 0` | `Missing` | `False` |
+| `Missing \ne 0` | `Missing` | `True` |
+| `Not(Missing > 0)` | `Missing` | `True` |
+| `And(Missing > 0, True)` | `Missing` | `False` |
+| `Or(Missing > 0, True)` | `True` | `True` (unchanged) |
+| `Not(Missing)` | `Missing` | `True` |
+| `If(Missing, 1, 2)` | absent-condition error | `2` |
+| `If(Missing, 1)` | absent-condition error | `NaN` |
+| `Which(Missing, 1, True, 2)` | absent-condition error | `2` |
+| `0 < Missing < 1` | `Missing` | `False` |
+| `Equal([1, Missing], [1, Missing])` | `Missing` | `False` |
+| `Equal([1, Missing], 1)` | `[True, Missing]` | `[True, False]` |
+| `Any([1, Missing], x ↦ x > 2)` | `Missing` | `False` |
+| `Any(Missing, x ↦ x > 2)`, `All(Missing, x ↦ x > 2)` | `Missing` | `False` |
+| `Element(2, Missing)`, `Contains(Missing, 3)`, `IsEmpty(Missing)` | `Missing` | `False` |
+| `NotElement(2, Missing)`, `NotSubset(Missing, {1})` | `Missing` | `True` |
+| `L < 3` with `L: list<integer> \| missing`, its type | `list<boolean> \| missing` | `boolean \| list<boolean>` |
+| a relation cell under a list of conditions, not selected | `Missing` | `False` |
+| a colour cell under a list of conditions, not selected | `Missing` | `Rgb(NaN, NaN, NaN)` |
+| `If(c_2 < 1, 0 < If(c_1 < 1, 1))` with `c_1 = 2`, `c_2 = 0` (corpus row neyret/xhlkk7k9aq) | `Missing` | `False` |
+
+Desmos, measured by Tycho on 2026-11-02, gives the same values:
+`\{u<1:5,7\}` is 7 with `u` undefined; `\{L<2:5,7\}` with
+`L=[1,0/0,3]` is `[5,7,7]`; `5\{u<1\}` is undefined.
+
+What the decision does NOT change: the symbolic three-valued logic of the
+assumptions and of set membership (`common/kleene.ts`, `contains()`), which
+answers "unknown" for a question it cannot decide; the reading of an error
+operand by a connective ("The connectives with a failed operand", §3); and
+the value of an operator that is not a boolean predicate over an absent
+collection (`Reverse(Missing)` is still `Missing`, `Length(Missing)` is
+still `NaN`; a later item of
+`docs/plans/2026-11-02-compiler-contraction-plan.md`).
+
+A boolean predicate of the collection and set libraries is two-valued too:
+an absent operand (`Missing`, `Undefined`, or a restriction whose condition
+is false) makes it `False`, and makes its negated form (`NotElement`,
+`NotSubset`, `NotSuperset`, `NotSupersetEqual`) `True`. The predicates are
+`Any`, `All`, `Contains`, `ContainsSequence`, `StartsWith`, `EndsWith`,
+`IsEmpty`, `Element`, `Subset`, `SubsetEqual`, `Superset`, `SupersetEqual`
+and the negated forms (`absentPredicateAnswer()` in
+`src/compute-engine/boxed-expression/validate.ts`). `All(Missing, p)` is
+`False` because an absent value is not a collection in which every element
+holds. So a predicate over a restricted collection gives one value on every
+route: `Element(2, If(c, L))` is `False` when `c` is false, both when it is
+evaluated again from its held form `If(c, True)` and when it is evaluated
+fresh over `Missing`. The rule covers an absent collection (or set)
+operand only. The value that `Element` and `NotElement` search for is an
+ordinary element (user decision 2026-09-26): `Element(Missing, [1,
+Missing])` is `True`, `Element(Missing, Integers)` is `False`, and a
+membership that the search cannot decide stays held
+(`Element(Missing, Set(7))`, `Element(Undefined, Integers)`). The
+number-theory predicates (`IsPrime(Missing)`, `IsEven`, `Divides`) and
+`Congruent` still answer `Missing`.
+
+The type of a comparison or a connective follows: it has no `missing` arm.
+With `L: list<integer> | missing`, `L < 3` is typed
+`boolean | list<boolean>` (before: `list<boolean> | missing`), and with
+`y: collection | integer | missing`, `y < x` is typed
+`broadcastable<boolean>`.
+
+In compiled code, a value computed from an absent value is still not
+specified (§6, and `docs/COMPILATION-MODEL.md`, "Caveats of compiled
+code"). For example, with `w: real | missing` passed as `undefined`,
+`If(w > 0, 1, 0)` compiles to `NaN` on JavaScript where the interpreter
+gives `0`. A `NaN` value is not an absent value there: with `w = NaN`, the
+compiled comparison is the plain IEEE comparison, `false`, and the compiled
+`If(w > 0, 1, 0)` is `0`, as in the interpreter.
+
 ### An undefined operand makes a comparison false, in a branch too — user decision of 2026-10-20
 
 **Settled, implemented 2026-10-20** (Tycho ledger rows 411 and 413; Desmos
@@ -153,9 +257,10 @@ What the decision does NOT change:
   `javascript` and `python` targets, the same arm as `If(¬(NaN = 0), a, b)`.
   The GPU targets took the then arm before and still do. `interval-js`
   still answers `'maybe'` for `\sqrt{x} \ne 0` over an `empty` operand.
-- **`Missing`** keeps its Kleene reading in the interpreter:
-  `Less(Missing, 1)` is `Missing`, and an `If` on it is the absent-condition
-  error (§3.D). In compiled code a comparison, a connective or a branch
+- **`Missing`** kept its Kleene reading in the interpreter until the
+  user decision of 2026-11-02 (two-valued comparisons, above): `Less(Missing,
+  1)` was `Missing`, and an `If` on it was the absent-condition error
+  (§3.D). Since that decision both are `False`/the else arm. In compiled code a comparison, a connective or a branch
   condition over an absent operand is unspecified (decision of 2026-11-01,
   §6): the `javascript` and `python` targets give the IEEE answer for the
   absent object (`false`), so `If(w > 0, 1, 0)` with `w: real | missing`
@@ -264,7 +369,9 @@ What the extension does NOT change:
 
 - **`≠` (`NotEqual`)**, as in the 2026-10-20 decision: `1/0 ≠ 0` stays
   `True`, and `i ≠ 0` is `True`.
-- **`Missing`** keeps its Kleene reading: `Less(Missing, i)` is `Missing`.
+- **`Missing`** kept its Kleene reading until the user decision of
+  2026-11-02 (two-valued comparisons): `Less(Missing, i)` was `Missing`;
+  it is `False` now.
   A chain is the conjunction of its adjacent pairs, and it stops at the
   first pair that is `False`: `0 < i < Missing` is `(0 < i) ∧ (i <
   Missing)`, which is `False ∧ Missing`, so `False`, and the operands after
@@ -273,15 +380,17 @@ What the extension does NOT change:
   `Missing < 2 < 1` is. A pair with a `NaN` operand is `False` the same way
   (user decision 2026-10-23): `0 < NaN < Missing` and `Missing < 0 < NaN` are
   `False`, on the interpreter and the compiled targets; before, the absent
-  operand won and the chain was `Missing`. `NaN < Missing < 0` stays
-  `Missing`: each of its pairs has the absent operand. A branch over a chain
+  operand won and the chain was `Missing`. `NaN < Missing < 0` was
+  `Missing` until 2026-11-02, because each of its pairs has the absent
+  operand; since the two-valued decision of 2026-11-02 a pair with a
+  `Missing` operand is `False`, so this chain is `False` too. A branch over a chain
   is decided link by link on the compiled targets too: with `x = 1` and `w`
   absent, `If(x < 0 < w, 1, 2)` is `2`, where the compiled code answered
-  `NaN`. One case compiled numeric code cannot tell apart: for an operand
-  declared with a `missing` arm (`w: number | missing`), NaN is also the
-  numeric spelling of the absent value, so a link `0 < w` with `w = NaN` is
-  undecided on the compiled targets, where the interpreter, given the value
-  `NaN`, decides it `False`.
+  `NaN`. A link `0 < w` with `w = NaN` is `False` on the compiled targets
+  too, also for an operand declared with a `missing` arm
+  (`w: number | missing`): the compiled code tests such an operand only for
+  the object null, and the plain comparison decides `NaN` (two-valued
+  comparisons, user decision 2026-11-02).
 
 The comparison stays inert only when no operand has a value with no order
 and every operand that is not a number is a free symbol or an unevaluated
@@ -479,7 +588,9 @@ and the list of switched producers are in
 
 **`Missing` — the position-preserving absent datum.** For non-numeric
 domains, "there is no element there" is answered by the `Missing` symbol
-(type `missing`), with Kleene three-valued comparison semantics. In
+(type `missing`). A comparison with it is `False` (two-valued, user
+decision of 2026-11-02; before it, the comparison was `Missing` by Kleene
+three-valued semantics). In
 numeric domains absence is absorbed into `NaN` instead — deliberately,
 because compile targets are float-only and `NaN` propagates there for
 free, whereas a symbolic marker cannot compile. This is an accepted,
@@ -684,8 +795,9 @@ re-check whenever new evidence settles.
    declared result type: `NaN` when the result type is numeric
    (`Mod(1, 0) → Indeterminate` on the exact route and `NaN` under `.N()`,
    both members of `nan`, §1), `Missing` when it is a settled non-numeric type
-   (carried through comparisons by Kleene semantics, discharged by
-   `IsMissing`/`Coalesce`), the union of the two when it is
+   (a comparison with it is `False` since the user decision of 2026-11-02,
+   where Kleene semantics carried it through comparisons before; discharged
+   by `IsMissing`/`Coalesce`), the union of the two when it is
    indeterminate. This is conceptually the same `marker(T)` rule the
    collections layer implements (`markerType()`/`withMarker()`,
    `src/compute-engine/library/collections.ts`), though the current
@@ -1040,22 +1152,25 @@ This does not change arithmetic propagation. Comparisons
 (`And`, `Not`, `If`) rejects it with `incompatible-type`, as for `NaN`.
 Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4 and §5.
 
-**`Missing` propagates by Kleene** in comparisons (`Less(Missing, 1) →
-Missing`) and preserves positional slots. Whether it omits a key during
+**`Missing` makes a comparison `False`** (`Less(Missing, 1) → False`; user
+decision of 2026-11-02, two-valued comparisons; from 2026-07-24 to
+2026-11-02 it propagated by Kleene, `Less(Missing, 1) → Missing`, and an
+`If` or a `Which` on an absent condition was a catchable error
+expression, the absent-condition error) and preserves positional slots. Whether it omits a key during
 record/dictionary construction remains open, as described in §1.
 In a *numeric* slot, `Missing` is
 normalized to `NaN` at the boundary (numeric domains absorb absence, per
 §1), so numeric operators never need a `missing` arm; a `| missing` arm
 survives only on data/object-domain results.
 
-The comparisons are the exception (user decision 2026-10-23, ROADMAP CE-93):
-a comparison with an absent operand is `Missing`, in a numeric slot too, as
-the condition of an `If` reads it. With `w: number | missing` holding
-`Missing`, `w > 0` is `Missing` (typed `boolean | missing`) and
-`If(w > 0, 1, 0)` has no value; before, the slot read its absent value as
-`NaN`, and `w > 0` was `False` while the `If` had no value. A `NaN` is a
-value, and a comparison with it keeps the IEEE answer. This is the
-interpreter's rule. In compiled code a comparison with an absent operand is
+The comparisons are the exception. The decision of 2026-11-02 ("A
+comparison is two-valued", above) replaced the earlier rule: with
+`w: number | missing` holding `Missing`, `w > 0` is `False` and
+`If(w > 0, 1, 0)` is `0`. From 2026-10-23 (ROADMAP CE-93) to that
+decision, a comparison with an absent operand was `Missing`, in a numeric
+slot too: `w > 0` was `Missing` (typed `boolean | missing`) and
+`If(w > 0, 1, 0)` had no value. A `NaN` is a value, and a comparison with
+it keeps the IEEE answer. In compiled code a comparison with an absent operand is
 unspecified (decision of 2026-11-01, §6): the `javascript` and `python`
 targets give the IEEE answer for the absent object the host passes
 (`undefined > 0` is `false`), the GPU targets have only `NaN` and give the
@@ -1139,6 +1254,11 @@ explicit checks and fallbacks use `isMissingValue`, which includes both
 numeric markers. Both share `isAbsentSymbol` with the numeric gate's
 `isAbsentScalarSymbol`; the symbol test recognizes `Missing` and `Undefined`.
 
+SUPERSEDED 2026-11-02 (two-valued comparisons, above): a comparison and a
+connective read `Missing` and `Undefined` alike as an absent value, which
+makes a comparison `False` and which a connective reads as `False`; the
+paragraph below is the rule before that decision.
+
 Two families are deliberately NOT covered, because their scalar arm reads the
 `Missing` symbol BY NAME on a separate Kleene route rather than through that
 predicate: the relational operators (`Equal`, `Less`, …) and the boolean
@@ -1157,7 +1277,10 @@ read alike by the comparison operators, by the logical connectives, and by the
 handlers that own their absence semantics** (user ruling of 2026-09-22).
 `Equal(Undefined, 1)` is `Missing`, `Not(Undefined)` is `Missing`,
 `First(Undefined)` is `Missing`, and `Distance(Undefined, (1, 1))` is `NaN` —
-each the answer the same expression gives for `Missing`.
+each the answer the same expression gives for `Missing`. Since the user
+decision of 2026-11-02 (two-valued comparisons, above) the two symbols are
+still read alike, but `Equal(Undefined, 1)` is `False` and `Not(Undefined)`
+is `True`, as for `Missing`.
 
 **A comparison of two COLLECTIONS asks about the collections as a whole, and
 one element pair with no answer leaves that whole question unanswered** (user
@@ -1185,6 +1308,10 @@ undecided COMPARISON, not absent condition data:
 the compiled kernel answers `NaN`, the same answer a condition resting on a
 `NaN` operand already gives. The marker passes through `Not`, `And` and `Or`
 by the ordinary Kleene table, so a settling sibling still decides the branch.
+SUPERSEDED 2026-11-02 (two-valued comparisons, above): such a comparison is
+`False` (`NotEqual`: `True`), the element-wise form answers `[True,
+False]`, and the `Which` takes its default arm, `0`. The compiled kernel
+still answers `NaN` for an absent cell, a value that is not specified.
 
 **A WRITTEN absence symbol lowers to the target's object-domain null** —
 `undefined` on JavaScript, and the target's numeric marker where there is no
@@ -1250,8 +1377,16 @@ which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
   Julia `isequal`, Mathematica `Position`, Python `in`); it replaces the
   unpublished rule of the same day under which a marker was never found.
   Membership and comparison are different questions: `NaN = NaN` stays
-  `False` and `Equal([1, Missing], [1, 5])` stays `Missing`.
-- **D. Selection keeps only a decided `True`; the quantifiers are Kleene.**
+  `False` and `Equal([1, Missing], [1, 5])` stays `False` (it was `Missing`
+  before the user decision of 2026-11-02, two-valued comparisons).
+- **D. Selection keeps only a decided `True`; the quantifiers are
+  two-valued.** (Amended by the user decision of 2026-11-02, two-valued
+  comparisons: a comparison with an absent cell is `False`, and `Any` and
+  `All` read an absent answer as `False`, so `Any([1, Missing], x ↦ x > 2)`
+  and `All([1, Missing, 3], x ↦ x > 0)` are `False`; over an absent
+  collection both are `False` too, `Any(Missing, p)` and `All(Missing, p)`.
+  The Kleene reading of an absent answer in the text below is the rule of
+  2026-09-26, SUPERSEDED 2026-11-02.)
   The predicate is applied to each cell, and a comparison answers `Missing`
   for a `Missing`/`Undefined` cell (Kleene) and `False` for a `NaN` cell
   (IEEE). `Filter`, `Count(xs, p)`, `CountIf`, `Position`, `IndexWhere` and
@@ -1270,7 +1405,10 @@ which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
   and `Filter` returned its error message as a value on an absent cell.
 - **E. An absent collection makes the whole result absent** (ruled
   2026-09-26, above): `Length(Missing)` and `IndexOf(Missing, 3)` are `NaN`,
-  `Reverse(Missing)` and `Contains(Missing, 3)` are `Missing`. `NaN` in a
+  `Reverse(Missing)` is `Missing`. A boolean predicate is the exception
+  since the user decision of 2026-11-02 (two-valued comparisons, above):
+  `Contains(Missing, 3)`, `Element(3, Missing)` and `IsEmpty(Missing)` are
+  `False` (they were `Missing` before). `NaN` in a
   collection slot is a number, not an absent collection, so `Length(NaN)` is
   the same `incompatible-type` error as `Length(5)`, and `Join([1], NaN)`
   lifts the scalar to `[1, NaN]`.
@@ -1970,7 +2108,8 @@ maps its channels onto it:
   parameter) applied to an ABSENT operand gives an unspecified value in
   compiled code: the target's own value (`NaN`, `false`, `undefined`, a
   throw) or a decline, and everything computed from it is unspecified too.
-  The interpreter's Kleene comparisons and its absorption of `Missing` into
+  The interpreter's comparisons (two-valued since the user decision of
+  2026-11-02, Kleene before it) and its absorption of `Missing` into
   `NaN` are its own behavior, not a contract that compiled code follows.
   The host discharges a possibly absent value before computing on it. The
   statement of the rule is in `docs/COMPILATION-MODEL.md`, "Caveats of

@@ -504,6 +504,7 @@ import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   absentScalarMarker,
   absentArithmeticMarker,
+  absentPredicateAnswer,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
@@ -830,17 +831,28 @@ let _effectsParanoidActive = false;
  * the entry it replaced? Structural equality over the `ComputedEffects`
  * shapes (`'any'` | label array | co-finite `{not}` | `undefined`). */
 /**
- * The comparison operators. For present operands their element-wise answer
- * has a present cell (`True` or `False`), so the type of such a result may
- * drop the `missing` arm of its cells.
+ * The comparison operators and the connectives. Each one is two-valued: it
+ * answers `True` or `False`, also when an operand or a cell is absent (an
+ * absent value reads as `False` in a connective and makes a comparison
+ * `False`; user decision 2026-11-02, two-valued comparisons,
+ * `docs/ERROR-MODEL.md`). So the type of such a result has no `missing` arm,
+ * in its cells or as a whole.
  */
-const PRESENT_CELL_COMPARISONS: ReadonlySet<string> = new Set([
+const TWO_VALUED_OPERATORS: ReadonlySet<string> = new Set([
   'Less',
   'LessEqual',
   'Greater',
   'GreaterEqual',
   'Equal',
   'NotEqual',
+  'And',
+  'Or',
+  'Not',
+  'Xor',
+  'Equivalent',
+  'Implies',
+  'Nand',
+  'Nor',
 ]);
 
 function sameComputedEffects(a: ComputedEffects, b: ComputedEffects): boolean {
@@ -12611,6 +12623,14 @@ function* threadConditional(
         return ce._fn('If', [wholeGuard, cells]).evaluate(options);
       }
     }
+    // A negated predicate (`NotElement`, `NotSubset`, ...) answers `True`
+    // over an absent operand (`absentPredicateAnswer()`), but a false
+    // restriction of a boolean gives `False`. So the lifted form keeps that
+    // answer as its else branch: `NotElement(2, If(c, [1]))` is
+    // `If(c, True, True)`, `True` when `c` is false, as the fresh route
+    // `NotElement(2, Missing)` gives.
+    if (absentPredicateAnswer(op) === true)
+      return ce._fn('If', [guard, inner, ce.True]).evaluate(options);
     return ce._fn('If', [guard, inner]).evaluate(options);
   }
 
@@ -15076,6 +15096,10 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     };
     const maybeAbsorb = (t: Type): Type | BoxedType => {
       const absorbed = (): Type => {
+        // A boolean predicate that answers a boolean for an absent operand
+        // (`Contains(Missing, 3)` is `False`, `absentPredicateAnswer`) gains
+        // no `missing` arm.
+        if (absentPredicateAnswer(expr.operator) !== undefined) return t;
         const r = absorbOperandAbsence(
           t,
           absenceTypes(),
@@ -15402,68 +15426,51 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       });
       if (lifted !== undefined) {
         const result = maybeAbsorb(lifted);
-        // A `handle` operator that is not threaded (a comparison) answers
-        // `Missing` for the whole result when an operand that is a
-        // collection is absent as a whole (`L < 3` with
-        // `L: list<integer> | missing`), where an absent cell gives an absent
-        // cell. The lift types the cells only, so the type gains the arm.
-        // When every possibly absent operand is such a collection with no
-        // absent cell, the cells of the result are present too: the type is
-        // `list<boolean> | missing`, not `list<boolean | missing> | missing`.
-        // Only the comparisons give a present cell for present operands; any
-        // other `handle` operator may answer `Missing` for present inputs, so
+        // A `handle` operator that is not threaded answers one value for the
+        // whole result when an operand that is a collection is absent as a
+        // whole (`L < 3` with `L: list<integer> | missing`). The lift types
+        // the cells only, so the type gains an arm for that value.
+        //
+        // A comparison or a connective (`TWO_VALUED_OPERATORS`) answers the
+        // scalar `False` (or `True` for `NotEqual`, `Not`) there, and never
+        // `Missing`, in a cell or as a whole (user decision 2026-11-02,
+        // two-valued comparisons, `docs/ERROR-MODEL.md`): the arm is
+        // `boolean`, and an absent cell is removed from the cell type, so
+        // `L < 3` is `list<boolean> | boolean`.
+        //
+        // Any other `handle` operator answers `Missing` there, and the arm
+        // is `missing`. It may also answer `Missing` for present inputs, so
         // its cell type keeps the `missing` arm it declares.
         //
         // An operand absent as a whole whose present type only MAY be a
         // collection (`collection | integer | missing`) gives the arm too:
         // when it is absent, it is a collection that is absent or a scalar
-        // that is absent, and the comparison is `Missing` in both cases
-        // (`y < x` is `Missing` for `y = Missing` and `x = 3`). Its cells
-        // are not known to be present, so the cell type keeps any `missing`
-        // arm. Before, such an operand gave no arm: `y < x` was typed
-        // `broadcastable<boolean>`, which does not hold `Missing`, while the
-        // narrower `y: list<integer> | missing` gave the arm, so a wider
-        // operand type gave a narrower result type (issue #487).
+        // that is absent, and the answer is the same in both cases. Before,
+        // such an operand gave no arm, while the narrower
+        // `y: list<integer> | missing` gave the arm, so a wider operand type
+        // gave a narrower result type (issue #487).
         if (def.resolvedMissingBehavior === 'handle' && !threadedAbsence) {
           let absentWhole = false;
-          let absentElsewhere = false;
           for (const x of expr.ops) {
             if (!x.type.facts.containsMissing) continue;
             const present = threadedPresentType(x.type.type);
             if (
               present !== undefined &&
               (isBroadcastCollectionTypeOf(present) ||
-                isFixedShapeCollectionTypeOf(present))
-            ) {
-              absentWhole = true;
-              if (typeContainsMissing(present)) absentElsewhere = true;
-            } else {
-              if (present !== undefined && !cannotHoldAList(present))
-                absentWhole = true;
-              absentElsewhere = true;
-            }
-          }
-          // An operand that is not typed as absent, but whose type can hold an
-          // absent value (`unknown`, `any`: the `Undefined` symbol), also
-          // gives absent cells.
-          if (
-            absentWhole &&
-            !absentElsewhere &&
-            expr.ops.some(
-              (x) =>
-                !x.type.facts.containsMissing &&
-                isSubtype('missing', x.type.type)
+                isFixedShapeCollectionTypeOf(present) ||
+                !cannotHoldAList(present))
             )
-          )
-            absentElsewhere = true;
+              absentWhole = true;
+          }
           if (absentWhole) {
             const t = result instanceof BoxedType ? result.type : result;
-            const cells =
-              absentElsewhere || !PRESENT_CELL_COMPARISONS.has(expr.operator)
-                ? t
-                : stripMissingFromType(t);
+            if (TWO_VALUED_OPERATORS.has(expr.operator))
+              return BoxedType.forResult(
+                widen('boolean', stripMissingFromType(t)),
+                expr.engine._typeResolver
+              );
             return BoxedType.forResult(
-              widen('missing', cells),
+              widen('missing', t),
               expr.engine._typeResolver
             );
           }

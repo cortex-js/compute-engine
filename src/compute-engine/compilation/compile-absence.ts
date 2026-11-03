@@ -8,7 +8,11 @@ import type {
 } from '../global-types.js';
 import { isDecidedLoopIndex } from './javascript-value-facts.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
-import { leafwardElementType, pointArity } from '../collection-utils.js';
+import {
+  leafwardElementType,
+  pointArity,
+  unmatchedCellKind,
+} from '../collection-utils.js';
 import {
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
@@ -27,7 +31,6 @@ import type {
   CompiledCondition,
   ConditionDialect,
   ConditionNode,
-  DecidedNumberTest,
   LocalEntry,
   LocalValueFrame,
 } from './compiler-types.js';
@@ -328,38 +331,44 @@ export function isDecidedByConstruction(node: ConditionNode): boolean {
 }
 
 /**
- * The run-time tests that an already-emitted operand that may be absent
- * (`operandMayBeAbsent`) holds a value a comparison can decide: `present`
- * tests that it does not hold the object null, and `decided` that it is not
- * NaN. In compiled numeric code NaN is also the absence marker of such an
- * operand: a nested else-less `If` or a default-less `Which` with a
- * numeric result answers NaN when it selects no arm, where the interpreter
- * answers `Missing`, so `If(If(c > 0, 1) > 0, 1, 0)` at `c = -1` must take
- * no arm (the interpreter's absent-condition error), not the else arm.
+ * The run-time test that an already-emitted operand that may be absent
+ * (`operandMayBeAbsent`) holds a value: the dialect's presence test,
+ * `dialect.not` applied to `dialect.isUndecided`, checks that it does not
+ * hold the target's object null (`=== undefined` in JavaScript, `is None` in
+ * Python). A condition over such an operand takes no arm when the operand is
+ * the object null: Python cannot compare `None` with a number, and in
+ * JavaScript `undefined === undefined` is `true`. The compiled value over an
+ * absent operand is not specified (`docs/COMPILATION-MODEL.md`, "Caveats of
+ * compiled code").
  *
- * Both are plain comparisons, with no function call. `code` appears in the
- * result up to three times, which is why the caller passes the NAME of a
+ * There is no test for NaN. A comparison is two-valued, and an operand that
+ * is NaN makes it `False` (`NotEqual` `True`), in the interpreter and in
+ * the plain IEEE comparison that the target emits (user decision 2026-11-02,
+ * two-valued comparisons, `docs/ERROR-MODEL.md`). So with
+ * `w: number | missing` and `w = NaN`, `If(w > 0, 1, 0)` is `0` on every
+ * route.
+ *
+ * The test is a plain comparison, with no function call. `code` appears in
+ * the result once, and the caller's comparison names it once more, which is
+ * why the caller passes the NAME of a
  * costly operand here rather than the operand's own source
  * (`withConditionOperands`, `kleeneRelationLeaf`): an operand with effects
  * is always bound, so the name is what gets repeated, never the effect (an
  * impure operand reaches the analysis only when the caller can bind —
  * `conditionDecidability`). A fragment that is not a single token is
- * parenthesized, because `===` binds looser than most operators an operand
- * may contain.
+ * parenthesized, because `===` (JavaScript) and `is` (Python) bind looser
+ * than most operators an operand may contain.
  */
-export function operandDecidedConjuncts(
+export function operandPresenceConjuncts(
   code: TargetSource,
-  decided: DecidedNumberTest,
-  present: DecidedNumberTest
+  dialect: ConditionDialect
 ): TargetSource[] {
   // A fragment the compiler already reduced to a finite numeric literal
   // holds that number at every call, so it can decide every comparison it
   // takes part in and needs no test.
   if (code.length > 0 && Number.isFinite(Number(code))) return [];
   const atom = ATOMIC_FRAGMENT.test(code) ? code : `(${code})`;
-  // `present` comes first: Python's NaN test raises on `None`, and the
-  // conjunction stops at the first false conjunct.
-  return [present(atom), decided(atom)];
+  return [`${dialect.not}(${dialect.isUndecided(atom)})`];
 }
 
 /**
@@ -442,9 +451,9 @@ export function isNanLiteral(a: Expression): boolean {
  * for `And`, `Or`, `Not` and `Xor` of operands that are each such a
  * comparison or have no `missing` arm.
  *
- * A comparison with an absent operand is `Missing` in the interpreter
- * (ROADMAP CE-93), so its type has a `missing` arm. Such a comparison
- * compiles with no guard on every target: on a target with no object
+ * A comparison with an absent operand is `False` in the interpreter (user
+ * decision 2026-11-02, two-valued comparisons). Such a comparison compiles
+ * with no guard on every target: on a target with no object
  * domain (the GPU targets) an absent number IS `NaN`, which IEEE
  * arithmetic compares `false`, and on every target the compiled value of a
  * comparison with an absent operand is not specified
@@ -561,6 +570,31 @@ export function nanPointLiteral(
   return `[${Array.from({ length: n }, () => 'NaN').join(', ')}]`;
 }
 
+/**
+ * The JavaScript literal of the value at a position that an element-wise
+ * selection or a restriction by a list of conditions does not select, when
+ * every type of `cellTypes` is a boolean (`false`: a relation arm, a
+ * region of a plot, is not drawn there) or every type is a colour (the
+ * non-finite colour, whose channels are `NaN`: the same object as
+ * `nonFiniteColor()` in `javascript-runtime.ts` and the colour branch of the
+ * `realGuard` of the JavaScript target, with the five keys in the same order;
+ * the interpreter's cell is `Rgb(NaN, NaN, NaN)`, and a plotter reads either
+ * as "no colour here"); `undefined` otherwise. The interpreter gives the same cells
+ * (`unmatchedCell()` in `library/control-structures.ts`; both read
+ * `unmatchedCellKind()`), user decision 2026-11-02, two-valued
+ * comparisons.
+ */
+export function unmatchedCellLiteral(
+  cellTypes: ReadonlyArray<Readonly<Type>>
+): string | undefined {
+  if (cellTypes.length === 0) return undefined;
+  const kinds = cellTypes.map((t) => unmatchedCellKind(t));
+  if (kinds.every((k) => k === 'boolean')) return 'false';
+  if (kinds.every((k) => k === 'color'))
+    return "({ space: 'oklch', c0: NaN, c1: NaN, c2: NaN, alpha: undefined })";
+  return undefined;
+}
+
 export function absentDomainIsObject(t: Readonly<Type>): boolean {
   const stripped = resolveTypeForCompilation(
     stripMissingFromType(resolveTypeForCompilation(t))
@@ -629,8 +663,8 @@ export function kleeneValueLeaf(
  * An operand whose emitted source is not already a name or a constant is
  * bound to a parameter first, and the comparison then reads that parameter
  * (`_codeOverrides`, the same substitution the real-operand runtime guard
- * uses). Without it the operand's computation runs THREE times: the
- * comparison embeds it once and the decidedness test names it twice more.
+ * uses). Without it the operand's computation runs TWICE: the comparison
+ * embeds it once and the presence test names it once more.
  * Common-subexpression elimination cannot remove those copies — it analyzes
  * the expression tree, where the operand occurs once, while the copies are
  * made at code-generation time.
@@ -654,17 +688,11 @@ export function kleeneRelationLeaf(
   const params: string[] = [];
   const args: TargetSource[] = [];
   const installed: Expression[] = [];
-  const present = (x: TargetSource) =>
-    `${dialect.not}(${dialect.isUndecided(x)})`;
   try {
     const conjuncts: TargetSource[] = [];
     for (const op of test.operands) {
       const code = core.compile(op, target);
-      const inline = operandDecidedConjuncts(
-        code,
-        dialect.decidedNumber,
-        present
-      );
+      const inline = operandPresenceConjuncts(code, dialect);
       // No test at all: the operand is a constant the compiler already
       // folded, so it decides every comparison it takes part in.
       if (inline.length === 0) continue;
@@ -677,9 +705,7 @@ export function kleeneRelationLeaf(
       args.push(code);
       _codeOverrides.set(op, name);
       installed.push(op);
-      conjuncts.push(
-        ...operandDecidedConjuncts(name, dialect.decidedNumber, present)
-      );
+      conjuncts.push(...operandPresenceConjuncts(name, dialect));
     }
     const compare = core.compile(test.expr, target);
     const value = negate ? `${dialect.not}(${compare})` : `(${compare})`;
@@ -707,9 +733,9 @@ export function kleeneRelationLeaf(
  * An operand whose emitted source is not already a name or a constant is
  * bound to a temporary first, and the condition `fn` compiles reads that
  * temporary instead (`_codeOverrides`, the same substitution the real-operand
- * runtime guard uses). Without it the operand's computation runs THREE times
- * per call: the condition embeds it once and the decidedness test names it
- * twice more. Common-subexpression elimination cannot remove those copies —
+ * runtime guard uses). Without it the operand's computation runs TWICE per
+ * call: the condition embeds it once and the presence test names it once
+ * more. Common-subexpression elimination cannot remove those copies —
  * it analyzes the expression tree, where the operand occurs once, while the
  * copies are made at code-generation time.
  *
@@ -736,17 +762,11 @@ export function withConditionOperands<T>(
 ): { value: T; bindings: Array<[string, TargetSource]> } {
   const bindings: Array<[string, TargetSource]> = [];
   const installed: Expression[] = [];
-  const present = (x: TargetSource) =>
-    `${dialect.not}(${dialect.isUndecided(x)})`;
   try {
     const conjuncts: TargetSource[] = [];
     for (const op of operands) {
       const code = core.compile(op, target);
-      const inline = operandDecidedConjuncts(
-        code,
-        dialect.decidedNumber,
-        present
-      );
+      const inline = operandPresenceConjuncts(code, dialect);
       // No test at all: the operand is a constant the compiler already
       // folded, so it decides every comparison it takes part in.
       if (inline.length === 0) continue;
@@ -758,9 +778,7 @@ export function withConditionOperands<T>(
       bindings.push([name, code]);
       _codeOverrides.set(op, name);
       installed.push(op);
-      conjuncts.push(
-        ...operandDecidedConjuncts(name, dialect.decidedNumber, present)
-      );
+      conjuncts.push(...operandPresenceConjuncts(name, dialect));
     }
     return { value: fn(conjuncts), bindings };
   } finally {

@@ -461,7 +461,9 @@ const REVIEW_CASES: ReviewCase[] = [
     value: ['List', ['List', 1, 2], 'Missing'],
     expr: ['Less', 'L', 2],
     latex: 'L<2',
-    type: 'list<list<boolean | missing> | missing>',
+    // The absent row is compared as one absent value: `False` (user
+    // decision of 2026-11-02, two-valued comparisons).
+    type: 'list<boolean | list<boolean>>',
   },
   {
     label: 'And over an absent row',

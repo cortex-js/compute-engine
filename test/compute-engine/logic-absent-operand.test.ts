@@ -1,27 +1,18 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 // Every logic connective reads an absent operand (`Missing`, or `Undefined`,
-// which is read the same way) by the same Kleene rule: an operand that
-// decides the result wins, otherwise the result is the absence marker
-// `Missing`. `Xor` and `Equivalent` have no deciding operand — flipping any
-// one operand flips the result — so an absent operand makes them absent,
-// unless another operand is an unknown symbol: then they stay symbolic, as
-// `And(A, Missing)` does (a second user decision of 2026-09-27; before it,
-// `Xor(A, Missing)` was `Missing`). Before the first user decision of
-// 2026-09-27, `Xor` and `Equivalent` rejected a `Missing` operand with
-// `incompatible-type` at canonicalization, and kept an `Undefined` operand
-// symbolic (`Xor(True, Undefined)` evaluated to `Not(Undefined)`), while
-// `And`, `Or` and `Not` answered `Missing`.
+// which is read the same way) as `False`. The logic is two-valued: an absent
+// value is not a third truth value (user decision of 2026-11-02, two-valued
+// comparisons). So `And(True, Missing)` is `False`, `Not(Missing)` is
+// `True`, `Xor(True, Missing)` is `True` and `Xor(A, Missing)` is `A`.
+// From 2026-09-27 to 2026-11-02 the connectives used the Kleene
+// three-valued tables: `And(True, Missing)` was `Missing`.
 //
-// The TYPE of a connective contains every value it can evaluate to (user
-// decision 2026-10-18): `missing` when the result is always `Missing`
-// (`And(True, Missing)`), `boolean | missing` when it may be (`And(A,
-// Missing)`, an operand typed `boolean | missing`, an `Undefined` operand),
-// and `boolean` when an operand decides the result (`And(False, Missing)` is
-// `False`). Before this decision every connective was typed `boolean`
-// whatever its operands, as the comparisons were until 2026-10-17.
+// The TYPE of a connective is `boolean`, also with an absent operand: the
+// result is never `Missing`. From 2026-10-18 to 2026-11-02 the type had a
+// `missing` arm where the Kleene result could be `Missing`.
 //
-// `docs/ERROR-MODEL.md` §3 is the reference for the absence contract.
+// `docs/ERROR-MODEL.md` is the reference for the absence contract.
 //
 // Boolean contexts use UPPERCASE symbols: evaluating a symbol as a boolean
 // operand retypes it `boolean` for the engine's lifetime.
@@ -32,37 +23,32 @@ const evalJson = (expr: any) => ce.box(expr).evaluate().json;
 
 describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — box route', () => {
   const table: [any, any][] = [
-    [['And', 'True', 'Missing'], 'Missing'],
-    [['Or', 'False', 'Missing'], 'Missing'],
-    [['Not', 'Missing'], 'Missing'],
-    [['And', 'True', 'Undefined'], 'Missing'],
-    [['Or', 'False', 'Undefined'], 'Missing'],
-    [['Not', 'Undefined'], 'Missing'],
-    [['Xor', 'True', 'Missing'], 'Missing'],
-    [['Xor', 'False', 'Missing'], 'Missing'],
-    [['Xor', 'True', 'Undefined'], 'Missing'],
-    [['Xor', 'Missing', 'True'], 'Missing'],
-    [['Xor', 'True', 'False', 'Missing'], 'Missing'],
-    [
-      ['Xor', 'A', 'Missing'],
-      ['Xor', 'A', 'Missing'],
-    ],
-    [
-      ['Xor', 'A', 'Undefined'],
-      ['Xor', 'A', 'Missing'],
-    ],
-    [['Equivalent', 'True', 'Missing'], 'Missing'],
-    [['Equivalent', 'False', 'Missing'], 'Missing'],
-    [['Equivalent', 'True', 'Undefined'], 'Missing'],
-    [['Equivalent', 'Missing', 'False'], 'Missing'],
-    [['Equivalent', 'Missing', 'Missing'], 'Missing'],
+    [['And', 'True', 'Missing'], 'False'],
+    [['Or', 'False', 'Missing'], 'False'],
+    [['Not', 'Missing'], 'True'],
+    [['And', 'True', 'Undefined'], 'False'],
+    [['Or', 'False', 'Undefined'], 'False'],
+    [['Not', 'Undefined'], 'True'],
+    [['Xor', 'True', 'Missing'], 'True'],
+    [['Xor', 'False', 'Missing'], 'False'],
+    [['Xor', 'True', 'Undefined'], 'True'],
+    [['Xor', 'Missing', 'True'], 'True'],
+    [['Xor', 'True', 'False', 'Missing'], 'True'],
+    [['Xor', 'A', 'Missing'], 'A'],
+    [['Xor', 'A', 'Undefined'], 'A'],
+    [['Equivalent', 'True', 'Missing'], 'False'],
+    [['Equivalent', 'False', 'Missing'], 'True'],
+    [['Equivalent', 'True', 'Undefined'], 'False'],
+    [['Equivalent', 'Missing', 'False'], 'True'],
+    [['Equivalent', 'Missing', 'Missing'], 'True'],
+    // A held equivalence spells the absent operand `False`.
     [
       ['Equivalent', 'A', 'Missing'],
-      ['Equivalent', 'A', 'Missing'],
+      ['Equivalent', 'A', 'False'],
     ],
     [
       ['Equivalent', 'A', 'Undefined'],
-      ['Equivalent', 'A', 'Missing'],
+      ['Equivalent', 'A', 'False'],
     ],
   ];
   test.each(table)('%j evaluates to %s', (expr, expected) => {
@@ -72,30 +58,15 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — box route', () => {
     expect(boxed.N().json).toEqual(expected);
   });
 
-  test('the boxed expression is typed with the absent result it can give', () => {
-    // `True` decides neither `And` nor `Xor` nor `Equivalent`, so the result
-    // is always `Missing`; `True` decides `Or`.
-    for (const op of ['And', 'Xor', 'Equivalent'])
-      expect(ce.box([op, 'True', 'Missing']).type.toString()).toBe('missing');
-    expect(ce.box(['Or', 'True', 'Missing']).type.toString()).toBe('boolean');
-    // An `Undefined` operand is read as absent, but its own type is
-    // `unknown`, so it is a possibly-absent operand, as for the comparisons.
-    for (const op of ['And', 'Xor', 'Equivalent'])
+  test('the boxed expression is typed boolean', () => {
+    for (const op of ['And', 'Or', 'Xor', 'Equivalent']) {
+      expect(ce.box([op, 'True', 'Missing']).type.toString()).toBe('boolean');
       expect(ce.box([op, 'True', 'Undefined']).type.toString()).toBe(
-        'boolean | missing'
-      );
-    expect(ce.box(['Not', 'Missing']).type.toString()).toBe('missing');
-    expect(ce.box(['Not', 'Undefined']).type.toString()).toBe(
-      'boolean | missing'
-    );
-  });
-
-  test('the evaluated result is typed missing, as for And', () => {
-    for (const op of ['And', 'Xor', 'Equivalent']) {
-      expect(ce.box([op, 'True', 'Missing']).evaluate().type.toString()).toBe(
-        'missing'
+        'boolean'
       );
     }
+    expect(ce.box(['Not', 'Missing']).type.toString()).toBe('boolean');
+    expect(ce.box(['Not', 'Undefined']).type.toString()).toBe('boolean');
   });
 
   test('a possibly-absent operand validates, as for And', () => {
@@ -104,7 +75,7 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — box route', () => {
     for (const op of ['And', 'Xor', 'Equivalent']) {
       const expr = sc.box([op, 'True', 'M']);
       expect(expr.isValid).toBe(true);
-      expect(expr.type.toString()).toBe('boolean | missing');
+      expect(expr.type.toString()).toBe('boolean');
     }
   });
 
@@ -136,44 +107,44 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — parse route', () => {
     [
       '\\mathrm{True}\\veebar\\mathrm{Missing}',
       ['Xor', 'True', 'Missing'],
-      'Missing',
+      'True',
     ],
     [
       '\\mathrm{True}\\veebar\\mathrm{Undefined}',
       ['Xor', 'True', 'Undefined'],
-      'Missing',
+      'True',
     ],
     [
       '\\operatorname{Xor}(\\mathrm{True}, \\mathrm{Missing})',
       ['Xor', 'True', 'Missing'],
-      'Missing',
+      'True',
     ],
     [
       '\\mathrm{True}\\iff\\mathrm{Missing}',
       ['Equivalent', 'True', 'Missing'],
-      'Missing',
+      'False',
     ],
     [
       '\\mathrm{True}\\iff\\mathrm{Undefined}',
       ['Equivalent', 'True', 'Undefined'],
-      'Missing',
+      'False',
     ],
     [
       '\\mathrm{True}\\Leftrightarrow\\mathrm{Missing}',
       ['Equivalent', 'True', 'Missing'],
-      'Missing',
+      'False',
     ],
     [
       '\\mathrm{True}\\land\\mathrm{Missing}',
       ['And', 'True', 'Missing'],
-      'Missing',
+      'False',
     ],
     [
       '\\mathrm{False}\\lor\\mathrm{Missing}',
       ['Or', 'False', 'Missing'],
-      'Missing',
+      'False',
     ],
-    ['\\lnot\\mathrm{Missing}', ['Not', 'Missing'], 'Missing'],
+    ['\\lnot\\mathrm{Missing}', ['Not', 'Missing'], 'True'],
     ['\\mathrm{True}\\veebar\\mathrm{False}', ['Xor', 'False', 'True'], 'True'],
     ['\\mathrm{True}\\iff\\mathrm{True}', 'True', 'True'],
   ];
@@ -187,42 +158,40 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — parse route', () => {
 
 describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — result type', () => {
   // Each row: the expression, its type, and the value it evaluates to. The
-  // type must contain the value; it is `boolean` (no `missing` arm) where an
-  // operand decides the result, and `missing` where `Missing` is the only
-  // possible result.
+  // type is `boolean`: an absent operand reads as `False`, so the result is
+  // never `Missing`.
   const sc = new ComputeEngine();
   sc.declare('M', 'boolean | missing');
   const table: [any, string, any][] = [
-    [['And', 'True', 'Missing'], 'missing', 'Missing'],
-    [['And', 'Missing', 'True'], 'missing', 'Missing'],
+    [['And', 'True', 'Missing'], 'boolean', 'False'],
+    [['And', 'Missing', 'True'], 'boolean', 'False'],
     [['And', 'False', 'Missing'], 'boolean', 'False'],
     [['And', 'Missing', 'False'], 'boolean', 'False'],
     [['And', 'False', 'Undefined'], 'boolean', 'False'],
-    [['And', 'True', 'Undefined'], 'boolean | missing', 'Missing'],
-    [['And', 'True', 'M'], 'boolean | missing', 'M'],
-    [['And', 'A', 'Missing'], 'boolean | missing', ['And', 'A', 'Missing']],
-    [['Or', 'False', 'Missing'], 'missing', 'Missing'],
+    [['And', 'True', 'Undefined'], 'boolean', 'False'],
+    [['And', 'True', 'M'], 'boolean', 'M'],
+    [['And', 'A', 'Missing'], 'boolean', 'False'],
+    [['Or', 'False', 'Missing'], 'boolean', 'False'],
     [['Or', 'True', 'Missing'], 'boolean', 'True'],
-    [['Or', 'False', 'M'], 'boolean | missing', 'M'],
-    [['Not', 'Missing'], 'missing', 'Missing'],
-    [['Not', 'Undefined'], 'boolean | missing', 'Missing'],
-    [['Not', 'M'], 'boolean | missing', ['Not', 'M']],
-    [['Xor', 'False', 'Missing'], 'missing', 'Missing'],
-    // Whatever `A` is, an absent operand makes the exclusive or absent.
-    [['Xor', 'A', 'Missing'], 'missing', ['Xor', 'A', 'Missing']],
-    [['Xor', 'True', 'M'], 'boolean | missing', ['Not', 'M']],
-    [['Equivalent', 'False', 'Missing'], 'missing', 'Missing'],
-    [['Equivalent', 'True', 'Undefined'], 'boolean | missing', 'Missing'],
-    [['Implies', 'True', 'Missing'], 'missing', 'Missing'],
-    [['Implies', 'Missing', 'False'], 'missing', 'Missing'],
+    [['Or', 'False', 'M'], 'boolean', 'M'],
+    [['Not', 'Missing'], 'boolean', 'True'],
+    [['Not', 'Undefined'], 'boolean', 'True'],
+    [['Not', 'M'], 'boolean', ['Not', 'M']],
+    [['Xor', 'False', 'Missing'], 'boolean', 'False'],
+    [['Xor', 'A', 'Missing'], 'boolean', 'A'],
+    [['Xor', 'True', 'M'], 'boolean', ['Not', 'M']],
+    [['Equivalent', 'False', 'Missing'], 'boolean', 'True'],
+    [['Equivalent', 'True', 'Undefined'], 'boolean', 'False'],
+    [['Implies', 'True', 'Missing'], 'boolean', 'False'],
+    [['Implies', 'Missing', 'False'], 'boolean', 'True'],
     [['Implies', 'False', 'Missing'], 'boolean', 'True'],
     [['Implies', 'Missing', 'True'], 'boolean', 'True'],
-    [['Implies', 'Undefined', 'False'], 'boolean | missing', 'Missing'],
-    [['Nand', 'True', 'Missing'], 'missing', 'Missing'],
+    [['Implies', 'Undefined', 'False'], 'boolean', 'True'],
+    [['Nand', 'True', 'Missing'], 'boolean', 'True'],
     [['Nand', 'False', 'Missing'], 'boolean', 'True'],
-    [['Nor', 'False', 'Missing'], 'missing', 'Missing'],
+    [['Nor', 'False', 'Missing'], 'boolean', 'True'],
     [['Nor', 'True', 'Missing'], 'boolean', 'False'],
-    [['Nor', 'M', 'False'], 'boolean | missing', ['Not', 'M']],
+    [['Nor', 'M', 'False'], 'boolean', ['Not', 'M']],
   ];
   test.each(table)('%j is typed %s', (expr, type, value) => {
     const boxed = sc.box(expr);
@@ -240,16 +209,16 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — result type', () => {
     expect(sc.box(['Not', ['Less', 1, 2]]).type.toString()).toBe('false');
   });
 
-  test('a broadcast over a list carries the missing arm to its cells', () => {
-    // `And([True, False], Missing)` is `[Missing, False]`.
+  test('a broadcast over a list reads the absent operand in each cell', () => {
+    // `And([True, False], Missing)` is `[False, False]`.
     const expr = sc.box(['And', ['List', 'True', 'False'], 'Missing']);
-    expect(expr.type.toString()).toBe('list<boolean | missing^2>');
-    expect(expr.evaluate().json).toEqual(['List', 'Missing', 'False']);
+    expect(expr.type.toString()).toBe('list<boolean^2>');
+    expect(expr.evaluate().json).toEqual(['List', 'False', 'False']);
   });
 
   test('the negated comparisons, built from Not, are typed like Not', () => {
-    // `NotLess(a, b)` is `Not(Less(a, b))`. A `Missing` operand types the
-    // comparison `missing`, an `Undefined` operand `boolean | missing`.
+    // `NotLess(a, b)` is `Not(Less(a, b))`. A comparison with an absent
+    // operand is `False`, so its negation is `True`.
     for (const op of [
       'NotLess',
       'NotGreater',
@@ -261,29 +230,29 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — result type', () => {
         [1, 'Missing'],
       ]) {
         const expr = sc.box([op, a, b]);
-        expect(expr.type.toString()).toBe('missing');
-        expect(expr.evaluate().json).toEqual('Missing');
+        expect(expr.type.toString()).toBe('boolean');
+        expect(expr.evaluate().json).toEqual('True');
       }
       const expr = sc.box([op, 'Undefined', 1]);
-      expect(expr.type.toString()).toBe('boolean | missing');
-      expect(expr.evaluate().json).toEqual('Missing');
+      expect(expr.type.toString()).toBe('boolean');
+      expect(expr.evaluate().json).toEqual('True');
       expect(sc.box([op, 'x', 1]).type.toString()).toBe('boolean');
     }
   });
 
   test('the parse route gives the same types', () => {
     const table: [string, string][] = [
-      ['\\mathrm{True}\\land\\mathrm{Missing}', 'missing'],
+      ['\\mathrm{True}\\land\\mathrm{Missing}', 'boolean'],
       ['\\mathrm{False}\\land\\mathrm{Missing}', 'boolean'],
-      ['\\mathrm{False}\\lor\\mathrm{Missing}', 'missing'],
-      ['\\lnot\\mathrm{Missing}', 'missing'],
-      ['\\lnot\\mathrm{Undefined}', 'boolean | missing'],
-      ['\\mathrm{True}\\veebar\\mathrm{Missing}', 'missing'],
-      ['\\mathrm{True}\\iff\\mathrm{Missing}', 'missing'],
-      ['\\mathrm{True}\\implies\\mathrm{Missing}', 'missing'],
+      ['\\mathrm{False}\\lor\\mathrm{Missing}', 'boolean'],
+      ['\\lnot\\mathrm{Missing}', 'boolean'],
+      ['\\lnot\\mathrm{Undefined}', 'boolean'],
+      ['\\mathrm{True}\\veebar\\mathrm{Missing}', 'boolean'],
+      ['\\mathrm{True}\\iff\\mathrm{Missing}', 'boolean'],
+      ['\\mathrm{True}\\implies\\mathrm{Missing}', 'boolean'],
       ['\\mathrm{False}\\implies\\mathrm{Missing}', 'boolean'],
-      ['\\mathrm{Missing}\\not<1', 'missing'],
-      ['\\mathrm{Undefined}\\not<1', 'boolean | missing'],
+      ['\\mathrm{Missing}\\not<1', 'boolean'],
+      ['\\mathrm{Undefined}\\not<1', 'boolean'],
     ];
     for (const [latex, type] of table)
       expect([latex, ce.parse(latex).type.toString()]).toEqual([latex, type]);

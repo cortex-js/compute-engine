@@ -1,8 +1,12 @@
 /**
  * A compiled comparison with an ABSENT operand.
  *
- * The interpreter answers `Missing` for a comparison with a written absence
- * operand (`Less(Missing, t)`, `Equal(Undefined, 1)`: Kleene). The compiled
+ * A comparison is two-valued (user decision of 2026-11-02, two-valued
+ * comparisons, `docs/ERROR-MODEL.md`): the interpreter answers `False` for a
+ * comparison with a written absence operand (`Less(Missing, t)`,
+ * `Equal(Undefined, 1)`; `NotEqual`: `True`), and a branch over it takes
+ * its arm. From 2026-07-24 to 2026-11-02 it answered `Missing` (Kleene) and a
+ * branch over it took no arm. The text below describes that time. The compiled
  * JavaScript lowered the absence symbol to `undefined` and compared it, so
  * the value was a confident `false` (`true` for `NotEqual`), and an `If` over
  * it took an arm — the else arm for `Less`, the then arm for `NotEqual` —
@@ -63,14 +67,14 @@ describe('a comparison with a written absence operand', () => {
   // of `docs/plans/2026-11-01-absent-value-contract.md`). Only the
   // interpreter's value is checked for it.
   for (const absent of ['Missing', 'Undefined']) {
-    test.each(RELATIONS)(`%s(${absent}, t) is undecided`, (h) => {
+    test.each(RELATIONS)(`%s(${absent}, t) is False (NotEqual: True)`, (h) => {
       const json = [h, absent, 't'];
-      expect(interpreted(json, 0)).toBe('Missing');
+      expect(interpreted(json, 0)).toBe(h === 'NotEqual' ? 'True' : 'False');
     });
   }
 
   test('a settling sibling still decides a connective', () => {
-    // Kleene: `And(undecided, false)` is false, `Or(undecided, true)` true.
+    // `And(false, false)` is false, `Or(false, true)` is true.
     const and = [
       'If',
       ['And', ['Less', 'Missing', 't'], ['Less', 't', -1]],
@@ -87,14 +91,15 @@ describe('a comparison with a written absence operand', () => {
 
 describe('a comparison with an operand that may be absent', () => {
   // `First([Missing, 1])` is typed `integer | missing | nan` and is the
-  // object null at run time. Its comparison is `false` on both routes (the
-  // interpreter reads it in a numeric slot as NaN), but a branch over it is
-  // undecided: the interpreter refuses to branch on the absent condition.
+  // object null at run time. Its comparison is `False` in the interpreter
+  // (`NotEqual`: `True`), and a branch over it takes the else arm (the then
+  // arm for `NotEqual`). The compiled branch takes no arm and gives `NaN`:
+  // its value is not specified for an absent operand (see the header).
   const F = ['First', ['List', 'Missing', 1]];
 
-  test.each(RELATIONS)('If(%s(First([Missing, 1]), t)) takes no arm', (h) => {
-    expect(interpreted(['If', [h, F, 't'], 1, 2], 0)).toEqual(
-      expect.arrayContaining(['Error'])
+  test.each(RELATIONS)('If(%s(First([Missing, 1]), t)) takes its arm', (h) => {
+    expect(interpreted(['If', [h, F, 't'], 1, 2], 0)).toBe(
+      h === 'NotEqual' ? 1 : 2
     );
     expect(run(['If', [h, F, 't'], 1, 2], 0)).toBeNaN();
   });
@@ -115,10 +120,10 @@ describe('a comparison with an operand that may be absent', () => {
     ['Equal', undefined],
     ['NotEqual', undefined],
   ])(
-    '%s over a restricted string is undecided in the interpreter',
+    '%s over a restricted string is False in the interpreter (NotEqual: True)',
     (h) => {
       const json = [h, ['If', ['Less', 1, 't'], { str: 'a' }], { str: 'b' }];
-      expect(interpreted(json, 0)).toBe('Missing');
+      expect(interpreted(json, 0)).toBe(h === 'Equal' ? 'False' : 'True');
       expect(run(['If', json, 1, 2], 2)).toBe(h === 'Equal' ? 2 : 1);
     }
   );
@@ -193,13 +198,12 @@ describe('a chained comparison with an absent operand', () => {
 
   test.each([
     ['Less(x, 0, Missing)', decidedFalse, 1, 'False'],
-    ['Less(x, 5, Missing)', undecided, 1, 'Missing'],
+    ['Less(x, 5, Missing)', undecided, 1, 'False'],
     ['Less(x, 5, Missing)', undecided, 9, 'False'],
-    ['LessEqual(Missing, x, 5)', leading, 1, 'Missing'],
+    ['LessEqual(Missing, x, 5)', leading, 1, 'False'],
     ['LessEqual(Missing, x, 5)', leading, 9, 'False'],
-    // A NaN link is `False` (user decision 2026-10-23): `NaN < 0` decides
-    // the chain, wherever the absent operand sits. Before, the absent operand
-    // won and the chain was `Missing`.
+    // A NaN link is `False` (user decision 2026-10-23), and so is a link with
+    // an absent operand (user decision 2026-11-02).
     ['Less(x, 0, Missing)', decidedFalse, NaN, 'False'],
     ['LessEqual(Missing, x, 5)', leading, NaN, 'False'],
   ])('%s at x = %p', (_l, json, x, interp) => {
@@ -209,6 +213,8 @@ describe('a chained comparison with an absent operand', () => {
   test.each([
     ['Less(x, 0, Missing)', decidedFalse, 1, 2],
     ['Less(x, 5, Missing)', undecided, 9, 2],
+    ['Less(x, 5, Missing)', undecided, 1, 2],
+    ['LessEqual(Missing, x, 5)', leading, 1, 2],
     ['LessEqual(Missing, x, 5)', leading, 9, 2],
     ['Less(x, 0, Missing)', decidedFalse, NaN, 2],
     ['LessEqual(Missing, x, 5)', leading, NaN, 2],
@@ -243,10 +249,10 @@ describe('a chained comparison with an absent operand', () => {
     [['Less', 0, 'NaN', 'Missing'], 'False'],
     [['Less', 0, 'NaN', 'Undefined'], 'False'],
     [['Less', 'Missing', 0, 'NaN'], 'False'],
-    // Every pair has the absent operand: the chain stays absent.
-    [['Less', 'NaN', 'Missing', 0], 'Missing'],
-    [['Less', 'NaN', 'Undefined', 0], 'Missing'],
-    [['Less', ['Complex', 0, 1], 'Undefined', 0], 'Missing'],
+    // Every pair has the absent operand: the chain is `False` too.
+    [['Less', 'NaN', 'Missing', 0], 'False'],
+    [['Less', 'NaN', 'Undefined', 0], 'False'],
+    [['Less', ['Complex', 0, 1], 'Undefined', 0], 'False'],
   ])('the interpreter reads %j as %s', (json, expected) => {
     expect(ce.box(json as never).evaluate().json).toBe(expected);
   });

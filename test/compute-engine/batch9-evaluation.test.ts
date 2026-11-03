@@ -107,7 +107,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     '\\operatorname{StartsWith}(L, [1])',
     'If(0 < t, "True")',
     '"True"',
-    '"Missing"',
+    '"False"',
   ],
   [
     'ListFrom',

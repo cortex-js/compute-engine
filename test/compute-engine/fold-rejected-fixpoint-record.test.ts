@@ -19,6 +19,10 @@
  * type could settle at the wider one. That type did not hold the value:
  * `y < x` is `Missing` for `y = Missing`. Both are fixed here.
  *
+ * Since the user decision of 2026-11-02 (two-valued comparisons) `y < x` is
+ * `False` for `y = Missing`, not `Missing`, so the type of the comparison
+ * has no `missing` arm: the arm for an absent `y` is `boolean`.
+ *
  * The timing assertion runs under `CE_PERF=1` only (`npm run test:perf`).
  */
 import { ComputeEngine } from '../../src/compute-engine';
@@ -28,16 +32,11 @@ const PERF = process.env.CE_PERF === '1';
 
 describe('a comparison with an operand that may be an absent collection', () => {
   const rows: [string, string][] = [
-    ['collection | missing', 'broadcastable<boolean> | missing'],
-    ['collection | integer | missing', 'broadcastable<boolean> | missing'],
-    [
-      'collection | integer | missing | nan',
-      'broadcastable<boolean> | missing',
-    ],
-    // A definite collection gave the arm before (unchanged).
-    ['list<integer> | missing', 'list<boolean | missing> | missing'],
-    // A scalar: the comparison's own type has the arm (unchanged).
-    ['integer | missing', 'boolean | missing'],
+    ['collection | missing', 'broadcastable<boolean>'],
+    ['collection | integer | missing', 'broadcastable<boolean>'],
+    ['collection | integer | missing | nan', 'broadcastable<boolean>'],
+    // A scalar: the comparison is a boolean.
+    ['integer | missing', 'boolean'],
   ];
   for (const [declared, expected] of rows) {
     test(`y: ${declared} gives ${expected}`, () => {
@@ -45,18 +44,36 @@ describe('a comparison with an operand that may be an absent collection', () => 
       ce.declare('y', declared as any);
       const t = ce.box(['Less', 'y', 'x']).type;
       expect(t.toString()).toBe(expected);
-      // The value for an absent `y` and a scalar `x` is `Missing`.
+      // The value for an absent `y` and a scalar `x` is `False`.
       const v = ce.box(['Less', 'Missing', 3]).evaluate();
-      expect(v.symbol).toBe('Missing');
+      expect(v.symbol).toBe('False');
       expect(v.type.matches(t)).toBe(true);
     });
   }
 
-  test('an If over such a comparison has a missing arm', () => {
+  test('y: list<integer> | missing gives boolean | list<boolean>', () => {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'list<integer> | missing');
+    expect(ce.box(['Less', 'y', 'x']).type.toString()).toBe(
+      'boolean | list<boolean>'
+    );
+  });
+
+  test('y: list<integer> | missing: the type holds False', () => {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'list<integer> | missing');
+    const t = ce.box(['Less', 'y', 'x']).type;
+    expect(ce.box(['Less', 'Missing', 3]).evaluate().type.matches(t)).toBe(
+      true
+    );
+  });
+
+  test('an If over such a comparison has no missing arm', () => {
+    // The condition is never `Missing`, so the `If` takes an arm.
     const ce = new ComputeEngine();
     ce.declare('y', 'collection | integer | missing | nan');
     expect(ce.box(['If', ['Greater', 'x', 'y'], 1, 2]).type.toString()).toBe(
-      'integer | list<integer | list<any>> | missing'
+      'broadcastable<integer>'
     );
   });
 });
@@ -134,12 +151,13 @@ describe('issue #487: nested folds whose fixpoint is rejected', () => {
       ['List', ['List', 3, 1, 4], 2],
       ['Range', 1, 2, 1],
     ] as any);
-    expect(expr.type.toString()).toBe(
-      'list<collection | integer | missing | nan>'
-    );
+    expect(expr.type.toString()).toBe('list<integer | list | missing | nan>');
+    // Since the user decision of 2026-11-02 (two-valued comparisons) the
+    // condition of the inner `If` has no `missing` arm, and the inner
+    // accumulator settles at `list<unknown>` (it was `collection<any>`).
     expect(accumulators(expr)).toEqual([
-      'st: list<collection | integer | missing | nan>',
-      'b: collection<any>',
+      'st: list<integer | list | missing | nan>',
+      'b: list<unknown>',
     ]);
     expect(expr.evaluate().toString()).toBe('[[3,1,4,3,4,3,4,3,4],2]');
   });

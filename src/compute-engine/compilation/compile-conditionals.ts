@@ -47,6 +47,7 @@ import {
   conditionDecidability,
   exactSelect,
   nanPointLiteral,
+  unmatchedCellLiteral,
   noBranchValue,
 } from './compile-absence.js';
 import {
@@ -390,8 +391,10 @@ export function compileExprRestriction(
   // own type, the list of results. A missing number is the numeric
   // absence (`NaN`); a missing POINT is a point whose coordinates are
   // all `NaN` (`nanPointLiteral`), as in the interpreter (selection rule
-  // of 2026-11-02, `docs/BROADCAST-MODEL.md`); any other value that is
-  // not a number is the object null (`undefined` on JavaScript). The
+  // of 2026-11-02, `docs/BROADCAST-MODEL.md`); a missing boolean is
+  // `false` and a missing colour has `NaN` channels
+  // (`unmatchedCellLiteral`); any other value that is not a number is the
+  // object null (`undefined` on JavaScript). The
   // element-wise `Which` gives the same cells (its selection helper
   // takes the absence of the cell type, `_SYS.selectAbsent`), so the
   // two forms of the same selection agree.
@@ -405,9 +408,9 @@ export function compileExprRestriction(
     ? (collectionElementType(valueType.type) ?? 'unknown')
     : valueType.type;
   const nullLiteral = target.absence?.object?.nullLiteral;
-  const nanPoint = nanPointLiteral([held]);
+  const unmatched = nanPointLiteral([held]) ?? unmatchedCellLiteral([held]);
   const absent =
-    nanPoint ??
+    unmatched ??
     (coerce === undefined &&
     nullLiteral !== undefined &&
     absenceKind([held], target) === 'object'

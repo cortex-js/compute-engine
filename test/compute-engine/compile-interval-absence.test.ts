@@ -213,8 +213,10 @@ describe('a restriction over a relation', () => {
     // x in [-0.5, 0.5]: the restriction is undecided → at most 'maybe'.
     expect(fn.run!({ x: iv(-0.5, 0.5), y: iv(-2, -2) })).toBe('maybe');
     // The relation is evaluated only when the condition is not already
-    // decided false.
-    expect(fn.code).toMatch(/=== 'false' \? 'false' : _IA\.and\(/);
+    // decided false. The restriction of a relation compiles as
+    // `If(c, r, False)` (user decision of 2026-11-02, two-valued
+    // comparisons).
+    expect(fn.code).toMatch(/=== 'false' \? _IA\.res\('false'\)/);
   });
 });
 

@@ -167,9 +167,14 @@ describe('element-wise selection: absence and no-match (R4/R4′)', () => {
     declines(expr);
   });
 
-  test('a LIFTED (scalar) absent condition ends the walk', () => {
-    // The interpreter answers a whole-expression "condition is absent" error
-    // — NaN on a real target — and never falls through to the later clause.
+  test('a LIFTED (scalar) absent condition is False', () => {
+    // An absent condition is `False` (user decision of 2026-11-02,
+    // two-valued comparisons), so the walk goes on to the later clause.
+    // Before, the interpreter answered a whole-expression "condition is
+    // absent" error. The compiled value is still NaN: a compiled value
+    // computed from an absent value is not specified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"), so only the
+    // interpreter's value is checked.
     const expr = ce.box([
       'Which',
       'Missing',
@@ -177,8 +182,7 @@ describe('element-wise selection: absence and no-match (R4/R4′)', () => {
       ['List', 'True', 'False'],
       2,
     ] as any);
-    expect(expr.evaluate().operator).toBe('Error');
-    expect(parity(expr)).toEqual(NaN);
+    expect(expr.evaluate().toString()).toBe('[2,NaN]');
   });
 
   test('an empty-list condition answers the empty list', () => {

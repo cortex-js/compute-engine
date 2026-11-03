@@ -559,15 +559,17 @@ describe('Chained NotEqual (pairwise, not all-distinct)', () => {
         1,
         'x',
       ]);
-      expect(run(['NotEqual', 3, ['f'], 'Missing']).value).toBe('Missing');
-      // A False pair wins over a Missing pair.
+      // A pair with `Missing` is `True`, as a pair with `NaN` is (user
+      // decision of 2026-11-02, two-valued comparisons).
+      expect(run(['NotEqual', 3, ['f'], 'Missing']).value).toBe('True');
       expect(run(['NotEqual', 'Missing', ['f'], 1]).value).toBe('False');
     });
 
     it('a pair of two Missing values is not a False pair', () => {
       // The walk over the operands stopped at `Missing ≠ Missing`, because
       // the two values are the same, and gave `False`. The binary
-      // `NotEqual(Missing, Missing)` is `Missing`, so the chain is too.
+      // `NotEqual(Missing, Missing)` is `True` (an absent value is read as
+      // `NaN`), so the walk goes on to the next pair.
       const ce2 = new ComputeEngine();
       ce2.declare('g', {
         signature: '() -> any',
@@ -575,11 +577,11 @@ describe('Chained NotEqual (pairwise, not all-distinct)', () => {
         evaluate: () => ce2.Missing,
       });
       expect(ce2.box(['NotEqual', 'Missing', ['g'], 1]).evaluate().json).toBe(
-        'Missing'
+        'True'
       );
       expect(
         ce2.box(['NotEqual', 'Missing', ['g'], 'Missing']).evaluate().json
-      ).toBe('Missing');
+      ).toBe('True');
       // `NaN ≠ NaN` is `True` (IEEE), so the walk goes on to the last pair.
       expect(
         ce2.box(['NotEqual', 'NaN', ['Random'], 'NaN']).evaluate().json
@@ -959,11 +961,13 @@ describe('Equal over an operand that only becomes a collection at evaluation (Ty
   });
 });
 
-describe('Absence in comparisons: IEEE over NaN, Kleene over Missing (§3.D)', () => {
-  // Amended 2026-07-24 (Julia model): NaN follows IEEE 754 (`NaN == NaN` is
-  // false, and NaN is unordered so orderings are false), while the `Missing`
-  // symbol is Kleene (`Missing == x` is `Missing`). Discharge/aggregates are
-  // unaffected (see missing-value.test.ts).
+describe('Absence in comparisons: IEEE over NaN, and Missing is read as NaN', () => {
+  // NaN follows IEEE 754 (`NaN == NaN` is false, and NaN is unordered so
+  // orderings are false). A comparison is two-valued (user decision of
+  // 2026-11-02, two-valued comparisons): the `Missing` symbol is read as
+  // `NaN`. From 2026-07-24 to 2026-11-02 it was Kleene (`Missing == x` was
+  // `Missing`). Discharge/aggregates are unaffected (see
+  // missing-value.test.ts).
   test('NaN is IEEE', () => {
     expect(ce.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
     expect(ce.box(['NotEqual', 'NaN', 'NaN']).evaluate().symbol).toBe('True');
@@ -973,12 +977,12 @@ describe('Absence in comparisons: IEEE over NaN, Kleene over Missing (§3.D)', (
     expect(ce.box(['GreaterEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
   });
 
-  test('the Missing symbol is Kleene', () => {
-    expect(ce.box(['Equal', 2, 'Missing']).evaluate().symbol).toBe('Missing');
-    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe('Missing');
-    expect(ce.box(['Less', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+  test('the Missing symbol is read as NaN', () => {
+    expect(ce.box(['Equal', 2, 'Missing']).evaluate().symbol).toBe('False');
+    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe('True');
+    expect(ce.box(['Less', 'Missing', 1]).evaluate().symbol).toBe('False');
     expect(ce.box(['GreaterEqual', 'Missing', 1]).evaluate().symbol).toBe(
-      'Missing'
+      'False'
     );
   });
 });
@@ -1240,9 +1244,9 @@ describe('Chains SHORT-CIRCUIT: a chain is a conjunction of its adjacent pairs (
     expect(calls).toEqual([1, 1, 1]);
   });
 
-  it('a decided False wins over a later Missing or an undecided pair (Kleene)', () => {
+  it('a pair with Missing is False, and a decided False wins over an undecided pair', () => {
     expect(run(['Less', 5, 1, 'Missing'])).toBe('False');
-    expect(run(['Less', 5, 'Missing', 3])).toBe('Missing');
+    expect(run(['Less', 5, 'Missing', 3])).toBe('False');
     expect(run(['Less', 'x', 1, 0])).toBe('False');
   });
 

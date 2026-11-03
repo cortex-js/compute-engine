@@ -459,10 +459,10 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     expect(list.box(json as any).evaluate().toString()).toBe('"Missing"');
   });
 
-  test('a decisive operand of a connective wins over an absent one', () => {
-    // `And(g(x)[5] < 1, b)` at `x = []`: the comparison is absent, and
-    // `b = false` decides, as `And(Missing, False)` is `False` in the
-    // interpreter.
+  test('a comparison with an absent operand is False in a connective', () => {
+    // `And(g(x)[5] < 1, b)` at `x = []`: the element is absent, so the
+    // comparison is `False` (user decision of 2026-11-02, two-valued
+    // comparisons), and the `And` is `False` for every `b`.
     const ce = rowEngine('(unknown) -> list<unknown>', 'list<real>');
     ce.declare('b', 'boolean');
     const json = ['And', ['Less', ['At', ['g', 'x'], 5], 1], 'b'];
@@ -471,7 +471,7 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     ce.assign('b', ce.False);
     expect(expr.evaluate().toString()).toBe('"False"');
     ce.assign('b', ce.True);
-    expect(expr.evaluate().toString()).toBe('"Missing"');
+    expect(expr.evaluate().toString()).toBe('"False"');
   });
 
   test('an absent operand beside a rotation view is a NaN cell', () => {
@@ -560,7 +560,8 @@ describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence'
     // An `any` input does not settle the shape of the argument of `g`. For a
     // `string` input the shape is settled, and the element read finds no
     // `string`: the compiled equality cannot tell the absent `string` from
-    // a number, so it declines and the interpreter answers `Missing`.
+    // a number, so it declines. The interpreter answers `False`: the element
+    // is absent (user decision of 2026-11-02, two-valued comparisons).
     const json = ['Equal', ['At', ['g', 'x'], 5], 1];
     const any = engine('a', 'any');
     const unsettled = compile(any.box(json), { to: 'javascript' } as never);
@@ -568,20 +569,27 @@ describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence'
     expect(unsettled.diagnostic?.code).toBe('unsettled-shape');
     expect(unsettled.unsupported).toContain('x');
     const ce = engine('a', 'string');
-    expect(ce.box(json).evaluate().symbol).toBe('Missing');
-    expect(compile(ce.box(json), { to: 'javascript' } as never).success).toBe(
-      false
-    );
+    expect(ce.box(json).evaluate().symbol).toBe('False');
+    expect(
+      compile(engine(undefined, 'string', false).box(json), {
+        to: 'javascript',
+      } as never).success
+    ).toBe(false);
+    // With `x` assigned, the comparison is a constant: the compiler folds it
+    // with the interpreter, to `false`.
+    const folded = compile(ce.box(json), { to: 'javascript' } as never);
+    expect(folded.success).toBe(true);
+    expect(folded.run!({} as never)).toBe(false);
   });
 
   // The compiled value of a comparison with an absent operand is not
   // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
   // "Everything computed from an absent value, except at a discharge"; R4 of
   // `docs/plans/2026-11-01-absent-value-contract.md`).
-  test('g(x)[5] = 1 at x = [] is Missing in the interpreter', () => {
+  test('g(x)[5] = 1 at x = [] is False in the interpreter', () => {
     const ce = engine(['List'], 'list<real>');
     const json = ['Equal', ['At', ['g', 'x'], 5], 1];
-    expect(ce.box(json).evaluate().symbol).toBe('Missing');
+    expect(ce.box(json).evaluate().symbol).toBe('False');
   });
 
   test('an impure operand of the guarded comparison is evaluated once', () => {

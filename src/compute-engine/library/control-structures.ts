@@ -62,6 +62,7 @@ import {
   isWalkableFiniteCollection,
   mayCarryDimensions,
   pointArity,
+  unmatchedCellKind,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -73,7 +74,6 @@ import { reduceType } from '../../common/type/reduce.js';
 import {
   cannotHoldAList,
   isSubtype,
-  provablyAdmits,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
@@ -116,6 +116,7 @@ import {
   describeBoundSymbol,
 } from '../boxed-expression/operand-descriptor.js';
 import {
+  isAbsentSymbol,
   isFunction,
   isNumber,
   isSymbol,
@@ -500,23 +501,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // element-wise result of its masks: with `c := [True, False]`,
         // `If(c, 1, 0)` is `[1, 0]`.
         const mixed = scalarOrMaskConditionShape([cond?.type]);
-        // A whole-collection comparison that is undecided (`[1, 2] = [1,
-        // Missing]`) selects no branch, and the `If` is `Missing`
-        // (`evaluateCondition`). Such a condition is typed `boolean |
-        // missing`, so the result keeps a `missing` arm.
-        const undecided = mayBeUndecidedCondition([cond]);
         if (mixed)
           return BoxedType.forResult(
-            withUndecidedArm(
-              reduceType({
-                kind: 'union',
-                types: [
-                  scalar,
-                  elementwiseResultType(armList, mixed, ifFalse !== undefined),
-                ],
-              }),
-              undecided
-            ),
+            reduceType({
+              kind: 'union',
+              types: [
+                scalar,
+                elementwiseResultType(armList, mixed, ifFalse !== undefined),
+              ],
+            }),
             context.engine._typeResolver
           );
         // A condition whose type cannot be read and that may hold a list (an
@@ -526,20 +519,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // rank.
         if (cond !== undefined && unreadableConditionMayBeMask(cond.type))
           return BoxedType.forResult(
-            withUndecidedArm(
-              reduceType({
-                kind: 'union',
-                types: [
-                  scalar,
-                  elementwiseResultType(armList, {}, ifFalse !== undefined),
-                ],
-              }),
-              undecided
-            ),
+            reduceType({
+              kind: 'union',
+              types: [
+                scalar,
+                elementwiseResultType(armList, {}, ifFalse !== undefined),
+              ],
+            }),
             context.engine._typeResolver
           );
         return BoxedType.forResult(
-          withUndecidedArm(scalar, undecided),
+          scalar,
           context.engine._typeResolver
         );
       },
@@ -812,11 +802,6 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             .map((x): Type =>
               untypedArm(x, context.engine) ? 'unknown' : x.type
             );
-          // A clause before the first mask whose condition is an undecided
-          // whole-collection comparison makes the `Which` `Missing`
-          // (`evaluateWhich`).
-          if (mayBeUndecidedCondition(conds.slice(0, shape.firstMask)))
-            whole.push('missing');
           return BoxedType.forResult(
             whole.length === 0
               ? elementwise
@@ -866,9 +851,6 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // When another condition is not a scalar either, the scalar typing
         // above is kept.
         const mixed = scalarOrMaskConditionShape(conds.map((c) => c?.type));
-        // An undecided whole-collection comparison makes the `Which`
-        // `Missing` (`evaluateWhich`), also when a default clause follows.
-        const undecided = mayBeUndecidedCondition(conds);
         // Otherwise, when a condition that is not a scalar cannot be read
         // and may hold a list (two conditions of type `boolean |
         // list<boolean>`, an operand of type `unknown`), it can be a mask of
@@ -883,24 +865,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             : undefined);
         if (shapeOfMasks)
           return BoxedType.forResult(
-            withUndecidedArm(
-              reduceType({
-                kind: 'union',
-                types: [
-                  scalar,
-                  elementwiseResultType(
-                    arms.map((x) => x.type),
-                    shapeOfMasks,
-                    dflt >= 0
-                  ),
-                ],
-              }),
-              undecided
-            ),
+            reduceType({
+              kind: 'union',
+              types: [
+                scalar,
+                elementwiseResultType(
+                  arms.map((x) => x.type),
+                  shapeOfMasks,
+                  dflt >= 0
+                ),
+              ],
+            }),
             context.engine._typeResolver
           );
         return BoxedType.forResult(
-          withUndecidedArm(scalar, undecided),
+          scalar,
           context.engine._typeResolver
         );
       },
@@ -1294,6 +1273,16 @@ function restrictionType(
   // `missing` arm: the `NaN` or `Missing` that a false condition gives
   // sits outside the declared type, as `NaN` sits outside `real`
   // (decision 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`).
+  // A boolean value is the exception: a false condition gives `False`
+  // (`maskedValue()`), a value of the type `boolean`, so the type admits
+  // it. `If(c, Equal(1, 1))` is typed `boolean`, not `true`: with the type
+  // `true`, a compiled condition `If(If(c, 1 = 1), 1, 2)` was dropped as
+  // always true, and gave 1 where `c` is false.
+  if (unmatchedCellKind(expr.type) === 'boolean')
+    return BoxedType.forResult(
+      widen(expr.type, 'boolean'),
+      context.engine._typeResolver
+    );
   return BoxedType.forResult(expr.type, context.engine._typeResolver);
 }
 
@@ -1411,9 +1400,19 @@ function isNumericValueType(t: Type): boolean {
  * restriction masked every value to `Missing`, so a masked NUMBER read as
  * `Missing` on the route that held the restriction and as `NaN` on the route
  * that evaluated it fresh (`2·x{c}` versus `2·Missing`).
+ *
+ * A boolean value (a relation, a region of a plot) masks to `False`: the
+ * logic is two-valued, so the absent boolean is `False`, as the cell of a
+ * relation arm under a list of conditions is (`unmatchedCell()`), and
+ * `If(c, x > 0)` in a condition reads as `c ∧ x > 0` (user decision
+ * 2026-11-02, two-valued comparisons; corpus row neyret/xhlkk7k9aq, whose
+ * condition is `If(c_2 < 1, 0 < If(c_1 < 1, 1))`).
  */
 function maskedValue(ce: ComputeEngine, expr: Expression): Expression {
-  return isNumericValueType(expr.type.type) ? ce.NaN : ce.Missing;
+  if (isNumericValueType(expr.type.type)) return ce.NaN;
+  return unmatchedCellKind(expr.type.type) === 'boolean'
+    ? ce.False
+    : ce.Missing;
 }
 
 /** The type of a point of `n` coordinates that can be `NaN`. */
@@ -1428,12 +1427,17 @@ function nanPointType(n: number): Type {
  * The value of a POSITION that an element-wise selection or a mask does not
  * select, from the type `t` of the value at that position: `NaN` for a
  * number, a point whose coordinates are all `NaN` for a point (a plotter
- * skips such a point, as Desmos skips an undefined element), and `Missing`
- * otherwise. A position is never `undefined` and never needs `IsMissing` or
- * `Coalesce` to be read (selection rule of 2026-11-02,
+ * skips such a point, as Desmos skips an undefined element), `False` for a
+ * boolean (a relation arm is a region of a plot, and the region is not
+ * drawn there), the colour `Rgb(NaN, NaN, NaN)` for a colour (a plotter
+ * reads a colour with a channel that is not finite as "no colour here"),
+ * and `Missing` otherwise. A position is never `undefined` and never needs
+ * `IsMissing` or `Coalesce` to be read (selection rule of 2026-11-02,
  * `docs/BROADCAST-MODEL.md`, which reverses the decision of 2026-10-18 that
- * a point cell with no match is absent). A scalar condition that is false
- * selects no arm WHOLE, and gives `maskedValue()` instead.
+ * a point cell with no match is absent; the boolean and colour cells are
+ * from the two-valued comparisons of 2026-11-02, Tycho item 189 for the
+ * colour). A scalar condition that is false selects no arm WHOLE, and gives
+ * `maskedValue()` instead.
  */
 function unmatchedCell(ce: ComputeEngine, t: Readonly<Type>): Expression {
   if (isNumericValueType(t as Type)) return ce.NaN;
@@ -1443,14 +1447,19 @@ function unmatchedCell(ce: ComputeEngine, t: Readonly<Type>): Expression {
       'Tuple',
       Array.from({ length: n }, () => ce.NaN)
     );
+  const kind = unmatchedCellKind(t);
+  if (kind === 'boolean') return ce.False;
+  if (kind === 'color') return ce._fn('Rgb', [ce.NaN, ce.NaN, ce.NaN]);
   return ce.Missing;
 }
 
 /**
  * The cell at one position of a restriction by a list of conditions, from
  * the condition `c` at that position and the value `elem` there: the
- * `NaN` point when `elem` is a point and `c` is `False`
- * (`unmatchedCell()`), and `If(c, elem)` otherwise. The value of
+ * `NaN` point, `False` or the `NaN` colour when `elem` is a point, a
+ * boolean or a colour and `c` is `False` (`unmatchedCell()`), and
+ * `If(c, elem)` otherwise (`If(c, elem, Rgb(NaN, NaN, NaN))` for a colour).
+ * The value of
  * `If(c, elem)` when `c` is false is `NaN` for a number, as
  * `unmatchedCell()` gives, but `Missing` for a point, the value of a point
  * that a SCALAR condition does not select. So a cell whose condition is not
@@ -1463,8 +1472,21 @@ function maskCell(
   c: Expression,
   elem: Expression
 ): Expression {
-  if (sym(c) === 'False' && pointArity(elem.type.type) !== undefined)
+  if (
+    sym(c) === 'False' &&
+    (pointArity(elem.type.type) !== undefined ||
+      unmatchedCellKind(elem.type.type) !== undefined)
+  )
     return unmatchedCell(ce, elem.type.type);
+  // A colour cell whose condition is not decided carries the no-colour value
+  // as an explicit else branch: `If(c, elem)` with `c` false is `Missing`
+  // for a colour (`maskedValue()`), but the unmatched colour cell is
+  // `Rgb(NaN, NaN, NaN)` (`unmatchedCell()`). With the else branch, the cell
+  // read before `c` is assigned and evaluated after `c = False` gives the
+  // same value as the evaluation of the whole restriction. A relation cell
+  // needs no else branch: `maskedValue()` already gives `False` for it.
+  if (unmatchedCellKind(elem.type.type) === 'color')
+    return ce._fn('If', [c, elem, unmatchedCell(ce, elem.type.type)]);
   return ce._fn('If', [c, elem]);
 }
 
@@ -1474,6 +1496,8 @@ function withUnmatchedCellType(t: Type): Type {
   if (isNumericValueType(t)) return widen(t, 'number');
   const n = pointArity(t);
   if (n !== undefined) return widen(t, nanPointType(n));
+  const kind = unmatchedCellKind(t);
+  if (kind !== undefined) return widen(t, kind);
   return reduceType({ kind: 'union', types: [t, 'missing'] });
 }
 
@@ -1707,57 +1731,47 @@ const BRANCH_RELATIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * A branch condition after evaluation: `value` is what the condition
- * evaluates to — exactly what `cond.canonical.evaluate()` answers, errors,
- * element-wise lists and inert symbolic forms included — and `undecided` is
- * `true` when that value selects no arm although it is not symbolic.
- *
- * One shape carries the flag: the absent marker `Missing` that a
- * whole-collection comparison answers when its element recursion meets a
- * pair with no answer (user ruling of 2026-09-21). That marker reports an
- * undecided comparison, not absent condition DATA, which is why it takes no
- * arm instead of raising the absent-condition error a `Missing` condition
- * otherwise raises. The marker survives `Not` and the connectives through
- * their ordinary Kleene evaluation, so the flag has to survive them too.
+ * The value of a branch condition, read two-valued: an absent value
+ * (`Missing`, `Undefined`) is `False`. The logic is two-valued: an absent
+ * condition is not a third truth value, and the branch takes its next arm
+ * (the else arm, or the absent value of the domain of the arm), as Desmos
+ * does: `\{u<1:5,7\}` is 7 when `u` is undefined (user decision 2026-11-02,
+ * two-valued comparisons, `docs/ERROR-MODEL.md`). Every other value is kept.
  */
-type EvaluatedCondition = { value: Expression; undecided: boolean };
+function twoValued(value: Expression): Expression {
+  const s = sym(value);
+  return s === 'Missing' || s === 'Undefined' ? value.engine.False : value;
+}
 
 /**
- * Evaluate the condition of an `If`/`Which` for branch selection.
+ * Evaluate the condition of an `If`/`Which` for branch selection: exactly
+ * what `cond.canonical.evaluate()` answers (errors, element-wise lists and
+ * inert symbolic forms included), with an absent value read as `False`
+ * (`twoValued`).
  *
- * A relation with an undefined numeric operand (`NaN`, `Indeterminate`) has
- * its IEEE 754 value, and the branch uses that value as it uses any other:
- * `If(0/0 > 0, 1, 0)` is `0` and `If(0/0 ≠ 0, 1, 0)` is `1` (user decisions
- * 2026-10-20, Tycho rows 411 and 413, and 2026-10-23; from
- * 2026-09-03 to those dates such a condition selected no arm). The compiled
- * lanes take the same arm (`BaseCompiler.conditionDecidability`).
+ * A relation with an undefined operand (`NaN`, `Indeterminate`, `Missing`)
+ * is `False` (`True` for `≠`), and the branch uses that value as it uses
+ * any other: `If(0/0 > 0, 1, 0)` is `0` and `If(0/0 ≠ 0, 1, 0)` is `1` (user
+ * decisions 2026-10-20, Tycho rows 411 and 413, 2026-10-23 and 2026-11-02).
+ * The compiled lanes take the same arm (`BaseCompiler.conditionDecidability`).
  *
- * The walk reproduces the ordinary evaluation of the condition and adds
- * nothing but the flag:
+ * The walk reproduces the ordinary evaluation of the condition:
  * - A relation evaluates its operands left to right and then itself over
  *   the values; an error in an operand propagates through the relation as
  *   it always did, and a collection-shaped operand gives the element-wise
  *   list the relation always gave (a NaN CELL then takes the else cell on
  *   both lanes, measured 2026-09-03 — `evaluateElementwiseSelection` owns
- *   that contract). Only the `Missing` of a whole-collection comparison is
- *   flagged.
+ *   that contract).
  * - `And`/`Or` keep their short-circuit contract (`evaluateShortCircuit`,
  *   `library/logic.ts`): operands are evaluated left to right and the walk
  *   stops at the first decider (`False` for `And`, `True` for `Or`) or the
  *   first error, so an operand a decided one guards is never evaluated. A
- *   flagged operand does not stop the walk: it decides nothing. The
- *   survivors are then combined three-valued, as the compiled lowering
- *   does: a decided `False` decides an `And` whatever its siblings are, a
- *   decided `True` decides an `Or`; all-decided survivors fold with a flag
- *   if any of them was flagged; a survivor that is still symbolic (a
- *   relation with a free variable) keeps the whole connective inert, spelled
- *   with the ORIGINAL sub-conditions so that a later binding can still
- *   decide it and the flagged evidence is not folded away; a collection-shaped
- *   survivor hands the connective to its ordinary element-wise evaluation.
- *   `Nand`, `Nor` and `Implies` are the same walk through their `And`/`Or`
- *   spelling, `Not` flips its operand and keeps the flag.
- * - Anything else evaluates as before, unflagged. `Xor` and the remaining
- *   heads are not three-valued here: a flag under them is lost.
+ *   survivor that is still symbolic (a relation with a free variable) keeps
+ *   the whole connective inert; a collection-shaped survivor hands the
+ *   connective to its ordinary element-wise evaluation. `Nand`, `Nor` and
+ *   `Implies` are the same walk through their `And`/`Or` spelling, and `Not`
+ *   negates the value of its operand.
+ * - Anything else evaluates as before.
  *
  * `numericApproximation` is the numeric request of the `If`/`Which` that
  * holds the condition. It is forwarded to every evaluation of the walk, so
@@ -1772,13 +1786,13 @@ type EvaluatedCondition = { value: Expression; undecided: boolean };
 function evaluateCondition(
   cond: Expression,
   numericApproximation?: boolean
-): EvaluatedCondition {
+): Expression {
   const c = cond.canonical;
   const ce = c.engine;
   const options = numericApproximation
     ? { numericApproximation: true }
     : undefined;
-  if (!isFunction(c)) return { value: c.evaluate(options), undecided: false };
+  if (!isFunction(c)) return twoValued(c.evaluate(options));
   const op = c.operator;
 
   if (BRANCH_RELATIONS.has(op)) {
@@ -1793,8 +1807,7 @@ function evaluateCondition(
       c.ops,
       numericApproximation
     );
-    if (chain !== undefined && !Array.isArray(chain))
-      return { value: chain, undecided: false };
+    if (chain !== undefined && !Array.isArray(chain)) return twoValued(chain);
     const ops: Expression[] = [];
     if (chain !== undefined) ops.push(...chain);
     else
@@ -1844,21 +1857,7 @@ function evaluateCondition(
       );
     }
     const value = ce.function(op, relationOps).evaluate(options);
-    const s = sym(value);
-    // A whole-collection comparison (two or more collection operands) answers
-    // the absent marker `Missing` when its element recursion meets a pair
-    // with no answer — an absent cell on either side (user ruling of
-    // 2026-09-21, `library/relational-operator.ts`). That marker reports an
-    // UNDECIDED comparison, not absent condition DATA, so the branch takes no
-    // arm. A scalar `Missing` condition keeps its own answer, the catchable
-    // absent-condition error: there the condition itself is the absent datum.
-    // A NaN operand is not flagged: the relation's IEEE value (`True` for
-    // `NotEqual`, `False` for the others) selects the arm.
-    return {
-      value,
-      undecided:
-        s === 'Missing' && ops.filter((x) => x.isCollection).length >= 2,
-    };
+    return twoValued(value);
   }
 
   if (op === 'And' || op === 'Or')
@@ -1881,7 +1880,7 @@ function evaluateCondition(
   if (op === 'Not' && c.nops === 1)
     return negateCondition(evaluateCondition(c.op1, numericApproximation));
 
-  return { value: c.evaluate(options), undecided: false };
+  return twoValued(c.evaluate(options));
 }
 
 /** True when `x` is a finite real number literal that is not exact (a
@@ -1890,30 +1889,15 @@ function isInexactRealNumber(x: Expression): boolean {
   return isNumber(x) && !x.isExact && !x.isComplex && x.isFinite === true;
 }
 
-/**
- * `Not` of an evaluated condition: the flag survives a value that is still
- * one of the shapes it describes — a decided `True`/`False`, or the absent
- * marker `Missing`, which `Not` reproduces (`Not(Missing)` is `Missing`).
- * Dropping the flag on the marker made the interpreter raise the
- * absent-condition error for `Which(Not(<undecided comparison>), …)` where
- * the compiled lane took no arm.
- */
-function negateCondition(inner: EvaluatedCondition): EvaluatedCondition {
-  const ce = inner.value.engine;
-  if (errorValue(inner.value) !== undefined) return inner;
-  const value = ce.function('Not', [inner.value]).evaluate();
-  const s = sym(value);
-  return {
-    value,
-    undecided:
-      inner.undecided && (s === 'True' || s === 'False' || s === 'Missing'),
-  };
+/** `Not` of an evaluated condition. An error is kept as it is. */
+function negateCondition(inner: Expression): Expression {
+  if (errorValue(inner) !== undefined) return inner;
+  return inner.engine.function('Not', [inner]).evaluate();
 }
 
 /**
- * The three-valued, short-circuiting walk of an `And`/`Or` branch condition
- * — see `evaluateCondition`. `node` is the connective as written (its
- * original operands are kept for the inert spelling); `ops` are the
+ * The short-circuiting walk of an `And`/`Or` branch condition — see
+ * `evaluateCondition`. `node` is the connective as written; `ops` are the
  * operands to walk, which differ from `node.ops` only for the `Implies`
  * spelling. `numericApproximation` is the numeric request of the walk (see
  * `evaluateCondition`).
@@ -1923,73 +1907,49 @@ function evaluateConnective(
   op: 'And' | 'Or',
   ops: ReadonlyArray<Expression>,
   numericApproximation?: boolean
-): EvaluatedCondition {
+): Expression {
   const ce = node.engine;
   const decider = op === 'And' ? 'False' : 'True';
-  const survivors: { original: Expression; result: EvaluatedCondition }[] = [];
+  // An operand of collection shape makes the connective element-wise: a
+  // scalar decider (an absent operand read as `False`) must not collapse
+  // the list, as in the ordinary connective (`evaluateShortCircuit()` in
+  // `library/logic.ts`): `If(And([True, False], Missing), 1, 0)` is
+  // `[0, 0]`.
+  const elementwise = ops.some(isCollectionShaped);
+  const survivors: Expression[] = [];
+  // The first failed operand. As in the ordinary connective
+  // (`evaluateShortCircuit()` in `library/logic.ts`), a failed operand does
+  // not end the walk: a later operand that decides the result (an absent
+  // operand read as `False` for `And`) wins, so `If(And(1, Missing), 5, 7)`
+  // is `7`, as `And(1, Missing)` is `False`. The error is returned only when
+  // no later operand decides. An operand after a deciding one is not
+  // evaluated, so `If(And(False, <error>), 5, 7)` is `7`.
+  let failed: Expression | undefined = undefined;
   for (const x of ops) {
     const r = evaluateCondition(x, numericApproximation);
-    if (errorValue(r.value) !== undefined) return r;
-    if (sym(r.value) === decider && !r.undecided)
-      return { value: ce.symbol(decider), undecided: false };
-    survivors.push({ original: x, result: r });
+    if (errorValue(r) !== undefined) {
+      if (elementwise) return r;
+      failed ??= r;
+      continue;
+    }
+    if (!elementwise && sym(r) === decider) return ce.symbol(decider);
+    survivors.push(r);
   }
+  if (failed) return failed;
   // A collection-shaped survivor: the element-wise contract of the
-  // connective, over the evaluated values, unflagged.
-  if (survivors.some((s) => isCollectionShaped(s.result.value)))
-    return {
-      value: ce
-        .function(
-          op,
-          survivors.map((s) => s.result.value)
-        )
-        .evaluate(
-          numericApproximation ? { numericApproximation: true } : undefined
-        ),
-      undecided: false,
-    };
-  // A symbolic survivor keeps the connective inert, spelled with the
-  // original sub-conditions (a flagged survivor folded to its value would
-  // decide the connective the wrong way).
-  // A survivor that is already FLAGGED is not symbolic: its value is the
-  // absent marker `Missing` of an undecided whole-collection comparison,
-  // which the connective folds by the ordinary Kleene table (`And(Missing,
-  // True)` is `Missing`). Treating it as symbolic left the whole `Which`
-  // inert where the compiled lane took no arm.
-  // A survivor that evaluated to the absent marker `Missing` is not symbolic
-  // either: it is a value. With no deciding survivor and no symbolic one,
-  // the Kleene table gives `Missing` (`And(True, Missing)`,
-  // `Or(False, Missing)`), so the condition is absent, as `Not(Missing)` and
-  // a comparison with an absent operand already are.
-  const symbolic = survivors.some((s) => {
-    const v = sym(s.result.value);
-    return (
-      v !== 'True' && v !== 'False' && v !== 'Missing' && !s.result.undecided
-    );
-  });
-  if (symbolic)
-    return {
-      value: ce.function(
-        op,
-        survivors.map((s) =>
-          s.result.undecided ? s.original.canonical : s.result.value
-        )
-      ),
-      undecided: false,
-    };
-  if (
-    survivors.some(
-      (s) => sym(s.result.value) === 'Missing' && !s.result.undecided
-    )
-  )
-    return { value: ce.symbol('Missing'), undecided: false };
+  // connective, over the evaluated values.
+  if (survivors.some((r) => isCollectionShaped(r)))
+    return ce
+      .function(op, survivors)
+      .evaluate(
+        numericApproximation ? { numericApproximation: true } : undefined
+      );
+  // A symbolic survivor keeps the connective inert.
+  if (survivors.some((r) => sym(r) !== 'True' && sym(r) !== 'False'))
+    return ce.function(op, survivors);
   // Every survivor is the non-deciding value (`True` for `And`, `False`
-  // for `Or`), or a flagged value: the connective folds to the
-  // non-deciding value, flagged if any survivor was flagged.
-  return {
-    value: ce.symbol(op === 'And' ? 'True' : 'False'),
-    undecided: survivors.some((s) => s.result.undecided),
-  };
+  // for `Or`).
+  return ce.symbol(op === 'And' ? 'True' : 'False');
 }
 
 /**
@@ -2270,19 +2230,12 @@ function selectionArmError(
   return undefined;
 }
 
-function absentConditionError(ce: ComputeEngine): Expression {
-  return ce.error(
-    'The condition is absent (`Missing`). Discharge absence with ' +
-      '`Coalesce()` or `IsMissing()` before branching'
-  );
-}
-
 /**
  * The supertype every element-wise-eligible condition is checked against.
  *
  * The cells admitted at RUNTIME (`conditionCells`) are `True`/`False`/`Missing`
- * — an absent cell is a legitimate condition value (R4′) — so the static gate
- * must admit `missing` cells too, or `Which(["True", "Missing"], …)` would
+ * — an absent cell is read as `False` — so the static gate must admit
+ * `missing` cells too, or `Which(["True", "Missing"], …)` would
  * evaluate element-wise while typing scalar. It stays a strict supertype of
  * those cells: a condition typing `list<unknown>`, or plain `unknown`, does not
  * match and keeps the scalar typing.
@@ -2300,10 +2253,10 @@ const CONDITION_CELL_TYPE = parseType('boolean | missing');
 
 /**
  * The value of a condition at one node of an element-wise selection: a
- * condition value (`True`, `False` or `Missing`), or a list of such values
- * (`MaskList`).
+ * condition value (`True` or `False`; an absent cell is read as `False`),
+ * or a list of such values (`MaskList`).
  */
-type MaskCell = 'True' | 'False' | 'Missing' | MaskList;
+type MaskCell = 'True' | 'False' | MaskList;
 
 /**
  * A list-valued condition at one node of an element-wise selection: the
@@ -2319,7 +2272,8 @@ type MaskList = { value: Expression; cells: MaskCell[] };
  * The gate (§3 of `docs/BROADCAST-MODEL.md`) is
  * deliberately narrow: an indexed collection (never a `Set`, never a tuple —
  * tuples are points, not lists) of statically known finite length whose cells
- * are ALL condition values (`True`/`False`/`Missing`) or themselves such
+ * are ALL condition values (`True`, `False`, `Missing` or `Undefined`; an
+ * absent cell reads as `False`) or themselves such
  * collections. A nested mask is read here so that the selection can refuse
  * it (`evaluateElementwiseSelection()`): a condition is a boolean or a flat
  * list of booleans. A collection with a symbolic or non-boolean cell at any depth, or
@@ -2336,8 +2290,14 @@ function conditionCells(c: Expression): MaskList | undefined {
   const cells: MaskCell[] = [];
   for (const cell of Array.from(c.each()) as Expression[]) {
     const s = sym(cell);
-    if (s === 'True' || s === 'False' || s === 'Missing') {
+    if (s === 'True' || s === 'False') {
       cells.push(s);
+      continue;
+    }
+    // An absent cell is read as `False`: the logic is two-valued (user
+    // decision 2026-11-02, two-valued comparisons).
+    if (isAbsentSymbol(cell)) {
+      cells.push('False');
       continue;
     }
     const nested = conditionCells(cell);
@@ -2398,9 +2358,8 @@ function evaluateElementwiseSelection(
   // conditions are not evaluated at all.
   const participants: Expression[] = [];
   // The value of each retained clause's condition at the top node: the
-  // materialized mask of a list-valued condition, `'True'` for a lifted
-  // scalar `True`, or `'Missing'` for a lifted scalar absent condition (an
-  // all-`Missing` condition row).
+  // materialized mask of a list-valued condition, or `'True'` for a lifted
+  // scalar `True`.
   const selectors: MaskCell[] = [];
   const arms: Expression[] = [];
   for (let k = 0; k < clauses.length; k++) {
@@ -2419,20 +2378,9 @@ function evaluateElementwiseSelection(
               : undefined
           );
     const s = sym(c);
-    // `Undefined` is treated as not-True (decision 9), like `False`.
-    if (s === 'False' || s === 'Undefined') continue;
-    if (s === 'Missing') {
-      // A lifted scalar ABSENT condition is an all-`Missing` condition row,
-      // not a whole-expression error: absence is position-local (R4′) and a
-      // scalar condition lifts to every position (R1). Every position still
-      // undecided when this clause is reached becomes an absent-condition
-      // error cell; positions already selected keep their value, and no later
-      // clause can decide what absence left undecided — so the walk stops
-      // here, exactly as a lifted `True` does.
-      selectors.push('Missing');
-      arms.push(arm);
-      break;
-    }
+    // An absent condition (`Missing`, `Undefined`) is read as `False`: the
+    // logic is two-valued (user decision 2026-11-02).
+    if (s === 'False' || s === 'Undefined' || s === 'Missing') continue;
     if (s === 'True') {
       selectors.push('True');
       arms.push(arm);
@@ -2471,11 +2419,10 @@ function evaluateElementwiseSelection(
 
   // 2/ Compute the selection, node by node of the mask. At a node where every
   // condition is a scalar, it is the index of the first clause whose
-  // condition is `True` there, `NO_MATCH` when no condition is, and
-  // `ABSENT_CONDITION` when the first condition that is not `False` is
-  // `Missing`. At a node where some condition is a list, it is one selection
-  // for each position, and the list-valued conditions there must have the
-  // same length. The first clause's condition is the collection that
+  // condition is `True` there, and `NO_MATCH` when no condition is. At a
+  // node where some condition is a list, it is one selection for each
+  // position, and the list-valued conditions there must have the same
+  // length. The first clause's condition is the collection that
   // activated the gate, so the top node is always a list node.
   const reached = new Set<number>();
   const select = (node: ReadonlyArray<MaskCell>): SelectionNode | undefined => {
@@ -2487,7 +2434,6 @@ function evaluateElementwiseSelection(
           reached.add(k);
           return k;
         }
-        if (node[k] === 'Missing') return ABSENT_CONDITION;
       }
       return NO_MATCH;
     }
@@ -2563,8 +2509,7 @@ function evaluateElementwiseSelection(
     const result: Expression[] = [];
     for (let j = 0; j < node.positions.length; j++) {
       const child = node.positions[j];
-      if (child === ABSENT_CONDITION) result.push(absentConditionError(ce));
-      else if (child === NO_MATCH)
+      if (child === NO_MATCH)
         result.push((noMatch[depth] ??= noMatchCell(ce, armTypes, depth)));
       else if (typeof child === 'number') result.push(pick(here[child], j)!);
       else {
@@ -2631,13 +2576,9 @@ function lowerRankArmError(
 
 /** A selection at a node of the mask where no clause selects. */
 const NO_MATCH = -1;
-/** A selection at a node of the mask where the deciding condition is
- * `Missing`. */
-const ABSENT_CONDITION = -2;
-
 /**
  * The selection at one node of the mask of an element-wise selection: the
- * index of the selected clause, `NO_MATCH` or `ABSENT_CONDITION` at a node
+ * index of the selected clause or `NO_MATCH` at a node
  * where every condition is a scalar, or a `SelectionList` at a node where
  * some condition is a list.
  */
@@ -3000,14 +2941,17 @@ function elementwiseCellType(
   // (`noMatchCell`): `NaN` when every arm is numeric, so the cell joins in
   // `number`, the narrowest type that admits `NaN`; a `NaN` point when every
   // arm is a point, so the cell joins in a point of `number` coordinates;
-  // `Missing` otherwise, so the cell keeps a `missing` arm. The union is
-  // built explicitly: `widen` joins toward a common supertype and would
-  // dissolve the absence marker.
+  // `False` or the `NaN` colour when every arm is a boolean or a colour
+  // (`unmatchedCellKind`); `Missing` otherwise, so the cell keeps a
+  // `missing` arm. The union is built explicitly: `widen` joins toward a
+  // common supertype and would dissolve the absence marker.
   const joined = widen(...contributions);
   const position = noMatchPositionType(arms, depth);
   if (isNumericValueType(position)) return widen(joined, 'number');
   const n = pointArity(position);
   if (n !== undefined) return widen(joined, nanPointType(n));
+  const kind = unmatchedCellKind(position);
+  if (kind !== undefined) return widen(joined, kind);
   return reduceType({ kind: 'union', types: [joined, 'missing'] });
 }
 
@@ -3145,39 +3089,6 @@ function unreadableConditionMayBeMask(t: Type): boolean {
 }
 
 /**
- * True when one of the conditions `conds` states that it may be `missing`,
- * the value of a whole-collection comparison that is undecided (`[1, 2] =
- * [1, Missing]`, typed `boolean | missing`). Such a condition selects no
- * clause, and the `If` or `Which` is `Missing` (`evaluateCondition`). An
- * `unknown` arm and the type `any` state nothing (`provablyAdmits`): such a
- * condition is not a comparison whose type is known.
- *
- * A comparison is undecided only when two or more of its operands are
- * collections (`evaluateCondition`). A comparison with at most one operand
- * that can hold a list (`At(s, 2) = 0`) that is `Missing` has an absent
- * operand: the `If` or `Which` is then the absent-condition error, which the
- * type does not show. So such a comparison adds no `missing` arm.
- */
-function mayBeUndecidedCondition(
-  conds: ReadonlyArray<OperandDescriptor | undefined>
-): boolean {
-  return conds.some((c) => {
-    if (c === undefined) return false;
-    const t = c.type;
-    if (t === 'any' || !provablyAdmits('missing', t)) return false;
-    const s = c.structureOf?.();
-    if (s?.kind === 'application' && BRANCH_RELATIONS.has(s.head))
-      return s.children.filter((x) => !cannotHoldAList(x.type)).length >= 2;
-    return true;
-  });
-}
-
-/** The type `t` with a `missing` arm when `undecided` is true. */
-function withUndecidedArm(t: Type, undecided: boolean): Type {
-  return undecided ? reduceType({ kind: 'union', types: [t, 'missing'] }) : t;
-}
-
-/**
  * The shape of the masks of a selection whose only condition that is not a
  * scalar has a union type whose options are each a scalar condition type or
  * a mask type, with at least one of each (`boolean | list<boolean>`), and
@@ -3292,10 +3203,7 @@ function evaluateIf(
   const armOptions = options.numericApproximation
     ? { numericApproximation: true }
     : undefined;
-  const { value: evaluatedOnce, undecided } = evaluateCondition(
-    cond,
-    options.numericApproximation
-  );
+  const evaluatedOnce = evaluateCondition(cond, options.numericApproximation);
   // A held conjunction in a restriction is evaluated once more, before the
   // verdict checks below, which keeps one copy of each condition: the
   // restriction of a group of restricted terms is `If(And(c, c), …)`
@@ -3319,22 +3227,14 @@ function evaluateIf(
   // as a host exception.
   const condError = errorValue(evaluated);
   if (condError !== undefined) return condError;
-  // An undecided whole-collection comparison (`evaluateCondition`) selects
-  // no arm: the value is `Missing`, the position-preserving absent
-  // datum that an else-less `If` and a `Which` with no selected clause
-  // already answer (no-selection ruling 2026-08-27). The compiled
-  // lanes answer their numeric spelling of the same marker, `NaN`.
-  // Unlike a free-variable condition this can never resolve, so the
-  // node is not held inert; unlike an absent condition it is not a
-  // program defect, so it is not an error.
-  if (undecided) return engine.Missing;
   const evaluatedCond = sym(evaluated);
   if (evaluatedCond === 'True')
     return ifTrue?.evaluate(armOptions) ?? engine.Missing;
   // With no else branch, a false condition gives the absent value of the
   // domain of the arm (`maskedValue`): `NaN` for a number, as a restriction
   // `e\{c\}` does. A statement arm (`If(k = 2, Assign(a, 5))`) has no
-  // value, so the result is `Missing`.
+  // value, so the result is `Missing`. An absent condition (`Missing`) is
+  // read as `False` by `evaluateCondition`: `If(Missing, 1, 2)` is `2`.
   if (evaluatedCond === 'False')
     return (
       ifFalse?.evaluate(armOptions) ??
@@ -3342,13 +3242,6 @@ function evaluateIf(
         ? engine.Missing
         : maskedValue(engine, ifTrue))
     );
-  // An ABSENT condition (the `Missing` symbol) is a legitimate runtime
-  // data state, not a program defect: it is Kleene-undecidable, so
-  // branching is an error — but a catchable error EXPRESSION (R's
-  // `if (NA)` stance), never the typo throw below. Discharge with
-  // `Coalesce`/`IsMissing` before branching. (§3.D residual, resolved
-  // 2026-07-24.)
-  if (evaluatedCond === 'Missing') return absentConditionError(engine);
   // A single-branch `If(c, e)` whose arm is a value is the restriction
   // `e\{c\}`, which the parser reads as this `If` (`evaluateRestriction()`):
   // a list of conditions masks element by element (truncated to the shorter
@@ -3464,8 +3357,8 @@ function distributeOverListArms(
 /**
  * The value of the restriction `expr\{c\}`, the single-branch `If(c, expr)`
  * whose arm is a value, for a condition `c` that is already evaluated and
- * that is not an error, not `True`, not `False`, not absent and not an
- * undecided comparison of whole collections (`evaluateIf()` answers these).
+ * that is not an error, not `True` and not `False` (`evaluateIf()` answers
+ * these; an absent condition is read as `False` there).
  * A restriction that cannot be decided now is held, spelled `If(c, e)`.
  *
  * - A finite collection of conditions (a mask) restricts element by element.
@@ -3567,8 +3460,6 @@ function evaluateRestriction(
     }
   }
 
-  if (sym(c) === 'Undefined') return maskedValue(ce, expr);
-
   if (
     expr.type.matches('collection<any>') &&
     !isTupleShapedType(expr.type.type) &&
@@ -3620,8 +3511,8 @@ async function evaluateIfAsync(
           options._precisionWindow
         );
   if (evaluated === undefined) return fallback(ops);
-  const { value, undecided } = evaluateCondition(evaluated);
-  if (errorValue(value) === undefined && !undecided) {
+  const value = evaluateCondition(evaluated);
+  if (errorValue(value) === undefined) {
     const decided = sym(value);
     if (decided === 'True')
       return ifTrue === undefined
@@ -3673,15 +3564,15 @@ async function evaluateWhichAsync(
   let i = 0;
   while (i < args.length - 1) {
     const evaluated = await args[i].evaluateAsync(evalOptions);
-    const { value, undecided } = evaluateCondition(evaluated);
-    if (errorValue(value) !== undefined || undecided)
+    const value = evaluateCondition(evaluated);
+    if (errorValue(value) !== undefined)
       return fallback([...args.slice(0, i), evaluated, ...args.slice(i + 1)]);
     const guard = sym(value);
     if (guard === 'True') {
       if (!args[i + 1]) return engine.Missing;
       return args[i + 1].evaluateAsync(evalOptions);
     }
-    if (guard !== 'False' && guard !== 'Undefined')
+    if (guard !== 'False')
       return fallback([...args.slice(0, i), evaluated, ...args.slice(i + 1)]);
     i += 2;
   }
@@ -3696,10 +3587,7 @@ function evaluateWhich(
   while (i < args.length - 1) {
     // The guard is evaluated with the numeric request of the `Which`, as the
     // selected arm is (see `evaluateIf`).
-    const { value: evaluated, undecided } = evaluateCondition(
-      args[i],
-      options.numericApproximation
-    );
+    const evaluated = evaluateCondition(args[i], options.numericApproximation);
     // A guard `Which` reaches is DEMANDED, so an error in it propagates —
     // the same obligation `If` discharges for its condition (see the comment
     // there): a lazy operator owns propagation for what it demands, and an
@@ -3707,28 +3595,19 @@ function evaluateWhich(
     // exception rather than as a value.
     const condError = errorValue(evaluated);
     if (condError !== undefined) return condError;
-    // An undecided whole-collection comparison (`evaluateCondition`)
-    // selects no clause, and falling through to a later clause would decide
-    // what the comparison left undecided: the whole `Which` answers `Missing`, its
-    // no-selection value (see the `If` handler for the reasoning and the
-    // compiled lanes' `NaN` spelling of it).
-    if (undecided) return options.engine.Missing;
     const cond = sym(evaluated);
     if (cond === 'True') {
       // A selected clause with no arm has no value to answer: `Missing`, the
       // position-preserving absent datum (no-selection ruling 2026-08-27).
       if (!args[i + 1]) return options.engine.Missing;
       return args[i + 1].evaluate(options);
-    } else if (cond !== 'False' && cond !== 'Undefined') {
-      // An ABSENT guard (the `Missing` symbol) is Kleene-undecidable: this
-      // clause can neither be taken nor skipped (falling through to a later
-      // clause would decide what absence left undecided), so the `Which` is
-      // a catchable error EXPRESSION — not the typo throw below. (§3.D
-      // residual, resolved 2026-07-24.)
-      if (cond === 'Missing') return absentConditionError(options.engine);
+    } else if (cond !== 'False') {
+      // An absent guard (`Missing`) never reaches this point:
+      // `evaluateCondition` reads it as `False`, and the next clause is
+      // tried (`Which(Missing, 1, True, 2)` is `2`).
       // A LIST-VALUED condition selects element-wise (§3 of
       // `docs/BROADCAST-MODEL.md`). Every earlier
-      // clause fell through (its condition was a scalar `False`/`Undefined`),
+      // clause fell through (its condition was a scalar `False`),
       // so it can never select and the remaining clauses carry the whole
       // selection.
       const mask = conditionCells(evaluated);
@@ -3772,7 +3651,7 @@ function evaluateWhich(
       // evaluation discarded (`Which(C = U[1], …)` kept `U[1]` where the
       // condition had read `10`; in a big-op loop it kept the index symbol
       // in place of the assigned value). The earlier clauses (already decided
-      // `False`/`Undefined`) are carried over AS WRITTEN: the held node stays
+      // `False`) are carried over AS WRITTEN: the held node stays
       // a faithful copy of the original conditional, so nothing is lost if the
       // undecided condition later resolves. Fixpoint-guarded with `isSame`.
       //

@@ -263,12 +263,22 @@ describe('COMPARISON CHAINS IN ASSUMPTIONS', () => {
       ce.declare('f', 'function');
       expect(ce.assume(ce.box(json))).toBe('not-a-predicate');
     }
-    // The links applied before the rejected one keep their bindings.
+    // The links applied before a rejected one keep their bindings (`ce2`
+    // below). The link
+    // `1 = Undefined` is `False`: a comparison with an absent operand is
+    // `False` (user decision of 2026-11-02, two-valued comparisons), so the
+    // chain is a contradiction. Before, the link was `Missing`, which is not
+    // a predicate.
     const ce = new ComputeEngine();
     expect(ce.assume(ce.box(['Equal', 'x', 1, 'Undefined']))).toBe(
+      'contradiction'
+    );
+    const ce2 = new ComputeEngine();
+    ce2.declare('f', 'function');
+    expect(ce2.assume(ce2.box(['Equal', 'x', 1, ['f', 1]]))).toBe(
       'not-a-predicate'
     );
-    expect(ce.box('x').evaluate().json).toBe(1);
+    expect(ce2.box('x').evaluate().json).toBe(1);
   });
 
   test('verify and ask do not accept a chain from its first link only', () => {

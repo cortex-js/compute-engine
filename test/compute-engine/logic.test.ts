@@ -974,12 +974,13 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
     expect(run(['Implies', ['scT'], ['scF']])).toBe('False');
     expect(calls).toEqual(['T', 'F']);
     expect(sc.expr(['Nor', 'q', 'p']).json).toEqual(['Nor', 'q', 'p']);
-    // Kleene over absence, as for And/Or: a decider wins, else Missing.
-    expect(run(['Nand', 'True', 'Missing'])).toBe('Missing');
+    // An absent operand reads as `False`, as for And/Or (user decision of
+    // 2026-11-02, two-valued comparisons).
+    expect(run(['Nand', 'True', 'Missing'])).toBe('True');
     expect(run(['Nand', 'Missing', 'False'])).toBe('True');
-    expect(run(['Nor', 'False', 'Missing'])).toBe('Missing');
-    expect(run(['Implies', 'True', 'Missing'])).toBe('Missing');
-    expect(run(['Implies', 'Missing', 'False'])).toBe('Missing');
+    expect(run(['Nor', 'False', 'Missing'])).toBe('True');
+    expect(run(['Implies', 'True', 'Missing'])).toBe('False');
+    expect(run(['Implies', 'Missing', 'False'])).toBe('True');
     expect(sc.expr(['Implies', 'Missing', 'True']).isValid).toBe(true);
     // `Nand`/`Nor` are NOT associative, so nesting is kept, unlike And/Or.
     expect(sc.expr(['Nand', ['Nand', 'a', 'b'], 'c']).json).toEqual([
@@ -1028,11 +1029,11 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
     ).toBe('["True","False"]');
   });
 
-  it('Kleene over absence is unchanged: a deciding operand wins, Missing propagates', () => {
+  it('an absent operand reads as False (user decision of 2026-11-02)', () => {
     expect(run(['And', 'Missing', 'False'])).toBe('False');
-    expect(run(['And', 'True', 'Missing'])).toBe('Missing');
+    expect(run(['And', 'True', 'Missing'])).toBe('False');
     expect(run(['Or', 'Missing', 'True'])).toBe('True');
-    expect(run(['Or', 'False', 'Missing'])).toBe('Missing');
+    expect(run(['Or', 'False', 'Missing'])).toBe('False');
   });
 
   it('symbolic simplifications are order-independent and still fire', () => {

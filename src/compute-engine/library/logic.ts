@@ -23,9 +23,12 @@ import {
   toDNF,
 } from '../symbolic/logic-utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { parseType } from '../../common/type/parse.js';
-import { operandAbsence } from './relational-operator.js';
-import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
+import {
+  isAbsentSymbol,
+  isSymbol,
+  isFunction,
+  sym,
+} from '../boxed-expression/type-guards.js';
 import { limitsIndexSites } from '../boxed-expression/binding-sites.js';
 import { validateArguments } from '../boxed-expression/validate.js';
 import { flatten } from '../boxed-expression/flatten.js';
@@ -302,14 +305,20 @@ type Reducer = (
   options: { engine: ComputeEngine }
 ) => Expression | undefined;
 
+/** Is `v` `False`, or an absent value (`Missing`, `Undefined`), which a
+ * connective reads as `False`? The logic is two-valued: an absent value is
+ * not a third truth value (user decision 2026-11-02, `docs/ERROR-MODEL.md`,
+ * two-valued comparisons). */
+function readsFalse(v: Expression): boolean {
+  const s = sym(v);
+  return s === 'False' || s === 'Missing' || s === 'Undefined';
+}
 /** `And` stops at the first `False` (result `False`). */
-const decideAnd: Decider = (ce, v) =>
-  sym(v) === 'False' ? ce.False : undefined;
+const decideAnd: Decider = (ce, v) => (readsFalse(v) ? ce.False : undefined);
 /** `Or` stops at the first `True` (result `True`). */
 const decideOr: Decider = (ce, v) => (sym(v) === 'True' ? ce.True : undefined);
 /** `Nand` = ¬`And`: stops at the first `False` (result `True`). */
-const decideNand: Decider = (ce, v) =>
-  sym(v) === 'False' ? ce.True : undefined;
+const decideNand: Decider = (ce, v) => (readsFalse(v) ? ce.True : undefined);
 /** `Nor` = ¬`Or`: stops at the first `True` (result `False`). */
 const decideNor: Decider = (ce, v) =>
   sym(v) === 'True' ? ce.False : undefined;
@@ -318,7 +327,7 @@ const decideNor: Decider = (ce, v) =>
  * decides too (`p ⇒ True` is `True` for every `p`), so a failed antecedent
  * does not make `Implies(err, True)` an error. */
 const decideImplies: Decider = (ce, v, i) =>
-  (i === 0 && sym(v) === 'False') || (i === 1 && sym(v) === 'True')
+  (i === 0 && readsFalse(v)) || (i === 1 && sym(v) === 'True')
     ? ce.True
     : undefined;
 
@@ -440,122 +449,6 @@ function connectiveType(
   return 'boolean';
 }
 
-/** A value of the three-valued (Kleene) logic of the connectives: `T` and
- * `F` for `True` and `False`, `M` for an absent value (`Missing`). */
-type Kleene = 'T' | 'F' | 'M';
-
-type AbsenceAwareConnective =
-  'And' | 'Or' | 'Not' | 'Xor' | 'Equivalent' | 'Implies' | 'Nand' | 'Nor';
-
-const kleeneNot = (a: Kleene): Kleene =>
-  a === 'M' ? 'M' : a === 'T' ? 'F' : 'T';
-const kleeneAnd = (a: Kleene, b: Kleene): Kleene =>
-  a === 'F' || b === 'F' ? 'F' : a === 'M' || b === 'M' ? 'M' : 'T';
-const kleeneOr = (a: Kleene, b: Kleene): Kleene =>
-  a === 'T' || b === 'T' ? 'T' : a === 'M' || b === 'M' ? 'M' : 'F';
-// `Xor` and `Equivalent` have no deciding operand: one absent operand makes
-// the result absent.
-const kleeneXor = (a: Kleene, b: Kleene): Kleene =>
-  a === 'M' || b === 'M' ? 'M' : a !== b ? 'T' : 'F';
-const kleeneEquivalent = (a: Kleene, b: Kleene): Kleene =>
-  a === 'M' || b === 'M' ? 'M' : a === b ? 'T' : 'F';
-
-/** The values an operand of a connective can evaluate to, read from its
- * type: `{M}` for an operand typed `missing`, one value for a `True`/`False`
- * literal or a boolean value type, all three for an operand that may be
- * absent, and `{T, F}` for a plain boolean. `undefined` when the operand is
- * not a scalar boolean (a collection, or an operand typed `unknown`). */
-function kleeneValues(op: OperandDescriptor): ReadonlySet<Kleene> | undefined {
-  const absence = operandAbsence(op);
-  if (absence === 'definite') return new Set(['M']);
-  // The `True` and `False` symbols are typed as the plain `boolean`, not as a
-  // value type, so their value is read from the structure.
-  const s = op.structureOf?.();
-  if (s?.kind === 'symbol' && s.name === 'True') return new Set(['T']);
-  if (s?.kind === 'symbol' && s.name === 'False') return new Set(['F']);
-  const claim = booleanClaim(op);
-  if (claim !== undefined) return new Set([claim ? 'T' : 'F']);
-  if (absence === 'possible') return new Set(['T', 'F', 'M']);
-  if (isSubtype(op.type, 'boolean')) return new Set(['T', 'F']);
-  return undefined;
-}
-
-/** Every value of `f(a, b)` for `a` in `xs` and `b` in `ys`. */
-function kleeneCombine(
-  xs: ReadonlySet<Kleene>,
-  ys: ReadonlySet<Kleene>,
-  f: (a: Kleene, b: Kleene) => Kleene
-): ReadonlySet<Kleene> {
-  const result = new Set<Kleene>();
-  for (const a of xs) for (const b of ys) result.add(f(a, b));
-  return result;
-}
-
-/**
- * The result type of a connective when an operand may be absent, or
- * `undefined` when the result cannot be `Missing` (the caller then keeps its
- * plain answer).
- *
- * The connectives read an absent operand (`Missing`, or the `Undefined`
- * symbol) by the Kleene table: an operand that decides the result wins
- * (`And(False, Missing)` is `False`), otherwise the result is `Missing`
- * (`And(True, Missing)`, `Not(Missing)`, `Xor(A, Missing)`). The type must
- * contain every value the evaluation can give, so it is computed from the
- * set of values each operand can take, combined by that table: `missing`
- * when `Missing` is the only possible result, `boolean | missing` when
- * `Missing` is one of several, and `undefined` when it is not possible.
- * Which operand may be absent is decided by `operandAbsence`, the same test
- * the comparisons use for their own `boolean | missing` result type.
- */
-function connectiveAbsenceType(
-  head: AbsenceAwareConnective,
-  ops: ReadonlyArray<OperandDescriptor>
-): Type | undefined {
-  if (!ops.some((op) => operandAbsence(op) !== undefined)) return undefined;
-  const values = ops.map(kleeneValues);
-  // An operand that is not a scalar boolean (a collection or an `unknown`
-  // value) beside an absent one: the result may be absent, and nothing more
-  // precise can be said cheaply.
-  if (values.some((v) => v === undefined))
-    return parseType('boolean | missing');
-  const sets = values as ReadonlyArray<ReadonlySet<Kleene>>;
-  const fold = (f: (a: Kleene, b: Kleene) => Kleene) =>
-    sets.slice(1).reduce((acc, v) => kleeneCombine(acc, v, f), sets[0]);
-  const negate = (xs: ReadonlySet<Kleene>) => new Set([...xs].map(kleeneNot));
-  let result: ReadonlySet<Kleene>;
-  switch (head) {
-    case 'And':
-      result = fold(kleeneAnd);
-      break;
-    case 'Or':
-      result = fold(kleeneOr);
-      break;
-    case 'Not':
-      result = negate(sets[0]);
-      break;
-    case 'Xor':
-      result = fold(kleeneXor);
-      break;
-    case 'Equivalent':
-      result = fold(kleeneEquivalent);
-      break;
-    case 'Implies':
-      // `a ⇒ b` is `¬a ∨ b`. A form with another operand count is invalid.
-      if (sets.length !== 2) return parseType('boolean | missing');
-      result = kleeneCombine(negate(sets[0]), sets[1], kleeneOr);
-      break;
-    case 'Nand':
-      result = negate(fold(kleeneAnd));
-      break;
-    case 'Nor':
-      result = negate(fold(kleeneOr));
-      break;
-  }
-  if (!result.has('M')) return undefined;
-  if (result.size === 1) return 'missing';
-  return parseType('boolean | missing');
-}
-
 export const LOGIC_LIBRARY: SymbolDefinitions = {
   True: {
     description: 'The boolean truth value true.',
@@ -579,7 +472,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   And: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('And', ops) ?? connectiveType('And', ops),
+        connectiveType('And', ops),
         context.engine._typeResolver
       ),
     description:
@@ -595,10 +488,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     lazy: true,
     complexity: 10000,
     signature: '(boolean+) -> boolean',
-    // A possibly-absent operand (`boolean | missing`, e.g. a comparison on an
-    // indexed read `cs[j] == "a"`) validates — the strip-before-validate gate
-    // (§3.B) removes the `missing` arm — and evaluation is Kleene: `False`
-    // dominates, a surviving `Missing` operand propagates. Without this, a
+    // A possibly-absent operand (`boolean | missing`, e.g. an indexed read
+    // `bs[j]`) validates — the strip-before-validate gate (§3.B) removes the
+    // `missing` arm — and an absent operand reads as `False`. Without this, a
     // guarded loop condition `j <= n && cs[j] == "a"` was REJECTED at
     // canonicalization with `incompatible-type`.
     missingBehavior: 'handle',
@@ -637,7 +529,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   Or: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('Or', ops) ?? connectiveType('Or', ops),
+        connectiveType('Or', ops),
         context.engine._typeResolver
       ),
     description:
@@ -650,8 +542,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     lazy: true,
     complexity: 10000,
     signature: '(boolean+) -> boolean',
-    // Kleene over absence, mirroring `And`: `True` dominates, a surviving
-    // `Missing` operand propagates.
+    // As for `And`: an absent operand reads as `False`.
     missingBehavior: 'handle',
     invokes: false,
     // "Option B" — see `And` above.
@@ -667,7 +558,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   Not: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('Not', ops) ?? connectiveType('Not', ops),
+        connectiveType('Not', ops),
         context.engine._typeResolver
       ),
     description: 'Logical negation (NOT).',
@@ -677,15 +568,15 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     complexity: 10100,
     // @todo: this may not be needed, since we also have rules.
     signature: '(boolean) -> boolean',
-    // Kleene over absence, like `And`/`Or`: a possibly-absent operand
-    // validates and `Not(Missing)` evaluates to `Missing`.
+    // As for `And`/`Or`: a possibly-absent operand validates, and an absent
+    // operand reads as `False`, so `Not(Missing)` is `True`.
     missingBehavior: 'handle',
     evaluate: evaluateNot,
   },
   Equivalent: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('Equivalent', ops) ?? 'boolean',
+        'boolean',
         context.engine._typeResolver
       ),
     description:
@@ -694,11 +585,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
-    // Kleene over absence, as for `And`/`Or`/`Not`: a possibly-absent operand
-    // (`boolean | missing`) validates through the strip-before-validate gate,
-    // and an absent operand makes the equivalence absent, since no value of
-    // the other operand decides it. Beside an unknown operand it stays
-    // symbolic, as `And(A, Missing)` does (see `evaluateEquivalent`).
+    // As for `And`/`Or`/`Not`: a possibly-absent operand (`boolean |
+    // missing`) validates through the strip-before-validate gate, and an
+    // absent operand reads as `False` (see `evaluateEquivalent`).
     missingBehavior: 'handle',
     canonical: (args: ReadonlyArray<Expression>, { engine: ce }) => {
       const lhs = sym(args[0]);
@@ -720,7 +609,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   Implies: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('Implies', ops) ?? 'boolean',
+        'boolean',
         context.engine._typeResolver
       ),
     description:
@@ -729,9 +618,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       '(`True`) without evaluating the consequent.',
     wikidata: 'Q7881229',
     broadcastable: true,
-    // Kleene over absence, as for `And`/`Or`: a possibly-absent operand
-    // (`boolean | missing`) validates through the strip-before-validate gate,
-    // and a surviving `Missing` operand propagates (see the reducers).
+    // As for `And`/`Or`: a possibly-absent operand (`boolean | missing`)
+    // validates through the strip-before-validate gate, and an absent
+    // operand reads as `False` (see the reducers).
     missingBehavior: 'handle',
     lazy: true,
     invokes: false,
@@ -751,7 +640,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   Xor: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('Xor', ops) ?? connectiveType('Xor', ops),
+        connectiveType('Xor', ops),
         context.engine._typeResolver
       ),
     description: 'Exclusive or: true when an odd number of operands are true',
@@ -761,18 +650,16 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     commutative: true,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
-    // Kleene over absence, as for `And`/`Or`/`Not`: a possibly-absent operand
-    // (`boolean | missing`) validates through the strip-before-validate gate,
-    // and an absent operand makes the exclusive or absent, since no value of
-    // the other operands decides it. Beside an unknown operand it stays
-    // symbolic, as `And(A, Missing)` does (see `evaluateXor`).
+    // As for `And`/`Or`/`Not`: a possibly-absent operand (`boolean |
+    // missing`) validates through the strip-before-validate gate, and an
+    // absent operand reads as `False` (see `evaluateXor`).
     missingBehavior: 'handle',
     evaluate: evaluateXor,
   },
   Nand: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('Nand', ops) ?? 'boolean',
+        'boolean',
         context.engine._typeResolver
       ),
     description:
@@ -782,9 +669,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     // Not `commutative` — the flag sorts the operands, and a short-circuit
     // form is defined over the WRITTEN order (see `canonicalShortCircuit`).
-    // Kleene over absence, as for `And`/`Or`: a possibly-absent operand
-    // (`boolean | missing`) validates through the strip-before-validate gate,
-    // and a surviving `Missing` operand propagates (see the reducers).
+    // As for `And`/`Or`: a possibly-absent operand (`boolean | missing`)
+    // validates through the strip-before-validate gate, and an absent
+    // operand reads as `False` (see the reducers).
     missingBehavior: 'handle',
     lazy: true,
     invokes: false,
@@ -800,7 +687,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   Nor: {
     type: (ops, context) =>
       BoxedType.forResult(
-        connectiveAbsenceType('Nor', ops) ?? 'boolean',
+        'boolean',
         context.engine._typeResolver
       ),
     description:
@@ -808,9 +695,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'evaluated left to right and evaluation stops at the first `True`.',
     wikidata: 'Q574946',
     broadcastable: true,
-    // Kleene over absence, as for `And`/`Or`: a possibly-absent operand
-    // (`boolean | missing`) validates through the strip-before-validate gate,
-    // and a surviving `Missing` operand propagates (see the reducers).
+    // As for `And`/`Or`: a possibly-absent operand (`boolean | missing`)
+    // validates through the strip-before-validate gate, and an absent
+    // operand reads as `False` (see the reducers).
     missingBehavior: 'handle',
     lazy: true,
     invokes: false,
@@ -1026,8 +913,12 @@ function evaluateForAll(
   const condOp1 = isFunction(condition) ? condition.op1 : undefined;
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
-    // Body doesn't depend on x, so ∀x. P ≡ P
-    return canonicalBody.evaluate(evalOptions);
+    // Body doesn't depend on x, so ∀x. P ≡ P. A quantifier is two-valued:
+    // an absent body (`Missing`, `Undefined`) is `False`, as the body of
+    // a quantifier over a finite domain is (user decision 2026-11-02,
+    // two-valued comparisons).
+    const value = canonicalBody.evaluate(evalOptions);
+    return isAbsentSymbol(value) ? ce.False : value;
   }
 
   // Try to extract a finite domain from the condition
@@ -1103,8 +994,10 @@ function evaluateExists(
   const condOp1 = isFunction(condition) ? condition.op1 : undefined;
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
-    // Body doesn't depend on x, so ∃x. P ≡ P
-    return canonicalBody.evaluate(evalOptions);
+    // Body doesn't depend on x, so ∃x. P ≡ P. An absent body is `False`,
+    // as for `ForAll` above.
+    const value = canonicalBody.evaluate(evalOptions);
+    return isAbsentSymbol(value) ? ce.False : value;
   }
 
   // Try to extract a finite domain from the condition
@@ -1180,11 +1073,14 @@ function evaluateExistsUnique(
         [domainResult.variable]: value,
       }).canonical;
       const result = substituted.evaluate(evalOptions);
+      // An absent answer (`Missing`, `Undefined`) reads as `False`, as for
+      // `ForAll`/`Exists` (`foldQuantifierAnswers`): the logic is two-valued.
+      const s = sym(result);
 
-      if (sym(result) === 'True') {
+      if (s === 'True') {
         count++;
         if (count > 1) return ce.False; // More than one witness
-      } else if (sym(result) !== 'False') {
+      } else if (s !== 'False' && s !== 'Missing' && s !== 'Undefined') {
         // A second witness after this answer still decides (`False`), so
         // the walk goes on. Otherwise the first failed answer is the result,
         // and an undetermined answer keeps the quantifier unevaluated, as

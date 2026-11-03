@@ -2,6 +2,43 @@
 
 ### Behavior Changes
 
+- **A comparison is two-valued: `True` or `False`.** An operand that does
+  not decide a comparison makes it `False` (`NotEqual`: `True`, since `≠`
+  is `Not(=)`): `NaN`, a pole, a value with no order, and now also an
+  absent value (`Missing`, `Undefined`). The connectives and the
+  quantifiers read an absent value as `False`, and so does the condition of
+  an `If` or a `Which`: the branch takes its next arm, as in Desmos, where
+  `\{u<1:5,7\}` is 7 with `u` undefined and `\{L<2:5,7\}` with
+  `L=[1,0/0,3]` is `[5,7,7]` (measured by Tycho on 2026-11-02). This
+  extends the rule of 2026-10-20 for a `NaN` operand (Tycho rows 411 and 413)
+  to `Missing`, to the connectives and to the conditions. Breaking
+  changes: `Missing > 0` is `False` (it was `Missing`); `Not(Missing > 0)`
+  and `Not(Missing)` are `True` (they were `Missing`); `And(Missing, True)`
+  is `False`; `If(Missing, 1, 2)` is `2` and `If(Missing, 1)` is `NaN`:
+  the absent-condition error is gone; `0 < Missing < 1` is `False`;
+  `Equal([1, Missing], [1, Missing])` is `False` and `Equal([1, Missing],
+  1)` is `[True, False]`; `Any([1, Missing], x ↦ x > 2)` is `False`. A
+  boolean predicate of the collection and set libraries over an absent
+  operand is `False` too (it was `Missing`): `Any(Missing, p)`,
+  `All(Missing, p)`, `Element(2, Missing)`, `Contains(Missing, 3)`,
+  `IsEmpty(Missing)`, `StartsWith`, `EndsWith`, `ContainsSequence`,
+  `Subset` and its relatives; the negated forms `NotElement`, `NotSubset`,
+  `NotSuperset` and `NotSupersetEqual` are `True`. So a predicate over a
+  restricted collection, `Element(2, If(c, L))`, gives the same value when
+  it is evaluated fresh and when it is evaluated again from its held form.
+  The number-theory predicates (`IsPrime(Missing)`) are still `Missing`. The
+  type of a comparison, a connective or such a predicate has no `missing`
+  arm: with `L: list<integer> | missing`, `L < 3` is typed
+  `boolean | list<boolean>` (it was `list<boolean> | missing`). Under a list
+  of conditions, a relation position that is not selected is `False` (it
+  was `Missing`), and a colour position is `Rgb(NaN, NaN, NaN)`, which a
+  plotter reads as "no colour here" (Tycho item 189). A restriction of a
+  relation by a scalar condition is `False` where the condition is false,
+  so the condition `If(c_2 < 1, 0 < If(c_1 < 1, 1))` of the corpus row
+  neyret/xhlkk7k9aq gives the interpreter's value in compiled code. A
+  scalar `Which` with no match is still `Missing`. In compiled code a
+  value computed from an absent value is still not specified. See
+  `docs/ERROR-MODEL.md`, "A comparison is two-valued".
 - **A restriction `e\{c\}` covers its whole group and parses to `If(c, e)`.**
   The parser no longer produces `When`. The restriction applies to the whole
   of the smallest group that holds it: the statement (the relation
