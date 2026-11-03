@@ -195,8 +195,8 @@ export function compileRuntimeMatrixPower(
   }
   // The aliases this call installs, with the alias each node had before
   // (`undefined` for none), so that they are restored also when the
-  // emission throws: a lane mismatch in the strict attempt of `auto` is
-  // caught, and the complex retry compiles the same nodes again.
+  // emission throws: an alias left installed after a decline would be read
+  // by the next compilation of the same nodes.
   const installed: Array<[Expression, string | undefined]> = [];
   let elementwise: string;
   try {
@@ -731,8 +731,8 @@ export function compileStaticInnerProduct(
   // (`linearAlgebraLane`: a complex entry, or a wide entry under
   // `mode: 'complex'`) goes to the helper choice, which emits the complex
   // helper. This is the answer a parent reads for the value of the node.
-  // A WIDE lane (`tuple<number, number>`, `vector<3>` in `strict` and
-  // `auto` mode) is read as real, as the helper choice reads it: the
+  // A WIDE lane (`tuple<number, number>`, `vector<3>` in `strict` mode)
+  // is read as real, as the helper choice reads it: the
   // written-out sum is scalar arithmetic on the coordinates, as the same
   // sum written by hand (`p_0 q_0 + p_1 q_1`) is.
   if (linearAlgebraLane(args) === 'complex') return undefined;

@@ -554,9 +554,9 @@ export function elementBinderLane(
     return 'as-typed';
   // Under the complex discipline a mixed source is not a mismatch: the
   // binder is bound complex and a real element is lifted at its read
-  // (`_SYS.cplx`), so the `auto` retry that the real-discipline `'mixed'`
-  // verdict asks for can succeed. Without this the retry raised the same
-  // lane mismatch and `auto` could not recover.
+  // (`_SYS.cplx`). The real-discipline `'mixed'` verdict is a lane mismatch,
+  // which strict declines; a host that wants the complex value compiles with
+  // `mode: 'complex'`.
   const mixed = complexDiscipline() ? 'complex' : 'mixed';
   const elements = core.elementComplexness(source);
   if (elements !== undefined) {
@@ -738,9 +738,8 @@ export function compileElementLoops(
   // binder's type reads real is bound COMPLEX for the body and for the inner
   // sources, which read it the same way (see `elementBinderLane`). A source
   // whose elements disagree has no single lowering for the body under the
-  // real discipline: that is a lane mismatch, which `mode: 'auto'` answers
-  // by compiling again under the complex discipline (where a wide binder
-  // is lifted at each use) and `mode: 'strict'` by declining.
+  // real discipline: that is a lane mismatch, and `mode: 'strict'`
+  // declines. Under `mode: 'complex'` a wide binder is lifted at each use.
   const complexFrame = new Map<string, boolean>();
   for (const binder of binders) {
     const leaf = binder.clause.ops[0];

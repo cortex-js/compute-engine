@@ -512,8 +512,8 @@ describe('COMPILE: a mapped input reached through a multi-clause function body',
  *
  * The compiled code reads the input, never the engine value, but every
  * analysis the compiler ran on the expression used to see the value: with
- * `a: real` and `a := 4`, `√a` saw a non-negative operand and compiled to the
- * real-only `Math.sqrt(_.a)`, which gives `NaN` when the input goes negative.
+ * `a: real` and `a := 4`, `√a` in the `complex` mode saw a non-negative
+ * operand and compiled to the real-only `Math.sqrt(_.a)`, which gives `NaN` when the input goes negative.
  * The target's `compile()` now hides the value for the compilation
  * (`withVarsValuesHidden`, `compilation/vars-inputs.ts`), so the output is the
  * same as for the symbol declared with no value. The value is restored
@@ -538,7 +538,7 @@ describe('COMPILE: a declared vars-mapped input compiles as if it had no value (
     const ce = engine(true);
     const r = ce
       ._getCompilationTarget('javascript')!
-      .compile(ce.parse('\\sqrt{a}'), { vars });
+      .compile(ce.parse('\\sqrt{a}'), { vars, mode: 'complex' });
     expect(r.code).toBe('_SYS.csqrt(({ re: _.a, im: 0 }))');
     expect(r.run!({ a: -4 })).toEqual({ re: 0, im: 2 });
     expect(r.run!({ a: 4 })).toBe(2);
@@ -574,7 +574,7 @@ describe('COMPILE: a declared vars-mapped input compiles as if it had no value (
   it('the standalone compile() and a direct custom target see no value', () => {
     const ce = engine(true);
     const expr = ce.parse('\\sqrt{a}');
-    expect(compile(expr, { vars }).code).toBe(
+    expect(compile(expr, { vars, mode: 'complex' }).code).toBe(
       '_SYS.csqrt(({ re: _.a, im: 0 }))'
     );
     // A direct target resolves symbols with its own `var` hook, which knows

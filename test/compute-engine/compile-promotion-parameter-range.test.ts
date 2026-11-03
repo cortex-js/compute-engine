@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-// Under the JavaScript target's default `auto` mode, a `Sqrt` (or `Ln`,
+// In the JavaScript target's `complex` mode, a `Sqrt` (or `Ln`,
 // `Log`, an even `Root`, a non-integer `Power`) whose operand is not
 // provably non-negative takes the complex lane, and the whole kernel with
 // it. The proof reads the ranged type of a symbol (`integer<1..16>`). These
@@ -76,9 +76,8 @@ describe('comprehension index over a literal range', () => {
     const c = ce.parse(
       '\\left[a\\sqrt{\\frac{k-0.5}{16}} \\operatorname{for} k = \\left[1...16\\right]\\right]'
     );
-    const r = compile(c, { to: 'javascript' });
+    const r = compile(c, { to: 'javascript', mode: 'complex' });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(false);
     expect(r.code).toContain('Math.sqrt(0.0625 * (k + -0.5))');
     expect(r.code).not.toContain('csqrt');
     const v = (r.run as (a: object) => number[])({ a: 2 });
@@ -107,10 +106,8 @@ describe('declared parameter types of a user function', () => {
       ce.assign('p', lambda(ce));
       const call = ce.box(['p', 'x']);
       expect(call.type.toString()).toBe('real');
-      const r = compile(call, { to: 'javascript' });
+      const r = compile(call, { to: 'javascript', mode: 'complex' });
       expect(r.success).toBe(true);
-      expect(r.promoted).toBe(false);
-      expect(r.mode).toBe('strict');
       expect(r.preamble).toContain(
         'const _fn_p = (k) => Math.sqrt(0.0625 * (k + -0.5));'
       );
@@ -126,9 +123,11 @@ describe('declared parameter types of a user function', () => {
     ce.declare('x', 'integer');
     ce.declare('p', '(integer) -> unknown');
     ce.assign('p', lambda(ce));
-    const r = compile(ce.box(['p', 'x']), { to: 'javascript' });
+    const r = compile(ce.box(['p', 'x']), {
+      to: 'javascript',
+      mode: 'complex',
+    });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(true);
     expect(r.preamble).toContain('_SYS.csqrt');
   });
 });
@@ -149,9 +148,8 @@ describe('range evidence at the call sites of a user function', () => {
   it('a Sum index specializes the function to its range', () => {
     const ce = engine();
     const e = ce.parse('\\sum_{k=1}^{16} p(k)');
-    const r = compile(e, { to: 'javascript' });
+    const r = compile(e, { to: 'javascript', mode: 'complex' });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(false);
     expect(r.preamble).toMatch(
       /const _fn_p_integer_1___ = \(k\) => Math\.cos\(_\.T \* k\) \* Math\.sqrt\(0\.0625 \* \(k \+ -0\.5\)\);/
     );
@@ -176,11 +174,10 @@ describe('range evidence at the call sites of a user function', () => {
   it('the definition for a wide argument stays generic', () => {
     const ce = engine();
     const e = ce.parse('\\sum_{k=1}^{16} p(k) + p(t)');
-    const r = compile(e, { to: 'javascript' });
+    const r = compile(e, { to: 'javascript', mode: 'complex' });
     expect(r.success).toBe(true);
-    // The call `p(t)` has an argument of unknown sign: its definition
-    // promotes.
-    expect(r.promoted).toBe(true);
+    // The call `p(t)` has an argument of unknown sign: its definition takes
+    // the complex lane.
     expect(r.preamble).toContain('const _fn_p = (k) =>');
     expect(r.preamble).toContain('_SYS.csqrt');
     expect(r.preamble).toContain(
@@ -191,15 +188,17 @@ describe('range evidence at the call sites of a user function', () => {
   it('call sites with different ranges share one specialization', () => {
     const ce = engine();
     const e = ce.parse('\\sum_{k=1}^{16} p(k) + \\sum_{j=1}^{8} p(j)');
-    const r = compile(e, { to: 'javascript' });
+    const r = compile(e, { to: 'javascript', mode: 'complex' });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(false);
     expect(r.preamble?.match(/const _fn_p_/g)?.length).toBe(1);
   });
 
   it('a function whose body proves nothing more is not specialized', () => {
     const ce = engine();
-    const r = compile(ce.parse('\\sum_{k=1}^{16} q(k)'), { to: 'javascript' });
+    const r = compile(ce.parse('\\sum_{k=1}^{16} q(k)'), {
+      to: 'javascript',
+      mode: 'complex',
+    });
     expect(r.success).toBe(true);
     expect(r.preamble ?? '').not.toContain('_fn_q_integer');
   });
@@ -234,28 +233,23 @@ describe('range evidence at the call sites of a user function', () => {
     ];
     for (const [name, src] of defs) ce.assign(name, ce.parse(src));
     const e = ce.parse('F(x, y) + u(x, y)');
-    const auto = compile(e, { to: 'javascript' });
+    const byDefault = compile(e, { to: 'javascript' });
     const strict = compile(e, { to: 'javascript', mode: 'strict' });
-    expect(auto.success).toBe(true);
+    expect(byDefault.success).toBe(true);
     expect(strict.success).toBe(true);
-    expect(auto.promoted).toBe(false);
-    expect(auto.mode).toBe('strict');
-    const text = `${auto.code}\n${auto.preamble}`;
+    const text = `${byDefault.code}\n${byDefault.preamble}`;
     expect(text).not.toContain('{ re:');
     expect(text).not.toContain('csqrt');
-    // The specialization of `n` takes the invariant `F(x, y)` as an extra
-    // parameter, computed once per sum, as the strict compile does.
-    expect(auto.preamble).toMatch(/_fn_n_[a-z0-9_]*\$inv0/);
     for (const point of [
       { x: 0.3, y: 0.2, T: 1 },
       { x: -0.7, y: 0.9, T: 4 },
     ]) {
-      expect(real(auto, point)).toBe(real(strict, point));
+      expect(real(byDefault, point)).toBe(real(strict, point));
       // `T` is read by the bodies of `p` and `q`, which a substitution in
       // `e` does not reach: it is assigned for the interpreted value.
       ce.assign('T', point.T);
       const expected = e.subs({ x: point.x, y: point.y }).N().re;
-      expect(real(auto, point)).toBeCloseTo(expected, 9);
+      expect(real(byDefault, point)).toBeCloseTo(expected, 9);
     }
   });
 });

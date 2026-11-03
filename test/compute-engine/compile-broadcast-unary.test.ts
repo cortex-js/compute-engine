@@ -174,11 +174,10 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     });
 
     it('the element variable compiles bare, not as a vars lookup', () => {
-      // `np.emath.sqrt`: the element variable is a wide temporary of unknown
-      // sign, and the default `auto` mode promotes such a radical
-      // (compile-mode step 4, 2026-08-16); the point here is the bare `_tv1`.
+      // `np.sqrt`: the default `strict` mode keeps a radical of a real
+      // operand on the real lane; the point here is the bare `_tv1`.
       const code = p(['Sqrt', ['List', 1, 4, 9]]);
-      expect(code).toBe('[np.emath.sqrt(_tv1) for _tv1 in [1, 4, 9]]');
+      expect(code).toBe('[np.sqrt(_tv1) for _tv1 in [1, 4, 9]]');
       expect(code).not.toContain('_.');
     });
 
@@ -241,14 +240,11 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // non-negative integer, and a provably non-integer one (`v ** 0.5` is a
       // float on a plain list and on an integer ndarray alike). The float
       // exponent `0.5` stays a `Power`: only the exact `1/2` canonicalizes to
-      // `Sqrt` (user decision 2026-09-27: a float operand is kept). That
-      // power is promoted to the complex lane, as the analysis reads it, so
-      // it is `np.emath.power` (CE-230.6).
+      // `Sqrt` (user decision 2026-09-27: a float operand is kept). In the
+      // default `strict` mode both stay on the real lane.
       expect(p(['Power', 'L', 3])).toBe('[_tv1 ** 3 for _tv1 in L]');
-      expect(p(['Power', 'L', 0.5])).toBe(
-        '[np.emath.power(_tv1, 0.5) for _tv1 in L]'
-      );
-      expect(p(['Power', 'L', ['Rational', 1, 2]])).toBe('np.emath.sqrt(L)');
+      expect(p(['Power', 'L', 0.5])).toBe('[_tv1 ** 0.5 for _tv1 in L]');
+      expect(p(['Power', 'L', ['Rational', 1, 2]])).toBe('np.sqrt(L)');
     });
 
     it('fans out over a merely collection-TYPED operand as well', () => {
@@ -426,7 +422,7 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
   it('a string-mapped head over a COMPLEX list answers NaN at a complex cell', () => {
     // `Math.hypot` has no complex form. Its operand is projected onto the
     // real numbers first, so a complex cell is NaN and a real cell is read.
-    const r = compile(ce.box(['Hypot', 'Z', 4]));
+    const r = compile(ce.box(['Hypot', 'Z', 4]), { mode: 'complex' });
     expect(r.success).toBe(true);
     const out = r.run!({ Z: [{ re: 3, im: 4 }, 3] }) as unknown as number[];
     expect(out[0]).toBeNaN();

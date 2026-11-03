@@ -211,8 +211,9 @@ test.each<[string, MathJsonExpression]>([
     expect(result.success).toBe(true);
     expect(source(result)).not.toMatch(/Array\.isArray|_SYS\.bcast\(/);
   }
-  // Power can produce complex values, so its sum keeps complex-capable reduction.
-  expect(source(reduced)).toContain('.reduce(');
+  // In the default `strict` mode a power of real operands is real, so its
+  // sum is unrolled like the other real heads.
+  expect(source(reduced)).not.toContain('.reduce(');
   for (const [x, y] of [
     [3, 4],
     [-2, 1],

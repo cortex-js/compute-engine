@@ -321,8 +321,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       isRealOnlyLowering: gpuIsRealOnlyLowering,
       // A shader value has ONE static shape (`float` or `vec2`), decided by
       // type analysis — the strict discipline IS this target's model, and the
-      // only mode it offers (`CompileMode`). A requested `'complex'`/`'auto'`
-      // is the `unsupported-mode` decline.
+      // only mode it offers (`CompileMode`). A requested `'complex'` is the
+      // `unsupported-mode` decline.
       supportedModes: GPU_SUPPORTED_MODES,
       // The shader type of each free symbol, for
       // `CompilationResult.freeSymbolTypes`. See `gpuLoweredSymbolTypeHook`.

@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 import { CancellationError } from '../../common/interruptible.js';
 import { mixTags } from '../numerics/random.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 
 // Lazy reference to break circular dependency:
 // compare → stochastic-equal → compile-expression → base-compiler → utils → ...
@@ -57,24 +58,6 @@ export function stochasticEqual(
   let evalA: ((vars: Record<string, number>) => ComplexValue) | null = null;
   let evalB: ((vars: Record<string, number>) => ComplexValue) | null = null;
 
-  // A `CancellationError` (deadline expiry mid-compile) must unwind per the
-  // `withTimeLimit` contract — only ordinary compile failures fall back.
-  try {
-    const compiledA = _compile(a);
-    if (compiledA.run) evalA = (vars) => toComplex(compiledA.run!(vars));
-  } catch (e) {
-    if (e instanceof CancellationError) throw e;
-    /* fall back to subs */
-  }
-
-  try {
-    const compiledB = _compile(b);
-    if (compiledB.run) evalB = (vars) => toComplex(compiledB.run!(vars));
-  } catch (e) {
-    if (e instanceof CancellationError) throw e;
-    /* fall back to subs */
-  }
-
   // Fallback evaluator using subs + N (returns both re and im)
   const subsEval = (
     expr: Expression,
@@ -83,6 +66,48 @@ export function stochasticEqual(
     const result = expr.subs(vars).N();
     return { re: result.re, im: result.im };
   };
+
+  // The compiled code is in the default `'strict'` mode, where an operation
+  // whose value is complex (`Sqrt(x)` at a negative `x`) gives `NaN`. Such a
+  // point is evaluated again with the interpreter (`subsEval`), so the real
+  // and the imaginary parts of the interpreter's value are compared. The
+  // `'complex'` mode is not used: its kernels lose precision where the real
+  // ones do not (`tan(arctan(a))` at `a = 10^5` is off by `0.008`), and an
+  // identity such as `tan(arctan(a)) = a` was then not confirmed.
+  const withInterpreterAtNaN =
+    (
+      expr: Expression,
+      run: (vars: Record<string, number>) => number | ComplexResult
+    ) =>
+    (vars: Record<string, number>): ComplexValue => {
+      const v = toComplex(run(vars));
+      return hasNaN(v) ? subsEval(expr, vars) : v;
+    };
+
+  // A `CancellationError` (deadline expiry mid-compile) must unwind per the
+  // `withTimeLimit` contract — only ordinary compile failures fall back.
+  // Only an expression made of heads that propagate `NaN` is compiled (see
+  // `propagatesNaN`); every other expression is evaluated with the
+  // interpreter.
+  if (propagatesNaN(a)) {
+    try {
+      const compiledA = _compile(a);
+      if (compiledA.run) evalA = withInterpreterAtNaN(a, compiledA.run);
+    } catch (e) {
+      if (e instanceof CancellationError) throw e;
+      /* fall back to subs */
+    }
+  }
+
+  if (propagatesNaN(b)) {
+    try {
+      const compiledB = _compile(b);
+      if (compiledB.run) evalB = withInterpreterAtNaN(b, compiledB.run);
+    } catch (e) {
+      if (e instanceof CancellationError) throw e;
+      /* fall back to subs */
+    }
+  }
 
   const doEvalA =
     evalA ?? ((vars: Record<string, number>) => subsEval(a, vars));
@@ -186,6 +211,85 @@ export function stochasticEqual(
 
   if (informativeCount === 0) return undefined;
   return true;
+}
+
+// The heads whose strict JavaScript lowering gives `NaN` when an operand is
+// `NaN`. The compiled code is in the `'strict'` mode, where a real-typed
+// operand is computed in the real lane and an operation whose value is
+// complex (`Sqrt(x)` at `x = -1`) gives `NaN`. Through a head on this list,
+// that `NaN` reaches the result, and `withInterpreterAtNaN` evaluates the
+// sample point again with the interpreter. A head that is not on the list
+// can remove the `NaN` before it reaches the result: with `x: real`, strict
+// code for `Imaginary(Sqrt(x))` is the literal `0`, and the compiled
+// `Coalesce(Sqrt(x), 0)` reads `NaN` as absent and gives `0`; the
+// interpreter gives `1` and `i` at `x = -1`. The compiled code of a call of a
+// user function is also not examined here.
+//
+// Each head was checked with a probe that compiles the head over `x`, over
+// `Sqrt(x)` and over `Ln(x)` (with `x: real`, and a number literal as the
+// other operand of a binary head), runs it at `x = NaN` and at real points,
+// and compares each finite value with the interpreter. `Arcsec` and `Arccsc`
+// are not on the list: for a real operand they use the complex helpers
+// `_SYS.casec` and `_SYS.cacsc`, which give a finite value at `NaN`. `Hypot`
+// is not on the list: `Math.hypot(NaN, Infinity)` is `Infinity`.
+const NAN_PROPAGATING_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Sqrt',
+  'Root',
+  'Square',
+  'Exp',
+  'Ln',
+  'Log',
+  'Lb',
+  'Lg',
+  'Abs',
+  'Sign',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Max',
+  'Min',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Arcsin',
+  'Arccos',
+  'Arctan',
+  'Arctan2',
+  'Arccot',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Coth',
+  'Sech',
+  'Csch',
+  'Arsinh',
+  'Arcosh',
+  'Artanh',
+  'Arcoth',
+  'Arsech',
+  'Arcsch',
+]);
+
+/**
+ * Return `true` if every node of `expr` is a number literal, a symbol, or an
+ * application of a head in `NAN_PROPAGATING_HEADS`. Only such an expression
+ * is evaluated with its compiled code; every other expression is evaluated
+ * with the interpreter at each sample point.
+ */
+function propagatesNaN(expr: Expression): boolean {
+  if (isNumber(expr) || isSymbol(expr)) return true;
+  if (!isFunction(expr) || !NAN_PROPAGATING_HEADS.has(expr.operator))
+    return false;
+  return expr.ops.every((op) => propagatesNaN(op));
 }
 
 function hasNaN(v: ComplexValue): boolean {

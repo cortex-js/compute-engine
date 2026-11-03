@@ -387,7 +387,7 @@ rule:
   order. Binding only one of them would run its draw before the draws of
   operands written to its left (`javascript-target.ts` and `gpu-draw-order.ts`,
   the comments on binding impure chain operands).
-- The run-time real check of a real-only head in `auto` mode (`Max(√x, …)`,
+- The run-time real check of a real-only head in `complex` mode (`Max(√x, …)`,
   an ordering comparison) does not move or skip a draw. When an operand has
   an effect, every operand is evaluated before the check, once and in
   argument order, so `Max(√x, Random())` consumes one index also when `√x`

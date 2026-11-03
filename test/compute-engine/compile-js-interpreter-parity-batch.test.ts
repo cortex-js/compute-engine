@@ -49,7 +49,8 @@ function parity(
   ce: ComputeEngine,
   expr: Expression,
   symbol: string,
-  values: ReadonlyArray<unknown>
+  values: ReadonlyArray<unknown>,
+  mode?: 'complex'
 ): Array<[unknown, unknown]> | 'declined' {
   let run: (vars: Record<string, unknown>) => unknown;
   // A free input declared `any` is refused, so a `symbol` of that type is
@@ -65,7 +66,7 @@ function parity(
             ['Typed', symbol, { str: type }],
           ] as never)
         : expr,
-      { to: 'javascript', fallback: false } as never
+      { to: 'javascript', fallback: false, ...(mode ? { mode } : {}) } as never
     ) as unknown as {
       run: (...args: unknown[]) => unknown;
     };
@@ -271,7 +272,7 @@ describe('CE-215.1: a list exponent with a fractional cell takes the complex lan
           [3, -4],
         ],
         [-1, -4],
-      ])
+      ], 'complex')
     );
   });
 
@@ -283,14 +284,14 @@ describe('CE-215.1: a list exponent with a fractional cell takes the complex lan
       'p',
       ['List', ['Rational', 1, 3], 0.5],
     ] as never);
-    expectParity(parity(ce, expr, 'p', [[-8, -4]]));
+    expectParity(parity(ce, expr, 'p', [[-8, -4]], 'complex'));
   });
 
   test('p^[2, 0.5] with p: real fans out on the complex lane', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'real');
     const expr = ce.box(['Power', 'p', ['List', 2, 0.5]] as never);
-    expectParity(parity(ce, expr, 'p', [-4, 4]));
+    expectParity(parity(ce, expr, 'p', [-4, 4], 'complex'));
   });
 
   test('an integer list exponent stays on the real lane', () => {

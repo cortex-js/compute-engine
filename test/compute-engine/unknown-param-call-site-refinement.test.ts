@@ -32,18 +32,13 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   a fully concrete `real` parameter — maximal type information, complex
  *   admission present — and still measuring `Math.sqrt` and `NaN`.
  *
- * RESOLUTION for half 2 (ruled 2026-08-15, SUPERSEDED 2026-08-16): an opt-in
- * compile option was the first answer. The compile-mode migration
- * (`docs/COMPILATION-MODEL.md`, step 4) then made
- * promotion the DEFAULT: `mode: 'auto'` on `javascript`/`python` promotes
- * `Sqrt`/`Ln`/`Log` of an operand of unknown sign, and an ordering comparison
- * over such a value compiles under the D2 runtime rule instead of declining,
- * so nothing is lost by promoting. `mode: 'strict'` is where the old
- * real-kernel contract lives, and `mode: 'complex'` forces the promotion
- * (the opt-in option was removed after 0.167.0). The tests below therefore
- * read as a BEFORE/AFTER pair: each one that documented the real-kernel
- * default now pins the promoted default beside the strict-mode lowering it
- * replaced.
+ * RESOLUTION for half 2: `mode: 'complex'` on `javascript`/`python`
+ * promotes `Sqrt`/`Ln`/`Log` of an operand of unknown sign. The default
+ * `mode: 'strict'` keeps the real kernel, and its value is `NaN` where the
+ * exact value is complex (`docs/COMPILATION-MODEL.md`, "Caveats of
+ * compiled code"). The mode `auto`, which promoted by default, was removed
+ * after 0.177.0. Each test below pins the promoted value of the complex
+ * mode beside the real kernel of the default.
  */
 
 const Z_DEF = 'z(t) \\coloneq \\sqrt{t-1}';
@@ -159,20 +154,20 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
     );
   });
 
-  test('compiled promotes by default, and only strict emits the real kernel', () => {
-    // Was "compiled emits the real kernel and returns NaN (today's
-    // contract)": since the compile-mode migration (step 4, 2026-08-16) the
-    // default mode `auto` promotes the unknown-sign radical, so the compiled
-    // value is the interpreter's.
+  test('compiled promotes in the complex mode; the default strict mode emits the real kernel', () => {
+    // The `complex` mode promotes the unknown-sign radical, so the compiled
+    // value is the interpreter's. The default `strict` mode keeps the real
+    // kernel, and its value is `NaN` where the exact value is complex
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
     const ce = new ComputeEngine();
     ce.declare('t', 'real');
     ce.parse(Z_DEF, { strict: false }).evaluate();
-    const r = compile(ce.parse(Z_CHAIN, { strict: false }))!;
+    const r = compile(ce.parse(Z_CHAIN, { strict: false }), {
+      mode: 'complex',
+    })!;
     expect(r.success).toBe(true);
     expect(r.run!({ t: 0.3 })).toBeCloseTo(PROMOTED, 12);
-    const strict = compile(ce.parse(Z_CHAIN, { strict: false }), {
-      mode: 'strict',
-    })!;
+    const strict = compile(ce.parse(Z_CHAIN, { strict: false }))!;
     expect(strict.run!({ t: 0.3 })).toBeNaN();
   });
 
@@ -184,9 +179,8 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
     // `u` declared `real` — no placeholder anywhere, and the node ALREADY
     // typed `complex` — `mode: 'strict'` still emits the real kernel
     // and still returns NaN. Complex admission in the type is not what selects
-    // the lane; the MODE is (compile-mode step 4, 2026-08-16), which is why
-    // the same source promotes under the default `auto` with the type
-    // unchanged.
+    // the lane; the MODE is, which is why the same source promotes under
+    // `mode: 'complex'` with the type unchanged.
     test('the node is typed complex with a fully concrete parameter', () => {
       const ce = new ComputeEngine();
       ce.declare('u', 'real');
@@ -204,12 +198,14 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
       expect(strict.success).toBe(true);
       expect(strict.code).toContain('Math.sqrt');
       expect(strict.run!({ u: 0.3 })).toBeNaN();
-      // The default mode promotes the very same source (compile-mode step 4,
-      // 2026-08-16) — the type is identical in both compilations, so the mode
-      // is what moved, exactly as this block argues.
-      const auto = compile(ce.parse(INLINE_CHAIN, { strict: false }))!;
-      expect(auto.code).toContain('_SYS.csqrt');
-      expect(auto.run!({ u: 0.3 })).toBeCloseTo(PROMOTED, 12);
+      // The complex mode promotes the very same source: the type is
+      // identical in both compilations, so the mode is what moved, exactly
+      // as this block argues.
+      const complex = compile(ce.parse(INLINE_CHAIN, { strict: false }), {
+        mode: 'complex',
+      })!;
+      expect(complex.code).toContain('_SYS.csqrt');
+      expect(complex.run!({ u: 0.3 })).toBeCloseTo(PROMOTED, 12);
     });
 
     test('the complex lane, when selected, produces the interpreter’s value', () => {
@@ -227,19 +223,16 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
   });
 });
 
-describe('promotion in mode: complex (ruled 2026-08-15, now the default)', () => {
-  test('strict keeps the real kernel and its NaN; the default does not', () => {
-    // Was "OFF by default: the witness keeps the real kernel and its NaN".
-    // Promotion is the default since the compile-mode migration (step 4,
-    // 2026-08-16); the non-promoting discipline is `mode: 'strict'`.
+describe('promotion in mode: complex', () => {
+  test('strict, the default, keeps the real kernel and its NaN; complex does not', () => {
     const ce = new ComputeEngine();
     ce.declare('t', 'real');
     ce.parse(Z_DEF, { strict: false }).evaluate();
-    const strict = compile(ce.parse(Z_CHAIN, { strict: false }), {
-      mode: 'strict',
-    })!;
+    const strict = compile(ce.parse(Z_CHAIN, { strict: false }))!;
     expect(strict.run!({ t: 0.3 })).toBeNaN();
-    const r = compile(ce.parse(Z_CHAIN, { strict: false }))!;
+    const r = compile(ce.parse(Z_CHAIN, { strict: false }), {
+      mode: 'complex',
+    })!;
     expect(r.run!({ t: 0.3 })).toBeCloseTo(PROMOTED, 12);
   });
 
@@ -343,22 +336,22 @@ describe('promotion in mode: complex (ruled 2026-08-15, now the default)', () =>
   test('python: promotion reaches that target too', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
-    // `np.sqrt` is now the STRICT lowering; the default and the explicit
-    // complex mode both promote (compile-mode step 4, 2026-08-16).
-    const off = compile(ce.parse('\\sqrt{u-1}', { strict: false }), {
-      to: 'python',
-      mode: 'strict',
-    })!;
-    expect(off.code).toContain('np.sqrt');
-    expect(off.code).not.toContain('np.emath.sqrt');
+    // `np.sqrt` is the lowering of the default `strict` mode; the
+    // complex mode promotes.
     for (const options of [
       { to: 'python' as const },
-      { to: 'python' as const, mode: 'complex' as const },
+      { to: 'python' as const, mode: 'strict' as const },
     ]) {
-      const on = compile(ce.parse('\\sqrt{u-1}', { strict: false }), options)!;
-      // `np.emath`, not `cmath` — see the zero-domain test below.
-      expect(on.code).toContain('np.emath.sqrt');
+      const off = compile(ce.parse('\\sqrt{u-1}', { strict: false }), options)!;
+      expect(off.code).toContain('np.sqrt');
+      expect(off.code).not.toContain('np.emath.sqrt');
     }
+    const on = compile(ce.parse('\\sqrt{u-1}', { strict: false }), {
+      to: 'python',
+      mode: 'complex',
+    })!;
+    // `np.emath`, not `cmath` — see the zero-domain test below.
+    expect(on.code).toContain('np.emath.sqrt');
   });
 
   test('a COLLECTION-returning body does not make an extracted scalar complex', () => {

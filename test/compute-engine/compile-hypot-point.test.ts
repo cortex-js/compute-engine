@@ -315,9 +315,9 @@ describe('a compiled Hypot consumes a point leg whole', () => {
 
   test('a complex element is projected element-wise; an all-complex list fails closed', () => {
     // `Math.hypot` has no complex call form, and the JavaScript target
-    // declares the head real-only (`JS_REAL_ONLY_LOWERINGS`). Over an array
-    // with a complex element LANE the real-only lowering runs over the
-    // element-wise real projection
+    // declares the head real-only (`JS_REAL_ONLY_LOWERINGS`). In the complex
+    // mode, over an array with a complex element LANE the real-only lowering
+    // runs over the element-wise real projection
     // (a real element keeps its value, any other becomes NaN — the Tycho
     // item 251 design, `docs/COMPILATION-MODEL.md` "Compile modes"), so a
     // mixed list compiles and the complex cell answers NaN. A list whose
@@ -327,7 +327,11 @@ describe('a compiled Hypot consumes a point leg whole', () => {
       ['List', ['Complex', 1, 1], 2],
       3,
     ]);
-    const r = compile(mixed, { fallback: false, constantFold: false });
+    const r = compile(mixed, {
+      fallback: false,
+      constantFold: false,
+      mode: 'complex',
+    });
     expect(r?.success).toBe(true);
     const value = r!.run!({}) as number[];
     expect(value).toHaveLength(2);
@@ -340,7 +344,11 @@ describe('a compiled Hypot consumes a point leg whole', () => {
       3,
     ]);
     expect(() =>
-      compile(allComplex, { fallback: false, constantFold: false })
+      compile(allComplex, {
+        fallback: false,
+        constantFold: false,
+        mode: 'complex',
+      })
     ).toThrow(/Could not compile/);
   });
 });

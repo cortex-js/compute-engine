@@ -584,19 +584,19 @@ export function compileRoot(
 }
 
 /**
- * Record, for the `promoted` report, the promotions of a subtree that the
+ * Record, in the promotion record (`CompilerState._promoted`), the promotions of a subtree that the
  * constant fold replaces with a COMPLEX literal. The subtree is not
  * compiled, so no emitter records its promotable heads. But the literal is
  * complex because those heads promote: with promotion off, the fold
  * declines and the real kernel gives NaN (`√(Σ cos k)` for k = 1..5 is
- * `1.11…i` under `auto` and NaN under `strict`). So each promotable head
+ * `1.11…i` under `complex` and NaN under `strict`). So each promotable head
  * of the subtree is given to `promotesRadicalToComplex`, which records the
  * same promotions that the emitters record for the same heads.
  *
  * A call of a user function in the subtree is folded with its body, so
  * the body of the function is read too (once for each function, which
  * also stops a recursive function). With `g := k ↦ √(k − 5)`, `x + g(3)`
- * folds to `x + 1.41…i` under `auto`, and the promotion is in the body of
+ * folds to `x + 1.41…i` under `complex`, and the promotion is in the body of
  * `g`.
  *
  * A descendant that folds on its own to a REAL number supplies no part of

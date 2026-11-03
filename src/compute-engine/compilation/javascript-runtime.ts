@@ -4023,8 +4023,8 @@ function caseFoldText(s: unknown): string {
 /**
  * A compiled scalar callback as the REAL function the numeric kernels
  * (`_SYS.integrate`, `_SYS.nd`, `_SYS.limit`, the Monte-Carlo estimator)
- * consume: those kernels are real-only, and under the promoting disciplines
- * (`auto`, `complex`) a compiled body may hand back a `{re, im}` object —
+ * consume: those kernels are real-only, and under the promoting discipline
+ * (`complex`) a compiled body may hand back a `{re, im}` object —
  * `y^{3/2}` in an integrand promotes to `_SYS.cpow`, which yields `{re: …, im:
  * 0}` on the real axis. The value is projected exactly as the D2 rule
  * projects a real-only head's operand: a plain number passes; an object with
@@ -6602,7 +6602,12 @@ export const SYS_HELPERS = {
     isUnsignedPole(z) ? NaN : new Complex(z.re, z.im).arg(),
   // Ring operation, not a kernel: no roundoff chop (see `kernelResult`).
   cconj: (z: ComplexResult) => ({ re: z.re, im: -z.im }),
-  cneg: (z: ComplexResult) => ({ re: -z.re, im: -z.im }),
+  // A zero imaginary part stays `+0`. The negation of a real value lifted to
+  // `{re, im: 0}` must be on the same side of a branch cut as the negative
+  // real the interpreter computes: with `im: -0`, `_SYS.cln` and
+  // `_SYS.csqrt` take the lower side of the cut, and `Ln(-x)` at `x = 2`
+  // gave `ln 2 − iπ` where the interpreter gives `ln 2 + iπ`.
+  cneg: (z: ComplexResult) => ({ re: -z.re, im: z.im === 0 ? 0 : -z.im }),
   // Color helpers
   ...colorHelpers,
 };

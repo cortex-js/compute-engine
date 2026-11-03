@@ -128,7 +128,6 @@ import {
   _codeOverrides,
   _pushComplexMemoLayer,
   _withFoldedRealOverride,
-  hasPromotedDefinition,
   isRealOnlyLowering,
   liftPromotionSuppression,
   notePromoted,
@@ -264,6 +263,7 @@ import {
   withCseScope,
   withNestedCseHarvest,
 } from './compile-cse.js';
+import { elementwiseClosureIsComplex } from './compile-broadcast.js';
 import { core } from './compiler-core-hooks.js';
 import type { CoreHooks } from './compiler-core-hooks.js';
 import {
@@ -1231,7 +1231,7 @@ function compileExpression(
     // The report of a compilation that declines is the neutral one (see
     // the reset of `_lastReport` below). It is written here too, because
     // the `AbsArg` refusal below throws before that reset.
-    CompilerState._lastReport = { mode: 'strict', promoted: false };
+    CompilerState._lastReport = { mode: 'strict' };
     // `AbsArg` is refused in any angular unit other than radians, also
     // when a stored value or a function body that the expression reads
     // holds it. The test is made here, before any handler reads the
@@ -1248,8 +1248,7 @@ function compileExpression(
     // drained the pool left every later direct-target compilation skipping
     // symbolic closed forms permanently. Nested compilations (depth > 0)
     // deliberately consume the OUTER pool, so the aggregate stays bounded
-    // by one pool per outermost entry; an auto-mode escalation retry
-    // re-enters at depth 0 and gets its own pool.
+    // by one pool per outermost entry.
     resetSharedCompilationBudgets();
   }
   // The compile MODE (`CompileMode`) is latched from the OUTERMOST
@@ -1318,12 +1317,12 @@ function compileExpression(
         : undefined;
   // A declined compilation must not report the previous compilation's mode.
   // Reset first so a fallback built for the decline
-  // reports `strict`/not promoted. This is the only report a decline gets —
+  // reports `strict`. This is the only report a decline gets —
   // whether it throws before the latches below are written (an unsupported
   // requested mode throws in `resolveCompileMode`) or long after, since the
   // `finally` re-freezes only on the success path.
   if (CompilerState._compileDepth === 0)
-    CompilerState._lastReport = { mode: 'strict', promoted: false };
+    CompilerState._lastReport = { mode: 'strict' };
   const nextMode =
     CompilerState._compileDepth === 0 ? resolveCompileMode(target) : prevMode;
   // Written only after `resolveCompileMode` above — its throw escapes the
@@ -1487,67 +1486,26 @@ function compileExpression(
     // to attach (`withReferences` → `modeReport`), before the latches are
     // restored.
     //
-    // `mode` is the latched DISCIPLINE — `'strict'` or `'complex'`, with
-    // `'auto'` collapsed to `'strict'` because `auto` is a policy OVER the
-    // two disciplines (try strict, escalate on a `LaneMismatch`), not a
-    // discipline code can be compiled under — WIDENED to `'complex'` when a
-    // promotable head was promoted (`_promoted`). The widening is needed
-    // because under `auto` a promotable head is lowered through the complex
-    // kernel on the FIRST attempt, with no escalation: `_mode` still reads
-    // `'strict'` while the emitted code computes in the complex kernel and
-    // returns `{re, im}`, so `_mode` alone contradicted `promoted: true` on
-    // the same result.
-    //
-    // The widening is NOT a lane oracle: an operand that is already
-    // complex-TYPED (`Sqrt(z)` with `z: complex`) or a complex literal
-    // (`2i·x`) routes through the complex kernel in EVERY discipline, and
-    // `promotesRadicalToComplex` deliberately does not count that as a
-    // promotion (`promoted` reports a lane DIFFERENCE with the shader
-    // targets, which is what a merely-unknown-sign operand creates). Such a
-    // compile emits `{re, im}` and still reports `mode: 'strict'`. Read the
-    // returned value's shape (`typeof v === 'number'`), never `mode`, to
-    // decide whether a result is complex-shaped.
+    // `mode` is the requested mode: the latched discipline, or `'bigint'`
+    // when the integer lane is the bigint one. It is not a lane oracle: an
+    // operand that is complex-TYPED (`Sqrt(z)` with `z: complex`) or a
+    // complex literal (`2i·x`) routes through the complex kernel in EVERY
+    // discipline, so such a compile emits `{re, im}` and still reports
+    // `mode: 'strict'`. Read the returned value's shape
+    // (`typeof v === 'number'`), never `mode`, to decide whether a result
+    // is complex-shaped.
     //
     // Only a compilation that EMITTED code gets this report: the report
-    // describes emitted code, and a decline emitted none. A decline throws
-    // out of the `try` above with the latches already written, so freezing
-    // unconditionally here would hand `buildInterpreterFallback` — which
-    // spreads `modeReport()` onto a `success: false` result whose `run` is
-    // interpreter-backed — a `{mode: 'complex', promoted: true}` describing
-    // code that does not exist: before the decline, the emitters of the
-    // operands compiled so far can have recorded promotions in
-    // `_promoted`. The ANALYSIS predicate `isComplexValued` calls the same
-    // `promotesRadicalToComplex` as the emitters, but it restores
-    // `_promoted` after the call, because the subtree it reads can be
-    // folded or never emitted. So on the success path `_promoted` records
-    // the promotions of emitted code only. On the throw path the
-    // neutral `{mode: 'strict', promoted: false}` installed at depth-0 entry
-    // stands. (User ruling 2026-08-17, on Tycho consumer item 201.)
+    // describes emitted code, and a decline emitted none. On the throw path
+    // the neutral `{mode: 'strict'}` installed at depth-0 entry stands.
     if (CompilerState._compileDepth === 0 && emitted) {
-      // A promotion in the body of an emitted user-function definition is
-      // recorded on that definition (`promotedDefinitions`), not in
-      // `_promoted`. It counts while the definition is in `defs`; a
-      // definition removed later as unreferenced is taken out of the
-      // report again (`pruneUnreferencedVariantBases`).
-      const registry = target.userFunctions;
-      const promoted =
-        CompilerState._promoted || hasPromotedDefinition(registry);
-      // In `mode: 'bigint'` the discipline is `'strict'`, which never
-      // promotes, and the report names the requested mode.
       CompilerState._lastReport = {
         mode:
           CompilerState._integerLane === 'bigint'
             ? 'bigint'
-            : CompilerState._mode === 'complex' || promoted
+            : CompilerState._mode === 'complex'
               ? 'complex'
               : 'strict',
-        promoted,
-      };
-      CompilerState._lastReportBasis = {
-        registry,
-        complexDiscipline: CompilerState._mode === 'complex',
-        bigintLane: CompilerState._integerLane === 'bigint',
-        promotedOutsideDefinitions: CompilerState._promoted,
       };
     }
     CompilerState._mode = prevMode;
@@ -1693,7 +1651,7 @@ export function realOperandGuard(
   // COLOR, never a bare scalar that flips the caller's reading at runtime.
   resultKind: 'boolean' | 'number' | 'color'
 ): TargetSource | undefined {
-  // The rule belongs to the `auto` and `complex` disciplines; in strict
+  // The rule belongs to the `complex` discipline; in strict
   // mode nothing changes — a typed-complex or provably non-real operand of
   // a real-only head fails closed as before (design D2/D6: "in strict mode
   // nothing changes").
@@ -1962,7 +1920,7 @@ export function promotesRadicalToComplex(
   head: MathJsonSymbol,
   args: ReadonlyArray<Expression>
 ): boolean {
-  // The `auto` and `complex` disciplines promote (design §2: "unknown-sign
+  // The `complex` discipline promotes (design §2: "unknown-sign
   // radicals/logarithms promote" — the interpreter's `√(−1)`, `ln(−2)` fall
   // out); strict never.
   if (!promotionActive()) return false;
@@ -2048,7 +2006,7 @@ export function promotesRadicalToComplex(
   // operand has to clear the bar. An omitted operand cannot be cleared.
   if (!args.some((a) => a === undefined || !assumedRealNonNegative(a)))
     return false;
-  // `promoted` reports a lane DIFFERENCE with the shader targets: a
+  // A promotion is a lane DIFFERENCE with the shader targets: a
   // PROVABLY negative operand, or one TYPED complex, is complex-shaped on
   // every target and in every mode (not a promotion); only a real-shaped
   // operand of UNKNOWN sign is.
@@ -2283,10 +2241,10 @@ export function operandElementLane(
  *   none of them is complex-valued, or the type proves every entry real
  *   (`matrix<real>`).
  * - `'wide'`: the type admits real and complex entries (`matrix<number>`,
- *   `list<unknown>`, an undeclared collection) and the mode is `strict` or
- *   `auto`. The heads READ A WIDE OPERAND AS REAL: the target emits the
+ *   `list<unknown>`, an undeclared collection) and the mode is `strict`.
+ *   The heads READ A WIDE OPERAND AS REAL: the target emits the
  *   real-only helper, and a parent reads the value of the head as real.
- *   This is the reading of a `number`-typed scalar in the same modes. A
+ *   This is the reading of a `number`-typed scalar in the same mode. A
  *   `{re, im}` entry a caller binds to such an operand computes as a
  *   non-number: the entries of a binding are the caller's responsibility
  *   (`EntryPlan`, `javascript-runtime.ts`). The value is kept separate from `'real'` because a head whose value
@@ -3934,7 +3892,7 @@ export function compileExpr(
   // goes to the `Power` function lowering instead of the `**` operator.
   // So does a power that the analysis reads as promoted to the complex
   // lane (an unknown-sign real base with a float exponent, `t^0.3`, in the
-  // `auto` mode, see `promotesRadicalToComplex`): the function lowering
+  // `complex` mode, see `promotesRadicalToComplex`): the function lowering
   // emits `np.emath.power` for it, which gives the complex value for a
   // negative base, as the analysis reports to the parent. Before, the
   // `**` operator was emitted for this form in every mode, so the emission
@@ -4174,8 +4132,8 @@ export function compileExpr(
   //  - A complex ascription over a value that is not a scalar (a point,
   //    a color, a boolean) contradicts the value. Fail closed.
   //  - A real ascription over a value that is complex only because of
-  //    promotion selects the real lane for the value. Under a mode that
-  //    promotes (`auto`, `complex`), an unknown-sign `Sqrt`, `Ln`, `Log`,
+  //    promotion selects the real lane for the value. Under the mode that
+  //    promotes (`complex`), an unknown-sign `Sqrt`, `Ln`, `Log`,
   //    even `Root` or non-integer `Power` lowers through a complex kernel,
   //    and makes the value complex. The ascription says that the value is
   //    real, so the value compiles with promotion off
@@ -4184,7 +4142,7 @@ export function compileExpr(
   //    real-typed result has when it has no real value. With
   //    `p: (real) -> real` and `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, the
   //    definition is `Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))`
-  //    in every mode, and `promoted` stays `false`. "Complex only because
+  //    in every mode, and no promotion is recorded. "Complex only because
   //    of promotion" means: complex with promotion on, real with promotion
   //    off. A value that is real with promotion on (`|√k|`) keeps its
   //    promoted heads.
@@ -6858,9 +6816,8 @@ export function emitFunctionLiteralDefinition(
       let body: TargetSource;
       // A promotion recorded while this body compiles belongs to this
       // definition, not to the code that asked for it: it is recorded on
-      // the definition (`promotedDefinitions`), and the report counts it
-      // only while the definition is in the emitted code (see
-      // `pruneUnreferencedVariantBases`).
+      // the definition (`promotedDefinitions`). No result field reads this
+      // record: the compile result reports only its `mode`.
       const outerPromoted = CompilerState._promoted;
       CompilerState._promoted = false;
       const promotedDefs = memoFor(promotedDefinitions, registry);
@@ -6978,25 +6935,6 @@ export function pruneUnreferencedVariantBases(
       changed = true;
     }
   }
-  // A removed definition is not in the emitted code, so a promotion in
-  // its body does not describe that code: compute the report again. The
-  // report is only lowered here, never raised.
-  const basis = CompilerState._lastReportBasis;
-  if (
-    basis !== undefined &&
-    basis.registry === registry &&
-    CompilerState._lastReport.promoted &&
-    !basis.promotedOutsideDefinitions &&
-    !hasPromotedDefinition(registry)
-  )
-    CompilerState._lastReport = {
-      mode: basis.complexDiscipline
-        ? 'complex'
-        : basis.bigintLane
-          ? 'bigint'
-          : 'strict',
-      promoted: false,
-    };
 }
 
 /**
@@ -7134,6 +7072,7 @@ const hubs: CoreHooks = {
   shaderSelectionStatement,
   elementComplexness,
   operandElementLane,
+  elementwiseClosureIsComplex,
   constantFoldValue,
   conditionNode,
   noteLocalComplex,

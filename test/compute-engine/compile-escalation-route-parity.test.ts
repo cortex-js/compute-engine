@@ -3,7 +3,7 @@ import { isLaneMismatchError } from '../../src/compute-engine/compilation/diagno
 import type { CompilationResult } from '../../src/compute-engine/compilation/types';
 
 /**
- * Route parity for the `mode: 'auto'` escalation.
+ * Route parity of the compile modes.
  *
  * There are two public routes into a compilation:
  *
@@ -11,26 +11,18 @@ import type { CompilationResult } from '../../src/compute-engine/compilation/typ
  * - a registered target obtained from `ce._getCompilationTarget(name)` and
  *   invoked through its own `.compile(expr, options)`.
  *
- * Under the default `auto` discipline a lane mismatch escalates: the
- * compilation is redone under `mode: 'complex'` and the result reports
- * `mode: 'complex'`, `promoted: true` and the failed strict attempt's
- * diagnostic in `escalation`. The escalation lives in the targets'
- * `compile()` (`compilation/auto-escalation.ts`), so both routes get it; when
- * it lived only in the standalone wrapper, the target-level route threw a
- * `LaneMismatchError` where the standalone route succeeded.
- *
- * `mode: 'strict'` is unaffected on either route: it never promotes, and a
- * mismatch it does raise is still a decline (a throw by default, a
- * `success: false` result with the `lane-mismatch` diagnostic under
- * `fallback: true`).
+ * Both routes must give the same result. In `mode: 'strict'` (the default)
+ * an unknown-sign radical stays on the real lane, and a lane mismatch is a
+ * decline: a throw by default on the target route, a `success: false`
+ * result with the `lane-mismatch` diagnostic under `fallback: true`.
  */
 
 /**
- * The witness: `k` is left FREE (undeclared), so `\sqrt{2k}` has unknown sign
- * and the promoting discipline lowers it through the complex kernel. The
- * promoted value then reaches `u`, the wide (unannotated) parameter of the
- * user function `Cwide`, which the compilation shaped real — the lane
- * mismatch. `Cwide(x√(2k) + k)·√(2π·2k)`.
+ * The witness: `k` is left FREE (undeclared), so `\sqrt{2k}` has unknown sign.
+ * In strict mode it stays on the real lane, so its value can reach `u`, the
+ * wide (unannotated) parameter of the user function `Cwide`, which the
+ * compilation shaped real, with no lane mismatch.
+ * `Cwide(x√(2k) + k)·√(2π·2k)`.
  */
 function witness(): {
   ce: ComputeEngine;
@@ -61,59 +53,10 @@ function strictWitness(): {
 const shape = (r: CompilationResult<'javascript'>) => ({
   success: r.success,
   mode: r.mode,
-  promoted: r.promoted,
-  escalation: r.escalation,
 });
 
-describe('compile escalation — standalone vs target-level route', () => {
-  it('escalates identically on both routes under the default mode', () => {
-    const { ce, expr } = witness();
-    const target = ce._getCompilationTarget('javascript')!;
-
-    const standalone = compile(expr) as CompilationResult<'javascript'>;
-    const direct = target.compile(expr);
-
-    expect(standalone.success).toBe(true);
-    expect(standalone.mode).toBe('complex');
-    expect(standalone.promoted).toBe(true);
-    expect(standalone.escalation?.code).toBe('lane-mismatch');
-    expect(standalone.escalation?.boundary).toBe('user-function parameter');
-    expect(standalone.escalation?.binding).toBe('the parameter `u` of `Cwide`');
-
-    expect(shape(direct)).toEqual(shape(standalone));
-    expect(direct.code).toBe(standalone.code);
-
-    // …and the compiled code computes the same values. At `k = 2` everything
-    // is real (`Cwide(4)·√(8π) = 5·5.0133…`); at `k = -1` the radicals are
-    // imaginary and their product is real again
-    // (`i√2 · i√(4π) = -√2·√(4π) = -5.0133…`).
-    expect(direct.run!({ x: 1, k: 2 })).toEqual(
-      standalone.run!({ x: 1, k: 2 })
-    );
-    expect(direct.run!({ x: 1, k: 2 })).toBeCloseTo(25.0663, 4);
-    expect(direct.run!({ x: 1, k: -1 })).toEqual(
-      standalone.run!({ x: 1, k: -1 })
-    );
-    expect(direct.run!({ x: 1, k: -1 })).toBeCloseTo(-5.0133, 4);
-  });
-
-  it('escalates on the target route with `auto` requested, and with `fallback` either way', () => {
-    const { ce, expr } = witness();
-    const target = ce._getCompilationTarget('javascript')!;
-    for (const options of [
-      { mode: 'auto' as const },
-      { fallback: false },
-      { fallback: true },
-    ]) {
-      const r = target.compile(expr, options);
-      expect(r.success).toBe(true);
-      expect(r.mode).toBe('complex');
-      expect(r.promoted).toBe(true);
-      expect(r.escalation?.code).toBe('lane-mismatch');
-    }
-  });
-
-  it('leaves `mode: strict` alone: no promotion, no escalation, on either route', () => {
+describe('compile modes — standalone vs target-level route', () => {
+  it('leaves `mode: strict` alone on either route', () => {
     const { ce, expr } = witness();
     const target = ce._getCompilationTarget('javascript')!;
     const standalone = compile(expr, {
@@ -121,11 +64,9 @@ describe('compile escalation — standalone vs target-level route', () => {
       fallback: false,
     }) as CompilationResult<'javascript'>;
     const direct = target.compile(expr, { mode: 'strict', fallback: false });
-    // Strict never promotes, so the radical stays in the real lane and no
-    // mismatch arises: the compilation succeeds under the strict discipline.
+    // The radical stays in the real lane and no mismatch arises: the
+    // compilation succeeds under the strict discipline.
     expect(standalone.mode).toBe('strict');
-    expect(standalone.promoted).toBe(false);
-    expect(standalone.escalation).toBeUndefined();
     expect(shape(direct)).toEqual(shape(standalone));
     expect(direct.code).toBe(standalone.code);
   });
@@ -161,44 +102,10 @@ describe('compile escalation — standalone vs target-level route', () => {
     expect(standalone.diagnostic?.code).toBe('lane-mismatch');
     expect(standalone.diagnostic?.kind).toBe('correctness');
 
-    // The same mismatch under the default `auto` escalates on both routes.
-    const autoDirect = target.compile(expr);
-    const autoStandalone = compile(expr) as CompilationResult<'javascript'>;
-    expect(shape(autoDirect)).toEqual(shape(autoStandalone));
-    expect(autoDirect.mode).toBe('complex');
-    expect(autoDirect.escalation?.binding).toBe('the parameter `x` of `b`');
-    expect(autoDirect.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
   });
 });
 
 describe('the Python target route behaves like the JavaScript one', () => {
-  it('promotes under the default mode; strict does not (source-only)', () => {
-    // The escalation call site is duplicated per target (each target's
-    // compile() applies compileWithAutoEscalation itself), so the Python
-    // wiring needs its own pin — a JavaScript-only suite would let the two
-    // call sites silently diverge. The JavaScript witness cannot run here:
-    // lane mismatches arise at USER-FUNCTION parameters, and the Python
-    // target has no lowering for user functions, so no Python-reachable
-    // mismatch witness exists today and the retry itself is exercised on
-    // the JavaScript route above. What IS measurable on this target — and
-    // what this pins — is the mode plumbing the helper wraps: `auto`
-    // promotes an unknown-sign radical on the FIRST attempt and reports the
-    // resolved discipline; `strict` never promotes.
-    const ce = new ComputeEngine();
-    const expr = ce.parse('\\sqrt{k} + k');
-    const auto = ce._getCompilationTarget('python')!.compile(expr, {});
-    expect(auto.success).toBe(true);
-    expect(auto.mode).toBe('complex');
-    expect(auto.promoted).toBe(true);
-    expect(typeof auto.code).toBe('string');
-    const strict = ce
-      ._getCompilationTarget('python')!
-      .compile(expr, { mode: 'strict' });
-    expect(strict.mode).toBe('strict');
-    expect(strict.promoted).toBe(false);
-    expect(strict.escalation).toBeUndefined();
-  });
-
   it("the decline's interpreter fallback follows the runner's value convention", () => {
     // The Python target builds its own fallback in its catch, so the runner
     // contract has to be honored there and not only on the standalone route.

@@ -1049,7 +1049,7 @@ function statedTypeOf(node: Expression): Readonly<Type> | undefined {
 /**
  * True when the compilation uses the `complex` compile mode: the option
  * `mode: 'complex'` of the target, or the discipline of that mode in force
- * (`complexDiscipline()`, also for the retry of the `auto` mode). Every
+ * (`complexDiscipline()`). Every
  * value that is not typed real is then lifted to a complex number where it
  * is used, so a real and a complex value have one representation.
  */

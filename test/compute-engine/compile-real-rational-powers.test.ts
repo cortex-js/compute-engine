@@ -30,7 +30,7 @@ describe('real branches of exact rational powers', () => {
     (p, q) => {
       const ce = realEngine();
       const expr = ce.box(['Add', 1, ['Power', 'x', ['Rational', p, q]]]);
-      for (const mode of ['strict', 'auto', 'complex'] as const) {
+      for (const mode of ['strict', 'complex'] as const) {
         const result = compile(expr, { mode, constantFold: false });
         expect(result.success).toBe(true);
         for (const x of [-8, -1.2, -0.3, 0.3, 2]) {
@@ -124,7 +124,7 @@ describe('real branches of exact rational powers', () => {
     const even = ce.box(['Power', 'x', ['Rational', 3, 2]]);
     const want = even.subs({ x: ce.number(-2) }).N();
     close(
-      compile(even, { constantFold: false }).run!({ x: -2 }),
+      compile(even, { constantFold: false, mode: 'complex' }).run!({ x: -2 }),
       want.re,
       want.im
     );
@@ -199,7 +199,7 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     (latex) => {
       const ce = realEngine();
       const expr = ce.parse(latex);
-      for (const mode of ['strict', 'auto', 'complex'] as const) {
+      for (const mode of ['strict', 'complex'] as const) {
         const result = compile(expr, { mode, constantFold: false });
         expect(result.success).toBe(true);
         expect(result.code).not.toContain('_SYS.cpow(');
@@ -409,9 +409,9 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     const code = (latex: string, options: object = {}) =>
       compile(ce.parse(latex), { constantFold: false, ...options }).code;
     // `0.5` and `0.3` read as `1/2` and `3/10`: an even denominator, the
-    // principal complex value.
-    expect(code('x^{0.5}')).toContain('_SYS.cpow(');
-    expect(code('x^{0.3}')).toContain('_SYS.cpow(');
+    // principal complex value in the complex mode.
+    expect(code('x^{0.5}', { mode: 'complex' })).toContain('_SYS.cpow(');
+    expect(code('x^{0.3}', { mode: 'complex' })).toContain('_SYS.cpow(');
     expect(code('x^{0.3}', { mode: 'strict' })).toBe('Math.pow(_.x, 0.3)');
     expect(code('x^{0.5}', { to: 'interval-js' })).toBe('_IA.sqrt(_.x)');
     expect(code('x^{0.3}', { to: 'interval-js' })).toBe('_IA.pow(_.x, 0.3)');

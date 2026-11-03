@@ -833,8 +833,10 @@ its value through a variable, so a block that returns it returns
 for step 4, row 7, and the absent-value code for step 4, row 2.
 
 3.4.6 **The complex lane** (options page 6, option A in its strict form).
-In progress 2026-11-03, session compute-engine-ee, base `2341d6f31`, in
-parallel with 3.4.3. `strict` is the only discipline and the default of
+Staged 2026-11-03, session compute-engine-ee, worked on base `2341d6f31` in
+parallel with 3.4.3, delivered onto `aee059e66` (3.4.3) and staged on
+`7f36a72d2`, not committed (the record is at the end of this item).
+`strict` is the only discipline and the default of
 every target; `mode: 'auto'` declines with `unsupported-mode`; the
 `promoted` and `escalation` result fields go; `mode: 'complex'` and
 `mode: 'bigint'` are unchanged; in the real lane an operation whose exact
@@ -927,7 +929,26 @@ value is complex gives the target's `NaN`.
   only when that succeeds, and else compiles `complex` for the CPU route
   (one extra compile per row, no CE change); (C) CE reports whether the
   kernel is complex, a new result field and a CE decision. 3.4.6 does not
-  wait for it: A and B need only `mode` from CE.
+  wait for it: A and B need only `mode` from CE. The user chose B
+  (relayed by tycho-f9, 2026-11-03). B assumes that `strict` declines where
+  a row needs complex values; measured on the candidate the same day, it
+  does not: with `x: real`, `\sqrt{x}^2` at `x = -4` compiles in `strict`
+  and gives `NaN` (`complex` and the interpreter give `-4`; `glsl`
+  compiles too), as the new caveat says; `\ln(x)` at `-2` is `NaN` too. A
+  complex literal is complex by its static type, so `\sin(\Re(x+iy))`
+  gives the same value in `strict` and `complex`. Tycho's 12 promoted
+  records are of the first kind, so B needs a second test on Tycho's side
+  (sent to tycho-f9: compare the two compiles on samples, or Tycho's own
+  test for an unknown-sign radical or logarithm, or option A). **The user
+  then chose A** (relayed by tycho-f9, 2026-11-03): at adoption every row
+  of a complex-mode document compiles in `complex` and is drawn on the CPU
+  only; a real-mode document compiles in `strict` with all its legs, which
+  is the split measured above (its colour lane included). Tycho reads the
+  document's complex mode or `result.mode === 'complex'`; nothing new is
+  needed from CE. Cost (Tycho's audit on CE `2341d6f31`): 32 of 688 Desmos
+  states are in complex mode; 24 rows of 17 documents lose a GLSL leg and
+  18 an interval leg; Tycho renders those 17 documents before and after at
+  adoption.
 - **Code lines** of `compilation` (not blank, `//` or `*`): 92,785 →
   92,665 for the removal of `auto`, before the fixes of `complex` mode.
 - **The causes** (diagnosis 2026-11-03, each reproduced in plain CE except
@@ -955,6 +976,140 @@ value is complex gives the target's `NaN`.
   **Decision (user, 2026-11-03):** A, B, C and E are fixed in this item; D
   is a ROADMAP entry with its witness, fixed before the language release.
   Tycho's split never reaches D, and with the split only A is in the corpus.
+- **The measure after the fixes of A, B, C and E** (runs `fix-cx` and
+  `fix-split`, compared with the 3.4.2 run where Tycho uses `auto`, 3,576
+  values of the 447 records whose mode changed). With the split: 12 values
+  differ, all within the caveats (hltzcphymj `0^{x+y-z}`, `~oo` written
+  `{re: Infinity, im: Infinity}`, 4 values; crmswfhqrd
+  `g(x) \text{ where } b \coloneq 1`, `NaN` → `{re: NaN, im: NaN}`, no
+  value in either case, 8 values); crmswfhqrd `\frac{1}{100}af(x)^2` has its
+  `auto` value again. With every route on `complex`: 28 values differ:
+  the 12 above, woeywky0kj (1, no value in either case), hyvhlz4chj (8,
+  cause D, CE-751.1) and 4d9knkydej `asOklab(g)` (7, still `NaN`
+  colours: after fix C the definition is real and right, and the call
+  lifts an element of a `list<number>` with `_SYS.cplx` for a parameter
+  that the definition reads on the real lane, which is cause D, CE-751.1). l49l5stdag has its `auto` values again. One new
+  javascript decline with every route on `complex`: neyret/51a4237846
+  `f(f(f(f(f(f(f(f(f(P)))))))))`, a timeout of Tycho's audit (5,483 ms,
+  4,882 ms at the base). Code lines of `compilation`: 92,748.
+  The full suite on the worktree: 33 tests failed in 12 files.
+- **What the full suite and the timeout were.** 31 of the 33 tests pinned
+  the removed behavior (a request for `auto`, promotion under the default)
+  and were moved to `mode: 'complex'` or to the strict `NaN`. 2 were a
+  defect of this item: the quadrature helper `withComplexAtNaN()` kept a
+  complex sample with a `NaN` part, so `∫₀^∞ x^{100} e^{-x}\,dx` lost its
+  log-space sample (`1.06e+113` for `100!`); it now keeps a complex sample
+  only when it is a number. The timeout of 51a4237846 was the closure
+  question of fix B running in `strict` too; it now runs in `complex` only
+  (`_operandElementLane()`), and the row compiles in the time of the base.
+  `derived-substreams.test.ts` "NIntegrate derives one too" draws 32
+  samples (one pass) where it drew 64: its samples are `NaN` (a `NaN` real
+  part) and no longer complex numbers; the value is `NaN` before and after.
+- **Decisions in this item, each with its alternative.** (1) `CompileMode`
+  is `'strict' | 'complex' | 'bigint'`; the option check still accepts the
+  string `'auto'` so that the request declines with `unsupported-mode` and
+  a message that names `'complex'` (the other option: keep `'auto'` in the
+  type as a value that is always refused). (2) The engine's own
+  compilations stay in `strict`: the `Map` drain and the `Reduce` fast path
+  compute a `NaN` element again with the interpreter, a quadrature
+  integrand is compiled in `complex` at its first `NaN` sample
+  (`withComplexAtNaN()`), and stochastic equality uses the compiled kernel
+  only for an expression whose every head propagates `NaN` (an allowlist:
+  arithmetic, powers, roots, logarithms, rounding, `Max`, `Min`, the
+  trigonometric and hyperbolic functions and their inverses, without
+  `Arcsec`, `Arccsc` and `Hypot`), else the interpreter samples it; the
+  other option, `complex` for every internal compilation, broke a `solve`
+  test (complex `tan(arctan(a))` at `a = 10^5` is off by 0.008). (3) In
+  `complex` mode the negation of a real value keeps a `+0` imaginary part,
+  so `Ln(-x)` at `x = 2` is `ln 2 + iπ` (it was `ln 2 − iπ`; `auto` never
+  compiled it in complex mode). (4) A random node shared by two positions
+  declines only in `complex` mode (its guard is a complex-lane guard); in
+  `strict` it compiles and draws once per position, as the interpreter
+  does. (5) A fold whose lane is complex lifts its seed, so an empty or a
+  one-element list gives the complex shape (`Product(Map(Sqrt, P)) + 1` is
+  `2` at `P = []`). (6) The table of options page 6 is wrong in one row:
+  `h(P[1])` with `P: list<tuple<complex, real>>` declines with
+  `lane-mismatch` in `strict` (the parameter is not inferred complex); it
+  compiles with `mode: 'complex'` or an annotated parameter.
+  `docs/COMPILATION-MODEL.md` states the measured behavior.
+- **Not fixed.** Cause D (CE-751.1, user decision). The second mismatch of
+  art/hyvhlz4chj (an inlined `Dot` over a function that returns a tuple,
+  with complex arguments), probably the same family as D. In the default
+  mode, `Gamma(s, z)` with `z: real` at `z = -1` gives `NaN` where the
+  interpreter gives `e` (as `strict` did before): a known-limitations line
+  marked `plausible?`. CE-751 (decision (a), 2026-11-01) relies on the
+  restart that this rule removes; its entry says so.
+- **The final corpus measure** (runs `m-cx` and `m-split` on the combined
+  tree, `aee059e66` plus this item, Tycho `44a25d4e3` with the `At` handler
+  of 3.4.2). Against the runs of this item on `2341d6f31`: no value changed
+  (77,051 and 77,164 values). Against Tycho on `auto` (3,584 values of the
+  re-keyed records): with the split, which is Tycho's adoption (option A),
+  12 values differ, all within the caveats (above); with every route on
+  `complex`, 28 (the 12, cause D 15, woeywky0kj 1). Declines with the split:
+  javascript 44 → 43, glsl 47, interval-js 74 (the 4 new are hbvzf9yk1r,
+  above, which Tycho's option A keeps off the interval route); with every
+  route on `complex`, one new javascript decline, art/2ki2hjsouf
+  (`scalar arithmetic over a list-valued operand`); it is not separated
+  from the commits of `aee059e66` (3.4.3, CE-791, CE-792), and Tycho's
+  adoption does not compile that row in `complex`.
+- **Code lines** of `compilation` (not blank, `//` or `*`): 92,785 → 92,748
+  on the base `2341d6f31` (before the review fixes); 92,790 → 92,763 on
+  `aee059e66`. Source: 39 `.ts` files (one deleted, `auto-escalation.ts`);
+  tests: 75 files, 2 of them new (`compile-mode-auto-removed.test.ts`,
+  `compile-complex-lane-agreement.test.ts`), none deleted (about 12 tests
+  removed); `benchmarks/python-performance.py`, which a test writes, now
+  emits `np.sqrt` (the default is `strict`); one inline snapshot changed
+  (`item-284-derivative-compile-cost.test.ts`, the default emits the real
+  jets).
+- **Review**: Claude and Codex, three rounds. Round 1 (both): the
+  stochastic equality confirmed `Imaginary(Sqrt(x)) = 0` (high, Codex),
+  the seed of a widened fold (medium, Codex; its example was right, the
+  defect was a fold of type `complex` over an empty or one-element list),
+  four comments and the `supportedModes` check (Claude). Round 2 (Codex):
+  the round-1 fix missed `Coalesce` and user function bodies (two high);
+  replaced by the allowlist. Round 3 (Codex): no finding. Claude stopped
+  after round 1 (low and nit findings only).
+- **Checks** on the combined tree (`/tmp/wt-compute-engine-ee-346m`, byte
+  for byte the files staged): typecheck, lint, `check:deps`, the full suite
+  (1,803 suites, 77,587 tests, 0 failed), the corpus measure above; on the
+  main tree after the delivery onto `7f36a72d2` (whose commit changes only
+  the group-theory library and `numerics/modular.ts`): typecheck and 7
+  targeted files. Python execution tests ran on the worktree for the
+  changed Python files (189 and 519 tests, 0 failed), not on the combined
+  tree.
+- **Tycho at adoption.** Option A (above); its sites of `mode: 'auto'`
+  become `'complex'`; its 14 readers of `promoted` read the document's
+  complex mode or `result.mode === 'complex'`; Tycho renders the 17
+  documents that lose a GLSL or interval leg.
+
+What step 4, row 6 (the complex-lane contraction) needs from this item:
+the dead code it removes is now unreachable or written and never read:
+`CompilerState._promoted`, `notePromoted`, `recordPromotion`,
+`promotedDefinitions`, `hasPromotedDefinition` and their accessors in
+`base-compiler.ts`, with their save and restore sites in
+`compile-folding.ts`, `compile-statements.ts`, `compile-folded-values.ts`,
+`compile-complexness.ts` and `compiler-core.ts`; `CompileTarget.reset` and
+its contract check; the `'auto'` entry of `COMPILE_MODES` once the decline
+message is no longer wanted; the promotion of unknown-sign radicals in
+`compile-complexness.ts` is used only by `mode: 'complex'` now. The lane
+recording per definition (`recordUserFunctionLane`,
+`_userFunctionLanes`) is still read by the GPU target and by the pruning,
+so row 6 measures it before it removes it; cause D (CE-751.1) needs the
+lane of each parameter of an emitted definition, which is close to that
+recording, so row 6 and CE-751.1 should be planned together.
+
+What 3.4.4 (block locals) and 3.4.5 (function values) need from this item:
+the lane of a local and of a parameter now follows its static type only,
+in `strict`; the complex half of the local shape frames (options page 4)
+is a lane chosen once from the declared or inferred type, with no record
+of a complex value that reaches a real binding and no restart. By the rule
+(not measured in this item), a local assigned a complex value in one
+branch and a real value in another has a type that is not complex, so in
+`strict` its complex branch gives `NaN` (within the new caveat) or
+declines, and in `complex` it is complex; 3.4.4 measures it. A
+function value or callback (3.4.5) whose parameter is untyped is complex
+in `complex` mode and real in `strict`; a call that sends a complex
+argument to a definition compiled real is cause D (CE-751.1).
 
 The compiler side of 3.1 to 3.4 in this release is the minimum that keeps
 compiled code equal to the interpreter: the new static errors decline, the
@@ -1010,7 +1165,16 @@ A rise or a fall does not make the run fail, so it does not block a release.
   A′ declines a write to an engine symbol; the census did not count it),
   and whether the third-party user of the bigint mode uses currying, partial
   application or a function value in a variable (function values B declines
-  them).
+  them). The first check is done (tycho-c6, 2026-11-03, Tycho's codegen
+  audit of all 757 documents and the showcase, on CE 0.176.0 and on
+  aee059e66): no `Assign` writes a symbol its block does not declare, and no
+  first assignment sits in a branch, a loop body or an operand, so the
+  decline of A′ changes no Tycho row. The only `Declare` without a value
+  left is Tycho-built, in its implicit-surface march kernel
+  (`Declare(base, "integer")` then `Assign(base, …)`, and `v0` to `v7` as
+  `real`; 288 compiled expressions in 32 documents): Tycho changes that
+  builder in its adoption item 4; no CE change is needed. The bigint-user
+  check is still open.
 - Tycho confirms that its complex-mode documents compile in complex mode or
   declare their inputs complex (the complex lane in its strict form).
 - Tycho's checks after the release: the 3-D point routes, point labels and

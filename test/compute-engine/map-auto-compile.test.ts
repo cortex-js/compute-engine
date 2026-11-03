@@ -350,12 +350,14 @@ describe('Map auto-compile', () => {
     expect(els[0].re).toBe(2);
     expect(els[1].re).toBe(0); // 2i: pure imaginary
     expect(els[1].im).toBe(2);
-    // Both elements are served by the compiled lambda: the default compile
-    // mode `auto` promotes the unknown-sign radical (compile-mode step 4,
-    // 2026-08-16), so `√(−4)` comes back as the complex `2i` instead of the
-    // `NaN` that used to send that element to the interpreter double-check.
-    expect(stats.compiledHits).toBe(2);
-    expect(stats.nanDoubleChecks).toBe(0);
+    // The drain compiles in the default mode, `'strict'`: the unknown-sign
+    // radical stays on the real lane, so `√(−4)` is `NaN` in the compiled
+    // lambda, and the interpreter double-check computes that element. The
+    // value is the interpreter's `2i`, as it was when the removed `'auto'`
+    // mode promoted the radical and the compiled lambda served both
+    // elements.
+    expect(stats.compiledHits).toBe(1);
+    expect(stats.nanDoubleChecks).toBe(1);
   });
 
   // ── 11. Failure semantics: deadline ────────────────────────────────────

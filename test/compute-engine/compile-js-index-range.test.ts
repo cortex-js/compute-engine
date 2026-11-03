@@ -360,8 +360,8 @@ describe('a complex-lane count or bound reads its real part', () => {
     ['[i \\text{ for } i = [1...\\sqrt{K}]]', [1, 2]],
   ])('%s', (latex, expected) => {
     const expr = ce.parse(latex);
-    expect(code(expr)).toContain('_SYS.realPart(');
-    expect(kernel(expr)({ K: 4, L })).toEqual(expected);
+    expect(code(expr, { mode: 'complex' })).toContain('_SYS.realPart(');
+    expect(kernel(expr, { mode: 'complex' })({ K: 4, L })).toEqual(expected);
     // The interpreter agrees.
     const interpreted = expr
       .subs({ K: 4, L: ce.box(['List', ...L] as any) } as any)

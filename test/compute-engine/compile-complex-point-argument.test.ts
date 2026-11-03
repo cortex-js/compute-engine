@@ -7,8 +7,8 @@
  * real numbers. With `P: list<tuple<complex, real>>`, the compiled
  * `h(P[1])` added `1` to a `{re, im}` object and gave the string
  * "[object Object]1", where the interpreter gives `2 + i`. Such a call is
- * now a lane mismatch: in `mode: 'auto'` (the default) the compilation
- * starts again in `mode: 'complex'`, and in `mode: 'strict'` it declines.
+ * now a lane mismatch: `mode: 'complex'` compiles it, and in
+ * `mode: 'strict'` (the default) it declines.
  * The same test applies to the callback of `Map` and to the combiner of
  * `Reduce`, `Fold` and `Scan`.
  */
@@ -115,7 +115,7 @@ function expectSameValue(
   json: unknown,
   value: unknown = P,
   jsValue: unknown = jsP,
-  mode?: 'strict'
+  mode: 'strict' | 'complex' = 'complex'
 ) {
   const interp = ce.box(['Apply', json, value] as any).evaluate();
   const expected = interp.isCollection ? [...interp.each()] : [interp];
@@ -167,7 +167,7 @@ describe('A complex point given to an engine-level function', () => {
     ['two coordinates', ['h2', ['At', 'P', 1]]],
   ];
   for (const [name, body, type, value, jsValue] of cases) {
-    test(`auto: ${name}`, () =>
+    test(`complex: ${name}`, () =>
       expectSameValue(fn(body, type), value, jsValue));
     test(`strict: ${name}`, () =>
       name === 'the result of a function call'
@@ -197,7 +197,7 @@ describe('A list of complex points given to an engine-level callback', () => {
     ['Scan', ['Scan', 'P', 'k2', 0]],
   ];
   for (const [name, body] of cases) {
-    test(`auto: ${name}`, () => expectSameValue(fn(body)));
+    test(`complex: ${name}`, () => expectSameValue(fn(body)));
     test(`strict: ${name}`, () =>
       expectStrictDecline(
         fn(body),
@@ -252,7 +252,7 @@ describe('Positions of a point parameter', () => {
     ['a call', ['h3', ['At', 'P', 1]]],
   ];
   for (const [name, body] of cases) {
-    test(`auto: ${name}`, () => expectSameValue(fn(body, CC), Pcc, jsPcc));
+    test(`complex: ${name}`, () => expectSameValue(fn(body, CC), Pcc, jsPcc));
     test(`strict: ${name}`, () =>
       name === 'Map'
         ? expectStrictDecline(
@@ -274,7 +274,7 @@ describe('Positions of a point parameter', () => {
 });
 
 describe('A complex point given to a parameter with no type', () => {
-  test('auto: g9(P[1])', () => expectSameValue(fn(['g9', ['At', 'P', 1]])));
+  test('complex: g9(P[1])', () => expectSameValue(fn(['g9', ['At', 'P', 1]])));
   for (const g of ['g9', 'g8'])
     test(`strict: ${g}(P[1])`, () =>
       expectStrictDecline(
@@ -286,7 +286,7 @@ describe('A complex point given to a parameter with no type', () => {
 describe('A written point with a coordinate compiled as complex', () => {
   // `Typed(z, 'number')` has the type `number`, but `z` is complex.
   const point = ['Tuple', ['Typed', 'z', "'number'"], 2];
-  test('auto: Map', () => expectSameValue(fn(['Map', 'h2', ['List', point]])));
+  test('complex: Map', () => expectSameValue(fn(['Map', 'h2', ['List', point]])));
   test('strict: Map', () =>
     expectStrictDecline(
       fn(['Map', 'h2', ['List', point]]),
@@ -294,7 +294,7 @@ describe('A written point with a coordinate compiled as complex', () => {
     ));
   // The call with a written point is inlined, and each coordinate is read
   // in its own lane, so it gives the interpreter's value in strict mode.
-  for (const mode of ['auto', 'strict'] as const)
+  for (const mode of ['complex', 'strict'] as const)
     test(`${mode}: a call`, () => {
       const json = fn(['h2', point]);
       const r = compile(ce.box(json as any), { fallback: false, mode })!;
@@ -306,8 +306,8 @@ describe('A written point with a coordinate compiled as complex', () => {
 describe('A position with no type is read as real', () => {
   // The test does not look at what the body does with a value at a
   // position typed `any` or `unknown`. `Length` reads no coordinate, so
-  // `len` is a mismatch that the body does not need: `auto` compiles it in
-  // the complex mode with the same value, and `strict` declines the
+  // `len` is a mismatch that the body does not need: `complex` compiles it
+  // with the same value, and `strict` declines the
   // callback of `Map`. A direct call over `P[1]` is compiled at the call
   // site, which reads each coordinate in its own lane, so strict mode
   // compiles it and gives the interpreter's value (no message).
@@ -332,7 +332,7 @@ describe('A position with no type is read as real', () => {
     ],
   ];
   for (const [name, body, message] of cases) {
-    test(`auto: ${name}`, () => expectSameValue(fn(body)));
+    test(`complex: ${name}`, () => expectSameValue(fn(body)));
     test(`strict: ${name}`, () =>
       message !== undefined
         ? expectStrictDecline(fn(body), message)
@@ -416,7 +416,7 @@ describe('A block-local combiner that hides an engine-level function', () => {
 describe('The decline message of an engine-level Map callback with no type', () => {
   // `Map(g3, P)` binds each point whole through a generated parameter. The
   // message names an element of `P`, not that parameter.
-  test('auto', () => expectSameValue(fn(['Map', 'g3', 'P'])));
+  test('complex', () => expectSameValue(fn(['Map', 'g3', 'P'])));
   test('strict', () =>
     expectStrictDecline(
       fn(['Map', 'g3', 'P']),
@@ -448,7 +448,7 @@ describe('A written complex point at a parameter declared with a real position',
     expect(v.re).toBe(4);
     expect(v.im).toBe(2);
   });
-  test('auto: hr((x + i·x, x))', () => expectSameValue(json, 2, 2));
+  test('complex: hr((x + i·x, x))', () => expectSameValue(json, 2, 2));
   test('strict: hr((x + i·x, x))', () =>
     expectSameValue(json, 2, 2, 'strict'));
 });

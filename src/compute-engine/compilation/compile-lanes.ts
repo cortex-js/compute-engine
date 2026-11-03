@@ -175,8 +175,8 @@ export function isProvablyNonReal(expr: Expression): boolean {
 
 /**
  * The lowering of the real-only head `h` for complex operands that the
- * target gives (`CompileTarget.complexLowering`), in the modes that apply
- * the run-time realness rule (`runtimeRealGuards`: `auto` and `complex`).
+ * target gives (`CompileTarget.complexLowering`), in the mode that applies
+ * the run-time realness rule (`runtimeRealGuards`: `complex`).
  * In the `strict` mode a complex operand of a real-only head declines, as
  * before.
  */
@@ -384,14 +384,17 @@ export function userParamBinding(
 
 /**
  * The effective compile mode for `target`: its requested `mode` when set
- * and offered by its `supportedModes` (default `['strict']`), else the
- * target's default — `'auto'` when offered, otherwise `'strict'`.
+ * and offered by its `supportedModes` (default `['strict']`), else
+ * `'strict'`, the default of every target.
  *
  * A REQUESTED mode the target does not offer throws a `CompileDeclineError`
  * (`code: 'unsupported-mode'`, `kind: 'capability'`): the caller asked for
  * a discipline this target cannot deliver, and silently compiling in
  * another would hand back code whose value shape the caller did not ask
- * for.
+ * for. The removed mode `'auto'` is not a `CompileMode`, but a host that
+ * does not type-check its options can still pass it, and a custom target
+ * can still list it: it is refused the same way on every target, with a
+ * message that names `'complex'` as its replacement.
  */
 export function resolveCompileMode(
   target: CompileTarget<Expression>
@@ -409,8 +412,16 @@ export function resolveCompileMode(
     ? declared
     : declared.filter((m) => m !== 'bigint');
   const requested = target.mode;
-  if (requested === undefined)
-    return supported.includes('auto') ? 'auto' : 'strict';
+  if (requested === undefined) return 'strict';
+  if ((requested as string) === 'auto')
+    throw new CompileDeclineError({
+      code: 'unsupported-mode',
+      kind: 'capability',
+      message:
+        "Could not compile: the mode 'auto' was removed. Request " +
+        "mode: 'complex' for complex intermediate values, or omit the mode " +
+        "for 'strict', the default.",
+    });
   if (!supported.includes(requested))
     throw new CompileDeclineError({
       code: 'unsupported-mode',
@@ -892,7 +903,28 @@ export function _operandElementLane(
     );
     if (lanes.some((l) => l === undefined)) return undefined;
     if (lanes.some((l) => l === 'mixed')) return 'mixed';
-    return core.isComplexValued(a);
+    // The lane of the closure that the broadcast emits, asked under the
+    // frames it is built in, not the lane of the whole node: the type of
+    // the whole node (for example `list<number>`) is not the type of the
+    // scalar node that the closure's codegen reads
+    // (`elementwiseClosureIsComplex()`). The two differ only in the
+    // `complex` mode, which reads a wide type as complex. In that mode
+    // `elementParamTypes()` types each element parameter on the real lane;
+    // a parameter on the complex lane, or one whose element is not a number,
+    // has no type.
+    // In the other modes a wide type is real, so the lane of the whole
+    // node is the answer, and the closure question, which boxes the
+    // closure's node in a scratch scope at each call, is not asked: its
+    // cost grows with the nesting of broadcasts (nine nested calls of a
+    // user function over points compiled about 20% slower with it).
+    if (!complexDiscipline()) return core.isComplexValued(a);
+    return core.elementwiseClosureIsComplex(
+      engine,
+      a.operator,
+      a.ops,
+      lanes as boolean[],
+      target
+    );
   }
   // A `Reduce` or `Scan` with `Add` or `Multiply` emits the same
   // shape-agnostic combiner as `Sum` and `Product` (`_SYS.sadd`/

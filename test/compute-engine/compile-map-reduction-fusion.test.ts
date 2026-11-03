@@ -62,7 +62,7 @@ describe('mapped scalar reductions', () => {
   test('complex-producing callbacks retain the complex combiner', () => {
     const ce = engine();
     const expr = ce.box(['Add', 1, ['Sum', ['Map', 'Ln', 'P']]]);
-    const r = compile(expr);
+    const r = compile(expr, { mode: 'complex' });
     expect(r.success).toBe(true);
     expect(source(r)).not.toContain('.map(');
     const actual = r.run!({ P: [-1, 1] }) as { re: number; im: number };
@@ -87,13 +87,17 @@ describe('mapped scalar reductions', () => {
     expect(r.run!({ P: [1, 2, 3] })).toBe(15);
   });
 
-  test('a named map shared by two consumers keeps one materialization', () => {
+  test('a named map shared by two consumers is fused into each reduction', () => {
+    // In the default `'strict'` mode each reduction fuses the map, so no
+    // array is materialized. The removed `'auto'` mode materialized the map
+    // once, for the product only.
     const ce = engine();
     ce.parse('f(t):=t^2').evaluate();
     const map: MathJsonExpression = ['Map', 'f', 'P'];
     const r = compile(ce.box(['Add', ['Sum', map], ['Product', map]]));
     expect(r.success).toBe(true);
-    expect(source(r).match(/\.map\(/g)).toHaveLength(1);
+    expect(source(r)).not.toContain('.map(');
+    expect(source(r).match(/\.reduce\(/g)).toHaveLength(2);
     expect(r.run!({ P: [1, 2, 3] })).toBe(50);
   });
 });

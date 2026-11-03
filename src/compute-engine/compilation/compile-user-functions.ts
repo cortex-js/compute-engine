@@ -1052,8 +1052,8 @@ export function registryHelperName(
  * `source` whose elements are complex scalars, when the function's single
  * parameter is WIDE, is a `LaneMismatch` decline — the value-position
  * emission is the one real-shaped `_fn_f`, and complex elements would be
- * consumed as numbers. Under `auto` the engine-level `compile()` escalates
- * this to complex mode, where the one emission lifts its parameter at use.
+ * consumed as numbers. In `mode: 'complex'` the one emission lifts its
+ * parameter at use, and nothing mismatches.
  * A parameter DECLARED complex is not a mismatch (the call coerces into
  * it). No-op outside the strict-shaped disciplines, or when `callback` is
  * not a unary user function.
@@ -1441,8 +1441,8 @@ export function tryCompileUserFunction(
   // complex-shaped scalar argument bound to a parameter the function does
   // not declare complex is a LaneMismatch DECLINE — the body was shaped
   // real for that parameter, and neither a per-call-site specialization
-  // nor a real-lane emission is the strict answer (`auto` escalates it to
-  // complex mode). Checked before emission, like the broadcast gate above:
+  // nor a real-lane emission is the strict answer (in `mode: 'complex'`
+  // the parameter is lifted at use). Checked before emission, like the broadcast gate above:
   // whether the callee can be emitted is irrelevant to whether this call
   // is sound. A target with its own definition lowering (the shader
   // targets) checks the argument shapes against its static signature.
@@ -2618,8 +2618,7 @@ export function tryCompileLocalFunctionCall(
     // argument there is a lane mismatch, as on the route below
     // (`localLaneMismatchAt()`): with `g := (p, x) ↦ Max(p) + x`,
     // `g(q, z)` for a complex `z` gave the string "[object Object]2". In
-    // `auto` the compilation starts again in `mode: 'complex'`; in
-    // `strict` it declines. A complex point at a parameter typed as the
+    // `strict` it declines; in `mode: 'complex'` the parameter is lifted. A complex point at a parameter typed as the
     // point is compiled in the lane of the point, and is not tested.
     if (strictLanes() && !target.userFunctions?.lowering) {
       const typedAsPoint = (i: number) =>
@@ -2738,9 +2737,8 @@ export function tryCompileLocalFunctionCall(
   // Without this test, `g = (a, b) => a + b` received `{re, im}` objects
   // and the real `+` joined them as strings: `Reduce(L, g, 0)` over
   // `[1 + i, 2]` gave "[object Object][object Object]…" where the
-  // interpreter gives `3 + i`. In `mode: 'auto'` the mismatch makes the
-  // compilation start again in `mode: 'complex'`, where the literal
-  // compiles its parameters with no declared type in the complex lane. In
+  // interpreter gives `3 + i`. In `mode: 'complex'` the literal compiles
+  // its parameters with no declared type in the complex lane. In
   // `mode: 'strict'` the compilation declines.
   // The test comes after the call written with the body of the function
   // for a tuple argument (above). That call is made only when all the

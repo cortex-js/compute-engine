@@ -717,7 +717,10 @@ describe('GPU: real-only lowerings reject a complex argument', () => {
       ['Haversine', Z],
       ['BesselJ', 1, Z],
     ]) {
-      const r = compile(ce.box(expr), { to: 'javascript' } as any) as any;
+      const r = compile(ce.box(expr), {
+        to: 'javascript',
+        mode: 'complex',
+      } as any) as any;
       expect(r.success).toBe(true);
       const real = ce.box(expr).subs({ x: 0.5, y: 0 }).N().re;
       expect(Number.isFinite(real)).toBe(true);

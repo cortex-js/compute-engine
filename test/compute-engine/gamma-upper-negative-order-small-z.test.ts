@@ -172,8 +172,13 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
     expect(v.im).toBeCloseTo(3.0631394125454936, 10);
   });
 
-  test('compiled Gamma(s, z) promotes a real z < 0 to the complex kernel', () => {
-    const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
+  test('compiled Gamma(s, z) promotes a real z < 0 to the complex kernel in complex mode', () => {
+    // The default `strict` mode keeps the real kernel, which gives `NaN`
+    // for `z < 0`.
+    const r = compile(ce.expr(['Gamma', 's', 'z']), {
+      fallback: false,
+      mode: 'complex',
+    });
     expect(r.success).toBe(true);
     // Γ(1, z) = e^{−z} is real on the whole real line
     const real = r.run!({ s: 1, z: -1 });

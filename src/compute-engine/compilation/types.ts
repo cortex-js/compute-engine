@@ -54,16 +54,18 @@ export type CompiledFunctionEntry =
  *   are complex-shaped; a wide binding is real, and a complex-shaped value
  *   meeting one fails closed with a `LaneMismatch`. No promotion of an
  *   unknown-sign radical. This is the shader targets' model, applied to
- *   every target.
+ *   every target. An operation whose exact value is complex on a real lane
+ *   gives the target's `NaN` (`Sqrt(x)` with `x: real` at `x = -4`).
  * - `'complex'` — a wide numeric binding is complex-shaped and lifted at use;
- *   unknown-sign radicals/logarithms promote. Always sound, only slower.
- * - `'auto'` — `strict` plus promotion of the unknown-sign radicals, and on
- *   a `LaneMismatch` the compilation is redone once in `complex` mode.
+ *   unknown-sign radicals/logarithms promote. Always sound, only slower. The
+ *   compiled code returns a JavaScript `number` when the value is real and a
+ *   `{re, im}` object only when the imaginary part is nonzero.
  * - `'bigint'` — JavaScript target only. The `strict` discipline, with every
  *   integer-typed value computed as a JavaScript `bigint`, so an integer past
  *   `2^53 − 1` stays exact. A node that is not on the integer lane declines
- *   with `code: 'bigint-lane'`. No promotion and no escalation: a requested
- *   `'bigint'` compiles once, and the result reports `mode: 'bigint'`. The
+ *   with `code: 'bigint-lane'`. No promotion, and no detection of a value
+ *   past `2^53`: the mode is used only when it is requested, and the result
+ *   reports `mode: 'bigint'`. The
  *   compiled code returns a `bigint` for every finite integer value, a
  *   `boolean` for a boolean value, and a `number` (`NaN` or `Infinity`)
  *   when a sub-expression had no finite value; that `number` has no defined
@@ -71,22 +73,22 @@ export type CompiledFunctionEntry =
  *   `docs/COMPILATION-MODEL.md`, "Compile modes", and in
  *   `docs/plans/2026-10-31-ce715-bigint-compile-mode.md`.
  *
- * `'auto'` is the default of the `javascript` and `python` targets: an
- * unknown-sign radical promotes with no opt-in, a lane mismatch declines,
- * and that decline redoes the compilation once under `'complex'`. `'bigint'`
- * is used only when it is requested. Which discipline the returned code
- * was compiled under is reported on the result (`CompilationResult.mode`,
- * never `'auto'`).
+ * `'strict'` is the default of every target. `'complex'` and `'bigint'` are
+ * used only when they are requested. A request for the removed mode
+ * `'auto'` (from a host that does not type-check its options) declines with
+ * `code: 'unsupported-mode'`; `'complex'` replaces it. Which discipline the
+ * returned code was compiled under is reported on the result
+ * (`CompilationResult.mode`).
  *
  * A declared real result is real in every mode. The body of a function
  * declared with a real result type (`(real) -> real`, `-> finite_real`,
  * `-> nan | real`) is a real ascription. When the body is complex only
  * because of promotion, it compiles with promotion off, as `'strict'`
- * compiles it, also under `'auto'` and `'complex'`: an unknown-sign radical
+ * compiles it, also under `'complex'`: an unknown-sign radical
  * in it gives `NaN` outside its real domain. A body that is complex also
  * without promotion (a `complex`-typed operand) still declines.
  */
-export type CompileMode = 'strict' | 'complex' | 'auto' | 'bigint';
+export type CompileMode = 'strict' | 'complex' | 'bigint';
 
 /**
  * Where the values of a free symbol live on a shader target — the kinds a
@@ -317,8 +319,8 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  *
  * - `code` — a stable machine-readable identifier: `'lane-mismatch'`,
  *   `'unsupported-mode'`, `'bigint-lane'` (in `mode: 'bigint'`, a node that
- *   is not on the integer lane; it is not a lane mismatch, so it never
- *   starts the `auto` retry), `'static-type-error'` (a sub-expression of
+ *   is not on the integer lane; it is not a lane mismatch),
+ *   `'static-type-error'` (a sub-expression of
  *   static type `error`), `'untyped-input'` (an input whose static type is
  *   `unknown` or `any`, so its shape is not known; the kind is
  *   `'correctness'`), `'unsettled-shape'` (a value that has no single shape
@@ -987,8 +989,8 @@ export interface CompileTarget<Expr = unknown> {
 
   /**
    * A lowering of the real-only head `head` that accepts complex operands,
-   * or `undefined` when the target has none. In the `auto` and `complex`
-   * modes, an operand of a real-only head that may hold a complex value
+   * or `undefined` when the target has none. In the `complex`
+   * mode, an operand of a real-only head that may hold a complex value
    * takes the run-time rule described at `isRealOnlyLowering` (the value is
    * NaN where an operand is not real). When this hook gives a lowering for
    * the head, that lowering is emitted instead, and computes the value for
@@ -1474,19 +1476,18 @@ export interface CompileTarget<Expr = unknown> {
   /**
    * The compile mode requested for this compilation (`CompileMode`). The
    * promotion of an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` through the
-   * complex kernels is a property of the mode (`auto`, the default on
-   * JavaScript/Python, and `complex` promote; `strict` never does). Set by
+   * complex kernels is a property of the mode (`complex` promotes; `strict`, the default,
+   * never does). Set by
    * the built-in targets from the caller's `mode` option, and by the direct
    * custom-target route (`compile(expr, { target })`), which records the
-   * resolved effective mode here per call — like `constantFold`, an omitted
-   * option resets the field, so a reused
-   * caller target never carries a previous call's choice. Read ONCE, at the
+   * requested `mode` option here per call (`undefined` when the option is
+   * omitted) — like `constantFold`, an omitted option resets the field, so a
+   * reused caller target never carries the mode of an earlier call. Read ONCE, at the
    * outermost compilation (`BaseCompiler.compile` at depth 0), where it is
    * validated against `supportedModes` — a requested mode the target does
    * not offer is a `capability` decline (`code: 'unsupported-mode'`), never a
    * silent coercion — and latched for the whole compilation as
-   * `BaseCompiler.mode`. Absent ⇒ the target's default: `'auto'` when
-   * `supportedModes` includes it, else `'strict'`. `'bigint'` is offered by
+   * `BaseCompiler.mode`. Absent ⇒ `'strict'`. `'bigint'` is offered by
    * the `javascript` target only; it is latched as the `'strict'`
    * discipline plus the bigint integer lane (`BaseCompiler.integerLane`).
    */
@@ -1494,15 +1495,12 @@ export interface CompileTarget<Expr = unknown> {
 
   /**
    * The compile modes this target offers (default `['strict']`). The built-in
-   * `javascript` target declares all four (`'bigint'` is JavaScript only),
-   * `python` declares `'strict'`, `'complex'` and `'auto'`; `interval-js`,
-   * `glsl` and `wgsl` declare `['strict']` (intervals are real; a shader has
-   * one static shape per value). A custom target that declares `'complex'`
-   * or `'auto'` must also provide `complexLift` and `complexIsReal` (checked
-   * when the target is passed to `compile()`); a DIRECT target additionally
-   * needs `reset()` for `'auto'` to be offered — without it a requested
-   * `'auto'` resolves to `'strict'` (there is no fresh-state retry to run).
-   * Only the built-in JavaScript target offers `'bigint'`: a custom target
+   * `javascript` target declares all three (`'bigint'` is JavaScript only),
+   * `python` declares `'strict'` and `'complex'`; `interval-js`, `glsl` and
+   * `wgsl` declare `['strict']` (intervals are real; a shader has one static
+   * shape per value). A custom target that declares `'complex'` must also
+   * provide `complexLift` and `complexIsReal` (checked when the target is
+   * passed to `compile()`). Only the built-in JavaScript target offers `'bigint'`: a custom target
    * that lists it compiles in its other modes, but a `'bigint'` request on
    * it is the `unsupported-mode` decline.
    */
@@ -1512,8 +1510,8 @@ export interface CompileTarget<Expr = unknown> {
    * The idempotent number → complex lift, as target source: given code for a
    * value that may be a plain number or already complex, return code that
    * yields the complex representation (`_SYS.cplx(x)` on JavaScript,
-   * `complex(x)` on Python). Required of a target that offers `'complex'` or
-   * `'auto'`; complex mode lifts every wide numeric operand AT ITS USE
+   * `complex(x)` on Python). Required of a target that offers `'complex'`;
+   * complex mode lifts every wide numeric operand AT ITS USE
    * through this hook.
    */
   complexLift?: (code: TargetSource) => TargetSource;
@@ -1522,7 +1520,7 @@ export interface CompileTarget<Expr = unknown> {
    * The runtime realness test, as target source: given code for a value that
    * may be complex, return a boolean expression that is true when its
    * imaginary part is exactly zero. Required of a target that offers
-   * `'complex'` or `'auto'`; the runtime rule for ordering comparisons and
+   * `'complex'`; the runtime rule for ordering comparisons and
    * integer-only heads over a maybe-complex operand is emitted through it.
    */
   complexIsReal?: (code: TargetSource) => TargetSource;
@@ -1563,7 +1561,7 @@ export interface CompileTarget<Expr = unknown> {
    * fails: `'boolean'` → the target's `false`, `'number'` → its NaN.
    * JavaScript emits `((g1 && g2) ? (body) : NaN)`, Python `((body) if (g1
    * and g2) else float('nan'))`. Required, with the three hooks above, for a
-   * target that offers `'complex'` or `'auto'`; a target without it keeps the
+   * target that offers `'complex'`; a target without it keeps the
    * compile-time fail-closed decline for a maybe-complex operand of a
    * real-only head.
    */
@@ -1582,11 +1580,9 @@ export interface CompileTarget<Expr = unknown> {
   /**
    * Drop everything a failed compilation attempt wrote to this target
    * (helper preamble, emitted user-function definitions, temporaries, bound
-   * frames). Required of a DIRECT (caller-owned, reusable) target for
-   * `'auto'` to be offered: an escalation recompiles on fresh state, and a
-   * target reused across the retry would otherwise carry the failed
-   * attempt's output into the second emission. Registered targets are
-   * constructed per compilation and need no hook.
+   * frames). The compiler does not call it: no compilation is redone on the
+   * same target. It is accepted so that a target that provides it still
+   * type-checks.
    */
   reset?: () => void;
 
@@ -2641,45 +2637,35 @@ export interface CompilationOptions<Expr = unknown> {
   preamble?: string;
 
   /**
-   * The arithmetic discipline to compile under — `'strict'`, `'complex'`,
-   * `'auto'` or, on the `javascript` target only, `'bigint'` (see
+   * The arithmetic discipline to compile under — `'strict'` (the default),
+   * `'complex'` or, on the `javascript` target only, `'bigint'` (see
    * `CompileMode`). Effective mode = this option ?? the target's `mode` ??
-   * the target's default (`'auto'` if its `supportedModes` includes it, else
-   * `'strict'`). The `javascript` target offers all four and `python` offers
-   * the first three, so their default is `'auto'`; `interval-js`, `glsl` and
-   * `wgsl` offer `'strict'` only. Requesting a mode the target does not offer
-   * is a `capability` decline (`success: false`, `diagnostic.code ===
-   * 'unsupported-mode'`), never a silent coercion.
+   * `'strict'`. The `javascript` target offers all three and `python` offers
+   * the first two; `interval-js`, `glsl` and `wgsl` offer `'strict'` only.
+   * Requesting a mode the target does not offer is a `capability` decline
+   * (`success: false`, `diagnostic.code === 'unsupported-mode'`), never a
+   * silent coercion. The removed mode `'auto'` is such a decline on every
+   * target; request `'complex'` instead.
    *
    * `'bigint'` computes every integer value as a JavaScript `bigint`, so a
-   * counting function stays exact past `2^53 − 1`. `'auto'` never selects
-   * it: a host requests it. A node that is not on the integer lane declines
+   * counting function stays exact past `2^53 − 1`. It is used only when a
+   * host requests it. A node that is not on the integer lane declines
    * with `diagnostic.code === 'bigint-lane'`. The inputs are `bigint` values
    * or safe-integer numbers; the result is a `bigint`, a `boolean`, or a
    * `number` (`NaN`, `Infinity`) that has no defined relation to the value
    * of `evaluate()`. `broadcast()` and `broadcastAsync()` refuse the mode.
    * See `docs/COMPILATION-MODEL.md`, "Compile modes".
    *
-   * The result reports what was used: `CompilationResult.mode` is the
-   * discipline the returned code was compiled under, `promoted` whether an
-   * unknown-sign radical was lowered through a complex kernel, and
-   * `escalation` (under `'auto'`) why the compilation was redone in complex
-   * mode.
+   * The result reports the discipline the returned code was compiled under
+   * (`CompilationResult.mode`).
    *
-   * The disciplines are live, not merely reported: a default (`'auto'`)
-   * compilation promotes an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` with no
-   * opt-in (except in the body of a function declared with a real result,
-   * which compiles on the real lane in every mode when only promotion would
-   * make it complex — see `CompileMode`), a complex-shaped value reaching a
-   * binding the strict attempt
-   * shaped real declines with a lane mismatch, and that decline redoes the
-   * compilation ONCE under `'complex'`. That redo is each registered
-   * target's own responsibility — the built-in targets apply the shared
-   * `compileWithAutoEscalation` helper (`compilation/auto-escalation.ts`)
-   * inside their `compile()`, and a CUSTOM registered target that declares
-   * `'auto'` support must do the same, or its callers get the raw
-   * `LaneMismatchError` instead of the retry. See `CompileMode` for the
-   * disciplines.
+   * Under the default `'strict'`, the lane of a value follows its static
+   * type: an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` stays on the real lane
+   * and gives `NaN` outside its real domain, and a complex-shaped value
+   * reaching a binding shaped real declines with a lane mismatch. Under
+   * `'complex'` such a radical promotes (except in the body of a function
+   * declared with a real result, which compiles on the real lane in every
+   * mode when only promotion would make it complex — see `CompileMode`).
    */
   mode?: CompileMode;
 
@@ -3711,31 +3697,16 @@ export type CompilationResult<
 
   /**
    * The arithmetic discipline the returned code was compiled under —
-   * `'strict'`, `'complex'` or `'bigint'` (never `'auto'`, which is a policy
-   * over the first two disciplines, not one code can be compiled under). Set
-   * by the built-in targets on every result. See `CompileMode`. `'bigint'`
-   * is reported when that mode was requested and the code was emitted
-   * (always with `promoted: false`). A declined compilation reports
-   * `'strict'`, in every mode.
-   *
-   * `'complex'` is reported whenever the complex discipline was latched (it
-   * was requested, or `'auto'` escalated to it after a lane mismatch — see
-   * `escalation`) OR a promotable head (an unknown-sign `Sqrt`/`Ln`/`Log`, or
-   * a `Power` with a non-integer exponent) was promoted through the complex
-   * kernel; `'strict'` otherwise. So `promoted === true` implies
-   * `mode === 'complex'`. The two fields still differ: an explicitly
-   * requested `'complex'` compile that contains no promotable head reports
-   * `mode: 'complex'` with `promoted: false`.
+   * `'strict'`, `'complex'` or `'bigint'`: the requested mode, or `'strict'`
+   * when none was requested. Set by the built-in targets on every result. See
+   * `CompileMode`. A declined compilation reports `'strict'`, in every mode.
    *
    * **Not a lane oracle, and not a shader-portability test.** An operand that
-   * is ALREADY complex-typed — a `complex`/`imaginary`-typed symbol, a
-   * `Complex(…)` literal, `ImaginaryUnit` — routes through the complex kernel
-   * in EVERY discipline, so it is deliberately not counted as a promotion:
-   * compiling `3 + 2i` with `mode: 'strict'` emits `({ re: 3, im: 2 })` and
-   * reports `('strict', false)`. `mode: 'strict'` therefore does NOT
-   * guarantee the emitted code is free of `{re, im}` arithmetic. (The
-   * exclusion is the `!isNonRealNumber(a.type.type)` conjunct guarding the
-   * `notePromoted()` call in `BaseCompiler.promotesRadicalToComplex`.)
+   * is complex-typed — a `complex`/`imaginary`-typed symbol, a `Complex(…)`
+   * literal, `ImaginaryUnit` — routes through the complex kernel in EVERY
+   * discipline: compiling `3 + 2i` with `mode: 'strict'` emits
+   * `({ re: 3, im: 2 })` and reports `'strict'`. `mode: 'strict'` therefore
+   * does NOT guarantee the emitted code is free of `{re, im}` arithmetic.
    *
    * `mode` describes the EMISSION, not the shape of a returned value: a
    * compile that reports `'complex'` can still hand back a plain real number
@@ -3743,28 +3714,6 @@ export type CompilationResult<
    * per-sample test of a returned value's shape is `typeof v === 'number'`.
    */
   mode?: 'strict' | 'complex' | 'bigint';
-
-  /**
-   * Whether any promotable head (an unknown-sign `Sqrt`/`Ln`/`Log`, …) was
-   * lowered through a complex kernel — the signal that this compiled unit
-   * would NOT compute the same value on a shader target's real kernel, even
-   * when no escalation happened. Set by the built-in targets on every result.
-   *
-   * The body of a function declared with a real result (`(real) -> real`)
-   * that is complex only because of promotion compiles with promotion off,
-   * in every mode (see `CompileMode`). Its promotable heads stay on the real
-   * kernel and give `NaN` outside their real domain, so they do not set this
-   * field.
-   */
-  promoted?: boolean;
-
-  /**
-   * Under `mode: 'auto'`, present when the strict-mode attempt declined with a
-   * lane mismatch and the compilation was redone in complex mode: the
-   * diagnostic of the FAILED strict attempt (its `boundary` and `binding` say
-   * why the slow way was taken).
-   */
-  escalation?: CompileDiagnostic;
 
   /**
    * Library/helper code that must be included before the compiled `code`.

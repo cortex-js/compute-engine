@@ -196,7 +196,7 @@ describe('scalar accumulation of collection-capable block results', () => {
 
   test('complex terms retain complex arithmetic', () => {
     const { expr } = fixture('Sum', ['Sqrt', ['Negate', 'i']]);
-    const r = compile(expr);
+    const r = compile(expr, { mode: 'complex' });
     expect(r.success).toBe(true);
     const value = r.run!({ N: 3 }) as { re: number; im: number };
     expect(value.re).toBe(0);

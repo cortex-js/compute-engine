@@ -713,7 +713,10 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF TH
   ];
 
   test.each(FUNCTION_CASES)('JS: %s', (_name, f, expected) => {
-    const result = compile(ce.box(f as any), { to: 'javascript' });
+    const result = compile(ce.box(f as any), {
+      to: 'javascript',
+      mode: 'complex',
+    });
     expect(result.success).toBe(true);
     const value = result.run!(2 as never) as number | { re: number; im: number };
     const reference = new ComputeEngine().box(['Apply', f, 2] as any).N();

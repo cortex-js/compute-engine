@@ -1111,13 +1111,12 @@ export function isNamesTarget(t: Expression): boolean {
 
 /**
  * Attach `freeSymbols` / `unsupported` (from `analyzeReferences`) and the
- * mode report (`mode`, `promoted`) to a compilation result, returning the
+ * mode report (`mode`) to a compilation result, returning the
  * same object. Used by the built-in targets to make every result carry its
  * declarative reference analysis and the discipline it was compiled under.
  *
  * The report is the one frozen when the outermost compilation ended
- * (`modeReport`): `mode` is the latched discipline, `promoted` whether a
- * promotable head was lowered through a complex kernel.
+ * (`modeReport`): `mode` is the mode the code was compiled under.
  */
 export function withReferences<
   R extends {
@@ -1337,56 +1336,34 @@ export function defaultLoweredSymbolType(
 }
 
 /**
- * The `mode`/`promoted` fields every built-in result carries (see
+ * The `mode` field every built-in result carries (see
  * `CompilationResult`): the report frozen when the most recent outermost
- * compilation ended (`_lastReport`) — the RESOLVED discipline the code was
- * compiled under, and whether a promotable head was lowered through a
- * complex kernel.
+ * compilation ended (`_lastReport`) — the mode the code was compiled under.
  *
- * `mode` is the latched DISCIPLINE, with `'auto'` collapsed to `'strict'`
- * (`'auto'` is never reported: it is a policy over the two disciplines —
- * try strict, escalate on a `LaneMismatch` — not one code can be compiled
- * under), widened to `'complex'` when a promotable head was promoted. So it
- * is `'complex'` when the complex discipline was requested, when `auto`
- * escalated to it on a retry, and when `auto`'s first attempt promoted a
- * head without escalating.
+ * It is NOT a lane oracle: an operand that is complex-TYPED (`Sqrt(z)` with
+ * `z: complex`) or a complex literal (`2i·x`) routes through the complex
+ * kernel in every discipline, so such a compile emits `{re, im}` and still
+ * reports `mode: 'strict'`. Test a returned value's shape with
+ * `typeof v === 'number'`, not with `mode`.
  *
- * It is NOT a lane oracle: an operand that is already complex-TYPED
- * (`Sqrt(z)` with `z: complex`) or a complex literal (`2i·x`) routes
- * through the complex kernel in every discipline, and
- * `promotesRadicalToComplex` deliberately does not count that as a
- * promotion — `promoted` reports a lane DIFFERENCE with the shader targets,
- * which only an unknown-sign real-shaped operand creates. Such a compile
- * emits `{re, im}` and still reports `mode: 'strict'`. Test a returned
- * value's shape with `typeof v === 'number'`, not with `mode`.
- *
- * `mode === 'complex'` is implied by `promoted === true`; the two still
- * differ, since an explicitly requested `'complex'` compile that contained
- * no promotable head reports `('complex', false)`.
- *
- * A compilation in `mode: 'bigint'` that emitted code reports
- * `('bigint', false)`: the integer lane is a choice of representation over
- * the strict discipline, and the strict discipline never promotes.
- *
- * A DECLINE reports the neutral `('strict', false)`: the report describes
- * emitted code, and a decline emitted none (see `compile`'s `finally`).
+ * A DECLINE reports the neutral `'strict'`: the report describes emitted
+ * code, and a decline emitted none (see `compile`'s `finally`).
  */
 export function modeReport(): {
   mode: 'strict' | 'complex' | 'bigint';
-  promoted: boolean;
 } {
   return { ...CompilerState._lastReport };
 }
 
 /**
- * The report of a compilation that declined: `strict` and not promoted,
- * since no code was emitted. It is not read from `_lastReport`, because a
+ * The report of a compilation that declined: `strict`, since no code was
+ * emitted. It is not read from `_lastReport`, because a
  * decline can be thrown before the outermost `compile()` resets it (the
  * `AbsArg` refusal of `rewriteAngularUnit()` at a target's entry), and
  * `_lastReport` then still holds the report of the previous compilation.
  */
-export function declineReport(): { mode: 'strict'; promoted: false } {
-  return { mode: 'strict', promoted: false };
+export function declineReport(): { mode: 'strict' } {
+  return { mode: 'strict' };
 }
 
 /**

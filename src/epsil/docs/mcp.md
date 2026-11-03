@@ -201,7 +201,8 @@ it as (here `vec2`, the uniform to declare), and whether it was declared or
 inferred. When the target declines, `ok` is `false`, there is no `code`, and
 `error` and `diagnostic` give the reason. `to` is `javascript` (the default),
 `glsl`, `wgsl`, `python` or `interval-js`, and `mode` selects the arithmetic
-discipline: `auto` (the default), `strict` or `complex`.
+discipline: `strict` (the default), `complex` or, on `javascript` only,
+`bigint`.
 
 Each call uses a new engine. A symbol that is not declared has the type
 inferred from its uses, so declare the types the compilation depends on with

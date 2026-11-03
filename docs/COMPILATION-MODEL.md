@@ -63,6 +63,15 @@ when it compiles. A difference that this list does not name is a defect.
   `null` input is a value outside the declared type (JavaScript reads
   `null` as `0` in arithmetic). The decision record is
   `docs/plans/2026-11-01-absent-value-contract.md`.
+- **`NaN` for a complex value on the real lane.** In the `strict` mode, the
+  default of every target, the lane of a value follows its static type. An
+  operation whose exact value is complex but whose operands are on the
+  real lane gives the target's `NaN` on every target: `Sqrt(x)` with
+  `x: real` at `x = -4` is `NaN`, where the interpreter gives `2i`. This
+  is the model of the shader targets, applied to every target. The host
+  gets the complex value with `mode: 'complex'` or by declaring the input
+  `complex`. A complex value passed at an input or a parameter declared
+  real is a value outside its declared type (next item).
 - A value for an input that holds a value outside its declared type, for an
   input left out, or for an error that the static type does not show.
   "Shapes are settled at compile time" (R5) and "Fail closed" below list
@@ -109,6 +118,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (`Math.acos(1 / x)`, `2 * Math.asin(Math.sqrt(x))`) and give `NaN`; the
   interpreter gives a complex value (`Arcsec(0.5)` is `1.3170i`). With
   `x: real` the same programs take the complex lane and agree.
+- `plausible?` — `javascript`, the default mode (`strict`), `z: real`:
+  `Gamma(s, z)` at `s = 1`, `z = -1` gives `NaN`; the interpreter gives
+  `e`, a real value. The real lowering of the upper incomplete gamma has no
+  value for `z < 0`; `mode: 'complex'` gives the interpreter's value. Since
+  the removal of `mode: 'auto'` (2026-11-03) this is the default, as it was
+  already the value of `strict`.
 - `javascript`: in a loop with an outer `a = 100`, `function f() { a }` and
   `let (a, b) = (k, f())`, the compiled `b` is `k`; the interpreter gives
   `b = 100` (was CE-756).
@@ -974,9 +989,8 @@ converts it to a plain `Array` once, on its side (a typed array nested as a
 row is an entry, and is not read). A
 `{re, im}` object or a string at an entry of a list read on the real lane
 computes with that value, as it would in plain JavaScript; the interpreter
-is the route that validates. The `strict` mode, and the default `auto` mode
-when it does not escalate, read the entries of a `list<number>` on the real
-lane; the `complex` mode reads them on the complex lane (see "Complex
+is the route that validates. The `strict` mode, the default, reads the
+entries of a `list<number>` on the real lane; the `complex` mode reads them on the complex lane (see "Complex
 modes"). Any other value passes untouched, and the code reads it in the
 shape of its declared type: a value of another shape (a number for a
 binding declared `list<real>`) gives an undefined result. When the code then
@@ -1223,30 +1237,56 @@ On GLSL the proof assumes an absolute error of at most 2⁻⁶ on [-π/2, π/2]
 ## Compile modes
 
 The `mode` option selects how the compiled code computes numeric values:
-`strict`, `complex`, `auto` or `bigint`. The `javascript` target offers the
-four modes, `python` offers the first three, and `interval-js`, `glsl` and
-`wgsl` offer `strict` only. A request for a mode that the target does not
-offer declines with the code `'unsupported-mode'`. The default is `auto`
-when the target offers it, else `strict`. The first three modes select how
-the code handles complex values (below). The `bigint` mode selects how it
-computes integers ("The `bigint` mode", at the end of this section).
+`strict`, `complex` or `bigint`. The `javascript` target offers the three
+modes, `python` offers the first two, and `interval-js`, `glsl` and `wgsl`
+offer `strict` only. A request for a mode that the target does not offer
+declines with the code `'unsupported-mode'`. The default is `strict` on
+every target. The first two modes select how the code handles complex
+values (below). The `bigint` mode selects how it computes integers ("The
+`bigint` mode", at the end of this section).
 
-`strict` preserves real-lane assumptions and declines on an incompatible
-complex boundary. `complex` compiles wide numeric bindings through complex
-kernels. This includes the cells of a list or tensor input whose cell type
+The mode `auto` was removed in the release after 0.177.0 (user decision of
+2026-11-02, `docs/plans/2026-11-02-language-axes-options.md`, §6). A
+request for it declines with `'unsupported-mode'` on every target, with a
+message that names `complex` as its replacement. The result fields
+`promoted` and `escalation` were removed with it.
+
+| Input                                                            | 0.177.0 (default `auto`)            | Now (default `strict`)                         |
+| ---------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------- |
+| `Sqrt(x)`, `x: real`, at `x = -4`                                | promoted; `{re: 0, im: 2}`           | `NaN`; `{re: 0, im: 2}` with `mode: 'complex'` |
+| `x + 2i`, `x: real`                                              | complex, static                      | complex, static, unchanged                     |
+| `h = (p) ↦ p[1] + 1`, `P: list<tuple<complex, real>>`, `h(P[1])` | lane recorded, restart               | `lane-mismatch` decline; compiles with `mode: 'complex'` or `(p: tuple<complex, real>)` |
+| `f = (x) ↦ x^2` compiled real, called with `2i` by the host      | restart in complex mode              | outside the type, unspecified                  |
+| `compile(e, {mode: 'complex'})`                                  | complex                              | complex, unchanged                             |
+| `compile(e, {mode: 'auto'})`                                     | `strict` plus promotion and redo     | `unsupported-mode` decline                     |
+
+`strict` is the only discipline that the default uses. The lane of a value
+is complex when its static type is complex (a declared `complex` input or
+parameter, a complex literal, an operation whose result type is complex),
+and real otherwise. An operation whose exact value is complex on a real lane
+gives `NaN` (see "Caveats of compiled code"). A complex-shaped value that
+reaches a binding the compilation shaped real declines with
+`'lane-mismatch'`; the compilation is not redone in another mode.
+`complex` compiles wide numeric bindings through complex kernels. This includes the cells of a list or tensor input whose cell type
 admits a complex value (`list<number>`, `tensor<number>`, `list<unknown>`):
 the element-wise lowering of arithmetic and of the cell functions uses the
 complex-aware kernels (`_SYS.sadd`, `_SYS.smul`, `_SYS.csqrt`, …), as for
 `list<complex>`, while cells typed `real` or `integer` keep the real lane.
-`auto` first attempts strict mode and retries once in complex mode on a lane
-mismatch. The result records its effective mode, promotion, escalation,
-and diagnostic.
+The element-wise lowering reads such a cell with its cell type: `r·10^i`
+with `i: list<integer>` takes the real power, as `r·10^k` with
+`k: integer` does.
+In the `complex` mode an unknown-sign radical or logarithm (`Sqrt`, `Ln`,
+`Log`, an even `Root`, a non-integer `Power`) is promoted to the complex
+kernel. A kernel compiled in the `complex` mode returns a JavaScript
+number when its value is real and a `{re, im}` object only when the
+imaginary part is nonzero: `Sqrt(x)^2` at `x = -4` is the number `-4`,
+`Sqrt(x)` at `x = -4` is `{re: 0, im: 2}`. The result records its mode and,
+on a decline, its diagnostic.
 
-Unknown-sign radical operations are the promotion trigger. Real-only kernels
-guard and project only where the model explicitly permits it. `Mean`,
-`Variance`, `StandardDeviation` and their population forms are the exception
-on JavaScript (`CompileTarget.complexLowering`): in the `auto` and `complex`
-modes, data that may hold a complex entry takes `_SYS.cmean`, `_SYS.cvariance`
+Real-only kernels guard and project only where the model explicitly permits
+it. `Mean`, `Variance`, `StandardDeviation` and their population forms are
+the exception on JavaScript (`CompileTarget.complexLowering`): in the
+`complex` mode, data that may hold a complex entry takes `_SYS.cmean`, `_SYS.cvariance`
 and the like, which compute the interpreter's value (`Mean([3, 4i])` is
 `1.5 + 2i`; the variance is the real sum of `|x − mean|²` over `n − 1`)
 instead of `NaN`. Real data gives the same bits as the real lowerings. A
@@ -1284,13 +1324,12 @@ result type (`p: (real) -> real`, also `-> finite_real` and `-> nan | real`)
 has its body wrapped in a real ascription, `Typed(body, 'real')`. When the
 body is complex only because of promotion — complex with promotion on, real
 with promotion off — the ascription selects the real lane for the body: the
-body compiles with promotion off, as `strict` compiles it, in the `auto` mode
-and in the `complex` mode. An unknown-sign `Sqrt`, `Ln`, `Log`, even `Root` or
+body compiles with promotion off, as `strict` compiles it, also in the
+`complex` mode. An unknown-sign `Sqrt`, `Ln`, `Log`, even `Root` or
 non-integer `Power` in the body then gives `NaN` outside its real domain, the
 same value that `strict` gives. This is the reading that a real-typed symbol
 already has: the type `real` excludes `NaN`, and `NaN` is the answer when a
-real result has no value. The result reports `promoted: false` for such a body.
-For example, with `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, `p(x)` compiles to
+real result has no value. For example, with `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, `p(x)` compiles to
 `Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))` and is `NaN` at `x = 0`.
 
 The rule applies only where it changes the lane of the body:
@@ -1408,7 +1447,7 @@ in `base-compiler.ts`).
 
 A real-only head (an ordering comparison, `Floor`, `Mod`, `Min`, `Erf`, …)
 over an operand that may be complex at run time takes the runtime rule in the
-`auto` and `complex` modes: the operand is bound once, the head's real
+`complex` mode: the operand is bound once, the head's real
 lowering runs on its real part when the imaginary part is exactly zero, and
 the value is `NaN` (or `false`, for an ordering) otherwise. A statically
 non-real operand (`i`, `2i`, an `imaginary`-typed symbol, a list literal every
@@ -1426,9 +1465,8 @@ Targets provide the projection through the `complexRealElements` hook
 (`_SYS.crealElements` on JavaScript, `_ce_creal_elems` on Python); a target
 without it keeps the compile-time decline. The `complexPromotion` option, a
 compatibility alias of `mode: 'complex'` since 0.115.0, is removed with no
-warning: a call that still passes `true` is compiled in the default `auto`
-mode, which promotes unknown-sign radicals but does not lift wide bindings as
-`complex` does. The `realOnly` option, which projected a compiled unit's
+warning: a call that still passes `true` is compiled in the default
+`strict` mode. The `realOnly` option, which projected a compiled unit's
 RESULT to a real number (or `NaN`) after the kernel had run, is removed, and
 so is its warning: a compiled value whose
 imaginary part is exactly zero is already returned as a plain number, so a
@@ -1453,9 +1491,10 @@ Catalan form `Binomial(2n, n) − Binomial(2n, n + 1)` at `n = 40n` gives
 **How to request it.** `compile(expr, { mode: 'bigint' })`. Only the
 built-in `javascript` target offers it. A custom target that lists
 `'bigint'` in its `supportedModes` still declines with
-`'unsupported-mode'`. The `auto` mode never selects `bigint`, and a request
-for `bigint` compiles once, with no retry in another mode. The result
-reports `mode: 'bigint'` and `promoted: false`. Inside the compiler the mode
+`'unsupported-mode'`. The mode is used only when a host requests it: no
+compilation detects an integer past `2^53` and changes to `bigint`, and a
+request for `bigint` compiles once, with no retry in another mode. The
+result reports `mode: 'bigint'`. Inside the compiler the mode
 is the `strict` discipline with a second setting, the integer lane
 (`'bigint'` in place of `'double'`).
 
@@ -1539,7 +1578,6 @@ compiles with the parameter lanes of its signature.
 **What declines.** The compilation declines with the diagnostic code
 `'bigint-lane'`, of kind `'capability'`, whose message names the node and
 its type, and the expression runs on the interpreter, as every decline does.
-This code is not `'lane-mismatch'`, so the `auto` retry does not start.
 Examples, with `n`, `m: integer` and `x: real`:
 
 | Expression                                                | Reason of the decline                                          |

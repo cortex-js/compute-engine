@@ -257,7 +257,7 @@ describe('complex mode — one emission per user function, lift at use (design �
     // folded with the raw `+` and string-concatenated the objects.
     const ce = new ComputeEngine();
     ce.declare('L', 'list<complex>');
-    for (const mode of ['auto', 'complex', 'strict'] as const) {
+    for (const mode of ['complex', 'strict'] as const) {
       const r = compile(ce.box(['Sum', 'L']), { mode, fallback: false });
       expect(r.code).toContain('_SYS.sadd');
       expect(r.run!({ L: [{ re: 1, im: 1 }, 2] })).toEqual({ re: 3, im: 1 });
@@ -270,22 +270,20 @@ describe('complex mode — one emission per user function, lift at use (design �
     );
   });
 
-  it("a decline raised before the mode latch reports strict/not-promoted, never a previous compilation's report", () => {
+  it("a decline raised before the mode latch reports strict, never a previous compilation's report", () => {
     // Review round 3 (2026-08-16): an `unsupported-mode` decline throws in
     // `resolveCompileMode` before the try/finally that freezes the report,
     // so the fallback result could carry the PREVIOUS compilation's
-    // `mode: 'complex'`/`promoted: true`.
+    // `mode: 'complex'`.
     const ce = new ComputeEngine();
     const prior = compile(ce.parse('\\sqrt{x}'), CX);
     expect(prior.mode).toBe('complex');
-    expect(prior.promoted).toBe(true);
     const declined = compile(ce.parse('x + 1'), {
       to: 'glsl',
       mode: 'complex',
     });
     expect(declined.success).toBe(false);
     expect(declined.mode).toBe('strict');
-    expect(declined.promoted).toBe(false);
   });
 
   it('Reduce over a complex list matches the interpreter', () => {
@@ -412,7 +410,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
     // `.re`/`.im` off the plain number the guard emitted: `2·Erf(√y)` ran to
     // `{re: NaN, im: NaN}` at every point (measured 2026-08-16, `auto` and
     // `complex` modes alike). The value must be the plain real product.
-    for (const mode of ['auto', 'complex'] as const) {
+    for (const mode of ['complex'] as const) {
       // `Gamma` is no longer in this list: its JavaScript lowering takes a
       // complex kernel for a maybe-complex operand (see the `Arsinh` case).
       for (const h of ['Erf'] as const) {
@@ -484,7 +482,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
       [['WithRandomSeed', S, ['Random']], { x: 4 }],
     ];
     test.each(cases)('%j at %j', (json, values) => {
-      const r = compile(ce.box(json), { constantFold: false, fallback: false });
+      const r = compile(ce.box(json), { ...CX, constantFold: false });
       expect(r.success).toBe(true);
       expect(r.run!(values)).toBeCloseTo(interpreted(json, values), 10);
     });
@@ -499,7 +497,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
       [['Mandelbrot', 'a', S]],
     ];
     test.each(nonReal)('%j is NaN where the radical is not real', (json) => {
-      const r = compile(ce.box(json), { constantFold: false, fallback: false });
+      const r = compile(ce.box(json), { ...CX, constantFold: false });
       expect(r.run!({ a: 0.5, x: -4 })).toBeNaN();
     });
   });
@@ -516,7 +514,6 @@ describe('complex mode — D2/D6 runtime rules', () => {
     e.declare('L', 'list<real>');
     e.declare('Z', 'list<complex>');
     e.declare('w', 'complex');
-    const AUTO = { mode: 'auto', fallback: false } as const;
 
     it('Tycho item 251: Min over a list-valued piecewise with a Sqrt arm compiles in every promoting mode', () => {
       // The histogram row's body: `P : list<real>` (10 000 elements in the
@@ -534,7 +531,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
       const ref = body
         .subs({ P: ce2.box(['List', 0.1, 0.5, 0.9]), m: 0.38, V: 0.4712 })
         .N().re;
-      for (const mode of ['auto', 'complex', 'strict'] as const) {
+      for (const mode of ['complex', 'strict'] as const) {
         const r = compile(body, { mode, fallback: false });
         expect(r.success).toBe(true);
         expect(r.run!(at)).toBeCloseTo(ref, 12);
@@ -543,12 +540,12 @@ describe('complex mode — D2/D6 runtime rules', () => {
     });
 
     it('Floor/Mod/Min over a promoted radical list: the real lowering per element, NaN at a complex root', () => {
-      const floor = compile(e.box(['Floor', ['Sqrt', 'L']]), AUTO);
+      const floor = compile(e.box(['Floor', ['Sqrt', 'L']]), CX);
       expect(floor.run!({ L: [4, -1, 2.25] })).toEqual([2, NaN, 1]);
-      const mod = compile(e.box(['Mod', ['Sqrt', 'L'], 2]), AUTO);
+      const mod = compile(e.box(['Mod', ['Sqrt', 'L'], 2]), CX);
       expect(mod.run!({ L: [9, -1] })).toEqual([1, NaN]);
       // A reducer is NaN as soon as one element is complex.
-      const min = compile(e.box(['Min', ['Sqrt', 'L']]), AUTO);
+      const min = compile(e.box(['Min', ['Sqrt', 'L']]), CX);
       expect(min.run!({ L: [4, 9] })).toBe(2);
       expect(min.run!({ L: [4, -9] })).toBeNaN();
       // (The real-only STRING helpers — `Erf`, `Gamma`, … — are not
@@ -559,11 +556,11 @@ describe('complex mode — D2/D6 runtime rules', () => {
     it('an ordering over a promoted radical list compares the real roots and is false at a complex one', () => {
       // Measured before the element-wise form: `√L < 1` broadcast a raw `<`
       // over `{re, im}` roots and ran to `[false, false]` at `L = [0.5, 2]`.
-      const r = compile(e.parse('\\sqrt{L} < 1'), AUTO);
+      const r = compile(e.parse('\\sqrt{L} < 1'), CX);
       expect(r.run!({ L: [0.5, 2] })).toEqual([true, false]);
       expect(r.run!({ L: [-1, 0.25] })).toEqual([false, true]);
       // A CHAIN over an array operand is one closure over the projections.
-      const chain = compile(e.parse('0 < \\sqrt{L} < 2'), AUTO);
+      const chain = compile(e.parse('0 < \\sqrt{L} < 2'), CX);
       expect(chain.run!({ L: [1, -1, 9] })).toEqual([true, false, false]);
     });
 
@@ -572,14 +569,14 @@ describe('complex mode — D2/D6 runtime rules', () => {
       // admits no scalar complex), so `Min(Z)` folded `Math.min` over objects
       // (NaN at every point) and `Z < 2` compared objects, behind
       // `success: true`.
-      const less = compile(e.parse('Z < 2'), AUTO);
+      const less = compile(e.parse('Z < 2'), CX);
       expect(less.run!({ Z: [1, { re: 2, im: 3 }, { re: 1, im: 0 }] })).toEqual(
         [true, false, true]
       );
-      const min = compile(e.box(['Min', 'Z']), AUTO);
+      const min = compile(e.box(['Min', 'Z']), CX);
       expect(min.run!({ Z: [{ re: 1, im: 0 }, 3] })).toBe(1);
       expect(min.run!({ Z: [{ re: 1, im: 1 }, 3] })).toBeNaN();
-      const floor = compile(e.box(['Floor', 'Z']), AUTO);
+      const floor = compile(e.box(['Floor', 'Z']), CX);
       expect(floor.run!({ Z: [1.5, { re: 2, im: 1 }] })).toEqual([1, NaN]);
     });
 
@@ -587,7 +584,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
       // The whole-value guard would answer a scalar `false`/NaN for the
       // list-shaped result; the element-wise form projects the scalar too, so
       // the broadcast keeps one value per element.
-      const less = compile(e.parse('L < w'), AUTO);
+      const less = compile(e.parse('L < w'), CX);
       expect(less.run!({ L: [0.5, 2], w: { re: 2, im: 0 } })).toEqual([
         true,
         false,
@@ -596,11 +593,11 @@ describe('complex mode — D2/D6 runtime rules', () => {
         false,
         false,
       ]);
-      const mod = compile(e.parse('L \\bmod w'), AUTO);
+      const mod = compile(e.parse('L \\bmod w'), CX);
       expect(mod.run!({ L: [5, 7], w: 3 })).toEqual([2, 1]);
       expect(mod.run!({ L: [5, 7], w: { re: 3, im: 1 } })).toEqual([NaN, NaN]);
       // A reducer over both answers the scalar NaN, as the scalar rule does.
-      const max = compile(e.box(['Max', ['Sqrt', 'L'], 'w']), AUTO);
+      const max = compile(e.box(['Max', ['Sqrt', 'L'], 'w']), CX);
       expect(max.run!({ L: [4, 9], w: 5 })).toBe(5);
       expect(max.run!({ L: [4, 9], w: { re: 5, im: 1 } })).toBeNaN();
     });
@@ -618,30 +615,39 @@ describe('complex mode — D2/D6 runtime rules', () => {
       }
     });
 
-    it('what keeps declining: a set operand, an undecided element lane; a color head keeps its NaN-filled shape', () => {
+    it('what keeps declining: a set operand; a broadcastable operand compiles; a color head keeps its NaN-filled shape', () => {
       // A set has no positional array lowering, so there is nothing the
       // element-wise projection could map over.
       expect(
         compile(e.box(['Min', ['Set', ['Complex', 1, 1], 2]]), {
-          mode: 'auto',
+          mode: 'complex',
           constantFold: false,
         }).success
       ).toBe(false);
       // A `broadcastable<complex>` parameter is an array or a scalar at run
-      // time and its element lane is undecided; it would reach the re-emitted
-      // real lowering unprojected beside the guarded scalar, so the whole
-      // form keeps its compile-time decline.
+      // time. In `mode: 'complex'` it is lifted and projected element-wise
+      // beside the guarded scalar, so the form compiles and gives the
+      // interpreter's values (a complex element compares `false`). The
+      // removed `'auto'` mode compiled it in the strict discipline, where
+      // it declines.
       const e2 = new ComputeEngine();
       e2.declare('w', 'complex');
       e2.declare('bc', 'broadcastable<complex>');
+      const bcLess = compile(e2.box(['Less', 'w', 'bc']), { mode: 'complex' });
+      expect(bcLess.success).toBe(true);
+      expect(bcLess.run!({ w: 1, bc: 2 } as any)).toBe(true);
+      expect(bcLess.run!({ w: 1, bc: [0, 2] } as any)).toEqual([false, true]);
       expect(
-        compile(e2.box(['Less', 'w', 'bc']), { mode: 'auto' }).success
-      ).toBe(false);
+        bcLess.run!({ w: { re: 1, im: 1 }, bc: [0, 2] } as any)
+      ).toEqual([false, false]);
+      expect(
+        bcLess.run!({ w: 1, bc: [{ re: 2, im: 0 }, { re: 2, im: 1 }] } as any)
+      ).toEqual([true, false]);
       // A color head's failing value is a COLOR: its complex scalar channel
       // keeps the whole-value guard even beside a list channel, so the value
       // is the documented non-finite color — the same five-key object a
       // successful color is, with NaN channels.
-      const rgb = compile(e.box(['Rgb', 'w', 'L', 1]), AUTO);
+      const rgb = compile(e.box(['Rgb', 'w', 'L', 1]), CX);
       expect(rgb.code).toContain('_SYS.cisreal(');
       expect(rgb.run!({ w: { re: 0.5, im: 1 }, L: [0.2, 0.4] })).toEqual({
         space: 'oklch',
@@ -655,21 +661,21 @@ describe('complex mode — D2/D6 runtime rules', () => {
     it('a list literal every element of which is non-real is still the compile-time decline', () => {
       const r = compile(
         e.box(['Floor', ['List', ['Complex', 1, 1], ['Complex', 2, 1]]]),
-        { mode: 'auto', constantFold: false }
+        { mode: 'complex', constantFold: false }
       );
       expect(r.success).toBe(false);
       expect(r.diagnostic?.kind).toBe('capability');
       // …while a list with one real element takes the element-wise rule.
       const mixed = compile(
         e.box(['Floor', ['List', ['Complex', 1, 1], 2.5]]),
-        { mode: 'auto', fallback: false, constantFold: false }
+        { mode: 'complex', fallback: false, constantFold: false }
       );
       expect(mixed.run!({})).toEqual([NaN, 2]);
     });
   });
 
   it('a statically non-real operand is a compile-time capability decline in every mode', () => {
-    for (const mode of ['strict', 'auto', 'complex'] as const) {
+    for (const mode of ['strict', 'complex'] as const) {
       // A closed comparison with a non-real operand folds to the value of
       // the interpreter, `False`: a value that is not a real number has no
       // order (user decision of 2026-10-21, Tycho ledger row 413 (a)). A

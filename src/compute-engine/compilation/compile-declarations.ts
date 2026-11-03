@@ -60,8 +60,8 @@ import type {
 /**
  * Whether the compilation in progress PROMOTES: an unknown-sign
  * `Sqrt`/`Ln`/`Log` (and the real-typed operand of an inverse-trig head of
- * unknown magnitude) lowers through the complex kernels — the `auto` and
- * `complex` disciplines. `strict` never promotes (the shader targets'
+ * unknown magnitude) lowers through the complex kernels — the `complex`
+ * discipline. `strict` never promotes (the shader targets'
  * model).
  *
  * Promotion is off, in every mode, inside the value of a `Typed` node whose
@@ -76,7 +76,7 @@ export function promotionActive(): boolean {
 }
 
 /**
- * Whether the compile mode promotes (`auto` or `complex`), also inside the
+ * Whether the compile mode promotes (`complex`), also inside the
  * value of a real ascription
  * (`withPromotionSuppressed`). A module-level definition (a user function)
  * is always compiled with the promotion of the mode
@@ -87,7 +87,7 @@ export function promotionActive(): boolean {
  * compiled with promotion on and reused by every later call.
  */
 export function modePromotes(): boolean {
-  return CompilerState._mode === 'auto' || CompilerState._mode === 'complex';
+  return CompilerState._mode === 'complex';
 }
 
 /**
@@ -102,9 +102,7 @@ export function modePromotes(): boolean {
  * values keep the real kernel; the type-based realness proofs survive as an
  * optimization.
  *
- * In force for `mode: 'complex'` — as requested, or as the discipline of
- * `auto`'s escalated retry after a `LaneMismatch` (the engine-level
- * `compile()` redoes the compilation with `mode: 'complex'`).
+ * In force for `mode: 'complex'`.
  */
 export function complexDiscipline(): boolean {
   return CompilerState._mode === 'complex';
@@ -553,7 +551,7 @@ export function collectionFoldsReal(coll: Expression): boolean {
   // COMPLEX discipline: a wide element (`list<number>`) may hold a
   // `{re, im}` at run time; only a real-only element type folds raw.
   if (complexDiscipline()) return elt !== undefined && isSubtype(elt, 'real');
-  // Strict shapes (strict, and `auto`'s first attempt): a wide element is
+  // Strict shapes (strict): a wide element is
   // real, as everywhere else — but under promotion the element TYPE can
   // hide a promoting callback the analysis cannot see into.
   if (!promotionActive()) return true;

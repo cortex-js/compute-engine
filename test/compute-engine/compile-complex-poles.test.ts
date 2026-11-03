@@ -33,7 +33,10 @@ ce.declare('C', 'list<tuple<number, number, number>>');
 type Cell = number | { re: number; im: number };
 
 function run(json: unknown, vars: Record<string, unknown>): unknown {
-  const r = compile(ce.box(json as never), { fallback: false });
+  const r = compile(ce.box(json as never), {
+    fallback: false,
+    mode: 'complex',
+  });
   expect(r.success).toBe(true);
   return r.run!(vars as never);
 }

@@ -543,7 +543,12 @@ describe('LerchPhi JS compile', () => {
   ce.declare('lp_z', 'real');
   ce.declare('lp_s', 'real');
   ce.declare('lp_a', 'real');
-  const run = compile(ce.box(['LerchPhi', 'lp_z', 'lp_s', 'lp_a']))?.run;
+  // Some values below are complex (`a < 0`, `z > 1`): the default `strict`
+  // mode gives `NaN` there, and `mode: 'complex'` gives the interpreter's
+  // value (a real value is a number in that mode).
+  const run = compile(ce.box(['LerchPhi', 'lp_z', 'lp_s', 'lp_a']), {
+    mode: 'complex',
+  })?.run;
 
   function expectParity(got: unknown, z: number, s: number, a: number) {
     const n = phi(z, s, a).N();

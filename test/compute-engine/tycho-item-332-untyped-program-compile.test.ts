@@ -209,7 +209,15 @@ describe('ranges through Max, Min, Add and Sqrt', () => {
     expect(code(['Multiply', 2, ['Sqrt', ['Max', 0, 'w']]])).toBe(
       '2 * Math.sqrt(Math.max(0, _.w))'
     );
-    expect(code(['Sqrt', 'w'])).toContain('_SYS.csqrt');
+    // An operand of unknown sign takes the complex kernel in the complex
+    // mode.
+    expect(
+      compile(ce.box(['Sqrt', 'w'] as never), {
+        to: 'javascript',
+        fallback: false,
+        mode: 'complex',
+      }).code
+    ).toContain('_SYS.csqrt');
   });
 
   test('Max of a wide operand and a non-negative one is non-negative', () => {

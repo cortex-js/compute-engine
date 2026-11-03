@@ -2,7 +2,6 @@ import type { MathJsonSymbol } from '../../math-json/types.js';
 import { entrySource } from './function-purity.js';
 import type { Expression, JSSource } from '../global-types.js';
 import type {
-  CompileDiagnostic,
   CompileMode,
   CompileTarget,
   CompilationResult,
@@ -12,11 +11,7 @@ import type {
 import { BaseCompiler } from './base-compiler.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { resolveStorageHints } from './storage-hints.js';
-import {
-  compileDiagnosticOf,
-  isKindDeclineError,
-  isLaneMismatchError,
-} from './diagnostics.js';
+import { compileDiagnosticOf, isKindDeclineError } from './diagnostics.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { rewritePartialApplications } from './partial-application.js';
 import {
@@ -60,12 +55,11 @@ export type CompileExpressionOptions<T extends string = string> = {
  * for JS-executable targets, a `run` function.
  *
  * `mode` selects the arithmetic discipline (`'strict'` | `'complex'` |
- * `'auto'`, see `CompileMode` in `compilation/types.ts`); the effective mode
- * is `options.mode` ?? the target's `mode` ?? the target's default (`'auto'`
- * where offered, else `'strict'`), and a mode the target does not offer is a
- * `capability` decline. The result reports the discipline used (`mode`),
- * whether a radical was promoted (`promoted`) and, on a decline, the
- * structured `diagnostic` beside `error`.
+ * `'bigint'`, see `CompileMode` in `compilation/types.ts`); the effective
+ * mode is `options.mode` ?? the target's `mode` ?? `'strict'`, and a mode
+ * the target does not offer is a `capability` decline. The result reports
+ * the discipline used (`mode`) and, on a decline, the structured
+ * `diagnostic` beside `error`.
  *
  * If the expression cannot be compiled, falls back to interpretation
  * (success: false, run: applicableN1) unless `options.fallback` is false,
@@ -80,10 +74,9 @@ export type CompileExpressionOptions<T extends string = string> = {
  * `Sqrt`, `Power`, …) dispatch to a complex helper when an argument is
  * complex-valued; the real-only special functions do not. A complex value
  * must never reach a real helper (a compiled `Erf(z)` would return −1): under
- * `mode: 'strict'` the compiler fails closed with the offending
- * head; under `auto` (the default) and `complex` a MAYBE-complex operand (a
- * `complex`-typed symbol, a promoted radical, a wide binding in complex mode)
- * uses a runtime guard: the real helper runs when the value's
+ * `mode: 'strict'` (the default) the compiler fails closed with the offending
+ * head; under `complex` a MAYBE-complex operand (a `complex`-typed symbol, a
+ * promoted radical, a wide binding) uses a runtime guard: the real helper runs when the value's
  * imaginary part is exactly zero, `NaN` otherwise — and only a STATICALLY
  * non-real operand (`Erf(2i)`) is the compile-time decline. The shader
  * targets always fail closed. (`Real`/`Imaginary`/`Argument`/`Conjugate` are
@@ -237,19 +230,12 @@ export function compile<
       // `constantFold` stamp above: a reused caller target must not carry
       // state from a previous call.
       options.target.storage = undefined;
-      // The effective compile mode, resolved for a DIRECT target and stamped
-      // per call (an omitted option must reset the field, like the two
-      // above). A direct target offers `'complex'` only with the two lowering
-      // hooks and `'auto'` only with `reset()` as well (there is no fresh
-      // per-compilation target to retry on); a requested `'auto'` that the
-      // target declares but cannot retry resolves to `'strict'`, as
-      // documented on `CompileTarget.supportedModes`. A requested mode the
-      // target does not declare at all is the `unsupported-mode` decline,
-      // raised by `BaseCompiler.compile` when it latches the mode.
-      options.target.mode = resolveDirectTargetMode(
-        options.target,
-        options.mode
-      );
+      // The requested compile mode, stamped per call (an omitted option must
+      // reset the field, like the two above, so a reused target never keeps
+      // a previous call's mode). A requested mode the target does not offer
+      // is the `unsupported-mode` decline, raised by `BaseCompiler.compile`
+      // when it latches the mode.
+      options.target.mode = options.mode;
       // A `vars`-mapped symbol is compiled as the valueless input of its
       // declared type (`withVarsValuesHidden`), as on a registered target.
       // The `vars` keys also ride on the target (`varsKeys`), so neither the
@@ -281,36 +267,8 @@ export function compile<
       let direct: CompilationResult<T, R>;
       try {
         direct = withVarsValuesHidden(expr, vars, () => {
-          let code: string;
-          let escalation: CompileDiagnostic | undefined;
-          try {
-            code = BaseCompiler.compileRoot(rewritten, target);
-          } catch (e) {
-            // The `auto` escalation (design §4) for a CALLER-OWNED target: a
-            // `LaneMismatch` in the strict attempt redoes the compilation under
-            // the complex discipline, on FRESH target state — a direct target
-            // offers `auto` only when it provides `reset()`
-            // (`resolveDirectTargetMode`), which drops whatever the failed attempt
-            // wrote (helpers, definitions, temporaries). A REGISTERED target
-            // escalates inside its own `compile()` instead
-            // (`compileWithAutoEscalation`, `auto-escalation.ts`), which is what
-            // makes the target-level route behave like this entry; this branch
-            // cannot use that helper, because a caller's target is reused across
-            // calls and its state has to be reset between the two attempts.
-            if (!isLaneMismatchError(e) || target.mode !== 'auto') throw e;
-            target.reset?.();
-            target.mode = 'complex';
-            // The SAME collision seed as the first attempt (the caller's spliced
-            // `vars`/`functions` source included), or the retry could number a
-            // temporary into a name the caller's own source uses.
-            target.naming = BaseCompiler.newNamingContext(
-              rewritten,
-              namingSources
-            );
-            code = BaseCompiler.compileRoot(rewritten, target);
-            escalation = e.diagnostic;
-          }
-          const result = BaseCompiler.withReferences(
+          const code = BaseCompiler.compileRoot(rewritten, target);
+          return BaseCompiler.withReferences(
             {
               target: (target.language ?? 'custom') as T,
               success: true,
@@ -320,8 +278,6 @@ export function compile<
             target,
             vars ? new Set(Object.keys(vars)) : undefined
           );
-          if (escalation !== undefined) result.escalation = escalation;
-          return result;
         });
       } finally {
         target.varsKeys = previousVarsKeys;
@@ -368,14 +324,6 @@ export function compile<
       constantFold: options?.constantFold,
       storage: options?.storage,
     };
-    // The `auto` escalation (design §4) is NOT applied here: a registered
-    // target owns it, inside its own `compile()`
-    // (`compileWithAutoEscalation`, `auto-escalation.ts`), so that a caller
-    // reaching the target directly through `ce._getCompilationTarget(name)`
-    // escalates identically to one coming through this entry. A `LaneMismatch`
-    // in the strict attempt therefore never surfaces here: the target has
-    // already redone the compilation under the complex discipline and set
-    // `escalation` on the result.
     return strictTypesChecked(
       expr,
       languageTarget.compile(expr, targetOptions) as CompilationResult<T, R>,
@@ -488,40 +436,4 @@ function strictTypesChecked<T extends string, R>(
   ) as CompilationResult<T, R>;
   fallback.freeSymbolTypes = result.freeSymbolTypes;
   return fallback;
-}
-
-/**
- * The effective compile mode for a direct, caller-owned target. Its declared
- * `supportedModes` (default `['strict']`) are narrowed by
- * the hooks each needs — `'complex'` needs `complexLift` and `complexIsReal`
- * (the declaration contract already rejects a target declaring it without
- * them), `'auto'` needs those and `reset()`. A requested `'auto'` that is
- * declared but not offered (no `reset()`) resolves to `'strict'`; the
- * default with nothing requested is `'auto'` when offered, else `'strict'`.
- * Any other requested mode is returned as-is for `BaseCompiler.compile` to
- * validate against the declared list (the `unsupported-mode` decline).
- *
- * Only the per-call `options.mode` is requested. The resolved value is
- * recorded on `target.mode` by the caller (like `constantFold`), so on a
- * reused direct target `target.mode` holds the
- * PREVIOUS call's resolution — reading it back as a request would make an
- * omitted `mode` inherit the last explicit choice instead of resetting to the
- * target's default.
- */
-function resolveDirectTargetMode(
-  target: CompileTarget<Expression>,
-  requested: CompileMode | undefined
-): CompileMode {
-  const declared: readonly CompileMode[] = target.supportedModes ?? ['strict'];
-  const hasLowering =
-    typeof target.complexLift === 'function' &&
-    typeof target.complexIsReal === 'function';
-  const offersAuto =
-    declared.includes('auto') &&
-    hasLowering &&
-    typeof target.reset === 'function';
-  if (requested === undefined) return offersAuto ? 'auto' : 'strict';
-  if (requested === 'auto' && declared.includes('auto') && !offersAuto)
-    return 'strict';
-  return requested;
 }

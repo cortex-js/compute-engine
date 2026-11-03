@@ -65,10 +65,8 @@ export class CompileDeclineError extends Error {
  * complex-typed source, …). Reported as `code: 'lane-mismatch'`, `kind:
  * 'correctness'` — the value the previous emission computed at that boundary
  * was wrong (`NaN`, or a `{re, im}` consumed as a number), and is withdrawn.
- * Under `mode: 'auto'` the escalation catches this error and redoes the
- * compilation in complex mode (`compileWithAutoEscalation` in
- * `auto-escalation.ts`, applied by a registered target inside its own
- * `compile()` so both public compile routes escalate alike).
+ * The compilation is not redone in another mode: a host that wants the
+ * complex value compiles with `mode: 'complex'`.
  *
  * `binding` is USER-LEGIBLE by contract: an authored identifier (the
  * parameter `x` of `b`, the local `k`) or an honest description ("an unnamed
@@ -132,11 +130,9 @@ export class KindDeclineError extends CompileDeclineError {
  * 'capability'`: no value that was computed right before is withdrawn, the
  * expression runs on the interpreter instead.
  *
- * It is NOT a lane mismatch (`isLaneMismatchError` is `false` for it), so
- * `compileWithAutoEscalation` never redoes the compilation in `complex`
- * mode on it. A requested `'bigint'` is not `'auto'` and compiles once
- * anyway, but the code stays separate so that no route can change one
- * decline into the other.
+ * It is NOT a lane mismatch (`isLaneMismatchError` is `false` for it): the
+ * two codes stay separate so that no route can change one decline into the
+ * other.
  *
  * `node` is the node as `toString()` writes it (carried as `value` on the
  * diagnostic), `type` its static type, and `reason` says why the node is not

@@ -476,12 +476,12 @@ export function compileExprFunctionLiteral(
         });
     }
 
-    // An `Apply` of this literal in strict mode (and in the first attempt of
-    // `auto`): a complex-shaped argument at a parameter that `complexParam`
-    // puts in the real lane is a `LaneMismatch` decline, as for a call of a
-    // named function (`laneMismatchAt`). The body is not compiled again for
-    // the lanes of each call: `auto` compiles the whole expression again
-    // under `'complex'`, and `strict` declines. Without this check, the
+    // An `Apply` of this literal in strict mode: a complex-shaped argument
+    // at a parameter that `complexParam` puts in the real lane is a
+    // `LaneMismatch` decline, as for a call of a named function
+    // (`laneMismatchAt`). The body is not compiled again for the lanes of
+    // each call: `strict` declines, and a host that wants the complex value
+    // compiles with `mode: 'complex'`. Without this check, the
     // `{ re, im }` object of `Apply(x ↦ 2x, √y)` reached a body that
     // multiplies it as a number, and the result was `NaN`.
     const appliedArgs =

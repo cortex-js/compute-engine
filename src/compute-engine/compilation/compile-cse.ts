@@ -85,8 +85,8 @@ import { isScalarShaped } from './static-shape.js';
  *
  * A user function is emitted ONCE per compilation, under this one name:
  * how a wide parameter is shaped is a property of the compile MODE
- * (strict/auto: real, a complex-shaped argument to it is a `LaneMismatch`
- * decline that `auto` escalates; complex: complex, lifted at use), never
+ * (strict: real, a complex-shaped argument to it is a `LaneMismatch`
+ * decline; complex: complex, lifted at use), never
  * of the call site. (The per-call-site `_fn_b$z1` lane specializations
  * that preceded the compile modes were retired 2026-08-16.) `$` cannot
  * appear in a MathJSON symbol, so the `$c<n>` multi-clause helper names and

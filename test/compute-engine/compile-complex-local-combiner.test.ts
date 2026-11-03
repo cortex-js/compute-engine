@@ -8,9 +8,8 @@
  * objects as strings: `Reduce(L, g, 0)` over `[1 + i, 2]` gave the string
  * "[object Object][object Object][object Object]", where the interpreter
  * gives `3 + i`. Such a call is now a lane mismatch, as for an
- * engine-level function. In `mode: 'auto'` (the default) the compilation
- * starts again in `mode: 'complex'`, where the local compiles in the
- * complex lane. In `mode: 'strict'` the compilation declines.
+ * engine-level function. In `mode: 'complex'` the local compiles in the
+ * complex lane. In `mode: 'strict'` (the default) the compilation declines.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -46,7 +45,11 @@ function parts(v: unknown): [number, number] {
 function expectSameValue(json: unknown, options: Record<string, unknown> = {}) {
   const interp = ce.box(['Apply', json, L] as any).evaluate();
   const expected = interp.isCollection ? [...interp.each()] : [interp];
-  const r = compile(ce.box(json as any), { fallback: false, ...options })!;
+  const r = compile(ce.box(json as any), {
+    fallback: false,
+    mode: 'complex',
+    ...options,
+  })!;
   expect(r.success).toBe(true);
   const out = r.run!(jsL);
   const actual = Array.isArray(out) ? out : [out];
@@ -189,7 +192,7 @@ describe('A block-local function called with complex arguments', () => {
     expect(message).toMatch(/the complex accumulator of the fold/);
     expect(message).toMatch(/a signature declared with `Declare`/);
     expect(message).not.toMatch(/_a/);
-    // The default mode compiles it in the complex lane.
+    // The complex mode compiles it in the complex lane.
     expectSameValue(json);
   });
 
@@ -252,7 +255,10 @@ describe('A block-local function called with complex arguments', () => {
     for (const json of cases) {
       const interp = ce.box(['Apply', json, P] as any).evaluate();
       const expected = interp.isCollection ? [...interp.each()] : [interp];
-      const r = compile(ce.box(json as any), { fallback: false })!;
+      const r = compile(ce.box(json as any), {
+        fallback: false,
+        mode: 'complex',
+      })!;
       expect(r.success).toBe(true);
       const out = r.run!(jsP);
       const actual = Array.isArray(out) ? out : [out];
@@ -302,7 +308,7 @@ describe('A block-local function called with complex arguments', () => {
       ),
     ];
     for (const json of cases) {
-      for (const mode of ['auto', 'strict']) {
+      for (const mode of ['complex', 'strict']) {
         const interp = ce2.box(['Apply', json, J] as any).evaluate();
         const expected = interp.isCollection
           ? [...interp.each()].map((x) => x.re)

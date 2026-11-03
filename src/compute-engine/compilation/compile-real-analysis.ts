@@ -86,7 +86,7 @@ export function withoutNaNMember(t: Type | undefined): Type | undefined {
  * commonest radical in a plot — must keep the real kernel rather than
  * promote (Tycho item 144: `√(⌈x⌉² + ⌈y⌉²)` stays on the fast path).
  *
- * Sound because the premise IS the compiled contract: under strict/auto a
+ * Sound because the premise IS the compiled contract: under strict a
  * wide binding holds a real (the D3 entry check refuses an object), and
  * under complex mode a wide operand is complex-valued and takes the complex
  * kernel before this predicate is consulted. A value TYPED non-real is not
@@ -697,7 +697,7 @@ export function realRootDegreeTerms(
 
 /**
  * Whether applying `head` to `args` takes the COMPLEX lane purely because
- * the compile mode promotes (`auto`, `complex`).
+ * the compile mode promotes (`complex`).
  *
  * The rule is deliberately NOT "the node's type admits complex". That test
  * is too weak in both directions and misses the case promotion exists for:

@@ -791,7 +791,11 @@ describe('Compiled Zeta / HurwitzZeta match N()', () => {
   ce.declare('cp_a', 'real');
   const runZ1 = compile(ce.box(['Zeta', 'cp_s']))?.run;
   const runZ = compile(ce.box(['Zeta', 'cp_s', 'cp_a']))?.run;
-  const runH = compile(ce.box(['HurwitzZeta', 'cp_s', 'cp_a']))?.run;
+  // `HurwitzZeta(0.5, -0.5)` is complex: the default `strict` mode gives
+  // `NaN` there, and `mode: 'complex'` gives the interpreter's value.
+  const runH = compile(ce.box(['HurwitzZeta', 'cp_s', 'cp_a']), {
+    mode: 'complex',
+  })?.run;
 
   // Compare a compiled value with the interpreter's `.N()`: `~oo` is
   // `+Infinity` compiled; a complex value is a `{ re, im }` object.

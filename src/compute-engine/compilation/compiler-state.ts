@@ -12,7 +12,6 @@ import type {
   ElementLane,
   UnrolledIndexFrame,
   UnsafeIntegerOperand,
-  UserFunctionRegistry,
 } from './compiler-types.js';
 
 /**
@@ -74,8 +73,8 @@ export const ANTIDERIVATIVE_COMPILATION_HANG_MS = 30_000;
  *
  * Reset at each DEPTH-0 entry of `BaseCompiler.compile` — the boundary
  * every route crosses: `compileRoot` (raw custom targets),
- * `compileCseRoot` (registered targets invoked directly), the public
- * `compile()` entry, and each attempt of an auto-mode escalation. Nested
+ * `compileCseRoot` (registered targets invoked directly), and the public
+ * `compile()` entry. Nested
  * compilations consume the outer pool rather than getting a fresh one, so
  * the aggregate is bounded by one pool per depth-0 entry. A caller that
  * deliberately issues several root compilations against one target — a
@@ -131,8 +130,8 @@ export class CompilerState {
    * the way out. `'strict'` outside any compilation.
    *
    * Consulted by the analysis and the emitters through the three gates
-   * `strictLanes` (strict, auto), `complexDiscipline` (complex) and
-   * `promotionActive`/`runtimeRealGuards` (auto, complex); see
+   * `strictLanes` (strict), `complexDiscipline` (complex) and
+   * `promotionActive`/`runtimeRealGuards` (complex); see
    * `docs/COMPILATION-MODEL.md` for the disciplines.
    */
   static _mode: Exclude<CompileMode, 'bigint'> = 'strict';
@@ -162,12 +161,10 @@ export class CompilerState {
   static _promotionSuppressed = 0;
   /**
    * Set when this compilation lowered a promotable head through a complex
-   * kernel — the `promoted` field of the result (design §4): the signal that
-   * the compiled unit would NOT compute the same value on a shader target's
-   * real kernel, escalation or not. Reset at the outermost compilation entry,
-   * frozen into `_lastReport` at its exit. A compile-time fact decided from
-   * the source (operand sign provability, operand type), never from a
-   * runtime value — so the same source always reports the same flag.
+   * kernel (only `mode: 'complex'` promotes). Reset at the outermost
+   * compilation entry. No result field reads it: the compile result lost its
+   * `promoted` field when the `'auto'` mode was removed, and this record is
+   * left for the removal of the promotion machinery.
    */
   static _promoted = false;
   /**
@@ -187,7 +184,8 @@ export class CompilerState {
    * type-based analysis fell through to the operand recursion and reported
    * them complex whenever an operand was — a promoted unknown-sign radical,
    * say. The enclosing arithmetic then read `.re`/`.im` off a plain number.
-   * Measured before this latch, in the default `auto` mode: `2·Erf(√y)`
+   * Measured before this latch, in the removed `auto` mode, which promoted
+   * an unknown-sign radical as `complex` mode does: `2·Erf(√y)`
    * compiled to `{re: 2 * _b.re, …}` around a bare `_SYS.erf(…)` and ran to
    * `{re: NaN}` at every point, and `Limit` at +∞ — whose growth oracles
    * probe through the compiler — declined `k·Erf(√y) + anything` for every
@@ -197,32 +195,13 @@ export class CompilerState {
   static _realOnlyLowering: ((h: string) => boolean) | undefined = undefined;
   /**
    * The report of the most recently COMPLETED outermost compilation, read by
-   * `modeReport` when a target attaches `mode`/`promoted` to its result. A
+   * `modeReport` when a target attaches `mode` to its result. A
    * compilation that DECLINES leaves the neutral value written at its entry
    * instead — it emitted no code for a report to describe.
    */
   static _lastReport: {
     mode: 'strict' | 'complex' | 'bigint';
-    promoted: boolean;
-  } = { mode: 'strict', promoted: false };
-  /**
-   * What `_lastReport` was computed from, so that the report can be
-   * computed again when unreferenced user-function definitions are removed
-   * from the emitted code (`pruneUnreferencedVariantBases`): the registry of
-   * the definitions, whether the discipline was `complex`, and whether a
-   * promotion was recorded outside the body of every definition.
-   * `bigintLane` is whether the integer lane was `'bigint'`
-   * (`_integerLane`), so that the report computed again keeps
-   * `mode: 'bigint'`.
-   */
-  static _lastReportBasis:
-    | {
-        registry: UserFunctionRegistry | undefined;
-        complexDiscipline: boolean;
-        bigintLane: boolean;
-        promotedOutsideDefinitions: boolean;
-      }
-    | undefined;
+  } = { mode: 'strict' };
   /** The answers of `isConstantPole` for the evaluated operands of this
    * compilation; reset at each outermost compilation, as
    * `_knownExponentMemo`. */

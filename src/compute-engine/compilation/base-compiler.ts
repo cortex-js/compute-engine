@@ -942,12 +942,6 @@ export class BaseCompiler {
   static set _lastReport(v: (typeof CompilerState)['_lastReport']) {
     CompilerState._lastReport = v;
   }
-  static get _lastReportBasis() {
-    return CompilerState._lastReportBasis;
-  }
-  static set _lastReportBasis(v: (typeof CompilerState)['_lastReportBasis']) {
-    CompilerState._lastReportBasis = v;
-  }
   static readonly hasPromotedDefinition = hasPromotedDefinition;
   static get complexDiscipline() {
     return complexDiscipline();

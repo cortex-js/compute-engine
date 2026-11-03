@@ -1,6 +1,5 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
-import { compileWithAutoEscalation } from '../../src/compute-engine/compilation/auto-escalation';
 import * as diagnostics from '../../src/compute-engine/compilation/diagnostics';
 import {
   bigintLaneError,
@@ -29,8 +28,7 @@ import { createJavaScriptRuntime } from '../../src/runtime';
  *   (`BaseCompiler.integerLane`).
  * - An expression that the lane analysis (step 2,
  *   `compile-bigint-lane.test.ts`) rejects declines with `code:
- *   'bigint-lane'`, a `capability` decline that never starts the `auto`
- *   retry. An expression that it accepts compiles to `bigint` code (step 3,
+ *   'bigint-lane'`, a `capability` decline. An expression that it accepts compiles to `bigint` code (step 3,
  *   `compile-bigint-emission.test.ts`).
  */
 
@@ -61,7 +59,6 @@ describe('bigint mode: compilations on javascript', () => {
     const r = compile(expr, { mode: 'bigint' });
     expect(r.success).toBe(true);
     expect(r.mode).toBe('bigint');
-    expect(r.promoted).toBe(false);
     expect(r.run!({ n: 3n } as never)).toBe(expected);
   });
 
@@ -83,7 +80,6 @@ describe('bigint mode: compilations on javascript', () => {
     expect(r.diagnostic!.message).toMatch(/mode 'bigint'/);
     // A decline reports the neutral mode: no code was emitted.
     expect(r.mode).toBe('strict');
-    expect(r.promoted).toBe(false);
     // The interpreter fallback still runs.
     expect(r.run).toBeDefined();
   });
@@ -359,7 +355,7 @@ describe('bigint mode: the latches during and after a compilation', () => {
   it('a later compilation in another mode does not see the bigint lane', () => {
     compile(ce.parse('n + 1'), { mode: 'bigint' });
     const seen = new Set<string>();
-    for (const mode of [undefined, 'strict', 'complex', 'auto'] as const) {
+    for (const mode of [undefined, 'strict', 'complex'] as const) {
       const r = compile(ce.parse('x + 1'), {
         mode,
         operators: (op) => {
@@ -373,8 +369,8 @@ describe('bigint mode: the latches during and after a compilation', () => {
   });
 });
 
-describe('bigint mode: the auto default is unchanged', () => {
-  it("a plain compile resolves to 'auto' and reports mode 'strict'", () => {
+describe('bigint mode: the strict default is unchanged', () => {
+  it("a plain compile resolves to 'strict' and reports mode 'strict'", () => {
     const modes = new Set<string>();
     const r = compile(ce.parse('2x + 1'), {
       operators: (op) => {
@@ -383,11 +379,10 @@ describe('bigint mode: the auto default is unchanged', () => {
       },
     });
     expect(r.success).toBe(true);
-    // `auto` is latched during the compilation proper; the static reads its
-    // resting value `'strict'` outside it.
-    expect(modes).toEqual(new Set(['strict', 'auto']));
+    // The default mode `'strict'` is latched during the compilation proper,
+    // and it is also the resting value of the static outside it.
+    expect(modes).toEqual(new Set(['strict']));
     expect(r.mode).toBe('strict');
-    expect(r.promoted).toBe(false);
     expect(r.run!({ x: 3 })).toBe(7);
   });
 });
@@ -411,24 +406,9 @@ describe('the bigint-lane diagnostic', () => {
     expect(e.message).toBe(e.diagnostic.message);
   });
 
-  it('is not a lane mismatch, so the auto escalation does not retry on it', () => {
+  it('is not a lane mismatch', () => {
     const e = bigintLaneError({ node: 'n', type: 'integer', reason: 'test' });
     expect(isLaneMismatchError(e)).toBe(false);
-    for (const requested of [undefined, 'auto', 'bigint'] as const) {
-      const attempts: Array<string | undefined> = [];
-      expect(() =>
-        compileWithAutoEscalation(
-          requested,
-          ['strict', 'complex', 'auto', 'bigint'],
-          (m) => {
-            attempts.push(m);
-            throw e;
-          }
-        )
-      ).toThrow(e);
-      // One attempt, never a second one in `complex` mode.
-      expect(attempts).toEqual([requested]);
-    }
   });
 });
 

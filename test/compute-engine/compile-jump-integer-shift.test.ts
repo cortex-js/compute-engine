@@ -337,6 +337,7 @@ describe('The structural code is kept', () => {
     const r = compile(box(['Floor', ['Add', 'x', ['Complex', 1, 1]]]), {
       fallback: false,
       constantFold: false,
+      mode: 'complex',
     });
     expect(r.code).toContain('_SYS.cisreal(');
   });

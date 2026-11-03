@@ -34,13 +34,19 @@ const MATRICES = [
 
 /** The compiled value and the interpreter's value, with `L` declared
  * `type` and `M` declared `matrix<number>`. */
-function both(type: string, expr: unknown, value: unknown) {
+function both(
+  type: string,
+  expr: unknown,
+  value: unknown,
+  mode?: 'complex'
+) {
   const ce = new ComputeEngine();
   ce.declare('L', type);
   ce.declare('M', 'matrix<number>');
   const r = compile(ce.box(expr as any), {
     to: 'javascript',
     fallback: false,
+    ...(mode ? { mode } : {}),
   } as any);
   expect(r.success).toBe(true);
   const ce2 = new ComputeEngine();
@@ -168,7 +174,8 @@ describe('THE PRODUCT OF A FOLD AND A MATRIX (CE-388)', () => {
     const r = both(
       'list<unknown>',
       ['Add', ['Multiply', ['Sum', 'L'], ['Sum', 'L']], 1],
-      [c(1, 1), 2]
+      [c(1, 1), 2],
+      'complex'
     );
     expect(r.compiled).toEqual(c(9, 6));
     expect(r.evaluated).toBe('(9 + 6i)');

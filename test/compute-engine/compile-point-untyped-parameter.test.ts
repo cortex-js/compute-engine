@@ -122,7 +122,7 @@ function interpret(json: unknown): unknown {
   return v.isCollection ? [...v.each()].map((x) => x.re) : v.re;
 }
 
-function expectSameValue(json: unknown, mode: 'auto' | 'strict') {
+function expectSameValue(json: unknown, mode: 'complex' | 'strict') {
   const expected = interpret(json);
   const r = compile(ce.box(json as any), { fallback: false, mode })!;
   expect(r.success).toBe(true);
@@ -170,7 +170,7 @@ describe('A point at an untyped parameter of an engine-level function', () => {
           ? value.map((x) => expect.closeTo(x, 12))
           : expect.closeTo(value as number, 12)
       ));
-    test(`${label} (auto)`, () => expectSameValue(json, 'auto'));
+    test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
     test(`${label} (strict)`, () => expectSameValue(json, 'strict'));
   }
 });
@@ -185,8 +185,8 @@ describe('A complex point at an untyped parameter', () => {
   for (const [label, json, value] of cases) {
     test(`${label}: the interpreter's value`, () =>
       expect(interpret(json)).toBeCloseTo(value, 12));
-    // In `auto`, the compilation starts again in `mode: 'complex'`.
-    test(`${label} (auto)`, () => expectSameValue(json, 'auto'));
+    // In `mode: 'complex'`, a complex point at the parameter compiles.
+    test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
     // In `strict`, a complex point at a parameter compiled as real is a
     // lane mismatch, and the compilation declines.
     test(`${label} (strict) declines`, () =>
@@ -272,7 +272,13 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
           ? value.map((x) => expect.closeTo(x, 12))
           : expect.closeTo(value as number, 12)
       ));
-    test(`${label} (auto)`, () => expectSameValue(json, 'auto'));
+    // In `mode: 'complex'`, `Reduce(P, gh, (0, 0))` declines: the parameter
+    // of `gh` that receives the point has no declared or inferred type, and
+    // the complex mode refuses a point there. A decline runs the
+    // interpreter, so it is not a wrong value; the strict compilation of
+    // the same call is checked below.
+    if (label !== 'Reduce(P, gh, (0, 0))')
+      test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
     test(`${label} (strict)`, () => expectSameValue(json, 'strict'));
   }
 
@@ -289,7 +295,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     ],
   ];
   for (const [label, json, message] of declines)
-    for (const mode of ['auto', 'strict'] as const)
+    for (const mode of ['complex', 'strict'] as const)
       test(`${label} (${mode}) declines`, () =>
         expect(() =>
           compile(ce.box(json as any), { fallback: false, mode })
@@ -297,13 +303,13 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
 
   // No declared parameter type of `ghd` is tested at run time, so the
   // definition for one point takes each call.
-  for (const mode of ['auto', 'strict'] as const)
+  for (const mode of ['complex', 'strict'] as const)
     test(`Reduce(P, ghd, (0, 0)) (${mode})`, () =>
       expectSameValue(['Reduce', 'P', 'ghd', ['Tuple', 0, 0]], mode));
 
   // Only the parameter that receives the point is typed in the literal
   // compiled for one point. A complex argument at the other parameter is a
-  // lane mismatch: `auto` starts again in complex mode, `strict` declines.
+  // lane mismatch: `strict` declines, `mode: 'complex'` compiles it.
   // Before, the call gave the string "[object Object]2".
   describe('g := (p, x) ↦ Max(p) + x; g(q, z) with a complex z', () => {
     const lane = new ComputeEngine();
@@ -324,10 +330,10 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
         .N();
       expect([v.re, v.im]).toEqual([3, 2]);
     });
-    test('auto', () => {
+    test('complex', () => {
       const r = compile(lane.box(json as any), {
         fallback: false,
-        mode: 'auto',
+        mode: 'complex',
       })!;
       expect(r.success).toBe(true);
       expect(r.run!({ q: [1, 2], z: { re: 1, im: 2 } } as any)).toEqual({
@@ -399,7 +405,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     });
   });
 
-  // A complex coordinate: in `strict`, a lane mismatch. In `auto`, the
+  // A complex coordinate: in `strict`, a lane mismatch. In `complex`, the
   // first point gives `NaN`, as `Max` of a complex coordinate does in a
   // direct compile (`Max(Q[1])`); the interpreter keeps
   // `1 + max(2, 1 + i)`, which has no numeric value.
@@ -407,10 +413,10 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     expect(() =>
       compile(ce.box(['Map', 'gm', 'Q']), { fallback: false, mode: 'strict' })
     ).toThrow(/Lane mismatch/));
-  test('Map(gm, Q) (auto)', () => {
+  test('Map(gm, Q) (complex)', () => {
     const r = compile(ce.box(['Map', 'gm', 'Q']), {
       fallback: false,
-      mode: 'auto',
+      mode: 'complex',
     })!;
     const v = r.run!(INPUTS as any) as number[];
     expect(Number.isNaN(v[0])).toBe(true);
@@ -435,7 +441,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
         compile(ce.box(['Map', 'gm', 'P']), {
           to,
           fallback: false,
-          mode: to === 'glsl' ? 'strict' : 'auto',
+          mode: to === 'glsl' ? 'strict' : 'complex',
         })
       ).toThrow());
   test('Map(gm, P) on interval-js does not compile', () => {

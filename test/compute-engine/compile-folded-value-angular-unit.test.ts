@@ -400,18 +400,17 @@ describe('AbsArg in degree mode', () => {
 
   // The refusal is thrown at the entry of the target, before the outermost
   // compilation resets its report. The fallback result reported the mode
-  // and the promotion of the previous compilation.
-  test('the fallback reports no promotion', () => {
+  // of the previous compilation.
+  test('the fallback reports the mode strict', () => {
     const ce = engineWithK();
     const previous = compile(ce.box(['Sqrt', ['Subtract', 'x', 1]]), {
       mode: 'complex',
     });
-    expect(previous.promoted).toBe(true);
+    expect(previous.mode).toBe('complex');
     const r = compile(ce.box(['AbsArg', 'x']));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(REFUSAL);
     expect(r.mode).toBe('strict');
-    expect(r.promoted).toBe(false);
   });
 
   test('the values of evaluate()', () => {

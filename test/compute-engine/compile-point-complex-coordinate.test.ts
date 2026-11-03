@@ -5,7 +5,7 @@
  * An emitted definition reads a point parameter's coordinates as plain
  * numbers in every discipline (`V[1] ?? NaN`, `_SYS.pow2`). A point whose
  * coordinate lowers through the complex kernels — `(x / 1, y / sqrt(1 - e^2))`
- * under the `auto` discipline, where the unknown-sign square root promotes —
+ * in the `complex` mode, where the unknown-sign square root is complex —
  * hands that definition a `{re, im}` object, and the body computed `NaN`
  * behind `success: true`. Corpus witness: `neyret/hpr2q4kles`, whose `P_0`
  * answered `NaN` where the interpreter answers 1.024.
@@ -81,16 +81,22 @@ describe('a point argument with a complex-shaped coordinate', () => {
     expect(String(r.preamble)).not.toContain('_fn_l');
   });
 
-  test('a promoted square root in a coordinate inlines, real and complex results alike', () => {
+  test('a complex square root in a coordinate inlines, real and complex results alike', () => {
     const ce = engine();
     ce.declare('f', '(unknown) -> number');
     ce.assign(
       'f',
       ce.parse(String.raw`e \mapsto l\left(A\left(e\right)\right)`)
     );
-    const real = compile(ce.box(['f', 0.206]), { fallback: false });
+    const real = compile(ce.box(['f', 0.206]), {
+      fallback: false,
+      mode: 'complex',
+    });
     expect(real.run!({})).toBeCloseTo(ce.box(['f', 0.206]).N().re, 12);
-    const complex = compile(ce.box(['f', 1.5]), { fallback: false });
+    const complex = compile(ce.box(['f', 1.5]), {
+      fallback: false,
+      mode: 'complex',
+    });
     // `sqrt(1 + (1.118 i)^2)` = `sqrt(-0.25)` = 0.5 i.
     expect(complex.run!({})).toEqual({ re: 0, im: expect.closeTo(0.5, 12) });
   });
@@ -98,7 +104,7 @@ describe('a point argument with a complex-shaped coordinate', () => {
   test('the corpus shape fails closed instead of answering NaN', () => {
     // `P_0` = `l(d_iv(r(M_0, -a) - C(D, d), A(e_0))) - (D + d) / 2`. Inside
     // the emitted `P_0`, the inlined `d_iv` hands `l` a point whose second
-    // coordinate is a division by the promoted `sqrt(1 - e_0^2)`; the point
+    // coordinate is a division by the complex `sqrt(1 - e_0^2)`; the point
     // is wrapped in the return-type ascription of the helper that built it,
     // which the inline substitution does not read through, so the call
     // declines.
@@ -126,7 +132,7 @@ describe('a point argument with a complex-shaped coordinate', () => {
     // arithmetic over a possibly list-valued operand. That decline compiles
     // its user-function operands first, so the more specific decline of the
     // inner call is the one reported.
-    expect(() => compile(call, { fallback: false })).toThrow(
+    expect(() => compile(call, { fallback: false, mode: 'complex' })).toThrow(
       /Could not compile a call of `\w+`: argument \d is a point with a complex-valued coordinate/
     );
   });

@@ -58,7 +58,7 @@ function interpreted(ce: ComputeEngine, c: Case): [number, number] {
 
 describe('COMPILED ROOT OF A COMPLEX RADICAND', () => {
   for (const c of CASES)
-    for (const mode of ['strict', 'auto', 'complex'] as const)
+    for (const mode of ['strict', 'complex'] as const)
       it(`javascript ${mode}: ${c.latex} at ${JSON.stringify(c.vars)}`, () => {
         const ce = engine();
         const result = compile(ce.parse(c.latex), {

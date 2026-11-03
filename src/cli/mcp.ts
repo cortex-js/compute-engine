@@ -83,7 +83,7 @@ const COMPILE_TARGETS = [
   'interval-js',
 ] as const;
 
-const COMPILE_MODES = ['auto', 'strict', 'complex', 'bigint'] as const;
+const COMPILE_MODES = ['strict', 'complex', 'bigint'] as const;
 
 const TOOLS = [
   {
@@ -218,7 +218,7 @@ const TOOLS = [
           type: 'string',
           enum: [...COMPILE_MODES],
           description:
-            'The arithmetic discipline: "strict" (real kernel, a lane mismatch declines), "complex", "auto" (strict, escalating to complex when needed), or "bigint" ("javascript" only: integer values are exact JavaScript bigint values; an expression that is not on the integer lane declines with the code "bigint-lane"). Omit it to use the default of the target: "auto" on "javascript" and "python", "strict" on "glsl", "wgsl" and "interval-js", which offer only "strict" (another mode declines with the code "unsupported-mode")',
+            'The arithmetic discipline: "strict" (the default of every target: the lane of a value follows its static type, an operation whose exact value is complex on a real lane gives NaN, and a lane mismatch declines), "complex" (unknown-sign radicals and logarithms give complex values; "javascript" and "python" only), or "bigint" ("javascript" only: integer values are exact JavaScript bigint values; an expression that is not on the integer lane declines with the code "bigint-lane"). "glsl", "wgsl" and "interval-js" offer only "strict"; another mode declines with the code "unsupported-mode"',
         },
         timeLimit: {
           type: 'number',

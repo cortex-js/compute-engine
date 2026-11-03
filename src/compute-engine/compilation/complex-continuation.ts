@@ -5,7 +5,7 @@ import { isNumber } from '../boxed-expression/type-guards.js';
  * Heads whose interpreter kernel continues a real function into the complex
  * plane: with real operands the value is complex off the real domain
  * (`LerchPhi(3, 2, 1)` is `0.773 − 1.150i`). The JavaScript target lowers
- * them to the complex kernel in `auto` and `complex` mode; a shader target
+ * them to the complex kernel in `complex` mode; a shader target
  * has no complex lane for them and declines a provably complex value.
  * `Gamma` is here for its two-operand form, the upper incomplete gamma
  * Γ(s, z), which is complex for `z < 0` (`Gamma(1, −1)` is `e`, but

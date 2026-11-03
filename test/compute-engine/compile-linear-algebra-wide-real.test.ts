@@ -2,9 +2,9 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 
 // A linear-algebra operand whose type does not say whether its entries are
 // real or complex (`matrix<number>`, `vector<number>`, an undeclared
-// collection symbol) is READ AS REAL on the JavaScript target in `strict` and
-// `auto` mode (user decision of 2026-09-24, option B), as a `number`-typed
-// scalar is. `mode: 'complex'` reads it as complex. A `complex` entry type
+// collection symbol) is READ AS REAL on the JavaScript target in `strict`
+// mode, the default (user decision of 2026-09-24, option B), as a
+// `number`-typed scalar is. `mode: 'complex'` reads it as complex. A `complex` entry type
 // keeps the complex lane in every mode.
 //
 // The compiled runner does not read the entries of a collection-valued
@@ -23,9 +23,9 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 // `M: number | list<number>`, which may be a scalar, and `Trace` declines a
 // possibly-scalar operand for that reason, whatever its lane.)
 
-const MODES = ['strict', 'auto'] as const;
+const MODES = ['strict'] as const;
 
-function js(expr: any, mode: string = 'auto'): any {
+function js(expr: any, mode: string = 'strict'): any {
   return compile(expr, { to: 'javascript', mode, fallback: false } as any);
 }
 

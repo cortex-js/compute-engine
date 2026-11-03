@@ -12,6 +12,7 @@ import {
   couldBeNumericTuple,
   isTuple,
   isTupleShapedType,
+  leafwardElementType,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -84,8 +85,10 @@ import {
 import {
   PROMOTABLE_RADICAL_HEADS,
   isRealOnlyLowering,
+  wideNumericType,
 } from './compiler-mode.js';
 import { _popLocalComplex, _pushLocalComplex } from './compile-loops.js';
+import { complexDiscipline } from './compile-declarations.js';
 import { compileValueOperand } from './compile-statements.js';
 import { cseAdmission } from './compile-cse.js';
 
@@ -102,18 +105,200 @@ import { cseAdmission } from './compile-cse.js';
  * bindings advances no engine-wide version, and the bindings are discarded
  * with the scope. Every other name resolves from the scope as it does from
  * the current scope, because the new scope starts empty.
+ *
+ * A name with an entry in `types` is declared with that type in the scope
+ * before it is boxed; any other name has the type `unknown`.
  */
 function withElementSymbols<T>(
   engine: ComputeEngine,
   names: ReadonlyArray<string>,
-  f: (symbols: Expression[]) => T
+  f: (symbols: Expression[]) => T,
+  types?: ReadonlyArray<Type | undefined>
 ): T {
   const scratch: Scope = {
     parent: engine.context.lexicalScope,
     bindings: new Map(),
   };
   return withScratchScope(engine, scratch, () =>
-    f(engine._inScope(scratch, () => names.map((name) => engine.expr(name))))
+    f(
+      engine._inScope(scratch, () =>
+        names.map((name, i) => {
+          const t = types?.[i];
+          if (t !== undefined) engine.declare(name, t, scratch);
+          return engine.expr(name);
+        })
+      )
+    )
+  );
+}
+
+/**
+ * The types of the element parameters of the scalar closure of a broadcast
+ * over `args` (`withElementSymbols()`), in the `complex` mode only.
+ *
+ * In that mode a WIDE type (`unknown`, `number`) is read as complex
+ * (`wideIsComplex`). An element parameter that has no type is `unknown`, so
+ * the analysis read every node of the closure whose type follows from its
+ * operands as complex, while the emitters of many heads choose their
+ * lowering from the lane of their operands, which the closure records as
+ * real (`closureFrames()`). `Sin` of a real element parameter was emitted
+ * as `Math.sin`, and its node, typed `number`, was reported complex. So an
+ * element parameter on the real lane gets the type of the element (the
+ * leaf type of a collection operand, the type of a scalar operand), and
+ * `real` when that type is a wide numeric type: on the real lane it holds a
+ * plain number. An element parameter on the complex lane, or one whose
+ * element is not a number (a boolean, a string, a point read whole), keeps
+ * no type.
+ *
+ * In the other modes a wide type is read as real, so a parameter with no
+ * type gives the same lane as a typed one, and the closure is emitted as
+ * before.
+ */
+function elementParamTypes(
+  args: ReadonlyArray<Expression>,
+  argIsComplex: ReadonlyArray<boolean>
+): Array<Type | undefined> | undefined {
+  if (!complexDiscipline()) return undefined;
+  return args.map((a, i) => {
+    if (argIsComplex[i] === true) return undefined;
+    let t: Type = compilationType(a);
+    if (isArrayOperand__(a))
+      for (let depth = 0; depth < 8; depth++) {
+        const e = leafwardElementType(t);
+        if (e === undefined) break;
+        t = e;
+      }
+    if (!isSubtype(t, 'number')) return undefined;
+    return wideNumericType(t) ? 'real' : t;
+  });
+}
+
+/** The analysis frames under which the scalar closure of a broadcast of
+ * `h` over `args` is built (`closureFrames()`). */
+type ClosureFrames = {
+  complexFrame: Map<string, boolean>;
+  radicalFrame:
+    | {
+        head: string;
+        params: Set<string>;
+        promotes: boolean;
+        realPower?: { value: number; oddNumerator: boolean };
+      }
+    | undefined;
+};
+
+/**
+ * The analysis frames of the scalar closure of a broadcast of `h` over
+ * `args`, with element parameter `params[i]` for `args[i]`, which holds a
+ * `{re, im}` object at every position when `argIsComplex[i]` is true.
+ */
+function closureFrames(
+  h: string,
+  args: ReadonlyArray<Expression>,
+  params: ReadonlyArray<string>,
+  argIsComplex: ReadonlyArray<boolean>
+): ClosureFrames {
+  // The element parameters are bare symbols with no type of their own, so the
+  // head's scalar codegen would read every one of them as REAL and emit
+  // `_tv1 * _tv2` over a pair of `{re, im}` objects. Declaring their
+  // complex-ness in a local frame — the same mechanism a `Block` local uses
+  // (`_localComplex`) — makes that codegen pick the complex lowering, so the
+  // closure agrees with the array it will actually be mapped over. This is
+  // what lets an all-complex collection broadcast at all; before it, any
+  // complex operand declined here and fell through to the fail-closed guard.
+  const complexFrame = new Map<string, boolean>();
+  params.forEach((p, i) => complexFrame.set(p, argIsComplex[i] === true));
+  // For a promotable radical/`Power` head, the promotion verdict must be
+  // decided on the NODE-LEVEL operands — the element temps the closure is
+  // built from carry no sign or type evidence, so a verdict derived from
+  // them promotes shapes whose operands are provably non-negative
+  // (`√(x²+L²)` with a list `L`), diverging from the downstream
+  // `isComplexValued` analysis that reads the real operands. Record the
+  // node-level verdict for `promotesRadicalToComplex` to return when the
+  // scalar codegen re-asks with exactly these temps. Decided strictly
+  // inside the `_pushLocalComplex` frame so memoized analysis answers
+  // stay in that frame's memo layer.
+  _pushLocalComplex(complexFrame);
+  try {
+    const radicalFrame =
+      h === 'Power' ||
+      h === 'Root' ||
+      COMPLEX_CONTINUATION_HEADS.has(h) ||
+      PROMOTABLE_RADICAL_HEADS.has(h)
+        ? {
+            head: h,
+            params: new Set(params),
+            promotes: COMPLEX_CONTINUATION_HEADS.has(h)
+              ? continuesToComplex(h, args)
+              : core.promotesRadicalToComplex(h, args),
+            realPower: h === 'Power' ? realPowerExponent(args) : undefined,
+          }
+        : undefined;
+    return { complexFrame, radicalFrame };
+  } finally {
+    _popLocalComplex();
+  }
+}
+
+/**
+ * Run `f` under the analysis frames `frames`: the radical verdict strictly
+ * inside the local-complex frame, in the order the verdict was decided in,
+ * so the memo layer that `f` writes is the frame's own.
+ */
+function inClosureFrames<T>(frames: ClosureFrames, f: () => T): T {
+  _pushLocalComplex(frames.complexFrame);
+  if (frames.radicalFrame !== undefined)
+    _broadcastRadicalVerdict.push(frames.radicalFrame);
+  try {
+    return f();
+  } finally {
+    if (frames.radicalFrame !== undefined) _broadcastRadicalVerdict.pop();
+    _popLocalComplex();
+  }
+}
+
+/**
+ * Whether the scalar closure that `tryCompileBroadcast` builds for an
+ * element-wise application of `h` over `args` returns a `{re, im}` object,
+ * when the element parameter of `args[i]` holds a `{re, im}` object exactly
+ * when `argIsComplex[i]` is true.
+ *
+ * The closure is the head's own scalar codegen applied to element
+ * parameters, under the frames of `closureFrames()`. In the complex mode
+ * `elementParamTypes()` gives each element parameter on the real lane the
+ * type of its element; a parameter on the complex lane, or one whose element
+ * is not a number, has no type. The codegen and `isComplexValued` agree on
+ * every node, so this asks `isComplexValued` about the same node under the
+ * same frames. The type of the whole application cannot answer, because it
+ * is the type of a collection (for example `list<number>`), not the type of
+ * the scalar node that the closure computes for one element. A scalar rule
+ * does not read a collection type as complex, while the closure can write a
+ * `{re, im}` object. Read from the whole node, the real `*` multiplied that
+ * object and gave `[NaN, NaN]`.
+ *
+ * A head mapped to a STRING is a real-only scalar helper: its closure is
+ * a plain call, which returns a number.
+ */
+export function elementwiseClosureIsComplex(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  argIsComplex: ReadonlyArray<boolean>,
+  target: CompileTarget<Expression>
+): boolean {
+  if (typeof target.functions?.(h) !== 'function') return false;
+  const params = args.map((_, i) => `_ce_lane_el${i}`);
+  const frames = closureFrames(h, args, params, argIsComplex);
+  return inClosureFrames(frames, () =>
+    withElementSymbols(
+      engine,
+      params,
+      (symbols) =>
+        core.isComplexValued(
+          engine.function(h, symbols, { form: 'structural' })
+        ),
+      elementParamTypes(args, argIsComplex)
+    )
   );
 }
 
@@ -1102,53 +1287,7 @@ export function tryCompileBroadcast(
   // `target.var` so they compile bare, not as `_.<name>` lookups — same
   // pattern as the Sum/Product loop index).
   const params = args.map(() => tempVar(target));
-  // The element parameters are bare symbols with no type of their own, so the
-  // head's scalar codegen would read every one of them as REAL and emit
-  // `_tv1 * _tv2` over a pair of `{re, im}` objects. Declaring their
-  // complex-ness in a local frame — the same mechanism a `Block` local uses
-  // (`_localComplex`) — makes that codegen pick the complex lowering, so the
-  // closure agrees with the array it will actually be mapped over. This is
-  // what lets an all-complex collection broadcast at all; before it, any
-  // complex operand declined here and fell through to the fail-closed guard.
-  const complexFrame = new Map<string, boolean>();
-  params.forEach((p, i) => complexFrame.set(p, argIsComplex[i] === true));
-  // For a promotable radical/`Power` head, the promotion verdict must be
-  // decided on the NODE-LEVEL operands — the element temps the closure is
-  // built from carry no sign or type evidence, so a verdict derived from
-  // them promotes shapes whose operands are provably non-negative
-  // (`√(x²+L²)` with a list `L`), diverging from the downstream
-  // `isComplexValued` analysis that reads the real operands. Record the
-  // node-level verdict for `promotesRadicalToComplex` to return when the
-  // scalar codegen re-asks with exactly these temps. Decided strictly
-  // inside the `_pushLocalComplex` frame so memoized analysis answers
-  // stay in that frame's memo layer.
-  _pushLocalComplex(complexFrame);
-  let radicalFrame:
-    | {
-        head: string;
-        params: Set<string>;
-        promotes: boolean;
-        realPower?: { value: number; oddNumerator: boolean };
-      }
-    | undefined;
-  try {
-    radicalFrame =
-      h === 'Power' ||
-      h === 'Root' ||
-      COMPLEX_CONTINUATION_HEADS.has(h) ||
-      PROMOTABLE_RADICAL_HEADS.has(h)
-        ? {
-            head: h,
-            params: new Set(params),
-            promotes: COMPLEX_CONTINUATION_HEADS.has(h)
-              ? continuesToComplex(h, args)
-              : core.promotesRadicalToComplex(h, args),
-            realPower: h === 'Power' ? realPowerExponent(args) : undefined,
-          }
-        : undefined;
-  } finally {
-    _popLocalComplex();
-  }
+  const frames = closureFrames(h, args, params, argIsComplex);
   /**
    * The head's own scalar lowering, with element parameter `i` standing for
    * the source text `sources[i]`.
@@ -1179,24 +1318,23 @@ export function tryCompileBroadcast(
       },
       ...withBoundScope(target, params),
     };
-    _pushLocalComplex(complexFrame);
-    if (radicalFrame !== undefined) _broadcastRadicalVerdict.push(radicalFrame);
-    try {
-      return dispatch
+    return inClosureFrames(frames, () =>
+      dispatch
         ? dispatchingScalarBody(h, sources)
         : typeof fn === 'function'
-          ? withElementSymbols(engine, params, (symbols) =>
-              fn(
-                symbols,
-                (expr) => compileValueOperand(expr, innerTarget),
-                innerTarget
-              )
+          ? withElementSymbols(
+              engine,
+              params,
+              (symbols) =>
+                fn(
+                  symbols,
+                  (expr) => compileValueOperand(expr, innerTarget),
+                  innerTarget
+                ),
+              elementParamTypes(args, argIsComplex)
             )
-          : `${fn}(${sources.join(', ')})`;
-    } finally {
-      if (radicalFrame !== undefined) _broadcastRadicalVerdict.pop();
-      _popLocalComplex();
-    }
+          : `${fn}(${sources.join(', ')})`
+    );
   };
   const scalarBody = buildScalarBody(params);
   // A `RotateLeft`/`RotateRight` operand whose base provably holds scalars

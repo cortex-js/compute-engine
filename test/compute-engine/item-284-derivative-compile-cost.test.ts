@@ -51,10 +51,16 @@ function engineWith(definition: string): ComputeEngine {
 const radical = engineWith(RADICAL);
 radical.declare('e', 'real');
 
-function compiled(ce: ComputeEngine, order: number, to = 'javascript') {
+function compiled(
+  ce: ComputeEngine,
+  order: number,
+  to = 'javascript',
+  mode?: 'complex'
+) {
   return compile(ce.box(['Apply', ['Derivative', 'f', order], 'x']), {
     to,
     fallback: true,
+    mode,
   } as never) as {
     success: boolean;
     code?: string;
@@ -113,16 +119,20 @@ function relative(
 describe('applied derivative: the forward-mode lowering', () => {
   test('an order above 1 of a composed body emits the jet lowering', () => {
     const ce = radical;
+    // The default `strict` mode takes the real jets: `√u` of a real
+    // operand is on the real lane, and its value is `NaN` at `u < 0`. The
+    // complex mode keeps the symbolic closed form (`tryCompileJetDerivative`
+    // declines there).
     for (const order of [2, 3, 4]) {
       const r = compiled(ce, order);
       expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.jcread');
+      expect(r.code).toContain('_SYS.jread');
       // The whole point: the emitted code is a walk of the BODY and does not
       // grow with the order.
       expect(r.code!.length).toBeLessThan(400);
     }
     expect(compiled(ce, 2).code).toMatchInlineSnapshot(
-      `"((_tv1) => _SYS.jcread(_SYS.jcsqrt(_SYS.jcadd(_tv1, _SYS.jcsqrt(_SYS.jcadd(_tv1, _SYS.jcsqrt(_SYS.jcadd(_tv1, _SYS.jcsqrt(_SYS.jcadd(_tv1, _tv1)))))))), 2))(_SYS.jcv(_.x, 2))"`
+      `"((_tv1) => _SYS.jread(_SYS.jsqrt(_SYS.jadd(_tv1, _SYS.jsqrt(_SYS.jadd(_tv1, _SYS.jsqrt(_SYS.jadd(_tv1, _SYS.jsqrt(_SYS.jadd(_tv1, _tv1)))))))), 2))(_SYS.jv(_.x, 2))"`
     );
   });
 
@@ -139,12 +149,13 @@ describe('applied derivative: the forward-mode lowering', () => {
   });
 
   test('the compiled value matches the interpreter off the real domain', () => {
-    // `√u` of an unknown-sign real promotes to the complex kernel, so the
-    // jets have to run in complex arithmetic — a real jet would answer NaN
-    // here while the rest of the compilation answers a complex value.
+    // In the complex mode, `√u` of an unknown-sign real promotes to the
+    // complex kernel, and the compilation keeps the symbolic closed form (a
+    // real jet would answer NaN here while the rest of the compilation
+    // answers a complex value). The default `strict` mode gives `NaN` here.
     const ce = radical;
     for (const order of [2, 3]) {
-      const r = compiled(ce, order);
+      const r = compiled(ce, order, 'javascript', 'complex');
       for (const x of [-1, -0.2]) {
         const v = asComplex(r.run({ x }));
         expect(v.im).not.toBe(0);
@@ -257,13 +268,13 @@ describe('applied derivative: the forward-mode lowering', () => {
     }
   });
 
-  test('an odd radical under a promoting body keeps the real root', () => {
-    // The body promotes to the complex kernel (the square root of an
-    // unknown-sign value), but the cube root inside it is still the real one
-    // the ordinary emitter lowers — so the complex jet family has to take the
+  test('an odd radical under a complex body keeps the real root', () => {
+    // The body is complex (the term `i·x³`), so the jets run in complex
+    // arithmetic, but the cube root inside it is still the real one the
+    // ordinary emitter lowers — so the complex jet family has to take the
     // real branch for a real negative constant coefficient, not the principal
     // branch it uses everywhere else.
-    const ce = engineWith('f(x):=\\sqrt{x}+\\sqrt[3]{x}+x^3+\\sin x+\\cos x');
+    const ce = engineWith('f(x):=\\sqrt[3]{x}+ix^3+\\sin x+\\cos x+x^2');
     const r = compiled(ce, 2);
     expect(r.code).toContain('_SYS.jcroot');
     for (const x of [-0.7, 1.3])
@@ -691,14 +702,20 @@ describe('applied derivative: the value shape of the emitted code', () => {
 describe('an even-degree root of an unknown-sign operand', () => {
   // `Root(u, k)` with an EVEN degree is `Sqrt`'s case: the real
   // `Math.pow(u, 1/k)` is NaN for a negative `u` where the interpreter
-  // answers the principal complex root. An ODD degree keeps the real kernel,
-  // because the interpreter answers the REAL root there.
+  // answers the principal complex root. The complex mode promotes it; the
+  // default `strict` mode keeps the real kernel and its `NaN`. An ODD
+  // degree keeps the real kernel, because the interpreter answers the REAL
+  // root there.
 
   test('the fourth root agrees with the interpreter on both sides of zero', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const expr = ce.parse('\\sqrt[4]{x}');
-    const r = compile(expr, { to: 'javascript', fallback: false } as never) as {
+    const r = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+      mode: 'complex',
+    } as never) as {
       run: (v: Record<string, number>) => number | { re: number; im: number };
     };
     for (const x of [-8, 16]) {
@@ -728,7 +745,11 @@ describe('an even-degree root of an unknown-sign operand', () => {
     ce.declare('x', 'real');
     ce.parse('f(x):=\\sqrt[4]{x+x^2+\\sin x+\\cos x+x^3}').evaluate();
     const expr = ce.box(['Apply', ['Derivative', 'f', 2], 'x']);
-    const r = compile(expr, { to: 'javascript', fallback: false } as never) as {
+    const r = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+      mode: 'complex',
+    } as never) as {
       run: (v: Record<string, number>) => number | { re: number; im: number };
     };
     for (const x of [-0.7, 1.4]) {

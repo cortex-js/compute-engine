@@ -36,7 +36,7 @@ const SUMMAND = (idx: string) =>
   `\\cos\\left(${idx}\\left(\\left|x\\right|-\\sqrt{\\frac{9.81}{k[${idx}]}}t\\right)\\right)`;
 
 describe('Tycho item 252: complex-lane Sum with an index named i', () => {
-  for (const mode of [undefined, 'strict', 'auto', 'complex'] as const) {
+  for (const mode of [undefined, 'strict', 'complex'] as const) {
     for (const idx of ['i', 'j']) {
       test(`unrolled form, index ${idx}, mode ${mode ?? 'default'}`, () => {
         const ce = engine();

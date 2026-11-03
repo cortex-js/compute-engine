@@ -16,6 +16,61 @@
 
 ### Behavior Changes
 
+- **The compile mode `'auto'` is removed; `'strict'` is the default of
+  every target.** The lane of a compiled value follows its static type: it
+  is complex for a declared `complex` input or parameter, a complex literal
+  or an operation whose result type is complex, and real otherwise.
+  Breaking changes, each with its replacement:
+  - `compile(expr, { mode: 'auto' })` declines with
+    `diagnostic.code === 'unsupported-mode'` on every target. Use
+    `mode: 'complex'` where complex values are wanted: an unknown-sign
+    radical or logarithm is computed on the complex lane, and a kernel
+    whose value is real still returns a JavaScript number (`Sqrt(x)^2` at
+    `x = -4` is `-4`). A value that is not a number can come back in its
+    complex form (`0^x` at `x = -1` is `{re: Infinity, im: Infinity}`, the
+    interpreter's `ComplexInfinity`, where `'auto'` gave `Infinity`).
+  - The default mode of the `javascript` and `python` targets is `'strict'`
+    (it was `'auto'`). On the real lane an operation whose exact value is
+    complex gives `NaN` on every target, as on the shader targets: with
+    `x: real`, `compile(Sqrt(x))` at `x = -4` gives `NaN` (it gave
+    `{re: 0, im: 2}`); with `mode: 'complex'` it gives `{re: 0, im: 2}`. A
+    complex value that reaches a binding compiled real declines with
+    `'lane-mismatch'`, and the compilation is no longer redone in complex
+    mode. `x + 2i` with `x: real` is complex in every mode, as before.
+  - The compile result has no `promoted` and no `escalation` field.
+    `result.mode` is the requested mode, `'strict'` when none is requested.
+    A host that kept a promoted kernel off a shader target reads
+    `result.mode === 'complex'`, or compiles `'strict'` for the shader.
+  - The `reset()` hook of a custom compile target is no longer called, and
+    `supportedModes` no longer accepts `'auto'`.
+  - An escalation of a compilation to `mode: 'bigint'` when a run-time value
+    passes `2^53` will not be added: `'bigint'` is used only when it is
+    requested.
+  - The engine's own compilations (the `Map` drain, `Reduce`, the
+    stochastic equality probes, the numeric integration and series
+    kernels) compile in `'strict'`, and their values do not change: the
+    `Map` drain and `Reduce` compute a `NaN` element again with the
+    interpreter, an integrand is computed in `'complex'` at a `NaN` sample,
+    and the stochastic equality probes use the compiled code only for an
+    expression of heads that give `NaN` for a `NaN` operand (arithmetic,
+    powers, roots, logarithms, the trigonometric and hyperbolic functions,
+    rounding, `Max`, `Min`); any other expression is sampled with the
+    interpreter.
+  - In `mode: 'complex'`, five cases where the compiled code mixed a
+    complex object with real arithmetic, and gave `NaN` or a string where
+    the interpreter gives a real number, are fixed: a power of a call whose
+    value is complex (`f(x)^2` with `f: (real) -> unknown`); an element-wise
+    operation over a list (`r·10^i` with `i: list<integer>`,
+    `Sqrt(L^2)` with `L: list<real>`); `Sqrt`, `Ln` and `Log` of a value
+    whose type admits a complex value but which is not negative
+    (`\sqrt{x^2+y^2}` with `x, y: real | signed_infinity`); a `Product`
+    over a shared `Map` (`Sum(Map(f, P)) + Product(Map(f, P))`); and a
+    fold over an empty list or one element (`Product(Map(Sqrt, P)) + 1`
+    with `P = []` is `2`). The negation of a real value keeps a `+0`
+    imaginary part, so `Ln(-x)` at `x = 2` is `ln 2 + iπ`, as in the
+    interpreter (it was `ln 2 − iπ`).
+  See `docs/COMPILATION-MODEL.md`, "Compile modes".
+
 - **One static error, one dynamic non-value per domain.** An `Error` is the
   one static failure, `NaN` is the one numeric non-value, and `Missing` is
   the absent datum of the other domains. `Indeterminate` is no longer a

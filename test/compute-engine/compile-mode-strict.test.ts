@@ -11,10 +11,9 @@ import type { MathJsonExpression } from '../../src/math-json/types';
  * compilation shaped REAL is a `LaneMismatch` decline (`code:
  * 'lane-mismatch'`, `kind: 'correctness'`, a user-legible `binding`), where
  * before it either compiled silently wrong or was served by a per-call-site
- * lane specialization. The rule is in force for `mode: 'strict'` ONLY: since
- * step 4 (2026-08-16) the default `auto` answers the same mismatch by
- * escalating the whole compilation to `mode: 'complex'`, which has a single
- * lane and never declines here (see `BaseCompiler.strictLanes`).
+ * lane specialization. The rule is in force for `mode: 'strict'` (the
+ * default) ONLY: `mode: 'complex'` has a single lane and never declines here
+ * (see `BaseCompiler.strictLanes`).
  *
  * The D3 entry check applies in every mode: a `{re, im}` bound at `run()` to a
  * free symbol or lambda parameter analyzed real throws a `TypeError`; a plain
@@ -43,7 +42,7 @@ function engineWith(): ComputeEngine {
 function declineOf(
   ce: ComputeEngine,
   expr: MathJsonExpression,
-  mode: 'strict' | 'auto' | 'complex' = 'strict'
+  mode: 'strict' | 'complex' = 'strict'
 ): { boundary?: string; binding?: string; value?: string } | undefined {
   try {
     compile(ce.box(expr), { mode, fallback: false, constantFold: false });
@@ -174,14 +173,15 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     ).toBeUndefined();
   });
 
-  it('nothing declines under auto (it escalates instead) or complex (single lane)', () => {
+  it('nothing declines under complex (single lane)', () => {
     const ce = engineWith();
-    expect(declineOf(ce, ['b', 'z'], 'auto')).toBeUndefined();
-    const auto = compile(ce.box(['b', 'z']), { mode: 'auto', fallback: false });
-    // Lane specialization is gone: `auto` retries the whole compilation under
-    // the complex discipline (compile-mode step 4, 2026-08-16), so there is a
-    // single `_fn_b` and the mismatch is reported as the escalation cause.
-    expect(auto.success).toBe(true);
+    // Complex mode: one emission of `b`, its wide parameter lifted at use.
+    expect(declineOf(ce, ['b', 'z'], 'complex')).toBeUndefined();
+    const cx = compile(ce.box(['b', 'z']), {
+      mode: 'complex',
+      fallback: false,
+    });
+    expect(cx.success).toBe(true);
     // The call's result is not wrapped in the lift-at-use `_SYS.cplx`:
     // `b`'s declared result `number` is a WIDE numeric type since the
     // finite-by-default flip put `complex` below that name, but the one
@@ -190,20 +190,9 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     // (`userFunctions.complexShaped`). The call site carries no runtime
     // broadcast guard: `z` is EXPLICITLY declared, and an explicit scalar
     // declaration is the caller's input contract (user ruling 2026-09-07).
-    expect(auto.code).toBe('_fn_b(_.z)');
-    expect(auto.mode).toBe('complex');
-    expect(auto.escalation?.boundary).toBe('user-function parameter');
-    expect(auto.escalation?.binding).toBe('the parameter `x` of `b`');
-    expect(auto.escalation?.value).toBe('z');
-    // …and the value matches the interpreter's `b(1 + 2i) = 2 + 4i`.
-    expect(auto.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
-    // Complex mode: one emission of `b`, its wide parameter lifted at use.
-    expect(declineOf(ce, ['b', 'z'], 'complex')).toBeUndefined();
-    const cx = compile(ce.box(['b', 'z']), {
-      mode: 'complex',
-      fallback: false,
-    });
     expect(cx.code).toBe('_fn_b(_.z)');
+    expect(cx.mode).toBe('complex');
+    // …and the value matches the interpreter's `b(1 + 2i) = 2 + 4i`.
     expect(cx.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
   });
 
@@ -222,8 +211,6 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     );
     expect(red.success).toBe(true);
     expect(red.mode).toBe('strict');
-    expect(red.promoted).toBe(false);
-    expect(red.escalation).toBeUndefined();
     expect(
       red.run!({
         L: [
@@ -241,7 +228,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
 describe('D3 — the entry check of the JavaScript runner (every mode)', () => {
   it('a {re, im} for a free symbol analyzed real throws a TypeError naming it', () => {
     const ce = new ComputeEngine();
-    for (const mode of ['strict', 'auto'] as const) {
+    for (const mode of ['strict'] as const) {
       const r = compile(ce.parse('2x + 1'), { mode, fallback: false });
       expect(() => r.run!({ x: { re: 1, im: 1 } })).toThrow(
         /"x" was compiled as a real number/

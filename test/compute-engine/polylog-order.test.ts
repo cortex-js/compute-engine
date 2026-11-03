@@ -574,7 +574,12 @@ describe('PolyLog result types', () => {
 describe('PolyLog JS compile', () => {
   ce.declare('pl_s', 'real');
   ce.declare('pl_z', 'real');
-  const run = compile(ce.box(['PolyLog', 'pl_s', 'pl_z']))?.run;
+  // The values on the cut `z > 1` are complex: the default `strict` mode
+  // gives `NaN` there, and `mode: 'complex'` gives the interpreter's value
+  // (a real value is a number in that mode).
+  const run = compile(ce.box(['PolyLog', 'pl_s', 'pl_z']), {
+    mode: 'complex',
+  })?.run;
 
   // The compiled lane (`polylogOrderReal`) answers the integer orders the
   // way the interpreter does. At z = −1 the interpreter uses the exact

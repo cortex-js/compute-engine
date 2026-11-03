@@ -44,7 +44,7 @@ describe('CE-213: a power whose exponent reads an assigned symbol', () => {
   test('the compiled power takes the complex lane, as the interpreter does', () => {
     const ce = new ComputeEngine();
     ce.assign('k', 1);
-    const r = js(ce, 'y^{k/2-1}');
+    const r = js(ce, 'y^{k/2-1}', { mode: 'complex' });
     expect(r.success).toBe(true);
     for (const y of [-2, -0.5, 3]) {
       const interp = ce
@@ -56,7 +56,9 @@ describe('CE-213: a power whose exponent reads an assigned symbol', () => {
     }
     // The same value as the exponent written as a number (which
     // canonicalizes to `1/√y`, so the last bit can differ).
-    const literal = asComplex(js(ce, 'y^{-1/2}').run({ y: -2 }));
+    const literal = asComplex(
+      js(ce, 'y^{-1/2}', { mode: 'complex' }).run({ y: -2 })
+    );
     const symbolic = asComplex(r.run({ y: -2 }));
     expect(symbolic.re).toBeCloseTo(literal.re, 14);
     expect(symbolic.im).toBeCloseTo(literal.im, 14);

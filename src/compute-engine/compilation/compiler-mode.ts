@@ -157,15 +157,12 @@ export function integerLane(): 'double' | 'bigint' {
  * `docs/COMPILATION-MODEL.md`), never a specialization
  * or a silent real-lane emission.
  *
- * In force for `mode: 'strict'` and for `mode: 'auto'`, whose FIRST attempt
- * is the strict discipline (with promotion): the `LaneMismatch` it raises
- * is what the escalation catches to redo the compilation under `'complex'`
- * (design §4, `compileWithAutoEscalation` in `auto-escalation.ts`, which a
- * registered target applies inside its own `compile()`). Under `'complex'`
- * a wide binding is complex-shaped and nothing mismatches.
+ * In force for `mode: 'strict'` (and `mode: 'bigint'`, which latches the
+ * strict discipline). Under `'complex'` a wide binding is complex-shaped and
+ * nothing mismatches.
  */
 export function strictLanes(): boolean {
-  return CompilerState._mode === 'strict' || CompilerState._mode === 'auto';
+  return CompilerState._mode === 'strict';
 }
 
 /**
@@ -235,11 +232,11 @@ export function restorePromotionSuppression(saved: number): void {
 /**
  * Whether the D2/D6 RUNTIME rule is in force (`realOperandGuard`): a
  * maybe-complex operand of a real-only head is guarded at run time rather
- * than declined at compile time — the `auto` and `complex` disciplines. In
- * strict mode nothing changes: such an operand fails closed as before.
+ * than declined at compile time — the `complex` discipline. In strict mode
+ * such an operand fails closed.
  */
 export function runtimeRealGuards(): boolean {
-  return CompilerState._mode === 'auto' || CompilerState._mode === 'complex';
+  return CompilerState._mode === 'complex';
 }
 
 /**
@@ -307,7 +304,7 @@ export function notePromoted(): void {
 }
 
 /**
- * Record, for the `promoted` report, that `head` (a promotable head) is
+ * Record, in the promotion record (`CompilerState._promoted`), that `head` (a promotable head) is
  * being lowered through a complex kernel because its operand is already
  * complex-valued — a promotion when that operand is complex only by
  * wideness (the complex discipline lifted it), a no-op otherwise. The

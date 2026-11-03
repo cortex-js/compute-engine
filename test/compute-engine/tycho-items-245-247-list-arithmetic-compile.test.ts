@@ -191,6 +191,7 @@ describe('Tycho item 246 (a) — a radical or logarithm over a list is a list op
     // dispatching product answers the complex value the interpreter does.
     const r = compile(ce.box(['Multiply', 2, ['Sqrt', 'L']] as never), {
       to: 'javascript',
+      mode: 'complex',
     });
     expect(r.success).toBe(true);
     const v = r.run({ L: [-4, 9] }) as [{ re: number; im: number }, number];

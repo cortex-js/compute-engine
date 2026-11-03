@@ -2923,10 +2923,10 @@ describe('The simple rule for assignments (R3)', () => {
   });
 
   // In the `strict` mode a real and a complex number are two
-  // representations, and the compilation does not succeed. The default
-  // `auto` mode retries in the `complex` mode, where every value that is not
-  // typed real is lifted to a complex number: there the two are one class,
-  // and the compiled value is the interpreter's `2i`.
+  // representations, and the compilation does not succeed. In the `complex`
+  // mode every value that is not typed real is lifted to a complex number:
+  // there the two are one class, and the compiled value is the interpreter's
+  // `2i`.
   test('a real, then a complex number, compiles only in the complex mode', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2941,7 +2941,7 @@ describe('The simple rule for assignments (R3)', () => {
       strict = { success: false };
     }
     expect(strict.success).toBe(false);
-    const r = compile(engine().box(json), { fallback: false });
+    const r = compile(engine().box(json), { mode: 'complex', fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({})).toEqual({ re: 0, im: 2 });
   });

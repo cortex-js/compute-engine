@@ -166,7 +166,7 @@ export function trySpecializedUserCall(
  * an operand to keep the real lane, and cannot: a `Sqrt`, `Ln` or `Log`
  * whose operand is not provably non-negative, a `Root` with an even
  * degree, or a `Power` with a non-integer exponent, whose radicand or base
- * is not provably non-negative. Under the `auto` and `complex` modes, such
+ * is not provably non-negative. Under the `complex` mode, such
  * a node takes the complex lane, and so does every value computed from it.
  *
  * This is the test of `promotesRadicalToComplex`, without its side
@@ -211,7 +211,7 @@ export function radicalNeedsSignProof(
  * parameter typed by the range, can prove the sign of an operand that it
  * cannot prove otherwise: `√((k − 0.5)/16)` is real for every `k` in
  * `1..16`, while for a `k` typed `unknown` it takes the complex lane under
- * the `auto` mode, and the whole kernel with it.
+ * the `complex` mode, and the whole kernel with it.
  *
  * A specialization is emitted only when it changes that verdict: it must
  * have fewer unproven radicals (`unprovenRadicalCount`) than the
@@ -367,7 +367,7 @@ export function rangeSpecializedParameterTypes(
  * The declared signature is the contract of every call: with `p` declared
  * `(integer<1..16>) -> unknown` and assigned `k ↦ √((k − 0.5)/16)`, the
  * literal's own parameter `k` has no type, and its body would take the
- * complex lane under the `auto` mode, while every call of `p` passes an
+ * complex lane under the `complex` mode, while every call of `p` passes an
  * integer from 1 to 16. The GPU targets read the declared parameter types
  * the same way when they synthesize a definition.
  *

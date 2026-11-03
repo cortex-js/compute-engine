@@ -8,7 +8,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 // compiled, a mutually recursive pair, and a wide operand, which is read as
 // real.
 
-const MODES = ['strict', 'auto', 'complex'] as const;
+const MODES = ['strict', 'complex'] as const;
 
 function js(expr: any, mode: string): any {
   return compile(expr, { to: 'javascript', mode, fallback: false } as any);
@@ -30,7 +30,7 @@ describe('A MATRIX WITH A `Matrix` HEAD HAS THE LANE OF ITS ENTRIES', () => {
   // `\begin{pmatrix}…\end{pmatrix}` parses to `Matrix(List(List(…), …))`.
   // The lane analysis read the entries of a `List` only, so the same matrix
   // written with a `Matrix` head was wide (`matrix<2x2>`) and failed closed in
-  // `strict` and `auto`, while the `List` spelling compiled.
+  // `strict`, while the `List` spelling compiled.
   const PMATRIX = '\\begin{pmatrix}x&1\\\\1&x\\end{pmatrix}';
   const CASES: Array<[string, string, any]> = [
     ['determinant', `\\det${PMATRIX}`, 8],
@@ -101,11 +101,11 @@ describe('A MATRIX WITH A `Matrix` HEAD HAS THE LANE OF ITS ENTRIES', () => {
     }
   }
 
-  it('RowReduce of a pmatrix compiles in auto', () => {
+  it('RowReduce of a pmatrix compiles in complex', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const expr = ce.parse(`\\operatorname{RowReduce}(${PMATRIX})`);
-    expect(js(expr, 'auto').run({ x: 3 })).toEqual([
+    expect(js(expr, 'complex').run({ x: 3 })).toEqual([
       [1, 0],
       [0, 1],
     ]);
@@ -129,8 +129,8 @@ describe('A MATRIX WITH A `Matrix` HEAD HAS THE LANE OF ITS ENTRIES', () => {
 describe('A RECURSIVE CALL HAS THE LANE OF THE BODY OF ITS DEFINITION', () => {
   // While a definition compiles, the lane of its own recursive calls is not
   // known yet, and is assumed from the type of the call. With
-  // `f: (integer) -> number`, the call types `number`, which strict and auto
-  // read as real. The body `n·f(n − 1)` is then complex (the base case is
+  // `f: (integer) -> number`, the call types `number`, which strict reads as
+  // real. The body `n·f(n − 1)` is then complex (the base case is
   // `i`), and the compilation failed closed in every mode. The definition is
   // now compiled a second time with the recursive calls read as complex.
   const CASES_F = '\\begin{cases} i & n = 0 \\\\ n f(n-1) & \\end{cases}';
@@ -197,7 +197,7 @@ describe('A RECURSIVE CALL HAS THE LANE OF THE BODY OF ITS DEFINITION', () => {
 
 describe('A RECURSIVE CALL HAS THE ENTRY LANE OF THE BODY OF ITS DEFINITION', () => {
   // With `f: (integer) -> matrix<number>`, the type of a recursive call does
-  // not say whether its entries are complex, and strict and auto read it as
+  // not say whether its entries are complex, and strict reads it as
   // real: `MatrixPower(f(n − 1), 2)` took the real matrix helper, which
   // answers NaN entries for the complex base case. The body returns complex
   // entries, so the definition is now compiled a second time with the
@@ -232,7 +232,7 @@ describe('A RECURSIVE CALL HAS THE ENTRY LANE OF THE BODY OF ITS DEFINITION', ()
 });
 
 // A wide operand (`matrix<number>`, `vector<number>`) is read as real in
-// `strict` and `auto` mode (user decision of 2026-09-24, option B), also when
+// `strict` mode (user decision of 2026-09-24, option B), also when
 // the operand is computed from the symbol. Before, the compilation failed
 // closed and its diagnostic named the symbol to declare.
 //
@@ -302,7 +302,7 @@ describe('A SHAPE-PRESERVING HEAD KEEPS A REAL LANE', () => {
     ['Drop', ['Drop', 'u', 0], 14],
   ];
   for (const [label, operand, expected] of HEADS) {
-    for (const mode of ['strict', 'auto']) {
+    for (const mode of ['strict', 'complex']) {
       it(`Dot(${label}(u), u), ${mode}`, () => {
         const ce = new ComputeEngine();
         ce.declare('u', 'vector<real>');

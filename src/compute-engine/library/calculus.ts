@@ -1574,6 +1574,50 @@ function exactDivergenceValue(
 }
 
 /**
+ * The compiled integrand `run` of the pure function literal `fn`, with each
+ * sample where it is `NaN` computed again by `fn` compiled in
+ * `mode: 'complex'`. The integrand compiles in the default `'strict'` mode,
+ * where an operation whose value is complex gives `NaN`, while the value of
+ * the integrand is complex there: `∫_{-0.2}^{∞} y^{-1/2} e^{-y/2} dy` has an
+ * imaginary part, from the samples at `y < 0`. The complex form is compiled
+ * at the first `NaN` sample, so an integrand with none keeps the real
+ * kernel only; when it does not compile, the `NaN` stands. The `NaN` also
+ * stands when the complex value has a `NaN` part (`x¹⁰⁰·e⁻ˣ` is `∞·0` on
+ * both lanes past `x ≈ 1200`): the log-space fallback of
+ * `withLogSpaceFallback()` then computes that sample, and it reads only a
+ * number.
+ */
+function withComplexAtNaN<A extends number[]>(
+  ce: ComputeEngine,
+  fn: Expression,
+  run: (...args: A) => unknown
+): (...args: A) => unknown {
+  let complexRun: ((...args: A) => unknown) | null | undefined;
+  return (...args: A) => {
+    const v = run(...args);
+    if (typeof v !== 'number' || !Number.isNaN(v)) return v;
+    if (complexRun === undefined) {
+      const compiled = implicitCompile(ce, fn, { mode: 'complex' });
+      complexRun = compiled?.success
+        ? (compiled.run as (...args: A) => unknown)
+        : null;
+    }
+    if (complexRun === null) return v;
+    const w = complexRun(...args);
+    if (typeof w === 'number') return w;
+    const z = w as { re?: unknown; im?: unknown } | null | undefined;
+    if (
+      typeof z?.re === 'number' &&
+      typeof z.im === 'number' &&
+      !Number.isNaN(z.re) &&
+      !Number.isNaN(z.im)
+    )
+      return w;
+    return v;
+  };
+}
+
+/**
  * The compiled integrand `run` of the function literal `fn`, with each sample
  * where it is `NaN` or an infinity computed again in log space
  * (`logSpaceProduct`, `symbolic/log-space-product.ts`), when `fn` is a
@@ -1600,6 +1644,7 @@ function withLogSpaceFallback<A extends number[]>(
   // (`Random()`) would run again, and the log-space form reads a factor
   // twice (for its sign and its magnitude).
   if (!isTransitivelyPure(fn)) return run;
+  run = withComplexAtNaN(ce, fn, run);
   const parameters = fn.ops.slice(1);
   const names = parameters.map((p) => sym(p));
   if (names.some((n) => n === undefined)) return run;

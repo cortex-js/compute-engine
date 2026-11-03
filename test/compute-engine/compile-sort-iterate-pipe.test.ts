@@ -628,11 +628,9 @@ describe('COMPILED PIPE', () => {
     expect(compiled(sum, { y: 4 })).toEqual([5, 5]);
   });
 
-  test('a complex argument of an applied literal recompiles in complex mode', () => {
-    // `√y` is complex for a negative `y`, and the literal compiles its
-    // parameter in the real lane. The default mode ('auto') declines the
-    // real-lane compilation with a lane mismatch and compiles the whole
-    // expression again in 'complex' mode.
+  test('a complex argument of an applied literal compiles in complex mode', () => {
+    // `√y` is complex for a negative `y`. The 'complex' mode compiles the
+    // parameter of the literal in the complex lane.
     for (const expr of [
       ['Apply', key(['Multiply', 'x', 2]), ['Sqrt', 'y']],
       ['Pipe', ['Sqrt', 'y'], ['Multiply', '_', 2]],
@@ -640,7 +638,7 @@ describe('COMPILED PIPE', () => {
     ]) {
       expect(interpreted(expr, { y: 4 })).toBe(4);
       expect(ce.box(expr).subs({ y: -4 }).evaluate().im).toBe(4);
-      for (const mode of [undefined, 'auto', 'complex']) {
+      for (const mode of ['complex']) {
         const result: any = compile(
           ce.box(expr) as any,
           { to: 'javascript', fallback: false, mode } as any
@@ -746,13 +744,13 @@ describe('COMPILED PIPE', () => {
         callee === 'dbl' ? ['dbl', arg] : ['Apply', callee, arg];
       for (const arg of ['CM', 'RR']) {
         const expected = nested(ce.box(apply(arg)).subs(boxed).evaluate());
-        const auto: any = compile(
+        const cx: any = compile(
           ce.box(apply(arg)) as any,
-          { to: 'javascript', fallback: false } as any
+          { to: 'javascript', fallback: false, mode: 'complex' } as any
         );
-        expect(auto.success).toBe(true);
-        expect(auto.mode).toBe(arg === 'CM' ? 'complex' : 'strict');
-        expect(parts(auto.run(value))).toEqual(expected);
+        expect(cx.success).toBe(true);
+        expect(cx.mode).toBe('complex');
+        expect(parts(cx.run(value))).toEqual(expected);
       }
       expect(laneMismatchOf(apply('CM'))?.boundary).toBe(
         callee === 'dbl'
@@ -806,14 +804,14 @@ describe('COMPILED PIPE', () => {
     ]) {
       const value = ce.box(expr).subs({ y: 3 }).evaluate().N();
       expect([value.re, value.im]).toEqual([6, 2]);
-      const auto: any = compile(
+      const cx: any = compile(
         ce.box(expr) as any,
-        { to: 'javascript', fallback: false } as any
+        { to: 'javascript', fallback: false, mode: 'complex' } as any
       );
-      expect(auto.success).toBe(true);
-      expect(auto.mode).toBe('complex');
-      expect(complexParts(auto.run({ y: 3 }))).toEqual([6, 2]);
-      expect(complexParts(auto.run({ y: -1 }))).toEqual([-2, 2]);
+      expect(cx.success).toBe(true);
+      expect(cx.mode).toBe('complex');
+      expect(complexParts(cx.run({ y: 3 }))).toEqual([6, 2]);
+      expect(complexParts(cx.run({ y: -1 }))).toEqual([-2, 2]);
       const strict: any = compile(
         ce.box(expr) as any,
         { to: 'javascript', mode: 'strict' } as any
@@ -841,7 +839,7 @@ describe('COMPILED PIPE', () => {
       'y',
     ];
     for (const expr of [one, two]) {
-      for (const mode of [undefined, 'auto', 'strict']) {
+      for (const mode of [undefined, 'complex', 'strict']) {
         const result: any = compile(
           ce.box(expr) as any,
           { to: 'javascript', mode } as any
@@ -877,16 +875,16 @@ describe('COMPILED PIPE', () => {
       return [value.re, value.im];
     };
 
-    test('a position typed `number`: auto compiles in complex mode, strict declines', () => {
+    test('a position typed `number`: complex mode compiles, strict declines', () => {
       const expr = literal(['Typed', 'p', "'tuple<number, real>'"]);
       expect(expected(expr)).toEqual([2, 1]);
-      const auto: any = compile(
+      const cx: any = compile(
         ce.box(expr) as any,
-        { to: 'javascript', fallback: false } as any
+        { to: 'javascript', fallback: false, mode: 'complex' } as any
       );
-      expect(auto.success).toBe(true);
-      expect(auto.mode).toBe('complex');
-      expect(complexParts(auto.run({ P: jsP }))).toEqual([2, 1]);
+      expect(cx.success).toBe(true);
+      expect(cx.mode).toBe('complex');
+      expect(complexParts(cx.run({ P: jsP }))).toEqual([2, 1]);
       const d = laneMismatchOf(expr);
       expect(d?.boundary).toBe('applied function-literal parameter');
       expect(d?.binding).toBe('the parameter `p` of the function literal');

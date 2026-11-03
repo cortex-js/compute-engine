@@ -328,7 +328,7 @@ describe('COMPILED FOLDS OVER ELEMENTS OF UNKNOWN TYPE', () => {
 });
 
 describe('A COMPILED CALL OF A FUNCTION THAT RETURNS A LIST', () => {
-  const MODES = ['strict', 'auto', 'complex'] as const;
+  const MODES = ['strict', 'complex'] as const;
   for (const mode of MODES) {
     test(`${mode}: g(x)[1] + g(x)[2], g := t ↦ [t, 2]`, () => {
       const ce = new ComputeEngine();

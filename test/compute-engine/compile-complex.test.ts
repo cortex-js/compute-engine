@@ -617,7 +617,7 @@ describe('COMPILE COMPLEX - literal square fast path and recursive lambdas', () 
     );
     const res = compile(
       e.box(['M2', 5, ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']]]),
-      { fallback: false }
+      { mode: 'complex', fallback: false }
     );
     const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
     const interp = e.box(['M2', 5, ['Complex', 0.13, 0.21]]).N();
@@ -657,19 +657,16 @@ describe('COMPILE COMPLEX - literal square fast path and recursive lambdas', () 
     );
     const res = compile(
       e.box(['K', 10, ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']]]),
-      { fallback: false }
+      { mode: 'complex', fallback: false }
     );
     // True recursion: the emitted call references the named local. K's `z`
     // slot is wide-typed and receives the complex `x + iy`; per-call-site lane
-    // specialization (`_fn_K$z01`) is gone — the default `auto` escalates the
-    // whole compilation to `mode: 'complex'` at that boundary (compile-mode
-    // step 4, 2026-08-16), so there is ONE `_fn_K`, complex throughout, which
-    // the recursive self-call `K(n-1, z)` reuses.
+    // specialization (`_fn_K$z01`) is gone — in `mode: 'complex'` there is
+    // ONE `_fn_K`, complex throughout, which the recursive self-call
+    // `K(n-1, z)` reuses.
     expect(res.code).toContain('_fn_K(');
     expect(res.code).not.toContain('$z');
     expect(res.mode).toBe('complex');
-    expect(res.escalation?.boundary).toBe('user-function parameter');
-    expect(res.escalation?.binding).toBe('the parameter `z` of `K`');
     const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
     const interp = e.box(['K', 10, ['Complex', 0.13, 0.21]]).N();
     expect(v.re).toBeCloseTo(interp.re, 12);
@@ -823,7 +820,7 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
     );
     const res = compile(
       e.box(['K2', 6, ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']]]),
-      { fallback: false }
+      { mode: 'complex', fallback: false }
     );
     const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
     const interp = e.box(['K2', 6, ['Complex', 0.13, 0.21]]).N();
@@ -853,7 +850,7 @@ describe('COMPILE COMPLEX - coercion reads the value SHAPE, not the static type'
   // Both directions are pinned as runtime values against the interpreter.
   const armValue = 0.9797958971132712; // √0.96, the interpreter's answer
 
-  it('a promoted radical arm is NOT wrapped (default/complex discipline)', () => {
+  it('a promoted radical arm is NOT wrapped (complex discipline)', () => {
     const { ComputeEngine } = require('../../src/compute-engine');
     const e = new ComputeEngine();
     e.declare('x', 'real');
@@ -867,7 +864,7 @@ describe('COMPILE COMPLEX - coercion reads the value SHAPE, not the static type'
           ['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]],
         ],
       ]),
-      { fallback: false }
+      { mode: 'complex', fallback: false }
     );
     expect(res.run!({ x: -1 })).toBeCloseTo(armValue, 12);
     expect(res.run!({ x: 1 })).toBe(2);
@@ -1081,7 +1078,10 @@ describe('a complex tuple component compiles and keeps its shape (Tycho item 62)
 
   // The same invariant, for a component that only becomes complex when called.
   test('a call-time complex component keeps its slot', () => {
-    const r = jsTarget().compile(ce.parse('(t, \\sqrt{t})', { strict: false }));
+    const r = jsTarget().compile(
+      ce.parse('(t, \\sqrt{t})', { strict: false }),
+      { mode: 'complex' }
+    );
     // sqrt of a negative argument is complex only at call time
     expect(r.run({ t: -4 })).toEqual([-4, { re: 0, im: 2 }]);
   });
@@ -1125,11 +1125,11 @@ describe('an unused complex operand leaves the result real', () => {
 // = NaN behind `success: true`. It was filed against the former promotion
 // opt-in option (`b(a(t))` with `a(t) := √(t−1)`) but was never specific to it — a
 // declared-complex `w` took the same path on the default route. Per-call-site
-// lane specialization (`_fn_b$z1`) served this for one release; since the
-// compile-mode migration (step 4, 2026-08-16) the default mode `auto` answers
-// the same boundary by escalating ONCE to `mode: 'complex'` — a single
-// `_fn_b`, complex throughout, with `result.escalation` naming the binding.
-// A call whose arguments are all real never escalates and keeps the real lane.
+// lane specialization (`_fn_b$z1`) served this for one release; now a
+// complex argument at a wide parameter compiles in `mode: 'complex'` — a
+// single `_fn_b`, complex throughout — and is a lane-mismatch decline in the
+// default `strict` mode. A call whose arguments are all real keeps the real
+// lane.
 describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function parameter (per-lane emission)', () => {
   const fresh = () => {
     const { ComputeEngine } = require('../../src/compute-engine');
@@ -1147,25 +1147,21 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
 
   it('the ROADMAP witness |b(a(t))/2 − 1| matches the interpreter', () => {
     const e = fresh();
-    // No opt-in: the default `auto` promotes the unknown-sign radical in `a`
-    // and escalates at `b`'s wide parameter (compile-mode step 4, 2026-08-16).
-    const r = compile(e.parse('|b(a(t))/2 - 1|'));
+    // `mode: 'complex'` promotes the unknown-sign radical in `a`.
+    const r = compile(e.parse('|b(a(t))/2 - 1|'), { mode: 'complex' });
     expect(r.success).toBe(true);
     // Interpreter: |2·√(0.3−1)/2 − 1| = |i·0.83666 − 1| = 1.30384…
     expect(r.run!({ t: 0.3 })).toBeCloseTo(1.3038404810405297, 12);
   });
 
-  it('b(a(t)) escalates the compilation to the complex lane and returns {re, im}', () => {
+  it('b(a(t)) compiles on the complex lane and returns {re, im}', () => {
     const e = fresh();
     expect(BaseCompiler.isComplexValued(e.parse('a(t)'))).toBe(false); // static verdict
-    const r = compile(e.parse('t \\mapsto b(a(t))'));
-    // One emission, no `$z` specialization: the promoted `a(t)` reaching `b`'s
-    // wide parameter escalates the whole compilation to `mode: 'complex'`
-    // (compile-mode step 4, 2026-08-16).
+    const r = compile(e.parse('t \\mapsto b(a(t))'), { mode: 'complex' });
+    // One emission, no `$z` specialization: the promoted `a(t)` reaches `b`'s
+    // wide parameter, and `_fn_b` is complex throughout.
     expect(r.code).not.toContain('$z');
     expect(r.mode).toBe('complex');
-    expect(r.escalation?.boundary).toBe('user-function parameter');
-    expect(r.escalation?.binding).toBe('the parameter `x` of `b`');
     const v = r.run!(0.3) as { re: number; im: number };
     expect(v.re).toBeCloseTo(0, 12);
     expect(v.im).toBeCloseTo(1.6733200530681511, 12);
@@ -1173,13 +1169,13 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
 
   it('an identity body (pass-through) keeps working through the complex lane', () => {
     const e = fresh();
-    const r = compile(e.parse('t \\mapsto f(a(t))'));
+    const r = compile(e.parse('t \\mapsto f(a(t))'), { mode: 'complex' });
     const v = r.run!(0.3) as { re: number; im: number };
     expect(v.re).toBeCloseTo(0, 12);
     expect(v.im).toBeCloseTo(0.8366600265340756, 12);
   });
 
-  it('DEFAULT path: a declared-complex argument to b(x) := 2x computes 2w', () => {
+  it('a declared-complex argument to b(x) := 2x computes 2w', () => {
     const e = fresh();
     for (const [src, expected] of [
       ['b(w)', { re: 2, im: 4 }],
@@ -1191,7 +1187,7 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
       ['h(2, w)', { re: 2, im: 4 }],
       ['h(w, w)', { re: -3, im: 4 }],
     ] as const) {
-      const r = compile(e.parse(src), { fallback: false });
+      const r = compile(e.parse(src), { mode: 'complex', fallback: false });
       expect(r.success).toBe(true);
       const v = r.run!({ w: W, t: 2 }) as { re: number; im: number };
       expect([src, v.re, v.im]).toEqual([src, expected.re, expected.im]);
@@ -1201,7 +1197,10 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
   it('a real-valued body over a complex lane parameter stays a plain number', () => {
     const e = fresh();
     e.parse('r(x) := |x|').evaluate();
-    const r = compile(e.parse('r(w) + 1'), { fallback: false });
+    const r = compile(e.parse('r(w) + 1'), {
+      mode: 'complex',
+      fallback: false,
+    });
     expect(r.run!({ w: { re: 3, im: 4 } })).toBe(6);
   });
 
@@ -1216,12 +1215,13 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     expect(r.run!(0.3)).toBeCloseTo(0.6, 12);
   });
 
-  it('a real and a complex call to one function share the single escalated emission', () => {
+  it('a real and a complex call to one function share the single complex emission', () => {
     const e = fresh();
-    const r = compile(e.parse('t \\mapsto b(a(t)) + b(t)'));
-    // The two lanes no longer coexist: the escalation to `mode: 'complex'`
-    // compiles ONE `_fn_b`, complex-bodied, which serves the real call `b(t)`
-    // too (compile-mode step 4, 2026-08-16).
+    const r = compile(e.parse('t \\mapsto b(a(t)) + b(t)'), {
+      mode: 'complex',
+    });
+    // The two lanes do not coexist: `mode: 'complex'` compiles ONE `_fn_b`,
+    // complex-bodied, which serves the real call `b(t)` too.
     expect(r.code).not.toContain('$z');
     expect((r.code!.match(/const _fn_b = /g) ?? []).length).toBe(1);
     expect(r.mode).toBe('complex');
@@ -1230,12 +1230,11 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     expect(v.im).toBeCloseTo(1.6733200530681511, 12);
   });
 
-  it('a recursive self-call inside the escalated compilation reuses the one emission', () => {
-    // K's `z` slot is wide-typed and receives a complex argument, so the
-    // compilation escalates to `mode: 'complex'` (compile-mode step 4,
-    // 2026-08-16). There is a single `_fn_K`, its `z` framed as a scalar
-    // complex object, which the self-call `K(n-1, z)` reuses — never a
-    // real-lane emission that would receive the complex object.
+  it('a recursive self-call inside a complex compilation reuses the one emission', () => {
+    // K's `z` slot is wide-typed and receives a complex argument, compiled
+    // in `mode: 'complex'`. There is a single `_fn_K`, its `z` framed as a
+    // scalar complex object, which the self-call `K(n-1, z)` reuses — never
+    // a real-lane emission that would receive the complex object.
     const { ComputeEngine } = require('../../src/compute-engine');
     const e = new ComputeEngine();
     e.assign(
@@ -1261,18 +1260,20 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
         'z',
       ])
     );
-    const r = compile(e.parse('t \\mapsto K(3, t + 2i)'), { fallback: false });
+    const r = compile(e.parse('t \\mapsto K(3, t + 2i)'), {
+      mode: 'complex',
+      fallback: false,
+    });
     expect(r.code).not.toContain('$z');
     expect((r.code!.match(/const _fn_K = /g) ?? []).length).toBe(1);
     expect(r.mode).toBe('complex');
-    expect(r.escalation?.binding).toBe('the parameter `z` of `K`');
     const v = r.run!(0.1) as { re: number; im: number };
     const interp = e.box(['K', 3, ['Complex', 0.1, 2]]).N();
     expect(v.re).toBeCloseTo(interp.re, 10);
     expect(v.im).toBeCloseTo(interp.im, 10);
   });
 
-  it('a COLLECTION of complex scalars broadcast into a wide-typed parameter escalates', () => {
+  it('a COLLECTION of complex scalars broadcast into a wide-typed parameter', () => {
     // `b(L)` broadcasts at run time (`_SYS.bcastFn`) — the body receives one
     // ELEMENT per call, so the boundary is the elements'. Before: `[NaN, NaN]`.
     const e = fresh();
@@ -1282,12 +1283,11 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
       { re: 0, im: 1 },
     ];
     for (const src of ['b(L)', 'b([w, 2w])']) {
-      const r = compile(e.parse(src), { fallback: false });
-      // One emission, escalated, instead of the retired `_fn_b$z1`
-      // specialization (compile-mode step 4, 2026-08-16).
+      const r = compile(e.parse(src), { mode: 'complex', fallback: false });
+      // One complex emission instead of the retired `_fn_b$z1`
+      // specialization.
       expect(r.code).not.toContain('$z');
       expect(r.mode).toBe('complex');
-      expect(r.escalation?.binding).toBe('the parameter `x` of `b`');
       expect(r.run!({ L, w: W })).toEqual([
         { re: 2, im: 4 },
         src === 'b(L)' ? { re: 0, im: 2 } : { re: 4, im: 8 },
@@ -1318,7 +1318,7 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
       '\\mathrm{Map}(b, L)',
       '\\mathrm{Map}(x \\mapsto 2x, L)',
     ]) {
-      const r = compile(e.parse(src), { fallback: false });
+      const r = compile(e.parse(src), { mode: 'complex', fallback: false });
       expect(r.run!({ L })).toEqual(expected);
     }
     // A real source keeps the real-lane `_fn_b` reference, with no complex
@@ -1710,21 +1710,24 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
       },
     ],
   ])('a BARE user-function combiner bound via %s', (_label, define) => {
+    // A complex element reaches the wide parameter of the bare combiner,
+    // which compiles in `mode: 'complex'` only.
+    const cxop = { ...opts, mode: 'complex' } as const;
     test('Reduce/Scan with the widening combiner `h` compute complex', () => {
       const engine = makeEngine();
       define(engine);
       expect(
-        compile(engine.box(['Reduce', 'L', 'h', 0]), opts).run!({})
+        compile(engine.box(['Reduce', 'L', 'h', 0]), cxop).run!({})
       ).toEqual(cx(2, 6));
-      expect(compile(engine.box(['Scan', 'L', 'h', 0]), opts).run!({})).toEqual(
+      expect(compile(engine.box(['Scan', 'L', 'h', 0]), cxop).run!({})).toEqual(
         [cx(2, 4), cx(2, 6)]
       );
       expect(
-        compile(engine.box(['Reduce', 'L', 'h', ['Complex', 1, 1]]), opts).run!(
+        compile(engine.box(['Reduce', 'L', 'h', ['Complex', 1, 1]]), cxop).run!(
           {}
         )
       ).toEqual(cx(3, 7));
-      expect(compile(engine.box(['Scan', 'L', 'h']), opts).run!({})).toEqual([
+      expect(compile(engine.box(['Scan', 'L', 'h']), cxop).run!({})).toEqual([
         cx(1, 2),
         cx(1, 4),
       ]);
@@ -1732,7 +1735,7 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
     test('the real-accumulator combiner `n` takes the element lane and stays real', () => {
       const engine = makeEngine();
       define(engine);
-      const r = compile(engine.box(['Reduce', 'L', 'n', 0]), opts);
+      const r = compile(engine.box(['Reduce', 'L', 'n', 0]), cxop);
       expect(r.run!({})).toBeCloseTo(1 + Math.sqrt(5), 12);
     });
     test('over a REAL source the combiner keeps the real lane (`_fn_h`)', () => {
@@ -1755,10 +1758,10 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
         'number'
       );
       expect(
-        compile(engine.box(['Add', ['Reduce', 'L', 'h', 0], 1]), opts).run!({})
+        compile(engine.box(['Add', ['Reduce', 'L', 'h', 0], 1]), cxop).run!({})
       ).toEqual(cx(3, 6));
       expect(
-        compile(engine.box(['Add', ['At', ['Scan', 'L', 'h', 0], 2], 1]), opts)
+        compile(engine.box(['Add', ['At', ['Scan', 'L', 'h', 0], 2], 1]), cxop)
           .run!({})
       ).toEqual(cx(3, 6));
     });
@@ -2002,10 +2005,10 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
     ]);
   const expected = Math.sqrt(89) - 1;
 
-  it('auto computes the real value on the real lane', () => {
+  it('strict mode computes the real value on the real lane', () => {
     ce.declare('zf1', 'complex');
     ce.assign('zf1', 5);
-    const r = compile(witness('zf1'), { mode: 'auto', fallback: false });
+    const r = compile(witness('zf1'), { mode: 'strict', fallback: false });
     expect(r.success).toBe(true);
     // No promotion: the sign analysis reads the ASSIGNED value through
     // `zf1²` (positive), so the radicand is proven non-negative and the
@@ -2013,17 +2016,15 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
     // answer `not-zero` from the `complex` declaration alone, which hid
     // that proof and forced the complex lane; a declared `complex` is not
     // a proof of a non-real value.
-    expect(r.promoted).toBe(false);
     expect(r.run!({ x: -8 })).toBeCloseTo(expected, 10);
     ce.forget('zf1');
   });
 
-  it('auto promotes for a genuinely complex assigned value', () => {
+  it('complex mode promotes for a genuinely complex assigned value', () => {
     ce.declare('zf5', 'complex');
     ce.assign('zf5', ce.box(['Complex', 0, 5]));
-    const r = compile(witness('zf5'), { mode: 'auto', fallback: false });
+    const r = compile(witness('zf5'), { mode: 'complex', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(true);
     // √(64 − 25) − 1
     expect(r.run!({ x: -8 })).toBeCloseTo(Math.sqrt(39) - 1, 10);
     ce.forget('zf5');
@@ -2041,7 +2042,7 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
   it('a symbolic real value (√2) is lifted too', () => {
     ce.declare('zf3', 'complex');
     ce.assign('zf3', ce.expr(['Sqrt', 2]));
-    const r = compile(witness('zf3'), { mode: 'auto', fallback: false });
+    const r = compile(witness('zf3'), { mode: 'complex', fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({ x: -8 })).toBeCloseTo(Math.sqrt(66) - 1, 10);
     ce.forget('zf3');
@@ -2052,7 +2053,7 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
     // real-only: the kernel's `cisreal` guard yields NaN by design (D6).
     ce.declare('zf4', 'complex');
     ce.assign('zf4', ce.expr(['Complex', 3, 4]));
-    const r = compile(witness('zf4'), { mode: 'auto', fallback: false });
+    const r = compile(witness('zf4'), { mode: 'complex', fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({ x: -8 })).toBeNaN();
     ce.forget('zf4');
@@ -2060,9 +2061,8 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
 
   it('a plain real assignment (no complex declaration) folds un-lifted', () => {
     ce.assign('zf5', 5);
-    const r = compile(witness('zf5'), { mode: 'auto', fallback: false });
+    const r = compile(witness('zf5'), { mode: 'strict', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(false);
     expect(r.run!({ x: -8 })).toBeCloseTo(expected, 10);
     ce.forget('zf5');
   });
@@ -2088,9 +2088,8 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
       ['Sqrt', ['Add', ['Power', 'x', 2], ['Power', 'Lbc', 2]]],
       1,
     ]);
-    const r = compile(expr, { mode: 'auto', fallback: false });
+    const r = compile(expr, { mode: 'strict', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(false);
     const v = r.run!({ x: -8 }) as number[];
     expect(v.map((e) => typeof e)).toEqual([
       'number',
@@ -2107,13 +2106,13 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
     setupL();
     const sqrtL = ['Sqrt', ['Add', ['Power', 'x', 2], ['Power', 'Lbc', 2]]];
     const mul = compile(ce.expr(['Multiply', sqrtL, 2]), {
-      mode: 'auto',
+      mode: 'complex',
       fallback: false,
     });
     expect(mul.success).toBe(true);
     expect((mul.run!({ x: -8 }) as number[])[0]).toBeCloseTo(16, 10);
     const max = compile(ce.expr(['Max', 0, ['Subtract', sqrtL, 1]]), {
-      mode: 'auto',
+      mode: 'complex',
       fallback: false,
     });
     expect(max.success).toBe(true);
@@ -2128,9 +2127,8 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
       ['Ln', ['Add', ['Power', 'x', 2], ['Power', 'Lbc', 2], 1]],
       1,
     ]);
-    const r = compile(expr, { mode: 'auto', fallback: false });
+    const r = compile(expr, { mode: 'strict', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(false);
     const v = r.run!({ x: -8 }) as number[];
     expect(v[0]).toBeCloseTo(Math.log(65) + 1, 10);
     ce.forget('Lbc');
@@ -2144,11 +2142,10 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
     // `-1` yields the interpreter's principal value of `(-1)^{0.3}`.
     ce.assign('Mbc', ce.expr(['List', -1, 2]));
     const r = compile(ce.expr(['Power', ['Add', 'x', 'Mbc'], 0.3]), {
-      mode: 'auto',
+      mode: 'complex',
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(true);
     const v = r.run!({ x: 0 }) as [{ re: number; im: number }, number];
     expect(v[0].re).toBeCloseTo(Math.cos(0.3 * Math.PI), 10);
     expect(v[0].im).toBeCloseTo(Math.sin(0.3 * Math.PI), 10);
@@ -2166,7 +2163,7 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
     let outcome: 'declined' | 'threw' | 'ran' = 'ran';
     let v: unknown;
     try {
-      const r = compile(expr, { mode: 'auto', fallback: false });
+      const r = compile(expr, { mode: 'complex', fallback: false });
       if (!r.success) outcome = 'declined';
       else v = r.run!({});
     } catch {
@@ -2202,9 +2199,9 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
   const hsv = () =>
     ce.expr(['Hsv', ['Multiply', 90, ['Sqrt', ['Add', 'x', 1]]], 1, 1]);
 
-  it('auto matches strict on real inputs through the promoted lane', () => {
+  it('complex matches strict on real inputs through the promoted lane', () => {
     const s = compile(hsv(), { mode: 'strict', fallback: false });
-    const a = compile(hsv(), { mode: 'auto', fallback: false });
+    const a = compile(hsv(), { mode: 'complex', fallback: false });
     expect(s.success).toBe(true);
     expect(a.success).toBe(true);
     for (const x of [0, 3]) {
@@ -2223,7 +2220,7 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
     // `Array.isArray` workaround). A compiled color is now the object
     // `{ space, c0, c1, c2, alpha }`, so the failing branch is that object
     // with NaN channels.
-    const a = compile(hsv(), { mode: 'auto', fallback: false });
+    const a = compile(hsv(), { mode: 'complex', fallback: false });
     expect(a.run!({ x: -2 })).toEqual({
       space: 'oklch',
       c0: NaN,
@@ -2233,7 +2230,7 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
     });
   });
 
-  it('every color head: auto matches strict on real inputs, NaN color on complex', () => {
+  it('every color head: complex matches strict on real inputs, NaN color on complex', () => {
     const sqrtX = ['Sqrt', ['Add', 'x', 1]];
     const shapes: [string, unknown][] = [
       ['Rgb', ['Rgb', ['Multiply', 0.2, sqrtX], 0.5, 0.5]],
@@ -2260,7 +2257,7 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
     for (const [label, json] of shapes) {
       const expr = ce.expr(json as Parameters<typeof ce.expr>[0]);
       const s = compile(expr, { mode: 'strict', fallback: false });
-      const a = compile(expr, { mode: 'auto', fallback: false });
+      const a = compile(expr, { mode: 'complex', fallback: false });
       expect(`${label}: ${s.success}/${a.success}`).toBe(`${label}: true/true`);
       const sv = colorChannels(s.run!({ x: 3 }));
       const av = colorChannels(a.run!({ x: 3 }));
@@ -2417,7 +2414,7 @@ describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcas
         't',
         ['Tuple', ['Sqrt', ['Subtract', 't', 9]], 0],
       ] as never),
-      { fallback: false }
+      { mode: 'complex', fallback: false }
     );
     expect(r.code).toContain('_SYS.smul');
     const v = r.run!({ t: 2 }) as [{ re: number; im: number }, number];
@@ -2617,7 +2614,7 @@ describe('COMPILE COMPLEX - a dead arm of a selection does not set the lane (CE-
       ['Add', 'x', ['If', ['Greater', 1, 0], 'y', radical]],
     ],
   ];
-  for (const mode of ['auto', 'strict'] as const) {
+  for (const mode of ['strict'] as const) {
     for (const [name, json] of cases) {
       it(`${mode}: ${name} stays on the real lane`, () => {
         const engine = new ComputeEngine();
@@ -2640,7 +2637,7 @@ describe('COMPILE COMPLEX - a dead arm of a selection does not set the lane (CE-
         'x',
         ['If', ['Less', 1, 0], 'y', ['Sqrt', ['Subtract', 'y', 1]]],
       ]) as never,
-      { to: 'javascript', mode: 'auto', fallback: false } as never
+      { to: 'javascript', mode: 'complex', fallback: false } as never
     ) as any;
     expect(result.code).toContain('re:');
   });

@@ -61,9 +61,9 @@ const ROWS = [
 ];
 
 describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
-  // The fold uses `_SYS.sadd`/`_SYS.smul`, which give a complex entry where
-  // an element is complex; the parent reads its entries with the same
-  // helpers, never with the JavaScript `+`.
+  // In the complex mode, the fold uses `_SYS.sadd`/`_SYS.smul`, which give a
+  // complex entry where an element is complex; the parent reads its entries
+  // with the same helpers, never with the JavaScript `+`.
   test.each([
     ['Sum + 1', ['Add', ['Sum', 'L'], 1], [c(2, 1), 6], '[(2 + i),6]'],
     [
@@ -94,7 +94,7 @@ describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
       '[[2,3],[(2 + i),6]]',
     ],
   ])('%s over list<unknown>', (_, expr, compiled, evaluated) => {
-    expect(run('list<unknown>', expr, ROWS)).toEqual(compiled);
+    expect(run('list<unknown>', expr, ROWS, 'complex')).toEqual(compiled);
     expect(evaluate('list<unknown>', expr, ROWS)).toBe(evaluated);
   });
 

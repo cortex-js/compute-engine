@@ -6365,8 +6365,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // See `CompileTarget.shapeDispatch`.
       shapeDispatch: intervalShapeDispatch,
       // Intervals are real: the strict discipline is the only mode this
-      // target offers (`CompileMode`); a requested `'complex'`/`'auto'` is
-      // the `unsupported-mode` decline.
+      // target offers (`CompileMode`); a requested `'complex'` is the
+      // `unsupported-mode` decline.
       supportedModes: INTERVAL_SUPPORTED_MODES,
       // See `CompileTarget.varsObjectName`: free symbols read as `_.<id>`
       // (below), so a lambda parameter spelled `_` must not shadow the vars

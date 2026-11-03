@@ -98,6 +98,16 @@ export interface CoreHooks {
     engine: ComputeEngine,
     target: CompileTarget<Expression>
   ): ElementLane;
+  /** Whether the scalar closure of an element-wise broadcast of `h` over
+   * `args` returns a `{re, im}` object (`elementwiseClosureIsComplex()`,
+   * `compile-broadcast.ts`). */
+  elementwiseClosureIsComplex(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    argIsComplex: ReadonlyArray<boolean>,
+    target: CompileTarget<Expression>
+  ): boolean;
   constantFoldValue(
     expr: Expression,
     target: CompileTarget<Expression>
@@ -251,6 +261,7 @@ export const core: CoreHooks = {
   shaderSelectionStatement: notInstalled('shaderSelectionStatement'),
   elementComplexness: notInstalled('elementComplexness'),
   operandElementLane: notInstalled('operandElementLane'),
+  elementwiseClosureIsComplex: notInstalled('elementwiseClosureIsComplex'),
   constantFoldValue: notInstalled('constantFoldValue'),
   conditionNode: notInstalled('conditionNode'),
   noteLocalComplex: notInstalled('noteLocalComplex'),

@@ -91,3 +91,95 @@ describe('STOCHASTIC EQUALITY', () => {
     expect(a.isIdenticallyEqual(b)).toBe(true);
   });
 });
+
+// The compiled sample evaluator is in the `'strict'` mode: with `x: real`,
+// `Sqrt(x)` is computed in the real lane, and a complex value gives `NaN`.
+// A complex projection can remove that `NaN` before it reaches the result:
+// strict code for `Imaginary(Sqrt(x))` is the literal `0`, but the
+// interpreter gives `1` at `x = -1`. An expression with a projection over an
+// operand that is not a number literal is evaluated with the interpreter.
+describe('STOCHASTIC EQUALITY WITH A COMPLEX PROJECTION', () => {
+  beforeAll(() => {
+    ce.pushScope();
+    ce.declare('x', 'real');
+  });
+  afterAll(() => ce.popScope());
+
+  it('Imaginary(Sqrt(x)) = 0 is false', () => {
+    expect(
+      stochasticEqual(ce.box(['Imaginary', ['Sqrt', 'x']]), ce.box(0))
+    ).toBe(false);
+    expect(
+      stochasticEqual(ce.box(['Abs', ['Imaginary', ['Sqrt', 'x']]]), ce.box(0))
+    ).toBe(false);
+    expect(stochasticEqual(ce.box(['Imaginary', ['Ln', 'x']]), ce.box(0))).toBe(
+      false
+    );
+  });
+
+  it('Real, Argument and Conjugate of Sqrt(x) are not confirmed as real', () => {
+    const sqrtX = ce.box(['Sqrt', 'x']);
+    expect(stochasticEqual(ce.box(['Real', ['Sqrt', 'x']]), sqrtX)).toBe(false);
+    expect(
+      stochasticEqual(ce.box(['Argument', ['Sqrt', 'x']]), ce.box(0))
+    ).toBe(false);
+    expect(stochasticEqual(ce.box(['Conjugate', ['Sqrt', 'x']]), sqrtX)).toBe(
+      false
+    );
+  });
+
+  it('a true identity with a projection is still confirmed', () => {
+    expect(stochasticEqual(ce.box(['Imaginary', 'x']), ce.box(0))).toBe(true);
+    expect(
+      stochasticEqual(
+        ce.box(['Imaginary', ['Sqrt', 'x']]),
+        ce.box(['Sqrt', ['Max', 0, ['Negate', 'x']]])
+      )
+    ).toBe(true);
+  });
+});
+
+// A side is evaluated with its compiled code only when every node is a number
+// literal, a symbol, or a head whose strict lowering propagates `NaN`. A head
+// that consumes a `NaN` (the compiled `Coalesce` reads `NaN` as absent), or a
+// call of a user function, can remove the `NaN` of a complex intermediate, so
+// such a side is evaluated with the interpreter.
+describe('STOCHASTIC EQUALITY WITH A HEAD THAT CONSUMES NaN', () => {
+  beforeAll(() => {
+    ce.pushScope();
+    ce.declare('x', 'real');
+  });
+  afterAll(() => ce.popScope());
+
+  it('Coalesce(Sqrt(x), 0) = Sqrt(Max(0, x)) is false', () => {
+    expect(
+      stochasticEqual(
+        ce.box(['Coalesce', ['Sqrt', 'x'], 0]),
+        ce.box(['Sqrt', ['Max', 0, 'x']])
+      )
+    ).toBe(false);
+  });
+
+  it('a call of a user function is evaluated with the interpreter', () => {
+    ce.pushScope();
+    try {
+      ce.box([
+        'Assign',
+        'f',
+        ['Function', ['Imaginary', ['Sqrt', 't']], ['Typed', 't', "'real'"]],
+      ]).evaluate();
+      expect(stochasticEqual(ce.box(['f', 'x']), ce.box(0))).toBe(false);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  it('a true identity over heads that propagate NaN is still confirmed', () => {
+    expect(
+      stochasticEqual(ce.parse('\\sin(x)^2 + \\cos(x)^2'), ce.box(1))
+    ).toBe(true);
+    expect(stochasticEqual(ce.parse('e^{2x}'), ce.parse('(e^x)^2'))).toBe(
+      true
+    );
+  });
+});

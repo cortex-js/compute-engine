@@ -30,8 +30,12 @@ const ce = new ComputeEngine();
 ce.declare('x', 'real');
 ce.precision = 'machine';
 
-function run(json: any, vars: Record<string, unknown> = {}): unknown {
-  const r = compile(ce.box(json), { to: 'javascript', fallback: false });
+function run(
+  json: any,
+  vars: Record<string, unknown> = {},
+  mode?: 'complex'
+): unknown {
+  const r = compile(ce.box(json), { to: 'javascript', fallback: false, mode });
   expect(r.success).toBe(true);
   return (r.run as (v: Record<string, unknown>) => unknown)(vars);
 }
@@ -448,7 +452,10 @@ describe('TYCHO 264 — per-shape broadcast kernels keep the interpreter semanti
   });
 
   test('a list result with a complex cell is normalized at the boundary', () => {
-    expect(run(['Sqrt', ['List', 4, -4]])).toEqual([2, { re: 0, im: 2 }]);
+    expect(run(['Sqrt', ['List', 4, -4]], {}, 'complex')).toEqual([
+      2,
+      { re: 0, im: 2 },
+    ]);
     expect(run(['List', 1, ['Complex', 2, 0], true])).toEqual([1, 2, true]);
   });
 

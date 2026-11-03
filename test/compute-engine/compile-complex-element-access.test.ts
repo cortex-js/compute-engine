@@ -291,17 +291,15 @@ describe('promotion over a collection-valued body (ROADMAP 2026-08-15)', () => {
     }
   );
 
-  test('the DEFAULT now promotes too, and matches the interpreter', () => {
-    // Was "OFF: still the real kernel and its NaN". The default mode is `auto`
-    // since the compile-mode migration (step 4, 2026-08-16), and `auto`
-    // promotes an unknown-sign radical — so no opt-in is needed to reach the
-    // interpreter's value; `mode: 'strict'` is what keeps the real kernel.
+  test('the DEFAULT keeps the real kernel and its NaN', () => {
+    // The default mode is `strict`: an unknown-sign radical stays on the
+    // real lane, so `mode: 'complex'` is needed to reach the interpreter's
+    // value.
     const ce = withFn('w', RADICALS('List'));
     const r = compile(ce.box(CHAIN('w') as any))!;
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.cabs');
-    expect(r.promoted).toBe(true);
-    expect(r.run!({ t: 0.3 } as any)).toBeCloseTo(PROMOTED, 12);
+    expect(r.code).toContain('Math.abs');
+    expect(r.run!({ t: 0.3 } as any)).toBeNaN();
     const strict = compile(ce.box(CHAIN('w') as any), { mode: 'strict' })!;
     expect(strict.code).toContain('Math.abs');
     expect(strict.run!({ t: 0.3 } as any)).toBeNaN();
@@ -330,7 +328,9 @@ describe('promotion over a collection-valued body (ROADMAP 2026-08-15)', () => {
     // (`{re, im} < 2` is never true), wrong at t = 2 where the interpreter
     // answers True.
     const ce = withFn('w', RADICALS('List'));
-    const r = compile(ce.box(['Less', ['At', ['w', 't'], 1], 2] as any))!;
+    const r = compile(ce.box(['Less', ['At', ['w', 't'], 1], 2] as any), {
+      mode: 'complex',
+    })!;
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.cisreal(');
     expect(r.run!({ t: 0.3 } as any)).toBe(false); // √(−0.7) is complex
@@ -378,7 +378,7 @@ describe('whole-collection scalar arithmetic in a promoting mode (ROADMAP 2026-0
   const IN = { t: 3 };
   const OUT = { t: 0.3 };
 
-  const compiled = (body: unknown, mj: unknown, mode: 'complex' | 'auto') => {
+  const compiled = (body: unknown, mj: unknown, mode: 'complex') => {
     const ce = withFn('w', body);
     return compile(ce.box(mj as any), { mode })!;
   };
@@ -389,7 +389,6 @@ describe('whole-collection scalar arithmetic in a promoting mode (ROADMAP 2026-0
     ['w(t)/2', ['Divide', ['w', 't'], 2]],
   ])('ON: %s compiles', (_label, mj) => {
     expect(compiled(W, mj, 'complex').success).toBe(true);
-    expect(compiled(W, mj, 'auto').success).toBe(true);
   });
 
   test('ON: the values match the interpreter at both ends of the domain', () => {
@@ -411,7 +410,7 @@ describe('whole-collection scalar arithmetic in a promoting mode (ROADMAP 2026-0
 
   test('the out-of-domain elements come back complex whether the opt-in is on or off', () => {
     const mj = ['Multiply', 2, ['w', 't']];
-    for (const mode of ['complex', 'auto'] as const) {
+    for (const mode of ['complex'] as const) {
       const ce = withFn('w', W);
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const r = compile(ce.box(mj as any), { mode })!;
@@ -425,22 +424,18 @@ describe('whole-collection scalar arithmetic in a promoting mode (ROADMAP 2026-0
   });
 
   test('an unaffected shape lowers identically under the default and under strict', () => {
-    // Promotion must not change what an unaffected shape compiles to. The
-    // no-radical control below is that shape: its elements never promote, so
-    // the default `auto` emits the same real `_SYS.bcast` closure as `strict`.
-    // (The comparison used to be ON vs OFF of a promotion opt-in option; its
-    // replacement `mode: 'complex'` has a single lane that lifts wide symbols
-    // by design — compile-mode step 4, 2026-08-16.)
+    // The no-radical control below is an unaffected shape: the default mode
+    // emits the same real `_SYS.bcast` closure as an explicit `strict`.
     const mj = ['Multiply', 2, ['w', 't']];
     const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
     const strict = compile(withFn('w', P).box(mj as any), { mode: 'strict' })!;
-    expect(compiled(P, mj, 'auto').code).toBe(strict.code);
+    expect(compile(withFn('w', P).box(mj as any))!.code).toBe(strict.code);
   });
 
   test('CONTROL: a collection body with NO radical compiles under both flag states', () => {
     const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
     const mj = ['Multiply', 2, ['w', 't']];
-    for (const mode of ['complex', 'auto'] as const) {
+    for (const mode of ['complex'] as const) {
       const r = compiled(P, mj, mode);
       expect(r.success).toBe(true);
       expect(r.run!(IN as any)).toEqual([12, 8]);
@@ -450,7 +445,6 @@ describe('whole-collection scalar arithmetic in a promoting mode (ROADMAP 2026-0
   test('CONTROL: a SCALAR radical body compiles under both flag states', () => {
     const Z = ['Sqrt', ['Subtract', 't', 1]];
     const mj = ['Multiply', 2, ['w', 't']];
-    expect(compiled(Z, mj, 'auto').success).toBe(true);
     const on = compiled(Z, mj, 'complex');
     expect(on.success).toBe(true);
     expect(on.run!(OUT as any)).toEqual({
@@ -461,7 +455,6 @@ describe('whole-collection scalar arithmetic in a promoting mode (ROADMAP 2026-0
 
   test('CONTROL: the INDEXED read keeps compiling — it was never scalar-over-a-list', () => {
     const mj = ['Multiply', 2, ['At', ['w', 't'], 1]];
-    expect(compiled(W, mj, 'auto').success).toBe(true);
     const on = compiled(W, mj, 'complex');
     expect(on.success).toBe(true);
     expect(on.run!(OUT as any)).toEqual({ re: 0, im: 2 * Math.sqrt(0.7) });

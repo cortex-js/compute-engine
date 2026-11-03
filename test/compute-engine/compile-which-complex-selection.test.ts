@@ -47,16 +47,20 @@ function interpreted(expr: Expression): unknown {
 }
 
 /**
- * Compile `expr`, run it, and assert it matches interpretation.
+ * Compile `expr` in `mode`, the complex mode by default, run it, and assert
+ * it matches interpretation.
  *
  * Run with folding both ON and OFF: with folding on, the whole literal subtree
  * may be evaluated and emitted as a value, which never exercises the
  * `_SYS.select` lowering these cases are about.
  */
-function parity(expr: Expression): unknown {
+function parity(
+  expr: Expression,
+  mode: 'strict' | 'complex' = 'complex'
+): unknown {
   let value: unknown;
   for (const constantFold of [true, false]) {
-    const r = compile(expr, { fallback: false, constantFold });
+    const r = compile(expr, { fallback: false, constantFold, mode });
     expect(r?.success).toBe(true);
     value = r!.run!({});
     expect(value).toEqual(interpreted(expr));
@@ -64,9 +68,13 @@ function parity(expr: Expression): unknown {
   return value;
 }
 
-/** The emitted source, with compile-time constant folding turned off. */
-function code(expr: Expression): string {
-  return compile(expr, { fallback: false, constantFold: false })!.code ?? '';
+/** The emitted source in `mode`, the complex mode by default, with
+ * compile-time constant folding turned off. */
+function code(
+  expr: Expression,
+  mode: 'strict' | 'complex' = 'complex'
+): string {
+  return compile(expr, { fallback: false, constantFold: false, mode })!.code ?? '';
 }
 
 const L = ['List', 4, 9, 16];
@@ -116,8 +124,8 @@ describe('a complex-TYPED arm whose runtime cells are real', () => {
       'True',
       0,
     ] as any);
-    expect(code(expr)).toContain('Math.sqrt');
-    expect(parity(expr)).toEqual([4, 9, 0]);
+    expect(code(expr, 'strict')).toContain('Math.sqrt');
+    expect(parity(expr, 'strict')).toEqual([4, 9, 0]);
   });
 });
 
@@ -138,7 +146,11 @@ describe('an arm that is genuinely complex at run time', () => {
     // The selection adds no coercion: the arm's own emission is what lands in
     // the cells, so the two runs must agree at every selected position.
     const arm = ce.box(['Sqrt', ['Negate', L]] as any);
-    const alone = compile(arm, { fallback: false, constantFold: false })!;
+    const alone = compile(arm, {
+      fallback: false,
+      constantFold: false,
+      mode: 'complex',
+    })!;
     expect(alone.run!({})).toEqual([
       { re: 0, im: 2 },
       { re: 0, im: 3 },
@@ -257,7 +269,11 @@ describe('a complex-valued CONDITION and arithmetic over a complex arm', () => {
       'True',
       0,
     ] as any);
-    const r = compile(expr, { fallback: false, constantFold: false });
+    const r = compile(expr, {
+      fallback: false,
+      constantFold: false,
+      mode: 'complex',
+    });
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.crealElements(');
     expect(r.run!({})).toEqual([0, 0, 0]);

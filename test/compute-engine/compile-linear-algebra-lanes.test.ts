@@ -10,7 +10,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 // lane, and that the Python target agrees with the interpreter on complex
 // values.
 
-const MODES = ['strict', 'auto', 'complex'] as const;
+const MODES = ['strict', 'complex'] as const;
 
 function js(expr: any, mode: string): any {
   return compile(expr, { to: 'javascript', mode, fallback: false } as any);
@@ -64,10 +64,9 @@ describe('THE WRITTEN-OUT INNER PRODUCT FOLLOWS THE LANE OF ITS OPERANDS', () =>
       expectValue(result.run({ p: [I, 1], q: [I, 1] }), expected);
     });
 
-    // In `strict` and `auto` mode a `number` coordinate is read as a real
-    // number, as a scalar `number` symbol is, and the written-out sum is
-    // kept.
-    for (const mode of ['strict', 'auto'] as const)
+    // In `strict` mode a `number` coordinate is read as a real number, as a
+    // scalar `number` symbol is, and the written-out sum is kept.
+    for (const mode of ['strict'] as const)
       it(`${mode}, ${route} route: Dot(p, q) + 1 is written out`, () => {
         const result = js(build(engine()), mode);
         expect(result.code).not.toContain('_SYS.complexMatmul(');
@@ -80,7 +79,7 @@ describe('THE WRITTEN-OUT INNER PRODUCT FOLLOWS THE LANE OF ITS OPERANDS', () =>
 describe('A SIGNED INFINITY IS A REAL ENTRY', () => {
   // `Floor(x)` types `integer | signed_infinity`. The infinite members of a
   // union entry type made the entry wide, and a `Determinant` over such a
-  // matrix declined in `strict` and `auto` mode.
+  // matrix declined in `strict` mode.
   for (const mode of MODES)
     it(`${mode}: Determinant(M) + 1 over a matrix<integer | +oo> symbol`, () => {
       const ce = new ComputeEngine();
@@ -216,8 +215,7 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
 describe('THE LANE OF A NESTED LINEAR-ALGEBRA HEAD', () => {
   // The result type of `MatrixPower`, `MatrixMultiply` and `Cross` loses the
   // entry type (`MatrixPower(A, 2)` types `matrix`), so the lane read from
-  // the type was wide, and the parent head declined in `strict` and `auto`
-  // mode. The lane is read from the operands of the nested head instead.
+  // the type was wide, and the parent head declined in `strict` mode. The lane is read from the operands of the nested head instead.
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('A', 'matrix<real>');
@@ -616,9 +614,9 @@ describe('PYTHON: THE OPERANDS OF A COMPLEX PRODUCT AND POWER', () => {
 
 describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
   // `scipy.special.loggamma` takes a different branch than the interpreter,
-  // so a complex operand of `GammaLn` takes the run-time realness rule: the
-  // real lowering on the real part when the imaginary part is exactly zero,
-  // and an error otherwise. `Artanh` and `Arsinh` take `cmath`, with the
+  // so in `mode: 'complex'` a complex operand of `GammaLn` takes the run-time
+  // realness rule: the real lowering on the real part when the imaginary part
+  // is exactly zero, and an error otherwise. The strict default declines. `Artanh` and `Arsinh` take `cmath`, with the
   // interpreter's side of each branch cut (`pyInverseTrig`).
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
@@ -632,6 +630,7 @@ describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
       const r = compile(engine().box([head, Z]), {
         to: 'python',
         fallback: false,
+        mode: 'complex',
       } as any) as any;
       expect(r.code).toContain('_ce_cisreal');
     });
@@ -736,7 +735,7 @@ describe('PYTHON: STATISTICS AND TRACE OF COMPLEX VALUES', () => {
   // `{re, im}` entries; before it, `Mean` took the run-time realness rule and
   // answered NaN for complex data.
   it('JavaScript: Mean(L) takes the complex lowering', () => {
-    const r = js(engine().box(['Mean', 'L']), 'auto');
+    const r = js(engine().box(['Mean', 'L']), 'complex');
     expect(r.code).toContain('_SYS.cmean(');
   });
 });

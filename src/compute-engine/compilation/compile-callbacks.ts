@@ -64,6 +64,8 @@ import {
   LOCAL_SCALAR,
   callbackLiteral,
   collectionElementTypeOf,
+  collectionFoldsReal,
+  complexDiscipline,
   declareValueOperand,
 } from './compile-declarations.js';
 import {
@@ -580,8 +582,8 @@ export function elementLaneMismatch(
  * not look at what the body does with the value. So `len = (L) =>
  * Length(L)` (`L: collection`, with `any` elements) is a mismatch for a
  * point with complex coordinates, although `Length` reads no coordinate:
- * `mode: 'auto'` then compiles it in `mode: 'complex'` with the same
- * value, and `mode: 'strict'` declines. A position with another type
+ * `mode: 'strict'` declines, and `mode: 'complex'` compiles it with the
+ * same value. A position with another type
  * (`string`) is never a mismatch. At the top level, a parameter type that
  * admits a number (see `pointTestKind`) is tested only for an argument
  * that is a point or a collection.
@@ -778,15 +780,29 @@ export function cachedLiteralWithParameterTypes(
   return rebuilt;
 }
 
-/** Whether a BUILTIN fold over `coll` seeded with `init` runs in the complex
- * lane: its elements are complex scalars, or its seed is complex-shaped. */
+/**
+ * Whether a BUILTIN fold over `coll` seeded with `init` runs in the complex
+ * lane: its elements are complex scalars, or its seed is complex-shaped.
+ *
+ * In the `complex` mode, also when its elements are numbers that may be
+ * `{re, im}` objects: the question that `Sum` and `Product` over the same
+ * collection ask (`collectionFoldsReal()`) says that the raw real operator
+ * cannot fold them. `Product(L)` canonicalizes to `Reduce(L, Multiply, 1)`,
+ * so without this rule `Product(Map(f, P))` with `f(t) := t^2` and
+ * `P: list<real>` multiplied the `{re, im}` values of `f` with the real `*`
+ * and gave `NaN`, while `Sum(Map(f, P))` gave the right value.
+ */
 export function foldLaneIsComplex(
   coll: Expression,
   init: Expression | undefined | null
 ): boolean {
+  if (hasUniformComplexScalarElements(coll)) return true;
+  if (init !== undefined && init !== null && core.isComplexValued(init))
+    return true;
+  if (!complexDiscipline()) return false;
+  const elt = collectionElementTypeOf(coll);
   return (
-    hasUniformComplexScalarElements(coll) ||
-    (init !== undefined && init !== null && core.isComplexValued(init))
+    elt !== undefined && isSubtype(elt, 'number') && !collectionFoldsReal(coll)
   );
 }
 

@@ -873,8 +873,8 @@ export function compileExprTyped(
     // does every value under `strict` and on the shader targets, which
     // never promote.
     if (promotionActive() && isRealScalarAscription(typed)) {
-      // The analysis emits nothing, so it must not change the `promoted`
-      // report: the record is restored after it. The compilation that
+      // The analysis emits nothing, so it must not change the promotion
+      // record: the record is restored after it. The compilation that
       // follows records the promotions of the code that it emits. A
       // decline emits nothing either.
       const promoted = CompilerState._promoted;

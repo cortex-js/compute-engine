@@ -61,7 +61,7 @@ describe('A `Typed` ascription and the lane of its value', () => {
   // compiled to `_fn_q(_.w) + 1` and returned `"[object Object]1"`. The
   // interpreter checks the returned value against the ascription: `2i` is not
   // real, so the call is an `incompatible-type` error, and `Add` propagates it.
-  for (const mode of ['auto', 'complex'] as const)
+  for (const mode of ['complex'] as const)
     it(`JavaScript ${mode}: a complex value under a real result fails closed`, () => {
       const ce = withSignature('(unknown) -> real', 'z \\mapsto z^2');
       const expr = ce.parse('q(w) + 1');
@@ -93,6 +93,7 @@ describe('A `Typed` ascription and the lane of its value', () => {
     const ce = withSignature('(unknown) -> real', 'z \\mapsto |z|');
     const r = compile(ce.parse('q(w) + 1'), {
       to: 'javascript',
+      mode: 'complex',
       fallback: false,
     } as any) as any;
     expect(r.success).toBe(true);
@@ -129,7 +130,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
     '\\operatorname{erf}(x+\\imaginaryI)',
     '\\operatorname{erfc}(1-2\\imaginaryI+x)',
   ])
-    for (const mode of ['auto', 'complex'] as const)
+    for (const mode of ['complex'] as const)
       it(`JavaScript ${mode}: ${latex} fails closed`, () => {
         expect(() =>
           compile(engine().parse(latex), {
@@ -140,7 +141,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
         ).toThrow(/is certainly not a real number/);
       });
 
-  for (const mode of ['auto', 'complex'] as const)
+  for (const mode of ['complex'] as const)
     it(`JavaScript ${mode}: \\Gamma(x+\\imaginaryI) compiles to the complex kernel`, () => {
       const ce = engine();
       const r = compile(ce.parse('\\Gamma(x+\\imaginaryI)'), {
@@ -160,6 +161,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
   it('JavaScript: Erf(z) over a complex-typed symbol keeps the run-time rule', () => {
     const r = compile(engine().parse('\\operatorname{erf}(z)'), {
       to: 'javascript',
+      mode: 'complex',
       fallback: false,
     } as any) as any;
     expect(r.run({ z: { re: 0.5, im: 0 } })).toBeCloseTo(0.5204998778, 9);
@@ -171,6 +173,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
   it('JavaScript: Erf(x·i) keeps the run-time rule', () => {
     const r = compile(engine().parse('\\operatorname{erf}(x\\imaginaryI)'), {
       to: 'javascript',
+      mode: 'complex',
       fallback: false,
     } as any) as any;
     expect(r.run({ x: 0 })).toBe(0);

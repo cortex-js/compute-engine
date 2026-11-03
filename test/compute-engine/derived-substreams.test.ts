@@ -288,13 +288,15 @@ describe('Integrate / NIntegrate derive a sub-stream', () => {
   it('NIntegrate derives one too', () => {
     // `NIntegrate` samples only when its quadrature fails, and does not
     // take a sample count. The integrand is `√(−1−x)·e^(e^(e^(10+x)))`: the
-    // triple exponential overflows to +∞, so each compiled sample is complex
-    // with a NaN real part and an infinite imaginary part. The quadrature
-    // then has no finite estimate, so the Monte-Carlo fallback runs. Because
-    // the samples are complex, both passes run (the real part, then the
-    // imaginary part), and the test shows that the two passes use one
-    // sub-stream. Because no sample is finite, each pass stops at the
-    // 32-sample viability probe, which keeps the test cheap.
+    // triple exponential overflows to +∞, so each sample has no value: the
+    // strict kernel gives NaN, and the complex kernel that the integrand
+    // takes at a NaN sample (`withComplexAtNaN()` in `library/calculus.ts`)
+    // gives a NaN real part, so the sample stays NaN. The quadrature then has
+    // no finite estimate, so the Monte-Carlo fallback runs. The samples are
+    // not complex numbers, so only the real pass runs, and it stops at the
+    // 32-sample viability probe, which keeps the test cheap. The test shows
+    // that the fallback draws from the one sub-stream that `NIntegrate`
+    // derives.
     // With `√(−1−x)` alone, each pass drew 1e7 samples (about 25 s in jest).
     // Count the draws too, to show that the fallback ran: the sub-stream is
     // derived before the quadrature, so the tag alone does not show it.
@@ -338,8 +340,8 @@ describe('Integrate / NIntegrate derive a sub-stream', () => {
       proto._substream = original;
     }
     expect(tags).toHaveLength(1);
-    // Two passes, each stopped by the 32-sample viability probe.
-    expect(draws).toBe(64);
+    // One pass, stopped by the 32-sample viability probe.
+    expect(draws).toBe(32);
   });
 });
 

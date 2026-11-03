@@ -54,7 +54,6 @@ import {
   recordScalarParams,
   recordDecidedLoopIndex,
 } from './javascript-value-facts.js';
-import { compileWithAutoEscalation } from './auto-escalation.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import {
   absentBaseReadIsNumeric,
@@ -904,16 +903,15 @@ const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The compile modes the JavaScript target offers (`CompileMode`): all four.
- * Its emitters implement the complex lowering (`_SYS.c*`), so `'complex'` and
- * `'auto'` are deliverable; the effective default is therefore `'auto'`.
- * `'bigint'` is offered by this target only (the strict discipline with
- * integer values as JavaScript `bigint` values).
+ * The compile modes the JavaScript target offers (`CompileMode`): all three.
+ * Its emitters implement the complex lowering (`_SYS.c*`), so `'complex'` is
+ * deliverable; the default is `'strict'`. `'bigint'` is offered by this
+ * target only (the strict discipline with integer values as JavaScript
+ * `bigint` values).
  */
 const JS_SUPPORTED_MODES: readonly CompileMode[] = [
   'strict',
   'complex',
-  'auto',
   'bigint',
 ];
 
@@ -5106,14 +5104,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Ln: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       // The operand may be complex only by WIDENESS (the complex discipline
-      // lifted it): that is a promotion for the `promoted` report, and the
+      // lifted it): that is a promotion for the promotion record (`CompilerState._promoted`), and the
       // predicate below records it (its lowering is the same kernel).
       BaseCompiler.recordPromotion('Ln', args);
       return complexUnary(target, '_SYS.cln', compile(args[0]));
     }
     // Real-emitted operand with a complex result — a PROVABLY negative operand
     // (`Ln(-2)`, or `a := -2` → `Ln(a)` is `complex`), or an
-    // unknown-sign one in a promoting mode (`auto`, `complex`). The
+    // unknown-sign one in the promoting mode (`complex`). The
     // parent emits `{re, im}` arithmetic, so `Math.log` — a `NaN` number —
     // must not be the lowering. In `strict` mode an unknown-sign operand
     // keeps the real kernel (pinned; `promotesToComplexLane` mirrors the
@@ -5553,10 +5551,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (mapped !== undefined) return mapped;
     }
+    const nested = !library
+      ? undefined
+      : nestedElementCombiner('Reduce', coll, op, init);
+    const laneComplex = library && BaseCompiler.foldLaneIsComplex(coll, init);
     let combiner = !library
       ? undefined
-      : (nestedElementCombiner('Reduce', coll, op, init) ??
-        builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init)));
+      : (nested ?? builtinCombiner(op, laneComplex));
+    // A builtin fold in the complex lane gives a `{re, im}` object only
+    // after a step of its combiner. With no step, the native `reduce` gives
+    // the seed as it is (a real seed is a plain number), and with one
+    // element and no seed it gives that element as it is. The analysis
+    // (`foldLaneIsComplex()`) calls the fold complex, so every consumer
+    // reads `.re` and `.im` of its value, and a plain number gives `NaN`:
+    // `Product(Map(Sqrt, P)) + 1` with `P = []` gave `NaN`, where the
+    // interpreter gives `2`. So the value of such a fold is lifted.
+    const liftFold = (code: string): string =>
+      laneComplex && nested === undefined ? `_SYS.cplx(${code})` : code;
     // The seed's code when the accumulator lane is complex and the seed is
     // real (`combinerPlan.coerceSeed`); `undefined` = compile `init` as-is.
     let seed: string | undefined;
@@ -5710,8 +5721,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter returns `Nothing` (numeric projection NaN) — so guard the
     // empty case to yield NaN instead of throwing at runtime.
     if (init !== undefined && init !== null)
-      return `(${collCode}).reduce(${combiner}, ${seed ?? compile(init)})`;
-    return `((_l) => _l.length === 0 ? NaN : _l.reduce(${combiner}))(${collCode})`;
+      return liftFold(
+        `(${collCode}).reduce(${combiner}, ${seed ?? compile(init)})`
+      );
+    return liftFold(
+      `((_l) => _l.length === 0 ? NaN : _l.reduce(${combiner}))(${collCode})`
+    );
   },
   // --- List-shaped collection operators ---------------------------------
   // Each lowers to a native array operation. Only an indexed collection
@@ -7552,8 +7567,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // the value with the same answer (`BaseCompiler.linearAlgebraLane`):
       // `_SYS.complexPointdot` returns `{re, im}` inner products, and
       // `_SYS.pointdot` real ones. A wide coordinate type
-      // (`list<tuple<number, number>>`) is read as real in `strict` and
-      // `auto` mode.
+      // (`list<tuple<number, number>>`) is read as real in `strict` mode.
       const helper = linearAlgebraHelper(
         'Dot',
         'pointdot',
@@ -7951,7 +7965,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // for the compiled code to match: an operand whose entries are complex, or
   // are complex under `mode: 'complex'`, fails closed. An operand whose
   // type does not say whether its entries are real (`matrix<number>`, an
-  // undeclared matrix) is read as real in `strict` and `auto` mode, as the
+  // undeclared matrix) is read as real in `strict` mode, as the
   // other linear-algebra heads read it (`linearAlgebraOperandLane`).
   RowReduce: (args, compile) => {
     if (args[0] === undefined)
@@ -8011,8 +8025,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Log: (args, compile, target) => {
     // Complex either because an operand is, or because the RESULT is complex —
     // from a PROVABLY negative argument (`Log(-2)`, or `a := -2` making
-    // `Log(a)` `complex`), or from an unknown-sign argument in a promoting
-    // mode (`auto`, `complex`). Either way the enclosing expression
+    // `Log(a)` `complex`), or from an unknown-sign argument in the promoting
+    // mode (`complex`). Either way the enclosing expression
     // reads `{re, im}`, so `Math.log10` — a `NaN` number — must not be the
     // lowering. In `strict` mode an unknown-sign operand keeps the real
     // kernel (pinned; `promotesToComplexLane` mirrors the `isComplexValued`
@@ -8035,7 +8049,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args.some((a) => BaseCompiler.isComplexValued(a)) ||
       promotesToComplexLane('Log', args)
     ) {
-      // Recorded for the `promoted` report when the operand is complex only
+      // Recorded in the promotion record (`CompilerState._promoted`) when the operand is complex only
       // by wideness (a no-op otherwise; the lowering below is the same).
       BaseCompiler.recordPromotion('Log', args);
       if (base !== undefined)
@@ -8214,7 +8228,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(exp)
     ) {
       // A base complex only by WIDENESS with a non-integer exponent is a
-      // promotion for the `promoted` report (see `promotesRadicalToComplex`).
+      // promotion for the promotion record (`CompilerState._promoted`) (see `promotesRadicalToComplex`).
       BaseCompiler.recordPromotion('Power', args);
       // Small literal integer power of a complex base: inline a
       // square-and-multiply chain instead of the polar-form `_SYS.cpow` — an
@@ -8325,7 +8339,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `a ⩴ -2`). The enclosing expression reads `{re, im}` off this node, so
     // the real `Math.pow` lowering — a `NaN` *number* — would NaN-poison it.
     // See `resultIsComplexValued`.
-    // …or PROMOTED (the `auto`/`complex` disciplines): an unknown-sign base
+    // …or PROMOTED (the `complex` discipline): an unknown-sign base
     // with a provably non-integer exponent takes the complex kernel too,
     // agreeing with `isComplexValued`'s report to the parent
     // (`promotesRadicalToComplex`).
@@ -8585,7 +8599,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(exp)
     ) {
       // A radicand complex only by WIDENESS under an even degree is a
-      // promotion for the `promoted` report, as in `Sqrt` below (a no-op
+      // promotion for the promotion record (`CompilerState._promoted`), as in `Sqrt` below (a no-op
       // otherwise; the lowering is the same).
       BaseCompiler.recordPromotion('Root', [arg, exp]);
       return spliceJSValues(
@@ -8809,7 +8823,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Sqrt: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       // The operand may be complex only by WIDENESS (the complex discipline
-      // lifted it): that is a promotion for the `promoted` report, and the
+      // lifted it): that is a promotion for the promotion record (`CompilerState._promoted`), and the
       // predicate below records it (its lowering is the same kernel).
       BaseCompiler.recordPromotion('Sqrt', args);
       return complexUnary(target, '_SYS.csqrt', compile(args[0]));
@@ -8826,7 +8840,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // The operand is real-emitted but the result is complex — because the
     // operand is PROVABLY negative (`a := -2` → `Sqrt(a)` is `complex`),
-    // or because a promoting mode (`auto`, `complex`) promotes an
+    // or because the promoting mode (`complex`) promotes an
     // unknown-sign operand. The enclosing expression reads `{re, im}` off this
     // node, so `Math.sqrt` — which yields a `NaN` *number* there — would
     // NaN-poison it. In `strict` mode an unknown-sign operand keeps
@@ -10212,13 +10226,13 @@ function resultIsWideUnderComplexDiscipline(
  * a parent reading `{re, im}` around a child that emitted a bare number is
  * `NaN` everywhere. So both sides apply the same two conditions — a PROVABLY
  * negative operand always promotes, and an operand of merely UNKNOWN sign
- * promotes only in a promoting mode (`auto`, `complex`), never in `strict`.
+ * promotes only in the promoting mode (`complex`), never in `strict`.
  */
 function promotesToComplexLane(
   head: MathJsonSymbol,
   args: ReadonlyArray<Expression>
 ): boolean {
-  // Promotion in the `auto` and `complex` modes, decided by the same
+  // Promotion in the `complex` mode, decided by the same
   // predicate that `isComplexValued` uses, never by the node's type, which is
   // the wide `number` for an operand of unknown sign.
   if (BaseCompiler.promotesRadicalToComplex(head, args)) return true;
@@ -11259,30 +11273,16 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         vars: options.vars,
         functions: options.functions,
       });
-    const requestedMode = options.mode;
     try {
-      // Under `auto` — requested, or this target's default — a lane mismatch
-      // in the strict attempt redoes the compilation under the complex
-      // discipline. The escalation sits INSIDE this method, not in the
-      // standalone `compile()` export, so both routes into a compilation get
-      // it (`auto-escalation.ts`). It wraps `compileOrThrow`, which throws on
-      // a decline, so the mismatch reaches the retry rather than being
-      // wrapped into the `success: false` fallback built below. Each attempt
-      // builds its own target in `compileOrThrow`, so the retry starts from
-      // clean per-compilation state.
+      // `compileOrThrow` throws on a decline, and the catch below turns the
+      // decline into the `success: false` fallback when it is requested.
       // A `vars`-mapped symbol is compiled as the valueless input of its
-      // declared type: its engine value is hidden for both attempts
-      // (`withVarsValuesHidden`).
+      // declared type: its engine value is hidden (`withVarsValuesHidden`).
       // A call of a user function that shadows a library operator is
       // compiled under a private name (`withShadowingCallsRenamed`).
       return withVarsValuesHidden(expr, options.vars, () =>
-        compileWithAutoEscalation(requestedMode, JS_SUPPORTED_MODES, (m) =>
-          withShadowingCallsRenamed(expr, options, (renamed) =>
-            this.compileOrThrow(
-              renamed,
-              m === requestedMode ? options : { ...options, mode: m }
-            )
-          )
+        withShadowingCallsRenamed(expr, options, (renamed) =>
+          this.compileOrThrow(renamed, options)
         )
       );
     } catch (e) {
@@ -13534,7 +13534,7 @@ function emitIterateStream(
  * helper and its parent always agree on the representation of the value.
  *
  * An operand whose type admits real and complex entries (`matrix<number>`)
- * has the lane `'wide'` in `strict` and `auto` mode, and is read as real: the
+ * has the lane `'wide'` in `strict` mode, and is read as real: the
  * real helper is emitted, and a `{re, im}` entry a caller binds there
  * computes as a non-number (`NaN`); the entries of a binding are the
  * caller's responsibility (see `EntryPlan` in `javascript-runtime.ts`).
@@ -14874,8 +14874,7 @@ function callbackArg(
   BaseCompiler.assertCallbackAnnotations(kind, callback, argTypes, target);
   // STRICT shapes: a bare user-function symbol with a WIDE parameter over
   // complex ELEMENTS is a lane mismatch (the one emission of the function is
-  // real-shaped) — a decline under `strict`, an escalation to complex mode
-  // under `auto`. Unary callbacks only: a combiner-shaped callback (an
+  // real-shaped) — a decline under `strict`. Unary callbacks only: a combiner-shaped callback (an
   // accumulator prefix) is planned by `combinerPlan`.
   if (extraArgTypes.length === 0)
     BaseCompiler.assertCallbackLaneMatch(callback, source, target);
@@ -17058,7 +17057,7 @@ function emitCollectionReduce(
   // `list<number>`/`vector<n>`) and is always an array — no runtime guard.
   // Elements PROVABLY real fold with the raw operator; anything else — a
   // `list<number>` (wide elements), a `Map` whose callback promotes
-  // (`Map(Ln, xs)` under `auto`), a list with a complex cell — folds with the
+  // (`Map(Ln, xs)` under `complex`), a list with a complex cell — folds with the
   // shape-agnostic scalar combiner (`_SYS.sadd`/`_SYS.smul`: numbers add as
   // numbers, a `{re, im}` in either position adds as complex), so a complex
   // element never reaches `+` and string-concatenates. One `typeof` per

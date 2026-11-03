@@ -9,8 +9,10 @@ function engine(): ComputeEngine {
 const source = (r: { code?: string; preamble?: string }): string =>
   (r.preamble ?? '') + (r.code ?? '');
 
+// In the `complex` mode, the bounds of a loop can prove the sign of its
+// index, so a radical or a logarithm of the index keeps the real lowering.
 describe('real arithmetic from loop bounds', () => {
-  test.each(['auto', 'complex'] as const)(
+  test.each(['complex'] as const)(
     '%s uses a non-negative index',
     (mode) => {
       for (const body of ['\\ln(i)', '\\sqrt{9.91/i}']) {
@@ -37,19 +39,23 @@ describe('real arithmetic from loop bounds', () => {
     // and only the contextual analysis of the loop bounds can prove the sign.
     const sum = compile(ce.parse('\\sum_{i=1}^{N}\\ln(i)'), {
       constantFold: false,
+      mode: 'complex',
     });
     expect(sum.success).toBe(true);
     // Disabling constant folding also disables the contextual analysis hook.
     expect(source(sum)).toContain('_SYS.cln');
     ce.declare('x', 'real');
-    const large = compile(ce.parse('x+\\sum_{i=1}^{101}x\\ln(i)'));
+    const large = compile(ce.parse('x+\\sum_{i=1}^{101}x\\ln(i)'), {
+      mode: 'complex',
+    });
     expect(source(large)).not.toContain('_SYS.cln');
     const limited = compile(ce.parse('x+\\sum_{i=1}^{4}x\\ln(i)'), {
       iterationBudget: 2,
+      mode: 'complex',
     });
     expect(limited.run!({ x: 2 })).toBeNaN();
     const expr = ce.parse('\\prod_{i=1}^{N}\\sqrt{1/i}');
-    const product = compile(expr);
+    const product = compile(expr, { mode: 'complex' });
     expect(source(product)).not.toContain('_SYS.csqrt');
     expect(product.run!({ N: 4 })).toBeCloseTo(1 / Math.sqrt(24), 12);
     expect(product.run!({ N: 0 })).toBe(1);
@@ -59,7 +65,7 @@ describe('real arithmetic from loop bounds', () => {
     for (const lower of ['-2', 'M']) {
       const ce = engine();
       const expr = ce.parse(`\\sum_{i=${lower}}^{N}\\sqrt{i}`);
-      const r = compile(expr);
+      const r = compile(expr, { mode: 'complex' });
       expect(source(r)).toContain('_SYS.csqrt');
       const expected = expr.subs({ N: -1, M: -2 }).N();
       const actual = r.run!({ N: -1, M: -2 }) as { re: number; im: number };
@@ -73,7 +79,7 @@ describe('real arithmetic from loop bounds', () => {
     const expr = ce.parse(
       '\\sum_{i=1}^{N}(\\ln(i)+\\left|\\sum_{i=-2}^{M}\\sqrt{i}\\right|)'
     );
-    const r = compile(expr);
+    const r = compile(expr, { mode: 'complex' });
     expect(r.success).toBe(true);
     expect(source(r)).toContain('_SYS.csqrt');
     expect(source(r)).not.toContain('_SYS.cln');
@@ -87,7 +93,7 @@ describe('real arithmetic from loop bounds', () => {
     const ce = engine();
     ce.parse('g(i):=\\ln(i)').evaluate();
     const expr = ce.parse('\\sum_{i=1}^{N}(\\ln(i)+\\left|g(-i)\\right|)');
-    const r = compile(expr);
+    const r = compile(expr, { mode: 'complex' });
     expect(r.success).toBe(true);
     expect(source(r)).toContain('_SYS.cln');
     expect(r.run!({ N: 3 })).toBeCloseTo(expr.subs({ N: 3 }).N().re, 12);
@@ -96,14 +102,14 @@ describe('real arithmetic from loop bounds', () => {
   test('non-finite bounds and iteration budgets retain their guards', () => {
     const ce = engine();
     const expr = ce.parse('\\sum_{i=1}^{N}\\ln(i)');
-    const r = compile(expr, { iterationBudget: 5 });
+    const r = compile(expr, { iterationBudget: 5, mode: 'complex' });
     expect(r.run!({ N: 5 })).toBeCloseTo(Math.log(120), 12);
     for (const N of [6, NaN, Infinity]) expect(r.run!({ N })).toBeNaN();
     expect(r.run!({ N: -Infinity })).toBe(0);
-    const unrestricted = compile(expr);
+    const unrestricted = compile(expr, { mode: 'complex' });
     for (const N of [NaN, Infinity, -Infinity])
       expect(unrestricted.run!({ N })).toBeNaN();
-    const unrelated = compile(ce.parse('\\ln(M)'));
+    const unrelated = compile(ce.parse('\\ln(M)'), { mode: 'complex' });
     expect(source(unrelated)).toContain('_SYS.cln');
   });
 });

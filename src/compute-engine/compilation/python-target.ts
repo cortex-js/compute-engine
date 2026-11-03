@@ -5,7 +5,6 @@ import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
-import { compileWithAutoEscalation } from './auto-escalation.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import { resolveStorageHints } from './storage-hints.js';
 
@@ -5968,7 +5967,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.recordPromotion('Ln', args);
       return `cmath.log(${compile(args[0])})`;
     }
-    // Promotion (the `auto` and `complex` modes): an operand of unknown sign
+    // Promotion (the `complex` mode): an operand of unknown sign
     // takes the complex lane so the compiled value matches the interpreter's
     // promotion. Uses the SAME predicate `BaseCompiler.isComplexValued`
     // reports to the enclosing node, or the parent reads a real where a
@@ -5985,7 +5984,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return `np.log(${compile(args[0])})`;
   },
   Log: (args, compile) => {
-    // Log with base: log(x, base). In a promoting mode (`auto`, `complex`)
+    // Log with base: log(x, base). In the promoting mode (`complex`)
     // an operand of unknown sign — value OR base, since a negative base
     // makes the quotient complex too — routes through `np.emath`, numpy's
     // domain-relaxed variant (complex for a negative input, `-inf` at zero).
@@ -6040,7 +6039,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(args[0]) ||
       BaseCompiler.isComplexValued(args[1])
     ) {
-      // Recorded for the `promoted` report when the base is complex only by
+      // Recorded in the promotion record (`CompilerState._promoted`) when the base is complex only by
       // wideness (see `promotesRadicalToComplex`; a no-op otherwise).
       BaseCompiler.recordPromotion('Power', args);
       return negativeBase !== undefined && withHelper
@@ -6058,7 +6057,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         : magnitude;
       return `(lambda ${value}: ${result})(${compile(args[0])})`;
     }
-    // PROMOTION (the `auto`/`complex` disciplines): an unknown-sign base with
+    // PROMOTION (the `complex` discipline): an unknown-sign base with
     // a provably non-integer exponent — `np.emath.power` returns the complex
     // principal value for a negative base (the same helper family the
     // promoted `Sqrt`/`Ln`/`Log` use), agreeing with `isComplexValued`'s
@@ -6075,7 +6074,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Sqrt: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      // Recorded for the `promoted` report when the operand is complex only
+      // Recorded in the promotion record (`CompilerState._promoted`) when the operand is complex only
       // by wideness (see `promotesRadicalToComplex`).
       BaseCompiler.recordPromotion('Sqrt', args);
       return `cmath.sqrt(${compile(args[0])})`;
@@ -6102,7 +6101,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // `z ** (1 / n)`, as the interpreter does. The parity test runs when the
     // code runs because the value of the radicand is only known then.
     if (BaseCompiler.isComplexValued(x) || BaseCompiler.isComplexValued(n)) {
-      // Recorded for the `promoted` report when the radicand is complex only
+      // Recorded in the promotion record (`CompilerState._promoted`) when the radicand is complex only
       // by wideness (see `promotesRadicalToComplex`; a no-op otherwise).
       BaseCompiler.recordPromotion('Root', args);
       return `(lambda _z, _n: complex(np.sign(_z.real) * np.power(abs(_z.real), 1.0 / _n.real)) if _z.imag == 0 and _n.imag == 0 and _n.real % 2 == 1 else _z ** (1.0 / _n))(complex(${compile(x)}), complex(${compile(n)}))`;
@@ -7709,15 +7708,11 @@ PYTHON_FUNCTIONS.ApplyWhole = (args, compile, target) =>
  * vectorized operations.
  */
 /**
- * The compile modes the Python target offers (`CompileMode`): all three. Its
- * emitters implement the complex lowering (native `complex`, `cmath`), so
- * `'complex'` and `'auto'` are deliverable; the effective default is `'auto'`.
+ * The compile modes the Python target offers (`CompileMode`): `'strict'`, the
+ * default, and `'complex'`. Its emitters implement the complex lowering
+ * (native `complex`, `cmath`), so `'complex'` is deliverable.
  */
-const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = [
-  'strict',
-  'complex',
-  'auto',
-];
+const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = ['strict', 'complex'];
 
 /**
  * The heads this target maps to a helper name that takes a complex argument.
@@ -8183,24 +8178,12 @@ export class PythonTarget implements LanguageTarget<Expression> {
         vars: options.vars,
         functions: options.functions,
       });
-    const requestedMode = options.mode;
     try {
-      // Under `auto` — requested, or this target's default — a lane mismatch
-      // in the strict attempt redoes the compilation under the complex
-      // discipline. Shared with the standalone `compile()` route, which
-      // reaches the escalation through this method rather than owning a copy
-      // of it (`auto-escalation.ts`); `compileOrThrow` throws on a decline, so
-      // the mismatch reaches the retry instead of the fallback built below,
-      // and each attempt builds its own target.
-      // A `vars`-mapped symbol is compiled as the valueless input of its
-      // declared type (`withVarsValuesHidden`).
+      // `compileOrThrow` throws on a decline, so the decline reaches the
+      // fallback built below. A `vars`-mapped symbol is compiled as the
+      // valueless input of its declared type (`withVarsValuesHidden`).
       return withVarsValuesHidden(expr, options.vars, () =>
-        compileWithAutoEscalation(requestedMode, PYTHON_SUPPORTED_MODES, (m) =>
-          this.compileOrThrow(
-            expr,
-            m === requestedMode ? options : { ...options, mode: m }
-          )
-        )
+        this.compileOrThrow(expr, options)
       );
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented

@@ -472,6 +472,7 @@ describe('statistics of complex data', () => {
     const r = compile(ce.box(['Mean', 'p']), {
       to: 'javascript',
       fallback: false,
+      mode: 'complex',
       functions: { Mean: '_.customMean' },
     });
     expect(r.code).not.toContain('_SYS.cmean');
@@ -796,34 +797,6 @@ describe('Power of a base whose rank is not known', () => {
     expect(() => list.run!({ p: RANK3, q: 2 } as never)).toThrow(
       /matrix power/
     );
-  });
-
-  it('an auto-mode escalation inside the exponent leaves no binding behind', () => {
-    // The strict attempt declines with a lane mismatch while it compiles the
-    // exponent, after the base was bound to a parameter; the complex retry
-    // must bind it again. (`Floor` makes the exponent an integer, so the
-    // matrix power is computed rather than refused.)
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tensor<number>');
-    ce.declare('k', 'real');
-    ce.assign('Cwide', ce.parse('u \\mapsto u + 1'));
-    const expr = ce.box([
-      'Power',
-      ['Add', 'p', 1],
-      ['Floor', ['Cwide', ['Sqrt', 'k']]],
-    ]);
-    const r = compile(expr, { to: 'javascript', fallback: false });
-    expect(r.escalation?.code).toBe('lane-mismatch');
-    expect(r.run!({ p: M, k: 4 } as never)).toEqual([
-      [20, 57],
-      [76, -75],
-    ]);
-    // A second compilation of the same node is not affected either.
-    const again = compile(expr, { to: 'javascript', fallback: false });
-    expect(again.run!({ p: M, k: 4 } as never)).toEqual([
-      [20, 57],
-      [76, -75],
-    ]);
   });
 
   /**
@@ -1158,19 +1131,19 @@ describe('Power of a base whose rank is not known', () => {
   });
 });
 
-describe('complex mode: the auto mode after it escalates', () => {
-  it('a lane mismatch escalates, and the list cells take the complex lane', () => {
+describe('complex mode: a complex value at a wide parameter', () => {
+  it('the list cells take the complex lane', () => {
     const ce = new ComputeEngine();
-    // `√k` is promoted (k has an unknown sign) and reaches the wide
-    // parameter `u` of `Cwide`, which the strict attempt reads as real: a
-    // lane mismatch, so `auto` compiles again in the `complex` mode.
+    // `√k` (k has an unknown sign) reaches the wide parameter `u` of
+    // `Cwide`. The `strict` mode reads `u` as real and declines with a lane
+    // mismatch; the `complex` mode compiles it.
     ce.assign('Cwide', ce.parse('u \\mapsto u + 1'));
     ce.declare('p', 'list<number>');
     const r = compile(ce.box(['Add', ['Cwide', ['Sqrt', 'k']], 'p']), {
       fallback: false,
+      mode: 'complex',
     });
     expect(r.mode).toBe('complex');
-    expect(r.escalation?.code).toBe('lane-mismatch');
     expect(r.code).toContain('_SYS.sadd(');
     // √4 + 1 = 3, plus each cell.
     expect(r.run!({ k: 4, p: [1, ONE_PLUS_I] } as never)).toEqual([

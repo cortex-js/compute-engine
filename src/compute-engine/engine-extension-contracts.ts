@@ -176,6 +176,14 @@ function assertCompileTargetContract(
   assertCompileTargetModesContract(target);
 }
 
+/**
+ * The mode names that pass option validation. `'auto'` is not a
+ * `CompileMode` any more, but it is accepted here so that a request for it
+ * reaches `resolveCompileMode`, which declines it with
+ * `code: 'unsupported-mode'` and names `'complex'` as its replacement. An
+ * option error here would throw out of `compile()` instead of giving that
+ * decline.
+ */
 const COMPILE_MODES: readonly string[] = [
   'strict',
   'complex',
@@ -184,14 +192,21 @@ const COMPILE_MODES: readonly string[] = [
 ];
 
 /**
+ * The mode names that a target can declare in `supportedModes`: the
+ * `CompileMode` values. `'auto'` is not among them, because no target can
+ * offer it.
+ */
+const SUPPORTED_MODES: readonly string[] = COMPILE_MODES.filter(
+  (m) => m !== 'auto'
+);
+
+/**
  * The compile-mode declaration of a custom target (`CompileTarget.mode`,
  * `supportedModes`, `complexLift`, `complexIsReal`, `reset`): each is
- * well-formed when present, and a target that DECLARES `'complex'` or
- * `'auto'` provides the two lowering hooks the complex discipline is emitted
- * through — a declaration without them is rejected here, at option
- * validation, rather than discovered as a missing hook mid-emission.
- * (`reset()` is not required: without it a direct target's `'auto'` resolves
- * to `'strict'`, see `CompileTarget.supportedModes`.)
+ * well-formed when present, and a target that DECLARES `'complex'` provides
+ * the two lowering hooks the complex discipline is emitted through — a
+ * declaration without them is rejected here, at option validation, rather
+ * than discovered as a missing hook mid-emission.
  */
 function assertCompileTargetModesContract(
   target: Record<string, unknown>
@@ -207,18 +222,18 @@ function assertCompileTargetModesContract(
   if (declared !== undefined) {
     if (
       !Array.isArray(declared) ||
-      declared.some((m) => !COMPILE_MODES.includes(m as string))
+      declared.some((m) => !SUPPORTED_MODES.includes(m as string))
     )
       throw new Error(
-        `Invalid compile target: "supportedModes" must be an array of ${COMPILE_MODES.map((m) => `"${m}"`).join(', ')}`
+        `Invalid compile target: "supportedModes" must be an array of ${SUPPORTED_MODES.map((m) => `"${m}"`).join(', ')}`
       );
     if (
-      (declared.includes('complex') || declared.includes('auto')) &&
+      declared.includes('complex') &&
       (typeof target.complexLift !== 'function' ||
         typeof target.complexIsReal !== 'function')
     )
       throw new Error(
-        'Invalid compile target: a target whose "supportedModes" includes "complex" or "auto" must provide the "complexLift()" and "complexIsReal()" hooks'
+        'Invalid compile target: a target whose "supportedModes" includes "complex" must provide the "complexLift()" and "complexIsReal()" hooks'
       );
   }
   for (const hook of ['complexLift', 'complexIsReal', 'reset'] as const)
@@ -355,7 +370,7 @@ export function assertCompilationOptionsContract(
     !COMPILE_MODES.includes(options.mode as string)
   ) {
     throw new Error(
-      'Invalid compilation option "mode": expected "strict", "complex", "auto" or "bigint"'
+      'Invalid compilation option "mode": expected "strict", "complex" or "bigint"'
     );
   }
 

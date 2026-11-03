@@ -42,7 +42,6 @@ import {
 } from './compile-declarations.js';
 import {
   _broadcastRadicalVerdict,
-  assumedRealNonNegative,
   knownExponentPower,
   realPowerExponent,
 } from './compile-real-analysis.js';
@@ -95,7 +94,7 @@ import {
  * the operands are real but the interpreter's kernel continues the head
  * into the complex plane (`LerchPhi(z, s, a)` for `z > 1`), and the facts
  * on the operands do not prove the value real
- * (`complexContinuation`). `auto` and `complex` promote, as for `Sqrt` and
+ * (`complexContinuation`). `complex` promotes, as for `Sqrt` and
  * `Ln` of an operand of unknown sign; `strict` keeps the real lane and its
  * `NaN`. A complex operand is not decided here: the head's complex kernel
  * takes it in every mode.
@@ -947,14 +946,14 @@ export function _isComplexValuedFunction(
       return foldLaneIsComplex(coll, init);
   }
   if (promotionActive()) {
-    // The predicate records a promotion for the `promoted` report
+    // The predicate records a promotion in the promotion record (`CompilerState._promoted`)
     // (`notePromoted`), but this analysis emits nothing: the node can be
     // folded to a literal, or be part of a subtree that is never emitted.
     // The emitter of the head calls the same predicate when it lowers the
     // node, and that call records the promotion of the emitted code. So
     // the record of the analysis is removed here. With `x` real,
-    // `x + Sum(√(2 + sin k), k, 1, 16)` folds the sum to `22.85…`, and the
-    // report stays `promoted: false`.
+    // `x + Sum(√(2 + sin k), k, 1, 16)` folds the sum to `22.85…`, and
+    // nothing is recorded.
     // The record is restored in a `finally`, so a throw from the predicate
     // (a type read, a cancellation at the deadline) that a caller catches
     // does not leave the promotion in the report.
@@ -1058,25 +1057,46 @@ export function _isComplexValuedFunction(
     const viaDefinition = userCallLane(expr);
     if (viaDefinition !== undefined) return viaDefinition;
   }
-  // A loop-bound proof can settle a radical whose declared result remains
-  // number (including poles and NaN). The real emitter then returns a plain
-  // number even in complex mode, so its parent must use that representation.
+  // `Sqrt`, `Ln` and `Log` answer as their emitters decide, whatever the
+  // node's type is: complex when an operand is complex-valued, or when an
+  // operand is PROVABLY negative and the finite part of the result type is
+  // not real (`a := -2` makes `Sqrt(a)` `complex`). Promotion of an operand
+  // of unknown sign in the `complex` mode was answered above.
+  //
+  // The type alone cannot answer. Its handlers widen the result to
+  // `complex` for a real operand of unknown sign (`√−2 = 1.414…i`), but the
+  // pinned compile contract keeps the real kernel for that case: these are
+  // the hottest plotted heads, and `Math.sqrt(-2)`/`sqrt(r)` give a
+  // real-shaped `NaN` when the code runs. And a WIDE type does not make the
+  // node complex either: with `x, y: real | signed_infinity`, the radicand
+  // of `√(x² + y²)` types `nan | number`, and the emitter writes
+  // `Math.sqrt` because the radicand is not negative. Read from the wide
+  // type, the parent multiplied that number as a `{re, im}` object, and
+  // `1 − 0.15·√(x² + y²)` gave `{re: NaN, im: NaN}`. A loop-bound proof
+  // that a radicand is not negative needs no rule of its own: such a
+  // radicand is not provably negative.
   if (
-    CompilerState._unrolledIndexValues.some(
-      (frame) => frame.lowerBounds?.size
-    ) &&
-    ['Sqrt', 'Ln', 'Log'].includes(expr.operator) &&
-    expr.ops.every(
-      (op) => !core.isComplexValued(op) && assumedRealNonNegative(op)
-    )
-  )
-    return false;
-  if (
-    expr.operator === 'Power' &&
-    realPowerExponent(expr.ops) !== undefined &&
-    !expr.ops.some((a) => core.isComplexValued(a))
-  )
-    return false;
+    expr.operator === 'Sqrt' ||
+    expr.operator === 'Ln' ||
+    expr.operator === 'Log'
+  ) {
+    if (expr.ops.some((a) => core.isComplexValued(a))) return true;
+    return (
+      expr.ops.some((a) => a.isNegative === true) &&
+      isNonRealNumber(finitePartOfType(expr.type.type))
+    );
+  }
+  // The `Power` emitters take the complex form as soon as an operand is
+  // complex-valued, before they read the node's type. So this predicate
+  // answers from the operands first too. The node's type cannot answer for
+  // that case: with `f(t) := sin(b·t)` on the complex lane, `f(x)^2` types
+  // `nan | real<0..>`, while its emitter squares the `{re, im}` value of
+  // `f(x)`. Read from the type, the parent added `1` to that object with the
+  // real `+` and gave `"[object Object]1"`.
+  if (expr.operator === 'Power') {
+    if (expr.ops.some((a) => core.isComplexValued(a))) return true;
+    if (realPowerExponent(expr.ops) !== undefined) return false;
+  }
   // A head whose emitter picks its real or complex lowering from the
   // OPERANDS (`COMPLEX_PROPAGATING_HEADS`: every target writes
   // `args.some(isComplexValued)`, never a test of the node's type) is
@@ -1089,7 +1109,7 @@ export function _isComplexValuedFunction(
   // NaN. Such an operand is complex-shaped with a real value (an imaginary
   // part of 0), so the complex lane gives the right number. The same rule
   // covers a non-real type: `Multiply(1e5, Sqrt(u))` is typed `complex`,
-  // but the `Sqrt` carve-out below keeps `Sqrt(u)` real, so the product is
+  // but the `Sqrt`/`Ln`/`Log` rule above keeps `Sqrt(u)` real, so the product is
   // real (Tycho item 144). And a wide type: `9.81 / k[i]` is typed `number`
   // (the element read has a `nan` arm) and is emitted as the real
   // `9.81 / _SYS.at(k, i)`, so `√(9.81 / k[i])` must not hand that number
@@ -1114,36 +1134,7 @@ export function _isComplexValuedFunction(
   // copy of the wide-type rule at the end of this function, which the
   // `Power` emitter reads. Change one, change all four.
   const t = expr.type;
-  if (isNonRealNumber(finitePartOfType(t.type))) {
-    // Sqrt/Ln/Log carve-out (2026-07-31): their type handlers now widen
-    // to `complex` for a real operand of UNKNOWN sign
-    // (type soundness: `√−2 = 1.414…i`), but the pinned compile contract
-    // keeps the real kernel for that case — these are the hottest plotted
-    // heads, and `Math.sqrt(-2)`/`sqrt(r)` yield a real-shaped `NaN` at
-    // run time. Only a provably negative or provably complex operand
-    // routes complex. The heads' own emitters use the same predicate
-    // (`resultIsComplexValued(head, args) && a provably negative
-    // operand`), so parent and child always agree on the value SHAPE —
-    // the invariant that matters for compiled correctness.
-    if (
-      expr.operator === 'Sqrt' ||
-      expr.operator === 'Ln' ||
-      expr.operator === 'Log'
-    ) {
-      // Promotion is NOT re-checked here: the gate at
-      // the top of this function already answered `true` for every promoted
-      // case, so reaching this line in a promoting mode means
-      // `promotesRadicalToComplex` declined — every operand is provably
-      // non-negative — and the emitters' `promotesToComplexLane` will
-      // decline identically. Returning `true` here would therefore report
-      // complex over an emitter still producing `Math.sqrt`, which is the
-      // shape disagreement this whole predicate exists to prevent.
-      return expr.ops.some(
-        (a) => a.isNegative === true || core.isComplexValued(a)
-      );
-    }
-    return true;
-  }
+  if (isNonRealNumber(finitePartOfType(t.type))) return true;
   // The REAL verdict reads the same finite part the non-real verdict above
   // does. Asking `t.matches('real')` of the whole union answers false for a
   // head that can blow up — `Abs` of a complex operand of unproven

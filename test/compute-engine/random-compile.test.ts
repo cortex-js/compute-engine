@@ -1542,9 +1542,19 @@ describe('a real-operand guard over an impure node shared by two positions', () 
   // position. The guard replaces an operand by its temporary through an
   // override keyed on the node, which cannot give the two positions two
   // evaluations, so such a head keeps its decline and the interpreter
-  // fallback gives the value (CE-687).
-  function bothRuns(ce: ComputeEngine, expr: any, seed: number, x = 0) {
-    const r = compile(expr, { constantFold: false })!;
+  // fallback gives the value (CE-687). The guard is emitted in the
+  // `complex` mode only: in the default `strict` mode `√x` with `x: real`
+  // is on the real lane (`NaN` at `x < 0`), no guard is emitted, and each
+  // position of the shared node is compiled again, so it draws once per
+  // position, as the interpreter does.
+  function bothRuns(
+    ce: ComputeEngine,
+    expr: any,
+    seed: number,
+    x = 0,
+    mode?: 'complex'
+  ) {
+    const r = compile(expr, { constantFold: false, mode })!;
     const c = withRandomSeedFrame(ce, seed, () => [
       r.run!({ x }),
       ce._random(),
@@ -1557,53 +1567,84 @@ describe('a real-operand guard over an impure node shared by two positions', () 
   }
 
   /** The diagnostic code of the decline under `fallback: false`. */
-  function declineCode(expr: any): string | undefined {
+  function declineCode(expr: any, mode?: 'complex'): string | undefined {
     try {
-      compile(expr, { fallback: false, constantFold: false });
+      compile(expr, { fallback: false, constantFold: false, mode });
     } catch (err) {
       return (err as { diagnostic?: { code: string } }).diagnostic?.code;
     }
     return undefined;
   }
 
-  test('Max(e, e) with e = √(Random() − 0.5) declines and draws twice', () => {
+  test('Max(e, e) with e = √(Random() − 0.5) declines in complex mode and draws twice', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Sqrt', ['Subtract', ['Random'], 0.5]]);
     const expr = ce.function('Max', [e, e]);
-    expect(declineCode(expr)).toBe('shared-impure-operand');
+    expect(declineCode(expr, 'complex')).toBe('shared-impure-operand');
     for (let seed = 1; seed <= 6; seed++) {
-      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, seed);
+      const { result, compiled: c, interpreted: i } = bothRuns(
+        ce,
+        expr,
+        seed,
+        0,
+        'complex'
+      );
       expect(result.success).toBe(false);
       expect(i[1]).toBe(draw(seed, 2));
       expect(c).toEqual(i);
     }
+    // The default mode compiles, and draws once per position.
+    expect(declineCode(expr)).toBeUndefined();
+    for (let seed = 1; seed <= 6; seed++) {
+      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, seed);
+      expect(result.success).toBe(true);
+      expect(c[1]).toBe(draw(seed, 2));
+      expect(i[1]).toBe(draw(seed, 2));
+      if (Number.isFinite(i[0])) expect(c).toEqual(i);
+    }
   });
 
-  test('Max(r, √x, r) with one Random node declines and draws twice', () => {
+  test('Max(r, √x, r) with one Random node declines in complex mode and draws twice', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const r = ce.box(['Random']);
     const expr = ce.function('Max', [r, ce.box(['Sqrt', 'x']), r]);
     for (const x of [4, -4]) {
-      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, 7, x);
+      const { result, compiled: c, interpreted: i } = bothRuns(
+        ce,
+        expr,
+        7,
+        x,
+        'complex'
+      );
       expect(result.success).toBe(false);
       expect(i[1]).toBe(draw(7, 2));
       expect(c).toEqual(i);
     }
+    // The default mode compiles: `√x` is `NaN` at `x = -4`.
+    for (const x of [4, -4]) {
+      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, 7, x);
+      expect(result.success).toBe(true);
+      expect(c[1]).toBe(draw(7, 2));
+      expect(i[1]).toBe(draw(7, 2));
+      if (x === 4) expect(c).toEqual(i);
+      else expect(c[0]).toBeNaN();
+    }
   });
 
-  test('Less(e, e) declines with its own diagnostic, in every mode', () => {
+  test('Less(e, e) declines with its own diagnostic in complex mode', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Sqrt', ['Subtract', ['Random'], 0.5]]);
     const expr = ce.function('Less', [e, e]);
-    for (const mode of ['auto', 'complex'] as const) {
-      expect(() =>
-        compile(expr, { mode, fallback: false, constantFold: false })
-      ).toThrow(/occurs at more than one position/);
-    }
-    expect(declineCode(expr)).toBe('shared-impure-operand');
+    expect(() =>
+      compile(expr, { mode: 'complex', fallback: false, constantFold: false })
+    ).toThrow(/occurs at more than one position/);
+    expect(declineCode(expr, 'complex')).toBe('shared-impure-operand');
+    // The default mode compiles `Less` on the real lane, one draw per
+    // position.
+    expect(declineCode(expr)).toBeUndefined();
     for (let seed = 1; seed <= 6; seed++) {
-      const r = compile(expr, { constantFold: false })!;
+      const r = compile(expr, { constantFold: false, mode: 'complex' })!;
       expect(r.success).toBe(false);
       const c = withRandomSeedFrame(ce, seed, () => [r.run!({}), ce._random()]);
       const i = withRandomSeedFrame(ce, seed, () => [
@@ -1647,7 +1688,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
       y,
       ce.box(['Sqrt', 'x']),
     ]);
-    expect(declineCode(expr)).toBe('shared-impure-operand');
+    expect(declineCode(expr, 'complex')).toBe('shared-impure-operand');
   });
 
   test('a symbol whose value draws is impure to the guard', () => {
@@ -1661,9 +1702,15 @@ describe('a real-operand guard over an impure node shared by two positions', () 
     const sx = ce.box(['Sqrt', 'x']);
     // One `r` node at two positions beside a draw declines.
     const shared = ce.function('Max', [r, r, ce.box(['Random']), sx]);
-    expect(declineCode(shared)).toBe('shared-impure-operand');
+    expect(declineCode(shared, 'complex')).toBe('shared-impure-operand');
     for (const x of [4, -4]) {
-      const { compiled: c, interpreted: i } = bothRuns(ce, shared, 7, x);
+      const { compiled: c, interpreted: i } = bothRuns(
+        ce,
+        shared,
+        7,
+        x,
+        'complex'
+      );
       expect(i[1]).toBe(draw(7, 3));
       expect(c).toEqual(i);
     }
@@ -1813,7 +1860,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
     ce.assign('r', ce.box(['Assign', 'y', 1], { form: 'raw' }));
     const y = ce.box('y');
     const expr = ce.function('Max', [y, ce.box('r'), y, ce.box(['Sqrt', 'x'])]);
-    expect(declineCode(expr)).toBe('shared-impure-operand');
+    expect(declineCode(expr, 'complex')).toBe('shared-impure-operand');
     // The same write inside an operand that also draws: the labels of
     // `Random() + r` show only the draw.
     const mixed = ce.function('Max', [
@@ -1822,7 +1869,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
       y,
       ce.box(['Sqrt', 'x']),
     ]);
-    expect(declineCode(mixed)).toBe('shared-impure-operand');
+    expect(declineCode(mixed, 'complex')).toBe('shared-impure-operand');
   });
 
   test('Max(r, r) with no maybe-complex operand compiles and draws twice', () => {

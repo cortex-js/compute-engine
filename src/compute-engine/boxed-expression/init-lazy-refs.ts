@@ -40,7 +40,9 @@ _setProduct(Product);
 // The stochastic-equality probes are an implicit compilation path: route them
 // through `implicitCompile` so they honor the `ce.jit` flag (and its CSP
 // latch); a no-compile returns an empty record, and the caller's interpreter
-// fallback takes over.
+// fallback takes over. The compilation is in the default `'strict'` mode;
+// `stochasticEqual` evaluates a point where the compiled value is `NaN`
+// again with the interpreter, which gives the complex value.
 _setCompile((expr) => implicitCompile(expr.engine, expr) ?? {});
 _setGetPolynomialCoefficients(getPolynomialCoefficients);
 _setGetPolynomialDegree(polynomialDegree);

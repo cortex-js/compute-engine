@@ -441,10 +441,9 @@ export function compileInnerSymbol(
     // emitted.
     // The gate is `isComplexValued`, NOT `complexDiscipline`: consumers
     // decide their {re, im} reads with that same predicate, and it is
-    // true for a declared-complex symbol under every mode — including
-    // `auto`'s per-node promotion, which stays in the strict-lanes
-    // discipline. Gating on mode left `auto` emitting `.re` reads
-    // against a bare folded literal.
+    // true for a declared-complex symbol under every mode, including the
+    // strict-lanes discipline. Gating on mode left a strict compilation
+    // emitting `.re` reads against a bare folded literal.
     if (target.complexLift !== undefined && core.isComplexValued(expr)) {
       const value = expr.engine._getSymbolValue(s);
       if (

@@ -1340,12 +1340,12 @@ describe('COMPILE Equal/NotEqual is exact', () => {
 });
 
 // CO-P1-3: a complex-typed argument into a real-only helper (`_SYS.erf`)
-// silently returned garbage (−1). It must never compute that garbage. Since
-// the compile-mode migration (step 4, 2026-08-16) the answer splits in two:
-// an operand that is only MAYBE complex takes the D2/D6 runtime rule (the real
-// helper when the value is real at run time, `NaN` when it is not), while an
-// operand that is STATICALLY non-real still fails closed at compile time.
-// `mode: 'strict'` keeps the old compile-time decline for both.
+// silently returned garbage (−1). It must never compute that garbage. In
+// `mode: 'complex'` the answer splits in two: an operand that is only MAYBE
+// complex takes the D2/D6 runtime rule (the real helper when the value is real
+// at run time, `NaN` when it is not), while an operand that is STATICALLY
+// non-real still fails closed at compile time. `mode: 'strict'` (the default)
+// declines at compile time for both.
 describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
   it('Erf of a complex value throws in strict mode', () => {
     const engine = new ComputeEngine();
@@ -1355,20 +1355,21 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     ).toThrow(/real-only target helper/);
   });
 
-  it('Erf of a STATICALLY non-real operand declines in the default mode too', () => {
+  it('Erf of a STATICALLY non-real operand declines in complex mode too', () => {
     const engine = new ComputeEngine();
     expect(() =>
       compile(engine.box(['Erf', 'ImaginaryUnit']), {
         fallback: false,
         constantFold: false,
+        mode: 'complex',
       })
     ).toThrow(/is certainly not a real number/);
   });
 
-  it('Erf of a MAYBE-complex value takes the runtime rule in the default mode', () => {
+  it('Erf of a MAYBE-complex value takes the runtime rule in complex mode', () => {
     const engine = new ComputeEngine();
     engine.declare('z', 'complex');
-    const r = compile(engine.box(['Erf', 'z']));
+    const r = compile(engine.box(['Erf', 'z']), { mode: 'complex' });
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.cisreal(');
     expect(r.run!({ z: 0.5 } as any)).toBeCloseTo(0.5204998778130466, 12);
@@ -1426,18 +1427,19 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     test.each(HEADS)(
       '%s over a MAYBE-complex operand takes the runtime rule',
       (h, rest) => {
-        // `x + (1+i)` is complex-typed but not statically non-real, so since
-        // the compile-mode migration (step 4, 2026-08-16) it compiles under
-        // the D2/D6 runtime rule instead of declining: the real lowering when
-        // the value is real at run time, `NaN` when it is not. Here the
-        // imaginary part is 1 at every `x`, so the answer is always `NaN` —
-        // no longer a silent one behind a real lowering.
+        // `x + (1+i)` is complex-typed but not statically non-real, so in
+        // `mode: 'complex'` it compiles under the D2/D6 runtime rule instead
+        // of declining: the real lowering when the value is real at run time,
+        // `NaN` when it is not. Here the imaginary part is 1 at every `x`,
+        // so the answer is always `NaN` — no longer a silent one behind a
+        // real lowering.
         const engine = new ComputeEngine();
         const r = compile(engine.box([h, Z, ...rest] as any), {
           fallback: false,
           // Every operand but `x` is a literal; without this the whole call
           // could fold and the lowering under test would never be emitted.
           constantFold: false,
+          mode: 'complex',
         });
         expect(r.success).toBe(true);
         expect(r.code).toContain('_SYS.cisreal(');
@@ -1474,6 +1476,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
           compile(engine.box([h, STATIC, ...rest] as any), {
             fallback: false,
             constantFold: false,
+            mode: 'complex',
           })
         ).toThrow(
           FLIPPED.has(h as string)
@@ -1579,7 +1582,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
         h,
         ['List', 'ImaginaryUnit', ['Multiply', 2, 'ImaginaryUnit']],
       ] as any);
-      const r = compile(expr, { constantFold: false });
+      const r = compile(expr, { constantFold: false, mode: 'complex' });
       expect(r.success).toBe(true);
       const value = r.run!({}) as number | { re: number; im: number };
       const expected = expr.N();
@@ -1691,7 +1694,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       const engine = new ComputeEngine();
       const r = compile(
         engine.box(['Mean', ['Add', ['Complex', 1, 1], 'x']] as any),
-        { constantFold: false }
+        { constantFold: false, mode: 'complex' }
       );
       expect(r.success).toBe(true);
       expect(r.code).toContain('_SYS.cmean(');
@@ -1699,6 +1702,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       expect(
         compile(engine.box(['Mean', ['Complex', 1, 1]] as any), {
           constantFold: false,
+          mode: 'complex',
         }).run!({})
       ).toEqual({ re: 1, im: 1 });
     });
@@ -4525,11 +4529,10 @@ describe('ordering over a complex-valued operand fails closed', () => {
   // symbolic while `x` has no value, and answers `False` once the value of
   // `i·x` is not a real number (user decision of 2026-10-21). The compiled
   // form used to emit a raw `<` over the `{re, im}`
-  // object — a silent `false` behind `success: true`. Since the compile-mode
-  // migration (step 4, 2026-08-16) the default mode answers this with the D2
-  // RUNTIME rule instead of a compile-time decline: `false` when the operand
-  // is complex at run time, the real comparison when it is not. `mode:
-  // 'strict'` keeps the decline.
+  // object — a silent `false` behind `success: true`. `mode: 'complex'`
+  // answers this with the D2 RUNTIME rule instead of a compile-time decline:
+  // `false` when the operand is complex at run time, the real comparison when
+  // it is not. `mode: 'strict'` (the default) declines.
   it('Less/LessEqual/Greater/GreaterEqual over a maybe-complex operand use the runtime rule', () => {
     const ce = new ComputeEngine();
     // `i·x` is 0 (real) at x = 0 and complex elsewhere, so the two branches of
@@ -4544,6 +4547,7 @@ describe('ordering over a complex-valued operand fails closed', () => {
     ] as const) {
       const r = compile(ce.box([h, ['Multiply', 'ImaginaryUnit', 'x'], 0]), {
         fallback: false,
+        mode: 'complex',
       })!;
       expect(r.success).toBe(true);
       expect(r.code).toContain('_SYS.cisreal(');
@@ -4568,7 +4572,7 @@ describe('ordering over a complex-valued operand fails closed', () => {
     ]);
     // The condition is `false` at every `x` here (complex, or `0 < 0`), so the
     // `True` arm gives 2 and `Mod(2, 1) = 0`.
-    const r = compile(expr, { fallback: false })!;
+    const r = compile(expr, { fallback: false, mode: 'complex' })!;
     expect(r.success).toBe(true);
     expect(r.run!({ x: 1 })).toBe(0);
     expect(r.run!({ x: 0 })).toBe(0);
@@ -4579,10 +4583,9 @@ describe('ordering over a complex-valued operand fails closed', () => {
   });
 
   it('still admits an unknown-sign radical operand', () => {
-    // `Sqrt(x)` types `complex` for an operand of unknown sign. The default
-    // mode promotes it to the complex kernel (compile-mode step 4,
-    // 2026-08-16) and the comparison reads the promoted value through the
-    // runtime rule — so this must keep compiling, and keep answering the real
+    // `Sqrt(x)` types `complex` for an operand of unknown sign. The strict
+    // default keeps it on the real lane, where it is `NaN` for a negative
+    // radicand, so this must keep compiling, and keep answering the real
     // comparison wherever the radicand is non-negative.
     const ce = new ComputeEngine();
     const r = compile(ce.box(['Less', ['Sqrt', 'x'], 2]), { fallback: false })!;

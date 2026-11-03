@@ -2100,6 +2100,38 @@ compiled for `real`?
 Recommendation: (a). With no decision, both examples keep their wrong
 values.
 
+Option (a) compiles the value again in the complex lane, as the restart of
+`c4e0a3bdb` did. The complex-lane decision of 2026-11-02
+(`docs/plans/2026-11-02-language-axes-options.md`, page 6) removes the
+restart and makes `strict` the default, whose real lane reads a `number`
+element as real. So option (a) needs a mechanism without a restart: the
+complex lane for a `number` binding at compile time, or the decline of
+option (b). Plan item 3.4.6 records this.
+
+- **CE-751.1** (corpus) In `mode: 'complex'`, a call of a user function
+  sends a complex argument (`_SYS.cplx(ceArg_0)`; an untyped parameter is
+  complex in this mode) to a definition that reads that parameter on the
+  real lane (`_fn_s_x = (x) => ((x - Math.floor(x)) % 1)`).
+  `realProjection` (`compile-user-functions.ts`) converts the argument back
+  only when the declared parameter type is real; here it is `unknown`.
+  Witness: Tycho art/hyvhlz4chj, the colour `asOklab(c_{lavinga})` gives
+  an oklab colour of `NaN` channels where the interpreter gives a real
+  colour (8 sampled values), and Tycho neyret/4d9knkydej `asOklab(g)`
+  (7 values; the call `_fn_r(_SYS.atNoWrap(Z, 1),
+  _SYS.cplx(_SYS.atNoWrap(Z, 2)))` lifts an element of a `list<number>` to a
+  complex object for a definition that reads `ceArg_1` with `Math.atan2`),
+  when Tycho's colour lane compiles a real-mode
+  document in `complex`; Tycho's planned split (the colour lane in
+  `complex` only for a complex-mode document) does not reach it. Plain
+  program: `u: real; s(x) := x - \lfloor x\rfloor; g := t ↦ s(t)+1`;
+  `g(u)` in complex mode gives `"[object Object]NaN1"`, expected `1.25` at
+  `u = 0.25`. Fix: at the call, convert a complex argument for a parameter
+  that the definition reads on the real lane with the real-operand rule
+  (`cisreal ? creal : NaN`), which needs the lane of each parameter of an
+  emitted definition (about 40 to 80 lines); or decline that call (about 15
+  lines). User decision 2026-11-03: fixed before the language release, not
+  in item 3.4.6.
+
 ### CE-715. The `bigint` compile mode: the shapes it declines
 
 **Status:** ready; capability. The mode `compile(expr, { mode: 'bigint' })`
@@ -2124,10 +2156,6 @@ the user.
 - **CE-715.4** (low) A binding typed `integer | infinity` as a lane input.
 - **CE-715.5** (medium) A `bigint` output form for `broadcast()`,
   `broadcastAsync()` and the stored batch loaders.
-- **CE-715.6** Dropped (user decision 2026-11-02): no escalation to `bigint`
-  on a run-time value, ever; the bigint lane is used only on `mode: 'bigint'`,
-  as the complex lane is used only by static type or on `mode: 'complex'`
-  (`docs/plans/2026-11-02-language-axes-options.md`, page 6).
 - **CE-715.7** (low) The Python target's `Rational` lowering as an exact
   `fractions.Fraction`.
 - **CE-715.8** (medium) Control and comparison shapes that the lane analysis

@@ -23,8 +23,8 @@ import type { Expression } from '../../src/compute-engine/global-types';
  *   effective-mode resolution of §5 and the unsupported-mode `capability`
  *   decline;
  * - the `LaneMismatchError` / `CompileDeclineError` classes and the
- *   `CompileDiagnostic` payload, and the `mode` / `promoted` / `diagnostic`
- *   result fields (`mode: 'strict'`, `promoted: false` until later steps);
+ *   `CompileDiagnostic` payload, and the `mode` / `diagnostic` result
+ *   fields;
  * - the D7 fixes in the shared interpreter fallback: a `{re, im}` `vars` value
  *   is declared complex, and the result follows the runner's convention;
  * - the result convention (§5): the transcendental `_SYS` kernels chop their
@@ -33,13 +33,9 @@ import type { Expression } from '../../src/compute-engine/global-types';
  * - the internal callers of the (since removed) `realOnly` option, migrated to
  *   a local numeric projection.
  *
- * Migration step 4 (2026-08-16) landed the `auto` default on `javascript` and
- * `python`: the pins below that used to read "accepted but compiled as
- * `strict`" now read the shipped behavior — `auto` promotes an unknown-sign
- * radical and escalates once to `complex` at a wide binding. (The former
- * `complexPromotion: true` option, deprecated to `mode: 'complex'` at that
- * step, was removed after 0.167.0.) A test whose subject is the
- * non-promoting discipline passes `mode: 'strict'` explicitly.
+ * `'strict'` is the default mode of every target: an unknown-sign radical
+ * stays on the real lane, and only `mode: 'complex'` promotes it. The mode
+ * `'auto'` was removed; a request for it is the `unsupported-mode` decline.
  */
 
 /** A minimal direct custom target (the RPN shape of `compile-plugin.test.ts`). */
@@ -69,34 +65,25 @@ function customTarget(
 describe('compile mode — option surface (step 1)', () => {
   const ce = new ComputeEngine();
 
-  it('accepts every mode value and reports mode/promoted on the result', () => {
-    for (const mode of ['strict', 'complex', 'auto'] as const) {
+  it('accepts every mode value and reports the mode on the result', () => {
+    for (const mode of ['strict', 'complex'] as const) {
       const r = compile(ce.parse('2x + 1'), { mode });
       expect(r.success).toBe(true);
-      // `2x + 1` has no promotable head, so `auto` reports the mode of its
-      // first (strict) attempt; only an explicit `complex` reports 'complex'.
-      expect(r.mode).toBe(mode === 'complex' ? 'complex' : 'strict');
-      expect(r.promoted).toBe(false);
-      expect(r.escalation).toBeUndefined();
+      expect(r.mode).toBe(mode);
       expect(r.diagnostic).toBeUndefined();
       expect(r.run!({ x: 3 })).toBe(7);
     }
   });
 
-  it('strict and auto compile the same code when nothing promotes', () => {
+  it('the default compiles the strict code', () => {
     const plain = ce.parse('2x + 1');
     const plainStrict = compile(plain, { mode: 'strict' }).code;
-    expect(compile(plain, { mode: 'auto' }).code).toBe(plainStrict);
     expect(compile(plain).code).toBe(plainStrict);
-    // With a promotable head the two lanes part: the default `auto` promotes
-    // the unknown-sign radical (compile-mode step 4, 2026-08-16), `strict`
-    // keeps the real kernel.
+    // The default `strict` keeps the real kernel of an unknown-sign radical.
     const expr = ce.parse('\\sqrt{x} + 2x');
-    expect(compile(expr, { mode: 'strict' }).code).toContain('Math.sqrt');
-    const auto = compile(expr, { mode: 'auto' });
-    expect(auto.code).toContain('_SYS.csqrt');
-    expect(auto.promoted).toBe(true);
-    expect(compile(expr).code).toBe(auto.code);
+    const strict = compile(expr, { mode: 'strict' });
+    expect(strict.code).toContain('Math.sqrt');
+    expect(compile(expr).code).toBe(strict.code);
     // Complex mode promotes the radical and lifts the wide `x`.
     expect(compile(expr, { mode: 'complex' }).code).toContain('_SYS.csqrt');
   });
@@ -110,7 +97,12 @@ describe('compile mode — option surface (step 1)', () => {
   it('a mode the target does not offer is a capability decline, never a silent coercion', () => {
     for (const to of ['glsl', 'wgsl', 'interval-js'] as const) {
       for (const mode of ['complex', 'auto'] as const) {
-        const r = compile(ce.parse('x + 1'), { to, mode });
+        // `'auto'` is no longer a `CompileMode`; a host that does not
+        // type-check its options can still pass it.
+        const r = compile(ce.parse('x + 1'), {
+          to,
+          mode: mode as unknown as CompileMode,
+        });
         expect(r.success).toBe(false);
         expect(r.diagnostic).toBeDefined();
         expect(r.diagnostic!.code).toBe('unsupported-mode');
@@ -147,9 +139,7 @@ describe('compile mode — option surface (step 1)', () => {
     const e = new ComputeEngine();
     e.declare('z', 'complex');
     // `Erf` has a real-only helper: a complex-typed operand fails closed.
-    // Pinned in `strict`: under the default `auto` a MAYBE-complex operand
-    // takes the D2/D6 runtime rule and compiles (compile-mode step 4,
-    // 2026-08-16); the compile-time decline is the strict-lane behavior.
+    // The compile-time decline is the behavior of the strict lane.
     const r = compile(e.box(['Erf', 'z']), { mode: 'strict' });
     expect(r.success).toBe(false);
     expect(r.diagnostic).toEqual({
@@ -158,7 +148,6 @@ describe('compile mode — option surface (step 1)', () => {
       message: r.error,
     });
     expect(r.mode).toBe('strict');
-    expect(r.promoted).toBe(false);
   });
 });
 
@@ -191,17 +180,14 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     return seen;
   }
 
-  it('javascript defaults to auto; an explicit mode is latched as requested', () => {
+  it('javascript defaults to strict; an explicit mode is latched as requested', () => {
     const expr = ce.parse('x + 1');
-    expect(observedModes(expr)).toEqual(new Set(['strict', 'auto']));
+    expect(observedModes(expr)).toEqual(new Set(['strict']));
     expect(observedModes(expr, { mode: 'strict' })).toEqual(
       new Set(['strict'])
     );
     expect(observedModes(expr, { mode: 'complex' })).toEqual(
       new Set(['strict', 'complex'])
-    );
-    expect(observedModes(expr, { mode: 'auto' })).toEqual(
-      new Set(['strict', 'auto'])
     );
   });
 
@@ -232,49 +218,32 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     expect(r.success).toBe(true);
     expect(r.code).toBe('x + 1');
     expect(r.mode).toBe('strict');
-    // Its resolved mode is stamped on the target per call.
-    expect(t.mode).toBe('strict');
+    // The requested mode is stamped on the target per call: none here.
+    expect(t.mode).toBeUndefined();
     // A requested mode it does not declare is the capability decline.
     const declined = compile(ce.parse('x + 1'), { target: t, mode: 'complex' });
     expect(declined.success).toBe(false);
     expect(declined.diagnostic!.code).toBe('unsupported-mode');
   });
 
-  it("a direct target declaring 'auto' without reset() resolves auto to strict; with reset() it offers auto", () => {
-    const hooks = {
-      supportedModes: ['strict', 'complex', 'auto'] as const,
+  it("a direct target declaring 'complex' offers it; a reused target does not keep the previous call's mode", () => {
+    const t = customTarget({
+      supportedModes: ['strict', 'complex'] as const,
       complexLift: (c: string) => `lift(${c})`,
       complexIsReal: (c: string) => `isreal(${c})`,
-    };
-    const noReset = customTarget({ ...hooks });
-    // Nothing requested: `auto` is declared but not offered → strict.
-    compile(ce.parse('x + 1'), { target: noReset });
-    expect(noReset.mode).toBe('strict');
-    // Requested `auto`, declared but not offered → strict, not a decline.
-    const r = compile(ce.parse('x + 1'), { target: noReset, mode: 'auto' });
-    expect(r.success).toBe(true);
-    expect(noReset.mode).toBe('strict');
+    });
     // `complex` needs only the two lowering hooks.
-    compile(ce.parse('x + 1'), { target: noReset, mode: 'complex' });
-    expect(noReset.mode).toBe('complex');
-
-    const withReset = customTarget({ ...hooks, reset: () => {} });
-    compile(ce.parse('x + 1'), { target: withReset });
-    expect(withReset.mode).toBe('auto');
-    // A reused direct target does NOT inherit the previous call's explicit
-    // mode: an omitted option resets to the target's default (the
-    // `constantFold` stamping pattern).
-    compile(ce.parse('x + 1'), { target: withReset, mode: 'strict' });
-    expect(withReset.mode).toBe('strict');
-    compile(ce.parse('x + 1'), { target: withReset });
-    expect(withReset.mode).toBe('auto');
+    compile(ce.parse('x + 1'), { target: t, mode: 'complex' });
+    expect(t.mode).toBe('complex');
+    // An omitted option clears the stamped mode (the `constantFold`
+    // stamping pattern), and the compilation is `strict`.
+    const r = compile(ce.parse('x + 1'), { target: t });
+    expect(t.mode).toBeUndefined();
+    expect(r.mode).toBe('strict');
   });
 
-  it("a direct target declaring 'complex' or 'auto' without the lowering hooks is rejected at option validation", () => {
-    for (const declared of [
-      ['strict', 'complex'],
-      ['strict', 'auto'],
-    ] as const) {
+  it("a direct target declaring 'complex' without the lowering hooks is rejected at option validation", () => {
+    for (const declared of [['strict', 'complex']] as const) {
       const bad = customTarget({ supportedModes: declared });
       expect(() => compile(ce.parse('x + 1'), { target: bad })).toThrow(
         /complexLift\(\).*complexIsReal\(\)/
@@ -290,19 +259,15 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     ).toThrow(/supportedModes/);
   });
 
-  it('a built-in target passed directly declares all four modes with its hooks, and defaults to strict there (no reset)', () => {
+  it('a built-in target passed directly declares its three modes with its hooks, and defaults to strict there', () => {
     const jsRaw = new JavaScriptTarget().createTarget();
-    expect(jsRaw.supportedModes).toEqual([
-      'strict',
-      'complex',
-      'auto',
-      'bigint',
-    ]);
+    expect(jsRaw.supportedModes).toEqual(['strict', 'complex', 'bigint']);
     expect(jsRaw.complexLift!('v')).toBe('_SYS.cplx(v)');
     expect(jsRaw.complexIsReal!('v')).toBe('_SYS.cisreal(v)');
     const r = compile(ce.parse('x + 1'), { target: jsRaw });
     expect(r.success).toBe(true);
-    expect(jsRaw.mode).toBe('strict');
+    expect(r.mode).toBe('strict');
+    expect(jsRaw.mode).toBeUndefined();
   });
 });
 
@@ -385,7 +350,7 @@ describe('result convention (design §5) — exact im !== 0 at the boundary, ker
 
   it('booleans are never coerced', () => {
     expect(compile(ce.parse('x < 3')).run!({ x: 1 })).toBe(true);
-    for (const mode of ['strict', 'complex', 'auto'] as const)
+    for (const mode of ['strict', 'complex'] as const)
       expect(compile(ce.parse('x < 3'), { mode }).run!({ x: 5 })).toBe(false);
   });
 
@@ -403,9 +368,7 @@ describe('D7 — the shared interpreter fallback honors the runner contract in b
     const e = new ComputeEngine();
     e.declare('z', 'complex');
     // `Erf` fails closed on a complex-typed operand → interpreter fallback.
-    // `strict` keeps that decline: under the default `auto` the operand is
-    // only MAYBE complex and the D2/D6 runtime rule compiles it instead
-    // (compile-mode step 4, 2026-08-16).
+    // `strict`, the default, keeps that decline.
     const r = compile(e.box(['Add', ['Erf', 'z'], 'z']), {
       fallback: true,
       mode: 'strict',

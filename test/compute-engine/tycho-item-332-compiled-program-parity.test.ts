@@ -12,7 +12,7 @@
  *    and divided as numbers: `0 < k` was always false, so no circle was ever
  *    added. The loop variable is now bound complex when every element is
  *    complex-valued, and a source whose elements disagree is a lane mismatch
- *    (the `auto` mode then compiles again under the complex discipline).
+ *    (the `complex` mode compiles it under the complex discipline).
  * 2. The check that a real-bound block local is never assigned a complex
  *    value did not enter the braced body of a `for`/`while`/`if` (a nested
  *    `Block`), nor mask the loop's variables: `r = r + 1 / k` inside such a
@@ -51,16 +51,23 @@ function numeric(v: unknown): number {
   throw new Error(`not a number: ${JSON.stringify(v)}`);
 }
 
-function compiled(source: string, ce = new ComputeEngine()) {
+function compiled(
+  source: string,
+  ce = new ComputeEngine(),
+  mode?: 'complex'
+) {
   const [program] = parseEpsil(source);
   const expr = ce.box(program);
-  const result = compile(expr, { to: 'javascript' });
+  const result = compile(expr, { to: 'javascript', mode });
   return { expr, result };
 }
 
 /** The interpreted and the compiled value of an Epsil program. */
-function parity(source: string): { evaluated: number; compiled: number } {
-  const { expr, result } = compiled(source);
+function parity(
+  source: string,
+  mode?: 'complex'
+): { evaluated: number; compiled: number } {
+  const { expr, result } = compiled(source, undefined, mode);
   if (!result.success) throw new Error(`did not compile: ${source}`);
   return {
     evaluated: expr.evaluate().N().re,
@@ -68,8 +75,12 @@ function parity(source: string): { evaluated: number; compiled: number } {
   };
 }
 
-function expectParity(source: string, expected: number): void {
-  const { evaluated, compiled } = parity(source);
+function expectParity(
+  source: string,
+  expected: number,
+  mode?: 'complex'
+): void {
+  const { evaluated, compiled } = parity(source, mode);
   expect(evaluated).toBeCloseTo(expected, 10);
   expect(compiled).toBeCloseTo(expected, 10);
 }
@@ -132,7 +143,8 @@ let d = Sqrt(a)
 let r = 0
 for k in [a + d, a - d] { r = r + 1 / k }
 r`,
-      -0.4
+      -0.4,
+      'complex'
     );
   });
 
@@ -147,20 +159,19 @@ for z in [[a + d, 1 + d], [a - d, 1 - d]] {
   if Re(x) < 0 { n = n + 1 }
 }
 n`,
-      2
+      2,
+      'complex'
     );
   });
 
-  test('a loop variable over complex and real elements escalates', () => {
+  test('a loop variable over complex and real elements', () => {
     const source = `let g = [-4, 9]
 let a = g[1]
 let d = Sqrt(a)
 let r = 0
 for k in [d, 1] { if k == 1 { r = r + 1 } }
 r`;
-    expectParity(source, 1);
-    const { result } = compiled(source);
-    expect(result.escalation).toMatchObject({ boundary: 'Loop index' });
+    expectParity(source, 1, 'complex');
   });
 
   test('Max(0, x) is non-negative, so its square root is real', () => {
@@ -195,7 +206,8 @@ while i <= 3 {
   i = i + 1
 }
 count`,
-      3
+      3,
+      'complex'
     );
   });
 
@@ -212,7 +224,8 @@ while i <= 3 {
   i = i + 1
 }
 count`,
-      3
+      3,
+      'complex'
     );
   });
 

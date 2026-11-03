@@ -102,7 +102,7 @@ function plain(v: unknown): unknown {
 
 describe('JavaScript: a chained At compiles as the nested access', () => {
   for (const [type, value] of BASES)
-    for (const mode of ['auto', 'strict'] as const)
+    for (const mode of ['complex', 'strict'] as const)
       test.each(READS.map((json) => [JSON.stringify(json), json]))(
         `${type}, ${mode}: %s`,
         (label, json) => {
@@ -144,7 +144,7 @@ describe('A chained read whose nested type is not a subtype of its type', () => 
   ] as const)('%s', (type, name, read) => {
     const ce = new ComputeEngine();
     ce.declare(name, type);
-    for (const mode of ['auto', 'strict'] as const)
+    for (const mode of ['complex', 'strict'] as const)
       expect(() =>
         compile(ce.box(['Add', read, 1] as never), { fallback: false, mode })
       ).toThrow(/Could not compile/);

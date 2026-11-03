@@ -24,7 +24,7 @@
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
-const MODES = ['strict', 'auto', 'complex'] as const;
+const MODES = ['strict', 'complex'] as const;
 
 /** Expect the compilation of `expr` on the JavaScript target, in the mode
  * `mode`, to be refused because the input `x` has no type. The compiled code

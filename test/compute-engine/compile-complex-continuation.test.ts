@@ -2,9 +2,9 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 
 /**
  * A special function whose interpreter kernel continues into the complex
- * plane takes the complex lane of the JavaScript target in `auto` and
- * `complex` mode where its value may be complex, as `Sqrt` and `Ln` do; in
- * `strict` mode it stays real and answers `NaN`. The shader targets have no
+ * plane takes the complex lane of the JavaScript target in `complex` mode
+ * where its value may be complex, as `Sqrt` and `Ln` do; in `strict` mode
+ * it stays real and answers `NaN`. The shader targets have no
  * complex lane and decline a value that is provably complex.
  */
 
@@ -23,7 +23,7 @@ function run(
   head: string,
   names: string[],
   values: number[],
-  mode: 'auto' | 'complex' | 'strict'
+  mode: 'complex' | 'strict'
 ): Value | number {
   const r = compile(ce.box([head, ...names]), {
     to: 'javascript',
@@ -55,7 +55,7 @@ describe('Special functions continued into the complex plane (JavaScript)', () =
     const ref = reference(head, values);
     const label = `${head}(${values.join(', ')})`;
 
-    for (const mode of ['auto', 'complex'] as const)
+    for (const mode of ['complex'] as const)
       test(`${label} = ${fmt(ref)} (${mode}, as .N())`, () => {
         const out = run(head, names, values, mode) as Value;
         expect(out.re).toBeCloseTo(ref.re, 9);
@@ -81,7 +81,7 @@ const realCases: [string, string[], number[], number][] = [
 
 describe('Special functions continued into the complex plane: the real region', () => {
   for (const [head, names, values, expected] of realCases)
-    for (const mode of ['auto', 'complex', 'strict'] as const)
+    for (const mode of ['complex', 'strict'] as const)
       test(`${head}(${values.join(', ')}) = ${expected.toFixed(6)} (${mode})`, () => {
         expect(run(head, names, values, mode)).toBeCloseTo(expected, 9);
       });
@@ -94,7 +94,7 @@ describe('A complex operand takes the complex kernel in every mode', () => {
     ['EllipticK', []],
     ['HurwitzZeta', [3]],
   ] as [string, number[]][])
-    for (const mode of ['auto', 'strict'] as const)
+    for (const mode of ['complex', 'strict'] as const)
       test(`${head}(0.5 + i) as .N() (${mode})`, () => {
         const ref = ce.box([head, ['Complex', 0.5, 1], ...extra]).N() as any;
         const r = compile(ce.box([head, operand, ...extra] as any), {
@@ -118,7 +118,7 @@ describe('HurwitzZeta(1, z) is the unsigned pole for a non-real z', () => {
     ).toBe(true);
     const r = compile(
       ce.box(['HurwitzZeta', 1, ['Add', 'x', 'ImaginaryUnit']] as any),
-      { to: 'javascript', mode: 'auto', fallback: false } as any
+      { to: 'javascript', mode: 'complex', fallback: false } as any
     ) as any;
     const out = r.run({ x: 0.5 }) as Value;
     // The compiled unsigned pole: an infinite part and a non-zero
@@ -151,7 +151,7 @@ describe('A user definition with a compile handler replaces the continuation', (
 
 describe('Arcsec and Arccsc follow their type, as the inverse hyperbolics do', () => {
   for (const head of ['Arcsec', 'Arccsc'])
-    for (const mode of ['auto', 'complex', 'strict'] as const) {
+    for (const mode of ['complex', 'strict'] as const) {
       const ref = reference(head, [0.5]);
       test(`${head}(0.5) = ${fmt(ref)} (${mode})`, () => {
         const out = run(head, ['x'], [0.5], mode) as Value;

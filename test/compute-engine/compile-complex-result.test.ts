@@ -118,14 +118,16 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       }
     });
 
-    // A real-typed symbol of UNKNOWN sign is exactly the case the default mode
-    // `auto` promotes (compile-mode step 4, 2026-08-16): the complex kernel
-    // covers both signs and hands an in-domain value back as a plain number.
-    // `mode: 'strict'` is where the real lowering lives now, and it is pinned
-    // here beside each promoted one.
-    it('Sqrt of a real-typed symbol promotes; strict keeps the real lowering', () => {
+    // A real-typed symbol of UNKNOWN sign: in `mode: 'complex'` the complex
+    // kernel covers both signs and hands an in-domain value back as a plain
+    // number. `mode: 'strict'` (the default) keeps the real lowering, and it
+    // is pinned here beside each complex one.
+    it('Sqrt of a real-typed symbol is complex in the complex mode; strict keeps the real lowering', () => {
       const ce = engineWithNegativeAssignment();
-      const result = compile(ce.parse('\\sqrt{r}'), { fallback: false });
+      const result = compile(ce.parse('\\sqrt{r}'), {
+        fallback: false,
+        mode: 'complex',
+      });
       expect(result.code).toBe('_SYS.csqrt(({ re: _.r, im: 0 }))');
       expect(result.run!({ r: 4 })).toBe(2);
       expect(result.run!({ r: -1 })).toEqual({ re: 0, im: 1 }); // √−1 = i
@@ -137,9 +139,12 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       expect(strict.run!({ r: 4 })).toBe(2);
     });
 
-    it('Ln of a real-typed symbol promotes; strict keeps the real lowering', () => {
+    it('Ln of a real-typed symbol is complex in the complex mode; strict keeps the real lowering', () => {
       const ce = engineWithNegativeAssignment();
-      const result = compile(ce.parse('\\ln(r)'), { fallback: false });
+      const result = compile(ce.parse('\\ln(r)'), {
+        fallback: false,
+        mode: 'complex',
+      });
       expect(result.code).toBe('_SYS.cln(({ re: _.r, im: 0 }))');
       expect(result.run!({ r: 1 })).toBe(0);
       // ln(−1) = πi.
@@ -152,9 +157,12 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       expect(strict.run!({ r: 1 })).toBe(0);
     });
 
-    it('Log of a real-typed symbol promotes; strict keeps the real lowering', () => {
+    it('Log of a real-typed symbol is complex in the complex mode; strict keeps the real lowering', () => {
       const ce = engineWithNegativeAssignment();
-      const result = compile(ce.parse('\\log(r)'), { fallback: false });
+      const result = compile(ce.parse('\\log(r)'), {
+        fallback: false,
+        mode: 'complex',
+      });
       // Base 10 has its own complex kernel, whose real-axis value is the
       // real lane's `Math.log10` (Tycho item 240).
       expect(result.code).toContain('_SYS.clog10(({ re: _.r, im: 0 }))');
@@ -495,7 +503,7 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
         ['Sqrt', ['Negate', 'u']],
         ['Arcsin', 'u'],
       ]),
-      { fallback: false, constantFold: false }
+      { fallback: false, constantFold: false, mode: 'complex' }
     );
     expect(runtimeTuple.code).toContain('_SYS.csqrt(');
     expect(runtimeTuple.run!({ u: 0.25 })).toEqual([
@@ -522,9 +530,9 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
     ).toEqual({ re: 1, im: 1e-4 });
   });
 
-  it('Sqrt/Ln/Log promote an unknown-sign operand to the complex kernel', () => {
-    // The default mode `auto` promotes an unknown-sign operand to the complex
-    // kernel (compile-mode step 4, 2026-08-16). An in-domain argument still
+  it('Sqrt/Ln/Log take the complex kernel for an unknown-sign operand in the complex mode', () => {
+    // `mode: 'complex'` lowers an unknown-sign operand with the complex
+    // kernel. An in-domain argument still
     // comes back as a plain number — the kernel gives an exact zero part — while an
     // out-of-domain one returns the complex value the interpreter agrees with.
     const ce = new ComputeEngine();
@@ -546,7 +554,10 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
         { re: 0, im: Math.PI / Math.LN10 },
       ],
     ] as const) {
-      const result = compile(ce.parse(latex), { fallback: false });
+      const result = compile(ce.parse(latex), {
+        fallback: false,
+        mode: 'complex',
+      });
       expect(result.code).toContain(code);
       expect(result.run!({ u: arg })).toBe(expected);
       expect(result.run!({ u: -1 })).toEqual(negative);

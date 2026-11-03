@@ -152,7 +152,7 @@ describe('A CALL OF A USER FUNCTION WITH A COMPLEX BODY IS COMPLEX', () => {
 
   // The body of `h` reads the GLOBAL `k`: a complex local `k` of the calling
   // `Block` is not visible in the emitted `_fn_h`, so the call stays real.
-  for (const mode of ['strict', 'auto'] as const)
+  for (const mode of ['strict', 'complex'] as const)
     it(`javascript ${mode}: a complex caller local does not reach the body`, () => {
       const ce = new ComputeEngine();
       ce.assign('k', 1);
@@ -293,7 +293,7 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
   ];
 
   for (const { name, build, vars, expected, glsl, javascript } of CASES) {
-    for (const mode of ['strict', 'auto'] as const)
+    for (const mode of ['strict', 'complex'] as const)
       it(`javascript ${mode}, ${name}`, () => {
         const ce = shadowEngine();
         const expr = build(ce);
@@ -361,32 +361,32 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
     expected: { re: number; im: number };
     // The modes in which the expression compiles. In the others it fails
     // closed and the interpreter evaluates it.
-    compiles: ReadonlyArray<'strict' | 'auto'>;
+    compiles: ReadonlyArray<'strict' | 'complex'>;
   }> = [
     {
       name: 'parse route: p((x, 1))',
       build: (ce) => ce.parse('p((x, 1))'),
       vars: { x: 2 },
       expected: { re: 2, im: 1 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       name: 'parse route: \\sum_{k=1}^{3} p((x, 1))',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} p((x, 1))'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       name: 'parse route: \\sum_{j=1}^{3} p((x, 1)), no name in common',
       build: (ce) => ce.parse('\\sum_{j=1}^{3} p((x, 1))'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       // In `strict` the radical is a real number (NaN below 5), so the point
-      // reaches the specialized definition. In `auto` it is complex, the
+      // reaches the specialized definition. In `complex` it is complex, the
       // call must be inlined, and the inlined `k` would be captured by the
       // index: that fails closed.
       name: 'parse route: \\sum_{k=1}^{3} p((x, \\sqrt{x-5}))',
@@ -407,28 +407,28 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       build: (ce) => ce.parse('\\sum_{k=1}^{3} (k + p((x, 1)))'),
       vars: { x: 2 },
       expected: { re: 12, im: 3 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       name: 'parse route: \\sum_{k=1}^{3} q((x, k)), the index in the point',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} q((x, k))'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       name: 'parse route: \\sum_{k=1}^{300} q((x, k)), run-time loop',
       build: (ce) => ce.parse('\\sum_{k=1}^{300} q((x, k))'),
       vars: { x: 2 },
       expected: { re: 45150, im: 300 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       name: 'parse route: \\prod_{k=1}^{2} p((x, 1))',
       build: (ce) => ce.parse('\\prod_{k=1}^{2} p((x, 1))'),
       vars: { x: 2 },
       expected: { re: 3, im: 4 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       name: 'box route: Sum(p((x, 1)), k from 1 to 3)',
@@ -436,7 +436,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
         ce.box(['Sum', ['p', ['Tuple', 'x', 1]], ['Limits', 'k', 1, 3]]),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       // Compiles for the reason stated for `k + p((x, 1))` above: the
@@ -451,7 +451,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
         ]),
       vars: { x: 2 },
       expected: { re: 4, im: 1 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       // The inlined body is compiled at the call site, where the index `k`
@@ -468,7 +468,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       build: (ce) => ce.parse('\\sum_{j=1}^{3} a((x, \\imaginaryI x))'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      compiles: ['strict', 'auto'],
+      compiles: ['strict', 'complex'],
     },
     {
       name: 'box route: a Block local k beside a((x, i·x)), inlining declines',
@@ -490,7 +490,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
   ];
 
   for (const { name, build, vars, expected, compiles } of CASES) {
-    for (const mode of ['strict', 'auto'] as const)
+    for (const mode of ['strict', 'complex'] as const)
       it(`javascript ${mode}, ${name}`, () => {
         const ce = pointEngine();
         const expr = build(ce);
@@ -568,7 +568,7 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
     return ce;
   }
 
-  for (const mode of ['strict', 'auto', 'complex'] as const) {
+  for (const mode of ['strict', 'complex'] as const) {
     it(`javascript ${mode}: a wide signature compiles with the complex recursive call`, () => {
       const ce = recursive('(integer) -> number');
       const result = compile(ce.parse('r(n) + x'), {
@@ -587,7 +587,7 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
     });
   }
 
-  for (const mode of ['strict', 'auto'] as const) {
+  for (const mode of ['strict', 'complex'] as const) {
     // Without a declaration, `r` is typed `(unknown) -> number`, as the
     // declared `(integer) -> number` is (CE-454: the self-recursive hypothesis
     // confirms the number result), so the body compiles with the complex

@@ -118,11 +118,10 @@ describe('PYTHON TARGET', () => {
     it('should compile exponential and logarithm', () => {
       const expr = ce.parse('\\exp(x) + \\ln(y)');
       const code = python.compile(expr).code;
-      // \exp(x) is canonicalized to e^x. `y` has unknown sign, so the default
-      // mode `auto` promotes the logarithm to `np.emath.log`, which returns a
-      // complex value for a negative argument (compile-mode step 4,
-      // 2026-08-16); `mode: 'strict'` keeps `np.log`.
-      expect(code).toBe('np.e ** x + np.emath.log(y)');
+      // \exp(x) is canonicalized to e^x. `y` has unknown sign: the default
+      // mode `strict` keeps the real `np.log`, and `mode: 'complex'` takes
+      // `np.emath.log`.
+      expect(code).toBe('np.e ** x + np.log(y)');
     });
 
     it('should compile square root', () => {
@@ -164,9 +163,8 @@ describe('PYTHON TARGET', () => {
       const code = python.compile(expr).code;
       // Expression is canonicalized (arguments reordered). The INNER radicand
       // `x² + 1` is provably non-negative and keeps `np.sqrt`; the outer one
-      // has unknown sign, so the default mode promotes it to `np.emath.sqrt`
-      // (compile-mode step 4, 2026-08-16).
-      expect(code).toBe('np.emath.sqrt(x + np.sqrt(x ** 2 + 1))');
+      // has unknown sign: the default mode `strict` keeps it real too.
+      expect(code).toBe('np.sqrt(x + np.sqrt(x ** 2 + 1))');
     });
 
     it('should compile rational expressions', () => {
@@ -379,10 +377,9 @@ describe('PYTHON TARGET', () => {
       const expr = ce.parse('\\frac{-b + \\sqrt{b^2 - 4ac}}{2a}');
       const code = python.compile(expr).code;
 
-      // The discriminant has unknown sign, so the default mode promotes it —
-      // `np.emath.sqrt` returns the complex root of a negative discriminant
-      // instead of `nan` (compile-mode step 4, 2026-08-16).
-      expect(code).toContain('np.emath.sqrt');
+      // The discriminant has unknown sign: the default mode `strict` keeps
+      // the real `np.sqrt`, which gives `nan` for a negative discriminant.
+      expect(code).toContain('np.sqrt');
       expect(code).toContain('b ** 2');
     });
 
@@ -524,17 +521,24 @@ describe('PYTHON TARGET', () => {
     });
 
     it('should use np.emath.sqrt for a real symbol of unknown sign', () => {
-      // A real operand whose sign is unknown is promoted by the default mode
-      // `auto` (compile-mode step 4, 2026-08-16); `mode: 'strict'` is where
-      // the real `np.sqrt` lowering lives.
-      const expr = ce.parse('\\sqrt{x}');
-      expect(src(expr)).toBe('np.emath.sqrt(x)');
+      // A real operand whose sign is unknown takes `np.emath.sqrt` in
+      // `mode: 'complex'`; `mode: 'strict'` (the default) is where the real
+      // `np.sqrt` lowering lives.
+      const scoped = new ComputeEngine();
+      scoped.declare('x', 'real');
+      const expr = scoped.parse('\\sqrt{x}');
+      expect(
+        python
+          .compile(expr, { mode: 'complex', constantFold: false })
+          .code!.split('\n')
+          .pop()
+      ).toBe('np.emath.sqrt(x)');
       expect(python.compile(expr, { mode: 'strict' }).code).toBe('np.sqrt(x)');
     });
 
-    it('a real-only head over a promoted radical LIST takes the element-wise runtime rule', () => {
+    it('a real-only head over a complex radical LIST takes the element-wise runtime rule', () => {
       // The element-wise form of the D2/D6 runtime rule
-      // (`docs/COMPILATION-MODEL.md`, "Compile modes"): the promoted roots
+      // (`docs/COMPILATION-MODEL.md`, "Compile modes"): the complex roots
       // are projected element-wise (`_ce_creal_elems`: an exactly-real root
       // as its real part, a complex one as `nan`) and the real lowering runs
       // over the projection. Same rule for an ordering; `strict` keeps the
@@ -542,14 +546,16 @@ describe('PYTHON TARGET', () => {
       const e = new ComputeEngine();
       e.declare('L', 'list<real>');
       const floor = python.compile(e.box(['Floor', ['Sqrt', 'L']]), {
-        mode: 'auto',
+        mode: 'complex',
       });
       expect(floor.success).toBe(true);
       expect(floor.code).toContain('def _ce_creal_elems(_v):');
       expect(floor.code).toContain(
         '(lambda _tv1: (np.floor(_ce_creal_elems(_tv1))))(np.emath.sqrt(L))'
       );
-      const less = python.compile(e.parse('\\sqrt{L} < 1'), { mode: 'auto' });
+      const less = python.compile(e.parse('\\sqrt{L} < 1'), {
+        mode: 'complex',
+      });
       expect(less.code).toContain(
         '(lambda _tv1: (_ce_ord(np.less, _ce_creal_elems(_tv1), 1)))(np.emath.sqrt(L))'
       );
@@ -1371,9 +1377,8 @@ describe('PYTHON TARGET', () => {
   // CO-P1-3: a complex argument into a real-only helper returned garbage.
   describe('CO-P1-3 complex into a real-only helper fails closed', () => {
     it('GammaLn of a complex value throws with the offending head, in strict mode', () => {
-      // Under the default mode `auto` a MAYBE-complex operand takes the D2/D6
-      // runtime rule instead of declining (compile-mode step 4, 2026-08-16);
-      // the compile-time decline is the strict-lane behavior. (`Erf` and then
+      // In `mode: 'complex'` a MAYBE-complex operand takes the D2/D6 runtime
+      // rule instead of declining; the compile-time decline is the strict-lane behavior. (`Erf` and then
       // `Sign` were the fixture here; `scipy.special.erf` takes a complex
       // argument, and `Sign` of a complex value is now written out as
       // `z / |z|`, so the Python target declares neither real-only.)
@@ -1411,7 +1416,7 @@ describe('PYTHON TARGET', () => {
       const scoped = new ComputeEngine();
       scoped.declare('t', 'real');
       scoped.declare('m', 'imaginary');
-      for (const mode of ['auto', 'strict', 'complex'] as const) {
+      for (const mode of ['strict', 'complex'] as const) {
         for (const arg of [['Add', 't', 'ImaginaryUnit'], 'm'] as any[]) {
           let message = '';
           try {
@@ -1438,15 +1443,16 @@ describe('PYTHON TARGET', () => {
       const raise = `(_ for _ in ()).throw(ValueError('${GAMMALN_REASON}'))`;
       expect(
         python
-          .compile(scoped.box(['GammaLn', 'z']))
+          .compile(scoped.box(['GammaLn', 'z']), { mode: 'complex' })
           .code.split('\n')
           .pop()
       ).toBe(
-        `(lambda _tv1: scipy.special.gammaln(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else ${raise})(z)`
+        // In `mode: 'complex'` the scalar value is lifted with `_ce_cplx`.
+        `_ce_cplx((lambda _tv1: scipy.special.gammaln(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else ${raise})(z))`
       );
       expect(
         python
-          .compile(scoped.box(['GammaLn', 'L']))
+          .compile(scoped.box(['GammaLn', 'L']), { mode: 'complex' })
           .code.split('\n')
           .pop()
       ).toBe(
@@ -2237,7 +2243,9 @@ describe('COMPILE PYTHON: a chained ordering over operands that may be complex',
     scoped.declare('x', 'real');
     scoped.declare('y', 'real');
     const code = new PythonTarget()
-      .compile(scoped.box(['Less', ['Sqrt', 'x'], ['Sqrt', 'y'], 0]))
+      .compile(scoped.box(['Less', ['Sqrt', 'x'], ['Sqrt', 'y'], 0]), {
+        mode: 'complex',
+      })
       .code.split('\n')
       .pop();
     expect(code).toBe(

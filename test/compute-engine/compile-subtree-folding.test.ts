@@ -264,11 +264,11 @@ describe('COMPILE constant folding - constant collections', () => {
     ] as any);
     expect(negRoots.N().toString()).toBe('[2i,3i,4i]');
     expect(compile(negRoots).code).toContain('.map(');
-    // The default mode promotes the unknown-sign radical inside the callback
-    // (compile-mode step 4, 2026-08-16), so the structural value now agrees
-    // with `.N()`; `mode: 'strict'` keeps the real kernel and its NaNs.
-    expect(compile(negRoots).code).toContain('_SYS.csqrt');
-    expect(compile(negRoots).run!({})).toEqual([
+    // The complex mode takes the complex kernel for the unknown-sign radical
+    // inside the callback, so the structural value agrees with `.N()`;
+    // `mode: 'strict'` (the default) keeps the real kernel and its NaNs.
+    expect(compile(negRoots, { mode: 'complex' }).code).toContain('_SYS.csqrt');
+    expect(compile(negRoots, { mode: 'complex' }).run!({})).toEqual([
       { re: 0, im: 2 },
       { re: 0, im: 3 },
       { re: 0, im: 4 },

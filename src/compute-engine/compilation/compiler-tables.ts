@@ -389,7 +389,8 @@ export const SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> = new Set([
  *    `ColorMix`, `ColorFromColorspace`) — color components and mix ratios
  *    are real by definition; the `_SYS.*` converters behind them do plain
  *    arithmetic on their channels. Measured (Tycho item 204, on 0.115.0):
- *    `Hsv(90·√(x+1), 1, 1)` under the default `auto` handed `_SYS.hsv`
+ *    `Hsv(90·√(x+1), 1, 1)` under the removed `auto` mode (which
+ *    promoted as `complex` does) handed `_SYS.hsv`
  *    the promoted `{re, im}` object and returned `[NaN, NaN, NaN]` at
  *    EVERY input — including `x = 3`, where `√4 = 2` is entirely real —
  *    with no decline the consumer could detect; a `ColorMix` ratio and a
@@ -743,9 +744,8 @@ export const ABSENCE_DISCHARGING_HEADS: ReadonlySet<string> = new Set([
  *   eta-expansion `(_a: complex?, _x: complex?) ↦ h(_a, _x)`, whose call
  *   site then binds a complex-typed argument to `h`'s parameter — a
  *   `LaneMismatch` for a WIDE parameter under strict shapes (declined by
- *   `strict`, escalated to complex mode by `auto`, where the one emission
- *   of `h` lifts its parameter at use), a coercion for a declared-complex
- *   one. A bare symbol with both lanes real is returned unchanged.
+ *   `strict`; in `complex` mode the one emission of `h` lifts its
+ *   parameter at use), a coercion for a declared-complex one. A bare symbol with both lanes real is returned unchanged.
  *
  * `undefined` when `op` is not a two-parameter combiner this analysis can
  * see (a builtin, an infix operator symbol, a multi-clause function): the

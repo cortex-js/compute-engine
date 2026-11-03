@@ -477,7 +477,10 @@ describe('A user function named like a parameter of a combiner literal', () => {
       .evaluate();
     expect(expected.re).toBe(3);
     expect(expected.im).toBe(1);
-    const r = compile(ce2.box(fn as any), { fallback: false })!;
+    const r = compile(ce2.box(fn as any), {
+      fallback: false,
+      mode: 'complex',
+    })!;
     expect(r.success).toBe(true);
     expect(
       r.run!([

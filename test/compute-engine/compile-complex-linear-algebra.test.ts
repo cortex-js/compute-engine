@@ -25,7 +25,7 @@ function engine(xType = 'real'): ComputeEngine {
   return ce;
 }
 
-const MODES = ['strict', 'auto'] as const;
+const MODES = ['strict', 'complex'] as const;
 
 describe('NORM OF A LIST WITH A COMPLEX ENTRY', () => {
   const CASES: Array<{
@@ -286,7 +286,7 @@ describe('LINEAR ALGEBRA OVER A COMPLEX ENTRY', () => {
   ];
 
   for (const { name, build } of CASES)
-    for (const mode of [...MODES, 'complex'] as const)
+    for (const mode of MODES)
       it(`javascript ${mode}: ${name}`, () => {
         const ce = engine();
         const expr = build(ce);
@@ -370,7 +370,7 @@ describe('LINEAR ALGEBRA OVER A COMPLEX ENTRY', () => {
 // A symbol declared `matrix<complex>` (or `vector<complex>`) has a complex
 // lane: the compiler emits the complex form of the helper, whose value is
 // always `{re, im}`, and a parent expression reads it as complex. A symbol
-// declared `matrix<number>` is read as REAL in `strict` and `auto` mode (user
+// declared `matrix<number>` is read as REAL in `strict` mode, the default (user
 // decision of 2026-09-24, option B), as a `number`-typed scalar is: the
 // compiler emits the real-only helper. The compiled runner does not read the
 // entries of the symbol when it is called: `run()` requires inputs of the
@@ -424,7 +424,7 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
   ];
 
   for (const [name, json] of CASES)
-    for (const mode of [...MODES, 'complex'] as const)
+    for (const mode of MODES)
       it(`javascript ${mode}, matrix<complex>: ${name}`, () => {
         const ce = complexEngine();
         const expr = ce.box(json);
@@ -447,7 +447,7 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
       });
 
   // The same heads over `matrix<number>`/`vector<number>` symbols compile on
-  // the real lane in the default modes, including under a parent
+  // the real lane in the default `strict` mode, including under a parent
   // expression: real entries give the interpreter's value, and a complex
   // entry is not refused when the code is called (its value is not
   // specified).
@@ -477,7 +477,7 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
       ['Add', ['At', ['Dot', 'PC', ['Tuple', 1, 2]], 1], 1],
     ],
   ] as Array<[string, any]>)
-    for (const mode of MODES)
+    for (const mode of ['strict'] as const)
       it(`javascript ${mode}, matrix<number>: ${name} is read as real`, () => {
         const ce = wideEngine();
         const expr = ce.box(json);
@@ -516,8 +516,8 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
 
   // `Distance` reads either representation of a coordinate
   // (`_SYS.distanceAny`). The runner does not read the entries of a
-  // `vector<number>` symbol, so in the default modes a complex coordinate
-  // reaches the helper, and the distance is ‖u − w‖, as under
+  // `vector<number>` symbol, so in the default `strict` mode a complex
+  // coordinate reaches the helper, and the distance is ‖u − w‖, as under
   // `mode: 'complex'`.
   it('javascript: Distance(u, w) over vector<number> operands', () => {
     const ce = wideEngine();

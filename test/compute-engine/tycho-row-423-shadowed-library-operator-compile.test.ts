@@ -61,7 +61,11 @@ const DECLARATIONS: [string, (ce: ComputeEngine, body: string) => void][] = [
 ];
 
 /** Compile `expr`, and collect the fallback messages of the compilation. */
-function compiled(expr: any, to: string): { result: any; warnings: string[] } {
+function compiled(
+  expr: any,
+  to: string,
+  mode?: 'complex'
+): { result: any; warnings: string[] } {
   const warnings: string[] = [];
   const warn = jest
     .spyOn(console, 'warn')
@@ -69,7 +73,7 @@ function compiled(expr: any, to: string): { result: any; warnings: string[] } {
       warnings.push(args.map(String).join(' '));
     });
   try {
-    return { result: compile(expr, { to } as any) as any, warnings };
+    return { result: compile(expr, { to, mode } as any) as any, warnings };
   } finally {
     warn.mockRestore();
   }
@@ -327,10 +331,11 @@ describe('the parts of the compiler that read a head by its name', () => {
     ce: ComputeEngine,
     expr: any,
     vars: Record<string, number>,
-    to = 'javascript'
+    to = 'javascript',
+    mode?: 'complex'
   ): void {
     const boxed = ce.box(expr);
-    const { result } = compiled(boxed, to);
+    const { result } = compiled(boxed, to, mode);
     expect(result.success).toBe(true);
     const value = result.run(vars);
     const expected = boxed.subs(vars).N();
@@ -369,10 +374,10 @@ describe('the parts of the compiler that read a head by its name', () => {
       ['Square', 't\\mapsto t-100'],
       ['Exp', 't\\mapsto t-100'],
     ]);
-    // √(0 − 100) = 10i.
-    agrees(ce, ['Sqrt', ['Square', 'x']], { x: 0 });
-    agrees(ce, ['Sqrt', ['Exp', 'x']], { x: 0 });
-    agrees(ce, ['Sqrt', ['Square', 'x']], { x: 200 });
+    // √(0 − 100) = 10i, in the complex mode.
+    agrees(ce, ['Sqrt', ['Square', 'x']], { x: 0 }, 'javascript', 'complex');
+    agrees(ce, ['Sqrt', ['Exp', 'x']], { x: 0 }, 'javascript', 'complex');
+    agrees(ce, ['Sqrt', ['Square', 'x']], { x: 200 }, 'javascript', 'complex');
   });
 
   test('no scalar fact reads a list-valued user Floor or Sin as a scalar', () => {

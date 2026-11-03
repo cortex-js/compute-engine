@@ -311,21 +311,19 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       expect(e.type.toString()).toBe('number');
       // The branch decision above is a TYPE decision and does not move. The
       // LOWERING does: a non-integer number exponent over a base of unknown
-      // sign is promoted by the default mode `auto` (compile-mode step 4,
-      // 2026-08-16), which reproduces the interpreter at a negative base
-      // instead of `NaN`. `mode: 'strict'` keeps `Math.pow`.
-      const auto = compile(e, { fallback: false });
-      expect(auto.code).toBe(
+      // sign is promoted by `mode: 'complex'`, which reproduces the
+      // interpreter at a negative base instead of `NaN`. The default
+      // `strict` mode keeps `Math.pow`.
+      const complex = compile(e, { fallback: false, mode: 'complex' });
+      expect(complex.code).toBe(
         '_SYS.cpow(({ re: _.r, im: 0 }), ({ re: 0.3, im: 0 }))'
       );
-      expect(auto.run!({ r: 4 })).toBe(Math.pow(4, 0.3));
-      const neg = auto.run!({ r: -2 }) as { re: number; im: number };
+      expect(complex.run!({ r: 4 })).toBe(Math.pow(4, 0.3));
+      const neg = complex.run!({ r: -2 }) as { re: number; im: number };
       const interp = ce2.box(['Power', -2, 0.3]).N();
       expect(neg.re).toBeCloseTo(interp.re, 12);
       expect(neg.im).toBeCloseTo(interp.im, 12);
-      expect(compile(e, { fallback: false, mode: 'strict' }).code).toBe(
-        'Math.pow(_.r, 0.3)'
-      );
+      expect(compile(e, { fallback: false }).code).toBe('Math.pow(_.r, 0.3)');
       // A VARIABLE exponent is not promoted: it keeps the real helper.
       ce2.declare('q', 'real');
       expect(
@@ -370,7 +368,11 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       for (const b of bases) {
         for (const e of exps) {
           const expr = ce.box(['Power', b, e]);
-          const r = compile(expr, { fallback: false });
+          // In the default `strict` mode a power whose static type is
+          // `number` (not `complex`) is on the real lane, and its value
+          // is `NaN` where the exact value is complex: `(-2)^(-1/4)`. The
+          // complex mode gives the interpreter's value.
+          const r = compile(expr, { fallback: false, mode: 'complex' });
           if (!r.success || !r.run) continue;
           const v = (r.run as any)() as any;
           const c =

@@ -16,8 +16,12 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const ce = new ComputeEngine();
 
-function js(latex: string, vars: Record<string, number> = {}): { code: string; value: unknown } {
-  const r = compile(ce.parse(latex), { to: 'javascript' });
+function js(
+  latex: string,
+  vars: Record<string, number> = {},
+  mode?: 'complex'
+): { code: string; value: unknown } {
+  const r = compile(ce.parse(latex), { to: 'javascript', mode });
   expect(r.success).toBe(true);
   return { code: r.code!, value: r.run!(vars) };
 }
@@ -37,8 +41,8 @@ describe('javascript: the runtime spelling matches the fold', () => {
   });
 
   test('base 10 on the complex lane agrees with the fold on the real axis', () => {
-    const { code, value } = js('\\log(x)', { x: 4 });
-    expect(code).toBe('_SYS.clog10(({ re: _.x, im: 0 }))');
+    const { code, value } = js('\\log(x)', { x: 4 }, 'complex');
+    expect(code).toBe('_SYS.clog10(_SYS.cplx(_.x))');
     expect(value).toBe(Math.log10(4));
     expect(ce.parse('\\log(4)').N().re).toBe(Math.log10(4));
   });
@@ -50,15 +54,18 @@ describe('javascript: the runtime spelling matches the fold', () => {
   });
 
   test('base 2 takes Math.log2 on both lanes', () => {
-    expect(js('\\log_{2}(x)', { x: 8 })).toEqual({
-      code: '_SYS.clog2(({ re: _.x, im: 0 }))',
+    expect(js('\\log_{2}(x)', { x: 8 }, 'complex')).toEqual({
+      code: '_SYS.clog2(_SYS.cplx(_.x))',
       value: 3,
     });
     expect(js('\\log_{2}(p)', { p: 8 })).toEqual({ code: 'Math.log2(_.p)', value: 3 });
   });
 
   test('a negative real argument keeps its imaginary part', () => {
-    const r = compile(ce.parse('\\log(x)'), { to: 'javascript' });
+    const r = compile(ce.parse('\\log(x)'), {
+      to: 'javascript',
+      mode: 'complex',
+    });
     expect(r.run!({ x: -100 })).toEqual({ re: 2, im: Math.PI / Math.LN10 });
   });
 

@@ -34,6 +34,18 @@ import { isForwardCallReference } from './boxed-expression/forward-call-referenc
  * Explicit `compile()` calls must NOT go through this helper — a direct user
  * request keeps failing loudly with the environment's own error, regardless
  * of the flag.
+ *
+ * The compile mode is the target's default, `'strict'`, unless `options`
+ * names one: an operation whose value is complex (`Sqrt(x)` at `x = -4`)
+ * gives `NaN`. Each caller either reads only real values and treats a `NaN`
+ * or a non-number as "no value here" (`implicitCompileNumeric` and the limit
+ * probes), or computes such an element again: with the interpreter (the
+ * `Map` drain, the `Reduce` fast path and the stochastic-equality probes), or
+ * with the integrand compiled in `mode: 'complex'` (the quadrature kernels,
+ * `withComplexAtNaN()` in `library/calculus.ts`), so it gets the
+ * interpreter's value. A quadrature integrand that is not pure keeps the
+ * `NaN`, because it cannot be evaluated a second time
+ * (`withLogSpaceFallback()`).
  */
 export function implicitCompile(
   ce: IComputeEngine,
