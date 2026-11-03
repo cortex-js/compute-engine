@@ -100,11 +100,13 @@ describe('the two evaluation routes agree', () => {
       'list<tuple<integer, integer>^2>',
       '[(NaN, NaN),(NaN, NaN)]',
     ],
+    // A scalar condition selects the list whole: the sum is the absent list
+    // (selection rule of 2026-11-02; it was `[NaN,NaN]`).
     [
       '[1,2]{c} + 1',
       ['Add', ['If', C, ['List', 1, 2]], 1],
       'vector<integer^2>',
-      '[NaN,NaN]',
+      '"Missing"',
     ],
     [
       '(1,2){c} + (1,1)',

@@ -2241,15 +2241,13 @@ function bcastWith(
  * selects it (see `compileJSSelection`). `select` unwraps it.
  *
  * With a `depth` of 1 or more, the arm is a list whose values `depth` levels
- * down are points (a list of points has `depth` 1): under a mask of rank 2 or
- * more, the arm is indexed down to that depth and its values there are whole
- * (`selectNested`). Under a flat mask such an arm is an ordinary list arm.
- *
- * With `unknownPointDepth`, the arm is a list whose type does not give the
- * depth of its points (`list<any>`, `tensor<tuple<…>>`), and `depth` is
- * `Infinity`. Under a flat mask it is an ordinary list arm. Under a mask of
- * rank 2 or more, an element of the arm that is an array where the mask is
- * still a list can be a point or a row, and `selectNested` throws.
+ * down are points (a list of points has `depth` 1). With
+ * `unknownPointDepth`, the arm is a list whose type does not give the depth
+ * of its points (`list<any>`, `tensor<tuple<…>>`), and `depth` is
+ * `Infinity`. `selectWith` uses each of these arms as an ordinary list arm:
+ * a condition is a boolean or a flat list of booleans, and a mask whose
+ * value has a list cell gives `NaN` before any arm is read. The compiler
+ * still emits the depth (`wholeAt`, `pointDepthUnknown`); no helper reads it.
  */
 class WholeArm {
   constructor(
@@ -2261,11 +2259,11 @@ class WholeArm {
 
 /**
  * The absence value of a position that no clause of a selection matched, for
- * each depth of a mask of rank 2 or more: `values[d - 1]` at depth `d`, and
- * the last value at any deeper level. The compiler passes it when the cells
- * of the arms at one depth are numbers and at another are not: with a matrix
- * arm `M`, `If(M < 3, M)` has a row at depth 1 and a number at depth 2, so
- * an unmatched cell of a mask of rank 2 is `NaN`.
+ * each depth: `values[d - 1]` at depth `d`, and the last value at any deeper
+ * level. The compiler passes it when the cells of the arms at one depth are
+ * numbers and at another are not (a matrix arm `M` has a row at depth 1 and
+ * a number at depth 2). `selectWith` reads only depth 1: a mask whose value
+ * has a list cell gives `NaN`, so no position is deeper than 1.
  */
 class AbsentByDepth {
   constructor(readonly values: ReadonlyArray<unknown>) {}
@@ -2277,6 +2275,19 @@ function absentAtDepth(absent: unknown, depth: number): unknown {
   if (!(absent instanceof AbsentByDepth)) return absent;
   const values = absent.values;
   return values[Math.min(depth, values.length) - 1];
+}
+
+/**
+ * The absence of the WHOLE value of a selection whose conditions are all
+ * scalar at run time and none of them true, from `absent`, the absence of
+ * one position under a list of conditions. A scalar condition selects the
+ * value whole, so the value can be one point or a list of points; a point
+ * of `NaN` coordinates (an array `absent`) has the shape of only the first.
+ * The whole value is then `undefined`, as the scalar `If` compiles it. A
+ * number cell keeps `NaN`.
+ */
+function wholeAbsent(absent: unknown): unknown {
+  return Array.isArray(absent) ? undefined : absent;
 }
 
 /**
@@ -2302,10 +2313,11 @@ function absentAtDepth(absent: unknown, depth: number): unknown {
  *   projected to NaN, as everywhere in `bcastWith` (R3). A scalar arm lifts to
  *   its positions, an array arm is indexed at each;
  * - a position no clause matched is `absent` (R4): the absence value of the
- *   cell type, which the compiler passes. It is `NaN` for a number cell, and
- *   `undefined` for a cell that is a point or another value that is not a
- *   number (`selectAbsent`), as a single missing point is `undefined`. When
- *   every condition is scalar and none is true, the whole value is `absent`.
+ *   cell type, which the compiler passes. It is `NaN` for a number cell, a
+ *   point whose coordinates are `NaN` (`[NaN, NaN]`) for a point cell, and
+ *   `undefined` for another value that is not a number (`selectAbsent`). When
+ *   every condition is scalar and none is true, the whole value is `absent`,
+ *   or `undefined` when `absent` is a point (`wholeAbsent`).
  *   A position whose condition cell is absent (NaN — how a real target renders
  *   `Missing`) is NaN: the position is CONSUMED, never offered to a later
  *   clause, matching the interpreter's positioned "condition is absent" error
@@ -2362,16 +2374,19 @@ function selectWith(
     const last = selectors[selectors.length - 1];
     // No condition is true: the value is absent. An absent condition is NaN.
     if (last === 'absent') return NaN;
-    if (last !== true) return absentAtDepth(absent, 1);
+    if (last !== true) return wholeAbsent(absentAtDepth(absent, 1));
     const v = armThunks[armThunks.length - 1]();
     return v instanceof WholeArm ? v.value : v;
   }
 
   // A condition with a list cell is a mask of rank 2 or more (or with rows
-  // of different lengths): it is selected node by node (`selectNested`).
+  // of different lengths). The interpreter refuses such a condition with an
+  // `incompatible-type` error (a condition is a boolean or a flat list of
+  // booleans, selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`); the
+  // compiled spelling of that error is `NaN`. Only a condition whose static
+  // type does not settle its shape (`tensor<boolean>`) reaches this test.
   for (const s of selectors)
-    if (Array.isArray(s) && s.some((x) => Array.isArray(x)))
-      return selectNested(absent, selectors, armThunks);
+    if (Array.isArray(s) && s.some((x) => Array.isArray(x))) return NaN;
 
   // 3/ Selection: the first clause that is `true` at each position (`-1`: no
   // match), and the positions whose condition cell is absent. A lifted
@@ -2458,168 +2473,6 @@ function selectWith(
     out[j] = indexed[k] ? (values[k] as unknown[])[j] : values[k];
   }
   return out;
-}
-
-/** The selection at a node of a mask where no clause matched. */
-const SELECT_NO_MATCH = -1;
-/** The selection at a node of a mask where the deciding condition is
- * absent. */
-const SELECT_ABSENT = -2;
-
-/**
- * `selectWith` over a mask of rank 2 or more, or a mask whose rows have
- * different lengths: the rule of the interpreter
- * (`evaluateElementwiseSelection` in `library/control-structures.ts`),
- * applied node by node of the mask.
- *
- * - At a node where some condition is an array, every array condition and
- *   every array arm that a position selects must have the same length, a
- *   scalar condition or a scalar arm lifts to each position, and each
- *   position is a node one level down.
- * - At a node where every condition is a scalar, the first clause whose
- *   condition is `true` gives its arm's value at that node WHOLE (it may be
- *   an array); an absent condition gives `NaN` (the interpreter's "condition
- *   is absent" error cell); no `true` condition gives the absence value of
- *   that depth (`absentAtDepth`).
- * - An arm that is an array at a node and a scalar one level down, where the
- *   conditions are still arrays, has a lower rank than the mask, and is
- *   refused, as `Add` refuses two tensors of different shapes. A refusal and
- *   a length mismatch are the interpreter's `incompatible-dimensions` error,
- *   which this target renders as `NaN` for the whole value, as `bcastWith`
- *   does.
- * - A cell of a condition that is neither a condition value nor an array
- *   throws, as in `selectWith`.
- *
- * Each arm that a position selects is evaluated once, whole. An arm wrapped
- * with a depth (`WholeArm`) is indexed down to that depth, and its values
- * there are points, which are whole.
- *
- * An arm whose type does not give the depth of its points
- * (`WholeArm.unknownPointDepth`) is indexed like any other array. But where
- * its element at a list node of the mask is an array and the mask is still a
- * list one level down, that element can be a point (one value, which makes
- * the arm of lower rank than the mask, refused by the interpreter) or a row
- * (indexed). Compiled code cannot tell the two apart, so a `RangeError` is
- * thrown instead of an answer.
- */
-function selectNested(
-  absent: unknown,
-  selectors: ReadonlyArray<true | 'absent' | unknown[]>,
-  armThunks: ReadonlyArray<() => unknown>
-): unknown {
-  // 1/ The selection tree, from the conditions only. A list node is an
-  // array of the selections at its positions.
-  type Node = number | Node[];
-  const reached = new Uint8Array(selectors.length);
-  const selectNode = (node: ReadonlyArray<unknown>): Node | undefined => {
-    let n = -1;
-    for (const s of node) {
-      if (!Array.isArray(s)) continue;
-      if (n < 0) n = s.length;
-      else if (s.length !== n) return undefined;
-    }
-    if (n < 0) {
-      for (let k = 0; k < node.length; k++) {
-        const s = node[k];
-        if (s === true) {
-          reached[k] = 1;
-          return k;
-        }
-        if (s === false) continue;
-        if (s === 'absent' || s === undefined || s === null || s !== s)
-          return SELECT_ABSENT;
-        throw new Error('Condition must evaluate to "True" or "False".');
-      }
-      return SELECT_NO_MATCH;
-    }
-    const positions: Node[] = new Array(n);
-    for (let j = 0; j < n; j++) {
-      const child = selectNode(node.map((s) => (Array.isArray(s) ? s[j] : s)));
-      if (child === undefined) return undefined;
-      positions[j] = child;
-    }
-    return positions;
-  };
-  const tree = selectNode(selectors);
-  if (!Array.isArray(tree)) return NaN;
-
-  // 2/ Each REACHED arm once, whole, in clause order. `wholeDepth[k]` is the
-  // depth from which the values of the arm are whole: 0 for a scalar and for
-  // a point, the depth of its points for a list of points, and no limit for
-  // any other array.
-  const values: unknown[] = new Array(selectors.length);
-  const wholeDepth: number[] = new Array(selectors.length).fill(Infinity);
-  const unknownPointDepth = new Uint8Array(selectors.length);
-  for (let k = 0; k < selectors.length; k++) {
-    if (reached[k] === 0) continue;
-    const v = armThunks[k]();
-    if (v instanceof WholeArm) {
-      values[k] = v.value;
-      wholeDepth[k] = v.depth;
-      if (v.unknownPointDepth) unknownPointDepth[k] = 1;
-    } else values[k] = v;
-  }
-  // Is `v`, the value of arm `k` at a node of depth `depth` (the top node
-  // has depth 0), indexed at that node?
-  const indexed = (v: unknown, k: number, depth: number): v is unknown[] =>
-    Array.isArray(v) && depth < wholeDepth[k];
-
-  // 3/ Assemble, node by node. `here[k]` is the value of arm `k` at the
-  // node, of depth `depth`.
-  const assemble = (
-    node: Node[],
-    here: ReadonlyArray<unknown>,
-    depth: number
-  ): unknown[] | undefined => {
-    for (let k = 0; k < here.length; k++) {
-      if (reached[k] === 0) continue;
-      const v = here[k];
-      if (indexed(v, k, depth) && v.length !== node.length) return undefined;
-    }
-    const out: unknown[] = new Array(node.length);
-    for (let j = 0; j < node.length; j++) {
-      const child = node[j];
-      const at = (k: number): unknown => {
-        const v = here[k];
-        return indexed(v, k, depth) ? v[j] : v;
-      };
-      if (child === SELECT_ABSENT) out[j] = NaN;
-      else if (child === SELECT_NO_MATCH)
-        out[j] = absentAtDepth(absent, depth + 1);
-      else if (typeof child === 'number') out[j] = at(child);
-      else {
-        const next: unknown[] = new Array(here.length);
-        for (let k = 0; k < here.length; k++) {
-          if (reached[k] === 0) continue;
-          const v = at(k);
-          // An arm indexed at this node whose element is not indexed at the
-          // list node below has a lower rank than the mask: refused.
-          if (indexed(here[k], k, depth) && !indexed(v, k, depth + 1))
-            return undefined;
-          // An element that is an array of an arm whose type does not give
-          // the depth of its points, where the mask is still a list: a
-          // point or a row (see `WholeArm`).
-          if (
-            unknownPointDepth[k] === 1 &&
-            indexed(here[k], k, depth) &&
-            Array.isArray(v)
-          )
-            throw new RangeError(
-              'Element-wise selection: the type of an arm does not give the ' +
-                'depth of its points, and under a mask of rank 2 or more ' +
-                'compiled code cannot tell a point of the arm from a row'
-            );
-          next[k] = v;
-        }
-        const list = assemble(child, next, depth + 1);
-        if (list === undefined) return undefined;
-        out[j] = list;
-      }
-    }
-    return out;
-  };
-  const result = assemble(tree, values, 0);
-  return result ?? NaN;
 }
 
 // --- Complex entries of the linear-algebra helpers ------------------------
@@ -4869,20 +4722,20 @@ export const SYS_HELPERS = {
   // collection at run time — see `select` and `compileJSSelection`.
   select,
   // `select` where a position that no clause matched is `absent`, not `NaN`:
-  // the compiler uses it when the cell type is a point (`undefined`).
+  // the compiler uses it when the cell type is not a number (`[NaN, NaN]`
+  // for a point, `undefined` for another value).
   selectAbsent: (absent: unknown, ...clauses: Array<() => unknown>): unknown =>
     selectWith(absent, clauses),
   // A point arm of such a selection, lifted whole rather than indexed.
   wholeArm: (value: unknown): WholeArm => new WholeArm(value),
-  // A list arm whose values `depth` levels down are points, which a mask of
-  // rank 2 or more does not index (`selectNested`).
+  // A list arm whose values `depth` levels down are points. `selectWith`
+  // uses it as an ordinary list arm: a mask whose value has a list cell
+  // gives `NaN` (`WholeArm`).
   wholeAt: (depth: number, value: unknown): WholeArm =>
     new WholeArm(value, depth),
   // An arm whose type is a point or a list of points: an array with no
   // array in it is the point, lifted whole; any other value is the list,
-  // whose points are whole `depth` levels down under a mask of rank 2 or
-  // more (`depth` is 0 under a flat mask, where the list is an ordinary
-  // list arm).
+  // an ordinary list arm (`WholeArm`).
   pointOrPoints: (depth: number, value: unknown): unknown =>
     Array.isArray(value) &&
     value.length > 0 &&
@@ -4892,32 +4745,36 @@ export const SYS_HELPERS = {
         ? new WholeArm(value, depth)
         : value,
   // A list arm whose type does not give the depth of its points: an
-  // ordinary list arm, but `selectNested` throws where a point of it cannot
-  // be told from a row (`WholeArm`).
+  // ordinary list arm. A mask whose value has a list cell gives `NaN`
+  // before the arm is read (`WholeArm`).
   pointDepthUnknown: (value: unknown): WholeArm =>
     new WholeArm(value, Infinity, true),
-  // The absence value of an unmatched position for each depth of a mask of
-  // rank 2 or more (`AbsentByDepth`), passed to `selectAbsent`.
+  // The absence value of an unmatched position for each depth
+  // (`AbsentByDepth`; only depth 1 is read), passed to `selectAbsent`.
   absentByDepth: (...values: unknown[]): AbsentByDepth =>
     new AbsentByDepth(values),
   // The restriction `value\{conditions\}` (a restriction) over a LIST of conditions:
-  // one masked value per condition, `absent` (the absence value of one
-  // position: `NaN` or its complex form for a number, `undefined` for a
-  // point or a string) where the condition is not true. A list
+  // one masked value per condition, `absent` (the value of one position
+  // that is not selected: `NaN` or its complex form for a number, a point
+  // whose coordinates are `NaN` for a point, and `undefined` for another
+  // value that is not a number) where the condition is not true. A list
   // value (`zip`) is aligned with the conditions element by element and
   // truncated to the shorter of the two, exactly as the interpreter aligns
   // them; any other value — a number, a point — is one value, repeated at
   // every position. A `zip` of `null` aligns a value that is an array at run
   // time and repeats any other: the compiler passes it for a value that
   // cannot be a point (`broadcastable<number>`). A condition that is not an
-  // array at run time is one scalar condition.
+  // array at run time is one scalar condition, which selects the value
+  // whole: when it is not true, the value is `absent`, or `undefined` when
+  // `absent` is a point (`wholeAbsent`).
   restrict: (
     conds: unknown,
     value: unknown,
     zip: boolean | null,
     absent: unknown
   ): unknown => {
-    if (!Array.isArray(conds)) return conds === true ? value : absent;
+    if (!Array.isArray(conds))
+      return conds === true ? value : wholeAbsent(absent);
     if (zip ?? Array.isArray(value)) {
       if (!Array.isArray(value)) return absent;
       const n = Math.min(conds.length, value.length);

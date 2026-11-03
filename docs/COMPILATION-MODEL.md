@@ -1757,15 +1757,23 @@ An `iterationBudget` option caps that length, and the list is then truncated
 over budget, which gives `NaN`: a truncated point list still draws its first
 points.
 
-A restriction `value\{conditions\}` (`When`) whose condition is a list
-compiles on the JavaScript target through `_SYS.restrict`, one position for
-each condition (user decision 2026-09-15). A list value is aligned with the
-conditions and truncated to the shorter of the two, as the interpreter aligns
-them; a number or a point is one value, repeated at each position. A position
-whose condition is not true holds the absence value: `NaN` for a number,
-real or complex (a plain `NaN`, not `{ re: NaN, im: NaN }`, so that
-`IsMissing` reads the cell as absent), `undefined` for a point or a string.
-A value that may be either a list or a point at run time declines.
+A restriction `value\{conditions\}` (`If(conditions, value)`) whose
+condition is a list compiles on the JavaScript target through
+`_SYS.restrict`, one position for each condition (user decision
+2026-09-15). A list value whose length the types give has the length of the
+conditions, or the expression is a static error and declines; a list whose
+length is known at run time only is aligned with the conditions and truncated
+to the shorter of the two, as the interpreter aligns it. A number or a point
+is one value, repeated at each position. A position whose condition is not
+true holds `NaN` for a number, real or complex (a plain `NaN`, not
+`{ re: NaN, im: NaN }`), and a point whose coordinates are `NaN`
+(`[NaN, NaN]`) for a point (selection rule of 2026-11-02,
+`docs/BROADCAST-MODEL.md`; it was `undefined`). A string under a list of
+conditions is a static error and declines. A value that may be either a list
+or a point at run time declines. A condition whose static type does not settle
+its shape (`tensor<boolean>`) compiles; when its value is a nested list, the
+compiled selection gives `NaN` where the interpreter gives an
+`incompatible-type` error.
 
 An infinite collection compiles on the JavaScript target only under a
 bounding consumer: `Take`, `TakeWhile`, or `First` and `At` with a constant

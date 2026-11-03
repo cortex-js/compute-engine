@@ -276,7 +276,10 @@ describe('R3 — length policy (strict, lifted regime)', () => {
     expect(r.toString()).toMatch(/incompatible-dimensions/);
   });
 
-  test('an unbounded condition against a finite one is a mismatch, not a truncation', () => {
+  test('an unbounded condition is refused: it is not a flat list', () => {
+    // Selection rule of 2026-11-02: a condition is a boolean or a flat list
+    // of booleans. A `Cycle` is an unbounded indexed collection, so the
+    // `Which` is a static error (it was a length mismatch at evaluation).
     const ce = engine();
     const r = ce
       .box([
@@ -287,8 +290,8 @@ describe('R3 — length policy (strict, lifted regime)', () => {
         2,
       ])
       .evaluate();
-    expect(r.operator).toBe('Error');
-    expect(r.toString()).toMatch(/Infinity/);
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toMatch(/incompatible-type/);
   });
 
   test('the same diagnostic Add produces', () => {
@@ -317,9 +320,11 @@ describe('R3 — length policy (strict, lifted regime)', () => {
   test('an unknown-length selected arm leaves the expression inert', () => {
     const ce = engine();
     ce.declare('m', 'integer');
+    // The arm is a list of numbers: an arm of booleans is refused under a
+    // list condition (selection rule of 2026-11-02).
     const unknown = [
       'Map',
-      ['Function', ['Greater', '_', 2], '_'],
+      ['Function', ['Multiply', 2, '_'], '_'],
       ['Range', 1, 'm'],
     ];
     const r = ce.box(['Which', ['List', 'True', 'False'], unknown]).evaluate();
@@ -364,25 +369,25 @@ describe('R4 — the no-match cell follows the type of its position', () => {
     expect(cells(r)).toEqual(['NaN', 'NaN', 'NaN']);
   });
 
-  // User decision 2026-10-17: a position that no clause selects holds the
-  // absence marker of the type of the position, as a restriction masks a cell:
-  // `NaN` for a number, `Missing` for anything else (a string, a point).
-  // Before, the marker was `NaN` whatever the arms were.
-  test('a string arm masks to Missing', () => {
+  // Selection rule of 2026-11-02: a position that no clause selects is `NaN`
+  // for a number cell and a point of `NaN` coordinates for a point cell. A
+  // string cell has no such value, so a string arm under a list condition is
+  // a static error. This reverses the decision of 2026-10-17, which gave
+  // `Missing` for a point or a string cell.
+  test('a string arm under a list condition is a static error', () => {
     const ce = engine();
-    const r = ce
-      .box(['Which', ['List', 'True', 'False'], { str: 'hot' }])
-      .evaluate();
-    expect(cells(r)).toEqual(['"hot"', '"Missing"']);
+    const e = ce.box(['Which', ['List', 'True', 'False'], { str: 'hot' }]);
+    expect(e.isValid).toBe(false);
+    expect(e.evaluate().toString()).toMatch(/incompatible-type/);
   });
 
-  test('a point arm masks to Missing, as restriction and the scalar forms do', () => {
+  test('a point arm masks to a NaN point; the scalar forms give Missing', () => {
     const ce = engine();
     const cond = ['Less', ['List', 1, 5], 3];
     const which = ce.box(['Which', cond, ['Tuple', 1, 2]]).evaluate();
     const when = ce.box(['If', cond, ['Tuple', 1, 2]]).evaluate();
-    expect(cells(which)).toEqual(['(1, 2)', '"Missing"']);
-    expect(cells(when)).toEqual(['(1, 2)', '"Missing"']);
+    expect(cells(which)).toEqual(['(1, 2)', '(NaN, NaN)']);
+    expect(cells(when)).toEqual(['(1, 2)', '(NaN, NaN)']);
     expect(
       ce
         .box(['Which', ['Less', 5, 3], ['Tuple', 1, 2]])
@@ -397,7 +402,7 @@ describe('R4 — the no-match cell follows the type of its position', () => {
     ).toBe('"Missing"');
     // The else-less `If` is the same selection.
     const ifForm = ce.box(['If', cond, ['Tuple', 1, 2]]).evaluate();
-    expect(cells(ifForm)).toEqual(['(1, 2)', '"Missing"']);
+    expect(cells(ifForm)).toEqual(['(1, 2)', '(NaN, NaN)']);
   });
 
   test('a number arm masks to NaN in both operators', () => {
@@ -407,29 +412,19 @@ describe('R4 — the no-match cell follows the type of its position', () => {
     expect(cells(ce.box(['If', cond, 7]).evaluate())).toEqual(['7', 'NaN']);
   });
 
-  test('a number arm beside a point arm masks to Missing', () => {
+  test('a number arm beside a point arm is a static error', () => {
+    // All the arms of a selection under a list condition have one element
+    // kind (selection rule of 2026-11-02).
     const ce = engine();
-    const r = ce
-      .box([
-        'Which',
-        ['Less', ['List', 1, 5, 9], 3],
-        7,
-        ['Greater', ['List', 1, 5, 9], 8],
-        ['Tuple', 1, 2],
-      ])
-      .evaluate();
-    expect(cells(r)).toEqual(['7', '"Missing"', '(1, 2)']);
-    expect(
-      r.type.matches(
-        ce.box([
-          'Which',
-          ['Less', ['List', 1, 5, 9], 3],
-          7,
-          ['Greater', ['List', 1, 5, 9], 8],
-          ['Tuple', 1, 2],
-        ]).type
-      )
-    ).toBe(true);
+    const e = ce.box([
+      'Which',
+      ['Less', ['List', 1, 5, 9], 3],
+      7,
+      ['Greater', ['List', 1, 5, 9], 8],
+      ['Tuple', 1, 2],
+    ]);
+    expect(e.isValid).toBe(false);
+    expect(e.type.toString()).toBe('error');
   });
 
   test('If without an else branch yields NaN, not Nothing (positions preserved)', () => {
@@ -441,30 +436,20 @@ describe('R4 — the no-match cell follows the type of its position', () => {
 });
 
 describe('R4′ — a Missing condition cell is an error cell at that position', () => {
-  test('other positions are unaffected', () => {
+  test('a written Missing cell in a list condition is a static error', () => {
+    // Selection rule of 2026-11-02: a condition is a boolean or a flat list
+    // of booleans, so a list condition whose type admits a `Missing` cell is
+    // refused. Before, the cell was an error cell at its position.
     const ce = engine();
-    const r = ce
-      .box(['Which', ['List', 'True', 'Missing', 'False'], 1, 'True', 0])
-      .evaluate();
-    const c = cells(r);
-    expect(c[0]).toBe('1');
-    expect(c[1]).toMatch(/absent/);
-    expect(c[2]).toBe('0');
-  });
-
-  test('the cell is the same catchable error the scalar form produces', () => {
-    const ce = engine();
-    const scalar = ce.box(['If', 'Missing', 1, 2]).evaluate();
-    const r = ce.box(['If', ['List', 'Missing', 'True'], 1, 2]).evaluate();
-    const cell = Array.from(r.each())[0] as any;
-    expect(cell.operator).toBe('Error');
-    expect(cell.toString()).toBe(scalar.toString());
-  });
-
-  test('an absent cell does not fall through to a later clause', () => {
-    const ce = engine();
-    const r = ce.box(['Which', ['List', 'Missing'], 1, 'True', 99]).evaluate();
-    expect(cells(r)[0]).toMatch(/absent/);
+    for (const json of [
+      ['Which', ['List', 'True', 'Missing', 'False'], 1, 'True', 0],
+      ['If', ['List', 'Missing', 'True'], 1, 2],
+      ['Which', ['List', 'Missing'], 1, 'True', 99],
+    ]) {
+      const e = ce.box(json as any);
+      expect(e.isValid).toBe(false);
+      expect(e.evaluate().toString()).toMatch(/incompatible-type/);
+    }
   });
 
   test('a lifted SCALAR Missing condition is an all-Missing condition row', () => {
@@ -567,9 +552,10 @@ describe('activation gate', () => {
   test('a LATER collection-condition with a symbolic cell stays inert — DIFFERENT length', () => {
     const ce = engine();
     ce.declare('x', 'number');
-    // The gate never admitted this condition, so it must not report a
-    // dimension error about it: a condition it refuses leaves the WHOLE
-    // expression inert, whatever its length (§3).
+    // Selection rule of 2026-11-02: the two list conditions have lengths
+    // that their types give (2 and 3), so the selection is the static
+    // `incompatible-dimensions` error. Before, the cell `x = 4` kept the
+    // whole expression inert.
     const r = ce
       .box([
         'Which',
@@ -581,13 +567,13 @@ describe('activation gate', () => {
         0,
       ])
       .evaluate();
-    expect(r.operator).toBe('Which');
+    expect(r.toString()).toMatch(/incompatible-dimensions/);
   });
 
-  test('a PROVABLY INFINITE later condition is still a length mismatch', () => {
+  test('a PROVABLY INFINITE later condition is refused: it is not a flat list', () => {
     const ce = engine();
-    // Unlike the refused conditions above, a KNOWN infinite length is a
-    // genuine R3 mismatch against the finite participants.
+    // Selection rule of 2026-11-02: a `Cycle` is not a flat list of
+    // booleans, so the `Which` is a static error (it was a length mismatch).
     const r = ce
       .box([
         'Which',
@@ -599,9 +585,8 @@ describe('activation gate', () => {
         0,
       ])
       .evaluate();
-    expect(r.operator).toBe('Error');
-    expect(r.toString()).toMatch(/incompatible-dimensions/);
-    expect(r.toString()).toMatch(/Infinity/);
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toMatch(/incompatible-type/);
   });
 
   test('a collection of non-booleans is refused at boxing (never selected)', () => {
@@ -730,11 +715,12 @@ describe('elementwise If', () => {
     expect(ce.box('count').evaluate().re).toBe(0);
   });
 
-  test('a Missing condition cell yields an error cell', () => {
+  test('a Missing condition cell is a static error', () => {
+    // Selection rule of 2026-11-02 (it was an error cell at its position).
     const ce = engine();
     const r = ce.box(['If', ['List', 'True', 'Missing'], 1, 0]).evaluate();
-    expect(cells(r)[0]).toBe('1');
-    expect(cells(r)[1]).toMatch(/absent/);
+    expect(r.operator).toBe('Error');
+    expect(r.toString()).toMatch(/incompatible-type/);
   });
 });
 
@@ -750,10 +736,13 @@ describe('type handler', () => {
   });
 
   test('a declared indexed_collection<boolean> condition types list<T>', () => {
+    // An ordered collection of booleans is a flat list of booleans: a host
+    // types a comparison over a list of points this way (Tycho item 335).
     const ce = engine();
     ce.declare('b', 'indexed_collection<boolean>');
-    const t = ce.box(['Which', 'b', 1, 'True', 0]).type;
-    expect(t.matches(parseType('list<integer>'))).toBe(true);
+    const e = ce.box(['Which', 'b', 1, 'True', 0]);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe('list<integer>');
   });
 
   test('a derived condition (a broadcast comparison) types list<T^n>', () => {
@@ -820,41 +809,26 @@ describe('type handler', () => {
     expect(v.type.matches(e.type)).toBe(true);
   });
 
-  test('NO default + non-numeric arm: the union element type drops the shape', () => {
+  test('string arms under a list condition are a static error', () => {
+    // Selection rule of 2026-11-02: a string cell has no `NaN`, so a string
+    // arm under a list condition is refused, with or without a default
+    // clause. Before, the types were `list<missing | string>` and
+    // `list<string^2>`.
     const ce = engine();
-    // Joining in the NaN marker over a `string` arm yields a UNION element
-    // type. A dimensioned `list` type IS the tensor claim (`isTensor` is
-    // exactly `dimensions !== undefined`) and the union-free clause
-    // (tensor-unification design §D3 rule 2) never claims a shape for a
-    // heterogeneous cell population — so the declared type must not either,
-    // or it promises a shape the evaluated value can never carry.
-    // The no-match cell of a string arm is `Missing` (user decision
-    // 2026-10-17), so the element type is `missing | string`.
-    const e = ce.box(['Which', ['List', 'True', 'False'], { str: 'hot' }]);
-    expect(e.type.toString()).toBe('list<missing | string>');
-    expect(e.type.matches(parseType('list<missing | string^2>'))).toBe(false);
-
-    const v = e.evaluate();
-    expect(cells(v)).toEqual(['"hot"', '"Missing"']);
-    expect(v.type.toString()).toBe('list<missing | string>');
-    // The invariant this case used to break.
-    expect(v.type.matches(e.type)).toBe(true);
-  });
-
-  test('WITH a default clause the string arms stay union-free and keep the shape', () => {
-    const ce = engine();
-    // Contrast with the case above: a default makes the NaN cell
-    // unreachable, so the element type is the union-free `string` and the
-    // shape claim survives.
-    const e = ce.box([
-      'Which',
-      ['List', 'True', 'False'],
-      { str: 'hot' },
-      'True',
-      { str: 'cold' },
-    ]);
-    expect(e.type.toString()).toBe('list<string^2>');
-    expect(e.evaluate().type.matches(e.type)).toBe(true);
+    for (const json of [
+      ['Which', ['List', 'True', 'False'], { str: 'hot' }],
+      [
+        'Which',
+        ['List', 'True', 'False'],
+        { str: 'hot' },
+        'True',
+        { str: 'cold' },
+      ],
+    ]) {
+      const e = ce.box(json as any);
+      expect(e.type.toString()).toBe('error');
+      expect(e.isValid).toBe(false);
+    }
   });
 
   test('If without an else branch widens; with one it does not', () => {
@@ -877,13 +851,13 @@ describe('type handler', () => {
     expect(e.type.toString()).toBe('integer');
   });
 
-  test('a condition with Missing cells types element-wise, as it evaluates', () => {
+  test('a condition with Missing cells is a static error', () => {
+    // Selection rule of 2026-11-02: `["True", "Missing"]` types
+    // `list<boolean | missing>`, which is not a flat list of booleans.
     const ce = engine();
-    // Runtime admits `True`/`False`/`Missing` cells (R4′), so the static gate
-    // must too: `["True", "Missing"]` types `list<boolean | missing>`.
     const e = ce.box(['Which', ['List', 'True', 'Missing'], 1, 'True', 0]);
-    expect(e.evaluate().operator).toBe('List');
-    expect(e.type.matches(parseType('list<integer>'))).toBe(true);
+    expect(e.evaluate().operator).toBe('Error');
+    expect(e.type.toString()).toBe('error');
   });
 
   test('a condition typing plain unknown adds the type of a mask of unknown rank', () => {
@@ -1042,365 +1016,104 @@ describe('perf smoke', () => {
   });
 });
 
-describe('an element-wise selection over an arm whose elements are lists', () => {
-  // The selection indexes each list arm position by position, so a position
-  // holds an element of the arm: a row of a matrix. The arms were read by
-  // their cells, so `If(C, [[1], [2], [3]], 0)` was typed `vector<integer^3>`
-  // while its value is `[[1], 0, [3]]`.
+describe('the selection rule of 2026-11-02: what is a static error', () => {
+  // A condition is a boolean or a flat list of booleans; every arm is a
+  // scalar or a flat list of the length of the condition, and all arms have
+  // one element kind (numbers or points). Anything else is a static error:
+  // the expression is invalid, its type is `error`, its value is the error,
+  // and a compilation declines. These forms selected at every level of a
+  // nested mask, or put a row of an arm at a position, before
+  // (`docs/BROADCAST-MODEL.md`, the entries of 2026-07-27 and 2026-10-22).
   const C = ['List', 'True', 'False', 'True'];
   const ROWS = ['List', ['List', 1], ['List', 2], ['List', 3]];
-  const cases: Array<[unknown, string, string]> = [
-    [['If', C, ROWS, 0], 'list<integer | vector<integer^1>>', '[[1],0,[3]]'],
+  const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+  const cases: Array<[string, unknown]> = [
+    ['a nested list condition', ['If', ['List', ['List', 'True']], 1, 0]],
     [
-      ['If', C, ROWS, ['List', ['List', 0], ['List', 0], ['List', 0]]],
-      'list<vector<integer^1>>',
-      '[[1],[0],[3]]',
+      'an uneven list condition',
+      ['If', ['List', ['List', 'True'], ['List', 'False', 'True']], 7, 0],
     ],
-    [
-      ['Which', C, ROWS, 'True', 0],
-      'list<integer | vector<integer^1>>',
-      '[[1],0,[3]]',
-    ],
-    // With no default, an unselected position holds the absence marker of a
-    // list element, `Missing`, not the numeric `NaN`.
-    [
-      ['Which', C, ROWS],
-      'list<missing | vector<integer^1>>',
-      '[[1],"Missing",[3]]',
-    ],
+    ['a matrix condition', ['If', ['Less', M, 3], 1, 0]],
+    ['a matrix condition in Which', ['Which', ['Less', M, 2], 10, 'True', 0]],
+    ['an arm whose elements are lists', ['If', C, ROWS, 0]],
+    ['an arm whose elements are lists in Which', ['Which', C, ROWS]],
+    ['a list of strings', ['If', C, ['List', "'a'", "'b'", "'c'"], "'d'"]],
+    ['a number arm beside a point arm', ['If', C, ['Tuple', 1, 2], 0]],
   ];
-  test.each(cases)('%j', (expr, type, value) => {
+  test.each(cases)('%s', (_label, json) => {
     const ce = engine();
-    const e = ce.box(expr as any);
-    expect(e.type.toString()).toBe(type);
-    const v = e.evaluate();
-    expect(v.toString()).toBe(value);
-    expect(v.type.matches(e.type)).toBe(true);
+    const e = ce.box(json as any);
+    expect(e.isValid).toBe(false);
+    expect(e.type.toString()).toBe('error');
+    expect(e.evaluate().operator).toBe('Error');
   });
 
-  test('a tensor arm of unknown rank holds a cell or a tensor at a position', () => {
+  test('a boolean arm is accepted, as a relation is', () => {
+    // A relation under a list condition is a region of a plot
+    // (`1 > 0 where (x+2)^2 + y^2 <= (0..0.2..1.6)^2`); a position that is
+    // not selected is `Missing`, as before the rule.
     const ce = engine();
-    ce.declare('T', 'tensor<integer>');
-    ce.declare('B', 'list<boolean>');
-    expect(ce.box(['If', 'B', 'T', 0]).type.toString()).toBe(
-      'list<integer | tensor<integer>>'
+    expect(ce.box(['If', C, 'True', 'False']).evaluate().toString()).toBe(
+      '["True","False","True"]'
     );
+    const e = ce.box(['If', C, ['Greater', 1, 0]]);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('["True","Missing","True"]');
   });
 
-  test('an arm of a different length is a dimension error at evaluation', () => {
-    // A signature's result type describes the successful values
-    // (`docs/ERROR-MODEL.md` §4): the length mismatch is reported by the
-    // value, as for `[1, 2] + [1, 2, 3]`.
-    const ce = engine();
-    const e = ce.box(['If', C, ROWS, ['List', 0]]);
-    expect(e.evaluate().toString()).toBe(
-      'Error("incompatible-dimensions", "3 vs 1")'
-    );
-  });
-});
-
-describe('ELEMENT-WISE WHICH OVER A MASK THAT MAY BE NESTED', () => {
-  // A comparison over a bare `indexed_collection` is typed
-  // `list<boolean | list<any>>`: an element of the collection may be a list,
-  // which the comparison maps at its leaves. Such a mask selects element-wise
-  // whether its value is flat or nested, so an element of the result is a
-  // cell or a list: `list<integer | list<any>>`.
-  test('the selection is typed element-wise, and both values match', () => {
-    for (const [value, expected] of [
-      [['List', 1, 2, 3], '[1,0,0]'],
-      [['List', ['List', 1, 2], ['List', 3]], '[[1,0],[0]]'],
+  test('a declared condition whose type cannot be a flat list', () => {
+    for (const type of [
+      'list',
+      'list<any>',
+      'indexed_collection<any>',
+      'tensor<boolean^(2x2x2)>',
+      'collection<boolean>',
+      'matrix<boolean>',
+      'list<boolean | missing>',
     ]) {
       const ce = engine();
-      ce.declare('C', 'indexed_collection');
-      const e = ce.box(['Which', ['Less', 'C', 2], 1, 'True', 0]);
-      expect(e.type.toString()).toBe('list<integer | list<any>>');
-      ce.assign('C', ce.box(value as any));
-      const v = ce.box(['Which', ['Less', 'C', 2], 1, 'True', 0]).evaluate();
-      expect(v.toString()).toBe(expected);
-      expect(v.type.matches(e.type)).toBe(true);
+      ce.declare('T', type);
+      expect(ce.box(['If', 'T', 1, 0]).isValid).toBe(false);
     }
   });
 
-  test('a mask of unknown rank (tensor<boolean>) types its cells or lists', () => {
+  test('a condition whose type does not settle its shape is checked on its value', () => {
+    // `C < 2` over `C: indexed_collection` types `list<boolean | list<any>>`,
+    // and `T` declared `tensor<boolean>` has no number of dimensions: each
+    // can be a flat list, so neither is refused by its type. A value that is
+    // a nested list is refused when the selection is evaluated.
     const ce = engine();
+    ce.declare('C', 'indexed_collection');
+    const e = ce.box(['Which', ['Less', 'C', 2], 1, 'True', 0]);
+    expect(e.isValid).toBe(true);
+    ce.assign('C', ce.box(['List', 1, 3]));
+    expect(e.evaluate().toString()).toBe('[1,0]');
     ce.declare('T', 'tensor<boolean>');
-    const e = ce.box(['If', 'T', 1, 0]);
-    expect(e.type.toString()).toBe('list<integer | list<any>>');
-    ce.assign(
-      'T',
-      ce.box(['List', ['List', 'True', 'False'], ['List', 'False', 'True']])
+    expect(ce.box(['If', 'T', 1, 0]).isValid).toBe(true);
+    ce.assign('T', ce.box(['List', ['List', 'True'], ['List', 'False']]));
+    expect(ce.box(['If', 'T', 1, 0]).evaluate().operator).toBe('Error');
+  });
+
+  test('a list arm of another length is an error', () => {
+    const ce = engine();
+    const e = ce.box(['If', ['List', 'True', 'False'], ['List', 1, 2, 3], 0]);
+    expect(e.type.toString()).toBe('error');
+    expect(e.evaluate().toString()).toBe(
+      'Error("incompatible-dimensions", "2 vs 3")'
     );
-    const v = ce.box(['If', 'T', 1, 0]).evaluate();
-    expect(v.toString()).toBe('[[1,0],[0,1]]');
-    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
   });
-});
 
-describe('a mask of rank 2 or more selects at each level', () => {
-  // At a node where some condition is a list, every list participant has
-  // the same length and each position is a node one level down; at a node
-  // where every condition is a scalar, the selected arm's value at that node
-  // is taken whole. The result follows the mask.
-  const M = ['List', ['List', 1, 2], ['List', 3, 4]];
-  function matrixEngine(): ComputeEngine {
+  test('a scalar condition still takes any arm whole', () => {
     const ce = engine();
-    ce.assign('M', ce.box(M as any));
-    return ce;
-  }
-
-  const cases: Array<[unknown, string | undefined, string, string]> = [
-    [
-      ['If', ['Less', 'M', 3], 'M', 0],
-      '\\mathrm{If}(M < 3, M, 0)',
-      '[[1,2],[0,0]]',
-      'matrix<integer^(2x2)>',
-    ],
-    [
-      ['If', ['Less', 'M', 3], 1, 0],
-      '\\mathrm{If}(M < 3, 1, 0)',
-      '[[1,1],[0,0]]',
-      'matrix<integer^(2x2)>',
-    ],
-    [
-      ['Which', ['Less', 'M', 2], 10, ['Less', 'M', 4], 'M', 'True', 0],
-      '\\begin{cases} 10 & M < 2 \\\\ M & M < 4 \\\\ 0 & \\text{otherwise} \\end{cases}',
-      '[[10,2],[3,0]]',
-      'matrix<integer^(2x2)>',
-    ],
-    // No else branch: an unselected cell of a numeric arm is `NaN`, so the
-    // cells are `number`.
-    [
-      ['If', ['Less', 'M', 3], 'M'],
-      '\\mathrm{If}(M < 3, M)',
-      '[[1,2],[NaN,NaN]]',
-      'matrix<2x2>',
-    ],
-    // An arm that no position selects is not evaluated, so its length is
-    // not checked.
-    [
-      ['If', ['Less', 'M', 0], ['List', 10, 20, 30], 0],
-      undefined,
-      '[[0,0],[0,0]]',
-      'matrix<integer^(2x2)>',
-    ],
-    // The rows of a lazy arm are read at the level where they are lists.
-    [
-      ['If', ['Less', 'M', 3], ['List', ['Range', 1, 2], ['Range', 3, 4]], 0],
-      undefined,
-      '[[1,2],[0,0]]',
-      'matrix<integer^(2x2)>',
-    ],
-    // A tuple arm is one value at each cell.
-    [
-      ['If', ['Less', 'M', 3], ['Tuple', 1, 2], ['Tuple', 0, 0]],
-      undefined,
-      '[[(1, 2),(1, 2)],[(0, 0),(0, 0)]]',
-      'matrix<tuple<integer, integer>^(2x2)>',
-    ],
-    // A string arm without a default: the unselected cells are `Missing`,
-    // and a union cell carries no dimensions.
-    [
-      ['If', ['Less', 'M', 3], { str: 'a' }],
-      undefined,
-      '[["a","a"],["Missing","Missing"]]',
-      'list<list<missing | string>>',
-    ],
-    // A mask of rank 3.
-    [
-      [
-        'If',
-        [
-          'List',
-          ['List', ['List', 'True', 'False']],
-          ['List', ['List', 'False', 'True']],
-        ],
-        1,
-        0,
-      ],
-      undefined,
-      '[[[1,0]],[[0,1]]]',
-      'tensor<integer^(2x1x2)>',
-    ],
-  ];
-
-  test.each(cases)('%j', (expr, latex, value, type) => {
-    const ce = matrixEngine();
-    const e = ce.box(expr as any);
-    expect(e.type.toString()).toBe(type);
-    const v = e.evaluate();
-    expect(v.toString()).toBe(value);
-    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
-    if (latex !== undefined) {
-      const p = ce.parse(latex);
-      expect(p.type.toString()).toBe(type);
-      expect(p.evaluate().toString()).toBe(value);
-    }
-  });
-
-  test('the function route agrees with the box route', () => {
-    const ce = matrixEngine();
-    const v = ce
-      .function('If', [ce.box(['Less', 'M', 3]), ce.symbol('M'), ce.number(0)])
-      .evaluate();
-    expect(v.toString()).toBe('[[1,2],[0,0]]');
-  });
-
-  test('the numeric and asynchronous routes agree', async () => {
-    const ce = matrixEngine();
-    const e = ce.box(['If', ['Less', 'M', 3], ['Sqrt', 2], 0]);
-    expect(e.evaluate().toString()).toBe('[[sqrt(2),sqrt(2)],[0,0]]');
-    expect(e.N().toString()).toBe(
-      '[[1.4142135623730950488,1.4142135623730950488],[0,0]]'
+    expect(ce.box(['If', 'True', ROWS, 0]).evaluate().toString()).toBe(
+      '[[1],[2],[3]]'
     );
-    const w = ce.box([
-      'Which',
-      ['Less', 'M', 2],
-      10,
-      ['Less', 'M', 4],
-      'M',
-      'True',
-      0,
-    ]);
-    expect((await w.evaluateAsync()).toString()).toBe('[[10,2],[3,0]]');
-  });
-
-  test('a mask whose rows have different lengths', () => {
-    const ce = engine();
-    const R = ['List', ['List', 'True'], ['List', 'False', 'True']];
-    const e = ce.box(['If', R, 7, 0] as any);
-    expect(e.type.toString()).toBe('list<integer | list<any>>');
-    const v = e.evaluate();
-    expect(v.toString()).toBe('[[7],[0,7]]');
-    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
-    // The parse route reads the mask from a symbol.
-    ce.assign('R', ce.box(R as any));
-    const p = ce.parse('\\mathrm{If}(R, 7, 0)');
-    expect(p.type.toString()).toBe('list<integer | list<any>>');
-    expect(p.evaluate().toString()).toBe('[[7],[0,7]]');
-  });
-
-  test('a list participant of a different length is a dimension error', () => {
-    const ce = matrixEngine();
-    // An arm whose length differs from the mask at the top level.
     expect(
       ce
-        .box(['If', ['Less', 'M', 3], ['List', 10, 20, 30], 0])
+        .box(['If', 'False', 1, ['List', "'a'", "'b'"]])
         .evaluate()
         .toString()
-    ).toBe('Error("incompatible-dimensions", "2 vs 3")');
-    expect(
-      ce.parse('\\mathrm{If}(M < 3, [10, 20, 30], 0)').evaluate().toString()
-    ).toBe('Error("incompatible-dimensions", "2 vs 3")');
-    // An arm of lower rank than the mask, as `M + [10, 20]` is.
-    expect(
-      ce
-        .box(['If', ['Less', 'M', 3], ['List', 10, 20], 0])
-        .evaluate()
-        .toString()
-    ).toBe('Error("incompatible-dimensions", "2x2 vs 2")');
-    expect(
-      ce.parse('\\mathrm{If}(M < 3, [10, 20], 0)').evaluate().toString()
-    ).toBe('Error("incompatible-dimensions", "2x2 vs 2")');
-    // An arm whose rows differ from the rows of the mask.
-    expect(
-      ce
-        .box(['If', ['Less', 'M', 3], ['List', ['List', 1], ['List', 2]], 0])
-        .evaluate()
-        .toString()
-    ).toBe('Error("incompatible-dimensions", "2 vs 1")');
-    // Two conditions whose rows differ.
-    expect(
-      ce
-        .box([
-          'Which',
-          ['List', ['List', 'True', 'False'], ['List', 'True']],
-          1,
-          ['List', ['List', 'True', 'True'], ['List', 'True', 'True']],
-          2,
-          'True',
-          0,
-        ])
-        .evaluate()
-        .toString()
-    ).toBe('Error("incompatible-dimensions", "1 vs 2")');
-    // An unbounded arm that a position selects.
-    expect(
-      ce
-        .box(['If', ['Less', 'M', 3], ['Cycle', ['List', 1]], 0])
-        .evaluate()
-        .toString()
-    ).toBe('Error("incompatible-dimensions", "2 vs Infinity")');
-  });
-
-  test('a Missing cell at any depth is an error cell at its position', () => {
-    const ce = engine();
-    const v = ce
-      .box([
-        'If',
-        ['List', ['List', 'True', 'Missing'], ['List', 'False', 'True']],
-        1,
-        0,
-      ])
-      .evaluate();
-    expect(v.ops![0].ops![0].toString()).toBe('1');
-    expect(v.ops![0].ops![1].operator).toBe('Error');
-    expect(v.ops![1].toString()).toBe('[0,1]');
-  });
-
-  test('a symbolic cell at any depth keeps the expression inert', () => {
-    const ce = engine();
-    ce.declare('x', 'boolean');
-    const r = ce
-      .box([
-        'If',
-        ['List', ['List', 'True', 'x'], ['List', 'False', 'True']],
-        1,
-        0,
-      ])
-      .evaluate();
-    expect(r.operator).toBe('If');
-  });
-
-  test('a condition after a lifted True is not evaluated', () => {
-    // `Which(M < 2, 1, True, 2, <a mask of another shape>, 3)`: the third
-    // condition is unreachable, so it neither shapes nor errors the result.
-    const ce = matrixEngine();
-    const v = ce
-      .box([
-        'Which',
-        ['Less', 'M', 2],
-        1,
-        'True',
-        2,
-        ['List', 'True', 'False', 'True'],
-        3,
-      ])
-      .evaluate();
-    expect(v.toString()).toBe('[[1,2],[2,2]]');
-  });
-
-  test('a scalar True condition at a node selects the arm whole there', () => {
-    // `V < 3` is `[True, False]`: at position 0 the first condition is the
-    // scalar `True`, and the second condition (a row of `M < 2`) makes the
-    // node a list node, so the first row of the first arm `M` is read
-    // there.
-    const ce = matrixEngine();
-    ce.assign('V', ce.box(['List', 1, 5]));
-    const e = ce.box([
-      'Which',
-      ['Less', 'V', 3],
-      'M',
-      ['Less', 'M', 2],
-      0,
-      'True',
-      5,
-    ]);
-    // The masks have different ranks, so the rank of the result is not
-    // known statically.
-    expect(e.type.toString()).toBe('list<integer | list<any>>');
-    const v = e.evaluate();
-    expect(v.toString()).toBe('[[1,2],[5,5]]');
-    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+    ).toBe('["a","b"]');
   });
 });
 
@@ -1441,17 +1154,12 @@ describe('the result type of a selection over a broadcastable arm', () => {
 
   test('the type holds the value for a matrix, a vector and a scalar', () => {
     const values: Array<[unknown, unknown, string]> = [
-      [
-        ['If', ['Less', 'B', 0], ['Negate', 'B'], 'B'],
-        ['List', ['List', 1, -2], ['List', -3, 4]],
-        '[[1,2],[3,4]]',
-      ],
-      [
-        ['If', ['Less', 'B', 0], 0, 'B'],
-        ['List', ['List', 1, -2], ['List', -3, 4]],
-        '[[1,0],[0,4]]',
-      ],
-      [['Which', ['Less', 'B', 0], 0, 'True', 'B'], ['List', 1, -2], '[1,0]'],
+      // A matrix value of `B` makes `B < 0` a matrix condition, which the
+      // selection rule of 2026-11-02 refuses (it gave `[[1,2],[3,4]]` and
+      // `[[1,0],[0,4]]`).
+      // A vector value of `B: broadcastable<number>` types `B < 0` as
+      // `tensor<boolean>`, which does not settle a flat list: refused too
+      // (it gave `[1,0]`).
       [['If', ['Less', 'B', 0], ['Negate', 'B'], 'B'], -3, '3'],
     ];
     for (const [expr, value, expected] of values) {
@@ -1467,10 +1175,10 @@ describe('the result type of a selection over a broadcastable arm', () => {
     }
   });
 
-  test('a mask of lower rank than the arm gives a value that is not a tensor', () => {
-    // With `C := [-1, 1]` and `B := [[1, 2], [3, 4]]`, the selection takes
-    // the first row of `B` whole and lifts `0`: `[[1, 2], 0]`. The type read
-    // before the assignment holds this value through its list arm.
+  test('a mask of lower rank than the arm is a static error', () => {
+    // With `C := [-1, 1]` and `B := [[1, 2], [3, 4]]`, the arm `B` is a list
+    // whose elements are lists, which the selection rule of 2026-11-02
+    // refuses under a list condition. Before, the value was `[[1, 2], 0]`.
     const ce = engine();
     ce.declare('B', 'broadcastable<number>');
     ce.declare('C', 'broadcastable<number>');
@@ -1482,8 +1190,7 @@ describe('the result type of a selection over a broadcastable arm', () => {
     ce.assign('C', ce.box(['List', -1, 1]));
     ce.assign('B', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
     const v = ce.box(expr as any).evaluate();
-    expect(v.toString()).toBe('[[1,2],0]');
-    expect(isSubtype(v.type.type, type.type)).toBe(true);
+    expect(v.operator).toBe('Error');
   });
 });
 
@@ -1520,8 +1227,10 @@ describe('the result type when the shape of a condition is not known', () => {
       )
     ).toEqual({
       type: 'list<integer | list<any>>',
-      value: '[[1,0],[0,1]]',
-      holds: true,
+      // Selection rule of 2026-11-02: once `u` holds a matrix, the type of
+      // `u` is a matrix, and the condition is a static error.
+      value: expect.stringContaining('incompatible-type'),
+      holds: false,
     });
     expect(
       typedThenEvaluated(
@@ -1530,8 +1239,10 @@ describe('the result type when the shape of a condition is not known', () => {
         { M: ['List', ['List', 1, 2], ['List', 3, 4]], u: MASK }
       )
     ).toEqual({
-      type: 'list<integer | list<any>>',
-      value: '[[1,0],[0,1]]',
+      // `M < 0` over a matrix is not a flat list (selection rule of
+      // 2026-11-02).
+      type: 'error',
+      value: expect.stringContaining('incompatible-type'),
       holds: true,
     });
   });
@@ -1569,10 +1280,9 @@ describe('the result type when the shape of a condition is not known', () => {
   });
 
   test('the no-match cell reads the arms of the clauses before the first mask', () => {
-    // The string arm of the scalar clause makes the no-match cell `Missing`,
-    // in the value as in the type, although only the numeric arm after it
-    // is selected. Before, the evaluation read only the arms from the mask
-    // onward and answered `[1, NaN]`, which the type does not hold.
+    // Selection rule of 2026-11-02: a string arm of a selection with a list
+    // condition is a static error, also in a clause before the first mask.
+    // Before, the no-match cell was `Missing` (`[1, "Missing"]`).
     expect(
       typedThenEvaluated(
         { x: 'real' },
@@ -1586,8 +1296,8 @@ describe('the result type when the shape of a condition is not known', () => {
         { x: -1 }
       )
     ).toEqual({
-      type: 'list<integer | missing | string> | string',
-      value: '[1,"Missing"]',
+      type: 'error',
+      value: expect.stringContaining('incompatible-type'),
       holds: true,
     });
   });
@@ -1628,13 +1338,17 @@ describe('the result type when the shape of a condition is not known', () => {
 
   test('a union of masks of different ranks is a mask of unknown rank', () => {
     const declarations = { P: 'matrix<boolean^(2x2)> | list<boolean^3>' };
+    // Selection rule of 2026-11-02: the type admits a flat list of booleans,
+    // so it is not refused; a value that is a nested list (the matrix arm)
+    // is refused when the selection is evaluated.
     expect(
       typedThenEvaluated(declarations, ['If', 'P', 1, 0], { P: MASK })
-    ).toEqual({
-      type: 'list<integer | list<any>>',
-      value: '[[1,0],[0,1]]',
-      holds: true,
-    });
+    ).toEqual(
+      expect.objectContaining({
+        type: 'list<integer | list<any>>',
+        value: expect.stringContaining('incompatible-type'),
+      })
+    );
     expect(
       typedThenEvaluated(declarations, ['If', 'P', 1, 0], {
         P: ['List', 'True', 'False', 'True'],
@@ -1708,5 +1422,66 @@ describe('a condition whose type cannot be read (CE-22)', () => {
     const v = e.evaluate();
     expect(v.toString()).toBe('5');
     expect(v.type.matches(e.type)).toBe(true);
+  });
+});
+
+describe('the selection rule of 2026-11-02: values', () => {
+  test('a false scalar condition selects a restricted list whole, for every reader', () => {
+    // Rule 4: a scalar condition selects its arm whole, so the value is the
+    // absent value of the whole list, `Missing`. `\sin` gave `[NaN, NaN,
+    // NaN]`: it mapped the cells of the held restriction.
+    const ce = engine();
+    ce.declare('t', 'real');
+    ce.assign('t', -1);
+    for (const latex of [
+      '[1,2,3]\\{0<t\\}',
+      '2[1,2,3]\\{0<t\\}',
+      '\\sin([1,2,3]\\{0<t\\})',
+      '[1,2,3]\\{0<t\\}+1',
+    ])
+      expect(ce.parse(latex).evaluate().toString()).toBe('"Missing"');
+    const R = ['If', ['Less', 0, 't'], ['List', 1, 2, 3]];
+    for (const json of [['Sin', R], ['Add', R, 1], ['Multiply', 2, R]])
+      expect(
+        ce
+          .box(json as any)
+          .evaluate()
+          .toString()
+      ).toBe('"Missing"');
+  });
+
+  test('an undecided scalar condition is lifted over the whole result', () => {
+    const ce = engine();
+    ce.declare('t', 'real');
+    const e = ce.box(['Sin', ['If', ['Less', 0, 't'], ['List', 1, 2]]]);
+    const held = e.evaluate();
+    expect(held.toString()).toBe('If(0 < t, [sin(1),sin(2)])');
+    expect(held.isCollection).toBe(true);
+    ce.assign('t', -1);
+    expect(held.evaluate().toString()).toBe('"Missing"');
+    ce.assign('t', 1);
+    expect(held.evaluate().toString()).toBe('[sin(1),sin(2)]');
+  });
+
+  test('an unmatched point cell is a point of NaN coordinates', () => {
+    const ce = engine();
+    ce.declare('v', 'list<real>');
+    const e = ce.box(['If', ['Greater', 'v', 0], ['Tuple', 1, 2]]);
+    expect(e.type.toString()).toBe('list<tuple<number, number>>');
+    ce.assign('v', ce.box(['List', -1, 2, 3]));
+    expect(e.evaluate().toString()).toBe('[(NaN, NaN),(1, 2),(1, 2)]');
+  });
+
+  test('the scalar no-match value of Which is unchanged', () => {
+    const ce = engine();
+    ce.declare('t', 'real');
+    ce.assign('t', -1);
+    expect(
+      ce
+        .box(['Which', ['Less', 't', -5], 1])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+    expect(ce.parse('\\{t>0: 1\\}').evaluate().toString()).toBe('"Missing"');
   });
 });

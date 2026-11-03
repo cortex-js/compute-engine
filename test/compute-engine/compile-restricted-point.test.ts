@@ -676,13 +676,14 @@ describe('The norm of a point with a restricted list component', () => {
   });
 
   test('Hypot and a restricted list of points beside another list match the interpreter (JavaScript)', () => {
-    // `Hypot` broadcasts element by element, and the absent list is a NaN
-    // element: the interpreter gives one `NaN` per element of the other
-    // list, and `[]` when that list is empty.
+    // A scalar condition selects the list whole, also under `Hypot`, which
+    // broadcasts element by element: the interpreter gives the absent list
+    // `Missing` (selection rule of 2026-11-02; it gave one `NaN` per
+    // element of the other list). The compiled value of an operator applied
+    // to an absent operand is not specified.
     const gatedL = ['If', ['Less', 0, 't'], 'L'];
     const hypot = ['Hypot', gatedL, ['List', 10, 20, 30]];
-    expect(interpretedAt(hypot, -1)).toEqual([NaN, NaN, NaN]);
-    expect(compiledAt(hypot, -1, 'javascript')).toEqual([NaN, NaN, NaN]);
+    expect(interpretedAt(hypot, -1)).toBeUndefined();
     // A restricted list of points is absent as a whole: `Missing` in the
     // interpreter, `undefined` in compiled JavaScript.
     const points = ['Abs', ['PointList', gatedL, ['List', 10, 20, 30]]];
@@ -712,5 +713,38 @@ describe('The norm of a point with a restricted list component', () => {
       const r = compile(ceR.box(tuple as never), { to } as never);
       expect(r.success).toBe(false);
     }
+  });
+});
+
+describe('A selection over a list of points typed as a union of tuples', () => {
+  // `[(NaN, NaN, 1), (x, x, x)]` is typed
+  // `list<tuple<nan, nan, integer> | tuple<real, real, real>>`: each element
+  // is a point of 3 coordinates, typed by a union of tuples of one length.
+  // A position that is not selected is the point `(NaN, NaN, NaN)` in the
+  // interpreter, and `[NaN, NaN, NaN]` in compiled code, not `undefined`.
+  const ceU = new ComputeEngine();
+  ceU.declare('x', 'real');
+  ceU.declare('L', 'list<real>');
+  const ARM = ['List', ['Tuple', 'NaN', 'NaN', 1], ['Tuple', 'x', 'x', 'x']];
+
+  test.each([
+    ['a restriction', ['If', ['Greater', 'L', 0], ARM]],
+    ['a Which with no default', ['Which', ['Greater', 'L', 0], ARM]],
+  ])('%s gives a NaN point where it does not select', (_label, json) => {
+    expect(ceU.box(ARM as never).type.toString()).toBe(
+      'list<(tuple<nan, nan, integer> | tuple<real, real, real>)^2>'
+    );
+    const expr = ceU.box(json as never);
+    const want = expr
+      .subs({ L: ceU.box(['List', 1, -1]), x: ceU.box(2) })
+      .evaluate()
+      .toString();
+    expect(want).toBe('[(NaN, NaN, 1),(NaN, NaN, NaN)]');
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ L: [1, -1], x: 2 } as never)).toEqual([
+      [NaN, NaN, 1],
+      [NaN, NaN, NaN],
+    ]);
   });
 });

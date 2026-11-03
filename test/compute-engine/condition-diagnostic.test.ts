@@ -11,8 +11,11 @@ import { ComputeEngine } from '../../src/compute-engine';
 // boxing, exactly as a wrong-typed argument to `Sin` does, and the evaluate
 // handlers propagate it as the condition's error. Everything that may still
 // resolve stays inert: a symbol of unknown type, a relation with free
-// variables, a `missing`-admitting type, a boolean collection (element-wise
-// selection), a possibly-collection type.
+// variables, a `missing`-admitting type, a flat list of booleans (element-wise
+// selection), a possibly-collection type. A collection condition must be a
+// flat list of booleans by its type: a list whose cells can be `Missing` or
+// are not known to be booleans is refused (the selection rule of 2026-11-02,
+// `docs/BROADCAST-MODEL.md`).
 //
 
 describe('If/Which: a provably non-boolean condition is an error operand', () => {
@@ -50,6 +53,10 @@ describe('If/Which: a provably non-boolean condition is an error operand', () =>
     [['If', 'rg', 1, 2], 'range'],
     [['If', 'bnum', 1, 2], 'broadcastable<number>'],
     [['If', 'nOrLN', 1, 2], 'list<number>'],
+    // A list condition must be a flat list of booleans by its type.
+    [['If', 'LBM', 1, 2], 'list<boolean | missing>'],
+    [['If', 'LU', 1, 2], 'list<unknown>'],
+    [['If', 'Lbare', 1, 2], 'list'],
   ])('%j is refused', (expr, actual) => {
     const boxed = ce.box(expr as any);
     expect(boxed.errors).toHaveLength(1);
@@ -68,9 +75,6 @@ describe('If/Which: a provably non-boolean condition is an error operand', () =>
     [['If', 'b', 1, 2]],
     [['If', 'kb', 1, 2]],
     [['If', 'LB', 1, 2]],
-    [['If', 'LBM', 1, 2]],
-    [['If', 'LU', 1, 2]],
-    [['If', 'Lbare', 1, 2]],
     [['If', 'bbool', 1, 2]],
     [['If', 'bOrLN', 1, 2]],
     [['Which', 'undeclaredCond', 1, 'True', 2]],

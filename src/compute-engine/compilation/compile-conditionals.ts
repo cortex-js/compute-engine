@@ -46,6 +46,7 @@ import {
   compileGuardTest,
   conditionDecidability,
   exactSelect,
+  nanPointLiteral,
   noBranchValue,
 } from './compile-absence.js';
 import {
@@ -387,10 +388,10 @@ export function compileExprRestriction(
   // The absence at each position is decided from what one position
   // holds — a list element, or the whole value — not from the node's
   // own type, the list of results. A missing number is the numeric
-  // absence (`NaN`); a missing POINT and a missing string are the
-  // object null (`undefined` on JavaScript), as a single missing point
-  // is (R1 of `docs/plans/2026-11-01-absent-value-contract.md`: a
-  // producer gives the absence marker of its result type). The
+  // absence (`NaN`); a missing POINT is a point whose coordinates are
+  // all `NaN` (`nanPointLiteral`), as in the interpreter (selection rule
+  // of 2026-11-02, `docs/BROADCAST-MODEL.md`); any other value that is
+  // not a number is the object null (`undefined` on JavaScript). The
   // element-wise `Which` gives the same cells (its selection helper
   // takes the absence of the cell type, `_SYS.selectAbsent`), so the
   // two forms of the same selection agree.
@@ -404,12 +405,14 @@ export function compileExprRestriction(
     ? (collectionElementType(valueType.type) ?? 'unknown')
     : valueType.type;
   const nullLiteral = target.absence?.object?.nullLiteral;
+  const nanPoint = nanPointLiteral([held]);
   const absent =
-    coerce === undefined &&
+    nanPoint ??
+    (coerce === undefined &&
     nullLiteral !== undefined &&
     absenceKind([held], target) === 'object'
       ? nullLiteral
-      : 'NaN';
+      : 'NaN');
   const zip = runtimeZip ? 'null' : String(list);
   return `_SYS.restrict(${conds}, ${val}, ${zip}, ${absent})`;
 }

@@ -296,6 +296,10 @@ describe('An input with no type is refused (R1)', () => {
     expect(r.success).toBe(false);
     expect(r.unsupported).toEqual(['M']);
     expect(r.run!({ M: [1, 5] })).toEqual([1, 0]);
+    // A condition is a boolean or a flat list of booleans. Over a matrix,
+    // `M < 3` is a nested list, which the interpreter refuses with an
+    // `incompatible-type` error, and the fallback gives `NaN` for an error
+    // (the selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`).
     expect(
       r.run!({
         M: [
@@ -303,10 +307,7 @@ describe('An input with no type is refused (R1)', () => {
           [3, 4],
         ],
       })
-    ).toEqual([
-      [1, 2],
-      [0, 0],
-    ]);
+    ).toBeNaN();
     expect(r.run!({ M: 2 })).toBe(2);
     // Declared, the input compiles.
     ce.declare('M', 'real');

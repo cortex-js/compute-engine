@@ -213,25 +213,104 @@ Corollary rules for the strict regime:
   `empty-broadcast.test.ts` (the lone-empty operand answers `[]` on the
   interpreter and on the compiled JavaScript lane, and the empty-beside-
   non-empty mismatch).
-- Selection (2026-07-27): elementwise `Which`/`If` over list-valued
-  conditions belongs to the LIFTED regime — every list-valued participant
-  (conditions and selected arms) must share one length, checked through the
-  same `broadcastLengthMismatch`. Selection is lazy per element and an
-  unmatched position preserves shape with the documented absence value.
-- Selection over a mask of any rank (2026-10-22): a condition may be a nested
-  list of `True`/`False`/`Missing`, uneven rows included. The rule above
-  applies at every level of the mask: at a level where a condition is a list,
-  every list condition and every list arm must share its length, and a scalar
-  lifts; at a level where every condition is a scalar, the first `True`
-  clause takes its arm's value there WHOLE (`If([True, False], [[1], [2]], 0)`
-  is `[[1], 0]`). An arm that is a list at a level and a scalar where the mask
-  is still a list (an arm of lower rank than the mask) is refused with the
-  `incompatible-dimensions` error of `Add` (`If(M < 3, [10, 20], 0)` with `M`
-  a 2×2 matrix). The compiled JavaScript follows the same rule
-  (`selectNested`, `compilation/javascript-runtime.ts`); the Python and
-  interval-JavaScript targets refuse a condition that may be a list.
-  Tests: `elementwise-which.test.ts` and `compile-elementwise-which.test.ts`,
-  "a mask of rank 2 or more".
+- Selection (2026-11-02, replaces the entries of 2026-07-27 and
+  2026-10-22): `If` and `Which` select element-wise only when the static
+  type of a condition is a flat list of booleans; `If(c, e1, e2)` is
+  `Which(c, e1, True, e2)`.
+  - The condition is a boolean or a flat list of booleans. Accepted:
+    `list<boolean>`, `list<boolean^3>`, `indexed_collection<boolean>`
+    (`P.x > 1` over a list of points that a host types as an indexed
+    collection). A static error (`incompatible-type`): a nested list
+    (`If([[True], [False, True]], 7, 0)`), `M < 3` over a matrix `M`, a
+    `matrix<boolean>`, a list with a `Missing` cell (`[True, Missing]`),
+    a collection with no order (`collection<boolean>`, `set<boolean>`), and
+    a collection whose cells are not known to be booleans (`list`,
+    `list<any>`, `indexed_collection<any>`). A type that does not settle
+    the number of dimensions but admits a flat list is not refused:
+    `tensor<boolean>` (`x < L` with `x` declared
+    `broadcastable<number | tuple>`), `list<boolean | list<any>>`
+    (`L < f(u)` with `f` of result type `unknown`), `boolean | list<boolean>`.
+    When the value of such a condition is a nested list, the evaluation gives
+    the same `incompatible-type` error, and compiled code gives `NaN`.
+  - Every arm is a scalar or a flat list of the condition's length. Only
+    numbers and points need one element kind: the arms are all numbers
+    (`If(L < 3, L, 0)`) or all points (`If(L < 3, (1, 2))`). A static
+    error: an arm whose elements are lists
+    (`If([True, False, True], [[1], [2], [3]], 0)`), a string or a list of
+    strings (a string has no value for a position that is not selected), a
+    set, a number arm beside a point arm (`If(L > 0, (1, 2), 0)`), and a list
+    arm of another length (`If([True, False], [1, 2, 3], 0)` is
+    `incompatible-dimensions`, `2 vs 3`, as `[1, 2] + [1, 2, 3]` is). An
+    arm whose static type does not settle this is checked on its value when
+    the selection is evaluated. The result type is `list<T>` from the static
+    types of the arms.
+  - A relation (a boolean arm) and a statement (an `Assign`, a definition,
+    a drawing head) are accepted under a list condition, as before:
+    `1 > 0 \text{ where } (x+2)^2 + y^2 \le (0..0.2..1.6)^2` is
+    `If(… ≤ Range(0, 1.6, 0.2)^2, 0 < 1)`, a region of a plot. A position of
+    a boolean arm that is not selected is `Missing`
+    (`If([True, False], 1 > 0)` is `[True, Missing]`). An arm of another
+    kind that is not a string is accepted too, as a scalar arm or as a list
+    arm: a colour, a symbol, a tuple that is not a point, or a list of
+    these. A position of such an arm that is not selected is `Missing`: the
+    30×30 colour grid
+    `Which(Sqrt(X^2 + Y^2) <= 1, Hsv(0, 0, v), True, Hsv(0, 0, 0.8))` over
+    lists `X` and `Y` (Tycho item 189).
+  - A position that is not selected is `NaN` for a number cell and a point
+    whose coordinates are `NaN` for a point cell:
+    `If([True, False, False], (1, 2))` is `[(1, 2), (NaN, NaN), (NaN, NaN)]`,
+    and `If([1, 5] < 3, 7)` is `[7, NaN]`. A number cell or a point cell
+    is never `undefined` or `Missing`, and no such cell needs `IsMissing` or
+    `Coalesce` to be read; an
+    operator that maps over the list reads the `NaN` point as a point
+    (`Sin(If([1, 2] > 1, [(1, 2), (3, 4)]))` is
+    `[(NaN, NaN), (sin(3), sin(4))]`). This reverses the decision of
+    2026-10-18 that a point or a string cell with no match is absent
+    (`Missing`, `undefined` in compiled JavaScript) and is read by
+    `IsMissing` or `Coalesce`. The compiled JavaScript gives `[NaN, NaN]`
+    for such a point (`nanPointLiteral()` in
+    `compilation/compile-absence.ts`). Limit: a cell read from a held
+    restriction whose condition is not decided is itself a restriction
+    (`If([0 < t], [(1, 2)])` read at position 1 is `If(0 < t, (1, 2))`).
+    When this cell is evaluated alone after the condition becomes false, it
+    is `Missing`, while the whole restriction gives the `NaN` point at that
+    position.
+  - A scalar condition selects an arm whole, also when the arm is a list:
+    `If(t > 0, [1, 2, 3])` at `t = -1` is `Missing`, the absent value of
+    the whole list. Every reader keeps this: an operator that maps over its
+    operands lifts the condition outward (`Sin(If(c, L))` is
+    `If(c, Sin(L))`, `liftWholeRestrictions()` in
+    `boxed-expression/boxed-function.ts`), so `\sin([1,2,3]\{0<t\})`,
+    `2[1,2,3]\{0<t\}` and `[1,2,3]\{0<t\}+1` are `Missing` at
+    `t = -1`. Before, such an operator mapped over the restricted cells and
+    gave `[NaN, NaN, NaN]`. When the condition is false, the other operands
+    of the operator are not evaluated: `[1,2,3]\{t>0\} + [1,2,3,4]` at
+    `t = -1` is `Missing`, not `incompatible-dimensions`. The conditions of
+    all the restrictions of one call are evaluated, each once, before any of
+    them is read: a condition with an effect (a random draw) runs also when
+    an earlier condition of the same call is false. A restriction whose
+    condition is not decided keeps its held form,
+    `If(0 < t, [sin(1), sin(2), sin(3)])`, which still presents as a
+    collection (Tycho item 66). The condition is lifted only when its static
+    type is a subtype of `boolean`: a condition typed `unknown` or
+    `boolean | list<boolean>` can be a mask at run time. A user function
+    whose body can receive `Missing` (an unannotated parameter, a parameter
+    whose type admits `missing`, a parameter with a default, a declared
+    function whose absence behavior is not `propagate`) is not lifted over:
+    the condition is evaluated once, and the function receives the list when
+    it is `True`, `Missing` when it is `False`, and the restriction over the
+    evaluated condition when it is not decided. With
+    `f(xs) = Coalesce(xs, [0])`, `f(If(0 < t, [1, 2]))` is `[0]` at
+    `t = -1`. Limit: an undecided restriction under two operators that map
+    over their operands, `Sin(Cos(If(c, L)))`, is held as the list of its
+    restricted cells, not as `If(c, Sin(Cos(L)))`; when this held value is
+    evaluated again after `c` becomes `False`, it is `[NaN, NaN, NaN]`, not
+    `Missing`.
+  - The no-match value of a scalar `Which` is unchanged: `Missing`.
+  - Tests: `elementwise-which.test.ts` ("the selection rule of 2026-11-02:
+    what is a static error"), `when-list-condition.test.ts`,
+    `compile-when-nested-mask.test.ts`,
+    `tycho-item-335-when-indexed-collection-type.test.ts`.
 - Restriction and single-branch `If` (2026-11-02): the parser reads a
   restriction `e\{c\}` as `If(c, e)`, not `When(e, c)`, and the restriction
   covers the whole of the smallest group that holds it: `y=x\{c\}` is
@@ -244,8 +323,9 @@ Corollary rules for the strict regime:
   `When` does: `NaN` for a number, `Missing` otherwise. Its type is the
   type of `e`, with no `nan` or `missing` arm (`integer` for `If(c, 1)`):
   the absent value is implicit in every type. With a list condition, `If(c, e)` selects
-  element-wise as in the entries above. `When` stays in the library for a
-  caller that builds it. Rule: `docs/plans/2026-11-02-restriction-binding.md`
+  element-wise as in the selection entry above, and a scalar condition
+  selects `e` whole, also when `e` is a list. `When` is removed (item 3.2 of
+  `docs/plans/2026-11-02-compiler-contraction-plan.md`). Rule: `docs/plans/2026-11-02-restriction-binding.md`
   and `docs/plans/2026-11-02-where-binding.md`. Tests:
   `latex-syntax/restriction-where-binding.test.ts`.
 

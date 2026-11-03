@@ -1816,8 +1816,23 @@ describe('Interval target — a selection among list values', () => {
     // The conditions stay scalar.
     declines(
       ce,
-      ce.box(['Which', ['List', ['Less', 'x', 1]], ['List', 'x', 1], 'True', 1]),
+      ce.box([
+        'Which',
+        ['List', ['Less', 'x', 1], ['Less', 'x', 2]],
+        ['List', 'x', 1],
+        'True',
+        1,
+      ]),
       /branch condition is a collection/
+    );
+    // A list condition and a list arm of different lengths are a static
+    // error of the selection, `incompatible-dimensions` (the selection rule
+    // of 2026-11-02, `docs/BROADCAST-MODEL.md`), so the compilation declines
+    // on the invalid expression.
+    declines(
+      ce,
+      ce.box(['Which', ['List', ['Less', 'x', 1]], ['List', 'x', 1], 'True', 1]),
+      /incompatible-dimensions/
     );
   });
 });

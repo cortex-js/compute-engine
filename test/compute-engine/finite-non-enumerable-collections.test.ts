@@ -200,8 +200,11 @@ describe('operators that decide membership or splice elements', () => {
         ['Set', 'b', 'f'],
       ])
     ).toBe('Set(b)');
-    expect(evaluate(['If', ['List', 'True', 'False'], ['Set', 1, 2]])).toBe(
-      '[1,NaN]'
+    // A set has no positions, so a selection by a list of conditions refuses
+    // a set arm with a static type error (the selection rule of 2026-11-02,
+    // `docs/BROADCAST-MODEL.md`).
+    expect(evaluate(['If', ['List', 'True', 'False'], ['Set', 1, 2]])).toMatch(
+      /^Error\(ErrorCode\("incompatible-type"/
     );
     // The range is one element of the list, so it materializes as a nested
     // list (it is not spliced into the outer list).

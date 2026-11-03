@@ -221,8 +221,10 @@ describe('a collection-TYPED but valueless operand', () => {
     // numbers has no cell that could be a condition value — is refused at
     // boxing as an `incompatible-type` error operand, and evaluation answers
     // that error. What matters is that the `Which` does NOT fall through to
-    // the `True` clause and answer 2. A collection whose cells could still be
-    // booleans (`list<unknown>`) is held, like every undecided condition.
+    // the `True` clause and answer 2. A collection whose cells are not known
+    // to be booleans (`list<unknown>`) is refused too: a condition that is a
+    // collection must be a flat list of booleans by its type (the selection
+    // rule of 2026-11-02, `docs/BROADCAST-MODEL.md`).
     it('refuses a condition that is not booleanish at all', () => {
       const ce = new ComputeEngine();
       ce.declare('N', 'list<number>');
@@ -231,7 +233,7 @@ describe('a collection-TYPED but valueless operand', () => {
       expect(boxed.evaluate().operator).toBe('Error');
       ce.declare('U', 'list<unknown>');
       expect(ce.box(['Which', 'U', 1, 'True', 2]).evaluate().operator).toBe(
-        'Which'
+        'Error'
       );
     });
   });

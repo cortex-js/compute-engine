@@ -8,7 +8,7 @@ import type {
 } from '../global-types.js';
 import { isDecidedLoopIndex } from './javascript-value-facts.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
-import { leafwardElementType } from '../collection-utils.js';
+import { leafwardElementType, pointArity } from '../collection-utils.js';
 import {
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
@@ -530,6 +530,35 @@ export function isNumericShaped(t: Readonly<Type>): boolean {
   // Toward the cells (`leafwardElementType`), as in `typeHasComplexLeaf`.
   const element = leafwardElementType(r);
   return element !== undefined && isNumericShaped(element);
+}
+
+/**
+ * The JavaScript literal of a point whose coordinates are all `NaN`
+ * (`[NaN, NaN]`), when every type of `cellTypes` is a point (a tuple of
+ * numbers, or a union of such tuples, as `pointArity()` reads it) of one
+ * length; `undefined` otherwise. An element-wise selection
+ * or a restriction by a list of conditions puts this point at a position
+ * that is not selected, where a point is expected, as the interpreter does
+ * (`unmatchedCell()` in `library/control-structures.ts`; selection rule of
+ * 2026-11-02, `docs/BROADCAST-MODEL.md`). The literal is evaluated once for
+ * each call of the run-time helper, and its positions share it; no compiled
+ * code writes into an element of a list of points.
+ */
+export function nanPointLiteral(
+  cellTypes: ReadonlyArray<Readonly<Type>>
+): string | undefined {
+  let n: number | undefined;
+  for (const t of cellTypes) {
+    // A point is a tuple of numbers, or a union of such tuples of one
+    // length (`tuple<nan, nan, integer> | tuple<real, real, real>`), as the
+    // interpreter reads it.
+    const arity = pointArity(t);
+    if (arity === undefined) return undefined;
+    if (n !== undefined && n !== arity) return undefined;
+    n = arity;
+  }
+  if (n === undefined) return undefined;
+  return `[${Array.from({ length: n }, () => 'NaN').join(', ')}]`;
 }
 
 export function absentDomainIsObject(t: Readonly<Type>): boolean {

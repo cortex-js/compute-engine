@@ -103,13 +103,13 @@
   the ASCII form, where it printed `3 {0 < t}`. Witness: the parser has
   produced only `If` since the restriction rule above; Tycho, the only known
   builder of `When`, builds `If` from its next release.
-- **A held restriction over a list is the list of its restricted elements.**
-  With `t` free, `If(0<t, [1, 2, 3])` is an indexed collection, and an
-  operation applied to each element applies to each restricted element:
-  `\sin([1,2,3]\{0<t\})` is `[\sin(1), \sin(2), \sin(3)]`, each restricted
-  by `0<t`, and with `t = -1` it is `[NaN, NaN, NaN]` (it was `Missing`:
-  the `When` form was typed with a `missing` arm, so the operation took the
-  list whole). With a `True` or `False` condition the value is unchanged.
+- **A held restriction over a list presents as a list.** With `t` free,
+  `If(0<t, [1, 2, 3])` is an indexed collection of 3 elements
+  (`isCollection`, `count` and `each()` agree with its type). An operation
+  applied to each element keeps the condition outside:
+  `\sin([1,2,3]\{0<t\})` is `If(0<t, [\sin(1), \sin(2), \sin(3)])`, and with
+  `t = -1` it is `Missing`, as before. With a `True` or `False` condition the
+  value is unchanged.
 - **The type of a restriction has no `missing` or `nan` arm.** `If(c, e)` has
   the type of `e`, and an accessor of it has the element type:
   `At(If(0<t, (1, 2)), 1)` is `integer`, where `When` gave `integer | nan`.
@@ -117,6 +117,42 @@
   type, as `NaN` is outside `real`. `Insert`, `ReplaceAt`, `Append`,
   `Distance`, `Norm` and `Midpoint` of a restricted value lose the
   `missing` arm that the restriction gave them.
+- **Element-wise selection takes a flat list of booleans, and a position with
+  no match is `NaN` or a `NaN` point.** `If` and `Which` select element by
+  element only when the static type of a condition is a list:
+  - A position that no clause selects is `NaN` for a number and a point whose
+    coordinates are `NaN` for a point:
+    `If([True, False], (1, 2))` is `[(1, 2), (NaN, NaN)]` (it was
+    `[(1, 2), Missing]`), and compiled JavaScript gives `[NaN, NaN]` (it gave
+    `undefined`). The type of a restriction of a list of points is
+    `list<tuple<number, number>>`, with no `missing` arm. `IsMissing` and
+    `Coalesce` no longer read such a cell as absent. A plot skips a `NaN`
+    point.
+  - These are errors found from the types (`incompatible-type`), and a
+    compilation declines them: a condition that is a list of lists
+    (`If([[True], [False, True]], 7, 0)`, `If(M < 3, M, 0)` with `M` a
+    matrix), a condition with a `Missing` element, a condition typed
+    `collection<boolean>`, `set<boolean>`, `list` or `list<any>`, an arm whose
+    elements are lists, a string or a set under a list of conditions, and a
+    number arm beside a point arm. Two lengths that the types give and that
+    differ are `incompatible-dimensions`: `If([True, False], [1, 2, 3], 0)`
+    (a single-branch restriction such as `[1,2,3]\{[True, False]\}` was
+    truncated to the shorter length). A length known only from the value is
+    still truncated.
+  - A relation arm, such as the region `1>0 \text{ where } x^2+y^2 \le
+    (0..0.2..1)^2`, is accepted under a list of conditions, as before.
+  - A condition whose type does not settle the number of dimensions
+    (`tensor<boolean>`, `boolean | list<boolean>`) is accepted, and is
+    checked on its value: a nested list there is an `incompatible-type`
+    error, and `NaN` in compiled code.
+  - The no-match value of `Which` with a scalar condition is unchanged:
+    `Missing`.
+
+  Witness: the 757 documents of Tycho's corpus. Only one value changes, the
+  unmatched points of a 3-D point list (art/njncrg9fkv, `undefined` →
+  `[NaN, NaN, NaN]`), and no document gains a decline. No document holds a
+  nested condition, an uneven condition or a string arm under a list of
+  conditions.
 
 - **Compiled code no longer tests for an input that the caller leaves out.**
   The host supplies every input with a value of its declared type; the

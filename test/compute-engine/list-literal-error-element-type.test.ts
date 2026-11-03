@@ -240,13 +240,18 @@ describe('A declared collection refuses a value with a failed element', () => {
     expect(() => engine.assign('s', 'fs')).toThrow(/failed element/);
   });
 
-  test('the value of an element-wise If', () => {
+  test('the value of an element-wise If with a Missing condition cell', () => {
+    // A condition with a `Missing` cell is a static error of the selection
+    // (the selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`), so the
+    // whole value is an `incompatible-type` error, not a list with a failed
+    // element, and the declared collection refuses it as an error.
     const engine = new ComputeEngine();
     engine.declare('x', 'list<integer>');
     const value = engine
       .box(['If', ['List', 'True', 'Missing', 'False'], 1, 0])
       .evaluate();
-    expect(() => engine.assign('x', value)).toThrow(/failed element/);
+    expect(value.operator).toBe('Error');
+    expect(() => engine.assign('x', value)).toThrow(/incompatible-type/);
   });
 
   test('the Assign operator gives an incompatible-type error value', () => {
@@ -425,27 +430,26 @@ describe('A parameter binding does not refuse an argument with a failed element'
 });
 
 describe('The value of an element-wise If or Which matches its static type', () => {
+  // A condition with a `Missing` cell is a static error of the selection
+  // (the selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`): the
+  // expression is an `incompatible-type` error, of type `error`, and so is
+  // its value.
   test('If([True, Missing, False], 1, 0)', () => {
     const expr = ce.box(['If', ['List', 'True', 'Missing', 'False'], 1, 0]);
     const value = expr.evaluate();
-    expect(expr.type.toString()).toBe('list<integer>');
-    expect(value.nops).toBe(3);
-    expectErrorsKept(value, 1);
-    // Before: list<unknown>, which did not match list<integer>
-    expect(value.type.toString()).toBe('vector<integer^3>');
+    expect(expr.type.toString()).toBe('error');
+    expect(value.operator).toBe('Error');
+    expect(value.toString()).toContain('incompatible-type');
     expect(value.type.matches(expr.type)).toBe(true);
   });
 
   test('If([Missing, Missing], 1, 0)', () => {
     const expr = ce.box(['If', ['List', 'Missing', 'Missing'], 1, 0]);
     const value = expr.evaluate();
-    expect(expr.type.toString()).toBe('vector<integer^2>');
-    expectErrorsKept(value, 2);
-    // Every cell failed, so the value keeps the typing of a list with no
-    // successful cell, `list<unknown>`, which does not match the static
-    // type. Unchanged: before, also `list<unknown>`, no match.
-    expect(value.type.toString()).toBe('list<unknown>');
-    expect(value.type.matches(expr.type)).toBe(false);
+    expect(expr.type.toString()).toBe('error');
+    expect(value.operator).toBe('Error');
+    expect(value.toString()).toContain('incompatible-type');
+    expect(value.type.matches(expr.type)).toBe(true);
   });
 
   test('Which([True, False], 1, Missing, 2)', () => {

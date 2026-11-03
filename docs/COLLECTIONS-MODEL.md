@@ -189,7 +189,7 @@ The user decided five rules on 2026-09-29:
   the read is not `NaN` or `Missing`: `Second(Dedup(Cycle([1, 1])))` stays as
   written.
 - **A restriction over an infinite carrier, or a carrier of unknown length,
-  pairs over the length of the mask.** `When(Range(1, ∞), [True, False])` is
+  pairs over the length of the mask.** `If([True, False], Range(1, ∞))` is
   `[1, NaN]`: the second element is masked, and a masked number is `NaN`.
   Before, it was `[Range(1, ∞), Missing]`. A carrier whose type has a tuple or
   string arm is not read element by element: a point is one value

@@ -99,7 +99,7 @@ import { Complex } from 'complex.js';
 import { realPowerReconstructionDigits } from '../numerics/real-power.js';
 import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import { operandMayBeAbsent } from './compile-absence.js';
+import { nanPointLiteral, operandMayBeAbsent } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { reservedNameSpelling } from './compile-loops.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
@@ -2036,9 +2036,11 @@ function compileJSSelection(
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
   // A mask that is not provably flat (of rank 1) may have rank 2 or more at
-  // run time, which the helper selects node by node (`selectNested`). Only
-  // then are the absence value of each depth and the depth of the points of
-  // a list arm passed, so the code of a flat mask is unchanged.
+  // run time. The helper gives `NaN` for a mask whose value has a list cell,
+  // as the interpreter refuses such a condition. For such a mask the
+  // compiler still passes the absence value of each depth and the depth of
+  // the points of a list arm, which the helper does not read; the code of a
+  // flat mask is unchanged.
   const flat = elementwiseMaskRank(conds.map((c) => c.type.type)) === 1;
   if (target && absent === undefined) {
     // The cell of an arm: a point arm is lifted whole, a list arm is indexed
@@ -2059,19 +2061,23 @@ function compileJSSelection(
       return t;
     };
     const nullLiteral = target.absence?.object?.nullLiteral;
+    // A position that no clause selects is `NaN` for a number cell, a
+    // point of `NaN` coordinates for a point cell (`nanPointLiteral`), and
+    // the object null for any other cell.
     const absentOf = (cellTypes: ReadonlyArray<Type>): string =>
-      nullLiteral !== undefined &&
+      nanPointLiteral(cellTypes) ??
+      (nullLiteral !== undefined &&
       BaseCompiler.absenceKind(cellTypes, target) === 'object'
         ? nullLiteral
-        : 'NaN';
+        : 'NaN');
     let cellTypes = args
       .filter((_x, i) => i % 2 === 1)
       .map((x) => cellOf(x.type.type));
     absent = absentOf(cellTypes);
-    // Under a mask of rank 2 or more, an unmatched position `d` levels down
-    // holds the absence value of the arms' cells at that depth, as in the
-    // interpreter (`noMatchCell`): with a matrix arm `M`, `If(M < 3, M)` has
-    // a row at depth 1 and a number at depth 2.
+    // The absence value of the arms' cells at each depth: with a matrix arm
+    // `M`, `If(M < 3, M)` has a row at depth 1 and a number at depth 2. The
+    // helper reads only depth 1: a mask whose value has a list cell gives
+    // `NaN`.
     if (!flat) {
       const byDepth = [absent];
       const rank = elementwiseMaskRank(conds.map((c) => c.type.type));
@@ -2123,23 +2129,22 @@ function compileJSSelection(
       // list<tuple<…>>`): a point is an array of scalar coordinates at run
       // time, a list of points an array of arrays, so the value tells the
       // two apart. A point is lifted whole, as the interpreter lifts it, and
-      // a list of points is indexed, with its points whole at their depth
-      // under a mask that may be nested (`_SYS.pointOrPoints`, ROADMAP
+      // a list of points is indexed (`_SYS.pointOrPoints`, ROADMAP
       // CE-223.2).
       const pointOrList = pointOrPointListDepth(x.type.type);
       if (pointOrList !== undefined)
         return `() => _SYS.pointOrPoints(${flat ? 0 : pointOrList}, ${compile(x, i)})`;
-      // A list of points under a mask that may be nested: its points are
-      // whole at their depth (`WholeArm`).
+      // A list of points under a mask that may be nested: the helper uses it
+      // as an ordinary list arm, and a mask whose value has a list cell
+      // gives `NaN` (`WholeArm`).
       const depth = flat ? undefined : pointDepthOfArm(x.type.type);
       if (depth !== undefined)
         return `() => _SYS.wholeAt(${depth}, ${compile(x, i)})`;
       // A list arm whose type does not give the depth of its points but
       // may hold points (an element type `tuple<…> | tensor<tuple<…>>`, or
-      // `any`): a point is an array at this ABI, like a row, so under a
-      // mask of rank 2 or more the helper throws where it cannot tell the
-      // two apart (`_SYS.pointDepthUnknown`). The interpreter refuses a
-      // point arm of lower rank than the mask (`incompatible-dimensions`).
+      // `any`), under a mask that may be nested: the helper uses it as an
+      // ordinary list arm, and a mask whose value has a list cell gives
+      // `NaN` (`_SYS.pointDepthUnknown`).
       if (!flat && mayHoldPointAtUnknownDepth(x.type.type))
         return `() => _SYS.pointDepthUnknown(${compile(x, i)})`;
       return `() => (${compile(x, i)})`;

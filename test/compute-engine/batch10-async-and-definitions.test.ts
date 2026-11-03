@@ -61,11 +61,15 @@ const CASES: [string, unknown, string, string, string][] = [
     '7',
   ],
   [
+    // A scalar condition selects the list whole: the guard is lifted out of
+    // the call, and a false condition gives `Missing`, the absent value of
+    // the whole list (the selection rule of 2026-11-02,
+    // `docs/BROADCAST-MODEL.md`).
     'restricted list',
     ['F', ['If', POSITIVE, ['List', 1, 2]]],
-    '[If(0 < t, 6),If(0 < t, 7)]',
+    'If(0 < t, [6,7])',
     '[6,7]',
-    '[NaN,NaN]',
+    '"Missing"',
   ],
   [
     'list with a restricted cell',
@@ -141,13 +145,44 @@ describe('evaluateAsync threads a conditional value out of an async-only operato
     ['\\operatorname{AsyncOnly}(1\\{0<t\\})', 'If(0 < t, 6)'],
     [
       '\\operatorname{AsyncOnly}([1,2]\\{0<t\\})',
-      '[If(0 < t, 6),If(0 < t, 7)]',
+      'If(0 < t, [6,7])',
     ],
     ['\\operatorname{AsyncOnly}(1\\{0<t\\})+1', 'If(0 < t, 7)'],
   ])('%s, parse route', async (tex, expected) => {
     expect((await engine().parse(tex).evaluateAsync()).toString()).toBe(
       expected
     );
+  });
+
+  test('a guard that is an error or absent does not evaluate the call', async () => {
+    // The guard of the lifted restriction is decided by the `If` handler:
+    // an error, or `Undefined` read as an absent condition, gives an error
+    // and the async-only call is not evaluated, as on the synchronous route.
+    for (const [value, expected] of [
+      ['Undefined', 'Error("The condition is absent'],
+      [['Error', "'oops'"], 'Error("oops")'],
+    ] as const) {
+      const ce = new ComputeEngine();
+      let calls = 0;
+      ce.declare('Counted', {
+        broadcastable: true,
+        signature: '(number) -> number',
+        evaluateAsync: async ([x]) => {
+          calls += 1;
+          return ce.number(x.re + 5);
+        },
+      });
+      ce.assign('t', ce.box(value as MathJsonExpression));
+      const json = ['If', POSITIVE, ['List', 1, 2]];
+      const got = (
+        await ce.box(['Counted', json] as MathJsonExpression).evaluateAsync()
+      ).toString();
+      expect([value, got.startsWith(expected), calls]).toEqual([
+        value,
+        true,
+        0,
+      ]);
+    }
   });
 
   test('the held result agrees with a fresh evaluation', async () => {

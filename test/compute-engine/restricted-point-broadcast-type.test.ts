@@ -119,9 +119,11 @@ describe('a broadcast over a restricted list keeps the list and the absence', ()
     // It was `number | vector<3>`: the absence arm became a scalar.
     expect(r.type).toBe('vector<3>');
     expect(r.present).toBe(present);
-    // A held restriction over a list is mapped cell by cell, so the absent
-    // list is a list of `NaN`.
-    expect(r.absent).toBe('[NaN,NaN,NaN]');
+    // A scalar condition selects the list whole, also under an operator
+    // that maps over its operand: the absent value is the absent list
+    // `Missing` (selection rule of 2026-11-02). It was `[NaN,NaN,NaN]`,
+    // the held restriction mapped cell by cell.
+    expect(r.absent).toBe('"Missing"');
   });
 
   test('a restricted scalar beside a list restricts the whole list', () => {
@@ -205,7 +207,10 @@ describe('a list that holds a restricted point or masked points', () => {
   const PJ = ['If', ['Less', 0, 't'], ['PointList', 0, 1]];
   const PTS = ['If', ['Greater', ['List', 1, 2], 1], ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]];
   const NUMS = ['If', ['Greater', ['List', 1, 2, 3], 2], ['List', 10, 20, 30]];
-  const POINTS = 'list<missing | tuple<number, number>>';
+  // A list of points masked by a list of conditions: a position that is not
+  // selected is a point whose coordinates are `NaN` (selection rule of
+  // 2026-11-02; it was `Missing`), so the cells are points of numbers.
+  const MASKED_POINTS = 'list<tuple<number, number>>';
   // The type of a list literal of two such points: the literal states its
   // length.
   const POINT_PAIR = 'list<(missing | tuple<number, number>)^2>';
@@ -241,9 +246,9 @@ describe('a list that holds a restricted point or masked points', () => {
     [
       'a restricted point plus masked points',
       ['Add', PJ, PTS],
-      '["Missing",(3, 5)]',
+      '[(NaN, NaN),(3, 5)]',
       '["Missing","Missing"]',
-      INTEGER_POINTS,
+      MASKED_POINTS,
     ],
     [
       'a restricted point times masked numbers',
@@ -276,16 +281,16 @@ describe('a list that holds a restricted point or masked points', () => {
     [
       'Sin of masked points',
       ['Sin', PTS],
-      '["Missing",(sin(3), sin(4))]',
-      '["Missing",(sin(3), sin(4))]',
-      POINTS,
+      '[(NaN, NaN),(sin(3), sin(4))]',
+      '[(NaN, NaN),(sin(3), sin(4))]',
+      MASKED_POINTS,
     ],
     [
       'a scalar times masked points',
       ['Multiply', 2, PTS],
-      '["Missing",(6, 8)]',
-      '["Missing",(6, 8)]',
-      INTEGER_POINTS,
+      '[(NaN, NaN),(6, 8)]',
+      '[(NaN, NaN),(6, 8)]',
+      MASKED_POINTS,
     ],
   ])('%s', (_label, json, present, absent, type) => {
     expect(new ComputeEngine().box(json).type.toString()).toBe(type);
@@ -419,9 +424,11 @@ describe('a list that holds a restricted point or masked points', () => {
       ['Less', 0, ['TraceCondition']],
       ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
     ];
+    // A scalar condition selects the row whole: the quotient is the absent
+    // list (selection rule of 2026-11-02; it was `["Missing","Missing"]`).
     expect(
       ce.box(['Divide', row, ['List', 1, 2]]).evaluate().toString()
-    ).toBe('["Missing","Missing"]');
+    ).toBe('"Missing"');
     expect(calls).toBe(1);
   });
 

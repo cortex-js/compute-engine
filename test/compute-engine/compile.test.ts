@@ -1933,12 +1933,13 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(boxed.errors).toHaveLength(1);
     expect(() => js.compile(boxed)).toThrow(/invalid expression/);
     expect(boxed.evaluate().operator).toBe('Error');
-    // A condition whose collection shape is knowable only at run time still
-    // compiles, and `_SYS.select` then throws rather than picking a branch.
+    // A condition declared as a bare `list` does not settle a flat list of
+    // booleans, so it is a static error and does not compile (selection
+    // rule of 2026-11-02; it compiled, and the compiled code threw).
     e.declare('dd', 'list');
-    const r = js.compile(e.box(['If', 'dd', 1, 2]));
-    expect(r.success).toBe(true);
-    expect(() => r.run!({ dd: [10, 20] })).toThrow(/Condition must evaluate/);
+    expect(() => js.compile(e.box(['If', 'dd', 1, 2]))).toThrow(
+      /invalid expression/
+    );
   });
 
   it('the free-function compile() converts the throw to success:false + fallback', () => {

@@ -54,13 +54,14 @@ describe('restriction: list-condition broadcast', () => {
     expect(r.toString()).toBe('[NaN,NaN,30]');
   });
 
-  test('different lengths truncate to the shorter (At mask alignment)', () => {
+  test('different lengths are a static error', () => {
+    // A list value has the length of the list of conditions (selection rule
+    // of 2026-11-02). Before, it was truncated to the shorter, `[10,20]`.
     const ce = new ComputeEngine();
     const r = ce
       .parse('\\left[10,20,30\\right]\\left\\{\\left[1,2\\right]>0\\right\\}')
       .evaluate();
-    // condition has 2 elements → result has 2 elements
-    expect(r.json).toEqual(['List', 10, 20]);
+    expect(r.toString()).toBe('Error("incompatible-dimensions", "2 vs 3")');
   });
 
   test('stacked restriction with one list condition broadcasts through And', () => {

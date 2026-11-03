@@ -214,12 +214,14 @@ describe('Compiled arithmetic on an absent point', () => {
     expect(compiledRun(json, 2)).toEqual([2, 3, 4]);
   });
 
-  // A present list gives the shape, and the absent list is `NaN` in each
-  // numeric cell: the interpreter answers `[NaN, NaN]`, typed `vector<2>`.
-  // The compiled value is not specified.
-  test('a list plus an absent list is a list of NaN', () => {
+  // A scalar condition selects a list whole, and `Add` lifts the condition
+  // out of the sum: when it is false, the sum is `Missing`, the absent value
+  // of the whole list, which the interpreter fallback gives as `undefined`
+  // (the selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`). The
+  // compiled value is not specified.
+  test('a list plus an absent list is absent', () => {
     const json = ['Add', ['List', 1, 2], gated(['List', 1, 2])];
-    expect(fallbackRun(json, 0)).toEqual([NaN, NaN]);
+    expect(fallbackRun(json, 0)).toBeUndefined();
   });
 
   test('a present point times a scalar', () => {

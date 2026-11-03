@@ -248,6 +248,124 @@ cell; a scalar condition selects an arm whole; `If(c, e1, e2)` is
 2026-10-22 selection entries with this rule; the 2026-10-18 decision on
 `undefined` cells is reversed and recorded.
 
+The result of 3.3 (2026-11-02, session compute-engine-53; base `5a1ceb18a`;
+staged, not committed).
+
+- **A false scalar condition over a list.** Implemented: the whole-list
+  absent value `Missing` for every reader, by rule 4 (the arm is selected
+  whole), which is also the value of compiled code within its caveats (one
+  scalar `NaN`, or `undefined` for points). The alternative, every reader
+  maps cell by cell (`[NaN, NaN, NaN]` for all four expressions), would
+  change what Tycho's renderer receives and contradict rule 4. Mechanism:
+  before an operator maps its operands, an operand `If(c, L)` whose condition
+  is of type `boolean` is lifted out of the call, `Sin(If(c, L))` →
+  `If(c, Sin(L))`, where the call maps that operand element by element (a
+  broadcastable library operator; a lambda or a user function that
+  propagates absence, at a required scalar parameter whose type does not
+  admit `missing`). At any other position of a user function the condition
+  is evaluated once and the function receives `L` or `Missing` whole, so a
+  body with `Coalesce` or a default parameter still runs
+  (`liftWholeRestrictions()` in `boxed-expression/boxed-function.ts`).
+  Probe, `t` real and `t = -1`:
+
+  | Expression               | Before (5a1ceb18a)  | After     |
+  | ------------------------ | ------------------- | --------- |
+  | `[1,2,3]\{0<t\}`         | `Missing`           | `Missing` |
+  | `2[1,2,3]\{0<t\}`        | `Missing`           | `Missing` |
+  | `[1,2,3]\{0<t\}+1`       | `Missing`           | `Missing` |
+  | `\sin([1,2,3]\{0<t\})`   | `[NaN, NaN, NaN]`   | `Missing` |
+
+  With `t` free, `\sin([1,2,3]\{0<t\})` is the held
+  `If(0<t, [\sin 1, \sin 2, \sin 3])`, which presents as a collection
+  (Tycho item 66). Other probe values: `If(v>0, (1,2))` with
+  `v = [-1, 2, 3]` was `[Missing, (1,2), (1,2)]`, typed
+  `list<missing | tuple>`, and is `[(NaN,NaN), (1,2), (1,2)]`, typed
+  `list<tuple<number, number>>`; `If([[True],[False,True]], 7, 0)` was
+  `[[7],[0,7]]` and is an `incompatible-type` error;
+  `Which(t < -5, 1)` stays `Missing`.
+- **Choices beyond the rule, each reversible.** (1) A relation arm (a
+  region of a plot) and a statement arm stay accepted under a list
+  condition, with their old values (a cell with no match is `Missing`; item
+  3.4, two-valued comparisons, settles it): the first build refused them,
+  and 30 corpus rows lost every compiled record (for example neyret/3afaeatwub
+  `1>0 \text{ where } (x+2)^2+y^2\le(0..0.2..1.6)^2`, art/hyvhlz4chj).
+  (2) `indexed_collection<boolean>` is a flat condition (Tycho types a point
+  list as `indexed_collection<tuple>`, Tycho item 335). (3) A condition type
+  that admits a flat list but does not settle the rank (`tensor<boolean>`,
+  `list<boolean | list<any>>`, `boolean | list<boolean>`) is accepted and
+  checked on its value (a nested value is an `incompatible-type` error, `NaN`
+  compiled): Tycho types an unannotated parameter
+  `broadcastable<number | tuple>`, so a condition in a function body has such
+  a type, and refusing it lost the corpus rows neyret/o0iqr4bhzk,
+  art/lkto8x8wr5 and art/njncrg9fkv. Refused: a nested list, a `Missing`
+  cell, `collection<boolean>`, `set<boolean>`, bare `list`, `list<any>`,
+  `matrix<boolean>`. (4) A length known only from the value is still
+  truncated to the shorter length; two lengths that the types give and that
+  differ are `incompatible-dimensions`. (5) A false scalar condition that a
+  compiled selection finds at run time gives `undefined` for the whole value
+  (`NaN` for a number), not one `[NaN, NaN]` point. (6) A colour arm (and a
+  symbol, a tuple that is not a point) stays accepted under a list
+  condition, and its unmatched cell stays `Missing`: rule 2 names numbers,
+  points and strings only, and refusing a colour arm broke Tycho item 189
+  (`Which(\sqrt{X^2+Y^2} \le 1, \mathrm{Hsv}(0,0,…), \mathrm{True},
+  \mathrm{Hsv}(0,0,0.8))` over a 30×30 grid, `corpus`; every position is
+  matched there, so no `Missing` cell reaches Tycho). The other option, a
+  colour as a third element kind, needs a decision on its unmatched value: a
+  colour has no `NaN`.
+- **Tycho's answer** (tycho-f9, 2026-11-02, a reading of Tycho main, no
+  tests run): the 3-D point markers (`scatterPoints` and
+  `buildScatterGeometry` in `plot-3d/geometry-builders.ts`), the 3-D
+  polyline (broken at the `NaN` slot, `splitPolylinesAtGaps`), the GPU routes
+  (`drawScatter`, the colour pass and 3-D picking use the compacted buffer)
+  and the 2-D point labels (`scatter-series.ts`) skip a point with a `NaN`
+  coordinate; a 3-D label anchored at a `NaN` point is dropped because
+  `project()` returns `visible: false` (no explicit filter, no test); not
+  traced: the single head-point draw in `plot3d-renderer.ts`, which is not
+  fed from a point list. The `Missing`-cell readers change in Tycho's
+  adoption step 4; the scalar `Which` no-match needs no change. Open on
+  Tycho's side: whether its list readers accept a whole-list `Missing` (or a
+  compiled scalar `NaN`) where a list is expected, and its own codegen audit
+  with the 3.3 build.
+- **The corpus measure** (Tycho frozen at `44a25d4e3`, the tools of 3.2 with
+  records keyed by MathJSON): 17,690 records in both runs; declines
+  javascript 66, glsl 48, interval-js 90 in both runs, no new decline; one
+  key changed, as expected: art/njncrg9fkv, the restricted 3-D point list
+  `p \text{ where } \mathrm{PointZ}(p)+… < h_{ash}(…)`, whose unmatched cells
+  went from `undefined` to `[NaN, NaN, NaN]` (8 values). 77,146 values
+  compared.
+- **Code lines** (not blank, `//` or `*`): `library` 77,924 → 78,095,
+  `boxed-expression` 83,789 → 83,930, `compilation` 92,482 → 92,398.
+  `selectNested` is deleted; the rank-2 selection code that is now
+  unreachable stays for step 4: in `javascript-runtime.ts` the depth forms of
+  `WholeArm`, `absentByDepth`, `wholeAt`, `pointDepthUnknown`, and the
+  `!flat` branches of `compileJSSelection` that emit them; in the
+  interpreter the levels below 1 of `evaluateElementwiseSelection`,
+  `lowerRankArmError`, and the depth-2 code of `armTypeAtDepth`,
+  `conditionShape` and `mergeMaskShapes`.
+- **Review**: three rounds, Claude and Codex. Fixed: the lift through a user
+  function that discharges absence, the wrong shape of a compiled false
+  scalar condition over a list of points, a condition typed
+  `boolean | list<boolean>` treated as scalar, the held form of an undecided
+  split, the evaluate options of the lifted call, a parameter that admits
+  `missing`. The full suite then found three defects that the targeted tests
+  did not (a colour arm refused, Tycho item 189; a point arm typed as a union
+  of tuples refused; the async route left an async-only operator
+  unevaluated in a held restriction); their fixes had their own three review
+  rounds (a compiled union-of-tuples point cell, the async guard test, the
+  alias unfolding of `pointArity()` with a cycle limit). Not fixed: a
+  declared `number | tuple` arm compared at run time (`crafted`); the effect
+  order of conditions with an effect (`crafted`, written as a limit in
+  `docs/BROADCAST-MODEL.md`); Codex's finding that `If([True, False], xs)`
+  with `xs: list<real>` holding 3 elements is truncated to `[1, NaN]`, which
+  is choice (4). Every review fix had a review except the last change to
+  `pointArity()` (an early exit of the union walk and its comment).
+- **Checks** on the final tree: typecheck, lint, `check:deps`, `test:core`
+  (5,501 passed), the full suite (1,798 suites, 78,168 tests passed, run
+  before the last two review fixes; the targeted selection files passed
+  after them), the corpus measure above (run before the last edit of
+  `pointArity()`, which gives the same answer for every type and only stops
+  the walk earlier).
+
 3.4 **The decided axes of step 2**, each in the interpreter and its
 documents: two-valued comparisons, Missing as a result only, the error model,
 block locals, function values, the complex lane. Each one is a step of its

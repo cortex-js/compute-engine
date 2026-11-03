@@ -22,6 +22,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { unrollFixedWidthCollections } from '../../src/compute-engine/compilation/fixed-width-unroll';
+import { SYS_HELPERS } from '../../src/compute-engine/compilation/javascript-runtime';
 
 const ce = new ComputeEngine();
 for (const s of ['x', 'u', 'v', 'a', 'b', 'c', 'd', 'e']) ce.declare(s, 'real');
@@ -180,7 +181,9 @@ describe('A literal index pushed through an element-wise selection', () => {
       ['Less', ['List', 1, 3, 1], 2],
       ['Tuple', 1, 2],
     ]);
-    expect(point.evaluate().toString()).toBe('[(1, 2),"Missing",(1, 2)]');
+    // An unmatched point cell is a point of `NaN` coordinates (selection
+    // rule of 2026-11-02; it was `Missing`).
+    expect(point.evaluate().toString()).toBe('[(1, 2),(NaN, NaN),(1, 2)]');
     expect(
       ce
         .box(['Which', ['Less', 3, 2], ['Tuple', 1, 2]])
@@ -224,17 +227,20 @@ describe('A literal index pushed through an element-wise selection', () => {
     // walked.
     const short = ce.box(['At', ['If', cond, ['List', 'u', 'v']], 2]);
     expect(unrollFixedWidthCollections(short)).toBe(short);
-    // The scalar form and the element-wise form agree at each position.
-    for (const [value, masked] of [
-      [7, 'NaN'],
-      [['Tuple', 1, 2], '"Missing"'],
+    // The scalar form and the element-wise form agree at each position for
+    // a number. For a point, an unmatched cell is a point of `NaN`
+    // coordinates, and a false scalar condition gives `Missing` (selection
+    // rule of 2026-11-02; the cell was `Missing` too).
+    for (const [value, masked, maskedOne] of [
+      [7, 'NaN', 'NaN'],
+      [['Tuple', 1, 2], '(NaN, NaN)', '"Missing"'],
     ] as const) {
       const whole = ce
         .box(['If', ['Less', ['List', 1, 3], 2], value])
         .evaluate();
       const one = ce.box(['If', ['Less', 3, 2], value]).evaluate();
       expect(whole.ops![1].toString()).toBe(masked);
-      expect(one.toString()).toBe(masked);
+      expect(one.toString()).toBe(maskedOne);
     }
   });
 
@@ -341,10 +347,10 @@ describe('A selection over a wide list-shaped condition is written out', () => {
   });
 
   test('a list arm wider than the condition is a mismatch, not a fan-out', () => {
-    // The interpreter reports the dimension mismatch and the run-time
-    // selection answers NaN; five scalar selections would hide it. (The
-    // arithmetic under the condition is still fanned out by rule 4, so the
-    // selection node is rebuilt; it stays a selection.)
+    // The lengths are known statically and differ, so the selection is the
+    // static `incompatible-dimensions` error (selection rule of 2026-11-02);
+    // before, it stayed a selection and the run-time selection answered
+    // NaN. Five scalar selections would hide it.
     const expr = ce.box([
       'Which',
       WIDE,
@@ -352,7 +358,10 @@ describe('A selection over a wide list-shaped condition is written out', () => {
       'True',
       0,
     ]);
-    expect(unrollFixedWidthCollections(expr).operator).toBe('Which');
+    expect(expr.isValid).toBe(false);
+    expect(unrollFixedWidthCollections(expr).toString()).toMatch(
+      /incompatible-dimensions/
+    );
   });
 
   test('a clause reading live caller source is not repeated', () => {
@@ -401,18 +410,26 @@ describe('A point arm of the run-time selection is lifted whole', () => {
       ['Less', ['List', 1, 2, 3], 2],
       ['Tuple', 1, 2],
     ]);
-    // The interpreter masks a point position with `Missing` (user decision
-    // 2026-10-17); a compiled array spells a missing point with `undefined`,
-    // as a single missing point and the compiled restriction over a list of
-    // conditions do (user decision 2026-10-18).
-    expect(expr.evaluate().toString()).toBe('[(1, 2),"Missing","Missing"]');
+    // An unmatched point position is a point of `NaN` coordinates in the
+    // interpreter and in the compiled array (selection rule of 2026-11-02,
+    // which reverses the decisions of 2026-10-17 and 2026-10-18: the cell
+    // was `Missing`, compiled `undefined`).
+    expect(expr.evaluate().toString()).toBe(
+      '[(1, 2),(NaN, NaN),(NaN, NaN)]'
+    );
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.wholeArm(');
-    expect(r.run!({})).toEqual([[1, 2], undefined, undefined]);
+    expect(r.run!({})).toEqual([
+      [1, 2],
+      [NaN, NaN],
+      [NaN, NaN],
+    ]);
   });
 
-  test('a point default beside a list arm', () => {
+  test('a point default beside a list arm of numbers is a static error', () => {
+    // All arms of a selection under a list condition have one element kind
+    // (selection rule of 2026-11-02); it gave `[10, (1, 2), (1, 2)]`.
     const expr = ce.box([
       'Which',
       ['Less', ['List', 1, 2, 3], 2],
@@ -420,9 +437,10 @@ describe('A point arm of the run-time selection is lifted whole', () => {
       'True',
       ['Tuple', 1, 2],
     ]);
-    expect(expr.evaluate().toString()).toBe('[10,(1, 2),(1, 2)]');
-    const r = compile(expr, { fallback: false });
-    expect(r.run!({})).toEqual([10, [1, 2], [1, 2]]);
+    expect(expr.isValid).toBe(false);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /invalid expression/
+    );
   });
 
   test('an arm that may be a point or a scalar is lifted whole', () => {
@@ -442,12 +460,77 @@ describe('A point arm of the run-time selection is lifted whole', () => {
     expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
-  test('a point symbol arm under a run-time list condition', () => {
-    const expr = ce.box(['Which', ['Less', 'L', 2], 'P', 'True', 0]);
+  test('a point symbol arm under a list condition', () => {
+    // A point arm beside a number arm is a static error (selection rule of
+    // 2026-11-02; it gave `[[7, 8], 0, 0]`). With a point default, the
+    // arm is lifted whole.
+    expect(
+      ce.box(['Which', ['Less', 'L', 2], 'P', 'True', 0]).isValid
+    ).toBe(false);
+    const expr = ce.box(['Which', ['Less', 'L', 2], 'P', 'True', ['Tuple', 0, 0]]);
     const r = compile(expr, { fallback: false });
-    expect(r.run!({ L: [1, 2, 3], P: [7, 8] })).toEqual([[7, 8], 0, 0]);
-    // When the condition is a scalar at run time the arm is answered whole.
-    expect(r.run!({ L: 1, P: [7, 8] })).toEqual([7, 8]);
-    expect(r.run!({ L: 5, P: [7, 8] })).toBe(0);
+    expect(r.run!({ L: [1, 2, 3], P: [7, 8] })).toEqual([
+      [7, 8],
+      [0, 0],
+      [0, 0],
+    ]);
+  });
+});
+
+describe('A point selection whose condition is a scalar at run time', () => {
+  // A condition whose static type may be a list (`boolean | list<boolean>`,
+  // or `B < 0` with `B: broadcastable<number>`) can be one boolean at run
+  // time. Under a list of conditions an unselected position is a point of
+  // `NaN` coordinates; a false scalar condition selects nothing for the
+  // whole value, which can be one point or a list of points, so the whole
+  // value is `undefined`, as the scalar `If` compiles it, not one point
+  // `[NaN, NaN]` in place of a list of points.
+  const pe = new ComputeEngine();
+  pe.declare('c', 'boolean | list<boolean>');
+  pe.declare('B', 'broadcastable<number>');
+  pe.declare('P', 'tuple<real, real>');
+  pe.declare('Q', 'list<tuple<real, real>>');
+  const P = [1, 2];
+  const Q = [
+    [1, 2],
+    [3, 4],
+  ];
+
+  test.each([
+    ['If', 'c', 'P'],
+    ['If', 'c', 'Q'],
+    ['Which', 'c', 'P'],
+    ['Which', 'c', 'Q'],
+    ['If', ['Less', 'B', 0], 'P'],
+    ['If', ['Less', 'B', 0], 'Q'],
+    ['Which', ['Less', 'B', 0], 'P'],
+    ['Which', ['Less', 'B', 0], 'Q'],
+  ])('%s(%j, %s)', (h, cond, value) => {
+    const r = compile(pe.box([h, cond, value] as any), { fallback: false });
+    expect(r.success).toBe(true);
+    // A false scalar condition: the whole value is absent.
+    expect(r.run!({ c: false, B: 1, P, Q })).toBeUndefined();
+    // A true scalar condition: the value whole.
+    expect(r.run!({ c: true, B: -1, P, Q })).toEqual(value === 'P' ? P : Q);
+    // A list of conditions: a point of `NaN` coordinates where the
+    // condition is false.
+    expect(r.run!({ c: [true, false], B: [-1, 1], P, Q })).toEqual([
+      [1, 2],
+      [NaN, NaN],
+    ]);
+  });
+
+  test('the restriction helper over a scalar condition', () => {
+    // `_SYS.restrict` is also reached with a condition that is a scalar at
+    // run time: a false one gives `undefined` for a point cell, `NaN` for a
+    // number cell.
+    expect(SYS_HELPERS.restrict(false, Q, true, [NaN, NaN])).toBeUndefined();
+    expect(SYS_HELPERS.restrict(false, P, false, [NaN, NaN])).toBeUndefined();
+    expect(SYS_HELPERS.restrict(true, Q, true, [NaN, NaN])).toEqual(Q);
+    expect(SYS_HELPERS.restrict(false, [1, 2], null, NaN)).toBeNaN();
+    expect(SYS_HELPERS.restrict([false, true], Q, true, [NaN, NaN])).toEqual([
+      [NaN, NaN],
+      [3, 4],
+    ]);
   });
 });

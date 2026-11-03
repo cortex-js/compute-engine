@@ -55,11 +55,13 @@ import {
   isUnresolvedCollectionOperand,
   isTuple,
   isTupleShapedType,
+  isTupleOrTupleUnionShapedType,
   typeCouldBeCollection,
   typeCouldBeUnkeyedCollection,
   isCollectionShaped,
   isWalkableFiniteCollection,
   mayCarryDimensions,
+  pointArity,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -394,7 +396,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     If: {
       description:
         '`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\\{c\\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.\n' +
-        'When `c` is a list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is then `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection.',
+        'When `c` is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection. A condition that is a scalar selects an arm whole, also when the arm is a list.',
       lazy: true,
       // Selects among its operands, so an error in an operand it does not
       // choose does not bubble (`docs/ERROR-MODEL.md` §3).
@@ -556,6 +558,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // for other operators: the expression is invalid, and its evaluate
         // handler is never called with an absent operand.
         while (xs.length < 2) xs.push(engine.error('missing'));
+        // A condition that is a flat list of booleans selects element-wise,
+        // and its arms must be numbers or points (a boolean and a statement
+        // are also accepted): an arm that is not is a static error, and the
+        // whole `If` is that error (`selectionArmError`).
+        if (isListCondition(xs[0])) {
+          const armError = selectionArmError(engine, [xs[0]], xs.slice(1));
+          if (armError !== undefined) return armError;
+        }
         return engine._fn('If', xs);
       },
       // A surplus operand after the else branch is refused, as for any
@@ -733,11 +743,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     Which: {
       description:
         '`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.\n' +
-        'Element-wise selection: when a condition is a list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.\n' +
+        'Element-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.\n' +
         '  - A condition that is not a list applies to every position.\n' +
-        '  - Every list must have the length of the condition, else the value is an `incompatible-dimensions` error.\n' +
-        '  - A position that no clause selects holds `NaN` when every expression is a number, `Missing` otherwise.\n' +
-        '  - A condition that is a list of lists (a comparison of a matrix) selects at every level; an expression with fewer levels than the condition is an `incompatible-dimensions` error, one with more levels is taken whole at each position.',
+        '  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `Missing` cell. A relation (a boolean) is accepted.\n' +
+        '  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean.',
       keywords: ['piecewise'],
       lazy: true,
       // Selects among its operands, so an error in an operand it does not
@@ -915,15 +924,24 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           );
         // The even positions are conditions, checked for a provably
         // non-boolean type (`conditionOperand`); the odd positions are the
-        // values, canonicalized as written.
-        return options.engine._fn(
-          'Which',
-          args.map((x, i) =>
-            i % 2 === 0
-              ? conditionOperand(options.engine, x.canonical)
-              : x.canonical
-          )
+        // values, canonicalized as written. When a condition is a flat list
+        // of booleans, the selection is element-wise, and every arm must be
+        // a number or a point; a boolean and a statement are also accepted
+        // (`selectionArmError`).
+        const ops = args.map((x, i) =>
+          i % 2 === 0
+            ? conditionOperand(options.engine, x.canonical)
+            : x.canonical
         );
+        if (ops.some((x, i) => i % 2 === 0 && isListCondition(x))) {
+          const armError = selectionArmError(
+            options.engine,
+            ops.filter((_, i) => i % 2 === 0),
+            ops.filter((_, i) => i % 2 === 1)
+          );
+          if (armError !== undefined) return armError;
+        }
+        return options.engine._fn('Which', ops);
       },
       evaluate: (ops, options) => evaluateWhich(ops, options),
       evaluateAsync: (ops, options) => evaluateWhichAsync(ops, options),
@@ -1259,14 +1277,15 @@ function restrictionType(
     // A masked NUMERIC cell is `NaN` (`maskedValue`), so the cells are
     // numbers, `list<number>`: the materialized list the mask answers
     // (`[NaN, NaN, 30]`) is typed by the `List` handler, which joins a
-    // `NaN` cell and an integer cell to `number`. Any other cell keeps
-    // its `missing` arm.
+    // `NaN` cell and an integer cell to `number`. A masked point cell is a
+    // `NaN` point (`unmatchedCell()`), so a point cell joins in a point of
+    // `number` coordinates. Any other cell keeps its `missing` arm.
     return BoxedType.forResult(
       {
         kind: 'list',
         elements: isNumericValueType(cell)
           ? 'number'
-          : reduceType({ kind: 'union', types: [cell, 'missing'] }),
+          : withUnmatchedCellType(cell),
       },
       context.engine._typeResolver
     );
@@ -1397,6 +1416,67 @@ function maskedValue(ce: ComputeEngine, expr: Expression): Expression {
   return isNumericValueType(expr.type.type) ? ce.NaN : ce.Missing;
 }
 
+/** The type of a point of `n` coordinates that can be `NaN`. */
+function nanPointType(n: number): Type {
+  return {
+    kind: 'tuple',
+    elements: Array.from({ length: n }, () => ({ type: 'number' as Type })),
+  };
+}
+
+/**
+ * The value of a POSITION that an element-wise selection or a mask does not
+ * select, from the type `t` of the value at that position: `NaN` for a
+ * number, a point whose coordinates are all `NaN` for a point (a plotter
+ * skips such a point, as Desmos skips an undefined element), and `Missing`
+ * otherwise. A position is never `undefined` and never needs `IsMissing` or
+ * `Coalesce` to be read (selection rule of 2026-11-02,
+ * `docs/BROADCAST-MODEL.md`, which reverses the decision of 2026-10-18 that
+ * a point cell with no match is absent). A scalar condition that is false
+ * selects no arm WHOLE, and gives `maskedValue()` instead.
+ */
+function unmatchedCell(ce: ComputeEngine, t: Readonly<Type>): Expression {
+  if (isNumericValueType(t as Type)) return ce.NaN;
+  const n = pointArity(t);
+  if (n !== undefined)
+    return ce._fn(
+      'Tuple',
+      Array.from({ length: n }, () => ce.NaN)
+    );
+  return ce.Missing;
+}
+
+/**
+ * The cell at one position of a restriction by a list of conditions, from
+ * the condition `c` at that position and the value `elem` there: the
+ * `NaN` point when `elem` is a point and `c` is `False`
+ * (`unmatchedCell()`), and `If(c, elem)` otherwise. The value of
+ * `If(c, elem)` when `c` is false is `NaN` for a number, as
+ * `unmatchedCell()` gives, but `Missing` for a point, the value of a point
+ * that a SCALAR condition does not select. So a cell whose condition is not
+ * decided, `If(t < 0, (6, 8))` with `t` free, stays `Missing` for a point
+ * when it is later evaluated alone with `t` false; the evaluation of the
+ * whole restriction with `t` assigned gives the `NaN` point.
+ */
+function maskCell(
+  ce: ComputeEngine,
+  c: Expression,
+  elem: Expression
+): Expression {
+  if (sym(c) === 'False' && pointArity(elem.type.type) !== undefined)
+    return unmatchedCell(ce, elem.type.type);
+  return ce._fn('If', [c, elem]);
+}
+
+/** The type of a position of a list that can hold `unmatchedCell()` of a
+ * value of type `t`, `t` joined with the type of that cell. */
+function withUnmatchedCellType(t: Type): Type {
+  if (isNumericValueType(t)) return widen(t, 'number');
+  const n = pointArity(t);
+  if (n !== undefined) return widen(t, nanPointType(n));
+  return reduceType({ kind: 'union', types: [t, 'missing'] });
+}
+
 /**
  * Lazy indexed-collection handlers for a held restriction, the single-branch
  * `If(c, value)` (Tycho item 66).
@@ -1515,7 +1595,7 @@ function restrictionCollectionHandlers(): CollectionHandlers {
             ci = next.value;
           }
         } else ci = cond.at(i);
-        return ci === undefined ? undefined : cell(ce, elem, ci);
+        return ci === undefined ? undefined : maskCell(ce, ci, elem);
       },
     };
   };
@@ -1551,6 +1631,13 @@ function restrictionCollectionHandlers(): CollectionHandlers {
       // integers whenever the collection is present. The cells the handlers
       // enumerate are restricted cells, `If(cond, elem)`: absent exactly
       // when the collection is, since they carry its condition.
+      // Under a list of conditions, a cell that is not selected is `NaN` or
+      // a `NaN` point (`unmatchedCell()`), which the type of the restriction
+      // admits (`restrictionType()`: `list<number>`,
+      // `list<tuple<number, number>>`), so the element type is read from
+      // that type.
+      if (operands(expr)?.cond.type.matches('collection<any>'))
+        return collectionElementType(expr.type.type) ?? 'unknown';
       return collectionElementType(v.type.type) ?? 'unknown';
     },
 
@@ -1923,7 +2010,7 @@ function evaluateConnective(
  * variable that may be assigned later), a relation with free variables, a
  * `missing`-admitting type (an absent condition is a catchable runtime
  * error, not a boxing error), and a collection or possibly-collection type
- * whose cells could be condition values (a list of booleans selects
+ * whose cells could be condition values (a flat list of booleans selects
  * element-wise, `docs/BROADCAST-MODEL.md` §"The rule").
  *
  * The element-wise carrier is narrow — an indexed or broadcastable
@@ -1932,8 +2019,9 @@ function evaluateConnective(
  * `boolean | missing`. A tuple (a point binds whole and never selects), a
  * set, a dictionary or a record, a string (its cells are characters), and an
  * indexed collection with provably non-boolean cells (`list<number>`,
- * `range`, `number | list<number>`) are refused like a scalar. A bare kind
- * or an `unknown`-element collection (`list`, `list<unknown>`) stays inert.
+ * `range`, `number | list<number>`) are refused like a scalar. A type that
+ * is only a collection and is not an ordered collection of booleans
+ * (`FLAT_MASK_TYPE`) is refused with that type as the expected type.
  */
 function conditionOperand(ce: ComputeEngine, cond: Expression): Expression {
   const t = cond.type;
@@ -1969,11 +2057,217 @@ function conditionOperand(ce: ComputeEngine, cond: Expression): Expression {
       provablyDisjoint(cell, 'missing')
     )
       return refuse();
+    // A condition that is a collection is a flat list of booleans, and
+    // nothing else (selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`).
+    // A collection type that cannot be one is refused
+    // (`isNeverFlatMaskType()`).
+    if (isSubtype(type, COLLECTION_SHAPE_TYPE) && isNeverFlatMaskType(type))
+      return ce.typeError(FLAT_MASK_TYPE, t, cond);
     return cond;
   }
   if (isSubtype('missing', type)) return cond;
   if (!provablyDisjoint(type, 'boolean')) return cond;
   return refuse();
+}
+
+/** The type of a condition that selects element-wise: an ordered
+ * collection of booleans, which is a flat list of booleans. */
+const FLAT_MASK_TYPE = parseType('indexed_collection<boolean>')!;
+
+/**
+ * True when no value of the collection type `t` is a flat list of
+ * booleans, so that a condition of this type is a static error.
+ *
+ * Accepted: `list<boolean>`, `list<boolean^3>`, and
+ * `indexed_collection<boolean>` (a comparison over a list of points that a
+ * host types as an indexed collection).
+ *
+ * Refused: a nested list (`[[True], [False, True]]`, `list<list<boolean>>`),
+ * a matrix or a tensor of two dimensions or more (`M < 3` over a matrix), a
+ * list whose cells can be `Missing` (`[True, Missing]`), a collection with
+ * no order (`collection<boolean>`, `set<boolean>`), and a collection whose
+ * cells are not known to be booleans (`list`, `list<any>`,
+ * `indexed_collection<any>`).
+ *
+ * Not refused: a type that does not settle the number of dimensions but
+ * admits a flat list of booleans. `tensor<boolean>` (no dimensions given)
+ * is the type of `x < L` when `x` is declared
+ * `broadcastable<number | tuple>` (a scalar or a collection), and
+ * `list<boolean | list<any>>` is the type of `L < f(u)` when the result type
+ * of `f` is `unknown`. A host declares the parameters of a function this way
+ * before it knows their type, and a value of these types is often a flat
+ * list. Such a condition selects element-wise only when its value is a list
+ * of booleans.
+ */
+function isNeverFlatMaskType(t: Readonly<Type>): boolean {
+  if (isSubtype(t, FLAT_MASK_TYPE)) return false;
+  const r = resolveTypeAlias(t as Type);
+  if (typeof r !== 'string' && r.kind === 'union')
+    return r.types.every((x) => isNeverFlatMaskType(x));
+  if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return true;
+  if (
+    typeof r !== 'string' &&
+    r.kind === 'list' &&
+    r.dimensions !== undefined &&
+    r.dimensions !== null &&
+    r.dimensions.length >= 2
+  )
+    return true;
+  const cell = collectionElementType(t as Type);
+  if (cell === undefined || cell === 'any' || cell === 'unknown') return true;
+  if (isSubtype('missing', cell)) return true;
+  return provablyDisjoint(cell, 'boolean');
+}
+
+/**
+ * True when the static type of the condition `cond` says that it is a flat
+ * list of booleans (`FLAT_MASK_TYPE`), so that the selection is element-wise.
+ * A condition of type `list<never>` (the empty list) is not one: it has no
+ * cell to select.
+ */
+function isListCondition(cond: Expression | undefined): boolean {
+  if (cond === undefined || !cond.isValid) return false;
+  const t = cond.type.type;
+  return (
+    t !== 'never' &&
+    isSubtype(t, FLAT_MASK_TYPE) &&
+    collectionElementType(t) !== 'never'
+  );
+}
+
+/**
+ * The element kind of the arm `arm` of a selection whose condition is a
+ * flat list of booleans: `number` or `point` (a tuple of numbers) for an arm
+ * that is a scalar of that kind or a flat list of that kind; an `Error`
+ * expression for an arm that the selection rule of 2026-11-02 refuses
+ * (`docs/BROADCAST-MODEL.md`): a nested list, a string or a list of
+ * strings (a string cell has no `NaN` for a position that is not selected),
+ * or a value of another kind (a set); `undefined` when the static type
+ * does not tell (an arm of type `unknown`, an absent value) and for an arm
+ * that the rule does not constrain.
+ *
+ * Three kinds of arm are not constrained, and keep the value and the type
+ * that they had before the rule. A boolean or a list of booleans (a relation:
+ * `If(L < 3, x > 0)`, the region `1 > 0 where (x+2)^2 + y^2 <= (0..0.2..1.6)^2`
+ * of a plot) gives `Missing` at a position that is not selected. A statement
+ * (an `Assign`, a definition, a drawing head) is not a value. A scalar of
+ * another kind that is not a string, such as a colour (the colour grid
+ * `Which(L <= 1, Hsv(0, 0, v), True, Hsv(0, 0, 0.8))` of a plot, Tycho item
+ * 189), gives `Missing` at a position that is not selected.
+ */
+function selectionArmKind(
+  ce: ComputeEngine,
+  arm: Expression
+): 'number' | 'point' | Expression | undefined {
+  if (!arm.isValid || isStatementArm(arm)) return undefined;
+  const t = arm.type.type;
+  if (arm.type.isUnknown || t === 'any' || t === 'never') return undefined;
+  const refuse = () =>
+    ce.typeError(parseType('number | tuple | list<number | tuple>')!, t, arm);
+  let cell: Type = t;
+  // A point is a tuple, or a union of tuples
+  // (`tuple<nan, nan, integer> | tuple<real, real, real>`, the type of a
+  // point whose coordinates can be `NaN`), not a list arm.
+  if (
+    isSubtype(t, COLLECTION_SHAPE_TYPE) &&
+    !isTupleOrTupleUnionShapedType(t)
+  ) {
+    if (isSubtype(t, 'string')) return refuse();
+    // An ordered collection is a list arm (`list<number>`, the
+    // `indexed_collection<number>` of a carrier); a set or a dictionary has
+    // no positions.
+    if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return refuse();
+    const element = collectionElementType(t);
+    if (element === undefined) return undefined;
+    if (
+      isSubtype(element, COLLECTION_SHAPE_TYPE) &&
+      !isTupleOrTupleUnionShapedType(element)
+    )
+      return refuse();
+    cell = element;
+  }
+  const present = stripMissingFromType(cell);
+  if (present === 'never' || present === 'nothing') return undefined;
+  if (isSubtype(present, 'boolean')) return undefined;
+  if (isSubtype(present, 'number')) return 'number';
+  if (pointArity(present) !== undefined) return 'point';
+  // A character is the cell of a string, and has no `NaN` either.
+  if (isSubtype(present, 'character')) return refuse();
+  return undefined;
+}
+
+/**
+ * The error of the value `value` of the arm `arm` of a selection by a list
+ * of conditions, or `undefined` when the value is accepted. The canonical
+ * form refuses an arm whose static type is a list of lists or a string
+ * (`selectionArmKind()`); an arm whose static type does not settle this
+ * (`broadcastable<number>`, `unknown`) is checked here, on its value.
+ */
+function runtimeArmError(
+  ce: ComputeEngine,
+  arm: Expression,
+  value: Expression
+): Expression | undefined {
+  if (isStatementArm(arm)) return undefined;
+  const kind = selectionArmKind(ce, value);
+  return kind !== undefined && typeof kind !== 'string' ? kind : undefined;
+}
+
+/** The length of a flat list type with one known dimension
+ * (`list<boolean^3>`), or `undefined`. */
+function staticListLength(t: Readonly<Type>): number | undefined {
+  const r = resolveTypeAlias(t as Type);
+  if (typeof r === 'string' || r.kind !== 'list') return undefined;
+  const dims = r.dimensions;
+  return dims?.length === 1 && dims[0] >= 0 ? dims[0] : undefined;
+}
+
+/**
+ * The static error of a selection whose conditions `conds` include a flat
+ * list of booleans, or `undefined` when its arms `arms` are accepted. Every
+ * arm is a scalar or a flat list (`selectionArmKind()`), and all arms have
+ * one element kind: an arm whose kind is a point where an earlier arm is a
+ * number (or the reverse) is refused. A list condition and a list arm whose
+ * lengths the types give must have one length: `If([True, False], [1, 2,
+ * 3], 0)` is the `incompatible-dimensions` error `2 vs 3`, the error that
+ * `[1, 2] + [1, 2, 3]` gives.
+ */
+function selectionArmError(
+  ce: ComputeEngine,
+  conds: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<Expression>
+): Expression | undefined {
+  let length: number | undefined;
+  for (const c of conds) {
+    if (!isListCondition(c)) continue;
+    const n = staticListLength(c.type.type);
+    if (n === undefined) continue;
+    if (length !== undefined && n !== length)
+      return ce.error('incompatible-dimensions', `${length} vs ${n}`);
+    length = n;
+  }
+  let kind: 'number' | 'point' | undefined;
+  for (const arm of arms) {
+    const n =
+      length === undefined || isTupleShapedType(arm.type.type)
+        ? undefined
+        : staticListLength(arm.type.type);
+    if (n !== undefined && n !== length)
+      return ce.error('incompatible-dimensions', `${length} vs ${n}`);
+    const k = selectionArmKind(ce, arm);
+    if (k === undefined) continue;
+    if (typeof k !== 'string') return k;
+    kind ??= k;
+    if (k !== kind)
+      return ce.typeError(
+        parseType(
+          kind === 'number' ? 'number | list<number>' : 'tuple | list<tuple>'
+        )!,
+        arm.type.type,
+        arm
+      );
+  }
+  return undefined;
 }
 
 function absentConditionError(ce: ComputeEngine): Expression {
@@ -2026,8 +2320,9 @@ type MaskList = { value: Expression; cells: MaskCell[] };
  * deliberately narrow: an indexed collection (never a `Set`, never a tuple —
  * tuples are points, not lists) of statically known finite length whose cells
  * are ALL condition values (`True`/`False`/`Missing`) or themselves such
- * collections, so a mask can have any rank, and its rows can have different
- * lengths. A collection with a symbolic or non-boolean cell at any depth, or
+ * collections. A nested mask is read here so that the selection can refuse
+ * it (`evaluateElementwiseSelection()`): a condition is a boolean or a flat
+ * list of booleans. A collection with a symbolic or non-boolean cell at any depth, or
  * one whose length is not yet known, does not activate it — the conditional
  * then keeps its existing behavior (inert, or the spell-check throw), so every
  * symbolic `Which` PRODUCER (Solve validity guards, the conditional-value
@@ -2065,8 +2360,8 @@ function conditionCells(c: Expression): MaskList | undefined {
  * scalar arm lifts. All list-valued participants — conditions and selected
  * arms — must share one length, checked with the same
  * `broadcastLengthMismatch` as `Add` (R3). A position no clause matches is
- * `NaN` when every arm is numeric and `Missing` otherwise (R4,
- * `noMatchCell`); a position whose condition cell is `Missing` is the same
+ * `NaN` for a number, a point whose coordinates are `NaN` for a point, and
+ * `Missing` for any other value (R4, `noMatchCell`); a position whose condition cell is `Missing` is the same
  * catchable "condition is absent" error the scalar form produces (R4′).
  *
  * A mask of rank 2 or more (a list whose elements are lists of conditions,
@@ -2155,6 +2450,12 @@ function evaluateElementwiseSelection(
         return broadcastLengthMismatch(ce, [...participants, c]);
       return undefined;
     }
+    // A condition whose static type does not settle its shape
+    // (`tensor<boolean>`, `isNeverFlatMaskType()`) can have a nested list as
+    // its value. A nested condition is refused, as the canonical form refuses
+    // a condition whose type is a nested list (`conditionOperand()`).
+    if (mask.cells.some((cell) => typeof cell !== 'string'))
+      return ce.typeError(FLAT_MASK_TYPE, c.type, c);
     participants.push(c);
     selectors.push(mask);
     arms.push(arm);
@@ -2221,6 +2522,12 @@ function evaluateElementwiseSelection(
   for (let k = 0; k < arms.length; k++) {
     if (!reached.has(k)) continue;
     const value = arms[k].canonical.evaluate(options);
+    // An arm whose static type does not settle its shape can have a value
+    // that the canonical form refuses (`selectionArmError()`): a list whose
+    // elements are lists, a string. That value is refused with the same
+    // error.
+    const refused = runtimeArmError(ce, arms[k], value);
+    if (refused !== undefined) return refused;
     armValues[k] = value;
     if (!isBroadcastableCollection(value)) {
       values[k] = value;
@@ -2239,8 +2546,9 @@ function evaluateElementwiseSelection(
   // list-valued conditions of that node, as at the top node. A position that
   // no clause selects holds the absence marker of the type of that position
   // (`noMatchCell`, which reads the arms at the depth of the position):
-  // `NaN` when every arm puts a number there, `Missing` otherwise, as a
-  // restriction masks a cell by the type of its value. `noMatchArmTypes`, when given,
+  // `NaN` when every arm puts a number there, a `NaN` point when every arm
+  // puts a point there, `Missing` otherwise, as a restriction masks a cell
+  // by the type of its value. `noMatchArmTypes`, when given,
   // replaces the types of the arms of `clauses`: a `Which` whose first mask
   // comes after a scalar clause passes the types of all its reachable arms.
   const armTypes = noMatchArmTypes ?? clauses.map(({ arm }) => arm.type.type);
@@ -2645,14 +2953,17 @@ function armCellType(t: Readonly<Type>, depth = 0): Type {
 }
 
 /**
- * True when the no-match cell of an element-wise selection, at a position
- * `depth` levels down, is `NaN`: every arm puts a number there
- * (`armTypeAtDepth`). Otherwise the no-match cell is `Missing`.
+ * The type of the value that the arms of an element-wise selection put at a
+ * position `depth` levels down (`armTypeAtDepth`), joined over the arms. The
+ * no-match cell there is the `unmatchedCell()` of this type: `NaN` when
+ * every arm puts a number there, a `NaN` point when every arm puts a point
+ * there, `Missing` otherwise.
  */
-function noMatchIsNaN(arms: ReadonlyArray<Type>, depth: number): boolean {
-  return isNumericValueType(
-    widen(...arms.map((t) => armTypeAtDepth(t, depth)))
-  );
+function noMatchPositionType(
+  arms: ReadonlyArray<Type>,
+  depth: number
+): Type {
+  return widen(...arms.map((t) => armTypeAtDepth(t, depth)));
 }
 
 /**
@@ -2685,13 +2996,18 @@ function elementwiseCellType(
   contributions: ReadonlyArray<Type> = arms.map((t) => armTypeAtDepth(t, depth))
 ): Type {
   if (hasDefault) return widen(...contributions);
-  // The no-match cell is the absence marker of the type of the position
+  // The no-match cell is the `unmatchedCell()` of the type of the position
   // (`noMatchCell`): `NaN` when every arm is numeric, so the cell joins in
-  // `number`, the narrowest type that admits `NaN`; `Missing` otherwise, so
-  // the cell keeps a `missing` arm. The union is built explicitly: `widen`
-  // joins toward a common supertype and would dissolve the absence marker.
+  // `number`, the narrowest type that admits `NaN`; a `NaN` point when every
+  // arm is a point, so the cell joins in a point of `number` coordinates;
+  // `Missing` otherwise, so the cell keeps a `missing` arm. The union is
+  // built explicitly: `widen` joins toward a common supertype and would
+  // dissolve the absence marker.
   const joined = widen(...contributions);
-  if (noMatchIsNaN(arms, depth)) return widen(joined, 'number');
+  const position = noMatchPositionType(arms, depth);
+  if (isNumericValueType(position)) return widen(joined, 'number');
+  const n = pointArity(position);
+  if (n !== undefined) return widen(joined, nanPointType(n));
   return reduceType({ kind: 'union', types: [joined, 'missing'] });
 }
 
@@ -2753,15 +3069,16 @@ function possiblyElementwiseResultType(
 
 /**
  * The value of a position that no clause of an element-wise selection
- * selects, given the types of all the arms of the selection: the absence
- * marker of the type of the position, `NaN` when every arm puts a number
- * there and `Missing` otherwise (a point, a list, a string, a value that is
- * not provably numeric). A list arm puts its element there, a scalar or a
- * point arm puts itself (`armElementType`). This is the rule a restriction
- * applies to a cell it masks (`maskedValue`), so `Which([1, 5] < 3, (1, 2))`
- * and `If([1, 5] < 3, (1, 2))` are both `[(1, 2), Missing]`, and
+ * selects, given the types of all the arms of the selection: the
+ * `unmatchedCell()` of the type of the position, `NaN` when every arm puts
+ * a number there, a point whose coordinates are `NaN` when every arm puts a
+ * point there, and `Missing` otherwise (a boolean, a value that is not
+ * provably numeric). A list arm puts its element there, a scalar or a point
+ * arm puts itself (`armElementType`). This is the rule a restriction applies
+ * to a cell it masks, so `Which([1, 5] < 3, (1, 2))` and
+ * `If([1, 5] < 3, (1, 2))` are both `[(1, 2), (NaN, NaN)]`, and
  * `Which([1, 5] < 3, 7)` and `If([1, 5] < 3, 7)` are both `[7, NaN]`
- * (user decision 2026-10-17). The rule reads the types of the arms and not
+ * (selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`). The rule reads the types of the arms and not
  * their values: an arm that no position reaches is not evaluated.
  *
  * `depth` is the number of list levels between the result and the position:
@@ -2774,7 +3091,7 @@ function noMatchCell(
   arms: ReadonlyArray<Type>,
   depth = 1
 ): Expression {
-  return noMatchIsNaN(arms, depth) ? ce.NaN : ce.Missing;
+  return unmatchedCell(ce, noMatchPositionType(arms, depth));
 }
 
 /**
@@ -3215,6 +3532,10 @@ function evaluateRestriction(
       )
     ) {
       const ev = expr.evaluate(options);
+      // The value of the restricted expression is refused when the canonical
+      // form refuses its type (`runtimeArmError()`).
+      const refused = runtimeArmError(ce, expr, ev);
+      if (refused !== undefined) return refused;
       const ordered = isOrderedCarrierType(expr.type.type);
       const atomic = isAtomicCarrierValue(expr.type.type, ev);
       let zip = false;
@@ -3238,8 +3559,9 @@ function evaluateRestriction(
         const cis = sym(ci);
         const elem = zip ? elems[i] : ev;
         if (cis === 'True') result.push(elem);
-        else if (cis === 'False') result.push(maskedValue(ce, elem));
-        else result.push(ce._fn('If', [ci, zip ? elems[i] : expr]));
+        else if (cis === 'False')
+          result.push(unmatchedCell(ce, elem.type.type));
+        else result.push(maskCell(ce, ci, zip ? elems[i] : expr));
       }
       return ce._fn('List', result);
     }

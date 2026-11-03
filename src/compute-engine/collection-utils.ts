@@ -2404,6 +2404,52 @@ export function leafwardElementType(t: Readonly<Type>): Type | undefined {
 }
 
 /**
+ * The number of coordinates of a point type: a tuple whose elements are all
+ * numbers (`tuple<real, real>`), or a union of such tuples of one length
+ * (`tuple<nan, nan, integer> | tuple<real, real, real>`, the type of a point
+ * whose coordinates can be `NaN`). `undefined` for any other type. The
+ * `missing` arm of the type is ignored. A transparent type alias is unfolded,
+ * with the cycle guard of `resolveTypeAlias()`; a nominal type stays folded,
+ * so it is not a point, because a structural `(NaN, NaN)` is not a value of
+ * the nominal type. `depth` limits the walk through nested unions: an alias
+ * whose union has no arm other than itself (`c = c | c`) stays a union of
+ * references after `resolveTypeAlias()`, and the walk would not end. The
+ * walk stops at the first arm that is not a point of the first arm's
+ * arity, so it is linear in `depth`.
+ * The interpreter (`unmatchedCell()` in `library/control-structures.ts`) and
+ * the compiler (`nanPointLiteral()` in `compilation/compile-absence.ts`) both
+ * read a point here, so a position that a selection does not select is the
+ * same `NaN` point in both.
+ */
+export function pointArity(
+  t: Readonly<Type>,
+  depth = 0
+): number | undefined {
+  if (depth > 8) return undefined;
+  const present = resolveTypeAlias(
+    stripMissingFromType(resolveTypeAlias(t))
+  );
+  if (typeof present === 'string') return undefined;
+  if (present.kind === 'union') {
+    let n: number | undefined;
+    for (const arm of present.types) {
+      const k = pointArity(arm, depth + 1);
+      if (k === undefined || (n !== undefined && k !== n)) return undefined;
+      n = k;
+    }
+    return n;
+  }
+  if (present.kind !== 'tuple' || present.elements.length === 0)
+    return undefined;
+  return present.elements.every((x) => {
+    const el = stripMissingFromType(x.type);
+    return el !== 'never' && isSubtype(el, 'number');
+  })
+    ? present.elements.length
+    : undefined;
+}
+
+/**
  * The type `t` with each `range` element of a collection replaced by
  * `list<integer>`, at any depth; `t` itself (the same object) when it has no
  * such element. A `range` is a list of integers, but the name does not show

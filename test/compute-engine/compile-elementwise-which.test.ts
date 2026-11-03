@@ -46,6 +46,15 @@ function parity(expr: Expression, vars?: object): unknown {
   return value;
 }
 
+/** Assert that `expr` is a static error of the selection rule of
+ * 2026-11-02, so that the compilation declines. */
+function declines(expr: Expression): void {
+  expect(expr.isValid).toBe(false);
+  expect(() => compile(expr, { fallback: false })).toThrow(
+    /invalid expression/
+  );
+}
+
 /**
  * The emitted source, with compile-time constant folding turned off.
  *
@@ -153,11 +162,9 @@ describe('element-wise selection: absence and no-match (R4/R4′)', () => {
       'True',
       0,
     ] as any);
-    const interp = ce
-      .box(['Which', ['List', 'True', 'Missing', 'False'], 1, 'True', 0] as any)
-      .evaluate();
-    expect(interp.ops![1].operator).toBe('Error');
-    expect(parity(expr)).toEqual([1, NaN, 0]);
+    // Selection rule of 2026-11-02: a list condition with a `Missing` cell
+    // is a static error (it was `[1, NaN, 0]` on both lanes).
+    declines(expr);
   });
 
   test('a LIFTED (scalar) absent condition ends the walk', () => {
@@ -192,15 +199,11 @@ describe('element-wise selection: absence and no-match (R4/R4′)', () => {
       /invalid expression/
     );
     expect(expr.evaluate().operator).toBe('Error');
-    // A condition whose cells are knowable only at run time still compiles,
-    // and the compiled artifact throws rather than picking a branch.
+    // A condition declared as a bare `list` does not settle a flat list of
+    // booleans, so it is a static error too (selection rule of 2026-11-02;
+    // it compiled, and the compiled code threw at run time).
     ce.declare('runtimeCells', 'list');
-    const late = ce.box(['Which', 'runtimeCells', 1, 'True', 0] as any);
-    const r = compile(late, { fallback: false })!;
-    expect(r.success).toBe(true);
-    expect(() => r.run!({ runtimeCells: [10, 20] })).toThrow(
-      /Condition must evaluate/
-    );
+    declines(ce.box(['Which', 'runtimeCells', 1, 'True', 0] as any));
   });
 });
 
@@ -213,7 +216,9 @@ describe('element-wise selection: length policy (R3)', () => {
       ['List', 'True', 'True', 'True'],
       2,
     ] as any);
-    expect(parity(expr)).toEqual(NaN);
+    // The lengths are known statically and differ: a static error
+    // (selection rule of 2026-11-02; both lanes gave NaN).
+    declines(expr);
   });
 
   test('condition/arm mismatch projects to NaN', () => {
@@ -222,7 +227,9 @@ describe('element-wise selection: length policy (R3)', () => {
       ['List', 'True', 'False', 'True'],
       ['List', 7, 8],
     ] as any);
-    expect(parity(expr)).toEqual(NaN);
+    // The lengths are known statically and differ: a static error
+    // (selection rule of 2026-11-02; both lanes gave NaN).
+    declines(expr);
   });
 
   test('arm/arm mismatch projects to NaN', () => {
@@ -233,7 +240,9 @@ describe('element-wise selection: length policy (R3)', () => {
       'True',
       ['List', 9, 9],
     ] as any);
-    expect(parity(expr)).toEqual(NaN);
+    // The lengths are known statically and differ: a static error
+    // (selection rule of 2026-11-02; both lanes gave NaN).
+    declines(expr);
   });
 });
 
@@ -261,7 +270,9 @@ describe('element-wise selection: the `If` forms', () => {
       1,
       0,
     ] as any);
-    expect(parity(expr)).toEqual([1, NaN, 0]);
+    // A `Missing` cell is a static error (selection rule of 2026-11-02;
+    // both lanes gave `[1, NaN, 0]`).
+    declines(expr);
   });
 
   test('If length mismatch projects to NaN', () => {
@@ -271,7 +282,9 @@ describe('element-wise selection: the `If` forms', () => {
       ['List', 1, 2],
       0,
     ] as any);
-    expect(parity(expr)).toEqual(NaN);
+    // The lengths are known statically and differ: a static error
+    // (selection rule of 2026-11-02; both lanes gave NaN).
+    declines(expr);
   });
 });
 
@@ -510,429 +523,30 @@ describe('element-wise selection: what stays unchanged', () => {
  * a cell that is not a number, `undefined`.
  */
 describe('element-wise selection: a mask of rank 2 or more', () => {
-  const MATRIX = [
-    [1, 2],
-    [3, 4],
-  ];
-  /** A JavaScript value as MathJSON: an array is a `List`. */
-  const toJson = (v: unknown, points = false): unknown =>
-    Array.isArray(v)
-      ? [points ? 'Tuple' : 'List', ...v.map((x) => toJson(x))]
-      : v === true
-        ? 'True'
-        : v === false
-          ? 'False'
-          : v;
-  /** An absent cell (`NaN`, `undefined`, `Missing`, an error) as one value,
-   * so the two lanes compare. */
-  const ABSENT = 'absent';
-  const normalized = (v: unknown): unknown =>
-    Array.isArray(v)
-      ? v.map(normalized)
-      : v === undefined || (typeof v === 'number' && Number.isNaN(v))
-        ? ABSENT
-        : v;
-  const projected = (x: Expression): unknown => {
-    if (x.symbol === 'True') return true;
-    if (x.symbol === 'False') return false;
-    if (x.symbol === 'Missing' || x.operator === 'Error') return ABSENT;
-    if (x.operator === 'List' || x.operator === 'Tuple')
-      return (x.ops ?? []).map(projected);
-    if (x.string !== undefined) return x.string;
-    return x.re;
-  };
-
-  /** Compile `expr` with the declarations, run it on `vars`, and compare it
-   * with the interpreter's value for the same assignments. */
-  function compiledAndInterpreted(
-    declarations: Record<string, string>,
-    expr: unknown,
-    vars: Record<string, unknown>,
-    pointLists: string[] = []
-  ): { compiled: unknown; interpreted: unknown; raw: unknown } {
-    const c = new ComputeEngine();
-    for (const [name, type] of Object.entries(declarations))
-      c.declare(name, type as any);
-    const r = compile(c.box(expr as any), { fallback: false });
-    expect(r?.success).toBe(true);
-    const raw = r!.run!(vars as any);
-    const i = new ComputeEngine();
-    for (const [name, type] of Object.entries(declarations))
-      i.declare(name, type as any);
-    for (const [name, value] of Object.entries(vars)) {
-      const json = pointLists.includes(name)
-        ? ['List', ...(value as unknown[][]).map((p) => toJson(p, true))]
-        : toJson(value);
-      i.assign(name, i.box(json as any));
-    }
-    return {
-      compiled: normalized(raw),
-      interpreted: normalized(projected(i.box(expr as any).N())),
-      raw,
-    };
-  }
-
-  const M = { M: 'matrix<integer^(2x2)>' };
-  const cases: Array<
-    [string, Record<string, string>, unknown, Record<string, unknown>, unknown]
-  > = [
+  // Selection rule of 2026-11-02: a condition is a boolean or a flat list of
+  // booleans, and an arm is a scalar or a flat list. A mask of rank 2 (a
+  // comparison of a matrix), an uneven mask and an arm whose elements are
+  // lists are static errors, so the compilation declines. Before, the
+  // JavaScript target selected them node by node (`selectNested`).
+  const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+  test.each([
+    ['If(M < 3, M, 0)', ['If', ['Less', M, 3], M, 0]],
+    ['If(M < 3, 1, 0)', ['If', ['Less', M, 3], 1, 0]],
+    ['Which(M < 2, 10, True, 0)', ['Which', ['Less', M, 2], 10, 'True', 0]],
     [
-      'If(M < 3, M, 0)',
-      M,
-      ['If', ['Less', 'M', 3], 'M', 0],
-      { M: MATRIX },
-      [
-        [1, 2],
-        [0, 0],
-      ],
+      'an uneven mask',
+      ['If', ['List', ['List', 'True'], ['List', 'False', 'True']], 7, 0],
     ],
     [
-      'If(M < 3, 1, 0)',
-      M,
-      ['If', ['Less', 'M', 3], 1, 0],
-      { M: MATRIX },
-      [
-        [1, 1],
-        [0, 0],
-      ],
+      'an arm whose elements are lists',
+      ['If', ['List', 'True', 'False'], ['List', ['List', 1], ['List', 2]], 0],
     ],
-    [
-      'Which(M < 2, 10, M < 4, M, True, 0)',
-      M,
-      ['Which', ['Less', 'M', 2], 10, ['Less', 'M', 4], 'M', 'True', 0],
-      { M: MATRIX },
-      [
-        [10, 2],
-        [3, 0],
-      ],
-    ],
-    [
-      'If(M < 3, M)',
-      M,
-      ['If', ['Less', 'M', 3], 'M'],
-      { M: MATRIX },
-      [
-        [1, 2],
-        [ABSENT, ABSENT],
-      ],
-    ],
-    // An arm of lower rank than the mask is refused, as `M + [10, 20]` is.
-    [
-      'If(M < 3, [10, 20], 0)',
-      M,
-      ['If', ['Less', 'M', 3], ['List', 10, 20], 0],
-      { M: MATRIX },
-      ABSENT,
-    ],
-    [
-      'If(M < 3, [10, 20, 30], 0)',
-      M,
-      ['If', ['Less', 'M', 3], ['List', 10, 20, 30], 0],
-      { M: MATRIX },
-      ABSENT,
-    ],
-    // An arm that no position selects is not evaluated.
-    [
-      'If(M < 0, [10, 20, 30], 0)',
-      M,
-      ['If', ['Less', 'M', 0], ['List', 10, 20, 30], 0],
-      { M: MATRIX },
-      [
-        [0, 0],
-        [0, 0],
-      ],
-    ],
-    [
-      'If(M < 3, (1, 2), (0, 0))',
-      M,
-      ['If', ['Less', 'M', 3], ['Tuple', 1, 2], ['Tuple', 0, 0]],
-      { M: MATRIX },
-      [
-        [
-          [1, 2],
-          [1, 2],
-        ],
-        [
-          [0, 0],
-          [0, 0],
-        ],
-      ],
-    ],
-    [
-      'If(M < 3, "a")',
-      M,
-      ['If', ['Less', 'M', 3], { str: 'a' }],
-      { M: MATRIX },
-      [
-        ['a', 'a'],
-        [ABSENT, ABSENT],
-      ],
-    ],
-    [
-      'a mask whose rows have different lengths',
-      { R: 'list<list<boolean>>' },
-      ['If', 'R', 7, 0],
-      { R: [[true], [false, true]] },
-      [[7], [0, 7]],
-    ],
-    [
-      'masks of rank 1 and 2',
-      { M: 'matrix<integer^(2x2)>', V: 'list<integer>' },
-      ['Which', ['Less', 'V', 3], 'M', ['Less', 'M', 2], 0, 'True', 5],
-      { M: MATRIX, V: [1, 5] },
-      [
-        [1, 2],
-        [5, 5],
-      ],
-    ],
-    [
-      'a broadcastable operand holding a matrix',
-      { B: 'broadcastable<number>' },
-      ['If', ['Less', 'B', 0], ['Negate', 'B'], 'B'],
-      {
-        B: [
-          [1, -2],
-          [-3, 4],
-        ],
-      },
-      [
-        [1, 2],
-        [3, 4],
-      ],
-    ],
-    [
-      'a mask of lower rank than a broadcastable arm',
-      { B: 'broadcastable<number>', C: 'broadcastable<number>' },
-      ['If', ['Less', 'C', 0], 'B', 0],
-      { C: [-1, 1], B: MATRIX },
-      [[1, 2], 0],
-    ],
-  ];
-  test.each(cases)('%s', (_label, declarations, expr, vars, expected) => {
-    const { compiled, interpreted } = compiledAndInterpreted(
-      declarations,
-      expr,
-      vars
-    );
-    expect(compiled).toEqual(expected);
-    expect(compiled).toEqual(interpreted);
-  });
-
-  test('an unmatched cell of a numeric arm is NaN at the depth of the cell', () => {
-    // The cells of `M` are numbers, its rows are not: the absence value of
-    // each depth is passed (`_SYS.absentByDepth`).
-    const { raw } = compiledAndInterpreted(M, ['If', ['Less', 'M', 3], 'M'], {
-      M: MATRIX,
-    });
-    expect(raw).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
-  });
-
-  test('a list of points is whole at the depth of its points', () => {
-    // At the rows of the mask, an element of `P` is a point, which is one
-    // value: an arm of lower rank than the mask, refused as in the
-    // interpreter.
-    const { compiled, interpreted } = compiledAndInterpreted(
-      { M: 'matrix<integer^(2x2)>', P: 'list<tuple<integer, integer>>' },
-      ['If', ['Less', 'M', 3], 'P', ['Tuple', 0, 0]],
-      { M: MATRIX, P: MATRIX },
-      ['P']
-    );
-    expect(compiled).toEqual(ABSENT);
-    expect(compiled).toEqual(interpreted);
-  });
-
-  test('an arm whose type does not give the depth of its points throws under a nested mask', () => {
-    // A point is an array in compiled code, like a row, so without the depth
-    // of its points the helper read each point of `P` as a row of the mask:
-    // `If(C, P, 0)` was `[[1, 0], [0, 4]]`. The interpreter refuses the
-    // point arm, of lower rank than the mask (`incompatible-dimensions`).
-    // The element type of a `tensor<tuple<…>>` is the union `tuple<…> |
-    // tensor<tuple<…>>`, and the elements of `list<any>`, `list<unknown>`
-    // and a bare `list` may be points. The selection compiles, and the run
-    // throws where an element of the arm is an array and the mask is still
-    // a list one level down (`_SYS.pointDepthUnknown`).
-    const C = [
-      [true, false],
-      [false, true],
-    ];
-    for (const type of [
-      'tensor<tuple<integer, integer>>',
-      'list<any>',
-      'list<unknown>',
-      'list',
-    ]) {
-      const c = new ComputeEngine();
-      c.declare('C', 'matrix<boolean^(2x2)>');
-      c.declare('P', type as any);
-      const expr = ['If', 'C', 'P', 0];
-      const r = compile(c.box(expr as any), { fallback: false });
-      expect(r?.success).toBe(true);
-      expect(() => r!.run!({ C, P: MATRIX } as any)).toThrow(RangeError);
-      expect(() => r!.run!({ C, P: MATRIX } as any)).toThrow(
-        /does not give the depth of its points/
-      );
-      // The interpreter refuses the same selection over points.
-      c.assign('C', c.box(toJson(C) as any));
-      c.assign('P', c.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-      expect(c.box(expr as any).evaluate().operator).toBe('Error');
-    }
-    // A mask that is flat at run time: the arm is an ordinary list arm, on
-    // the fused loop and on the generic selection (`cse: false`).
-    for (const cse of [true, false]) {
-      const c = new ComputeEngine();
-      c.declare('S', 'list');
-      const r = compile(c.box(['If', ['Less', 'S', 3], 'S', 0] as any), {
-        fallback: false,
-        cse,
-      });
-      expect(r?.success).toBe(true);
-      expect(r!.code).toContain('_SYS.pointDepthUnknown');
-      expect(r!.run!({ S: [1, 5] } as any)).toEqual([1, 0]);
-    }
-    // A mask that is provably flat, with a bare `list` arm of numbers.
-    expect(
-      compiledAndInterpreted(
-        { V: 'list<boolean>', P: 'list' },
-        ['If', 'V', 'P', 0],
-        { V: [true, false], P: [1, 2] }
-      )
-    ).toMatchObject({ compiled: [1, 0], interpreted: [1, 0] });
-    // The guard of the fused loop sends a matrix to the generic selection,
-    // which reaches the check.
-    const c = new ComputeEngine();
-    c.declare('S', 'list');
-    const fused = compile(c.box(['If', ['Less', 'S', 3], 'S', 0] as any), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(fused!.code).toContain('_SYS.numericSelectionInputs(');
-    expect(() => fused!.run!({ S: MATRIX } as any)).toThrow(RangeError);
-    // A matrix arm and a broadcastable arm still give the interpreter's
-    // value.
-    for (const type of ['matrix<integer^(2x2)>', 'broadcastable<number>'])
-      expect(
-        compiledAndInterpreted(
-          { C: 'matrix<boolean^(2x2)>', P: type },
-          ['If', 'C', 'P', 0],
-          { C, P: MATRIX }
-        )
-      ).toMatchObject({
-        compiled: [
-          [1, 0],
-          [0, 4],
-        ],
-        interpreted: [
-          [1, 0],
-          [0, 4],
-        ],
-      });
-  });
-
-  test('a flat mask keeps its code', () => {
-    // The absence value of each depth and the depth of the points of a list
-    // arm are passed only when the mask may have rank 2 or more.
-    const c = new ComputeEngine();
-    c.declare('V', 'list<integer>');
-    c.declare('P', 'list<tuple<integer, integer>>');
-    const source =
-      compile(c.box(['If', ['Less', 'V', 3], 'P', ['Tuple', 0, 0]] as any), {
-        fallback: false,
-        constantFold: false,
-      })?.code ?? '';
-    expect(source).not.toContain('_SYS.wholeAt');
-    expect(source).not.toContain('_SYS.absentByDepth');
-  });
-
-  test('the interval and Python targets refuse a condition that may be a list', () => {
-    // These targets have no element-wise selection. A condition that is a
-    // list was refused; one that MAY be a list (`B < 0` for a broadcastable
-    // `B`) is refused too, where a conditional expression read the
-    // truthiness of an array. Before, the Python compile of `B < 0`
-    // overflowed the stack.
-    for (const [declarations, expr] of [
-      [M, ['If', ['Less', 'M', 3], 'M', 0]],
-      [{ B: 'broadcastable<number>' }, ['If', ['Less', 'B', 0], 0, 'B']],
-      [
-        { B: 'broadcastable<number>' },
-        ['Which', ['Less', 'B', 0], 0, 'True', 'B'],
-      ],
-      [{ B: 'broadcastable<number>' }, ['If', ['Less', 'B', 0], 1]],
-      [
-        { B: 'broadcastable<number>' },
-        ['Which', ['Less', 'B', 0], 1, 'True', 0],
-      ],
-    ] as Array<[Record<string, string>, unknown]>) {
-      for (const to of ['interval-js', 'python']) {
-        const c = new ComputeEngine();
-        for (const [name, type] of Object.entries(declarations))
-          c.declare(name, type as any);
-        let success: boolean | undefined;
-        let message = '';
-        try {
-          success = compile(c.box(expr as any), {
-            to,
-            fallback: false,
-          } as any)?.success;
-        } catch (e) {
-          message = (e as Error).message;
-        }
-        expect(success).not.toBe(true);
-        expect(message).not.toMatch(/call stack/);
-      }
-    }
-    // The comparison alone still compiles on Python.
-    const c = new ComputeEngine();
-    c.declare('B', 'broadcastable<number>');
-    expect(
-      compile(c.box(['Less', 'B', 0] as any), {
-        to: 'python',
-        fallback: false,
-      } as any)?.success
-    ).toBe(true);
-    // A shader target declines too: the restriction is typed
-    // `broadcastable<number> | missing`, a value that may be an absent
-    // list, which has no shader representation.
-    for (const to of ['glsl', 'wgsl'])
-      expect(() =>
-        compile(c.box(['If', ['Less', 'B', 0], 1] as any), {
-          to,
-          fallback: false,
-        } as any)
-      ).toThrow(/object-domain absent/);
-  });
-
-  test('compiled JavaScript restricts by a condition that may be a list', () => {
-    // The conditional expression `c ? 1 : NaN` read the array of `B < 0` as
-    // true: `If(B < 0, 1)` was `1` for `B = [-1, 2]`, where the
-    // interpreter answers `[1, NaN]`. Such a condition now takes the
-    // element-wise selection helper, which reads a condition that is not an
-    // array at run time as one scalar condition.
-    const declarations = { B: 'broadcastable<number>' };
-    for (const expr of [
-      ['If', ['Less', 'B', 0], 1],
-      ['If', ['Less', 'B', 0], ['List', 1, 2]],
-    ])
-      for (const B of [-1, 2, [-1, 2]]) {
-        const { compiled, interpreted } = compiledAndInterpreted(
-          declarations,
-          expr,
-          { B }
-        );
-        expect(compiled).toEqual(interpreted);
-      }
-    const c = new ComputeEngine();
-    c.declare('B', 'broadcastable<number>');
-    const r = compile(c.box(['If', ['Less', 'B', 0], 1] as any), {
-      fallback: false,
-    });
-    expect(r!.run!({ B: -1 } as any)).toBe(1);
-    expect(r!.run!({ B: 2 } as any)).toBeNaN();
-    expect(r!.run!({ B: [-1, 2] } as any)).toEqual([1, NaN]);
+    ['a string arm', ['If', ['List', 'True', 'False'], "'a'", "'b'"]],
+  ])('%s declines', (_label, json) => {
+    declines(ce.box(json as any));
   });
 });
+
 
 /**
  * An UNDECIDED scalar condition (ruling 2026-09-02).
@@ -1137,5 +751,34 @@ describe('compiled If/Which take no branch on an undecided condition', () => {
     expect(run(expr, { x: NaN })).toBe(1);
     expect(run(expr, { x: -1 })).toBe(1);
     expect(run(expr, { x: 1 })).toBe(2);
+  });
+});
+
+describe('the selection rule of 2026-11-02: the NaN point cell', () => {
+  test('a restriction of a point by a list of conditions', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('v', 'list<real>');
+    const expr = ce2.box(['If', ['Greater', 'v', 0], ['Tuple', 1, 2]]);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.restrict(');
+    expect(r.run!({ v: [-1, 2] })).toEqual([
+      [NaN, NaN],
+      [1, 2],
+    ]);
+    ce2.assign('v', ce2.box(['List', -1, 2]));
+    expect(expr.evaluate().toString()).toBe('[(NaN, NaN),(1, 2)]');
+  });
+
+  test('a restriction of a list of points by a list of conditions', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('v', 'list<real>');
+    ce2.declare('p', 'list<tuple<real, real>>');
+    const expr = ce2.box(['If', ['Greater', 'v', 0], 'p']);
+    const r = compile(expr, { fallback: false });
+    expect(r.run!({ v: [-1, 2], p: [[1, 1], [2, 2]] })).toEqual([
+      [NaN, NaN],
+      [2, 2],
+    ]);
   });
 });

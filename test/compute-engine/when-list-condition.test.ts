@@ -37,23 +37,23 @@ describe('a restriction with a list of conditions', () => {
   });
 
   test('a point is one value: lifted whole at every position, never zipped', () => {
+    // A masked point cell is a point whose coordinates are `NaN` on both
+    // routes (selection rule of 2026-11-02, which reverses the user decision
+    // of 2026-10-18 that it is `Missing`, `undefined` in compiled code).
     expect(interp(['If', COND, ['Tuple', 'u', 'v']])).toBe(
-      '[(5, 1),"Missing","Missing"]'
+      '[(5, 1),(NaN, NaN),(NaN, NaN)]'
     );
-    // A masked point cell is `undefined` in compiled code, as a single
-    // missing point is (user decision 2026-10-18); a masked number cell
-    // stays `NaN` (test above).
     expect(run(['If', COND, ['Tuple', 'u', 'v']])).toEqual([
       [5, 1],
-      undefined,
-      undefined,
+      [NaN, NaN],
+      [NaN, NaN],
     ]);
     expect(
       ce
         .box(['If', ['List', 'True', 'False', 'False'], ['Tuple', 1, 2]])
         .evaluate()
         .toString()
-    ).toBe('[(1, 2),"Missing","Missing"]');
+    ).toBe('[(1, 2),(NaN, NaN),(NaN, NaN)]');
   });
 
   test('a list value is zipped with the conditions', () => {
@@ -66,21 +66,24 @@ describe('a restriction with a list of conditions', () => {
     expect(run(json)).toEqual([NaN, NaN, 30]);
   });
 
-  test("a list value keeps the interpreter's alignment: truncated to the shorter", () => {
+  test('a list value of another length than the conditions is a static error', () => {
+    // A list arm has the length of the condition (selection rule of
+    // 2026-11-02). Before, the value was truncated to the shorter length,
+    // `[10,NaN]` for both forms below.
     const shorter = [
       'If',
       ['Less', ['List', 'v', ['Multiply', 2, 'v'], ['Multiply', 3, 'v']], 2],
       ['List', 10, 20],
     ];
-    expect(interp(shorter)).toBe('[10,NaN]');
-    expect(run(shorter)).toEqual([10, NaN]);
+    expect(interp(shorter)).toBe('Error("incompatible-dimensions", "3 vs 2")');
+    expect(() => run(shorter)).toThrow(/invalid expression/);
     const longer = [
       'If',
       ['Less', ['List', 'v', ['Multiply', 2, 'v']], 2],
       ['List', 10, 20, 30, 40],
     ];
-    expect(interp(longer)).toBe('[10,NaN]');
-    expect(run(longer)).toEqual([10, NaN]);
+    expect(interp(longer)).toBe('Error("incompatible-dimensions", "2 vs 4")');
+    expect(() => run(longer)).toThrow(/invalid expression/);
     const allFalse = [
       'If',
       ['Greater', ['List', 'v', ['Multiply', 2, 'v']], 5],
@@ -106,19 +109,16 @@ describe('a restriction with a list of conditions', () => {
     expect(out[1]).toBeNaN();
   });
 
-  test('a string is one value, repeated, with the object null as its absence', () => {
+  test('a string under a list of conditions is a static error', () => {
+    // A string cell has no value for a position that is not selected
+    // (selection rule of 2026-11-02). Before, the string was repeated, with
+    // `Missing` (`undefined` in compiled code) where a condition is false.
     ce.declare('s', 'string');
     const json = ['If', ['Less', ['Multiply', 'v', ['List', 1, 2]], 2], 's'];
-    expect(
-      ce
-        .box(json)
-        .subs({ v: 1, s: ce.string('a') })
-        .evaluate()
-        .toString()
-    ).toBe('["a","Missing"]');
-    expect(
-      compile(ce.box(json), { fallback: false }).run!({ v: 1, s: 'a' })
-    ).toEqual(['a', undefined]);
+    expect(ce.box(json).isValid).toBe(false);
+    expect(() => compile(ce.box(json), { fallback: false })).toThrow(
+      /invalid expression/
+    );
   });
 
   test('a value of wide type fails closed instead of guessing its shape', () => {
@@ -161,10 +161,10 @@ describe('a restriction with a list of conditions', () => {
         .toString();
     expect(r.run!({ ...VARS, Q: [3, 4] })).toEqual([
       [3, 4],
-      undefined,
-      undefined,
+      [NaN, NaN],
+      [NaN, NaN],
     ]);
-    expect(interpQ(['Tuple', 3, 4])).toBe('[(3, 4),"Missing","Missing"]');
+    expect(interpQ(['Tuple', 3, 4])).toBe('[(3, 4),(NaN, NaN),(NaN, NaN)]');
     expect(
       r.run!({
         ...VARS,
@@ -174,10 +174,14 @@ describe('a restriction with a list of conditions', () => {
           [5, 6],
         ],
       })
-    ).toEqual([[1, 2], undefined, undefined]);
+    ).toEqual([
+      [1, 2],
+      [NaN, NaN],
+      [NaN, NaN],
+    ]);
     expect(
       interpQ(['List', ['Tuple', 1, 2], ['Tuple', 3, 4], ['Tuple', 5, 6]])
-    ).toBe('[(1, 2),"Missing","Missing"]');
+    ).toBe('[(1, 2),(NaN, NaN),(NaN, NaN)]');
   });
 
   test('both routes agree with the one-clause Which', () => {

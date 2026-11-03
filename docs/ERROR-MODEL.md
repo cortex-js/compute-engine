@@ -2480,7 +2480,11 @@ document's history):
   `x` is a number, and `Missing` when it is a point, a list, a string or a
   value not provably numeric (`maskedValue`, `library/control-structures.ts`);
   a masked numeric cell of a list mask is `NaN` too (`[10,20,30]{[1,2,3] > 2}`
-  is `[NaN, NaN, 30]`). This amends the 2026-09-09 rule above, which masked
+  is `[NaN, NaN, 30]`). Amended 2026-11-02 (selection rule, `docs/BROADCAST-MODEL.md`):
+  under a list of conditions, a masked point cell is a point whose
+  coordinates are `NaN` (`If([False, True], [(1, 2), (3, 4)])` is
+  `[(NaN, NaN), (3, 4)]`), a string is a static error, and a scalar
+  condition masks a list whole, to `Missing`. This amends the 2026-09-09 rule above, which masked
   every value to `Missing`: that was the one place the engine spelled an
   absent number as `Missing`, so `2·x{c}`, threaded to `2x{c}`, answered
   `Missing` on the held route and `NaN` when evaluated fresh (`2·Missing`),

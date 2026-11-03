@@ -199,12 +199,21 @@ describe('a single-branch If over a mask compiles as the restriction', () => {
       C: [true, true],
       L: [10, 20, 30],
     });
+    // The declared types do not give the lengths, so the interpreter
+    // aligns the values at run time, as the compiled code does. When the
+    // types give two lengths, the expression is a static error (selection
+    // rule of 2026-11-02).
+    ce.assign('C', ce.box(['List', 'True', 'True']));
+    ce.assign('L', ce.box(['List', 10, 20, 30]));
+    const interpreted = ce.box(['If', 'C', 'L']).evaluate();
+    expect(interpreted.json).toEqual(['List', 10, 20]);
+    expect(compiled).toEqual([10, 20]);
     const ce2 = new ComputeEngine();
     ce2.assign('C', ce2.box(['List', 'True', 'True']));
     ce2.assign('L', ce2.box(['List', 10, 20, 30]));
-    const interpreted = ce2.box(['If', 'C', 'L']).evaluate();
-    expect(interpreted.json).toEqual(['List', 10, 20]);
-    expect(compiled).toEqual([10, 20]);
+    expect(ce2.box(['If', 'C', 'L']).evaluate().toString()).toBe(
+      'Error("incompatible-dimensions", "2 vs 3")'
+    );
   });
 });
 

@@ -251,9 +251,12 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
     });
 
     it('declines conflicting condition widths', () => {
+      // Two list conditions of lengths 2 and 4 are a static error (selection
+      // rule of 2026-11-02), so the compilation declines before the target
+      // reads the widths.
       expect(() =>
         g(['Which', ['Less', 'N2', 3], 1, ['Less', 'N4', 3], 2, 'True', 0])
-      ).toThrow(/mix vec2 and vec4/);
+      ).toThrow(/invalid expression/);
     });
 
     it('declines a complex-valued arm', () => {
@@ -263,8 +266,11 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
     });
 
     it('declines a tuple-typed arm', () => {
+      // A point arm beside a number arm is a static error (selection rule of
+      // 2026-11-02), so the compilation declines before the target reads
+      // the arms.
       expect(() => g(['Which', ['Less', 'N2', 3], 'P', 'True', 0])).toThrow(
-        /tuple arm/
+        /invalid expression/
       );
     });
 

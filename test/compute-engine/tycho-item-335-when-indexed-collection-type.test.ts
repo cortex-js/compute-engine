@@ -39,31 +39,21 @@ const CASES: Case[] = [
   {
     declared: 'list<tuple<number, number>>',
     points: true,
-    staticType: 'list<missing | tuple<number, number>>',
+    staticType: 'list<tuple<number, number>>',
     value: POINTS,
-    evaluated: '["Missing",(2, 4),(3, 9)]',
+    evaluated: '[(NaN, NaN),(2, 4),(3, 9)]',
   },
   // An ORDERED carrier (`indexed_collection<T>`) is zipped with the mask
   // whatever its length, over the mask's length (user decision 2026-09-29),
-  // so a cell has the element type alone.
+  // so a cell has the element type alone. A position that the mask does not
+  // select is a point whose coordinates are `NaN` (selection rule of
+  // 2026-11-02; it was `Missing`).
   {
     declared: 'indexed_collection<tuple<number, number>>',
     points: true,
-    staticType: 'list<missing | tuple<number, number>>',
+    staticType: 'list<tuple<number, number>>',
     value: POINTS,
-    evaluated: '["Missing",(2, 4),(3, 9)]',
-  },
-  // An UNORDERED carrier (`collection<T>`) may hold an infinite set, such as
-  // `Integers`, which has no first element and is not zipped: each cell is
-  // then the whole value. So a cell is typed as the join of the element type
-  // and the carrier type.
-  {
-    declared: 'collection<tuple<number, number>>',
-    points: true,
-    staticType:
-      'list<collection<tuple<number, number>> | missing | tuple<number, number>>',
-    value: POINTS,
-    evaluated: '["Missing",(2, 4),(3, 9)]',
+    evaluated: '[(NaN, NaN),(2, 4),(3, 9)]',
   },
   // A masked NUMBER is `NaN` (user decision 2026-09-25), so the cells of a
   // numeric carrier are `number`, the type that admits `NaN`.
@@ -213,15 +203,18 @@ describe('TYCHO ITEM 335: CARRIERS THAT ARE NOT ZIPPED, AND NON-LIST MASKS', () 
     expect(isSubtype(v.type.type, staticType)).toBe(true);
   });
 
-  // An infinite UNORDERED carrier (`Integers`) has no first element and is
-  // not zipped: each cell is the whole set.
-  test('an infinite unordered carrier: each cell is the whole value', () => {
+  // An UNORDERED carrier (`collection<T>`, `Integers`) has no positions to
+  // pair with the cells of a mask: under a list of conditions it is a static
+  // error (selection rule of 2026-11-02). Before, a finite one was zipped and
+  // each cell of an infinite one was the whole value.
+  test('an unordered carrier under a mask is a static error', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['If', ['List', 'True', 'False'], 'Integers']);
-    const staticType = e.type.type;
-    const v = e.evaluate();
-    expect(v.json).toEqual(['List', 'Integers', 'Missing']);
-    expect(isSubtype(v.type.type, staticType)).toBe(true);
+    expect(e.type.toString()).toBe('error');
+    expect(e.evaluate().operator).toBe('Error');
+    ce.declare('P', 'collection<tuple<number, number>>');
+    expect(restriction(ce, true).type.toString()).toBe('error');
+    expect(ce.parse('P\\{P.x > 1\\}').operator).toBe('Error');
   });
 
   // The condition of a restriction is a boolean or a LIST of booleans (a
@@ -384,9 +377,7 @@ describe('TYCHO ITEM 335: CARRIERS THAT KEEP THEIR BEHAVIOR', () => {
   test('a tuple, a string and an infinite set are not zipped', () => {
     const ce = new ComputeEngine();
     const probes: [unknown, string][] = [
-      [['Tuple', 1, 2], '[(1, 2),"Missing",(1, 2)]'],
-      [{ str: 'ab' }, '["ab","Missing","ab"]'],
-      ['Integers', '["Integers","Missing","Integers"]'],
+      [['Tuple', 1, 2], '[(1, 2),(NaN, NaN),(1, 2)]'],
     ];
     for (const [carrier, evaluated] of probes) {
       const e = ce.box([
@@ -401,13 +392,16 @@ describe('TYCHO ITEM 335: CARRIERS THAT KEEP THEIR BEHAVIOR', () => {
     }
   });
 
-  test('a finite set is zipped, as before', () => {
+  // A string, a set and an infinite set under a mask are static errors
+  // (selection rule of 2026-11-02): a string cell has no value for a
+  // position that is not selected, and a set has no positions. Before, a
+  // string and an infinite set were repeated, and a finite set was zipped.
+  test('a string or a set under a mask is a static error', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['If', ['List', 'True', 'False'], ['Set', 1, 2]]);
-    const declared = e.type.type;
-    const v = e.evaluate();
-    expect(v.toString()).toBe('[1,NaN]');
-    expect(isSubtype(v.type.type, declared)).toBe(true);
+    for (const carrier of [{ str: 'ab' }, 'Integers', ['Set', 1, 2]]) {
+      const e = ce.box(['If', ['List', 'True', 'False'], carrier] as any);
+      expect(e.type.toString()).toBe('error');
+    }
   });
 });
 
@@ -491,7 +485,7 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
       'tuple<number, number> | list<number>',
     ]) {
       const { e, v } = evaluated(declared, ['Tuple', 1, 2]);
-      expect(v.toString()).toBe('[(1, 2),"Missing"]');
+      expect(v.toString()).toBe('[(1, 2),(NaN, NaN)]');
       // The held form agrees: a restricted point is not a collection.
       expect(e.isCollection).toBe(false);
     }
@@ -507,9 +501,15 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
     expect(v.toString()).toBe('[1,NaN]');
   });
 
-  test('a string held under a string-or-list union is one value', () => {
-    const { v } = evaluated('string | list<string>', { str: 'ab' });
-    expect(v.toString()).toBe('["ab","Missing"]');
+  // A string under a mask is refused (selection rule of 2026-11-02). The
+  // union does not settle that the value is a string, so the value is
+  // refused when the selection is evaluated.
+  test('a string held under a string-or-list union is refused', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'string | list<string>');
+    const e = ce.box(['If', MASK, 'P'] as any);
+    ce.assign('P', ce.box({ str: 'ab' }));
+    expect(e.evaluate().operator).toBe('Error');
   });
 
   test('the compiler dispatches on a point-or-point-list union', () => {
@@ -527,9 +527,12 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
     })!;
     expect(result.success).toBe(true);
     const run = result.run as (s: Record<string, unknown>) => unknown;
-    expect(run({ P: [1, 2] })).toEqual([[1, 2], undefined]);
+    expect(run({ P: [1, 2] })).toEqual([
+      [1, 2],
+      [NaN, NaN],
+    ]);
     expect(evaluated(type, ['Tuple', 1, 2]).v.toString()).toBe(
-      '[(1, 2),"Missing"]'
+      '[(1, 2),(NaN, NaN)]'
     );
     expect(
       run({
@@ -538,22 +541,29 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
           [3, 4],
         ],
       })
-    ).toEqual([[1, 2], undefined]);
+    ).toEqual([
+      [1, 2],
+      [NaN, NaN],
+    ]);
     expect(
       evaluated(type, ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]).v.toString()
-    ).toBe('[(1, 2),"Missing"]');
+    ).toBe('[(1, 2),(NaN, NaN)]');
   });
 
-  // A string is one value under a restriction whatever the declaration: the
-  // exception that zips a tuple held by a symbol declared with an ordered
-  // type does not apply to a string.
-  test('a string held by a symbol declared as an ordered type is one value', () => {
+  // A string under a mask is refused whatever the declaration (selection
+  // rule of 2026-11-02): by its type for `indexed_collection<character>`,
+  // by its value for `indexed_collection<any>`. Before, it was one value,
+  // repeated.
+  test('a string held by a symbol declared as an ordered type is refused', () => {
     for (const declared of [
       'indexed_collection<character>',
       'indexed_collection<any>',
     ]) {
-      const { v } = evaluated(declared, { str: 'ab' });
-      expect(v.toString()).toBe('["ab","Missing"]');
+      const ce = new ComputeEngine();
+      ce.declare('P', declared);
+      const e = ce.box(['If', MASK, 'P'] as any);
+      ce.assign('P', ce.box({ str: 'ab' }));
+      expect(e.evaluate().operator).toBe('Error');
     }
   });
 });

@@ -3,10 +3,14 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { TEST_PYTHON } from './test-python';
 
-// A restriction or a `Which` over a list that selects no clause at a position
-// gives `Missing` in that cell in the interpreter. In compiled JavaScript, a
-// missing POINT cell is `undefined`, as a single missing point is; a missing
-// number cell stays `NaN`.
+// A restriction or a `Which` over a list of conditions that selects no clause
+// at a position gives `NaN` in a number cell and a point whose coordinates
+// are `NaN` in a point cell, in the interpreter and in compiled JavaScript
+// (`[NaN, NaN]`). Such a cell is never `Missing` or `undefined`, so
+// `IsMissing` and `Coalesce` read it as present. A string arm under a list
+// of conditions is a static error: a string has no `NaN`. This is the
+// selection rule of 2026-11-02 (`docs/BROADCAST-MODEL.md`), which reverses
+// the decision of 2026-10-18 that such a point or string cell is absent.
 
 const ce = new ComputeEngine();
 ce.declare('v', 'list<real>');
@@ -27,7 +31,7 @@ function compiled(json: any): unknown {
   return result.run({ v: V });
 }
 
-describe('COMPILED LIST CELL OF A MISSING POINT', () => {
+describe('COMPILED LIST CELL OF AN UNMATCHED POINT', () => {
   test.each([
     ['Which', ['Which', ['Greater', 'v', 0], ['Tuple', 1, 2]]],
     [
@@ -50,15 +54,15 @@ describe('COMPILED LIST CELL OF A MISSING POINT', () => {
       ],
     ],
     ['restriction', ['If', ['Greater', 'v', 0], ['Tuple', 1, 2]]],
-  ])('%s: the cell is undefined', (_name, json) => {
-    expect(interpreted(json)).toBe('[(1, 2),"Missing"]');
-    expect(compiled(json)).toEqual([[1, 2], undefined]);
+  ])('%s: the cell is a NaN point', (_name, json) => {
+    expect(interpreted(json)).toBe('[(1, 2),(NaN, NaN)]');
+    expect(compiled(json)).toEqual([[1, 2], [NaN, NaN]]);
   });
 
-  test('a read at one index of the same selection is undefined too', () => {
+  test('a read at one index of the same selection is a NaN point too', () => {
     const json = ['At', ['Which', ['Greater', 'v', 0], ['Tuple', 1, 2]], 2];
-    expect(interpreted(json)).toBe('"Missing"');
-    expect(compiled(json)).toBeUndefined();
+    expect(interpreted(json)).toBe('(NaN, NaN)');
+    expect(compiled(json)).toEqual([NaN, NaN]);
   });
 
   test.each([
@@ -70,21 +74,26 @@ describe('COMPILED LIST CELL OF A MISSING POINT', () => {
     expect(Number.isNaN(out[1])).toBe(true);
   });
 
-  test('a string cell is undefined in both forms', () => {
-    // The list form of a restriction gave the object null for a missing string, and
-    // the element-wise `Which` gave `NaN`: both give `undefined` now.
+  test('a string arm is a static error in both forms', () => {
+    // A string has no value for a position that is not selected, so the
+    // selection refuses a string arm under a list of conditions, and the
+    // compilation of the invalid expression throws.
     for (const json of [
       ['Which', ['Greater', 'v', 0], { str: 'a' }],
       ['If', ['Greater', 'v', 0], { str: 'a' }],
+      ['IsMissing', ['At', ['Which', ['Greater', 'v', 0], { str: 'a' }], 2]],
     ]) {
-      expect(interpreted(json)).toBe('["a","Missing"]');
-      expect(compiled(json)).toEqual(['a', undefined]);
+      expect(interpreted(json)).toContain('incompatible-type');
+      expect(() => compile(ce.box(json as any), { fallback: false })).toThrow(
+        /invalid expression/
+      );
     }
   });
 
   test('a position whose condition is absent stays NaN', () => {
     // An absent condition cell (NaN) is the interpreter's error cell, which
-    // compiles to NaN; it is not a position that no clause matched.
+    // compiles to NaN; it is not a position that no clause matched. The
+    // position whose condition is false is the NaN point.
     ce.declare('c', 'list<boolean>');
     const result = compile(ce.box(['Which', 'c', ['Tuple', 1, 2]]), {
       fallback: false,
@@ -93,14 +102,18 @@ describe('COMPILED LIST CELL OF A MISSING POINT', () => {
     const out = result.run({ c: [true, NaN, false] });
     expect(out[0]).toEqual([1, 2]);
     expect(Number.isNaN(out[1])).toBe(true);
-    expect(out[2]).toBeUndefined();
+    expect(out[2]).toEqual([NaN, NaN]);
   });
 });
 
 // A discharge (`IsMissing`, `Coalesce`) reads an absent operand whatever its
 // spelling (R3 of `docs/plans/2026-11-01-absent-value-contract.md`): the
-// compiled `undefined` of a missing point or string cell, and the `NaN` of
-// a missing number cell. Each program computes the interpreter's value.
+// compiled `undefined` of a read past the end of a list of points, and the
+// `NaN` of a missing number or complex cell. The point cell that a selection
+// over a list of conditions does not select is not absent: it is the NaN
+// point, which a discharge reads as present (the selection rule of
+// 2026-11-02, `docs/BROADCAST-MODEL.md`). Each program computes the
+// interpreter's value.
 describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
   const engine = new ComputeEngine();
   engine.declare('v', 'list<real>');
@@ -125,7 +138,7 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
 
   test.each([
     [
-      'IsMissing of the last cell of a selection of points',
+      'IsMissing of the unmatched last cell of a selection of points',
       [
         'Boole',
         [
@@ -133,30 +146,24 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
           ['Last', ['Which', ['Greater', 'v', 0], ['Tuple', 1, 2]]],
         ],
       ],
-      '1',
-      1,
+      '0',
+      0,
     ],
     [
-      'Coalesce of the first cell of the rest',
+      'Coalesce of the unmatched first cell of the rest',
       [
         'Coalesce',
         ['First', ['Rest', ['Which', ['Greater', 'v', 0], ['Tuple', 1, 2]]]],
         ['Tuple', 9, 9],
       ],
-      '(9, 9)',
-      [9, 9],
+      '(NaN, NaN)',
+      [NaN, NaN],
     ],
     [
       'Coalesce of a read past the end of a list of points',
       ['Coalesce', ['At', 'P', 5], ['Tuple', 0, 0]],
       '(0, 0)',
       [0, 0],
-    ],
-    [
-      'IsMissing of an unmatched string cell',
-      ['IsMissing', ['At', ['Which', ['Greater', 'v', 0], { str: 'a' }], 2]],
-      '"True"',
-      true,
     ],
     // A missing complex cell of a restriction over a list of conditions is plain
     // `NaN`, as the element-wise `Which` gives it: the complex value
@@ -179,10 +186,10 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
     expect(run).toEqual(compiledValue);
   });
 
-  test('the cell of a selection of points stays undefined', () => {
+  test('the unmatched cell of a selection of points is a NaN point', () => {
     const [value, run] = both(['Which', ['Greater', 'v', 0], ['Tuple', 1, 2]]);
-    expect(value).toBe('[(1, 2),"Missing"]');
-    expect(run).toEqual([[1, 2], undefined]);
+    expect(value).toBe('[(1, 2),(NaN, NaN)]');
+    expect(run).toEqual([[1, 2], [NaN, NaN]]);
   });
 
   test('IsMissing of the last cell of a complex When', () => {

@@ -272,32 +272,35 @@ describe('Point accessors over a list whose cells can be absent', () => {
       '"Missing"',
     ],
     ['Last of an absent first point', ['Last', AF], MT, '(6, 8)', '(6, 8)'],
+    // A point cell that a list of conditions does not select is a point
+    // whose coordinates are `NaN` (selection rule of 2026-11-02), so its
+    // coordinates are `NaN`, where they were `Missing`.
     [
       'PointX of an element-wise restriction',
       ['PointX', LE],
-      ML,
-      '[3,"Missing"]',
-      '["Missing",6]',
+      'list<number>',
+      '[3,NaN]',
+      '[NaN,6]',
     ],
     [
       'PointY of an element-wise restriction',
       ['PointY', LE],
-      ML,
-      '[4,"Missing"]',
-      '["Missing",8]',
+      'list<number>',
+      '[4,NaN]',
+      '[NaN,8]',
     ],
     [
       'First of an element-wise restriction',
       ['First', LE],
-      MT,
+      'missing | tuple<number, number>',
       '(3, 4)',
-      '"Missing"',
+      '(NaN, NaN)',
     ],
     [
       'Last of an element-wise restriction',
       ['Last', LE],
-      MT,
-      '"Missing"',
+      'missing | tuple<number, number>',
+      '(NaN, NaN)',
       '(6, 8)',
     ],
     [

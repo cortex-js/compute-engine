@@ -343,6 +343,7 @@ import {
   isBareCutOnDescent,
   type AliasDescent,
   typeContainsMissing,
+  typeCouldHoldMissing,
   typeHasNanFreeNumericCell,
   widen,
   widenElementTypes,
@@ -7658,6 +7659,16 @@ export class BoxedFunction
         if (heldError !== undefined) return heldError;
       }
 
+      // 1c/ A restricted collection with a scalar condition is selected
+      // whole, so an operator that maps over its operands lifts the guard
+      // instead of zipping the restricted cells (`liftWholeRestrictions`).
+      if (def.broadcastable || isUserFunctionDef(def)) {
+        const lifted = liftWholeRestrictions(this, def, (c) =>
+          c.evaluate(options)
+        );
+        if (lifted !== undefined) return lifted.evaluate(options);
+      }
+
       //
       // 2/ Broadcast if applicable
       // Skip broadcasting for Add/Multiply with tensors - they have their own
@@ -9119,6 +9130,44 @@ export class BoxedFunction
       if (def.lazy === true && this._localScope === undefined) {
         const heldError = heldErrorCallback(this, def);
         if (heldError !== undefined) return heldError;
+      }
+
+      // 1c/ See the synchronous route.
+      if (def.broadcastable || isUserFunctionDef(def)) {
+        const lifted = await liftWholeRestrictionsAsync(this, def, (c) =>
+          c.evaluateAsync(options)
+        );
+        // When the guard is not decided, the `If` handler holds the
+        // restriction over its arm, which it evaluates synchronously: an
+        // operator with only an `evaluateAsync` handler would stay
+        // unevaluated in the held arm (`If(0 < t, AsyncOnly([1, 2]))`). So
+        // the lifted call is evaluated here, on the asynchronous route, and
+        // the `If` holds its value (`If(0 < t, [6, 7])`). A guard that the
+        // `If` handler decides (`True`, `False`, an error, `Missing`,
+        // `Undefined`) is left to that handler, as on the synchronous route:
+        // it gives the error or the absent value without evaluating the call.
+        // Two differences from the synchronous route remain: the held form
+        // holds the evaluated call where the synchronous `If` can hold the
+        // call unevaluated (a lazy or infinite value); and a joined guard
+        // that is false only as a whole (`And(c, Not(c))`) is decided after
+        // the call is evaluated. Both give the same value once the guard is
+        // decided; they differ in when an effect inside the call runs.
+        if (
+          lifted !== undefined &&
+          isFunction(lifted, 'If') &&
+          lifted.nops === 2 &&
+          PLANNED_RESTRICTION_CALLS.has(lifted.op2) &&
+          errorValue(lifted.op1) === undefined &&
+          !['True', 'False', 'Missing', 'Undefined'].some((s) =>
+            isSymbol(lifted.op1, s)
+          )
+        ) {
+          const value = await lifted.op2.evaluateAsync(options);
+          return this.engine
+            ._fn('If', [lifted.op1, value])
+            .evaluateAsync(options);
+        }
+        if (lifted !== undefined) return lifted.evaluateAsync(options);
       }
 
       //
@@ -11622,6 +11671,230 @@ function withEvaluatedRestriction(
 ): Expression {
   if (c === undefined || !isFunction(op) || c.isSame(op.op1)) return op;
   return op.engine._fn('If', [c, op.op2]);
+}
+
+/**
+ * The application `expr` with the guard of each restricted collection
+ * operand lifted outward, `If(c, op(…, L, …))`, or `undefined` when no
+ * operand is a restricted collection with a scalar condition.
+ *
+ * A restriction `If(c, L)` whose condition `c` is a scalar selects the
+ * collection `L` WHOLE: where `c` is false, the value is the absent value of
+ * the whole list, `Missing`, not a list of absent cells. An operator that
+ * maps over its operands must keep that rule, so `Sin(If(c, [1, 2, 3]))` is
+ * `If(c, Sin([1, 2, 3]))`, which is `Missing` when `c` is false, as
+ * `If(c, [1, 2, 3])` is. The held restriction presents as the collection of
+ * its cells `If(c, L_i)` (`isCollection`, `count`, `each()`), and without
+ * this lift the broadcast steps zip those cells, which gave
+ * `[NaN, NaN, NaN]` when `c` is false (rule 4 of the selection rule of
+ * 2026-11-02, `docs/BROADCAST-MODEL.md`).
+ *
+ * A restriction whose condition is a mask (a list of booleans) is not
+ * lifted: it selects element-wise, and its cells are the cells of the
+ * broadcast.
+ *
+ * A restriction is lifted or selected only when the type of its condition
+ * is a subtype of `boolean`. A condition of a wider type (`unknown`, or
+ * `boolean | list<boolean>`) can be a mask at run time, and a mask selects
+ * element-wise: with `f(xs) = Length(xs)` and `c` holding `[True, False]`,
+ * `f(If(c, [1, 2]))` is `2`, which a lift or a selection would change.
+ *
+ * Only the operands at a position that the call maps element by element
+ * are lifted (`liftsRestrictionAt`). At another position of a user
+ * function, the function must receive the whole selection, the list or
+ * `Missing`, and its body decides what to do with it. The condition is
+ * evaluated once: when it is `True`, the function receives `L`; when it is
+ * `False`, it receives `Missing`; otherwise the operand stays the held
+ * restriction `If(c, L)`. With `f(xs) = Coalesce(xs, [0])`,
+ * `f(If(c, [1, 2]))` is then `[0]` when `c` is false, where the lift gave
+ * `Missing` without running the body, and the broadcast of the user
+ * function over the cells `If(c, L_i)` gave `[[0], [0]]`. No two-branch
+ * `If(c, f(…, L, …), f(…, Missing, …))` is built: when `c` is undecided,
+ * that form does not present as a collection, and the held restriction
+ * does.
+ *
+ * `evaluateCondition` evaluates a condition (synchronously, or through
+ * `evaluateAsync` in the async route). It is called once for each distinct
+ * condition, lifted or not: a condition with an effect (a random draw) that
+ * is a guard at one position and a selection at another has one value.
+ *
+ * The result is an expression that the caller evaluates with its own
+ * options: the call itself when every guard is `True`, `Missing` when a
+ * guard is `False`, and otherwise `If(g, call)`, where `g` is the evaluated
+ * guard. The `If` handler then holds the restriction over the evaluated
+ * call, or gives the verdict of a guard that is an error, `Missing` or
+ * `Undefined`. The `If` handler gives the caller's options only to a held
+ * call: a selected arm receives only the numeric request, so a guard that is
+ * `True` is not sent through it.
+ */
+function liftWholeRestrictions(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  evaluateCondition: (c: Expression) => Expression
+): Expression | undefined {
+  if (PLANNED_RESTRICTION_CALLS.has(expr)) return undefined;
+  const plan = wholeRestrictionPlan(expr, def);
+  if (plan === undefined) return undefined;
+  const values = plan.conditions.map(evaluateCondition);
+  return applyWholeRestrictionPlan(expr, plan, values);
+}
+
+/** Async mirror of `liftWholeRestrictions`. */
+async function liftWholeRestrictionsAsync(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  evaluateCondition: (c: Expression) => Promise<Expression>
+): Promise<Expression | undefined> {
+  if (PLANNED_RESTRICTION_CALLS.has(expr)) return undefined;
+  const plan = wholeRestrictionPlan(expr, def);
+  if (plan === undefined) return undefined;
+  const values: Expression[] = [];
+  for (const c of plan.conditions) values.push(await evaluateCondition(c));
+  return applyWholeRestrictionPlan(expr, plan, values);
+}
+
+/**
+ * The calls that `applyWholeRestrictionPlan` built. The restrictions of
+ * such a call were already lifted or selected, and its conditions were
+ * evaluated. When the call is evaluated, the plan is not made again: this
+ * would evaluate each held condition once more.
+ */
+const PLANNED_RESTRICTION_CALLS = new WeakSet<Expression>();
+
+/**
+ * The operands of `expr` with each liftable restriction replaced by its
+ * collection (`ops`), the distinct conditions of the restrictions
+ * (`conditions`), the index in `conditions` of the condition of each lifted
+ * restriction (`guards`, without repeats), and the restrictions at a
+ * position that is not lifted (`selections`), each with the index of its
+ * condition in `conditions`. `undefined` when no operand is a restricted
+ * collection with a condition of type `boolean`.
+ */
+function wholeRestrictionPlan(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition
+):
+  | {
+      ops: ReadonlyArray<Expression>;
+      guards: number[];
+      conditions: Expression[];
+      selections: { index: number; condition: number; value: Expression }[];
+    }
+  | undefined {
+  // Most calls have no restriction operand: exit before any allocation.
+  if (!expr.ops.some((op) => isFunction(op, 'If') && op.nops === 2))
+    return undefined;
+  const guards: number[] = [];
+  const conditions: Expression[] = [];
+  const indexOf = (c: Expression): number => {
+    const k = conditions.findIndex((x) => x.isSame(c));
+    return k < 0 ? conditions.push(c) - 1 : k;
+  };
+  const selections: {
+    index: number;
+    condition: number;
+    value: Expression;
+  }[] = [];
+  const ops = expr.ops.map((op, i) => {
+    const parts = restrictionParts(op);
+    if (
+      parts === undefined ||
+      op.isCollection !== true ||
+      !parts.condition.type.matches('boolean')
+    )
+      return op;
+    if (!liftsRestrictionAt(def, i)) {
+      if (isUserFunctionDef(def))
+        selections.push({
+          index: i,
+          condition: indexOf(parts.condition),
+          value: parts.value,
+        });
+      return op;
+    }
+    const k = indexOf(parts.condition);
+    if (!guards.includes(k)) guards.push(k);
+    return parts.value;
+  });
+  if (guards.length === 0 && selections.length === 0) return undefined;
+  return { ops, guards, conditions, selections };
+}
+
+/**
+ * The call of `wholeRestrictionPlan` with each selection resolved by the
+ * value of its condition (`values`, in the order of `plan.conditions`):
+ * `True` gives the collection, `False` gives `Missing`, any other value
+ * keeps the restriction over its evaluated condition,
+ * `If(value, L)`. Then the lifted guards: when one of them is `False`, the
+ * result is `Missing`, the absent value of the whole list; when all of them
+ * are `True`, the result is the call; otherwise the guards that are not
+ * `True` wrap the call, `If(guard, call)`. `undefined` when nothing
+ * changed, so that the caller continues with the call as it is.
+ */
+function applyWholeRestrictionPlan(
+  expr: BoxedFunction,
+  plan: NonNullable<ReturnType<typeof wholeRestrictionPlan>>,
+  values: ReadonlyArray<Expression>
+): Expression | undefined {
+  const ce = expr.engine;
+  let changed = plan.guards.length > 0;
+  const ops = [...plan.ops];
+  for (const { index, condition, value } of plan.selections) {
+    const c = values[condition];
+    if (isSymbol(c, 'True')) ops[index] = value;
+    else if (isSymbol(c, 'False')) ops[index] = ce.Missing;
+    else {
+      const held = withEvaluatedRestriction(expr.ops[index], c);
+      if (held === expr.ops[index]) continue;
+      ops[index] = held;
+    }
+    changed = true;
+  }
+  if (!changed) return undefined;
+  const guards = plan.guards.map((k) => values[k]);
+  if (guards.some((g) => isSymbol(g, 'False'))) return ce.Missing;
+  const body = expr._withSameBinding(ops);
+  PLANNED_RESTRICTION_CALLS.add(body);
+  const open = guards.filter((g) => !isSymbol(g, 'True'));
+  if (open.length === 0) return body;
+  const guard = open.length === 1 ? open[0] : ce._fn('And', open);
+  return ce._fn('If', [guard, body]);
+}
+
+/**
+ * True when the call of `def` maps a collection at operand position `i`
+ * element by element, so that a restriction over that collection can be
+ * lifted over the whole call (`liftWholeRestrictions`).
+ *
+ * - A broadcastable library operator maps every operand.
+ * - A user function maps the operand at a parameter whose declared type is
+ *   a scalar type (the element-wise broadcast of a user function). An
+ *   unannotated parameter (`unknown`) is not lifted: its body can take the
+ *   collection whole or discharge its absence (`Coalesce`, `??`). A
+ *   parameter with a default value and a rest parameter are not lifted
+ *   either: each of them gives a value of its own for an absent argument.
+ *   A user function is lifted only when an absent argument cannot reach its
+ *   body: its absence behavior is `propagate` (the call is `Missing`), or
+ *   it is a function literal (its typed parameter refuses `Missing`). A
+ *   declared function whose behavior is `pass-through` (a non-numeric
+ *   scalar parameter, `f(s: string) = Coalesce(s, "none")`) or `handle`
+ *   runs its body with `Missing`, so the lift, which skips the body, would
+ *   change its value.
+ */
+function liftsRestrictionAt(def: BoxedOperatorDefinition, i: number): boolean {
+  if (def.resolvedMissingBehavior === 'handle') return false;
+  if (!isUserFunctionDef(def)) return def.broadcastable;
+  if (!def._isLambda && def.resolvedMissingBehavior !== 'propagate')
+    return false;
+  const sig = def.signature.type;
+  if (typeof sig === 'string' || sig.kind !== 'signature') return false;
+  const args = sig.args ?? [];
+  if (i >= args.length) return false;
+  const t = args[i].type;
+  // A parameter whose type admits `Missing` (`x: real | missing`) gives the
+  // body an absent argument to discharge (`Coalesce(x, 0)`): the selection
+  // rule applies, not the lift.
+  return t !== 'unknown' && isScalarType(t) && !typeCouldHoldMissing(t);
 }
 
 /** Async mirror of `evaluateBroadcastLiftsOnce`. */

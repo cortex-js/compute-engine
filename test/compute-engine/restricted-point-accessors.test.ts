@@ -107,14 +107,16 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
     expect(type(['PointX', ['List', 'Missing', ['Tuple', 1, 2]]])).toBe(
       'list<integer | missing | nan^2>'
     );
-    // An element-wise restriction whose first condition is false.
+    // An element-wise restriction whose first condition is false. A masked
+    // point is a point whose coordinates are `NaN` (selection rule of
+    // 2026-11-02; it was `Missing`), so its coordinate is `NaN`.
     const elementwise = [
       'If',
       ['List', c, ['Less', 't', 0]],
       ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
     ];
-    expect(value(['PointX', elementwise], -1)).toBe('["Missing",3]');
-    expect(value(['PointX', elementwise], 2)).toBe('[1,"Missing"]');
+    expect(value(['PointX', elementwise], -1)).toBe('[NaN,3]');
+    expect(value(['PointX', elementwise], 2)).toBe('[1,NaN]');
   });
 
   test('PointZ of a restricted 2-D point is a dimension error whatever the condition', () => {

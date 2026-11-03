@@ -5,11 +5,14 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * A restriction, `If` and `Which` over a nested mask, on both routes (ROADMAP
  * CE-223).
  *
- * - CE-223.1 (user decision 2026-10-23): `If(C, v)` with a mask `C` of rank
- *   2 or more selects cell by cell at every level. Before, the interpreter
- *   kept the restriction unevaluated, and
- *   the compiled code read each row as one condition that is not `True`
- *   (`[NaN, NaN]`).
+ * - CE-223.1: a mask of rank 2 or more is not a condition (selection rule
+ *   of 2026-11-02, `docs/BROADCAST-MODEL.md`, which reverses the user
+ *   decision of 2026-10-23 that such a mask selects cell by cell at every
+ *   level). A condition whose static type is a matrix or a nested list is a
+ *   static error, and a compilation declines. A condition whose static type
+ *   does not settle its shape (`B < 0` over `B: tensor<number>`) compiles;
+ *   when its value is nested, the interpreter gives an `incompatible-type`
+ *   error and the compiled code `NaN`, its compiled spelling.
  * - CE-223.2: an arm typed as a point or a list of points that holds one
  *   point at run time is lifted whole, as the interpreter lifts it. Before,
  *   the compiled code indexed the point as a list.
@@ -63,81 +66,66 @@ function check(
   expect(r.run(inputs)).toEqual(interpreted);
 }
 
-describe('CE-223.1: When with a mask of rank 2 selects cell by cell', () => {
+/** The compiled value is `NaN` where the interpreter's value is an error. */
+function checkRefusedAtRunTime(
+  ce: ComputeEngine,
+  json: unknown,
+  inputs: Record<string, unknown>
+): void {
+  const r = compile(ce.box(json as any), {
+    to: 'javascript',
+    fallback: false,
+  } as any) as any;
+  expect(r.success).toBe(true);
+  let text = JSON.stringify(json);
+  for (const [name, value] of Object.entries(inputs))
+    text = text.split(`"${name}"`).join(JSON.stringify(literal(value)));
+  expect(ce.box(JSON.parse(text)).evaluate().operator).toBe('Error');
+  expect(r.run(inputs)).toEqual(NaN);
+}
+
+/** The compilation of `json` declines: the expression is a static error. */
+function declines(ce: ComputeEngine, json: unknown): void {
+  const e = ce.box(json as any);
+  expect(e.isValid).toBe(false);
+  expect(() =>
+    compile(e, { to: 'javascript', fallback: false } as any)
+  ).toThrow(/invalid expression/);
+}
+
+describe('CE-223.1: a mask of rank 2 is not a condition', () => {
   const ce = new ComputeEngine();
   ce.declare('C', 'matrix<boolean^(2x2)>');
   ce.declare('v', 'real');
   ce.declare('M', 'matrix<integer^(2x2)>');
   ce.declare('B', 'tensor<number>');
-  const mask = [
-    [true, false],
-    [false, true],
-  ];
 
-  test('the interpreter selects at every level', () => {
+  test('the interpreter refuses a nested list condition', () => {
     const e = ce.box([
       'If',
       ['List', ['List', 'True', 'False'], ['List', 'False', 'True']],
       5,
     ]);
-    expect(e.evaluate().toString()).toBe('[[5,NaN],[NaN,5]]');
-    // The same value as the else-less `If`.
-    const i = ce.box([
-      'If',
-      ['List', ['List', 'True', 'False'], ['List', 'False', 'True']],
-      5,
-    ]);
-    expect(e.evaluate().isSame(i.evaluate())).toBe(true);
+    expect(e.isValid).toBe(false);
+    expect(e.evaluate().toString()).toContain('incompatible-type');
   });
 
-  test('the interpreter type of the restriction follows the mask', () => {
-    expect(ce.box(['If', 'C', 'v']).type.toString()).toBe(
-      ce.box(['If', 'C', 'v']).type.toString()
-    );
-  });
-
-  test('a matrix value under a matrix mask', () => {
-    check(ce, ['If', 'C', 'M'], {
-      M: [
-        [1, 2],
-        [3, 4],
-      ],
-      C: mask,
-    });
-  });
-
-  test('a scalar value under a matrix mask', () => {
-    check(ce, ['If', 'C', 'v'], { v: 5, C: mask });
+  test('a matrix mask declines', () => {
+    declines(ce, ['If', 'C', 'M']);
+    declines(ce, ['If', 'C', 'v']);
   });
 
   test('a mask whose rank is known at run time only', () => {
-    // `B < 0` over a `tensor<number>`: a matrix at run time is a mask of
-    // rank 2, a vector a mask of rank 1.
-    check(ce, ['If', ['Less', 'B', 0], 'v'], {
+    // `B < 0` over a `tensor<number>`: a vector at run time is a flat
+    // mask; a matrix is a nested mask, which is refused.
+    check(ce, ['If', ['Less', 'B', 0], 'v'], { v: 5, B: [1, -1, -2] });
+    checkRefusedAtRunTime(ce, ['If', ['Less', 'B', 0], 'v'], {
       v: 5,
       B: [
         [1, -1],
         [-2, 3],
       ],
     });
-    check(ce, ['If', ['Less', 'B', 0], 'v'], { v: 5, B: [1, -1, -2] });
-    check(ce, ['If', ['Less', 'B', 0], 'B'], {
-      B: [
-        [1, -1],
-        [-2, 3],
-      ],
-    });
-  });
-
-  test('a value of lower rank than the mask is refused', () => {
-    // The interpreter answers `incompatible-dimensions`; compiled code
-    // spells the error as `NaN`, as for `If`.
-    const e = ce.box([
-      'If',
-      ['List', ['List', 'True', 'False'], ['List', 'False', 'True']],
-      ['List', 10, 20],
-    ]);
-    expect(e.evaluate().toString()).toContain('incompatible-dimensions');
   });
 });
 
@@ -147,19 +135,8 @@ describe('CE-223.2: an arm that is a point or a list of points', () => {
   ce.declare('C', 'matrix<boolean^(2x2)>');
   ce.declare('F', 'list<boolean>');
 
-  test('one point under a nested mask is lifted whole', () => {
-    check(
-      ce,
-      ['If', 'C', 'P'],
-      {
-        C: [
-          [true, false],
-          [false, true],
-        ],
-        P: [1, 2],
-      },
-      ['P']
-    );
+  test('one point under a nested mask declines', () => {
+    declines(ce, ['If', 'C', 'P']);
   });
 
   test('one point under a flat mask is lifted whole', () => {
@@ -187,17 +164,7 @@ describe('CE-223.3: When(B, B < 0) with B: broadcastable<number>', () => {
   const ce = new ComputeEngine();
   ce.declare('B', 'broadcastable<number>');
 
-  test.each([
-    [[1, -2, 3]],
-    [-2],
-    [2],
-    [
-      [
-        [1, -2],
-        [-3, 4],
-      ],
-    ],
-  ])('B = %j', (B) => {
+  test.each([[[1, -2, 3]], [-2], [2]])('B = %j', (B) => {
     const r = compile(ce.box(['If', ['Less', 'B', 0], 'B']), {
       to: 'javascript',
       fallback: false,
@@ -208,5 +175,14 @@ describe('CE-223.3: When(B, B < 0) with B: broadcastable<number>', () => {
       ce.box(['If', ['Less', lit as any, 0], lit as any]).evaluate().json
     );
     expect(r.run({ B })).toEqual(interpreted);
+  });
+
+  test('a matrix B is a nested mask, refused at run time', () => {
+    checkRefusedAtRunTime(ce, ['If', ['Less', 'B', 0], 'B'], {
+      B: [
+        [1, -2],
+        [-3, 4],
+      ],
+    });
   });
 });
