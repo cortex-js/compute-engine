@@ -139,7 +139,7 @@ nightly run, tell the user; do not take over that investigation unless asked.
   `src/epsil/docs/`, so edit the page in this repo instead. Run each example
   that a page shows against the current source before you write its result.
 - Follow BUILD.md and the shared-box specifics for completion checks; after-edit
-  hooks and commit-time formatting do not replace them. Capture test exit codes
+  hooks do not replace them. Capture test exit codes
   directly rather than relying on the exit status of an output-filtering pipe.
 - The instructions exist to make the work efficient. When one asks for work that
   looks redundant in the case at hand (a check that already ran on the same

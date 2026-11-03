@@ -25,7 +25,7 @@
     "check:deps": "madge --circular --extensions ts src/compute-engine",
     "check:corpus": "tsx docs/mathnet/scripts/check-corpus.ts",
     "check:roundtrip": "tsx docs/mathnet/scripts/check-roundtrip.ts",
-    "lint": "npm run lint:code && npm run format:check",
+    "lint": "npm run lint:code",
     "lint:code": "oxlint src",
     "ci:corpus-pipeline": "tsx scripts/fungrim/validate.ts --corpus data/fungrim --check && tsx scripts/fungrim/artifact-freshness.ts && tsx scripts/fungrim/apply-solve-templates.ts --check && tsx scripts/fungrim/recompile-drift.ts && tsx scripts/fungrim/compile-properties.ts --check && tsx scripts/rubi/bundle-corpus.ts && git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json && npm run check:corpus && npm run check:roundtrip",
     "ci": "npm run check:docs && npm run test:tools && npm run lint && npm run typecheck && npm run check:deps && npm run ci:corpus-pipeline && bash scripts/test-types.sh && npm test",
@@ -36,7 +36,7 @@
     "format:check": "prettier --check 'src/**/*.{ts,js,css,md}' 'vscode-epsil/{src,test}/**/*.{ts,mjs}'",
     "test:types": "npm run types && bash scripts/test-types.sh",
     "types": "node scripts/types.mjs",
-    "ci:extended": "npm run ci && npm run test:python",
+    "ci:extended": "npm run ci && npm run format:check && npm run test:python",
     "test:python": "node scripts/test-python.mjs",
     "test:core": "node scripts/test-core.mjs",
     "check:docs": "node scripts/check-doc-references.mjs",
@@ -171,7 +171,6 @@
     "husky": "^9.1.7",
     "jest": "^30.5.2",
     "jest-silent-reporter": "^0.6.0",
-    "lint-staged": "^16.4.0",
     "madge": "^8.0.0",
     "mdast-util-from-markdown": "^2.1.0",
     "minimatch": "11.0.1",
@@ -200,9 +199,5 @@
     "typedoc": {
       "minimatch": "^10.2.5"
     }
-  },
-  "lint-staged": {
-    "src/**/*.{ts,js,css,md}": "prettier --write",
-    "vscode-epsil/{src,test}/**/*.{ts,mjs}": "prettier --write"
   }
 }

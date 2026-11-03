@@ -1,6 +1,0 @@
-# lint-staged restores the unstaged part of a partly staged file by line
-# number. When Prettier changes the line count of the staged part, that
-# restore can put lines at the wrong place with no error. The check below
-# refuses such a commit first; see the header of the script.
-node scripts/check-partly-staged-formatted.mjs || exit 1
-npx --no-install lint-staged

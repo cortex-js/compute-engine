@@ -128,9 +128,11 @@ REGISTRY=$(npm config get registry)
 NPM_USER=$(npm whoami --registry "$REGISTRY" 2>/dev/null) ||
   fail "Not authenticated with the npm registry ($REGISTRY). Run 'npm login', then run the release again."
 echo "✓ Authenticated with $REGISTRY as $NPM_USER"
-# The checks of `npm run ci` that the full suite does not run. They are
-# skipped when the caller says that `npm run ci:extended` passed, as the
-# publish check does (GITHUB_ACTIONS=true or CE_FULL_SUITE_PASSED=1).
+# The checks of `npm run ci` that the full suite does not run, and the
+# Prettier check. They are skipped when the caller says that
+# `npm run ci:extended` passed, as the publish check does (GITHUB_ACTIONS=true
+# or CE_FULL_SUITE_PASSED=1): `ci:extended` runs all of them, the Prettier
+# check included.
 # CHECKED_SHA is the commit that they checked: the release commit must have
 # it as its parent (step 4).
 CHECKED_SHA=$(git rev-parse HEAD)
@@ -249,15 +251,6 @@ if [ "$(git log -1 --format=%s "$RELEASE_SHA")" != "$VERSION" ] ||
   fail "HEAD moved right after the release commit: ${RELEASE_SHA:0:9} is not it. Nothing was published. Find the commit \"$VERSION\" with 'git log', then run 'npm publish' from a tree where it is HEAD."
 fi
 echo "✓ Committed ${RELEASE_SHA:0:9} \"$VERSION\""
-# With `--only`, a pre-commit hook that rewrites a file (the lint-staged
-# prettier step) leaves the old content staged, as a change that would undo
-# the rewrite in the next commit. The generated documentation is excluded
-# from prettier today (.prettierignore), so this is a guard.
-# shellcheck disable=SC2086 # The file lists are split on purpose.
-if [ -n "$(git diff --cached --name-only -- $VERSION_FILES $DOC_FILES)" ]; then
-  git diff --cached --stat -- $VERSION_FILES $DOC_FILES
-  fail "The commit hook changed these files: the index still holds their old content. Run 'git add' on them before any other commit, then run 'npm publish'."
-fi
 
 # Step 5: the publish, with the build and test checks of its hooks.
 # CE_RELEASE_SHA makes prepublish-check.sh refuse, before the upload, when

@@ -140,8 +140,9 @@ records its result. It takes the lock automatically.
 
 ### Formatting, hooks, and releases
 
-Prettier formats staged source at commit time. It does not replace validation,
-review, or staging-queue checks. Husky owns `core.hooksPath` (`.husky/_`);
+No commit hook formats the source; the release checks formatting, and
+`npm run format` fixes it (BUILD.md). Do not run Prettier on a shared file: it
+rewraps lines of other sessions, which then show in your diff. Husky owns `core.hooksPath` (`.husky/_`);
 `.husky/post-commit` forwards to the common Git directory's local post-commit
 hook for queue cleanup. Integrate additional hooks without replacing that path.
 

@@ -27,8 +27,8 @@ Useful commands:
 
 The extension sources (`src/` and `test/`) use the root prettier configuration,
 like the rest of the repository. The root `npm run format` and
-`npm run format:check` include them, and the pre-commit hook formats them when
-they are staged.
+`npm run format:check` include them. No commit hook formats them; the release
+checks their formatting.
 
 The server is transport-agnostic (`vscode-languageserver` picks its transport
 from the command line), so it can also be driven directly for debugging:

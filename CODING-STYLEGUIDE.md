@@ -11,8 +11,8 @@ written, and propose a change to a rule rather than skip it.
 ## Formatting and scope
 
 - Let Prettier own formatting; do not maintain a second set of spacing or
-  wrapping rules. Source formatting is applied by the commit hook and checked by
-  CI, as described in BUILD.md.
+  wrapping rules. Do not run Prettier on the files you edit: `npm run format`
+  runs on the whole tree before a release, as described in BUILD.md.
 - Follow surrounding naming and module conventions. Choose names that describe
   behavior or domain concepts; avoid unexplained abbreviations.
 - Keep changes focused. Avoid unrelated renaming, reformatting, and refactoring.

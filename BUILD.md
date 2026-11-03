@@ -15,15 +15,16 @@ enables Husky hooks; it does not build bundles or generate documentation. Git
 installs also need `npm run build` before using package exports. Worktree setup
 is documented in the shared-box specifics.
 
-All source files use Prettier. The pre-commit hook runs lint-staged on staged
-`src/**/*.{ts,js,css,md}` and `vscode-epsil/{src,test}/**/*.{ts,mjs}` files and
-preserves unstaged edits. Agents still stage only their intended hunks and never
-commit on the user's behalf. CI is the formatting gate even when hooks are
-bypassed.
+All source files use Prettier, but no commit hook and no CI job formats or
+checks them. Commits between releases can hold unformatted code. The release
+checks (`scripts/release-checks.sh`) run `npm run format:check` and stop the
+release when a file is not formatted: run `npm run format` and commit the result
+as a commit of its own. Agents do not run Prettier on the files they edit, so
+that their diffs hold only their changes.
 
 - `npm run format`: format all source files explicitly.
 - `npm run format:check`: check source formatting without modifying files.
-- `npm run lint`: Oxlint plus the formatting check. The public explicit-`any`
+- `npm run lint`: Oxlint. It does not check formatting. The public explicit-`any`
   policy is an Oxlint rule, with narrow documented exceptions.
 
 ## Shared agent skills
@@ -52,8 +53,7 @@ agents. Repository-wide validation remains the orchestrator's responsibility.
 | Changing documentation inputs | `npm run doc`; review the generated changes.                                 |
 | Preparing a release           | `npm run release`; see the release sequence below.                           |
 
-Prettier runs automatically on staged source files when committing. Normal
-checks do not require Python. Release CI runs extended validation, and slower
+Normal checks do not require Python. Release CI runs extended validation, and slower
 suites also run nightly. A local release runs the same checks: the publish check
 runs the full test suite (`scripts/ci-nightly.sh`), and
 `scripts/release-checks.sh` runs the checks of `npm run ci` that the full suite
@@ -94,8 +94,8 @@ Before returning a delegated implementation:
    and `npx oxlint` on the changed source files. After a review fix, run only
    the test files that the fix can affect. Do not run, unless the task
    assigns it: a batch of many test files, the full suite, `npm run lint`,
-   `npm run test:python`, or a Prettier check or write (the pre-commit hook
-   formats staged source). The after-edit hook type-checks each edit, so run
+   `npm run test:python`, or a Prettier check or write (the release checks
+   formatting). The after-edit hook type-checks each edit, so run
    the compiler by hand only when the hook is off or the task asks for it.
 2. Report changed files, exact commands and results, checks not run and why,
    recommended remaining validation, and unresolved issues. Returning unchecked
@@ -172,7 +172,7 @@ release requirements. Worker limits and box-lock rules still apply.
 | `npm run test:perf`                          | Run timing assertions serially with `CE_PERF=1`.                                                                  |
 | `npm run ci:corpus-pipeline`                 | Check corpus regressions and generated rule artifacts.                                                            |
 | `npm run ci`                                 | Lint/format, typecheck, dependencies, corpus checks, consumer declarations, and normal runtime tests.             |
-| `npm run ci:extended`                        | Normal CI plus Python execution validation.                                                                       |
+| `npm run ci:extended`                        | Normal CI plus the Prettier check and Python execution validation.                                                |
 | `npm run build`                              | Incremental declarations, both JavaScript bundle variants, version stamping, and production consumer smoke tests. |
 | `npm run build -- development`               | Generate declarations and bundles without production consumer smoke tests.                                        |
 | `npm run clean`                              | Remove `build` and `dist`, including declaration cache metadata.                                                  |
@@ -225,7 +225,9 @@ npm run release # a minor release; or: npm run release -- patch (major, or an ex
    `CHANGELOG.md` has no `## [Unreleased]` heading, and when the latest full
    test run failed. Then it runs `scripts/release-checks.sh`: lint,
    `check:docs`, `check:deps`, `test:tools` and the corpus pipeline, the checks
-   of `npm run ci` that the full test suite does not run.
+   of `npm run ci` that the full test suite does not run, and
+   `npm run format:check`. When the formatting check fails, run
+   `npm run format`, commit the result, and run the release again.
 2. `npm version <bump> --no-git-tag-version`. The version hook
    (`scripts/version.sh`) writes the version and date in the changelog and the
    version of the VS Code extension.
