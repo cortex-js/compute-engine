@@ -554,25 +554,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   add(rhs: number | Expression): Expression {
-    // An absent symbol (`Missing`, `Undefined`) plus a number is `NaN`:
-    // arithmetic with an absent operand is `NaN` (user decision of
-    // 2026-09-25). The `+ 0` fastpath below would return the symbol itself.
-    // An expression operand goes to `add()`, which reads the absent term.
-    if (typeof rhs === 'number' && isAbsentSymbol(this)) return this.engine.NaN;
+    // An absent symbol (`Missing`) plus a number is `Missing`: `Missing` is
+    // a result only, and an operator over it gives `Missing`
+    // (`docs/ERROR-MODEL.md`). An expression operand goes to `add()`, which
+    // reads the absent term.
+    if (typeof rhs === 'number' && isAbsentSymbol(this))
+      return this.engine.Missing;
     if (rhs === 0) return this;
     return add(this, this.engine.expr(rhs));
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
-    // An absent symbol times a number is `NaN`, for the reason given in
-    // `add()`: the `· 1`, `· 0` and `· -1` fastpaths below would return the
-    // symbol, `0` or `-Missing`. An expression operand goes to `mul()`,
-    // which reads the absent factor (and answers `Missing` beside a point).
+    // An absent symbol times a number is `Missing`, for the reason given in
+    // `add()`: the `· 0` and `· -1` fastpaths below would return `0` or
+    // `-Missing`. An expression operand goes to `mul()`, which reads the
+    // absent factor.
     if (
       (typeof rhs === 'number' || rhs instanceof NumericValue) &&
       isAbsentSymbol(this)
     )
-      return this.engine.NaN;
+      return this.engine.Missing;
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
 

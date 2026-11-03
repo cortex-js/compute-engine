@@ -176,9 +176,11 @@ describe('Tycho 257 — an indexed point carrier reaches the accessors', () => {
     return ce;
   }
 
-  test('the carrier really does index to a three-member union', () => {
+  test('the carrier really does index to a union of a number and a point', () => {
+    // The marker of a read that may find nothing is implicit
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
     expect(withCarrier().box(['At', 'P', 2]).type.toString()).toBe(
-      'missing | number | tuple<number, number>'
+      'number | tuple<number, number>'
     );
   });
 

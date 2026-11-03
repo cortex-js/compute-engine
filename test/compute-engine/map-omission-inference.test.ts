@@ -13,8 +13,9 @@ describe('Map omission inference preserves the remaining data contract', () => {
       ce.declare('xs', type);
       ce.assign('xs', ce.box(['List', ['List', 1, 'Missing'], ['List', 4]]));
       const map = ce.box(['Map', 'Sqrt', 'xs']);
+      // `Sqrt(Missing)` is `Missing`, so the elements can be absent.
       expectTypeBetween(map, {
-        atMost: 'list<indexed_collection<any> | number | nothing>',
+        atMost: 'list<indexed_collection<any> | missing | number | nothing>',
       });
       expect(isSubtype('nothing', collectionElementType(map.type.type)!)).toBe(
         true

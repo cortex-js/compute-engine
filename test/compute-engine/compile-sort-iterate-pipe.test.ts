@@ -174,23 +174,19 @@ describe('COMPILED SORT WITH A SORT KEY', () => {
 });
 
 describe('COMPILED SORT WITH A COMPARATOR', () => {
+  // A declared input cannot hold an absent element (a declared type cannot
+  // name `missing`, `docs/ERROR-MODEL.md`, "`Missing` is a result only"), so
+  // the absent element is written in the list, and only the interpreter is
+  // checked.
   test('the result type is read over the present elements', () => {
     // The comparator is never called with an absent element, so a
     // `Missing` element does not make its result `boolean | missing`.
-    ce.declare('M', 'list<real | missing>');
-    const expr = ['Sort', 'M', comparator(['Greater', 'a', 'b'])];
-    expect(interpreted(expr, { M: ['List', 3, 'Missing', 1, 2] })).toEqual([
-      3,
-      2,
-      1,
-      undefined,
-    ]);
-    expect(compiled(expr, { M: [3, undefined, 1, 2] })).toEqual([
-      3,
-      2,
-      1,
-      undefined,
-    ]);
+    const expr = [
+      'Sort',
+      ['List', 3, 'Missing', 1, 2],
+      comparator(['Greater', 'a', 'b']),
+    ];
+    expect(interpreted(expr, {})).toEqual([3, 2, 1, undefined]);
   });
 
   test('a number result: negative puts the first element first', () => {

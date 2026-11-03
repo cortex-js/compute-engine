@@ -687,8 +687,9 @@ export function signatureDefaultOperands(
  *   `(x: number, factor: number = 2)`), nothing is inserted: the call reports
  *   `missing` for the required parameter as it does without defaults, and a
  *   default is never moved into a required position.
- * - An operand that is absent (`Missing`, `Undefined`, `NaN`,
- *   `Indeterminate`: the absence test of `Coalesce`, `isMissingValue()`) at
+ * - An operand that is absent (`Missing`, `NaN`,
+ *   `Indeterminate`, a `NaN` point: the absence test of `Coalesce`,
+ *   `isMissingValue()`) at
  *   a parameter with a default is replaced by the default too
  *   (`withAbsentDefaults()`). An operand that is present is never changed.
  *
@@ -723,8 +724,8 @@ export function fillParameterDefaults(
  * leaves out: `(k: real | missing = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
  * and `f(At(L, 100))` with `L` a list of two elements. The default is then a
  * discharge of absence, as `Coalesce` is, and it uses the same absence test
- * (`isMissingValue()`): `Missing`, `Undefined`, `NaN` and `Indeterminate` are
- * absent. `Nothing` is not: a written `Nothing` operand is removed before the
+ * (`isMissingValue()`): `Missing`, `NaN`, `Indeterminate` and a `NaN`
+ * point are absent. `Nothing` is not: a written `Nothing` operand is removed before the
  * fill, so the parameter is left out and takes its default that way. A
  * caller that needs to pass an absent value through a parameter declares no
  * default for it. (R6 of `docs/plans/2026-11-01-absent-value-contract.md`.)

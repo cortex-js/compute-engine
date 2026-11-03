@@ -228,20 +228,16 @@ describe('an else-less If as a block statement', () => {
     // `TypeError` instead of a propagated NaN. Before this `Which` and the
     // else-less `If` emitted `undefined` for an unknown arm while a restriction
     // emitted `NaN`.
-    // `c` may be absent, so the selections test it by its value.
     const e = new ComputeEngine();
     e.declare('x', 'real');
-    e.declare('c', 'boolean | missing');
+    e.declare('c', 'boolean');
     const js = (j: unknown) => compile(e.box(j as any), { fallback: false });
-    expect(js(['Which', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
-    expect(js(['If', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
+    expect(js(['Which', 'c', 'x']).code).toMatch(/: NaN\)$/);
     expect(js(['If', 'c', 'x']).code).toMatch(/: NaN\)$/);
-    expect(js(['Which', 'c', { str: 's' }]).code).toMatch(
-      /\? undefined : undefined\)$/
-    );
+    expect(js(['Which', 'c', { str: 's' }]).code).toMatch(/: undefined\)$/);
     expect(js(['If', 'c', { str: 's' }]).code).toMatch(/: undefined\)$/);
     // Mixed string and number arms stay numeric.
-    expect(js(['Which', 'c', { str: 's' }, 'c', 1]).code).toMatch(/NaN\)$/);
+    expect(js(['Which', 'c', { str: 's' }, 'c', 1]).code).toMatch(/NaN\)+$/);
     // The discharge side reads the same rule: `IsMissing` and `Coalesce`
     // recognize the absent value the selection produced, in every domain.
     const mixed = ['Which', 'c', { str: 's' }, 'c', 1];
@@ -543,21 +539,9 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
     expect((r.run as any)({ x: NaN })).toBe(5);
   });
 
-  test('a statement If over an absent condition value runs neither branch', () => {
-    // The `'value'` shape in statement position: the condition is bound to a
-    // block-scoped constant, so an application is evaluated once.
-    const e = new ComputeEngine();
-    e.declare('b', 'boolean | missing');
-    const expr = e.box([
-      'Block',
-      ['Declare', 's', { str: 'unknown' }, 1],
-      ['If', 'b', ['Assign', 's', -1]],
-      's',
-    ] as any);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect((r.run as any)({ b: true })).toBe(-1);
-    expect((r.run as any)({ b: false })).toBe(1);
-    expect((r.run as any)({ b: undefined })).toBe(1);
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so a condition input cannot be declared absent.
+  test('a condition declared boolean | missing is a static error', () => {
+    expect(() => new ComputeEngine().declare('b', 'boolean | missing')).toThrow();
   });
 });

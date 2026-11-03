@@ -89,7 +89,9 @@ describe('A NAMED LIBRARY OPERATOR IS TYPED BY ITS HANDLER (CE-45.2)', () => {
       const src = ['List', 1, 'Missing', 2];
       const named = ce.box(['Map', op, src]);
       const lambda = ce.box(['Map', ['Function', [op, 'x'], 'x'], src]);
-      expect(named.type.toString()).toBe('list<integer | nan^3>');
+      // The absent cell gives a `Missing` cell, so the cell type has a
+      // `missing` arm (`nan` before 2026-11-02).
+      expect(named.type.toString()).toMatch(/ \| missing\^3>$/);
       expect(named.type.toString()).toBe(lambda.type.toString());
       expect(named.evaluate().type.matches(named.type)).toBe(true);
     }

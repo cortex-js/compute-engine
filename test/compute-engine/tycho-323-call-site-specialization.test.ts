@@ -89,8 +89,9 @@ describe('TYCHO ITEM 323: CALL-SITE SPECIALIZATION OF A WHOLE-LIST FUNCTION', ()
       test(`declared ${variant}, depth ${depth}: typed from the argument`, () => {
         const { expr } = compiled(variant, depth);
         // Before: `list<unknown>`. The elements are the real numbers the
-        // body computes, or NaN for an element read outside the list.
-        expect(expr.type.toString()).toBe('list<nan | real>');
+        // body computes. The NaN of an element read outside the list is
+        // implicit in the type of the accessor.
+        expect(expr.type.toString()).toBe('list<real>');
       });
 
       test(`declared ${variant}, depth ${depth}: compiles to the reference values`, () => {
@@ -191,9 +192,10 @@ describe('MULTIPLY OVER A NAN | REAL FACTOR', () => {
  */
 describe('SCALAR ARGUMENT WITH A NAN ARM', () => {
   test.each([
-    // The helpers read elements with `l[i]`, typed `nan | real`, so the
-    // chain has a `nan` arm whatever `a` is.
-    ['real', 'list<nan | real>'],
+    // The helpers read elements with `l[i]`, typed `real` (the NaN of a
+    // read out of range is implicit in the type of the accessor), so the
+    // `nan` arm comes from `a`.
+    ['real', 'list<real>'],
     ['nan | real', 'list<nan | real>'],
     ['real | signed_infinity | nan', 'list<nan | real | signed_infinity>'],
   ])('d(s(u(L)), a) with a: %s types %s', (declared, expected) => {
@@ -201,7 +203,7 @@ describe('SCALAR ARGUMENT WITH A NAN ARM', () => {
     ce.declare('a', declared as never);
     expect(ce.parse('d(s(u(L)), a)').type.toString()).toBe(expected);
     // A literal argument is unchanged.
-    expect(ce.parse('d(s(u(L)), 2)').type.toString()).toBe('list<nan | real>');
+    expect(ce.parse('d(s(u(L)), 2)').type.toString()).toBe('list<real>');
   });
 
   test('a body without a random draw', () => {

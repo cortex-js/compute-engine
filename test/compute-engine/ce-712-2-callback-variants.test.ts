@@ -466,48 +466,14 @@ describe('a parameter declared `expression` takes the variant typed by the eleme
   });
 });
 
-// A union of shapes declared at an input, on interval-js: the dispatch
-// recognizes an absent element spelled with the absence marker of the
-// target, `{ lo: NaN, hi: NaN }`.
-describe('interval-js: the shape dispatch reads the absence marker', () => {
-  test('f(U), U: list<real> | list<list<real> | missing>', () => {
+// A union of shapes declared at an input cannot have a `missing` member or
+// element (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+describe('interval-js: the shape dispatch of a declared union', () => {
+  test('a union with an absent member cannot be declared', () => {
     const ce = makeEngine();
-    ce.declare('U', 'list<real> | list<list<real> | missing>');
-    const expr = ['f', 'U'];
-    const interp = ce
-      .box(expr as never)
-      .subs({ U: ce.box(['List', 'Missing', ['List', 1, 2]] as never) } as never)
-      .evaluate();
-    expect(interp.toString()).toBe('[NaN,[3,5]]');
-    const r = compileTo(ce, expr, 'interval-js');
-    expect(r.success).toBe(true);
-    const v = r.run!({
-      U: [
-        { lo: NaN, hi: NaN },
-        [
-          { lo: 1, hi: 1 },
-          { lo: 2, hi: 2 },
-        ],
-      ],
-    } as never);
-    expectClose(intervalValue(v), [NaN, [3, 5]]);
-  });
-
-  test('f(U), U: list<real> | list<list<real>> | missing, U absent', () => {
-    // The absent input reaches `f` as the absence marker, and gives the
-    // empty result, as the interpreter's `NaN` for `f(Missing)`.
-    const ce = makeEngine();
-    ce.declare('U', 'list<real> | list<list<real>> | missing');
-    expect(
-      ce
-        .box(['f', 'U'] as never)
-        .subs({ U: ce.symbol('Missing') } as never)
-        .evaluate()
-        .toString()
-    ).toBe('NaN');
-    const r = compileTo(ce, ['f', 'U'], 'interval-js');
-    expect(r.success).toBe(true);
-    expectClose(intervalValue(r.run!({ U: undefined } as never)), NaN);
+    expect(() =>
+      ce.declare('U', 'list<real> | list<list<real> | missing>')
+    ).toThrow(/cannot be declared/);
   });
 });
 

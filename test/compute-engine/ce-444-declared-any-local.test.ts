@@ -73,7 +73,9 @@ describe('an operand typed any at a generic collection parameter', () => {
 });
 
 describe('an absent value of a block local declared any', () => {
-  test('is NaN in arithmetic, as for a symbol declared any', () => {
+  // An operator over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only").
+  test('is Missing in arithmetic, as for a symbol declared any', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
@@ -82,7 +84,7 @@ describe('an absent value of a block local declared any', () => {
       ['Add', 'xs', 1],
     ] as any);
     const value = expr.evaluate();
-    expect(value.isNaN).toBe(true);
+    expect(value.symbol).toBe('Missing');
     expect(value.type.matches(expr.type)).toBe(true);
   });
 });

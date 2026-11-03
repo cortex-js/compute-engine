@@ -1330,8 +1330,8 @@ function euclideanNormTypeOf(
  * is derived from; a tuple-TYPED symbol keeps the wide `number`. */
 function pointNormTypeOf(d: OperandDescriptor, engine: PureEngineView): string {
   // A list component that may be absent gives one norm per element when it
-  // is present, and `NaN` (the norm of a point with an absent coordinate)
-  // when it is absent.
+  // is present, and `Missing` (the norm of a point with an absent
+  // coordinate) when it is absent.
   const broadcast = pointNormBroadcastsOperand(d, engine);
   if (broadcast === 'gated-list') return 'list<number> | nan';
   if (broadcast === 'list') return 'list<number>';
@@ -1357,7 +1357,7 @@ function isPointListOperand(
 ): boolean {
   // The `missing` arm of an element is not read: an element that is a
   // restricted point, or an absent point, is typed `missing | tuple<…>`, and
-  // the norm of such a cell is a number (its norm, or `NaN` when absent).
+  // the norm of such a cell is its norm, or `Missing` when it is absent.
   // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
   const cell =
     d.facts.elementType ?? pointCollectionElementType(resolveType(d.type));
@@ -2209,11 +2209,11 @@ function pointListDotProduct(
         'incompatible-dimensions',
         `${as.length} vs ${bs.length}`
       );
-    // An absent coordinate (`Missing`, `Undefined`) makes this point's
-    // product `NaN`, as it makes the product of two points `NaN` (see the
+    // An absent coordinate (`Missing`) makes this point's product
+    // `Missing`, as it makes the product of two points `Missing` (see the
     // `Dot` evaluate handler).
     if ([...as, ...bs].some((c) => isAbsentSymbol(c))) {
-      results.push(ce.NaN);
+      results.push(ce.Missing);
       continue;
     }
     if (![...as, ...bs].every((c) => isNumber(c))) return undefined;
@@ -2247,11 +2247,11 @@ function pointListDotProduct(
  * Such a list is taken point by point, one product per point, as a list of
  * points is (see `pointListDotProduct`). A restricted point is applied `Dot`
  * again, and the lift moves its condition to its product. An ABSENT point
- * (`Missing` or `Undefined`, such as the point of an element-wise
- * restriction whose condition is false) answers `NaN` at its position: the
- * product of two points is a number, and `NaN` is the absence marker of a
- * numeric cell (`docs/ERROR-MODEL.md`, the section on `Missing` in a numeric
- * slot).
+ * (`Missing`, such as the point of an element-wise restriction whose
+ * condition is false) answers `Missing` at its position: an operator over
+ * `Missing` gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+ * only — user decision of 2026-11-02"), and the result cell is typed with a
+ * `missing` arm (`withAbsentPointCellResults()`, `boxed-function.ts`).
  *
  * Only a list whose every element is a point, a restricted point or an absent
  * value is taken point by point. A restricted VECTOR whose cells have
@@ -2299,7 +2299,7 @@ function pointCellsDotProduct(
     const a = sides[0]?.[i] ?? ops[0];
     const b = sides[1]?.[i] ?? ops[1];
     if (isAbsentSymbol(a) || isAbsentSymbol(b)) {
-      results.push(ce.NaN);
+      results.push(ce.Missing);
       continue;
     }
     const product = ce
@@ -2316,7 +2316,7 @@ function pointCellsDotProduct(
 
 /**
  * True when `x` can be a cell of a list of points once its condition is
- * decided: a point (a tuple), an absent point (`Missing`, `Undefined`), a
+ * decided: a point (a tuple), an absent point (`Missing`), a
  * restricted point `If(c, P)`, or a piecewise value `Which(c₁, P₁, …)`
  * whose every branch is a point.
  */
@@ -2339,7 +2339,7 @@ function isPointCell(x: Expression): boolean {
  * until the conditions are decided, and stays unevaluated.
  */
 /** Whether `op` is a literal list one of whose cells is the absent datum
- * (`Missing` or `Undefined`), such as `[1, Missing]`. */
+ * (`Missing`), such as `[1, Missing]`. */
 function hasAbsentCell(op: Expression): boolean {
   return isFunction(op, 'List') && op.ops.some((x) => isAbsentSymbol(x));
 }
@@ -3546,9 +3546,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `Trace([[1, NaN], [3, 4]])` is 5 (the NaN is off the diagonal) while
       // `Trace([[NaN, 1], [3, 4]])` is NaN.
       nanBehavior: ['handle', 'reject', 'reject'],
-      // An ABSENT operand — the `Missing` or `Undefined` symbol — has no
-      // trace, and the answer is the absence marker of the numeric codomain,
-      // `NaN`, as it is for `Norm`. Declared explicitly because the
+      // An ABSENT operand — the `Missing` symbol — has no
+      // trace, and the answer is `Missing`, as it is for `Norm`: an operator
+      // over `Missing` gives `Missing`. Declared explicitly because the
       // signature is not all-numeric (a tensor), so the derived policy would
       // be `pass-through`, which refused `Trace(Missing)` at boxing with an
       // `incompatible-type` error. Only the operand slot strips `missing`:
@@ -3565,12 +3565,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       type: ([m], context) => {
         if (m === undefined) return undefined;
         const t = m.type;
-        // An operand that is only absent (`Missing`, or `Undefined`, which
-        // the propagating policy types `missing`) answers `NaN` (see
-        // `missingBehavior` above), a number. Without this arm the result
-        // type kept the declared `number | tensor`, and the absence gate,
-        // which reads the result type to pick its marker, answered `Missing`
-        // instead of `NaN`.
+        // An operand that is only absent (`Missing`, which the propagating
+        // policy types `missing`) is read as a number operand here: the
+        // result is `number`, and the absorption of absent operands
+        // (`absorbOperandAbsence`) then types the application `missing`,
+        // its value (`Trace(Missing)` is `Missing`). Without this arm the
+        // result type kept the declared `number | tensor`.
         if (t === 'missing')
           return BoxedType.forResult('number', context.engine._typeResolver);
         if (typeof t !== 'string' && t.kind === 'list') {
@@ -4039,11 +4039,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // signature is not all-numeric, so the derived policy would be
       // `pass-through`, which refused `Dot(Missing, (1, 1))` at boxing with
       // an `incompatible-type` error. With `propagate`, the `missing` arm of
-      // an operand is stripped before the type handler reads it, and the
-      // type of the application gains a `missing` arm when its result is not
-      // a number: `Dot([(1, 2), (3, 4)] {0 < t}, (1, 1))` is typed
-      // `list<integer> | missing`, and `Dot((1, 2) {0 < t}, (1, 1))`, whose
-      // absent value is `NaN`, is typed `number`.
+      // an operand is stripped before the type handler reads it. The absent
+      // value of the product is `Missing`, and the marker is implicit in the
+      // type of a restricted operand: `Dot([(1, 2), (3, 4)] {0 < t}, (1, 1))`
+      // is typed `list<integer>`, and `Dot((1, 2) {0 < t}, (1, 1))` is typed
+      // `integer`. Both are `Missing` when the condition is false.
       missingBehavior: 'propagate',
       // A restricted operand `P {c}` whose condition is not decided moves
       // out of the application: `Dot((1, 2) {0 < t}, (1, 1))` is `3 {0 < t}`
@@ -4174,7 +4174,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // vectors and to the matrix product otherwise — exactly what
       // `MatrixMultiply` already computes.
       evaluate: (ops, { engine: ce, numericApproximation, expression }) => {
-        // An ABSENT operand — the `Missing` or `Undefined` symbol, such as
+        // An ABSENT operand — the `Missing` symbol, such as
         // the value of a restricted point or a restricted list of points
         // whose condition is false — answers the absence marker of the
         // codomain, read off the application's type (`absentScalarMarker`):
@@ -4197,9 +4197,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // not numbers.
         if (hasRestrictedCell(ops)) return undefined;
         // A vector with an ABSENT cell (`[1, Missing]`, the value of a
-        // restricted cell whose condition is false): the absent component
-        // contributes `NaN`, so the product is `NaN`, as `Norm((1, Missing))`
-        // and `Sum([1, Missing])` answer. Such a list used to be refused at
+        // restricted cell whose condition is false): the product is
+        // `Missing`, as `Norm((1, Missing))` and `Sum([1, Missing])` answer:
+        // an operator over `Missing` gives `Missing`. Such a list used to be refused at
         // boxing, because its rank-free type `list<integer | missing>` did not
         // match `vector`; the validation now reads its length from the value
         // (`strippedMatchesParam`, `boxed-expression/validate.ts`) and admits
@@ -4242,7 +4242,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               'incompatible-dimensions',
               `${counts[0]} vs ${counts[1]}`
             );
-          return ce.NaN;
+          return ce.Missing;
         }
 
         // Two empty lists. The values do not tell vectors from point lists,
@@ -4303,8 +4303,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // A POINT with an ABSENT coordinate (`(1, Missing)`, the value of a
         // restricted coordinate whose condition is false) against a point or
-        // a vector of the same width: the absent component contributes `NaN`,
-        // so the product is `NaN`, as `Norm((1, Missing))` and the vector
+        // a vector of the same width: the product is `Missing`, as
+        // `Norm((1, Missing))` and the vector
         // `[1, Missing]` above answer. The lowering below requires a numeric
         // tuple, so without this the product stayed unevaluated. The other
         // operand must be a point or a flat list: against a matrix the
@@ -4331,7 +4331,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
                 'incompatible-dimensions',
                 `${widths[0]} vs ${widths[1]}`
               );
-            return ce.NaN;
+            return ce.Missing;
           }
         }
 
@@ -4618,15 +4618,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // also requires two 3-vectors — see `canEnumerateTensorOperands`.
       canEnumerate: canEnumerateTensorOperands,
       evaluate: (ops, { engine: ce, expression }) => {
-        // An ABSENT operand — the `Missing` or `Undefined` symbol, such as
+        // An ABSENT operand — the `Missing` symbol, such as
         // the value of a restricted point whose condition is false — makes
-        // the product absent. Beside a point, the product is an absent
-        // point, `Missing`, as `(1, 2, 3) · Missing` is. Beside a LIST, the
-        // absence is one absent cell per component, `NaN`, as
-        // `[1, 2, 3] + Missing` is `[NaN, NaN, NaN]`: that is also what the
-        // type of the application says, a `vector` with no `missing` arm
-        // (`absorbOperandAbsence`, `boxed-expression/broadcast-lift-type.ts`).
-        // An absent operand makes the product absent, `Missing`: the
+        // the product absent, `Missing`, beside a point or a list: the
         // evaluation driver's absence gate answers the marker of the codomain
         // before this handler runs (user decision 2026-09-25, every
         // collection operator); this arm is the same answer for a route that
@@ -5316,10 +5310,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // while a NaN operand is an ordinary numeric argument the handler
       // answers for.
       nanBehavior: ['handle', 'reject'],
-      // An ABSENT operand — the `Missing` or `Undefined` symbol, such as the
+      // An ABSENT operand — the `Missing` symbol, such as the
       // value of a restricted point `P{c}` whose condition is false — has no
-      // norm, and the answer is the absence marker of the numeric codomain,
-      // `NaN`, as it is for `Abs`. Declared explicitly because the signature
+      // norm, and the answer is `Missing`, as it is for `Abs`: an operator
+      // over `Missing` gives `Missing`. Declared explicitly because the signature
       // is not all-numeric (a tensor, a tuple), so the derived policy would
       // be `pass-through`, which refused `Norm(Missing)` at boxing with an
       // `incompatible-type` error. Only the operand slot strips `missing`:
@@ -5500,10 +5494,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // collection of characters, and has no norm).
           const isCollectionComponent = (el: Expression): boolean =>
             !isString(el) && !isCharacter(el) && el.isCollection;
-          // An ABSENT component — the `Missing` or `Undefined` symbol — is
-          // not a wrong kind: it is a numeric cell with no value, and the
-          // norm is `NaN`, as `Sum`, `Max` and `Mean` answer for a list that
-          // holds one. The wrong-kind error still wins when the vector holds
+          // An ABSENT component — the `Missing` symbol — is not a wrong
+          // kind, and the norm is `Missing`, as `Sum`, `Max` and `Mean`
+          // answer for a list that holds one. The wrong-kind error still wins when the vector holds
           // both.
           let hasAbsent = false;
           for (const el of elements) {
@@ -5515,7 +5508,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             if (admissionOf(el, 'number') === 'refute')
               return ce.typeError('number', el.type, el);
           }
-          if (hasAbsent) return ce.NaN;
+          if (hasAbsent) return ce.Missing;
 
           // The broadcasting components zip element by element, so they must
           // have one length, as the operands of `Add` and `Hypot` must: a
@@ -5704,7 +5697,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // A LIST of points that holds absent or restricted points
         // (`isPointCell`): one norm per cell. An absent point has no norm,
-        // and the marker of a numeric cell is `NaN`. A restricted point is
+        // and its cell is `Missing`. A restricted point is
         // applied `Norm` again, and the conditional-value lift moves its
         // condition to its norm (`threadsConditionals`). A list whose every
         // cell has the same condition does not reach this: that condition
@@ -5719,7 +5712,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const norms: Expression[] = [];
           for (const pt of x.ops) {
             if (isAbsentSymbol(pt)) {
-              norms.push(ce.NaN);
+              norms.push(ce.Missing);
               continue;
             }
             const n = isFunction(pt, 'Tuple')
@@ -5838,8 +5831,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             elements.map((el) => el.evaluate())
           );
           if (!isTensorValue(matrix)) {
-            // A matrix with an ABSENT cell — the `Missing` or `Undefined`
-            // symbol — has the norm `NaN`, as a vector with one has (see
+            // A matrix with an ABSENT cell — the `Missing` symbol — has the
+            // norm `Missing`, as a vector with one has (see
             // `vectorNorm` above). A `Missing` cell types its row
             // `list<integer | missing>`, which is not a tensor type, so the
             // matrix branch below never sees such a matrix. The same checks
@@ -5871,7 +5864,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
                 admissionOf(cell, 'number') === 'refute'
               )
                 return ce.typeError('number', cell.type, cell);
-            return ce.NaN;
+            return ce.Missing;
           }
           return ce
             .function('Norm', [matrix, ...ops.slice(1)])

@@ -159,6 +159,8 @@ import {
   isBareCutOnDescent,
   isCutOnDescent,
   unfoldAliasOnDescent,
+  DECLARED_MISSING_MESSAGE,
+  declaredTypeNamesMissing,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
@@ -298,7 +300,7 @@ import {
 import {
   effectContractErrorValue,
   isEffectContractError,
-  matchesDeclaredTypeAxes,
+  matchesOrAbsent,
   signatureEffects,
 } from '../boxed-expression/effects-inference.js';
 import {
@@ -400,11 +402,10 @@ import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluatio
  * `incompatible-type` declared-type diagnostic.
  */
 /**
- * The absence markers: `Nothing` (an operand to drop), `Missing` (an absent
- * value with a position) and `Undefined` (an absent value of unknown type).
- * They cannot be rebound (user decision 2026-09-27): the engine recognizes
- * each one by its NAME in many places — `Nothing` is erased from operand
- * lists, and arithmetic reads a `Missing` or `Undefined` operand as absent
+ * The absence markers: `Nothing` (an operand to drop) and `Missing` (an
+ * absent value with a position). They cannot be rebound: the engine
+ * recognizes each one by its NAME in many places — `Nothing` is erased from
+ * operand lists, and arithmetic reads a `Missing` operand as absent
  * whatever it is bound to — so a user binding of one of these names could
  * never behave like the value it holds. A declaration, an assignment or a
  * function definition of one of them evaluates to the
@@ -414,7 +415,6 @@ import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluatio
 const ABSENCE_MARKERS: ReadonlySet<string> = new Set([
   'Nothing',
   'Missing',
-  'Undefined',
 ]);
 
 /**
@@ -664,7 +664,7 @@ function delimitedOperands(
 
 /**
  * True when no value of type `t` is absent. The absent values (`Missing`,
- * `Undefined`, `NaN`, `Indeterminate`) have the types `missing` and `nan`,
+ * `NaN`, `Indeterminate`) have the types `missing` and `nan`,
  * so a type that admits neither cannot hold one: a `list<…>`, a `tuple<…>`,
  * a `string`, a `dictionary`, a function type, an `integer` or a `real`.
  * Every type is a subtype of `unknown`, so an unresolved type returns false;
@@ -2841,8 +2841,7 @@ function isText(op: Expression): boolean {
 }
 
 /**
- * The error for an absent element (`Missing`, or `Undefined`, which a list
- * types as a `missing` cell) that a text operator reads from a collection of
+ * The error for an absent element (`Missing`) that a text operator reads from a collection of
  * text values: `StringJoin`'s operand, the `chars` set of `Trim`.
  *
  * Argument validation admits a collection typed `collection<string |
@@ -5597,8 +5596,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     IsMissing: {
       description:
-        'True for `Missing`, `Undefined`, `NaN`, or `Indeterminate`, ' +
-        'regardless of provenance. `Nothing` is not an absent datum.',
+        'True for `Missing`, `NaN`, a point whose coordinates are all ' +
+        '`NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.',
       complexity: 500,
       signature: '(any) -> boolean',
       examples: ['[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]'],
@@ -5629,7 +5628,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Coalesce: {
       description:
         'Return the first operand that is not ABSENT (`Missing`, ' +
-        '`Undefined`, `NaN`, or `Indeterminate`), evaluated left-to-right. ' +
+        '`NaN`, a point whose coordinates are all `NaN`, or ' +
+        '`Indeterminate`), evaluated left-to-right. ' +
         'If every operand ' +
         'is absent, the last operand’s value is returned verbatim (still ' +
         'absent). `Nothing` passes through without selecting a fallback.',
@@ -5702,8 +5702,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     AssertPresent: {
       description:
         'Assert that a value is present: return it unchanged, or an ' +
-        '`expected-present` error when it is ABSENT (`Missing`, `Undefined`, ' +
-        '`NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an ' +
+        '`expected-present` error when it is ABSENT (`Missing`, ' +
+        '`NaN`, a point whose coordinates are all `NaN`, or ' +
+        '`Indeterminate`). `Nothing` is an omission marker, not an ' +
         'absent datum, and passes through; an error operand propagates. ' +
         'Epsil spells it `x?!`. Only the value itself is checked, never the ' +
         'cells of a collection.',
@@ -5753,7 +5754,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // of its free variables, so `AssertPresent([x, 1])` is `[x, 1]` and
         // `Length(AssertPresent([x, 1]))` reduces to 2. The test reads the
         // type: `missing` and `nan` are the absent outcomes (`Missing`,
-        // `Undefined`, `NaN`, `Indeterminate`), so a type that admits
+        // `NaN`, `Indeterminate`), so a type that admits
         // neither is present. Every type is a subtype of `unknown`, so an
         // unresolved symbol keeps the assertion; so does `number`, which
         // admits `nan`. A held restriction (`If(c, 3)` with `c` undecided)
@@ -6309,7 +6310,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce.expr(op1.operator);
       },
       evaluate: ([x], { engine: ce }) => {
-        if (x === undefined) return ce.symbol('Undefined');
+        if (x === undefined) return ce.Missing;
         return ce.symbol(boundExpression(x).operator);
       },
     },
@@ -6982,7 +6983,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const attributes = definitionAttributes(args[2]);
         // An absence marker cannot be rebound: install nothing (the install
         // below runs at canonicalization, so an evaluate-time refusal alone
-        // left `function Undefined(x) { x }` callable), and let the evaluate
+        // left `function Missing(x) { x }` callable), and let the evaluate
         // handler return the `absence-marker-binding` error.
         const markerName = sym(symbol);
         if (markerName !== undefined && ABSENCE_MARKERS.has(markerName))
@@ -9012,7 +9013,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         ce.symbol(
           sym(symbolArg) ??
             (isString(symbolArg) ? symbolArg.string : undefined) ??
-            'Undefined'
+            'Missing'
         ),
     },
 
@@ -13959,6 +13960,14 @@ function* declareSteps(
       );
     }
     if (!isValidType(parsed)) return undefined;
+    // The declared type of a local may not name the marker `missing`:
+    // `Missing` is a result only (`declaredTypeNamesMissing()`). The same
+    // error value as a type that does not parse.
+    if (declaredTypeNamesMissing(parsed))
+      return ce.error(
+        ['invalid-type-declaration', DECLARED_MISSING_MESSAGE],
+        sym(ops[0]) ?? undefined
+      );
     type = parsed;
     effectsDeclared = signatureEffects(parsed) !== undefined;
   }
@@ -14334,7 +14343,7 @@ function* declareSteps(
   // first one.
   //
   // The verdict is the one both `declareOne` branches ultimately reach —
-  // the per-axis `matchesDeclaredTypeAxes` (the fresh branch through the
+  // the per-axis `matchesOrAbsent` (the fresh branch through the
   // value-definition constructor, the upgrade branch through
   // `ce.assign`) — with the same arguments and the same error value, so
   // the diagnostic is unchanged: same code, same blamed name.
@@ -14356,7 +14365,7 @@ function* declareSteps(
     // literals to the install path.
     if (isFunction(boundValue, 'Function')) return null;
     if (
-      matchesDeclaredTypeAxes(
+      matchesOrAbsent(
         ce,
         boundValue.type,
         declaredType,

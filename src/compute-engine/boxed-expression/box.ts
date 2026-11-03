@@ -1887,7 +1887,7 @@ function boxInternal(
     return ce.error('unexpected-mathjson', stringifyForError(expr));
   }
 
-  return ce.symbol('Undefined');
+  return ce.Missing;
 }
 
 /**

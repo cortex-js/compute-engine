@@ -18,13 +18,26 @@ import { typeToString } from '../../src/common/type/serialize';
 // case can be written in LaTeX.
 //
 
+/** Declare `name` with `decl`. A declared type cannot name `missing`
+ * (`Missing` is a result only), so when `decl` names it, `name` is assigned
+ * `value` instead, and its type is inferred from the value. */
+function declareOrInfer(
+  ce: ComputeEngine,
+  name: string,
+  decl: string,
+  value: unknown
+): void {
+  if (/\bmissing\b/.test(decl)) ce.assign(name, ce.box(value as any));
+  else ce.declare(name, decl);
+}
+
 function check(
   decl: string,
   value: unknown,
   build: (ce: ComputeEngine) => Expression
 ): { staticType: string; value: string; sound: boolean } {
   const ce = new ComputeEngine();
-  ce.declare('L', decl);
+  declareOrInfer(ce, 'L', decl, value);
   const staticType = build(ce).type.toString();
   ce.assign('L', ce.box(value as any));
   const v = build(ce).evaluate();
@@ -287,7 +300,7 @@ describe('THE DERIVE ROUTE OVER NESTED LISTS', () => {
     );
     expect(derived).toBeDefined();
     expect(typeToString(derived!)).toBe(type);
-    ce.declare('L', decl);
+    declareOrInfer(ce, 'L', decl, value);
     ce.assign('L', ce.box(value as any));
     const v = ce.box(expr as any).evaluate();
     expect(v.type.matches(ce.type(derived!))).toBe(true);
@@ -307,13 +320,14 @@ describe('THE DERIVE ROUTE OVER NESTED LISTS', () => {
       'list<list<tuple<infinity | nan | real, infinity | nan | real>>>',
     ],
     [
+      // Typed from the value: the row has a proved length.
       'list<list<tuple<integer, integer>> | missing>',
       ['List', ['List', ['Tuple', 1, 2]], 'Missing'],
-      'list<list<missing | tuple<infinity | nan | real, infinity | nan | real>> | missing>',
+      'list<list<(missing | tuple<infinity | nan | real, infinity | nan | real>)^1> | missing>',
     ],
   ])('%s divided by a symbol (box)', (decl, value, type) => {
     const ce = new ComputeEngine();
-    ce.declare('L', decl);
+    declareOrInfer(ce, 'L', decl, value);
     ce.declare('x', 'integer');
     const e = ce.box(['Divide', 'L', 'x']);
     expect(e.type.toString()).toBe(type);
@@ -500,17 +514,19 @@ describe('POINTS BESIDE NUMBERS WITH AN ABSENT CELL', () => {
       Q,
       'list<list<integer | missing>>',
       ['List', ['List', 1, 'Missing'], ['List', 3, 4]],
+      // `M` is typed from its value, a 2×2 matrix whose cells can be
+      // absent, so the result gains a `missing` arm.
       op === 'Divide'
-        ? 'list<list<missing | tuple<number, number>>>'
+        ? 'matrix<(missing | tuple<infinity | nan | real, infinity | nan | real>)^(2x2)>'
         : op === 'Mod'
-          ? 'list<list<nan | real>>'
-          : 'list<list<number>>',
+          ? 'list<list<missing | nan | real>>'
+          : 'list<list<missing | number>>',
     ]);
   }
   test.each(CASES)('%s of a %s and a %s', (op, dq, vq, dm, vm, type) => {
     const ce = new ComputeEngine();
     ce.declare('Q', dq);
-    ce.declare('M', dm);
+    declareOrInfer(ce, 'M', dm, vm);
     const staticType = ce.box([op, 'Q', 'M']).type;
     expect(staticType.toString()).toBe(type);
     ce.assign('Q', ce.box(vq as any));
@@ -606,23 +622,24 @@ describe('A PRODUCT OF ROWS OF POINTS OF DIFFERENT DIMENSIONS', () => {
 //
 // `Map` over a list whose cells are rows of points or absent: the static
 // type holds the value (measured, no change needed). An absent row stays
-// `Missing`.
+// `Missing`. The list is typed from its value, so its rows have a proved
+// length.
 //
 describe('MAP OVER ROWS OF POINTS WITH AN ABSENT ROW', () => {
   test.each<[unknown, string, string]>([
     [
       ['Function', ['Multiply', 2, 'x'], 'x'],
-      'list<list<tuple<integer, integer>> | missing>',
+      'list<list<tuple<integer, integer>^1> | missing>',
       '[[(2, 4)],"Missing"]',
     ],
     [
       ['Function', ['Sin', 'x'], 'x'],
-      'list<list<tuple<number, number>> | missing>',
+      'list<list<tuple<number, number>^1> | missing>',
       '[[(sin(1), sin(2))],"Missing"]',
     ],
     [
       ['Function', 'x', 'x'],
-      'list<list<tuple<integer, integer>> | missing>',
+      'list<list<tuple<integer, integer>^1> | missing>',
       '[[(1, 2)],"Missing"]',
     ],
   ])('%j', (fn, type, evaluated) => {

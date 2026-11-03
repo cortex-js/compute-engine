@@ -630,7 +630,7 @@ describe('ERROR-MODEL §3 — NaN propagates by IEEE', () => {
   });
 });
 
-describe('ERROR-MODEL §3 — a comparison with Missing is False, and Missing is absorbed into NaN in numeric slots', () => {
+describe('ERROR-MODEL §3 — a comparison with Missing is False, and an operator over Missing gives Missing', () => {
   const ce = new ComputeEngine();
 
   // A comparison is two-valued (user decision of 2026-11-02, two-valued
@@ -650,7 +650,7 @@ describe('ERROR-MODEL §3 — a comparison with Missing is False, and Missing is
     }
   });
 
-  describe('Sin(Missing) → NaN', () => {
+  describe('Sin(Missing) → Missing', () => {
     for (const { route, expr } of routes(
       ce,
       ['Sin', 'Missing'],
@@ -658,16 +658,17 @@ describe('ERROR-MODEL §3 — a comparison with Missing is False, and Missing is
       'Sin',
       () => [ce.box('Missing')]
     )) {
-      // Numeric domains absorb absence at the boundary, so numeric operators
-      // never need a `missing` arm (the 2026-07-24 absence ruling).
-      test(`[${route}] absence entering a numeric slot is normalized to NaN`, () => {
-        expect(isNaNValue(ce, expr.evaluate())).toBe(true);
+      // An operator over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`,
+      // "`Missing` is a result only"). Before, a numeric slot normalized the
+      // absence to `NaN` (the 2026-07-24 absence ruling).
+      test(`[${route}] absence entering a numeric slot gives Missing`, () => {
+        expect(isMissingValue(expr.evaluate())).toBe(true);
       });
     }
   });
 
-  test('Missing + 1 is NaN, not Missing', () => {
-    expect(isNaNValue(ce, ce.box(['Add', 'Missing', 1]).evaluate())).toBe(true);
+  test('Missing + 1 is Missing', () => {
+    expect(isMissingValue(ce.box(['Add', 'Missing', 1]).evaluate())).toBe(true);
   });
 });
 
@@ -2837,20 +2838,25 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
     expect(symbolName(ce2.box(['Which']).evaluate())).toBe('Missing');
     // Since 2026-11-02 the else-less `If` answers as a restriction does (it
     // is the form the parser gives `e\\{c\\}`): the absent value of the
-    // domain of its arm, `NaN` for a number and `Missing` otherwise.
+    // domain of its arm, `NaN` for a number, the point of `NaN` coordinates
+    // for a point (since 2026-11-03), and `Missing` otherwise.
     expect(ce2.box(['If', 'False', 5]).evaluate().isNaN).toBe(true);
     expect(
-      symbolName(ce2.box(['If', 'False', ['Tuple', 1, 2]]).evaluate())
-    ).toBe('Missing');
+      ce2.box(['If', 'False', ['Tuple', 1, 2]]).evaluate().toString()
+    ).toBe('(NaN, NaN)');
+    expect(symbolName(ce2.box(['If', 'False', { str: 'a' }]).evaluate())).toBe(
+      'Missing'
+    );
     expect(symbolName(ce2.box(['Which', 'False', 1]).evaluate())).toBe(
       'Missing'
     );
     // A restriction differs since 2026-09-25: it masks to the marker of
-    // its VALUE'S type, `NaN` for a number and `Missing` otherwise.
+    // its VALUE'S type, `NaN` for a number, the point of `NaN` coordinates
+    // for a point (since 2026-11-03), and `Missing` otherwise.
     expect(ce2.box(['If', 'False', 5]).evaluate().isNaN).toBe(true);
     expect(
-      symbolName(ce2.box(['If', 'False', ['Tuple', 1, 2]]).evaluate())
-    ).toBe('Missing');
+      ce2.box(['If', 'False', ['Tuple', 1, 2]]).evaluate().toString()
+    ).toBe('(NaN, NaN)');
   });
 
   test('the single-branch If restriction has the type of its value, unlike a default-less Which', () => {
@@ -3007,14 +3013,16 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
     // flip repealed the premise — the bare tiers are finite and `NaN` has its
     // own singleton type — so the marker is additive and the element tier
     // survives. A position that the literal is proved NOT to hold is
-    // typed as the marker alone, `nan`.
+    // typed as the marker alone, `nan`. A result type describes the
+    // successful values, so an access that MAY find nothing has no marker
+    // arm (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
     expect(ce.box(['At', ['List', 1, 2, 3], 99]).type.toString()).toBe('nan');
     expect(ce.box(['At', ['List', 1.5, 2.5], 9]).type.toString()).toBe('nan');
     // An access that may find nothing: the length of a filter's result is
     // not known before evaluation.
     const kept = ['Filter', ['List', 1, 2, 3], ['Function', ['Less', 'x', 9], 'x']];
-    expect(ce.box(['First', kept]).type.toString()).toBe('integer | nan');
-    expect(ce.box(['Last', kept]).type.toString()).toBe('integer | nan');
+    expect(ce.box(['First', kept]).type.toString()).toBe('integer');
+    expect(ce.box(['Last', kept]).type.toString()).toBe('integer');
   });
 
   test('an access proved to find an element has no marker', () => {
@@ -3050,13 +3058,14 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
         .box(['At', ['List', ce.string('a'), ce.string('b')], 9])
         .type.toString()
     ).toBe('missing');
-    // A position that may not exist keeps the `| missing` arm.
+    // A position that may not exist has no marker arm: the marker of a
+    // result type is implicit.
     ce.declare('k9', 'integer');
     expect(
       ce
         .box(['At', ['List', ce.string('a'), ce.string('b')], 'k9'])
         .type.toString()
-    ).toBe('missing | string');
+    ).toBe('string');
   });
 });
 
@@ -3120,17 +3129,17 @@ describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection
     }
   });
 
-  test('an ABSENT operand has no size: NaN, the marker of a number', () => {
+  test('an ABSENT operand has no size: Missing', () => {
     // User decision 2026-09-25: a collection operator over an absent
-    // collection answers the marker of its result. `First([])` is absent
-    // only at evaluation. Before, both operators answered the
+    // collection answers an absent value, `Missing` since an operator over
+    // `Missing` gives `Missing`. `First([])` is absent only at evaluation. Before, both operators answered the
     // `incompatible-type` error of a decided non-collection.
     const ce = new ComputeEngine();
     for (const json of ['Missing', ['First', ['List']]]) {
       for (const head of ['Length', 'Count']) {
         const r = ce.box([head, json] as never);
         expect(r.isValid).toBe(true);
-        expect(r.evaluate().toString()).toBe('NaN');
+        expect(r.evaluate().toString()).toBe('"Missing"');
       }
     }
   });
@@ -3143,14 +3152,14 @@ describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection
       expect(errorCode(ce.box(['Count', 5, second]).evaluate())).toBe(
         'incompatible-type'
       );
-      // An absent source answers `NaN` on both forms too (user decision
+      // An absent source answers `Missing` on both forms too (user decision
       // 2026-09-25); it was refused with the same error.
       expect(
         ce
           .box(['Count', ['First', ['List']], second])
           .evaluate()
           .toString()
-      ).toBe('NaN');
+      ).toBe('"Missing"');
     }
   });
 
@@ -4033,8 +4042,10 @@ describe('the arithmetic core declares its domains', () => {
 
     // The missing-value behavior is no longer declared: with every
     // parameter numeric it DERIVES to `propagate`, so an absent operand
-    // still yields `NaN` (§3.A of the missing-value typing design).
-    expect(isNaNv(ce, ce.box(['Negate', 'Missing']).evaluate())).toBe(true);
+    // yields `Missing` (an operator over `Missing` gives `Missing`).
+    expect(isMissingValue(ce.box(['Negate', 'Missing']).evaluate())).toBe(
+      true
+    );
 
     // A `Quantity` and a `Measurement` type `value` — disjoint from the
     // declared carrier — and keep working because the canonical handler,

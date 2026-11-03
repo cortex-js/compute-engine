@@ -97,7 +97,7 @@ export function tryCompilePointListCall(
   target: CompileTarget<Expression>,
   /** The compiled defaults for a call that maps over a list argument
    * (`emitUserFunctionCall`, `mapDefaults`). */
-  mapDefaults?: () => ReadonlyArray<string | undefined>
+  mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
 ): TargetSource | undefined {
   // A parameter declared `broadcastable<P>`, with `P` a point type, maps
   // to the cells of its argument, and a point is a cell: a tuple is not a
@@ -465,6 +465,24 @@ export function tryCompilePointListCall(
     name = emitted.name;
   }
   if (name === undefined) return undefined;
+  // The fill of each parameter with a default (`mapDefaults`, the target's
+  // `Coalesce` chosen from the type of the parameter). The other arguments
+  // are filled before the call (`absentFilledArguments()`). The mapped
+  // point is filled here, for each point: at a parameter declared as a
+  // point, the interpreter gives the default to a `NaN` point of the list,
+  // so with `g := (p: tuple<number, number> = (0, 0)) ↦ PointX(p)`,
+  // `g([(1, 2), (NaN, NaN)])` is `[1, 0]`.
+  const fills =
+    target.language === 'javascript' && targetCoalesce(target) !== undefined
+      ? (mapDefaults?.() ?? [])
+      : [];
+  const pointFill = untypedElement === undefined ? fills[at] : undefined;
+  if (pointFill !== undefined) {
+    const ps = args.map(() => tempVar(target));
+    name =
+      `((${ps.join(', ')}) => ${name}(` +
+      `${ps.map((p, i) => (i === at ? pointFill(p) : p)).join(', ')}))`;
+  }
   const codes = args.map((a) => compileValueOperand(a, target));
   const temps = args.map(() => tempVar(target));
   const point = tempVar(target);
@@ -586,13 +604,8 @@ export function tryCompilePointListCall(
     // interpreter fills each cell of a broadcast. With no default to fill,
     // the mapped function is the callee itself, not an arrow that only
     // calls it.
-    const coalesce = targetCoalesce(target);
-    const fills =
-      target.language === 'javascript' && coalesce !== undefined
-        ? (mapDefaults?.() ?? [])
-        : [];
     const cellArgs = temps.map((t, i) =>
-      i === at || fills[i] === undefined ? t : coalesce!(t, fills[i]!)
+      i === at || fills[i] === undefined ? t : fills[i]!(t)
     );
     const fn = fills.every((f, i) => i === at || f === undefined)
       ? name
@@ -810,7 +823,7 @@ export function compileUntypedScalarSlotCall(
   params: ReadonlyArray<Type | undefined>,
   scalarLists: ReadonlyArray<'list' | 'maybe' | 'untyped' | false>,
   target: CompileTarget<Expression>,
-  mapDefaults?: () => ReadonlyArray<string | undefined>
+  mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
 ): TargetSource | undefined {
   const at = scalarLists.indexOf('untyped');
   const reason =

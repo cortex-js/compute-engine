@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Control structures
 
-The 13 definitions of the control structures library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 12 definitions of the control structures library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -77,8 +77,8 @@ fixedPoint(cos, 1.0)
 
 `(expression, expression, expression?) -> any`
 
-`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is `Missing` when `c` is `False`. Only the selected expression is evaluated.
-When `c` is a list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is then `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection.
+`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\{c\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.
+When `c` is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection. A condition that is a scalar selects an arm whole, also when the arm is a list.
 
 ### Loop
 
@@ -104,24 +104,12 @@ A case of a `Match`: `MatchCase(pattern, body)` or `MatchCase(pattern, guard, bo
 
 Inside a `Match` pattern, `Pin(expr)` matches the value of `expr` (evaluated at match time) rather than its structure.
 
-### when
-
-MathJSON `When` · `(expression, boolean) -> any`
-
-Conditional/restriction value. `When(e, cond)` evaluates to:
-  - `e` when `cond` evaluates to `True`
-  - the absence marker of the type of `e` when `cond` evaluates to `False` (the "masking rule"): `NaN` for a number, `Missing` — the position-preserving absent datum, the answer a selection with no selected branch gives — for a point, a list, a string or a value not provably numeric; consumers like 2D plotters skip masked points
-  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)
-Stacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.
-Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.
-
 ### Which
 
 `(expression+) -> unknown`
 
 `Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.
-Element-wise selection: when a condition is a list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.
+Element-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.
   - A condition that is not a list applies to every position.
-  - Every list must have the length of the condition, else the value is an `incompatible-dimensions` error.
-  - A position that no clause selects holds `NaN` when every expression is a number, `Missing` otherwise.
-  - A condition that is a list of lists (a comparison of a matrix) selects at every level; an expression with fewer levels than the condition is an `incompatible-dimensions` error, one with more levels is taken whole at each position.
+  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `Missing` cell. A relation (a boolean) is accepted.
+  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean.

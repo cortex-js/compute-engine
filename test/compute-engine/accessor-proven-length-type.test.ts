@@ -76,18 +76,19 @@ describe('an access into an operand proved NOT to hold the position', () => {
   const ce = engine();
 
   // The value is always the marker, and the type is the marker alone:
-  // `nan` for number elements, `missing` for other elements. A chained read
+  // `nan` for number elements, `missing` for other elements. A point
+  // position answers a point whose coordinates are `NaN`, typed as a point. A chained read
   // reads its marker from the element type of the operand of the inner
   // access (`M[7][1]` over a matrix is `NaN`, typed `nan`).
   test.each([
-    ['Third', [POINTS], 'missing'],
-    ['At', [POINTS, 9], 'missing'],
-    ['At', [POINTS, 0], 'missing'],
+    ['Third', [POINTS], 'tuple<number, number>'],
+    ['At', [POINTS, 9], 'tuple<number, number>'],
+    ['At', [POINTS, 0], 'tuple<number, number>'],
     ['At', [['List', 7, 8, 9], 9], 'nan'],
     ['At', ['v3', 4], 'nan'],
     ['At', [{ str: 'abc' }, 9], 'missing'],
     ['At', [['List', { str: 'a' }, { str: 'b' }], -3], 'missing'],
-    ['First', [['Take', POINTS, 0]], 'missing'],
+    ['First', [['Take', POINTS, 0]], 'tuple<number, number>'],
     ['At', ['m23', 3], 'missing'],
     // A range that holds fewer elements than the position.
     ['Third', [['Range', 1, 2]], 'nan'],
@@ -104,7 +105,7 @@ describe('an access into an operand proved NOT to hold the position', () => {
         .box(['Third', POINTS] as any)
         .evaluate()
         .toString()
-    ).toBe('"Missing"');
+    ).toBe('(NaN, NaN)');
     expect(ce.box(['At', ['List', 7, 8, 9], 9]).evaluate().isNaN).toBe(true);
     for (const json of [
       ['Third', ['Range', 1, 2]],
@@ -145,7 +146,9 @@ describe('an access into an operand proved NOT to hold the position', () => {
       [['At', ['At', rows, 7], 1], 'nan', 'NaN'],
       [['First', ['At', rows, 7]], 'nan', 'NaN'],
       [['Last', ['Third', rows]], 'nan', 'NaN'],
-      [['At', ['At', POINTS, 9], 2], 'nan', 'NaN'],
+      // `At` of a coordinate of the NaN point is typed as a number;
+      // `Second` reads the marker.
+      [['At', ['At', POINTS, 9], 2], 'number', 'NaN'],
       [['Second', ['At', POINTS, -5]], 'nan', 'NaN'],
       [['At', ['At', strings, 3], 1], 'missing', '"Missing"'],
       [['First', ['First', ['Take', rows, 0]]], 'nan', 'NaN'],
@@ -181,45 +184,48 @@ describe('an access that can find nothing keeps its absent member', () => {
   ];
 
   test.each([
+    // The result type of an accessor describes the present values: the
+    // absence marker is implicit.
     // A filter can select nothing.
-    ['First', [filter], 'missing | tuple<integer, integer>'],
+    ['First', [filter], 'tuple<integer, integer>'],
     // The source of `Rest` has no proved length, so an empty result is
     // possible.
-    ['First', [['Rest', 'pts']], 'missing | tuple<number, number>'],
+    ['First', [['Rest', 'pts']], 'tuple<number, number>'],
     // A count that is not a literal.
-    ['First', [['Take', POINTS, 'n']], 'missing | tuple<integer, integer>'],
+    ['First', [['Take', POINTS, 'n']], 'tuple<integer, integer>'],
     // A declaration with no length: the value can be replaced by `[]`.
-    ['First', ['pts'], 'missing | tuple<number, number>'],
-    ['First', ['held'], 'missing | tuple<number, number>'],
+    ['First', ['pts'], 'tuple<number, number>'],
+    ['First', ['held'], 'tuple<number, number>'],
     // A range with a symbolic bound.
-    ['First', [['Range', 1, 'n']], 'integer | nan'],
+    ['First', [['Range', 1, 'n']], 'integer'],
     // A variable index.
-    ['At', [POINTS, 'n'], 'missing | tuple<integer, integer>'],
+    ['At', [POINTS, 'n'], 'tuple<integer, integer>'],
   ])('%s%j is typed %s', (head, args, expected) => {
     expect(typeOf(ce, [head, ...(args as unknown[])])).toBe(expected);
   });
 
-  test('an operand that may be absent as a whole keeps the member', () => {
-    // `At(rows, n)` is typed `missing | vector<integer^2>`: the row has a
-    // length, but there may be no row.
+  test('an operand that may be absent as a whole leaves the marker implicit', () => {
+    // `At(rows, n)` is typed `vector<integer^2>`: the row has a length, and
+    // the absence of a row is implicit in the type of the accessor.
     const rows = ['List', ['List', 1, 2], ['List', 3, 4]];
     const t = typeOf(ce, ['First', ['At', rows, 'n']]);
-    expect(t).toContain('nan');
+    expect(t).toBe('integer');
   });
 
   test('a literal element that may evaluate to Nothing does not prove a length', () => {
     // The list erases an element that evaluates to `Nothing`, so
     // `[If(c, "a", Nothing)]` is `[]` when `c` is false, and `First` of it
-    // is `Missing`. Before, the literal was typed `list<string^1>` and the
-    // `First` of it `string`.
+    // is `Missing`. Before, the literal was typed `list<string^1>`. The
+    // `First` of it is typed `string`: the marker of an accessor is
+    // implicit in its type.
     const ce = engine();
     ce.declare('c', 'boolean');
     const list = ['List', ['If', 'c', "'a'", 'Nothing']];
     expect(typeOf(ce, list)).toBe('list<string>');
-    expect(typeOf(ce, ['First', list])).toBe('missing | string');
+    expect(typeOf(ce, ['First', list])).toBe('string');
     expect(
       typeOf(ce, ['First', ['List', ['Which', 'c', "'a'", 'True', 'Nothing']]])
-    ).toBe('missing | string');
+    ).toBe('string');
     ce.assign('c', false);
     expect(ce.box(['First', list]).evaluate().symbol).toBe('Missing');
     // A conditional with no `Nothing` branch still proves the length.
@@ -381,7 +387,7 @@ describe('an element read over a base that declares any elements', () => {
     ['value', 'any'],
     // Controls
     ['list<number>', 'number'],
-    ['list<integer>', 'integer | nan'],
+    ['list<integer>', 'integer'],
     ['list', 'any'],
   ])('P: %s, P[i] is %s on the parse and box routes', (t, expected) => {
     const ce = declared(t);
@@ -576,7 +582,8 @@ describe('arithmetic over a read proved to find no row', () => {
   test.each([
     [['Add', ['At', rows, 5], 1], 'Missing'],
     [['Multiply', 2, ['Third', rows]], 'Missing'],
-    [['Add', ['At', POINTS, 9], ['Tuple', 1, 1]], 'Missing'],
+    // A point position answers the NaN point, and the sum is a NaN point.
+    [['Add', ['At', POINTS, 9], ['Tuple', 1, 1]], '(NaN, NaN)'],
     [['Add', ['At', ['List', 7, 8], 5], 1], 'NaN'],
   ])('%j is %s, with a type that holds it', (json, value) => {
     const expr = ce.box(json as any);

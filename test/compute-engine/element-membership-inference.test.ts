@@ -126,10 +126,10 @@ describe('Element membership element-type inference (function parameters)', () =
       [
         'Function',
         ['Element', 'v', 'digits'],
-        ['Typed', 'v', { str: 'string | missing' }],
+        ['Typed', 'v', { str: 'any' }],
       ],
     ]).evaluate();
-    expect(paramBindingType(ce, 'f')).toBe('missing | string');
+    expect(paramBindingType(ce, 'f')).toBe('any');
   });
 
   test('a same-named global is not hijacked by a bare parameter', () => {

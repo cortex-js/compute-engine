@@ -17,14 +17,18 @@ import { isFunction } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
+  functionLiteralParameterType,
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
 import {
   argumentMayBeAbsent,
   declineIntervalAbsentDefault,
   defaultFillingWrapper,
+  defaultFillTypes,
+  elementTypeAtRank,
   literalDefaultFills,
   mayBeAbsentAtRunTime,
+  signatureParameterTypes,
   targetCoalesce,
 } from './compile-parameter-defaults.js';
 import type { CompileTarget, TargetSource } from './types.js';
@@ -679,16 +683,47 @@ export function compileExprFunctionLiteral(
     const maps = ranks !== undefined && ranks.some((r) => r > 0);
     // The wrapper that fills the parameters with a default value (see
     // `fills` above), around `value`. `only` limits it to the parameters
-    // from that position on.
-    const withDefaults = (value: string, only = 0): string => {
+    // from that position on. The test of each fill is chosen from the type
+    // of the value that reaches the parameter (`defaultFillTypes()`): the
+    // argument of the `Apply`, else the value the consumer passes, an
+    // element of it inside the map (`perElement`).
+    const withDefaults = (
+      value: string,
+      only = 0,
+      perElement = false
+    ): string => {
       const these = fills.map((f, i) => (i < only ? undefined : f));
       if (!these.some((f) => f !== undefined)) return value;
+      const reaching =
+        appliedArgs?.map((a) => a.type.type) ??
+        passed?.types.map((t, i) =>
+          t === undefined
+            ? undefined
+            : elementTypeAtRank(t, perElement ? (ranks?.[i] ?? 0) : 0)
+        );
       const bound = tempVar(target);
       const wrapper = defaultFillingWrapper(
         bound,
         these,
         () => tempVar(target),
-        targetCoalesce(target)
+        targetCoalesce(target) === undefined
+          ? undefined
+          : targetCoalesce(
+              target,
+              defaultFillTypes(
+                these.length,
+                (i) =>
+                  these[i] === undefined
+                    ? undefined
+                    : optionalParameterDefault(literalParams[i])?.type.type,
+                literalParams.map((p) => functionLiteralParameterType(p)),
+                reaching,
+                literal === undefined
+                  ? undefined
+                  : signatureParameterTypes(literal.type.type),
+                'a `Function` literal'
+              )
+            )
       );
       return (
         javascriptStatements(target)?.parameters([[bound, value]], wrapper) ??
@@ -701,7 +736,7 @@ export function compileExprFunctionLiteral(
       // parameter that the consumer leaves out is filled outside the map
       // too, so that the map receives a value for it.
       const mapped = staticMapCallback(
-        withDefaults(callee),
+        withDefaults(callee, 0, true),
         ranks!,
         target,
         passed?.types

@@ -97,7 +97,8 @@ describe('FlatMap with a callback that names a user function', () => {
     engine
       .box(['Assign', 'twice', ['Function', ['List', 'x', 'x'], 'x']])
       .evaluate();
-    engine.declare('l', 'list<integer | missing>');
+    // The type of `l` is inferred from its value: a declared type cannot
+    // name `missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
     engine.box(['Assign', 'l', ['List', 1, 'Missing']]).evaluate();
     const named = engine.box(['FlatMap', 'l', 'twice']);
     const inline = engine.box(['FlatMap', 'l', TWICE_LITERAL]);

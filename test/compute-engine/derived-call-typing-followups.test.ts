@@ -65,9 +65,9 @@ describe('THE DERIVED AT REFUSES A BASE THAT CANNOT BE INDEXED', () => {
   );
 
   test.each([
-    ['list<integer>', 'integer | nan'],
-    ['tuple<integer, integer>', 'integer | nan'],
-    ['string', 'character | missing'],
+    ['list<integer>', 'integer'],
+    ['tuple<integer, integer>', 'integer'],
+    ['string', 'character'],
     ['integer | list<integer>', 'unknown'],
     ['missing', 'unknown'],
     ['unknown', 'unknown'],
@@ -218,7 +218,7 @@ describe('AN ARGUMENT OUTSIDE AN INFERRED SIGNATURE TYPES THE CALL FROM THE BODY
 
   test('the derived route', () => {
     expect(derived(ce, 'U', ['list<list<tuple<integer, integer>>>'])).toBe(
-      'list<number> | missing'
+      'list<number>'
     );
     const e = ce.parse(
       '\\operatorname{Map}(L \\mapsto U(L), [[[(1, 2), (3, 4)]]])'
@@ -324,9 +324,12 @@ describe('A SELF-REFERENTIAL ALIAS AT A DECLARED POINT PARAMETER', () => {
     expect(ce.box(['k', 'x']).type.toString()).toBe('list<list<number>>');
   });
 
-  test('a list of points with an absent arm', () => {
-    const ce = engine('A | list<tuple<number, number> | missing>', true);
-    expect(ce.box(['k', 'x']).type.toString()).toBe('list<missing | number>');
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only").
+  test('a list of points with an absent arm cannot be declared', () => {
+    expect(() =>
+      engine('A | list<tuple<number, number> | missing>', true)
+    ).toThrow(/cannot be declared/);
   });
 
   // A nominal type is not a subtype of its definition, so the typing does

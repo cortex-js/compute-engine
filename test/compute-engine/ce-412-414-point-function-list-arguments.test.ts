@@ -464,20 +464,14 @@ describe('CE-414.1: A LIST AT A SCALAR SLOT BESIDE A POINT PARAMETER MAPS', () =
     expect(compiled(ce, 'n((1,2),[0,1,2])')).toEqual([1, 2, 3]);
   });
 
-  test('an absent element at a scalar slot is bound to the parameter, not replaced by Missing', () => {
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"): a parameter that admits an absent
+  // element is a static error.
+  test('a parameter declared with missing is a static error', () => {
     const ce = new ComputeEngine();
-    ce.declare('k', {
-      signature: `(${POINT}, real | missing) -> integer`,
-    });
-    ce.assign('k', ce.parse('(P,t) \\mapsto 7'));
-    const json = ['k', ['Tuple', 1, 2], ['List', 'Missing', 1]];
-    expect(
-      ce
-        .box(json as never)
-        .evaluate()
-        .toString()
-    ).toBe('[7,7]');
-    expect(ce.box(json as never).type.toString()).toBe('list<integer>');
+    expect(() =>
+      ce.declare('k', { signature: `(${POINT}, real | missing) -> integer` })
+    ).toThrow();
   });
 
   test('a tensor of unknown rank at a scalar slot types the call as a tensor', () => {
@@ -761,61 +755,6 @@ describe('CE-418: A broadcastable<tuple<…>> PARAMETER BESIDE A BARE tuple<…>
     }
   });
 
-  test('a list of points absent as a whole answers Missing, for every declaration', async () => {
-    // ROADMAP CE-420, user decision 2026-10-24: an argument typed as a list
-    // of points (or as a point or a list of points) that is absent as a
-    // whole gives `Missing`, at a `broadcastable<tuple<…>>` parameter as at a
-    // `tuple<…>` one, and the type of the call has the `missing` option.
-    // Before, the `broadcastable<…>` parameter refused it with an
-    // `incompatible-type` error.
-    for (const decl of [`list<${POINT}> | missing`, `${B} | missing`]) {
-      for (const [name, sig] of Object.entries(SIGS)) {
-        const ce = engine(sig);
-        ce.declare('U', decl);
-        ce.declare('V', `list<${POINT}>`);
-        const args = name === 'broadcastable second' ? ['V', 'U'] : ['U', 'V'];
-        const latex = `f(${args.join(', ')})`;
-        const type = ce.parse(latex).type;
-        expect(isSubtype('missing', type.type)).toBe(true);
-        ce.assign('U', ce.Missing);
-        ce.assign('V', ce.box(L as never));
-        const call = ce.box(['f', ...args] as never);
-        expect(call.evaluate().symbol).toBe('Missing');
-        expect((await call.evaluateAsync()).symbol).toBe('Missing');
-        expect(
-          ce
-            .function(
-              'f',
-              args.map((a) => ce.symbol(a))
-            )
-            .evaluate().symbol
-        ).toBe('Missing');
-        expect(ce.parse(latex).evaluate().symbol).toBe('Missing');
-      }
-    }
-    // One parameter: the type is the bare `tuple<…>` one.
-    const ce = new ComputeEngine();
-    ce.declare('g', { signature: `(${B}) -> unknown` });
-    ce.assign('g', ce.parse('a \\mapsto (a.x+1, a.y+1)'));
-    ce.declare('U', `list<${POINT}> | missing`);
-    expect(ce.parse('g(U)').type.toString()).toBe(
-      'list<tuple<number, number>> | missing'
-    );
-    ce.assign('U', ce.Missing);
-    expect(ce.parse('g(U)').evaluate().symbol).toBe('Missing');
-    // A single point that may be absent is still refused, at either
-    // declaration.
-    for (const sig of [`(${B})`, `(${POINT})`]) {
-      const ce2 = new ComputeEngine();
-      ce2.declare('g', { signature: `${sig} -> unknown` });
-      ce2.assign('g', ce2.parse('a \\mapsto (a.x+1, a.y+1)'));
-      ce2.declare('Q', `${POINT} | missing`);
-      ce2.assign('Q', ce2.Missing);
-      expect(JSON.stringify(ce2.parse('g(Q)').evaluate().json)).toContain(
-        "'incompatible-type'"
-      );
-    }
-  });
 
   test('the async route answers Missing at an absent point', async () => {
     const ce = engine(SIGS['broadcastable first']);
@@ -866,13 +805,6 @@ describe('CE-419: A SCALAR-SLOT TENSOR OF UNKNOWN RANK KEEPS THE ABSENCES OF THE
     );
   });
 
-  test('an operand that may be absent as a whole adds missing', () => {
-    const ce = engine();
-    ce.declare('Pw', 'list<tuple<real, real>> | missing');
-    expect(ce.box(['h', 'Pw', 'TT']).type.toString()).toBe(
-      'missing | tensor<real>'
-    );
-  });
 
   test('without absence the type is tensor<real>', () => {
     const ce = engine();
@@ -928,53 +860,9 @@ describe('review round 2 (compiler)', () => {
     expect(compiled(ce, 'f(P, Q)', { P, Q: [10, 20] })).toEqual(expected);
   });
 
-  test('an absent point at a broadcastable slot compiles to undefined', () => {
-    // User decision 2026-10-24, ROADMAP CE-420: the interpreter answers
-    // `Missing` for the absent point, as for a bare `tuple<…>` parameter,
-    // and the compiled map answers `undefined`, the compiled spelling of
-    // `Missing`. Before, the compiled call declined.
-    const ce = engine(`(${B})`, ONE);
-    ce.declare('P', `list<missing | ${POINT}>`);
-    expect(compiled(ce, 'f(P)', { P: [[1, 2], undefined] })).toEqual([
-      [2, 3],
-      undefined,
-    ]);
-    ce.assign('P', ce.box(['List', ['Tuple', 1, 2], 'Missing']));
-    expect(ce.parse('f(P)').evaluate().json).toEqual([
-      'List',
-      ['Tuple', 2, 3],
-      'Missing',
-    ]);
-  });
 
-  test('a list absent as a whole at a broadcastable slot compiles to undefined', () => {
-    // ROADMAP CE-420: the interpreter answers `Missing` for a list of points
-    // that is absent as a whole, as for a bare `tuple<…>` parameter.
-    for (const decl of [`list<${POINT}> | missing`, `${B} | missing`]) {
-      const ce = engine(`(${B})`, ONE);
-      ce.declare('P', decl);
-      expect(compiled(ce, 'f(P)', { P: undefined })).toBeUndefined();
-      expect(compiled(ce, 'f(P)', { P: [[1, 2]] })).toEqual([[2, 3]]);
-    }
-  });
 
-  test('a point that may be absent at another broadcastable slot declines', () => {
-    // The interpreter refuses an absent point passed whole (as for a bare
-    // `tuple<…>` parameter); the compiled map would compute with it.
-    const ce = engine(`(${B}, ${POINT})`, PAIR);
-    ce.declare('U', `${POINT} | missing`);
-    ce.declare('V', `list<${POINT}>`);
-    declines(ce, 'f(U, V)');
-  });
 
-  test('control: an absent point at a bare tuple slot compiles to undefined', () => {
-    const ce = engine(`(${POINT})`, ONE);
-    ce.declare('P', `list<missing | ${POINT}>`);
-    expect(compiled(ce, 'f(P)', { P: [[1, 2], undefined] })).toEqual([
-      [2, 3],
-      undefined,
-    ]);
-  });
 });
 
 describe('review round 2 (interpreter)', () => {
@@ -1287,7 +1175,7 @@ describe('review round 3 (interpreter)', () => {
         : k === 2
           ? 'Missing'
           : k === 3
-            ? 'Undefined'
+            ? 'Missing'
             : ['Tuple', k, 0]
     );
     const call = ce.box(['f', ['List', ...items]] as never);

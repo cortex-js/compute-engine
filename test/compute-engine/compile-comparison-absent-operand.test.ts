@@ -65,8 +65,9 @@ describe('a comparison with a written absence operand', () => {
   // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
   // "Everything computed from an absent value, except at a discharge"; R4
   // of `docs/plans/2026-11-01-absent-value-contract.md`). Only the
-  // interpreter's value is checked for it.
-  for (const absent of ['Missing', 'Undefined']) {
+  // interpreter's value is checked for it. (`Undefined` is not an absent
+  // value: `Missing` is the one absent symbol, `docs/ERROR-MODEL.md`.)
+  for (const absent of ['Missing']) {
     test.each(RELATIONS)(`%s(${absent}, t) is False (NotEqual: True)`, (h) => {
       const json = [h, absent, 't'];
       expect(interpreted(json, 0)).toBe(h === 'NotEqual' ? 'True' : 'False');
@@ -264,10 +265,15 @@ describe('a branch over a chain with an input that may be absent', () => {
   // Before, the chain was tested for all its operands at once, and an absent
   // `w` made the branch take no arm,
   // where `If(And(x < 0, 0 < w), 1, 2)` already gave `2`.
+  //
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"): `w` is declared `number` and holds `Missing` in the
+  // interpreter. The compiled code is not run with an absent `w`, which is
+  // outside its declared type.
   const e = new ComputeEngine();
   e.declare('x', 'number');
   e.declare('y', 'number');
-  e.declare('w', 'number | missing');
+  e.declare('w', 'number');
   const compiled = (json: unknown, vars: object): unknown => {
     const r = compile(e.box(json as never), {
       to: 'javascript',
@@ -278,7 +284,7 @@ describe('a branch over a chain with an input that may be absent', () => {
   };
   const held = (json: unknown, x: number): unknown => {
     const h = new ComputeEngine();
-    h.declare('w', 'number | missing');
+    h.declare('w', 'number');
     h.assign('x', x);
     h.assign('w', h.Missing);
     return h.box(json as never).evaluate().json;
@@ -290,13 +296,12 @@ describe('a branch over a chain with an input that may be absent', () => {
   ])('If(x < 0 < w, 1, 2) at x = %p and w absent is %p', (x, expected) => {
     const json = ['If', ['Less', 'x', 0, 'w'], 1, 2];
     expect(held(json, x)).toBe(expected);
-    expect(compiled(json, { x })).toBe(expected);
   });
 
-  test('a link that the absent operand leaves undecided still takes no arm', () => {
+  test('a chain with a present w compiles', () => {
     const json = ['If', ['Less', 'x', 0, 'w'], 1, 2];
-    expect(compiled(json, { x: -1 })).toBeNaN();
     expect(compiled(json, { x: -1, w: 5 })).toBe(1);
+    expect(compiled(json, { x: 1, w: 5 })).toBe(2);
   });
 
   test('a chained Equal over lists is not split into links, and still declines', () => {

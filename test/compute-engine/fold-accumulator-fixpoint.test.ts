@@ -28,9 +28,9 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
   it('types the fold from the accumulator', () => {
     const ce = engine();
     const fold = ce.box(FOLD as any);
-    expect(fold.type.toString()).toBe('list<integer | nan>');
+    expect(fold.type.toString()).toBe('list<integer>');
     expect(fold.ops[1].type.toString()).toBe(
-      '(acc: list<integer | nan>, i: integer) -> list<integer | nan>'
+      '(acc: list<integer>, i: integer) -> list<integer>'
     );
     expect(fold.evaluate().toString()).toBe('[6,2,4]');
   });
@@ -55,7 +55,7 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       ['Function', ['Add', 'x', 1], 'x'],
       FOLD,
     ] as any);
-    expect(mapped.type.toString()).toBe('list<integer | nan>');
+    expect(mapped.type.toString()).toBe('list<integer>');
     expect(mapped.evaluate().toString()).toBe('[7,3,5]');
     expect(
       ce
@@ -74,7 +74,7 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       ce
         .box(['Scan', RANGE, ['Function', BODY, 'acc', 'i'], ['List']] as any)
         .type.toString()
-    ).toBe('list<list<integer | nan>>');
+    ).toBe('list<list<integer>>');
     expect(
       ce
         .box([
@@ -186,7 +186,7 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       RANGE,
     ] as any);
     expect(fold.ops[1].type.toString()).toBe(
-      '(acc: list<integer>, i: integer) -> list<integer | nan>'
+      '(acc: list<integer>, i: integer) -> list<integer>'
     );
   });
 

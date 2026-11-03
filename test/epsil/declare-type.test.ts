@@ -1348,10 +1348,10 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
 //
 describe('EPSIL RECURSIVE TYPES', () => {
   const SELF =
-    'type alias json = missing | boolean | real | string | list<json> | dictionary<json>\n';
+    'type alias json = boolean | real | string | list<json> | dictionary<json>\n';
 
   const MUTUAL = [
-    'type alias json = missing | boolean | real | string | type jsonArray | type jsonObject',
+    'type alias json = boolean | real | string | type jsonArray | type jsonObject',
     'type alias jsonArray = list<json>',
     'type alias jsonObject = dictionary<json>',
     '',
@@ -1371,6 +1371,9 @@ describe('EPSIL RECURSIVE TYPES', () => {
         expect(r.diagnostics).toEqual([]);
       });
 
+      // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+      // "`Missing` is a result only"), but a store accepts a value that
+      // holds the marker where the declared type accepts a present value.
       test('accepts `Missing` as a position-preserving null', () => {
         const ce = new ComputeEngine();
         const r = executeEpsil(

@@ -82,6 +82,7 @@ import {
   FunctionInterface,
   Sign,
 } from './global-types.js';
+import type { IComputeEngine as ComputeEngine } from './global-types.js';
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
   isAbsentArithmeticOperand,
@@ -1857,11 +1858,11 @@ function couldBeNumericElement(el: Type, seen?: AliasDescent): boolean {
   return (
     el === 'any' ||
     el === 'unknown' ||
-    // An absent component (`Missing`, or `Undefined`, which a tuple literal
-    // also types `missing`) reads as `NaN` in a numeric slot, so it does not
-    // stop the tuple from being a point: `-(1, Missing)` negates to
-    // `(-1, NaN)` and `(3, 4) - (1, Missing)` is `(2, NaN)`. Without this
-    // both stayed inert.
+    // An absent component (`Missing`) does not stop the tuple from being a
+    // point: the arithmetic computes each component, and an operator over
+    // `Missing` gives `Missing`, so `-(1, Missing)` is `(-1, Missing)` and
+    // `(3, 4) - (1, Missing)` is `(2, Missing)`. Without this both stayed
+    // inert.
     el === 'missing' ||
     isSubtype(el, 'number') ||
     isSubtype('number', el) ||
@@ -2447,6 +2448,15 @@ export function pointArity(
   })
     ? present.elements.length
     : undefined;
+}
+
+/**
+ * The point of `n` coordinates that are all `NaN`: the absent value of the
+ * domain of a point of arity `n` (`pointArity()`), which a read out of
+ * range, a false restriction and an unselected position give for a point.
+ */
+export function nanPoint(ce: ComputeEngine, n: number): Expression {
+  return ce._fn('Tuple', Array.from({ length: n }, () => ce.NaN));
 }
 
 /**
@@ -4206,7 +4216,7 @@ export function typeMayCarryQuotientShape(t: Type): boolean {
 
 /**
  * True when `x` is a SCALAR absent term of a sum or product: an absence symbol
- * (`Missing`, `Undefined`), or a negation, product, quotient or power of one
+ * (`Missing`), or a negation, product, quotient or power of one
  * (`-Missing`, `2·Missing`) whose type cannot be a collection. Beside a point,
  * such a term makes the whole point absent (`Missing`). A term that may be a
  * collection (`Missing·L`, with `L` a list) is not a scalar absence: it
@@ -6142,15 +6152,7 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
         if (store.length === 1) return expr.engine.number(store[0]).type.type;
         return widenAll(numericStoreTiers(store));
       }
-      // The `Undefined` symbol is an absent element, as `Missing` is
-      // (`isAbsentSymbol`), but it is declared `unknown`, which the widening
-      // drops: `[1, Undefined]` answered `integer`, and `Zip` of two such
-      // lists was typed `list<tuple<integer, integer>>` although its second
-      // element is `Missing`. It is a `missing` element here, as in the type
-      // of the literal (`classifyCellD`, `library/collections.ts`).
-      const elementType = (op: Expression): Type =>
-        isSymbol(op, 'Undefined') ? 'missing' : op.type.type;
-      if (expr.nops === 1) return elementType(expr.ops[0]);
+      if (expr.nops === 1) return expr.ops[0].type.type;
       // Several elements join their TIERS, as the numeric store above does:
       // a number literal is typed by its value (`{ kind: 'value', value: 1 }`),
       // and `widen` keeps a `nan` arm as a union, so the literal types of
@@ -6159,7 +6161,7 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
       // `machineNumberTierType` applies to a stored element.
       return widenAll(
         expr.ops.map((op) =>
-          isNumber(op) ? numberLiteralTierType(op) : elementType(op)
+          isNumber(op) ? numberLiteralTierType(op) : op.type.type
         )
       );
     },
@@ -6611,7 +6613,36 @@ function pointFitsParameter(t: Type, param: Type): boolean {
   // tuple types that is a subtype of `param` is accepted.
   if (t === 'never') return false;
   if (isSubtype(t, param)) return true;
-  const r = resolveTypeAlias(t);
+  let r = resolveTypeAlias(t);
+  // A `NaN` point (a tuple whose coordinates are all `nan`, the type of a
+  // read past the end of a list of points) is accepted at a point parameter
+  // of its arity, as the scalar `NaN` point is (`acceptsNaNArgument()`,
+  // `boxed-expression/validate.ts`): the cell of the map binds it and the
+  // body runs with it. So `list<tuple<integer, integer> | tuple<nan, nan>>`
+  // maps over `tuple<real, real>`. The other arms are checked as usual.
+  const arity = pointArity(param);
+  const isNaNPointArm = (x: Type): boolean => {
+    const a = resolveTypeAlias(x);
+    return (
+      typeof a !== 'string' &&
+      a.kind === 'tuple' &&
+      a.elements.length === arity &&
+      a.elements.every((el) => isSubtype(el.type, 'nan'))
+    );
+  };
+  if (arity !== undefined) {
+    if (isNaNPointArm(r)) return true;
+    if (typeof r !== 'string' && r.kind === 'union') {
+      const rest = r.types.filter((x) => !isNaNPointArm(x));
+      if (rest.length === 0) return true;
+      if (rest.length < r.types.length) {
+        const present: Type =
+          rest.length === 1 ? rest[0] : { kind: 'union', types: rest };
+        if (isSubtype(present, param)) return true;
+        r = resolveTypeAlias(present);
+      }
+    }
+  }
   return (
     (r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple')) &&
     typesOverlap(r, param)
@@ -7187,7 +7218,7 @@ export function holdsConditionalValue(x: Expression): boolean {
  * True when a "not a member" answer about `value` and the collection `xs` is
  * not settled yet, because an unknown could still make them match: `x ∈
  * [1, 2]` is true when `x` becomes 1. A structural match is always settled,
- * and an absent element (`Missing`, `Undefined`) matches only the same
+ * and an absent element (`Missing`) matches only the same
  * marker, which is a structural match, so it never keeps the answer open.
  *
  * - A literal `List`, `Set` or `Tuple`: an element that is not the same
@@ -7229,7 +7260,7 @@ export function searchMayStillMatch(
 }
 
 function isAbsentElement(x: Expression): boolean {
-  return isSymbol(x, 'Missing') || isSymbol(x, 'Undefined');
+  return isSymbol(x, 'Missing');
 }
 
 /**

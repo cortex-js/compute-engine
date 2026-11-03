@@ -193,15 +193,17 @@ describe('Map callback types follow lexical bindings', () => {
   });
 
   test('a callback parameter does not borrow library missing-cell behavior', () => {
+    // A declared type cannot name `missing`: `L` is typed from a value that
+    // holds an absent cell.
     const ce = new ComputeEngine();
-    ce.declare('L', 'list<integer | missing>');
+    ce.assign('L', ce.box(['List', 1, 'Missing']));
     const fn = ce.box([
       'Function',
       ['Map', 'IsPrime', 'L'],
-      ['Typed', 'IsPrime', '(integer | missing) -> boolean'],
+      ['Typed', 'IsPrime', '(integer) -> boolean'],
     ]);
     expect(fn.isValid).toBe(true);
-    expect(fn.op1.op1.type.toString()).toBe('list<boolean>');
+    expect(fn.op1.op1.type.toString()).toBe('list<boolean^2>');
   });
 
   test('a reducer parameter does not borrow the built-in arithmetic result', () => {

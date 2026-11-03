@@ -1441,15 +1441,17 @@ export function resolveTypeAlias(t: Readonly<Type>): Type {
 
 /**
  * The top type (`unknown`, `any` or `value`) of a union whose other branches
- * are only the absence markers `missing` and `nothing`, or `undefined` for
- * any other type. A transparent alias is unfolded, the union and each of its
- * branches.
+ * are only the absence markers `missing` and `nothing` or collections, or
+ * `undefined` for any other type. A transparent alias is unfolded, the union
+ * and each of its branches.
  *
  * An index into a list whose elements are typed `unknown` has such a type:
- * with `g: (unknown) -> list<unknown>` and `x: any`, `g(x)[1]` is typed
- * `missing | unknown`, and its value is a list when `x` is a list (the call
- * maps over it). The absence branches do not change what a present value can
- * be, so the readers that ask whether an operand may be a collection read
+ * with `g: (unknown) -> list<unknown>` and `x: any`, the element type of
+ * `g(x)` is `list<unknown> | unknown`, and so is the type of `g(x)[1]`. Its
+ * value is a list when `x` is a list (the call maps over it), and a point
+ * when `x` is a point. The absence branches do not change what a present
+ * value can be, and a collection branch is one of the values of the top
+ * type, so the readers that ask whether an operand may be a collection read
  * such a type as its top type. Without this, they read the union only by its
  * `broadcastable` branches, and took the element for a scalar: compiled
  * `g(x)[1] + 1` added `1` to an array with the JavaScript `+` and gave the
@@ -1464,7 +1466,12 @@ export function topTypeBesideAbsence(
   for (const branch of r.types) {
     const b = resolveTypeAlias(branch);
     if (b === 'unknown' || b === 'any' || b === 'value') top ??= b;
-    else if (b !== 'missing' && b !== 'nothing') return undefined;
+    else if (
+      b !== 'missing' &&
+      b !== 'nothing' &&
+      !isSubtype(b, 'collection')
+    )
+      return undefined;
   }
   return top;
 }
@@ -1512,6 +1519,101 @@ export function typeContainsMissing(
 ): boolean {
   return containsPrimitive(t, (p) => p === 'missing', seen);
 }
+
+/**
+ * True when a DECLARED type names the marker type `missing` at a position
+ * that a declaration may not give it: the type of a symbol, an element or
+ * slot of a collection, or a parameter of a function signature, at any
+ * depth (`real | missing`, `list<string | missing>`,
+ * `(real | missing) -> real`).
+ *
+ * `Missing` is a result only: it is produced by a selection with no match,
+ * by an accessor out of range and by the written symbol, and it is never the
+ * declared type of an input, a parameter, a local or an element. The result
+ * type of a signature is not read: as for `error`, the marker is implicit in
+ * a result, and an author who declares the partiality of a result may spell
+ * it (`(real) -> real | missing`).
+ *
+ * The declaration routes (`ce.declare`, an operator signature, a parameter
+ * annotation of a function literal, an Epsil declaration) refuse a type for
+ * which this is true. An inferred type is not a declaration and is never
+ * checked.
+ *
+ * Source: `docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+ * decision of 2026-11-02".
+ */
+export function declaredTypeNamesMissing(t: Readonly<Type>): boolean {
+  return namesMissingInDeclaration(t, undefined, new Set());
+}
+
+/**
+ * {@link declaredTypeNamesMissing} with its two guards. `seen` is the
+ * descent guard: it cuts a self-referential alias at its repeat on one
+ * path. `read` holds each alias reference that this walk has already read
+ * through its definition, keyed by its declaration (or, for an alias with
+ * type arguments, by the reference written out, since the arguments change
+ * its definition). The question is whether the marker can be reached from
+ * the declared type, and the answer for one alias does not depend on where
+ * the walk meets it, so a second meeting answers `false`: when the first
+ * meeting found the marker, the walk has already answered `true`. Without
+ * this set, the walk read each alias once per path to it, and a chain of
+ * aliases whose definitions name the previous alias several times
+ * (`R1 = tuple<R0, R0> | tuple<R0, R0, R0>`, then `R2` from `R1`, ...) took
+ * a time exponential in the length of the chain: about 8 seconds for 10
+ * aliases, and no end in practice for 20.
+ */
+function namesMissingInDeclaration(
+  t: Readonly<Type>,
+  seen: AliasDescent,
+  read: Set<unknown>
+): boolean {
+  if (typeof t === 'string') return t === 'missing';
+  // Each nested type is read by this function again, so that a signature
+  // nested in a constructor (`list<(real | missing) -> real>`) is checked on
+  // its parameters, and not on its result.
+  const names = (x: Readonly<Type>) => namesMissingInDeclaration(x, seen, read);
+  switch (t.kind) {
+    case 'signature':
+      return [...(t.args ?? []), ...(t.optArgs ?? [])]
+        .concat(t.variadicArg === undefined ? [] : [t.variadicArg])
+        .some((a) => names(a.type));
+    case 'union':
+    case 'intersection':
+      return t.types.some(names);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return names(t.elements);
+    case 'tuple':
+      return t.elements.some((e) => names(e.type));
+    case 'dictionary':
+      return names(t.values);
+    case 'record':
+    case 'object':
+      return Object.values(t.elements).some(names);
+    case 'reference': {
+      // A transparent alias is read through its definition, under the
+      // descent guard, so that a self-referential alias stops at its
+      // repeat. A nominal type is opaque: only its type arguments are read.
+      const unfolded = unfoldAliasOnDescent(t, seen);
+      if (unfolded === undefined) return false;
+      if (unfolded.type === t) return t.args?.some(names) ?? false;
+      const key = t.args?.length ? typeToDedupKey(t) : declarationOf(t);
+      if (read.has(key)) return false;
+      read.add(key);
+      return namesMissingInDeclaration(unfolded.type, unfolded.seen, read);
+    }
+    default:
+      return false;
+  }
+}
+
+/** The message of the error that a declaration naming `missing` gets
+ * ({@link declaredTypeNamesMissing}). */
+export const DECLARED_MISSING_MESSAGE =
+  'the type `missing` cannot be declared: `Missing` is a result only (of a selection with no match or an accessor out of range); declare the type of the present value and read an absent one with `IsMissing` or `Coalesce`';
 
 /**
  * A set of KIND TYPE names: the names of the types of the value kinds of an
@@ -1987,115 +2089,6 @@ export function widenNumericCellsWithNan(
       });
     default:
       return t as Type;
-  }
-}
-
-export function absorbNumericAbsence(t: Readonly<Type>): Type {
-  // A whole `missing` cell in a `propagate` result is numeric-domain (I6):
-  // its runtime value is `NaN`, so it is `nan`. A numeric arm keeps the type
-  // the handler answered and gains a `nan` arm: `Length` of a list that may
-  // be absent is `integer | +oo | nan`, not `number`. A `never` cell stays
-  // `number`, as before.
-  if (t === 'missing') return 'nan';
-  if (t === 'never') return 'number';
-  if (typeof t === 'string')
-    return isSubtype(t, 'number') ? widenWithNan(t) : t;
-  switch (t.kind) {
-    case 'union': {
-      // A `missing` arm beside present arms that are all tuples is an
-      // absent POINT, not an absent number. A point is atomic, so its
-      // absence is not absorbed into a `NaN` coordinate: the cell answers
-      // `Missing` (`docs/ERROR-MODEL.md`, the section on `Missing` in a
-      // numeric slot), and the arm stays. `list<missing | tuple<…>>` stays
-      // as it is; `list<missing | integer>` becomes `list<integer | nan>`. The
-      // bare `tuple`, a point of no stated arity, is a tuple arm too.
-      // Without it, the sum of a `list<tuple<number, number>> | tuple` and
-      // a `list<missing | tuple<number, number>> | tuple<number, number>`,
-      // which is `list<missing | tuple> | tuple`, had its `missing` cell
-      // absorbed into `number`.
-      const present = t.types.filter((x) => resolveTypeAlias(x) !== 'missing');
-      const keepMissing =
-        present.length > 0 &&
-        present.length < t.types.length &&
-        present.every((x) => {
-          const r = resolveTypeAlias(x);
-          return r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple');
-        });
-      const arms = (keepMissing ? present : t.types)
-        .map((x) => absorbNumericAbsence(x))
-        .filter((x) => x !== 'never');
-      if (keepMissing) arms.push('missing');
-      if (arms.length === 0) return 'never';
-      if (arms.length === 1) return arms[0];
-      // Numeric arms are kept side by side, not joined: `widen` joins
-      // `real` and `+oo` to `number`, which loses the arms the handler
-      // answered. Only the other arms (a list, a tuple) are joined with
-      // `widen`, and the numeric arms are added beside the result: with a
-      // list arm, `Abs` of `list<integer> | integer | missing` cells keeps
-      // `nan | real | signed_infinity` beside the list.
-      const flat: Type[] = [];
-      const others: Type[] = [];
-      for (const arm of arms) {
-        if (!isSubtype(arm, 'number')) {
-          others.push(arm);
-          continue;
-        }
-        for (const x of typeof arm !== 'string' && arm.kind === 'union'
-          ? arm.types
-          : [arm])
-          if (!flat.includes(x)) flat.push(x);
-      }
-      if (others.length === 0)
-        return flat.length === 1 ? flat[0] : { kind: 'union', types: flat };
-      const joined = widen(...others);
-      // A joined arm that already holds every number (`value`, `any`) keeps
-      // the answer `widen` gave.
-      if (flat.length === 0 || flat.every((x) => isSubtype(x, joined)))
-        return joined;
-      return {
-        kind: 'union',
-        types: [
-          ...(typeof joined !== 'string' && joined.kind === 'union'
-            ? joined.types
-            : [joined]),
-          ...flat,
-        ],
-      };
-    }
-    case 'intersection':
-      return {
-        kind: 'intersection',
-        types: t.types.map((x) => absorbNumericAbsence(x)),
-      };
-    case 'list':
-    case 'collection':
-    case 'indexed_collection':
-    case 'broadcastable':
-      return { ...t, elements: absorbNumericAbsence(t.elements) };
-    case 'tuple':
-      return {
-        ...t,
-        elements: t.elements.map((e) => ({
-          ...e,
-          type: absorbNumericAbsence(e.type),
-        })),
-      };
-    // A RANGED or literal numeric type (`integer<1..3>`, `real<0..1>`) is a
-    // number, and an absent operand makes its value `NaN`, which no range
-    // admits: it widens to its bare tier and gains a `nan` arm, as the bare
-    // numeric primitives do in the string branch above. The range is
-    // removed because the value of a literal is typed without its range
-    // (`[1, NaN]` is a `list<integer | nan>`, not a list of `integer<0..>`),
-    // so the type of the value of `Abs(L)` would not be a subtype of a
-    // ranged result. Without this arm `2·y` with
-    // `y: integer<1..3> | missing` was typed `integer<2..6>`, while the same
-    // product over `y: integer | missing` was wider, and a `Map` of `2x`
-    // over `[1, Missing, 3]` claimed `list<integer<2..6>>` for a value that
-    // holds `NaN` (found 2026-09-26).
-    case 'numeric':
-      return widenWithNan(stripNumericRanges(t));
-    default:
-      return t;
   }
 }
 

@@ -419,7 +419,8 @@ describe('Element-wise uses still broadcast', () => {
         'let L = [10, 20, 30]\nfunction g(t) { L[t] + 1 }\ng([1, 3])'
       )
     ).toBe('[11,31]');
-    expect(ce2.symbol('g').type.toString()).toBe('(t: unknown) -> integer | nan');
+    // The absence marker of an accessor is implicit in its type.
+    expect(ce2.symbol('g').type.toString()).toBe('(t: unknown) -> integer');
   });
 
   test('a container operand is not a whole use: a point maps over a list', () => {

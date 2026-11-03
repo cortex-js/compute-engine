@@ -2,6 +2,62 @@
 
 ### Behavior Changes
 
+- **`Missing` is a result only.** `Missing` is produced by a selection with
+  no match, an accessor out of range and the written symbol, and it can no
+  longer be declared. Breaking changes, each with its replacement:
+  - A declared type that names `missing`, at any depth, is an error:
+    `ce.declare("w", "real | missing")` and `ce.declare("f", "(real |
+    missing) -> real")` throw, an operator definition whose signature has
+    such a parameter throws, a parameter annotation of a function literal
+    (`["Typed", "x", "'real | missing'"]`) or a signature string is an
+    `invalid-type-annotation` error, a `Declare` statement is an
+    `invalid-type-declaration` error, and Epsil reports a
+    `type-annotation-error` (`let x: real | missing = 1`). Declare the
+    type of the present value, and read an absent value with `IsMissing`
+    or `Coalesce` (`??`). The result type of a signature may still name
+    `missing`.
+  - `"Undefined"` is no longer an absent value: it is an ordinary symbol
+    with no value (`IsMissing(Undefined)` is `False`, `Undefined + 1` stays
+    `Undefined + 1`). Use `"Missing"`. The engine writes `Missing` where
+    it wrote `Undefined` (an operand that is not given when an expression
+    is serialized, a `dynamic` value with no result).
+  - An operator over `Missing` gives `Missing` (it gave `NaN` in a
+    numeric domain): `Missing + 2`, `Sin(Missing)`, `1 / Missing`,
+    `Max(1, Missing)`, `Sum([1, Missing])`, `Mean([1, Missing])`,
+    `Norm((1, Missing))` and `ce.box("Missing").add(1)` are `Missing`, and
+    `[1, Missing] + 1` is `[2, Missing]`. `Missing + 2` is typed
+    `missing`. An aggregate over `NaN` or over no data is still `NaN`.
+    Read the absence with `IsMissing` or `Coalesce` before computing.
+  - `At`, `First` and `Last` over a list of points, out of range, give a
+    point whose coordinates are all `NaN` (they gave `Missing`):
+    `At([(1, 2), (3, 4)], 5)` is `(NaN, NaN)`, in the interpreter and in
+    compiled JavaScript and Python. Over numbers the value is `NaN`, and
+    over other values `Missing`, as before.
+  - A false restriction of a point gives a point whose coordinates are all
+    `NaN` (it gave `Missing`, and `undefined` in compiled JavaScript):
+    `If(c, (1, 2))` with `c` false is `(NaN, NaN)`, in the interpreter and
+    in compiled JavaScript and Python, so `Sin(If(c, (0, 1)))` is
+    `(NaN, NaN)` and `Norm(If(c, (3, 4)))` is `NaN`. `First` of a false
+    restricted list of points is `(NaN, NaN)` too, while the restricted list
+    itself stays `Missing`. `IsMissing` and `Coalesce` read the `NaN` point
+    as absent, as before.
+  - Compiled code tests every point for absence at a parameter default and
+    at `AssertPresent`, also a point typed `tuple<real, real>`: a read out
+    of range gives the `NaN` point whatever the type of the point says.
+    `AssertPresent(At(qs, 9))` with `qs: list<tuple<real, real>>` now
+    raises the `expected-present` error in compiled JavaScript, as in the
+    interpreter (it gave `[NaN, NaN]`).
+  - The result type of an accessor has no marker arm: with `ss:
+    list<string>`, `At(ss, i)` is typed `string` (it was `string |
+    missing`), and with `ys: list<real>`, `At(ys, i)` is typed `real` (it
+    was `real | nan`). The value out of range is still the marker. A read
+    whose position is proved not to exist keeps the marker type
+    (`At([1, 2], 5)` is typed `nan`).
+  - The signature of `Append` is `(collection<any>, any+) -> collection`
+    (it was `(collection<any>, (value | missing)+) -> collection`): an
+    appended `Missing` is still kept as a cell (`Append([1], Missing)` is
+    `[1, Missing]`).
+  See `docs/ERROR-MODEL.md`, "`Missing` is a result only".
 - **A comparison is two-valued: `True` or `False`.** An operand that does
   not decide a comparison makes it `False` (`NotEqual`: `True`, since `≠`
   is `Not(=)`): `NaN`, a pole, a value with no order, and now also an

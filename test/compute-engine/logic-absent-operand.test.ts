@@ -21,33 +21,25 @@ const ce = new ComputeEngine();
 
 const evalJson = (expr: any) => ce.box(expr).evaluate().json;
 
+// `Undefined` is not an absent value since 2026-11-02 (`docs/ERROR-MODEL.md`,
+// "`Missing` is a result only"): the rows that read it as one are gone.
 describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — box route', () => {
   const table: [any, any][] = [
     [['And', 'True', 'Missing'], 'False'],
     [['Or', 'False', 'Missing'], 'False'],
     [['Not', 'Missing'], 'True'],
-    [['And', 'True', 'Undefined'], 'False'],
-    [['Or', 'False', 'Undefined'], 'False'],
-    [['Not', 'Undefined'], 'True'],
     [['Xor', 'True', 'Missing'], 'True'],
     [['Xor', 'False', 'Missing'], 'False'],
-    [['Xor', 'True', 'Undefined'], 'True'],
     [['Xor', 'Missing', 'True'], 'True'],
     [['Xor', 'True', 'False', 'Missing'], 'True'],
     [['Xor', 'A', 'Missing'], 'A'],
-    [['Xor', 'A', 'Undefined'], 'A'],
     [['Equivalent', 'True', 'Missing'], 'False'],
     [['Equivalent', 'False', 'Missing'], 'True'],
-    [['Equivalent', 'True', 'Undefined'], 'False'],
     [['Equivalent', 'Missing', 'False'], 'True'],
     [['Equivalent', 'Missing', 'Missing'], 'True'],
     // A held equivalence spells the absent operand `False`.
     [
       ['Equivalent', 'A', 'Missing'],
-      ['Equivalent', 'A', 'False'],
-    ],
-    [
-      ['Equivalent', 'A', 'Undefined'],
       ['Equivalent', 'A', 'False'],
     ],
   ];
@@ -69,14 +61,12 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — box route', () => {
     expect(ce.box(['Not', 'Undefined']).type.toString()).toBe('boolean');
   });
 
-  test('a possibly-absent operand validates, as for And', () => {
-    const sc = new ComputeEngine();
-    sc.declare('M', 'boolean | missing');
-    for (const op of ['And', 'Xor', 'Equivalent']) {
-      const expr = sc.box([op, 'True', 'M']);
-      expect(expr.isValid).toBe(true);
-      expect(expr.type.toString()).toBe('boolean');
-    }
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so an operand cannot be declared possibly absent.
+  test('an operand cannot be declared `boolean | missing`', () => {
+    expect(() => new ComputeEngine().declare('M', 'boolean | missing')).toThrow(
+      /cannot be declared/
+    );
   });
 
   test('a non-boolean operand is still a type error', () => {
@@ -110,11 +100,6 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — parse route', () => {
       'True',
     ],
     [
-      '\\mathrm{True}\\veebar\\mathrm{Undefined}',
-      ['Xor', 'True', 'Undefined'],
-      'True',
-    ],
-    [
       '\\operatorname{Xor}(\\mathrm{True}, \\mathrm{Missing})',
       ['Xor', 'True', 'Missing'],
       'True',
@@ -122,11 +107,6 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — parse route', () => {
     [
       '\\mathrm{True}\\iff\\mathrm{Missing}',
       ['Equivalent', 'True', 'Missing'],
-      'False',
-    ],
-    [
-      '\\mathrm{True}\\iff\\mathrm{Undefined}',
-      ['Equivalent', 'True', 'Undefined'],
       'False',
     ],
     [
@@ -160,33 +140,30 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — result type', () => {
   // Each row: the expression, its type, and the value it evaluates to. The
   // type is `boolean`: an absent operand reads as `False`, so the result is
   // never `Missing`.
+  // `M` is a boolean with no value. `Undefined` is not an absent value
+  // since 2026-11-02, so the rows that read it as one are gone.
   const sc = new ComputeEngine();
-  sc.declare('M', 'boolean | missing');
+  sc.declare('M', 'boolean');
   const table: [any, string, any][] = [
     [['And', 'True', 'Missing'], 'boolean', 'False'],
     [['And', 'Missing', 'True'], 'boolean', 'False'],
     [['And', 'False', 'Missing'], 'boolean', 'False'],
     [['And', 'Missing', 'False'], 'boolean', 'False'],
-    [['And', 'False', 'Undefined'], 'boolean', 'False'],
-    [['And', 'True', 'Undefined'], 'boolean', 'False'],
     [['And', 'True', 'M'], 'boolean', 'M'],
     [['And', 'A', 'Missing'], 'boolean', 'False'],
     [['Or', 'False', 'Missing'], 'boolean', 'False'],
     [['Or', 'True', 'Missing'], 'boolean', 'True'],
     [['Or', 'False', 'M'], 'boolean', 'M'],
     [['Not', 'Missing'], 'boolean', 'True'],
-    [['Not', 'Undefined'], 'boolean', 'True'],
     [['Not', 'M'], 'boolean', ['Not', 'M']],
     [['Xor', 'False', 'Missing'], 'boolean', 'False'],
     [['Xor', 'A', 'Missing'], 'boolean', 'A'],
     [['Xor', 'True', 'M'], 'boolean', ['Not', 'M']],
     [['Equivalent', 'False', 'Missing'], 'boolean', 'True'],
-    [['Equivalent', 'True', 'Undefined'], 'boolean', 'False'],
     [['Implies', 'True', 'Missing'], 'boolean', 'False'],
     [['Implies', 'Missing', 'False'], 'boolean', 'True'],
     [['Implies', 'False', 'Missing'], 'boolean', 'True'],
     [['Implies', 'Missing', 'True'], 'boolean', 'True'],
-    [['Implies', 'Undefined', 'False'], 'boolean', 'True'],
     [['Nand', 'True', 'Missing'], 'boolean', 'True'],
     [['Nand', 'False', 'Missing'], 'boolean', 'True'],
     [['Nor', 'False', 'Missing'], 'boolean', 'True'],
@@ -233,9 +210,6 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — result type', () => {
         expect(expr.type.toString()).toBe('boolean');
         expect(expr.evaluate().json).toEqual('True');
       }
-      const expr = sc.box([op, 'Undefined', 1]);
-      expect(expr.type.toString()).toBe('boolean');
-      expect(expr.evaluate().json).toEqual('True');
       expect(sc.box([op, 'x', 1]).type.toString()).toBe('boolean');
     }
   });

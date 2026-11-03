@@ -1,12 +1,14 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
-// The comparisons read an `Undefined` operand as an absent operand, as for
-// `Missing`. A comparison is two-valued (user decision of 2026-11-02,
-// two-valued comparisons): an absent operand makes it `False` (`NotEqual`:
-// `True`), and its type is `boolean`. The type handlers read the
-// `Undefined` symbol itself, so that no value type (`true`, `false`) is
-// read for it. From 2026-10-17 to 2026-11-02 the value was `Missing` and the
-// type `boolean | missing`.
+// A comparison is two-valued (user decision of 2026-11-02, two-valued
+// comparisons): an absent operand (`Missing`) makes it `False` (`NotEqual`:
+// `True`), and its type is `boolean`. From 2026-10-17 to 2026-11-02 the
+// value was `Missing` and the type `boolean | missing`.
+//
+// These tests used `Undefined` as the absent operand until `Undefined`
+// became an ordinary symbol (`docs/ERROR-MODEL.md`, "`Missing` is a result
+// only — user decision of 2026-11-02"): a comparison with `Undefined` now
+// stays unevaluated, as with any unknown symbol.
 //
 // Boolean contexts use UPPERCASE symbols: evaluating a symbol as a boolean
 // operand retypes it `boolean` for the engine's lifetime.
@@ -22,13 +24,13 @@ const HEADS = [
   'NotEqual',
 ];
 
-describe('A COMPARISON WITH AN UNDEFINED OPERAND', () => {
+describe('A COMPARISON WITH A MISSING OPERAND', () => {
   const cases: [string, any[]][] = [];
   for (const head of HEADS)
     for (const args of [
-      ['Undefined', 3],
-      [3, 'Undefined'],
-      ['Undefined', 'Undefined'],
+      ['Missing', 3],
+      [3, 'Missing'],
+      ['Missing', 'Missing'],
     ])
       cases.push([head, args]);
 
@@ -46,21 +48,22 @@ describe('A COMPARISON WITH AN UNDEFINED OPERAND', () => {
 
   test.each(HEADS)('%s on the parse route', (head) => {
     const latex = {
-      Less: '\\operatorname{Undefined} < 3',
-      LessEqual: '\\operatorname{Undefined} \\le 3',
-      Greater: '\\operatorname{Undefined} > 3',
-      GreaterEqual: '\\operatorname{Undefined} \\ge 3',
-      Equal: '\\operatorname{Undefined} = 3',
-      NotEqual: '\\operatorname{Undefined} \\ne 3',
+      Less: '\\operatorname{Missing} < 3',
+      LessEqual: '\\operatorname{Missing} \\le 3',
+      Greater: '\\operatorname{Missing} > 3',
+      GreaterEqual: '\\operatorname{Missing} \\ge 3',
+      Equal: '\\operatorname{Missing} = 3',
+      NotEqual: '\\operatorname{Missing} \\ne 3',
     }[head]!;
     const expr = ce.parse(latex);
     expect(expr.type.toString()).toBe('boolean');
     expect(expr.evaluate().json).toBe(head === 'NotEqual' ? 'True' : 'False');
   });
 
-  test('a Missing operand gives the type boolean', () => {
-    for (const head of HEADS)
-      expect(ce.box([head, 'Missing', 3]).type.toString()).toBe('boolean');
+  test('an Undefined operand is an unknown symbol, not an absence', () => {
+    const expr = ce.box(['Less', 'Undefined', 3]);
+    expect(expr.type.toString()).toBe('boolean');
+    expect(expr.evaluate().json).toEqual(['Less', 'Undefined', 3]);
   });
 
   test('a comparison without an absent operand keeps its type', () => {
@@ -79,8 +82,8 @@ describe('NOTGREATER EVALUATES', () => {
     [['NotGreater', 1, 3], 'True'],
     [['NotGreater', 3, 1], 'False'],
     [['NotGreater', 3, 3], 'True'],
-    // `Not(Undefined > 3)` is `Not(False)`.
-    [['NotGreater', 'Undefined', 3], 'True'],
+    // `Not(Missing > 3)` is `Not(False)`.
+    [['NotGreater', 'Missing', 3], 'True'],
   ])('%j evaluates to %s', (expr, expected) => {
     expect(ce.box(expr).evaluate().json).toBe(expected);
   });

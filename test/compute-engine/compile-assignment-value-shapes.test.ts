@@ -495,18 +495,16 @@ describe('Python compile() of a selection whose arm is a block with a value', ()
   });
 });
 
+// `Undefined` is not an absent value since 2026-11-02 (`docs/ERROR-MODEL.md`,
+// "`Missing` is a result only"), so `[1, Missing]` is no longer compared
+// with `[1, Undefined]`.
 describe('interval-js: a written absence in a list', () => {
-  test('`[1, Missing]` compiles as `[1, Undefined]` does', () => {
+  test('`[1, Missing]` compiles to an empty interval cell', () => {
     const ce = new ComputeEngine();
     const missing = compile(ce.box(['List', 1, 'Missing']), {
       to: 'interval-js',
     });
-    const undef = compile(ce.box(['List', 1, 'Undefined']), {
-      to: 'interval-js',
-    });
-    expect(undef.success).toBe(true);
     expect(missing.success).toBe(true);
-    expect(missing.code).toBe(undef.code);
     expect(missing.run!({})).toEqual([
       { kind: 'interval', value: { lo: 1, hi: 1 } },
       { kind: 'empty' },

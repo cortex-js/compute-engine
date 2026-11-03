@@ -1885,8 +1885,7 @@ function getReferencedFunctions(expr: Expression, result: Set<string>): void {
  */
 function isReferencedFunctionHead(expr: Expression): boolean {
   const head = expr.operator;
-  if (head === 'Unknown' || head === 'Undefined' || head === 'Nothing')
-    return false;
+  if (head === 'Unknown' || head === 'Nothing') return false;
 
   const engine = expr.engine;
   const def = expr.operatorDefinition ?? engine.lookupDefinition(head);
@@ -2010,7 +2009,7 @@ function collectReferences(
 ): void {
   if (isSymbol(expr)) {
     const s = expr.symbol;
-    if (s === 'Unknown' || s === 'Undefined' || s === 'Nothing') return;
+    if (s === 'Unknown' || s === 'Nothing') return;
 
     if (expr.valueDefinition?.isConstant) return;
 

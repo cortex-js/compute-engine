@@ -91,22 +91,53 @@ contract that never moves (`placeholderSkeletonOf()`,
 `boxed-value-definition.ts`). A nested `unknown` position
 (`list<tuple<unknown, integer>>`) does not refine.
 
+### `missing` is a marker type: inferable, not declarable
+
+`missing` is the type of the symbol `Missing`, a marker type like
+`error` (user decision of 2026-11-02, `ERROR-MODEL.md`, "`Missing` is a
+result only"). It cannot be written in a declared type: `ce.declare('w',
+'real | missing')`, an operator signature with a parameter `real |
+missing`, a parameter annotation `(x: real | missing) -> …`, a `Declare`
+statement and an Epsil annotation that name it are errors, at any depth
+(`list<string | missing>`). The result type of a signature may name it.
+Inference still gives a constructed value a `missing` arm
+(`Map(i ↦ At(names, i), [1, 99])` is typed `list<string | missing>`), and
+an operator over an operand typed `missing` is typed `missing`.
+
+The marker is implicit in a result type, as `error` is (`ERROR-MODEL.md`
+§4, the rule of 2026-09-01): `At` is `(indexed_collection<T>, integer+) ->
+T`, `First` and `Last` are `(indexed_collection<T>) -> T`, and `If(c, e)`
+with no else is `(boolean, T) -> T`. With `ss: list<string>`, `At(ss, i)`
+is typed `string`, and its value is `Missing` when `i` is out of range;
+with `ys: list<real>`, `At(ys, i)` is typed `real`, and its value is
+`NaN` out of range. A read whose position is proved not to exist is typed
+by its marker alone (`At([1, 2], 5)` is typed `nan`). So a type does not
+show that a read may be absent, and no presence test decides from a type
+alone that such a read is present (`mayHoldRestriction()`,
+`boxed-expression/conditional-value.ts`). `IsMissing` is `(any) ->
+boolean` and `Coalesce` is `(any, T) -> T`.
+
 ### Declared types and absence
 
-A declared type is a contract on every value the symbol takes (user
-decisions P1 and P1b, 2026-10-21,
-`plans/2026-10-21-presence-contracts-and-assertion.md`). `s: string`
-refuses `Missing` and `Undefined` as it refuses `5`, and `xs: list<string>`
-refuses `["a", Missing]`. Write the absence into the type when it is
-possible: `string | missing`, `list<string | missing>`, or a refining
-declaration (`list`, `list<unknown>`). `number` admits `NaN`; `real`,
+A declared type is a contract on every present value the symbol takes
+(user decisions P1 and P1b, 2026-10-21,
+`plans/2026-10-21-presence-contracts-and-assertion.md`): `s: string`
+refuses `5`, and `xs: list<string>` refuses `[5, "a"]`. Since 2026-11-02
+the absence cannot be written into a declared type (`string | missing` is
+an error, see above), so a store into a declared name accepts the marker
+`Missing` where the type accepts a present value: `s: string` takes
+`At(["a"], 5)`, and `xs: list<string>` takes `["a", Missing]`
+(`matchesOrAbsent()`, `effects-inference.ts`). `matches` stays strict:
+`missing` is not a subtype of `string`. `number` admits `NaN`; `real`,
 `integer` and `complex` hold finite values only and refuse it, so
 `real | nan` is the declaration that admits it. The check is
-`matchesDeclaredTypeAxes()` (`effects-inference.ts`) on the engine's
+`matchesOrAbsent()` (`effects-inference.ts`) on the engine's
 assignment route and the Epsil run time, and `declaredTypeMismatch()`
-(`src/epsil/static-diagnostics.ts`) in the Epsil static check, which also
-reports a possibly absent initializer (`let y: string = xs[i]`, typed
-`missing | string`; `let r: real = zs[i]`, typed `nan | real`).
+(`src/epsil/static-diagnostics.ts`) in the Epsil static check, which
+removes the `missing` arms of the value's type in the same way: an
+initializer that is always absent (`let y: string = xs[5]` with `xs` a
+list of two strings, typed `missing`) and one that may be absent
+(`let y: string = xs[i]`, typed `string`) are not reported.
 
 A value whose type is `unknown` states nothing about itself, so
 `matchesDeclaredTypeAxes()` admits it at a declared type without a check,
@@ -115,9 +146,7 @@ This matches the argument check, which also admits an `unknown`-typed
 argument at a typed parameter. A declared function signature is the
 exception: it keeps refusing an `unknown` value, because that value would
 satisfy the arity, effects and polymorphism checks all at once without
-proof. An absence symbol (`Missing`, `Undefined`) is tested before this
-rule, so a declaration that excludes absence still refuses `Undefined`,
-whose type is `unknown`.
+proof. The absence symbol `Missing` is tested before this rule.
 
 A library operator with no declared absence behavior refuses an absent
 operand at a parameter typed as data (`string`, `boolean`, `value`, …) with

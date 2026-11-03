@@ -187,11 +187,11 @@ describe('a collection-TYPED but valueless operand', () => {
     // A NaN LITERAL is a number and must still flow through, or this guard
     // would have broken absent-datum semantics (§3.C) instead of the
     // valueless-operand case it targets.
-    it('still folds an absent datum to NaN', () => {
+    it('still folds an absent datum to Missing', () => {
       const ce = new ComputeEngine();
-      expect(ce.box(['Mean', ['List', 1, 'Missing', 3]]).evaluate().isNaN).toBe(
-        true
-      );
+      expect(
+        ce.box(['Mean', ['List', 1, 'Missing', 3]]).evaluate().symbol
+      ).toBe('Missing');
     });
   });
 

@@ -140,7 +140,8 @@ describe('paired statistics omit whole observations', () => {
           ce.box(['List', 10, 20, 30]),
         ])
         .evaluate();
-      expect(retained.isNaN).toBe(true);
+      // A retained `Missing` datum gives `Missing` (`NaN` before 2026-11-02).
+      expect(retained.symbol).toBe('Missing');
     }
   );
 

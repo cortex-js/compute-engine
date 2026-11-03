@@ -307,9 +307,12 @@ describe('EVERY READER OF A RANGE USES THE EXACT COUNT', () => {
       ).toBe('True');
     });
 
-    test('the type does not prove an 11th element', () => {
-      // An access past the proved length has `nan` in its type.
-      expect(ce.box(['At', r, 11]).type.toString()).toContain('nan');
+    test('a read past the count is NaN', () => {
+      // The type of the read is the element type: a read that the type
+      // handler does not prove out of range carries no marker in its type
+      // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+      expect(ce.box(['At', r, 11]).type.toString()).toBe('real');
+      expect(ce.box(['At', r, 11]).evaluate().toString()).toBe('NaN');
     });
 
     test('a subset test agrees with the elements', () => {

@@ -42,7 +42,7 @@ Four values mark that a value is absent. They do not behave the same way.
 | `NaN`       | A number that is not defined (Not a Number).                              |
 
 `nothing` disappears where it is written. `missing` keeps its position, and an
-arithmetic operation on it gives `NaN`:
+arithmetic operation on it gives `missing`:
 
 ```epsil
 [12, nothing, 34]
@@ -51,10 +51,10 @@ arithmetic operation on it gives `NaN`:
 
 ```epsil
 [nothing + 1, missing + 1]
-// ➔ [1, NaN]
+// ➔ [1, "Missing"]
 ```
 
-`isMissing` is true for `missing`, `Undefined` and `NaN`. `Coalesce` returns
+`isMissing` is true for `missing` and `NaN`. `Coalesce` returns
 the first operand that is not absent:
 
 ```epsil

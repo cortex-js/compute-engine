@@ -35,25 +35,24 @@ const P: unknown = ['Function', ['Greater', 'k', 1], 'k'];
 const ADD2: unknown = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
 
 /** An engine with `x: list<list<integer>>`, `i: integer`, `y: list<integer>`,
- * `c: real`, `r: list<integer> | missing`. */
+ * `c: real`. */
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('x', 'list<list<integer>>');
   ce.declare('i', 'integer');
   ce.declare('y', 'list<integer>');
   ce.declare('c', 'real');
-  ce.declare('r', 'list<integer> | missing');
   return ce;
 }
 
 /** The interpreter's value, as JSON, with `x` holding `ROWS`, `y` holding the
- * first row, `r` holding the first row or `Missing`, and `i`, `c` as given.
+ * first row, and `i`, `c` as given.
  * Evaluated numerically and materialized, so that an exact value
  * (`Sqrt(14)`) and a lazy view (`Reverse([3, 1, 2])`) compare with the
  * compiled array or number. */
 function interpreted(
   json: unknown,
-  values: { i?: number; c?: number; r?: 'present' | 'absent' }
+  values: { i?: number; c?: number }
 ): unknown {
   const ce = engine();
   const e = ce.box(json as never);
@@ -65,12 +64,6 @@ function interpreted(
   ce.assign('y', ce.box(['List', ...ROWS[0]] as never));
   ce.assign('i', values.i ?? 1);
   ce.assign('c', values.c ?? 1);
-  ce.assign(
-    'r',
-    values.r === 'absent'
-      ? ce.symbol('Missing')
-      : ce.box(['List', ...ROWS[0]] as never)
-  );
   return e.evaluate({ numericApproximation: true, materialization: true }).json;
 }
 
@@ -102,31 +95,61 @@ function spell(v: unknown): unknown {
   return v;
 }
 
-const PRESENT = { x: ROWS, y: ROWS[0], i: 1, c: 1, r: ROWS[0] };
-const ABSENT = { x: ROWS, y: ROWS[0], i: 7, c: -1, r: undefined };
+/** Check a compiled result against the interpreter's value within the
+ * caveats of compiled code (`docs/COMPILATION-MODEL.md`): where the
+ * interpreter gives `Missing`, the compiled code may give `NaN`, `undefined`
+ * or a throw; every other value must be equal. */
+function expectWithinCaveats(
+  result: { value?: unknown; error?: string },
+  expected: unknown
+): void {
+  if (expected === 'Missing') {
+    if (result.error !== undefined) return;
+    expect(['Missing', 'NaN']).toContain(spell(result.value));
+    return;
+  }
+  expect(result.error).toBeUndefined();
+  expect(spell(result.value)).toEqual(expected);
+}
+
+const PRESENT = { x: ROWS, y: ROWS[0], i: 1, c: 1 };
+const ABSENT = { x: ROWS, y: ROWS[0], i: 7, c: -1 };
+
+describe('a declared absent operand', () => {
+  test('is an error: `Missing` is a result only', () => {
+    expect(() =>
+      new ComputeEngine().declare('r', 'list<integer> | missing')
+    ).toThrow(/cannot be declared/);
+  });
+});
 
 describe('issue #383: Length and Count of a row of a list of lists compile', () => {
   test('the reported case', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'list<list<integer>>');
-    expect(ce.box(['At', 'x', 1]).type.toString()).toBe(
-      'list<integer> | missing'
-    );
+    // The result type of an accessor leaves the absence marker implicit.
+    expect(ce.box(['At', 'x', 1]).type.toString()).toBe('list<integer>');
     for (const head of ['Length', 'Count']) {
       const r = compile(ce.box([head, ['At', 'x', 1]] as never), {
         fallback: false,
       } as never);
       expect(r.success).toBe(true);
       expect(r.run!({ x: [[1, 2, 3], [4]] } as never)).toBe(3);
-      // The index is past the end: `Length(Missing)` is `NaN` in the
-      // interpreter, and the compiled value is `NaN` too.
-      expect(r.run!({ x: [] } as never)).toBeNaN();
+      // The index is past the end: `Length(Missing)` is `Missing` in the
+      // interpreter, and the compiled value is not specified (`NaN`,
+      // `undefined` or a throw), but it is not a finite number.
+      let absent: unknown;
+      try {
+        absent = r.run!({ x: [] } as never);
+      } catch {
+        absent = undefined;
+      }
+      expect(Number.isFinite(absent)).toBe(false);
     }
   });
 
-  test('the operand is bound once and tested for the absent value', () => {
+  test('the operand is read once', () => {
     const { code } = compiled(['Length', ['At', 'x', 'i']], PRESENT);
-    expect(code).toContain('=== undefined) ? Number.NaN :');
     // One read of the row, not one per use.
     expect(code!.match(/_SYS\.at\(/g)).toHaveLength(1);
   });
@@ -180,18 +203,17 @@ describe('compiled and interpreted values agree for a row that can be absent', (
     // compiled code gives `Missing` (`undefined`). Only the present row is
     // compared for these heads.
     if (['IsEmpty', 'Contains', 'Any'].includes(head as string)) return;
-    const absent = compiled(json, ABSENT);
-    expect(spell(absent.value)).toEqual(interpreted(json, { i: 7 }));
+    expectWithinCaveats(compiled(json, ABSENT), interpreted(json, { i: 7 }));
   });
 
-  test('Norm of a row: a float, NaN when the row is absent', () => {
+  test('Norm of a row: a float, Missing when the row is absent', () => {
     // The interpreter's exact value is `Sqrt(14)`; the compiled one its
     // float. (`Differences` has no JavaScript lowering at all, so it is not
     // in the table above.)
     const json = ['Norm', ['At', 'x', 'i']];
     expect(compiled(json, PRESENT).value).toBeCloseTo(Math.sqrt(14), 12);
     expect(compiled(json, ABSENT).value).toBeNaN();
-    expect(interpreted(json, { i: 7 })).toBe('NaN');
+    expect(interpreted(json, { i: 7 })).toBe('Missing');
   });
 
   test('a nested read keeps its own marker', () => {
@@ -210,7 +232,6 @@ describe('other operands that can be absent as a whole', () => {
       'a restricted list literal',
       ['If', ['Greater', 'c', 0], ['List', 3, 1, 2]],
     ],
-    ['a symbol declared `list<integer> | missing`', 'r'],
   ])('%s', (_label, operand) => {
     for (const json of [
       ['Length', operand],
@@ -224,15 +245,10 @@ describe('other operands that can be absent as a whole', () => {
       expect(spell(present.value)).toEqual(interpreted(json, { c: 1 }));
       // The compiled value of an operator applied to an absent operand is not
       // specified, so a restricted operand is checked only when present.
-      if (Array.isArray(operand)) continue;
-      const absent = compiled(json, ABSENT);
-      expect(spell(absent.value)).toEqual(
-        interpreted(json, { c: -1, r: 'absent' })
-      );
     }
   });
 
-  test('a restricted list of points: Last is the absent point', () => {
+  test('a restricted list of points: Last is the NaN point', () => {
     const ce = new ComputeEngine();
     ce.declare('c', 'real');
     const pts = [
@@ -245,7 +261,16 @@ describe('other operands that can be absent as a whole', () => {
     } as never);
     expect(r.success).toBe(true);
     expect(r.run!({ c: 1 } as never)).toEqual([3, 4]);
-    expect(r.run!({ c: -1 } as never)).toBeUndefined();
+    // A read of a point of an absent list of points is the point of `NaN`
+    // coordinates, as in the interpreter (user decision 2026-11-03).
+    expect(r.run!({ c: -1 } as never)).toEqual([NaN, NaN]);
+    expect(
+      ce
+        .box(['Last', pts] as never)
+        .subs({ c: -1 })
+        .evaluate()
+        .toString()
+    ).toBe('(NaN, NaN)');
   });
 
   test('two rows: Dot of two reads, either of which can be absent', () => {
@@ -262,15 +287,22 @@ describe('other operands that can be absent as a whole', () => {
         i: 2,
       } as never)
     ).toBe(32);
-    expect(
-      r.run!({
+    // The second row is absent: the interpreter gives `Missing`, and the
+    // compiled value is not specified, but it is not a finite number.
+    let absent: unknown;
+    try {
+      absent = r.run!({
         x: [
           [1, 2, 3],
           [4, 5, 6],
         ],
         i: 7,
-      } as never)
-    ).toBeNaN();
+      } as never);
+    } catch {
+      absent = undefined;
+    }
+    expect(Number.isFinite(absent)).toBe(false);
+    expect(interpreted(json, { i: 7 })).toBe('Missing');
   });
 });
 
@@ -459,17 +491,17 @@ describe('interpreter: lazy operators over an operand that can be absent', () =>
   test.each([
     [['Filter', ['At', 'x', 'i'], P], ['List', 3, 2], 'Missing'],
     [['Map', F, ['At', 'x', 'i']], ['List', 6, 2, 4], 'Missing'],
-    [['Reduce', ['At', 'x', 'i'], 'Add', 0], 6, 'NaN'],
-    [['Reduce', ['At', 'x', 'i'], ADD2, 0], 6, 'NaN'],
+    [['Reduce', ['At', 'x', 'i'], 'Add', 0], 6, 'Missing'],
+    [['Reduce', ['At', 'x', 'i'], ADD2, 0], 6, 'Missing'],
     [['Any', ['At', 'x', 'i'], P], 'True', 'False'],
     [['Scan', ['At', 'x', 'i'], 'Add'], ['List', 3, 4, 6], 'Missing'],
     [['Differences', ['At', 'x', 'i']], ['List', -2, 1], 'Missing'],
-    [['Sum', ['Map', F, ['At', 'x', 'i']]], 12, 'NaN'],
-    [['Sum', ['Filter', ['At', 'x', 'i'], P]], 5, 'NaN'],
-    [['Length', ['Filter', ['At', 'x', 'i'], P]], 2, 'NaN'],
-    [['Length', ['Map', F, ['At', 'x', 'i']]], 3, 'NaN'],
+    [['Sum', ['Map', F, ['At', 'x', 'i']]], 12, 'Missing'],
+    [['Sum', ['Filter', ['At', 'x', 'i'], P]], 5, 'Missing'],
+    [['Length', ['Filter', ['At', 'x', 'i'], P]], 2, 'Missing'],
+    [['Length', ['Map', F, ['At', 'x', 'i']]], 3, 'Missing'],
     [['Take', ['Map', F, ['At', 'x', 'i']], 2], ['List', 6, 2], 'Missing'],
-    [['Product', ['If', ['Greater', 'c', 0], 'y']], 6, 'NaN'],
+    [['Product', ['If', ['Greater', 'c', 0], 'y']], 6, 'Missing'],
     [
       ['Filter', ['If', ['Greater', 'c', 0], 'y'], P],
       ['List', 3, 2],
@@ -480,11 +512,11 @@ describe('interpreter: lazy operators over an operand that can be absent', () =>
     expect(interpretedExact(json, { i: 7, c: -1 })).toEqual(absent);
   });
 
-  test('Sum of a Map over a written Missing is NaN', () => {
+  test('Sum of a Map over a written Missing is Missing', () => {
     const ce = new ComputeEngine();
     expect(
       ce.box(['Sum', ['Map', F, 'Missing']] as never).evaluate().json
-    ).toBe('NaN');
+    ).toBe('Missing');
   });
 
   test('an error in one operand is not hidden by an absent operand', () => {
@@ -492,7 +524,8 @@ describe('interpreter: lazy operators over an operand that can be absent', () =>
     // the error is the result, with the frame of `Map`, in both orders, on
     // the synchronous and the asynchronous routes.
     const ce = new ComputeEngine();
-    ce.declare('a', 'list<integer> | missing');
+    // A store into a declared name accepts `Missing`.
+    ce.declare('a', 'list<integer>');
     ce.assign('a', ce.symbol('Missing'));
     ce.declare('g', '(unknown) -> list<integer> | missing');
     ce.assign('g', ce.box(['Function', ['Sin', ['Reverse', 'k']], 'k']));
@@ -526,7 +559,7 @@ describe('interpreter: lazy operators over an operand that can be absent', () =>
       present = true;
       expect((await e.evaluateAsync()).json).toBe(6);
       present = false;
-      expect((await e.evaluateAsync()).json).toBe('NaN');
+      expect((await e.evaluateAsync()).json).toBe('Missing');
     }
   });
 

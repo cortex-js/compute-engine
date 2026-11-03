@@ -202,9 +202,12 @@ describe('AN ELEMENT ACCESS THAT FINDS NOTHING', () => {
     expect(symbolOf(value)).toBe('Missing');
   });
 
-  test('a numeric list of unknown length keeps `T | nan`', () => {
-    expect(engine.box(['First', 'Xs']).type.toString()).toBe('integer | nan');
-    expect(engine.box(['At', 'Xs', 4]).type.toString()).toBe('integer | nan');
+  // The marker of a read that may find nothing is implicit in its type
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user decision of
+  // 2026-11-02"): `First` of a `list<integer>` is typed `integer`.
+  test('a numeric list of unknown length is typed `T`', () => {
+    expect(engine.box(['First', 'Xs']).type.toString()).toBe('integer');
+    expect(engine.box(['At', 'Xs', 4]).type.toString()).toBe('integer');
   });
 
   test('Epsil route', () => {
@@ -236,13 +239,13 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('a source typed `any`', () =>
     check(
       engine.box(['Map', 'Sqrt', 'U']),
-      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
+      'list<complex | indexed_collection<any> | infinity | missing | nothing>'
     ));
 
   test('a source typed `list<any>`', () =>
     check(
       engine.box(['Map', 'Sqrt', 'La']),
-      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
+      'list<complex | indexed_collection<any> | infinity | missing | nothing>'
     ));
 
   test('a source whose element type has a list arm', () =>
@@ -251,7 +254,7 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('another broadcastable operator', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Negate', 'U']),
-      'list<indexed_collection<any> | nothing | number>'
+      'list<indexed_collection<any> | missing | nothing | number>'
     );
     expect(v.toString()).toBe('[[-1,-2],[-3]]');
   });
@@ -267,11 +270,11 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('parse route', () => {
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, U)'),
-      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
+      'list<complex | indexed_collection<any> | infinity | missing | nothing>'
     );
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, \\mathrm{La})'),
-      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
+      'list<complex | indexed_collection<any> | infinity | missing | nothing>'
     );
   });
 });
@@ -284,13 +287,14 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   engine.assign('Nn', engine.box(['List', ['List', 1, 2], 3]));
   engine.declare('Lbs', 'list<any>');
   engine.assign('Lbs', engine.box(['List', 'True', 'Missing']));
-  engine.declare('Lim', 'list<integer | missing>');
-  engine.assign('Lim', engine.box(['List', 4, 'Missing']));
+  // A list literal with a `Missing` cell, typed `list<integer | missing^2>`
+  // (a declared type cannot name `missing`).
+  const Lim = ['List', 4, 'Missing'];
 
   test('an element nested two levels deep', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Sqrt', 'Ld']),
-      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
+      'list<complex | indexed_collection<any> | infinity | missing | nothing>'
     );
     expect(v.toString()).toBe('[2,[[3]]]');
   });
@@ -298,7 +302,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('several sources whose elements may be lists', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Power', 'Nn', 'Nn']),
-      'list<indexed_collection<any> | nothing | number>'
+      'list<indexed_collection<any> | missing | nothing | number>'
     );
     expect(v.toString()).toBe('[[1,4],27]');
   });
@@ -313,20 +317,20 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
     expect(v.toString()).toBe('["False","True"]');
   });
 
-  test('a boolean result over an absent cell of a declared list', () => {
+  test('a boolean result over an absent cell of a list literal', () => {
     const v = expectTypeHoldsValue(
-      engine.box(['Map', 'IsPrime', 'Lim']),
+      engine.box(['Map', 'IsPrime', Lim]),
       'list<boolean | missing>'
     );
     expect(v.toString()).toBe('["False","Missing"]');
   });
 
-  test('a numeric result over an absent cell has no `missing` arm', () => {
+  test('a numeric result over an absent cell is a `Missing` cell', () => {
     const v = expectTypeHoldsValue(
-      engine.box(['Map', 'Sqrt', 'Lim']),
-      'list<complex | nan>'
+      engine.box(['Map', 'Sqrt', Lim]),
+      'list<complex | missing^2>'
     );
-    expect(v.toString()).toBe('[2,NaN]');
+    expect(v.toString()).toBe('[2,"Missing"]');
   });
 
   // A library operator keeps its declared result (or, when that says
@@ -340,19 +344,19 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
     expect(v.toString()).toBe('[Hold(1),Hold(2)]');
   });
 
-  // `PointX("")` is `Missing`, so a cell is a character or `Missing`. A list
-  // literal whose cells are a union that is not a number type states no
-  // length (`[Missing, "b"]` is typed `list<character | missing>`), so the
-  // type of the `Map` states none either, and holds both values.
+  // `PointX("")` is `Missing`, so a cell is a character or `Missing`. The
+  // marker of a read that may find nothing is implicit in the type of the
+  // accessor (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+  // decision of 2026-11-02"), so the `Map` is typed `list<character^2>`, and
+  // the value with an absent cell holds the marker that the type leaves
+  // implicit.
   test('PointX over strings is not typed as lists of numbers', () => {
-    for (const strings of [
-      ["'a'", "'b'"],
-      ["''", "'b'"],
-    ]) {
-      const e = engine.box(['Map', 'PointX', ['List', ...strings]]);
-      expect(e.type.toString()).toBe('list<character | missing>');
-      expect(e.evaluate().type.matches(e.type)).toBe(true);
-    }
+    const present = engine.box(['Map', 'PointX', ['List', "'a'", "'b'"]]);
+    expect(present.type.toString()).toBe('list<character^2>');
+    expect(present.evaluate().type.matches(present.type)).toBe(true);
+    const absent = engine.box(['Map', 'PointX', ['List', "''", "'b'"]]);
+    expect(absent.type.toString()).toBe('list<character^2>');
+    expect(absent.evaluate().toString()).toBe('["Missing","b"]');
   });
 });
 
@@ -399,9 +403,10 @@ describe('MAP OF A USER FUNCTION WITH NO DECLARED RESULT', () => {
 
 describe('ZIP OF ABSENT CELLS', () => {
   // Each row is a present tuple, including a row of missing coordinates.
+  // The source is a list literal with a `Missing` cell (a declared type
+  // cannot name `missing`).
   const engine = new ComputeEngine();
-  engine.declare('L', 'list<integer | missing>');
-  engine.assign('L', engine.box(['List', 1, 'Missing', 3]));
+  const L = ['List', 1, 'Missing', 3];
 
   function checkViews(zip: Expression): void {
     expect(zip.type.toString()).toBe(
@@ -418,12 +423,17 @@ describe('ZIP OF ABSENT CELLS', () => {
     expect(listed(value).type.matches(zip.type)).toBe(true);
   }
 
-  test('box route', () => checkViews(engine.box(['Zip', 'L', 'L'])));
+  test('box route', () => checkViews(engine.box(['Zip', L, L])));
 
-  test('parse route', () => checkViews(engine.parse('\\mathrm{Zip}(L, L)')));
+  test('parse route', () =>
+    checkViews(
+      engine.parse(
+        '\\mathrm{Zip}([1, \\operatorname{Missing}, 3], [1, \\operatorname{Missing}, 3])'
+      )
+    ));
 
   test('an element access', () => {
-    expect(engine.box(['At', ['Zip', 'L', 'L'], 2]).evaluate().json).toEqual([
+    expect(engine.box(['At', ['Zip', L, L], 2]).evaluate().json).toEqual([
       'Tuple',
       'Missing',
       'Missing',
@@ -449,41 +459,22 @@ describe('ZIP OF ABSENT CELLS', () => {
 });
 
 describe('ZIP OF ABSENT CELLS, COMPILED AND WITH AN ERASED ITEM', () => {
+  // A compiled input cannot be declared with absent cells: the declaration
+  // is an error (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+  // decision of 2026-11-02").
   const engine = new ComputeEngine();
-  engine.declare('L', 'list<integer | missing>');
   engine.declare('I', 'list<integer>');
 
-  test('JavaScript: a row of absent cells remains a row', () => {
-    const r = compile(engine.box(['Zip', 'L', 'L']), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.run!({ L: [1, undefined, 3] } as never)).toEqual([
-      [1, 1],
-      [undefined, undefined],
-      [3, 3],
-    ]);
-  });
-
-  test('JavaScript: a row with a present cell is a row', () => {
-    const r = compile(engine.box(['Zip', 'L', 'I']), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.run!({ L: [1, undefined], I: [4, 5] } as never)).toEqual([
-      [1, 4],
-      [undefined, 5],
-    ]);
+  test('an input declared with absent cells is an error', () => {
+    expect(() => engine.declare('L', 'list<integer | missing>')).toThrow(
+      /the type `missing` cannot be declared/
+    );
   });
 
   test('JavaScript: a source with no absent cell keeps the plain row', () => {
     const r = compile(engine.box(['Zip', 'I', 'I']), { to: 'javascript' });
     expect(r.success).toBe(true);
     expect(r.code).not.toContain('_x === undefined');
-  });
-
-  test('Python: all-missing rows need no collapse test', () => {
-    const r = compile(engine.box(['Zip', 'L', 'L']), { to: 'python' });
-    expect(r.success).toBe(true);
-    expect(
-      compile(engine.box(['Zip', 'L', 'I']), { to: 'python' }).success
-    ).toBe(true);
   });
 
   test('an omitted item keeps its row coordinate', () => {
@@ -512,37 +503,37 @@ describe('Absent whole collections and absent number cells (CE-44, CE-20)', () =
     // An absent list makes the comparison `False` (user decision of
     // 2026-11-02, two-valued comparisons), so the type has a `boolean` arm,
     // not a `missing` arm.
+    // A declared type cannot name `missing`: an operand that may be absent
+    // is a restriction, `If(c, n)`.
     const c = new ComputeEngine();
-    c.declare('L', 'list<integer> | missing');
-    expect(c.box(['Less', 'L', 3]).type.toString()).toBe(
-      'boolean | list<boolean>'
-    );
-    expect(c.box(['Equal', 'L', 3]).type.toString()).toBe(
-      'boolean | list<boolean>'
-    );
+    c.declare('c', 'boolean');
     // An absent scalar gives a `False` cell (user decision of 2026-11-02,
     // two-valued comparisons).
-    c.declare('n', 'integer | missing');
-    expect(c.box(['Less', 'n', ['List', 1, 2]]).type.toString()).toBe(
-      'list<boolean^2>'
-    );
+    c.declare('n', 'integer');
+    expect(
+      c.box(['Less', ['If', 'c', 'n'], ['List', 1, 2]]).type.toString()
+    ).toBe('list<boolean^2>');
     // The value is `False` when the operand is absent.
     expect(c.box(['Less', 'Missing', 3]).evaluate().json).toBe('False');
   });
 
   test('the type of a comparison of an absent list holds its value', () => {
+    // The list is absent when the condition of the restriction is false.
     const c = new ComputeEngine();
-    c.declare('L', 'list<integer> | missing');
-    const e = c.box(['Less', 'L', 3]);
-    c.assign('L', c.Missing);
+    c.declare('L', 'list<integer>');
+    c.declare('c', 'boolean');
+    const e = c.box(['Less', ['If', 'c', 'L'], 3]);
+    c.assign('c', c.False);
     expect(e.evaluate().type.matches(e.type)).toBe(true);
   });
 
-  test('an operand typed unknown (Undefined) gives False cells', () => {
+  test('an absent operand beside a list gives False cells', () => {
+    // `Undefined` is an ordinary symbol, not an absent value: the absent
+    // operand is `Missing`.
     const c = new ComputeEngine();
-    c.declare('L', 'list<integer> | missing');
-    const e = c.box(['Less', 'L', 'Undefined']);
-    expect(e.type.toString()).toBe('boolean | list<boolean>');
+    c.declare('L', 'list<integer>');
+    const e = c.box(['Less', 'L', 'Missing']);
+    expect(e.type.toString()).toBe('list<boolean>');
     c.assign('L', c.box(['List', 1, 2]));
     const v = e.evaluate();
     expect(v.toString()).toBe('["False","False"]');
@@ -557,10 +548,13 @@ describe('Absent whole collections and absent number cells (CE-44, CE-20)', () =
       missingBehavior: 'handle',
       evaluate: () => c.Missing,
     } as never);
-    c.declare('L', 'list<integer> | missing');
-    // The cells keep their absent arm: not `list<integer> | missing`.
-    expect(c.box(['Pick', 'L', 3]).type.toString()).toBe(
-      'list<integer | missing> | missing'
+    c.declare('L', 'list<integer>');
+    c.declare('c', 'boolean');
+    // The cells keep their absent arm: not `list<integer>`. The restriction
+    // `If(c, L)` is typed `list<integer>`: the marker of an absent value is
+    // implicit in its type, so the result has no outer `missing` arm.
+    expect(c.box(['Pick', ['If', 'c', 'L'], 3]).type.toString()).toBe(
+      'list<integer | missing>'
     );
   });
 

@@ -224,7 +224,7 @@ export function compareQuantities(
  * the unit table), when a dimensionless quantity is compared with a number
  * (`6 percent` and `0.06`, `30 deg` and `1`: `compareQuantities()` compares
  * them by their values), and when the magnitude is an absent value,
- * `Missing` or `Undefined` (an absent value is not known to be different).
+ * `Missing` (an absent value is not known to be different).
  */
 export function quantityDimensionsDiffer(
   a: Expression,
@@ -336,7 +336,7 @@ function isQuantity(
 }
 
 /** The dimension of the unit of the quantity `q`, or `null` when it is not
- * known or when the magnitude of `q` is absent (`Missing` or `Undefined`,
+ * known or when the magnitude of `q` is absent (`Missing`,
  * `isAbsentSymbol()`). */
 function quantityDimension(q: Expression): DimensionVector | null {
   if (!isQuantity(q) || isAbsentSymbol(q.op1)) return null;

@@ -74,6 +74,7 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
+  matchesOrAbsent,
   hasSignaturePlaceholder,
   presentedValueType,
   refineDeclaredPlaceholders,
@@ -4339,7 +4340,7 @@ function assertAssignableValueDef(
       ? ce.type(def._placeholderSkeleton)
       : def.type;
   if (
-    !matchesDeclaredTypeAxes(
+    !matchesOrAbsent(
       ce,
       value.type,
       contract,

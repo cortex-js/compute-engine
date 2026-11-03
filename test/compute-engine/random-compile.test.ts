@@ -1475,21 +1475,15 @@ describe('a comparison chain evaluates the operands the interpreter evaluates', 
     }
   });
 
-  test('an Equal chain with an absent operand before a draw declines', () => {
-    // A compiled `Equal` pair with an absent operand is `false`, and the
-    // `&&` after it skips the draw. The compilation still declines. The
-    // interpreter reads that pair as `False` too (user decision of
-    // 2026-11-02, two-valued comparisons), so it does not draw either.
-    // Before, it read the pair as `Missing` and drew.
-    const json = ['Equal', 'a', 'b', ['Random']];
+  test('an Equal chain with an absent operand before a draw does not draw', () => {
+    // The interpreter reads a pair with an absent operand as `False` (user
+    // decision of 2026-11-02, two-valued comparisons), so it does not draw.
+    // Before, it read the pair as `Missing` and drew. A declared type cannot
+    // name `missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result only"),
+    // so the absent operand is the symbol `Missing`.
+    const json = ['Equal', 'Missing', 'True', ['Random']];
     const ce = new ComputeEngine();
-    ce.declare('a', 'boolean | missing');
-    ce.declare('b', 'boolean | missing');
-    expect(() =>
-      compile(ce.box(json), { fallback: false, constantFold: false })
-    ).toThrow(/may be absent before an operand with an effect/);
-    ce.assign('a', ce.Missing);
-    ce.assign('b', ce.True);
+    expect(() => ce.declare('a', 'boolean | missing')).toThrow();
     const next = withRandomSeedFrame(ce, 7, () => {
       // The first pair, `Missing = True`, is `False`.
       expect(ce.box(json).evaluate().json).toBe('False');
@@ -1510,20 +1504,8 @@ describe('a comparison chain evaluates the operands the interpreter evaluates', 
     ).toEqual([false, draw(7, 0)]);
   });
 
-  test('an absent pair before the last draw declines, also after an earlier draw', () => {
-    // Each pair before the LAST impure operand counts: a `false` pair skips
-    // every operand after it.
-    const ce = new ComputeEngine();
-    ce.declare('a', 'boolean | missing');
-    ce.declare('b', 'boolean | missing');
-    for (const json of [
-      ['Equal', ['Random'], 'a', ['Random']],
-      ['Equal', 0.5, ['Random'], 'a', 'b', ['Random']],
-    ])
-      expect(() =>
-        compile(ce.box(json), { fallback: false, constantFold: false })
-      ).toThrow(/may be absent before an operand with an effect/);
-    // Operands whose type has no `missing` option compile.
+  test('a chain with pairs before the last draw compiles', () => {
+    // Operands whose value is present compile.
     const r = compiled(new ComputeEngine(), [
       'Equal',
       'True',
@@ -2201,20 +2183,6 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
       vars: { W: 'next_value()' },
     })!.code;
     expect(code.split('next_value()').length - 1).toBe(1);
-  });
-
-  test('Python declines caller code after a pair that may read an absent operand', () => {
-    // At `m = None` Python stops at `m == 0`; the interpreter reads
-    // `Missing` there, goes on and evaluates `W`.
-    const ce = new ComputeEngine();
-    ce.declare('m', 'number | missing');
-    expect(() =>
-      compile(ce.box(['Equal', 'm', 0, 'W']), {
-        to: 'python',
-        fallback: false,
-        vars: { W: 'next_value()' },
-      })
-    ).toThrow(/may read an absent operand/);
   });
 
   test('interval-js and Python bind the caller code of a chain', () => {

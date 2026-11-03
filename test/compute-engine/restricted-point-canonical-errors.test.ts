@@ -1,6 +1,8 @@
 /**
  * A RESTRICTED POINT — a point with a condition, `If(c, (0,1))`, or a
- * `Which` with point branches and no default — is typed `missing | tuple<…>`.
+ * `Which` with point branches and no default — is typed `tuple<…>` (the
+ * absence marker is implicit in the type; a declared type cannot name
+ * `missing`, `docs/ERROR-MODEL.md`, "`Missing` is a result only").
  * When present it is a point, so the shapes that have no meaning for a point
  * have no meaning for it either, whatever the value of the condition:
  *
@@ -105,18 +107,19 @@ describe.each([1, -1])('Restricted point shapes, t = %d', (tv) => {
 });
 
 describe('Declared restricted point and number list', () => {
+  // `q` is a restricted point.
+  const q = ['If', ['Less', 0, 't'], ['Tuple', 0, 1]];
   const ce = new ComputeEngine();
-  ce.declare('q', 'missing | tuple<number, number>');
   ce.declare('p', 'tuple<number, number>');
   ce.declare('L', 'list<number>');
   ce.declare('M', 'list<tuple<number, number>>');
 
   test.each([
-    [['Multiply', 'q', 'p'], 'no-product-between-points'],
-    [['Multiply', 'q', 'q'], 'no-product-between-points'],
-    [['Divide', 1, 'q'], 'no-division-by-point'],
-    [['Divide', 'q', 'q'], 'no-division-by-point'],
-    [['Add', 'q', 'L'], 'incompatible-type'],
+    [['Multiply', q, 'p'], 'no-product-between-points'],
+    [['Multiply', q, q], 'no-product-between-points'],
+    [['Divide', 1, q], 'no-division-by-point'],
+    [['Divide', q, q], 'no-division-by-point'],
+    [['Add', q, 'L'], 'incompatible-type'],
     [['Add', 'p', 'L'], 'incompatible-type'],
   ])('%j is %s', (json, code) => {
     const e = ce.box(json as never);
@@ -125,11 +128,11 @@ describe('Declared restricted point and number list', () => {
   });
 
   test.each([
-    [['Divide', 'q', 2]],
-    [['Multiply', 2, 'q']],
-    [['Add', 'q', 'p']],
-    [['Add', 'q', 'M']],
-    [['Dot', 'q', 'p']],
+    [['Divide', q, 2]],
+    [['Multiply', 2, q]],
+    [['Add', q, 'p']],
+    [['Add', q, 'M']],
+    [['Dot', q, 'p']],
     // An element whose type is not known is not proof of a list of numbers.
     [['Add', 'p', ['List', 'x', 1]]],
   ])('%j stays valid', (json) => {
@@ -244,22 +247,24 @@ describe('Declared list of points', () => {
   const ce = new ComputeEngine();
   ce.declare('p', 'tuple<number, number>');
   ce.declare('M', 'list<tuple<number, number>>');
-  ce.declare('R', 'missing | list<tuple<number, number>>');
-  ce.declare('E', 'list<missing | tuple<number, number>>');
+  // `R` is a restricted list of points, and `E` a list of points with an
+  // absent cell.
+  const R = ['If', ['Less', 0, 't'], 'M'];
+  const E = ['List', ['Tuple', 1, 2], 'Missing'];
   ce.declare('N', 'list<number>');
   ce.declare('U', 'list<number | tuple<number, number>>');
   ce.declare('A', 'list<any>');
 
   test.each([
     [['Multiply', 'M', 'p'], 'no-product-between-points'],
-    [['Multiply', 'R', ['Tuple', 1, 2]], 'no-product-between-points'],
-    [['Multiply', 'E', 'p'], 'no-product-between-points'],
+    [['Multiply', R, ['Tuple', 1, 2]], 'no-product-between-points'],
+    [['Multiply', E, 'p'], 'no-product-between-points'],
     [['Divide', 1, 'M'], 'no-division-by-point'],
-    [['Divide', 'N', 'R'], 'no-division-by-point'],
-    [['Divide', 'p', 'E'], 'no-division-by-point'],
+    [['Divide', 'N', R], 'no-division-by-point'],
+    [['Divide', 'p', E], 'no-division-by-point'],
     [['Add', 'M', 1], 'incompatible-type'],
-    [['Add', 'R', 'N'], 'incompatible-type'],
-    [['Add', 'E', ['List', 1, 2]], 'incompatible-type'],
+    [['Add', R, 'N'], 'incompatible-type'],
+    [['Add', E, ['List', 1, 2]], 'incompatible-type'],
   ])('%j is %s', (json, code) => {
     const e = ce.box(json as never);
     expect(e.isValid).toBe(false);
@@ -269,11 +274,11 @@ describe('Declared list of points', () => {
   test.each([
     [['Multiply', 2, 'M']],
     [['Multiply', 'N', 'M']],
-    [['Divide', 'R', 2]],
+    [['Divide', R, 2]],
     [['Divide', 'M', 'N']],
-    [['Negate', 'E']],
+    [['Negate', E]],
     [['Add', 'M', 'p']],
-    [['Add', 'M', 'R']],
+    [['Add', 'M', R]],
     [['Multiply', 'N', 'p']],
     // A type that only MAY be a list of points is not proof.
     [['Add', ['List', 'x', ['Tuple', 1, 2]], 1]],
@@ -292,9 +297,10 @@ describe('Declared list of points', () => {
 // The canonical error for a list of points times a point suggests `Dot`, so
 // `Dot` must accept a restricted list of points and a restricted point. When
 // the condition is not decided, the restriction moves to the product. When it
-// is false, the operand is absent and the product is the absence marker of
-// its codomain: `NaN` for the product of two points (a number), `Missing` for
-// a list of points (a list).
+// is false, the operand is absent and the product is `Missing`: an operator
+// over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a
+// result only"). The held form of a product of two points is
+// `If(c, v, Missing)`.
 describe('Dot of a restricted point or a restricted list of points', () => {
   const RL = [
     'If',
@@ -350,9 +356,9 @@ describe('Dot of a restricted point or a restricted list of points', () => {
     [
       'a restricted vector and a vector',
       ['Dot', ['If', ['Less', 0, 't'], ['List', 1, 2]], ['List', 1, 1]],
-      'If(0 < t, 3)',
+      'If(0 < t, 3, "Missing")',
       '3',
-      'NaN',
+      '"Missing"',
     ],
   ])('%s', (_l, json, free, present, absent) => {
     expect(value(json)).toBe(free);

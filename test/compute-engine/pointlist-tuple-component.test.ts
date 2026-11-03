@@ -32,13 +32,11 @@ describe('a tuple-typed component is refused when the call is boxed', () => {
   const ce = new ComputeEngine();
   ce.declare('P', 'tuple');
   ce.declare('Q', 'tuple<integer, integer>');
-  ce.declare('W', 'missing | tuple<integer, integer>');
 
   const cases: [unknown, number][] = [
     [['PointList', ['List', 1, 2], ['Tuple', 5, 6]], 1],
     [['PointList', ['List', 1, 2], 'P'], 1],
     [['PointList', ['List', 1, 2], 'Q'], 1],
-    [['PointList', ['List', 1, 2], 'W'], 1],
     [['PointList', ['Tuple', 5, 6], 3], 0],
     [['PointList', 'P', 3], 0],
     [['PointList', ['Tuple', 5, 6]], 0],
@@ -51,6 +49,14 @@ describe('a tuple-typed component is refused when the call is boxed', () => {
     expect(refused.operator).toBe('Error');
     expect(json(refused)).toContain("'incompatible-type'");
     expect(json(refused)).toContain(EXPECTED);
+  });
+
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only").
+  test('a component declared with missing is a static error', () => {
+    expect(() =>
+      new ComputeEngine().declare('W', 'missing | tuple<integer, integer>')
+    ).toThrow();
   });
 
   test('the error names the expected and the actual types', () => {
@@ -119,13 +125,5 @@ describe('the other components are admitted as before', () => {
     const expr = ce.box(input as never);
     expect(expr.isValid).toBe(true);
     expect(expr.evaluate().toString()).toBe(expected);
-  });
-
-  test('a restricted list source keeps its absent arm', () => {
-    const ce = new ComputeEngine();
-    ce.declare('M', 'missing | list<integer>');
-    expect(ce.box(['PointList', ['List', 1, 2], 'M']).type.toString()).toBe(
-      'list<tuple<integer, integer>> | missing'
-    );
   });
 });

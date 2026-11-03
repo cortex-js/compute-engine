@@ -296,16 +296,15 @@ describe('P40: bottom conforms VACUOUSLY', () => {
     );
   });
 
-  test('a ground-arm solve of `T | missing` at `missing` passes either way', () => {
-    for (const withConformance of [false, true]) {
-      const ce = new ComputeEngine();
-      ce.declareProtocol('Comparable', {});
-      if (withConformance) conform(ce, 'string', ['Comparable']);
-      expect(
-        run(ce, 'function f(x: T | missing) -> T where T is Comparable { 1 }')
-      ).toEqual([]);
-      expect(value(ce, 'f(Missing)')).toBe('1');
-    }
+  // A parameter annotation cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"), so the ground-arm solve of `T | missing`
+  // at `missing` is no longer reached.
+  test('a parameter annotated `T | missing` is a type annotation error', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Comparable', {});
+    expect(
+      run(ce, 'function f(x: T | missing) -> T where T is Comparable { 1 }')
+    ).toContain('type-annotation-error');
   });
 
   test('an unrelated solution still fails the constraint', () => {

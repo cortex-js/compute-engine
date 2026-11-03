@@ -302,7 +302,12 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
 
   test('the reported case: g(x)[1] + 1 at x = [1, 2] is [2, 3]', () => {
     const ce = rowEngine('(unknown) -> list<unknown>');
-    expect(ce.box(ELEMENT as any).type.toString()).toBe('missing | unknown');
+    // The absence marker of an accessor is implicit in its type. The
+    // element type of `g(x)` is `list<unknown> | unknown`, and so is the
+    // type of the read.
+    expect(ce.box(ELEMENT as any).type.toString()).toBe(
+      'list<unknown> | unknown'
+    );
     // `x` is a list in one compilation and a number in the other.
     const list = rowEngine('(unknown) -> list<unknown>', 'list<real>');
     expect(compiledFunction(list, ['Add', ELEMENT, 1])({ x: [1, 2] })).toEqual(
@@ -318,8 +323,11 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
     const ce = rowEngine('(unknown) -> list<unknown>');
     const expr = ce.box(['Sin', ELEMENT]);
     const type = expr.type;
+    // The absence marker of the read is implicit in the type, so the type
+    // has no `missing` arm. The element can be a point: `g((1, 2))[1]` is
+    // `(1, 2)`.
     expect(type.toString()).toBe(
-      'list<list<any> | number | tuple> | missing | number | tuple'
+      'list<list<any> | number | tuple> | number | tuple'
     );
     ce.assign('x', ce.box(['List', 1, 2]));
     expect(expr.evaluate().type.matches(type)).toBe(true);
@@ -474,11 +482,12 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     expect(expr.evaluate().toString()).toBe('"False"');
   });
 
-  test('an absent operand beside a rotation view is a NaN cell', () => {
+  test('an absent operand beside a rotation view is absent in each cell', () => {
     // `g(x)[5] + RotateLeft(xs)` at `x = []`: the present list gives the
-    // shape, and the absent operand is `NaN` in each cell, as in the
-    // interpreter. The compiled `RotateLeft` may pass a rotation view, not
-    // an array, to the broadcast, which reads it as a collection.
+    // shape, and the absent operand gives `Missing` in each cell in the
+    // interpreter; the compiled value is `NaN` there, which the caveats of
+    // compiled code allow. The compiled `RotateLeft` may pass a rotation
+    // view, not an array, to the broadcast, which reads it as a collection.
     const ce = rowEngine('(unknown) -> list<unknown>', 'list<real>');
     ce.declare('xs', 'list<number>');
     const json = ['Add', ['At', ['g', 'x'], 5], ['RotateLeft', 'xs']];
@@ -486,7 +495,7 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     const run = compiledFunction(ce, json, ['x', 'xs']);
     ce.assign('x', ce.box(['List']));
     ce.assign('xs', ce.box(['List', 1, 2]));
-    expect(expr.evaluate().toString()).toBe('[NaN,NaN]');
+    expect(expr.evaluate().toString()).toBe('["Missing","Missing"]');
     expect(run({ x: [], xs: [1, 2] })).toEqual([NaN, NaN]);
   });
 });

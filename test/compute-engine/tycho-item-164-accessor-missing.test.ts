@@ -33,10 +33,15 @@ describe('Tycho item 164: accessors over At results (missing | T)', () => {
       expect(e.type.toString()).toBe('number');
     });
 
-    test('PointY, PointZ, First, Last, Distance compose with At', () => {
+    test('PointY, First, Last, Distance compose with At', () => {
+      // `S[2]` is typed `tuple<number, number>` (the absence marker of an
+      // accessor is implicit), so `PointZ` of it is an
+      // `incompatible-dimensions` error, as for any 2-D point.
+      expect(
+        ce.parse('\\operatorname{PointZ}(S\\left[2\\right])').isValid
+      ).toBe(false);
       for (const src of [
         '\\operatorname{PointY}(S\\left[2\\right])',
-        '\\operatorname{PointZ}(S\\left[2\\right])',
         '\\operatorname{First}(S\\left[2\\right])',
         '\\operatorname{Last}(S\\left[2\\right])',
         '\\operatorname{Distance}(S\\left[2\\right],\\left(0,0\\right))',

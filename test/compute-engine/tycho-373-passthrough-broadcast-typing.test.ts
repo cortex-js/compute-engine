@@ -670,24 +670,23 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
         expect(numeric.evaluate().toString()).toBe('((-1, -2), (1, 2))');
       });
 
-      // An absent component (`Missing`, or `Undefined`, which a tuple
-      // literal also types `missing`) reads as `NaN` in the body's
-      // arithmetic, so the tuple is a numeric tuple, as it is for `Negate`
-      // and `Add`. The call is typed `any`, as for `f((1, 2))`. Before, it
+      // An absent component (`Missing`) gives `Missing` in the body's
+      // arithmetic (an operator over `Missing` gives `Missing`), and the
+      // tuple is bound whole. The call is typed `any`, as for `f((1, 2))`. Before, it
       // kept the signature result `tuple<number, number>`, which the pair of
       // pairs it evaluates to does not fit.
       test(`${route}: a tuple with an absent component is a numeric tuple`, () => {
         const ce = engine(declared);
-        for (const absent of ['Missing', 'Undefined']) {
-          const call = ce.box(['f', ['Tuple', 1, absent]]);
-          expect(call.type.toString()).toBe('any');
-          expect(call.evaluate().toString()).toBe(
-            `((-1, NaN), (1, "${absent}"))`
-          );
-        }
+        const call = ce.box(['f', ['Tuple', 1, 'Missing']]);
+        expect(call.type.toString()).toBe('any');
+        expect(call.evaluate().toString()).toBe(
+          '((-1, "Missing"), (1, "Missing"))'
+        );
         const open = ce.box(['f', ['Tuple', 'a', 'Missing']]);
         expect(open.type.toString()).toBe('any');
-        expect(open.evaluate().toString()).toBe('((-a, NaN), (a, "Missing"))');
+        expect(open.evaluate().toString()).toBe(
+          '((-a, "Missing"), (a, "Missing"))'
+        );
         // The descriptor route, with an absent component and with a
         // component that may be absent.
         for (const t of [
@@ -713,11 +712,11 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       test(`${route}: a tuple whose every coordinate is absent is typed any`, () => {
         const ce = engine(declared);
         const whole = ce.box(['f', 'Missing']);
-        expect(whole.type.toString()).toBe('tuple<number, missing>');
-        expect(whole.evaluate().toString()).toBe('(NaN, "Missing")');
+        // An operator over an operand typed `missing` is typed `missing`.
+        expect(whole.type.toString()).toBe('tuple<missing, missing>');
+        expect(whole.evaluate().toString()).toBe('("Missing", "Missing")');
         for (const call of [
           ce.box(['f', ['Tuple', 'Missing', 'Missing']]),
-          ce.box(['f', ['Tuple', 'Undefined', 'Missing']]),
           ce.parse('f((\\operatorname{Missing}, \\operatorname{Missing}))'),
         ]) {
           expect(call.op1.type.toString()).toMatch(
@@ -726,17 +725,18 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
           expect(call.type.toString()).toBe('any');
           expect(call.evaluate().json).toEqual([
             'Tuple',
-            ['Tuple', 'NaN', 'NaN'],
+            ['Tuple', 'Missing', 'Missing'],
             call.op1.json,
           ]);
         }
-        // An index read that may be out of range is the same union with
-        // number components: the tuple arm gives a pair of pairs.
+        // An index read that may be out of range is typed as a point: the
+        // absence marker of an accessor is implicit. The call gives a pair of
+        // pairs.
         ce.declare('L', 'list<tuple<integer, integer>>');
         ce.assign('L', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
         ce.declare('j', 'integer');
         expect(ce.box(['At', 'L', 'j']).type.toString()).toBe(
-          'missing | tuple<integer, integer>'
+          'tuple<integer, integer>'
         );
         expect(ce.box(['f', ['At', 'L', 'j']]).type.toString()).toBe('any');
         // The descriptor route reads the same unions.
@@ -828,7 +828,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
   // `PointX(L[k])` already typed `number`. The body is now typed under the
   // present part of the argument, as for a plain `Missing` argument
   // (`presentPart`, `call-result-type.ts`).
-  test('row 374: an argument typed `missing | tuple` is typed from the body, present and absent', () => {
+  test('row 374: an index read of a point list is typed from the body', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<tuple<number, number, number>>');
     ce.declare('k', 'integer');
@@ -838,14 +838,15 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
         '(p, s) \\mapsto (s\\cdot\\operatorname{PointX}(p), s\\cdot\\operatorname{PointY}(p), s\\cdot\\operatorname{PointZ}(p))'
       )
     );
+    // The absence marker of an accessor is implicit in its type.
     expect(ce.parse('L[k]').type.toString()).toBe(
-      'missing | tuple<number, number, number>'
+      'tuple<number, number, number>'
     );
     expect(ce.parse('\\operatorname{PointX}(L[k])').type.toString()).toBe(
       'number'
     );
     expect(ce.parse('W(L[k], 2)').type.toString()).toBe(
-      'tuple<missing, missing, missing> | tuple<number, number, number>'
+      'tuple<number, number, number>'
     );
     // A plain absent argument is the absent arm alone, and the two
     // literal-shaped readings of row 373 are unchanged.
@@ -853,7 +854,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       'tuple<missing, missing, missing>'
     );
     expect(ce.parse('W((1,2,3), 2)').type.toString()).toBe(
-      'tuple<integer | nan, integer | nan, integer | nan>'
+      'tuple<integer, integer, integer>'
     );
     expect(ce.parse('W(L, 2)').type.toString()).toBe(
       'tuple<list<number>, list<number>, list<number>>'
@@ -863,9 +864,10 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     ce.assign('k', 1);
     expect(ce.parse('W(L[k], 2)').evaluate().toString()).toBe('(2, 4, 6)');
+    // An index out of range reads the NaN point.
     ce.assign('k', 5);
     const absent = ce.parse('W(L[k], 2)').evaluate();
-    expect(absent.json).toEqual(['Tuple', 'Missing', 'Missing', 'Missing']);
+    expect(absent.json).toEqual(['Tuple', 'NaN', 'NaN', 'NaN']);
     expect(isSubtype(absent.type.type, ce.parse('W(L[k], 2)').type.type)).toBe(
       true
     );
@@ -877,7 +879,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     ]);
   });
 
-  test('row 374: a body that passes the argument through keeps the absent case', () => {
+  test('row 374: a body that passes the argument through reads the NaN point', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<tuple<number, number, number>>');
     ce.declare('k', 'integer');
@@ -886,39 +888,35 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     ce.assign('V', ce.parse('(p) \\mapsto (\\operatorname{PointX}(p), 1)'));
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     ce.assign('k', 5);
-    // The derivation joins the present arm with the absent arm. A first
-    // version typed the body under the present part alone and read
-    // `f(L[k])` as a point. A tuple with one present coordinate stays a
-    // tuple, so `g` and `V` carry the absent coordinate in a tuple arm.
+    // An index out of range reads the NaN point, a point: the read is
+    // typed as a point, and so is the argument passed through.
     expect(ce.parse('f(L[k])').type.toString()).toBe(
-      'missing | tuple<number, number, number>'
+      'tuple<number, number, number>'
     );
-    expect(ce.parse('g(L[k], 2)').type.toString()).toBe(
-      'tuple<missing, integer> | tuple<tuple<number, number, number>, integer>'
-    );
-    expect(ce.parse('V(L[k])').type.toString()).toBe(
-      'tuple<missing, integer> | tuple<number, integer>'
-    );
+    expect(ce.parse('g(L[k], 2)').type.toString()).toBe('any');
+    expect(ce.parse('V(L[k])').type.toString()).toBe('tuple<number, integer>');
     for (const call of ['f(L[k])', 'g(L[k], 2)', 'V(L[k])']) {
       const e = ce.parse(call);
       const v = e.evaluate();
       expect(isSubtype(v.type.type, e.type.type)).toBe(true);
     }
-    expect(ce.parse('f(L[k])').evaluate().toString()).toBe('"Missing"');
-    expect(ce.parse('g(L[k], 2)').evaluate().toString()).toBe('("Missing", 2)');
-    expect(ce.parse('V(L[k])').evaluate().toString()).toBe('("Missing", 1)');
+    expect(ce.parse('f(L[k])').evaluate().toString()).toBe('(NaN, NaN, NaN)');
+    expect(ce.parse('g(L[k], 2)').evaluate().toString()).toBe(
+      '((NaN, NaN, NaN), 2)'
+    );
+    expect(ce.parse('V(L[k])').evaluate().toString()).toBe('(NaN, 1)');
   });
 
-  test('row 374: two arguments that may be absent derive every presence combination', () => {
+  test('row 374: two index reads that may be out of range', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<tuple<number, number, number>>');
     ce.declare('k', 'integer');
     ce.declare('j', 'integer');
     ce.assign('F', ce.parse('(p, q) \\mapsto (p, q)'));
+    // The reads are typed as points (the absence marker of an accessor is
+    // implicit), and the call is typed `any`, which holds every value.
     const e = ce.parse('F(L[k], L[j])');
-    expect(e.type.toString()).toBe(
-      'tuple<missing, missing> | tuple<missing, tuple<number, number, number>> | tuple<tuple<number, number, number>, missing> | tuple<tuple<number, number, number>, tuple<number, number, number>>'
-    );
+    expect(e.type.toString()).toBe('any');
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     for (const [k, j] of [
       [5, 2],
@@ -950,19 +948,18 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     expect(isSubtype(v.type.type, e.type.type)).toBe(true);
   });
 
-  test('row 374: an absent point keeps the point rule outside a body', () => {
+  test('row 374: an index out of range of a point list is the NaN point', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<tuple<number, number, number>>');
     ce.declare('k', 'integer');
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     ce.assign('k', 5);
-    // The written type of these applications is a point: an absent point
-    // scaled or negated is an absent point (`docs/ERROR-MODEL.md`), not
-    // `NaN`.
-    expect(ce.parse('-L[k]').evaluate().toString()).toBe('"Missing"');
-    expect(ce.parse('2 L[k]').evaluate().toString()).toBe('"Missing"');
+    // An index out of range of a point list reads the NaN point, so these
+    // applications give the NaN point.
+    expect(ce.parse('-L[k]').evaluate().toString()).toBe('(NaN, NaN, NaN)');
+    expect(ce.parse('2 L[k]').evaluate().toString()).toBe('(NaN, NaN, NaN)');
     expect(ce.parse('2 L[k] + (1,1,1)').evaluate().toString()).toBe(
-      '"Missing"'
+      '(NaN, NaN, NaN)'
     );
   });
 

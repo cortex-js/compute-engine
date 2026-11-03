@@ -124,11 +124,13 @@ describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', 
   // type — and the missing-absorption that used to widen that echo to `number`
   // has nothing to absorb. These pin the pre-migration behavior so a future
   // attempt has to confront it deliberately.
-  test('an absent operand still types `number` (missing-value P2 §3.B)', () => {
+  test('an absent operand types `missing` (missing-value P2 §3.B)', () => {
+    // An operator over an operand typed `missing` is typed `missing`, and
+    // its value is `Missing`.
     const ce = engine();
     const e = ce.box(['Negate', 'Missing']);
-    expect(e.type.toString()).toBe('nan'); // was `value` under the clause
-    expect(e.evaluate().toString()).toBe('NaN');
+    expect(e.type.toString()).toBe('missing'); // was `value` under the clause
+    expect(e.evaluate().toString()).toBe('"Missing"');
     expect(ce.box('Negate').operatorDefinition!.resolvedMissingBehavior).toBe(
       'propagate'
     );

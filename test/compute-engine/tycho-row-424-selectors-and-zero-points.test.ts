@@ -489,8 +489,9 @@ describe('the derivative of an element selector is the selector of the derivativ
     expect(at(['First', 'PM'], 0.5)).toBe('(0, 0)');
     expect(at(['Take', 'PM', 1], 0.5)).toBe('[(0, 0)]');
     expect(at(['At', 'PM', ['Ceil', 'u']], 0.5)).toBe('(0, 0)');
-    // Each coordinate: an absent point has absent coordinates
-    expect(at(['PointX', 'PM'], 0.5)).toBe('[0,"Missing"]');
+    // Each coordinate: an absent point has absent coordinates, and the
+    // absent value of a coordinate, a number, is `NaN`
+    expect(at(['PointX', 'PM'], 0.5)).toBe('[0,NaN]');
   });
 
   test('a container that can be a list or a dictionary is read by position', () => {
@@ -511,18 +512,14 @@ describe('the derivative of an element selector is the selector of the derivativ
   });
 
   test('a constant element that can be absent: the zero of its value', () => {
-    // `Q: missing | tuple<integer, integer>`. The zero was built from the
-    // type with the `missing` arm removed, so an absent `Q` gave the present
-    // point `(0, 0)`.
+    // `Q` was declared `missing | tuple<integer, integer>`. The zero was
+    // built from the type with the `missing` arm removed, so an absent `Q`
+    // gave the present point `(0, 0)`. A declared type cannot name `missing`
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only"), so the absent
+    // element is the written `Missing`.
     const ce = engine();
-    for (const [name, value] of [
-      ['QM', 'Missing'],
-      ['QP', ['Tuple', 1, 2]],
-      ['QN', undefined],
-    ] as const) {
-      ce.declare(name, 'missing | tuple<integer, integer>');
-      if (value !== undefined) ce.assign(name, ce.box(value as never));
-    }
+    ce.declare('QP', 'tuple<integer, integer>');
+    ce.assign('QP', ce.box(['Tuple', 1, 2] as never));
     const d = (expr: unknown) =>
       ce
         .box(['D', expr, 'u'] as never)
@@ -536,22 +533,13 @@ describe('the derivative of an element selector is the selector of the derivativ
       q,
     ];
     // The value is `Missing`: the derivative is `Missing`
-    expect(d(list('QM'))).toBe('[(1, 1),"Missing"]');
-    expect(d(arm('QM'))).toBe('If(0 < u, (1, 1), "Missing")');
-    expect(d(['Last', list('QM')])).toBe('"Missing"');
+    expect(d(list('Missing'))).toBe('[(1, 1),"Missing"]');
+    expect(d(arm('Missing'))).toBe('If(0 < u, (1, 1), "Missing")');
+    expect(d(['Last', list('Missing')])).toBe('"Missing"');
     // The value is a point: the zero point
     expect(d(list('QP'))).toBe('[(1, 1),(0, 0)]');
     expect(d(arm('QP'))).toBe('If(0 < u, (1, 1), (0, 0))');
     expect(d(['Last', list('QP')])).toBe('(0, 0)');
-    // No value: the element keeps the scalar `0`, and a selector declines
-    expect(d(list('QN'))).toBe('[(1, 1),0]');
-    expect(d(arm('QN'))).toBe('If(0 < u, (1, 1), 0)');
-    expect(
-      ce.box(['D', ['Last', list('QN')], 'u'] as never).evaluate().operator
-    ).toBe('D');
-    expect(
-      ce.box(['D', ['PointY', list('QN')], 'u'] as never).evaluate().operator
-    ).toBe('D');
   });
 
   test('a key of a constant dictionary: present is zero, absent stays absent', () => {

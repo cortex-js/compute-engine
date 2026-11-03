@@ -398,7 +398,7 @@ export function compileGPUBroadcastUnary(
  * array of `vec2` as one vector, and `p.z` reads a component that a `vec2`
  * does not have, so the shader is not valid. An operand that `At` cannot
  * index (a list of unknown length, a matrix) declines with the reason of
- * `At`. An operand that is always absent (`Missing`, `Undefined`) goes to
+ * `At`. An operand that is always absent (`Missing`) goes to
  * `At` too, which declines an absent base.
  */
 function compileGPUPositional(
@@ -795,7 +795,6 @@ function compileGPUAt(
   // are read alike (user ruling of 2026-09-22).
   if (
     isSymbol(index, 'Missing') ||
-    isSymbol(index, 'Undefined') ||
     isSubtype(it, 'missing')
   ) {
     requirePureFold('base');

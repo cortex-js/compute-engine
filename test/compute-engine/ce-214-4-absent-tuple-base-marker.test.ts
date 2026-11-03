@@ -18,6 +18,13 @@
  * `NaN` where the interpreter gives `Missing`.
  *
  * Each case compares the compiled run (no fallback) with `.evaluate()`.
+ *
+ * Since `Missing` is a result only (`docs/ERROR-MODEL.md`), an accessor over
+ * an absent base gives `Missing` in the interpreter, also at a numeric slot.
+ * Where the interpreter gives `Missing`, compiled code may give `NaN`,
+ * `undefined` or throw (`docs/COMPILATION-MODEL.md`, "Caveats of compiled
+ * code"), so the cases of a base typed by one tuple compare within these
+ * caveats.
  */
 
 import { execFileSync } from 'child_process';
@@ -78,6 +85,31 @@ function compiled(ce: ComputeEngine, json: unknown, vars: object): unknown {
   return (r.run as unknown as (...args: unknown[]) => unknown)(
     ...Object.values(vars)
   );
+}
+
+/** The compiled value of `json` agrees with the interpreter value
+ * `expected` within the caveats of compiled code: where the interpreter
+ * gives `Missing` (`undefined` here), the compiled code may give `NaN`,
+ * `undefined` or throw. */
+function expectWithinCaveats(
+  label: unknown[],
+  run: () => unknown,
+  expected: unknown
+): void {
+  if (expected !== undefined) {
+    expect([...label, run()]).toEqual([...label, expected]);
+    return;
+  }
+  let c: unknown;
+  try {
+    c = run();
+  } catch {
+    return;
+  }
+  expect([...label, c === undefined || Number.isNaN(c)]).toEqual([
+    ...label,
+    true,
+  ]);
 }
 
 /** The JavaScript value of `v` as MathJSON: the inner arrays of a list of
@@ -170,7 +202,6 @@ describe('CE-214.4: a base typed by one tuple', () => {
   ];
   test.each([
     ['list<tuple<number, string>>', [[], [[1, 's']]]],
-    ['list<tuple<number | missing, string>>', [[], [[undefined, 's']]]],
     ['list<tuple<unknown, number>>', [[], [['s', 2]], [[3, 2]], [[[1, 2], 2]]]],
     ['list<tuple<string, string>>', [[], [['r', 's']]]],
     ['list<tuple<integer, real>>', [[], [[1, 2.5]]]],
@@ -179,9 +210,14 @@ describe('CE-214.4: a base typed by one tuple', () => {
       for (const b of values as unknown[][][]) {
         const ce = new ComputeEngine();
         ce.declare('b', type);
-        const c = compiled(ce, json, { b });
-        ce.assign('b', ce.box(tupleListJson(b) as never));
-        expect([json, b, c]).toEqual([json, b, interpreted(ce, json)]);
+        const ci = new ComputeEngine();
+        ci.declare('b', type);
+        ci.assign('b', ci.box(tupleListJson(b) as never));
+        expectWithinCaveats(
+          [json, b],
+          () => compiled(ce, json, { b }),
+          interpreted(ci, json)
+        );
       }
   });
 
@@ -207,30 +243,31 @@ describe('CE-214.4: a base typed by one tuple', () => {
       ]) {
         const ce = new ComputeEngine();
         ce.declare('b', 'list<tuple<unknown, number>>');
-        const c = compiled(ce, json, { b });
-        ce.assign('b', ce.box(tupleListJson(b) as never));
-        expect([json, b, c]).toEqual([json, b, interpreted(ce, json)]);
+        const ci = new ComputeEngine();
+        ci.declare('b', 'list<tuple<unknown, number>>');
+        ci.assign('b', ci.box(tupleListJson(b) as never));
+        expectWithinCaveats(
+          [json, b],
+          () => compiled(ce, json, { b }),
+          interpreted(ci, json)
+        );
       }
     }
-    for (const p of [undefined, ['s', 2], [3, 2]]) {
+    for (const p of [['s', 2], [3, 2]]) {
       for (const json of [
         ['Third', 'p'],
         ['At', 'p', 3],
       ]) {
         const ce = new ComputeEngine();
-        ce.declare('p', 'missing | tuple<unknown, number>');
+        ce.declare('p', 'tuple<unknown, number>');
         const c = compiled(ce, json, { p });
         ce.assign(
           'p',
-          ce.box(
-            (p === undefined
-              ? 'Missing'
-              : [
-                  'Tuple',
-                  typeof p[0] === 'string' ? { str: p[0] } : p[0],
-                  p[1],
-                ]) as never
-          )
+          ce.box([
+            'Tuple',
+            typeof p[0] === 'string' ? { str: p[0] } : p[0],
+            p[1],
+          ] as never)
         );
         expect([json, p, c]).toEqual([json, p, interpreted(ce, json)]);
       }
@@ -305,7 +342,6 @@ describePython('CE-214.4: Python, a base typed by one tuple', () => {
           : String(v);
   test.each([
     ['list<tuple<number, string>>', [[], [[1, 's']]]],
-    ['list<tuple<number | missing, string>>', [[], [[undefined, 's']]]],
     ['list<tuple<unknown, number>>', [[], [['s', 2]], [[3, 2]]]],
     ['list<tuple<string, string>>', [[], [['r', 's']]]],
     ['list<tuple<integer, real>>', [[], [[1, 2.5]]]],
@@ -334,9 +370,14 @@ describePython('CE-214.4: Python, a base typed by one tuple', () => {
     })
       .trim()
       .split('\n');
-    expect(cases.map((c, i) => [...c.slice(0, 2), out[i]])).toEqual(
-      cases.map((c) => [c[0], c[1], c[2]])
-    );
+    // Where the interpreter gives `Missing` (`None`), the compiled code may
+    // give `nan` (the caveats of compiled code).
+    expect(
+      cases.map((c, i) => [
+        ...c.slice(0, 2),
+        c[2] === 'None' && out[i] === 'nan' ? 'None' : out[i],
+      ])
+    ).toEqual(cases.map((c) => [c[0], c[1], c[2]]));
   });
 
   test('a symbol typed `any` in an index does not change the marker', () => {

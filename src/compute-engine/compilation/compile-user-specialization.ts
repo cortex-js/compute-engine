@@ -66,7 +66,7 @@ export function trySpecializedUserCall(
   },
   /** The compiled defaults for a call that maps over a list argument: each
    * absent cell is filled (`emitUserFunctionCall`, `mapDefaults`). */
-  mapDefaults?: () => ReadonlyArray<string | undefined>
+  mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
 ): TargetSource | undefined {
   const emitted = core.ensureSpecializedUserCallEmitted(
     engine,

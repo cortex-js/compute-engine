@@ -1797,21 +1797,20 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   if (holdsKindValue(op1) || holdsKindValue(op2))
     return isLiteral(op2, 1) ? op1 : ce._fn('Divide', [op1, op2]);
 
-  // An absent operand (`Missing` or `Undefined`) folds to `NaN` here, as a
-  // `NaN` operand does above and for the same reasons: arithmetic with an
-  // absent operand is `NaN` (user decision of 2026-09-25), and the folds
-  // below would otherwise erase the absence — `Missing / 1` was `Missing`
-  // and `Missing / Missing` was `1` (the `a/a` fold). A point numerator was
-  // handled above: a tuple divided by an absent value is not a number. An
-  // operand that is or may be a collection (`[1, 2, 3] / Missing`) keeps
-  // the `Divide`, so evaluation broadcasts the absence over the cells
-  // (`[NaN, NaN, NaN]`) instead of collapsing the shape to one scalar.
+  // An absent operand (`Missing`) folds to `Missing` here: `Missing` is a
+  // result only, and an operator over it gives `Missing`
+  // (`docs/ERROR-MODEL.md`). The folds below would otherwise erase the
+  // absence: `Missing / Missing` would be `1` (the `a/a` fold). A point
+  // numerator was handled above. An operand that is or may be a collection
+  // (`[1, 2, 3] / Missing`) keeps the `Divide`, so evaluation broadcasts
+  // the absence over the cells instead of collapsing the shape to one
+  // scalar.
   if (
     (isAbsentSymbol(op1) || isAbsentSymbol(op2)) &&
     !typeMayCarryQuotientShape(op1.type.type) &&
     !typeMayCarryQuotientShape(op2.type.type)
   )
-    return ce.NaN;
+    return ce.Missing;
 
   // A fully-determined expression (no free variables) that is not already a
   // literal. Such expressions may evaluate to 0 or ∞ (e.g. 1-1, tan(π/2))
@@ -2281,12 +2280,12 @@ export function div(num: Expression, denom: number | Expression): Expression {
   ]);
   if (residue !== undefined) return residue;
 
-  // An absent operand (`Missing`, `Undefined`, or a product or negation of
-  // one): arithmetic with an absent operand is `NaN` (user decision of
-  // 2026-09-25), as the `Divide` operator answers at evaluation. Before,
-  // `ce.box('Missing').div(ce.box(2))` was `½·"Missing"`. A point divided by
-  // an absent value is an absent point, `Missing`, as for a product: a tuple
-  // is atomic, so there is no cell for the absence to land in. An operand
+  // An absent operand (`Missing`, or a product or negation of one): the
+  // quotient is `Missing`, as the `Divide` operator answers at evaluation:
+  // `Missing` is a result only, and an operator over it gives `Missing`
+  // (`docs/ERROR-MODEL.md`). So `ce.box('Missing').div(ce.box(2))` is
+  // `Missing`, and so is a point divided by an absent value: a tuple is
+  // atomic, so there is no cell for the absence to land in. An operand
   // that is or may be a collection keeps the quotient, for the reason given
   // in `canonicalDivide`. This applies to a JavaScript number divisor too:
   // `Multiply(Missing, L).div(2)`, with `L` a list, keeps the list shape.
@@ -2298,7 +2297,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
         (typeof denom === 'number' ||
           !typeMayCarryQuotientShape(denom.type.type))))
   )
-    return isTuple(num) ? ce.Missing : ce.NaN;
+    return ce.Missing;
 
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
@@ -2584,11 +2583,10 @@ export function canonicalMultiply(
   }
 
   // A product of several factors that folds down to a lone absent factor
-  // (`Multiply(Missing, 1)`) is `NaN`, not the bare symbol: arithmetic with
-  // an absent operand is `NaN` (user decision of 2026-09-25), and removing
-  // the `· 1` must not turn the product into the absent value itself.
-  // `Multiply(Missing, 2)` is not folded here: it stays a product, and its
-  // evaluation answers `NaN`.
+  // (`Multiply(Missing, 1)`) is `Missing`, the value of arithmetic with an
+  // absent operand (`docs/ERROR-MODEL.md`, "`Missing` is a result only",
+  // rule 3). `Multiply(Missing, 2)` is not folded here: it stays a product,
+  // and its evaluation answers `Missing`.
   const severalFactors = xs.length > 1;
   const hasAbsentFactor = xs.some((x) => isAbsentSymbol(x));
 
@@ -2681,9 +2679,10 @@ export function canonicalMultiply(
       if (product.isZero) {
         // 0 * ±∞ is the indeterminate form (`Indeterminate`, or `NaN` when
         // a factor is a float), 0 * NaN = NaN, 0 * Indeterminate is
-        // `Indeterminate`, and 0 times an absent factor is NaN (arithmetic
-        // with an absent operand is `NaN`)
-        if (hasAbsentFactor) return ce.NaN;
+        // `Indeterminate`, and 0 times an absent factor is `Missing`
+        // (arithmetic with an absent operand is `Missing`,
+        // `docs/ERROR-MODEL.md`, "`Missing` is a result only", rule 3)
+        if (hasAbsentFactor) return ce.Missing;
         // A factor that reads a variable with an assigned value keeps the
         // product: its value is the one the variable holds when the product
         // is evaluated, and the fold must not read the value it holds now.
@@ -2872,7 +2871,9 @@ export function canonicalMultiply(
     // symbol stays admitted.
     if (heldNonNumericScalar(ys[0]))
       return ce.typeError('number', ys[0].type, ys[0]);
-    if (severalFactors && isAbsentSymbol(ys[0])) return ce.NaN;
+    // A product of several factors that folds down to a lone absent factor
+    // (`Multiply(1, Missing)`) is `Missing`, as the product itself is.
+    if (severalFactors && isAbsentSymbol(ys[0])) return ce.Missing;
     return ys[0];
   }
 
@@ -3354,11 +3355,11 @@ function mulImpl(
   if (xs.some((x) => isTuple(x)) && !hasUnresolvedTupleCofactor(xs))
     return mulTuples(ce, xs, false, expand);
 
-  // An absent factor (`Missing`, `Undefined`, or a product or negation of
-  // one) makes the product `NaN`, as the `Multiply` operator answers at
-  // evaluation: arithmetic with an absent operand is `NaN` (user decision of
-  // 2026-09-25). Before, `ce.box('Missing').mul(ce.box(2))` was
-  // `2·"Missing"`. A tuple co-factor was handled above: an absent factor
+  // An absent factor (`Missing`, or a product or negation of one) makes the
+  // product `Missing`, as the `Multiply` operator answers at evaluation:
+  // `Missing` is a result only, and an operator over it gives `Missing`
+  // (`docs/ERROR-MODEL.md`). So `ce.box('Missing').mul(ce.box(2))` is
+  // `Missing`. A tuple co-factor was handled above: an absent factor
   // beside a point makes the whole point absent (`mulTuples`). A factor that
   // is collection-typed but has no value yet (`L: list<number>`) keeps the
   // product inert: once it resolves, the absence is broadcast over its cells.
@@ -3366,7 +3367,7 @@ function mulImpl(
     xs.some((x) => isAbsentArithmeticOperand(x)) &&
     !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
   )
-    return ce.NaN;
+    return ce.Missing;
 
   // A kind value among the factors (a residue class): only the hooks of the
   // kinds apply, after the broadcast over a collection above
@@ -3989,7 +3990,7 @@ function mulTuples(
 
   if (tuples.length >= 2) return pointProductError(ce, xs);
 
-  // An absent factor (`Missing` or `Undefined`) beside a point makes the
+  // An absent factor (`Missing`) beside a point makes the
   // whole point absent: a tuple is atomic, so there is no cell for the
   // absence to land in (`docs/ERROR-MODEL.md` §3). The `Multiply` operator
   // already answers `Missing` at evaluation; the `.mul()` method answered the
@@ -4036,10 +4037,10 @@ function mulTuples(
     )
       return multiply(scalar, c);
     const cv = numericApproximation ? c.N() : c.evaluate();
-    // An absent component (`Missing` or `Undefined`) is `NaN` in this numeric
-    // slot. `mulN()` keeps the symbol, so without this `(2·(1, Missing)).N()`
-    // was `(2, 2·Missing)` while the exact route gave `(2, NaN)`.
-    if (isAbsentSymbol(cv)) return ce.NaN;
+    // An absent component (`Missing`) makes its product `Missing`, as the
+    // `Multiply` operator answers. `mulN()` keeps the symbol, so without
+    // this `(2·(1, Missing)).N()` was `(2, 2·Missing)`.
+    if (isAbsentSymbol(cv)) return ce.Missing;
     const product = multiply(scalar, cv);
     return numericApproximation ? product : product.evaluate();
   });
@@ -4218,7 +4219,8 @@ function mulTensors(
         list.ops.map((c) => {
           if (readsAssignedVariable(ce, c)) return multiply(scalar, c);
           const cv = c.evaluate();
-          return multiplyCell(scalar, isAbsentSymbol(cv) ? ce.NaN : cv);
+          // An absent cell (`Missing`) makes its product `Missing`.
+          return isAbsentSymbol(cv) ? ce.Missing : multiplyCell(scalar, cv);
         })
       );
     }
@@ -4242,12 +4244,19 @@ function mulTensors(
   // evaluated again. A list of symbolic cells is not data, so its
   // evaluation evaluates every cell again: a list of six unevaluated
   // integrals tried each antiderivative once more (ROADMAP CE-604).
-  const evaluated = xs.map((op) =>
-    absentCellsAsNaN(
-      ce,
-      numericApproximation ? op.N() : operandsAreValues ? op : op.evaluate()
-    )
-  );
+  // `withAbsentCells` maps an operand read with `NaN` cells to the operand
+  // with its `Missing` cells, for the element-wise product below.
+  const withAbsentCells = new Map<Expression, Expression>();
+  const evaluated = xs.map((op) => {
+    const value = numericApproximation
+      ? op.N()
+      : operandsAreValues
+        ? op
+        : op.evaluate();
+    const read = absentCellsAsNaN(ce, value);
+    if (read !== value) withAbsentCells.set(read, value);
+    return read;
+  });
   // The rank of each operand that is a lazy collection of vectors or
   // matrices, read once from its type (`lazyCollectionRank()`).
   const lazyRanks = evaluated.map((x) => lazyCollectionRank(x));
@@ -4331,14 +4340,13 @@ function mulTensors(
         otherCollection = true;
         continue;
       }
-      // An absent scalar factor (`Missing` or `Undefined`) is read as `NaN`:
-      // every cell of a packed tensor is a number, and the absence marker of
-      // a numeric cell is `NaN` (`docs/ERROR-MODEL.md`, the codomain rule).
-      // Kept as the symbol, the cell products disagreed: `Missing · 2` is
-      // `NaN` through the `Multiply` absence gate, but `Missing · 1` folds
-      // the identity factor away and answered the bare `Missing`, so
-      // `Missing · [1, 2, 3]` was `[Missing, NaN, NaN]`.
-      scalars.push(isAbsentSymbol(x) ? ce.NaN : x);
+      // An absent scalar factor (`Missing`) declines the tensor kernels:
+      // every cell of a packed tensor is a number, and `Missing` is not one.
+      // The caller broadcasts the product over the cells, and each cell is
+      // `Missing`, as an operator over `Missing` gives `Missing`:
+      // `Missing · [1, 2, 3]` is `[Missing, Missing, Missing]`.
+      if (isAbsentSymbol(x)) return undefined;
+      scalars.push(x);
     }
   }
 
@@ -4405,6 +4413,20 @@ function mulTensors(
 
   // Fold the tensors left to right, in order.
   let product: Expression = tensors[0];
+  // The positions (0-based) of the cells of `product` that are absent: an
+  // element-wise product of vectors has a `Missing` cell where a factor has
+  // one, as an operator over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"). The fold computes on the `NaN` cells of
+  // `absentCellsAsNaN()`, and the absent cells are set at the end. A matrix
+  // product mixes the cells, and keeps its `NaN` cells.
+  let absentCells: Set<number> | undefined;
+  const collectAbsentCells = (x: Expression): void => {
+    const original = withAbsentCells.get(x);
+    if (!isFunction(original, 'List')) return;
+    original.ops.forEach((c, k) => {
+      if (isAbsentSymbol(c)) (absentCells ??= new Set()).add(k);
+    });
+  };
   for (let i = 1; i < tensors.length; i++) {
     const nextTensor = tensors[i];
 
@@ -4430,6 +4452,8 @@ function mulTensors(
       const productTensor = packTensor(ce, product);
       const nextTensorPacked = packTensor(ce, nextTensor);
       if (!productTensor || !nextTensorPacked) return ce._fn('Multiply', xs);
+      if (i === 1) collectAbsentCells(product);
+      collectAbsentCells(nextTensor);
       // Each element is a float when its own element of the list is a float
       // (`elementFloatMask()`).
       const aFloats = elementFloatMask(product, productTensor);
@@ -4480,6 +4504,7 @@ function mulTensors(
     if (!next.isValid || next.operator === 'MatrixMultiply')
       return ce._fn('Multiply', xs);
     product = next;
+    absentCells = undefined;
   }
 
   // Apply the combined scalar factor.
@@ -4487,6 +4512,13 @@ function mulTensors(
     product = isTensorValue(product)
       ? scaleTensor(ce, product, scalar, multiplyCell)
       : multiply(scalar, product);
+  }
+  if (absentCells !== undefined && isFunction(product, 'List')) {
+    const cells = absentCells;
+    product = ce.function(
+      'List',
+      product.ops.map((c, k) => (cells.has(k) ? ce.Missing : c))
+    );
   }
   return product;
 }

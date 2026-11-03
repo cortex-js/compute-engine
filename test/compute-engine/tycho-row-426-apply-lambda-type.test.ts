@@ -499,7 +499,8 @@ describe('row 426 review: names and scopes', () => {
   });
 
   test('an argument that may be absent: as the named route', () => {
-    // `At(LL, 1)` is `missing | list<real>`.
+    // `At(LL, 1)` is `list<real>`: the absence marker is implicit in the
+    // type of a read.
     const ce = rowEngine();
     ce.declare('LL', 'list<list<real>>');
     ce.declare('q', 'function');
@@ -510,7 +511,7 @@ describe('row 426 review: names and scopes', () => {
       ['At', 'LL', 1],
     ]);
     expect(applied).toBe(typeOf(ce, ['q', ['At', 'LL', 1]]));
-    expect(applied).toBe('list<number> | missing');
+    expect(applied).toBe('list<number>');
     expect(
       typeAndFit(['Apply', F(['Map', 'p', 'a'], 'a'), ['At', 'LL', 1]]).fits
     ).toBe(true);

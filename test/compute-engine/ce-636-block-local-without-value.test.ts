@@ -462,12 +462,13 @@ describe('CE-636: a branch statement that can run no branch', () => {
   });
 
   test('a loop pass where the condition is undecided after a pass that assigned', () => {
-    // `b` is a `boolean | missing` input. The condition `Or(i = 1, b)` is
-    // read by its value, which the analysis takes as one that can be
-    // undecided, so the read of `n` is of class 3 on the targets that can
-    // run no branch. GLSL and WGSL always run one branch. (A `boolean` input
-    // holds `true` or `false`, so the condition is decided and the block
-    // compiles.)
+    // `L[i]` is a read of a `list<boolean>` input that can find nothing
+    // (`Missing`). The condition `Or(i = 1, L[i])` is read by its value,
+    // which the analysis takes as one that can be undecided, so the read of
+    // `n` is of class 3 on the targets that can run no branch. GLSL and WGSL
+    // always run one branch. (A `boolean` input holds `true` or `false`, so
+    // the condition is decided and the block compiles.) A declared type
+    // cannot name `missing`, so the input cannot be `boolean | missing`.
     const json = [
       'Block',
       ['Assign', 's', 0],
@@ -478,7 +479,7 @@ describe('CE-636: a branch statement that can run no branch', () => {
           D('n'),
           [
             'If',
-            ['Or', ['Equal', 'i', 1], 'b'],
+            ['Or', ['Equal', 'i', 1], ['At', 'L', 'i']],
             ['Assign', 'n', 1],
             ['Assign', 'n', 2],
           ],
@@ -490,15 +491,19 @@ describe('CE-636: a branch statement that can run no branch', () => {
     ];
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    ce.declare('b', 'boolean | missing');
+    ce.declare('L', 'list<boolean>');
     const expr = ce.box(json as any);
     for (const to of ['javascript', 'python'])
       expect(() => compile(expr, { to, fallback: false })).toThrow(SOME_PATHS);
     expect(() =>
-      new PythonTarget().compileFunction(expr, 'f', ['x', 'b'])
+      new PythonTarget().compileFunction(expr, 'f', ['x', 'L'])
     ).toThrow(SOME_PATHS);
-    ce.assign('b', false);
+    // The third read is out of range: `Or(False, Missing)` is `False`.
+    ce.assign('L', ce.box(['List', 'False', 'False']));
     expect(expr.evaluate().re).toBe(5);
+    expect(() => ce.declare('b', 'boolean | missing')).toThrow(
+      /the type `missing` cannot be declared/
+    );
   });
 
   test('a Which whose last condition is True has no path with no branch', () => {

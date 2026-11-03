@@ -248,13 +248,13 @@ describe('CE-577: Cancel with no single unknown, and an absent term', () => {
     expect(run('Cancel', 'a+b').latex).toBe('a+b');
   });
 
-  test('an absent term gives NaN, as evaluating the sum does', () => {
-    expect(ce.expr(['Add', 'Missing', 1]).evaluate().isNaN).toBe(true);
-    expect(ce.expr(['Factor', ['Add', 'Missing', 1]]).evaluate().isNaN).toBe(
-      true
-    );
+  test('an absent term gives Missing, as evaluating the sum does', () => {
+    expect(ce.expr(['Add', 'Missing', 1]).evaluate().symbol).toBe('Missing');
     expect(
-      ce.expr(['Together', ['Add', 'Missing', 'a', 'a']]).evaluate().isNaN
-    ).toBe(true);
+      ce.expr(['Factor', ['Add', 'Missing', 1]]).evaluate().symbol
+    ).toBe('Missing');
+    expect(
+      ce.expr(['Together', ['Add', 'Missing', 'a', 'a']]).evaluate().symbol
+    ).toBe('Missing');
   });
 });

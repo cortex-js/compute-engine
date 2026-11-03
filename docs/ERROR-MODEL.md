@@ -102,7 +102,8 @@ propagating it, handling it, or checking it at runtime; it does not make
 **Implemented** (the presence assertion since 2026-10-21): treat `NaN` and
 `Indeterminate` alike in `IsMissing`, `Coalesce` / `??`, and the presence
 assertion `x?!`. Both count as absent, both select a fallback, and both
-fail the assertion. `Missing` and `Undefined` continue to do so;
+fail the assertion. `Missing` continues to do so (`Undefined` is no
+longer an absent value: "`Missing` is a result only", above);
 `Nothing` remains an omission marker rather than an absent datum.
 
 This supersedes the earlier D7 rule that exact `Indeterminate` bypasses
@@ -115,6 +116,115 @@ existing exact arithmetic propagation: `Mean([1, Indeterminate])` and
 `Coalesce(Indeterminate, 5)` returns `5`. Consumers may need separate
 policies; this does not prescribe a helper name or mechanically broaden
 every absence gate, nor decide field omission or tuple normalization.
+
+### `Missing` is a result only — user decision of 2026-11-02
+
+**Settled, implemented 2026-11-03** (option A of page 1 of
+`docs/plans/2026-11-02-language-axes-options.md`).
+
+1. **`missing` cannot be declared.** A declared type of an input, a
+   parameter, a local or an element may not name `missing`, at any depth
+   (`real | missing`, `list<string | missing>`, `(real | missing) ->
+   real`). The declaration fails on the channel of an invalid type:
+   `ce.declare` throws, an operator signature throws, a parameter
+   annotation of a function literal and a signature string give an
+   `invalid-type-annotation` error, a `Declare` statement gives an
+   `invalid-type-declaration` error, and Epsil reports a
+   `type-annotation-error`. The result type of a signature may name it
+   (`(real) -> real | missing`). An inferred type is not a declaration
+   and is not checked. The library symbol `Missing` keeps its type
+   `missing`. An Epsil pattern annotation is a type test, not a
+   declaration, and is not checked.
+2. **The producers.** `Missing` is produced by a selection with no
+   match, an accessor out of range and the written symbol. The value
+   follows the domain of the position: `NaN` for a number, a point whose
+   coordinates are all `NaN` for a point, `Missing` otherwise. So
+   `At([(1, 2), (3, 4)], 5)` is `(NaN, NaN)` and `At(["a", "b"], 5)` is
+   `Missing`. A restriction `If(c, e)` with `c` false follows the same
+   rule (user decision of 2026-11-03): `If(c, 5)` is `NaN`,
+   `If(c, (1, 2))` is `(NaN, NaN)` on every route and in compiled
+   JavaScript and Python, and `If(c, "a")` and `If(c, [1, 2])` are
+   `Missing`. So `Sin(If(c, (0, 1)))` is `(NaN, NaN)`, and an accessor
+   of a point over an absent list of points gives the point of `NaN`
+   coordinates: `First(If(c, [(1, 2), (3, 4)]))` is `(NaN, NaN)`, while
+   the restricted list itself is `Missing`. A `Which` with no match
+   stays `Missing`.
+   Compiled code tests every point for this absent value at a default
+   and at `AssertPresent`, as it tests every `real` for `NaN`: a point
+   typed `tuple<real, real>` can be the point of `NaN` coordinates that a
+   read out of range gives, so no point is proved present by its type.
+3. **The readers stay**: `IsMissing`, `Coalesce`, `AssertPresent`, the
+   condition of a branch, and the position-preserving accessors. The
+   readers and the default of a parameter read a `NaN` point (a point
+   whose coordinates are all `NaN`) as absent, as they read `NaN` and
+   `Missing`, in the interpreter and in compiled code:
+   `Coalesce(At(ps, 9), (0, 0))` is `(0, 0)`. A point with one coordinate
+   that is not `NaN` is present. A coordinate of an absent point is `NaN`
+   (`PointX(Missing)` is `NaN`, typed `nan`), and a `NaN` point at a
+   parameter declared as a point is accepted, as `NaN` is at a numeric
+   parameter: the body runs with it. Any
+   other operator over `Missing` gives `Missing` in the interpreter:
+   `Missing + 2`, `Sin(Missing)`, `Max(1, Missing)`, `Sum([1,
+   Missing])`, `Mean([1, Missing])`, `Norm((1, Missing))` and the
+   methods `ce.box("Missing").add(1)` are `Missing`, and a broadcast
+   gives a `Missing` cell (`[1, Missing] + 1` is `[2, Missing]`). A
+   comparison, a connective and a boolean predicate of the collection
+   libraries give `False` ("A comparison is two-valued", below). An
+   aggregate over a `NaN` datum or over no data is still `NaN`. Compiled
+   code keeps its caveats: `NaN`, `undefined` or a throw where the
+   interpreter gives `Missing`.
+4. **`Undefined` is not an absent value.** It is an ordinary symbol with
+   no value: `IsMissing(Undefined)` is `False` and `Undefined + 1`
+   stays `Undefined + 1`. `Missing` is the one absent symbol.
+5. **Typing.** `missing` is a marker type, as `error` is. The mechanism
+   is the rule of 2026-09-01 on implicit markers in a result type (§4,
+   "RULED 2026-09-01: the omitted default is a RUNTIME contract only"):
+   a result type describes the successful values, and the marker is
+   implicit. So `At` is `(indexed_collection<T>, integer+) -> T`,
+   `First` and `Last` are `(indexed_collection<T>) -> T`, `If(c, e)`
+   with no else is `(boolean, T) -> T`, `IsMissing` is `(any) ->
+   boolean` and `Coalesce` is `(any, T) -> T`. A read whose position
+   is proved not to exist is typed by its marker (`At([1, 2], 5)` is
+   typed `nan`). An operator over an operand typed `missing` is typed
+   `missing` (`Missing + 2`); over an operand that may be absent, the
+   result gains a `missing` arm. A constructed value can hold the marker,
+   and inference gives it a `missing` arm (`list<string | missing>`),
+   which can be inferred but not declared. `matches` stays strict.
+   A store into a declared name (`ce.assign`, `Assign`, a `Declare` with a
+   value, a typed Epsil `let` or assignment) accepts a value that holds the
+   marker where the declared type accepts a present value
+   (`matchesOrAbsent()`, `boxed-expression/effects-inference.ts`):
+   `s: string` takes `At(["a"], 5)`, `t: tuple<integer, integer>` takes
+   `(2, Missing)`, and `s := 5` is still refused. `NaN` is not a marker of
+   this kind: `x: real` refuses `At([1, 2], 5)`, which is `NaN`.
+   Since a type does not show that a read may be absent, a presence proof
+   (`Coalesce` or `AssertPresent` over an expression with free
+   variables, `IsMissing`, the compiled `AssertPresent`, the default of
+   a parameter) does not read a type alone: an expression that holds a
+   read (`At`, `First`, `Second`, `Third`, `Last`, `Field`, `PointX`,
+   `PointY`, `PointZ`), a `Which` or a restriction is never proved
+   present (`mayHoldRestriction()`,
+   `src/compute-engine/boxed-expression/conditional-value.ts`).
+
+| Input                                              | Before                                | Now                                            |
+| -------------------------------------------------- | ------------------------------------- | ---------------------------------------------- |
+| `w: real \| missing`, `If(IsMissing(w > 0), 1, 0)` | declaration accepted; `1` when absent | `ce.declare` throws (a static error)           |
+| `At([(1,2), (3,4)], 5)`                            | `Missing`                             | `(NaN, NaN)`                                   |
+| `At(["a", "b"], 5)`                                | `Missing`                             | `Missing`, unchanged                           |
+| `If(c, (1, 2))` with `c` false                       | `Missing`                             | `(NaN, NaN)` (decision of 2026-11-03)          |
+| `If(c, [1, 2])` with `c` false                       | `Missing`                             | `Missing`, unchanged                           |
+| `Coalesce(At(ps, 9), (0, 0))` with `ps = [(1, 2)]` | `(0, 0)`                              | `(0, 0)`, unchanged, and in compiled JavaScript |
+| `Coalesce(At(xs, 99), 0)` with `xs: list<real>`    | `0`                                   | `0`, unchanged, and `0` in compiled JavaScript |
+| `Missing + 2` in the interpreter                   | `NaN`                                 | `Missing`, typed `missing`                     |
+
+This decision supersedes, in the text below: the absorption of `Missing`
+into `NaN` by a numeric operator ("In a *numeric* slot, `Missing` is
+normalized to `NaN`", the 2026-07-24 and 2026-09-25 readings, `NaN` as
+the value of an aggregate over a `Missing` datum); every passage that
+reads `Undefined` as an absent value (the rulings of 2026-09-21 and
+2026-09-22); and every passage that declares an input or a parameter
+`T | missing` (`w: real | missing`, `list<expression | missing>`).
+Those passages are kept as history.
 
 ### A comparison is two-valued — user decision of 2026-11-02
 
@@ -1161,7 +1271,9 @@ record/dictionary construction remains open, as described in §1.
 In a *numeric* slot, `Missing` is
 normalized to `NaN` at the boundary (numeric domains absorb absence, per
 §1), so numeric operators never need a `missing` arm; a `| missing` arm
-survives only on data/object-domain results.
+survives only on data/object-domain results. (Superseded by "`Missing`
+is a result only", 2026-11-02: an operator over `Missing` gives
+`Missing`.)
 
 The comparisons are the exception. The decision of 2026-11-02 ("A
 comparison is two-valued", above) replaced the earlier rule: with
@@ -1223,7 +1335,8 @@ and univariate statistics. Binning, ordering, and custom-fold policies remain
 separate; see §1 and the design note.
 
 **`Undefined` in a numeric slot takes the same route as `Missing`** (ruled
-2026-09-21). The `Undefined` symbol names a value that does not exist. When
+2026-09-21; superseded by "`Missing` is a result only", 2026-11-02:
+`Undefined` is not an absent value). The `Undefined` symbol names a value that does not exist. When
 it reaches a numeric slot of an operator whose missing behavior is
 `propagate`, the absence gate normalizes it to the codomain's marker exactly
 as it normalizes `Missing`: `Cos(Undefined)` is `NaN` under `evaluate()` and

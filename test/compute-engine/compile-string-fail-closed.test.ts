@@ -1317,30 +1317,6 @@ describe('tier 2: scalar string equality lowers to exact content equality', () =
     expect(r.error).toMatch(/dictionary participant/);
   });
 
-  test('two `string | missing` operands decline, and the fallback answers', () => {
-    // Neither operand is provably a string, so the scalar text admission
-    // does not apply and the string gate declines. Until 2026-11-01 a
-    // guarded (Kleene) form with its own strict `===` compiled the pair; the
-    // compiled value of a comparison with an absent operand is no longer
-    // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
-    // the bullet "Everything computed from an absent value, except at a
-    // discharge"), and that form was removed.
-    const e = new ComputeEngine();
-    e.declare('sk', 'string | missing');
-    e.declare('tk', 'string | missing');
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const r = compile(e.box(['Equal', 'sk', 'tk']));
-    warn.mockRestore();
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/string-valued operands/);
-    const run = r.run as unknown as (v: {
-      sk: string | undefined;
-      tk: string | undefined;
-    }) => boolean | undefined;
-    expect(run({ sk: 'x', tk: 'x' })).toBe(true);
-    expect(run({ sk: 'x', tk: 'y' })).toBe(false);
-  });
-
   test('a non-NFC runtime string IS normalized, on both sides', () => {
     // The interpreter NFC-normalizes at BOXING time (`BoxedString`), so it
     // answers `True` for a decomposed/precomposed pair. This was pinned here as
@@ -1505,7 +1481,7 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
   });
 });
 
-describe('tier 2: NotEqual over `string | missing`', () => {
+describe('tier 2: NotEqual over a string', () => {
   // REGRESSION (2026-08-08). Once the tier-2 scalar admission started
   // accepting `NotEqual(s, "x")` for `s: string | missing` (the LITERAL
   // supplies the string evidence, and the union is neither provably numeric
@@ -1529,8 +1505,10 @@ describe('tier 2: NotEqual over `string | missing`', () => {
   });
 
   test('the compiled NotEqual is the text equality, negated', () => {
+    // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only"), so `s` is declared `string`.
     const e = new ComputeEngine();
-    e.declare('s', 'string | missing');
+    e.declare('s', 'string');
     const r = compile(e.box(['NotEqual', 's', { str: 'x' }]), {
       fallback: false,
     });
@@ -1884,7 +1862,7 @@ describe('a wide index-slot union is not string evidence', () => {
   test('the WHILE-loop whitespace scanner compiles and runs (annotated predicate)', () => {
     executeEpsil(
       ce,
-      'isW(c: string | missing) = c == " "\n' +
+      'isW(c: string) = c == " "\n' +
         'function w2(cs: list<string>, i: integer) -> integer {\n' +
         'let j = i\nwhile j <= Length(cs) && isW(cs[j]) { j = j + 1 }\nj }'
     );
@@ -1922,12 +1900,13 @@ describe('a wide index-slot union is not string evidence', () => {
   });
 
   test('the `skipWs` of the Epsil examples compiles in its natural while-form', () => {
-    // Verbatim from `src/epsil/docs/examples.md` (the JSON-parser program).
+    // From `src/epsil/docs/examples.md` (the JSON-parser program), with the
+    // parameter annotated `character`: a declared type cannot name `missing`.
     executeEpsil(
       ce,
       // The example's `list<string>`/`string` annotations become
       // `list<character>`/`character` now that `Characters` yields characters.
-      'isWs(c: character | missing) = c == " " || c == "\\n" || c == "\\t" || c == "\\r"\n' +
+      'isWs(c: character) = c == " " || c == "\\n" || c == "\\t" || c == "\\r"\n' +
         'function skipWs(cs: list<character>, i: integer) -> integer {\n' +
         '  let j = i\n' +
         '  while j <= Length(cs) && isWs(cs[j]) { j = j + 1 }\n' +
@@ -1954,7 +1933,7 @@ describe('a wide index-slot union is not string evidence', () => {
       // `Characters` yields `list<character>` since strings became collections
       // of characters, so the example's annotations move with it.
       'let digits = Characters("0123456789")\n' +
-        'isDigit(c: character | missing) = c in digits\n' +
+        'isDigit(c: character) = c in digits\n' +
         'function countDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {\n' +
         '  let j = i\n  let n = 0\n' +
         '  while j <= Length(cs) && isDigit(cs[j]) { n = n + 1\n j = j + 1 }\n' +
@@ -2024,11 +2003,7 @@ describe('a wide index-slot union is not string evidence', () => {
     // `string | number | boolean` is a real possibility of a string at run
     // time: the interpreter leaves `wq < 1` INERT, whereas a compiled
     // `_.wq < 1` would coerce and answer a plausible-looking boolean.
-    for (const type of [
-      'string | number | boolean',
-      // …and the same three sorts plus a non-collection arm.
-      'string | number | boolean | missing',
-    ] as const) {
+    for (const type of ['string | number | boolean'] as const) {
       ce = new ComputeEngine();
       ce.declare('wq', type);
       const expr = ce.box(['Less', 'wq', 1]);

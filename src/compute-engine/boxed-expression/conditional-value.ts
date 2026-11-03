@@ -1,6 +1,7 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  OperandDescriptor,
 } from '../global-types.js';
 
 import { isFunction, isSymbol } from './type-guards.js';
@@ -64,13 +65,30 @@ export function isRestriction(expr: Expression | null | undefined): boolean {
  * operand is absent. */
 const DISCHARGES = new Set(['AssertPresent', 'IsMissing']);
 
+/** The accessors whose value is the absence marker of the element domain
+ * (`NaN`, a point of `NaN` coordinates, or `Missing`) where the position
+ * they read does not exist, and whose result type does not show it. */
+export const ABSENT_READS: ReadonlySet<string> = new Set([
+  'At',
+  'First',
+  'Second',
+  'Third',
+  'Last',
+  'Field',
+  'PointX',
+  'PointY',
+  'PointZ',
+]);
+
 /** The collection constructors. The value of a constructor is the collection
  * itself, which is present even when an element is absent. An accessor over a
  * constructor (`First([If(c, 1), 2])`) can give the absent element, so this
- * applies only to a constructor that is the whole value being tested. */
+ * applies only to a constructor that is the whole value being tested. `Tuple`
+ * is not one of them: a tuple of numbers is a point, and a point whose
+ * coordinates are all `NaN` is absent (`(At(xs, j), At(xs, j))` with `j`
+ * out of range). */
 const CONSTRUCTORS = new Set([
   'List',
-  'Tuple',
   'Set',
   'Dictionary',
   'KeyValuePair',
@@ -78,18 +96,25 @@ const CONSTRUCTORS = new Set([
 
 /**
  * True if `expr`, or one of its sub-expressions, is a restriction
- * (`isRestriction()`). A restriction is typed as its value, so its type does
- * not show that it is absent where its condition fails, and an expression
- * that contains one (`If(c, If(d, True), False)`, `Add(If(c, P), Q)`) can
- * be absent although its type admits no absent value. A presence proof that
- * reads the type must call this function first.
+ * (`isRestriction()`), a `Which`, or a read at a position that may not
+ * exist (`ABSENT_READS`: `At(xs, i)`, `First(xs)`, `PointZ(p)`, …). Each
+ * of them is typed as its present value: a restriction as its arm, and a
+ * read as the element it reads, since the absence marker is implicit in a
+ * result type (`At` is `(indexed_collection<T>, integer+) -> T`). So its
+ * type does not show that it is absent where its condition fails or where
+ * its position does not exist, and an expression that contains one
+ * (`If(c, If(d, True), False)`, `Add(If(c, P), Q)`, `Add(At(xs, i), 1)`)
+ * can be absent although its type admits no absent value. A presence proof
+ * that reads the type must call this function first. The name tells the
+ * first of these cases only.
  *
  * The walk does not enter the operand of `AssertPresent` or `IsMissing`,
  * whose value is never absent, or the body of a function literal, which is
  * not evaluated where it is written. When `expr` itself is a collection
- * constructor (`List`, `Tuple`, `Set`, `Dictionary`, `KeyValuePair`), the
- * answer is false, because the collection is present even when an element is
- * absent. Below the root, the walk enters a constructor like any other
+ * constructor (`List`, `Set`, `Dictionary`, `KeyValuePair`), the answer is
+ * false, because the collection is present even when an element is absent. A
+ * `Tuple` is walked: a tuple of absent numbers is a `NaN` point, which the
+ * readers read as absent. Below the root, the walk enters a constructor like any other
  * operator, because an accessor (`First`, `At`) can give its absent element.
  * The walk enters every operand of a `Coalesce`, whose value is absent when
  * every operand is absent, and every other operator (`Add(If(c, P), Q)`).
@@ -104,12 +129,44 @@ export function mayHoldRestriction(
   return holdsRestriction(expr);
 }
 
+/**
+ * `mayHoldRestriction()` for an operand that a `type` handler sees as a
+ * descriptor, with no expression: true when the structural view of the
+ * operand (`structureOf()`) is, or holds, a single-branch `If`, a `Which`
+ * or a read of `ABSENT_READS`. A handler that proves a value from the type
+ * of the operand calls it first: `At(xs, i)` with `xs: list<integer<1..10>>`
+ * is typed `integer<1..10>`, but it is `NaN` when `i` is out of range, so
+ * `At(xs, i) > 0` is not always `True`. The walk does not enter the operand
+ * of `AssertPresent` or `IsMissing`, or the body of a function literal. As
+ * in `mayHoldRestriction()`, a collection constructor that is the whole
+ * operand gives false, and one below it is entered. An operand with no
+ * structural view is not walked, and gives false.
+ */
+export function descriptorMayHoldRestriction(d: OperandDescriptor): boolean {
+  const s = d.structureOf?.();
+  if (s?.kind === 'application' && CONSTRUCTORS.has(s.head)) return false;
+  return descriptorHoldsRestriction(d);
+}
+
+/** The walk of `descriptorMayHoldRestriction()` below the root, where a
+ * collection constructor is entered like any other operator. */
+function descriptorHoldsRestriction(d: OperandDescriptor): boolean {
+  const s = d.structureOf?.();
+  if (s?.kind !== 'application') return false;
+  const h = s.head;
+  if ((h === 'If' && s.children.length === 2) || h === 'Which') return true;
+  if (ABSENT_READS.has(h)) return true;
+  if (h === 'Function' || DISCHARGES.has(h)) return false;
+  return s.children.some((x) => descriptorHoldsRestriction(x));
+}
+
 /** The walk of `mayHoldRestriction()` below the root, where a collection
  * constructor is entered like any other operator. */
 function holdsRestriction(expr: Expression | null | undefined): boolean {
   if (!isFunction(expr)) return false;
   if (isRestriction(expr)) return true;
   const h = expr.operator;
+  if (h === 'Which' || ABSENT_READS.has(h)) return true;
   if (h === 'Function' || DISCHARGES.has(h)) return false;
   return expr.ops.some((x) => holdsRestriction(x));
 }

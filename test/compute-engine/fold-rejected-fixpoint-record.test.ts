@@ -23,6 +23,10 @@
  * `False` for `y = Missing`, not `Missing`, so the type of the comparison
  * has no `missing` arm: the arm for an absent `y` is `boolean`.
  *
+ * Since `Missing` is a result only (user decision of 2026-11-02), a declared
+ * type cannot name `missing`, and a read such as `st[2]` is typed by its
+ * element type with no `missing` or `nan` arm.
+ *
  * The timing assertion runs under `CE_PERF=1` only (`npm run test:perf`).
  */
 import { ComputeEngine } from '../../src/compute-engine';
@@ -31,50 +35,15 @@ import { RSK_ROW_INSERTION } from './fixtures/rsk-row-insertion';
 const PERF = process.env.CE_PERF === '1';
 
 describe('a comparison with an operand that may be an absent collection', () => {
-  const rows: [string, string][] = [
-    ['collection | missing', 'broadcastable<boolean>'],
-    ['collection | integer | missing', 'broadcastable<boolean>'],
-    ['collection | integer | missing | nan', 'broadcastable<boolean>'],
-    // A scalar: the comparison is a boolean.
-    ['integer | missing', 'boolean'],
-  ];
-  for (const [declared, expected] of rows) {
-    test(`y: ${declared} gives ${expected}`, () => {
-      const ce = new ComputeEngine();
-      ce.declare('y', declared as any);
-      const t = ce.box(['Less', 'y', 'x']).type;
-      expect(t.toString()).toBe(expected);
-      // The value for an absent `y` and a scalar `x` is `False`.
-      const v = ce.box(['Less', 'Missing', 3]).evaluate();
-      expect(v.symbol).toBe('False');
-      expect(v.type.matches(t)).toBe(true);
-    });
-  }
-
-  test('y: list<integer> | missing gives boolean | list<boolean>', () => {
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so the operand types that these tests declared
+  // (`collection | integer | missing`, `list<integer> | missing`) are
+  // refused.
+  test('an operand cannot be declared `collection | integer | missing`', () => {
     const ce = new ComputeEngine();
-    ce.declare('y', 'list<integer> | missing');
-    expect(ce.box(['Less', 'y', 'x']).type.toString()).toBe(
-      'boolean | list<boolean>'
-    );
-  });
-
-  test('y: list<integer> | missing: the type holds False', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'list<integer> | missing');
-    const t = ce.box(['Less', 'y', 'x']).type;
-    expect(ce.box(['Less', 'Missing', 3]).evaluate().type.matches(t)).toBe(
-      true
-    );
-  });
-
-  test('an If over such a comparison has no missing arm', () => {
-    // The condition is never `Missing`, so the `If` takes an arm.
-    const ce = new ComputeEngine();
-    ce.declare('y', 'collection | integer | missing | nan');
-    expect(ce.box(['If', ['Greater', 'x', 'y'], 1, 2]).type.toString()).toBe(
-      'broadcastable<integer>'
-    );
+    expect(() =>
+      ce.declare('y', 'collection | integer | missing' as any)
+    ).toThrow(/cannot be declared/);
   });
 });
 
@@ -103,12 +72,12 @@ describe('issue #487: nested folds whose fixpoint is rejected', () => {
     // 5404acb3f).
     const ce = new ComputeEngine();
     const expr = ce.box(issue());
-    expect(expr.type.toString()).toBe('collection<any> | missing | number');
+    expect(expr.type.toString()).toBe('collection<any> | number');
     expect(accumulators(expr)).toEqual([
       'a: collection<any>',
       'st: tuple<indexed_collection<collection<any>>>',
       'tacc: list<unknown>',
-      'tacc: list<collection<any> | missing>',
+      'tacc: list<collection<any>>',
       'bumped: unknown',
       'nacc: list<unknown>',
       'nacc: list<unknown>',
@@ -121,11 +90,10 @@ describe('issue #487: nested folds whose fixpoint is rejected', () => {
   });
 
   test('a fold rejected at the first step of the enclosing fold is rejected at the next', () => {
-    // `st[2]` is `2` at the first step and `collection | integer | missing |
-    // nan` at the next, where the comparison `st[1][g] > st[2]` can be
-    // `Missing`: the inner accumulator `b` keeps its admitted type at both
-    // steps. (Before, the comparison at the second step had no `missing`
-    // arm, the inner fixpoint settled there, and `b` was `list<unknown>`.)
+    // `st[2]` is `2` at the first step and `integer | list` at the next.
+    // (Before 2026-11-02 it was `collection | integer | missing | nan` at
+    // the next step, where the comparison `st[1][g] > st[2]` could be
+    // `Missing`.)
     const at = (x: any, i: any) => ['At', x, i];
     const rows = at('st', 1);
     const inner = [
@@ -151,12 +119,12 @@ describe('issue #487: nested folds whose fixpoint is rejected', () => {
       ['List', ['List', 3, 1, 4], 2],
       ['Range', 1, 2, 1],
     ] as any);
-    expect(expr.type.toString()).toBe('list<integer | list | missing | nan>');
+    expect(expr.type.toString()).toBe('list<integer | list>');
     // Since the user decision of 2026-11-02 (two-valued comparisons) the
     // condition of the inner `If` has no `missing` arm, and the inner
     // accumulator settles at `list<unknown>` (it was `collection<any>`).
     expect(accumulators(expr)).toEqual([
-      'st: list<integer | list | missing | nan>',
+      'st: list<integer | list>',
       'b: list<unknown>',
     ]);
     expect(expr.evaluate().toString()).toBe('[[3,1,4,3,4,3,4,3,4],2]');

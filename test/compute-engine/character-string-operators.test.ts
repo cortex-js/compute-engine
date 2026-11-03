@@ -286,18 +286,19 @@ describe('the Epsil route: the static pre-pass and the evaluation accept a chara
     expect(run(source)).toBe(expected);
   });
 
-  test('`toUpperCase(w[1])` is reported as possibly absent; `w[1]?!` is accepted', () => {
-    // `w[1]` of a string `w` is `character | missing`: a possibly absent
-    // argument at a library parameter that excludes absence is reported by
-    // the static check (decision P3, 2026-10-21). The assertion `w[1]?!`
-    // states that a split word is never empty, and the program runs the same.
+  test('`toUpperCase(w[1])` is not reported; `w[1]?!` is accepted', () => {
+    // `w[1]` of a string `w` is typed `character`: the marker of a read that
+    // may find nothing is implicit (`docs/ERROR-MODEL.md`, "`Missing` is a
+    // result only"), so the static check has no "may be absent" report. The
+    // assertion `w[1]?!` states that a split word is never empty, and the
+    // program runs the same.
     const reported = executeEpsil(
       new ComputeEngine(),
       'acronym(s) = stringJoin(map(w => toUpperCase(w[1]), stringSplit(s)), "")\n' +
         'acronym("portable network graphics")'
     );
     expect(reported.value.toString()).toBe('"PNG"');
-    expect(JSON.stringify(reported.diagnostics)).toContain('missing');
+    expect(reported.diagnostics).toEqual([]);
     expect(
       run(
         'acronym(s) = stringJoin(map(w => toUpperCase(w[1]?!), stringSplit(s)), "")\n' +

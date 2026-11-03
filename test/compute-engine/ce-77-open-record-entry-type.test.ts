@@ -111,10 +111,13 @@ describe('CE-77: a dictionary literal keeps the types of its fields', () => {
   // The literal is solved as `dictionary<V>` only at a collection parameter
   // whose element type mentions a type variable. At any other parameter the
   // record type of the literal is kept.
-  test('a record parameter in a union keeps the record type', () => {
+  // A signature parameter cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only").
+  test('a record parameter in a union with missing is refused', () => {
     const ce2 = new ComputeEngine();
-    ce2.declare('pickM', '(record{a: T} | missing) -> T where T');
-    expect(ce2.box(['pickM', LITERAL]).type.toString()).toBe('integer');
+    expect(() =>
+      ce2.declare('pickM', '(record{a: T} | missing) -> T where T')
+    ).toThrow(/cannot be declared/);
   });
 
   test('a bare type variable keeps the field types', () => {

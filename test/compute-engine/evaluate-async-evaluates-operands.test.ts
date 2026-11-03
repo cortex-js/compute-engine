@@ -207,14 +207,13 @@ describe('the operators and the functions give the values of the synchronous rou
     expect(await same(['Equal', ['Rational', 1, 10], 0.1], true)).toBe('True');
   });
 
-  // The type of the operand as written decides what an absent value is: a
-  // `number | missing` operand reads as `NaN` (a comparison with it is
-  // `False`), not as the Kleene `Missing`.
-  test('an operand typed number | missing that is Missing reads as NaN', async () => {
+  // A comparison with an absent operand is `False` on both routes. A
+  // declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so the absent operand is the symbol `Missing`.
+  test('a comparison with a Missing operand agrees on both routes', async () => {
     const engine = new ComputeEngine();
-    engine.declare('m', { type: 'number | missing' });
-    engine.assign('m', engine.Missing);
-    const expr = engine.box(['Less', 'm', 1]);
+    expect(() => engine.declare('m', { type: 'number | missing' })).toThrow();
+    const expr = engine.box(['Less', 'Missing', 1]);
     const sync = expr.evaluate().toString();
     expect((await expr.evaluateAsync()).toString()).toBe(sync);
   });

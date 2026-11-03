@@ -394,12 +394,14 @@ describe('R4 — the no-match cell follows the type of its position', () => {
         .evaluate()
         .toString()
     ).toBe('"Missing"');
+    // A false restriction of a point is the point of `NaN` coordinates
+    // (user decision 2026-11-03); a `Which` with no match stays `Missing`.
     expect(
       ce
         .box(['If', ['Less', 5, 3], ['Tuple', 1, 2]])
         .evaluate()
         .toString()
-    ).toBe('"Missing"');
+    ).toBe('(NaN, NaN)');
     // The else-less `If` is the same selection.
     const ifForm = ce.box(['If', cond, ['Tuple', 1, 2]]).evaluate();
     expect(cells(ifForm)).toEqual(['(1, 2)', '(NaN, NaN)']);
@@ -640,13 +642,15 @@ describe('scalar behavior is unchanged', () => {
 
   test('scalar If without an else branch is the absent value of its arm', () => {
     // An else-less `If` with a false condition answers the absent value of
-    // the domain of its arm: `NaN` for a number, `Missing` otherwise
-    // (decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`).
+    // the domain of its arm: `NaN` for a number, the point of `NaN`
+    // coordinates for a point, `Missing` otherwise (decisions of 2026-11-02,
+    // `docs/plans/2026-11-02-restriction-binding.md`, and 2026-11-03).
     const ce = engine();
     expect(ce.box(['If', 'False', 1]).evaluate().isNaN).toBe(true);
-    expect(ce.box(['If', 'False', ['Tuple', 1, 2]]).evaluate().symbol).toBe(
-      'Missing'
-    );
+    expect(
+      ce.box(['If', 'False', ['Tuple', 1, 2]]).evaluate().toString()
+    ).toBe('(NaN, NaN)');
+    expect(ce.box(['If', 'False', 'a']).evaluate().symbol).toBe('Missing');
   });
 
   test('a scalar Missing condition is False', () => {
@@ -1063,6 +1067,9 @@ describe('the selection rule of 2026-11-02: what is a static error', () => {
     expect(e.evaluate().toString()).toBe('["True","False","True"]');
   });
 
+  // `list<boolean | missing>` was in this list; a declared type cannot name
+  // `missing` since 2026-11-02 (`docs/ERROR-MODEL.md`, "`Missing` is a
+  // result only").
   test('a declared condition whose type cannot be a flat list', () => {
     for (const type of [
       'list',
@@ -1071,7 +1078,6 @@ describe('the selection rule of 2026-11-02: what is a static error', () => {
       'tensor<boolean^(2x2x2)>',
       'collection<boolean>',
       'matrix<boolean>',
-      'list<boolean | missing>',
     ]) {
       const ce = engine();
       ce.declare('T', type);

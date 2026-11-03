@@ -273,18 +273,20 @@ describe('GLSL sampler-backed At — the carrier type', () => {
     expect(read(ce).isValid).toBe(false);
   });
 
-  test('a two-dimensional list is pre-empted by the object-domain absence gate (control)', () => {
-    // `At` over a multi-axis list answers a collection element
-    // (`missing | vector<4>`), which the §3.F gate refuses ahead of any
-    // target lowering — with or without the hint. The lowering's own
-    // multi-axis arm is a backstop behind that gate.
+  test('a two-dimensional list is refused by the multi-axis lowering (control)', () => {
+    // `At` over a multi-axis list answers a collection element, typed
+    // `vector<4>`: the marker of a read that may find nothing is implicit
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only"), so the
+    // object-domain absence gate does not see it: the lowering's own
+    // multi-axis arm refuses it, and with the hint the sampler storage
+    // refuses the two-dimensional base.
     const ce = engineWith({ S: 'matrix<number^(4x4)>', k: 'integer' });
     const plain = message(() => glsl.compile(read(ce), NO_FOLD));
     const hinted = message(() =>
       glsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER })
     );
-    expect(plain).toMatch(/object-domain absent/);
-    expect(hinted).toBe(plain);
+    expect(plain).toMatch(/multi-axis/);
+    expect(hinted).toMatch(/2-dimensional/);
   });
 
   test('complex elements decline: a texel holds one float', () => {

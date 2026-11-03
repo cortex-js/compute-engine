@@ -405,10 +405,10 @@ export function foldQuantifierAnswers(
   let failed: Expression | undefined = undefined;
   let undetermined = false;
   for (const result of answers) {
-    // An absent answer (`Missing`, `Undefined`) reads as `False`: the logic
+    // An absent answer (`Missing`) reads as `False`: the logic
     // is two-valued (user decision 2026-11-02, two-valued comparisons).
     const s0 = sym(result);
-    const s = s0 === 'Missing' || s0 === 'Undefined' ? 'False' : s0;
+    const s = s0 === 'Missing' ? 'False' : s0;
     if (s === decisive) return kind === 'ForAll' ? ce.False : ce.True;
     if (s === definite) continue;
     if (!result.isValid)

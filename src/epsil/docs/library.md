@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 712 functions and constants of the standard library, by category.
+The 711 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -23,7 +23,7 @@ To search the library by concept rather than by name, use
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
 - [Core](#core) — 117 definitions · [full reference](/epsil/reference/core/)
-- [Control structures](#control-structures) — 13 definitions · [full reference](/epsil/reference/control-structures/)
+- [Control structures](#control-structures) — 12 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 126 definitions · [full reference](/epsil/reference/collections/)
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
@@ -54,7 +54,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `apply` | `Apply` | `(name: any, arguments: any*) -> unknown` | Apply a function to a list of arguments |
 | `applyWhole` | `ApplyWhole` | `(name: any, arguments: any*) -> unknown` | Apply a function to arguments, each bound whole (engine-internal). |
 | `arc` | `Arc` | `(any+) -> number` | Arc / wide-hat accent measure (`\widehat{ABC}`) — opaque typed head; not evaluated. |
-| — | `AssertPresent` | `(any) -> unknown` | Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`). |
+| — | `AssertPresent` | `(any) -> unknown` | Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, or `Indeterminate`). |
 | — | `Assign` | `(expression \| symbol, any) scope -> any` | Assign a value to a symbol or define a sequence. |
 | `assume` | `Assume` | `(any) scope -> string` | Record an assumption about a symbol. |
 | `baseForm` | `BaseForm` | `(T, (number \| string)?) -> T where T: number` | `BaseForm(expr, base=10)` |
@@ -64,7 +64,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `caseFold` | `CaseFold` | `(character \| string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. |
 | `characterFrom` | `CharacterFrom` | `(character \| string) -> character` | CharacterFrom(s): the character `s` denotes. |
 | `characters` | `Characters` | `(character \| string) -> list<character>` | Characters(s): split a string into a list of user-perceived characters (grapheme clusters). |
-| — | `Coalesce` | `(any+) -> unknown` | Return the first operand that is not ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`), evaluated left-to-right. |
+| — | `Coalesce` | `(any+) -> unknown` | Return the first operand that is not ABSENT (`Missing`, `NaN`, or `Indeterminate`), evaluated left-to-right. |
 | — | `Colon` | `(any, any) -> expression` | Type annotation (`a : b`) — opaque typed head. |
 | `composition` | `Composition` | `(function*) -> function` | The composition of functions, applied right to left: `Composition(f, g, h)(x)` is `f(g(h(x)))` |
 | `conforms` | `Conforms` | `(subject: any, protocols: string+) -> boolean` | True iff the subject conforms to EVERY named protocol. |
@@ -94,7 +94,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `integerString` | `IntegerString` | `(integer, integer?) -> string` | `IntegerString(n, base=10)` return a string representation of the integer `n` in base `base`. |
 | — | `InvisibleOperator` | `function` | Implicit operator used for juxtapositions such as function application or multiplication. |
 | `isError` | `IsError` | `(any) -> boolean` | True if the expression is an `Error` value, or a frozen expression embedding one (`"a" + 1`). |
-| `isMissing` | `IsMissing` | `(any) -> boolean` | True for `Missing`, `Undefined`, `NaN`, or `Indeterminate`, regardless of provenance. |
+| `isMissing` | `IsMissing` | `(any) -> boolean` | True for `Missing`, `NaN`, or `Indeterminate`, regardless of provenance. |
 | — | `Latex` | `(any+) -> string` | Serialize an expression to LaTeX |
 | — | `LatexString` | `(string) -> string` | Value preserving type conversion/tag indicating the string is a LaTeX string |
 | — | `MatchesType` | `(subject: any, type: string \| type) -> boolean` | True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. |
@@ -178,12 +178,11 @@ The [Control structures reference](/epsil/reference/control-structures/) has the
 | — | `Condition` | `(expression, symbol?) -> boolean` | Test whether a value satisfies one or more conditions. |
 | — | `Continue` | `() -> nothing` | Skip to the next iteration of the enclosing loop. |
 | `fixedPoint` | `FixedPoint` | `(function, initial: any, maxIterations: integer?) -> unknown` | Apply a function repeatedly, starting from an initial value, until two successive values are the same: `FixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself. |
-| — | `If` | `(expression, expression, expression?) -> any` | `If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is `Missing` when `c` is `False`. |
+| — | `If` | `(expression, expression, expression?) -> any` | `If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\{c\}`, which… |
 | — | `Loop` | `(body: expression, iterators: expression*) -> any` | Imperative loop, evaluated **for effect**. |
 | — | `Match` | `(expression, expression+) -> unknown` | Structural pattern match. |
 | — | `MatchCase` | `(expression, expression, expression?) -> nothing` | A case of a `Match`: `MatchCase(pattern, body)` or `MatchCase(pattern, guard, body)`. |
 | — | `Pin` | `(expression) -> nothing` | Inside a `Match` pattern, `Pin(expr)` matches the value of `expr` (evaluated at match time) rather than its structure. |
-| `when` | `When` | `(expression, boolean) -> any` | Conditional/restriction value. |
 | — | `Which` | `(expression+) -> unknown` | `Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. |
 
 ## Logic
@@ -229,7 +228,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `adjoin` | `Adjoin` | `(set<any>, any+) -> set` | The ring obtained by adjoining one or more elements to a base ring. |
 | `all` | `All` | `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given). |
 | `any` | `Any` | `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given). |
-| `append` | `Append` | `(collection<any>, (missing \| value)+) -> collection` | Add one or more elements to the end of a collection. |
+| `append` | `Append` | `(collection<any>, any+) -> collection` | Add one or more elements to the end of a collection. |
 | `argMax` | `ArgMax` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given). |
 | `argMin` | `ArgMin` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given). |
 | — | `At` | `(value: any, index: (boolean \| character \| indexed_collection<any> \| number \| string)+) -> unknown` | Access an element of an indexed collection. |

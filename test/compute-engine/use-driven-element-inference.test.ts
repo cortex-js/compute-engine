@@ -256,41 +256,14 @@ describe('R2: a boolean use commits the element like a scalar', () => {
   });
 });
 
-describe('the numeric short path refuses a non-numeric carrier behind an absence arm', () => {
-  // Found while pinning R2: `Sin(q)` refused `q: boolean | missing` (the
-  // definition route strips the absence arm and validates the carrier) while
-  // `q + 1`, `-q` and `√q` admitted it. The two routes now agree.
-  test('boolean | missing and string | missing are refused', () => {
+describe('a carrier behind a declared absence arm', () => {
+  // `Missing` is a result only (user decision of 2026-11-02): a declared type
+  // cannot name `missing`, so no symbol has a carrier behind an absence arm.
+  test('the declaration is refused', () => {
     const ce = new ComputeEngine();
-    ce.declare('q', { type: 'boolean | missing' });
-    ce.declare('sq', { type: 'string | missing' });
-    expect(ce.box(['Add', 'q', 1]).isValid).toBe(false);
-    expect(ce.box(['Negate', 'q']).isValid).toBe(false);
-    expect(ce.box(['Sqrt', 'q']).isValid).toBe(false);
-    expect(ce.box(['Sin', 'q']).isValid).toBe(false);
-    expect(ce.box(['Add', 'sq', 1]).isValid).toBe(false);
-  });
-
-  test('a carrier that could still be numeric is admitted as before', () => {
-    const ce = new ComputeEngine();
-    ce.declare('uq', { type: 'unknown | missing' });
-    ce.declare('lq', { type: 'list<number> | missing' });
-    ce.declare('mq', { type: 'missing' });
-    for (const n of ['uq', 'lq', 'mq'])
-      expect(ce.box(['Add', n, 1]).isValid).toBe(true);
-  });
-
-  test('a POINT behind an absence arm is refused, like a bare point', () => {
-    // A scalar does not add to a tuple at any component, and reading the
-    // operand's type exactly let an absence arm hide that: the rejection now
-    // reads through `missing` and across a union of numeric tuple spellings,
-    // so `tuple<number, number> | missing` is refused exactly as
-    // `tuple<number, number>` is. A scalar MULTIPLE of such a point stays
-    // admitted, since it scales the vector.
-    const ce = new ComputeEngine();
-    ce.declare('tq', { type: 'tuple<number, number> | missing' });
-    expect(ce.box(['Add', 'tq', 1]).isValid).toBe(false);
-    expect(ce.box(['Multiply', 'tq', 2]).isValid).toBe(true);
+    expect(() => ce.declare('q', { type: 'boolean | missing' })).toThrow(
+      /cannot be declared/
+    );
   });
 });
 

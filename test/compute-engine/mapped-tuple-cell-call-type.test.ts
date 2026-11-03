@@ -177,7 +177,6 @@ describe('a call that maps a list whose cells may be tuples', () => {
   test.each([
     'string | tuple<real, real>',
     'boolean | tuple<real, real>',
-    'missing | tuple<real, real>',
   ])('a tuple arm beside another kind of arm: `%s` is typed `any`', (t) => {
     expect(typeAndValue(engine(t), ['T', PAIR], ['Tuple', 3, 4])).toEqual({
       type: 'any',

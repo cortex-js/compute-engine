@@ -190,9 +190,11 @@ describe('the applications over a restricted list follow', () => {
     expect(row.twoStep).toBe('"Missing"');
     const cell = probe(ce, ['At', M, 2, 1]);
     // An element read of an absent collection answers the marker of its
-    // codomain, `NaN` for a number, so the type has a `nan` arm and no
-    // `missing` arm (user decision 2026-09-25).
-    expect(cell.type).toBe('integer | nan');
+    // codomain, `NaN` for a number (user decision 2026-09-25). A result type
+    // describes the successful values, so the marker is implicit and the
+    // type has no `nan` arm (`docs/ERROR-MODEL.md`, "`Missing` is a result
+    // only").
+    expect(cell.type).toBe('integer');
     expect(cell.value).toBe('If(0 < t, 3)');
     // A masked NUMBER is `NaN` (user decision 2026-09-25).
     expect(cell.twoStep).toBe('NaN');
@@ -309,15 +311,18 @@ describe('Dot and Cross of a vector with restricted or absent cells', () => {
       ['List', 1, 1, 1],
     ]);
     expect(e.isValid).toBe(true);
-    // A number: the product of an absent vector is `NaN`, as it is for a
-    // restricted point (`Dot((1, 2){0 < t}, (1, 1))`).
+    // A number: the product of an absent vector is `Missing`, as an
+    // operator over `Missing` is (`docs/ERROR-MODEL.md`, "`Missing` is a
+    // result only").
     expect(e.type.toString()).toBe('number');
-    expect(e.evaluate().toString()).toBe('If(0 < t, 6)');
+    // The held form keeps `Missing` as its else branch, so that it gives
+    // `Missing` once the condition fails, as a fresh evaluation does.
+    expect(e.evaluate().toString()).toBe('If(0 < t, 6, "Missing")');
     ce.assign('t', -1);
-    expect(e.evaluate().toString()).toBe('NaN');
+    expect(e.evaluate().toString()).toBe('"Missing"');
   });
 
-  test('an absent cell makes the product NaN', () => {
+  test('an absent cell makes the product Missing', () => {
     const ce = engine();
     // It was an `incompatible-type` error at boxing.
     expect(
@@ -325,7 +330,7 @@ describe('Dot and Cross of a vector with restricted or absent cells', () => {
         .box(['Dot', ['List', 1, 'Missing'], ['List', 1, 1]])
         .evaluate()
         .toString()
-    ).toBe('NaN');
+    ).toBe('"Missing"');
     expect(
       ce
         .box(['Cross', ['List', 1, 'Missing', 3], ['List', 1, 1, 1]])
@@ -347,17 +352,6 @@ describe('Dot and Cross of a vector with restricted or absent cells', () => {
     ).toContain('incompatible-dimensions');
   });
 
-  test('a valueless symbol declared as a list of points that may be absent stays symbolic', () => {
-    const ce = engine();
-    ce.declare('R', 'list<missing | tuple<integer, integer>>');
-    // It was an `incompatible-type` error at evaluation.
-    expect(
-      ce
-        .box(['Dot', 'R', ['Tuple', 1, 1]])
-        .evaluate()
-        .toString()
-    ).toBe('Dot(R, (1, 1))');
-  });
 });
 
 describe('a union element type under a length', () => {
@@ -415,7 +409,7 @@ describe('an element read of a restricted collection whose condition is false', 
     ['Second of a pair', ['Second', W(['Tuple', 1, 2])], 'integer'],
     ['Last of a list', ['Last', W(['List', 1, 2])], 'integer'],
     ['At of a list', ['At', W(['List', 1, 2]), 1], 'integer'],
-    ['At of a matrix, two indices', ['At', M, 2, 1], 'integer | nan'],
+    ['At of a matrix, two indices', ['At', M, 2, 1], 'integer'],
   ])('%s is NaN', (_label, json, type) => {
     const r = routes(json);
     expect(r.type).toBe(type);
@@ -429,6 +423,20 @@ describe('an element read of a restricted collection whose condition is false', 
 
   test.each([
     ['a row of a matrix', ['At', M, 2], 'vector<integer^2>'],
+    ['a string', ['First', W(['List', { str: 'a' }])], 'string'],
+  ])('%s is Missing', (_label, json, type) => {
+    const r = routes(json);
+    expect(r.type).toBe(type);
+    expect(r.held).toBe('"Missing"');
+    expect(r.fresh).toBe('"Missing"');
+    expect(r.n).toBe('"Missing"');
+    // `undefined` is the run-time spelling of `Missing`.
+    expect(r.js).toBeUndefined();
+  });
+
+  // A read of a point gives the absent value of the domain of a point, the
+  // point of `NaN` coordinates (user decision 2026-11-03).
+  test.each([
     [
       'a point of a list of points',
       ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])],
@@ -439,15 +447,13 @@ describe('an element read of a restricted collection whose condition is false', 
       ['At', W(['List', ['Tuple', 1, 2]]), 1],
       'tuple<integer, integer>',
     ],
-    ['a string', ['First', W(['List', { str: 'a' }])], 'string'],
-  ])('%s is Missing', (_label, json, type) => {
+  ])('%s is a NaN point', (_label, json, type) => {
     const r = routes(json);
     expect(r.type).toBe(type);
-    expect(r.held).toBe('"Missing"');
-    expect(r.fresh).toBe('"Missing"');
-    expect(r.n).toBe('"Missing"');
-    // `undefined` is the run-time spelling of `Missing`.
-    expect(r.js).toBeUndefined();
+    expect(r.held).toBe('(NaN, NaN)');
+    expect(r.fresh).toBe('(NaN, NaN)');
+    expect(r.n).toBe('(NaN, NaN)');
+    expect(r.js).toEqual([NaN, NaN]);
   });
 
   test('an absent operand of unknown type is Missing', () => {
@@ -532,17 +538,17 @@ describe('a user function applied to a restricted list', () => {
     }
   });
 
-  // A parameter whose type admits `missing` gives the body an absent
-  // argument to discharge: the condition is not lifted over the call.
-  test('a parameter typed real | missing receives Missing', async () => {
-    const r = await values([
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"): a parameter typed `real | missing` is an
+  // invalid type annotation.
+  test('a parameter typed real | missing is a static error', () => {
+    const fn = new ComputeEngine().box([
       'Function',
       ['Coalesce', 'x', 0],
       ['Typed', 'x', "'real | missing'"],
-    ]);
-    expect(r.present).toBe('[1,2]');
-    expect(r.absent).toBe('0');
-    expect(r.absentAsync).toBe('0');
+    ] as never);
+    expect(fn.isValid).toBe(false);
+    expect(JSON.stringify(fn.json)).toContain('invalid-type-annotation');
   });
 
   // The lifted call is evaluated with the options of the caller, in the

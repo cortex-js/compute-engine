@@ -66,15 +66,17 @@ describe('data of every supported shape is accepted', () => {
   });
 
   test('data with absent cells reaches the handler', () => {
+    // A declared type cannot name `missing`: `L` is typed from a value that
+    // holds an absent cell. A statistic over a `Missing` datum is `Missing`.
     const ce = new ComputeEngine();
-    ce.declare('L', 'list<integer | missing>');
+    ce.assign('L', ce.box(['List', 1, 'Missing', 3]));
     expect(valid(ce, ['Mean', 'L'])).toBe(true);
     expect(
       ce
         .box(['Mean', ['List', 1, 'Missing', 3]])
         .evaluate()
         .toString()
-    ).toBe('NaN');
+    ).toBe('"Missing"');
   });
 
   test('a collection of pairs at the bivariate statistics', () => {

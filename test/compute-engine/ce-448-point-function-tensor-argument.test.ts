@@ -56,6 +56,15 @@ function valueOf(decl: string, value: unknown): string {
   return v.toString();
 }
 
+/** The static type and the value of `g(value)` with the argument written
+ * in the call, and the check that the value matches the static type. */
+function literal(value: unknown): [string, string] {
+  const e = engine().box(['g', value] as any);
+  const v = e.evaluate();
+  expect(v.type.matches(e.type)).toBe(true);
+  return [e.type.toString(), v.toString()];
+}
+
 describe('CE-448: a function of a point maps over a tensor of points', () => {
   test('broadcastable<P> types the call broadcastable<R>', () => {
     expect(staticType(`broadcastable<${POINT}>`)).toBe('broadcastable<real>');
@@ -124,71 +133,58 @@ describe('CE-448: a function of a point maps over a tensor of points', () => {
     expect(e.evaluate().toString()).toBe('[[21,43],[65,87]]');
   });
 
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so the absent points below are written in the
+  // argument, and its type is inferred.
+  test('an argument cannot be declared with absent points', () => {
+    expect(() => engine().declare('S', `list<list<${POINT} | missing>>`)).toThrow(
+      /cannot be declared/
+    );
+  });
+
   test('an absent point at depth 2 is a Missing cell, and the type says so', () => {
     const value = [
       'List',
       ['List', ['Tuple', 1, 2], 'Missing'],
       ['List', ['Tuple', 5, 6], ['Tuple', 7, 8]],
     ];
-    expect(staticType(`list<list<${POINT} | missing>>`)).toBe(
-      'list<list<missing | real>>'
-    );
-    expect(valueOf(`list<list<${POINT} | missing>>`, value)).toBe(
-      '[[21,"Missing"],[65,87]]'
-    );
-    expect(staticType(`broadcastable<${POINT} | missing>`)).toBe(
-      'broadcastable<missing | real>'
-    );
-    expect(valueOf(`broadcastable<${POINT} | missing>`, value)).toBe(
-      '[[21,"Missing"],[65,87]]'
-    );
-  });
-
-  test('an absent tensor of points makes the call Missing', () => {
-    expect(staticType(`list<list<${POINT}>> | missing`)).toBe(
-      'list<list<real>> | missing'
-    );
-    expect(valueOf(`list<list<${POINT}>> | missing`, 'Missing')).toBe(
-      '"Missing"'
-    );
+    expect(literal(value)).toEqual([
+      'list<list<missing | real>>',
+      '[[21,"Missing"],[65,87]]',
+    ]);
   });
 
   test('an absent row is a Missing element of the top list, and the type says so', () => {
     // The `missing` arm is on the rows of the result, not on its cells:
     // the value `["Missing", [21]]` is not a `list<list<real | missing>>`.
-    const decl = `list<list<${POINT}> | missing>`;
-    expect(staticType(decl)).toBe('list<list<real> | missing>');
-    expect(valueOf(decl, ['List', 'Missing', ['List', ['Tuple', 1, 2]]])).toBe(
-      '["Missing",[21]]'
-    );
+    expect(literal(['List', 'Missing', ['List', ['Tuple', 1, 2]]])).toEqual([
+      'list<list<real> | missing>',
+      '["Missing",[21]]',
+    ]);
     // Absent rows and absent points: an arm at each depth.
-    const both = `list<list<${POINT} | missing> | missing>`;
-    expect(staticType(both)).toBe('list<list<missing | real> | missing>');
     expect(
-      valueOf(both, ['List', 'Missing', ['List', 'Missing', ['Tuple', 1, 2]]])
-    ).toBe('["Missing",["Missing",21]]');
+      literal(['List', 'Missing', ['List', 'Missing', ['Tuple', 1, 2]]])
+    ).toEqual([
+      'list<list<missing | real> | missing>',
+      '["Missing",["Missing",21]]',
+    ]);
   });
 
   test('a tensor whose points are all absent maps to Missing cells', () => {
-    const decl = `list<list<${POINT} | missing>>`;
-    expect(valueOf(decl, ['List', ['List', 'Missing']])).toBe('[["Missing"]]');
-    expect(
-      valueOf(`matrix<${POINT} | missing^(1x2)>`, [
-        'List',
-        ['List', 'Missing', 'Missing'],
-      ])
-    ).toBe('[["Missing","Missing"]]');
+    expect(literal(['List', ['List', 'Missing']])[1]).toBe('[["Missing"]]');
+    expect(literal(['List', ['List', 'Missing', 'Missing']])[1]).toBe(
+      '[["Missing","Missing"]]'
+    );
     // A ragged list: a row of absent points beside a row of points, and
     // beside an absent row.
-    const ragged = `list<list<${POINT} | missing> | missing>`;
     expect(
-      valueOf(ragged, [
+      literal([
         'List',
         ['List', 'Missing'],
         ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-      ])
+      ])[1]
     ).toBe('[["Missing"],[21,43]]');
-    expect(valueOf(ragged, ['List', ['List', 'Missing'], 'Missing'])).toBe(
+    expect(literal(['List', ['List', 'Missing'], 'Missing'])[1]).toBe(
       '[["Missing"],"Missing"]'
     );
   });

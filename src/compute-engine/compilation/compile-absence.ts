@@ -76,7 +76,9 @@ import { _codeAliases, _codeOverrides } from './compiler-mode.js';
  * position can hold the numeric marker at run time, from a producer that
  * picks its marker from a wider type (`_SYS.atWithValueMarker` returns a
  * `NaN` element as it is) or, on Python, from a written `Missing`, which is
- * `math.nan` there. Throws
+ * `math.nan` there. A point position (`pointArity()`) uses
+ * `absence.point` when the target has it, which reads a `NaN` point as
+ * absent too. Throws
  * (fail closed) when the target declares no absence capability at all, or
  * lacks the required object axis.
  */
@@ -93,6 +95,15 @@ export function absenceAxisForType(
       `Could not compile \`${opName}\`: target '${target.language ?? 'unknown'}' has no absence ` +
         `capability.`
     );
+  // A point position (a tuple of `n` numbers) also reads a `NaN` point as
+  // absent, with the target's point axis, chosen here from the static type.
+  const point = target.absence.point;
+  const n = point === undefined ? undefined : pointArity(t);
+  if (point !== undefined && n !== undefined)
+    return {
+      isAbsent: (x) => point.isAbsent(x, n),
+      coalesce: (x, d) => point.coalesce(x, d, n),
+    };
   if (!absentDomainIsObject(t)) return target.absence.numeric;
   // A target whose absence spellings cover its whole value model
   // (`coversValueModel`) discharges a list or a verdict position on the
@@ -150,9 +161,9 @@ export function blockLocalOf(e: Expression): LocalEntry | undefined {
   return undefined;
 }
 
-/** True when `a` is a written absence symbol, `Missing` or `Undefined`. */
+/** True when `a` is a written absence symbol, `Missing`. */
 export function isAbsenceSymbol(a: Expression): boolean {
-  return isSymbol(a, 'Missing') || isSymbol(a, 'Undefined');
+  return isSymbol(a, 'Missing');
 }
 
 /**

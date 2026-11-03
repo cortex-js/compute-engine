@@ -222,11 +222,6 @@ describe('a RECURSIVE sum survives its own payload', () => {
     expect(value(`${AST}\nType(plus(lit(5), lit(2)))`)).toBe(
       'TypeFrom("plus<never>")'
     );
-    // The flagship bare-variable arm, for contrast — same rule, and the shape
-    // that already worked because no alias stood in the way.
-    expect(value(`type opt<T> = T | missing\nType(opt(Missing))`)).toBe(
-      'TypeFrom("opt<never>")'
-    );
   });
 
   test('the GENERIC recursive sum works through a collection payload', () => {

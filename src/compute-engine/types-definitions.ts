@@ -541,7 +541,7 @@ export type OperandStructure =
        * ask whether an operand may hold a list read it. */
       local?: boolean;
       /** Present (`true`) when the symbol is free: it has no value, it is
-       * not a constant, not `Undefined` and not a pattern wildcard (a name
+       * not a constant and not a pattern wildcard (a name
        * that starts with `_`), and a scope of the current context other
        * than the system scope binds it, but not as a parameter of a
        * function literal, a local of a `Block` or the variable of a binder
@@ -3568,7 +3568,7 @@ export interface BoxedOperatorDefinition
    * non-variadic signature. */
   declaredParameterTypeAt(i: number): Type | undefined;
 
-  /** True when an absent scalar operand (`Missing`, `Undefined`) at position
+  /** True when an absent scalar operand (`Missing`) at position
    * `i` is refused at evaluation with an `incompatible-type` error naming the
    * parameter's type: a declared `reject`, or the default for an operator
    * with no absence behavior of its own whose parameter at `i` excludes

@@ -263,7 +263,7 @@ describe('SORT OF BOOLEANS, TUPLES OR SYMBOLS: INTERPRETER UNEVALUATED, JAVASCRI
 describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
   // User decision of 2026-09-25. `Sort([1, Missing])` stayed unevaluated,
   // because `Missing` compares neither equal to nor less than a number. An
-  // absent cell (`Missing` or `Undefined`) now sorts after every other
+  // absent cell (`Missing`) now sorts after every other
   // element, `NaN` included, in an ascending sort, a descending comparator and
   // a sort by key. Two absent cells keep their order in the input.
   const eng = new ComputeEngine();
@@ -273,7 +273,7 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
   const DESC_BOOL = ['Function', ['Greater', 'a', 'b'], 'a', 'b'];
   const NEG_KEY = ['Function', ['Negate', 'x'], 'x'];
 
-  test.each(['Missing', 'Undefined'])('%s', (absent) => {
+  test.each(['Missing'])('%s', (absent) => {
     const xs = ['List', 3, absent, 1];
     expect(value(['Sort', xs])).toBe(`[1,3,"${absent}"]`);
     expect(value(['Ordering', xs])).toBe('[3,1,2]');
@@ -283,7 +283,7 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
     expect(value(['Ordering', xs, DESC])).toBe('[1,3,2]');
   });
 
-  test.each(['Missing', 'Undefined'])(
+  test.each(['Missing'])(
     '%s is last by a key that ties every element',
     (absent) => {
       // The absent cell is ordered by itself, not by its key: with a
@@ -296,8 +296,8 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
   );
 
   test('after NaN, and two absent cells keep their order', () => {
-    expect(value(['Sort', ['List', 'Undefined', 3, 'NaN', 'Missing', 1]])).toBe(
-      '[1,3,NaN,"Undefined","Missing"]'
+    expect(value(['Sort', ['List', 'Missing', 3, 'NaN', 'Missing', 1]])).toBe(
+      '[1,3,NaN,"Missing","Missing"]'
     );
   });
 
@@ -327,24 +327,13 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
     ['Rest', 'list<integer | missing>'],
     ['Unique', 'list<integer | missing>'],
   ])('%s of a list with an absent cell is typed %s', (op, type) => {
-    for (const absent of ['Missing', 'Undefined']) {
-      const e = eng.box([op, ['List', 3, absent, 1]]);
-      expect(e.type.toString()).toBe(type);
-      expect(e.evaluate().type.matches(e.type)).toBe(true);
-    }
+    const e = eng.box([op, ['List', 3, 'Missing', 1]]);
+    expect(e.type.toString()).toBe(type);
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
     const parsed = eng.parse(
       `\\operatorname{${op}}([3, \\operatorname{Missing}, 1])`
     );
     expect(parsed.type.toString()).toBe(type);
-  });
-
-  test('a declared list with absent cells keeps its element type', () => {
-    const e2 = new ComputeEngine();
-    e2.declare('ms', 'list<real | missing>');
-    expect(e2.box(['Sort', 'ms']).type.toString()).toBe('list<missing | real>');
-    expect(e2.box(['Take', 'ms', 2]).type.toString()).toBe(
-      'list<missing | real>'
-    );
   });
 
   test('a list absent as a whole is still Missing', () => {
@@ -375,7 +364,7 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
       undefined,
     ]);
     expect(
-      runOf(['Sort', ['List', 'x', 'Undefined', 3, 'NaN', 'Missing', 1]], {
+      runOf(['Sort', ['List', 'x', 'Missing', 3, 'NaN', 'Missing', 1]], {
         x: 2,
       })
     ).toEqual([1, 2, 3, NaN, undefined, undefined]);
@@ -383,12 +372,12 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
       3, 1, 2,
     ]);
     expect(
-      runOf(['Ordering', ['List', 'Missing', 'x', 'NaN', 'Undefined', 1]], {
+      runOf(['Ordering', ['List', 'Missing', 'x', 'NaN', 'Missing', 1]], {
         x: 2,
       })
     ).toEqual([5, 2, 3, 1, 4]);
     expect(
-      value(['Ordering', ['List', 'Missing', 2, 'NaN', 'Undefined', 1]])
+      value(['Ordering', ['List', 'Missing', 2, 'NaN', 'Missing', 1]])
     ).toBe('[5,2,3,1,4]');
   });
 

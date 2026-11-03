@@ -1036,7 +1036,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
             .evaluate();
       }
 
-      // An absent value (`Missing`, `Undefined` or `NaN`) is an ordinary
+      // An absent value (`Missing` or `NaN`) is an ordinary
       // element to search for: it is a member where the same marker sits,
       // `Element(NaN, [1, NaN])` is `True` (user decision 2026-09-26,
       // `SEARCHED_VALUE_POLICY` in `library/collections.ts`). An absent

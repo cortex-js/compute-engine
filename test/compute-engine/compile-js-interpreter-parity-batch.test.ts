@@ -197,11 +197,16 @@ describe('CE-370: Max and Min flatten every level of an element that may be a li
     expect(parity(ce, expr, 'x', X_VALUES)).toBe('declined');
   });
 
-  test('an absent element gives NaN on both routes', () => {
+  // The element type of `g(x)` is not numeric, so the read out of range is
+  // `Missing`, and `Max` over it is `Missing` in the interpreter. Compiled
+  // code gives `NaN` there, as the caveats of compiled code allow
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
+  test('an absent element: Missing in the interpreter, NaN in compiled code', () => {
     const ce = engineWithG('list<real>');
     const expr = ce.box(['Max', ['At', ['g', 'x'], 1], 1] as never);
-    const rows = parity(ce, expr, 'x', [[]]);
-    expect(rows).toEqual([[NaN, NaN]]);
+    const rows = parity(ce, expr, 'x', [[]]) as Array<[unknown, unknown]>;
+    expect(rows[0][1]).toBeNaN();
+    expect(expr.evaluate().symbol).toBe('Missing');
   });
 });
 
@@ -302,24 +307,13 @@ describe('CE-215.1: a list exponent with a fractional cell takes the complex lan
 });
 
 describe('CE-214.5: a complex kernel of NaN is NaN', () => {
-  test('Sqrt(Sum(p)) with an absent cell', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list<number | missing>');
-    const expr = ce.box(['Sqrt', ['Sum', 'p']] as never);
-    expectParity(
-      parity(ce, expr, 'p', [
-        [undefined, 1],
-        [-4, 1],
-        [3, 1],
-      ])
-    );
-  });
-
-  test('Sqrt(Sum(p)) with an absent cell beside a row', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list<number | list<number> | missing>');
-    const expr = ce.box(['Sqrt', ['Sum', 'p']] as never);
-    expectParity(parity(ce, expr, 'p', [[undefined, [1, 2]]]));
+  // A declared input cannot hold an absent cell (a declared type cannot
+  // name `missing`, `docs/ERROR-MODEL.md`, "`Missing` is a result only"),
+  // and the interpreter gives `Missing` for a sum over one.
+  test('an input with absent cells cannot be declared', () => {
+    expect(() =>
+      new ComputeEngine().declare('p', 'list<number | missing>')
+    ).toThrow(/cannot be declared/);
   });
 });
 

@@ -180,7 +180,6 @@ describe('CE-546: a call over a number or a tuple', () => {
   test.each([
     'string | tuple<real, real>',
     'boolean | tuple<real, real>',
-    'number | missing | tuple<real, real>',
   ])('a tuple arm beside another kind of arm: `%s` is typed `any`', (t) => {
     expect(typeAndValue(engine(t), ['T', 'y'], ['Tuple', 3, 4])).toEqual({
       type: 'any',

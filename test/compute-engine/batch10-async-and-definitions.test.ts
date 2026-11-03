@@ -156,12 +156,14 @@ describe('evaluateAsync threads a conditional value out of an async-only operato
 
   test('a guard that is an error or absent does not evaluate the call', async () => {
     // The guard of the lifted restriction is decided by the `If` handler:
-    // an error gives an error, and `0 < Undefined` is `False` (user
-    // decision of 2026-11-02, two-valued comparisons), so the restriction
-    // is `Missing`. In both cases the async-only call is not evaluated, as
-    // on the synchronous route.
+    // an error gives an error, and `0 < Missing` is `False` (user decision
+    // of 2026-11-02, two-valued comparisons), so the restriction is
+    // `Missing`. In both cases the async-only call is not evaluated, as on
+    // the synchronous route. (`Undefined` is an ordinary symbol, not an
+    // absent value: `0 < Undefined` is undecided, and the call is evaluated
+    // under the held guard, as for an unknown `t`.)
     for (const [value, expected] of [
-      ['Undefined', '"Missing"'],
+      ['Missing', '"Missing"'],
       [['Error', "'oops'"], 'Error("oops")'],
     ] as const) {
       const ce = new ComputeEngine();

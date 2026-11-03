@@ -11,6 +11,10 @@ import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
 // not reported as a possibly absent argument. The run time is unchanged:
 // the check rewrites the statement it boxes, not the program.
 //
+// Since `Missing` is a result only (`docs/ERROR-MODEL.md`, user decision of
+// 2026-11-02), a read is typed by its element type and the static check no
+// longer reports an argument that may be absent, guarded or not.
+//
 
 function run(source: string): { value: string; diagnostics: string[] } {
   const r = executeEpsil(new ComputeEngine(), source);
@@ -30,7 +34,8 @@ function narrowed(source: string): string {
   );
 }
 
-// `v` is typed `missing | string`: the index is not proved in range.
+// `v` is typed `string`; the index is not proved in range, so it may be
+// absent at run time.
 const PRELUDE =
   'function f(p: string) { p }\n' +
   'let xs: list<string> = ["a"]\n' +
@@ -67,26 +72,15 @@ describe('an isMissing guard narrows the guarded symbol', () => {
     expect(r.diagnostics).toEqual([]);
   });
 
-  test('the absent arm itself is not narrowed', () => {
-    const r = run(`${PRELUDE}if isMissing(v) { f(v) } else { "none" }`);
-    expect(r.diagnostics.join(' ')).toContain('missing | string');
-  });
-
-  test('an unguarded arm is still reported', () => {
-    const r = run(`${PRELUDE}if i > 0 { f(v) } else { "none" }`);
-    expect(r.diagnostics.join(' ')).toContain('missing | string');
-  });
-
-  test('a reassignment inside the region ends it', () => {
-    const r = run(`${PRELUDE}if !isMissing(v) { v := xs[2]\n f(v) } else { 0 }`);
-    expect(r.diagnostics.join(' ')).toContain('missing | string');
-  });
-
-  test('a function literal in the region is not entered', () => {
-    const r = run(
-      `${PRELUDE}if !isMissing(v) { let g = () => f(v)\n g() } else { 0 }`
-    );
-    expect(r.diagnostics.join(' ')).toContain('missing | string');
+  // The absent arm, an unguarded arm, a reassignment inside the region and
+  // a function literal in the region were reported before 2026-11-02.
+  test.each([
+    `if isMissing(v) { f(v) } else { "none" }`,
+    `if i > 0 { f(v) } else { "none" }`,
+    `if !isMissing(v) { v := xs[2]\n f(v) } else { 0 }`,
+    `if !isMissing(v) { let g = () => f(v)\n g() } else { 0 }`,
+  ])('a read that is not narrowed is not reported: %s', (src) => {
+    expect(run(`${PRELUDE}${src}`).diagnostics).toEqual([]);
   });
 
   test('a guard inside a function body narrows', () => {
@@ -104,11 +98,11 @@ describe('an isMissing guard narrows the guarded symbol', () => {
     expect(r.diagnostics).toEqual([]);
   });
 
-  test('a reassignment later in a loop body ends the proof for the whole loop', () => {
+  test('a reassignment later in a loop body is not reported either', () => {
     const r = run(
       `${PRELUDE}let k = 0\nif !isMissing(v) { while k < 2 { f(v)\n v := xs[5]\n k := k + 1 } } else { 0 }`
     );
-    expect(r.diagnostics.join(' ')).toContain('missing | string');
+    expect(r.diagnostics).toEqual([]);
   });
 
   test('the right side of an assignment to the symbol is still in the region', () => {

@@ -891,22 +891,28 @@ the rational `1/4`, not a float.
 The program pulls together most of the language:
 
 - A **recursive type alias** names the result: a `json` value is a scalar, a
-  `list<json>`, or a dictionary.
+  `list<json>`, or a dictionary. A JSON `null` parses to `missing`, which the
+  alias does not name: a declared type cannot name `missing`, and a value of
+  any declared type can still hold it.
 - Each parse function takes the character list and a 1-based index and
   returns the tuple `(value, indexAfter)` — state is **threaded through
   return values** and read back with a destructuring assignment,
   `(v, j) := parseValue(cs, j)`.
 - `parseValue` dispatches on the next character with a **`match`
   expression**; the string scanner decodes escapes with another.
-- The character predicates take `character | missing`: an indexed read `cs[j]`
-  is absent past the end of input, and that possibility is part of its type.
+- The character predicates take a `character`. An indexed read `cs[j]` is
+  typed `character` and gives `missing` past the end of input, and a
+  `missing` argument at a `character` parameter is an `incompatible-type`
+  error. So each scanning loop tests `j <= length(cs)` before it reads.
+  Where a program must read an absent value, it uses `isMissing`, `??`,
+  `?!` or a default parameter.
 
 ```epsil
-type alias json = number | string | boolean | missing | list<json> | dictionary
+type alias json = number | string | boolean | list<json> | dictionary
 
 let digits = characters("0123456789")
-isDigit(c: character | missing) = c in digits
-isWs(c: character | missing) = c == " " || c == "\n" || c == "\t" || c == "\r"
+isDigit(c: character) = c in digits
+isWs(c: character) = c == " " || c == "\n" || c == "\t" || c == "\r"
 
 // Index of the first non-whitespace character at or after i
 function skipWs(cs: list<character>, i: integer) -> integer {

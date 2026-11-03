@@ -23,13 +23,16 @@ import type { Expression } from '../../src/compute-engine/global-types';
 // from the same derivation as the static type, so it is first listed into
 // a `List` or a `Set` literal, which is typed from its elements.
 //
+// A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+// is a result only — user decision of 2026-11-02"). So the symbols below are
+// assigned without a declaration, and their type is inferred from the value:
+// `L` is a `list<integer | missing^3>`, `S` a `set<integer | missing>` and
+// `t` a `tuple<integer, missing>`.
+//
 
 const ce = new ComputeEngine();
-ce.declare('L', 'list<integer | missing>');
 ce.assign('L', ce.box(['List', 1, 'Missing', 3]));
-ce.declare('S', 'set<integer | missing>');
 ce.assign('S', ce.box(['Set', 1, 'Missing']));
-ce.declare('t', 'tuple<integer, missing>');
 ce.assign('t', ce.box(['Tuple', 1, 'Missing']));
 
 /** The value as a literal collection, typed from its elements. */
@@ -41,6 +44,23 @@ function listed(v: Expression): Expression {
   ]);
 }
 
+/**
+ * Whether `value` is a value of `type`. The type of a list literal has no
+ * length (`[(1, Missing), 3, 4]` is typed `list<integer | tuple<integer,
+ * missing>>`), so a list literal is also a value of a list type with a
+ * length when it has that number of elements and each element is a value of
+ * the element type.
+ */
+function holds(value: Expression, type: Expression['type']): boolean {
+  if (value.type.matches(type)) return true;
+  const t = type.type;
+  if (value.operator !== 'List' || typeof t !== 'object' || t.kind !== 'list')
+    return false;
+  const dims = t.dimensions;
+  if (dims && (dims.length !== 1 || dims[0] !== value.count)) return false;
+  return [...value.each()].every((x) => x.type.matches(t.elements));
+}
+
 type Case = [name: string, json: unknown, latex: string, type: string];
 
 const CASES: Case[] = [
@@ -48,13 +68,15 @@ const CASES: Case[] = [
     'Join of a list',
     ['Join', 'L', ['List', 2]],
     '\\mathrm{Join}(L, \\lbrack 2\\rbrack)',
-    'list<integer | missing>',
+    'list<integer | missing^4>',
   ],
+  // The type has a length, and the type of the list literal of the value
+  // has none: `holds()` checks that the value is a value of the type.
   [
     'Join of a tuple with an absent slot',
     ['Join', 't', ['List', 3, 4]],
     '\\mathrm{Join}(t, \\lbrack 3, 4\\rbrack)',
-    'list<integer | tuple<integer, missing>>',
+    'list<(integer | tuple<integer, missing>)^3>',
   ],
   [
     'Join of a set',
@@ -74,11 +96,13 @@ const CASES: Case[] = [
     '\\mathrm{ListJoin}(t, \\lbrack 3, 4\\rbrack)',
     'list<integer | tuple<integer, missing>>',
   ],
+  // The type is wider than the type of the value, `list<integer |
+  // missing>`, but it holds the value.
   [
     'DeleteAt',
     ['DeleteAt', 'L', 1],
     '\\mathrm{DeleteAt}(L, 1)',
-    'list<integer | missing>',
+    'list<any> | string',
   ],
   [
     'Partition',
@@ -116,11 +140,13 @@ const CASES: Case[] = [
     '\\mathrm{DropWhile}(L, x \\mapsto \\bot)',
     'list<integer | missing>',
   ],
+  // The type is wider than the type of the value, `list<integer |
+  // missing>`, but it holds the value.
   [
     'RandomShuffle',
     ['RandomShuffle', 'L'],
     '\\mathrm{RandomShuffle}(L)',
-    'list<integer | missing>',
+    'list<any> | string',
   ],
   ['Dedup', ['Dedup', 'L'], '\\mathrm{Dedup}(L)', 'list<integer | missing>'],
   [
@@ -160,7 +186,7 @@ const CASES: Case[] = [
     'Map of the identity',
     ['Map', ['Function', 'x', 'x'], 'L'],
     '\\mathrm{Map}(x \\mapsto x, L)',
-    'list<integer | missing>',
+    'list<integer | missing^3>',
   ],
   [
     'Find',
@@ -212,7 +238,7 @@ describe('AN ABSENT ELEMENT KEEPS ITS MISSING ARM IN THE RESULT TYPE', () => {
     const expr = ce.box(json as any);
     expect(expr.type.toString()).toBe(type);
     const value = listed(expr.evaluate());
-    expect(value.type.matches(expr.type)).toBe(true);
+    expect(holds(value, expr.type)).toBe(true);
   });
 
   test.each(CASES)('%s, parse route', (_name, json, latex, type) => {
@@ -222,7 +248,7 @@ describe('AN ABSENT ELEMENT KEEPS ITS MISSING ARM IN THE RESULT TYPE', () => {
     expect(expr.operator).toBe((json as string[])[0]);
     expect(expr.type.toString()).toBe(type);
     const value = listed(expr.evaluate());
-    expect(value.type.matches(expr.type)).toBe(true);
+    expect(holds(value, expr.type)).toBe(true);
   });
 
   // No LaTeX syntax beyond the generic `\mathrm{…}` call, which needs a
@@ -250,35 +276,36 @@ describe('AN ABSENT ELEMENT KEEPS ITS MISSING ARM IN THE RESULT TYPE', () => {
     expect(value.type.matches(expr.type)).toBe(true);
   });
 
+  // `Join` states the length of its result (`list<integer | missing^4>`),
+  // and `Append` does not (`list<integer | missing>`): the type of `Join`
+  // is a subtype of the type of `Append`.
   test('Join is typed as Append is', () => {
-    expect(ce.box(['Join', 'L', ['List', 2]]).type.toString()).toBe(
-      ce.box(['Append', 'L', 2]).type.toString()
-    );
+    expect(
+      ce
+        .box(['Join', 'L', ['List', 2]])
+        .type.matches(ce.box(['Append', 'L', 2]).type)
+    ).toBe(true);
   });
 });
 
 //
 // A callback whose result type is DECLARED (a library operator, a function
 // symbol with a declared signature) says nothing about an absent cell. The
-// call answers the absence marker of its result there: `NaN` for a number
-// (`Sqrt(Missing)`), `Missing` for a point. So the element type of `Map`
-// takes the numeric absorption: `Map(Sqrt, L)` is `list<number>`, not the
-// declared `list<complex | infinity>`, which does not admit `NaN`. A
-// declared result with a `missing` arm says what the callback answers for
-// the absent cell, and is kept.
+// call answers `Missing` there (`Sqrt(Missing)` is `Missing`, and a call of
+// a function with a numeric parameter over `Missing` is `Missing`), so the
+// element type of `Map` gains a `missing` arm: `Map(Sqrt, L)` is
+// `list<complex | missing^3>` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+// only — user decision of 2026-11-02").
 //
 describe('A DECLARED CALLBACK ON AN ABSENT CELL', () => {
+  // The lists are assigned without a declaration: a declared type cannot
+  // name `missing`, and the inferred type of each has a `missing` arm.
   const ce2 = new ComputeEngine();
-  ce2.declare('L', 'list<integer | missing>');
   ce2.assign('L', ce2.box(['List', 1, 'Missing', 3]));
-  ce2.declare('K', 'list<string | missing>');
   ce2.assign('K', ce2.box(['List', "'ab'", 'Missing']));
-  ce2.declare('P', 'list<tuple<integer, integer> | missing>');
   ce2.assign('P', ce2.box(['List', ['Tuple', 1, 2], 'Missing']));
   ce2.declare('g', '(integer) -> integer');
   ce2.assign('g', ce2.box(['Function', ['Add', 'x', 1], 'x']));
-  ce2.declare('a', '(integer | missing) -> integer | missing');
-  ce2.assign('a', ce2.box(['Function', 'x', 'x']));
   ce2.declare('b', '(integer) -> boolean');
   ce2.assign('b', ce2.box(['Function', ['Greater', 'x', 1], 'x']));
 
@@ -291,27 +318,28 @@ describe('A DECLARED CALLBACK ON AN ABSENT CELL', () => {
   // A library operator given by name is typed by its own type handler, as
   // the lambda spelling is (user decision 2026-10-25, ROADMAP CE-45.2).
   test.each([
-    [['Map', 'Sqrt', 'L'], 'list<complex | nan>', '[1,NaN,sqrt(3)]'],
+    [['Map', 'Sqrt', 'L'], 'list<complex | missing^3>', '[1,"Missing",sqrt(3)]'],
     [
       ['Map', 'Ln', 'L'],
-      'list<complex | nan | signed_infinity>',
-      '[0,NaN,ln(3)]',
+      'list<complex | missing | signed_infinity^3>',
+      '[0,"Missing",ln(3)]',
     ],
-    [['Map', 'Floor', 'L'], 'list<integer | nan>', '[1,NaN,3]'],
-    [['Map', 'g', 'L'], 'list<integer | nan>', '[2,NaN,4]'],
-    [['Map', 'Length', 'K'], 'list<integer | nan>', '[2,NaN]'],
+    [['Map', 'Floor', 'L'], 'list<integer | missing^3>', '[1,"Missing",3]'],
+    [['Map', 'g', 'L'], 'list<integer | missing^3>', '[2,"Missing",4]'],
+    [['Map', 'Length', 'K'], 'list<integer | missing>', '[2,"Missing"]'],
+    // The type is wider than the type of the value, `list<complex |
+    // missing>`, but it holds the value.
     [
       ['Map', 'Sqrt', ['Take', 'L', 3]],
-      'list<complex | nan>',
-      '[1,NaN,sqrt(3)]',
+      'list<complex | indexed_collection<any> | infinity | missing | nothing>',
+      '[1,"Missing",sqrt(3)]',
     ],
     // An absent point gives an absent point.
     [
       ['Map', 'Negate', 'P'],
-      'list<missing | tuple<integer | nan, integer | nan>>',
+      'list<(missing | tuple<integer, integer>)^2>',
       '[(-1, -2),"Missing"]',
     ],
-    [['Map', 'a', 'L'], 'list<integer | missing>', '[1,"Missing",3]'],
     // The operators below call the function on a cell, but their result is
     // a position, a count or a cell, not what the function answers.
     [['IndexWhere', 'L', 'b'], 'integer', '3'],
@@ -378,9 +406,7 @@ describe('A DECLARED CALLBACK ON AN ABSENT CELL', () => {
 
 describe('THE ELEMENT TYPE OF A SET RESULT WITH AN ABSENT ELEMENT', () => {
   const ce3 = new ComputeEngine();
-  ce3.declare('S', 'set<integer | missing>');
   ce3.assign('S', ce3.box(['Set', 1, 'Missing']));
-  ce3.declare('L', 'list<integer | missing>');
   ce3.assign('L', ce3.box(['List', 1, 'Missing', 3]));
   // A function with no value, declared to return anything: `q(1)` can hold
   // strings, so the element type of the result is not known.
@@ -392,7 +418,7 @@ describe('THE ELEMENT TYPE OF A SET RESULT WITH AN ABSENT ELEMENT', () => {
     // The numeric arms are merged: `integer` is a subtype of `real`.
     [['Union', 'S', ['Set', 2.5]], 'set<missing | real>'],
     [['Join', 'S', ['Set', 2.5]], 'set<missing | real>'],
-    [['Join', 'L', ['List', 2.5]], 'list<missing | real>'],
+    [['Join', 'L', ['List', 2.5]], 'list<missing | real^4>'],
   ])('%j', (json, type) => {
     expect(ce3.box(json as any).type.toString()).toBe(type);
   });
@@ -474,13 +500,13 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
     // `Sqrt` maps over: the element of the result is a number or a list.
     [
       ['Map', 'Sqrt', 'B'],
-      'list<complex | indexed_collection<any> | infinity | nan | nothing>',
+      'list<complex | indexed_collection<any> | infinity | missing | nothing>',
     ],
     // `g` has only scalar parameters, so it maps over an element that is a
     // list, as `Sqrt` does (ROADMAP CE-485).
     [
       ['Map', 'g', 'B'],
-      'list<indexed_collection<any> | integer | nan | nothing>',
+      'list<indexed_collection<any> | integer | missing | nothing>',
     ],
   ])('%j', (json, type) => {
     const expr = ce4.box(json as any);

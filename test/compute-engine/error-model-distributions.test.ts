@@ -598,11 +598,12 @@ describe('Contract B — Quantile carrier', () => {
     expect(
       e.box(['Quantile', ['List', 1, ['Sqrt', -2], 3], 0.5]).evaluate().operator
     ).toBe('Quantile');
-    // ABSENT: `Missing` makes the whole aggregate `NaN` (§3.C), as the `NaN`
-    // datum already did.
+    // ABSENT: `Missing` makes the whole aggregate `Missing` (an operator
+    // over `Missing` gives `Missing`, `docs/ERROR-MODEL.md`, "`Missing` is a
+    // result only"); a `NaN` datum makes it `NaN`.
     expect(
-      e.box(['Quantile', ['List', 1, 'Missing', 3], 0.5]).evaluate().isNaN
-    ).toBe(true);
+      e.box(['Quantile', ['List', 1, 'Missing', 3], 0.5]).evaluate().symbol
+    ).toBe('Missing');
     // ERROR still outranks ABSENT: a refused datum is diagnosed even with an
     // absent one beside it.
     const err = e

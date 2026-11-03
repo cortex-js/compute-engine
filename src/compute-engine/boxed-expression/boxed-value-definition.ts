@@ -34,6 +34,8 @@ import { typeToString } from '../../common/type/serialize.js';
 import {
   collectionElementType,
   containsSignatureArm,
+  DECLARED_MISSING_MESSAGE,
+  declaredTypeNamesMissing,
   functionResult,
   isValidType,
   isWildcardFunctionType,
@@ -74,6 +76,7 @@ import {
   hasSignaturePlaceholder,
   inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
+  matchesOrAbsent,
   refineDeclaredPlaceholders,
   withArrowEffects,
 } from './effects-inference.js';
@@ -565,6 +568,21 @@ export class _BoxedValueDefinition
             '\n|   '
           )
         );
+      // A declared type may not name the marker `missing`: `Missing` is a
+      // result only (`declaredTypeNamesMissing()`). The same channel as an
+      // invalid type: the declaration throws. The library symbol `Missing`
+      // itself is the one value whose declared type is `missing`.
+      if (
+        !def.inferred &&
+        this.name !== 'Missing' &&
+        declaredTypeNamesMissing(type)
+      )
+        throw new Error(
+          [
+            `Symbol "${this.name}"`,
+            `The type "${typeToString(type)}" is invalid: ${DECLARED_MISSING_MESSAGE}`,
+          ].join('\n|   ')
+        );
 
       // A declared function type can give its optional parameters default
       // values (`(number, number = 2) -> number`). They are checked and boxed
@@ -621,7 +639,7 @@ export class _BoxedValueDefinition
         // `matches()`. When the declaration STATED effects (a non-empty
         // specifier, or `pure`) they are a contract and are checked here too.
         if (
-          !matchesDeclaredTypeAxes(
+          !matchesOrAbsent(
             ce,
             this._value.type,
             this._type,
@@ -1977,9 +1995,9 @@ function dynamicValue(
   // A LaTeX string is delimited by `$` or `$$`; the parser reads only what is
   // between the delimiters.
   if (isLatexString(value))
-    return ce.expr(parseLatex(asLatexString(value) ?? '') ?? 'Undefined');
+    return ce.expr(parseLatex(asLatexString(value) ?? '') ?? 'Missing');
 
-  if (typeof value === 'function') return ce.expr(value(ce) ?? 'Undefined');
+  if (typeof value === 'function') return ce.expr(value(ce) ?? 'Missing');
 
   if (value instanceof _BoxedExpression) return value;
 

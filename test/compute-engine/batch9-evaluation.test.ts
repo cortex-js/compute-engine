@@ -57,9 +57,9 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'ArgMax',
     ['ArgMax', 'L'],
     '\\operatorname{ArgMax}(L)',
-    'If(0 < t, 3)',
+    'If(0 < t, 3, "Missing")',
     '3',
-    'NaN',
+    '"Missing"',
   ],
   [
     'DeleteAt',
@@ -73,17 +73,17 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'IndexWhere',
     ['IndexWhere', 'L', gt2],
     '\\operatorname{IndexWhere}(L, x\\mapsto x>2)',
-    'If(0 < t, 2)',
+    'If(0 < t, 2, "Missing")',
     '2',
-    'NaN',
+    '"Missing"',
   ],
   [
     'CountIf',
     ['CountIf', 'L', gt2],
     '\\operatorname{CountIf}(L, x\\mapsto x>2)',
-    'If(0 < t, 2)',
+    'If(0 < t, 2, "Missing")',
     '2',
-    'NaN',
+    '"Missing"',
   ],
   [
     'RotateLeft',
@@ -232,6 +232,8 @@ describe('evaluateAsync threads a conditional value', () => {
     [
       'Dot((1,2){0<t}, (3,4))',
       ['Dot', ['If', ['Less', 0, 't'], ['Tuple', 1, 2]], ['Tuple', 3, 4]],
+      // A false restriction of a point is the point of `NaN` coordinates,
+      // whose dot product is `NaN` (user decision 2026-11-03).
       'If(0 < t, 11)',
     ],
   ];

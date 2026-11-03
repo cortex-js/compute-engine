@@ -75,7 +75,7 @@ describe('GPU: At over a list of points', () => {
           .box(['At', PL, k] as any)
           .evaluate()
           .toString()
-      ).toBe('"Missing"');
+      ).toBe('(NaN, NaN)');
       expect(glsl.compile(ce.box(['At', PL, k] as any)).code).toBe(
         'vec2(_gpu_nan())'
       );
@@ -178,7 +178,10 @@ describe('GPU: First, Second, Third and Last of a list of points', () => {
     expect(ce.box(['Last', points] as any).evaluate().toString()).toBe(
       '(3, 4)'
     );
-    expect(ce.box(['Third', points] as any).evaluate().symbol).toBe('Missing');
+    // A point position past the end is the NaN point.
+    expect(ce.box(['Third', points] as any).evaluate().toString()).toBe(
+      '(NaN, NaN)'
+    );
   });
 
   test('a position past the end is an absent point', () => {
@@ -235,13 +238,13 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
   });
 
   test('a list of strings declines', () => {
-    // A shader has no text type. The element of a list of unknown length
-    // can also be absent, and an absent string has no shader value.
+    // A shader has no text type, and a list of unknown length has no
+    // shader value.
     ce.declare('Ls', 'list<string>');
     ce.declare('Ls3', 'list<string^3>');
     for (const to of ['glsl', 'wgsl'] as const) {
       expect(() => code(to, ['First', 'Ls'])).toThrow(
-        /Could not compile an object-domain absent \('missing'\) position \(type 'missing \| string'\)/
+        /Could not compile `First` \(read as `At` with the index 1\): the base \(type `list<string>`\) has no statically known length/
       );
       expect(() => code(to, ['First', 'Ls3'])).toThrow(
         /Could not compile `First` \(read as `At` with the index 1\): the base's element type `string` is not a REAL scalar/
@@ -249,10 +252,11 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
     }
   });
 
-  // `At(P, k)` with an integer input `k` can be past the end of `P`, so its
-  // type is `missing | tuple<real, real>`. Its shader value is a `vec2` (a
-  // vector of NaN for an absent point), and an element of an absent point is
-  // NaN in the interpreter, so the element is a swizzle.
+  // `At(P, k)` with an integer input `k` can be past the end of `P`; its
+  // type is `tuple<real, real>`, the absence marker implicit. Its shader
+  // value is a `vec2` (a vector of NaN for an absent point), and an element
+  // of an absent point is NaN in the interpreter, so the element is a
+  // swizzle.
   test('a conditional point with no absent arm is read with a swizzle', () => {
     // A restriction, `If` with no else branch and `Which` give a vector of NaN
     // when the point is absent, and the interpreter gives NaN.
@@ -267,16 +271,12 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
   });
 
   test('only an At call and a boolean-tuple symbol take the swizzle', () => {
-    // A free symbol that can be absent has no shader value for the absent
-    // point, and a constructed boolean tuple is emitted as a float vector:
-    // both go to `At`, which declines.
-    ce.declare('pAbs', 'missing | tuple<real, real>');
+    // A constructed boolean tuple is emitted as a float vector: it goes to
+    // `At`, which declines. (A declared type cannot name `missing`, so no
+    // free symbol is a point that can be absent.)
     ce.declare('Bq', 'boolean');
     ce.declare('Cq', 'boolean');
     for (const to of ['glsl', 'wgsl'] as const) {
-      expect(() => code(to, ['First', 'pAbs'])).toThrow(
-        /Could not compile `First`/
-      );
       expect(() =>
         code(to, ['Not', ['First', ['Tuple', 'Bq', 'Cq']]])
       ).toThrow(/Could not compile `First`/);
@@ -285,28 +285,28 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
 
   test('an element of a point that can be absent is a swizzle', () => {
     ce.declare('P3', 'list<tuple<real, real, real>^3>');
-    expect(ce.box(['At', 'P', 'k']).type.toString()).toBe(
-      'missing | tuple<real, real>'
-    );
-    expect(ce.box(['First', ['At', 'P', 'k']]).type.toString()).toBe(
-      'nan | real'
-    );
+    // The absence marker of an accessor is implicit in its type.
+    expect(ce.box(['At', 'P', 'k']).type.toString()).toBe('tuple<real, real>');
+    expect(ce.box(['First', ['At', 'P', 'k']]).type.toString()).toBe('real');
     for (const to of ['glsl', 'wgsl'] as const) {
-      expect(code(to, ['First', ['At', 'P', 'k']])).toBe('_gpu_atp2_3(P, k).x');
-      expect(code(to, ['Second', ['At', 'P', 'k']])).toBe(
-        '_gpu_atp2_3(P, k).y'
+      expect(code(to, ['First', ['At', 'P', 'k']])).toBe(
+        '(_gpu_atp2_3(P, k)).x'
       );
-      expect(code(to, ['Last', ['At', 'P', 'k']])).toBe('_gpu_atp2_3(P, k).y');
+      expect(code(to, ['Second', ['At', 'P', 'k']])).toBe(
+        '(_gpu_atp2_3(P, k)).y'
+      );
+      expect(code(to, ['Last', ['At', 'P', 'k']])).toBe(
+        '(_gpu_atp2_3(P, k)).y'
+      );
       expect(code(to, ['Third', ['At', 'P3', 'k']])).toBe(
-        '_gpu_atp3_3(P3, k).z'
+        '(_gpu_atp3_3(P3, k)).z'
       );
       expect(code(to, ['Last', ['At', 'P3', 'k']])).toBe(
-        '_gpu_atp3_3(P3, k).z'
+        '(_gpu_atp3_3(P3, k)).z'
       );
-      // A `vec2` has no third component.
-      expect(() => code(to, ['Third', ['At', 'P', 'k']])).toThrow(
-        /Could not compile `Third`: .*no element at the position 3/
-      );
+      // A 2-D point has no third component: the read is proved to find
+      // nothing, typed `nan`, and compiles to NaN, as the interpreter gives.
+      expect(code(to, ['Third', ['At', 'P', 'k']])).toContain('_gpu_nan()');
     }
     // The interpreter: an element of an absent point is NaN.
     expect(

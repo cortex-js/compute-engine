@@ -1859,7 +1859,8 @@ describeMaybe('PYTHON EXECUTION PARITY — absence marker of element reads (venv
       .evaluate();
     if (isSymbol(v, 'Missing')) return 'None';
     if (isNumber(v)) return v.isNaN ? 'nan' : v.re;
-    return v.ops!.map((x) => x.re);
+    // A read outside a list of points is a point whose coordinates are `NaN`.
+    return v.ops!.map((x) => (x.isNaN ? 'nan' : x.re));
   }
 
   it('matches the interpreter', () => {
@@ -1885,11 +1886,13 @@ describeMaybe('PYTHON EXECUTION PARITY — absence marker of element reads (venv
       fs.unlinkSync(file);
     }
     const actual = JSON.parse(out) as Record<string, unknown[]>;
-    for (const [name, json] of CASES)
-      expect([name, actual[name]]).toEqual([
-        name,
-        [interpreted(json, -1), interpreted(json, 1)],
-      ]);
+    for (const [name, json] of CASES) {
+      // The first element of an absent list of points is a point whose
+      // coordinates are all `nan`, in the interpreter and in compiled
+      // Python (user decision 2026-11-03).
+      const expected = [interpreted(json, -1), interpreted(json, 1)];
+      expect([name, actual[name]]).toEqual([name, expected]);
+    }
   });
 });
 
@@ -2162,10 +2165,6 @@ describeMaybe(
         'broadcastable<boolean>',
         /operand 1 has the type `broadcastable<boolean>`/,
       ],
-      [
-        'list<boolean | missing>',
-        /operand 1 has the type `list<boolean \| missing>`/,
-      ],
       ['list<list<boolean>>', /operand 1 has the type `list<list<boolean>>`/],
     ])('And over a `%s` operand fails closed', (type, message) => {
       const e = new ComputeEngine();
@@ -2174,6 +2173,16 @@ describeMaybe(
       expect(() =>
         python.compileFunction(e.box(['And', 'L', 'q']), 'fn', ['L', 'q'])
       ).toThrow(message);
+    });
+
+    // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only"), so an operand declared
+    // `list<boolean | missing>` is refused at the declaration.
+    it('an operand declared `list<boolean | missing>` is refused', () => {
+      const e = new ComputeEngine();
+      expect(() => e.declare('L', 'list<boolean | missing>')).toThrow(
+        /`missing` cannot be declared/
+      );
     });
 
     // CE-281.1. One collection operand broadcasts the exact scalar test.
@@ -2237,9 +2246,10 @@ describeMaybe(
       'a user name that hides a builtin the code uses fails closed (lambda: %s)',
       (lambda) => {
         const cases: [any, Record<string, string>, string][] = [
-          // A condition that may be absent is tested with
-          // `isinstance(bool, (bool, np.bool_))`.
-          [['If', 'bool', 1, 2], { bool: 'boolean | missing' }, 'bool'],
+          // A condition that may be absent (the first element of a list
+          // that may be empty) is tested with
+          // `isinstance(_c, (bool, np.bool_))`.
+          [['If', ['First', 'bool'], 1, 2], { bool: 'list<boolean>' }, 'bool'],
           [
             ['Norm', 'x', 'isinstance'],
             // The order is declared a number or a string, so the code

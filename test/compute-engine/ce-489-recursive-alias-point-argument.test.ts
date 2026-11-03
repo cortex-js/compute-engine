@@ -190,10 +190,6 @@ describe('CE-489: a union of point arms of different ranks', () => {
   test.each([
     [`list<${P}> | list<list<${P}>>`, 'list<list<number>> | list<number>'],
     [
-      `list<${P}> | list<list<${P}>> | missing`,
-      'list<list<number>> | list<number> | missing',
-    ],
-    [
       `list<${P}> | list<list<list<${P}>>>`,
       'list<list<list<number>>> | list<number>',
     ],
@@ -373,45 +369,30 @@ describe('CE-489: more recursive aliases at a declared point parameter', () => {
   const EMPTY_ROW = ['List', ['List']];
   const EMPTY_DEEP = ['List', ['List', ['List']], ['List', ['Tuple', 1, 2]]];
 
-  // A `missing` arm anywhere in the alias. Before, the walk unfolded the
-  // alias again at each level, never met the reference, and the call was
-  // typed `error`.
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only — user decision of 2026-11-02"), so an alias
+  // with a `missing` arm is an error. A `Missing` row or point of a list
+  // literal maps to a `Missing` cell.
+  test('an alias with a missing arm is an error', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declareType('A', `list<A> | list<${P}> | missing`, { alias: true })
+    ).toThrow(/the type `missing` cannot be declared/);
+  });
+
   test.each([
+    [['List', 'Missing', ['List', ['Tuple', 1, 2]]], '["Missing",[3]]'],
+    [['List', 'Missing', ['Tuple', 1, 2]], '["Missing",3]'],
     [
-      'list<A> | list<P> | missing',
-      'list<list<list | missing | number> | list<missing | number> | missing> | list<missing | number> | missing',
-      [
-        [POINTS, '[3,7]'],
-        [NESTED, '[[3],[7]]'],
-        ['Missing', '"Missing"'],
-        [['List', 'Missing', ['List', ['Tuple', 1, 2]]], '["Missing",[3]]'],
-      ],
+      ['List', ['List', 'Missing'], ['List', ['Tuple', 1, 2]]],
+      '[["Missing"],[3]]',
     ],
-    [
-      'list<A | missing> | list<P>',
-      'list<list<list | missing> | list<missing | number> | missing> | list<missing | number>',
-      [
-        [NESTED, '[[3],[7]]'],
-        [['List', 'Missing', ['List', ['Tuple', 1, 2]]], '["Missing",[3]]'],
-      ],
-    ],
-    [
-      'list<A> | list<P | missing>',
-      'list<list<list | missing> | list<missing | number> | missing> | list<missing | number>',
-      [
-        [['List', 'Missing', ['Tuple', 1, 2]], '["Missing",3]'],
-        [
-          ['List', ['List', 'Missing'], ['List', ['Tuple', 1, 2]]],
-          '[["Missing"],[3]]',
-        ],
-      ],
-    ],
-  ] as const)('a missing arm: A = %s', (def, expected, values) => {
-    const d = def.replace(/\bP\b/g, P);
-    const ce = withY(d, 'A');
-    expect(ce.box(['k', 'y']).type.toString()).toBe(expected);
-    expect(ce.parse('k(y)').type.toString()).toBe(expected);
-    check(d, 'A', values as any);
+  ])('an absent cell of a list literal: %j', (value, expected) => {
+    const ce = withY(undefined, `list<${P}>`);
+    const e = ce.box(['k', value] as any);
+    const v = e.evaluate();
+    expect(v.toString()).toBe(expected);
+    expect(v.type.matches(e.type)).toBe(true);
   });
 
   // An empty list at any depth maps to an empty list. Before, the
@@ -747,32 +728,17 @@ describe('CE-505, CE-506: more cases at a point parameter', () => {
     }
   });
 
-  // An absent value makes the call `Missing`, as for a symbol declared
-  // `list<P> | missing`. Before, the call was typed `list<number>` and
-  // evaluated to an `incompatible-type` error.
-  test('a symbol declared list<never> | missing that holds Missing', () => {
+  // An absent value makes the call `Missing`: an operator over `Missing`
+  // gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result only —
+  // user decision of 2026-11-02"). A declared type cannot name `missing`, so
+  // the absent value is the written `Missing`.
+  test('a call over Missing is Missing', () => {
     const ce = withK();
-    ce.declare('z', 'list<never> | missing');
-    expect(ce.box(['k', 'z']).type.toString()).toBe('list<number> | missing');
-    ce.assign('z', ce.box('Missing'));
-    for (const e of routes(ce, 'z', 'z')) {
-      expect(e.type.toString()).toBe('list<number> | missing');
+    for (const e of routes(ce, 'Missing', '\\operatorname{Missing}')) {
       const v = e.evaluate();
       expect(v.toString()).toBe('"Missing"');
       expect(v.type.matches(e.type)).toBe(true);
     }
-    const r = compile(
-      ce.box([
-        'Function',
-        ['k', 'w'],
-        ['Typed', 'w', "'list<never> | missing'"],
-      ] as any),
-      { fallback: false } as any
-    ) as any;
-    expect(r.success).toBe(true);
-    // `Missing` is `undefined` in the compiled code.
-    expect(r.run(undefined)).toBeUndefined();
-    expect(r.run([])).toEqual([]);
   });
 
   // A row that is a symbol typed as a list of points is a list, not a

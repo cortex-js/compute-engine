@@ -79,7 +79,6 @@ ce.declare('Q', 'list<tuple<complex, real>>');
 ce.declare('q', 'tuple<real, real>');
 ce.declare('P3', 'list<tuple<real, real, real>>');
 ce.declare('LL', 'list<list<real>>');
-ce.declare('LM', 'list<tuple<real, real> | missing>');
 ce.declare('qc', 'tuple<complex, real>');
 
 const BOXED = {
@@ -288,9 +287,6 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       ],
       /function local to the block is compiled for a scalar/,
     ],
-    // The generic definition, compiled for a collection, would receive
-    // the absent value.
-    ['Map(gm, LM)', ['Map', 'gm', 'LM'], /the point may be absent/],
   ];
   for (const [label, json, message] of declines)
     for (const mode of ['auto', 'strict'] as const)
@@ -349,7 +345,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
   // compiled in the lane of the point: strict compiles it.
   describe('a complex point at the point parameter of a local function', () => {
     const cx = new ComputeEngine();
-    cx.declare('qm', 'tuple<complex, real> | missing');
+    cx.declare('qm', 'tuple<complex, real>');
     cx.declareType('CRow', 'tuple<complex, complex>');
     cx.declare('r', 'CRow');
     test('g := p ↦ 7; g(qm) (strict)', () => {
@@ -480,11 +476,13 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       )
     ).toThrow(/binds the point whole/));
 
-  // Python has no definition of `gm` compiled for one point.
+  // Python has no definition of `gm` compiled for one point. `P[1]` is
+  // typed as a point (the absence marker of an accessor is implicit), so
+  // the call declines as for a point argument.
   test('gm(P[1]) on python declines', () =>
     expect(() =>
       compile(ce.box(['gm', ['At', 'P', 1]]), { to: 'python', fallback: false })
-    ).toThrow(/binds the point whole/));
+    ).toThrow(/argument 1 is a point/));
 
   for (const to of ['glsl', 'wgsl'] as const)
     test(`gm(q) on ${to}`, () => {

@@ -577,7 +577,6 @@ export class ComputeEngine implements IComputeEngine {
     Nothing: null,
     Missing: null,
     None: null,
-    Undefined: null,
 
     // Note: `ImaginaryUnit` is deliberately NOT interned here. Its definition
     // has `holdUntil: 'never'`, so canonicalizing the symbol must substitute

@@ -7,10 +7,16 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // `docs/ERROR-MODEL.md` §3, "Absent values in collection operators"):
 //
 // - A. Positional operators keep an absent cell in place.
-// - B. Aggregates propagate: one absent cell makes the aggregate `NaN`.
+// - B. Aggregates propagate: one `Missing` cell makes the aggregate
+//   `Missing`, one `NaN` cell makes it `NaN`.
 // - C. Search is structural: a marker is found where the same marker sits.
 // - D. Selection keeps only a decided `True`; `Any`/`All` are Kleene.
 // - E. An absent collection makes the whole result absent.
+//
+// Since `Missing` is a result only (user decision of 2026-11-02,
+// `docs/ERROR-MODEL.md`), `Undefined` is not an absent value: it is an
+// ordinary symbol with no value, and an operator over `Missing` gives
+// `Missing`.
 //
 // Each rule is probed on the box route and on the parse route, because a
 // lazy operator with no `canonical` handler can behave differently on the
@@ -59,7 +65,7 @@ describe('Rule A: positional operators keep an absent cell', () => {
     [['Zip', L(1, 'Missing'), L(3, 4)], '[(1, 3),("Missing", 4)]'],
     [
       ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], L(1, 'Missing', 3)],
-      '[2,NaN,6]',
+      '[2,"Missing",6]',
     ],
   ])('%j', (json, expected) => {
     expect(value(json)).toBe(expected);
@@ -78,8 +84,8 @@ describe('Rule A: positional operators keep an absent cell', () => {
   });
 
   test('a mapped absent cell widens the element type', () => {
-    // The value holds `NaN`, so the type must admit it. Before, the ranged
-    // fold typed `Map(x ↦ 2x, [1, Missing, 3])` as `list<integer<2..6>>`:
+    // The value holds `Missing`, so the type must admit it. Before, the
+    // ranged fold typed `Map(x ↦ 2x, [1, Missing, 3])` as `list<integer<2..6>>`:
     // the absence absorption had no arm for a ranged numeric type and left
     // `integer<2..6>` as it was (`absorbNumericAbsence`,
     // `common/type/utils.ts`).
@@ -92,45 +98,44 @@ describe('Rule A: positional operators keep an absent cell', () => {
           L(1, 'Missing', 3),
         ])
         .type.toString()
-    ).toBe('list<integer | nan^3>');
-    ce.declare('q', 'integer<1..3> | missing');
-    expect(ce.box(['Multiply', 2, 'q']).type.toString()).toBe('integer | nan');
-    expect(ce.box(['Add', 'q', 1]).type.toString()).toBe('integer | nan');
-    ce.declare('r', 'real<0..1> | missing');
-    expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe('nan | real');
+    ).toBe('list<integer | missing^3>');
   });
 });
 
-describe('an operand that may be absent adds `nan` to the numeric result (CE-41)', () => {
-  // The absorption of an absent operand keeps the type the handler answered
-  // and adds `nan`. Before, every numeric arm was replaced by `number`.
-  test('Length of a row that may be absent', () => {
+describe('the type of a numeric result over an operand that may be absent (CE-41)', () => {
+  // A result type describes the successful values: the marker of a read
+  // that may be absent is implicit, so the type of `At(xs, 1)` is the row
+  // type and its `Length` has no `nan` arm.
+  test('Length of a row read by At', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<list<real>>');
     expect(ce.box(['Length', ['At', 'xs', 1]]).type.toString()).toBe(
-      'integer | nan | signed_infinity'
+      'integer | signed_infinity'
     );
   });
 
-  test('Sin of a real that may be absent', () => {
+  // `Missing` is a result only: a declared type cannot name `missing`.
+  test('a real declared with missing is a static error', () => {
     const ce = new ComputeEngine();
-    ce.declare('m', 'real | missing');
-    const e = ce.box(['Sin', 'm']);
-    expect(e.type.toString()).toBe('nan | real');
-    ce.assign('m', ce.box('Missing'));
-    expect(e.evaluate().type.matches(e.type)).toBe(true);
+    expect(() => ce.declare('m', 'real | missing')).toThrow();
+  });
+
+  test('Sin of Missing is Missing, typed missing', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Sin', 'Missing']);
+    expect(e.type.toString()).toBe('missing');
+    expect(e.evaluate().toString()).toBe('"Missing"');
   });
 });
 
 describe('Rule B: aggregates propagate an absent cell', () => {
   test.each([
-    [['Sum', L(1, 'Missing', 3)], 'NaN'],
+    [['Sum', L(1, 'Missing', 3)], '"Missing"'],
     [['Sum', L(1, 'NaN', 3)], 'NaN'],
-    [['Sum', L(1, 'Undefined', 3)], 'NaN'],
-    [['Product', L(1, 'Missing', 3)], 'NaN'],
-    [['Mean', L(1, 'Missing', 3)], 'NaN'],
+    [['Product', L(1, 'Missing', 3)], '"Missing"'],
+    [['Mean', L(1, 'Missing', 3)], '"Missing"'],
     [['Median', L(1, 'NaN', 3)], 'NaN'],
-    [['Max', L(1, 'Missing', 3)], 'NaN'],
+    [['Max', L(1, 'Missing', 3)], '"Missing"'],
     [['Min', L(1, 'NaN', 3)], 'NaN'],
     [
       [
@@ -139,7 +144,7 @@ describe('Rule B: aggregates propagate an absent cell', () => {
         ['Function', ['Add', 'a', 'b'], 'a', 'b'],
         0,
       ],
-      'NaN',
+      '"Missing"',
     ],
     // The empty collection answers the identity, not a marker.
     [['Sum', L()], '0'],
@@ -152,7 +157,7 @@ describe('Rule B: aggregates propagate an absent cell', () => {
 
   test('the parse route', () => {
     expect(parsed('\\operatorname{Sum}([1, \\operatorname{Missing}, 3])')).toBe(
-      'NaN'
+      '"Missing"'
     );
     expect(parsed('\\operatorname{Max}([1, \\mathrm{NaN}, 3])')).toBe('NaN');
   });
@@ -235,10 +240,8 @@ describe('Rule D: selection keeps a decided True, quantifiers are two-valued', (
   test.each([
     // Selection: a `Missing` predicate answer is "not selected".
     [['Filter', L(1, 'Missing', 3), gt0], '[1,3]'],
-    [['Filter', L(1, 'Undefined', 3), gt0], '[1,3]'],
     [['Filter', L(1, 'NaN', 3), gt0], '[1,3]'],
     [['Count', L(1, 'Missing', 3), gt0], '2'],
-    [['Count', L(1, 'Undefined', 3), gt0], '2'],
     [['Count', L(1, 'NaN', 3), gt0], '2'],
     [['CountIf', L(1, 'Missing', 3), gt0], '2'],
     [['Position', L(1, 'Missing', 3), gt0], '[1,3]'],
@@ -250,7 +253,6 @@ describe('Rule D: selection keeps a decided True, quantifiers are two-valued', (
     // Quantifiers: the table of `Or` and `And`, an absent answer `False`.
     [['Any', L(1, 'Missing', 3), gt2], '"True"'],
     [['Any', L(1, 'Missing'), gt2], '"False"'],
-    [['Any', L('Undefined'), gt2], '"False"'],
     [['All', L(1, 'Missing', 3), gt0], '"False"'],
     [['All', L(1, 'Missing', -1), gt0], '"False"'],
     [['Any', L()], '"False"'],
@@ -265,7 +267,7 @@ describe('Rule D: selection keeps a decided True, quantifiers are two-valued', (
     [['All', L(1, 'NaN', 3), gt0], '"False"'],
     // A predicate that answers `True` on the marker selects it.
     [['Any', L(1, 'Missing'), isMissing], '"True"'],
-    [['All', L('Missing', 'Undefined'), isMissing], '"True"'],
+    [['All', L('Missing', 'Missing'), isMissing], '"True"'],
   ])('%j', (json, expected) => {
     expect(value(json)).toBe(expected);
   });
@@ -350,16 +352,14 @@ describe('Rule E: an absent collection makes the result absent', () => {
   // over an absent collection, as a comparison with an absent operand is
   // (user decision of 2026-11-02, two-valued comparisons).
   test.each([
-    [['Length', 'Missing'], 'NaN'],
-    [['Length', 'Undefined'], 'NaN'],
-    [['Count', 'Missing'], 'NaN'],
-    [['Sum', 'Missing'], 'NaN'],
+    [['Length', 'Missing'], '"Missing"'],
+    [['Count', 'Missing'], '"Missing"'],
+    [['Sum', 'Missing'], '"Missing"'],
     [['Reverse', 'Missing'], '"Missing"'],
     [['First', 'Missing'], '"Missing"'],
     [['Join', L(1), 'Missing'], '"Missing"'],
-    [['Join', L(1), 'Undefined'], '"Missing"'],
     [['Contains', 'Missing', 3], '"False"'],
-    [['IndexOf', 'Missing', 3], 'NaN'],
+    [['IndexOf', 'Missing', 3], '"Missing"'],
     [['Element', 3, 'Missing'], '"False"'],
     [['Filter', 'Missing', gt0], '"Missing"'],
     [['Any', 'Missing', gt0], '"False"'],
@@ -401,13 +401,10 @@ describe('compiled to JavaScript', () => {
     expect(run(['Contains', L(1, 'NaN'), 'NaN'])).toBe(true);
     expect(run(['Element', 'NaN', L(1, 'NaN')])).toBe(true);
     expect(run(['IndexOf', L(1, 'NaN'), 'Missing'])).toBe(0);
-    expect(run(['IndexOf', L(1, 2), 'Undefined'])).toBe(0);
-    // A written `Missing` and a written `Undefined` both lower to
-    // `undefined`, while the interpreter keeps them apart: a search for
-    // either in a list that may hold an absent cell is not compiled.
+    expect(run(['IndexOf', L(1, 2), 'Missing'])).toBe(0);
+    // A search for a written `Missing` in a list that may hold an absent
+    // cell is not compiled.
     expect(refused(['IndexOf', L(1, 'Missing'), 'Missing'])).toBe(true);
-    expect(refused(['IndexOf', L(1, 'Missing'), 'Undefined'])).toBe(true);
-    expect(refused(['Contains', L(1, 'Undefined'), 'Missing'])).toBe(true);
     // `Contains` requires primitive elements on this target, and a
     // `missing` element arm is not one: it falls back to the interpreter.
     expect(refused(['Contains', L(1, 'Missing'), 5])).toBe(true);

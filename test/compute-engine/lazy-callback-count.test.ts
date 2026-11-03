@@ -257,18 +257,20 @@ describe('the absent-datum rule still holds after the extra walk was removed', (
   //
   // `Max`/`Min` no longer walk their collection operands a first time to look
   // for a `Missing` or `NaN` element. These pin that the one remaining walk
-  // still finds the absent element and still answers `NaN`.
+  // still finds the absent element: it answers `Missing` for a `Missing`
+  // element (an operator over `Missing` gives `Missing`) and `NaN` for a
+  // `NaN` element.
   //
   const ce = new ComputeEngine();
 
-  test('Max of a list containing Missing is NaN', () => {
+  test('Max of a list containing Missing is Missing', () => {
     expect(
       ce
         .box(['Max', ['List', 1, 'Missing', 3]])
         .evaluate()
         .toString()
     ) //
-      .toBe('NaN');
+      .toBe('"Missing"');
   });
 
   test('Max of a list containing NaN is NaN', () => {
@@ -449,8 +451,10 @@ describe('a DECLINED enumeration is not an EMPTY one', () => {
     ).toBe('NaN');
   });
 
-  test('Max of a Missing operand is still NaN', () => {
-    expect(ce.box(['Max', 'Missing']).evaluate().toString()).toBe('NaN');
+  test('Max of a Missing operand is Missing', () => {
+    expect(ce.box(['Max', 'Missing']).evaluate().toString()).toBe(
+      '"Missing"'
+    );
   });
 
   test('Mean of an empty collection is still NaN', () => {
@@ -674,15 +678,15 @@ describe('Max and Min look for an absent datum on the walk that folds', () => {
   // The fold recurses into nested collections, and the search for an absent
   // datum now goes with it. The earlier search looked at the first level
   // only, so `Max([[1, Missing], 3])` answered `Max(3, Missing)`, which
-  // evaluated a second time to `NaN`.
+  // evaluated a second time to the absent value.
   test.each(['Max', 'Min'])(
     '%s finds a Missing element of a nested list',
     (head) => {
       expect(evaluated([head, ['List', ['List', 1, 'Missing'], 3]])).toBe(
-        'NaN'
+        '"Missing"'
       );
       expect(evaluated([head, ['List', ['List', ['List', 'Missing']]]])).toBe(
-        'NaN'
+        '"Missing"'
       );
     }
   );
@@ -692,12 +696,12 @@ describe('Max and Min look for an absent datum on the walk that folds', () => {
   test.each(['Max', 'Min'])(
     '%s of an absent operand beside an operand that is not folded',
     (head) => {
-      expect(evaluated([head, { str: 'abc' }, 'Missing'])).toBe('NaN');
-      expect(evaluated([head, ['Range', 1, 5], 'Missing'])).toBe('NaN');
+      expect(evaluated([head, { str: 'abc' }, 'Missing'])).toBe('"Missing"');
+      expect(evaluated([head, ['Range', 1, 5], 'Missing'])).toBe('"Missing"');
       expect(evaluated([head, ['Cycle', ['List', 1, 2]], 'Missing'])).toBe(
-        'NaN'
+        '"Missing"'
       );
-      expect(evaluated([head, 'x', 'Missing'])).toBe('NaN');
+      expect(evaluated([head, 'x', 'Missing'])).toBe('"Missing"');
       expect(evaluated([head, 'x', 'NaN'])).toBe('NaN');
     }
   );

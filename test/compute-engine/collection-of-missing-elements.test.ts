@@ -9,7 +9,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 // expected, as one value typed `T | missing` is admitted where `T` is
 // expected. The operator that reads an absent element decides at run time: a
 // text operator answers an `incompatible-type` error that names the element,
-// an aggregate answers `NaN`, a positional operator keeps the cell.
+// an aggregate answers `Missing`, a positional operator keeps the cell.
 //
 // The admission is `absentElementsMatchParam`
 // (`src/compute-engine/boxed-expression/validate.ts`); the design text is
@@ -37,8 +37,6 @@ function engine(): ComputeEngine {
     signature: '(collection<integer>, string) -> integer',
     evaluate: (_ops, { engine }) => engine.number(1),
   });
-  ce.declare('ys', 'collection<string | missing>');
-  ce.declare('zs', 'list<string | missing>');
   return ce;
 }
 
@@ -68,8 +66,6 @@ describe('A collection of possibly absent elements at a collection parameter', (
       'set<missing | string> at collection<character | string>',
       ['StringJoin', ['Set', "'a'", 'Missing']],
     ],
-    ['a declared collection<string | missing>', ['StringJoin', 'ys']],
-    ['a declared list<string | missing>', ['joinList', 'zs', "'-'"]],
   ])('box route: %s is admitted', (_label, json) => {
     expect(boxed(json).isValid).toBe(true);
   });
@@ -87,16 +83,21 @@ describe('A collection of possibly absent elements at a collection parameter', (
       'list<integer | missing> at collection<number>',
       '\\operatorname{countAll}([1, \\operatorname{Missing}, 3], \\text{x})',
     ],
-    [
-      'a declared collection<string | missing>',
-      '\\operatorname{StringJoin}(\\operatorname{ys})',
-    ],
-    [
-      'a declared list<string | missing>',
-      '\\operatorname{joinList}(\\operatorname{zs}, \\text{-})',
-    ],
   ])('parse route: %s is admitted', (_label, latex) => {
     expect(parsed(latex).isValid).toBe(true);
+  });
+
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"): the collection is built with absent elements, not
+  // declared with them.
+  test('a declared collection<string | missing> is refused', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.declare('ys', 'collection<string | missing>')).toThrow(
+      /cannot be declared/
+    );
+    expect(() => ce.declare('zs', 'list<string | missing>')).toThrow(
+      /cannot be declared/
+    );
   });
 
   test('a collection of the wrong element type is still refused', () => {
@@ -150,12 +151,6 @@ describe('Run time: the operator that reads an absent element answers', () => {
         ).evaluate().json
       )
     ).toBe(absentError('Missing'));
-    // `Undefined` is an absent cell too: a list types it as `missing`.
-    expect(
-      JSON.stringify(
-        boxed(['StringJoin', L("'a'", 'Undefined'), "'-'"]).evaluate().json
-      )
-    ).toBe(absentError('Undefined'));
   });
 
   test('StringJoin of present elements is unchanged', () => {
@@ -182,8 +177,8 @@ describe('Run time: the operator that reads an absent element answers', () => {
   // The collection operators already answer by the rules of
   // `docs/ERROR-MODEL.md` §3, "Absent values in collection operators".
   test.each([
-    ['Sum', ['Sum', L(1, 'Missing', 3)], 'NaN'],
-    ['Max', ['Max', L(1, 'Missing', 3)], 'NaN'],
+    ['Sum', ['Sum', L(1, 'Missing', 3)], '"Missing"'],
+    ['Max', ['Max', L(1, 'Missing', 3)], '"Missing"'],
     ['Length', ['Length', L(1, 'Missing', 3)], '3'],
     ['Length of strings', ['Length', L("'a'", 'Missing', "'b'")], '3'],
     ['Sort', ['Sort', L(3, 'Missing', 1)], '[1,3,"Missing"]'],
@@ -200,15 +195,15 @@ describe('Run time: the operator that reads an absent element answers', () => {
     [
       'Map',
       ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], L(1, 'Missing', 3)],
-      '[2,NaN,6]',
+      '[2,"Missing",6]',
     ],
   ])('%s', (_label, json, expected) => {
     expect(boxed(json).evaluate().toString()).toBe(expected);
   });
 
   test.each([
-    ['Sum', '\\operatorname{Sum}([1, \\operatorname{Missing}, 3])', 'NaN'],
-    ['Max', '\\max([1, \\operatorname{Missing}, 3])', 'NaN'],
+    ['Sum', '\\operatorname{Sum}([1, \\operatorname{Missing}, 3])', '"Missing"'],
+    ['Max', '\\max([1, \\operatorname{Missing}, 3])', '"Missing"'],
     ['Length', '\\operatorname{Length}([1, \\operatorname{Missing}, 3])', '3'],
   ])('parse route: %s', (_label, latex, expected) => {
     expect(parsed(latex).evaluate().toString()).toBe(expected);
@@ -219,7 +214,7 @@ describe('Run time: the operator that reads an absent element answers', () => {
 // in the same way as a `Map` whose callback is the named operator: the
 // operator in the body decides. A text operator answers the
 // `incompatible-type` error for the cell, and a numeric operator answers
-// `NaN`. The lambda `x ↦ ToUpperCase(x)` is a broadcast shape, so its
+// `Missing`. The lambda `x ↦ ToUpperCase(x)` is a broadcast shape, so its
 // elements come from the lowered route (`makeSpineRunner()`,
 // `library/map-lowering.ts`). That route read the error of the level as a
 // level failure and put `Missing` in the cell, so the result held `Missing`
@@ -277,22 +272,22 @@ describe('Map: a lambda callback and the named operator agree on an absent eleme
     );
   });
 
-  test('a numeric body: both spellings still give NaN for the absent cell', () => {
+  test('a numeric body: both spellings give Missing for the absent cell', () => {
     const numbers = L(1, 'Missing', 2);
     const lambda = boxed(['Map', ['Function', ['Abs', 'x'], 'x'], numbers]);
     const named = boxed(['Map', 'Abs', numbers]);
-    expect(lambda.evaluate().toString()).toBe('[1,NaN,2]');
-    expect(named.evaluate().toString()).toBe('[1,NaN,2]');
+    expect(lambda.evaluate().toString()).toBe('[1,"Missing",2]');
+    expect(named.evaluate().toString()).toBe('[1,"Missing",2]');
     // Both types hold the value. Both keep the integer cells and add the
-    // `NaN` of the absent cell (CE-453).
-    expect(lambda.type.toString()).toBe('list<integer | nan^3>');
-    expect(named.type.toString()).toBe('list<integer | nan^3>');
+    // `missing` arm of the absent cell (CE-453).
+    expect(lambda.type.toString()).toBe('list<integer<0..> | missing^3>');
+    expect(named.type.toString()).toBe('list<integer<0..> | missing^3>');
     expect(lambda.evaluate().type.matches(lambda.type)).toBe(true);
     expect(named.evaluate().type.matches(named.type)).toBe(true);
     expect(
       boxed(['Map', ['Function', ['Add', 'x', 1], 'x'], numbers])
         .evaluate()
         .toString()
-    ).toBe('[2,NaN,3]');
+    ).toBe('[2,"Missing",3]');
   });
 });

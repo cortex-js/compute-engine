@@ -972,7 +972,9 @@ describe('Absences in a list of points', () => {
     expect(call.evaluate().toString()).toBe('[sqrt(17),2sqrt(17)]');
     ce.assign('t', -1);
     const r = call.evaluate();
-    expect(r.ops![0].symbol).toBe('Missing');
+    // A false restriction of a point is the point of `NaN` coordinates
+    // (user decision 2026-11-03), whose distance to `(4, 0)` is `NaN`.
+    expect(r.ops![0].toString()).toBe('NaN');
     expect(r.ops![1].toString()).toBe('2sqrt(17)');
     close(runJS(latex, { t: 1 }), [Math.hypot(1, 4), Math.hypot(2, 8)]);
     // The compiled value at t = -1 is not specified: the call is applied to
@@ -981,21 +983,18 @@ describe('Absences in a list of points', () => {
   });
 
   test('a list whose points are ALL absent still maps', () => {
-    // The evaluated argument `[Missing]` is typed `list<missing>`, which does
-    // not say its elements are points. The canonical argument does, so the
-    // call still maps and answers `[Missing]`, not an `incompatible-type`
-    // error for the whole list.
+    // The canonical argument says its elements are points, so the call
+    // maps, not an `incompatible-type` error for the whole list. A false
+    // restriction of a point is the point of `NaN` coordinates (user
+    // decision 2026-11-03), so the call answers `[NaN]`.
     const latex = 'k\\left(\\left[\\left(3,4\\right)\\{0<t\\}\\right]\\right)';
     const ce = absenceEngine(true);
     const call = ce.parse(latex);
     expect(call.type.toString()).toBe('list<real>');
     ce.assign('t', -1);
     const v = call.evaluate();
-    // The static type of the restricted point `If(c, P)` has no `missing`
-    // arm, so the type of this value, whose one cell is absent, does not
-    // match the static type: there is no present cell to check.
-    expect(v.json).toEqual(['List', 'Missing']);
-    expect(call.N().json).toEqual(['List', 'Missing']);
+    expect(v.json).toEqual(['List', 'NaN']);
+    expect(call.N().json).toEqual(['List', 'NaN']);
     // The compiled value is not specified: the call is applied to a list
     // computed from an absent point (`docs/COMPILATION-MODEL.md`, "Caveats
     // of compiled code").
@@ -1007,7 +1006,7 @@ describe('Absences in a list of points', () => {
       'k\\left(\\left[\\left(3,4\\right)\\{0<t\\}\\right]\\right)'
     );
     ce.assign('t', -1);
-    expect((await call.evaluateAsync()).json).toEqual(['List', 'Missing']);
+    expect((await call.evaluateAsync()).json).toEqual(['List', 'NaN']);
   });
 
   test('a PointList with an absent source is absent', () => {

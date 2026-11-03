@@ -232,8 +232,8 @@ c.id = "2"
 });
 
 describe('"Cycles"', () => {
-  const BUDDY = `type Buddy = object{name: string, friend: type Buddy | missing}
-let alice = Buddy(name: "Alice", friend: Missing)
+  const BUDDY = `type Buddy = object{name: string, friend: type Buddy | string}
+let alice = Buddy(name: "Alice", friend: "none")
 let bob = Buddy(name: "Bob", friend: alice)
 alice.friend = bob
 // alice's friend is bob, and bob's friend is alice — a cycle`;

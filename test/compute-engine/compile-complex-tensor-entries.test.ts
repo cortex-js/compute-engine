@@ -157,8 +157,9 @@ describe('COMPLEX ENTRIES IN COMPILED ARRAYS', () => {
     // The dispatching helpers read an absent element (`undefined`, `null`)
     // as a complex value and threw, and `Product` dropped an absent scalar
     // factor: `Product` of `[[2, 3], undefined]` was `[2, 3]`. The
-    // interpreter gives `[NaN, NaN]` for an absent operand of `Add` or
-    // `Multiply`.
+    // interpreter gives `[Missing, Missing]` for an absent operand of `Add`
+    // or `Multiply`, and compiled code may give `NaN` where the interpreter
+    // gives `Missing` (the caveats of compiled code).
     for (const op of ['Sum', 'Product']) {
       for (const value of [
         '[[2, 3], undefined]',
@@ -187,7 +188,7 @@ describe('COMPLEX ENTRIES IN COMPILED ARRAYS', () => {
         .box(['Product', ['List', ['List', 2, 3], 'Missing']])
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN]');
+    ).toBe('["Missing","Missing"]');
   });
 
   test('Multiply of complex rows or matrices read with At', () => {

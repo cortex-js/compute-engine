@@ -2,11 +2,13 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
-// The absence markers `Nothing`, `Missing` and `Undefined` cannot be rebound
-// (user decision 2026-09-27). The engine recognizes each one by its NAME —
+// The absence markers `Nothing` and `Missing` cannot be rebound (user
+// decision 2026-09-27). The engine recognizes each one by its NAME —
 // `Nothing` is dropped from operand lists, and arithmetic reads a `Missing`
-// or `Undefined` operand as absent whatever it is bound to — so a binding of
-// one of them could never behave like the value it holds. Every other
+// operand as absent whatever it is bound to — so a binding of one of them
+// could never behave like the value it holds. `Undefined` is not an absence
+// marker: it is an ordinary symbol with no value (`docs/ERROR-MODEL.md`,
+// "`Missing` is a result only"). Every other
 // capitalized library name is shadowed by a user binding
 // (`test/compute-engine/library-name-shadowing.test.ts`).
 //
@@ -25,12 +27,12 @@ describe('a binding of an absence marker is an error', () => {
   test.each([
     ['let Nothing = 3', 'Nothing'],
     ['let Missing = 3', 'Missing'],
-    ['const Undefined = 3', 'Undefined'],
+    ['const Missing = 3', 'Missing'],
     ['Missing = 3', 'Missing'],
     ['let (a, Missing) = (1, 2)', 'Missing'],
-    ['function Undefined(x) { x }', 'Undefined'],
+    ['function Missing(x) { x }', 'Missing'],
     ['f(Nothing) = 1', 'Nothing'],
-    ['(Undefined) => 1', 'Undefined'],
+    ['(Missing) => 1', 'Missing'],
     ['for Missing in [1] { 1 }', 'Missing'],
     ['match 3 { Missing => 1 }', 'Missing'],
     ['sum(Missing, Missing in [1, 2])', 'Missing'],
@@ -51,10 +53,11 @@ describe('a binding of an absence marker is an error', () => {
     // destructuring assignment writes each leaf.
     const value = (source: string) =>
       executeEpsil(new ComputeEngine(), source).value.toString();
-    expect(value('function Undefined(x) { x }\nUndefined(42)')).toBe(
-      'Undefined(42)'
+    // `Missing` is still the marker, not a function: the call is an error.
+    expect(value('function Missing(x) { x }\nMissing(42)')).toContain(
+      'expected-function'
     );
-    expect(value('Undefined(x) = x\nUndefined(3)')).toBe('Undefined(3)');
+    expect(value('Missing(x) = x\nMissing(3)')).toContain('expected-function');
     expect(value('let a = 0\n(a, Missing) := (1, Undefined)\nMissing')).toBe(
       '"Missing"'
     );
@@ -86,7 +89,7 @@ describe('a binding of an absence marker is an error', () => {
     const value = ce
       .box([
         'Declare',
-        'Undefined',
+        'Missing',
         ['Dictionary', ['KeyValuePair', 'value', 3]],
       ])
       .evaluate();

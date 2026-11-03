@@ -699,7 +699,7 @@ describe('the rename of the shadowing calls', () => {
     // absent input. The call keeps its own route: the compile declines.
     const ce = new ComputeEngine();
     ce.declare('Gamma', {
-      signature: '(number | missing) -> number',
+      signature: '(number) -> number',
       missingBehavior: 'reject',
       evaluate: ['Function', 42, 'x'],
     } as any);

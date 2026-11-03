@@ -1,9 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-// A collection operator over an ABSENT collection answers the marker of its
-// codomain, `Missing` for a collection result and `NaN` for a number (user
-// decision 2026-09-25): the default absence policy of an operator with no
+// A collection operator over an ABSENT collection answers `Missing`, also
+// for a number result (user decision 2026-09-25; since 2026-11-02 an operator
+// over `Missing` gives `Missing`, `docs/ERROR-MODEL.md`, "`Missing` is a
+// result only"; before, a number result was `NaN`): the default absence policy of an operator with no
 // declared `missingBehavior` now covers a signature whose parameters are
 // collections (and functions) as well as one whose parameters are numbers
 // (`signatureParamsPropagateAbsence`, `boxed-operator-definition.ts`). Before,
@@ -68,10 +69,10 @@ describe('a collection operator over an absent collection', () => {
     ['Length', ['Length', 'Missing']],
     ['Count', ['Count', 'Missing']],
     ['Reduce', ['Reduce', 'Missing', plus, 0]],
-  ])('%s answers NaN, the marker of a number', (_op, json) => {
+  ])('%s answers Missing, also for a number result', (_op, json) => {
     const e = engine().box(json as never);
     expect(e.isValid).toBe(true);
-    expect(e.evaluate().toString()).toBe('NaN');
+    expect(e.evaluate().toString()).toBe('"Missing"');
   });
 
   test('an absent operand beside a list still lands in each cell of a broadcast', () => {
@@ -82,7 +83,7 @@ describe('a collection operator over an absent collection', () => {
         .box(['Add', 'Missing', ['List', 1, 2]])
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN]');
+    ).toBe('["Missing","Missing"]');
   });
 });
 
@@ -170,15 +171,15 @@ describe('a collection operator over a restricted collection', () => {
 });
 
 describe('Insert, ReplaceAt and Append over an absent collection', () => {
-  // They answer `Missing` on every route (user decision 2026-09-26). Before,
-  // a boxed `Insert(Missing, 1, 2)` was an `incompatible-type` error, and
-  // only a restricted collection whose condition failed gave `Missing`.
+  // They answer `Missing` on every route (user decision 2026-09-26), and an
+  // operator over an operand typed `missing` is typed `missing`. Before, a
+  // boxed `Insert(Missing, 1, 2)` was an `incompatible-type` error, and only
+  // a restricted collection whose condition failed gave `Missing`.
   const RL = ['If', ['Less', 0, 't'], ['List', 1, 2]];
   test.each([
-    ['Insert', ['Insert', 'Missing', 1, 2], 'list<integer> | missing'],
-    ['ReplaceAt', ['ReplaceAt', 'Missing', 1, 2], 'list<integer> | missing'],
-    ['Append', ['Append', 'Missing', 1], 'list | missing'],
-    ['Append (Undefined)', ['Append', 'Undefined', 1], 'list | missing'],
+    ['Insert', ['Insert', 'Missing', 1, 2], 'missing'],
+    ['ReplaceAt', ['ReplaceAt', 'Missing', 1, 2], 'missing'],
+    ['Append', ['Append', 'Missing', 1], 'missing'],
   ])('%s answers Missing', (_op, json, type) => {
     const e = engine().box(json as never);
     expect(e.isValid).toBe(true);
@@ -364,8 +365,12 @@ describe('a search finds an absent value where the same marker sits', () => {
     expect(ce.box(['Contains', 'Missing', 2]).evaluate().toString()).toBe(
       '"False"'
     );
-    expect(ce.box(['IndexOf', 'Missing', 2]).evaluate().toString()).toBe('NaN');
-    expect(ce.box(['Count', 'Missing', 2]).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['IndexOf', 'Missing', 2]).evaluate().toString()).toBe(
+      '"Missing"'
+    );
+    expect(ce.box(['Count', 'Missing', 2]).evaluate().toString()).toBe(
+      '"Missing"'
+    );
     expect(
       ce
         .box(['Contains', 'Missing', 'Missing'])
@@ -422,7 +427,6 @@ describe('Join and the set operators over an absent collection', () => {
   test.each([
     [['Join', 'Missing', ['List', 1]]],
     [['Join', ['List', 1], 'Missing']],
-    [['Join', ['List', 1], 'Undefined']],
     [['Union', 'Missing', T]],
     [['Union', S, 'Missing']],
     [['Intersection', 'Missing', T]],
@@ -481,11 +485,10 @@ describe('Join and the set operators over an absent collection', () => {
   // `Join` and `Append` with an operand that can be absent are not collection
   // views: their collection handlers do not enumerate the present operands.
   // Before, `Join(Missing, [3])` evaluated to `Missing` but enumerated `3`,
-  // so `Sum` of it stayed unevaluated while `Sum(Missing)` is `NaN`, and the
+  // so `Sum` of it stayed unevaluated while `Sum(Missing)` is `Missing`, and the
   // unevaluated `Join([1, 2]{c}, [3])` printed as a `Set` of restricted cells.
   test.each([
     [['Join', 'Missing', ['List', 3]]],
-    [['Join', ['List', 3], 'Undefined']],
     [['Append', 'Missing', 3]],
     [['Join', ['If', c, ['List', 1, 2]], ['List', 3]]],
     [['Append', ['If', c, ['List', 1, 2]], 3]],
@@ -507,11 +510,11 @@ describe('Join and the set operators over an absent collection', () => {
   });
 
   test.each([
-    [['Sum', ['Join', 'Missing', ['List', 3]]], 'NaN'],
-    [['Sum', ['Append', 'Missing', 3]], 'NaN'],
-    [['Max', ['Join', 'Missing', ['List', 3]]], 'NaN'],
-    [['Max', ['Append', 'Missing', 3]], 'NaN'],
-    [['Length', ['Join', 'Missing', ['List', 3]]], 'NaN'],
+    [['Sum', ['Join', 'Missing', ['List', 3]]], '"Missing"'],
+    [['Sum', ['Append', 'Missing', 3]], '"Missing"'],
+    [['Max', ['Join', 'Missing', ['List', 3]]], '"Missing"'],
+    [['Max', ['Append', 'Missing', 3]], '"Missing"'],
+    [['Length', ['Join', 'Missing', ['List', 3]]], '"Missing"'],
     [['Reverse', ['Append', 'Missing', 3]], '"Missing"'],
   ])('a consumer of %j agrees with the evaluation', (json, expected) => {
     expect(
@@ -523,12 +526,12 @@ describe('Join and the set operators over an absent collection', () => {
   });
 
   test.each([
-    [['Sum', ['Join', ['If', c, ['List', 1, 2]], ['List', 3]]], '6', 'NaN'],
-    [['Sum', ['Append', ['If', c, ['List', 1, 2]], 3]], '6', 'NaN'],
+    [['Sum', ['Join', ['If', c, ['List', 1, 2]], ['List', 3]]], '6', '"Missing"'],
+    [['Sum', ['Append', ['If', c, ['List', 1, 2]], 3]], '6', '"Missing"'],
     [
       ['Length', ['Join', ['If', c, ['List', 1, 2]], ['List', 3]]],
       '3',
-      'NaN',
+      '"Missing"',
     ],
   ])('a consumer of %j over a restricted list', (json, present, absent) => {
     for (const [t, expected] of [
@@ -578,7 +581,7 @@ describe('A set relation over an absent set', () => {
     const ce = engine();
     for (const args of [
       ['Missing', ['Set', 2, 3]],
-      [['Set', 2], 'Undefined'],
+      [['Set', 2], 'Missing'],
     ]) {
       const e = ce.box([op, ...args] as never);
       expect(e.type.toString()).toBe('boolean');
@@ -730,10 +733,10 @@ describe('Absent sources under other collection operators', () => {
     ]) {
       expect(
         ce.box(['Sum', ['Join', ['List', 3], inner]] as never).evaluate().toString()
-      ).toBe('NaN');
+      ).toBe('"Missing"');
       expect(
         ce.box(['Length', ['Join', ['List', 3], inner]] as never).evaluate().toString()
-      ).toBe('NaN');
+      ).toBe('"Missing"');
     }
   });
   test('a lazy view with unknowns keeps membership open', () => {

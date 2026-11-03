@@ -5,7 +5,6 @@ import type {
 import {
   isNumber,
   isFunction,
-  isAbsentSymbol,
   isContinuationOperand,
 } from './type-guards.js';
 import { sortAddTerms, sortProductOperands } from './order.js';
@@ -73,17 +72,6 @@ function negateTupleComponents(
   return result;
 }
 
-/**
- * The result of cancelling an even number of negations around `expr`.
- * `-(-x)` is `x`, but `-(-Missing)` is `NaN`, not the bare symbol:
- * arithmetic with an absent operand (`Missing` or `Undefined`) is `NaN`
- * (user decision of 2026-09-25), and cancelling the signs must not turn the
- * negation into the absent value itself.
- */
-function absentAsNaN(expr: Expression): Expression {
-  return isAbsentSymbol(expr) ? expr.engine.NaN : expr;
-}
-
 export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
   let sign = -1;
@@ -91,7 +79,7 @@ export function canonicalNegate(expr: Expression): Expression {
     expr = expr.op1;
     sign = -sign;
   }
-  if (sign === 1) return absentAsNaN(expr);
+  if (sign === 1) return expr;
 
   if (isNumber(expr)) return expr.neg();
 
@@ -129,7 +117,7 @@ export function negate(expr: Expression): Expression {
     expr = expr.op1;
     sign = -sign;
   }
-  if (sign === 1) return absentAsNaN(expr);
+  if (sign === 1) return expr;
 
   if (isNumber(expr)) return expr.neg();
 

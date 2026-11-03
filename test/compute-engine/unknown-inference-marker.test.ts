@@ -136,20 +136,10 @@ describe('D4: a value-derived join keeps the unresolved arm', () => {
     // `list<integer>`).
     const join = ce.box(['ListJoin', 'fs', ['List', 2]]);
     expect(join.type.toString()).toBe('list<unknown>');
-    ce.declare('tu', 'tuple<unknown, missing>');
     const keep: MathJsonExpression = ['Function', ['Greater', '_', 0], '_'];
-    // Before an assignment, the first slot of `tu` is unresolved.
-    expect(ce.box(['Filter', 'tu', keep]).type.toString()).toBe(
-      'list<missing | unknown>'
-    );
-    // `Sort(tu)` goes through the generic solver. The element type of a
-    // tuple, read for the pattern `indexed_collection<T>`, keeps the
-    // `unknown` slot beside the `missing` slot, as `Filter` does.
-    expect(ce.box(['Sort', 'tu']).type.toString()).toBe(
-      'list<missing | unknown>'
-    );
-    // An assignment refines the nested `unknown` slot (CE-3.5): `tu` is then
-    // a `tuple<integer, missing>`.
+    // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only"): `tu` takes the type inferred from the
+    // value it is assigned, a `tuple<integer, missing>`.
     ce.assign('tu', ce.box(['Tuple', 1, 'Missing']));
     expect(ce.box('tu').type.toString()).toBe('tuple<integer, missing>');
     const filtered = ce.box(['Filter', 'tu', keep]);
@@ -194,7 +184,7 @@ describe('D4: a value-derived join keeps the unresolved arm', () => {
     expect(
       ce.box(['Map', IDENTITY, ['List', 1, 'Missing']]).type.toString()
     ).toBe('list<integer | missing^2>');
-    expect(ce.box(['Tuple', 1, 'Undefined']).type.toString()).toBe(
+    expect(ce.box(['Tuple', 1, 'Missing']).type.toString()).toBe(
       'tuple<integer, missing>'
     );
   });
@@ -397,16 +387,14 @@ describe('D2, D3, R7: a declaration with contents left to inference refines from
     ce.declareType('cyz', 'cyz | 0', { alias: true });
     expect(provablyAdmits('missing', ce.type('cyc').type)).toBe(false);
     expect(provablyAdmits('nothing', ce.type('cyz').type)).toBe(false);
-    ce.declareType('cym', 'cym | missing', { alias: true });
-    expect(provablyAdmits('missing', ce.type('cym').type)).toBe(true);
   });
 
   test('review: the reducer reads aliases of the markers and is order-independent', () => {
     const ce = new ComputeEngine();
+    // An alias of `missing` cannot be declared (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only").
     ce.declareType('U', 'unknown', { alias: true });
-    ce.declareType('M', 'missing', { alias: true });
     expect(s(reduceType(ce.type('missing | U').type))).toBe('U | missing');
-    expect(s(reduceType(ce.type('M | unknown').type))).toBe('M | unknown');
     expect(s(reduceType({ kind: 'union', types: ['unknown', 'any'] }))).toBe(
       'any'
     );

@@ -17,34 +17,46 @@ when it compiles. A difference that this list does not name is a defect.
 - A value where the interpreter gives no number. Where `evaluate()` gives
   `Missing`, `Nothing`, `Indeterminate`, an unevaluated form or an error,
   the compiled code can give `NaN`, `0`, `±Infinity`, `undefined` or
-  `null`, can throw, or can decline. With `q: real | missing` and `q`
-  absent, `Sqrt(q)` can give `0` on `javascript` where the interpreter
-  gives `NaN`.
+  `null`, can throw, or can decline. With `q` holding `Missing`, `Sqrt(q)`
+  can give `0` on `javascript` where the interpreter gives `Missing`.
 - **Everything computed from an absent value, except at a discharge.** An
   absent value is specified at three kinds of places only. Its producers: a
   read past the end (`At`, `First`, `Last`), a cell of an element-wise
   `If`, `Which` or `When` that no clause selects, a scalar selection that
-  takes no arm, an input or an element whose declared type has a `missing`
-  arm and holds `Missing`; the producer gives `NaN` for a numeric type and
-  the target's absent object (`undefined` on `javascript`, `None` on
-  `python`) otherwise. The structure that moves it without computing on it:
+  takes no arm, the written symbol `Missing`; the producer gives `NaN` for
+  a numeric type, a point whose coordinates are all `NaN` for a point type
+  (`At([(1, 2), (3, 4)], 5)` is `(NaN, NaN)` on every route), and the
+  target's absent object (`undefined` on `javascript`, `None` on
+  `python`) otherwise. A declared type cannot name `missing` (user
+  decision of 2026-11-02, `docs/ERROR-MODEL.md`, "`Missing` is a result
+  only"), so an input is never declared absent. The structure that moves it without computing on it:
   `At`, `First`, `Last`, `Rest`, `Length`, `Reverse`, and the binding of a
   callback parameter by `Map` and its relatives (`Length([1, Missing])` is 2
   on every route). Its discharge: `IsMissing`, `Coalesce` (`??`),
   `AssertPresent` (`?!`) and a default parameter, which give the
   interpreter's value for an absent operand of any spelling (`Missing`,
-  `NaN`, `undefined`, `None`). Every other operator over an absent operand
+  `NaN`, `undefined`, `None`). A point (a tuple of numbers, `tuple<real,
+  real>` included) is tested at a discharge and at a default with the point
+  test, which also reads the point of `NaN` coordinates as absent: no point
+  is proved present by its type, as no `real` is, because a read out of
+  range gives that point whatever the type says. The test is chosen from
+  the static type; the emitted code tests no type at run time. A false
+  restriction of a point, `If(c, (1, 2))`, is the point of `NaN`
+  coordinates (user decision of 2026-11-03) on `javascript` (`[NaN, NaN]`),
+  `python` (a tuple of `nan`), the shader targets (a `vec2` of
+  `NaN`) and `interval-js` (a point of `empty` coordinates).
+  Every other operator over an absent operand
   (arithmetic, a point operation, a comparison, `Not`, `And`, `Or`, a branch
   condition, a reducer, a string operation, the body of a user function) is
   unspecified in compiled code: the value can be `NaN`, `false`,
   `undefined`, a throw or a decline, and everything computed from that
   value is unspecified too, `IsMissing` and `Coalesce` of it included. With
-  `w: real | missing` holding `Missing`, `If(IsMissing(w), 1, 0)` is 1 on
+  `w` holding `Missing`, `If(IsMissing(w), 1, 0)` is 1 on
   every route; `If(w > 0, 1, 0)` is 0 in the interpreter (a comparison with
   an absent operand is `False`, user decision of 2026-11-02, two-valued
   comparisons) and `NaN` on `javascript` (the compiled condition takes no
   arm). The host discharges a possibly absent value before it computes on
-  it. The interpreter keeps its own rules (`Missing + 1` is `NaN`,
+  it. The interpreter keeps its own rules (`Missing + 1` is `Missing`,
   `Less(Missing, 1)` is `False`, `If(Missing, 1, 2)` is `2`) as a
   convenience, not as a guarantee that compiled code follows. The only
   absent object a host passes to compiled JavaScript is `undefined`; a
@@ -100,9 +112,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`: in a loop with an outer `a = 100`, `function f() { a }` and
   `let (a, b) = (k, f())`, the compiled `b` is `k`; the interpreter gives
   `b = 100` (was CE-756).
-- `javascript`: `Map(t ↦ 7, LL)` with `LL: list<list<real> | missing>` holding
-  `[[1, 2], [3]]` gives `[[7, 7], [7]]`; the interpreter gives `[7, 7]` (was
-  CE-742).
+- `python`: `At(L, 1.5)` with `L: list<real>` holding `[10, 20]` reads
+  `_l[int(_i) - 1]` and gives `10`; the interpreter gives `NaN` (a finite
+  index that is not an integer reads the absent value of the domain).
 - `javascript`, `python`: dependent `Sum` clauses with an outer `k = 3`,
   `Sum(j + k, Limits(j, 1, k), Limits(k, 1, k))`, give 36; the interpreter
   gives 24.
@@ -158,6 +170,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   interpreter gives `"d"`. A numeric local, `a ≔ If(c, 3)` with
   `f := (x = 5) ↦ x + 1`, agrees (6), because a numeric argument is always
   tested for absence.
+- `javascript`, `B: broadcastable<number>`, `P: tuple<real, real>` at
+  `B = 1` (plausible?): `If(B < 0, P)` gives `undefined` (the condition
+  can be a list, so the run-time selection `_SYS.selectAbsent` gives
+  `undefined` for the whole value when the condition is one `false`); the
+  interpreter gives `(NaN, NaN)`, a false restriction of a point (user
+  decision of 2026-11-03). With `c: boolean | list<boolean>`, `If(c, P)`
+  agrees: the declared union compiles one body per member.
 
 ## Shapes are settled at compile time
 
@@ -2355,8 +2374,8 @@ BEFORE the loop (outside the per-cell `try`): a cell whose two bounds are
 the same value is read as that number when the type has a numeric arm, any
 other cell by the kind's `entry`. One refused cell throws, or rejects the
 promise, for the whole call. Every other input keeps the pass-through of
-the runner, including the `NaN` that marks the absent value of a
-`real | missing` input.
+the runner, including a `NaN` input. (A `real | missing` input cannot be
+declared since 2026-11-02.)
 
 **No interpreter fallback.** A decline of an expression with an input
 whose type has an `enclosure` arm, or whose result type has one, THROWS on

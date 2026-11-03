@@ -226,13 +226,12 @@ describe('a collection-valued At is typed as a LIST, so parents compose', () => 
   // `At(p, I) + 1` degenerating to JS array-plus-number string concatenation)
   // and collection operators would fail closed on a genuine list.
   test('a collection index yields a list type, a scalar index does not', () => {
-    // §3.C: a gather is `list<T | marker(T)>`; the marker of a numeric `T` is
-    // the `nan` singleton, so the arm is additive and the element tier
-    // survives (it used to absorb to a bare `number`). A mask filters, so it
-    // carries no marker at all. A scalar index is `T | marker(T)`, unless
-    // the source is proved to hold that position (user decision 2026-09-30),
-    // and the marker `nan` alone when it is proved NOT to hold it.
-    expect(at(['List', 1, 3]).type.toString()).toBe('list<integer | nan>');
+    // A gather is `list<T>` and a scalar index is `T`: a result type
+    // describes the successful values, and the marker of a read that may
+    // find nothing is implicit (`docs/ERROR-MODEL.md`, "`Missing` is a
+    // result only"). A read proved NOT to hold the position is typed by the
+    // marker alone, `nan` for a number.
+    expect(at(['List', 1, 3]).type.toString()).toBe('list<integer>');
     expect(at(['List', 'True', 'False', 'True']).type.toString()).toBe(
       'list<integer>'
     );
@@ -399,17 +398,16 @@ describe('At with a CHAINED (multi-)index — result type follows the chain', ()
   const M = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
 
   test('a chained scalar index yields the scalar element type', () => {
-    // §3.C: the final scalar step is `T | marker(T)`, and the marker of a
-    // numeric `T` is the `nan` singleton.
+    // The final scalar step is `T`: the marker is implicit.
     const expr = ce.box(['At', M, 1, 2] as any);
     expect(expr.evaluate().re).toBe(2);
-    expect(expr.type.toString()).toBe('integer | nan');
+    expect(expr.type.toString()).toBe('integer');
   });
 
   test('a gather at a later step yields a list', () => {
     const expr = ce.box(['At', M, 1, ['List', 1, 2]] as any);
     expect(expr.evaluate().toString()).toBe('[1,2]');
-    expect(expr.type.toString()).toBe('list<integer | nan>');
+    expect(expr.type.toString()).toBe('list<integer>');
   });
 
   test('a single index into a matrix still yields the row type', () => {
@@ -438,8 +436,8 @@ describe('At with a CHAINED (multi-)index — result type follows the chain', ()
   test('a tuple source keeps its slot-aware typing', () => {
     const expr = ce.box(['At', ['Tuple', 10, 20, 30], ['List', 1, 3]] as any);
     expect(expr.evaluate().toString()).toBe('[10,30]');
-    // A gather is `list<T | marker(T)>`; the marker of a numeric `T` is `nan`.
-    expect(expr.type.toString()).toBe('list<integer | nan>');
+    // A gather is `list<T>`: the marker is implicit.
+    expect(expr.type.toString()).toBe('list<integer>');
     expect(ce.box(['At', ['Tuple', 10, 20, 30], 2] as any).type.toString()).toBe(
       'integer'
     );

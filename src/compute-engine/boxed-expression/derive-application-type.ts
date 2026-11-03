@@ -452,9 +452,9 @@ export function installBroadcastLiftHooks(hooks: BroadcastLiftHooks): void {
 
 /**
  * The components of a numeric tuple: a number, or an absence marker. An
- * absent component (`Missing`, or `Undefined`, which a tuple literal also
- * types `missing`) reads as `NaN` in a numeric slot, so it does not stop the
- * tuple from being a point: `-(1, Missing)` is `(-1, NaN)`. This is the rule
+ * absent component (`Missing`) does not stop the tuple from being a point:
+ * the arithmetic computes each component, and an operator over `Missing`
+ * gives `Missing`, so `-(1, Missing)` is `(-1, Missing)`. This is the rule
  * that the arithmetic handlers apply (`couldBeNumericElement`,
  * `collection-utils.ts`). A union of the two (`integer | missing`, the
  * component of an index read that can be out of range) is also accepted.
@@ -971,18 +971,6 @@ export function deriveApplicationType(
   if (kindType !== undefined) return kindType;
 
   const propagate = def.resolvedMissingBehavior === 'propagate';
-  // An operand that is the library `Undefined` symbol stands for an absent
-  // value in a numeric slot, as `Missing` does (`isAbsentScalarSymbol`,
-  // `validate.ts`), so it is typed `missing` here, as at the call site.
-  // Its declared type, `unknown`, is dropped by a join, and the result then
-  // claimed the type of the present operands.
-  if (propagate)
-    operands = operands.map((d) => {
-      const s = d.structureOf?.();
-      return s?.kind === 'symbol' && s.name === 'Undefined'
-        ? { type: 'missing', facts: d.facts, structureOf: d.structureOf }
-        : d;
-    });
   // An operand absent only in its cells, at an operator that reorders or
   // selects cells without computing from them, takes no part in the
   // absorption, as at the call site (`passesAbsentCellsThrough`).

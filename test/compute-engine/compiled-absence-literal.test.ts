@@ -1,8 +1,8 @@
 /**
  * A WRITTEN absence symbol in a compiled expression (2026-09-22).
  *
- * `Missing` and `Undefined` are values, not inputs the caller supplies. They
- * used to fall through to the compiler's free-symbol read, so a compiled
+ * `Missing` is a value, not an input the caller supplies. It used to fall
+ * through to the compiler's free-symbol read, so a compiled
  * `IsMissing(Missing)` was `Number.isNaN(_.Missing)` with
  * `freeSymbols: ["Missing"]` and answered `false` against the interpreter's
  * `True`.
@@ -15,6 +15,14 @@
  * ABSENT cell. On a target with no object axis — the shader targets and the
  * interval target — the numeric marker is the only spelling there is, and it
  * is what a written absence symbol lowers to.
+ *
+ * `Undefined` was read as an absent value too until `Missing` became a
+ * result only (`docs/ERROR-MODEL.md`, user decision of 2026-11-02): it is
+ * now an ordinary symbol, and `Missing` is the one absent symbol.
+ *
+ * Where the interpreter gives `Missing` (`Median([1, Missing, 3])`), the
+ * compiled code gives `NaN` (`docs/COMPILATION-MODEL.md`, "Caveats of
+ * compiled code").
  *
  * See `docs/ERROR-MODEL.md` §3.
  */
@@ -31,7 +39,7 @@ function js(expr: any) {
 }
 
 describe('a written absence symbol is a value, not a free symbol', () => {
-  test.each([['Missing'], ['Undefined']])(
+  test.each([['Missing']])(
     '%s alone reports no free symbol',
     (name) => {
       const r = js(name);
@@ -44,7 +52,7 @@ describe('a written absence symbol is a value, not a free symbol', () => {
     }
   );
 
-  test.each([['Missing'], ['Undefined']])(
+  test.each([['Missing']])(
     'a %s inside an expression reports no free symbol either',
     (name) => {
       expect(js(['IsMissing', name]).freeSymbols).toEqual([]);
@@ -55,12 +63,12 @@ describe('a written absence symbol is a value, not a free symbol', () => {
 });
 
 describe('the discharge primitives answer what the interpreter answers', () => {
-  test.each([['Missing'], ['Undefined']])('IsMissing(%s) is true', (name) => {
+  test.each([['Missing']])('IsMissing(%s) is true', (name) => {
     expect(js(['IsMissing', name]).run!({})).toBe(true);
     expect(ce.box(['IsMissing', name]).evaluate().symbol).toBe('True');
   });
 
-  test.each([['Missing'], ['Undefined']])('Coalesce(%s, 2) is 2', (name) => {
+  test.each([['Missing']])('Coalesce(%s, 2) is 2', (name) => {
     expect(js(['Coalesce', name, 2]).run!({})).toBe(2);
     expect(ce.box(['Coalesce', name, 2]).evaluate().re).toBe(2);
   });
@@ -71,19 +79,19 @@ describe('an absent cell reaches the statistics reducers as absent', () => {
   // array without calling the comparator, so an un-normalized absent cell
   // shifted the median instead of poisoning it: `Median([1, Missing, 3])` was
   // `3`.
-  test.each([['Missing'], ['Undefined']])(
-    'Median([1, %s, 3]) is NaN',
+  test.each([['Missing']])(
+    'Median([1, %s, 3]) is absent',
     (name) => {
       const r = js(['Median', ['List', 1, name, 3]]);
       expect(r.success).toBe(true);
       expect(Number.isNaN(r.run!({}) as number)).toBe(true);
-      expect(ce.box(['Median', ['List', 1, name, 3]]).evaluate().isNaN).toBe(
-        true
-      );
+      expect(
+        ce.box(['Median', ['List', 1, name, 3]]).evaluate().symbol
+      ).toBe('Missing');
     }
   );
 
-  test.each([['Missing'], ['Undefined']])('Mean([1, %s, 3]) is NaN', (name) => {
+  test.each([['Missing']])('Mean([1, %s, 3]) is NaN', (name) => {
     expect(Number.isNaN(js(['Mean', ['List', 1, name, 3]]).run!({}))).toBe(
       true
     );
@@ -96,15 +104,12 @@ describe('an absent cell reaches the statistics reducers as absent', () => {
     [0, 'Missing'],
     [1, 'Missing'],
     [2, 'Missing'],
-    [0, 'Undefined'],
-    [1, 'Undefined'],
-    [2, 'Undefined'],
-  ])('Median with the absent cell at position %i (%s) is NaN', (at, name) => {
+  ])('Median with the absent cell at position %i (%s) is absent', (at, name) => {
     const cells: any[] = [1, 2, 3];
     cells[at as number] = name;
     const expr = ['Median', ['List', ...cells]];
     expect(Number.isNaN(js(expr).run!({}) as number)).toBe(true);
-    expect(ce.box(expr).evaluate().isNaN).toBe(true);
+    expect(ce.box(expr).evaluate().symbol).toBe('Missing');
   });
 
   // A HOLE in a sparse array the caller supplies is absent too. The scan is
@@ -182,7 +187,7 @@ describe('an absent cell reaches the statistics reducers as absent', () => {
   // A whole operand that is absent is absent DATA. `Mean(Missing)` emits
   // `_SYS.mean(undefined)`, which used to raise "values is not iterable"
   // behind `success: true`.
-  test.each([['Missing'], ['Undefined']])(
+  test.each([['Missing']])(
     'a bare %s operand answers the reducer absent result',
     (name) => {
       expect(Number.isNaN(js(['Mean', name]).run!({}) as number)).toBe(true);
@@ -195,11 +200,11 @@ describe('an absent cell reaches the statistics reducers as absent', () => {
 });
 
 describe('an absent operand in a numeric slot still answers NaN', () => {
-  test.each([['Missing'], ['Undefined']])('Cos(%s) is NaN', (name) => {
+  test.each([['Missing']])('Cos(%s) is NaN', (name) => {
     expect(Number.isNaN(js(['Cos', name]).run!({}) as number)).toBe(true);
   });
 
-  test.each([['Missing'], ['Undefined']])('%s + 1 is NaN', (name) => {
+  test.each([['Missing']])('%s + 1 is NaN', (name) => {
     expect(Number.isNaN(js(['Add', name, 1]).run!({}) as number)).toBe(true);
   });
 });

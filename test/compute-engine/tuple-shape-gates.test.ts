@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { isSubtype } from '../../src/common/type/subtype';
-import { stripMissingFromType } from '../../src/common/type/utils';
 import type { Type } from '../../src/common/type/types';
 import {
   hasTupleOrStringArm,
@@ -26,6 +25,23 @@ import {
 // operand of `Dot`. Each test below compares an absence-slotted tuple with
 // a value-slotted tuple: the two must be treated alike.
 //
+// A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+// is a result only — user decision of 2026-11-02"), so the tuple with an
+// absence slot is the tuple literal `(1, Missing)`, typed
+// `tuple<integer, missing>`.
+//
+
+/** The tuple literal with an absence slot, typed `tuple<integer, missing>`. */
+const ABSENT_SLOT = ['Tuple', 1, 'Missing'];
+
+describe('A DECLARED TYPE WITH AN ABSENCE SLOT', () => {
+  test('is an error', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.declare('t', 'tuple<integer, missing>')).toThrow(
+      /the type `missing` cannot be declared/
+    );
+  });
+});
 
 const SPREAD_ERROR = (name: string) => [
   'Error',
@@ -35,13 +51,33 @@ const SPREAD_ERROR = (name: string) => [
 
 describe('A TUPLE WITH AN ABSENCE SLOT DOES NOT SPREAD', () => {
   const ce = new ComputeEngine();
-  ce.declare('t', 'tuple<integer, missing>');
   ce.declare('u', 'tuple<integer, integer>');
   // A union whose every arm is a tuple is a tuple too.
-  ce.declare('w', 'tuple<integer> | tuple<integer, missing>');
   ce.declare('v', 'tuple<integer> | tuple<integer, integer>');
 
-  test.each(['t', 'u', 'w', 'v'])('in a list literal, box route: %s', (s) => {
+  test('a tuple literal with an absence slot, box and parse routes', () => {
+    const error = SPREAD_ERROR('(1, "Missing")');
+    expect(ce.box(['List', ['Spread', ABSENT_SLOT], 5]).json).toEqual([
+      'List',
+      error,
+      5,
+    ]);
+    expect(
+      ce.parse(
+        '\\lbrack\\mathrm{Spread}((1, \\operatorname{Missing})), 5\\rbrack'
+      ).json
+    ).toEqual(['List', error, 5]);
+    expect(ce.box(['Set', ['Spread', ABSENT_SLOT], 5]).json).toEqual([
+      'Set',
+      5,
+      error,
+    ]);
+    expect(ce.box(['Dictionary', ['Spread', ABSENT_SLOT]]).json).toEqual(
+      error
+    );
+  });
+
+  test.each(['u', 'v'])('in a list literal, box route: %s', (s) => {
     expect(ce.box(['List', ['Spread', s], 5]).json).toEqual([
       'List',
       SPREAD_ERROR(s),
@@ -49,7 +85,7 @@ describe('A TUPLE WITH AN ABSENCE SLOT DOES NOT SPREAD', () => {
     ]);
   });
 
-  test.each(['t', 'u'])('in a list literal, function route: %s', (s) => {
+  test.each(['u'])('in a list literal, function route: %s', (s) => {
     const e = ce.function('List', [
       ce.function('Spread', [ce.symbol(s)]),
       ce.number(5),
@@ -57,7 +93,7 @@ describe('A TUPLE WITH AN ABSENCE SLOT DOES NOT SPREAD', () => {
     expect(e.json).toEqual(['List', SPREAD_ERROR(s), 5]);
   });
 
-  test.each(['t', 'u', 'w', 'v'])('in a list literal, parse route: %s', (s) => {
+  test.each(['u', 'v'])('in a list literal, parse route: %s', (s) => {
     expect(ce.parse(`\\lbrack\\mathrm{Spread}(${s}), 5\\rbrack`).json).toEqual([
       'List',
       SPREAD_ERROR(s),
@@ -65,7 +101,7 @@ describe('A TUPLE WITH AN ABSENCE SLOT DOES NOT SPREAD', () => {
     ]);
   });
 
-  test.each(['t', 'u', 'w', 'v'])('in a set literal, box route: %s', (s) => {
+  test.each(['u', 'v'])('in a set literal, box route: %s', (s) => {
     expect(ce.box(['Set', ['Spread', s], 5]).json).toEqual([
       'Set',
       5,
@@ -73,7 +109,7 @@ describe('A TUPLE WITH AN ABSENCE SLOT DOES NOT SPREAD', () => {
     ]);
   });
 
-  test.each(['t', 'u', 'w', 'v'])('in a set literal, parse route: %s', (s) => {
+  test.each(['u', 'v'])('in a set literal, parse route: %s', (s) => {
     expect(ce.parse(`\\lbrace\\mathrm{Spread}(${s}), 5\\rbrace`).json).toEqual([
       'Set',
       5,
@@ -81,13 +117,14 @@ describe('A TUPLE WITH AN ABSENCE SLOT DOES NOT SPREAD', () => {
     ]);
   });
 
-  test.each(['t', 'u'])('in a dictionary literal: %s', (s) => {
+  test.each(['u'])('in a dictionary literal: %s', (s) => {
     expect(ce.box(['Dictionary', ['Spread', s]]).json).toEqual(SPREAD_ERROR(s));
   });
 
   test('an assigned tuple with an absent slot', () => {
+    // An assignment accepts the `Missing` marker in a declared slot.
     const ce2 = new ComputeEngine();
-    ce2.declare('t', 'tuple<integer, missing>');
+    ce2.declare('t', 'tuple<integer, integer>');
     ce2.assign('t', ce2.box(['Tuple', 1, 'Missing']));
     expect(ce2.box(['List', ['Spread', 't'], 5]).evaluate().json).toEqual([
       'List',
@@ -99,16 +136,14 @@ describe('A TUPLE WITH AN ABSENCE SLOT DOES NOT SPREAD', () => {
 
 describe('JOIN APPENDS A TUPLE WITH AN ABSENCE SLOT AS ONE ELEMENT', () => {
   const ce = new ComputeEngine();
-  ce.declare('t', 'tuple<integer, missing>');
-  ce.assign('t', ce.box(['Tuple', 1, 'Missing']));
   ce.declare('u', 'tuple<integer, integer>');
   ce.assign('u', ce.box(['Tuple', 1, 2]));
 
   test.each([
-    ['t', ['Tuple', 1, 'Missing']],
-    ['u', ['Tuple', 1, 2]],
-  ])('box route: %s', (s, tuple) => {
-    const j = ce.box(['Join', s, ['List', 3, 4]]);
+    ['(1, Missing)', ABSENT_SLOT, ['Tuple', 1, 'Missing']],
+    ['u', 'u', ['Tuple', 1, 2]],
+  ])('box route: %s', (_label, s, tuple) => {
+    const j = ce.box(['Join', s as never, ['List', 3, 4]]);
     expect(j.count).toBe(3);
     expect(ce.box(['Length', j]).evaluate().json).toBe(3);
     expect(ce.box(['At', j, 1]).evaluate().json).toEqual(tuple);
@@ -120,26 +155,21 @@ describe('JOIN APPENDS A TUPLE WITH AN ABSENCE SLOT AS ONE ELEMENT', () => {
     ]);
   });
 
-  test.each(['t', 'u'])('parse route: %s', (s) => {
+  test.each(['(1, \\operatorname{Missing})', 'u'])('parse route: %s', (s) => {
     expect(ce.parse(`\\mathrm{Join}(${s}, [3, 4])`).count).toBe(3);
   });
 
   test('a union of tuples is one element', () => {
     const ce2 = new ComputeEngine();
-    ce2.declare('w', 'tuple<integer> | tuple<integer, missing>');
     ce2.declare('v', 'tuple<integer> | tuple<integer, integer>');
-    expect(ce2.box(['Join', ['List', 3, 4], 'w']).count).toBe(3);
     expect(ce2.box(['Join', ['List', 3, 4], 'v']).count).toBe(3);
   });
 
-  test('a scalar or a tuple with an absence slot is one element', () => {
-    // A union of a scalar and a tuple can only be one element. Before, the
-    // absence-slotted arm read as a collection, and `Join` reported an
-    // `incompatible-type` error for `s`, but not for `s2`.
+  test('a scalar or a tuple is one element', () => {
+    // A union of a scalar and a tuple can only be one element.
     const ce2 = new ComputeEngine();
-    ce2.declare('s', 'integer | tuple<integer, missing>');
     ce2.declare('s2', 'integer | tuple<integer, integer>');
-    for (const x of ['s', 's2']) {
+    for (const x of ['s2']) {
       expect(ce2.box(['Join', ['List', 3, 4], x]).json).toEqual([
         'List',
         3,
@@ -158,19 +188,24 @@ describe('A TUPLE WITH AN ABSENCE SLOT IN A LIST SNAPSHOT COUNTS AS ONE', () => 
   // the tuple with an absence slot counted as its two components, the bound
   // was 5 instead of 4, and the list stayed a lazy `ListJoin` view.
   const ce = new ComputeEngine();
-  ce.declare('t', 'tuple<integer, missing>');
-  ce.assign('t', ce.box(['Tuple', 1, 'Missing']));
   ce.declare('u', 'tuple<integer, integer>');
   ce.assign('u', ce.box(['Tuple', 1, 2]));
   ce.maxCollectionSize = 4;
 
-  test.each(['t', 'u'])('%s', (s) => {
+  test.each([
+    ['(1, Missing)', ABSENT_SLOT],
+    ['u', 'u'],
+  ])('%s', (_label, s) => {
     const result = ce
       .box([
         'List',
         [
           'Spread',
-          ['Join', s, ['Map', ['Function', ['Random'], 'x'], ['Range', 1, 3]]],
+          [
+            'Join',
+            s as never,
+            ['Map', ['Function', ['Random'], 'x'], ['Range', 1, 3]],
+          ],
         ],
       ])
       .evaluate();
@@ -179,14 +214,13 @@ describe('A TUPLE WITH AN ABSENCE SLOT IN A LIST SNAPSHOT COUNTS AS ONE', () => 
   });
 });
 
-describe('A TUPLE WITH AN ABSENCE SLOT MAY EQUAL A TUPLE LITERAL', () => {
-  // `p` can hold `(1, 2)`, so `(1, 2) = p` is not decided while `p` has no
-  // value, as for `q`. Before, `p` was judged definitively unequal (`False`).
+describe('A TUPLE SYMBOL MAY EQUAL A TUPLE LITERAL', () => {
+  // `q` can hold `(1, 2)`, so `(1, 2) = q` is not decided while `q` has no
+  // value.
   const ce = new ComputeEngine();
-  ce.declare('p', 'tuple<integer, integer | missing>');
   ce.declare('q', 'tuple<integer, integer>');
 
-  test.each(['p', 'q'])('box route: %s', (s) => {
+  test.each(['q'])('box route: %s', (s) => {
     expect(ce.box(['Equal', ['Tuple', 1, 2], s]).evaluate().json).toEqual([
       'Equal',
       ['Tuple', 1, 2],
@@ -204,7 +238,7 @@ describe('A TUPLE WITH AN ABSENCE SLOT MAY EQUAL A TUPLE LITERAL', () => {
     ]);
   });
 
-  test.each(['p', 'q'])('parse route: %s', (s) => {
+  test.each(['q'])('parse route: %s', (s) => {
     expect(ce.parse(`(1, 2) = ${s}`).evaluate().json).toEqual([
       'Equal',
       ['Tuple', 1, 2],
@@ -212,33 +246,18 @@ describe('A TUPLE WITH AN ABSENCE SLOT MAY EQUAL A TUPLE LITERAL', () => {
     ]);
   });
 
-  test.each(['p', 'q'])('isEqual: %s', (s) => {
+  test.each(['q'])('isEqual: %s', (s) => {
     expect(ce.box(['Tuple', 1, 2]).isEqual(ce.symbol(s))).toBeUndefined();
-  });
-
-  test('with a value', () => {
-    const ce2 = new ComputeEngine();
-    ce2.declare('p', 'tuple<integer, integer | missing>');
-    ce2.assign('p', ce2.box(['Tuple', 1, 2]));
-    expect(ce2.box(['Equal', ['Tuple', 1, 2], 'p']).evaluate().json).toBe(
-      'True'
-    );
   });
 });
 
-describe('A TUPLE OF TUPLES WITH ABSENCE SLOTS DOES NOT COMPILE AS A MATRIX', () => {
+describe('A TUPLE OF TUPLES DOES NOT COMPILE AS A MATRIX', () => {
   // The interpreter does not contract a tuple of tuples (one point with
-  // nested coordinates), so the compiled `Dot` declines it. Before, the
-  // absence-slotted inner tuples were not seen as tuples, and `Dot(a, a)`
-  // compiled to `_SYS.matmul(_.a, _.a)`.
+  // nested coordinates), so the compiled `Dot` declines it.
   const ce = new ComputeEngine();
-  ce.declare(
-    'a',
-    'tuple<tuple<real, real | missing>, tuple<real, real | missing>>'
-  );
   ce.declare('b', 'tuple<tuple<real, real>, tuple<real, real>>');
 
-  test.each(['a', 'b'])('%s', (s) => {
+  test.each(['b'])('%s', (s) => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       expect(compile(ce.box(['Dot', s, s]))?.success).toBe(false);
@@ -357,18 +376,17 @@ describe('A SELF-REFERENTIAL ALIAS OF A TUPLE UNION', () => {
 });
 
 describe('A TUPLE LITERAL IS NOT EQUAL ONLY TO A VALUE THAT CANNOT BE A TUPLE', () => {
-  // Each of `x` (undeclared), `r`, `s` and `p` can hold `(1, 2)`, so the
+  // Each of `x` (undeclared), `s` and `q` can hold `(1, 2)`, so the
   // comparison is not decided while they have no value. Before, a tuple
   // literal was definitively unequal (`False`) to every value whose type is
   // not a tuple, so `(1, 2) = x` was `False`.
   const ce = new ComputeEngine();
-  ce.declare('r', 'tuple<integer, integer> | missing');
   ce.declare('s', 'integer | tuple<integer, integer>');
   ce.declare('q', 'tuple<integer, integer>');
   ce.declare('L', 'list<integer>');
   ce.declare('n', 'integer');
 
-  test.each(['x', 'r', 's', 'q', 'L'])('box route: %s', (y) => {
+  test.each(['x', 's', 'q', 'L'])('box route: %s', (y) => {
     expect(ce.box(['Equal', ['Tuple', 1, 2], y]).evaluate().json).toEqual([
       'Equal',
       ['Tuple', 1, 2],
@@ -381,7 +399,7 @@ describe('A TUPLE LITERAL IS NOT EQUAL ONLY TO A VALUE THAT CANNOT BE A TUPLE', 
     ]);
   });
 
-  test.each(['x', 'r', 's'])('parse route: %s', (y) => {
+  test.each(['x', 's'])('parse route: %s', (y) => {
     expect(ce.parse(`(1, 2) = ${y}`).evaluate().json).toEqual([
       'Equal',
       ['Tuple', 1, 2],
@@ -394,7 +412,7 @@ describe('A TUPLE LITERAL IS NOT EQUAL ONLY TO A VALUE THAT CANNOT BE A TUPLE', 
     ]);
   });
 
-  test.each(['x', 'r', 's'])('isEqual: %s', (y) => {
+  test.each(['x', 's'])('isEqual: %s', (y) => {
     expect(ce.box(['Tuple', 1, 2]).isEqual(ce.symbol(y))).toBeUndefined();
     expect(ce.symbol(y).isEqual(ce.box(['Tuple', 1, 2]))).toBeUndefined();
   });
@@ -410,16 +428,26 @@ describe('A TUPLE LITERAL IS NOT EQUAL ONLY TO A VALUE THAT CANNOT BE A TUPLE', 
 });
 
 describe('A LIST LITERAL IS NOT EQUAL TO A UNION OF TUPLES', () => {
-  // Every value of `w` and `v` is a tuple, and a list is never equal to a
-  // tuple, as for `t` and `q`. Before, the comparison with a union of tuples
-  // stayed undecided.
+  // Every value of `v` is a tuple, and a list is never equal to a tuple, as
+  // for `q` and the tuple literal with an absence slot. Before, the
+  // comparison with a union of tuples stayed undecided.
   const ce = new ComputeEngine();
-  ce.declare('t', 'tuple<integer, missing>');
   ce.declare('q', 'tuple<integer, integer>');
-  ce.declare('w', 'tuple<integer> | tuple<integer, missing>');
   ce.declare('v', 'tuple<integer> | tuple<integer, integer>');
 
-  test.each(['t', 'q', 'w', 'v'])('%s', (y) => {
+  test('a tuple literal with an absence slot', () => {
+    const t = ce.box(ABSENT_SLOT);
+    expect(ce.box(['Equal', ['List', 1, 2], ABSENT_SLOT]).evaluate().json).toBe(
+      'False'
+    );
+    expect(ce.box(['Equal', ABSENT_SLOT, ['List', 1, 2]]).evaluate().json).toBe(
+      'False'
+    );
+    expect(ce.box(['List', 1, 2]).isEqual(t)).toBe(false);
+    expect(t.isEqual(ce.box(['List', 1, 2]))).toBe(false);
+  });
+
+  test.each(['q', 'v'])('%s', (y) => {
     expect(ce.box(['Equal', ['List', 1, 2], y]).evaluate().json).toBe('False');
     expect(ce.box(['Equal', y, ['List', 1, 2]]).evaluate().json).toBe('False');
     expect(ce.parse(`[1, 2] = ${y}`).evaluate().json).toBe('False');
@@ -480,8 +508,6 @@ describe('A SELF-REFERENTIAL ALIAS DOES NOT OVERFLOW THE STACK', () => {
   const ALIASES: [string, string][] = [
     ['cyc', 'cyc | tuple<number, number>'],
     ['lcyc', 'lcyc | list<integer>'],
-    ['mcyc', 'mcyc | tuple<number, number> | missing'],
-    ['mlcyc', 'mlcyc | list<integer> | missing'],
     ['pcyc', 'pcyc | tuple<number, number> | list<tuple<number, number>>'],
     ['nest', 'list<nest> | integer'],
     ['rcyc', 'rcyc | record{a: integer}'],
@@ -599,29 +625,14 @@ describe('A LIST LITERAL IS NOT EQUAL ONLY TO A VALUE THAT CANNOT BE A LIST', ()
 });
 
 describe('A SELF-REFERENTIAL ALIAS REACHED THROUGH A CONSTRUCTOR', () => {
-  // The inner `a` of `list<a | integer>` stands for values deeper in the
+  // The inner `pts` of `list<pts>` stands for values deeper in the
   // structure, unlike the arm `cyc` of `cyc | tuple<…>`, which adds no value
-  // of its own. A walk cut there must not drop it, and a rewrite of the
-  // leaves must not keep it with its old leaves. Before, the strip dropped
-  // it, and a quotient kept it unchanged, so each type below left out
+  // of its own. A rewrite of the leaves must not keep it with its old
+  // leaves. Before, a quotient kept it unchanged, so the type below left out
   // values that the expression can have.
   const ce = new ComputeEngine();
-  ce.declareType('a', 'list<a | integer> | missing', { alias: true });
-  ce.declareType('tree', 'integer | list<tree | missing>', { alias: true });
   ce.declareType('pts', 'tuple<integer, integer> | list<pts>', {
     alias: true,
-  });
-  const T = (s: string) => ce.type(s).type;
-
-  test('the strip keeps the deeper values', () => {
-    const a = stripMissingFromType(T('a'));
-    expect(isSubtype(T('list<list<list<integer>>>'), a)).toBe(true);
-    const tree = stripMissingFromType(T('tree'));
-    for (const value of [
-      ['List', ['List', 1]],
-      ['List', ['List', ['List', 1]]],
-    ])
-      expect(isSubtype(ce.box(value as never).type.type, tree)).toBe(true);
   });
 
   test('a quotient and a product admit the deeper values', () => {
@@ -646,7 +657,6 @@ describe('AN INTERSECTION OR A TYPE VARIABLE', () => {
   const ce = new ComputeEngine();
   ce.declare('k', 'tuple<integer, integer> & !tuple<0, 0>');
   ce.declare('z', 'indexed_collection<integer> & !set');
-  ce.declare('y', 'tuple<integer, missing> & tuple<number, missing>');
 
   test('an intersection with a tuple member is a tuple', () => {
     expect(ce.box(['Join', ['List', 3, 4], 'k']).count).toBe(3);
@@ -668,7 +678,6 @@ describe('AN INTERSECTION OR A TYPE VARIABLE', () => {
 
   test('a literal may equal it', () => {
     expect(ce.box(['List', 1, 2]).isEqual(ce.symbol('z'))).toBeUndefined();
-    expect(ce.box(['Tuple', 1, 2]).isEqual(ce.symbol('y'))).toBeUndefined();
   });
 
   test('a type variable could be a tuple or a list', () => {

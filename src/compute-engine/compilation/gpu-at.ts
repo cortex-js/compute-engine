@@ -349,12 +349,11 @@ export function gpuAtBaseShape(
   // tests the same two names.
   if (
     isSymbol(base, 'Missing') ||
-    isSymbol(base, 'Undefined') ||
     t === 'missing'
   )
     return {
       decline:
-        'the base is the absence marker (`Missing` or `Undefined`), which ' +
+        'the base is the absence marker (`Missing`), which ' +
         'has no shader value to index into',
     };
 
@@ -629,7 +628,6 @@ export function gpuAtEntryKind(e: Expression): GPUAtEntry {
   if (
     isString(e) ||
     isSymbol(e, 'Missing') ||
-    isSymbol(e, 'Undefined') ||
     isFunction(e, 'List') ||
     isFunction(e, 'Tuple') ||
     isFunction(e, 'Dictionary')
@@ -809,7 +807,6 @@ export function compileGPUPointListAt(
     );
   if (
     isSymbol(index, 'Missing') ||
-    isSymbol(index, 'Undefined') ||
     isSubtype(gpuType(index), 'missing')
   ) {
     if (!base.isPure)
@@ -1096,7 +1093,6 @@ export function compileGPUStorageBufferAt(
     );
   if (
     isSymbol(index, 'Missing') ||
-    isSymbol(index, 'Undefined') ||
     BaseCompiler.isComplexValued(index) ||
     !couldMatch(gpuType(index), 'number')
   )

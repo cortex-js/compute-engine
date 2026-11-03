@@ -185,8 +185,11 @@ describe('INDETERMINATE — the Add and Multiply folds', () => {
     );
   });
 
-  test('an absent term gives NaN (the absence rule is unchanged)', () => {
-    expect(box(['Add', 'Indeterminate', 'Missing']).toString()).toBe('NaN');
+  test('an absent term gives Missing', () => {
+    // An operator over `Missing` gives `Missing`.
+    expect(box(['Add', 'Indeterminate', 'Missing']).toString()).toBe(
+      '"Missing"'
+    );
   });
 
   test('the parse and Epsil routes agree', () => {
@@ -266,7 +269,7 @@ describe('INDETERMINATE — the reducers', () => {
       'NaN'
     );
     expect(box(['Mean', ['List', 1, 'Indeterminate', 'Missing']]).toString()).toBe(
-      'NaN'
+      '"Missing"'
     );
     expect(epsil('mean([1, Indeterminate])').toString()).toBe('Indeterminate');
   });
@@ -524,9 +527,9 @@ describe('INDETERMINATE — isExact and isMachineNumeric', () => {
 });
 
 describe('INDETERMINATE — the absence rules are unchanged', () => {
-  test('an absent operand still gives NaN, never Indeterminate', () => {
-    expect(box(['Add', 'Missing', 2]).toString()).toBe('NaN');
-    expect(box(['Length', 'Missing']).toString()).toBe('NaN');
+  test('an absent operand gives Missing, never Indeterminate', () => {
+    expect(box(['Add', 'Missing', 2]).toString()).toBe('"Missing"');
+    expect(box(['Length', 'Missing']).toString()).toBe('"Missing"');
     // A `Map` callback that errors per element gives an error or its absence
     // marker `NaN` per cell under `.N()`, never `Indeterminate` (the setup
     // of `compile-fold-error-value.test.ts`).
@@ -611,7 +614,7 @@ describe('INDETERMINATE — the list-cell repair keeps it', () => {
       ['List', 'Missing', ['Tuple', 1, 2]],
     ]);
     expect(expression.type.toString()).toBe(
-      'list<(missing | tuple<integer | nan, integer | nan>)^2>'
+      'list<(missing | tuple<integer, integer>)^2>'
     );
     expect(expression.evaluate().type.matches(expression.type)).toBe(true);
     const result = markAbsentPointCells(
@@ -1210,11 +1213,11 @@ describe('INDETERMINATE — the producers: the poles and the other NaN are uncha
     expect(box(['Ln', -2]).toString()).toBe('ln(-2)');
   });
 
-  test('an absent operand still gives NaN', () => {
-    expect(box(['Add', 'Missing', 2]).toString()).toBe('NaN');
-    expect(box(['Multiply', 'Missing', 0]).toString()).toBe('NaN');
-    expect(box(['Divide', 'Missing', 0]).toString()).toBe('NaN');
-    expect(box(['Length', 'Missing']).toString()).toBe('NaN');
+  test('an absent operand gives Missing', () => {
+    expect(box(['Add', 'Missing', 2]).toString()).toBe('"Missing"');
+    expect(box(['Multiply', 'Missing', 0]).toString()).toBe('"Missing"');
+    expect(box(['Divide', 'Missing', 0]).toString()).toBe('"Missing"');
+    expect(box(['Length', 'Missing']).toString()).toBe('"Missing"');
     expect(box(['Multiply', 'NaN', 0]).toString()).toBe('NaN');
     expect(box(['Power', 'NaN', 0]).toString()).toBe('NaN');
   });

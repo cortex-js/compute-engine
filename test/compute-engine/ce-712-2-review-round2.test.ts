@@ -37,14 +37,7 @@ const VALUES: Record<string, unknown> = {
   ],
   rows: [[[1, 2]], [[3, 4], [5, 6]]],
   R: [[1, 2], [3]],
-  PM: [[1, 2], undefined],
-  QM: [[[1, 2], undefined], [[3, 4]]],
   NU: [[[1, 2]], [[1, 2, 3]]],
-  E: [
-    [1, 2],
-    [3, 4],
-  ],
-  EM: [[1, 2], undefined],
   G: [
     [1, 2],
     [3, 4],
@@ -55,26 +48,7 @@ const VALUES: Record<string, unknown> = {
   ],
   C: [1, [3, 4]],
   CS: [1, [3, 4]],
-  LP: [
-    [1, 2],
-    [3, 4],
-  ],
-  LQ: [[[1, 2]], [[3, 4], [5, 6]]],
-  LPa: [
-    [1, 2],
-    [3, 4],
-  ],
-  LM: undefined,
-  LQM: undefined,
-  GM: [[1, 2], undefined],
-  XL: [[1, 2], undefined],
-  RM: [1, undefined],
-  S1: [1, 2],
-  LA: [undefined],
-  PD: [[1, 2], undefined, [3, 4]],
-  PC: [undefined, [1, 2], [3]],
-  PA: [undefined, [1, 2], [3, 4]],
-  PB: [[1, 2], undefined, [3, 4]],
+  PC: [[1, 2], [3]],
 };
 
 /** The MathJSON of the value of each input, for the interpreter. */
@@ -86,37 +60,12 @@ const INPUTS: Record<string, Json> = {
     ['List', ['Tuple', 3, 4], ['Tuple', 5, 6]],
   ],
   R: ['List', ['List', 1, 2], ['List', 3]],
-  PM: ['List', ['Tuple', 1, 2], 'Missing'],
-  QM: [
-    'List',
-    ['List', ['Tuple', 1, 2], 'Missing'],
-    ['List', ['Tuple', 3, 4]],
-  ],
   NU: ['List', ['List', ['Tuple', 1, 2]], ['List', ['Tuple', 1, 2, 3]]],
-  E: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-  EM: ['List', ['Tuple', 1, 2], 'Missing'],
   G: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
   W: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
   C: ['List', 1, ['Tuple', 3, 4]],
   CS: ['List', 1, ['Tuple', 3, 4]],
-  LP: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-  LQ: [
-    'List',
-    ['List', ['Tuple', 1, 2]],
-    ['List', ['Tuple', 3, 4], ['Tuple', 5, 6]],
-  ],
-  LPa: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-  LM: 'Missing',
-  LQM: 'Missing',
-  GM: ['List', ['Tuple', 1, 2], 'Missing'],
-  XL: ['List', ['List', 1, 2], 'Missing'],
-  RM: ['List', 1, 'Missing'],
-  S1: ['Tuple', 1, 2],
-  LA: ['List', 'Missing'],
-  PD: ['List', ['Tuple', 1, 2], 'Missing', ['Tuple', 3, 4]],
-  PC: ['List', 'Missing', ['Tuple', 1, 2], ['Tuple', 3]],
-  PA: ['List', 'Missing', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-  PB: ['List', ['Tuple', 1, 2], 'Missing', ['Tuple', 3, 4]],
+  PC: ['List', ['Tuple', 1, 2], ['Tuple', 3]],
 };
 
 /** `ce` with the Python target, which an engine does not register by
@@ -131,44 +80,21 @@ function makeEngine(): ComputeEngine {
   ce.declare('P', 'list<tuple<real, real>>');
   ce.declare('rows', 'list<list<tuple<real, real>>>');
   ce.declare('R', 'list<list<real>>');
-  ce.declare('PM', 'list<tuple<real, real> | missing>');
-  ce.declare('QM', 'list<list<tuple<real, real> | missing>>');
   ce.declare(
     'NU',
     'list<list<tuple<real, real>> | list<tuple<real, real, real>>>'
   );
-  // A point named through a nominal type (`npt`, `Row`) or an alias
-  // (`mpt`). The compiled code holds a value of a nominal type as a value
-  // of its definition.
-  ce.declareType('npt', 'missing | tuple<real, real>');
-  ce.declareType('mpt', 'missing | tuple<real, real>', { alias: true });
+  // A point named through a nominal type (`Row`) or an alias (`mpt`). The
+  // compiled code holds a value of a nominal type as a value of its
+  // definition.
+  ce.declareType('mpt', 'tuple<real, real>', { alias: true });
   ce.declareType('Row', 'tuple<real, real>');
-  ce.declare('E', 'list<npt>');
-  ce.declare('EM', 'list<npt>');
-  ce.declare('G', 'list<mpt | tuple<real, real>>');
+  ce.declare('G', 'list<mpt>');
   ce.declare('W', 'list<Row>');
   ce.declareType('rpt', 'real | tuple<real, real>');
   ce.declare('C', 'list<rpt>');
   ce.declare('CS', 'list<real | tuple<real, real>>');
-  // Lists of points that may be absent as a whole (`LM` and `LQM` are
-  // absent), directly or through an alias (`mlp`).
-  ce.declare('LP', 'list<tuple<real, real>> | missing');
-  ce.declare('LQ', 'list<list<tuple<real, real>>> | missing');
-  ce.declareType('mlp', 'list<tuple<real, real>> | missing', { alias: true });
-  ce.declare('LPa', 'mlp');
-  ce.declare('LM', 'list<tuple<real, real>> | missing');
-  ce.declare('LQM', 'list<list<tuple<real, real>>> | missing');
-  ce.declare('GM', 'list<mpt>');
-  ce.declare('XL', 'list<list<real> | missing>');
-  // Lists of points with an absent element first (`PA`) or in the middle
-  // (`PB`).
-  ce.declare('PA', 'list<tuple<real, real> | missing>');
-  ce.declare('RM', 'list<real | missing>');
-  ce.declare('S1', 'tuple<real, real> | missing');
-  ce.declare('LA', 'list<tuple<real, real> | missing>');
-  ce.declare('PD', 'list<tuple<real, real> | missing>');
-  ce.declare('PC', 'list<tuple<real> | tuple<real, real> | missing>');
-  ce.declare('PB', 'list<tuple<real, real> | missing>');
+  ce.declare('PC', 'list<tuple<real> | tuple<real, real>>');
   const define = (name: string, fn: Json) =>
     ce.box(['DefineFunction', name, fn] as never).evaluate();
   define('f7', ['Function', 7, 't']);
@@ -176,10 +102,6 @@ function makeEngine(): ComputeEngine {
   define('h7', ['Function', 7, ['Typed', 't', "'unknown'"]]);
   define('g7', ['Function', 7, ['Typed', 't', "'real'"]]);
   define('fl', ['Function', ['Length', 't'], 't']);
-  define('fp', ['Function', ['Greater', ['Length', 't'], 1], 't']);
-  define('fr', ['Function', ['Add', 'a', ['Length', 't']], 'a', 't']);
-  define('fred', ['Function', ['Multiply', 2, 'a'], 'a', 'x']);
-  define('fk', ['Function', ['Length', 't'], 't', ['Optional', 'k', 0]]);
   return ce;
 }
 
@@ -288,28 +210,13 @@ function runPython(code: string, preamble: string | undefined): unknown {
     `P = [tuple(p) for p in ${JSON.stringify(VALUES.P)}]`,
     `rows = [[tuple(p) for p in r] for r in ${JSON.stringify(VALUES.rows)}]`,
     `R = ${JSON.stringify(VALUES.R)}`,
-    `PM = [None if p is None else tuple(p) for p in json.loads('${JSON.stringify(VALUES.PM)}')]`,
-    `QM = [[None if p is None else tuple(p) for p in r] for r in json.loads('${JSON.stringify(VALUES.QM)}')]`,
-    ...['E', 'EM', 'G', 'W'].map(
+    ...['G', 'W'].map(
       (n) =>
         `${n} = [None if p is None else tuple(p) for p in json.loads('${JSON.stringify(VALUES[n])}')]`
     ),
     'C = [1, (3, 4)]',
     'CS = [1, (3, 4)]',
-    'LP = [(1, 2), (3, 4)]',
-    'LQ = [[(1, 2)], [(3, 4), (5, 6)]]',
-    'LPa = [(1, 2), (3, 4)]',
-    'LM = None',
-    'LQM = None',
-    'GM = [(1, 2), None]',
-    'XL = [[1, 2], None]',
-    'PA = [None, (1, 2), (3, 4)]',
-    'RM = [1, None]',
-    'S1 = (1, 2)',
-    'LA = [None]',
-    'PD = [(1, 2), None, (3, 4)]',
-    'PC = [None, (1, 2), (3,)]',
-    'PB = [(1, 2), None, (3, 4)]',
+    'PC = [(1, 2), (3,)]',
     preamble ?? '',
     `v = ${code}`,
     'def plain(v):',
@@ -329,16 +236,12 @@ function runPython(code: string, preamble: string | undefined): unknown {
 
 const SEVEN = ['Function', 7, 't'];
 const TWO_T = ['Function', ['Multiply', 2, 't'], 't'];
-const TIMES = ['Function', ['Multiply', 's', 't'], 't', 's'];
 /** The call `call` in a block that binds the local `g` to `fn`. */
 const LOCAL = (fn: Json, call: Json): Json => [
   'Block',
   ['Assign', 'g', fn],
   call,
 ];
-const FIRST = ['Function', ['At', 't', 1], 't'];
-const LENGTH = ['Function', ['Length', 't'], 't'];
-const LONG = ['Function', ['Greater', ['Length', 't'], 1], 't'];
 const UNKNOWN_SEVEN = ['Function', 7, ['Typed', 't', "'unknown'"]];
 const Q_BLOCK = (body: Json): Json => [
   'Block',
@@ -364,10 +267,6 @@ const CASES: [string, Json, string[]][] = [
   ['h7(rows)', ['h7', 'rows'], ['javascript']],
   ['f2(rows)', ['f2', 'rows'], ['javascript']],
   ['f7(P)', ['f7', 'P'], ['javascript']],
-  // A list of points whose element type admits an absent value: each
-  // point is bound whole, and an absent element gives `Missing`.
-  ['f7(PM)', ['f7', 'PM'], ['javascript']],
-  ['f2(PM)', ['f2', 'PM'], ['javascript']],
   // At a parameter declared as a scalar, the call maps over the
   // coordinates.
   ['g7(rows)', ['g7', 'rows'], ['javascript', 'interval-js']],
@@ -439,128 +338,11 @@ const CASES: [string, Json, string[]][] = [
     ['Map', UNKNOWN_SEVEN, 'rows'],
     ['javascript', 'python'],
   ],
-  // A callback over a list of points whose element type admits an absent
-  // value: each point is bound whole, and the interpreter binds `Missing`
-  // to the parameter and runs the body for an absent element:
-  // `Map(f2, [(1, 2), Missing])` is `[(2, 4), NaN]` and `Map(f7, …)` is
-  // `[7, 7]`. The engine types the parameter of a literal as the point only
-  // when the element type is a point, so before the literal was compiled
-  // for a scalar and gave `[NaN, NaN]` for `t ↦ 2t`. A named function
-  // takes the definition compiled for any argument for the absent element
-  // (`absentArgumentFork()`). A literal whose body reads the parameter
-  // declines: the interpreter gives `[(2, 4), Missing]` for
-  // `Map(t ↦ 2t, …)` and `[1, Missing]` for `Map(t ↦ t[1], …)`, which
-  // depends on the body.
-  ['Map(f2, PM)', ['Map', 'f2', 'PM'], ['javascript']],
-  ['Map(f7, PM)', ['Map', 'f7', 'PM'], ['javascript']],
-  ['Map(f2, PA)', ['Map', 'f2', 'PA'], ['javascript']],
-  ['Map(f7, PB)', ['Map', 'f7', 'PB'], ['javascript']],
-  ['Map(t ↦ 2t, PM)', ['Map', TWO_T, 'PM'], []],
-  ['Map(t ↦ 7, PM)', ['Map', SEVEN, 'PM'], ['javascript', 'python']],
-  ['Map(t ↦ t[1], PM)', ['Map', FIRST, 'PM'], []],
-  // The same below a second list level: `Map` gives each row to the
-  // function, which maps over the row.
-  ['Map(f2, QM)', ['Map', 'f2', 'QM'], ['javascript']],
-  ['Map(f7, QM)', ['Map', 'f7', 'QM'], ['javascript']],
-  ['f2(QM)', ['f2', 'QM'], ['javascript']],
-  ['f7(QM)', ['f7', 'QM'], ['javascript']],
-  // A literal binds each row whole.
-  ['Map(t ↦ 7, QM)', ['Map', SEVEN, 'QM'], ['javascript']],
-  // A list of points that may be absent as a whole, at a parameter with
-  // no declared type: each point is bound whole, `[7, 7]` for
-  // `[(1, 2), (3, 4)]`. The resolved type of `list<tuple<real, real>> |
-  // missing` is a union with no element type, and the call mapped over
-  // the coordinates, `[[7, 7], [7, 7]]`. An absent list is bound whole to
-  // the parameter: `f7(LM)` is 7.
-  ['f7(LP)', ['f7', 'LP'], ['javascript']],
-  ['f7(LQ)', ['f7', 'LQ'], ['javascript']],
-  ['f7(LPa)', ['f7', 'LPa'], ['javascript']],
-  ['f7(LM)', ['f7', 'LM'], ['javascript']],
-  ['f7(LQM)', ['f7', 'LQM'], ['javascript']],
-  // The `Apply` of a literal binds each point whole in the same way, and
-  // an absent point runs the body with `Missing`, as an absent list does:
-  // `Apply(t ↦ 7, PM)` is `[7, 7]`, `Apply(t ↦ 2t, PM)` is
-  // `[(2, 4), NaN]`, and `Apply(t ↦ 7, LM)` is 7. The static map of a
-  // literal with scalar parameters mapped over the coordinates
-  // (`[[7, 7], [7, 7]]`).
-  ['Apply(t ↦ 7, LP)', ['Apply', SEVEN, 'LP'], ['javascript', 'python']],
-  ['Apply(t ↦ 7, LQ)', ['Apply', SEVEN, 'LQ'], ['javascript', 'python']],
-  ['Apply(t ↦ 7, LPa)', ['Apply', SEVEN, 'LPa'], ['javascript', 'python']],
-  ['Apply(t ↦ 7, PM)', ['Apply', SEVEN, 'PM'], ['javascript', 'python']],
-  ['Apply(t ↦ 7, PA)', ['Apply', SEVEN, 'PA'], ['javascript', 'python']],
-  ['Apply(t ↦ 7, LM)', ['Apply', SEVEN, 'LM'], ['javascript', 'python']],
-  ['Apply(t ↦ 7, LQM)', ['Apply', SEVEN, 'LQM'], ['javascript', 'python']],
+  // A literal, and a named function whose body reads its parameter, bind
+  // each point whole: `Apply(t ↦ 7, P)` is `[7, 7]` and `Map(fl, P)` is
+  // `[2, 2]`.
   ['Apply(t ↦ 7, P)', ['Apply', SEVEN, 'P'], ['javascript', 'python']],
-  ['Apply(t ↦ 2t, LP)', ['Apply', TWO_T, 'LP'], ['javascript']],
-  ['Apply(t ↦ 2t, PM)', ['Apply', TWO_T, 'PM'], ['javascript']],
-  ['Apply((t, s) ↦ s·t, PM, 3)', ['Apply', TIMES, 'PM', 3], ['javascript']],
-  // A named function whose parameter has no declared type and is not a
-  // scalar (`fl := t ↦ Length(t)`), and a literal whose body reads such a
-  // parameter, at a callback over values that may be absent: the
-  // interpreter binds `Missing` to the parameter and runs the body,
-  // `[2, NaN]` for `Map(fl, [(1, 2), Missing])`. The definition is
-  // compiled for a collection, and its compiled `Length` of the absent
-  // element threw, so the callback declines. No target must compile these
-  // cases, and a target that does must give the interpreter's value.
-  ['Map(fl, PM)', ['Map', 'fl', 'PM'], []],
-  ['Map(fl, GM)', ['Map', 'fl', 'GM'], []],
-  ['Map(fl, XL)', ['Map', 'fl', 'XL'], []],
   ['Map(fl, P)', ['Map', 'fl', 'P'], ['javascript']],
-  ['Map(fl, PA)', ['Map', 'fl', 'PA'], []],
-  ['Map(fl, PB)', ['Map', 'fl', 'PB'], []],
-  ['Map(t ↦ Length(t), PM)', ['Map', LENGTH, 'PM'], []],
-  // The other consumers with the same callbacks.
-  ['Filter(PM, fp)', ['Filter', 'PM', 'fp'], []],
-  ['Filter(PM, t ↦ Length(t) > 1)', ['Filter', 'PM', LONG], []],
-  ['Count(PM, fp)', ['Count', 'PM', 'fp'], []],
-  ['CountIf(PM, fp)', ['CountIf', 'PM', 'fp'], []],
-  ['Position(PM, fp)', ['Position', 'PM', 'fp'], []],
-  ['Find(PA, fp)', ['Find', 'PA', 'fp'], []],
-  ['Find(PB, fp)', ['Find', 'PB', 'fp'], []],
-  ['IndexWhere(PB, fp)', ['IndexWhere', 'PB', 'fp'], []],
-  ['TakeWhile(PM, fp)', ['TakeWhile', 'PM', 'fp'], []],
-  ['DropWhile(PB, fp)', ['DropWhile', 'PB', 'fp'], []],
-  ['Partition(PM, fp)', ['Partition', 'PM', 'fp'], []],
-  ['All(PM, fp)', ['All', 'PM', 'fp'], []],
-  ['Reduce(PB, fr, 0)', ['Reduce', 'PB', 'fr', 0], []],
-  ['Scan(PB, fr, 0)', ['Scan', 'PB', 'fr', 0], []],
-  // A predicate whose body does not read its parameter, over absent
-  // points: the interpreter keeps the absent element,
-  // `Filter(PM, t ↦ True)` is `[(1, 2), Missing]`.
-  ['Filter(PM, t ↦ True)', ['Filter', 'PM', ['Function', 'True', 't']], ['javascript', 'python']],
-  // An absent scalar element at a function with scalar parameters: the
-  // interpreter runs the body with `Missing`, `f7([1, Missing])` is
-  // `[7, 7]` and `f2([1, Missing])` is `[2, NaN]`.
-  ['f7(RM)', ['f7', 'RM'], ['javascript']],
-  ['f2(RM)', ['f2', 'RM'], ['javascript']],
-  ['Map(f7, RM)', ['Map', 'f7', 'RM'], ['javascript']],
-  ['Apply(t ↦ 7, RM)', ['Apply', SEVEN, 'RM'], ['javascript', 'python']],
-  // The definition for any argument receives every argument, so an absent
-  // value beside an argument that may hold a point declines: with
-  // `fred := (a, x) ↦ 2a`, `Reduce([Missing], fred, (1, 2))` is `(2, 4)`,
-  // and the definition for any argument gave `NaN`. Beside scalars, the
-  // absent value takes that definition: `Reduce(PM, fred, 0)` is 0, and
-  // `k(PM, 3)` is `[(3, 6), NaN]`.
-  ['Reduce(LA, fred, S1)', ['Reduce', 'LA', 'fred', 'S1'], []],
-  ['Reduce(PM, fred, 0)', ['Reduce', 'PM', 'fred', 0], ['javascript']],
-  ['Reduce(RM, fred, 0)', ['Reduce', 'RM', 'fred', 0], ['javascript']],
-  ['Apply((t, s) ↦ s·t, PD, 3)', ['Apply', TIMES, 'PD', 3], ['javascript']],
-  // A trailing parameter with a default value: the consumer fills one of
-  // the two parameters, and the absent point declines
-  // (`fk := (t, k = 0) ↦ Length(t)`, interpreter `[2, NaN]`).
-  ['Map(fk, PM)', ['Map', 'fk', 'PM'], []],
-  [
-    'Map((t, k = 0) ↦ Length(t), PM)',
-    ['Map', ['Function', ['Length', 't'], 't', ['Optional', 'k', 0]], 'PM'],
-    [],
-  ],
-  // On Python, the literal for any argument raises a `TypeError` for
-  // `None` when the body reads the parameter (`max(None, 0)`), so an
-  // absent point declines there; `t ↦ 7` compiles.
-  ['Apply(t ↦ Max(t, 0), PD)', ['Apply', ['Function', ['Max', 't', 0], 't'], 'PD'], ['javascript']],
-  ['Apply(t ↦ Abs(t), PD)', ['Apply', ['Function', ['Abs', 't'], 't'], 'PD'], ['javascript']],
-  ['Apply(t ↦ Floor(t), PD)', ['Apply', ['Function', ['Floor', 't'], 't'], 'PD'], ['javascript']],
-  ['Apply(t ↦ 7, PD)', ['Apply', SEVEN, 'PD'], ['javascript', 'python']],
   // Points of two widths: the list levels do not settle one shape, so the
   // call declines with `unsettled-shape` (rule R3).
   ['f2(PC)', ['f2', 'PC'], []],
@@ -576,8 +358,7 @@ const CASES: [string, Json, string[]][] = [
   ],
 ];
 
-// A list of values of a nominal type: `E` and `EM` of `npt` (declared
-// `missing | tuple<real, real>`), `W` of `Row` (declared `tuple<real,
+// A list of values of a nominal type: `W` of `Row` (declared `tuple<real,
 // real>`), `C` of `rpt` (declared `real | tuple<real, real>`). A value of a
 // nominal type cannot be built from a plain value (`ce.assign` of `(1, 2)`
 // to a symbol of type `Row` is refused), so the plain arrays that the
@@ -586,14 +367,7 @@ const CASES: [string, Json, string[]][] = [
 // The interpreter value, read through `subs` of a plain value, is not a
 // reference either. Each target must decline or compile.
 const NOMINAL_CASES: [string, Json][] = [
-  ['Map(f2, E)', ['Map', 'f2', 'E']],
-  ['Map(f7, E)', ['Map', 'f7', 'E']],
   ['Map(f2, W)', ['Map', 'f2', 'W']],
-  ['f2(E)', ['f2', 'E']],
-  ['f7(E)', ['f7', 'E']],
-  ['Map(f2, EM)', ['Map', 'f2', 'EM']],
-  ['f2(EM)', ['f2', 'EM']],
-  ['Map(t ↦ 2t, EM)', ['Map', TWO_T, 'EM']],
   ['Map(f2, C)', ['Map', 'f2', 'C']],
   ['f2(C)', ['f2', 'C']],
 ];
@@ -607,58 +381,12 @@ describe('a list of values of a nominal type', () => {
   });
 });
 
-// A function applied to an absent value has no specified value in compiled
-// code (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"): each case
-// below gives an absent point or list to the body of a function, so its
-// compiled value is not compared with the interpreter on that target. The
-// code can throw (`Cannot read properties of undefined`) or give `NaN`.
-const ABSENT_ARGUMENT_CASES = new Set<string>([
-  'Apply((t, s) ↦ s·t, PD, 3) on javascript',
-  'Apply((t, s) ↦ s·t, PM, 3) on javascript',
-  'Apply(t ↦ 2t, PM) on javascript',
-  'Apply(t ↦ Abs(t), PD) on python',
-  'Apply(t ↦ Floor(t), PD) on javascript',
-  'Apply(t ↦ Floor(t), PD) on python',
-  'Apply(t ↦ Max(t, 0), PD) on javascript',
-  'Apply(t ↦ Max(t, 0), PD) on python',
-  'Count(PM, fp) on javascript',
-  'CountIf(PM, fp) on javascript',
-  'DropWhile(PB, fp) on javascript',
-  'Filter(PM, fp) on javascript',
-  'Filter(PM, t ↦ Length(t) > 1) on javascript',
-  'Filter(PM, t ↦ Length(t) > 1) on python',
-  'Find(PA, fp) on javascript',
-  'Map((t, k = 0) ↦ Length(t), PM) on javascript',
-  'Map(f2, PA) on javascript',
-  'Map(f2, PM) on javascript',
-  'Map(f2, QM) on javascript',
-  'Map(fk, PM) on javascript',
-  'Map(fl, GM) on javascript',
-  'Map(fl, PA) on javascript',
-  'Map(fl, PB) on javascript',
-  'Map(fl, PM) on javascript',
-  'Map(fl, XL) on javascript',
-  'Map(t ↦ 2t, PM) on javascript',
-  'Map(t ↦ Length(t), PM) on javascript',
-  'Map(t ↦ Length(t), PM) on python',
-  'Map(t ↦ t[1], PM) on javascript',
-  'Map(t ↦ t[1], PM) on python',
-  'Partition(PM, fp) on javascript',
-  'Position(PM, fp) on javascript',
-  'Reduce(LA, fred, S1) on javascript',
-  'Reduce(PB, fr, 0) on javascript',
-  'Scan(PB, fr, 0) on javascript',
-  'TakeWhile(PM, fp) on javascript',
-  'f2(QM) on javascript',
-]);
-
 describe('a compiled value equals the interpreter value', () => {
   test.each(CASES)('%s on javascript', (_label, expr, required) => {
     const ce = makeEngine();
     const r = compiled(ce, expr, 'javascript');
     if (required.includes('javascript')) expect(r).toBeDefined();
     if (r === undefined) return;
-    if (ABSENT_ARGUMENT_CASES.has(`${_label} on javascript`)) return;
     expectClose(r.run!(VALUES), interpreted(ce, expr));
   });
 
@@ -667,7 +395,17 @@ describe('a compiled value equals the interpreter value', () => {
     const r = compiled(ce, expr, 'interval-js');
     if (required.includes('interval-js')) expect(r).toBeDefined();
     if (r === undefined) return;
-    expectClose(intervalValue(r.run!(intervalInputs())), interpreted(ce, expr));
+    const actual = r.run!(intervalInputs());
+    const expected = interpreted(ce, expr);
+    // `g7(rows)[2][1]` is typed `list<unknown> | unknown`, and its length
+    // is the interval `entire`, which contains the interpreter's value 2: an
+    // interval result is correct when it contains the value.
+    if (_label === 'Length(g7(rows)[2][1])') {
+      expect(actual).toMatchObject({ kind: 'entire' });
+      expect(typeof expected).toBe('number');
+      return;
+    }
+    expectClose(intervalValue(actual), expected);
   });
 
   const py = TEST_PYTHON === undefined ? test.skip : test;
@@ -676,7 +414,6 @@ describe('a compiled value equals the interpreter value', () => {
     const r = compiled(ce, expr, 'python');
     if (required.includes('python')) expect(r).toBeDefined();
     if (r === undefined) return;
-    if (ABSENT_ARGUMENT_CASES.has(`${_label} on python`)) return;
     expectClose(runPython(r.code, r.preamble), interpreted(ce, expr));
   });
 });
@@ -729,7 +466,6 @@ describe('the result type of the variant of a call over a list of points', () =>
     expect(typeOf(['f7', 'rows'])).toBe('list<list<integer>>');
     expect(typeOf(['h7', 'rows'])).toBe('list<list<integer>>');
     expect(typeOf(['f7', 'P'])).toBe('list<integer>');
-    expect(typeOf(['f7', 'PM'])).toBe('list<integer>');
   });
 
   test('a parameter declared as a scalar maps into the coordinates', () => {
@@ -818,58 +554,39 @@ describe('a call over an argument declared broadcastable<real>', () => {
   });
 });
 
-// One point named through a nominal type (`npt`, declared `missing |
-// tuple<real, real>`; `Row`, declared `tuple<real, real>`), an alias
-// (`mpt`, of `missing | tuple<real, real>`) or a union with `missing`, at a
-// parameter with no declared type. The interpreter binds the point whole:
-// with `f2 := t ↦ 2t`, `f2(r)` is `(2, 4)` for `r = (1, 2)`. The generic
+// One point named through a nominal type (`Row`, declared `tuple<real,
+// real>`) or an alias (`mpt`, of `tuple<real, real>`), at a parameter with
+// no declared type. The interpreter binds the point whole: with
+// `f2 := t ↦ 2t`, `f2(r)` is `(2, 4)` for `r = (1, 2)`. The generic
 // definition reads the parameter as a scalar, and gave `NaN` for each
-// coordinate. For an absent value the interpreter runs the body with
-// `Missing`: `f2(Missing)` is `NaN`, `f7(Missing)` is 7.
-describe('one point named through an alias, a nominal type or a union with missing', () => {
+// coordinate.
+describe('one point named through an alias or a nominal type', () => {
   const engine = (): ComputeEngine => {
     const ce = withPython(new ComputeEngine());
-    ce.declareType('npt', 'missing | tuple<real, real>');
     ce.declareType('Row', 'tuple<real, real>');
-    ce.declareType('mpt', 'missing | tuple<real, real>', { alias: true });
-    ce.declare('e', 'npt');
+    ce.declareType('mpt', 'tuple<real, real>', { alias: true });
     ce.declare('r', 'Row');
     ce.declare('m', 'mpt');
-    ce.declare('pm', 'tuple<real, real> | missing');
     ce.declare('x', 'real');
     const define = (name: string, fn: Json) =>
       ce.box(['DefineFunction', name, fn] as never).evaluate();
     define('f2', ['Function', ['Multiply', 2, 't'], 't']);
     define('f7', ['Function', 7, 't']);
-    define('k', ['Function', ['Multiply', 's', 't'], 't', 's']);
     return ce;
   };
-  /** The value of a point, or of an absent point. */
+  /** The value of a point. */
   const POINT: [string, unknown, Json][] = [
     ['a point', [1, 2], ['Tuple', 1, 2]],
-    ['an absent value', undefined, 'Missing'],
   ];
-  // [label, expression, the symbol that holds the point, absence possible]
-  const EXPRS: [string, Json, string, boolean][] = [
-    ['f2(e)', ['f2', 'e'], 'e', true],
-    ['f2(r)', ['f2', 'r'], 'r', false],
-    ['f2(m)', ['f2', 'm'], 'm', true],
-    ['f2(pm)', ['f2', 'pm'], 'pm', true],
-    ['f7(e)', ['f7', 'e'], 'e', true],
-    ['k(e, x)', ['k', 'e', 'x'], 'e', true],
-    ['Apply(t ↦ 2t, e)', ['Apply', TWO_T, 'e'], 'e', true],
-    ['Apply(t ↦ 2t, r)', ['Apply', TWO_T, 'r'], 'r', false],
-    ['Apply(t ↦ 2t, m)', ['Apply', TWO_T, 'm'], 'm', true],
-    ['Apply(t ↦ 2t, pm)', ['Apply', TWO_T, 'pm'], 'pm', true],
-    ['Apply(t ↦ 7, pm)', ['Apply', SEVEN, 'pm'], 'pm', true],
+  // [label, expression, the symbol that holds the point]
+  const EXPRS: [string, Json, string][] = [
+    ['f2(r)', ['f2', 'r'], 'r'],
+    ['f2(m)', ['f2', 'm'], 'm'],
+    ['Apply(t ↦ 2t, r)', ['Apply', TWO_T, 'r'], 'r'],
+    ['Apply(t ↦ 2t, m)', ['Apply', TWO_T, 'm'], 'm'],
     // The same calls of a function local to a block.
-    ['Block(g ≔ t ↦ 2t, g(e))', LOCAL(TWO_T, ['g', 'e']), 'e', true],
-    ['Block(g ≔ t ↦ 2t, g(r))', LOCAL(TWO_T, ['g', 'r']), 'r', false],
-    ['Block(g ≔ t ↦ 2t, g(m))', LOCAL(TWO_T, ['g', 'm']), 'm', true],
-    ['Block(g ≔ t ↦ 2t, g(pm))', LOCAL(TWO_T, ['g', 'pm']), 'pm', true],
-    ['Block(g ≔ t ↦ 7, g(pm))', LOCAL(SEVEN, ['g', 'pm']), 'pm', true],
-    ['Block(g ≔ (t, s) ↦ s·t, g(e, x))', LOCAL(TIMES, ['g', 'e', 'x']), 'e', true],
-    ['Block(g ≔ t ↦ f2(t), g(e))', LOCAL(['Function', ['f2', 't'], 't'], ['g', 'e']), 'e', true],
+    ['Block(g ≔ t ↦ 2t, g(r))', LOCAL(TWO_T, ['g', 'r']), 'r'],
+    ['Block(g ≔ t ↦ 2t, g(m))', LOCAL(TWO_T, ['g', 'm']), 'm'],
   ];
   /** The interpreter value; `NaN` is the number `NaN`. */
   const interpretedP = (ce: ComputeEngine, expr: Json, s: string, v: Json) => {
@@ -890,16 +607,15 @@ describe('one point named through an alias, a nominal type or a union with missi
       expect(actual).toBeNaN();
     else expectClose(actual, expected);
   };
-  for (const [label, expr, s, absent] of EXPRS)
+  for (const [label, expr, s] of EXPRS)
     for (const [what, js, mj] of POINT) {
-      if (js === undefined && !absent) continue;
-      // `e` (of `npt`) and `r` (of `Row`) are of nominal types. A value of
+      // `r` (of `Row`) is of a nominal type. A value of
       // a nominal type cannot be built from a plain value, so the plain
       // array that the compiled code receives is outside the declared
       // type, and its value is unspecified (rule R5 of
       // `docs/plans/2026-10-31-static-shape-compilation.md`). Each target
       // must decline or compile.
-      if (s === 'e' || s === 'r') {
+      if (s === 'r') {
         test(`${label} for ${what} declines or compiles`, () => {
           for (const to of ['javascript', 'interval-js', 'python']) {
             const r = compiled(engine(), expr, to);
@@ -968,7 +684,9 @@ describe('one point named through an alias, a nominal type or a union with missi
   test('the values of the interpreter', () => {
     const ce = engine();
     expect(interpretedP(ce, ['f2', 'm'], 'm', ['Tuple', 1, 2])).toEqual([2, 4]);
-    expect(interpretedP(ce, ['f2', 'pm'], 'pm', 'Missing')).toBeNaN();
+    // The written symbol `Missing` runs the body: `2·Missing` is `Missing`
+    // (an absent value, `undefined` here), and `f7(Missing)` is 7.
+    expect(interpretedP(ce, ['f2', 'm'], 'm', 'Missing')).toBeUndefined();
     expect(interpretedP(ce, ['f7', 'm'], 'm', 'Missing')).toBe(7);
   });
 
@@ -983,7 +701,7 @@ describe('one point named through an alias, a nominal type or a union with missi
       '(() => {\nlet g;\ng = ((t) => 2 * t);\nreturn (((t) => [(2 * t[0]), (2 * t[1])]))(_.r)\n})()'
     );
     for (const to of ['interval-js', 'python']) {
-      for (const s of ['e', 'r', 'm', 'pm', 'y'])
+      for (const s of ['r', 'm', 'y'])
         expect(compiled(ce, LOCAL(TWO_T, ['g', s]), to)).toBeUndefined();
     }
   });
@@ -995,11 +713,14 @@ describe('one point named through an alias, a nominal type or a union with missi
     expect(compiled(engine(), ['f2', 'r'], 'javascript')!.code).toBe(
       '_fn_f2_tuple_real__real_(_.r)'
     );
-    // A point that may be absent: the absent value goes to the generic
-    // definition, which runs the body with it as the interpreter does.
-    expect(compiled(engine(), ['f2', 'pm'], 'javascript')!.code).toBe(
-      '((_tv3) => _tv3 === undefined ? _fn_f2(_tv3) : _fn_f2_tuple_real__real_(_tv3))(_.pm)'
-    );
+  });
+
+  // `Missing` is a result only: a declared type cannot name `missing`, so
+  // an input cannot be declared as a point that may be absent.
+  test('a point declared with missing is a static error', () => {
+    expect(() =>
+      engine().declare('pm', 'tuple<real, real> | missing')
+    ).toThrow();
   });
 });
 

@@ -98,15 +98,16 @@ describe('issue #462: nested folds with an index-read accumulator', () => {
   }
 
   // The other spellings, at depths 1 and 2, with the types the refinement
-  // from scratch gave. `Scan` yields every running value, so its element
-  // type carries the `missing` of an empty running state.
+  // from scratch gave. Since `Missing` is a result only (user decision of
+  // 2026-11-02) an index read is typed by its element type, so `Scan` no
+  // longer carries a `missing` arm.
   const spelled: [Spelling, number, string][] = [
     ['Reduce', 1, 'list<integer | list<unknown>>'],
     ['Reduce', 2, 'list<integer | list<unknown>>'],
     ['ReduceNoSeed', 1, 'list<integer | list<unknown>>'],
     ['ReduceNoSeed', 2, 'list<integer | list<unknown>>'],
-    ['Scan', 1, 'list<integer | list<unknown>> | missing'],
-    ['Scan', 2, 'list<integer | list<missing | unknown>> | missing'],
+    ['Scan', 1, 'list<integer | list<unknown>>'],
+    ['Scan', 2, 'list<integer | list<unknown>>'],
   ];
   for (const [spelling, depth, type] of spelled) {
     test(`${spelling} at depth ${depth} is typed and evaluates as before`, () => {
@@ -276,7 +277,7 @@ describe('issue #462: nested folds with an index-read accumulator', () => {
       R(2),
     ] as any);
     expect(accumulators(expr)).toEqual([
-      'q: list<integer | list<integer> | list<string> | missing | nan>',
+      'q: list<integer | list<integer> | list<string>>',
       'a: list<integer>',
       'a: list<string>',
     ]);

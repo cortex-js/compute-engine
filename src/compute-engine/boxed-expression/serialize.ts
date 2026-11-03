@@ -725,7 +725,7 @@ function serializeJsonFunction(
         'Add',
         [
           args[0],
-          ce._fn('Multiply', [args[1] ?? ce.symbol('Undefined'), ce.I]),
+          ce._fn('Multiply', [args[1] ?? ce.Missing, ce.I]),
         ],
         options,
         metadata
@@ -757,7 +757,7 @@ function serializeJsonFunction(
             [
               ce.One,
               ce._fn('Power', [
-                args[0] ?? ce.symbol('Undefined'),
+                args[0] ?? ce.Missing,
                 ce.number([1, -n]),
               ]),
             ],
@@ -802,7 +802,7 @@ function serializeJsonFunction(
       return serializeJsonFunction(
         ce,
         'Add',
-        [args[0], ce._fn('Negate', [args[1] ?? ce.symbol('Undefined')])],
+        [args[0], ce._fn('Negate', [args[1] ?? ce.Missing])],
         options,
         metadata
       );
@@ -823,7 +823,7 @@ function serializeJsonFunction(
 
   const fn: MathJsonExpression = [
     jsonHead,
-    ...args.map((x) => (x ? serializeJson(ce, x, argOptions) : 'Undefined')),
+    ...args.map((x) => (x ? serializeJson(ce, x, argOptions) : 'Missing')),
   ];
 
   const md: Metadata = { ...(metadata ?? {}) };

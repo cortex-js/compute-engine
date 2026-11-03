@@ -55,12 +55,14 @@ describe('LAZY COLLECTION AT A LIST PARAMETER', () => {
     expect(reference.every((x) => typeof x === 'number')).toBe(true);
   });
 
-  test('the argument is a lazy collection with a nan arm', () => {
+  test('the argument is a lazy collection', () => {
+    // The NaN of an element read out of range is implicit in the type of
+    // the accessor.
     const ce = engine('real');
     ce.assign('L', ce.box(['List', ...L]));
     const arg = ce.parse('u(L)').evaluate();
     expect(arg.isLazyCollection).toBe(true);
-    expect(arg.type.toString()).toBe('list<integer | nan>');
+    expect(arg.type.toString()).toBe('list<integer>');
   });
 
   test('parse route: s(u(L)) evaluates to the compiled values', () => {

@@ -79,8 +79,12 @@ describe('NAMED CALLBACK — DIRECT APPLICATION', () => {
     );
   });
 
-  test('an absent argument at a numeric parameter is NaN', () => {
-    expect(run(engine(), 'map(num, [1, missing, 3])')).toBe('[2,NaN,4]');
+  test('an absent argument at a numeric parameter is Missing', () => {
+    // The call gives `Missing` without running the body (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only").
+    expect(run(engine(), 'map(num, [1, missing, 3])')).toBe(
+      '[2,"Missing",4]'
+    );
   });
 
   test('an argument that the predicate cannot read is the error of the boxed call', () => {

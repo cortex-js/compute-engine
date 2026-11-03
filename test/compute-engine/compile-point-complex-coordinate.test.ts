@@ -66,7 +66,7 @@ describe('the body of a point-valued function is typed as a point', () => {
       )
     );
     expect(ce.box('r').type.toString()).toBe(
-      `(${PT}, unknown) -> list<tuple<number, number>> | missing | tuple<number, number>`
+      `(${PT}, unknown) -> list<tuple<number, number>> | tuple<number, number>`
     );
   });
 });

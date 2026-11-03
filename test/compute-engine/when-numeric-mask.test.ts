@@ -39,7 +39,7 @@ describe('a false restriction answers the marker of the value type', () => {
       'a point',
       ['If', C, ['Tuple', 1, 2]],
       'tuple<integer, integer>',
-      '"Missing"',
+      '(NaN, NaN)',
     ],
     ['a list', ['If', C, ['List', 1, 2]], 'vector<integer^2>', '"Missing"'],
     ['a string', ['If', C, { str: 'ab' }], 'string', '"Missing"'],
@@ -56,8 +56,13 @@ describe('a false restriction answers the marker of the value type', () => {
     expect(e.evaluate().toString()).toBe('"Missing"');
   });
 
-  test('an Undefined condition masks the same way', () => {
-    expect(engine().box(['If', 'Undefined', 1]).evaluate().isNaN).toBe(true);
+  test('an Undefined condition is held', () => {
+    // `Undefined` is an ordinary symbol with no value, not an absent value
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only"): the condition
+    // is not decided. It masked to `NaN` while `Undefined` was absent.
+    expect(engine().box(['If', 'Undefined', 1]).evaluate().operator).toBe(
+      'If'
+    );
   });
 
   test('a masked numeric cell of a list mask is NaN', () => {
@@ -75,13 +80,21 @@ describe('the two evaluation routes agree', () => {
   test.each([
     ['2·x{c}', ['Multiply', 2, ['If', C, 'x']], 'real', 'NaN'],
     ['sin(x{c})', ['Sin', ['If', C, 'x']], 'real', 'NaN'],
+    // An operator over an absent collection is `Missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only", rule 3), `Length` and `Sum` included
+    // (`Length(Missing)` is `Missing`, `absent-collection-operand.test.ts`).
     [
       'Length([1,2]{c})',
       ['Length', ['If', C, ['List', 1, 2]]],
       'integer',
-      'NaN',
+      '"Missing"',
     ],
-    ['Sum([1,2]{c})', ['Sum', ['If', C, ['List', 1, 2]]], 'integer', 'NaN'],
+    [
+      'Sum([1,2]{c})',
+      ['Sum', ['If', C, ['List', 1, 2]]],
+      'integer',
+      '"Missing"',
+    ],
     [
       '[1,2,3] + 2{c}',
       ['Add', ['List', 1, 2, 3], ['If', C, 2]],
@@ -112,7 +125,7 @@ describe('the two evaluation routes agree', () => {
       '(1,2){c} + (1,1)',
       ['Add', ['If', C, ['Tuple', 1, 2]], ['Tuple', 1, 1]],
       'tuple<integer, integer>',
-      '"Missing"',
+      '(NaN, NaN)',
     ],
   ])('%s', (_label, json, type, absent) => {
     const r = probe(json);

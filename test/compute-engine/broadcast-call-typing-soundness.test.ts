@@ -234,7 +234,6 @@ describe('a structural expression boxed from MathJSON', () => {
       'Nothing',
       'Missing',
       'None',
-      'Undefined',
       'ExponentialE',
     ])
       expect(ce.box(name, { form: 'structural' })).toBe(ce.symbol(name));

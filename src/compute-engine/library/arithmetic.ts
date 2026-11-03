@@ -19,7 +19,6 @@ import {
   checkNumericArgs,
   absentableCollectionOperandValue,
   absentScalarMarker,
-  absentArithmeticMarker,
   checkArity,
   hasAbsentScalarOperand,
   isAbsentableCollectionOperand,
@@ -483,7 +482,10 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
-import { isRestriction } from '../boxed-expression/conditional-value.js';
+import {
+  isRestriction,
+  restrictionParts,
+} from '../boxed-expression/conditional-value.js';
 import {
   cmp,
   exactConstantValue,
@@ -4052,11 +4054,20 @@ function tupleComponentwiseAddType(
 function withoutNonArithmeticArms(x: OperandDescriptor): OperandDescriptor {
   const t = x.type;
   if (typeof t === 'string' || t.kind !== 'union') return x;
+  // An application typed by a top type beside collections
+  // (`topTypeBesideAbsence`: `g(x)[1]` is `list<unknown> | unknown` for
+  // `g: (unknown) -> list<unknown>`) is read as its top type: its value can
+  // be any number, a list or a point. Read by its `list<unknown>` arm, the
+  // sum `g(x)[1] + 1` was typed as a list of integers, which the value `1.5`
+  // at `x = 0.5` is not.
+  const top =
+    operandChildren(x) !== undefined && topTypeBesideAbsence(t) !== undefined;
   const kept = t.types.filter(
     (arm) =>
       !isSubtype(arm, 'function') &&
       !isSubtype(arm, 'string') &&
-      !isSubtype(arm, 'character')
+      !isSubtype(arm, 'character') &&
+      !(top && isSubtype(arm, 'collection'))
   );
   if (kept.length === 0 || kept.length === t.types.length) return x;
   const type: Type =
@@ -13927,8 +13938,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const ca = la ? la[i] : pa!;
           const cb = lb ? lb[i] : pb!;
           // A cell that is not a point (`pointListOperand`): an absent point
-          // has no distance, and the marker of a numeric cell is `NaN`; a
-          // restricted point is applied `Distance` again, and the
+          // has no distance, and its cell is `Missing`, as an operator over
+          // `Missing` gives `Missing`; a restricted point is applied `Distance` again, and the
           // conditional-value lift moves its condition to its distance.
           if (!Array.isArray(ca) || !Array.isArray(cb)) {
             // The other side of the pair is the point at position `i`: the
@@ -13946,7 +13957,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 : b
               : (cb as Expression);
             if (isAbsentSymbol(xa) || isAbsentSymbol(xb)) {
-              results.push(ce.NaN);
+              results.push(ce.Missing);
               continue;
             }
             const d = ce
@@ -14010,10 +14021,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = options.engine;
         // One-operand form over an operand that can be absent as a whole
         // (`missing | list<…>`, a restricted list or a row read): as in
-        // `Sum.evaluate`. The product of an absent collection is `NaN`; a
-        // present collection is folded below.
+        // `Sum.evaluate`. The product of an absent collection is `Missing`,
+        // as an operator over `Missing` is (`docs/ERROR-MODEL.md`, "`Missing`
+        // is a result only", rule 3); a present collection is folded below.
         const resolved = withAbsentableOperandResolved(ops);
-        if (resolved === undefined) return ce.NaN;
+        if (resolved === undefined) return ce.Missing;
         ops = resolved;
         // EL-4 (revised): see the matching comment in `Sum.evaluate` — an
         // infinite domain stays symbolic under exact evaluate (`.N()` owns
@@ -14163,7 +14175,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
         if (pending !== undefined) {
           const resolved = await pending;
-          if (resolved === undefined) return ce.NaN;
+          if (resolved === undefined) return ce.Missing;
           ops = resolved;
         }
         const numeric = options.numericApproximation;
@@ -14417,11 +14429,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // holds its operand, and such a view is not finite before its source
         // is evaluated, so the sum stayed unevaluated. The operand is
         // evaluated here (`withAbsentableOperandResolved`): the sum of an
-        // absent collection is `NaN`, as `Sum(Missing)` is, and a present
-        // collection is summed below.
+        // absent collection is `Missing`, as `Sum(Missing)` is (an operator
+        // over `Missing`, `docs/ERROR-MODEL.md`, "`Missing` is a result
+        // only", rule 3), and a present collection is summed below.
         const resolved = withAbsentableOperandResolved([first, ...rest]);
-        if (resolved === undefined) return engine.NaN;
+        if (resolved === undefined) return engine.Missing;
         first = resolved[0];
+        // A restricted list whose condition is not decided, `[1, 2]{c}`, is
+        // summed under its condition, with `Missing` as the value where the
+        // condition fails: `If(c, 3, Missing)`. The sum of its restricted
+        // cells, `If(c, 3)`, would give `NaN` there (a restricted number is
+        // `NaN`), where a fresh evaluation gives `Missing`, the sum of an
+        // absent collection.
+        if (rest.length === 0 && first !== undefined && isRestriction(first)) {
+          const held = restrictionParts(first.evaluate());
+          if (held !== undefined && held.value.isCollection)
+            return engine
+              ._fn('If', [
+                held.condition,
+                engine
+                  ._fn('Sum', [held.value])
+                  .evaluate({ numericApproximation }),
+                engine.Missing,
+              ])
+              .evaluate();
+        }
         // A view over a source that is not a collection value yet
         // (`Rest(g(3))`) is not known to be finite before it is evaluated:
         // read its value (`isViewOverHeldEagerSource()`). (CE-97.1)
@@ -14659,7 +14691,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
         if (pending !== undefined) {
           const resolved = await pending;
-          if (resolved === undefined) return engine.NaN;
+          if (resolved === undefined) return engine.Missing;
           first = resolved[0];
         }
         // A view over a source that is not a collection value yet: as in the
@@ -15357,11 +15389,10 @@ function addSumTerm(
     acc.error = term.engine.typeError('number', term.type, term);
     return acc;
   }
-  // An absent term (`Missing`, `Undefined`) is `NaN` in a sum, as in any
-  // arithmetic. Kept as a term, a sum of that one term answered the term
-  // itself: `Sum([Missing])` was `Missing`, where `Sum([0, Missing])` is
-  // `NaN`.
-  if (isAbsentScalarSymbol(term)) term = term.engine.NaN;
+  // An absent term (`Missing`) is not a number literal, so it is kept as a
+  // term, and the `Add` that `finishSum` builds answers `Missing`:
+  // `Missing` is a result only, and an operator over it gives `Missing`, so
+  // `Sum([Missing])` and `Sum([0, Missing])` are both `Missing`.
   if (isNumber(term)) {
     const literal = acc.literal;
     if (literal === undefined) {
@@ -15577,7 +15608,7 @@ function pointOperand(x: Expression): readonly Expression[] | undefined {
   const count = x.count;
   if (count === undefined || count === 0 || count > MAX_DISTANCE_BROADCAST)
     return undefined;
-  // An absent element (`Missing` or `Undefined`) is an absent coordinate, as
+  // An absent element (`Missing`) is an absent coordinate, as
   // it is in a `Tuple`: `[1, Missing]` is a point whose distance to any other
   // point is `NaN`, and so is `[Missing, Missing]` (a list of absent POINTS
   // holds tuples, not bare symbols, so it cannot be mistaken for this).
@@ -15603,8 +15634,8 @@ function isCoordinate(x: Expression): boolean {
  * one. Both spellings broadcast: a list of tuples `[(0,0),(3,4)]` and the list
  * of lists `[[0,0],[3,4]]` a data import produces (Tycho item 138).
  *
- * A cell of a written-out `List` may also be an absent point (`Missing` or
- * `Undefined`, such as the point of an element-wise restriction whose
+ * A cell of a written-out `List` may also be an absent point (`Missing`,
+ * such as the point of an element-wise restriction whose
  * condition is false) or a restricted point whose condition is not decided
  * (a restriction, `Which`). Such a cell is returned as the expression itself, not
  * as coordinates, and the caller answers for it. At least one cell must be
@@ -15696,14 +15727,17 @@ function pointDistance(
   // reasons: the infinite-leg test below reads a number literal, and `∞ − ∞`
   // is NaN, a cancellation only the difference shows and never the two
   // coordinates on their own.
-  // An ABSENT coordinate (`Missing` or `Undefined`, such as the value of a
-  // restricted coordinate whose condition is false) makes the distance `NaN`,
-  // as it makes `Norm((1, Missing))` `NaN`: the numeric slot's absence marker
-  // absorbs, even beside an infinite leg (`Norm((+oo, Missing))` is `NaN`
-  // too). It used to reach the coordinate test below and answer an
-  // `expected-value` error.
-  if (a.some((c) => isAbsentSymbol(c)) || b.some((c) => isAbsentSymbol(c)))
-    return ce.NaN;
+  // An ABSENT coordinate (`Missing`) makes the distance `Missing`, even
+  // beside an infinite leg: `Missing` is a result only, and an operator over
+  // it gives `Missing` (`docs/ERROR-MODEL.md`). Without this test it
+  // reached the coordinate test below and answered an `expected-value` error.
+  // A malformed coordinate beside it still gives that error: an error
+  // outranks an absent value.
+  if (a.some((c) => isAbsentSymbol(c)) || b.some((c) => isAbsentSymbol(c))) {
+    if ([...a, ...b].some((c) => !isAbsentSymbol(c) && !isCoordinate(c)))
+      return ce.error('expected-value');
+    return ce.Missing;
+  }
   const legs: Expression[] = [];
   for (let i = 0; i < a.length; i++) {
     const ai = a[i];
@@ -15984,14 +16018,16 @@ function processMinMaxItem(
   const upper = mode === 'Max' || mode === 'Supremum';
   if (isSymbol(item, 'Nothing')) return [undefined, []];
 
-  // An ABSENT datum (the `Missing` symbol or a `NaN` number) makes the whole
-  // extremum absent, and in a numeric result absence is `NaN`. It is reported
-  // as this item's value, and the caller's `NaN` check absorbs it. The test is
+  // An ABSENT datum makes the whole extremum absent: a `Missing` datum makes
+  // it `Missing` (`Missing` is a result only, and an operator over it gives
+  // `Missing`), and a `NaN` datum makes it `NaN`. It is reported as this
+  // item's value, and the caller's absence check absorbs it. The test is
   // made here, on the walk that folds the elements, and not by a separate walk
   // before the fold: a lazy collection computes its elements again on every
   // walk, so a second walk doubles the work (and doubles the runs of a
   // callback that has a side effect). Because this function recurses into
   // nested collections, an absent datum at any depth is found.
+  if (isAbsentSymbol(item)) return [ce.Missing, []];
   if (isAbsentValue(item)) return [ce.NaN, []];
 
   // A residue class has no order, so it is not a datum of an extremum: an
@@ -16158,6 +16194,7 @@ function processMinMaxItem(
     let walked = 0;
     let sawIndeterminate = false;
     let sawNaN = false;
+    let sawMissing = false;
     for (const op of item.each()) {
       walked += 1;
       // A dictionary ELEMENT is not a number. The error names the whole
@@ -16181,7 +16218,11 @@ function processMinMaxItem(
         // The walk continues after a `NaN` too, so that an error found
         // later (a dictionary element) is the answer whatever the order of
         // the elements: `Max([NaN, d])` and `Max([d, NaN])` are both the
-        // error, as for `Sum`.
+        // error, as for `Sum`. A `Missing` element outranks a `NaN` one.
+        if (isAbsentSymbol(val)) {
+          sawMissing = true;
+          continue;
+        }
         if (val.isNaN) {
           if (!val.isIndeterminate) sawNaN = true;
           else sawIndeterminate = true;
@@ -16192,6 +16233,7 @@ function processMinMaxItem(
       }
       rest.push(...others);
     }
+    if (sawMissing) return [ce.Missing, []];
     if (sawNaN) return [ce.NaN, []];
     if (enumerationDeclinedAfterWalk(item, walked)) return [undefined, [item]];
     if (sawIndeterminate) return [ce.Indeterminate, []];
@@ -16723,17 +16765,18 @@ function evaluateMinMax(
 ): Expression {
   const upper = mode === 'Max' || mode === 'Supremum';
 
-  // The rule for an aggregate that consumes data: an absent datum (`Missing`
-  // or `NaN`, as an operand or as an element at any depth) or an empty input
-  // gives `NaN`. Both halves are decided by the ONE walk below:
-  // `processMinMaxItem` reports an absent datum as a `NaN` value, and an input
-  // that supplied no value and nothing symbolic is empty.
+  // The rule for an aggregate that consumes data: a `Missing` datum (as an
+  // operand or as an element at any depth) gives `Missing`, and a `NaN`
+  // datum or an empty input gives `NaN`. Both halves are decided by the ONE
+  // walk below: `processMinMaxItem` reports an absent datum as its marker,
+  // and an input that supplied no value and nothing symbolic is empty.
   ops = flatten(ops);
 
   let result: Expression | undefined = undefined;
   const rest: Expression[] = [];
   let sawIndeterminate = false;
   let sawNaN = false;
+  let sawMissing = false;
   const walk: ExtremumWalk = { inexact: false, machineLists: [] };
 
   for (const operand of ops) {
@@ -16767,7 +16810,11 @@ function evaluateMinMax(
       // The walk continues after a `NaN`, so that an error found in a later
       // operand (a dictionary) is the answer whatever the order of the
       // operands: `Max(NaN, d)` and `Max(d, NaN)` are both the error, as for
-      // `Sum`.
+      // `Sum`. A `Missing` operand outranks a `NaN` one.
+      if (isAbsentSymbol(val)) {
+        sawMissing = true;
+        continue;
+      }
       if (val.isNaN) {
         if (!val.isIndeterminate) sawNaN = true;
         else sawIndeterminate = true;
@@ -16778,6 +16825,7 @@ function evaluateMinMax(
     }
     rest.push(...others);
   }
+  if (sawMissing) return ce.Missing;
   if (sawNaN) return ce.NaN;
   if (sawIndeterminate)
     return walk.inexact ||
@@ -17299,7 +17347,7 @@ function addEvaluatedOperands(
     )
       return engine!.Missing;
     if (hasAbsentScalarOperand(evaluated))
-      return absentArithmeticMarker(engine!, expression, ops, evaluated);
+      return absentScalarMarker(engine!, expression);
   }
   // A sum with a kind value (a residue class) is folded by the hooks of
   // the kinds (`kindSumOrProduct()`): the generic sum below does not know
@@ -17504,7 +17552,7 @@ function mulEvaluatedOperands(
     )
       return engine!.Missing;
     if (hasAbsentScalarOperand(evaluated))
-      return absentArithmeticMarker(engine!, expression, ops, evaluated);
+      return absentScalarMarker(engine!, expression);
   }
   // A product with a kind value: see the matching comment in `Add`.
   if (evaluated.some(holdsKindValue)) {

@@ -24,6 +24,8 @@ import {
   isWildcardFunctionType,
   signatureEffects,
   resolveTypeAlias,
+  stripMissingFromType,
+  typeContainsMissing,
   withParameterNamesOf,
 } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
@@ -1521,12 +1523,11 @@ function redefinitionDiagnostic(
 const ABSENCE_MARKER_NAMES: ReadonlySet<string> = new Set([
   'Nothing',
   'Missing',
-  'Undefined',
 ]);
 
 /**
  * A binding of an absence marker — `let Missing = 3`, `Nothing = 1`, a
- * parameter, loop variable, match pattern or function named `Undefined` —
+ * parameter, loop variable, match pattern or function named `Missing` —
  * is an error (user decision 2026-09-27): the engine recognizes each marker
  * by its name, so a user binding of it could never behave like the value it
  * holds. One diagnostic per binding site, over the whole program, found with
@@ -2989,9 +2990,23 @@ function declaredTypeMismatch(
   }
   if (declared.isUnknown || value.type.isUnknown) return undefined;
 
+  // `Missing` is a result only, and a store into a declared name accepts it
+  // where the declared type accepts a present value (`matchesOrAbsent`, the
+  // run-time check of the same store): `let y: string = xs[5]` is `Missing`
+  // and is accepted, and `let y: list<string> = ["a", Missing]` is
+  // accepted. So the `missing` arms of the value's type, at the top and in
+  // every element, are removed before the comparison, and a value typed
+  // `missing` alone is not reported. A value that is wrong where it is
+  // present (`let y: list<string> = [5, Missing]`) is still reported.
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only".)
+  const valueType = typeContainsMissing(value.type.type)
+    ? ce.type(stripMissingFromType(value.type.type))
+    : value.type;
+  if (valueType.type === 'never') return undefined;
+
   // A closed literal IS its runtime value, so the full `matches()` check
   // applies to it. A list, tuple or set literal of closed literals is closed
-  // too, the absence symbols included: `let xs: list<string> = ["a",
+  // too, the absence symbols included: `let xs: list<string> = [5,
   // Missing]` is reported here as the run time refuses it (user decision
   // P1b, 2026-10-21: a declared element contract is checked on assignment).
   const isClosedLiteral = isClosedLiteralValue(value);
@@ -3010,63 +3025,34 @@ function declaredTypeMismatch(
     return undefined;
 
   const mismatch = isClosedLiteral
-    ? !value.type.matches(declared)
-    : declared.isDisjointFrom(value.type);
+    ? !valueType.matches(declared)
+    : declared.isDisjointFrom(valueType);
   if (!mismatch) {
-    // A POSSIBLY absent initializer (`let y: string = xs[i]`, typed
-    // `missing | string`) at a declaration that excludes absence: the run
-    // time refuses the absent case (user decision P1, 2026-10-21), and the
-    // static check reports it on the same terms as a possibly absent
-    // argument at a strict parameter (decision P3). The discharges are the
-    // same: `xs[i]?!`, `xs[i] ?? fallback`, or a declaration `string |
-    // missing`. A value with a top-level `missing` arm is refused by the run
-    // time at ANY declaration that does not admit `missing`, numeric or not
-    // (`let n: number = m` with `m: number | missing`, `let y: integer =
-    // first(filter(ys, …))`), so it is reported at every such declaration.
-    //
-    // A numeric read is typed with a `nan` arm instead (`zs[i]` on a
-    // `list<real>` is `nan | real`). Only `number` (and a union that names
-    // `nan`) admits `NaN`: `real`, `integer` and `complex` hold finite values
-    // only, and the run time refuses `NaN` there. So a `nan` arm is reported
-    // at a declaration that does not admit `nan`, when every OTHER arm fits
-    // the declaration: the possible `NaN` is then the only reason the value
-    // can fail. A value with another arm outside the declaration (`a / b`
-    // with `a, b: real` is `infinity | nan | real`) overlaps the declaration
-    // and is not reported, as an overlap is not reported elsewhere in this
-    // check.
-    const absentArm =
-      !isSubtype('missing', declared.type) &&
-      hasTopLevelArm(value.type.type, 'missing')
-        ? 'missing'
-        : !isSubtype('nan', declared.type) &&
-            hasTopLevelArm(value.type.type, 'nan') &&
-            otherArmsFit(value.type.type, 'nan', declared.type)
-          ? 'nan'
-          : undefined;
-    if (absentArm !== undefined) {
+    // A value that may be `NaN` (`zs[i]` on a `list<real>` is `nan |
+    // real`): only `number` (and a union that names `nan`) admits `NaN`;
+    // `real`, `integer` and `complex` hold finite values only, and the run
+    // time refuses `NaN` there. So a `nan` arm is reported at a declaration
+    // that does not admit `nan`, when every OTHER arm fits the declaration:
+    // the possible `NaN` is then the only reason the value can fail. A value
+    // with another arm outside the declaration (`a / b` with `a, b: real` is
+    // `infinity | nan | real`) overlaps the declaration and is not reported,
+    // as an overlap is not reported elsewhere in this check. A possible
+    // `Missing` is not reported: its arm was removed above.
+    if (
+      !isSubtype('nan', declared.type) &&
+      hasTopLevelArm(valueType.type, 'nan') &&
+      otherArmsFit(valueType.type, 'nan', declared.type)
+    ) {
       const snippet = epsilSnippet(value.json);
       // `?!` is a postfix operator: `a / b?!` would assert `b` alone, so a
       // snippet with an infix operator is wrapped in parentheses.
       const operand = /\s/.test(snippet) ? `(${snippet})` : snippet;
-      // A value that may be `Missing` or `NaN` (`ws[i]` on a
-      // `list<real | missing>` is `missing | nan | real`) needs both arms in
-      // the suggested declaration. `?!` and `??` discharge both already.
-      const alsoNaN =
-        absentArm === 'missing' &&
-        !isSubtype('nan', declared.type) &&
-        hasTopLevelArm(value.type.type, 'nan');
       const message =
-        absentArm === 'missing'
-          ? `The value \`${snippet}\` of type "${value.type}" may be absent, ` +
-            `and the declared type "${declared}" excludes absence. Write ` +
-            `\`${operand}?!\` to assert that it is present, ` +
-            `\`${operand} ?? fallback\` to replace an absent value, ` +
-            `or declare \`${declared} | missing${alsoNaN ? ' | nan' : ''}\``
-          : `The value \`${snippet}\` of type "${value.type}" may be \`NaN\`, ` +
-            `and the declared type "${declared}" excludes \`NaN\`. Write ` +
-            `\`${operand}?!\` to assert that it is not \`NaN\`, ` +
-            `\`${operand} ?? fallback\` to replace \`NaN\`, ` +
-            `or declare \`${declared} | nan\``;
+        `The value \`${snippet}\` of type "${value.type}" may be \`NaN\`, ` +
+        `and the declared type "${declared}" excludes \`NaN\`. Write ` +
+        `\`${operand}?!\` to assert that it is not \`NaN\`, ` +
+        `\`${operand} ?? fallback\` to replace \`NaN\`, ` +
+        `or declare \`${declared} | nan\``;
       return { message, provable: false };
     }
     return undefined;
@@ -3117,7 +3103,6 @@ function isClosedLiteralValue(
     isSymbol(value, 'True') ||
     isSymbol(value, 'False') ||
     isSymbol(value, 'Missing') ||
-    isSymbol(value, 'Undefined') ||
     isSymbol(value, 'Nothing')
   )
     return true;

@@ -240,20 +240,20 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
     ).toBe(once.toString());
   });
 
-  it('a MIXED callable union keeps its latent set', () => {
-    // `At` over a list of callbacks types as `((…) random -> …) | missing` —
-    // a union with one signature member and one that is not. The callable gate
-    // must stay in lockstep with the reader, which unions across members:
-    // bailing on the union would silently report a drawing callback pure.
-    // The index is a variable: with a literal index that the list is proved
-    // to hold, the access has no `missing` member and the type is not a union.
+  it('a callable read and a MIXED callable union keep their latent set', () => {
+    // `At` over a list of callbacks types as the signature of the callback,
+    // `(…) random -> …`: the absence marker of a read is implicit in its
+    // type (`docs/ERROR-MODEL.md`, "`Missing` is a result only"). The index
+    // is a variable. A declared mixed union, with one signature member and
+    // one that is not, is checked below: the callable gate must stay in
+    // lockstep with the reader, which unions across members, and bailing on
+    // the union would silently report a drawing callback pure.
     const ce = new ComputeEngine();
     ce.assign('rf', ce.parse('x \\mapsto \\mathrm{Random}()'));
     ce.declare('k', 'integer');
     ce.assign('picked', ce.box(['At', ['List', 'rf'], 'k']));
     const def = ce.lookupDefinition('picked');
     const t = def !== undefined && 'value' in def ? def.value.type.toString() : '';
-    expect(t).toContain('|');
     expect(t).toContain('random');
 
     expect(eff(ce.box(['Map', 'picked', ['List', 1, 2]]))).toEqual(['random']);

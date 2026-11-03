@@ -323,7 +323,7 @@ any([1, 3, 4], x => x % 2 == 0)
 
 ### append
 
-MathJSON `Append` · `(collection<any>, (missing | value)+) -> collection`
+MathJSON `Append` · `(collection<any>, any+) -> collection`
 
 Add one or more elements to the end of a collection.
 

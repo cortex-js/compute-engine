@@ -1999,7 +1999,7 @@ function isZeroValue(expr: Expression): boolean {
 /**
  * The zero of the VALUE of `container`, an expression that does not depend
  * on the variable: each number is `0`, each absence marker (`Missing`,
- * `Undefined`, `NaN`) stays as it is, and the tuples, lists and
+ * `NaN`) stays as it is, and the tuples, lists and
  * dictionaries keep their structure (`[(1, 2), Missing]` gives
  * `[(0, 0), Missing]`). A selector applied to this zero gives an absent
  * value where the selector applied to the container does.
@@ -2164,6 +2164,22 @@ function withZeroPoints(d: Expression, t: Type): Expression | undefined {
       ops.push(repaired);
     }
     return ce.function('List', ops);
+  }
+  // The derivative of a `Join` is the `Join` of the derivatives of its
+  // operands. An operand that is a list contributes its elements, and is
+  // repaired as a list of the type `t`; any other operand (a point) is one
+  // element, and is repaired as an element.
+  if (isFunction(d, 'Join')) {
+    const ops: Expression[] = [];
+    for (const op of d.ops) {
+      const repaired = withZeroPoints(
+        op,
+        op.type.matches('list') ? t : element
+      );
+      if (repaired === undefined) return undefined;
+      ops.push(repaired);
+    }
+    return ce.function('Join', ops);
   }
   return isSubtype(stripMissingFromType(element), 'number') ? d : undefined;
 }
@@ -2403,6 +2419,30 @@ function differentiateNode(
     });
     if (elements.some((e) => !e.isValid)) return undefined;
     return ce.function(expr.operator, elements);
+  }
+
+  // A `Join` whose result is a list concatenates its operands, which is
+  // linear, so its derivative is the `Join` of the derivatives of its
+  // operands: `d/du Join((u, u²), [u, 1])` is `Join((1, 2u), [1, 0])`. A
+  // tuple operand is one element of the result and its derivative is one
+  // tuple (`withZeroOfShape()` gives a constant point the zero point). The
+  // derivative of a collection operand must stay a collection: when it is
+  // the scalar `0` (a constant list whose length the type does not give),
+  // the `Join` would read it as one element, so the rule declines.
+  if (expr.operator === 'Join' && expr.type.matches('list')) {
+    const parts: Expression[] = [];
+    for (const op of expr.ops) {
+      const d = withZeroOfShape(
+        op,
+        differentiate(op, v, depth + 1, trace) ??
+          ce._fn('D', [op, ce.symbol(v)]),
+        v
+      );
+      if (!d.isValid) return undefined;
+      if (d.isSame(0) && !op.type.matches('number')) return undefined;
+      parts.push(d);
+    }
+    return ce.function('Join', parts);
   }
 
   // An accessor of a literal container selects one of its operands, so its

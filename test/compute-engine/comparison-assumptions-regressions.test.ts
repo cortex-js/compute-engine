@@ -265,12 +265,13 @@ describe('COMPARISON CHAINS IN ASSUMPTIONS', () => {
     }
     // The links applied before a rejected one keep their bindings (`ce2`
     // below). The link
-    // `1 = Undefined` is `False`: a comparison with an absent operand is
+    // `1 = Missing` is `False`: a comparison with an absent operand is
     // `False` (user decision of 2026-11-02, two-valued comparisons), so the
     // chain is a contradiction. Before, the link was `Missing`, which is not
-    // a predicate.
+    // a predicate. (`Undefined` is not an absent value since `Missing` is a
+    // result only, `docs/ERROR-MODEL.md`.)
     const ce = new ComputeEngine();
-    expect(ce.assume(ce.box(['Equal', 'x', 1, 'Undefined']))).toBe(
+    expect(ce.assume(ce.box(['Equal', 'x', 1, 'Missing']))).toBe(
       'contradiction'
     );
     const ce2 = new ComputeEngine();

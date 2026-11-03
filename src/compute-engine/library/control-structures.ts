@@ -61,6 +61,7 @@ import {
   isCollectionShaped,
   isWalkableFiniteCollection,
   mayCarryDimensions,
+  nanPoint,
   pointArity,
   unmatchedCellKind,
 } from '../collection-utils.js';
@@ -1382,9 +1383,12 @@ function containsSubexpression(e: Expression, part: Expression): boolean {
 
 /**
  * Whether a value of type `t` masks to `NaN`: its type, less any `missing`
- * arm, is a number. A value that is not provably numeric (`unknown`, a point,
- * a list, a string) masks to `Missing`, exactly as `absentScalarMarker`
- * (`boxed-expression/validate.ts`) reads the codomain of an application.
+ * arm, is a number. A value that is not provably numeric masks to the
+ * absent value of its own domain (`maskedValue()`): the point of `NaN`
+ * coordinates for a point (`pointArity()`), `False` for a boolean, and
+ * `Missing` otherwise (a list, a string, `unknown`). `absentScalarMarker`
+ * (`boxed-expression/validate.ts`) reads the codomain of an application in
+ * the same way for a number.
  */
 function isNumericValueType(t: Type): boolean {
   const present = stripMissingFromType(t);
@@ -1393,13 +1397,15 @@ function isNumericValueType(t: Type): boolean {
 
 /**
  * The value a false restriction answers for `expr`: the absence marker of
- * the value's own type, `NaN` for a number and `Missing` otherwise (user
- * decision 2026-09-25). One rule for absence, then: every operator answers
- * the marker of its codomain for an absent operand (`docs/ERROR-MODEL.md`,
- * §2 rule 4), and a restriction answers the marker of its value. Before, a
- * restriction masked every value to `Missing`, so a masked NUMBER read as
- * `Missing` on the route that held the restriction and as `NaN` on the route
- * that evaluated it fresh (`2·x{c}` versus `2·Missing`).
+ * the value's own type, `NaN` for a number, a point of `NaN` coordinates
+ * for a point (a tuple of numbers, `pointArity()`), and `Missing`
+ * otherwise (user decisions 2026-09-25 and 2026-11-03). One rule for
+ * absence, then: every operator answers the marker of its codomain for an
+ * absent operand (`docs/ERROR-MODEL.md`, §2 rule 4), and a restriction
+ * answers the marker of its value. Before, a restriction masked every value
+ * to `Missing`, so a masked NUMBER read as `Missing` on the route that held
+ * the restriction and as `NaN` on the route that evaluated it fresh
+ * (`2·x{c}` versus `2·Missing`).
  *
  * A boolean value (a relation, a region of a plot) masks to `False`: the
  * logic is two-valued, so the absent boolean is `False`, as the cell of a
@@ -1410,6 +1416,12 @@ function isNumericValueType(t: Type): boolean {
  */
 function maskedValue(ce: ComputeEngine, expr: Expression): Expression {
   if (isNumericValueType(expr.type.type)) return ce.NaN;
+  // A point (a tuple of numbers) masks to the point of `NaN` coordinates of
+  // its arity, the absent value of the domain of a point
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only", rule 2), as a
+  // read out of range of a list of points gives.
+  const n = pointArity(expr.type.type);
+  if (n !== undefined) return nanPoint(ce, n);
   return unmatchedCellKind(expr.type.type) === 'boolean'
     ? ce.False
     : ce.Missing;
@@ -1442,11 +1454,7 @@ function nanPointType(n: number): Type {
 function unmatchedCell(ce: ComputeEngine, t: Readonly<Type>): Expression {
   if (isNumericValueType(t as Type)) return ce.NaN;
   const n = pointArity(t);
-  if (n !== undefined)
-    return ce._fn(
-      'Tuple',
-      Array.from({ length: n }, () => ce.NaN)
-    );
+  if (n !== undefined) return nanPoint(ce, n);
   const kind = unmatchedCellKind(t);
   if (kind === 'boolean') return ce.False;
   if (kind === 'color') return ce._fn('Rgb', [ce.NaN, ce.NaN, ce.NaN]);
@@ -1460,12 +1468,8 @@ function unmatchedCell(ce: ComputeEngine, t: Readonly<Type>): Expression {
  * boolean or a colour and `c` is `False` (`unmatchedCell()`), and
  * `If(c, elem)` otherwise (`If(c, elem, Rgb(NaN, NaN, NaN))` for a colour).
  * The value of
- * `If(c, elem)` when `c` is false is `NaN` for a number, as
- * `unmatchedCell()` gives, but `Missing` for a point, the value of a point
- * that a SCALAR condition does not select. So a cell whose condition is not
- * decided, `If(t < 0, (6, 8))` with `t` free, stays `Missing` for a point
- * when it is later evaluated alone with `t` false; the evaluation of the
- * whole restriction with `t` assigned gives the `NaN` point.
+ * `If(c, elem)` when `c` is false is `NaN` for a number and the `NaN`
+ * point for a point (`maskedValue()`), as `unmatchedCell()` gives.
  */
 function maskCell(
   ce: ComputeEngine,
@@ -1732,7 +1736,7 @@ const BRANCH_RELATIONS: ReadonlySet<string> = new Set([
 
 /**
  * The value of a branch condition, read two-valued: an absent value
- * (`Missing`, `Undefined`) is `False`. The logic is two-valued: an absent
+ * (`Missing`) is `False`. The logic is two-valued: an absent
  * condition is not a third truth value, and the branch takes its next arm
  * (the else arm, or the absent value of the domain of the arm), as Desmos
  * does: `\{u<1:5,7\}` is 7 when `u` is undefined (user decision 2026-11-02,
@@ -1740,7 +1744,7 @@ const BRANCH_RELATIONS: ReadonlySet<string> = new Set([
  */
 function twoValued(value: Expression): Expression {
   const s = sym(value);
-  return s === 'Missing' || s === 'Undefined' ? value.engine.False : value;
+  return s === 'Missing' ? value.engine.False : value;
 }
 
 /**
@@ -2272,7 +2276,7 @@ type MaskList = { value: Expression; cells: MaskCell[] };
  * The gate (§3 of `docs/BROADCAST-MODEL.md`) is
  * deliberately narrow: an indexed collection (never a `Set`, never a tuple —
  * tuples are points, not lists) of statically known finite length whose cells
- * are ALL condition values (`True`, `False`, `Missing` or `Undefined`; an
+ * are ALL condition values (`True`, `False` or `Missing`; an
  * absent cell reads as `False`) or themselves such
  * collections. A nested mask is read here so that the selection can refuse
  * it (`evaluateElementwiseSelection()`): a condition is a boolean or a flat
@@ -2378,9 +2382,9 @@ function evaluateElementwiseSelection(
               : undefined
           );
     const s = sym(c);
-    // An absent condition (`Missing`, `Undefined`) is read as `False`: the
+    // An absent condition (`Missing`) is read as `False`: the
     // logic is two-valued (user decision 2026-11-02).
-    if (s === 'False' || s === 'Undefined' || s === 'Missing') continue;
+    if (s === 'False' || s === 'Missing') continue;
     if (s === 'True') {
       selectors.push('True');
       arms.push(arm);
@@ -3379,7 +3383,7 @@ function distributeOverListArms(
  *   symbol declared `list<number>`, `Range(1, n)`), or a finite carrier has
  *   elements that cannot be computed (`QuotientRing(Integers, 5)`), the
  *   whole restriction is held.
- * - A condition that evaluates to `Undefined` has no value, and gives the
+ * - A condition that evaluates to `Missing` has no value, and gives the
  *   absent value of `expr`.
  * - Any other condition is undecided, and the restriction is held. Over a
  *   collection value that is not a tuple or a string, the collection is
@@ -3702,7 +3706,7 @@ function evaluateWhich(
             ...args.slice(i + 1),
           ]);
     }
-    // `False` — or `Undefined` (decision 9), treated as not-True — falls
+    // `False` — or `Missing`, treated as not-True — falls
     // through to the next clause.
     i += 2;
   }
@@ -5080,7 +5084,6 @@ function firstDeclarationIndex(
 const UNBINDABLE_NAMES: ReadonlySet<string> = new Set([
   'Nothing',
   'Missing',
-  'Undefined',
 ]);
 
 /**
@@ -5088,8 +5091,8 @@ const UNBINDABLE_NAMES: ReadonlySet<string> = new Set([
  * statement list: a `DefineFunction(name, Function(…))` (the Epsil
  * `function g(k) { … }` and `g(k) = …`), where
  *
- * - `name` is a symbol and is not an absence marker (`Nothing`, `Missing`,
- *   `Undefined`), whose definition installs nothing;
+ * - `name` is a symbol and is not an absence marker (`Nothing`, `Missing`),
+ *   whose definition installs nothing;
  * - the second operand is a `Function` literal, the only clause that the
  *   `DefineFunction` canonical handler installs;
  * - `name` is not the constructor of a declared nominal type: such a

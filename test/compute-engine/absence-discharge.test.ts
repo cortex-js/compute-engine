@@ -17,7 +17,12 @@ describe('whole-value absence checks and fallbacks', () => {
     expect(ce.box(['IsMissing']).evaluate().operator).toBe('Error');
   });
 
-  test.each(['Missing', 'Undefined', 'NaN', 'Indeterminate'])(
+  test('Undefined is an ordinary symbol, not an absent value', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['IsMissing', 'Undefined']).evaluate().symbol).toBe('False');
+  });
+
+  test.each(['Missing', 'NaN', 'Indeterminate'])(
     '%s selects a fallback and the final absent operand is retained',
     (marker) => {
       const ce = new ComputeEngine();
@@ -142,7 +147,7 @@ describe('successful fallback result types', () => {
         .function('Coalesce', [ce.Missing, failure, ce.number(5)])
         .type.toString()
     ).toBe('never');
-    ce.declare('text', 'string | missing');
+    ce.declare('text', 'string');
     expectTypeBetween(
       ce.function('Coalesce', [ce.symbol('text'), failure, ce.number(5)]),
       { atMost: 'string' }
@@ -162,7 +167,7 @@ describe('successful fallback result types', () => {
     ).toBe('never');
   });
 
-  test.each(['string | missing', 'string'])(
+  test.each(['string'])(
     '%s with a failing fallback has successful string outcomes',
     (type) => {
       const ce = new ComputeEngine();
@@ -177,15 +182,8 @@ describe('successful fallback result types', () => {
       expect(derived).toBe('string');
       ce.assign('text', ce.string('ok'));
       expect(expr.evaluate().string).toBe('ok');
-      if (type === 'string') {
-        // A declared `string` is a contract on every value the symbol takes
-        // (user decision P1, 2026-10-21): the absent value is refused at the
-        // assignment, so the fallback is never reached through `text`.
-        expect(() => ce.assign('text', ce.Missing)).toThrow(
-          /not compatible with the type "string"/
-        );
-        return;
-      }
+      // A store into a declared name accepts `Missing`, and the fallback is
+      // then reached.
       ce.assign('text', ce.Missing);
       expect(expr.evaluate().operator).toBe('Error');
     }
@@ -208,8 +206,10 @@ describe('successful fallback result types', () => {
 
   test('Nothing and nested absent cells survive the whole-value check', () => {
     const ce = new ComputeEngine();
-    ce.declare('optional', 'integer | nothing | missing');
-    ce.declare('cells', 'list<integer | missing>');
+    // A declared type cannot name `missing`; the list is typed from a value
+    // that holds an absent cell.
+    ce.declare('optional', 'integer | nothing');
+    ce.assign('cells', ce.box(['List', 1, 'Missing']));
     const failure = ['RuntimeError', { str: 'absent' }];
     const optional = ce.box(['Coalesce', 'optional', failure]);
     expectTypeBetween(optional, { atMost: 'integer | nothing' });
@@ -223,7 +223,7 @@ describe('successful fallback result types', () => {
 
   test('an absent final fallback remains possible and unresolved content stays unresolved', () => {
     const ce = new ComputeEngine();
-    ce.declare('text', 'string | missing');
+    ce.declare('text', 'string');
     expectTypeBetween(ce.box(['Coalesce', 'text', 'Missing']), {
       atMost: 'string | missing',
       above: 'string',

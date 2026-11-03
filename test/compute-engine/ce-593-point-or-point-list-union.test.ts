@@ -514,8 +514,9 @@ describe('CE-593: a tuple value under an indexed_collection option', () => {
       'indexed_collection<tuple<number, number>> | tuple<number, number>'
     );
     const px = ce.box(['PointX', 'P']);
+    // The marker of a read that may find nothing is implicit.
     expect(px.type.toString()).toBe(
-      'list<number> | missing | number | tuple<number, number>'
+      'list<number> | number | tuple<number, number>'
     );
     ce.assign('P', ce.box(['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
     const value = px.evaluate();

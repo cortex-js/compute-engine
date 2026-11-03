@@ -4746,13 +4746,13 @@ describe('Norm — the L∞ norm of a point with a broadcasting component', () =
           ])
           .evaluate().json
       ).toEqual(['List', 'ExponentialE', 'Pi']);
-      // An absent coordinate makes the norm of that point `NaN`.
+      // An absent coordinate makes the norm of that point `Missing`.
       expect(
         eng
           .box(['Norm', ['Tuple', ['List', 1, 'Missing'], 2], order])
           .evaluate()
           .toString()
-      ).toBe('[2,NaN]');
+      ).toBe('[2,"Missing"]');
       // A coordinate with no value leaves the norm undecided.
       expect(
         eng.box(['Norm', ['Tuple', 'L', 'z'], order]).evaluate().operator

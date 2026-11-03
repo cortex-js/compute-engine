@@ -151,7 +151,12 @@ describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
 });
 
 describe('A FOLD OVER ELEMENTS THAT MAY BE ABSENT (CE-381)', () => {
-  // The interpreter reads an absent element as `NaN`, from that step on.
+  // The interpreter gives `Missing` from the step that reads an absent
+  // element on. A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"), so `L` is declared `list<number>` and
+  // holds the marker: a store accepts it where the declared type accepts a
+  // present value. Each `NaN` of the expected values below stands for
+  // `Missing`.
   // The compiled value of a fold over an absent element is not specified
   // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
   // "Everything computed from an absent value, except at a discharge"; R4 of
@@ -168,19 +173,19 @@ describe('A FOLD OVER ELEMENTS THAT MAY BE ABSENT (CE-381)', () => {
     ['Product', ['Product', 'L'], NaN],
     ['Sum', ['Sum', 'L'], NaN],
   ])('%s over [2, absent, 3]', (_, expr, expected) => {
-    expect(evaluate('list<number | missing>', expr, SCALARS)).toBe(
-      JSON.stringify(expected).replace(/null/g, 'NaN')
+    expect(evaluate('list<number>', expr, SCALARS)).toBe(
+      JSON.stringify(expected).replace(/null/g, '"Missing"')
     );
   });
 
   test('a complex seed over an absent element', () => {
     expect(
       evaluate(
-        'list<number | missing>',
+        'list<number>',
         ['Reduce', 'L', 'Multiply', 'ImaginaryUnit'],
         SCALARS
       )
-    ).toBe('NaN');
+    ).toBe('"Missing"');
   });
 
   const NESTED = [
@@ -192,8 +197,8 @@ describe('A FOLD OVER ELEMENTS THAT MAY BE ABSENT (CE-381)', () => {
     ['Sum', ['Sum', 'L'], [5, NaN]],
     ['Reduce(Multiply)', ['Reduce', 'L', 'Multiply', 1], [6, NaN]],
   ])('%s over rows with an absent entry', (_, expr, expected) => {
-    expect(evaluate('list<list<number | missing>>', expr, NESTED)).toBe(
-      JSON.stringify(expected).replace(/null/g, 'NaN')
+    expect(evaluate('list<list<number>>', expr, NESTED)).toBe(
+      JSON.stringify(expected).replace(/null/g, '"Missing"')
     );
   });
 
@@ -218,7 +223,6 @@ describe('A FOLD OVER ELEMENTS THAT ARE NOT NUMBERS (CE-382)', () => {
     ['list<list<boolean>>', ['Sum', 'L']],
     ['list<string>', ['Product', 'L']],
     ['list<boolean>', ['Sum', 'L']],
-    ['list<boolean | missing>', ['Sum', 'L']],
     ['list<boolean>', ['Reduce', 'L', 'Add', 0]],
     ['list<boolean>', ['Reduce', 'L', 'Max']],
     ['list<boolean>', ['Scan', 'L', 'Add', 0]],

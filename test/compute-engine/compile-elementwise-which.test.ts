@@ -577,8 +577,7 @@ describe('compiled If/Which take no branch on an undecided condition', () => {
   function make(): ComputeEngine {
     const engine = new ComputeEngine();
     engine.declare('x', 'number');
-    // `b` may be absent, so a condition over it is read by its value.
-    engine.declare('b', 'boolean | missing');
+    engine.declare('b', 'boolean');
     return engine;
   }
 
@@ -633,10 +632,13 @@ describe('compiled If/Which take no branch on an undecided condition', () => {
     expect(run(expr, { x: -3 })).toBe(2);
   });
 
-  test('an absent boolean condition answers NaN, not the else arm', () => {
-    const engine = make();
-    const expr = engine.box(['If', 'b', 1, -1]);
-    expect(run(expr, { b: undefined })).toBeNaN();
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so a condition input cannot be declared absent. An
+  // input left out has no specified compiled value.
+  test('a condition input cannot be declared `boolean | missing`', () => {
+    expect(() => new ComputeEngine().declare('b', 'boolean | missing')).toThrow(
+      /cannot be declared/
+    );
   });
 
   test('a boolean condition value selects an arm', () => {
@@ -735,14 +737,11 @@ describe('compiled If/Which take no branch on an undecided condition', () => {
     expect(r.run!({ x: NaN })).toBe(-1);
   });
 
-  test('`Not` over a boolean value is decided three-valued', () => {
+  test('`Not` over a boolean value', () => {
     // `Not` is lowered by exchanging the two constants the decided tests
-    // compare against, never by an emitted `!`: `!undefined` is a confident
-    // `true`, so the `!` used to hand `If(Not(b), 1, 2)` the first arm for an
-    // absent `b`.
+    // compare against, never by an emitted `!`.
     const engine = make();
     const expr = engine.box(['If', ['Not', 'b'], 1, 2]);
-    expect(run(expr, { b: undefined })).toBeNaN();
     expect(run(expr, { b: true })).toBe(2);
     expect(run(expr, { b: false })).toBe(1);
   });

@@ -2796,8 +2796,8 @@ Because objects are references, they can end up referring to each other
 in a loop:
 
 ```epsil
-type Buddy = object{name: string, friend: type Buddy | missing}
-let alice = Buddy(name: "Alice", friend: Missing)
+type Buddy = object{name: string, friend: type Buddy | string}
+let alice = Buddy(name: "Alice", friend: "none")
 let bob = Buddy(name: "Bob", friend: alice)
 alice.friend = bob
 // alice's friend is bob, and bob's friend is alice — a cycle

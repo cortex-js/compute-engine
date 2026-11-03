@@ -27,6 +27,12 @@
  * discharge"; R4 of `docs/plans/2026-11-01-absent-value-contract.md`). The
  * tests check the compiled value for a present point only, and the
  * interpreter fallback for both.
+ *
+ * Since 2026-11-03 a false restriction of a point is not absent: it is the
+ * point of `NaN` coordinates (`docs/ERROR-MODEL.md`, "`Missing` is a result
+ * only", rule 2), in the interpreter and in compiled code. Arithmetic on it
+ * gives the point of `NaN` coordinates on both routes, and the tests check
+ * both.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -94,9 +100,10 @@ describe('Compiled arithmetic on an absent point', () => {
   ];
 
   test.each(pointResults)(
-    '%s is undefined in the interpreter when the point is absent',
+    '%s is the NaN point when the restriction is false',
     (_label, json) => {
-      expect(fallbackRun(json, 0)).toBeUndefined();
+      expect(fallbackRun(json, 0)).toEqual([NaN, NaN]);
+      expect(compiledRun(json, 0)).toEqual([NaN, NaN]);
     }
   );
 
@@ -108,11 +115,15 @@ describe('Compiled arithmetic on an absent point', () => {
     }
   );
 
-  test('a list of numbers times the absent point is undefined per cell', () => {
+  test('a list of numbers times the NaN point is a NaN point per cell', () => {
     const json = ['Multiply', ['List', 1, 2, 3], gated()];
-    const expected = [undefined, undefined, undefined];
-    // `toStrictEqual` tells an `undefined` cell from `NaN`.
+    const expected = [
+      [NaN, NaN],
+      [NaN, NaN],
+      [NaN, NaN],
+    ];
     expect(fallbackRun(json, 0)).toStrictEqual(expected);
+    expect(compiledRun(json, 0)).toStrictEqual(expected);
     expect(compiledRun(json, 2)).toEqual([
       [2, 1],
       [4, 2],
@@ -120,19 +131,18 @@ describe('Compiled arithmetic on an absent point', () => {
     ]);
   });
 
-  test('a list of points with an absent cell keeps the cell absent', () => {
+  test('a list of points with a restricted cell keeps the NaN point', () => {
     const json = [
       'Multiply',
       ['List', gated(['Tuple', 1, 2]), ['Tuple', 3, 4]],
       2,
     ];
-    const expected = [undefined, [6, 8]];
+    const expected = [
+      [NaN, NaN],
+      [6, 8],
+    ];
     expect(fallbackRun(json, 0)).toStrictEqual(expected);
-    // The compiled cell of the absent point is not specified; the cell of
-    // the present point is.
-    const compiled = compiledRun(json, 0) as unknown[];
-    expect(compiled).toHaveLength(2);
-    expect(compiled[1]).toEqual([6, 8]);
+    expect(compiledRun(json, 0)).toStrictEqual(expected);
     expect(compiledRun(json, 2)).toEqual([
       [2, 4],
       [6, 8],
@@ -172,7 +182,14 @@ describe('Compiled arithmetic on an absent point', () => {
           [6, 8],
         ],
       ],
-      [-1, 1, [undefined, [6, 8]]],
+      [
+        -1,
+        1,
+        [
+          [NaN, NaN],
+          [6, 8],
+        ],
+      ],
       [1, -1, undefined],
       [-1, -1, undefined],
     ];
@@ -182,14 +199,11 @@ describe('Compiled arithmetic on an absent point', () => {
       if (d < 0) continue;
       expect(run('fallback', c, d)).toStrictEqual(expected);
     }
-    // The compiled value is checked where no point is absent, and in the
-    // cell of the present point when only the first point is absent. With
-    // `d` false the whole list is absent, and its compiled value is not
+    // The compiled value is checked where the list is present. With `d`
+    // false the whole list is absent, and its compiled value is not
     // specified.
     expect(run('compiled', 1, 1)).toStrictEqual(cases[0][2]);
-    const partial = run('compiled', -1, 1) as unknown[];
-    expect(partial).toHaveLength(2);
-    expect(partial[1]).toEqual([6, 8]);
+    expect(run('compiled', -1, 1)).toStrictEqual(cases[1][2]);
   });
 
   test('a coordinate of the absent point is NaN (a numeric slot)', () => {

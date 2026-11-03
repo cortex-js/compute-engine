@@ -201,16 +201,10 @@ describe('Python: NotEqual over `string | missing`', () => {
     ).toBe('True');
   });
 
-  test('the emitted NotEqual is the plain !=, with no tolerance', () => {
-    ce.declare('s', 'string | missing');
-    const out = python.compileFunction(
-      ce.box(['NotEqual', 's', { str: 'x' }]),
-      'f',
-      ['s']
-    );
-    expect(out).not.toContain('None if');
-    expect(out).toContain('(s) != ("x")');
-    expect(out).not.toContain('abs(');
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so an input that may be absent cannot be declared.
+  test('an input declared string | missing is a static error', () => {
+    expect(() => ce.declare('s', 'string | missing')).toThrow();
   });
 });
 

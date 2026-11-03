@@ -323,8 +323,8 @@ describe('the allow-list and its lowerings (§3.1.1)', () => {
     }
   );
 
-  it('At(L, k) is typed integer | nan: an index out of range carries NaN', () => {
-    expect(typeOf(accept(['At', 'L', 'n']).root)).toBe(t('integer | nan'));
+  it('At(L, k) is typed integer: the NaN of an index out of range is implicit', () => {
+    expect(typeOf(accept(['At', 'L', 'n']).root)).toBe(t('integer'));
   });
 
   it('Length(L) + n is on the lane, and Length(L) > 3 compiles', () => {

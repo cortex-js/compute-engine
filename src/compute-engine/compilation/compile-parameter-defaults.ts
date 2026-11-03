@@ -12,6 +12,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import {
+  functionLiteralParameterType,
   isRestParameter,
   optionalParameterDefault,
   requiredParameterCount,
@@ -25,6 +26,10 @@ import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
 import { typeCannotBeAbsent } from '../library/core.js';
 import { couldMatch } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
+import {
+  leafwardElementType,
+  pointArity,
+} from '../collection-utils.js';
 
 /**
  * True when the `Function` literal `literal` has a parameter with a default
@@ -92,11 +97,23 @@ export function literalAcceptsArgumentCount(
  * True when a value of the static type `t` can be absent when compiled code
  * runs: its type has a `missing` or `nan` member (`typeCannotBeAbsent()`),
  * or it can be a number, which compiled code holds as a float that can be
- * `NaN` (`0/0` with `x/y` typed `real`), or it is `unknown` or `any`. A
- * collection, a tuple, a string, a boolean, a symbol or a record cannot.
+ * `NaN` (`0/0` with `x/y` typed `real`), or it is `unknown` or `any`, or
+ * it is a point (`pointArity()`: a tuple of numbers, `tuple<real, real>`
+ * included). A point can be a `NaN` point, a tuple whose coordinates are
+ * all `NaN`, which the readers read as absent: an accessor out of range
+ * gives one for a point although the type of the point is
+ * `tuple<real, real>` (`At(qs, 9)` with `qs: list<tuple<real, real>>`),
+ * and the value can reach the parameter through a local, a callback or an
+ * `Apply`. So every point is treated as possibly absent, as a `real`
+ * scalar is. A collection, a tuple that is not a point (`tuple<string,
+ * real>`), a string, a boolean, a symbol or a record cannot be absent.
  */
 export function mayBeAbsentAtRunTime(t: Type): boolean {
-  return !typeCannotBeAbsent(t) || couldMatch(t, 'number');
+  return (
+    !typeCannotBeAbsent(t) ||
+    couldMatch(t, 'number') ||
+    pointArity(t) !== undefined
+  );
 }
 
 /**
@@ -186,6 +203,123 @@ export function userFunctionDefaults(
 }
 
 /**
+ * The declared type of each parameter of the user function `h`, by
+ * position (`undefined` for a parameter without one): the annotation of the
+ * parameter of its literal `literal`, else the parameter type of its
+ * declared signature. The fill of a default reads it to choose its absence
+ * test (`targetCoalesce()`): a parameter typed as a point also takes its
+ * default for a `NaN` point.
+ */
+export function userFunctionParameterTypes(
+  engine: ComputeEngine,
+  h: string,
+  literal: Expression | undefined
+): (Type | undefined)[] {
+  const result: (Type | undefined)[] = [];
+  if (literal !== undefined && isFunction(literal, 'Function'))
+    literal.ops
+      .slice(1)
+      .forEach((p, i) => (result[i] = functionLiteralParameterType(p)));
+  const def = engine.lookupDefinition(h);
+  if (def !== undefined && isValueDef(def) && !def.value.inferredType) {
+    const t = def.value.type.type;
+    if (typeof t === 'object' && t.kind === 'signature')
+      [...(t.args ?? []), ...(t.optArgs ?? [])].forEach(
+        (a, i) => (result[i] ??= a.type)
+      );
+  }
+  return result;
+}
+
+/**
+ * The type that selects the absence test of the fill of each parameter with
+ * a default (`targetCoalesce()`), by position: a point type (`pointArity()`)
+ * selects the point test, which also reads a `NaN` point as absent, as the
+ * interpreter's fill does (`withAbsentDefaults()`); any other type selects
+ * the scalar test.
+ *
+ * The declared type of the parameter (`declared`) is used when it is a
+ * point. Otherwise the static type of the value that reaches the parameter
+ * (`passed`: the argument of a call or of an `Apply`, or the value that the
+ * consumer of a callback passes) is used: with `O` the point `(0, 0)`,
+ * `(p = O) ↦ PointX(p)` has no declared type for `p`, and a `NaN` point
+ * passed to it takes the default. When no type of the passed value is known
+ * at the site (`passed[i]` is `undefined`, `unknown` or `any`), the type of
+ * the parameter (`declared`, else `inferred`) is used. If that is not a
+ * point but the default is one (`defaultType(i)`), the parameter is meant
+ * to receive a point and the fill could not choose its test without a test
+ * of the type at run time: the compilation then declines (`what` names the
+ * site in the message). A parameter whose default is not a point keeps the
+ * scalar test there: it fills `NaN`, `undefined` and `null`, and passes a
+ * `NaN` point through. Positions without a default (`defaultType(i)` is
+ * `undefined`) are `undefined`.
+ */
+export function defaultFillTypes(
+  count: number,
+  defaultType: (i: number) => Type | undefined,
+  declared: ReadonlyArray<Type | undefined>,
+  passed: ReadonlyArray<Type | undefined> | undefined,
+  inferred: ReadonlyArray<Type | undefined> | undefined,
+  what: string
+): (Type | undefined)[] {
+  const result: (Type | undefined)[] = [];
+  for (let i = 0; i < count; i++) {
+    const dt = defaultType(i);
+    if (dt === undefined) continue;
+    const d = declared[i];
+    if (d !== undefined && pointArity(d) !== undefined) {
+      result[i] = d;
+      continue;
+    }
+    // A position past the values that the site passes is left out: the
+    // fill reads `undefined`, which the scalar test reads as absent.
+    if (passed !== undefined && i >= passed.length) {
+      result[i] = d;
+      continue;
+    }
+    const p = passed?.[i];
+    if (p !== undefined && p !== 'unknown' && p !== 'any') {
+      result[i] = p;
+      continue;
+    }
+    const t = d ?? inferred?.[i];
+    if (
+      (t === undefined || pointArity(t) === undefined) &&
+      pointArity(dt) !== undefined
+    )
+      throw new Error(
+        `Could not compile ${what}: the parameter ${i + 1} has a default ` +
+          `value, and the value it receives can be a point whose type is ` +
+          `not known here. A \`NaN\` point takes the default, and the ` +
+          `compiled code cannot choose that test without a type. Declare ` +
+          `the type of the parameter.`
+      );
+    result[i] = t;
+  }
+  return result;
+}
+
+/** The parameter types of the signature type `t`, by position (the
+ * required, then the optional ones), or `undefined` when `t` is not a
+ * signature. */
+export function signatureParameterTypes(t: Type): Type[] | undefined {
+  if (typeof t !== 'object' || t.kind !== 'signature') return undefined;
+  return [...(t.args ?? []), ...(t.optArgs ?? [])].map((a) => a.type);
+}
+
+/** The type of an element `rank` list levels into a value of type `t`
+ * (`leafwardElementType()` at each level), `t` itself for the rank 0, or
+ * `undefined` when a level has no element type. A map over a list fills a
+ * default for each element, so the type of the element selects its
+ * test. */
+export function elementTypeAtRank(t: Type, rank: number): Type | undefined {
+  let result: Type | undefined = t;
+  for (let k = 0; k < rank && result !== undefined; k++)
+    result = leafwardElementType(result);
+  return result;
+}
+
+/**
  * The arguments `actuals` of a call, with each argument at a parameter with
  * a default (`defaults`, by position, `userFunctionDefaults()`) replaced by
  * `Coalesce(argument, default)`, so that an argument that is absent when the
@@ -262,6 +396,37 @@ export const jsIsAbsent = (x: string): string =>
   `Number.isNaN((${x}) ?? Number.NaN)`;
 
 /**
+ * The test of `jsIsAbsent()` on the bound operand `_c` of a position whose
+ * static type is a point of `n` coordinates, which also reads a `NaN` point
+ * as absent: an array whose `n` coordinates are all `NaN`, as a read past
+ * the end of a list of points gives (`_SYS.atPoint`). The interpreter reads
+ * the same values as absent (`isMissingValue()`, `type-guards.ts`). The
+ * coordinates are read only when `_c` is not `NaN`, `undefined` or
+ * `null`, so a point position that holds one of those markers is read
+ * without an error. The static type selects this test: the code does not
+ * test the type of `_c` at run time.
+ */
+function jsPointAbsentTest(n: number): string {
+  const coordinates = Array.from(
+    { length: n },
+    (_, i) => `Number.isNaN(_c[${i}])`
+  ).join(' && ');
+  return `Number.isNaN(_c ?? Number.NaN) || (${coordinates})`;
+}
+
+/** `IsMissing` at a point position of `n` coordinates on the JavaScript
+ * target (`jsPointAbsentTest()`). The operand is bound to a parameter so it
+ * is evaluated once. */
+export const jsIsAbsentPoint = (x: string, n: number): string =>
+  `((_c) => ${jsPointAbsentTest(n)})(${x})`;
+
+/** `Coalesce` at a point position of `n` coordinates on the JavaScript
+ * target: `x` unless `jsPointAbsentTest()` reads it as absent, else `d`,
+ * evaluated only then. */
+export const jsCoalescePoint = (x: string, d: string, n: number): string =>
+  `((_c) => (${jsPointAbsentTest(n)}) ? ${d} : _c)(${x})`;
+
+/**
  * The compiled default of each parameter operand of a `Function` literal,
  * `params`, by position: `undefined` for a parameter without a default.
  * `compile` compiles the default operand as an operand written at the call
@@ -274,7 +439,8 @@ export const jsIsAbsent = (x: string): string =>
  * numbers). The interpreter fills the same arguments with the same absence
  * test as `Coalesce` (`withAbsentDefaults()`, `parameter-defaults.ts`). A
  * JavaScript default parameter (`(x, k = 2) => …`) fills only `undefined`,
- * so it is not used.
+ * so it is not used. A parameter typed as a point also takes its default for
+ * a `NaN` point (`targetCoalesce()` with the parameter types).
  */
 export function literalDefaultFills(
   params: ReadonlyArray<Expression>,
@@ -294,16 +460,30 @@ export function literalDefaultFills(
  * `undefined`, `null` and `NaN` are absent. On the interval target it is
  * `undefined`: only an argument that the call leaves out is filled, with a
  * JavaScript default parameter (see `declineIntervalAbsentDefault()`).
+ *
+ * `paramTypes` are the declared types of the parameters, by position. The
+ * fill of a parameter typed as a point (`pointArity()`) uses the point axis
+ * of the target (`CompileTarget.absence.point`), which reads a `NaN` point
+ * as absent too, as the interpreter's fill does (`withAbsentDefaults()`).
+ * The third argument of the returned function is the position of the
+ * parameter.
  */
 export function targetCoalesce(
-  target: CompileTarget<Expression>
-): ((x: string, d: string) => string) | undefined {
+  target: CompileTarget<Expression>,
+  paramTypes?: ReadonlyArray<Type | undefined>
+): ((x: string, d: string, i?: number) => string) | undefined {
   if (target.language === 'interval-javascript') return undefined;
-  return (
+  const base: (x: string, d: string) => string =
     target.absence?.object?.coalesce ??
     target.absence?.numeric.coalesce ??
-    ((x, d) => `(${jsIsAbsent(x)} ? ${d} : ${x})`)
-  );
+    ((x, d) => `(${jsIsAbsent(x)} ? ${d} : ${x})`);
+  const point = target.absence?.point;
+  if (point === undefined || paramTypes === undefined) return base;
+  return (x, d, i) => {
+    const t = i === undefined ? undefined : paramTypes[i];
+    const n = t === undefined ? undefined : pointArity(t);
+    return n === undefined ? base(x, d) : point.coalesce(x, d, n);
+  };
 }
 
 /**
@@ -327,7 +507,7 @@ export function defaultFillingWrapper(
   callee: string,
   fills: ReadonlyArray<string | undefined>,
   fresh: () => string,
-  coalesce: ((x: string, d: string) => string) | undefined
+  coalesce: ((x: string, d: string, i?: number) => string) | undefined
 ): string {
   const params = fills.map(() => fresh());
   if (coalesce === undefined)
@@ -335,7 +515,7 @@ export function defaultFillingWrapper(
       .map((p, i) => (fills[i] === undefined ? p : `${p} = ${fills[i]}`))
       .join(', ')}) => ${callee}(${params.join(', ')}))`;
   const args = params.map((p, i) =>
-    fills[i] === undefined ? p : coalesce(p, fills[i]!)
+    fills[i] === undefined ? p : coalesce(p, fills[i]!, i)
   );
   return `((${params.join(', ')}) => ${callee}(${args.join(', ')}))`;
 }

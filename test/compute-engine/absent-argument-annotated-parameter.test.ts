@@ -4,18 +4,21 @@
  *
  * 1. At evaluation, an absent value (`Missing`) at a parameter ANNOTATED
  *    with a type that has no `missing` member is an `incompatible-type`
- *    error. A numeric annotation (`number`, `integer`, `real`) reads the
- *    absent value as `NaN`, the absence marker of a numeric domain, and
- *    accepts `NaN`. At a bare parameter the body runs with the absent
- *    value. Before,
+ *    error. At a numeric annotation (`number`, `integer`, `real`) the call
+ *    gives `Missing` without running the body, and the parameter accepts
+ *    `NaN`. At a bare parameter the body runs with the absent value.
+ *    Before,
  *    a function whose parameters were all numeric or collections answered
  *    the absence marker (`NaN`, `Missing`) without running, and the type of
  *    the call gained a `missing` member.
- * 2. At boxing, the engine admits an argument typed `missing | T` at a
+ * 2. At boxing, the engine admits an argument that may be absent at a
  *    parameter annotated `T`: its value is usually present.
- * 3. The Epsil static pre-pass is stricter: it reports such an argument,
- *    because an Epsil author can write the absent case out (`??`,
- *    `isMissing`, a parameter annotated `T | missing`).
+ *
+ * Since `Missing` is a result only (`docs/ERROR-MODEL.md`, user decision of
+ * 2026-11-02): a parameter annotation or a signature cannot name `missing`,
+ * the Epsil pre-pass no longer reports an argument that may be absent, and a
+ * read out of range in a list of points is a `NaN` point, which is a member
+ * of `tuple<number, number>`.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
@@ -52,13 +55,13 @@ function compiled(expr: any): unknown {
 }
 
 describe('an absent value at an annotated parameter', () => {
+  test('a point that is not found is a NaN point: the body runs', () => {
+    const src = `function f(p: tuple<number, number>) { p[1] + 1 }\nf(${ABSENT})`;
+    expect(box(src).expr.evaluate().toString()).toBe('NaN');
+    expect(run(src).value).toBe('NaN');
+  });
+
   test.each([
-    [
-      'a point parameter',
-      'function f(p: tuple<number, number>) { p[1] + 1 }',
-      `f(${ABSENT})`,
-      '"tuple<number, number>"',
-    ],
     [
       'a list parameter',
       'function f(xs: list<number>) { length(xs) }',
@@ -86,10 +89,15 @@ describe('an absent value at an annotated parameter', () => {
     expect(run(src).value).toBe('2');
   });
 
-  test('a restricted point whose condition fails is an absent value', () => {
+  // A call with `Missing` at a point parameter gives `Missing` without
+  // running the body, as at a numeric parameter.
+  test('a restricted point whose condition fails is a NaN point', () => {
+    // A false restriction of a point is the point of `NaN` coordinates
+    // (user decision 2026-11-03): the body runs with it, as with `NaN` at a
+    // number parameter.
     const src =
       'function f(p: tuple<number, number>) { p[1] + 1 }\nlet a = -1\nf(If(a > 0, (1, 2)))';
-    expect(run(src).value).toContain('incompatible-type');
+    expect(run(src).value).toBe('NaN');
   });
 
   test('a NaN at a number parameter is a number: the body runs', () => {
@@ -97,13 +105,13 @@ describe('an absent value at an annotated parameter', () => {
   });
 
   // `nan` is not a member of `integer` or `real`, but a user function accepts
-  // `NaN` at every numeric parameter (user decision 2026-09-30), and an
-  // absent value there is read as `NaN`.
+  // `NaN` at every numeric parameter (user decision 2026-09-30). An absent
+  // value there makes the call give `Missing` without running the body.
   test.each(['integer', 'real'])(
-    'an absent value at a parameter annotated %s is read as NaN',
+    'an absent value at a parameter annotated %s gives Missing',
     (type) => {
       const src = `function f(v: ${type}) { v + 1 }\nf(Missing)`;
-      expect(run(src)).toEqual({ value: 'NaN', diagnostics: [] });
+      expect(run(src)).toEqual({ value: '"Missing"', diagnostics: [] });
       expect(box(src).call.isValid).toBe(true);
     }
   );
@@ -114,7 +122,7 @@ describe('an absent value at an annotated parameter', () => {
     ['a restricted number whose condition fails', 'If(1 > 2, 3.5)'],
   ])('%s is accepted at an integer and a real parameter', (_label, arg) => {
     // The argument is a `NaN` value, not `Missing`: the case tests the
-    // acceptance of `NaN`, not the reading of an absent value as `NaN`.
+    // acceptance of `NaN`, not a call over an absent value.
     expect(run(arg).value).toBe('NaN');
     for (const type of ['integer', 'real']) {
       const src = `function f(v: ${type}) { v + 1 }\nf(${arg})`;
@@ -170,31 +178,32 @@ describe('an absent value at an annotated parameter', () => {
     expect(run(src).value).toContain('incompatible-type');
   });
 
-  test('an argument typed `missing` alone is refused at boxing', () => {
-    const { call } = box(
-      'function f(p: tuple<number, number>) { p[1] + 1 }\nf(Missing)'
-    );
-    expect(call.isValid).toBe(false);
+  test('an argument typed `missing` alone at a point parameter gives Missing', () => {
+    const src = 'function f(p: tuple<number, number>) { p[1] + 1 }\nf(Missing)';
+    expect(box(src).call.isValid).toBe(true);
+    expect(run(src).value).toBe('"Missing"');
   });
 
-  // A numeric domain absorbs absence as `NaN` (`docs/ERROR-MODEL.md` §3), and
-  // `NaN` is a member of `number`. The pre-pass reports nothing either.
-  test('an absent value at a number parameter is read as NaN', () => {
+  // A call with `Missing` at a numeric parameter gives `Missing` without
+  // running the body, also when the body would test the parameter. The
+  // pre-pass reports nothing.
+  test('an absent value at a number parameter gives Missing', () => {
     expect(run('function f(v: number) { v + 1 }\nf(Missing)')).toEqual({
-      value: 'NaN',
+      value: '"Missing"',
       diagnostics: [],
     });
     expect(
       run('function f(v: number) { isMissing(v) }\nf(Missing)').value
-    ).toBe('"True"');
+    ).toBe('"Missing"');
   });
 });
 
-// The MathJSON routes read an absent argument at a numeric parameter as
-// `NaN`, as the Epsil route does (`docs/ERROR-MODEL.md`, ruling of
-// 2026-09-30). Before 2026-10-17 the literal `Missing` was refused at boxing
-// with `incompatible-type` on these routes, and a function with a declared
-// signature gave its body the absent value (`g(x) = x` answered `Missing`).
+// On the MathJSON routes, as on the Epsil route, a call with an absent
+// argument at a numeric parameter gives `Missing` without running the body
+// (`docs/ERROR-MODEL.md`, "`Missing` is a result only"). Before 2026-10-17
+// the literal `Missing` was refused at boxing with `incompatible-type` on
+// these routes; from 2026-10-17 to 2026-11-02 the absent argument was read
+// as `NaN`.
 describe('an absent argument at a numeric parameter on the MathJSON routes', () => {
   test('a function literal applied directly', () => {
     const ce = new ComputeEngine();
@@ -208,7 +217,7 @@ describe('an absent argument at a numeric parameter on the MathJSON routes', () 
         'Missing',
       ]);
       expect(call.isValid).toBe(true);
-      expect(call.evaluate().toString()).toBe('NaN');
+      expect(call.evaluate().toString()).toBe('"Missing"');
     }
   });
 
@@ -218,16 +227,18 @@ describe('an absent argument at a numeric parameter on the MathJSON routes', () 
     ce.assign('g', ce.box(['Function', 'x', 'x']));
     const call = ce.box(['g', 'Missing']);
     expect(call.isValid).toBe(true);
-    expect(call.evaluate().toString()).toBe('NaN');
-    expect((await call.evaluateAsync()).toString()).toBe('NaN');
-    // Each element of a list is read the same way.
+    expect(call.evaluate().toString()).toBe('"Missing"');
+    expect((await call.evaluateAsync()).toString()).toBe('"Missing"');
+    // Each element of a list is mapped the same way.
     expect(ce.box(['g', ['List', 1, 'Missing']]).evaluate().toString()).toBe(
-      '[1,NaN]'
+      '[1,"Missing"]'
     );
   });
 
   test('the Epsil route answers the same', () => {
-    expect(run('function g(x: number) { x }\ng(Missing)').value).toBe('NaN');
+    expect(run('function g(x: number) { x }\ng(Missing)').value).toBe(
+      '"Missing"'
+    );
   });
 
   test('a non-numeric parameter still refuses the literal `Missing`', () => {
@@ -261,15 +272,16 @@ describe('an absent value at a parameter with no annotation', () => {
 });
 
 describe('an author who expects absence says so', () => {
-  test('a parameter annotated `T | missing` receives the absent value', () => {
-    const fn =
-      'function f(p: tuple<number, number> | missing) { if isMissing(p) { -1 } else { p[1] + 1 } }';
-    expect(run(`${fn}\nf(${ABSENT})`)).toEqual({ value: '-1', diagnostics: [] });
-    expect(run(`${fn}\nf(${PRESENT})`)).toEqual({ value: '2', diagnostics: [] });
+  test('a parameter annotation cannot name `missing`', () => {
+    const fn = 'function f(p: tuple<number, number> | missing) { 1 }';
+    const { diagnostics } = run(`${fn}\nf(${PRESENT})`);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain('type-annotation-error');
   });
 
   test('`??` removes the absent case from the argument', () => {
-    const src = `function f(p: tuple<number, number>) { p[1] + 1 }\nf(${ABSENT} ?? (0, 0))`;
+    const src =
+      'function f(xs: list<number>) { length(xs) }\nf(first(filter([[1, 2]], c => c[1] > 9)) ?? [0])';
     expect(run(src)).toEqual({ value: '1', diagnostics: [] });
   });
 });
@@ -279,7 +291,7 @@ describe('the engine admits an argument that may be absent', () => {
     const { call } = box(
       `function f(p: tuple<number, number>) { p[1] + 1 }\nf(${PRESENT})`
     );
-    expect(call.op1.type.toString()).toBe('missing | tuple<integer, integer>');
+    expect(call.op1.type.toString()).toBe('tuple<integer, integer>');
     expect(call.isValid).toBe(true);
     expect(call.type.toString()).toBe('number');
   });
@@ -309,39 +321,24 @@ describe('the engine admits an argument that may be absent', () => {
   });
 });
 
-describe('the Epsil static pre-pass reports an argument that may be absent', () => {
+// The Epsil static pre-pass does not report an argument that may be absent:
+// a type does not show that a read may be absent (`docs/ERROR-MODEL.md`,
+// "`Missing` is a result only").
+describe('the Epsil static pre-pass does not report an argument that may be absent', () => {
   const F = 'function f(p: tuple<number, number>) { p[1] + 1 }';
 
-  test('a `first(filter(…))` at an annotated parameter is reported', () => {
-    const { value, diagnostics } = run(`${F}\nf(${PRESENT})`);
-    // The program still runs: the pre-pass is a linter.
-    expect(value).toBe('2');
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]).toContain(
-      'expected `tuple<number, number>`, got `missing | tuple<integer, integer>`'
-    );
-  });
-
-  test('through a variable and a loop over tuples', () => {
-    const { diagnostics } = run(
-      `${F}\nlet C = ${PRESENT}\nlet s = 0\nfor gap in [(C, C)] { s = s + f(gap[2]) }\ns`
-    );
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]).toContain('at `gap[2]`');
-  });
-
-  // A function literal bound with `let` is checked as a `function`
-  // definition is: the pre-pass keeps the literal with the name it pins.
-  test('a function literal bound with `let` is checked the same way', () => {
-    const G = 'let g = (p: tuple<number, number>) => p[1] + 1';
-    expect(run(`${G}\ng(${PRESENT})`).diagnostics).toHaveLength(1);
-    expect(
-      run(`${G}\nlet C = ${PRESENT}\ng(C)`).diagnostics[0]
-    ).toContain('at `C`');
-    // Its bare parameter is not checked.
-    expect(
-      run(`let g = (p, n: number) => p[1] + n\ng(${PRESENT}, 1)`).diagnostics
-    ).toEqual([]);
+  test.each([
+    ['a `first(filter(…))` at an annotated parameter', `${F}\nf(${PRESENT})`],
+    [
+      'a variable in a loop over tuples',
+      `${F}\nlet C = ${PRESENT}\nlet s = 0\nfor gap in [(C, C)] { s = s + f(gap[2]) }\ns`,
+    ],
+    [
+      'a function literal bound with `let`',
+      `let g = (p: tuple<number, number>) => p[1] + 1\ng(${PRESENT})`,
+    ],
+  ])('%s', (_label, src) => {
+    expect(run(src).diagnostics).toEqual([]);
   });
 
   test.each([
@@ -352,10 +349,6 @@ describe('the Epsil static pre-pass reports an argument that may be absent', () 
     [
       'a bare parameter beside an annotated one',
       `function f(p, n: number) { p[1] + n }\nf(${PRESENT}, 1)`,
-    ],
-    [
-      'a parameter annotated `T | missing`',
-      `function f(p: tuple<number, number> | missing) { 1 }\nf(${PRESENT})`,
     ],
   ])('%s is not reported', (_label, src) => {
     expect(run(src).diagnostics).toEqual([]);
@@ -409,11 +402,11 @@ describe('a block-local function called with a list of points', () => {
     ).toEqual([11, 13]);
   });
 
-  test('an absent point gives an absent cell on both routes', () => {
+  test('a point that is not found is a NaN point: NaN on both routes', () => {
     const src = `function f(p: tuple<number, number>) { p[1] + 1 }\nf([(1, 2), ${ABSENT}])`;
     const { expr } = box(src);
-    expect(expr.evaluate().toString()).toBe('[2,"Missing"]');
-    expect(compiled(expr)).toEqual([2, undefined]);
+    expect(expr.evaluate().toString()).toBe('[2,NaN]');
+    expect(compiled(expr)).toEqual([2, NaN]);
   });
 
   // The type of a bare parameter is inferred from the body as one point; the
@@ -439,29 +432,15 @@ describe('a block-local function called with a list of points', () => {
   });
 });
 
-// A declaration whose parameter admits `missing` is how a host accepts an
-// absent argument. A function literal with a BARE parameter accepts an absent
-// value (the body runs with it), so it implements that declaration. Before
-// 2026-09-30 the bare parameter's placeholder type `unknown`, which excludes
-// `missing`, made the assignment throw "not compatible".
-describe('A BARE PARAMETER UNDER A DECLARED `T | missing` PARAMETER', () => {
-  test('the assignment is accepted and the body sees the absent value', () => {
+// A signature cannot name `missing` at a parameter (`docs/ERROR-MODEL.md`,
+// "`Missing` is a result only"). A function literal with a bare parameter
+// still implements a signature whose parameter does not name it.
+describe('A BARE PARAMETER UNDER A DECLARED PARAMETER', () => {
+  test('a signature with a `missing` parameter is refused', () => {
     const ce = new ComputeEngine();
-    ce.declare('f', { signature: '(string | missing) -> unknown' } as any);
     expect(() =>
-      ce.assign('f', ce.box(['Function', ['IsMissing', 's'], 's']))
-    ).not.toThrow();
-    expect(ce.box(['f', 'Missing']).evaluate().symbol).toBe('True');
-    expect(ce.box(['f', "'a'"]).evaluate().symbol).toBe('False');
-  });
-
-  test('a numeric slot with a missing member', () => {
-    const ce = new ComputeEngine();
-    ce.declare('k', { signature: '(integer | missing) -> unknown' } as any);
-    expect(() =>
-      ce.assign('k', ce.box(['Function', ['Add', 's', 1], 's']))
-    ).not.toThrow();
-    expect(ce.box(['k', 2]).evaluate().toString()).toBe('3');
+      ce.declare('f', { signature: '(string | missing) -> unknown' } as any)
+    ).toThrow(/cannot be declared/);
   });
 
   test('a declared slot without missing is unchanged', () => {
@@ -470,17 +449,6 @@ describe('A BARE PARAMETER UNDER A DECLARED `T | missing` PARAMETER', () => {
     expect(() =>
       ce.assign('h', ce.box(['Function', ['IsMissing', 's'], 's']))
     ).not.toThrow();
-  });
-
-  test('a concrete slot of the literal is still checked', () => {
-    const ce = new ComputeEngine();
-    ce.declare('g', { signature: '(string | missing) -> unknown' } as any);
-    expect(() =>
-      ce.assign(
-        'g',
-        ce.box(['Function', ['IsMissing', 's'], ['Element', 's', 'integer']])
-      )
-    ).toThrow();
   });
 });
 
@@ -525,16 +493,18 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
   });
 
   // A body that does not compute with the parameter answered `undefined`,
-  // the compiled absent value, before 2026-10-16. The interpreter reads the
-  // absent value as `NaN` at a numeric parameter.
+  // the compiled absent value, before 2026-10-16. The interpreter gives
+  // `Missing` for a call with an absent argument at a numeric parameter;
+  // compiled code gives `NaN` there, as the caveats of compiled code allow
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
   test.each([
     ['a direct call', 'function f(x: number) { x }\nf(Missing)'],
     [
       'a function literal bound with `const`',
       'const f = (x: number) => x\nf(Missing)',
     ],
-  ])('%s with an absent argument answers NaN', (_label, src) => {
-    expect(box(src).expr.evaluate().toString()).toBe('NaN');
+  ])('%s with an absent argument: Missing, compiled NaN', (_label, src) => {
+    expect(box(src).expr.evaluate().toString()).toBe('"Missing"');
     for (const constantFold of [true, false]) {
       const result = compile(box(src).expr, {
         to: 'javascript',
@@ -545,96 +515,42 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
     }
   });
 
-  // The call maps the function over the list.
-  test('a numeric parameter reads each absent element of a list as NaN', () => {
-    const run = compileWith('function f(x: number) { x }\nf(xs)', {
-      xs: 'list<number | missing>',
-    });
-    expect(run({ xs: [1, undefined] })).toEqual([1, NaN]);
-  });
-
   // The function is a value given to `map`, which calls it with each element
-  // as it is: the compiled function itself reads an absent argument as
-  // `NaN` (a default parameter value). Before 2026-10-16 the answer was
-  // `[1, undefined]`.
-  test('a function value given to `map` reads an absent element as NaN', () => {
-    const src = 'function f(x: number) { x }\nmap(f, xs)';
-    const run = compileWith(src, { xs: 'list<number | missing>' });
-    expect(run({ xs: [1, undefined] })).toEqual([1, NaN]);
+  // as it is: the call over the absent element gives `Missing`.
+  test('a function value given to `map` maps an absent element to Missing', () => {
     expect(
       executeEpsil(
         new ComputeEngine(),
         'function f(x: number) { x }\nmap(f, [1, Missing])'
       ).value?.toString()
-    ).toBe('[1,NaN]');
+    ).toBe('[1,"Missing"]');
   });
 
-  // A callback literal with a numeric parameter, given a list whose elements
-  // may be absent, compiles: the interpreter reads an absent element as
-  // `NaN`, and so does the compiled arrow. Before 2026-10-16 the compilation
-  // was refused, with a message saying that the interpreter reports a
-  // per-element error. A non-numeric parameter is still refused.
+  // A callback literal with a numeric parameter, given a list with an absent
+  // element, maps the absent element to `Missing` in the interpreter, and a
+  // sum over that list is `Missing`. A declared input cannot name `missing`,
+  // so the compiled code is not checked with an absent element.
   test.each([
-    ['map((x: number) => x, xs)', 'number', [NaN, 1, 2]],
-    ['map((x: integer) => x + 1, xs)', 'integer', [NaN, 2, 3]],
-    ['filter(xs, (x: number) => x > 1)', 'number', [2]],
-    ['sum(map((x: number) => x, xs))', 'number', NaN],
-  ])('the callback route %s compiles with the value of the interpreter', (src, element, expected) => {
-    const run = compileWith(src, { xs: `list<${element} | missing>` });
-    expect(run({ xs: [undefined, 1, 2] })).toEqual(expected);
+    ['map((x: number) => x, xs)', '["Missing",1,2]'],
+    ['map((x: integer) => x + 1, xs)', '["Missing",2,3]'],
+    ['filter(xs, (x: number) => x > 1)', '[2]'],
+    ['sum(map((x: number) => x, xs))', '"Missing"'],
+  ])('the callback route %s over an absent element', (src, expected) => {
     const ce = new ComputeEngine();
     ce.assign('xs', ce.box(['List', 'Missing', 1, 2]));
     const value = (executeEpsil(ce, src) as any).value;
-    expect(value.toString()).toBe(
-      Array.isArray(expected)
-        ? `[${expected.map((x) => (Number.isNaN(x) ? 'NaN' : x)).join(',')}]`
-        : 'NaN'
-    );
+    expect(value.toString()).toBe(expected);
   });
 
-  // A parameter annotated `complex` is computed in the complex lane, and its
-  // argument is lifted to a `{re, im}` record before the arrow receives it.
-  // Before 2026-10-17 an absent element was not read as `NaN` there: the
-  // compiled call read `.re` off `undefined` and threw.
-  test('a complex parameter reads an absent element as NaN', () => {
+  // A parameter annotated `complex` maps an absent element to `Missing` in
+  // the interpreter.
+  test('a complex parameter maps an absent element to Missing', () => {
     const src = 'map((z: complex) => 2 * z, xs)';
-    const run = compileWith(src, { xs: 'list<complex | missing>' });
-    const value = run({ xs: [undefined, { re: 1, im: 2 }, 3] }) as any[];
-    expect(value).toHaveLength(3);
-    expect(value[0]).toBeNaN();
-    expect(value[1]).toEqual({ re: 2, im: 4 });
-    expect(value[2]).toBe(6);
     const ce = new ComputeEngine();
     ce.assign('xs', ce.box(['List', 'Missing', ['Complex', 1, 2], 3]));
     expect((executeEpsil(ce, src) as any).value.toString()).toBe(
-      '[NaN,(2 + 4i),6]'
+      '["Missing",(2 + 4i),6]'
     );
-  });
-
-  // A function local to the compiled block is checked on its own literal,
-  // as an inline literal is: a numeric parameter admits the absent element
-  // (above), a string parameter does not.
-  test('a block-local callback with a string parameter is refused', () => {
-    const src = 'function f(s: string) { s }\nmap(f, xs)';
-    const [program] = parseEpsil(src);
-    const ce = new ComputeEngine();
-    ce.declare('xs', 'list<string | missing>');
-    const expr = ce.box(resolveLibraryNames(program, src, ce));
-    expect(() =>
-      compile(expr, { to: 'javascript', fallback: false } as any)
-    ).toThrow(/the callback parameter 's' is annotated 'string'/);
-  });
-
-  test('a callback with a string parameter and absent elements is refused', () => {
-    const [program] = parseEpsil('map((x: string) => x, xs)');
-    const ce = new ComputeEngine();
-    ce.declare('xs', 'list<string | missing>');
-    const expr = ce.box(
-      resolveLibraryNames(program, 'map((x: string) => x, xs)', ce)
-    );
-    expect(() =>
-      compile(expr, { to: 'javascript', fallback: false } as any)
-    ).toThrow(/the callback parameter 'x' is annotated 'string'/);
   });
 
   // The compiled value of a user function body over an absent argument is
@@ -644,21 +560,12 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
   // only the call with a present argument is checked.
   test('a function declared on the engine compiles a call with a present argument', () => {
     const ce = new ComputeEngine();
-    ce.declare('y', 'number | missing');
+    ce.declare('y', 'number');
     ce.declare('g', { signature: '(number) -> unknown' });
     ce.assign('g', ce.box(['Function', 'x', ['Typed', 'x', "'number'"]]));
     const result = compile(ce.box(['g', 'y']), { to: 'javascript' });
     expect(result.success).toBe(true);
     expect(result.run({ y: 3 })).toBe(3);
-  });
-
-  test('a parameter that admits missing, and a bare parameter, receive it', () => {
-    expect(
-      compileRun(
-        `function f(p: tuple<number, number> | missing) { isMissing(p) }\nf(${ABSENT})`
-      )()
-    ).toBe(true);
-    expect(compileRun(`function f(p) { p }\nf(${ABSENT})`)()).toBeUndefined();
   });
 
   test('a function literal applied directly computes a present argument', () => {
@@ -697,10 +604,10 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
 
   // The interpreter maps the function over the list.
   test.each([
-    ['a list', 'list<string | missing>', ['a', 'b'], [1, 1]],
+    ['a list', 'list<string>', ['a', 'b'], [1, 1]],
     [
       'a nested list',
-      'list<list<string | missing>>',
+      'list<list<string>>',
       [['a'], ['b', 'c']],
       [[1], [1, 1]],
     ],
@@ -716,7 +623,7 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
 
   test('a function literal applied to such a list maps over it', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<string | missing>');
+    ce.declare('xs', 'list<string>');
     const result = compile(
       ce.box([
         'Apply',

@@ -131,12 +131,15 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
   });
 });
 
-describe('unrolled Sum/Product: accumulation stops at the first NaN', () => {
+describe('unrolled Sum/Product: a read of a list of integers gets no NaN exit', () => {
   /**
    * A five-element list. `At(K, i)` for an `i` outside `1…5` has no value, so
-   * a term whose index leaves the list makes the running total NaN. Nothing
-   * in the body comes from the caller, so the terms after that one are
-   * unobservable and may be skipped.
+   * a term whose index leaves the list makes the running total NaN. The read
+   * is typed `integer`: the marker of an absent read is implicit in a result
+   * type (`docs/ERROR-MODEL.md`, "`Missing` is a result only"). A body whose
+   * type is a `real` subtype gets no between-term NaN exit, so every term is
+   * evaluated. The exit is an optimization only: NaN absorbs `+` and `*`,
+   * and the value is the same.
    */
   function pureEngine(): ComputeEngine {
     const ce = new ComputeEngine();
@@ -144,14 +147,12 @@ describe('unrolled Sum/Product: accumulation stops at the first NaN', () => {
     return ce;
   }
 
-  it('a pure Sum tests the accumulator between every pair of terms', () => {
+  it('a pure Sum accumulates every term with no test between them', () => {
     const ce = pureEngine();
     const expr = ce.parse('\\sum_{n=0}^{9} \\mathrm{At}(K, x-n)');
     const r = compile(expr, { to: 'javascript', fallback: true });
     expect(r.success).toBe(true);
-    // Ten terms leave nine gaps to test in. The test after the LAST
-    // accumulation is omitted: `return` hands back the same NaN either way.
-    expect(nanExits(source(r))).toBe(9);
+    expect(nanExits(source(r))).toBe(0);
     // `x = 4` puts every term's index at or below 4 − 0 = 4 and down to
     // 4 − 9 = −5, so the run leaves the list and the answer is NaN. The
     // interpreter, which never unrolls, agrees.
@@ -164,7 +165,7 @@ describe('unrolled Sum/Product: accumulation stops at the first NaN', () => {
     const expr = ce.parse('\\prod_{n=0}^{9} \\mathrm{At}(K, x-n)');
     const r = compile(expr, { to: 'javascript', fallback: true });
     expect(r.success).toBe(true);
-    expect(nanExits(source(r))).toBe(9);
+    expect(nanExits(source(r))).toBe(0);
     expect(source(r)).toMatch(/\*=/);
     expect(r.run!({ x: 4 })).toBeNaN();
     expect(expr.subs({ x: 4 }).evaluate().N().re).toBeNaN();
@@ -174,7 +175,7 @@ describe('unrolled Sum/Product: accumulation stops at the first NaN', () => {
     const ce = pureEngine();
     const expr = ce.parse('\\sum_{n=0}^{4} \\mathrm{At}(K, x-n)');
     const r = compile(expr, { to: 'javascript', fallback: true });
-    expect(nanExits(source(r))).toBe(4);
+    expect(nanExits(source(r))).toBe(0);
     // `x = 5` indexes 5, 4, 3, 2, 1 — the whole list, in reverse.
     expect(r.run!({ x: 5 })).toBe(150);
     expect(expr.subs({ x: 5 }).evaluate().N().re).toBe(150);

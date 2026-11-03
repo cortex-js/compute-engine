@@ -2267,7 +2267,7 @@ export function generateSequenceTerms(
     // A term is its value under `evaluate()`: a number, or an exact term
     // that is not a number literal (`1 + 3√2`, `x(x + 1) + 1`). A term that
     // is declined stays the expression `Subscript(name, n)`. An invalid
-    // term, or a value that is not a number (`Undefined`, a string, a list,
+    // term, or a value that is not a number (a string, a list,
     // possibly from a base value), is not a term: then the list has no
     // value.
     if (

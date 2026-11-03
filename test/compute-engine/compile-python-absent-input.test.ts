@@ -23,9 +23,12 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * absent one.
  */
 
+// A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+// is a result only"): `p` is declared `number`, and the interpreter is given
+// `Missing` for it.
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
-  ce.declare('p', 'number | missing');
+  ce.declare('p', 'number');
   ce.declare('a', 'any');
   ce.declare('x', 'number');
   return ce;
@@ -42,7 +45,7 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
   const src = (json: unknown): string =>
     python.compile(ce.box(json as never)).code;
 
-  it('reads a `number | missing` input as it is in arithmetic', () => {
+  it('reads a `number` input as it is in arithmetic', () => {
     expect(src(['Add', 'p', 1])).toBe('p + 1');
     expect(src(['Sin', 'p'])).toBe('np.sin(p)');
   });
@@ -97,7 +100,8 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
       1,
       -1,
     ]);
-    expect(guard).toContain('(1 < 1 / p)');
+    // Over a `number` input the branch is the plain conditional.
+    expect(guard).toContain('1 < 1 / p');
   });
 
   it('leaves an operator that handles absence unchanged', () => {
@@ -126,7 +130,7 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
   it('parenthesizes a compound `vars` source, for every declared type', () => {
     // The read is an operand of the operator around it: `2p` with
     // `vars: { p: '2+3' }` is `2 * (2+3)`, which is 10, not `2 * 2+3`.
-    for (const type of ['real | missing', 'real']) {
+    for (const type of ['real']) {
       const e = new ComputeEngine();
       e.declare('p', type);
       const twice = e.box(['Multiply', 2, 'p'] as never);
@@ -203,11 +207,9 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
       .split('\n');
   }
 
-  it('answers for a present input; the interpreter answers NaN for an absent one', () => {
+  it('answers for a present input; the interpreter answers Missing for an absent one', () => {
     expect(run(['Add', 'p', 1], ['2'])).toEqual(['3 3']);
-    expect(
-      ce.box(['Add', 'Missing', 1]).evaluate().isNaN
-    ).toBe(true);
+    expect(ce.box(['Add', 'Missing', 1]).evaluate().symbol).toBe('Missing');
   });
 
   it('runs the guard idiom: the interpreter takes the else arm for an absent input', () => {
@@ -244,7 +246,8 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
     // `unknown`, or `number` if the product narrows its symbols.
     const e = ce.parse('2\\pi r');
     expect(ce.symbol('r').valueDefinition?.inferredType).toBe(true);
-    expect(e.subs({ r: ce.Missing }).evaluate().isNaN).toBe(true);
+    // An operator over `Missing` gives `Missing` in the interpreter.
+    expect(e.subs({ r: ce.Missing }).evaluate().symbol).toBe('Missing');
     const script =
       `import numpy as np\nimport math\n` +
       `${python.compileFunction(e, 'f', ['r'])}\n` +
@@ -260,7 +263,7 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
     for (const latex of ['\\sin(r)', 'r^2+1', '\\sum_{k=1}^{10} k r']) {
       const e = ce.parse(latex);
       expect(ce.symbol('r').type.toString()).toBe('number');
-      expect(e.subs({ r: ce.Missing }).evaluate().isNaN).toBe(true);
+      expect(e.subs({ r: ce.Missing }).evaluate().symbol).toBe('Missing');
       const script =
         `import numpy as np\nimport math\n` +
         `${python.compileFunction(e, 'f', ['r'])}\n` +
@@ -273,7 +276,7 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
   });
 
   it('evaluates a compound `vars` source as one operand', () => {
-    for (const type of ['real | missing', 'real']) {
+    for (const type of ['real']) {
       const e = new ComputeEngine();
       e.declare('p', type);
       const code = python.compile(e.box(['Multiply', 2, 'p'] as never), {

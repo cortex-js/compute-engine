@@ -111,15 +111,15 @@ describe('Unary arithmetic methods on an absent operand', () => {
   // `.neg()` and `.inv()` keep `Negate(Missing)` and `Divide(1, Missing)`:
   // beside a point, a negated or inverted absence is an absent operand, and
   // `(1, 2) − Missing` is `Missing` (see `absent-point-arithmetic.test.ts`).
-  // Alone, each evaluates to `NaN`.
-  test('.neg() evaluates to NaN', () => {
+  // Alone, each evaluates to `Missing` (`NaN` before 2026-11-02).
+  test('.neg() evaluates to Missing', () => {
     const ce = new ComputeEngine();
-    expect(ce.box('Missing').neg().evaluate().toString()).toBe('NaN');
+    expect(ce.box('Missing').neg().evaluate().toString()).toBe('"Missing"');
   });
 
-  test('.inv() evaluates to NaN', () => {
+  test('.inv() evaluates to Missing', () => {
     const ce = new ComputeEngine();
-    expect(ce.box('Missing').inv().evaluate().toString()).toBe('NaN');
+    expect(ce.box('Missing').inv().evaluate().toString()).toBe('"Missing"');
   });
 
   test('.sub() beside a point is Missing', () => {

@@ -275,12 +275,14 @@ Corollary rules for the strict regime:
     (`Missing`, `undefined` in compiled JavaScript) and is read by
     `IsMissing` or `Coalesce`. The compiled JavaScript gives `[NaN, NaN]`
     for such a point (`nanPointLiteral()` in
-    `compilation/compile-absence.ts`). Limit: a cell read from a held
-    restriction whose condition is not decided is itself a restriction
+    `compilation/compile-absence.ts`). A cell read from a held restriction
+    whose condition is not decided is itself a restriction
     (`If([0 < t], [(1, 2)])` read at position 1 is `If(0 < t, (1, 2))`).
     When this cell is evaluated alone after the condition becomes false, it
-    is `Missing`, while the whole restriction gives the `NaN` point at that
-    position. A colour cell does not have this limit: the cell read from a
+    is the `NaN` point, as the whole restriction gives at that position: a
+    false restriction of a point by a scalar condition is the `NaN` point
+    (user decision of 2026-11-03; before, it was `Missing`). A colour cell
+    gives the same value as the whole restriction too: the cell read from a
     held restriction carries the no-colour value as an else branch
     (`If([C, True], [Rgb(1, 0, 0), Rgb(0, 1, 0)])` read at position 1 is
     `If(C, Rgb(1, 0, 0), Rgb(NaN, NaN, NaN))`), so it gives
@@ -290,7 +292,9 @@ Corollary rules for the strict regime:
     gives.
   - A scalar condition selects an arm whole, also when the arm is a list:
     `If(t > 0, [1, 2, 3])` at `t = -1` is `Missing`, the absent value of
-    the whole list. Every reader keeps this: an operator that maps over its
+    the whole list. When the arm is one point, the value is the `NaN`
+    point: `If(t > 0, (1, 2))` at `t = -1` is `(NaN, NaN)`, and
+    `[(1, 2), (3, 4)]\{t>0\}` stays `Missing` (its arm is a list). Every reader keeps this: an operator that maps over its
     operands lifts the condition outward (`Sin(If(c, L))` is
     `If(c, Sin(L))`, `liftWholeRestrictions()` in
     `boxed-expression/boxed-function.ts`), so `\sin([1,2,3]\{0<t\})`,

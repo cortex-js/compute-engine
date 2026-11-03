@@ -122,7 +122,7 @@ describe('coordinate accessor over a point-or-point-list union', () => {
     // The element-indexing reading answers the element at the position,
     // whatever its arm, so the point arm of the element type joins too.
     expect(ce.box(['PointX', 'P']).type.toString()).toBe(
-      'list<number> | missing | number | tuple<number, number>'
+      'list<number> | number | tuple<number, number>'
     );
     const chan = ce.box(['Add', ['Multiply', 360, ['PointX', 'P']], 0.5]);
     const r = compile(chan, { fallback: false });
@@ -202,8 +202,9 @@ describe('coordinate of a written-out point keeps the type of that component', (
     ce.declare('e', 'number');
     const point = ce.parse('(1, \\sqrt{1-e^2})');
     expect(point.type.toString()).toBe('tuple<integer, number>');
-    // The accessor's result carries the absence marker of a numeric coordinate.
-    expect(ce.box(['PointX', point]).type.toString()).toBe('integer | nan');
+    // A coordinate that exists is typed by its component, with no absence
+    // marker.
+    expect(ce.box(['PointX', point]).type.toString()).toBe('integer');
     expect(ce.box(['PointY', point]).type.toString()).toBe('number');
     // A symbol declared `tuple<number, number>` reads its declared
     // component type.
@@ -320,13 +321,11 @@ describe('coordinate accessor over a bare tuple, a broadcastable point, and two 
     expect(ce.box(['PointX', 'Q']).type.toString()).toBe('unknown');
     expect(ce.box(['PointX', 'R']).type.toString()).toBe('unknown');
     // A numeric element keeps the flat-point reading: `PointX([3, 4])` is 3.
-    // A `broadcastable<number>` is a number (no coordinate: `missing`), a
-    // vector (its first cell, a number) or a tensor of higher rank (its
-    // first row, a tensor).
+    // A `broadcastable<number>` is a number (no coordinate: `Missing`, a
+    // marker the result type leaves implicit), a vector (its first cell, a
+    // number) or a tensor of higher rank (its first row, a tensor).
     ce.declare('N', 'broadcastable<number>');
-    expect(ce.box(['PointX', 'N']).type.toString()).toBe(
-      'missing | number | tensor'
-    );
+    expect(ce.box(['PointX', 'N']).type.toString()).toBe('number | tensor');
   });
 
   test('a 2-D-or-3-D point: the third coordinate is the 3-D arm’s', () => {
@@ -343,14 +342,15 @@ describe('coordinate accessor over a bare tuple, a broadcastable point, and two 
     // `PointY` of a 1-tuple is the slot's absence marker, not a dimension
     // error (only the third coordinate errors): each arm answers as the
     // structural tuple of its arity does, and the answers are joined (dual
-    // review).
+    // review). The read is proved to find nothing, so it is typed by its
+    // marker alone, as an `At` read proved out of range is (`At((5), 2)` is
+    // typed `nan`): `nan` for an `integer` slot, `missing` for a `string`
+    // slot.
     const ce = new ComputeEngine();
     ce.declare('A', 'tuple<integer>');
     ce.declare('S', 'tuple<integer> | tuple<string>');
-    expect(ce.box(['PointY', 'A']).type.toString()).toBe('integer | nan');
-    expect(ce.box(['PointY', 'S']).type.toString()).toBe(
-      'integer | missing | nan | string'
-    );
+    expect(ce.box(['PointY', 'A']).type.toString()).toBe('nan');
+    expect(ce.box(['PointY', 'S']).type.toString()).toBe('missing | nan');
     expect(
       ce
         .box(['PointY', ['Tuple', 1]])
@@ -964,8 +964,8 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
     ];
     for (const [decl, expectedStatic] of [
       ['list', 'list<any> | number'],
-      ['list<list<any>>', 'list<any> | missing'],
-      ['tensor<number>', 'missing | number | tensor'],
+      ['list<list<any>>', 'list<any>'],
+      ['tensor<number>', 'number | tensor'],
     ] as const) {
       const ce = new ComputeEngine();
       ce.declare('v', decl);
@@ -992,7 +992,8 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
 
   // A list of points whose every point is absent keeps its length on
   // `interval-js`: the list is present, and each coordinate is the `empty`
-  // result. The interpreter answers `[Missing, Missing]`.
+  // result. The interpreter answers `[NaN, NaN]`: the coordinate of an
+  // absent point is a number, and the absent value of a number is `NaN`.
   test('interval-js: the coordinates of a list of absent points', () => {
     const ce = new ComputeEngine();
     ce.declare('c', 'real');
@@ -1005,9 +1006,7 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
     const empty = { kind: 'empty' };
     for (const head of ['PointX', 'PointY']) {
       const json = [head, ['List', 'Missing', 'Missing']];
-      expect(ce.box(json as any).evaluate().toString()).toBe(
-        '["Missing","Missing"]'
-      );
+      expect(ce.box(json as any).evaluate().toString()).toBe('[NaN,NaN]');
       expect(interval(json)).toEqual([empty, empty]);
     }
     // `[P{c}, Q{d}]` with both conditions false.
@@ -1027,55 +1026,26 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
     ]);
   });
 
-  // An absent point does not decide the reading of a list, on any route and
-  // in a lazy collection too. When every point is absent, the declared
-  // element type decides, as for an empty list.
+  // An absent point does not decide the reading of a list, and in a lazy
+  // collection neither. When every point is absent, the element type
+  // decides, as for an empty list. A declared type cannot name `missing`
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only"), so the lists are
+  // written, not declared inputs.
   test('absent points', () => {
     const ce = new ComputeEngine();
-    ce.declare('M', 'list<tuple<number, number> | missing>');
-    const cases: [unknown, unknown[], string, unknown[]][] = [
+    const cases: [unknown, string][] = [
       [
         ['List', 'Missing', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-        [undefined, [1, 2], [3, 4]],
-        '["Missing",1,3]',
-        [NaN, 1, 3],
+        '[NaN,1,3]',
       ],
-      [
-        ['List', 'Missing', 'Missing'],
-        [undefined, undefined],
-        '["Missing","Missing"]',
-        [NaN, NaN],
-      ],
-      [['List'], [], '[]', []],
+      [['List', 'Missing', 'Missing'], '[NaN,NaN]'],
     ];
-    for (const [value, js, interpreted, compiled] of cases) {
-      ce.assign('M', ce.box(value as any));
-      for (const e of [
-        ce.box(['PointX', 'M']),
-        ce.box(['PointX', value] as any),
-      ]) {
-        const v = e.evaluate();
-        expect(v.toString()).toBe(interpreted);
-        expect(v.type.matches(e.type)).toBe(true);
-      }
-      const e = ce.box(['PointX', 'M']);
-      expect(compile(e, { fallback: false }).run!({ M: js } as any)).toEqual(
-        compiled
-      );
-      const iv = compile(e, { to: 'interval-js', fallback: false }).run!({
-        M: js,
-      }) as any[];
-      expect(iv.length).toBe(compiled.length);
+    for (const [value, interpreted] of cases) {
+      const e = ce.box(['PointX', value] as any);
+      const v = e.evaluate();
+      expect(v.toString()).toBe(interpreted);
+      expect(v.type.matches(e.type)).toBe(true);
     }
-    ce.assign(
-      'M',
-      ce.box(['List', 'Missing', ['Tuple', 1, 2], ['Tuple', 3, 4]] as any)
-    );
-    expect(
-      compile(ce.box(['PointY', 'M']), { fallback: false }).run!({
-        M: [undefined, [1, 2], [3, 4]],
-      } as any)
-    ).toEqual([NaN, 2, 4]);
 
     // A lazy collection whose first element is absent.
     const lazy = ce.box([
@@ -1091,7 +1061,7 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
       ],
     ] as any);
     const lv = lazy.evaluate();
-    expect(lv.toString()).toBe('["Missing",2,3]');
+    expect(lv.toString()).toBe('[NaN,2,3]');
     expect(lv.type.matches(lazy.type)).toBe(true);
   });
 

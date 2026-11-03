@@ -18,6 +18,7 @@ import {
   isPointListArgumentType,
   isPointTensorArgumentType,
   isPointOrPointListArgumentType,
+  pointArity,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -46,6 +47,7 @@ import {
   functionLiteralParameterType,
   functionLiteralReturnMarker,
   functionLiteralReturnType,
+  isOptionalParameter,
   optionalParameterDefault,
   optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
@@ -88,10 +90,14 @@ import { compileValueOperand } from './compile-statements.js';
 import {
   declineIntervalAbsentDefault,
   defaultFillingWrapper,
+  defaultFillTypes,
+  elementTypeAtRank,
   mayBeAbsentAtRunTime,
+  signatureParameterTypes,
   targetCoalesce,
   literalTakesArgumentCount,
   userFunctionDefaults,
+  userFunctionParameterTypes,
 } from './compile-parameter-defaults.js';
 import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
 import { blockLocalOf, userFunctionSignature } from './compile-absence.js';
@@ -1132,6 +1138,16 @@ export function appliedArgumentTypeMismatch(
     const declared = functionLiteralParameterType(p);
     const actual = actuals[i];
     if (declared === undefined || actual === undefined) continue;
+    // An argument that can only be absent (its type is `missing` or `nan`:
+    // `First([])`, `At([1], 5)`) at a parameter with a default takes the
+    // default before its type is tested, in the interpreter and in the
+    // compiled code (which tests the argument with the absence test of
+    // `Coalesce`). So it is not a mismatch.
+    if (
+      isOptionalParameter(p) &&
+      isSubtype(actual.type.type, { kind: 'union', types: ['missing', 'nan'] })
+    )
+      continue;
     // At a parameter declared as a point (`p: tuple<real, real>`), the
     // interpreter maps the call over a list of points, and over a tensor of
     // points at every depth (user decisions 2026-09-25 and 2026-10-25,
@@ -1402,7 +1418,8 @@ function userFunctionValueRef(
     h,
     ref,
     target,
-    filledInside ? (passedTypes?.length ?? 0) : 0
+    filledInside ? (passedTypes?.length ?? 0) : 0,
+    passedTypes
   );
 }
 
@@ -1440,7 +1457,8 @@ function valueDefaultsRef(
   h: string,
   ref: string,
   target: CompileTarget<Expression>,
-  only: number
+  only: number,
+  reaching: ReadonlyArray<Type | undefined> | undefined
 ): string {
   const registry = target.userFunctions;
   const defaults = valueDefaults(engine, h)?.map((d, i) =>
@@ -1451,6 +1469,31 @@ function valueDefaultsRef(
   const readsBinding = defaults.some(
     (d) => isSymbol(d) && d.symbol !== 'True' && d.symbol !== 'False'
   );
+  // A parameter that receives a point also takes its default for a `NaN`
+  // point. The test is chosen from the declared type of the parameter, else
+  // from the type of the value that the consumer passes (`reaching`), or
+  // the compilation declines (`defaultFillTypes()`).
+  const literal = userFunctionLiteral(engine, h);
+  const parameterTypes =
+    targetCoalesce(target) === undefined
+      ? undefined
+      : defaultFillTypes(
+          defaults.length,
+          (i) => defaults[i]?.type.type,
+          userFunctionParameterTypes(engine, h, literal),
+          reaching,
+          literal === undefined
+            ? undefined
+            : signatureParameterTypes(literal.type.type),
+          `\`${h}\` as a function value`
+        );
+  // The name of a shared wrapper records the point tests it chose, so that
+  // a consumer that passes points and one that passes numbers do not share
+  // one wrapper.
+  const pointKey = (parameterTypes ?? [])
+    .map((t) => (t === undefined ? 0 : (pointArity(t) ?? 0)))
+    .join('_');
+  const pointSuffix = /[1-9]/.test(pointKey) ? `$p${pointKey}` : '';
   const fillsIn = (t: CompileTarget<Expression>) =>
     defaults.map((d) =>
       d === undefined ? undefined : compileValueOperand(callSiteDefault(d), t)
@@ -1460,9 +1503,10 @@ function valueDefaultsRef(
       ref,
       fillsIn(target),
       () => tempVar(target),
-      targetCoalesce(target)
+      targetCoalesce(target, parameterTypes)
     )})`;
-  const wrapperName = only === 0 ? `${ref}$d` : `${ref}$d${only}`;
+  const wrapperName =
+    (only === 0 ? `${ref}$d` : `${ref}$d${only}`) + pointSuffix;
   if (!registry.defs.has(wrapperName))
     registry.defs.set(
       wrapperName,
@@ -1470,7 +1514,7 @@ function valueDefaultsRef(
         ref,
         fillsIn(registry.root ?? target),
         () => tempVar(target),
-        targetCoalesce(target)
+        targetCoalesce(target, parameterTypes)
       )};`
     );
   return wrapperName;
@@ -1697,7 +1741,16 @@ function userFunctionValueRefWithoutDefaults(
   const ranks = callbackArgumentRanks(h, passed, nParams);
   if (ranks.some((r) => r > 0) && valueDefaults(engine, h) !== undefined) {
     fill.inside = true;
-    const filled = valueDefaultsRef(engine, h, callee, target, 0);
+    const filled = valueDefaultsRef(
+      engine,
+      h,
+      callee,
+      target,
+      0,
+      passed.types.map((t, i) =>
+        t === undefined ? undefined : elementTypeAtRank(t, ranks[i] ?? 0)
+      )
+    );
     // A wrapper written in place (a symbol default, read in the scope of
     // this reference) is mapped in place too; a shared one is mapped once.
     if (filled.startsWith('(')) {

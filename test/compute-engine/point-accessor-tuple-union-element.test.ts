@@ -148,12 +148,14 @@ describe('point accessor over a SINGLE point typed as a union of tuples', () => 
 });
 
 describe('scalar + tuple rejection reads through absence and unions', () => {
-  test('a `missing | tuple` operand is rejected like a plain tuple', () => {
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"): a point that may be absent comes from a
+  // restriction, below.
+  test('a `missing | tuple` declaration is refused', () => {
     const ce = new ComputeEngine();
-    ce.declare('q', 'missing | tuple<number, number>');
-    const sum = ce.box(['Add', 'q', 2]);
-    expect(sum.isValid).toBe(false);
-    expect(JSON.stringify(sum.json)).toContain('incompatible-type');
+    expect(() => ce.declare('q', 'missing | tuple<number, number>')).toThrow(
+      /cannot be declared/
+    );
   });
 
   test('a union of numeric tuple spellings is rejected as well', () => {
@@ -189,20 +191,7 @@ describe('scalar + tuple rejection reads through absence and unions', () => {
     expect(ce.box(['Add', 'p', 2]).isValid).toBe(false);
     // A scalar MULTIPLE of a point is defined (it scales the vector), so the
     // widened rejection must not reach `Multiply`.
-    ce.declare('q', 'missing | tuple<number, number>');
-    expect(ce.box(['Multiply', 'q', 2]).isValid).toBe(true);
-  });
-
-  test('a transparent ALIAS of `missing | tuple` is rejected too', () => {
-    // The alias is unfolded before the absence arm is stripped: stripping
-    // first leaves the reference node untouched, and the `missing` arm then
-    // hides the tuple from the test.
-    const ce = new ComputeEngine();
-    ce.declareType('gp', 'missing | tuple<number, number>', { alias: true });
-    ce.declare('q2', 'gp');
-    const sum = ce.box(['Add', 'q2', 2]);
-    expect(sum.isValid).toBe(false);
-    expect(JSON.stringify(sum.json)).toContain('incompatible-type');
+    expect(ce.box(['Multiply', 'p', 2]).isValid).toBe(true);
   });
 });
 

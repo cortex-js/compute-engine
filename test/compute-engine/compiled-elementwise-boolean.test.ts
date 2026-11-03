@@ -322,9 +322,12 @@ describe('a numeric missing slot is read as absent by a comparison, also under a
   // Substituting a lifted operand with its VALUE erases its declared type,
   // so the broadcast must read the absent value as the scalar path does: a
   // comparison with it is `False` (user decision 2026-11-02, two-valued
-  // comparisons; from 2026-10-23 to 2026-11-02 it was `Missing`).
+  // comparisons; from 2026-10-23 to 2026-11-02 it was `Missing`). A declared
+  // type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+  // only"): `x` is declared `number` and holds the marker, which a store
+  // accepts where the declared type accepts a present value.
   const engine = new ComputeEngine();
-  engine.declare('x', 'number | missing');
+  engine.declare('x', 'number');
   engine.assign('x', engine.symbol('Missing'));
 
   test('scalar and broadcast agree', () => {

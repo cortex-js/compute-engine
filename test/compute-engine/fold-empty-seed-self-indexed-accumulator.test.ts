@@ -151,8 +151,10 @@ describe('issue #425: a list accumulator indexed by its own element compiles', (
     const ce = engine();
     const reduce = ce.box(SELF_INDEXED as any);
     const fn = reduce.ops![1];
-    expect(fn.ops![1].type.toString()).toEqual('list<integer | nan^2>');
-    expect(reduce.type.toString()).toEqual('list<integer | nan^2>');
+    // The NaN of a read out of range is implicit in the type of the
+    // accessor.
+    expect(fn.ops![1].type.toString()).toEqual('vector<integer^2>');
+    expect(reduce.type.toString()).toEqual('vector<integer^2>');
   });
 
   it('compiles, and the compiled result matches the interpreter', () => {

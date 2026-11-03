@@ -36,7 +36,9 @@ import {
 } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import {
+  jsCoalescePoint,
   jsIsAbsent,
+  jsIsAbsentPoint,
   literalAcceptsArgumentCount,
   literalDefaultFills,
   literalHasParameterDefaults,
@@ -147,6 +149,7 @@ import {
   isNestedPointCollectionType,
   isTupleOrTupleUnionShapedType,
   leafwardElementType,
+  pointArity,
   pointCollectionElementType,
 } from '../collection-utils.js';
 import type { Type, TupleType } from '../../common/type/types.js';
@@ -576,7 +579,12 @@ import {
 } from './fixed-width-unroll.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
-import { bigintLaneError, compileDiagnosticOf } from './diagnostics.js';
+import {
+  bigintLaneError,
+  CompileDeclineError,
+  compileDiagnosticOf,
+  UNSETTLED_SHAPE_CODE,
+} from './diagnostics.js';
 import {
   offersBigintMode,
   registerBuiltInBigintTarget,
@@ -3010,8 +3018,17 @@ function compileNthElement(
     present !== 'unknown' &&
     present !== 'any' &&
     present !== 'never';
-  if (decided && !isSubtype(present, 'number'))
+  if (decided && !isSubtype(present, 'number')) {
+    // A read past the end of a list of points is a point whose coordinates
+    // are all `NaN`, as in the interpreter (`domainAbsenceMarker()`,
+    // `library/collections.ts`). An absent operand (`undefined`) reads the
+    // same point, as the interpreter reads a position-preserving accessor
+    // over an absent collection.
+    const arity = pointArity(present);
+    if (arity !== undefined)
+      return `_SYS.atPoint(${compile(arg)}, ${idx + 1}, ${arity})`;
     return `${compile(arg)}${read}[${idx}]`;
+  }
   if (decided && read === '' && !typeContainsMissing(eltT!))
     return `(${compile(arg)}[${idx}] ?? NaN)`;
   // When the type of the read does not decide the marker (`unknown`, a
@@ -3883,12 +3900,12 @@ function compileJSJoin(
   compile: (expr: Expression) => string
 ): string {
   if (args.length === 0) return '[]';
-  // An absent operand (`Missing`, `Undefined`) is an absent collection, and
+  // An absent operand (`Missing`) is an absent collection, and
   // the interpreter answers `Missing` for the whole join (user decision
   // 2026-09-26). The scalar arm below compiled it as one `undefined`
   // element (`[undefined, 3]`), so the call fails closed.
   const absent = args.findIndex(
-    (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
+    (a) => isSymbol(a, 'Missing')
   );
   if (absent >= 0)
     throw new Error(
@@ -5435,6 +5452,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // CE-368).
     if ((eltT === 'unknown' || eltT === 'any') && scalarIndex && !stringBase)
       return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)}${absentNaN()})`;
+    // A read out of range of a list of points is a point whose coordinates
+    // are all `NaN`, as in the interpreter (`domainAbsenceMarker()`,
+    // `library/collections.ts`): `At([(1, 2), (3, 4)], 5)` is `(NaN, NaN)`.
+    // The static element type picks the helper `_SYS.atPoint`, so the code
+    // tests no type at run time. A gather index reads a point of `NaN`
+    // coordinates at each position out of range.
+    const arity =
+      objectDomain && !stringBase ? pointArity(eltT!) : undefined;
+    if (arity !== undefined)
+      return `_SYS.atPoint(${collCode()}, ${compile(index)}, ${arity})`;
     if (objectDomain && scalarIndex)
       return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
     // A NUMERIC element type is trusted by every consumer of this read: the
@@ -5752,8 +5779,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         eltT === undefined &&
         !isProvablyStringOperand(coll) &&
         isUnionWithCollectionOrAbsentArm(jsType(coll)))
-    )
+    ) {
+      // The last element of an empty list of points is a point whose
+      // coordinates are all `NaN`, as in the interpreter
+      // (`domainAbsenceMarker()`, `library/collections.ts`). The static
+      // element type picks the helper `_SYS.atPoint`, so the code tests no
+      // type at run time.
+      const arity = present === undefined ? undefined : pointArity(present);
+      if (arity !== undefined)
+        return `_SYS.atPoint(${elementsArg('Last', coll, compile)}, -1, ${arity})`;
       return `_SYS.atWithValueMarker(${elementsArg('Last', coll, compile)}, -1${absentBaseReadIsNumeric(coll!, -1) ? ', true' : ''})`;
+    }
     return `_SYS.at(${elementsArg('Last', coll, compile)}, -1)`;
   },
   // All-but-first / all-but-first-n / first-n. A negative `Take`/`Drop` count
@@ -10883,6 +10919,9 @@ export class ComputeEngineFunctionLiteral extends Function {
       run: () => string;
       /** The positions of the parameters with a default value. */
       positions: number[];
+      /** By position, the number of coordinates of a parameter whose fill
+       * uses the point test (`lambdaDefaultFill()`), else `undefined`. */
+      arities: ReadonlyArray<number | undefined>;
       before: string;
       after: string;
     }
@@ -10921,16 +10960,23 @@ export class ComputeEngineFunctionLiteral extends Function {
       apply: (target, thisArg, argumentsList) => {
         // A parameter with a default value whose argument is absent (left
         // out, or supplied absent: `undefined`, `null` or `NaN`, the test
-        // of `jsIsAbsent()`) is filled first, so that the entry checks read
-        // the default as they read an argument. The arguments after the
-        // parameters are kept. The fill runs the definitions of `before`
-        // again, so it runs only when an argument at such a parameter is
-        // absent.
+        // of `jsIsAbsent()`, or a `NaN` point at a parameter whose fill
+        // uses the point test, `jsIsAbsentPoint()`) is filled first, so that
+        // the entry checks read the default as they read an argument. The
+        // arguments after the parameters are kept. The fill runs the
+        // definitions of `before` again, so it runs only when an argument at
+        // such a parameter is absent.
         if (
           fill !== undefined &&
-          defaultFill!.positions.some((i) =>
-            Number.isNaN(argumentsList[i] ?? Number.NaN)
-          )
+          defaultFill!.positions.some((i) => {
+            const a = argumentsList[i];
+            if (Number.isNaN(a ?? Number.NaN)) return true;
+            const n = defaultFill!.arities[i];
+            if (n === undefined || !Array.isArray(a)) return false;
+            for (let k = 0; k < n; k++)
+              if (!Number.isNaN(a[k])) return false;
+            return true;
+          })
         ) {
           const previous = setReconstructionDigits(reconstructionDigits);
           try {
@@ -11123,6 +11169,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           isAbsent: jsIsAbsent,
           coalesce: jsCoalesce,
         },
+        // A point position also reads a `NaN` point (an array whose
+        // coordinates are all `NaN`) as absent.
+        point: { isAbsent: jsIsAbsentPoint, coalesce: jsCoalescePoint },
         // A thrown `Error`, as an expression: an arrow function that throws,
         // called at once. `AssertPresent` (`x?!`) uses it for the absent branch.
         raise: (message) => `((_m) => { throw new Error(_m); })(${message})`,
@@ -12151,6 +12200,7 @@ function lambdaDefaultFill(
   | {
       run: () => string;
       positions: number[];
+      arities: (number | undefined)[];
       defaults: string;
       code: (before: string, after: string, body: string) => string;
     }
@@ -12162,12 +12212,31 @@ function lambdaDefaultFill(
     const code = fills[i]!;
     return t !== undefined && isNonRealNumber(t) ? `_SYS.cplx(${code})` : code;
   };
+  // A parameter typed as a point also takes its default for a `NaN` point
+  // (`jsIsAbsentPoint()`). A parameter with no declared type whose default
+  // is a point is meant to receive a point, and the interpreter fills a
+  // `NaN` point there, so it takes the point test of the arity of the
+  // default. The point test also reads `undefined`, `null` and `NaN` as
+  // absent, and reads no other scalar as absent (`5[0]` is `undefined`,
+  // which `Number.isNaN` reads as present), so the choice needs no test of
+  // the type at run time.
+  const arity = (i: number): number | undefined => {
+    const t =
+      functionLiteralParameterType(literalParams[i]) ??
+      optionalParameterDefault(literalParams[i])?.type.type;
+    return t === undefined ? undefined : pointArity(t);
+  };
+  const arities = fills.map((_, i) => arity(i));
+  const absent = (i: number): string => {
+    const n = arities[i];
+    return n === undefined
+      ? jsIsAbsent(params[i])
+      : jsIsAbsentPoint(params[i], n);
+  };
   const run = (): string =>
     fills
       .map((f, i) =>
-        f === undefined
-          ? ''
-          : `if (${jsIsAbsent(params[i])}) ${params[i]} = ${value(i)}; `
+        f === undefined ? '' : `if (${absent(i)}) ${params[i]} = ${value(i)}; `
       )
       .join('');
   const defaults = fills
@@ -12176,7 +12245,7 @@ function lambdaDefaultFill(
   const code = (before: string, after: string, body: string): string =>
     defaultFillFunction(params, `${before}${run()}${after}${body}`);
   const positions = fills.flatMap((f, i) => (f === undefined ? [] : [i]));
-  return { run, positions, defaults, code };
+  return { run, positions, arities, defaults, code };
 }
 
 /**
@@ -12390,7 +12459,12 @@ function compileToTarget(
       reconstructionDigits,
       kinds !== undefined || keyedResult(args[0].canonical),
       defaults !== undefined
-        ? { run: defaults.run, positions: defaults.positions, ...perCallAround }
+        ? {
+            run: defaults.run,
+            positions: defaults.positions,
+            arities: defaults.arities,
+            ...perCallAround,
+          }
         : undefined
     );
     return {
@@ -13568,11 +13642,9 @@ function collArg(
  * written symbol.)
  *
  * The written symbol is refused in one case: when the COLLECTION's element
- * type has a `missing` arm. `Missing` and `Undefined` both lower to
- * `undefined` here, while the interpreter keeps them apart
- * (`IndexOf([1, Missing], Undefined)` is `0`, since `Unique([Missing,
- * Undefined])` keeps both), so a written symbol searched in a list that may
- * hold either one could be found where the other sits. Against a list whose
+ * type has a `missing` arm. `Missing` lowers to `undefined` here, so a
+ * written `Missing` searched in a list that may hold an absent cell could be
+ * found where the interpreter does not find it. Against a list whose
  * elements cannot be absent the written symbol is never found on either
  * route, and compiles.
  */
@@ -13584,7 +13656,7 @@ function compileSearchedValue(
   search: (v: string) => string
 ): string {
   const t = resolveTypeForCompilation(needle.type.type);
-  const written = isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined');
+  const written = isSymbol(needle, 'Missing');
   if (
     !written &&
     typeContainsMissing(t) &&
@@ -13598,14 +13670,14 @@ function compileSearchedValue(
   if (written && collectionMayHoldAbsentCell(collection))
     throw new Error(
       `Could not compile \`${operator}\`: the searched value is \`${needle.toString()}\` and an element ` +
-        `of the collection may be absent; this target spells \`Missing\` and \`Undefined\` alike, ` +
-        `where the interpreter keeps them apart. The interpreter evaluates it instead.`
+        `of the collection may be absent; this target spells an absent cell as \`undefined\`, ` +
+        `which could not tell it from the written symbol. The interpreter evaluates it instead.`
     );
   return search(compile(needle));
 }
 
 /** True when the element type of `collection` has a `missing` arm, so a cell
- * may be `Missing` or `Undefined` at run time. */
+ * may be `Missing` at run time. */
 export function collectionMayHoldAbsentCell(
   collection: Expression | undefined
 ): boolean {
@@ -13727,7 +13799,7 @@ const ABSENT_LAST_COMPARATOR =
  * is not a number (`boolean`, `tuple<…>`, `list<…>`, `any`, `unknown`)
  * does not compile, and the two routes never give different answers.
  *
- * An absent cell (`Missing` or `Undefined`, typed `missing`) is allowed: the
+ * An absent cell (`Missing`, typed `missing`) is allowed: the
  * interpreter sorts it after every other cell (user decision of 2026-09-25),
  * and at run time it is `undefined`, which the compiled sort puts last too.
  * So the test is on the element type less its `missing` arm. Returns `true`
@@ -15711,12 +15783,12 @@ function scanForDistinctElement(root: Expression): boolean {
  * `_SYS.eqs` would find `Tuple(1, 2)` where a list element holds `[1, 2]`,
  * while the interpreter's `.isSame()` keeps a `Tuple` apart from a `List`. A
  * list of primitives, or a primitive (which never equals a list element), is
- * admitted; any other type fails closed. A written `Missing` or `Undefined` is
+ * admitted; any other type fails closed. A written `Missing` is
  * admitted too: `compileSearchedValue` applies its own rules for an absent
  * searched value.
  */
 function requireStructuralNeedle(kind: string, needle: Expression): void {
-  if (isSymbol(needle, 'Missing') || isSymbol(needle, 'Undefined')) return;
+  if (isSymbol(needle, 'Missing')) return;
   const t = jsType(needle);
   if (
     (isStructuralListElementType(t) || isPrimitiveElementType(t)) &&
@@ -16061,11 +16133,32 @@ function compileExtremum(
   // `Max([[1, 2], [3, 4]])` is 4. Every other operand whose elements are
   // collections is refused (`refuseNestedData`).
   const nested = args.map((a) => isNestedRealListOperand(a));
-  refuseNestedData(
-    kind,
-    args.filter((_a, i) => !nested[i]),
-    true
-  );
+  const refused = args.filter((_a, i) => !nested[i]);
+  try {
+    refuseNestedData(kind, refused, true);
+  } catch (refusal) {
+    // The refusal reads only the static type of each operand, before the
+    // operand is compiled. When an operand has no settled shape (with
+    // `g := t ↦ [t, t]` and `x: any`, `g(x)[1]` is a number or a list),
+    // that type can have a list arm with elements of unknown type
+    // (`list<unknown> | unknown`), and the refusal fires first, with the
+    // generic code `compile-error`. The compilation of the operand gives
+    // the decline with the code `unsettled-shape`, which names the input
+    // to declare (`x`) in `unsupported`, so that decline is preferred. The
+    // compilation declines in both cases.
+    for (const a of refused) {
+      try {
+        compile(a);
+      } catch (e) {
+        if (
+          e instanceof CompileDeclineError &&
+          e.diagnostic.code === UNSETTLED_SHAPE_CODE
+        )
+          throw e;
+      }
+    }
+    throw refusal;
+  }
   const fn = kind === 'Max' ? 'Math.max' : 'Math.min';
   const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
   // Reduce with the identity seed, but map an empty input to `NaN` (interpreter

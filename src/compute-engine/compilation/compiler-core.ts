@@ -38,6 +38,8 @@ import {
   isTextAtom,
   isTuple,
   isTupleWithListCoordinate,
+  nanPoint,
+  pointArity,
   unmatchedCellKind,
 } from '../collection-utils.js';
 import {
@@ -849,6 +851,29 @@ function isBooleanScalarRestriction(
     !args[0].type.matches('collection<any>') &&
     !mayBeCollectionCondition(args[0].type.type)
   );
+}
+
+/**
+ * The number of coordinates of the arm of a value-form single-branch
+ * `If(c, p)` whose arm `p` is a point (`pointArity()`) and whose condition
+ * `c` is a scalar (its type cannot hold a list), else `undefined`. Its
+ * value is the point of `NaN` coordinates where `c` fails
+ * (`maskedValue()` in `library/control-structures.ts`), so it compiles as
+ * `If(c, p, (NaN, …, NaN))`.
+ */
+function pointScalarRestrictionArity(
+  h: string,
+  args: ReadonlyArray<Expression>
+): number | undefined {
+  if (
+    h !== 'If' ||
+    args.length !== 2 ||
+    isStatementArm(args[1]) ||
+    args[0].type.matches('collection<any>') ||
+    mayBeCollectionCondition(args[0].type.type)
+  )
+    return undefined;
+  return pointArity(args[1].type.type);
 }
 
 function compileExpression(
@@ -4016,6 +4041,30 @@ export function compileExpr(
       undefined,
       'If'
     )!;
+  // A restriction of a point by a scalar condition, `If(c, p)`, is the
+  // point of `NaN` coordinates where `c` fails, as in the interpreter
+  // (`maskedValue()`, `library/control-structures.ts`): the absent value of
+  // the domain of a point (`docs/ERROR-MODEL.md`, "`Missing` is a result
+  // only", rule 2). It compiles as `If(c, p, (NaN, …, NaN))`. The node is
+  // not passed on: its operand indices do not name the synthesized point.
+  // Only the JavaScript and Python targets take this route. The interval
+  // target spells the point of `NaN` coordinates in its own restriction
+  // (`_IA.restrict` with the arity of the point), and has no lowering of a
+  // `Tuple`. The shader targets already give a `vec2` (or wider) of `NaN`
+  // for an absent point on their own route.
+  const restrictedArity =
+    target.language === 'javascript' || target.language === 'python'
+      ? pointScalarRestrictionArity(h, args)
+      : undefined;
+  if (restrictedArity !== undefined)
+    return compileExprIf(
+      engine,
+      h,
+      [args[0], args[1], nanPoint(engine, restrictedArity)],
+      target,
+      undefined,
+      'If'
+    )!;
   const selectionHead =
     h === 'If' && args.length === 2 && !isStatementArm(args[1]) ? 'Which' : h;
   if (h === 'If' && args.length === 2 && selectionHead === 'If')
@@ -5616,7 +5665,14 @@ export function ensureSpecializedUserCallEmitted(
         if (target.language === 'javascript' || interval) return undefined;
         t = 'complex';
         complexArgument = true;
-      } else t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
+      } else if (isSubtype(t, 'boolean')) t = 'boolean';
+      else if (isSubtype(t, 'number')) t = 'number';
+      // A string is a scalar too (`isScalarShaped()`), but a copy of the
+      // definition with the parameter typed `number` compiles the body
+      // wrongly (`c == " "` over a `number` declines), so the call keeps
+      // the generic definition. A read `cs[i]` of a `list<string>` is
+      // typed `string` and comes here.
+      else return undefined;
     } else if (
       target.language === 'javascript' &&
       !openIndexReadTuple &&

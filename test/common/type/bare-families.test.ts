@@ -92,12 +92,13 @@ describe('bare collection families constrain kind, not contents', () => {
   });
 
   test('TupleFrom reports a type that contains absent coordinates', () => {
+    // A declared type cannot name `missing`, so the absent cell is the
+    // written `Missing` of a list literal.
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list<integer | missing>');
-    ce.assign('xs', ce.box(['List', 1, 'Missing']));
-    const expr = ce.box(['TupleFrom', 'xs']);
+    const expr = ce.box(['TupleFrom', ['List', 1, 'Missing']]);
     const value = expr.evaluate();
     expect(value.json).toEqual(['Tuple', 1, 'Missing']);
+    expect(expr.type.toString()).toBe('tuple<integer, missing>');
     expect(isSubtype(value.type.type, expr.type.type)).toBe(true);
   });
 });

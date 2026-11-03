@@ -242,16 +242,19 @@ let first = xs[1] ?? 0
 is an error, not a missing value, and propagates.
 
 A function does not accept an absent value at a parameter annotated with a
-type, unless the type says so. With `function f(p: tuple<number, number>)`,
-the call `f(first(filter(xs, c => c[1] > 0)))` is reported by the static
-check, because a filter can find nothing, and it is an `incompatible-type`
-error when the value is absent. Write `f(first(filter(…)) ?? (0, 0))` to give
-a fallback, or annotate the parameter `tuple<number, number> | missing` and
-test `isMissing(p)` in the body. A parameter with no annotation receives the
-absent value, and a parameter annotated with a numeric type (`number`,
-`integer`, `real`) reads it as `NaN`, which such a parameter accepts.
-The first element of a list literal that has one (`first([(1, 2), (3, 4)])`)
-cannot be absent and needs no fallback.
+non-numeric type, and a declared type cannot name `missing`. With
+`function f(p: string)` and `xs: list<string>`, the read `xs[i]` is typed
+`string`, and the call `f(xs[i])` is an `incompatible-type` error when `i`
+is past the end. Write `f(xs[i] ?? "")` to give a fallback, or leave the
+parameter without an annotation and test `isMissing(p)` in the body. A
+parameter with no annotation receives the absent value, and a parameter
+annotated with a numeric type (`number`, `integer`, `real`) reads it as
+`NaN`, which such a parameter accepts. A read past the end of a list of
+points is a point whose coordinates are `NaN`: when no point matches,
+`first(filter(xs, c => c[1] > 5))` is `(NaN, NaN)`, which a parameter
+`p: tuple<number, number>` accepts. `??`, `isMissing` and a parameter
+default read such a point as absent: `ps[i] ?? (0, 0)` is `(0, 0)` when
+`i` is past the end.
 
 It is right-associative, so a chain falls through left to right:
 
@@ -293,10 +296,10 @@ let i = 2
 f(xs[i]?!)         // "b"; with i = 5, Error("expected-present", …)
 ```
 
-The static check accepts the asserted value where it would report the plain
-read: the type of `xs[i]?!` is the present part of the type of `xs[i]`
-(`string`, not `missing | string`), so it fits a parameter or a declaration
-that excludes absence. Only the value itself is checked, never the cells of a
+The type of `xs[i]?!` is the type of `xs[i]` (`string`): a read is typed by
+the element it reads, and the absent value is not part of its type. The
+assertion turns an absent value into an error at the read, before it reaches
+a parameter or a declaration. Only the value itself is checked, never the cells of a
 collection: `xs?!` asserts that the list is there, not that no cell is
 absent. `Nothing` is an omission marker, not an absent datum, and passes
 through; an error operand propagates unchanged.

@@ -33,7 +33,7 @@ describe('ZIP ELEMENT TYPE', () => {
       ce
         .box(['At', ['At', ['Zip', 'xs', ['Range', 1, 3]], 1], 1])
         .type.toString()
-    ).toBe('boolean | missing');
+    ).toBe('boolean');
   });
 
   test('a declared bare `list` source gives an `any` component', () => {
@@ -52,7 +52,7 @@ describe('ZIP ELEMENT TYPE', () => {
       ce
         .box(['At', ['At', ['Zip', 'ys', ['Range', 1, 3]], 1], 2])
         .type.toString()
-    ).toBe('integer | nan');
+    ).toBe('integer');
   });
 
   test('an explicit `any` element type stays `any` (absence markers admitted)', () => {

@@ -174,8 +174,8 @@ describe('alias lift: cell-scaling handlers type the structure they build', () =
     [['Negate', 'p'], 'tuple<integer, integer>'],
     [['Sin', 'p'], 'tuple<number, number>'],
     // Element access reads the alias body's element type.
-    [['At', 'L', 1], 'integer | nan'],
-    [['First', 'L'], 'integer | nan'],
+    [['At', 'L', 1], 'integer'],
+    [['First', 'L'], 'integer'],
     // Other lifted heads.
     [['Abs', 'L'], 'list<integer<0..>>'],
     [['Sqrt', 'L'], 'list<number>'],

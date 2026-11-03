@@ -1862,15 +1862,21 @@ describe('a matrix with an absent cell', () => {
     );
   });
 
-  it('can be assigned to a symbol declared as such a matrix', () => {
+  // A declared type cannot name `missing`, and a store accepts a value that
+  // holds the marker where the declared type accepts a present value
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+  it('can be assigned to a symbol declared as a matrix of numbers', () => {
     const ce = new ComputeEngine();
-    ce.declare('M', 'matrix<(number | missing)^(2x2)>');
+    expect(() =>
+      ce.declare('W', 'matrix<(number | missing)^(2x2)>')
+    ).toThrow(/cannot be declared/);
+    ce.declare('M', 'matrix<number^(2x2)>');
     expect(() => ce.assign('M', ce.box(A))).not.toThrow();
-    ce.declare('V', 'vector<(number | missing)^2>');
+    ce.declare('V', 'vector<number^2>');
     expect(() => ce.assign('V', ce.box(['List', 2, 'Missing']))).not.toThrow();
   });
 
-  it('the matrix product reads an absent cell as NaN', () => {
+  it('the matrix product reads an absent cell as NaN; a scalar multiple keeps a Missing cell', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Multiply', A, I]).evaluate().toString()).toBe(
       '[[NaN,NaN],[3,4]]'
@@ -1879,7 +1885,7 @@ describe('a matrix with an absent cell', () => {
       '[[2,NaN],[3,NaN]]'
     );
     expect(ce.box(['Multiply', 2, A]).evaluate().toString()).toBe(
-      '[[4,NaN],[6,8]]'
+      '[[4,"Missing"],[6,8]]'
     );
   });
 
@@ -1901,7 +1907,7 @@ describe('a matrix with an absent cell', () => {
   // A lazy collection of such rows is read as the matrix of its rows.
   it('a Reverse of rows with an absent cell times a matrix', () => {
     const ce = new ComputeEngine();
-    ce.declare('L', 'list<vector<(number | missing)^2>>');
+    ce.declare('L', 'list<vector<number^2>>');
     ce.declare('M', 'matrix<number>');
     ce.assign('L', ce.box(['List', ['List', 1, 'Missing'], ['List', 3, 4]]));
     ce.assign('M', ce.box(['List', ['List', 0, 1], ['List', 1, 0]]));
@@ -1940,37 +1946,14 @@ describe('a matrix with an absent cell', () => {
     ).toBe('[(1, 2),"Missing",(3, 4),(5, 6)]');
   });
 
-  it('the interpreter and compiled code agree on a Product', () => {
+  // A declared input cannot hold an absent cell (a declared type cannot name
+  // `missing`), so the compiled code is not checked with one.
+  it('the interpreter computes a Product of such matrices', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'list<matrix<(number | missing)^(2x2)>>');
+    ce.declare('P', 'list<matrix<number^(2x2)>>');
     ce.assign('P', ce.box(['List', A, I]));
     expect(ce.box(['Product', 'P']).evaluate().toString()).toBe(
       '[[NaN,NaN],[3,4]]'
     );
-    const ce2 = new ComputeEngine();
-    ce2.declare('P', 'list<matrix<(number | missing)^(2x2)>>');
-    const r = compile(ce2.box(['Product', 'P']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    // The cells of the first row are computed from the absent cell, so their
-    // compiled value is not specified (`docs/COMPILATION-MODEL.md`, "Caveats
-    // of compiled code", the bullet "Everything computed from an absent value,
-    // except at a discharge"). The second row has no absent operand and must
-    // agree. A host passes `undefined` for an absent cell.
-    const out = r.run!({
-      P: [
-        [
-          [2, undefined],
-          [3, 4],
-        ],
-        [
-          [1, 0],
-          [0, 1],
-        ],
-      ],
-    } as never) as number[][];
-    expect(out).toHaveLength(2);
-    expect(out[1]).toEqual([3, 4]);
   });
 });

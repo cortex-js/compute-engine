@@ -174,13 +174,12 @@ describe('ENCLOSURE COMPILE: x + 1 with x: enclosure', () => {
 });
 
 describe('ENCLOSURE COMPILE: the runner', () => {
-  test('y: real | missing keeps the absence reading of NaN', () => {
+  test('y: real | missing cannot be declared', () => {
+    // `Missing` is a result only: no compiled input is declared absent.
     const ce = engine();
-    ce.declare('y', 'real | missing');
-    const result = compileI(ce.parse('x + y'));
-    expect(result.run({ x: { lo: 0, hi: 1 }, y: NaN } as never)).toEqual({
-      kind: 'empty',
-    });
+    expect(() => ce.declare('y', 'real | missing')).toThrow(
+      /cannot be declared/
+    );
   });
 
   test('x < y and Max(x, y) with y: number run with y: Infinity', () => {

@@ -117,21 +117,24 @@ describe('a collection that could hold numbers keeps the fail-open admission', (
     expect(local.box(['Abs', 'ss']).isValid).toBe(false);
   });
 
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"): a list with an absent cell is a
+  // constructed value, and the symbol takes its inferred type.
   test('a list with an absence arm is admitted (the runtime gate owns the cell)', () => {
     const local = new ComputeEngine();
-    local.declare('ms', 'list<number | missing>');
+    local.assign('ms', local.box(['List', 1, 'Missing']));
     expect(local.box(['Ln', 'ms']).isValid).toBe(true);
     expect(local.box(['Abs', 'ms']).isValid).toBe(true);
-    local.declare('allAbsent', 'list<missing>');
+    local.assign('allAbsent', local.box(['List', 'Missing', 'Missing']));
     expect(local.box(['Ln', 'allAbsent']).isValid).toBe(true);
     expect(local.box(['Abs', 'allAbsent']).isValid).toBe(true);
   });
 
   test('an absence arm does not mask a non-numeric carrier', () => {
-    // `list<string | missing>`: the non-absent cells are strings, so the
+    // `list<missing | string>`: the non-absent cells are strings, so the
     // collection is refused like `list<string>` on both routes.
     const local = new ComputeEngine();
-    local.declare('sm', 'list<string | missing>');
+    local.assign('sm', local.box(['List', { str: 'a' }, 'Missing']));
     expect(local.box(['Ln', 'sm']).isValid).toBe(false);
     expect(local.box(['Abs', 'sm']).isValid).toBe(false);
   });

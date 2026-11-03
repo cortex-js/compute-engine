@@ -106,16 +106,18 @@ describe('deriveApplicationType', () => {
     }
   });
 
-  test('a propagate operator absorbs an absent operand as the call site does', () => {
-    // `Add` propagates absence: an `integer | missing` operand is handed to
-    // the handler stripped, and the result admits the `NaN` an absent
-    // numeric operand contributes — never the bare `integer` the handler
-    // would claim for the present arm alone.
+  test('a propagate operator keeps the absence of an operand', () => {
+    // `Add` propagates absence: an `integer | missing` operand (an inferred
+    // type can have the arm) is handed to the handler stripped, and the
+    // result keeps the `missing` arm, since an operator over `Missing` gives
+    // `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result only") —
+    // never the bare `integer` the handler would claim for the present arm
+    // alone.
     const t = deriveApplicationType(ce, 'Add', [
       describeType(ce.type('integer | missing').type),
       describeType(ce.type('1').type),
     ]);
-    expect(typeToString(t!)).toBe('integer | nan');
+    expect(typeToString(t!)).toBe('integer | missing');
     expect(
       deriveApplicationType(ce, 'Add', [
         describeType('integer'),
@@ -124,16 +126,17 @@ describe('deriveApplicationType', () => {
     ).toBe('integer');
   });
 
-  test('an Undefined operand of a propagate operator is absorbed like Missing', () => {
-    // `Undefined` is typed `unknown`, which a join drops: the result claimed
-    // `integer` for `Undefined + 1`, whose value is `NaN`.
+  test('a Missing operand of a propagate operator makes the result missing', () => {
+    // An operator over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only"): `Missing + 1` is typed `missing`. The
+    // derived type is the type of the call site.
     const t = deriveApplicationType(ce, 'Add', [
-      describeOperand(ce.box('Undefined')),
+      describeOperand(ce.box('Missing')),
       describeType(ce.type('1').type),
     ]);
-    expect(typeToString(t!)).toBe('integer | nan');
+    expect(typeToString(t!)).toBe('missing');
     expect(typeToString(t!)).toBe(
-      ce.box(['Add', 'Undefined', 1]).type.toString()
+      ce.box(['Add', 'Missing', 1]).type.toString()
     );
   });
 

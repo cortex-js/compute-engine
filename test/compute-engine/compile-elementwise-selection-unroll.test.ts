@@ -228,12 +228,12 @@ describe('A literal index pushed through an element-wise selection', () => {
     const short = ce.box(['At', ['If', cond, ['List', 'u', 'v']], 2]);
     expect(unrollFixedWidthCollections(short)).toBe(short);
     // The scalar form and the element-wise form agree at each position for
-    // a number. For a point, an unmatched cell is a point of `NaN`
-    // coordinates, and a false scalar condition gives `Missing` (selection
-    // rule of 2026-11-02; the cell was `Missing` too).
+    // a number and for a point: an unmatched cell of a point is a point of
+    // `NaN` coordinates (selection rule of 2026-11-02), and so is a false
+    // restriction of a point (user decision 2026-11-03).
     for (const [value, masked, maskedOne] of [
       [7, 'NaN', 'NaN'],
-      [['Tuple', 1, 2], '(NaN, NaN)', '"Missing"'],
+      [['Tuple', 1, 2], '(NaN, NaN)', '(NaN, NaN)'],
     ] as const) {
       const whole = ce
         .box(['If', ['Less', ['List', 1, 3], 2], value])
@@ -508,8 +508,16 @@ describe('A point selection whose condition is a scalar at run time', () => {
   ])('%s(%j, %s)', (h, cond, value) => {
     const r = compile(pe.box([h, cond, value] as any), { fallback: false });
     expect(r.success).toBe(true);
-    // A false scalar condition: the whole value is absent.
-    expect(r.run!({ c: false, B: 1, P, Q })).toBeUndefined();
+    // A false scalar condition: the whole value is absent. A false
+    // restriction of a point is the point of `NaN` coordinates (user
+    // decision 2026-11-03): `c` is an input declared `boolean |
+    // list<boolean>`, which compiles one body per member, and the body of a
+    // boolean `c` gives that point. With `B < 0`, the shape of the
+    // condition is not known, and the run-time selection gives `undefined`
+    // for the whole value (a known limitation, `docs/COMPILATION-MODEL.md`).
+    expect(r.run!({ c: false, B: 1, P, Q })).toEqual(
+      h === 'If' && cond === 'c' && value === 'P' ? [NaN, NaN] : undefined
+    );
     // A true scalar condition: the value whole.
     expect(r.run!({ c: true, B: -1, P, Q })).toEqual(value === 'P' ? P : Q);
     // A list of conditions: a point of `NaN` coordinates where the

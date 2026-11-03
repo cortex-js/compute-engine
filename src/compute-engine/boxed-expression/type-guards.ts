@@ -51,17 +51,10 @@ export function isSymbol(
 }
 
 /**
- * Is this expression one of the two SYMBOLS that stand for an absent value —
- * `Missing` or `Undefined`?
+ * Is this expression the SYMBOL that stands for an absent value, `Missing`?
  *
  * `Missing` is the position-preserving absent datum of `docs/ERROR-MODEL.md`
- * §1. `Undefined` is the symbol the engine writes for a value that does not
- * exist, and a user can write it directly. The two names are read as the same
- * absence everywhere the engine tests for one (user rulings of 2026-09-21 for
- * the numeric absence gate, 2026-09-22 for the operators that own their
- * absence semantics). `Undefined` keeps its own meaning otherwise: its
- * declared type is still `unknown`, and a bare `Undefined` evaluates to
- * itself.
+ * §1.
  *
  * This is the single choke point both absence tests share: `isAbsentValue`
  * below, which adds a `NaN` arm on top of it, and `isAbsentScalarSymbol`
@@ -71,20 +64,21 @@ export function isSymbol(
  * natively and some operators give a literal `NaN` a bespoke meaning.
  */
 export function isAbsentSymbol(expr: Expression | null | undefined): boolean {
-  return isSymbol(expr, 'Missing') || isSymbol(expr, 'Undefined');
+  return isSymbol(expr, 'Missing');
 }
 
 /**
- * True when `expr` is an absence symbol (`Missing` or `Undefined`), or an
+ * True when `expr` is an absence symbol (`Missing`), or an
  * arithmetic node that the arithmetic methods build around one: a `Negate`,
  * `Multiply`, `Divide` or `Power` with such an operand, at any depth
  * (`-Missing`, `2·Missing`, `1/Missing`, `Missing^2`).
  *
- * Arithmetic with an absent operand is `NaN` (user decision of 2026-09-25).
- * The `.add()`/`.mul()`/`.div()` methods read such an operand as `NaN` through
- * this test, as the `Add`/`Multiply`/`Divide` operators do at evaluation.
- * Before, the methods kept the symbol: `ce.box('Missing').mul(ce.box(2))`
- * was `2·"Missing"` while `Multiply(2, Missing)` evaluated to `NaN`.
+ * Arithmetic with an absent operand is `Missing`: an operator over `Missing`
+ * gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+ * decision of 2026-11-02"). The `.add()`/`.mul()`/`.div()` methods read such
+ * an operand through this test, as the `Add`/`Multiply`/`Divide` operators
+ * do at evaluation: `ce.box('Missing').mul(ce.box(2))` is `Missing`, as
+ * `Multiply(2, Missing)` is.
  */
 export function isAbsentArithmeticOperand(
   expr: Expression | null | undefined
@@ -98,15 +92,14 @@ export function isAbsentArithmeticOperand(
 }
 
 /**
- * True when a value is an absence MARKER — an absence symbol (`Missing` or
- * `Undefined`) or a `NaN` number — regardless of provenance (I6). This is the
+ * True when a value is an absence MARKER — an absence symbol (`Missing`) or a
+ * `NaN` number — regardless of provenance (I6). This is the
  * value-level test the missing-value runtime gate and chained-`At` absorption
  * use (`docs/TYPE-SYSTEM.md`).
  *
  * It is also the test the operators that OWN their absence semantics run —
  * the ones declared `missingBehavior: 'handle'`, such as the statistics
- * reducers and `Min`/`Max`. `Mean([1, Undefined, 3])` is `NaN` exactly as
- * `Mean([1, Missing, 3])` is.
+ * reducers and `Min`/`Max`. `Mean([1, Missing, 3])` is `Missing`.
  *
  * The `Indeterminate` literal is NOT absent, although its value is `NaN`: it
  * is the exact answer to an indeterminate form (`0/0`), a value with no
@@ -126,9 +119,31 @@ export function isAbsentValue(expr: Expression | null | undefined): boolean {
  * Absence handled by `IsMissing` and `Coalesce`. Both numeric markers count
  * as absent here; arithmetic consumers keep their distinct propagation rules.
  * `Nothing` is an omission marker and passes through these operations.
+ *
+ * A `NaN` point (a tuple whose coordinates are all `NaN` numbers) is also
+ * absent here: an accessor out of range over a list of points gives it in
+ * place of `Missing` (`At([(1, 2)], 5)` is `(NaN, NaN)`), so
+ * `Coalesce(At(ps, 5), (0, 0))` must select `(0, 0)` as it did when the read
+ * was `Missing`. A tuple with one coordinate that is not `NaN` is present.
  */
 export function isMissingValue(expr: Expression | null | undefined): boolean {
-  return isAbsentSymbol(expr) || (isNumber(expr) && expr.isNaN === true);
+  return (
+    isAbsentSymbol(expr) ||
+    (isNumber(expr) && expr.isNaN === true) ||
+    isNaNPointValue(expr)
+  );
+}
+
+/**
+ * True when `expr` is a `NaN` point: a `Tuple` with at least one element,
+ * whose elements are all numbers whose value is `NaN`.
+ */
+export function isNaNPointValue(expr: Expression | null | undefined): boolean {
+  if (!isFunction(expr) || expr.operator !== 'Tuple') return false;
+  const ops = expr.ops;
+  return (
+    ops.length > 0 && ops.every((x) => isNumber(x) && x.isNaN === true)
+  );
 }
 
 /**
@@ -212,7 +227,7 @@ export function nanOperandAnswer(
       if (x.isIndeterminate) sawIndeterminate = true;
       else if (isInexactOperand(x)) return ce.NaN;
     } else if (isSymbol(x) && (isAbsentSymbol(x) || x.isNaN === true)) {
-      // An absent operand (`Missing`, `Undefined`) makes the answer `NaN`,
+      // An absent operand (`Missing`) makes the answer `NaN`,
       // the absence marker; so does a symbol whose value is `NaN`, which
       // is not the `Indeterminate` literal. (A function operand is not
       // asked: the question would compute its type, and a function
@@ -229,7 +244,7 @@ export function nanOperandAnswer(
  * result has none. The answer is `Indeterminate` when every operand is exact
  * (an exact number, an infinity, or `Indeterminate` itself), and `NaN` when
  * any operand is inexact (`isInexactOperand()`: a float or the `NaN`
- * literal), absent (`Missing`, `Undefined`) or a symbol whose value is
+ * literal), absent (`Missing`) or a symbol whose value is
  * `NaN`. So `0/0` is `Indeterminate`, and `0/0.0` and `0.0·∞` are `NaN`, as a
  * float operand makes a numeric result a float.
  *

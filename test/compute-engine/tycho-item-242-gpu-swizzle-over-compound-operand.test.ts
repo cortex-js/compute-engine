@@ -80,12 +80,13 @@ describe('a primary operand keeps the direct suffix', () => {
   });
 });
 
-// An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
-// the target. A scalar has no components: WGSL rejects `.x` on an `f32`, so
+// An absent operand (`Missing`) compiles to the SCALAR NaN of the target.
+// (`Undefined` is not an absent value: it is an ordinary symbol, since
+// `Missing` became a result only, `docs/ERROR-MODEL.md`.) A scalar has no components: WGSL rejects `.x` on an `f32`, so
 // the coordinate read of an absent point is that NaN, with no swizzle.
 describe('a component read over an absent operand', () => {
   for (const op of ['PointX', 'PointY', 'PointZ'])
-    for (const arg of ['Missing', 'Undefined'])
+    for (const arg of ['Missing'])
       test(`${op}(${arg})`, () => {
         const glsl = compile(ce.box([op, arg]), {
           to: 'glsl',
@@ -104,7 +105,7 @@ describe('a component read over an absent operand', () => {
   // absent base: the interpreter gives `Missing`, and a decline is always
   // allowed.
   for (const op of ['First', 'Second', 'Third', 'Last'])
-    for (const arg of ['Missing', 'Undefined'])
+    for (const arg of ['Missing'])
       test(`${op}(${arg}) declines`, () => {
         for (const to of ['glsl', 'wgsl'] as const)
           expect(() =>

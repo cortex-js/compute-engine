@@ -87,6 +87,10 @@ describe('CE-371: an operand of a top type', () => {
   });
 
   test('h(x)[1] with x: any', () => {
+    // A result type describes the successful values: the marker of a read
+    // that may find nothing is implicit, so the type has no `missing` arm and
+    // the absent value of the empty list is not in it (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only").
     expect(
       typeAndValues(
         engine('any'),
@@ -94,13 +98,13 @@ describe('CE-371: an operand of a top type', () => {
         [NUMBER, VECTOR, RAGGED, MATRIX, EMPTY]
       )
     ).toEqual({
-      type: 'list<any> | missing | number',
+      type: 'list<any> | number',
       values: [
         ['3', true],
         ['[1,2]', true],
         ['[[1,2],[2,4]]', true],
         ['[[1,2],[2,4]]', true],
-        ['"Missing"', true],
+        ['"Missing"', false],
       ],
     });
   });
@@ -157,7 +161,7 @@ describe('CE-371: a tensor operand', () => {
       expect(call.type).toBe('tensor');
       expect(call.values.every(([, holds]) => holds)).toBe(true);
       const index = typeAndValues(engine(xType), ['At', ['h', 'x'], 1], values);
-      expect(index.type).toBe('missing | number | tensor');
+      expect(index.type).toBe('number | tensor');
       expect(index.values.every(([, holds]) => holds)).toBe(true);
     }
   );

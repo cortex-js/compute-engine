@@ -78,8 +78,9 @@ describe('issue #369: a Fold that builds a list compiles', () => {
 
 describe('issue #369: an annotated accumulator', () => {
   it('is admitted when the seed and the body provably satisfy it', () => {
-    // `p[i]` is typed `integer | nan` (an index may be out of range), so
-    // the body returns `list<integer | nan>`; the empty seed is
+    // `p[i]` is typed `integer` (a read is typed by its element type, the
+    // marker of a read out of range is implicit), so the body returns
+    // `list<integer>`, a member of `list<integer | nan>`; the empty seed is
     // `list<never>`, a member of every list type.
     const ce = engine();
     expect(
@@ -93,19 +94,19 @@ describe('issue #369: an annotated accumulator', () => {
     ).toEqual([6, 2, 4]);
   });
 
-  it('is declined, naming the argument type, when the body does not provably return it', () => {
+  // Before 2026-11-02 the read `p[i]` was typed `integer | nan`, and this
+  // annotation was declined with the argument type `list<integer | nan>`.
+  it('is admitted when the annotation is the element type of the read', () => {
     const ce = engine();
-    expect(() =>
-      js(
+    expect(
+      run(
         ce,
         fold(
           ['Function', BODY, ['Typed', 'acc', 'list<integer>'], 'i'],
           ['List']
         )
       )
-    ).toThrow(
-      /callback parameter 'acc' is annotated 'list<integer>', which the argument type 'list<integer \| nan>' does not provably satisfy/
-    );
+    ).toEqual([6, 2, 4]);
   });
 
   it('is declined when the seed does not satisfy it', () => {
@@ -159,7 +160,7 @@ describe('issue #369: an annotated accumulator', () => {
         ce.box(
           fold(
             ['Function', BODY, ['Typed', 'acc', 'list<integer>'], 'i'],
-            ['List']
+            ['List', 'True']
           ) as any
         ),
         { to: 'python', fallback: false }

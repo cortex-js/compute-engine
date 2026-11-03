@@ -24,7 +24,6 @@ import {
   stripMissingFromType,
   unfoldAliasOnDescent,
 } from '../../common/type/utils.js';
-import { absentMarkerIsNumeric } from './validate.js';
 import {
   deriveApplicationOf,
   describe,
@@ -44,6 +43,8 @@ import {
   isDestructuringParameter,
   isScalarType,
   isWideParameterType,
+  isOptionalParameter,
+  optionalParameterDefault,
   optionalParameterTarget,
 } from './function-literal.js';
 import {
@@ -51,6 +52,7 @@ import {
   isPointOrPointListArgumentType,
   isPointParameterType,
   isTupleShapedType,
+  pointArity,
 } from '../collection-utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
@@ -308,6 +310,66 @@ function declaredParameterTypes(
   return [...(sig.args ?? []), ...(sig.optArgs ?? [])].map((a) => a.type);
 }
 
+/** Whether the declared signature of the function bound by `binding` (the
+ * source that `declaredParameterTypes()` reads) gives a default value to
+ * the parameter at position `i`: `ce.declare('g', '(integer, integer = 2)
+ * -> integer')` gives one to the position 1. The interpreter fills it as it
+ * fills the default of the literal (`userFunctionDefaults()`,
+ * `compile-parameter-defaults.ts`). */
+function declaredDefaultAt(
+  binding: BoxedDefinition | undefined,
+  i: number
+): boolean {
+  if (!binding) return false;
+  let sig: Type | undefined;
+  if ('operator' in binding) {
+    if (binding.operator.inferredSignature) return false;
+    sig =
+      binding.operator._validationSignature ?? binding.operator.signature?.type;
+  } else {
+    if (binding.value.inferredType) return false;
+    sig = binding.value.type?.type;
+  }
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
+  const j = i - (sig.args?.length ?? 0);
+  return j >= 0 && sig.optArgs?.[j]?.default !== undefined;
+}
+
+/** Whether an argument in `args` is typed `missing` at a parameter of
+ * `literal` whose type is numeric or a point (a tuple of numbers,
+ * `pointArity()`). The type of the parameter is its annotation in the
+ * literal, else its type in the declared signature of the function. A
+ * parameter with a default value, in the literal or in the declared
+ * signature (`declaredDefaultAt()`), does not count: the call gives it its
+ * default in place of the absent argument, so with
+ * `f := (x: integer = 2) ↦ x`, `f(First([]))` is `2`. */
+function alwaysAbsentAtNumericParameter(
+  literal: Expression & FunctionInterface,
+  binding: BoxedDefinition | undefined,
+  args: readonly OperandDescriptor[]
+): boolean {
+  const params = literal.ops.slice(1);
+  let declaredParams: ReadonlyArray<Type> | undefined | null = null;
+  return args.some((a, i) => {
+    if (
+      resolveTypeAlias(a.type) !== 'missing' ||
+      i >= params.length ||
+      isOptionalParameter(params[i]) ||
+      declaredDefaultAt(binding, i)
+    )
+      return false;
+    if (declaredParams === null)
+      declaredParams = declaredParameterTypes(binding);
+    const p =
+      functionLiteralParameterType(params[i]) ?? declaredParams?.[i];
+    return (
+      p !== undefined &&
+      p !== 'never' &&
+      (isSubtype(p, 'number') || pointArity(p) !== undefined)
+    );
+  });
+}
+
 /** Derive a call's result from its body without changing the callable contract.
  * Parameters and straight-line locals carry descriptors, never runtime values.
  * Unsupported control flow and recursive calls keep the declared result. */
@@ -333,6 +395,17 @@ export function callResultType(
   // its signature says. The body of `r := x ↦ If(x = 0, 0, r(x − 1) + 1)`
   // calls `r("s" − 1)`, and the derivation of `r("s")` reads that call.
   if (inferred && args.some((x) => x.type === 'error')) return 'error';
+  // An argument that is always absent (typed `missing`) at a numeric or a
+  // point parameter makes the call `Missing` whatever the body
+  // (`absentAtNumericParameter()` in `boxed-function.ts`, and `apply()` in
+  // `function-utils.ts`), so the call is typed `missing`. An error argument
+  // outranks the absent value.
+  if (
+    literal !== undefined &&
+    !args.some((x) => x.type === 'error') &&
+    alwaysAbsentAtNumericParameter(literal, binding, args)
+  )
+    return 'missing';
   // A parameter whose uses require types that no value has (`n` in
   // `n ↦ Range(n) + n[1]`, a scalar bound and a collection) is typed
   // `never` (`narrowInferredType`, `boxed-symbol.ts`). Every call of such a
@@ -1965,16 +2038,9 @@ function literalBodyResultType(
       }
       // An application over an ABSENT operand (a parameter typed `missing`,
       // or a value derived as absent) is typed as the evaluation of the body
-      // answers it, not as the operator's type handler types a literal
-      // `Missing` operand. At evaluation, an operator that propagates
-      // absence answers the marker of its codomain read off the type of the
-      // application AS WRITTEN in the body (`absentMarkerIsNumeric`,
-      // `validate.ts`): `NaN` when that type is numeric, `Missing` otherwise.
-      // The written type is fixed by the parameter's declared type: inside
-      // `(p, s) ↦ (s·PointX(p), …)` with `p` inferred `collection<any> |
-      // tuple`, `PointX(p)` is typed `unknown` and its absent value is
-      // `Missing`, where the type handler of `PointX` over a literal
-      // `Missing` says `number` (the top-level `PointX(Missing)` is `NaN`).
+      // answers it: `missing`. At evaluation, an operator that propagates
+      // absence answers `Missing` (`absentScalarMarker`, `validate.ts`):
+      // `Missing` is a result only, and an operator over it gives `Missing`.
       // The condition is the evaluation's (step 4a of `BoxedFunction.
       // evaluate`): no operand is a collection (beside one, the absence
       // lands in each cell through the operator's own kernel); a
@@ -2003,11 +2069,7 @@ function literalBodyResultType(
               (_, i) => absentAt(i) && def.stripsMissingAt?.(i) === true
             ))
         ) {
-          const result = describeType(
-            absentMarkerIsNumeric(expr.type.type, def.signature.type)
-              ? 'number'
-              : 'missing'
-          );
+          const result = describeType('missing');
           memo.set(expr, result);
           return result;
         }
@@ -2085,17 +2147,25 @@ function literalBodyResultType(
     // The parameter of an absent argument is typed as the call binds the
     // absent value. The type of the parameter is its annotation in the
     // literal, else its type in the declared signature of the function.
-    // At a numeric type the absent value is read as `NaN` (`apply()`,
-    // `function-utils.ts`), so the parameter is typed `nan`. With no type,
-    // or a type with a `missing` member, it is typed `missing`. At any other
-    // type (a point, a list, a string) the call is an `incompatible-type`
+    // With no type, the absent value is bound as it is, so the parameter is
+    // typed `missing`. At a numeric type the call is `Missing` whatever the
+    // body (`apply()`, `function-utils.ts`), so the arm is `missing`, and
+    // the same at a point (a tuple of numbers, `pointArity()`). At any other
+    // type (a list, a string) the call is an `incompatible-type`
     // error, so a combination with an absent argument there gives no value
     // and adds nothing to the type. Before, the parameter was typed
     // `missing` in every case, and `f(P)` with
     // `f: (broadcastable<tuple<number, number>>) -> unknown`, the body
     // `a ↦ (a.x + 1, a.y + 1)` and `P: tuple<number, number> | missing` was
     // typed `tuple<missing, missing> | tuple<number, number>`.
-    const absentType = (i: number): Type | undefined => {
+    //
+    // A parameter with a default value receives its default in place of an
+    // absent argument, so it is typed as its annotation, else as the type
+    // of the default.
+    const absentType = (i: number): Type | 'call' | undefined => {
+      const fallback = optionalParameterDefault(params[i]);
+      if (fallback !== undefined)
+        return functionLiteralParameterType(params[i]) ?? fallback.type.type;
       const annotation =
         functionLiteralParameterType(params[i]) ?? declaredParams?.[i];
       if (
@@ -2104,17 +2174,18 @@ function literalBodyResultType(
         isSubtype('missing', annotation)
       )
         return 'missing';
-      if (isSubtype(annotation, 'number')) return 'nan';
+      if (
+        isSubtype(annotation, 'number') ||
+        pointArity(annotation) !== undefined
+      )
+        return 'call';
       return undefined;
     };
     // The type of the body when the arguments at `absentAt` are absent:
     // `null` when the call refuses one of them (no value, nothing to add),
-    // `undefined` when the body gives no type. With `forBound`, an absent
-    // argument is typed `missing` even where it is read as `NaN`, for the
-    // check against the declared result below.
+    // `undefined` when the body gives no type.
     const armType = (
-      absentAt: ReadonlySet<number>,
-      forBound: boolean
+      absentAt: ReadonlySet<number>
     ): Type | undefined | null => {
       const types: Type[] = [];
       for (let i = 0; i < names.length; i++) {
@@ -2124,7 +2195,8 @@ function literalBodyResultType(
         }
         const t = absentType(i);
         if (t === undefined) return null;
-        types.push(forBound ? 'missing' : t);
+        if (t === 'call') return 'missing';
+        types.push(t);
       }
       env = new Map(names.map((name, i) => [name, describeType(types[i])]));
       memo.clear();
@@ -2140,10 +2212,7 @@ function literalBodyResultType(
       .filter((i) => i >= 0);
     // The declared result bounds the PRESENT values, so each arm is checked
     // against it with its `missing` arms stripped: `missing` is a subtype of
-    // no values-only type. An argument that a numeric parameter reads as
-    // `NaN` is typed `missing` for that check (with `f: (real) -> unknown`
-    // and `a ↦ (a, 1)`, the inferred result is `tuple<real, integer>`, and
-    // `f(Missing)` is `(NaN, 1)`, whose `nan` coordinate is outside it).
+    // no values-only type.
     let result: Type | undefined;
     let declined = gated.length > 3;
     for (let mask = 0; !declined && mask < 1 << gated.length; mask++) {
@@ -2151,16 +2220,11 @@ function literalBodyResultType(
         ...alwaysAbsent,
         ...gated.filter((_, j) => (mask >> j) & 1),
       ]);
-      const arm = armType(absentAt, false);
+      const arm = armType(absentAt);
       if (arm === null) continue;
-      const bound = [...absentAt].some((i) => absentType(i) === 'nan')
-        ? armType(absentAt, true)
-        : arm;
       if (
         arm === undefined ||
-        bound === undefined ||
-        bound === null ||
-        !isSubtype(stripMissingFromType(bound), declared)
+        !isSubtype(stripMissingFromType(arm), declared)
       ) {
         declined = true;
         break;

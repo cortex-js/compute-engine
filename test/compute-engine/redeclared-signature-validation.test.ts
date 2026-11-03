@@ -57,7 +57,8 @@ const CASES: Case[] = [
   },
   {
     name: 'Append',
-    signature: '(any, (value | missing)+) -> collection',
+    // A parameter type cannot name `missing` (`Missing` is a result only).
+    signature: '(any, value+) -> collection',
     widened: ['Append', 5, 1],
     stock: ['Append', ['List', 1, 2], 3],
   },

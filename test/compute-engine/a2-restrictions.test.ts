@@ -203,13 +203,14 @@ describe('A2 — Multi-restriction GLSL verification', () => {
 
 describe('A2 — If(False, e) masking rule', () => {
   test('If(False, e) evaluates to NaN for a number', () => {
-    // The mask is the absence marker of the value's type (user decision
-    // 2026-09-25): `NaN` for a number, `Missing` for a point.
+    // The mask is the absence marker of the value's type (user decisions
+    // 2026-09-25 and 2026-11-03): `NaN` for a number, the point of `NaN`
+    // coordinates for a point.
     const ce = new ComputeEngine();
     expect(ce.expr(['If', 'False', 42]).evaluate().isNaN).toBe(true);
     expect(
-      ce.expr(['If', 'False', ['Tuple', 1, 2]]).evaluate().symbol
-    ).toEqual('Missing');
+      ce.expr(['If', 'False', ['Tuple', 1, 2]]).evaluate().toString()
+    ).toEqual('(NaN, NaN)');
   });
 
   test('If(True, e) evaluates to e', () => {

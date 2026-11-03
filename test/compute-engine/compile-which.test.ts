@@ -205,15 +205,12 @@ describe('COMPILE Which', () => {
       expect(result.run!({ b: false })).toBe(9);
     });
 
-    it('a condition of type `boolean | missing` that is absent answers NaN', () => {
+    // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only"), so a condition input cannot be declared
+    // absent.
+    it('a condition declared `boolean | missing` is a static error', () => {
       const engine = new ComputeEngine();
-      engine.declare('b', 'boolean | missing');
-      const expr = engine.expr(['Which', 'b', 5, 'True', 9]);
-      const result = compile(expr, { fallback: false })!;
-      expect(result.success).toBe(true);
-      expect(result.run!({ b: true })).toBe(5);
-      expect(result.run!({ b: false })).toBe(9);
-      expect(result.run!({ b: undefined } as any)).toBeNaN();
+      expect(() => engine.declare('b', 'boolean | missing')).toThrow();
     });
 
     it('needs no `_SYS.cond` guard and no operand test', () => {

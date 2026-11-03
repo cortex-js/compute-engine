@@ -85,7 +85,7 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
       ['PointY', ['List', RP, ['Tuple', 3, 4]]],
       '[If(0 < t, 2),4]',
       '[2,4]',
-      '["Missing",4]',
+      '[NaN,4]',
     ],
   ])('%s', (_l, json, free, present, absent) => {
     expect(value(json)).toBe(free);
@@ -94,18 +94,22 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
   });
 
   test('an absent coordinate follows the unrestricted absent point', () => {
-    // The restricted point at `t = -1` answers what `PointX(Missing)` does.
+    // The restricted point at `t = -1` answers what `PointX(Missing)` does:
+    // a coordinate of an absent point is `NaN`, as the held form
+    // `If(0 < t, 1)` gives (`docs/ERROR-MODEL.md`, "`Missing` is a result
+    // only"). The coordinates of an absent list of points stay `Missing`.
     expect(value(['PointX', 'Missing'])).toBe('NaN');
   });
 
   test('an absent first point does not decide the reading', () => {
+    // The coordinate of an absent point is a number, and the absent value
+    // of a number is `NaN` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+    // only"): the result cell is typed with a `nan` arm.
     expect(value(['PointX', ['List', 'Missing', ['Tuple', 1, 2]]])).toBe(
-      '["Missing",1]'
+      '[NaN,1]'
     );
-    // A masked cell is `Missing`, and the list is typed `list<T | missing>`
-    // (user decision of 2026-09-09, `docs/ERROR-MODEL.md`).
     expect(type(['PointX', ['List', 'Missing', ['Tuple', 1, 2]]])).toBe(
-      'list<integer | missing | nan^2>'
+      'list<integer | nan^2>'
     );
     // An element-wise restriction whose first condition is false. A masked
     // point is a point whose coordinates are `NaN` (selection rule of
@@ -134,9 +138,12 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
 
   test('the types', () => {
     expect(type(['PointX', RL])).toBe('vector<integer^2>');
-    expect(type(['PointX', RP])).toBe('integer | nan');
+    // The absence marker is implicit in the type of a read.
+    expect(type(['PointX', RP])).toBe('integer');
+    // A list that holds a restricted point can hold an absent point, whose
+    // coordinate is `NaN`.
     expect(type(['PointY', ['List', RP, ['Tuple', 3, 4]]])).toBe(
-      'vector<integer^2>'
+      'list<integer | nan^2>'
     );
   });
 });
@@ -169,21 +176,21 @@ describe('Cross of a restricted point', () => {
       ['Cross', RP3, ['Tuple', 1, 1, 1]],
       'If(0 < t, (-1, 2, -1))',
       '(-1, 2, -1)',
-      '"Missing"',
+      '(NaN, NaN, NaN)',
     ],
     [
       'a point and a restricted point',
       ['Cross', ['Tuple', 1, 1, 1], RP3],
       'If(0 < t, (1, -2, 1))',
       '(1, -2, 1)',
-      '"Missing"',
+      '(NaN, NaN, NaN)',
     ],
     [
       'two points restricted by the same condition',
       ['Cross', RP3, ['If', c, ['Tuple', 1, 1, 1]]],
       'If(0 < t, (-1, 2, -1))',
       '(-1, 2, -1)',
-      '"Missing"',
+      '(NaN, NaN, NaN)',
     ],
     [
       'a restricted vector and a vector',
@@ -295,14 +302,14 @@ describe('Compiled accessors of a restricted point', () => {
   // bound once and the operator is lowered on the present value under a
   // test for the absent value (`absentCollectionOperandGuard`,
   // `base-compiler.ts`, issue #383): the cross product of the present point
-  // is the interpreter's `(-1, 2, -1)`, and the absent point gives the
-  // absent object, as the interpreter answers `Missing`. This lowering was
-  // verified against the interpreter on JavaScript only; Python keeps its
-  // decline.
+  // is the interpreter's `(-1, 2, -1)`. A false restriction of a point is
+  // the point of `NaN` coordinates, and so is the cross product of it, as
+  // the interpreter answers. This lowering was verified against the
+  // interpreter on JavaScript only; Python keeps its decline.
   test('Cross of a restricted point compiles on javascript', () => {
     const json = ['Cross', RP3, ['Tuple', 1, 1, 1]];
     expect(run(json, 2)).toEqual([-1, 2, -1]);
-    expect(run(json, -1)).toBeUndefined();
+    expect(run(json, -1)).toEqual([NaN, NaN, NaN]);
   });
 
   test('Cross of a restricted point fails closed on python', () => {

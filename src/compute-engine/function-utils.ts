@@ -57,6 +57,7 @@ import {
   isString,
   isNumber,
   isAbsentSymbol,
+  isNaNPointValue,
   isExpression,
   sym,
 } from './boxed-expression/type-guards.js';
@@ -110,6 +111,7 @@ import {
   scopeActivationTemplate,
 } from './boxed-expression/ambient-chain.js';
 import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
+import { pointArity } from './collection-utils.js';
 import {
   GENERIC_DEFAULT_MESSAGE,
   NESTED_DEFAULT_MESSAGE,
@@ -205,6 +207,8 @@ import { substituteDeclaredBounds } from './boxed-expression/generic-instantiati
 import { isSubtype, widen } from '../common/type/subtype.js';
 import { typeToString } from '../common/type/serialize.js';
 import {
+  DECLARED_MISSING_MESSAGE,
+  declaredTypeNamesMissing,
   hasKindArm,
   isGroupedTypeText,
   returnTypeText,
@@ -599,7 +603,11 @@ export function annotateFunctionLiteralParams(
   let rewritten = false;
   const params = ops.slice(1).map((operand, i) => {
     const t = paramTypes[i];
-    if (t === undefined) return operand;
+    // An inferred type can hold the marker `missing` (the element type
+    // `tuple<string, missing>` of `{"a" -> Missing}`), which an annotation
+    // may not name (`declaredTypeNamesMissing()`): the parameter stays bare,
+    // and the body types it from its uses.
+    if (t === undefined || declaredTypeNamesMissing(t)) return operand;
     // A parameter with a default value is annotated inside its `Optional`
     // wrapper, and keeps its default operand.
     const optional = isFunction(operand, 'Optional') ? operand : undefined;
@@ -949,6 +957,13 @@ export function canonicalFunctionLiteralArguments(
     // (`Typed(f, "(number, number = 2) -> number")`) would never be used.
     if (t !== undefined && typeHasParameterDefault(t))
       return ce.error(NESTED_DEFAULT_MESSAGE, x.toString());
+    // A parameter may not be declared with the marker `missing`: `Missing`
+    // is a result only (`declaredTypeNamesMissing()`).
+    if (t !== undefined && declaredTypeNamesMissing(t))
+      return ce.error(
+        ['invalid-type-annotation', DECLARED_MISSING_MESSAGE],
+        x.toString()
+      );
     // A parameter declared `unknown`, or a transparent alias of it, is a
     // parameter with no declaration (user decision 2026-10-30, recorded
     // with GitHub issue #488). The annotation is removed here, so every
@@ -2028,6 +2043,15 @@ function bodySlotSignature(
     return { error: signatureStringError(ce, s, e) };
   }
   if (typeof t === 'string' || t.kind !== 'signature') return undefined;
+  // A parameter of the signature may not name the marker `missing`
+  // (`declaredTypeNamesMissing()`).
+  if (declaredTypeNamesMissing(t))
+    return {
+      error: ce.error(
+        ['invalid-type-annotation', DECLARED_MISSING_MESSAGE],
+        `"${s}"`
+      ),
+    };
   return { sig: t, operand: op };
 }
 
@@ -8849,6 +8873,39 @@ export function capturedValueMismatchNowEntry(
   return capturedValueMismatchEntry(fnExpr, capturedScope);
 }
 
+/**
+ * `options` with no written argument (`ApplyOptions.exactSources`) at a
+ * position where a parameter default replaced the argument: `before` are the
+ * arguments of a call, and `after` are the same arguments after the fill of
+ * the defaults (`withAbsentDefaults()`), which keeps each argument it does not
+ * replace. The written argument of a replaced position is the absent value
+ * (`At(qs, 9)` is a `NaN` point), not the default that the parameter is bound
+ * to. Under `.N()`, the body reads a recorded written argument in place of its
+ * parameter (`applyWrittenArguments`) or re-reads it near a jump (the
+ * activation of the parameter), so with the record kept,
+ * `Apply((p = O) ↦ At(p, 1), At(qs, 9)).N()` gave `NaN` where `.evaluate()`
+ * gave the first coordinate of `O`.
+ */
+function withoutReplacedSources(
+  options: ApplyOptions | undefined,
+  before: ReadonlyArray<Expression>,
+  after: ReadonlyArray<Expression>
+): ApplyOptions | undefined {
+  const sources = options?.exactSources;
+  if (
+    sources === undefined ||
+    before === after ||
+    !sources.some((s, i) => s !== undefined && before[i] !== after[i])
+  )
+    return options;
+  return {
+    ...options,
+    exactSources: sources.map((s, i) =>
+      before[i] !== after[i] ? undefined : s
+    ),
+  };
+}
+
 function makeLambda(
   expr: Expression,
   errorPolicy: ErrorArgPolicy = 'bubble'
@@ -9137,25 +9194,36 @@ function makeLambda(
   };
 
   // The parameters annotated with a NUMERIC type (`x: number`, `n: integer`,
-  // `t: real`). Two rules apply to them (user decisions 2026-09-30):
+  // `t: real`). Two values that are not members of such a type are accepted
+  // there:
   //
-  // - An absent value (`Missing`, `Undefined`) bound to one of them is read
-  //   as `NaN`, the absence marker of a numeric domain
-  //   (`docs/ERROR-MODEL.md` §3, "In a numeric slot, `Missing` is normalized
-  //   to `NaN` at the boundary"): `f(x: number) = x + 1` answers `NaN` for
-  //   `f(Missing)`, as `Missing + 1` does.
-  // - `NaN` is an acceptable value there, whatever the numeric type: it is
-  //   what a numeric computation answers when it has no value (a restricted
-  //   number whose condition fails, a read past the end of a list of
-  //   numbers), and `f(n: integer)` must not refuse it where `f(n: number)`
-  //   runs. `nan` is not a member of `integer` or `real` in the type
-  //   lattice, so the validation is told to skip such an argument
-  //   (`acceptNaNAtNumericParams`). A number that is not `NaN` is still
-  //   checked: `f(n: integer)` refuses `1.5`.
+  // - The absent value `Missing`. A call with `Missing` at such a parameter
+  //   is `Missing`, as an operator over `Missing` gives `Missing`, whatever
+  //   the body: `f(x: number) = x + 1` and `(x: integer) ↦ [x]` answer
+  //   `Missing` for `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+  //   only — user decision of 2026-11-02", which replaces the reading of
+  //   2026-09-30 that `Missing` is bound as `NaN` there). A partial
+  //   application binds it, and the validation is told to skip it
+  //   (`acceptNaNAtNumericParams`).
+  // - `NaN`, whatever the numeric type: it is what a numeric computation
+  //   answers when it has no value (a restricted number whose condition
+  //   fails, a read past the end of a list of numbers), and `f(n: integer)`
+  //   must not refuse it where `f(n: number)` runs. `nan` is not a member
+  //   of `integer` or `real` in the type lattice, so the validation is told
+  //   to skip it (`acceptNaNAtNumericParams`). A number that is not `NaN` is
+  //   still checked: `f(n: integer)` refuses `1.5`.
   //
-  // At a parameter annotated with any other type (a point, a list, a
-  // string) the absent value stays as it is, and the validation refuses it
-  // with `incompatible-type` unless the annotation has a `missing` member.
+  // At a parameter annotated as a point (a tuple of numbers, `pointArity()`)
+  // a call with `Missing` is `Missing` too (`absentResultParamIndexes`).
+  // A `NaN` point (a tuple whose coordinates are all `NaN`, the value of a
+  // read past the end of a list of points) is accepted there, as `NaN` is
+  // at a numeric parameter, and the body runs with it: with
+  // `f = (p: tuple<real, real>) ↦ PointX(p)`, `f(At([(1, 2)], 5))` is
+  // `NaN`. The scalar `NaN` is still refused there: it is not a point.
+  // At a parameter annotated
+  // with any other type (a list, a string) the absent value stays as it is,
+  // and the validation refuses it with `incompatible-type` unless the
+  // annotation has a `missing` member.
   //
   // The indexes are positions in `params`, which pair one to one with the
   // leading arguments and with the argument slots of the literal's
@@ -9166,19 +9234,33 @@ function makeLambda(
     if (t !== undefined && isSubtype(t, 'number')) acc.push(i);
     return acc;
   }, []);
-  const absorbAbsenceAtNumericParams = (values: Expression[]): Expression[] =>
-    numericParamIndexes.length === 0
-      ? values
-      : values.map((v, i) =>
-          numericParamIndexes.includes(i) && isAbsentSymbol(v) ? ce.NaN : v
-        );
+  /** The parameters annotated as a point, where a `NaN` point is accepted. */
+  const pointParamIndexes = params.reduce<number[]>((acc, p, i) => {
+    const t = functionLiteralParameterType(p);
+    if (t !== undefined && pointArity(t) !== undefined) acc.push(i);
+    return acc;
+  }, []);
+  /** The parameters where `Missing` makes the call `Missing`: the numeric
+   * parameters and the parameters annotated as a point. */
+  const absentResultParamIndexes = params.reduce<number[]>((acc, p, i) => {
+    const t = functionLiteralParameterType(p);
+    if (
+      t !== undefined &&
+      (isSubtype(t, 'number') || pointArity(t) !== undefined)
+    )
+      acc.push(i);
+    return acc;
+  }, []);
   /** `t` with the slot of each numeric parameter whose argument in `values`
-   * is `NaN` widened to `any`, so that the validation accepts that value. */
+   * is `NaN` or `Missing`, and of each point parameter whose argument is a
+   * `NaN` point, widened to `any`, so that the validation accepts that
+   * value. */
   const acceptNaNAtNumericParams = (
     t: Type,
     values: ReadonlyArray<Expression>
   ): Type => {
-    if (numericParamIndexes.length === 0) return t;
+    if (numericParamIndexes.length === 0 && pointParamIndexes.length === 0)
+      return t;
     if (typeof t === 'string' || t.kind !== 'signature') return t;
     // Slot `i` of `optArgs` (the parameters with a default value) is the
     // parameter at position `args.length + i`.
@@ -9187,8 +9269,12 @@ function makeLambda(
     if (args.length + optArgs.length === 0) return t;
     let changed = false;
     const accept = (arg: NamedElement, i: number): NamedElement => {
-      if (!numericParamIndexes.includes(i) || values[i]?.isNaN !== true)
-        return arg;
+      const v = values[i];
+      if (v === undefined) return arg;
+      const admitted = numericParamIndexes.includes(i)
+        ? v.isNaN === true || isAbsentSymbol(v)
+        : pointParamIndexes.includes(i) && isNaNPointValue(v);
+      if (!admitted) return arg;
       changed = true;
       return { ...arg, type: 'any' as Type };
     };
@@ -9579,7 +9665,9 @@ function makeLambda(
     options?: ApplyOptions,
     iterationStatements?: ReadonlyArray<Expression>
   ): Expression | undefined => {
+    const suppliedArgs = args;
     args = withDefaults(args);
+    options = withoutReplacedSources(options, suppliedArgs, args);
     // BOUND-VARIABLE parameters (`bindParameters`) are eliminated first, by
     // substitution: the parameter is replaced in the body by the symbol the
     // caller passed (every occurrence of the name, inner binders included —
@@ -9812,7 +9900,7 @@ function makeLambda(
       }
 
       // Evaluate the supplied arguments in the calling scope
-      let evaluatedKnownArgs = absorbAbsenceAtNumericParams(args.map(argValue));
+      let evaluatedKnownArgs = args.map(argValue);
 
       // An argument that only became an error when EVALUATED (`f(g(1))` with
       // `g(1)` failing) bubbles like a literal one — see step 2.
@@ -10007,21 +10095,23 @@ function makeLambda(
     // An argument that evaluates to an absent value (`At(L, 100)`) at a
     // parameter with a default takes the default, evaluated as a written
     // argument is (`withAbsentDefaults()`). The written absent arguments
-    // were replaced before (`withDefaults`). This runs before the absent
-    // value becomes `NaN` at a numeric parameter, and before the
-    // validation, which refuses `NaN` at a parameter typed `real | missing`.
-    let evaluatedArgs = absorbAbsenceAtNumericParams(
-      options?.holdArguments || !hasParameterDefaults
-        ? args.map(argValue)
-        : [
-            ...withAbsentDefaults(
-              args.map(argValue),
-              requiredParameterCount(params),
-              parameterDefaults,
-              (d) => argValue(callSiteDefault(d))
-            ),
-          ]
-    );
+    // were replaced before (`withDefaults`). This runs before the
+    // validation. The written argument of a replaced position is not
+    // recorded behind the activation (`withoutReplacedSources()`).
+    let evaluatedArgs: Expression[];
+    if (options?.holdArguments || !hasParameterDefaults)
+      evaluatedArgs = args.map(argValue);
+    else {
+      const values = args.map(argValue);
+      const filled = withAbsentDefaults(
+        values,
+        requiredParameterCount(params),
+        parameterDefaults,
+        (d) => argValue(callSiteDefault(d))
+      );
+      options = withoutReplacedSources(options, values, filled);
+      evaluatedArgs = [...filled];
+    }
 
     // An argument that only became an error when EVALUATED (`f(g(1))` with
     // `g(1)` failing) bubbles like a literal one — see step 2.
@@ -10029,6 +10119,14 @@ function makeLambda(
       const err = firstErrorArg(evaluatedArgs);
       if (err !== undefined) return err;
     }
+
+    // An absent value at a numeric or a point parameter makes the call
+    // `Missing` (see `absentResultParamIndexes`). An error argument outranks
+    // it (above).
+    if (
+      absentResultParamIndexes.some((k) => isAbsentSymbol(evaluatedArgs[k]))
+    )
+      return ce.Missing;
 
     // The rest collapse announced in step 2b: the evaluated trailing
     // arguments become ONE `Tuple` argument, so the binding below is an

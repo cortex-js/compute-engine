@@ -9,6 +9,10 @@ import type {
 } from '../global-types.js';
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
+import {
+  descriptorMayHoldRestriction,
+  mayHoldRestriction,
+} from '../boxed-expression/conditional-value.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 import {
   isCollectionShaped,
@@ -625,7 +629,7 @@ export function evaluateChainForCondition(
 /**
  * True when the adjacent pair `(a, b)` of a chain is `False` because an
  * operand is an undefined number (`NaN`, `Indeterminate`), an absent value
- * (`Missing`, `Undefined`), or has a value with no order (`nonRealKind()`;
+ * (`Missing`), or has a value with no order (`nonRealKind()`;
  * with `only: 'pole'`, only the pole, for `Equal`). This is the rule of the
  * verdict (`decideLess`, `decideLessEqual`, `decideEqual`) applied to one
  * pair, so that the chain stops there: `0 < i < 1` and `0 < Missing < 1` are
@@ -1106,6 +1110,22 @@ function decideNotEqual(
 }
 
 /**
+ * Whether one of the evaluated operands `a` and `b` of an order comparison
+ * may still be absent (`mayHoldRestriction()`): a restriction whose condition
+ * is not decided, or a read such as `At(xs, i)` whose position is not known.
+ * Such an operand is typed as its present value, so its sign and its bounds
+ * (`isLess()`, `compareFromAssumedBounds()`) are those of the present value,
+ * but its value can be `Missing` or `NaN`, and the comparison is then
+ * `False`. A `True` verdict over such an operand is not proved, and the
+ * comparison stays unevaluated: with `xs: list<integer<1..10>>`,
+ * `At(xs, i) > 0` is not `True`. A `False` verdict holds whether the operand
+ * is present or not.
+ */
+function pairMayBeAbsent(a: Expression, b: Expression): boolean {
+  return mayHoldRestriction(a) || mayHoldRestriction(b);
+}
+
+/**
  * The verdict of `Less` over its evaluated operands. `chain` is what
  * `evaluateChainOperands` (or its asynchronous twin) gave: the values, or
  * the early answer of a chain (`False` at the first adjacent pair that is
@@ -1158,7 +1178,7 @@ function decideLess(
       order !== undefined
         ? order < 0
         : (lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true));
-    if (cmp === undefined)
+    if (cmp === undefined || (cmp && pairMayBeAbsent(lhs, rhs)))
       return undecidedOrderedRelation(ce, 'Less', rawOps, ops);
     return cmp ? ce.True : ce.False;
   }
@@ -1185,7 +1205,7 @@ function decideLess(
           order !== undefined
             ? order < 0
             : (lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true));
-        if (cmp === undefined)
+        if (cmp === undefined || (cmp && pairMayBeAbsent(lhs, arg)))
           return undecidedOrderedRelation(ce, 'Less', rawOps, ops);
         if (cmp === false) return ce.False;
       }
@@ -1238,7 +1258,7 @@ function decideLessEqual(
       order !== undefined
         ? order <= 0
         : (lhs.isLessEqual(rhs) ?? compareFromAssumedBounds(lhs, rhs, false));
-    if (cmp === undefined)
+    if (cmp === undefined || (cmp && pairMayBeAbsent(lhs, rhs)))
       return undecidedOrderedRelation(ce, 'LessEqual', rawOps, ops);
     return cmp ? trueOrderedRelation(ce, ops) : ce.False;
   }
@@ -1266,7 +1286,7 @@ function decideLessEqual(
             ? order <= 0
             : (lhs.isLessEqual(arg) ??
               compareFromAssumedBounds(lhs, arg, false));
-        if (cmp === undefined)
+        if (cmp === undefined || (cmp && pairMayBeAbsent(lhs, arg)))
           return undecidedOrderedRelation(ce, 'LessEqual', rawOps, ops);
         if (cmp === false) return ce.False;
       }
@@ -2006,24 +2026,15 @@ function possiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
 }
 
 /**
- * Can this operand be absent when it is evaluated: its type has a `missing`
- * arm, or it is the `Undefined` symbol (typed `unknown`, but read as an
- * absent operand by `readComparisonAbsence`)? A comparison with such an
+ * Can this operand be absent when it is evaluated: does its type have a
+ * `missing` arm? A comparison with such an
  * operand is `False` when the operand is absent, so no VALUE type (`true`
  * or `false`) may be read from the other arms of its type
  * (`comparisonType`). The result type itself is `boolean`: a comparison is
  * two-valued (user decision 2026-11-02, two-valued comparisons).
  */
 function mayBeAbsentOperand(op: OperandDescriptor): boolean {
-  return typeContainsMissing(op.type) || isUndefinedSymbolOperand(op);
-}
-
-/** Is the operand the `Undefined` symbol? The test is on the name only, as
- * the value-level test `isAbsentSymbol` is: the symbol has no value
- * definition, so the structure node never carries the `system` flag. */
-function isUndefinedSymbolOperand(op: OperandDescriptor): boolean {
-  const s = op.structureOf?.();
-  return s?.kind === 'symbol' && s.name === 'Undefined';
+  return typeContainsMissing(op.type);
 }
 
 type ComparisonHead =
@@ -2130,6 +2141,12 @@ function comparisonType(
   if (ops.some(mayBeAbsentOperand)) return 'boolean';
   const t = base(ops);
   if (t !== 'boolean') return t;
+  // An operand that holds a restriction or a read at a position that may
+  // not exist (`descriptorMayHoldRestriction()`) is typed as its present
+  // value, but it can be `Missing` or `NaN`, and the comparison is then
+  // `False`: no VALUE type is read from its type. With
+  // `xs: list<integer<1..10>>`, `At(xs, i) > 0` is `boolean`, not `true`.
+  if (ops.some(descriptorMayHoldRestriction)) return 'boolean';
   return comparisonValueType(head, ops, tolerance) ?? 'boolean';
 }
 
@@ -2184,7 +2201,7 @@ function comparisonResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
 /**
  * Absence read for comparison operands.
  *
- * An operand that EVALUATED to an absence symbol (`Missing`, `Undefined`)
+ * An operand that EVALUATED to an absence symbol (`Missing`)
  * is read as `NaN`: a comparison is two-valued, and an undecided operand
  * makes it `False` (`NotEqual`: `True`), as a `NaN` operand does (user
  * decision 2026-11-02, two-valued comparisons, `docs/ERROR-MODEL.md`). So

@@ -80,14 +80,15 @@ describe('Norm — Contract B declaration', () => {
     expectIncompatible(ce.box(['Norm', ['List', 1, { str: 'a' }]] as any));
   });
 
-  test('an absent operand is NaN, as it is for Abs', () => {
+  test('an absent operand is Missing, as it is for Abs', () => {
     // `Missing` is not a wrong kind but a value that is not there: the
     // operand of `Norm(P{c})` when the restriction's condition is false.
-    // The numeric codomain's absence marker is `NaN`.
+    // An operator over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only").
     const ce = new ComputeEngine();
     const e = ce.box(['Norm', 'Missing'] as any);
     expect(e.isValid).toBe(true);
-    expect(e.evaluate().toString()).toBe('NaN');
+    expect(e.evaluate().toString()).toBe('"Missing"');
   });
 
   test('an undeclared operand symbol is inferred from the flipped carrier', () => {
@@ -235,23 +236,23 @@ describe('Trace — Contract B declaration', () => {
     expectIncompatible(ce.box(['Trace', 'True'] as any));
   });
 
-  test('an absent operand is NaN, as for Norm', () => {
+  test('an absent operand is Missing, as for Norm', () => {
     // User decision of 2026-09-25. It was an `incompatible-type` error at
-    // boxing.
+    // boxing. An operator over an operand typed `missing` is typed `missing`.
     const ce = new ComputeEngine();
-    for (const x of ['Missing', 'Undefined']) {
+    for (const x of ['Missing']) {
       const e = ce.box(['Trace', x] as any);
       expect(e.isValid).toBe(true);
-      expect(e.type.toString()).toBe('number');
-      expect(e.evaluate().toString()).toBe('NaN');
-      expect(e.N().toString()).toBe('NaN');
+      expect(e.type.toString()).toBe('missing');
+      expect(e.evaluate().toString()).toBe('"Missing"');
+      expect(e.N().toString()).toBe('"Missing"');
     }
     expect(
       ce
         .parse('\\operatorname{Trace}(\\operatorname{Missing})')
         .evaluate()
         .toString()
-    ).toBe('NaN');
+    ).toBe('"Missing"');
     // An absent AXIS is still refused.
     expect(
       ce.box(['Trace', ['List', ['List', 1, 2], ['List', 3, 4]], 'Missing', 2])

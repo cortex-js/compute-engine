@@ -5,7 +5,7 @@
 // Spec: docs/plans/2026-10-31-parameter-default-values.md, R8 and §7 item 9.
 //
 // A default fills an absent argument as it fills an argument that the call
-// leaves out: `(k: real | missing = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
+// leaves out: `(k: real = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
 // and `f(At(L, 100))`. The test of absence is the one of `Coalesce`:
 // `Missing`, `Undefined`, `NaN` and `Indeterminate` in the interpreter;
 // `undefined`, `null` and `NaN` in compiled JavaScript; `None` and a float or
@@ -30,12 +30,14 @@ function defaulted(d: Json, body: Json = ['Multiply', 'x', 'k']): Json {
   return ['Function', body, 'x', ['Optional', 'k', d]];
 }
 
-/** `(x, k: number | missing = 2) => k`: `k` can hold `Missing`. */
+/** `(x, k: number = 2) => k`. A declared type cannot name `missing`
+ * (`docs/ERROR-MODEL.md`, "`Missing` is a result only"): the default
+ * handles an absent argument. */
 const MAYBE_MISSING: Json = [
   'Function',
   'k',
   'x',
-  ['Optional', ['Typed', 'k', "'number | missing'"], 2],
+  ['Optional', ['Typed', 'k', "'number'"], 2],
 ];
 
 function run(
@@ -105,7 +107,7 @@ describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
     expect(fn.run(3, NaN)).toBe(6);
   });
 
-  test('`(x, k: number | missing = 2) => k` fills a supplied `Missing`', () => {
+  test('`(x, k: number = 2) => k` fills a supplied `Missing`', () => {
     // A default fills an absent argument as it fills an argument that the
     // call leaves out (R6 of docs/plans/2026-11-01-absent-value-contract.md).
     // Before R6, a supplied `Missing` was kept.
@@ -724,7 +726,6 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
   const ce = new ComputeEngine();
   ce.declare('L', 'list<real>');
   ce.declare('P', 'list<tuple<real, real>>');
-  ce.declare('M', 'list<real | missing>');
   // A default value is a number, a string, a boolean, a symbol, `[]` or
   // `{}`: a point default is a symbol whose value is the point.
   ce.declare('O', {
@@ -733,28 +734,19 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
     constant: true,
   } as any);
 
-  /** `(k: real | missing = 2) ↦ k` */
+  /** `(k: real = 2) ↦ k`, called with absent arguments */
   const K: Json = [
     'Function',
     'k',
-    ['Optional', ['Typed', 'k', "'real | missing'"], 2],
+    ['Optional', ['Typed', 'k', "'real'"], 2],
   ];
   /** `(k: real = 2) ↦ k` */
   const KR: Json = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 2]];
-  /** `(q: tuple<real, real> | missing = O) ↦ q`, with `O` = (0, 0) */
+  /** `(q: tuple<real, real> = O) ↦ q`, with `O` = (0, 0) */
   const Q: Json = [
     'Function',
     'q',
-    ['Optional', ['Typed', 'q', "'tuple<real, real> | missing'"], 'O'],
-  ];
-  const MAP: Json = [
-    'Map',
-    [
-      'Function',
-      ['Coalesce', 'k', 0],
-      ['Optional', ['Typed', 'k', "'real | missing'"], 2],
-    ],
-    'M',
+    ['Optional', ['Typed', 'q', "'tuple<real, real>'"], 'O'],
   ];
 
   // Each program, and its value on every route.
@@ -768,9 +760,11 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
     ['g(5) with k: real', ['Apply', KR, 5], 5],
     ['q()', ['Apply', Q], [0, 0]],
     ['q(Missing)', ['Apply', Q, 'Missing'], [0, 0]],
-    ['q(At(P, 5))', ['Apply', Q, ['At', 'P', 5]], [0, 0]],
     ['q(At(P, 1))', ['Apply', Q, ['At', 'P', 1]], [1, 2]],
-    ['Map((k = 2) ↦ Coalesce(k, 0), M)', MAP, [2, 3]],
+    // A read out of range of a list of points is the `NaN` point, which a
+    // default reads as absent, as `Coalesce` does (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only").
+    ['q(At(P, 5))', ['Apply', Q, ['At', 'P', 5]], [0, 0]],
     [
       'a block-local function',
       ['Block', ['Assign', 'h', K], ['h', ['At', 'L', 100]]],
@@ -781,7 +775,6 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
   const values = {
     L: ['List', 1, 2],
     P: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-    M: ['List', 'Missing', 3],
   };
 
   /** The interpreter's value as a number or a list of numbers. */
@@ -795,12 +788,24 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
     return v.re;
   }
 
+  test('a parameter declared with `missing` is a static error', () => {
+    // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only"): a default handles an absent argument.
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'function f(k: real | missing = 2) { k }'
+    );
+    expect(r.diagnostics.map((d: any) => d.message[0])).toContain(
+      'type-annotation-error'
+    );
+  });
+
   test.each(programs)('interpreter: %s', (_, expr, expected) => {
     expect(interpreterValue(expr)).toEqual(expected);
   });
 
   test.each(programs)('JavaScript: %s', (_, expr, expected) => {
-    const vars = { L: [1, 2], P: [[1, 2], [3, 4]], M: [undefined, 3] };
+    const vars = { L: [1, 2], P: [[1, 2], [3, 4]] };
     expect(run(ce, expr, 'javascript', vars).value).toEqual(expected);
   });
 
@@ -808,7 +813,7 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
     // The emitted definition takes every argument from the call, so the
     // call site fills the argument (`absentFilledArguments()`).
     const ce2 = new ComputeEngine();
-    const r = executeEpsil(ce2, 'function f(x, k: real | missing = 2) { k }');
+    const r = executeEpsil(ce2, 'function f(x, k: real = 2) { k }');
     expect(r.diagnostics).toEqual([]);
     ce2.declare('L', 'list<real>');
     for (const [expr, expected] of [
@@ -846,7 +851,6 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
       'import numpy as np',
       'L = [1.0, 2.0]',
       'P = [(1.0, 2.0), (3.0, 4.0)]',
-      'M = [None, 3.0]',
       'out = []',
     ];
     for (const [, expr] of programs) {
@@ -891,9 +895,12 @@ describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY 
     return v.re;
   }
 
-  test('a present list or point argument of a user function is passed whole', () => {
+  test('a present list argument of a user function is passed whole', () => {
     // Only an argument whose type can hold an absent value is filled at the
-    // call: a list or a point is present, and keeps its shape.
+    // call: a list is present, and keeps its shape. A point can be a `NaN`
+    // point, which takes the default: the value at `k` is then a point or
+    // the number 2, a shape that compiled code does not settle, so the call
+    // declines.
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
@@ -906,24 +913,32 @@ describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY 
     const vars = { L: [1, 2], T: [1, 2] };
     for (const [expr, expected] of [
       [['hu', 1, 'L'], [1, 2]],
-      [['hu', 1, 'T'], [1, 2]],
       [['hr', 1, 'L'], [2, 3]],
     ] as [Json, unknown][]) {
       expect(value(ce, expr, vals)).toEqual(expected);
       expect(run(ce, expr, 'javascript', vars).value).toEqual(expected);
     }
+    expect(value(ce, ['hu', 1, 'T'], vals)).toEqual([1, 2]);
+    expect(() =>
+      compile(ce.box(['hu', 1, 'T']) as any, {
+        to: 'javascript',
+        fallback: false,
+      } as any)
+    ).toThrow(/does not settle one shape/);
   });
 
   test('an absent argument at a typed parameter is filled before its type is tested', () => {
+    // The absent argument is a read out of range: `Missing` in the
+    // interpreter, `NaN` in compiled code.
     const ce = new ComputeEngine();
-    ce.declare('M', 'list<real | missing>');
+    ce.declare('M', 'list<real>');
     const KR = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 2]];
     for (const expr of [
-      ['Apply', KR, ['At', 'M', 1]],
-      ['Block', ['Assign', 'g', KR], ['g', ['At', 'M', 1]]],
+      ['Apply', KR, ['At', 'M', 5]],
+      ['Block', ['Assign', 'g', KR], ['g', ['At', 'M', 5]]],
     ]) {
-      expect(value(ce, expr, { M: ['List', 'Missing', 3] })).toBe(2);
-      expect(run(ce, expr, 'javascript', { M: [undefined, 3] }).value).toBe(2);
+      expect(value(ce, expr, { M: ['List', 1, 3] })).toBe(2);
+      expect(run(ce, expr, 'javascript', { M: [1, 3] }).value).toBe(2);
     }
   });
 
@@ -936,11 +951,11 @@ describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY 
       'function h(x, k: real = 2) { x + k }\nfunction hu(x, k = 2) { k }'
     );
     expect(r.diagnostics).toEqual([]);
-    ce.declare('M', 'list<real | missing>');
+    ce.declare('M', 'list<real>');
     ce.declare('x', 'real');
     ce.declare('y', 'real');
-    const vals = { M: ['List', 'Missing', 3], x: 0, y: 0 };
-    const vars = { M: [undefined, 3], x: 0, y: 0 };
+    const vals = { M: ['List', 'NaN', 3], x: 0, y: 0 };
+    const vars = { M: [NaN, 3], x: 0, y: 0 };
     const overM = ['Map', ['Function', ['h', 1, 'z'], 'z'], 'M'];
     expect(value(ce, overM, vals)).toEqual([3, 4]);
     expect(run(ce, overM, 'javascript', vars).value).toEqual([3, 4]);
@@ -951,12 +966,10 @@ describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY 
     ];
     expect(value(ce, quotient, vals)).toEqual([3, 2]);
     expect(run(ce, quotient, 'javascript', vars).value).toEqual([3, 2]);
-    // An argument typed `unknown` at an untyped parameter: the call
-    // declines, and the interpreter gives the value.
+    // An untyped parameter is filled too.
     const untyped = ['Map', ['Function', ['hu', 1, 'z'], 'z'], 'M'];
     expect(value(ce, untyped, vals)).toEqual([2, 3]);
-    const options = { to: 'javascript', fallback: false } as any;
-    expect(() => compile(ce.box(untyped) as any, options)).toThrow();
+    expect(run(ce, untyped, 'javascript', vars).value).toEqual([2, 3]);
   });
 
   describe('interval-js: a supplied argument that can be absent declines', () => {
@@ -1005,7 +1018,7 @@ describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY 
     ce.declare('d', 'real');
     ce.assign('d', 1);
     ce.declare('F5', {
-      signature: '(k: real | missing = d) -> real',
+      signature: '(k: real = d) -> real',
       evaluate: ([k]) => k,
     });
     const expr = ce.box([
@@ -1065,7 +1078,7 @@ describe('COMPILED PARAMETER DEFAULTS: DECLARED DEFAULTS AND BROADCASTS', () => 
 
   test('an absent cell of a broadcast takes the declared default', async () => {
     const ce = new ComputeEngine();
-    ce.declare('g', '(real | missing = 2) -> real');
+    ce.declare('g', '(real = 2) -> real');
     ce.assign('g', ce.box(['Function', ['Coalesce', 'k', 0], 'k']));
     const expr = ce.box(['g', ['List', 'Missing', 3]]);
     expect(expr.evaluate().toString()).toBe('[2,3]');
@@ -1101,27 +1114,27 @@ describe('COMPILED PARAMETER DEFAULTS: A CALL THAT MAPS OVER A LIST', () => {
     [
       'function hu(a, k = 2) { a + k }',
       'function hr(a, k: real = 2) { a + k }',
-      'function f(k: real | missing = 2) { k ?? 0 }',
+      'function f(k: real = 2) { k ?? 0 }',
     ].join('\n')
   );
   expect(r.diagnostics).toEqual([]);
   ce.declare('fv', '(real, real = 2) -> real');
   ce.assign('fv', ce.box(['Function', ['Add', 'a', 'k'], 'a', 'k']));
-  ce.declare('N', 'list<real | missing>');
-  ce.declare('LM', 'list<real | missing>');
+  // A declared type cannot name `missing`: the absent cells are `NaN`
+  // values of `N`, and a written `Missing` in a list literal.
+  ce.declare('N', 'list<real>');
   ce.declare('L', 'list<real>');
   const vals: Record<string, Json> = {
-    N: ['List', 'NaN', 'Missing', 0, 4],
-    LM: ['List', 'Missing', 3],
+    N: ['List', 'NaN', 'NaN', 0, 4],
     L: ['List', 1, 2],
   };
-  const vars = { N: [NaN, undefined, 0, 4], LM: [undefined, 3], L: [1, 2] };
+  const vars = { N: [NaN, NaN, 0, 4], L: [1, 2] };
 
   test.each([
     ['fv(1, N)', ['fv', 1, 'N'], [3, 3, 1, 5]],
     ['hu(1, N)', ['hu', 1, 'N'], [3, 3, 1, 5]],
     ['hr(1, N)', ['hr', 1, 'N'], [3, 3, 1, 5]],
-    ['f(LM)', ['f', 'LM'], [2, 3]],
+    ['f([Missing, 3])', ['f', ['List', 'Missing', 3]], [2, 3]],
     ['hr(1, L), present cells', ['hr', 1, 'L'], [2, 3]],
   ] as [string, Json, number[]][])('%s', (_, expr, expected) => {
     const sub = Object.fromEntries(

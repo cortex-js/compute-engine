@@ -110,15 +110,9 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     ]);
   });
 
-  test('the union with `missing`: an absent argument answers `Missing`', () => {
-    const ce = engine(`${UNION} | missing`);
-    expect(ce.parse('f(L)').type.toString()).toBe(
-      'list<tuple<number, number>> | missing | tuple<number, number>'
-    );
-    expect(run(ce, undefined)).toBeUndefined();
-    expect(run(ce, [1, 2])).toEqual([2, 3]);
-    ce.assign('L', ce.Missing);
-    expect(ce.parse('f(L)').evaluate().json).toBe('Missing');
+  test('the union with `missing` cannot be declared', () => {
+    // `Missing` is a result only (user decision of 2026-11-02).
+    expect(() => engine(`${UNION} | missing`)).toThrow(/cannot be declared/);
   });
 
   test('`broadcastable<tuple<…>>`: typed as a point or a tensor of points', () => {
@@ -228,13 +222,11 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
   });
 
   test('a list whose first point is absent is still mapped', () => {
-    const ce = engine(`${POINT} | list<missing | ${POINT}>`);
-    expect(ce.parse('f(L)').type.toString()).toBe(
-      'list<missing | tuple<number, number>> | tuple<number, number>'
-    );
-    expect(run(ce, [undefined, [3, 4]])).toEqual([undefined, [4, 5]]);
-    expect(run(ce, [undefined])).toEqual([undefined]);
-    expect(run(ce, [1, 2])).toEqual([2, 3]);
+    // A declared type cannot name `missing`, so `L` is typed from a value
+    // that holds an absent point.
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: `(${POINT}) -> ${POINT}` });
+    ce.assign('f', ce.parse('a \\mapsto (a.x+1, a.y+1)'));
     ce.assign('L', ce.box(['List', 'Missing', ['Tuple', 3, 4]]));
     expect(ce.parse('f(L)').evaluate().json).toEqual([
       'List',

@@ -152,7 +152,7 @@ export const FREE_SYMBOL_ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set([
 
 /**
  * True when `op` is a free symbol: a symbol with no value, which is not a
- * constant, not the `Undefined` symbol, not a pattern wildcard (a name that
+ * constant, not a pattern wildcard (a name that
  * starts with `_`), and which a scope of the current context binds, other
  * than the system scope. The type of the symbol is not tested.
  *
@@ -171,7 +171,7 @@ export const FREE_SYMBOL_ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set([
  * symbols of an arithmetic cell, not a free symbol that is an element.
  */
 export function isFreeSymbol(op: Expression): boolean {
-  if (!isSymbol(op) || op.symbol === 'Undefined') return false;
+  if (!isSymbol(op)) return false;
   const def = op.valueDefinition;
   if (def === undefined || def._blockLocal === true) return false;
   if (def.value !== undefined || def.isConstant) return false;

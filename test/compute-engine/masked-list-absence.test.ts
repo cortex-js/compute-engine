@@ -55,13 +55,15 @@ describe('a broadcast over a list restricted by a list of conditions', () => {
         .evaluate()
         .toString()
     );
-    // Same answer as masking the literal cells first.
+    // A selection with no match gives the absent value of the domain of the
+    // position, `NaN` for a number. A written `Missing` cell is not a
+    // selection: `Sin(Missing)` is `Missing`.
     expect(
       ce
         .box(['Sin', ['List', 'Missing', 'Missing', 30]])
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN,sin(30)]');
+    ).toBe('["Missing","Missing",sin(30)]');
   });
 
   test('the held restriction presents its zipped cells', () => {
@@ -109,14 +111,13 @@ describe('a broadcast over a list restricted by a list of conditions', () => {
 });
 
 describe('an absent scalar broadcast into a numeric list', () => {
-  // Every cell is a number, so every cell of an absent scalar combined with
-  // the list is `NaN`. Before the fix, `Multiply` scaled the cells one by
-  // one, and the cell `Missing · 1` folded its identity factor away and
-  // answered `Missing`: `Missing · [1, 2, 3]` was `[Missing, NaN, NaN]`.
+  // An operator over `Missing` gives `Missing`, so every cell of an absent
+  // scalar combined with the list is `Missing`. Before a fix, `Multiply`
+  // scaled the cells one by one, and the cell `Missing · 1` folded its
+  // identity factor away: the cells did not agree.
   test.each([
     ['Multiply', ['Multiply', 'Missing', ['List', 1, 2, 3]]],
     ['Multiply, list first', ['Multiply', ['List', 1, 2, 3], 'Missing']],
-    ['Multiply, Undefined', ['Multiply', 'Undefined', ['List', 1, 2, 3]]],
     ['Add', ['Add', 'Missing', ['List', 1, 2, 3]]],
     ['Add, a zero cell', ['Add', 'Missing', ['List', 0, 1, 2]]],
     ['Subtract', ['Subtract', ['List', 1, 2, 3], 'Missing']],
@@ -131,7 +132,7 @@ describe('an absent scalar broadcast into a numeric list', () => {
         .box(json as never)
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN,NaN]');
+    ).toBe('["Missing","Missing","Missing"]');
   });
 
   test('numeric evaluation agrees', () => {
@@ -140,7 +141,7 @@ describe('an absent scalar broadcast into a numeric list', () => {
         .box(['Multiply', 'Missing', ['List', 1, 2, 3]])
         .N()
         .toString()
-    ).toBe('[NaN,NaN,NaN]');
+    ).toBe('["Missing","Missing","Missing"]');
   });
 
   test('a matrix', () => {
@@ -149,13 +150,13 @@ describe('an absent scalar broadcast into a numeric list', () => {
         .box(['Multiply', 'Missing', ['List', ['List', 1, 2], ['List', 3, 1]]])
         .evaluate()
         .toString()
-    ).toBe('[[NaN,NaN],[NaN,NaN]]');
+    ).toBe('[["Missing","Missing"],["Missing","Missing"]]');
   });
 });
 
 describe('Norm of an absent operand', () => {
-  // `Abs` of an absent point is `NaN` (its codomain is a number), so `Norm`
-  // answers the same. Before the fix, `Norm(Missing)` was an
+  // An operator over `Missing` gives `Missing`: `Abs` of an absent point and
+  // `Norm` with an absent operand or cell are `Missing`. Before a fix, `Norm(Missing)` was an
   // `incompatible-type` error at boxing, so `Norm(P{c})` failed when the
   // point was absent.
   const c = new ComputeEngine();
@@ -164,9 +165,7 @@ describe('Norm of an absent operand', () => {
 
   test.each([
     ['Norm(Missing)', ['Norm', 'Missing']],
-    ['Norm(Undefined)', ['Norm', 'Undefined']],
-    ['Norm of an absent point', ['Norm', ['If', 'c', ['Tuple', 2, 3]]]],
-    ['Abs of an absent point', ['Abs', ['If', 'c', ['Tuple', 2, 3]]]],
+    ['Abs of an absent point', ['Abs', ['Tuple', 2, 'Missing']]],
     ['a vector with an absent cell', ['Norm', ['List', 1, 'Missing']]],
     ['the L1 norm', ['Norm', ['List', 1, 'Missing'], 1]],
     ['the L-infinity norm', ['Norm', ['List', 1, 'Missing'], "'Infinity'"]],
@@ -185,9 +184,22 @@ describe('Norm of an absent operand', () => {
       'the L-infinity norm of a matrix',
       ['Norm', ['List', ['List', 1, 2], ['List', 3, 'Missing']], "'Infinity'"],
     ],
+  ])('%s is Missing', (_, json) => {
+    const e = c.box(json as never);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('"Missing"');
+  });
+
+  // A false restriction of a point is the point of `NaN` coordinates (user
+  // decision 2026-11-03), whose norm is `NaN`.
+  test.each([
     [
-      'a matrix with an Undefined cell',
-      ['Norm', ['List', ['List', 1, 2], ['List', 3, 'Undefined']]],
+      'Norm of a false restricted point',
+      ['Norm', ['If', 'c', ['Tuple', 2, 3]]],
+    ],
+    [
+      'Abs of a false restricted point',
+      ['Abs', ['If', 'c', ['Tuple', 2, 3]]],
     ],
   ])('%s is NaN', (_, json) => {
     const e = c.box(json as never);
@@ -253,31 +265,32 @@ describe('Map over a list that holds a restricted point', () => {
   c.assign('c', false);
   const sinFn = ['Function', ['Sin', 'x'], 'x'];
 
-  test('the absent point maps to Missing', () => {
+  test('the false restricted point maps to a NaN point', () => {
     const m = c.box([
       'Map',
       sinFn,
       ['List', ['If', 'c', ['Tuple', 2, 3]], ['Tuple', 2, 3]],
     ] as never);
     expect(m.type.toString()).toBe('list<tuple<number, number>^2>');
-    expect(m.evaluate().toString()).toBe('[NaN,(sin(2), sin(3))]');
-    expect(m.at(1)?.toString()).toBe('NaN');
-    // Same answer as applying `Sin` to the restricted point directly.
+    expect(m.evaluate().toString()).toBe('[(NaN, NaN),(sin(2), sin(3))]');
+    // Same answer as applying `Sin` to the restricted point directly: a
+    // false restriction of a point is the point of `NaN` coordinates (user
+    // decision 2026-11-03).
     expect(
       c
         .box(['Sin', ['If', 'c', ['Tuple', 2, 3]]])
         .evaluate()
         .toString()
-    ).toBe('"Missing"');
+    ).toBe('(NaN, NaN)');
   });
 
-  test('a scalar product keeps the point absent', () => {
+  test('a scalar product keeps the NaN point', () => {
     const m = c.box([
       'Map',
       ['Function', ['Multiply', 2, 'x'], 'x'],
       ['List', ['If', 'c', ['Tuple', 2, 3]], ['Tuple', 2, 3]],
     ] as never);
-    expect(m.evaluate().toString()).toBe('[NaN,(4, 6)]');
+    expect(m.evaluate().toString()).toBe('[(NaN, NaN),(4, 6)]');
   });
 
   test('a numeric cell is still NaN', () => {
@@ -289,24 +302,25 @@ describe('Map over a list that holds a restricted point', () => {
 
 describe('a numeric function of a value that can be a list or absent', () => {
   // `PointX(V)` of a `V` that can be a point, a list of points, or a list
-  // of numbers is typed `list<number> | missing | number | tuple<…>`. When
-  // it is `Missing`, `PointX(V)^2` answers `Missing`, because the
-  // application's type is not provably numeric — so the type must say
-  // `missing`. It said `list<number> | number` before. The tuple arm of the
-  // operand's type is carried through as a point squared component-wise
+  // of numbers is typed `list<number> | number | tuple<…>`. The tuple arm of
+  // the operand's type is carried through as a point squared component-wise
   // (the arm-by-arm typing of a union with a tuple arm beside a list of
-  // numbers, `armwiseUnionBroadcastResultType`); it was dropped before.
+  // numbers, `armwiseUnionBroadcastResultType`); it was dropped before. When
+  // `V` holds `Missing`, `PointX(V)^2` is `Missing`.
   const PT =
     'indexed_collection<number | tuple<number, number>> | list<tuple<number, number>> | tuple<number, number>';
 
-  test('the type keeps the absence arm, and the value agrees', () => {
+  test('a declared absence arm is an error; a stored Missing gives Missing', () => {
     const c = new ComputeEngine();
-    // `V` takes `Missing` below, so its declaration admits absence (a
-    // declared type is a contract on every value, decision P1, 2026-10-21).
-    c.declare('V', `${PT} | missing`);
+    // A declared type cannot name `missing` (`Missing` is a result only),
+    // but a store into a declared name accepts `Missing`.
+    expect(() => c.declare('V', `${PT} | missing`)).toThrow(
+      /cannot be declared/
+    );
+    c.declare('V', PT);
     const p = c.box(['Power', ['PointX', 'V'], 2]);
     expect(p.type.toString()).toBe(
-      'list<number> | missing | number | tuple<number, number>'
+      'list<number> | number | tuple<number, number>'
     );
     c.assign('V', c.box('Missing'));
     expect(p.evaluate().toString()).toBe('"Missing"');

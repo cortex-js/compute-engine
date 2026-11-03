@@ -495,11 +495,11 @@ describe('interval-js broadcast() with a boolean variable', () => {
 });
 
 describe('a variable declared string (CE-634)', () => {
-  test('a variable declared `string | missing` accepts a string', () => {
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"): `string | missing` is a static error.
+  test('a variable declared `string | missing` is a static error', () => {
     const o = new ComputeEngine();
-    o.declare('t', 'string | missing');
-    const f = compile(o.parse('\\operatorname{If}(t = "a", 1, 2)'));
-    expect(f.run!({ t: 'a' })).toBe(1);
+    expect(() => o.declare('t', 'string | missing')).toThrow();
   });
 });
 
@@ -585,19 +585,6 @@ describe('interval-js: boolean inputs on broadcast() and a loaded runtime', () =
   });
 });
 
-describe('a variable declared `boolean | missing`', () => {
-  test('an empty column is an empty batch, on javascript and interval-js', () => {
-    const ce = new ComputeEngine();
-    ce.declare('c', 'boolean | missing');
-    ce.declare('x', 'real');
-    const expr = ce.box(['If', 'c', ['Add', 'x', 1], 0]);
-    const r = compile(expr);
-    expect(r.broadcast!({ x: new Float64Array(0), c: [] }).length).toBe(0);
-    const i = compile(expr, { to: 'interval-js' });
-    expect(i.booleanInputs).toEqual(['c']);
-    expect(i.broadcast!({ x: new Float64Array(0), c: [] }).length).toBe(0);
-  });
-});
 
 // Review of the comparison lowering of 2026-10-30. Each case is checked
 // against the interpreter's answer, named in the comment.

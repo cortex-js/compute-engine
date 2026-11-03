@@ -5,7 +5,11 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { hasTupleOrStringArm, isTupleShapedType } from '../collection-utils.js';
+import {
+  hasTupleOrStringArm,
+  isTupleShapedType,
+  pointArity,
+} from '../collection-utils.js';
 import {
   collectionElementType,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
@@ -444,10 +448,15 @@ export function compileExprAssertPresent(
     const code = compileValueOperand(operand, target);
     // A restriction (`If(c, 3)`) is absent where its
     // condition fails, whatever its type says, and so is an expression that
-    // contains one: it is never proved present.
+    // contains one: it is never proved present. A point (a tuple of
+    // numbers, `tuple<real, real>` included) is not proved present either:
+    // an accessor out of range gives a `NaN` point whatever the type of
+    // the point says, and the interpreter reads a `NaN` point as absent
+    // (`isMissingValue()`), so the assertion tests it on the point axis.
     const proved =
       !typeContainsMissing(t) &&
       !isSubtype('nan', resolveTypeForCompilation(t)) &&
+      pointArity(resolveTypeForCompilation(t)) === undefined &&
       resolveTypeForCompilation(t) !== 'unknown' &&
       !mayHoldRestriction(operand);
     if (proved) return code;

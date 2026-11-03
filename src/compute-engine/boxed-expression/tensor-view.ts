@@ -458,7 +458,7 @@ export function isNumberThatMayBeAbsent(types: ReadonlyArray<Type>): boolean {
 }
 
 /**
- * The value `x` with each absent cell (`Missing`, `Undefined`) read as `NaN`,
+ * The value `x` with each absent cell (`Missing`) read as `NaN`,
  * when its cells are numbers that may be absent (`[[2, Missing], [3, 4]]`, a
  * `matrix<(integer | missing)^(2x2)>`), and `x` itself otherwise. The
  * absence marker of a numeric cell is `NaN` (`docs/ERROR-MODEL.md`, the
@@ -473,7 +473,7 @@ export function absentCellsAsNaN(ce: ComputeEngine, x: Expression): Expression {
   const read = (v: Expression): Expression =>
     isFunction(v, 'List')
       ? ce.function('List', v.ops.map(read))
-      : isSymbol(v) && (v.symbol === 'Missing' || v.symbol === 'Undefined')
+      : isSymbol(v, 'Missing')
         ? ce.NaN
         : v;
   return read(x);

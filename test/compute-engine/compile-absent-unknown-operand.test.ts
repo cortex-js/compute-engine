@@ -10,6 +10,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * decision of 2026-10-23, ROADMAP CE-229). Since 2026-11-01 the compiled
  * value of such arithmetic is not specified (`docs/COMPILATION-MODEL.md`,
  * "Caveats of compiled code"); the interpreter's value does not change.
+ *
+ * Since `Missing` is a result only (`docs/ERROR-MODEL.md`, user decision of
+ * 2026-11-02), a read out of range in a list of points is a point whose
+ * coordinates are `NaN`, and an operator over `Missing` gives `Missing`.
  */
 function setup(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -37,15 +41,10 @@ describe('the coordinates of an absent point in a user function body', () => {
   // bullet "Everything computed from an absent value, except at a
   // discharge"; R4 of `docs/plans/2026-11-01-absent-value-contract.md`):
   // only the interpreter value is checked for it.
-  test('the interpreter gives a point of three absent coordinates', () => {
+  test('the interpreter gives a point of three NaN coordinates', () => {
     const ce = setup();
     const e = ce.box(['W', ['At', 'L', 5], 2]);
-    expect(e.evaluate().json).toEqual([
-      'Tuple',
-      'Missing',
-      'Missing',
-      'Missing',
-    ]);
+    expect(e.evaluate().json).toEqual(['Tuple', 'NaN', 'NaN', 'NaN']);
     const r = compile(e);
     expect(r.success).toBe(true);
   });
@@ -78,21 +77,21 @@ describe('beside a list, the absence lands in each cell', () => {
   });
 });
 
-describe('a numeric application of an absent value is NaN', () => {
-  test('a product of a number and an absent number', () => {
+describe('a numeric application of an absent value', () => {
+  test('a product of a number and an absent number is Missing, NaN compiled', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Multiply', 2, 'Missing']).evaluate().toString()).toBe(
-      'NaN'
+      '"Missing"'
     );
     const r = compile(ce.box(['Multiply', 2, 'x']));
     expect(r.run!({ x: undefined })).toBeNaN();
   });
 });
 
-describe('an absent value that a symbol declared any holds is NaN in arithmetic', () => {
-  // `docs/ERROR-MODEL.md` (the reading of a host input as `NaN`, ROADMAP
-  // CE-395): every route gives `NaN`. Before, the `assign` route gave
-  // `Missing`, from the codomain marker of the type `any`.
+describe('an absent value that a symbol declared any holds is Missing in arithmetic', () => {
+  // `docs/ERROR-MODEL.md`, "`Missing` is a result only": an operator over
+  // `Missing` gives `Missing` on the `subs` and the `assign` routes. The
+  // compiled fallback reads the host input `undefined` as `NaN`.
   test.each([
     [['Add', 'p', 1]],
     [['Multiply', 2, 'p']],
@@ -124,25 +123,22 @@ describe('an absent value that a symbol declared any holds is NaN in arithmetic'
     const substituted = expr
       .subs({ p: ce.box('Missing'), q: ce.box(2) })
       .evaluate();
-    expect(substituted.isNaN).toBe(true);
+    expect(substituted.symbol).toBe('Missing');
     // `assign`.
     ce.assign('p', ce.box('Missing'));
     ce.assign('q', ce.box(2));
     const assigned = expr.evaluate();
-    expect(assigned.isNaN).toBe(true);
-    expect(assigned.type.matches(expr.type)).toBe(true);
+    expect(assigned.symbol).toBe('Missing');
   });
 
-  test('the coordinate read of an absent point stays absent', () => {
-    // A READ is not a symbol: `s · PointX(p)` keeps the codomain marker
-    // (ROADMAP CE-229). The compiled value is not specified
-    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
-    // "Everything computed from an absent value, except at a discharge"; R4
-    // of `docs/plans/2026-11-01-absent-value-contract.md`).
+  test('the coordinate read of a point that is not found is NaN', () => {
+    // `At(L, 5)` over a list of points is the point `(NaN, NaN, NaN)`, so
+    // `s · PointX(p)` is `NaN`. The compiled value is not specified
+    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
     const ce = setup();
     const e = ce.box(['W', ['At', 'L', 5], 2]);
     const v = e.evaluate();
-    expect(v.json).toEqual(['Tuple', 'Missing', 'Missing', 'Missing']);
+    expect(v.json).toEqual(['Tuple', 'NaN', 'NaN', 'NaN']);
     expect(v.type.matches(e.type)).toBe(true);
   });
 });

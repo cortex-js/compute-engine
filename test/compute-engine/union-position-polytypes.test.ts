@@ -19,7 +19,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 //     construction and is rejected at declaration);
 //   - when a GROUND arm accepts the actual, the value took that branch and the
 //     operand says nothing about the variable: it contributes `never`, the
-//     neutral element of the bound join (so `opt(Missing)` is an `opt<never>`,
+//     neutral element of the bound join (so `opt("abc")` is an `opt<never>`,
 //     the bottom of the family);
 //   - otherwise the value took the open arm, and that arm's refutation is the
 //     union's (`list<T> | string` really does refute a `set<integer>`).
@@ -69,10 +69,13 @@ function countAssertFailures(f: () => void): number {
   return n;
 }
 
-/** `type opt<T> = T | missing` — the flagship union body. */
+/** `type opt<T> = T | string` — the flagship union body. The ground arm was
+ * `missing` until a declared type could no longer name `missing`
+ * (`docs/ERROR-MODEL.md`, "`Missing` is a result only"); any ground arm
+ * shows the same rule. */
 function optEngine(): ComputeEngine {
   const ce = new ComputeEngine();
-  ce.declareType('opt', 'T | missing', { typeParams: ['T'] });
+  ce.declareType('opt', 'T | string', { typeParams: ['T'] });
   return ce;
 }
 
@@ -81,10 +84,10 @@ function signatureOf(ce: ComputeEngine, name: string): string {
   return def?.operator?.signature?.toString() ?? 'NONE';
 }
 
-describe('RULE U — `type opt<T> = T | missing`', () => {
+describe('RULE U — `type opt<T> = T | string`', () => {
   test('the minted constructor is quantified over the union body', () => {
     expect(signatureOf(optEngine(), 'opt')).toBe(
-      '(T | missing) -> opt<T> where T'
+      '(T | string) -> opt<T> where T'
     );
   });
 
@@ -95,11 +98,11 @@ describe('RULE U — `type opt<T> = T | missing`', () => {
     expect(t.type.toString()).toBe('opt<integer>');
   });
 
-  test('the MISSING value takes the ground arm and solves T = never', () => {
+  test('a STRING value takes the ground arm and solves T = never', () => {
     // The ruled bottom-of-the-family answer: nothing about `T` was observed,
     // and `never` is the neutral element of the bound join.
     const ce = optEngine();
-    expect(ce.box(['opt', 'Missing']).type.toString()).toBe('opt<never>');
+    expect(ce.box(['opt', { str: 'abc' }]).type.toString()).toBe('opt<never>');
   });
 
   test('the subtype triple under the verified-out default', () => {
@@ -111,10 +114,10 @@ describe('RULE U — `type opt<T> = T | missing`', () => {
   });
 
   test('a UNION actual distributes and joins with the ground arm´s `never`', () => {
-    // `integer` matches the open arm (T ≥ integer); `missing` matches the
+    // `integer` matches the open arm (T ≥ integer); `string` matches the
     // ground arm (T ≥ never). `never` is neutral, so the join is `integer`.
     const ce = optEngine();
-    ce.declare('m', 'integer | missing');
+    ce.declare('m', 'integer | string');
     expect(ce.box(['opt', 'm']).type.toString()).toBe('opt<integer>');
   });
 
@@ -154,13 +157,13 @@ describe('RULE U — refutation propagates out of the open arm', () => {
 });
 
 describe('RULE U — a declared BOUND still binds through the arm', () => {
-  test('a `string` operand of `(T | missing) -> … where T: number` fails', () => {
+  test('a `string` operand of `(T | boolean) -> … where T: number` fails', () => {
     const ce = new ComputeEngine();
-    ce.declare('f', '(T | missing) -> list<T> where T: number');
+    ce.declare('f', '(T | boolean) -> list<T> where T: number');
     const bad = ce.box(['f', { str: 'abc' }]);
     expect(bad.isValid).toBe(false);
     // The instantiated parameter names the whole union, not just the arm.
-    expect(JSON.stringify(bad.json)).toContain('missing | number');
+    expect(JSON.stringify(bad.json)).toContain('boolean | number');
     // …and an in-bound operand solves normally.
     expect(ce.box(['f', 2]).type.toString()).toBe('list<integer>');
   });
@@ -217,10 +220,10 @@ describe('RULE U — declaration-time validation', () => {
 });
 
 describe('RULE U — variance analysis reaches through the union', () => {
-  test('`((T) -> nothing) | missing` is a variance violation naming the occurrence', () => {
+  test('`((T) -> nothing) | string` is a variance violation naming the occurrence', () => {
     const ce = new ComputeEngine();
     const message = messageOf(() =>
-      ce.declareType('h', '((T) -> nothing) | missing', { typeParams: ['T'] })
+      ce.declareType('h', '((T) -> nothing) | string', { typeParams: ['T'] })
     );
     expect(message).toContain('variance-violation');
     expect(message).toContain('parameter `T` of `h` is covariant');
@@ -229,7 +232,7 @@ describe('RULE U — variance analysis reaches through the union', () => {
 
   test('the same body under an `in` marker verifies', () => {
     const ce = new ComputeEngine();
-    ce.declareType('h', '((T) -> nothing) | missing', {
+    ce.declareType('h', '((T) -> nothing) | string', {
       typeParams: ['in T'],
     });
     expect(ce.type('h<integer>').toString()).toBe('h<integer>');
@@ -248,8 +251,8 @@ describe('RULE U — the consumers', () => {
 
   test('a union polytype round-trips through parse and serialize', () => {
     const ce = optEngine();
-    expect(ce.type('(T | missing) -> opt<T> where T').toString()).toBe(
-      '(T | missing) -> opt<T> where T'
+    expect(ce.type('(T | string) -> opt<T> where T').toString()).toBe(
+      '(T | string) -> opt<T> where T'
     );
     expect(ce.type('(list<T | string>) -> T where T').toString()).toBe(
       '(list<T | string>) -> T where T'
@@ -260,7 +263,7 @@ describe('RULE U — the consumers', () => {
     const ce = optEngine();
     expect(
       typeToString(resolveTypeForCompilation(ce.type('opt<integer>').type))
-    ).toBe('integer | missing');
+    ).toBe('integer | string');
   });
 
   test('the tag still erases at the value level', () => {
@@ -295,7 +298,7 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
         clause(ce, 'k', [
           'Function',
           { str: 'b' },
-          { str: '(x: T | missing) -> string where T' },
+          { str: '(x: T | boolean) -> string where T' },
         ])
       )
     ).toContain('generic-clause-unsupported');
@@ -304,7 +307,7 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
     clause(ce2, 'g', [
       'Function',
       { str: 'a' },
-      { str: '(x: T | missing) -> string where T' },
+      { str: '(x: T | boolean) -> string where T' },
     ]);
     expect(
       JSON.stringify(
@@ -344,7 +347,7 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
     // both must reach `provablyDisjoint` GROUND, and both must reach the same
     // verdict on the same operand.
     const ce = new ComputeEngine();
-    ce.declare('f', '(T | missing) -> list<T> where T: number');
+    ce.declare('f', '(T | boolean) -> list<T> where T: number');
     ce.declare('g', '(T) -> list<T> where T: number');
     ce.declare('s', 'string');
     // Both probes run UNDER the spy, and both must now count ZERO:
@@ -367,7 +370,7 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
     // as its declared BOUND, so `T: number` becomes `number`, and a `string`
     // operand refutes every instantiation the signature admits — a definite
     // error, not a provisional one. The union spelling must answer the same
-    // way as the bare variable: `T | missing` grounds to `number | missing`,
+    // way as the bare variable: `T | boolean` grounds to `boolean | number`,
     // which a string refutes just as squarely.
     expect(unionValid).toBe(bareValid);
     expect(unionValid).toBe(false);

@@ -84,8 +84,10 @@ describe('Mean', () => {
     expect(evaluated(ce, ['Mean', ['List', 1, 'NaN', 3]])).toBe('NaN');
   });
 
-  test('absent data and empty input are NaN (§3.C)', () => {
-    expect(evaluated(ce, ['Mean', ['List', 1, 'Missing', 3]])).toBe('NaN');
+  test('absent data is Missing, and empty input is NaN (§3.C)', () => {
+    expect(evaluated(ce, ['Mean', ['List', 1, 'Missing', 3]])).toBe(
+      '"Missing"'
+    );
     expect(evaluated(ce, ['Mean', ['List']])).toBe('NaN');
     expect(evaluated(ce, ['Mean', 'NaN'])).toBe('NaN');
   });
@@ -137,7 +139,9 @@ describe('Median', () => {
         ['List', 'PositiveInfinity', 'PositiveInfinity'],
       ])
     ).toBe('+oo');
-    expect(evaluated(ce, ['Median', ['List', 1, 'Missing', 3]])).toBe('NaN');
+    expect(evaluated(ce, ['Median', ['List', 1, 'Missing', 3]])).toBe(
+      '"Missing"'
+    );
     expect(evaluated(ce, ['Median', ['List']])).toBe('NaN');
   });
 
@@ -248,7 +252,7 @@ describe('the variance family', () => {
     const ce = new ComputeEngine();
     for (const h of HEADS) {
       expect(`${h}: ${evaluated(ce, [h, ['List', 1, 'Missing', 3]])}`).toBe(
-        `${h}: NaN`
+        `${h}: "Missing"`
       );
       expect(`${h}: ${evaluated(ce, [h, ['List']])}`).toBe(`${h}: NaN`);
       expect(evaluated(ce, [h, ['List', 1, { str: 'a' }, 3]])).toMatch(
@@ -454,7 +458,7 @@ describe('Kurtosis and Skewness', () => {
   test('absent data, empty input and a non-numeric datum', () => {
     for (const h of ['Kurtosis', 'Skewness']) {
       expect(`${h}: ${evaluated(ce, [h, ['List', 1, 'Missing', 3]])}`).toBe(
-        `${h}: NaN`
+        `${h}: "Missing"`
       );
       expect(`${h}: ${evaluated(ce, [h, ['List']])}`).toBe(`${h}: NaN`);
       expect(evaluated(ce, [h, ['List', 1, { str: 'a' }, 3]])).toMatch(
@@ -482,7 +486,9 @@ describe('Mode', () => {
     expect(
       evaluated(ce, ['Mode', ['List', 'PositiveInfinity', 'PositiveInfinity']])
     ).toBe('+oo');
-    expect(evaluated(ce, ['Mode', ['List', 1, 'Missing', 3]])).toBe('NaN');
+    expect(evaluated(ce, ['Mode', ['List', 1, 'Missing', 3]])).toBe(
+      '"Missing"'
+    );
     expect(evaluated(ce, ['Mode', ['List']])).toBe('NaN');
   });
 
@@ -516,7 +522,7 @@ describe('Quartiles', () => {
       evaluated(ce, ['Quartiles', ['List', 1, 'PositiveInfinity', 3]])
     ).toBe('(1, 3, +oo)');
     expect(evaluated(ce, ['Quartiles', ['List', 1, 'Missing', 3]])).toBe(
-      '(NaN, NaN, NaN)'
+      '"Missing"'
     );
     expect(evaluated(ce, ['Quartiles', ['List']])).toBe('(NaN, NaN, NaN)');
   });
@@ -583,7 +589,7 @@ describe('InterquartileRange', () => {
   test('absent data, empty input and a non-numeric datum', () => {
     expect(
       evaluated(ce, ['InterquartileRange', ['List', 1, 'Missing', 3]])
-    ).toBe('NaN');
+    ).toBe('"Missing"');
     expect(evaluated(ce, ['InterquartileRange', ['List']])).toBe('NaN');
     expect(
       evaluated(ce, ['InterquartileRange', ['List', 1, { str: 'a' }, 3]])
@@ -624,12 +630,14 @@ describe('a refused datum outranks an absent one', () => {
     );
   });
 
-  test('an absent datum with no refused datum is still NaN', () => {
+  test('an absent datum with no refused datum is still absent', () => {
     // The ranking only fires when both are present: absence keeps its own
     // answer otherwise.
-    expect(evaluated(ce, ['Mean', ['List', 'Missing', 3]])).toBe('NaN');
+    expect(evaluated(ce, ['Mean', ['List', 'Missing', 3]])).toBe('"Missing"');
     expect(evaluated(ce, ['Median', ['List', 'NaN', 3]])).toBe('NaN');
-    expect(evaluated(ce, ['Variance', ['List', 'Missing', 3]])).toBe('NaN');
+    expect(evaluated(ce, ['Variance', ['List', 'Missing', 3]])).toBe(
+      '"Missing"'
+    );
   });
 });
 
@@ -673,9 +681,10 @@ describe('the bivariate statistics', () => {
     }
   });
 
-  test('an ABSENT datum is NaN, the same as a NaN datum (§3.C)', () => {
+  test('an ABSENT datum is Missing, and a NaN datum is NaN (§3.C)', () => {
     // `Missing` used to be refused as MIS-SHAPED data while the identical
-    // input spelled with a `NaN` answered `NaN`.
+    // input spelled with a `NaN` answered `NaN`. An operator over `Missing`
+    // gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
     const ce = new ComputeEngine();
     for (const h of HEADS) {
       expect(
@@ -684,7 +693,7 @@ describe('the bivariate statistics', () => {
           ['List', 1, 2, 3],
           ['List', 1, 'Missing', 3],
         ])}`
-      ).toBe(`${h}: NaN`);
+      ).toBe(`${h}: "Missing"`);
       expect(
         `${h}: ${evaluated(ce, [h, ['List', 1, 2, 3], ['List', 1, 'NaN', 3]])}`
       ).toBe(`${h}: NaN`);

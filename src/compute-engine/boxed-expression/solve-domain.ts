@@ -2,6 +2,7 @@ import type { Type } from '../../common/type/types.js';
 import {
   collectionElementType,
   isBooleanOrBroadcastableBooleanType,
+  stripMissingFromType,
 } from '../../common/type/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -1336,8 +1337,18 @@ export function solveOverDomain(
   // The element type of the domain refines the scratch unknown's type (an
   // integer `Range` → `integer`), so `filterRootsByType` discards non-integer
   // roots before any membership test.
+  // The `missing` arm of the element type (a domain `[1, -1, Missing]` is
+  // `list<integer | missing>`) is removed: `Missing` is not a value of the
+  // unknown, and a declared type may not name `missing`
+  // (`declaredTypeNamesMissing()`), so the scratch declaration threw. A
+  // domain whose elements are all absent gives `never`, read as `number`.
   const elemType = collectionElementType(domain.type.type);
-  const refinedType: Type = elemType ?? 'number';
+  const presentType =
+    elemType === undefined ? undefined : stripMissingFromType(elemType);
+  const refinedType: Type =
+    presentType === undefined || presentType === 'never'
+      ? 'number'
+      : presentType;
 
   // The evaluation of a predicate with a float compares numbers within the
   // tolerance of the engine: `2 = 2.0000000000001` is `True`. Over a

@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compile';
 import {
   stripMissingFromType,
   typeContainsMissing,
@@ -18,18 +17,20 @@ import { typeToString } from '../../src/common/type/serialize';
  * - a restricted NUMERIC value still binds to a numeric declaration: since
  *   2026-09-25 it masks to `NaN` and types `integer | nan`, and `nan` is a
  *   number;
- * - the bare marker needs a declaration that admits absence
- *   (`tuple<number, number> | missing`), and the declared type stays exactly
- *   as written;
+ * - since `Missing` is a result only (`docs/ERROR-MODEL.md`, user decision
+ *   of 2026-11-02), a declared type cannot name `missing`, and a store into
+ *   a declared name accepts a value that holds the marker where the declared
+ *   type accepts a present value (`s: number` takes `Missing`,
+ *   `L: list<number>` takes `[1, Missing]`); the declared type stays
+ *   exactly as written;
  * - a restricted value `If(c, e)` has the static type of `e`, with no `nan`
  *   and no `missing` arm, so a restricted tuple binds to a declared
  *   `tuple<number, number>` (the restriction-binding decision of 2026-11-02,
  *   `docs/plans/2026-11-02-restriction-binding.md`);
- * - a declared element contract judges an absent cell (decision P1b);
  * - subtyping is unchanged (`missing <: number` is still false), and a symbol
  *   with NO declaration still infers the `T | missing` arm.
  *
- * The alias and `Dot`/`Norm` sections at the end pin the type helpers
+ * The alias section at the end pins the type helpers
  * (`typeContainsMissing`, `stripMissingFromType`), which other sites use.
  */
 
@@ -56,19 +57,17 @@ describe('the type a restriction carries', () => {
 });
 
 describe('ce.assign() of a gated value into a declared type', () => {
-  test('a gated tuple binds to a declared tuple, and to one that admits absence', () => {
+  test('a gated tuple binds to a declared tuple', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'tuple<number, number>');
     expect(() => ce.assign('P', gatedTuple(ce))).not.toThrow();
-    ce.declare('PM', 'tuple<number, number> | missing');
-    expect(() => ce.assign('PM', gatedTuple(ce))).not.toThrow();
   });
 
   test('the declared type stays exactly as written', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'tuple<number, number> | missing');
+    ce.declare('P', 'tuple<number, number>');
     ce.assign('P', gatedTuple(ce));
-    expect(ce.box('P').type.toString()).toBe('missing | tuple<number, number>');
+    expect(ce.box('P').type.toString()).toBe('tuple<number, number>');
   });
 
   test('a gated scalar binds to `number`', () => {
@@ -82,7 +81,7 @@ describe('ce.assign() of a gated value into a declared type', () => {
 describe('the bound gate still decides at evaluation', () => {
   test('a satisfied gate answers the tuple', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'tuple<number, number> | missing');
+    ce.declare('P', 'tuple<number, number>');
     ce.assign('P', gatedTuple(ce));
     ce.assign('a', 1);
     expect(ce.box('P').evaluate().toString()).toBe('(1, 2)');
@@ -91,10 +90,12 @@ describe('the bound gate still decides at evaluation', () => {
 
   test('a failed gate answers the marker', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'tuple<number, number> | missing');
+    ce.declare('P', 'tuple<number, number>');
     ce.assign('P', gatedTuple(ce));
     ce.assign('a', -1);
-    expect(ce.box('P').evaluate().symbol).toBe('Missing');
+    // A false restriction of a point is the point of `NaN` coordinates
+    // (user decision 2026-11-03), which `IsMissing` reads as absent.
+    expect(ce.box('P').evaluate().toString()).toBe('(NaN, NaN)');
     expect(ce.box(['IsMissing', 'P']).evaluate().symbol).toBe('True');
   });
 
@@ -110,23 +111,25 @@ describe('the bound gate still decides at evaluation', () => {
   });
 });
 
-describe('the marker itself needs a declaration that admits absence', () => {
-  test('`Missing` does not bind to a declared `number`', () => {
+describe('the marker itself binds to a declaration of a present value', () => {
+  test('`Missing` binds to a declared `number`', () => {
     const ce = new ComputeEngine();
     ce.declare('m', 'number');
-    expect(() => ce.assign('m', ce.symbol('Missing'))).toThrow(
-      /not compatible with the type "number"/
-    );
-    ce.declare('mm', 'number | missing');
-    expect(() => ce.assign('mm', ce.symbol('Missing'))).not.toThrow();
-    expect(ce.box('mm').evaluate().symbol).toBe('Missing');
+    expect(() => ce.assign('m', ce.symbol('Missing'))).not.toThrow();
+    expect(ce.box('m').evaluate().symbol).toBe('Missing');
+    expect(ce.box('m').type.toString()).toBe('number');
   });
 
-  test('`Missing` does not bind to a declared tuple type', () => {
+  test('`Missing` binds to a declared tuple type', () => {
     const ce = new ComputeEngine();
     ce.declare('T', 'tuple<number, number>');
-    expect(() => ce.assign('T', ce.symbol('Missing'))).toThrow(
-      /not compatible with the type "tuple<number, number>"/
+    expect(() => ce.assign('T', ce.symbol('Missing'))).not.toThrow();
+  });
+
+  test('a declared type cannot name `missing`', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.declare('mm', 'number | missing')).toThrow(
+      /cannot be declared/
     );
   });
 
@@ -149,11 +152,7 @@ describe('the other declared-type routes agree', () => {
     expect(() =>
       ce.declare('R', { type: 'tuple<number, number>', value: gatedTuple(ce) })
     ).not.toThrow();
-    ce.declare('RM', {
-      type: 'tuple<number, number> | missing',
-      value: gatedTuple(ce),
-    });
-    expect(ce.box('RM').type.toString()).toBe('missing | tuple<number, number>');
+    expect(ce.box('R').type.toString()).toBe('tuple<number, number>');
   });
 
   test('the `Assign` operator', () => {
@@ -161,10 +160,6 @@ describe('the other declared-type routes agree', () => {
     ce.declare('Q', 'tuple<number, number>');
     expect(
       ce.box(['Assign', 'Q', gatedTuple(ce)]).evaluate().operator
-    ).not.toBe('Error');
-    ce.declare('QM', 'tuple<number, number> | missing');
-    expect(
-      ce.box(['Assign', 'QM', gatedTuple(ce)]).evaluate().operator
     ).not.toBe('Error');
   });
 
@@ -213,17 +208,14 @@ describe('a genuinely incompatible value is still refused', () => {
   });
 });
 
-describe('a declared element contract judges an absent cell (P1b)', () => {
-  test('a list with an absent element does not bind to `list<number>`', () => {
+describe('a declared element contract and an absent cell', () => {
+  test('a list with an absent element binds to `list<number>`', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number>');
     expect(() =>
       ce.assign('L', ce.box(['List', 1, ce.symbol('Missing')]))
-    ).toThrow(/not compatible with the type "list<number>"/);
-    ce.declare('LM', 'list<number | missing>');
-    expect(() =>
-      ce.assign('LM', ce.box(['List', 1, ce.symbol('Missing')]))
     ).not.toThrow();
+    expect(ce.box('L').type.toString()).toBe('list<number>');
   });
 
   test('a record with a gated numeric field binds to a record type', () => {
@@ -275,13 +267,11 @@ describe('a declared element contract judges an absent cell (P1b)', () => {
   });
 });
 
-describe('a declaration with a CALLABLE arm refuses the bare marker', () => {
-  test('`Missing` does not bind to `number | (number) -> number`', () => {
+describe('a declaration with a CALLABLE arm and the bare marker', () => {
+  test('`Missing` binds to `number | (number) -> number` through its number arm', () => {
     const ce = new ComputeEngine();
     ce.declare('h', 'number | (number) -> number');
-    expect(() => ce.assign('h', ce.symbol('Missing'))).toThrow(
-      /not compatible with the type/
-    );
+    expect(() => ce.assign('h', ce.symbol('Missing'))).not.toThrow();
   });
 
   test('a gated SCALAR binds through the non-callable arm', () => {
@@ -309,36 +299,6 @@ describe('subtyping itself is unchanged', () => {
   });
 });
 
-describe('the compiler sees no new shape', () => {
-  // A declared symbol bound to a gated value must compile exactly as the same
-  // expression compiles when the symbol is declared with the `| missing` arm
-  // spelled out. Both arms are measured, so a divergence fails here rather
-  // than in a compile target.
-  function compiledScalar(declared: string): string | null {
-    const ce = new ComputeEngine();
-    ce.declare('P', declared as any);
-    ce.assign('P', ce.parse('3\\left\\{a>0\\right\\}'));
-    return compile(ce.box(['Add', 'P', 1]))?.code ?? null;
-  }
-
-  function compiledTuple(declared: string): string | null {
-    const ce = new ComputeEngine();
-    ce.declare('P', declared as any);
-    ce.assign('P', ce.parse('(1,2)\\left\\{a>0\\right\\}'));
-    return compile(ce.box(['At', 'P', 1]))?.code ?? null;
-  }
-
-  test('a declared scalar compiles as its `| missing` spelling does', () => {
-    expect(compiledScalar('number')).toBe(compiledScalar('number | missing'));
-  });
-
-  test('a declared tuple that admits absence compiles the gated read', () => {
-    expect(compiledTuple('tuple<number, number> | missing')).toBe(
-      compiledTuple('missing | tuple<number, number>')
-    );
-  });
-});
-
 describe('a `Typed` parameter is governed by its own missing policy', () => {
   // A parameter slot is NOT the assignment contract: the per-parameter
   // `missingBehavior` policy already decides what a gated argument does
@@ -363,44 +323,31 @@ describe('a `Typed` parameter is governed by its own missing policy', () => {
     ).toBe('4');
   });
 
-  test('the marker propagates through a numeric parameter as `NaN`', () => {
+  test('an absent argument at a numeric parameter gives `Missing`', () => {
+    // The call gives `Missing` without running the body (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only").
     const ce = new ComputeEngine();
     ce.assign(
       'f',
       ce.box(['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'number' }]])
     );
-    expect(ce.box(['f', ce.symbol('Missing')]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['f', ce.symbol('Missing')]).evaluate().symbol).toBe(
+      'Missing'
+    );
   });
 });
 
 describe('the absence helpers read through a structural alias', () => {
   // A structural alias (`declareType(…, { alias: true })`) IS its definition,
-  // so `typeContainsMissing` and `stripMissingFromType` must read through a
-  // reference to it, at the top and at a nested position. Before this, both
-  // stopped at the reference node: `list<mpt>` kept its `missing` arm after
-  // the strip, and the type handler of `Dot` and `Norm` then saw the arm and
-  // answered the wide `value`.
+  // so `typeContainsMissing` and `stripMissingFromType` read through a
+  // reference to it. A declared type cannot name `missing`, so an alias has
+  // no `missing` arm: the helpers keep it as it is.
   function engine() {
     const ce = new ComputeEngine();
-    ce.declareType('mpt', 'missing | tuple<number, number>', { alias: true });
-    ce.declareType('npt', 'missing | tuple<number, number>');
+    ce.declareType('npt', 'tuple<number, number>');
     ce.declareType('pt', 'tuple<number, number>', { alias: true });
     return ce;
   }
-
-  test('the helpers see the `missing` arm of an alias', () => {
-    const ce = engine();
-    const top = ce.type('mpt').type;
-    const nested = ce.type('list<mpt>').type;
-    expect(typeContainsMissing(top)).toBe(true);
-    expect(typeContainsMissing(nested)).toBe(true);
-    expect(typeToString(stripMissingFromType(top))).toBe(
-      'tuple<number, number>'
-    );
-    expect(typeToString(stripMissingFromType(nested))).toBe(
-      'list<tuple<number, number>>'
-    );
-  });
 
   test('an alias without a `missing` arm keeps its name', () => {
     const ce = engine();
@@ -409,7 +356,7 @@ describe('the absence helpers read through a structural alias', () => {
     expect(typeToString(stripMissingFromType(t))).toBe('list<pt>');
   });
 
-  test('a nominal type is opaque to the strip', () => {
+  test('a nominal type keeps its name', () => {
     const ce = engine();
     const t = ce.type('list<npt>').type;
     expect(typeContainsMissing(t)).toBe(false);
@@ -418,54 +365,10 @@ describe('the absence helpers read through a structural alias', () => {
 
   test('a self-referential alias stops at its repeat', () => {
     const ce = new ComputeEngine();
-    ce.declareType('nest', 'list<nest> | missing', { alias: true });
     ce.declareType('json', 'list<json> | integer', { alias: true });
-    const nest = ce.type('nest').type;
     const json = ce.type('json').type;
-    expect(typeContainsMissing(nest)).toBe(true);
     expect(typeContainsMissing(json)).toBe(false);
-    // The descent unfolds `nest` a bounded number of times, so the strip
-    // ends. The top-level `missing` arm is gone; the arm of the innermost
-    // `nest` that the descent did not unfold stays.
-    const stripped = stripMissingFromType(nest);
-    expect(typeof stripped === 'object' && stripped.kind).toBe('list');
     expect(stripMissingFromType(json)).toBe(json);
-  });
-
-  test('`Dot` and `Norm` type an alias operand as the definition', () => {
-    const ce = engine();
-    ce.declare('m', 'missing | tuple<number, number>');
-    ce.declare('n', 'mpt');
-    ce.declare('K', 'list<missing | tuple<number, number>>');
-    ce.declare('L', 'list<mpt>');
-    for (const [direct, alias] of [
-      ['m', 'n'],
-      ['K', 'L'],
-    ]) {
-      const dotDirect = ce.expr(['Dot', ['Tuple', 1, 2], direct]);
-      const dotAlias = ce.expr(['Dot', ['Tuple', 1, 2], alias]);
-      expect(dotAlias.isValid).toBe(true);
-      expect(dotAlias.type.toString()).toBe(dotDirect.type.toString());
-      const normDirect = ce.expr(['Norm', direct]);
-      const normAlias = ce.expr(['Norm', alias]);
-      expect(normAlias.isValid).toBe(true);
-      expect(normAlias.type.toString()).toBe(normDirect.type.toString());
-    }
-    expect(ce.expr(['Dot', ['Tuple', 1, 2], 'n']).type.toString()).toBe(
-      'number'
-    );
-    expect(ce.expr(['Norm', 'n']).type.toString()).toBe('+oo | nan | real');
-  });
-
-  test('`Dot` of a list of points with a list of an alias is valid', () => {
-    const ce = engine();
-    ce.declare('K', 'list<missing | tuple<number, number>>');
-    ce.declare('L', 'list<mpt>');
-    const direct = ce.expr(['Dot', ['List', ['Tuple', 1, 2]], 'K']);
-    const alias = ce.expr(['Dot', ['List', ['Tuple', 1, 2]], 'L']);
-    expect(alias.isValid).toBe(true);
-    expect(alias.type.toString()).toBe(direct.type.toString());
-    expect(alias.type.toString()).toBe('list<number>');
   });
 
   test('a nominal operand of `Dot` is still refused', () => {

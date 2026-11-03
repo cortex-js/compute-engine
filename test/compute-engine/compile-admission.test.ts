@@ -2990,26 +2990,6 @@ describe('The simple rule for assignments (R3)', () => {
   // A condition of type `boolean | missing` can be undecided and select no
   // branch. The rule does not depend on which branch runs: `p` gets a
   // number and a list.
-  test('a condition that can select no branch, with another shape, declines', () => {
-    const ce = engine();
-    ce.declare('A', 'list<integer | missing>');
-    ce.declare('B', 'list<integer | missing>');
-    declinesWithShape(
-      [
-        'Block',
-        ['Assign', 'p', 0],
-        [
-          'If',
-          ['Equal', 'A', 'B'],
-          ['Assign', 'p', ['List', 1, 2]],
-          ['Assign', 'p', ['List', 3, 4]],
-        ],
-        'p',
-      ],
-      ce
-    );
-  });
-
   // The stored function `g` writes `p` with a number, and the code assigns
   // `p` a list after the definition: `p` gets both shapes in one scope.
   test('a stored function that writes an outer name, with a later reassignment, declines', () => {
@@ -3228,10 +3208,14 @@ describe('The admission checks of the review of the simple rule (R3)', () => {
 
   // A condition of type `boolean | missing` cannot select element by
   // element: its branches are compared.
-  test('a condition that can be missing compares the branches', () => {
+  // A condition declared to admit an absent value is refused at its
+  // declaration: a declared type cannot name `missing`
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+  test('a condition cannot be declared to be missing', () => {
     const ce = engine();
-    ce.declare('c', 'boolean | missing');
-    declines(['If', 'c', ['List', 1, 2], 3], ce);
+    expect(() => ce.declare('c', 'boolean | missing')).toThrow(
+      /cannot be declared/
+    );
   });
 });
 

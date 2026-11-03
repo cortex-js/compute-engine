@@ -2,6 +2,7 @@
 // checks, captured bindings, and tryCompileUserFunction.
 
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
+import { ABSENT_READS } from '../boxed-expression/conditional-value.js';
 import type {
   BoxedDefinition,
   Expression,
@@ -25,6 +26,8 @@ import {
   isTuple,
   isTupleShapedType,
   isPointListArgumentType,
+  nanPoint,
+  pointArity,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -78,7 +81,9 @@ import {
   completedLiteralArguments,
   declineIntervalAbsentDefault,
   literalTakesArgumentCount,
+  targetCoalesce,
   userFunctionDefaults,
+  userFunctionParameterTypes,
 } from './compile-parameter-defaults.js';
 import { isCompileBoundName } from './compiler-names.js';
 import {
@@ -429,6 +434,16 @@ export function assertUserFunctionFreeBindings(
   }
 }
 
+/** The accessors whose value over an absent collection of points is the point
+ * of `NaN` coordinates (`absentCollectionOperandGuard()`). */
+const POINT_MARKER_ACCESSORS: ReadonlySet<string> = new Set([
+  'At',
+  'First',
+  'Second',
+  'Third',
+  'Last',
+]);
+
 /**
  * The lowering of `h(args)` when a collection operand can be ABSENT AS A
  * WHOLE, or `undefined` when the rule does not apply and the ordinary
@@ -455,7 +470,9 @@ export function assertUserFunctionFreeBindings(
  * that can be absent is compiled once and bound to a temporary. When a
  * temporary holds the absent value, the result is the marker: the numeric
  * marker (`NaN`) when the application's type, without its `missing` arm, is
- * a number, and the absent object (`undefined`) otherwise. When every
+ * a number, the point of `NaN` coordinates when it is a point and the head
+ * is a position-preserving accessor (`POINT_MARKER_ACCESSORS`), and the
+ * absent object (`undefined`) otherwise. When every
  * temporary holds a collection, the result is the ordinary lowering of the
  * head, compiled with each of these operands replaced by a symbol that
  * carries the PRESENT type and reads the temporary. The present type has no
@@ -583,10 +600,23 @@ export function absentCollectionOperandGuard(
   // interpreter (the evaluate handler answers it), whatever the type: a
   // collection whose elements may be rows sums to a row
   // (`number | vector<2>`), and its absent value still sums to `NaN`.
+  // A position-preserving accessor (`At`, `First`, `Second`, `Third`,
+  // `Last`) over an absent collection of points gives the point of `NaN`
+  // coordinates, the absent value of the domain of a point, as in the
+  // interpreter (`absentOperandMarker()`, `library/collections.ts`): the
+  // restricted list of points `If(c, [(1, 2), (3, 4)])` is absent where `c`
+  // is false, and its `First` is `(NaN, NaN)`. Any other operator over an
+  // absent operand gives the object null.
+  const arity =
+    codomain !== 'never' && POINT_MARKER_ACCESSORS.has(h)
+      ? pointArity(codomain)
+      : undefined;
   const marker =
     reduction || (codomain !== 'never' && isSubtype(codomain, 'number'))
       ? absence.numeric.make()
-      : absence.object.nullLiteral;
+      : arity !== undefined
+        ? core.compile(nanPoint(engine, arity), target)
+        : absence.object.nullLiteral;
 
   const names: string[] = [];
   const bindings: Array<[string, TargetSource]> = [];
@@ -1320,7 +1350,9 @@ export function tryCompileUserFunction(
   // target declines such an argument (`declineIntervalAbsentDefault`).
   // The compiled defaults for the map of a call that broadcasts over a
   // list argument (`emitUserFunctionCall`): each absent cell is filled.
-  let mapDefaults: (() => ReadonlyArray<string | undefined>) | undefined;
+  let mapDefaults:
+    | (() => ReadonlyArray<((x: string) => string) | undefined>)
+    | undefined;
   if (
     target.language === 'javascript' ||
     target.language === 'interval-javascript'
@@ -1336,13 +1368,20 @@ export function tryCompileUserFunction(
     );
     if (target.language === 'javascript') {
       args = absentFilledArguments(defaults, args);
-      if (defaults.some((d) => d !== undefined))
+      // Each fill is `x`, or the default when `x` is absent, with the
+      // target's `Coalesce` for the type of the parameter: a parameter
+      // typed as a point also takes its default for a `NaN` point.
+      const coalesce = targetCoalesce(
+        target,
+        userFunctionParameterTypes(engine, h, literal)
+      );
+      if (coalesce !== undefined && defaults.some((d) => d !== undefined))
         mapDefaults = () =>
-          defaults.map((d) =>
-            d === undefined
-              ? undefined
-              : compileValueOperand(callSiteDefault(d), target)
-          );
+          defaults.map((d, i) => {
+            if (d === undefined) return undefined;
+            const code = compileValueOperand(callSiteDefault(d), target);
+            return (x: string) => coalesce(x, code, i);
+          });
     }
   }
 
@@ -2083,6 +2122,20 @@ export function mayBeAbsentCollectionNode(
   // to `undefined` when its condition is not true, although its type (the
   // type of `L`) has no `missing` arm.
   if (a.operator === 'If' && a.nops === 2) return true;
+  // A read of a collection-valued element (`At(x, i)` of a list of lists)
+  // compiles to `undefined` at a position that does not exist, although its
+  // type (the element type) has no `missing` arm: the absence marker of a
+  // read is implicit in its type. A gather, an `At` with a collection
+  // index (`P[a...b]`), is a list in which each position that does not
+  // exist is an absent element: the gather as a whole is absent only when
+  // its source is. Guarding it would evaluate the whole gather before a
+  // reduction that walks it as a counted loop.
+  if (
+    a.operator === 'At' &&
+    a.ops.slice(1).some((x) => isSubtype(x.type.type, 'collection'))
+  )
+    return operand(a.ops[0]);
+  if (ABSENT_READS.has(a.operator)) return true;
   if (CONTROL_FLOW_HEADS.has(a.operator)) return false;
   const def = lookupApplicable(a.operator, engine.context.lexicalScope);
   if (!isOperatorDef(def)) return false;

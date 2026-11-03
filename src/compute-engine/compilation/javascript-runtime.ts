@@ -1824,7 +1824,7 @@ function complexVariance(
  *
  * That is the interpreter's rule, not an approximation of it. `collectData`
  * (`library/statistics.ts`) walks the operands, and a datum for which
- * `isAbsentValue` holds — the symbols `Missing` and `Undefined`, or a `NaN`
+ * `isAbsentValue` holds — the symbol `Missing`, or a `NaN`
  * number — makes the whole head answer `NaN`, or the triple `(NaN, NaN, NaN)`
  * for `Quartiles`. The reducers in `numerics/statistics.ts` are shared with
  * the interpreter and never see an absent cell, so the compiled lane has to
@@ -5711,6 +5711,70 @@ export const SYS_HELPERS = {
     const idx = iv > 0 ? iv - 1 : n + iv;
     if (i === 0 || idx < 0 || idx >= n) return NaN;
     return arr[idx] as number;
+  },
+  // The read `At(arr, i)` with a scalar index, for a collection whose static
+  // element type is a point of `n` coordinates (a tuple of `n` numbers). The
+  // compiler picks this helper at compile time from that type, so the code
+  // tests no type at run time. The index rules are the rules of `at`: a
+  // complex index is read through its real part, and a negative index counts
+  // from the end. An index out of range, zero, a fraction, `NaN`, and a base
+  // that is not an array (an absent collection is `undefined`) read a new
+  // point whose `n` coordinates are `NaN`, as in the interpreter: `At([(1,
+  // 2), (3, 4)], 5)` is `(NaN, NaN)` (`domainAbsenceMarker()` in
+  // `library/collections.ts`). An element in range is returned as it is.
+  //
+  // An index that is an array is read by `at` (a gather, or a boolean mask),
+  // and each position of a gather that is out of range is a new point of `n`
+  // `NaN` coordinates, where `at` puts the number `NaN`: the interpreter's
+  // `At([(1, 2)], [1, 9])` is `[(1, 2), (NaN, NaN)]`.
+  atPoint: (arr: unknown, i: unknown, n: number): unknown => {
+    const read = (k: unknown): unknown => {
+      if (Array.isArray(arr)) {
+        const iv = indexValue(k);
+        if (Number.isInteger(iv) && iv !== 0) {
+          const idx = iv > 0 ? iv - 1 : arr.length + iv;
+          if (idx >= 0 && idx < arr.length) return arr[idx];
+        }
+      }
+      return new Array<number>(n).fill(NaN);
+    };
+    if (!Array.isArray(i)) return read(i);
+    const picked = SYS_HELPERS.at(arr, i);
+    if (!Array.isArray(picked) || i.every((m) => typeof m === 'boolean'))
+      return picked;
+    return i.map((k) => read(k));
+  },
+  // The form of `atPoint` with the index rules of `atNoWrap`: only an
+  // integer in `1..length` reads an element, and every other index (zero,
+  // negative, fractional, past the end, not a number) reads a new point of
+  // `n` `NaN` coordinates. A complex index is read through its real part. A
+  // base that is not an array reads a point of `NaN` coordinates at each
+  // position. It is for a host that replaces the `At` lowering (see
+  // `atNoWrap`) and knows from the static type of the base that its elements
+  // are points of `n` coordinates; `atNoWrap` has no type and reads
+  // `undefined` there.
+  //
+  // The index can be a number or an array, so one call serves a host whose
+  // index is a gather at some sites. An array index is a gather, as in
+  // `atNoWrap`: the answer has one entry per position, and each position out
+  // of range is a new point of `n` `NaN` coordinates, as in the interpreter:
+  // `At([(1, 2)], [1, 9])` is `[(1, 2), (NaN, NaN)]`. A non-empty array of
+  // booleans is a mask, read by `atMask`: the elements at the positions
+  // where the mask is `true`, as the interpreter reads `At([(1, 2), (3, 4)],
+  // [True, False])` as `[(1, 2)]`. `atNoWrap` reads no mask.
+  atPointNoWrap: (arr: unknown, i: unknown, n: number): unknown => {
+    const read = (k: unknown): unknown => {
+      if (Array.isArray(arr)) {
+        const kv = indexValue(k);
+        if (Number.isInteger(kv) && kv >= 1 && kv <= arr.length)
+          return arr[kv - 1];
+      }
+      return new Array<number>(n).fill(NaN);
+    };
+    if (!Array.isArray(i)) return read(i);
+    if (i.length > 0 && i.every((m) => typeof m === 'boolean'))
+      return SYS_HELPERS.atMask(arr, i);
+    return i.map((k) => read(k));
   },
   // `ReplaceAt`, `DeleteAt` and `Insert` return a COPY of the array, as the
   // interpreter returns a new list and leaves its operand unchanged. The

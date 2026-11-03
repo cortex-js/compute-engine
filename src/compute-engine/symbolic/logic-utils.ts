@@ -11,9 +11,9 @@ import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
  */
 
 /**
- * Is this the name of an absent truth value? The two symbols that name an
- * absent datum are `Missing` and `Undefined`. The same two names are tested
- * by `isAbsentScalarSymbol`
+ * Is this the name of an absent truth value? The symbol that names an
+ * absent datum is `Missing`. The same name is tested by
+ * `isAbsentScalarSymbol`
  * (`src/compute-engine/boxed-expression/validate.ts`), which this module
  * does not otherwise depend on.
  *
@@ -21,11 +21,11 @@ import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
  * holds one (`sym(arg)`).
  */
 function isAbsenceName(name: string | undefined): boolean {
-  return name === 'Missing' || name === 'Undefined';
+  return name === 'Missing';
 }
 
 /**
- * Replace each absent operand (`Missing` or `Undefined`) with `False`. The
+ * Replace each absent operand (`Missing`) with `False`. The
  * logic is two-valued: an absent value is not a third truth value, and a
  * connective reads it as `False`, as the condition of an `If` or a `Which`
  * does. So `Not(Missing)` is `True`, `And(Missing, True)` is `False` and

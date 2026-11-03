@@ -112,6 +112,7 @@ import {
   ABSENT_CELLS_STAY_MISSING,
   absentCellsPresentType,
   absorbOperandAbsence,
+  withAbsentCellMarkers,
   movesAbsentCells,
   passesAbsentCellsThrough,
   withPresentCellAbsence,
@@ -203,6 +204,7 @@ import {
   isTopTypedBlockLocal,
   isRecordShapedType,
   broadcastCellTypeOf,
+  pointArity,
 } from '../collection-utils.js';
 import {
   failedWalkErrorSince,
@@ -242,6 +244,7 @@ import {
   isUnorderedSet,
   integerRangeElements,
   kindValueIsNaN,
+  isNaNPointValue,
 } from './type-guards.js';
 import {
   isRestriction,
@@ -503,7 +506,6 @@ import {
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   absentScalarMarker,
-  absentArithmeticMarker,
   absentPredicateAnswer,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
@@ -8402,24 +8404,23 @@ export class BoxedFunction
       //
       // 4a/ Missing-value behavior gate (§3.E of the missing-value typing
       // design). A `propagate` operator with an absent SCALAR operand
-      // (`Missing`, `Undefined`, or a `NaN`) answers the quiet marker of its
-      // own codomain
-      // (`absentScalarMarker`, `validate.ts`): `NaN` in a numeric result cell
-      // (I6 absorption), and the position-preserving `Missing` when the
-      // application is typed anything else — a point, a collection, or a type
-      // that is not provably numeric. The gate applies only when NO operand
+      // (`Missing`) answers `Missing` (`absentScalarMarker`, `validate.ts`):
+      // an operator over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`,
+      // "`Missing` is a result only — user decision of 2026-11-02"). A
+      // boolean predicate and a coordinate accessor give their own marker
+      // there. The gate applies only when NO operand
       // is a collection: a scalar-vs-collection application
       // (`Add(Missing, matrix)`) broadcasts the absence per cell through the
       // operator's own kernel (packing demotion, tensor-view). Under an
       // element-wise broadcast (step 2 above) the gate re-enters per element
-      // (`Sin([1,Missing,3])` → `[Sin(1), NaN, Sin(3)]`). A `reject` operator
+      // (`Sin([1,Missing,3])` → `[Sin(1), Missing, Sin(3)]`). A `reject` operator
       // errors at an absent operand in BOTH strict modes (the behavior gate,
       // not validation).
       //
       if (def instanceof _BoxedOperatorDefinition) {
         const behavior = def.resolvedMissingBehavior;
-        // The gate fires on an absence SYMBOL — `Missing` or `Undefined`
-        // — and only when no operand is collection-shaped: both conditions
+        // The gate fires on an absence SYMBOL — `Missing` — and only
+        // when no operand is collection-shaped: both conditions
         // live in `hasAbsentScalarOperand` (`validate.ts`), which the async
         // twin (step 3a) and the lazy `Add`/`Multiply` handlers share, so
         // the three routes decide the same question the same way.
@@ -8449,19 +8450,15 @@ export class BoxedFunction
           if (behavior === 'reject')
             return this.engine.error([
               'unexpected-argument',
-              // Name the operand that is actually absent: the gate accepts
-              // both `Missing` and `Undefined`, so a fixed `Missing` in the
-              // message would misreport an `Undefined` operand.
               (
                 tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
               ).toString(),
             ]);
-          // An absent value that a symbol holds, in a broadcastable numeric
-          // operator over numbers (`p + 1`, `Sin(p)`, `-p`), is `NaN`
-          // (`absentArithmeticMarker`).
-          return def.broadcastable
-            ? absentArithmeticMarker(this.engine, this, this.ops, tail)
-            : absentScalarMarker(this.engine, this);
+          // An operator over an absent operand gives `Missing` (`p + 1`,
+          // `Sin(p)` and `-p` with `p` absent), except a boolean predicate
+          // and a coordinate accessor, which give their own marker
+          // (`absentScalarMarker`).
+          return absentScalarMarker(this.engine, this);
         }
         // The default for an operator with no absence behavior of its own
         // (`pass-through`): an absent operand at a position whose declared
@@ -8761,7 +8758,7 @@ export class BoxedFunction
       // "Threading rules"). Structurally the same lift as the broadcast steps
       // above; gated on `broadcastable` and reusing the evaluated `tail`, so a
       // scalar call pays only a cheap `isFunction` test. Logic operators are
-      // excluded: Kleene logic is not strict (`And(Undefined, False)` stays
+      // excluded: Kleene logic is not strict (`And(Missing, False)` stays
       // `False`), so lifting a guard out of them would be unsound. `Add`/
       // `Multiply` are NOT excluded (unlike step 4b): threading them before the
       // arithmetic evaluate handler is what stops a fold from silently dropping
@@ -8852,9 +8849,7 @@ export class BoxedFunction
       //
       // 6/ Call the `evaluate` handler
       //
-      // An absent value at a declared numeric parameter of a function
-      // literal is read as `NaN` (`declaredLambdaOperands`).
-      const handlerOperands = declaredLambdaOperands(this.engine, def, tail);
+      const handlerOperands = tail;
       const walksBefore = walksMeasuredBy(def, handlerOperands);
       const failuresBefore = failedWalksMeasuredBy(def);
       // A handler of a host operator that states `pure: true` can still
@@ -9155,8 +9150,8 @@ export class BoxedFunction
         // unevaluated in the held arm (`If(0 < t, AsyncOnly([1, 2]))`). So
         // the lifted call is evaluated here, on the asynchronous route, and
         // the `If` holds its value (`If(0 < t, [6, 7])`). A guard that the
-        // `If` handler decides (`True`, `False`, an error, `Missing`,
-        // `Undefined`) is left to that handler, as on the synchronous route:
+        // `If` handler decides (`True`, `False`, an error, `Missing`)
+        // is left to that handler, as on the synchronous route:
         // it gives the error or the absent value without evaluating the call.
         // Two differences from the synchronous route remain: the held form
         // holds the evaluated call where the synchronous `If` can hold the
@@ -9170,7 +9165,7 @@ export class BoxedFunction
           lifted.nops === 2 &&
           PLANNED_RESTRICTION_CALLS.has(lifted.op2) &&
           errorValue(lifted.op1) === undefined &&
-          !['True', 'False', 'Missing', 'Undefined'].some((s) =>
+          !['True', 'False', 'Missing'].some((s) =>
             isSymbol(lifted.op1, s)
           )
         ) {
@@ -9872,7 +9867,7 @@ export class BoxedFunction
       //
       // 3a/ Missing-value behavior gate (§3.E) — parity with the sync path's
       // step 4a. A `propagate` operator with an absent scalar operand — the
-      // `Missing` or `Undefined` symbol, no collection operand — yields the
+      // `Missing` symbol, no collection operand — yields the
       // quiet marker of its own codomain
       // (`absentScalarMarker`): `NaN` into a numeric application type,
       // `Missing` otherwise. A `reject` operator errors.
@@ -9908,19 +9903,15 @@ export class BoxedFunction
           if (behavior === 'reject')
             return this.engine.error([
               'unexpected-argument',
-              // Name the operand that is actually absent: the gate accepts
-              // both `Missing` and `Undefined`, so a fixed `Missing` in the
-              // message would misreport an `Undefined` operand.
               (
                 tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
               ).toString(),
             ]);
-          // An absent value that a symbol holds, in a broadcastable numeric
-          // operator over numbers (`p + 1`, `Sin(p)`, `-p`), is `NaN`
-          // (`absentArithmeticMarker`).
-          return def.broadcastable
-            ? absentArithmeticMarker(this.engine, this, this.ops, tail)
-            : absentScalarMarker(this.engine, this);
+          // An operator over an absent operand gives `Missing` (`p + 1`,
+          // `Sin(p)` and `-p` with `p` absent), except a boolean predicate
+          // and a coordinate accessor, which give their own marker
+          // (`absentScalarMarker`).
+          return absentScalarMarker(this.engine, this);
         }
         // The default for an operator with no absence behavior of its own
         // (`pass-through`): an absent operand at a position whose declared
@@ -10398,10 +10389,7 @@ export class BoxedFunction
         // long operand yields and honors the abort signal; the handler then
         // evaluates values. Not under `.N()`: a comparison near a tie
         // re-reads the operand as written to decide it exactly.
-        // An absent value at a declared numeric parameter of a function
-        // literal is read as `NaN` (`declaredLambdaOperands`).
-        const declaredOps = declaredLambdaOperands(this.engine, def, tail);
-        let handlerOps: ReadonlyArray<Expression> = declaredOps;
+        let handlerOps: ReadonlyArray<Expression> = tail;
         let operandsEvaluated = false;
         if (
           demandsOperands &&
@@ -10495,7 +10483,7 @@ export class BoxedFunction
                 let answer: ReturnType<typeof def.evaluateAsync>;
                 try {
                   answer = def.evaluateAsync(
-                    kindAnswer !== undefined ? handlerOps : declaredOps,
+                    kindAnswer !== undefined ? handlerOps : tail,
                     opts
                   );
                 } catch (e) {
@@ -10974,6 +10962,11 @@ function tupleBroadcastCells(
   if (hasSurplusOperands(def, tail)) return undefined;
   if (skipBroadcastForVectorOps(def, false, tail)) return undefined;
   if (!tail.some(isTupleBroadcastParticipant)) return undefined;
+  // An absent operand beside a point makes the whole point absent, as for
+  // `Multiply` and `Divide`: `(5, 6)^Missing` is `Missing`, typed `missing`,
+  // not the point `(Missing, Missing)` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only").
+  if (tail.some(isAbsentScalarSymbol)) return expr.engine.Missing;
   // A function applied to each coordinate of a tuple with a LIST coordinate
   // (a data tuple such as `Tuple(A, B)` with `A`, `B` lists, not a point) is
   // an error, as the arithmetic operators are (see
@@ -11734,8 +11727,8 @@ function withEvaluatedRestriction(
  * options: the call itself when every guard is `True`, `Missing` when a
  * guard is `False`, and otherwise `If(g, call)`, where `g` is the evaluated
  * guard. The `If` handler then holds the restriction over the evaluated
- * call, or gives the verdict of a guard that is an error, `Missing` or
- * `Undefined`. The `If` handler gives the caller's options only to a held
+ * call, or gives the verdict of a guard that is an error or `Missing`.
+ * The `If` handler gives the caller's options only to a held
  * call: a selected arm receives only the numeric request, so a guard that is
  * `True` is not sent through it.
  */
@@ -12238,7 +12231,7 @@ export function viewOfExpression(x: Expression): BroadcastOperandView {
 
 /**
  * Broadcastable logic operators excluded from conditional-value threading.
- * Kleene logic is not strict — `And(Undefined, False)` must stay `False` — so
+ * Kleene logic is not strict — `And(Missing, False)` must stay `False` — so
  * lifting a restriction guard out of them would be unsound (design decision 2/9).
  */
 const CONDITIONAL_THREADING_SKIP = new Set([
@@ -12528,6 +12521,10 @@ const BARE_FUNCTION_CALLBACK_SLOTS: Readonly<
  * Each application of `op` to the values is yielded, not evaluated here: the
  * runner of the steps evaluates it (see `threadConditionalOperands`).
  */
+/** The coordinate accessors: readers of an absent point, which give the
+ * marker of the coordinate, `NaN` (`threadConditional`). */
+const COORDINATE_READERS = new Set(['PointX', 'PointY', 'PointZ']);
+
 function* threadConditional(
   ce: ComputeEngine,
   op: string,
@@ -12631,6 +12628,40 @@ function* threadConditional(
     // `NotElement(2, Missing)` gives.
     if (absentPredicateAnswer(op) === true)
       return ce._fn('If', [guard, inner, ce.True]).evaluate(options);
+    // An operator that is not a reader of `Missing` (its absent operand
+    // propagates) over a restricted COLLECTION gives `Missing` once the
+    // condition fails, as the fresh route gives: the restriction is the
+    // absent collection, and an operator over `Missing` is `Missing`
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only", rule 3). A
+    // single-branch `If` over a number or a point result would give `NaN`
+    // or the point of `NaN` coordinates there (`maskedValue()`), so the
+    // lifted form keeps `Missing` as its else branch: `ArgMax([1, 3, 5]{c})`
+    // is `If(c, 3, Missing)`, and `TupleFrom([1, 3, 5]{c})` is
+    // `If(c, (1, 3, 5), Missing)`. A
+    // restricted POINT is not absent where its condition fails: it is the
+    // point of `NaN` coordinates (`pointArity()`), and a number computed
+    // from it is `NaN`, so `Dot((1, 2){c}, (1, 1))` is `If(c, 3)`. A reader
+    // (`First`, `At`, `missingBehavior: 'handle'`, and the coordinate
+    // accessors `PointX`, `PointY`, `PointZ`) keeps the marker of its
+    // domain, `NaN` for a number: `First((1, 2){c})` is `If(c, 1)`.
+    if (
+      propagate &&
+      !COORDINATE_READERS.has(op) &&
+      (isSubtype(stripMissingFromType(inner.type.type), 'number') ||
+        pointArity(inner.type.type) !== undefined) &&
+      tail.some((x, i) => {
+        if (!isThreaded(x, i, 'If')) return false;
+        const value = restrictionParts(x)?.value;
+        return (
+          value !== undefined &&
+          pointArity(value.type.type) === undefined &&
+          (value.isCollection ||
+            isTuple(value) ||
+            value.type.matches('collection<any>'))
+        );
+      })
+    )
+      return ce._fn('If', [guard, inner, ce.Missing]).evaluate(options);
     return ce._fn('If', [guard, inner]).evaluate(options);
   }
 
@@ -14930,19 +14961,17 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       return instantiated ?? functionResult(resolved) ?? 'unknown';
     };
 
-    // Missing-value absorption (§3.B of the missing-value typing design). When
-    // this application resolves to `propagate` and some operand carries a
-    // `missing` arm, the base result is absorbed: every `missing` arm is
-    // stripped and every numeric result cell widens to `number` (an absent
-    // numeric cell contributes `NaN` — Q2/I6). Gated on `typeContainsMissing`,
-    // so a Missing-free program's type is byte-identical.
+    // Missing-value absorption (`absorbOperandAbsence()`). When this
+    // application resolves to `propagate` and some operand carries a
+    // `missing` arm, the result keeps the absence: an operator over
+    // `Missing` gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a
+    // result only"). Gated on `typeContainsMissing`, so a Missing-free
+    // program's type is byte-identical.
     //
-    // An `Undefined` operand is an absence too: the runtime gate reads it as
-    // `Missing` (`isAbsentScalarSymbol`, `validate.ts`), so `Undefined + 1`
-    // is `NaN` and `Undefined · [1, 2, 3]` is `[NaN, NaN, NaN]`. Its declared
-    // type is `unknown`, which a join drops, so without this the result
-    // claimed the type of the present operands (`integer`,
-    // `vector<integer^3>`). For the absorption it is typed `missing`.
+    // A `Missing` operand is an absence: `Missing + 1` is `Missing`, typed
+    // `missing`, and `Missing · [1, 2, 3]` is `[Missing, Missing, Missing]`.
+    // For the absorption it is typed `missing`, so the result does not claim
+    // the type of the present operands (`integer`).
     //
     // An operand absent only in its cells, at an operator that reorders or
     // selects cells without computing from them (`Sort`, `Reverse`), is a
@@ -15110,12 +15139,18 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         // (`withPresentCellAbsence`).
         return hasCellsPresent ? withPresentCellAbsence(t, r) : r;
       };
-      const result = applyContractB(
-        absorbMissing
-          ? absorbed()
-          : threadedAbsence
-            ? withThreadedAbsence(t)
-            : t
+      const result = withAbsentPointCellResults(
+        expr,
+        withMatrixProductNaNCells(
+          expr,
+          applyContractB(
+          absorbMissing
+            ? absorbed()
+            : threadedAbsence
+              ? withThreadedAbsence(t)
+              : t
+          )
+        )
       );
       return result === boxedHandlerResult?.type ? boxedHandlerResult : result;
     };
@@ -15184,10 +15219,6 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       const strippedFor = (i: number) => {
         if (def.resolvedMissingBehavior !== 'propagate')
           return threadedPresent?.[i];
-        // An `Undefined` operand is typed as the bare `missing` marker it
-        // stands for in a numeric slot, so the handler types it exactly as
-        // it types `Missing` (its declared type, `unknown`, made
-        // `Negate(Undefined)` an `unknown` result).
         if (absentTerm(expr.ops[i])) return 'missing';
         const stripped = operandTypes?.[i];
         // A BARE `missing` operand strips to `never`, and a `never`-typed
@@ -15449,10 +15480,33 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         // such an operand gave no arm, while the narrower
         // `y: list<integer> | missing` gave the arm, so a wider operand type
         // gave a narrower result type (issue #487).
+        //
+        // For a comparison or a connective, an operand that may be absent
+        // as a whole without a `missing` arm in its type also gives the
+        // arm: a single-branch `If(c, L)` or a `Which` with an undecided
+        // condition. Its type is the type of its present value
+        // (`list<integer>` for `If(c, L)`), and its absence is implicit.
+        // `Less(If(c, L), 3)` is `False` when `c` is false, so its type is
+        // `boolean | list<boolean>`.
         if (def.resolvedMissingBehavior === 'handle' && !threadedAbsence) {
           let absentWhole = false;
+          const twoValued = TWO_VALUED_OPERATORS.has(expr.operator);
           for (const x of expr.ops) {
-            if (!x.type.facts.containsMissing) continue;
+            if (!x.type.facts.containsMissing) {
+              // Only a restriction or a `Which` itself, not an operand that
+              // holds a read: `PointX(P)` over a list of points maps cell by
+              // cell and is not absent as a whole. And only an operand that
+              // is surely a collection: an absent scalar beside a list gives
+              // a list of `False` cells, not one `False`.
+              if (
+                twoValued &&
+                (isRestriction(x) || isFunction(x, 'Which')) &&
+                (isBroadcastCollectionTypeOf(x.type.type) ||
+                  isFixedShapeCollectionTypeOf(x.type.type))
+              )
+                absentWhole = true;
+              continue;
+            }
             const present = threadedPresentType(x.type.type);
             if (
               present !== undefined &&
@@ -15862,6 +15916,59 @@ const declaredConformanceSignatures = new WeakMap<
 >();
 
 /**
+ * Whether an argument in `ops` is the absent value `Missing` at a parameter
+ * whose type in the signature `declared` is numeric or a point (a tuple of
+ * numbers, `pointArity()`). A call of a user
+ * function with such an argument is `Missing`: `Missing` is a result only,
+ * and an operator over `Missing` gives `Missing` (`docs/ERROR-MODEL.md`,
+ * "`Missing` is a result only — user decision of 2026-11-02"). So
+ * `g(Missing)` is `Missing` for `g` declared `(number) -> unknown`, as for a
+ * function literal that annotates its parameter (`(x: number) ↦ x`,
+ * `apply()` in `function-utils.ts`). Before, the absent value was read as
+ * `NaN` there.
+ *
+ * `literal` is the function literal that the call applies, when it is
+ * known. A parameter that has a default value in the literal
+ * (`(k = 2) ↦ k`) does not count: the application gives it its default in
+ * place of the absent argument (`apply()`), so with `g` declared
+ * `(number) -> number` and `g := (k = 2) ↦ k`, `g(First([]))` is `2`. The
+ * caller fills the defaults of the declared signature before this check.
+ */
+function absentAtNumericParameter(
+  declared: Type,
+  ops: ReadonlyArray<Expression>,
+  literal?: Expression
+): boolean {
+  if (typeof declared === 'string' || declared.kind !== 'signature')
+    return false;
+  const args = declared.args ?? [];
+  // A call with fewer arguments than the required parameters is a partial
+  // application: the result is a function of the other parameters, and it
+  // is `Missing` only when the other arguments are supplied.
+  if (ops.length < args.length) return false;
+  const opt = declared.optArgs ?? [];
+  const params = isFunction(literal, 'Function')
+    ? literal.ops.slice(1)
+    : undefined;
+  return ops.some((x, i) => {
+    if (!isAbsentScalarSymbol(x)) return false;
+    if (params?.[i] !== undefined && isFunction(params[i], 'Optional'))
+      return false;
+    const p =
+      i < args.length
+        ? args[i].type
+        : i < args.length + opt.length
+          ? opt[i - args.length].type
+          : declared.variadicArg?.type;
+    return (
+      p !== undefined &&
+      p !== 'never' &&
+      (isSubtype(p, 'number') || pointArity(p) !== undefined)
+    );
+  });
+}
+
+/**
  * Check the EVALUATED arguments `ops` of a user function against the SCALAR
  * parameter types its author DECLARED (`declared`), and return the
  * `incompatible-type` error for the first argument that does not fit, or
@@ -15893,8 +16000,10 @@ const declaredConformanceSignatures = new WeakMap<
  * - A collection (a list, a tuple) at a scalar parameter of a function that
  *   broadcasts is not an error: the function is applied to its elements.
  * - `NaN` at a numeric parameter is accepted, and an absent value
- *   (`Missing`, `Undefined`) at a numeric parameter is left to the body,
- *   which computes `NaN` with it. An absent value at any other scalar
+ *   (`Missing`) at a numeric parameter is left to the call, which gives
+ *   `Missing` (an operator over `Missing` gives `Missing`): with `f`
+ *   declared `(integer) -> unknown` and assigned `x ↦ 0 · x`, `f(Missing)`
+ *   is `Missing`. An absent value at any other scalar
  *   parameter is refused, unless the declared type has a `missing` member.
  */
 function declaredScalarConformance(
@@ -15974,52 +16083,6 @@ function withAbsentOperandDefaults(
   return withAbsentDefaults(ops, t.args?.length ?? 0, defaults, (d, i) =>
     value(callSiteDefault(d), i)
   );
-}
-
-/**
- * The evaluated arguments `ops` of a user function, with an absent value
- * (`Missing`, `Undefined`) at a parameter whose DECLARED type is numeric
- * replaced by `NaN`, or `ops` itself when there is none.
- *
- * A numeric parameter reads an absent argument as `NaN`
- * (`docs/ERROR-MODEL.md`, ruling of 2026-09-30 on an absent argument at an
- * annotated parameter). A function literal reads it so for the parameters
- * it annotates (`makeLambda`, `function-utils.ts`), but the scalar types of
- * a signature declared on the name are not written on the literal (see
- * {@link declaredScalarConformance}), so the body received the absent value:
- * `g(Missing)` answered `Missing` for `g` declared `(number) -> unknown` and
- * assigned `x ↦ x`, where an Epsil `function g(x: number) { x }` answers
- * `NaN`.
- */
-function absentAsNaNAtDeclaredNumericParams(
-  ce: ComputeEngine,
-  declared: Type,
-  ops: ReadonlyArray<Expression>
-): ReadonlyArray<Expression> {
-  if (typeof declared === 'string' || declared.kind !== 'signature') return ops;
-  const args = declared.args ?? [];
-  const opt = declared.optArgs ?? [];
-  const paramAt = (i: number): Type | undefined =>
-    i < args.length
-      ? args[i].type
-      : i < args.length + opt.length
-        ? opt[i - args.length].type
-        : declared.variadicArg?.type;
-  if (
-    !ops.some((x, i) => {
-      const p = paramAt(i);
-      return (
-        isAbsentScalarSymbol(x) && p !== undefined && isSubtype(p, 'number')
-      );
-    })
-  )
-    return ops;
-  return ops.map((x, i) => {
-    const p = paramAt(i);
-    return isAbsentScalarSymbol(x) && p !== undefined && isSubtype(p, 'number')
-      ? ce.NaN
-      : x;
-  });
 }
 
 /**
@@ -16545,6 +16608,18 @@ function applyFunctionLiteralWith(
         operator: expr.operator,
         index: failed + 1,
       });
+    // An absent argument at a parameter whose DECLARED type is numeric
+    // makes the call `Missing`, as an operator over `Missing` gives
+    // `Missing` (`absentAtNumericParameter()`). A parameter with a default
+    // in the literal is filled by the application, not here.
+    if (
+      absentAtNumericParameter(
+        def._signatureSkeleton ?? declaredType,
+        args,
+        value
+      )
+    )
+      return expr.engine.Missing;
     return declaredScalarConformance(
       expr.engine,
       def,
@@ -16553,20 +16628,6 @@ function applyFunctionLiteralWith(
       args
     );
   };
-  // The arguments as the literal receives them: an absent value at a
-  // numeric parameter of the DECLARED signature is read as `NaN`
-  // (`absentAsNaNAtDeclaredNumericParams`), under the same conditions as the
-  // conformance check above.
-  const declaredArgs = (
-    args: ReadonlyArray<Expression>
-  ): ReadonlyArray<Expression> =>
-    !expr.engine.strict || def.inferredType || declaredType === undefined
-      ? args
-      : absentAsNaNAtDeclaredNumericParams(
-          expr.engine,
-          def._signatureSkeleton ?? declaredType,
-          args
-        );
   // The arguments are evaluated, so an infinite source (`Range(1, +∞)`,
   // `Cycle`) or one of unknown length maps too (`isUnknownLengthBroadcast`),
   // lazily, as at the operator-definition post-evaluation broadcast (step 4b).
@@ -16683,7 +16744,7 @@ function applyFunctionLiteralWith(
                       ._fn(expr.operator, zipped)
                       .evaluateAsync(options)
                   : (scalarConformance(zipped) ??
-                    apply(value, declaredArgs(zipped), {
+                    apply(value, zipped, {
                       ...options,
                       awaitStatements: true,
                       arityFrame,
@@ -16738,7 +16799,7 @@ function applyFunctionLiteralWith(
               ? expr.engine._fn(expr.operator, zipped).evaluate(options)
               : (scalarConformance(zipped) ??
                   appliedOrRefused(
-                    apply(value, declaredArgs(zipped), {
+                    apply(value, zipped, {
                       ...options,
                       arityFrame,
                     }),
@@ -16870,7 +16931,7 @@ function applyFunctionLiteralWith(
         : undefined;
     return apply(
       value,
-      declaredArgs(ops),
+      ops,
       awaitBody
         ? { ...options, awaitStatements: true, arityFrame, exactSources }
         : { ...options, arityFrame, exactSources },
@@ -18602,7 +18663,7 @@ function markAbsentPointListCells(
 /**
  * Whether the EVALUATED operand `x` at slot `i` is a list of points the map
  * applies to. This is `mapsAsPointList`, with one more case: a non-empty
- * `List` whose cells are ALL absent (`Missing` or `Undefined`), when the
+ * `List` whose cells are ALL absent (`Missing`), when the
  * canonical operand `canonicalOps[i]` is typed as a list of points. The
  * evaluated type of such a list (`list<missing>`) does not say that its
  * elements are points, but the canonical operand does:
@@ -18961,8 +19022,8 @@ function lazyElementFunction(
  * calls `operator` by name (the map to the cells). The lazy map applies it
  * with `ApplyWhole`, so each argument reaches it as one element.
  *
- * The test is `Contains([Missing, Undefined], p)`, which is true only for
- * the two absence symbols, as `isAbsentScalarSymbol` in the eager loops
+ * The test is `Contains([Missing], p)`, which is true only for the
+ * absence symbol, as `isAbsentScalarSymbol` in the eager loops
  * (`hasAbsentPoint`). `IsMissing` is not used: it is also true for `NaN`
  * and `Indeterminate`, and a declared `broadcastable<tuple<…>>` slot maps
  * any list, so a `NaN` element gave `Missing` on the lazy map and an
@@ -18990,7 +19051,7 @@ function absentPointGuard(
     literal !== undefined
       ? ce._fn('ApplyWhole', [literal, ...params], { canonical: false })
       : ce._fn(operator, params, { canonical: false });
-  const absentValues = ce._fn('List', [ce.Missing, ce.symbol('Undefined')], {
+  const absentValues = ce._fn('List', [ce.Missing], {
     canonical: false,
   });
   const tests = params
@@ -19104,7 +19165,7 @@ function declaredBroadcast(
 
 /**
  * Whether slot `i` of `plan` answers `Missing` for an absent point
- * (`Missing` or `Undefined`) of the list of points it maps, without calling
+ * (`Missing`) of the list of points it maps, without calling
  * the function: a point slot of the point-list plan (`pointListParamSlots`),
  * a `pointList` slot of the declared plan (`declaredPlanWithPointSlots`),
  * and a slot declared `broadcastable<tuple<…>>`. A parameter declared
@@ -19148,7 +19209,7 @@ function hasAbsentPoint(
 
 /**
  * Whether an operand of a declared-`broadcastable<T>` map is absent as a
- * whole (`Missing` or `Undefined` after evaluation) at a slot that answers
+ * whole (`Missing` after evaluation) at a slot that answers
  * `Missing` for an absent point (`absorbsAbsentPoint`), when the canonical
  * operand `canonicalOps[i]` is typed as a list of points or as a point or a
  * list of points (`list<tuple<…>> | missing`, `broadcastable<tuple<…>> |
@@ -19570,9 +19631,25 @@ function declaredElementError(
     const el = row[i];
     if (isBroadcastOperand(el, i)) continue;
     if (el.type.isUnknown || el.type.matches(t)) continue;
+    if (acceptsNaNPointElement(el, t)) continue;
     return ce.typeError(declaredSlotType(plan, i, t, mask), el.type, el);
   }
   return undefined;
+}
+
+/** Whether the element `el` of a mapped list is a `NaN` point (a tuple whose
+ * coordinates are all `NaN`, the value of a read past the end of a list of
+ * points) at the point slot type `t` of the same arity. It is accepted
+ * there, as a `NaN` point is at a point parameter of a direct call
+ * (`acceptNaNAtNumericParams`, `function-utils.ts`), and the body runs with
+ * it: with `h = (p: tuple<real, real>) ↦ PointX(p)`, `h(At([(1, 2)], [1, 3]))`
+ * is `[1, NaN]`. */
+function acceptsNaNPointElement(el: Expression, t: Type): boolean {
+  return (
+    isNaNPointValue(el) &&
+    isFunction(el) &&
+    pointArity(t) === el.nops
+  );
 }
 
 /** The type an `incompatible-type` error of slot `i` names, in a call that
@@ -19624,6 +19701,7 @@ function declaredBroadcastElement(
     if (t === undefined) continue;
     const el = row[i];
     if (el.type.isUnknown || el.type.matches(t)) continue;
+    if (acceptsNaNPointElement(el, t)) continue;
     // The boxed element, not its rendering: a diagnostic raised while a
     // broadcast cell is being computed reads a deliberately widened type,
     // and `typeError` recovers the precise one by re-reading the operand it
@@ -19914,30 +19992,6 @@ function unindexedCollectionOperandError(
 }
 
 /**
- * The evaluated operands `ops` that the `evaluate` handler of the operator
- * definition `def` receives: for a function literal under a signature
- * DECLARED on its name (the case {@link genericRuntimeConformance} checks
- * with `declaredScalarConformance`), an absent value at a numeric parameter
- * of the declaration is read as `NaN`
- * ({@link absentAsNaNAtDeclaredNumericParams}). `ops` itself otherwise.
- */
-function declaredLambdaOperands(
-  ce: ComputeEngine,
-  def: BoxedOperatorDefinition | undefined,
-  ops: ReadonlyArray<Expression>
-): ReadonlyArray<Expression> {
-  if (!ce.strict || !(def instanceof _BoxedOperatorDefinition)) return ops;
-  if (def.lazy === true || def.inferredSignature) return ops;
-  if (!isUserFunctionDef(def) || !def._isLambda || def._derivedSignature)
-    return ops;
-  return absentAsNaNAtDeclaredNumericParams(
-    ce,
-    def._validationSignature ?? def.signature.type,
-    ops
-  );
-}
-
-/**
  * The dispatch-site gate for the generic runtime conformance check
  * (`runtimeConformanceError`, `validate.ts` — R1/R8, §4.4 of
  * `docs/plans/2026-08-22-type-handlers-on-types.md`), shared by the sync
@@ -19997,10 +20051,19 @@ function genericRuntimeConformance(
     // annotations when it is applied, and the types of its bare parameters
     // are inferences. A multi-clause definition keeps its own dispatch.
     if (!def._isLambda || def._derivedSignature) return undefined;
+    // An absent argument at a parameter whose DECLARED type is numeric or a
+    // point makes the call `Missing` without running the body, as on the
+    // route where the function is held as a value
+    // (`absentAtNumericParameter()`). The defaults of the declared
+    // signature are already filled (`withAbsentOperandDefaults()`), and a
+    // parameter with a default in the literal is filled by the application.
+    const declared = def._validationSignature ?? def.signature.type;
+    if (absentAtNumericParameter(declared, ops, def._lambdaLiteral))
+      return ce.Missing;
     return declaredScalarConformance(
       ce,
       def,
-      def._validationSignature ?? def.signature.type,
+      declared,
       def.broadcastable === true,
       ops
     );
@@ -20193,12 +20256,92 @@ function evaluateStringPreservingResult(result: Expression): Expression {
  * A node that holds a restriction `If(c, xs)` (`mayHoldRestriction()`) can
  * be absent too, although its type has no `missing` member: a restriction
  * is typed as its value.
+ *
+ * A node with a written `Missing` operand (`Filter(Missing, p)`, typed
+ * `missing`) is absent: the absence test of step 4 answers `Missing` for it.
  */
 function mayBeAbsentAsWhole(expr: Expression): boolean {
   return (
     threadedPresentType(expr.type.type) !== undefined ||
-    mayHoldRestriction(expr)
+    mayHoldRestriction(expr) ||
+    (isFunction(expr) && expr.ops.some(isAbsentScalarSymbol))
   );
+}
+
+/**
+ * The operators that give one result cell for each point of a list of
+ * points, with the marker that the result cell holds for an absent point:
+ * `Missing` for an operator that computes a number from the point (an
+ * operator over `Missing` gives `Missing`: `Norm([Missing, (3, 4)])` is
+ * `[Missing, 5]`), and `NaN` for a coordinate accessor (a coordinate is a
+ * number, and the absent value of a number is `NaN`:
+ * `PointY([Missing, (3, 4)])` is `[NaN, 4]`).
+ */
+const ABSENT_POINT_CELL_MARKER: ReadonlyMap<string, 'nan' | 'missing'> =
+  new Map([
+    ['Norm', 'missing'],
+    ['Dot', 'missing'],
+    ['Distance', 'missing'],
+    ['PointX', 'nan'],
+    ['PointY', 'nan'],
+    ['PointZ', 'nan'],
+  ]);
+
+/**
+ * `t`, the type of the application `expr` of an operator of
+ * `ABSENT_POINT_CELL_MARKER`, with the marker of that operator added to each
+ * result cell when an operand is a list of points that can hold an absent
+ * point.
+ *
+ * A point of a list literal that holds a restriction (`If(c, (1, 2))`) is
+ * absent where its condition fails, but the type of the restriction is the
+ * type of the point, so the list is typed `list<tuple<…>>` and the absorption
+ * of absent operand cells (`absorbOperandAbsence`) does not see it. Such a
+ * point is found here with `mayHoldRestriction()`. For `Norm`, `Dot` and
+ * `Distance`, a `missing` arm of the element type (a written `Missing` point)
+ * counts too: these operators do not broadcast, and the absorption adds no
+ * arm to their result cells.
+ */
+function withAbsentPointCellResults(expr: Expression, t: Type): Type {
+  const marker = ABSENT_POINT_CELL_MARKER.get(expr.operator);
+  if (marker === undefined || !isFunction(expr)) return t;
+  const mayHoldAbsentPoint = (op: Expression): boolean => {
+    const element = collectionElementType(op.type.type);
+    if (element === undefined) return false;
+    if (!isTupleShapedType(stripMissingFromType(element))) return false;
+    if (marker === 'missing' && typeContainsMissing(element)) return true;
+    return isFunction(op, 'List') && op.ops.some((x) => mayHoldRestriction(x));
+  };
+  if (!expr.ops.some(mayHoldAbsentPoint)) return t;
+  return withAbsentCellMarkers(t, new Set([1]), marker);
+}
+
+/**
+ * `t`, the type of the `Multiply` application `expr`, with a `nan` arm on
+ * each numeric cell when the product is a matrix product (two collection
+ * operands, one of them a matrix) and an operand can hold an absent cell.
+ *
+ * The matrix product computes each result cell from a row and a column, so
+ * it reads an absent cell as `NaN` and gives `NaN` cells, not `Missing`
+ * cells: `[[1, Missing], [3, 4]] · [[1, 0], [0, 1]]` is `[[NaN, NaN],
+ * [3, 4]]`, and `[1, Missing] · [[1, 2], [3, 4]]` is `[NaN, NaN]`. The type
+ * that the absorption of absent cells gives (`absorbOperandAbsence`) has a
+ * `missing` arm on the cells of the first product, as for an element-wise
+ * product, and no arm on the second; the `nan` arm makes both types hold
+ * the value. No kernel gives these products `Missing` cells: no corpus
+ * program multiplies a matrix with an absent cell.
+ */
+function withMatrixProductNaNCells(expr: Expression, t: Type): Type {
+  if (expr.operator !== 'Multiply' || !isFunction(expr)) return t;
+  // An operand that is always absent strips to `never`, a subtype of every
+  // type: it is not a collection operand.
+  const present = expr.ops
+    .map((x) => stripMissingFromType(x.type.type))
+    .filter((x) => x !== 'never');
+  if (present.filter((x) => isSubtype(x, 'list')).length < 2) return t;
+  if (!present.some((x) => isSubtype(x, 'matrix'))) return t;
+  if (!expr.ops.some((x) => typeContainsMissing(x.type.type))) return t;
+  return widenNumericCellsWithNan(t);
 }
 
 /**

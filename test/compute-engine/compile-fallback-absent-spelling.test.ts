@@ -8,6 +8,11 @@
  * the cell's type the same way. Before, every absent result of the fallback
  * was `NaN`, so a host could tell from the value which route ran.
  *
+ * A point read out of range is not absent: it is the point whose
+ * coordinates are all `NaN` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+ * only"). `Undefined` is an ordinary symbol with no value, not an absent
+ * value.
+ *
  * Each case compares the fallback (forced with an unregistered target) with
  * the JavaScript compilation of the same expression.
  */
@@ -47,8 +52,10 @@ describe('Compilation fallback: the spelling of an absent value', () => {
 
   test.each([
     ['a number', gated(['Add', 't', 1]), NaN],
-    ['a point', gated(['Tuple', 't', 1]), undefined],
-    ['a point read from a list of points', ['At', 'P', 5], undefined],
+    // A false restriction of a point is the point of `NaN` coordinates
+    // (user decision 2026-11-03).
+    ['a point', gated(['Tuple', 't', 1]), [NaN, NaN]],
+    ['a point read from a list of points', ['At', 'P', 5], [NaN, NaN]],
     ['a list of numbers', gated(['List', 't', 1]), undefined],
     [
       'a list of points',
@@ -61,10 +68,6 @@ describe('Compilation fallback: the spelling of an absent value', () => {
     ['a boolean', gated(['Less', 't', 1]), false],
     ['a string', gated({ str: 'abc' }), undefined],
     ['the written symbol', 'Missing', undefined],
-    // A bare `Undefined` is typed `unknown`, a type that says nothing about
-    // the kind of the position: the fallback spells it as compiled code
-    // spells the written symbol (it gave `NaN`).
-    ['the bare Undefined', 'Undefined', undefined],
     [
       'a number read from a list with a written absence',
       ['First', ['List', 'Missing', 1]],
@@ -87,12 +90,18 @@ describe('Compilation fallback: the spelling of an absent value', () => {
     [
       'a list of points',
       ['List', ['Tuple', 't', 1], gated(['Tuple', 2, 3])],
-      [[0, 1], undefined],
+      [
+        [0, 1],
+        [NaN, NaN],
+      ],
     ],
     [
       'a list of points read from a list',
       ['List', ['At', 'P', 5], ['Tuple', 't', 1]],
-      [undefined, [0, 1]],
+      [
+        [NaN, NaN],
+        [0, 1],
+      ],
     ],
     ['a tuple, numeric coordinate', ['Tuple', 't', gated(2)], [0, NaN]],
     ['a tuple, written absence', ['Tuple', 't', 'Missing'], [0, undefined]],
@@ -171,15 +180,22 @@ describe('Python fallback: the spelling of an absent value', () => {
   test.each([
     // The compiled code of the argument, for the record of each spelling.
     ['the written symbol (`math.nan`)', 'Missing', NaN],
-    ['the bare Undefined (`math.nan`)', 'Undefined', NaN],
     [
       'a number read from a list with a written absence (`math.nan`)',
       ['First', ['List', 'Missing', 1]],
       NaN,
     ],
     ['a number (`float(nan)`)', gated(['Add', 't', 1]), NaN],
-    ['a point (`None`)', gated(['Tuple', 't', 1]), undefined],
-    ['a point read from a list of points (`None`)', ['At', 'P', 5], undefined],
+    [
+      'a point (`(math.nan, math.nan)`)',
+      gated(['Tuple', 't', 1]),
+      [NaN, NaN],
+    ],
+    [
+      'a point read from a list of points (`(math.nan, math.nan)`)',
+      ['At', 'P', 5],
+      [NaN, NaN],
+    ],
     ['a boolean (`False`)', gated(['Less', 't', 1]), false],
     [
       'a list, written absence (`[1, math.nan]`)',
@@ -272,7 +288,6 @@ describe('Interval fallback: the spelling of an absent value', () => {
 
   test.each([
     ['the written Missing', 'Missing'],
-    ['the written Undefined', 'Undefined'],
     ['an At past the end of a literal list', ['At', ['List', 't', 2], 5]],
     ['an At with index 0', ['At', ['List', 't', 2], 0]],
     ['an At past the end at run time', ['At', ['List', 't', 2], 'k']],
@@ -287,19 +302,5 @@ describe('Interval fallback: the spelling of an absent value', () => {
     ).toStrictEqual({
       kind: 'empty',
     });
-  });
-
-  test('a written absence cell of a list compiles to empty', () => {
-    // `Undefined`: a list with a `Missing` cell is typed with a `missing`
-    // element, which this target declines.
-    const r = compile(ce.box(['List', 1, 'Undefined'] as never), {
-      to: 'interval-js',
-      fallback: false,
-    } as never);
-    expect(r.success).toBe(true);
-    expect(r.run!({} as never)).toStrictEqual([
-      { kind: 'interval', value: { lo: 1, hi: 1 } },
-      { kind: 'empty' },
-    ]);
   });
 });

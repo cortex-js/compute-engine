@@ -2814,11 +2814,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       }
 
       if (code === 'incompatible-type') {
-        if (symbol(operand(op1, 3)) === 'Undefined') {
-          return `\\mathtip{\\error{${where}}}{\\notin ${serializer.serialize(
-            operand(op1, 2)
-          )}}`;
-        }
         return `\\mathtip{\\error{${where}}}{\\in ${serializer.serialize(
           operand(op1, 3)
         )}\\notin ${serializer.serialize(operand(op1, 2))}}`;

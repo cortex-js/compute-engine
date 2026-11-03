@@ -321,7 +321,7 @@ export function compilePointSwizzle(
  */
 export function gpuSwizzle(code: string, sw: string): string {
   const s = code.trim();
-  // An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
+  // An absent operand (`Missing`) compiles to the SCALAR NaN of
   // the target (`_gpu_nan()`, on both targets). A scalar has no components:
   // WGSL rejects `.x` on an `f32`, and GLSL before 4.20 rejects it on a
   // `float`. Every coordinate of an absent point is NaN, so one component of

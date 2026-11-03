@@ -5082,9 +5082,16 @@ function univariateRoots(
   // (an empty list from `solveScaledFloatPower()`).
   let noRoot = false;
   try {
-    // Use the declared type of the variable, if any, otherwise assume 'number'
+    // Use the declared type of the variable, if any, otherwise assume
+    // 'number'. The marker type `missing` (the type of the symbol `Missing`,
+    // read as the unknown of the link `1 = Missing` of an assumption) may
+    // not be declared (`Missing` is a result only, `docs/ERROR-MODEL.md`),
+    // and an unknown of that type has no root: assume 'number' instead.
     const varType = unknownType(ce, x).type;
-    ce.declare('_x', typeof varType === 'string' ? varType : 'number');
+    ce.declare(
+      '_x',
+      typeof varType === 'string' && varType !== 'missing' ? varType : 'number'
+    );
 
     // Match the root templates against an expression in which the unknown is
     // the literal `_x` symbol. The substitution pre-binds the `_x` wildcard

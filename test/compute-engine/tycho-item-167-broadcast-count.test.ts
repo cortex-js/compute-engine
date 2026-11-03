@@ -348,14 +348,12 @@ describe('Tycho item 326: count of an un-evaluated broadcast call', () => {
       );
       ce.declare('ov', '(number) -> number & (string) -> string');
       ce.assign('ov', ce.parse('x \\mapsto x'));
-      ce.declare('Mm', 'list<number> | missing');
       return [
         ['a bare `function` wildcard declaration', ['wild', 'M'], 3],
         ['a multi-clause definition (the lifted-operator arm)', ['mc', 'M'], 3],
         ['an overload set, read through its resolved arm', ['ov', 'M'], 3],
         ['a generic signature', ['gen', 'M'], undefined],
         ['a point-typed parameter over a point list', ['pt', 'PL'], undefined],
-        ['an argument that may be absent as a whole', ['wild', 'Mm'], undefined],
         ['more arguments than the signature admits', ['wild', 'M', 'M'], undefined],
         ['no argument at all', ['wild'], undefined],
       ];

@@ -63,9 +63,11 @@ function engine(): ComputeEngine {
 
 describe('issue #454: a fold whose accumulator is read by index', () => {
   it('is typed as a list, not as a one-element tuple', () => {
+    // A read by index is typed by its present value (`integer`): the
+    // absence marker is implicit in the type of a read.
     const ce = engine();
     expect(ce.box(FOLD as any).type.toString()).toEqual(
-      'list<integer | nan^3> | vector<integer^2>'
+      'vector<integer^2> | vector<integer^3>'
     );
   });
 

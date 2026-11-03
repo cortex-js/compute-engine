@@ -52,9 +52,11 @@ describe('CONDITIONAL VALUES — restriction threading (T1–T5)', () => {
     // type, `NaN` for a number (user decision 2026-09-25; it was `Missing`
     // under the 2026-09-09 alignment with the no-selection ruling).
     expect(ce.box(['If', ['Less', 3, 0], 5]).evaluate().isNaN).toBe(true);
+    // A point masks to the point of `NaN` coordinates (user decision
+    // 2026-11-03).
     expect(
-      ce.box(['If', ['Less', 3, 0], ['Tuple', 1, 2]]).evaluate().symbol
-    ).toBe('Missing');
+      ce.box(['If', ['Less', 3, 0], ['Tuple', 1, 2]]).evaluate().toString()
+    ).toBe('(NaN, NaN)');
   });
 
   it('numericizes a restriction with a True guard, passing options through', () => {
@@ -98,17 +100,18 @@ describe('CONDITIONAL VALUES — logic operators are excluded', () => {
 
 describe('CONDITIONAL VALUES — Which distribution (T6/T7)', () => {
   it('T6: distributes a scalar over Which branches, conditions untouched', () => {
-    // Which(x>0, 1, x<0, -1) + 2 → Which(x>0, 3, x<0, 1, True, NaN): the
-    // `Which` has no default clause, so `Missing + 2` (`NaN`) is the last
-    // branch.
+    // Which(x>0, 1, x<0, -1) + 2 → Which(x>0, 3, x<0, 1, True, Missing):
+    // the `Which` has no default clause, so `Missing + 2` (`Missing`) is the
+    // last branch.
     expect(ce.box(['Add', whichX, 2]).evaluate().toString()).toBe(
-      'Which(0 < x, 3, x < 0, 1, "True", NaN)'
+      'Which(0 < x, 3, x < 0, 1, "True", "Missing")'
     );
   });
 
   // With no condition true, the threaded form has the value of the
-  // application evaluated after the conditions are decided: an absent
-  // operand gives `NaN` (`docs/ERROR-MODEL.md`), not `Missing`.
+  // application evaluated after the conditions are decided: an operator
+  // over an absent operand gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only").
   it('a Which with no default clause: both orders agree', () => {
     const noDefault = ['Which', ['Greater', 'x', 1], 0];
     for (const json of [
@@ -124,14 +127,16 @@ describe('CONDITIONAL VALUES — Which distribution (T6/T7)', () => {
         );
     }
     expect(ce.box(['Add', 3, noDefault]).evaluate().toString()).toBe(
-      'Which(1 < x, 3, "True", NaN)'
+      'Which(1 < x, 3, "True", "Missing")'
     );
     expect(
       ce
         .box(['Add', ['List', 1, 2], noDefault])
         .evaluate()
         .toString()
-    ).toBe('[Which(1 < x, 1, "True", NaN),Which(1 < x, 2, "True", NaN)]');
+    ).toBe(
+      '[Which(1 < x, 1, "True", "Missing"),Which(1 < x, 2, "True", "Missing")]'
+    );
     // A default clause: no extra branch.
     expect(
       ce
@@ -431,25 +436,26 @@ describe('CONDITIONAL VALUES — layering normal form (decision 6)', () => {
 });
 
 describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
-  it('Which with an Undefined first condition falls through (no throw)', () => {
-    // Undefined → not-True → next branch (True) is selected.
+  it('Which with an Undefined first condition is held (no throw)', () => {
+    // `Undefined` is an ordinary symbol with no value, not an absent value
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only"): the condition
+    // is not decided, so the `Which` stays unevaluated.
     const r = ce
       .box(['Which', 'Undefined', 1, ['Greater', 3, 0], 2])
       .evaluate();
-    expect(r.isSame(2)).toBe(true);
+    expect(r.operator).toBe('Which');
   });
 
-  it('Which with only Undefined/False conditions yields Missing', () => {
-    // Decision 9 is unchanged: an `Undefined` guard is treated as not-True
-    // and falls through. What changed is the END value when no clause is
-    // selected — `Missing`, the position-preserving absent datum
-    // (no-selection ruling 2026-08-27), where it used to be `Undefined`.
+  it('Which with only Undefined/False conditions is held', () => {
+    // Decision 9 read an `Undefined` guard as not-True; since `Undefined` is
+    // not an absent value, the guard is undecided and the `Which` is held.
     const r = ce.box(['Which', 'Undefined', 1, ['Less', 3, 0], 2]).evaluate();
-    expect(r.symbol).toBe('Missing');
+    expect(r.operator).toBe('Which');
   });
 
-  it('restriction with an Undefined condition masks (NaN for a number)', () => {
-    expect(ce.box(['If', 'Undefined', 5]).evaluate().isNaN).toBe(true);
+  it('a restriction with an Undefined condition is held', () => {
+    // It was masked (`NaN` for a number) while `Undefined` was absent.
+    expect(ce.box(['If', 'Undefined', 5]).evaluate().operator).toBe('If');
   });
 
   it('a provably non-boolean Which condition is an error operand', () => {

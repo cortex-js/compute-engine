@@ -553,6 +553,59 @@ export function presentedValueType(
   return ce.type(stripMissingFromType(t));
 }
 
+/**
+ * The declared-type check of a STORE into a declared symbol (`ce.assign`, the
+ * `Assign` operator, a `Declare` with a value, a typed Epsil `let` or
+ * assignment): true when `value` fits `declared`, or when it is the marker
+ * `Missing`, or when each of its parts fits `declared` except the parts that
+ * are `Missing`.
+ *
+ * `Missing` is a result only: it cannot be declared, and a read out of range
+ * or a selection with no match produces it whatever type the collection has
+ * (`At(["a"], 5)` is `Missing`, and `(1, Missing) + (1, 1)` is
+ * `(2, Missing)`). A declared type cannot say "or absent", so a declared
+ * variable that may receive such a read must accept the marker where it
+ * accepts a present value: `s: string` takes `At(["a"], 5)`, and
+ * `t: tuple<integer, integer>` takes `(2, Missing)`. The `missing` arms of the
+ * value's type, at the top and in every element or component, are removed
+ * before the ordinary check (`matchesDeclaredTypeAxes`), so a value that is
+ * wrong where it is present (`5` for `string`, `[5, Missing]` for
+ * `list<string>`) is still refused.
+ *
+ * `BoxedType.matches` stays strict: `missing` is not a subtype of `string`.
+ * This tolerance belongs only to the store routes above. A numeric position
+ * holds `NaN`, not `Missing`, when it is absent, and `NaN` is not removed:
+ * `x: real` refuses `At([1, 2], 5)`, which is `NaN`, as it refuses `0/0`.
+ *
+ * Source: `docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+ * decision of 2026-11-02", rule 5.
+ */
+export function matchesOrAbsent(
+  ce: ComputeEngine,
+  value: BoxedType,
+  declared: BoxedType,
+  effectsDeclared: boolean,
+  valueExpr?: Expression,
+  /** The symbol being declared/assigned, for the diagnostic. */
+  symbol?: string
+): boolean {
+  if (valueExpr !== undefined && isAbsentSymbol(valueExpr)) return true;
+  if (typeContainsMissing(value.type)) {
+    const present = stripMissingFromType(value.type);
+    // A value typed `missing` alone is absent wherever it is read.
+    if (present === 'never') return true;
+    value = ce.type(present);
+  }
+  return matchesDeclaredTypeAxes(
+    ce,
+    value,
+    declared,
+    effectsDeclared,
+    valueExpr,
+    symbol
+  );
+}
+
 export function matchesDeclaredTypeAxes(
   ce: ComputeEngine,
   value: BoxedType,
@@ -571,10 +624,9 @@ export function matchesDeclaredTypeAxes(
 
   // A declared type is a contract on EVERY value the symbol takes (user
   // decision P1 of `docs/plans/2026-10-21-presence-contracts-and-assertion.md`,
-  // 2026-10-21): the absence symbols `Missing` and `Undefined` are refused
+  // 2026-10-21): the absence symbol `Missing` is refused
   // by a declaration that excludes absence, exactly as `5` is refused by
-  // `string`. `Undefined` is typed `unknown`, which the rule below would
-  // admit unchecked, so the value itself is tested first. A declaration
+  // `string`. The value itself is tested first. A declaration
   // that admits absence (`string | missing`, `any`, a placeholder `unknown`)
   // takes the symbol.
   if (
@@ -1677,7 +1729,6 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   // A `Function` with no body (raw input held unbound by `Hold`) has no
   // signature to build: it is an error value, not a throw (CE-106).
   if (body === undefined) return 'error';
-  const params = functionLiteralParameters(expr);
 
   // Result type: an explicit return-type ascription (the §4.2 marker) is
   // used verbatim, bypassing the widening rule. A Block's type is its last

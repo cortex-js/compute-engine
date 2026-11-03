@@ -447,9 +447,13 @@ describe('CE-588 — python', () => {
     expect(py(['If', ['Greater', 'x', 0], POINT, 'Missing'])).toBe(
       '(((x, y)) if (0 < x) else (None))'
     );
-    // The same code as the else-less `If`.
+    // The same code as the else-less `If` for a list. The else-less `If` of
+    // a point gives the point of `NaN` coordinates (user decision
+    // 2026-11-03), where the written `Missing` stays `None`.
     expect(py(['If', 'c', LIST, 'Missing'])).toBe(py(['If', 'c', LIST]));
-    expect(py(['If', 'c', POINT, 'Missing'])).toBe(py(['If', 'c', POINT]));
+    expect(py(['If', 'c', POINT])).toBe(
+      '(((x, y)) if (c) else ((np.nan, np.nan)))'
+    );
     // A scalar or complex value keeps the numeric marker.
     expect(py(['If', 'c', 'x', 'Missing'])).not.toContain('None');
     expect(py(['If', 'c', COMPLEX, 'Missing'])).not.toContain('None');
@@ -530,13 +534,21 @@ describe('CE-588 — interval-js', () => {
     const g = run(['If', ['Greater', 'x', 0], POINT]);
     for (const x of [
       { lo: 1, hi: 2 },
-      { lo: -2, hi: -1 },
       { lo: -1, hi: 1 },
     ]) {
-      // The written `Missing` gives the result of the else-less `If`.
+      // The written `Missing` gives the result of the else-less `If` where
+      // the condition can hold.
       expect(f({ x })).toEqual(g({ x }));
     }
+    // Where it fails, the written `Missing` is `empty`, and the else-less
+    // `If` of a point is the point of `empty` coordinates, the spelling on
+    // this target of the point of `NaN` coordinates (user decision
+    // 2026-11-03).
     expect(f({ x: { lo: -2, hi: -1 } })).toEqual({ kind: 'empty' });
+    expect(g({ x: { lo: -2, hi: -1 } })).toEqual([
+      { kind: 'empty' },
+      { kind: 'empty' },
+    ]);
   });
 
   it('a nested selection as a value of an If', () => {
@@ -549,7 +561,13 @@ describe('CE-588 — interval-js', () => {
     ]) {
       const f = run(json);
       expect(f({ c: 'true', d: 'true' })).toEqual([point(X), point(Y)]);
-      expect(f({ c: 'true', d: 'false' })).toEqual({ kind: 'empty' });
+      // The else-less `If(d, (x, y))` with `d` false is the point of
+      // `empty` coordinates (user decision 2026-11-03).
+      expect(f({ c: 'true', d: 'false' })).toEqual(
+        json[2][3] === undefined && json[2][2] === POINT
+          ? [{ kind: 'empty' }, { kind: 'empty' }]
+          : { kind: 'empty' }
+      );
       expect(f({ c: 'false', d: 'true' })).toEqual({ kind: 'empty' });
     }
   });

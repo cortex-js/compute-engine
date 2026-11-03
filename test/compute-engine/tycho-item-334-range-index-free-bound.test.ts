@@ -42,7 +42,8 @@ describe('A literal index over a range with a free bound stays symbolic', () => 
     test(`box route: ${label}`, () => {
       const ce = engine();
       const e = ce.box(json);
-      expect(e.type.toString()).toBe('integer | nan');
+      // The absence marker is implicit in the type of a read.
+      expect(e.type.toString()).toBe('integer');
       expect(e.evaluate().json).toEqual(json);
       expect(e.N().json).toEqual(json);
     });

@@ -40,7 +40,6 @@ import {
   spellCheckMessage,
   validateArguments,
   widenUnannotatedLiteralParams,
-  absentScalarMarker,
   absentMarkerIsNumeric,
   checkCollectionOperand,
   canonicalValueOperand,
@@ -105,6 +104,8 @@ import {
   isNestedPointCollectionType,
   isBroadcastablePointType,
   pushDistinct,
+  nanPoint,
+  pointArity,
 } from '../collection-utils.js';
 import {
   MeasuredWalk,
@@ -337,7 +338,6 @@ import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
   adjoinType as adjoinTypeD,
   bigOpResultType,
-  isUndefinedSymbolD,
   operandLiteralValue as descriptorLiteralValue,
   storedComponentTypeD,
 } from './type-handlers.js';
@@ -1670,8 +1670,7 @@ const SLICE_SIGNATURE_TEXT =
  * and `Count([NaN, NaN], NaN)` is `2`. A marker cell matches only the same
  * marker, so the other cells decide every other answer:
  * `Contains([Missing, 5], 5)` is `True` and `Contains([1, Missing], 5)` is
- * `False`. `Missing` and `Undefined` are different symbols, so one is not
- * found where the other sits, as `Unique([Missing, Undefined])` keeps both.
+ * `False`.
  * (User decision 2026-09-26, replacing the earlier rule of the same day under
  * which a marker was never found; the design record is
  * `docs/plans/2026-09-26-absent-values-in-collection-operators.md`, rule C.)
@@ -1826,7 +1825,7 @@ function isPredicateShorthand(op: Expression): boolean {
  * `undefined` is anything else (an element-valued failure, a malformed
  * predicate, an undecided relation), which the caller reports as before.
  *
- * A predicate that answers `Missing` or `Undefined` does NOT select the
+ * A predicate that answers `Missing` does NOT select the
  * element: an absent value reads as `False`. A comparison with an absent
  * element is already `False` (`Missing > 0`, user decision 2026-11-02,
  * two-valued comparisons), so `Filter([1, Missing, 3], x ↦ x > 0)` is
@@ -2405,7 +2404,7 @@ function fixpointLiteral(
     const result = functionResult(literal.type.type);
     if (result === undefined) return undefined;
     if (isKindOpenOperandType(result)) return 'rejected';
-    const next = widen(t, result);
+    const next = widen(t, withoutLengthChange(t, result));
     if (isSubtype(next, t) && isSubtype(t, next)) {
       // The pre-declared type is an inferred one, so a use in the body may
       // have moved the binding: the literal is kept only when its
@@ -2422,6 +2421,33 @@ function fixpointLiteral(
     t = next;
   }
   return undefined;
+}
+
+/**
+ * The result type `result` of a fold's body, without its length when it is
+ * a list of one length and the accumulator type `t` is a list of another
+ * length. A body that appends to the accumulator (`Join(a, x)`, typed with
+ * the sum of the lengths of its operands) gives a list one step longer at
+ * each step of `fixpointLiteral`, and the union of these lengths never
+ * settles: the accumulator of `Reduce([[1], [2]], (a, x) ↦ Join(a, x))` was
+ * then typed `list`, and the fold `list<any>`. Without the length, the
+ * widening gives `list<integer>`, and the next step settles.
+ */
+function withoutLengthChange(t: Type, result: Type): Type {
+  const a = resolveTypeAlias(t);
+  const b = resolveTypeAlias(result);
+  if (
+    typeof a === 'string' ||
+    typeof b === 'string' ||
+    a.kind !== 'list' ||
+    b.kind !== 'list' ||
+    !b.dimensions ||
+    (a.dimensions &&
+      a.dimensions.length === b.dimensions.length &&
+      a.dimensions.every((d, i) => d === b.dimensions![i]))
+  )
+    return result;
+  return { kind: 'list', elements: b.elements };
 }
 
 /** The fixpoint iteration runs at most this many steps from the seed. */
@@ -4170,10 +4196,8 @@ function tupleFromComponentTypes(
   // literal is accepted when each of its elements is: its stored type is
   // read from its elements, and an element that is not a literal can
   // change kind when it is evaluated (`Tuple(Range(1, 2), 1)` is typed
-  // `tuple<range, integer>`, and evaluates to `([1, 2], 1)`). `Undefined`
-  // is an absent component, typed `missing` (`storedComponentTypeD`).
+  // `tuple<range, integer>`, and evaluates to `([1, 2], 1)`).
   const literalComponent = (d: OperandDescriptor): boolean => {
-    if (isUndefinedSymbolD(d)) return true;
     if (provablyAdmits('nothing', d.type) || resultMayBeNothing(d, engine))
       return false;
     const s = d.structureOf?.();
@@ -4206,8 +4230,7 @@ function tupleFromComponentTypes(
       // An operand that is always absent (`Missing`, typed `missing`): the
       // result is `Missing`, and the `missing` arm is added outside the
       // handler, so no tuple type is claimed for it.
-      if (isSubtype(op.type, 'missing') || isUndefinedSymbolD(op))
-        return undefined;
+      if (isSubtype(op.type, 'missing')) return undefined;
       if (!literalComponent(op)) return undefined;
       result.push(storedComponentTypeD(op));
     } else {
@@ -5200,10 +5223,11 @@ function callbackHasUnresolvedParameterD(
  * that handler (or the signature instantiated on the arguments) applied to
  * an element of each source, or `undefined`. The answer is used only when
  * it is a subtype of `declared`, the declared result of the operator (with
- * each type variable read as its bound), or of `declared | nan`, so it can
- * only narrow the declared result. The `nan` arm is admitted because an
- * absent cell gives `NaN` (`Floor(Missing)` is `NaN`), and the handler
- * types that case.
+ * each type variable read as its bound), or of `declared | nan | missing`,
+ * so it can only narrow the declared result. The `missing` arm is admitted
+ * because an absent cell gives `Missing` (`Floor(Missing)` is `Missing`),
+ * and the handler types that case; the `nan` arm, because a cell read past
+ * the end of a numeric list gives `NaN`.
  *
  * The callback is typed as the body of the lambda spelling is typed (user
  * decision 2026-10-25, ROADMAP CE-45.2): with `xs: list<integer>`,
@@ -5211,7 +5235,7 @@ function callbackHasUnresolvedParameterD(
  * `list<real>`, as `Map(x ↦ |x|, xs)` and `Map(x ↦ Sin(x), xs)` are. They
  * were `list<number>`, the declared result of `Abs` and `Sin`. An absent
  * cell is typed by the handler too: `Map(Abs, [1, Missing, 2])` is
- * `list<integer | nan^3>`, not `vector<3>` (CE-453). A generic operator is
+ * `list<integer<0..> | missing^3>`, not `vector<3>` (CE-453). A generic operator is
  * instantiated on the element: `Map(Conjugate, xs)` is `list<integer>`, as
  * `Conjugate` is declared `(T) -> T`. It was `list<unknown>`, because the
  * declared result `T` was read without its argument.
@@ -5261,7 +5285,7 @@ function libraryOperatorCallElementTypeD(
     t === undefined ||
     t === 'never' ||
     isPolymorphicType(t) ||
-    !isSubtype(t, { kind: 'union', types: [bound, 'nan'] })
+    !isSubtype(t, { kind: 'union', types: [bound, 'nan', 'missing'] })
   )
     return undefined;
   return t;
@@ -6580,7 +6604,34 @@ function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
     : 'list';
   const elements = joinedElementTypeD(ops);
   if (elements === undefined) return kind;
+  // The length of the joined list, when every operand states its count: a
+  // tuple operand is one element, and a list of one axis with a known length
+  // contributes that many. `Join((1, 2), (3, 4))` is `list<tuple<integer,
+  // integer>^2>`. A consumer that maps over the result (the derivative of a
+  // coordinate of each point) needs the length.
+  if (kind === 'list') {
+    let count = 0;
+    for (const op of ops) {
+      const n = joinOperandCountD(op);
+      if (n === undefined) return { kind, elements };
+      count += n;
+    }
+    if (count > 0) return { kind, elements, dimensions: [count] };
+  }
   return { kind, elements };
+}
+
+/** The number of elements that the operand `op` adds to a `Join`, when its
+ * type states it: 1 for a tuple (`isAtomicJoinOperandD`), and the length of
+ * a list of one axis with a known length. `undefined` otherwise. */
+function joinOperandCountD(op: OperandDescriptor): number | undefined {
+  if (isAtomicJoinOperandD(op)) return 1;
+  const t = resolveTypeAlias(op.type);
+  if (typeof t === 'string' || t.kind !== 'list') return undefined;
+  const dims = t.dimensions;
+  if (!Array.isArray(dims) || dims.length !== 1 || dims[0] < 0)
+    return undefined;
+  return dims[0];
 }
 
 /**
@@ -6935,11 +6986,11 @@ function withDeclaredCallbackAbsence(
     const fn = ops[0]?.structureOf?.();
     // A function literal with an annotated parameter is not typed from its
     // body with the absent cells (`bareMappingElementTypeD` reads bare
-    // parameters only): its own result type describes a present cell. For
-    // an absent cell, the annotation gives the body `NaN`, so the result is
-    // absorbed as for a declared callback: `Map((x: integer) ↦ x + 1, m)`
-    // with `m := [1, Missing]` is `[2, NaN]`, which was typed
-    // `list<integer>`.
+    // parameters only): its own result type describes a present cell. A
+    // call with `Missing` at an annotated numeric parameter is `Missing`
+    // (`apply()`, `function-utils.ts`), so the element type gains a
+    // `missing` arm: `Map((x: integer) ↦ x + 1, m)` with `m := [1,
+    // Missing]` is `[2, Missing]`, typed `list<integer | missing>`.
     const annotatedLiteral =
       fn?.kind === 'function-literal' &&
       fn.parameters.some((p) => p.annotated !== undefined);
@@ -6957,12 +7008,44 @@ function withDeclaredCallbackAbsence(
       callbackHasUnknownResult(ops[0], engine)
     )
       return handler(ops, context);
+    if (annotatedLiteral) {
+      const t = handler(
+        ops.map((d, i) =>
+          i === 0 || !typeContainsMissing(d.type)
+            ? d
+            : {
+                type: stripMissingFromType(d.type),
+                facts: d.facts,
+                structureOf: d.structureOf,
+              }
+        ),
+        context
+      );
+      if (t === undefined) return undefined;
+      // The cell of an absent element is `Missing`; every other cell is a
+      // result of the literal, typed by its own result type.
+      const r = resolveTypeAlias(t.type);
+      const present = callbackResultTypeD(ops[0], engine);
+      return BoxedType.forResult(
+        present !== undefined &&
+          typeof r !== 'string' &&
+          (r.kind === 'list' ||
+            r.kind === 'set' ||
+            r.kind === 'collection' ||
+            r.kind === 'indexed_collection')
+          ? {
+              kind: r.kind,
+              elements: reduceType({
+                kind: 'union',
+                types: [present, 'missing'],
+              }),
+            }
+          : withMissingElements(t.type),
+        engine._typeResolver
+      );
+    }
     const declared = callbackResultTypeD(ops[0], engine);
-    if (
-      !annotatedLiteral &&
-      declared !== undefined &&
-      typeCouldHoldMissing(declared)
-    )
+    if (declared !== undefined && typeCouldHoldMissing(declared))
       return handler(ops, context);
     const present = ops.map((d, i) =>
       i === 0 || !typeContainsMissing(d.type)
@@ -6982,9 +7065,7 @@ function withDeclaredCallbackAbsence(
     // is given as `list<missing>`, a list with an absent cell.
     // The absorption reads the cells of a list or a collection only (a
     // broadcast never reads the cells of a set), so a set result is
-    // absorbed as a list of its elements and made a set again:
-    // `Map((x: integer) ↦ If(x > 0, Missing, x), s)` with
-    // `s := Set(1, -2, Missing)` is `Set(-2, NaN, Missing)`.
+    // absorbed as a list of its elements and made a set again.
     const result = resolveTypeAlias(t.type);
     const isSet = typeof result !== 'string' && result.kind === 'set';
     const absorbedCells = absorbOperandAbsence(
@@ -7011,14 +7092,6 @@ function withDeclaredCallbackAbsence(
     // L)` with `L: list<integer | missing>` holding `[4, Missing]` is
     // `[False, Missing]`. A callback that answers `NaN` (`Sqrt`) or an error
     // (`ToUpperCase`) for an absent value adds no arm.
-    // For an annotated literal, the absorption replaces a `missing` arm
-    // that the body returns for a present cell (`(x: integer) ↦ If(x > 0,
-    // Missing, x)`), so the result for a present cell is kept beside it.
-    if (annotatedLiteral)
-      return BoxedType.forResult(
-        joinedElements(t.type, absorbed),
-        engine._typeResolver
-      );
     return BoxedType.forResult(
       absentCellAnswerMayBeMissing(ops[0], sources, context.derive)
         ? withMissingElements(absorbed)
@@ -7026,26 +7099,6 @@ function withDeclaredCallbackAbsence(
       engine._typeResolver
     );
   });
-}
-
-/**
- * The collection type `b` with the element type of the collection type `a`
- * joined to its own (a union, not a widening), or `b` itself when one of
- * them has no element type.
- */
-function joinedElements(a: Type, b: Type): Type {
-  if (
-    typeof b === 'string' ||
-    (b.kind !== 'list' &&
-      b.kind !== 'set' &&
-      b.kind !== 'collection' &&
-      b.kind !== 'indexed_collection')
-  )
-    return b;
-  const ea = collectionElementType(a);
-  if (ea === undefined) return b;
-  const joined = reduceType({ kind: 'union', types: [ea, b.elements] });
-  return { kind: b.kind, elements: joined };
 }
 
 /**
@@ -7071,6 +7124,26 @@ function absentCellAnswerMayBeMissing(
       k
     )
   );
+  // A parameter declared with a numeric type makes the call `Missing` for an
+  // absent argument (`absentAtNumericParameter()`, `boxed-function.ts`):
+  // with `f: (integer) -> integer`, `f(Missing)` is `Missing`, although its
+  // result type leaves the marker implicit.
+  const sig = resolveTypeAlias(fn.type);
+  if (
+    typeof sig !== 'string' &&
+    sig.kind === 'signature' &&
+    sources.some((d, k) => {
+      const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
+      const p = slots[k]?.type ?? sig.variadicArg?.type;
+      return (
+        typeCouldHoldMissing(d.type) &&
+        p !== undefined &&
+        p !== 'never' &&
+        isSubtype(p, 'number')
+      );
+    })
+  )
+    return true;
   const t = derive(s.name, args);
   return t !== undefined && typeContainsMissing(t);
 }
@@ -7649,6 +7722,12 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   }
   if (typeof t !== 'string' && t.kind === 'tuple') {
     const ct = componentTypeD(xs, position);
+    // A tuple type has no component at this position (`PointY` of a
+    // `tuple<integer>`): the read is proved to find nothing, and its only
+    // value is the marker of the component type, so it is typed by that
+    // marker alone (`nan` for a numeric component), as an `At` read proved
+    // out of range is (`provenAccessType()`).
+    if (position > t.elements.length) return markerType(ct);
     if (ct === 'unknown') {
       // Fold only inference-pending SYMBOL/literal components; a
       // possibly-collection APPLICATION component keeps its honest type (see
@@ -8055,9 +8134,6 @@ function nestedPointCoordinateType(
  * - A number literal is a cell of its TIER (`integer`, `real`, …), read off
  *   its structure. The list's type is a stored contract, so the literal's
  *   own value or enclosure type is never part of it, and never built here.
- * - The `Undefined` symbol is a cell of type `missing`, as a `Missing` cell
- *   is (`isUndefinedSymbolD()`). Without this, the fold for inference-pending
- *   symbols below typed it `number`.
  * - An inference-pending bare SYMBOL (a symbol typed `unknown`) is a cell of
  *   type `number` — the generic-symbol fold; an application typed
  *   `unknown`/`any` blocks, since it could return a collection.
@@ -8071,7 +8147,6 @@ function classifyCellD(op: OperandDescriptor): Type | null {
   const s = op.structureOf?.();
   if (s?.kind === 'number') return s.tier;
   if (mayEvaluateToNothingD(op)) return null;
-  if (isUndefinedSymbolD(op)) return 'missing';
   const t = op.type;
   // A failed cell (an `error` component) blocks the shape claim, and the
   // literal takes the element type of `literalElementType()`.
@@ -9030,38 +9105,46 @@ function markerType(t: Type): Type {
   if (t === 'never') return 'missing';
   if (t === 'unknown' || t === 'any') return parseType('nan | missing') as Type;
   if (isSubtype(t, 'number')) return 'nan';
+  // A read outside a collection of points is a point whose coordinates are
+  // all `NaN` (`domainAbsenceMarker()`).
+  const n = pointArity(t);
+  if (n !== undefined)
+    return {
+      kind: 'tuple',
+      elements: Array.from({ length: n }, () => ({ type: 'number' as Type })),
+    };
   return 'missing';
 }
 
 /**
- * `T | marker(T)`, normalized (§3.C): a numeric `T` gains a visible `| nan`
- * arm, an indeterminate `T` normalizes to `unknown` (I5-sound — `unknown`
- * does not claim non-missing), and a settled non-numeric `T` gains a visible
- * `| missing` arm.
+ * The result type of a read of an element of type `T` at a position that
+ * may not exist (`At(xs, i)`, `First(xs)`, `Last(xs)`, a coordinate read):
+ * `T` itself. The absence marker of such a read (`NaN` for a number, a
+ * point of `NaN` coordinates for a point, `Missing` otherwise) is implicit
+ * in the result type, as `error` is: `At` is typed
+ * `(indexed_collection<T>, integer+) -> T`, not `-> T | marker(T)`.
  *
- * The numeric arm used to be absorbed instead of added, on the reasoning that
- * `NaN ∈ number` so `T | NaN` collapsed to `number` anyway. The lattice flip
- * repealed that premise — the bare tiers are finite and `NaN` is no longer
- * one of their members — so the marker is genuinely additive now, and
- * `integer | nan` is both spellable and honest where the old answer was a
- * bare `number` that lost the element tier.
+ * An element type `never` (the element of an empty collection) gives
+ * `missing`: the read has no other value. An indeterminate `T` (`unknown`,
+ * `any`) gives `unknown`. A union with an `unknown` arm is kept: with `g:
+ * (unknown) -> list<unknown>` and `x: any`, the element type of `g(x)` is
+ * `list<unknown> | unknown`, and so is the type of `g(x)[1]`.
  *
- * One numeric tier still absorbs the arm: `nan <: number` remains true, so
- * `withMarker(number)` reduces back to a bare `number` while `integer`,
- * `real`, `rational` and `complex` all gain a visible `| nan`. That is why a
- * downstream `matches('number')` gate sees no change from this function —
- * every accessor result it used to admit still matches, the narrower ones
- * because `nan <: number` makes `integer | nan` a subtype of `number` too.
+ * A read whose position is proved not to exist is typed by its marker
+ * alone (`provenAccessType()`), since that is its only value.
  *
- * The arms are joined with `reduceType`, NOT with `widen`: widening climbs the
- * numeric ladder, so it answers a bare `number` for `integer ⊔ nan` and
- * throws the element tier away again — the very loss this function stopped
- * taking.
+ * A static type therefore does not show whether a read is absent, and no
+ * reader of absence (`IsMissing`, `Coalesce`, `AssertPresent`) may decide
+ * from such a type that its operand is present.
+ *
+ * Source: `docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+ * decision of 2026-11-02", and the 2026-09-01 rule that the markers are
+ * implicit in result types.
  */
 function withMarker(t: Type): Type {
   if (t === 'never') return 'missing';
   if (t === 'unknown' || t === 'any') return 'unknown';
-  return reduceType({ kind: 'union', types: [t, markerType(t)] });
+  return t;
 }
 
 /**
@@ -9438,13 +9521,12 @@ function absenceMarker(
   // An absent cell (`Missing`, typed `missing`) says nothing about the domain
   // of the other cells, so its arm is dropped before the domain is read.
   // Without this, the answer depended on how an unrelated cell was spelled:
-  // `Third((1, Missing))` was `Missing` while `Third((1, Undefined))` and
-  // `Third((1, 2))` were `NaN` (user decision of 2026-09-25: an out-of-range
+  // `Third((1, Missing))` was `Missing` while `Third((1, 2))` was `NaN` (user decision of 2026-09-25: an out-of-range
   // read of a numeric collection is `NaN`).
   if (t !== undefined) t = stripMissingFromType(t);
 
   if (t !== undefined && t !== 'unknown' && t !== 'any' && t !== 'never')
-    return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
+    return domainAbsenceMarker(ce, t);
 
   // Indeterminate element type: probe a bounded prefix of the actual
   // elements. Only for a small, finite collection — never materialize a
@@ -9468,7 +9550,28 @@ function absenceMarker(
   }
 
   if (readType !== undefined)
-    return absentMarkerIsNumeric(readType, undefined) ? ce.NaN : ce.Missing;
+    return absentMarkerIsNumeric(readType, undefined)
+      ? ce.NaN
+      : domainAbsenceMarker(ce, readType);
+  return ce.Missing;
+}
+
+/**
+ * The value of a read outside a collection whose elements have the type
+ * `t`: `NaN` for a number, a point whose coordinates are all `NaN` for a
+ * point (`At([(1, 2), (3, 4)], 5)` is `(NaN, NaN)`), and `Missing`
+ * otherwise (`At(["a", "b"], 5)` is `Missing`). A point is read as
+ * `pointArity()` reads it, so a read out of range gives the same `NaN`
+ * point as a position that an element-wise selection does not select
+ * (`unmatchedCell()`, `library/control-structures.ts`).
+ *
+ * Source: `docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+ * decision of 2026-11-02".
+ */
+function domainAbsenceMarker(ce: ComputeEngine, t: Type): Expression {
+  if (t !== 'never' && isSubtype(t, 'number')) return ce.NaN;
+  const n = pointArity(t);
+  if (n !== undefined) return nanPoint(ce, n);
   return ce.Missing;
 }
 
@@ -9511,10 +9614,12 @@ function chainAbsorbMarker(
   }
   if (t === 'unknown' || t === 'any' || t === 'never') {
     if (readType !== undefined)
-      return absentMarkerIsNumeric(readType, undefined) ? ce.NaN : ce.Missing;
+      return absentMarkerIsNumeric(readType, undefined)
+        ? ce.NaN
+        : domainAbsenceMarker(ce, readType);
     return ce.Missing;
   }
-  return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
+  return domainAbsenceMarker(ce, t);
 }
 
 /**
@@ -9554,8 +9659,8 @@ function unrestricted(e: Expression): Expression {
  * over `xs`. An absent element (`Missing`, such as the point of an
  * element-wise restriction whose condition is false) is not a point and not a
  * scalar, so it cannot decide: `PointX([Missing, (1, 2)])` is the list of
- * x-coordinates `[Missing, 1]`, as `PointX([(1, 2), Missing])` is
- * `[1, Missing]`. A failed cell (an element that is, or holds, an `Error`)
+ * x-coordinates `[NaN, 1]`, as `PointX([(1, 2), Missing])` is
+ * `[1, NaN]`. A failed cell (an element that is, or holds, an `Error`)
  * cannot decide either: `PointX([<error>, (1, 2)])` is `[<error>, 1]`.
  */
 function firstPresentElement(xs: Expression): Expression | undefined {
@@ -9574,17 +9679,33 @@ function firstPresentElement(xs: Expression): Expression | undefined {
  * `expression` (user decision of 2026-09-26, `docs/ERROR-MODEL.md` §2): `NaN`
  * when that type, less its `missing` arm, is numeric, and `Missing`
  * otherwise. So `First((1, 2) {0 < t})` is `NaN` once `t` is negative, as it
- * is when the restriction was lifted out before `t` got a value, and `First`
- * of a restricted list of points is `Missing`. A bare absent operand
+ * is when the restriction was lifted out before `t` got a value. When that
+ * type is a point (`pointArity()`), the marker is the point of `NaN`
+ * coordinates of its arity, the absent value of the domain of a point
+ * (`docs/ERROR-MODEL.md`, "`Missing` is a result only", rule 2): `First`
+ * of a restricted list of points is `(NaN, NaN)` once the condition is
+ * false, as a read out of range of a list of points is. A bare absent operand
  * (`First(Missing)`) has an application type that is not numeric, and its
  * marker is `Missing`. With no application to read, the marker is `Missing`.
+ *
+ * An accessor is a reader of `Missing`, so this marker is not the value of
+ * an operator over `Missing` (`absentScalarMarker()`, always `Missing`).
  */
 function absentOperandMarker(
   ce: ComputeEngine,
   expression: Expression | undefined
 ): Expression {
   if (expression === undefined) return ce.Missing;
-  return absentScalarMarker(ce, expression);
+  if (
+    absentMarkerIsNumeric(
+      expression.type.type,
+      expression.operatorDefinition?.signature.type
+    )
+  )
+    return ce.NaN;
+  return pointArity(expression.type.type) !== undefined
+    ? domainAbsenceMarker(ce, expression.type.type)
+    : ce.Missing;
 }
 
 /**
@@ -9622,15 +9743,11 @@ function componentAt(
   // An absent base propagates position-preservingly, mirroring `At` over a
   // `Missing` base (`missingBehavior: 'handle'` on First/Second/Third/Last).
   // The marker is that of the application's codomain
-  // (`absentOperandMarker`): `NaN` for a numeric element, `Missing`
-  // otherwise. Both symbols that name an absent datum take this route (user
-  // ruling of 2026-09-22): `Undefined` is declared `unknown`, so without
-  // this test it fell through to the type error below and reported that an
-  // absent operand is not an indexed collection. The answer is a marker,
-  // never the operand itself — the marker is what a consumer discharges
-  // with `IsMissing`/`Coalesce`. The same two names are tested by
-  // `isAbsentScalarSymbol` (`boxed-expression/validate.ts`).
-  if (isSymbol(xs, 'Missing') || isSymbol(xs, 'Undefined'))
+  // (`absentOperandMarker`): `NaN` for a numeric element, the point of
+  // `NaN` coordinates for a point (`pointArity()`), and `Missing` otherwise
+  // (a row). The answer is a marker, never the operand itself — the
+  // marker is what a consumer discharges with `IsMissing`/`Coalesce`.
+  if (isSymbol(xs, 'Missing'))
     return absentOperandMarker(ce, expression);
   if (xs.isCollection) {
     // Runtime re-validation of the `indexed_collection` parameter (the static
@@ -10103,6 +10220,11 @@ function pointComponentOf(
     return ce
       .function(POINT_ACCESSOR_BY_POSITION[position - 1], [e])
       .evaluate();
+  // An absent point (`Missing`, the value of a restricted point whose
+  // condition is false) has an absent coordinate, and the absent value of a
+  // number is `NaN`: `PointY([If(c, (1, 2)), (3, 4)])` is `[NaN, 4]` when `c`
+  // is false, as `PointY(If(c, (1, 2)))` alone is `NaN`.
+  if (isAbsentSymbol(e)) return ce.NaN;
   const component = e.at(position);
   if (component !== undefined) return component;
   // A failed cell (an element that is, or holds, an `Error`) that is not a
@@ -10181,10 +10303,10 @@ function pointAccessorElementCount(
 // it maps over, `PointX(L)` at `k` is `PointX(L.at(k))`.
 //
 // A point that may be absent (`(1, 1) {1 < 0}`) is declined, so that `at()`
-// evaluates the accessor. The accessor gives a different marker for an
-// absent point inside a list (`Missing`, from `pointComponentOf`) and for an
-// absent point alone (`NaN`, from `missingBehavior: 'propagate'`), so
-// `PointX(L.at(k))` would not be the element `k` of the evaluation.
+// evaluates the accessor over the whole list, as the evaluation does. The
+// coordinate of an absent point is `NaN` in a list (`pointComponentOf`) and
+// alone, but only the evaluation of the list decides whether the point is
+// absent.
 function pointAccessorElementAt(
   position: number
 ): (expr: Expression, k: number) => Expression | undefined {
@@ -10194,8 +10316,8 @@ function pointAccessorElementAt(
     const point = xs.at(k);
     // A point that holds a restriction (`If(c, P)`) is typed as the point,
     // but it is absent where `c` fails, and the coordinate of an absent
-    // point in the list is `Missing`: the element is read from the
-    // evaluated value instead.
+    // point in the list is `NaN`: the element is read from the evaluated
+    // value instead.
     if (
       point === undefined ||
       !isTupleShapedType(point.type.type) ||
@@ -15747,20 +15869,35 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         fn === undefined
       )
         return BoxedType.forResult(result, engine._typeResolver);
-      // Any other result (a declared one, the own type of a literal, or the
-      // call of a symbol on a cell type with no `missing` arm) describes the
-      // call on a present cell only. The call on an absent
-      // cell is described as for a declared callback of `Map`: `NaN` for a
-      // number (`(x: integer) ↦ [x]` answers `NaN` for an absent cell, the
-      // absorption of `absorbOperandAbsence`), and a `missing` arm when that
-      // call can be absent. A literal with a bare parameter that
+      // A call of a literal with `Missing` at an annotated numeric parameter
+      // is `Missing` (`apply()`, `function-utils.ts`), and is spliced as one
+      // element: `(x: integer) ↦ [x]` over `[1, Missing]` is `[1, Missing]`,
+      // typed `list<integer | missing>`.
+      if (
+        literal?.kind === 'function-literal' &&
+        literal.parameters.some((p) => p.annotated !== undefined)
+      )
+        return BoxedType.forResult(
+          {
+            kind: 'list',
+            elements: reduceType({
+              kind: 'union',
+              types: [result.elements, 'missing'],
+            }),
+          },
+          engine._typeResolver
+        );
+      // Any other result (a declared one, the own type of a bare literal, or
+      // the call of a symbol on a cell type with no `missing` arm) describes
+      // the call on a present cell only. The call on an absent cell is
+      // described as for a declared callback of `Map`: the absorption of
+      // `absorbOperandAbsence`, and a `missing` arm when that call can be
+      // absent. A literal with a bare parameter that
       // `bareMappingElementTypeD` could not type gets that arm too: its own
       // type was computed with the parameter `unknown`, a value, and the
       // absent cell can go through its body as it is. The element type is
-      // the join of both calls: the absorption replaces a `missing` arm of
-      // the result that the callback returns for a present cell
-      // (`(x: integer) ↦ [x, Missing]` is `[1, Missing, NaN, Missing]` over
-      // `[1, Missing]`), so the result of the present call is kept beside it.
+      // the join of both calls, so the result of the present call is kept
+      // beside the absorbed one.
       // A source that can hold an absent cell only through `any` has no
       // `missing` arm for the absorption to read, so it is given as
       // `list<missing>`, as `withDeclaredCallbackAbsence` does for `Map`.
@@ -16159,13 +16296,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // not read as a collection. Only the collection strips `missing`: an
     // absent appended value is an ordinary cell, kept in place
     // (`Append([1], Missing)` is `[1, Missing]`), as `Insert` and `ReplaceAt`
-    // keep it and as `Join([1, Missing], [3])` does. The parameter spells the
-    // `missing` arm for that reason; `Undefined` is typed `unknown` and was
-    // already admitted (rule A of
-    // `docs/plans/2026-09-26-absent-values-in-collection-operators.md`).
+    // keep it and as `Join([1, Missing], [3])` does. The parameter is `any`
+    // for that reason: a declared parameter type may not name the marker
+    // `missing` (`declaredTypeNamesMissing()`), and `any` admits it (rule A
+    // of `docs/plans/2026-09-26-absent-values-in-collection-operators.md`).
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(collection<any>, (value | missing)+) -> collection',
+    signature: '(collection<any>, any+) -> collection',
     // Same-head flatten: `Append(Append(c, …vs), …ws)` → `Append(c, …vs, …ws)`,
     // so an accumulator loop (`xs = Append(xs, v)`) builds a node of bounded
     // DEPTH — every structural walker (serialization, hashing, `isSame`,
@@ -17393,10 +17530,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // remaining indices into the final position's domain.
         // An absent BASE (a restricted collection whose condition is false)
         // has no type of its own left to peel: its value is the `Missing`
-        // (or `Undefined`) symbol. The marker is then that of the application's codomain
+        // symbol. The marker is then that of the application's codomain
         // (`absentOperandMarker`): `NaN` for a numeric element, as when the
-        // restriction was lifted out before its condition was decided, and
-        // `Missing` for a row or a point.
+        // restriction was lifted out before its condition was decided, the
+        // point of `NaN` coordinates for a point (`pointArity()`), and
+        // `Missing` otherwise (a row).
         if (index === 1 && isAbsentSymbol(expr))
           return absentOperandMarker(ce, expression);
         // An absent INTERMEDIATE value (a row that is `Missing`) has no
@@ -22259,7 +22397,7 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
  * undetermined element) and no short-circuit fired, `undefined` is returned so
  * the expression stays inert — the CAS-correct behavior rather than throwing.
  *
- * A predicate answer of `Missing` or `Undefined` — what a comparison gives for
+ * A predicate answer of `Missing` — what a comparison gives for
  * an absent element, `Missing > 2` — is combined by KLEENE logic, the table
  * `Or` and `And` use, since `Any` is a fold of `Or` and `All` a fold of `And`:
  * a short-circuit still wins (`Any([1, Missing, 3], x ↦ x > 2)` is `True`,
@@ -22349,7 +22487,7 @@ function quantifierWalk(
         : route === undefined
           ? item.evaluate()
           : ((yield item.evaluateAsync(route)) as Expression);
-      // An absent answer (`Missing`, `Undefined`) reads as `False`, as in
+      // An absent answer (`Missing`) reads as `False`, as in
       // `Or` and `And`: the logic is two-valued (user decision 2026-11-02).
       const s =
         result !== undefined && isAbsentSymbol(result) ? 'False' : sym(result);
@@ -23008,7 +23146,7 @@ function canonicalList(
         // (Canonicalization already erased any `Nothing` elements.)
         run.push(...x.ops);
       } else if (isAbsentSymbol(x) || mayBeAbsentCollectionOperand(x)) {
-        // An absent operand (`Missing`, `Undefined`), or one that may be an
+        // An absent operand (`Missing`), or one that may be an
         // absent collection (`Sort(Missing)`, typed `missing`, which reads
         // as a scalar), is an absent collection, not one element (user
         // decision 2026-09-26): it is a segment of the `ListJoin`, which then
@@ -23112,7 +23250,7 @@ function canonicalSet(
       const x = op.ops[0].canonical;
       if (isFunction(x, 'List') || isFunction(x, 'Set')) run.push(...x.ops);
       else if (isAbsentSymbol(x) || mayBeAbsentCollectionOperand(x)) {
-        // An absent operand (`Missing`, `Undefined`), or one that may be an
+        // An absent operand (`Missing`), or one that may be an
         // absent collection (`Sort(Missing)`), is an absent collection, not
         // one element (user decision 2026-09-26), as in `canonicalList`: it
         // is a segment of the `Join`, which then evaluates to `Missing`, and
@@ -23929,7 +24067,7 @@ const SOURCE_FIRST_COLLECTION_OPERATORS = new Set([
 
 /**
  * True when `op`, a collection operand of `Join` or of `Append`, can be
- * absent: the `Missing` or `Undefined` symbol; a restriction (a single-branch
+ * absent: the `Missing` symbol; a restriction (a single-branch
  * `If`) or a piecewise value (`Which`, `If`) that is held because its condition is not
  * decided when the expression is built; or a nested `Join`, or a collection
  * operator whose source is one of these (`Take(Missing, 1)`).
@@ -23975,7 +24113,7 @@ function mayBeAbsentCollectionOperand(op: Expression): boolean {
  * collection route and its `collection<any>` inference.
  */
 function wrapScalarJoinOperand(ce: ComputeEngine, op: Expression): Expression {
-  // An absent operand (`Missing`, `Undefined`) is an absent collection, not
+  // An absent operand (`Missing`) is an absent collection, not
   // one element: `Join(Missing, [1])` is `Missing`, as a collection operator
   // over an absent collection is (user decision 2026-09-26). Before, it was
   // wrapped, and the result was `[Missing, 1]`, while a restricted list whose
@@ -25450,7 +25588,7 @@ function* sortedIndicesWalk(
   // existing changes meaning.
   if (f && fn && requiredArity(fn.type.type) === 1) {
     const keys = new Map<number, Expression>();
-    // An ABSENT element (`Missing`, `Undefined`) sorts last whatever its key
+    // An ABSENT element (`Missing`) sorts last whatever its key
     // (see `nanLastOrder`): it holds no value, so its key is not computed.
     // Compared by key, `Sort([Missing, 2, 1], x ↦ 0)` tied every element
     // and kept `Missing` first.
@@ -25583,7 +25721,7 @@ function* mergeSortWalk<T>(
  * either, and the caller decides the pair (the default order leaves the sort
  * undetermined).
  *
- * An ABSENT element — the `Missing` or `Undefined` symbol — sorts last too,
+ * An ABSENT element — the `Missing` symbol — sorts last too,
  * after every other element, `NaN` included, and whatever that other element
  * is: an absent cell holds no value to compare, so the only order that does
  * not depend on a guess is "at the end". Two absent elements tie, so the

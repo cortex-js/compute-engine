@@ -101,6 +101,7 @@ import {
   isTuple,
   isTextAtom,
   leafwardElementType,
+  pointArity,
 } from '../collection-utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { core } from './compiler-core-hooks.js';
@@ -2277,7 +2278,7 @@ function compilePythonComprehension(
  * search for the compiled value `v`.
  *
  * This target fails closed on a needle that may be the OBJECT-domain absence,
- * `Missing` or `Undefined`: a written absence symbol lowers to `math.nan` here
+ * `Missing`: a written absence symbol lowers to `math.nan` here
  * (`docs/ERROR-MODEL.md` §3, since numpy raises on `None`), so the compiled
  * search would find it where a `NaN` cell sits, while the interpreter keeps
  * the two markers apart (`IndexOf([1, NaN], Missing)` is `0`). The JavaScript
@@ -2285,7 +2286,7 @@ function compilePythonComprehension(
  * only a COMPUTED absence (`compileSearchedValue`).
  *
  * The same spelling makes the COLLECTION side ambiguous: a cell that is
- * `Missing` or `Undefined` is `nan` here too, so a numeric needle that is
+ * `Missing` is `nan` here too, so a numeric needle that is
  * `NaN` at run time would be found where an absent cell sits
  * (`IndexOf([1, Missing], NaN)` is `0` in the interpreter). A needle that may
  * be a number is therefore refused when the collection's element type has a
@@ -2312,7 +2313,6 @@ function pySearchedValue(
     );
   if (
     isSymbol(needle, 'Missing') ||
-    isSymbol(needle, 'Undefined') ||
     (typeContainsMissing(t) && couldMatch(stripMissingFromType(t), 'number'))
   )
     throw new Error(
@@ -2895,7 +2895,7 @@ const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b):
  *    and a compiled tuple needle matches it — a deliberate choice, matching how
  *    the engine lowers `Matrix` rows (as nested lists / an ndarray);
  *  - strings are unchanged. A needle that may be the object-domain absence
- *    (`Missing`, `Undefined`) does not reach this helper: `pySearchedValue`
+ *    (`Missing`) does not reach this helper: `pySearchedValue`
  *    refuses it at compile time, since this target spells it as `nan`.
  *
  * The one other departure from Python equality is NaN: `nan == nan` is False,
@@ -4351,12 +4351,12 @@ function compilePyJoin(
   compile: (expr: Expression) => string
 ): string {
   if (args.length === 0) return '[]';
-  // An absent operand (`Missing`, `Undefined`) is an absent collection, and
+  // An absent operand (`Missing`) is an absent collection, and
   // the interpreter answers `Missing` for the whole join (user decision
   // 2026-09-26). The scalar arm below compiled it as one `nan` element
   // (`[math.nan, 3]`), so the call fails closed.
   const absent = args.findIndex(
-    (a) => isSymbol(a, 'Missing') || isSymbol(a, 'Undefined')
+    (a) => isSymbol(a, 'Missing')
   );
   if (absent >= 0)
     throw new Error(
@@ -4492,8 +4492,16 @@ function pyAbsenceMarkerOfElementType(eltT: Type | undefined): string {
     present !== 'unknown' &&
     present !== 'any' &&
     present !== 'never'
-  )
-    return isSubtype(present, 'number') ? "float('nan')" : 'None';
+  ) {
+    if (isSubtype(present, 'number')) return "float('nan')";
+    // A read outside a collection of points is a point whose coordinates are
+    // all `nan`, as in the interpreter (`domainAbsenceMarker()`,
+    // `library/collections.ts`).
+    const n = pointArity(present);
+    if (n !== undefined)
+      return `(${Array.from({ length: n }, () => "float('nan')").join(', ')}${n === 1 ? ',' : ''})`;
+    return 'None';
+  }
   // An element type that is not known reads the first 10 elements, as the
   // interpreter's probe does (`MAX_ABSENCE_MARKER_PROBE`). A mixed element
   // type reads every element: the interpreter then picks the marker from
@@ -4954,7 +4962,7 @@ function pythonAbsent(
 }
 
 /**
- * True when `e` is a written absence symbol, `Missing` or `Undefined`, and
+ * True when `e` is a written absence symbol, `Missing`, and
  * not a variable of that name (a bound name or a key of the caller's
  * `vars`, which keep their meaning, as in `BaseCompiler._compileInner`).
  */
@@ -4962,7 +4970,7 @@ function pythonIsWrittenAbsence(
   e: Expression,
   target: CompileTarget<Expression>
 ): boolean {
-  if (!isSymbol(e, 'Missing') && !isSymbol(e, 'Undefined')) return false;
+  if (!isSymbol(e, 'Missing')) return false;
   return (
     target.boundVars?.has(e.symbol) !== true &&
     target.varsKeys?.has(e.symbol) !== true
@@ -4971,7 +4979,7 @@ function pythonIsWrittenAbsence(
 
 /**
  * The code of the value arm `arm` of a selection whose absence literal is
- * `absent` (`pythonAbsent`). A written `Missing` (or `Undefined`) arm is that
+ * `absent` (`pythonAbsent`). A written `Missing` arm is that
  * literal: beside a point or a list it is `None`, the value the else-less
  * `If(c, (x, y))` gives, where the written symbol alone
  * compiles to `math.nan` on this target (`writtenSymbol: 'numeric'`). Any
@@ -6932,7 +6940,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // each call, as in the interpreter. A native Python default (`k=2`) is
     // not used: it does not fill a supplied absent value.
     const declared: string[] = [];
-    const filled: [string, string][] = [];
+    const filled: [string, string, string][] = [];
     args.slice(1).forEach((p, i) => {
       const d = optionalParameterDefault(p);
       if (d === undefined) {
@@ -6940,7 +6948,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         return;
       }
       declared.push(`${params[i]}=None`);
-      filled.push([params[i], compile(callSiteDefault(d))]);
+      // A parameter typed as a point also takes its default for a `NaN`
+      // point (`pyPointAbsentTest()`). So does a parameter with no declared
+      // type whose default is a point: it is meant to receive a point, and
+      // the interpreter fills a `NaN` point there.
+      const t = functionLiteralParameterType(p) ?? d.type.type;
+      const n = t === undefined ? undefined : pointArity(t);
+      filled.push([
+        params[i],
+        compile(callSiteDefault(d)),
+        n === undefined ? PY_ABSENT_TEST : pyPointAbsentTest(n),
+      ]);
     });
     if (filled.length === 0)
       return `(lambda ${declared.join(', ')}: ${bodyCode})`;
@@ -6948,8 +6966,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       .map(([n]) => n)
       .join(', ')}: ${bodyCode})(${filled
       .map(
-        ([n, code]) =>
-          `${code} if (lambda _c: ${PY_ABSENT_TEST})(${n}) else ${n}`
+        ([n, code, test]) => `${code} if (lambda _c: ${test})(${n}) else ${n}`
       )
       .join(', ')}))`;
   },
@@ -7846,6 +7863,23 @@ const PY_ABSENT_TEST =
   '_c is None or (isinstance(_c, (float, complex, np.floating, ' +
   'np.complexfloating)) and cmath.isnan(_c))';
 
+/**
+ * The absence test of a discharge on `_c` at a position whose static type is
+ * a point of `n` coordinates: `PY_ABSENT_TEST`, or a `NaN` point (a point
+ * whose `n` coordinates are all `NaN`), as a read past the end of a list
+ * of points gives. The interpreter reads the same values as absent
+ * (`isMissingValue()`, `type-guards.ts`). The coordinates are read only
+ * when `PY_ABSENT_TEST` is false, so `None` and `math.nan` (a written
+ * `Missing` on this target) are read without an error.
+ */
+function pyPointAbsentTest(n: number): string {
+  const coordinates = Array.from(
+    { length: n },
+    (_, i) => `cmath.isnan(_c[${i}])`
+  ).join(' and ');
+  return `${PY_ABSENT_TEST} or (${coordinates})`;
+}
+
 export class PythonTarget implements LanguageTarget<Expression> {
   /** Whether to include 'import numpy as np' in generated code */
   private includeImports: boolean;
@@ -7987,7 +8021,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // axis is `None`. Consumed by `IsMissing`, `Coalesce` and `AssertPresent`.
       //
       // The numeric test reads `None` as absent as well as `math.nan`
-      // (2026-09-22). A WRITTEN absence symbol (`Missing`, `Undefined`) lowers
+      // (2026-09-22). A WRITTEN absence symbol (`Missing`) lowers
       // to the object null `None` — see the absence-symbol branch of
       // `BaseCompiler._compileInner` — and `cmath.isnan(None)` raises a
       // `TypeError`, so the `is None` test comes first and short-circuits
@@ -8020,6 +8054,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
         // idiom this target already uses for its integer-operand checks
         // (`pythonIntegerDivisionLike`). `AssertPresent` (`x?!`) uses it
         // for the absent branch.
+        // A point position also reads a `NaN` point as absent
+        // (`pyPointAbsentTest()`).
+        point: {
+          isAbsent: (x, n) => `(lambda _c: ${pyPointAbsentTest(n)})(${x})`,
+          coalesce: (x, d, n) =>
+            `(lambda _c: ${d} if (${pyPointAbsentTest(n)}) else _c)(${x})`,
+        },
         raise: (message) => `(_ for _ in ()).throw(ValueError(${message}))`,
         // A written `Missing` is `math.nan` here, not `None`: numpy raises
         // on `None` (`np.cos(None)`, `np.median([1, None, 3])`) where the

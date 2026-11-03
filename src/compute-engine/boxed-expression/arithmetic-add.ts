@@ -41,7 +41,6 @@ import {
 import {
   isNumber,
   isFunction,
-  isSymbol,
   isAbsentSymbol,
   isAbsentArithmeticOperand,
   isContinuationOperand,
@@ -236,14 +235,13 @@ export function canonicalAdd(
   }
 
   // A sum of several terms that folds down to a lone absent term
-  // (`Add(Missing, 0)`, `Add(Missing, 1, -1)`) is `NaN`, not the bare
-  // symbol: arithmetic with an absent operand is `NaN` (user decision of
-  // 2026-09-25), and removing the `+ 0` must not turn the sum into the
-  // absent value itself. `Add(Missing, x)` is not folded here: it stays a
-  // sum, and its evaluation answers `NaN`.
+  // (`Add(Missing, 0)`, `Add(Missing, 1, -1)`) is `Missing`: `Missing` is
+  // a result only, and an operator over it gives `Missing`
+  // (`docs/ERROR-MODEL.md`). `Add(Missing, x)` is not folded here: it
+  // stays a sum, and its evaluation answers `Missing`.
   const severalTerms = ops.length > 1;
   const lone = (x: Expression): Expression =>
-    severalTerms && isAbsentSymbol(x) ? ce.NaN : x;
+    severalTerms && isAbsentSymbol(x) ? ce.Missing : x;
 
   // Remove an exact literal 0. A float `0.0` is kept: a float operand makes
   // the sum numeric, so `0.0 + x` stays `0.0 + x`, as it does in Mathematica.
@@ -835,18 +833,18 @@ export function addArray(xs: ReadonlyArray<Expression>): Expression {
   // `(-6, n)` with `n` a list) add component-wise (never broadcast).
   if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, false);
 
-  // An absent term (`Missing`, `Undefined`, or a product or negation of one)
-  // makes the sum `NaN`, as the `Add` operator answers at evaluation:
-  // arithmetic with an absent operand is `NaN` (user decision of
-  // 2026-09-25). Before, only `Undefined` was read this way (in `Terms`),
-  // and `ce.box('Missing').add(ce.box(1))` was `"Missing" + 1`. A term that
-  // is collection-typed but has no value yet (`L: list<number>`) keeps the
-  // sum inert: once it resolves, the absence is broadcast over its cells.
+  // An absent term (`Missing`, or a product or negation of one) makes the
+  // sum `Missing`, as the `Add` operator answers at evaluation: `Missing`
+  // is a result only, and an operator over it gives `Missing`
+  // (`docs/ERROR-MODEL.md`). So `ce.box('Missing').add(ce.box(1))` is
+  // `Missing`. A term that is collection-typed but has no value yet
+  // (`L: list<number>`) keeps the sum inert: once it resolves, the absence
+  // is broadcast over its cells.
   if (
     xs.some((x) => isAbsentArithmeticOperand(x)) &&
     !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
   )
-    return xs[0].engine.NaN;
+    return xs[0].engine.Missing;
 
   // A kind value among the terms (a residue class): only the hooks of the
   // kinds apply, after the broadcast over a collection above
@@ -1036,7 +1034,7 @@ function addTuples(
   if (ops.some((x) => isProvablyScalarNumber(x)))
     return ce.error(['incompatible-type', 'tuple', 'number']);
 
-  // An absent addend (`Missing` or `Undefined`) beside a point makes the
+  // An absent addend (`Missing`) beside a point makes the
   // whole point absent: a tuple is atomic, so there is no cell for the
   // absence to land in (`docs/ERROR-MODEL.md` §3). The `Add` operator already
   // answers `Missing` at evaluation; the `.add()` method stayed an inert
@@ -1070,11 +1068,11 @@ function addTuples(
       const c = isFunction(x) ? x.ops[i] : x;
       return numericApproximation ? c.N() : c.evaluate();
     });
-    // An absent component (`Missing` or `Undefined`) is `NaN` in this numeric
-    // slot. `add()` folds `Undefined` to `NaN` but not `Missing`, so without
-    // this `(1, Missing) + (1, 1)` was `(2, Missing + 1)`.
+    // An absent component (`Missing`) makes the sum of the components
+    // `Missing`, as the `Add` operator answers: `(1, Missing) + (1, 1)` is
+    // `(2, Missing)`, as `-(1, Missing)` is `(-1, Missing)`.
     if (parts.some((p) => isAbsentSymbol(p))) {
-      components.push(ce.NaN);
+      components.push(ce.Missing);
       continue;
     }
     components.push(
@@ -1324,7 +1322,7 @@ export class Terms {
       // current value, and a sum built from the symbol must not depend on it
       // (with `w := NaN`, `w + 1` stayed `NaN` after `w := 4`). The symbol
       // stays a term, and `evaluate()` reads its value.
-      if ((isNumber(term) && term.isNaN) || isSymbol(term, 'Undefined')) {
+      if (isNumber(term) && term.isNaN) {
         this.terms = [{ term: nanOperandAnswer(ce, terms), coef: [] }];
         return;
       }

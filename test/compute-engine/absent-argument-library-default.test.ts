@@ -12,17 +12,20 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // parameter read as a form (`expression`, `symbol`) or admitting anything
 // (`any`, `unknown`).
 //
-// The Epsil static check reports a possibly absent argument at such a
-// parameter on the same terms as at a function literal's annotated parameter
-// (decision P3), with the same discharges: `?!`, `??`, or a guard.
+// The Epsil static check does not report a possibly absent argument at such
+// a parameter: `Missing` is a result only (user decision of 2026-11-02), and
+// the result type of an accessor leaves the marker implicit. The discharges
+// `?!`, `??` and a guard are accepted.
 //
 
 let ce: ComputeEngine;
 beforeEach(() => {
+  // A declared type cannot name `missing`, but a store into a declared name
+  // accepts `Missing`.
   ce = new ComputeEngine();
-  ce.declare('om', 'string | missing');
+  ce.declare('om', 'string');
   ce.assign('om', ce.Missing);
-  ce.declare('ob', 'boolean | missing');
+  ce.declare('ob', 'boolean');
   ce.assign('ob', ce.Missing);
 });
 
@@ -74,11 +77,11 @@ describe('the evaluation default', () => {
   });
 
   test('the declared behaviors are unchanged', () => {
-    expect(ce.box(['Length', 'om']).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['Length', 'om']).evaluate().toString()).toBe('"Missing"');
     // A comparison with an absent operand is `False` (user decision of
     // 2026-11-02, two-valued comparisons).
     expect(ce.box(['Equal', 'om', "'a'"]).evaluate().symbol).toBe('False');
-    expect(ce.box(['Sin', 'Missing']).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['Sin', 'Missing']).evaluate().toString()).toBe('"Missing"');
     expect(ce.box(['Coalesce', 'om', "'d'"]).evaluate().string).toBe('d');
   });
 
@@ -96,7 +99,7 @@ describe('the evaluation default', () => {
     // symbol assigned `Missing` is inferred `missing`, a type that no
     // admission matches to `character | string` (as `n := 5; ToUpperCase(n)`
     // is refused), so that form is a type error at boxing on every route.
-    ce.declare('w', 'string | missing');
+    ce.declare('w', 'string');
     ce.assign('w', ce.Missing);
     const expr = ce.box(['ToUpperCase', 'w']);
     expect(expr.isValid).toBe(true);
@@ -118,12 +121,10 @@ describe('the evaluation default', () => {
 describe('the Epsil static check at a library parameter', () => {
   const XS = 'let xs: list<string> = ["a"]\nlet i: integer = 1\n';
 
-  test('a possibly absent argument is reported', () => {
+  test('a possibly absent argument is not reported', () => {
+    // `xs[i]` is typed `string`: the marker of an accessor is implicit.
     const r = run(`${XS}trim(xs[i])`);
-    expect(r.diagnostics.join(' ')).toContain(
-      'expected `character | string`, got `missing | string` at `xs[i]`'
-    );
-    // The program still runs: the check is a linter.
+    expect(r.diagnostics).toEqual([]);
     expect(r.value).toBe('"a"');
   });
 

@@ -67,7 +67,7 @@
  * only what its body proves: `(unknown) -> list<unknown>`, not
  * `(unknown) -> vector<2>`, since a parameter with no annotation can
  * receive any value (`g("a")` is `["a", 2 "a"]`). So `g(x)` is a
- * `broadcastable<list<unknown>>`, an index into it is `missing | unknown`,
+ * `broadcastable<list<unknown>>`, an index into it is `list<unknown> | unknown`,
  * and the readers below give the types of the elements of a
  * `list<unknown>`. The checks that the type holds the value are unchanged.
  * Two consequences followed, both fixed since: compiled code that could not
@@ -83,8 +83,12 @@
  * `(unknown) -> vector<2>` (`g("a")` is now an `incompatible-type` error in
  * its second element). The types below are the ones that the box route gives
  * for `['Multiply', 2, 't']`: `g(x)` is a `list<list<any> | number>`, and an
- * index into it is `list<any> | missing | number`. Each type still holds the
- * values the tests read.
+ * index into it is `list<any> | number`. Each type still holds the values
+ * the tests read.
+ *
+ * The type of an accessor does not name the absence marker of a read out of
+ * range (`docs/ERROR-MODEL.md`, "`Missing` is a result only": the marker is
+ * implicit in a result type), and a declared type cannot name `missing`.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -214,9 +218,7 @@ describe('Tycho row 425: the instrument', () => {
     // The box route types `g(x)` and `g(x)[1]` the same way for
     // `t ↦ [t, 2\cdot t]` (ROADMAP CE-32).
     expect(ce.parse('g(x)').type.toString()).toBe('list<list<any> | number>');
-    expect(ce.parse('g(x)[1]').type.toString()).toBe(
-      'list<any> | missing | number'
-    );
+    expect(ce.parse('g(x)[1]').type.toString()).toBe('list<any> | number');
   });
 
   test('with x: any, Repeat(0, g(x)[1]) boxes', () => {
@@ -249,7 +251,7 @@ describe('Tycho row 425: the instrument', () => {
 describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
   // The types that the box route gives for `t ↦ [t, 2\cdot t]` (ROADMAP
   // CE-32): an element of `g(x)` is a number or a list.
-  const INDEX = 'list<any> | missing | number';
+  const INDEX = 'list<any> | number';
   const LIST = 'list<list<any> | number>';
   const readers: [string, unknown, string, string, string][] = [
     // name, expression, static type, value for x = 3, value for x = [1, 2, 3]
@@ -305,7 +307,7 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
     const ce = rowEngine();
     const expr = ce.box(json as any);
     const { type, values } = staticTypeAndValues(ce, expr, 'x', [LIST_X]);
-    // The operand is `list<any> | missing | number`: the accessor reads the
+    // The operand is `list<any> | number`: the accessor reads the
     // first slot of the list arm, which is of any type (ROADMAP CE-32; the
     // box route gives the same type for `t ↦ [t, 2\cdot t]`).
     expect(type).toBe('any');
@@ -320,9 +322,9 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
     const expr = ce.box(['Dot', ['At', ['g', 'x'], 1], ['List', 1, 1]]);
     // `Dot` claims a number only for two operands that are provably rank-1
     // numeric; an operand of unknown type gets the wide `value` of its
-    // signature, with the `missing` arm of the index.
+    // signature.
     expect(staticTypeAndValues(ce, expr, 'x', [LIST_X])).toEqual({
-      type: 'missing | value',
+      type: 'value',
       values: [['3', true]],
     });
   });
@@ -370,7 +372,7 @@ describe('Tycho row 425: a restricted list, a union T', () => {
         ['List', ['List', 1, 2], ['List', 3]],
       ])
     ).toEqual({
-      type: 'list<any> | missing | number',
+      type: 'list<any> | number',
       values: [
         ['3', true],
         ['[1,2]', true],
@@ -397,7 +399,7 @@ describe('Tycho row 425: a declared broadcastable<T>', () => {
     [
       'broadcastable<vector<2>>',
       VECTOR,
-      'missing | number | vector<2>',
+      'number | vector<2>',
       'list<number | vector<2>>',
     ],
     [
@@ -406,14 +408,8 @@ describe('Tycho row 425: a declared broadcastable<T>', () => {
         ['List', 1, 2],
         ['List', ['List', 1, 2], ['List', 3, 4, 5]],
       ],
-      'integer | list<integer> | missing | nan',
+      'integer | list<integer>',
       'list<integer | list<integer>>',
-    ],
-    [
-      'broadcastable<vector<2> | missing>',
-      VECTOR,
-      'missing | number | vector<2>',
-      'list<missing | number | vector<2>>',
     ],
     [
       'broadcastable<list<integer> | boolean>',
@@ -421,31 +417,30 @@ describe('Tycho row 425: a declared broadcastable<T>', () => {
         ['List', 1, 2],
         ['List', ['List', 1, 2], ['List', 3]],
       ],
-      'boolean | integer | list<integer> | missing | nan',
+      'boolean | integer | list<integer>',
       'list<boolean | integer | list<integer>>',
     ],
     [
       // A transparent alias of `vector<2>`, declared below.
       'broadcastable<v2>',
       VECTOR,
-      'missing | number | v2',
+      'number | v2',
       'list<number | v2>',
     ],
     [
       'broadcastable<broadcastable<vector<2>>>',
       [...VECTOR, ['List', ['List', ['List', 1, 2], ['List', 3, 4]]]],
-      'broadcastable<vector<2>> | missing | number',
+      'broadcastable<vector<2>> | number',
       'list<broadcastable<vector<2>> | number>',
     ],
     [
-      // An `unknown` element of the `T` arm does not absorb the list arm,
-      // and the access keeps its absence marker.
+      // An `unknown` element of the `T` arm does not absorb the list arm.
       'broadcastable<list<unknown>>',
       [
         ['List', 1, 2],
         ['List', ['List', 1], ['List', 2]],
       ],
-      'missing | unknown',
+      'list<unknown> | unknown',
       'list<list<unknown> | unknown>',
     ],
   ];
@@ -496,9 +491,7 @@ describe('Tycho row 425: a declared broadcastable<T>', () => {
   test('a T that cannot hold a list is a cell: the arm only', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'broadcastable<number>');
-    expect(ce.box(['At', 'p', 1]).type.toString()).toBe(
-      'missing | number | tensor'
-    );
+    expect(ce.box(['At', 'p', 1]).type.toString()).toBe('number | tensor');
   });
 });
 
@@ -674,7 +667,7 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
     // index out of range is picked from the value, and an element in range
     // is returned as it is.
     const ce = new ComputeEngine();
-    ce.declare('q', 'list<number | list<number> | missing>');
+    ce.declare('q', 'list<number | list<number>>');
     ce.declare('k', 'integer');
     const expr = ce.box(['At', 'q', 'k']);
     const run = compile(expr, {
@@ -683,7 +676,6 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
     } as never).run!;
     const cases: [unknown, unknown, number][] = [
       [[NaN, [1]], ['List', 'NaN', ['List', 1]], 1],
-      [[undefined, 1], ['List', 'Missing', 1], 5],
       [[[1], 2], ['List', ['List', 1], 2], 5],
       [[1, 2], ['List', 1, 2], 5],
     ];
@@ -752,8 +744,8 @@ function approximatelyEqual(a: string, b: string): boolean {
 describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
   // `m(t) = [[t, 2t], [3t, 4t]]`: `m(x)[1]` is a row (`vector<2>`) when `x`
   // is a number and a matrix when `x` is a list. Arithmetic on it maps over
-  // each arm and keeps the `missing` arm; it was typed `number`, and the
-  // compiled code read the absent value as a number.
+  // each arm; it was typed `number`, and the compiled code read the absent
+  // value as a number.
   function matrixEngine(xType = 'any'): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('m', 'function');
@@ -779,14 +771,14 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
   // list whose rows differ in length (`[[1], [2, 3]]`), which is not a
   // tensor (user decision 2026-10-25).
   test.each([
-    ['m(x)[1]', '\\operatorname{At}(m(x), 1)', 'list<any> | missing'],
-    ['sqrt(m(x)[1])', '\\sqrt{m(x)[1]}', 'list<list<any> | number> | missing'],
-    ['2 m(x)[1]', '2 m(x)[1]', 'list<any> | missing'],
-    ['sin(m(x)[1])', '\\sin(m(x)[1])', 'list<list<any> | number> | missing'],
+    ['m(x)[1]', '\\operatorname{At}(m(x), 1)', 'list<any>'],
+    ['sqrt(m(x)[1])', '\\sqrt{m(x)[1]}', 'list<list<any> | number>'],
+    ['2 m(x)[1]', '2 m(x)[1]', 'list<any>'],
+    ['sin(m(x)[1])', '\\sin(m(x)[1])', 'list<list<any> | number>'],
     [
       'floor(m(x)[1])',
       '\\lfloor m(x)[1] \\rfloor',
-      'list<infinity | integer | list<any> | nan> | missing',
+      'list<infinity | integer | list<any> | nan>',
     ],
   ])('%s', (name, latex, type) => {
     const ce = matrixEngine();
@@ -821,10 +813,14 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
         ]).toEqual([xType, compiled, true]);
       }
     }
-    // The type holds the value.
+    // The type holds the value. At `x = []` the value is `Missing`, which
+    // the type does not name: the absence marker is implicit in a result
+    // type (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
     for (const [, json] of VALUES) {
       ce.assign('x', ce.box(json as any));
-      expect(expr.evaluate().type.matches(ce.type(type))).toBe(true);
+      const value = expr.evaluate();
+      if (value.json === 'Missing') continue;
+      expect(value.type.matches(ce.type(type))).toBe(true);
     }
   });
 
@@ -853,11 +849,9 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
 
   test('a declared union of a matrix and a vector maps over each arm', () => {
     const ce = new ComputeEngine();
-    ce.declare('p', 'matrix<2x2> | vector<2> | missing');
-    expect(ce.box(['Sqrt', 'p']).type.toString()).toBe('missing | tensor');
-    expect(ce.box(['Multiply', 2, 'p']).type.toString()).toBe(
-      'missing | tensor'
-    );
+    ce.declare('p', 'matrix<2x2> | vector<2>');
+    expect(ce.box(['Sqrt', 'p']).type.toString()).toBe('tensor');
+    expect(ce.box(['Multiply', 2, 'p']).type.toString()).toBe('tensor');
   });
 });
 
@@ -935,20 +929,8 @@ describe('Tycho row 425: the compiled marker of a mixed element type', () => {
 
   test.each([
     [
-      'At over an absent base',
-      'missing | list<number | list<number>>',
-      ['At', 'p', 1],
-      [
-        [undefined, 'Missing'],
-        [
-          [1, 2],
-          ['List', 1, 2],
-        ],
-      ],
-    ],
-    [
-      'Third with a missing cell arm',
-      'list<number | list<number> | missing>',
+      'Third of numbers or lists',
+      'list<number | list<number>>',
       ['Third', 'p'],
       [
         [
@@ -958,22 +940,10 @@ describe('Tycho row 425: the compiled marker of a mixed element type', () => {
       ],
     ],
     [
-      'Second with a missing cell arm',
-      'list<number | list<number> | missing>',
+      'Second of numbers or lists',
+      'list<number | list<number>>',
       ['Second', 'p'],
       [[[1], ['List', 1]]],
-    ],
-    [
-      'Third of a broadcastable that may be absent',
-      'broadcastable<vector<2>> | missing',
-      ['Third', 'p'],
-      [
-        [
-          [1, 2],
-          ['List', 1, 2],
-        ],
-        [undefined, 'Missing'],
-      ],
     ],
     [
       'Third of numbers or booleans',
@@ -1005,11 +975,10 @@ describe('Tycho row 425: the compiled marker of a mixed element type', () => {
   // row of `[[1, 2], [3, 4]]` as a number and gave `NaN` (the interpreter
   // gives 4).
   test.each([
-    'list<number | vector<2>> | missing',
-    'broadcastable<vector<2>> | missing',
-    'list<vector<2>> | missing',
+    'list<number | vector<2>>',
+    'broadcastable<vector<2>>',
+    'list<vector<2>>',
     'list<unknown>',
-    'list<unknown> | missing',
   ])('the statistics decline over %s', (type) => {
     // The interpreter answers 4 for `Max`, 1 for `Min` and an error for
     // `Mean` and `Median`; the compiled code read each row as a number.
@@ -1081,9 +1050,9 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     ['Reduce(p, Add, 0) + 1', ['Add', ['Reduce', 'p', 'Add', 0], 1]],
     ['Product(Rest(p)) + 1', ['Add', ['Product', ['Rest', 'p']], 1]],
     ['Sum(p)', ['Sum', 'p']],
-  ])('%s over list<number | vector<2>> | missing', (_name, json) => {
+  ])('%s over list<number | vector<2>>', (_name, json) => {
     const ce = new ComputeEngine();
-    ce.declare('p', 'list<number | vector<2>> | missing');
+    ce.declare('p', 'list<number | vector<2>>');
     const expr = ce.box(json as any);
     const type = expr.type;
     const values = [
@@ -1096,13 +1065,8 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
         ],
         L(L(1, 2), L(3, 4)),
       ],
-      [undefined, 'Missing'],
     ] as const;
-    // The compiled value over an absent `p` is not specified
-    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
-    // "Everything computed from an absent value, except at a discharge"):
-    // only the present values are compared.
-    expectParity(compiledVsInterpreted(ce, expr, 'p', values.slice(0, 3)));
+    expectParity(compiledVsInterpreted(ce, expr, 'p', values));
     for (const [, json] of values) {
       ce.assign('p', ce.box(json as any));
       expect([
@@ -1188,12 +1152,11 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     ce.assign('p', ce.box(L(0.5, L(1, 2)) as any));
     expect(sum.evaluate().toString()).toBe('[1.5,2.5]');
     expect(sum.evaluate().type.matches(type)).toBe(true);
-    ce.declare('q', 'list<missing | vector<2>>');
-    const absent = ce.box(['Sum', 'q']);
-    const absentType = absent.type;
+    // A list whose only cell is absent: its sum is absent. The type of the
+    // sum does not name the absence marker, which is implicit in a result
+    // type.
     ce.assign('q', ce.box(L('Missing') as any));
-    expect(absent.evaluate().toString()).toBe('NaN');
-    expect(absent.evaluate().type.matches(absentType)).toBe(true);
+    expect(ce.box(['Sum', 'q']).evaluate().json).toBe('Missing');
   });
 
   test('a fold over rows of different depths is admitted and compiles', () => {
@@ -1285,11 +1248,7 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
   });
 
   test('Python reduces a possibly nested operand for Max', () => {
-    for (const type of [
-      'broadcastable<number>',
-      'matrix | missing',
-      'list<vector<2>> | missing',
-    ]) {
+    for (const type of ['broadcastable<number>']) {
       const ce = new ComputeEngine();
       ce.declare('p', type);
       expect(
@@ -1596,19 +1555,13 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     ['At(First(p), 2)', ['At', ['First', 'p'], 2]],
     ['At(Last(p), 1)', ['At', ['Last', 'p'], 1]],
     ['At(At(p, 1), 5)', ['At', ['At', 'p', 1], 5]],
-  ])('%s over broadcastable<vector<2>> | missing is a number', (_n, json) => {
+  ])('%s over broadcastable<vector<2>> is a number', (_n, json) => {
     const ce = new ComputeEngine();
-    ce.declare('p', 'broadcastable<vector<2>> | missing');
+    ce.declare('p', 'broadcastable<vector<2>>');
     const expr = ce.box(json as any);
     expect(expr.type.toString()).toBe('number');
-    const result = compiledVsInterpreted(ce, expr, 'p', [
-      [[], L()],
-      [undefined, 'Missing'],
-    ]);
-    expect(result).toEqual([
-      ['NaN', 'NaN'],
-      ['NaN', 'NaN'],
-    ]);
+    const result = compiledVsInterpreted(ce, expr, 'p', [[[], L()]]);
+    expect(result).toEqual([['NaN', 'NaN']]);
   });
 
   test('PointX of an index into a broadcastable of lists of strings', () => {

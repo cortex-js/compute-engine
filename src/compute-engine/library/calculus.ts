@@ -1308,8 +1308,8 @@ type IntegrandParts = {
   sawNumeric: () => boolean;
   /** True when no sample produced a number, and every sample was a value
    * with no number: the number `NaN` (compiled code, or a `NaN` literal), the
-   * absent marker (`Missing`, `Undefined`, a compiled `undefined`), or
-   * arithmetic built around it (`0.5·Missing`, which is `NaN`). The
+   * absent marker (`Missing`, a compiled `undefined`), or
+   * arithmetic built around it (`0.5·Missing`, which is `Missing`). The
    * integrand then HAS a value at every sample, the undefined one, and so
    * does the integral: `NaN` (user decision 2026-10-23), as `NIntegrate` and
    * the compiled routes give for `∫₀¹ Which(t > 5, 1) dt`. A sample that is a
@@ -3815,11 +3815,11 @@ function nIntegrateMultiple(
  * `seen` (shared across the whole walk, keyed on the definition) terminates
  * recursive definitions and self-referential bindings.
  *
- * The absence symbols `Missing`, `Undefined` and `Nothing` are not reported: `unknowns`
+ * The absence symbols `Missing` and `Nothing` are not reported: `unknowns`
  * lists them, as they have no value, but they are values here, not free
- * variables waiting for one. Arithmetic with them is `NaN`, so `∫₀¹ t·Missing
- * dt` is `NaN` under `.N()`, as an integrand with no value is
- * (`sawOnlyUndefinedValues`).
+ * variables waiting for one. Arithmetic with `Missing` is `Missing`, an
+ * integrand value with no number, so `∫₀¹ t·Missing dt` is `NaN` under
+ * `.N()`, as an integrand with no value is (`sawOnlyUndefinedValues`).
  */
 function transitiveUnknowns(
   expr: Expression,
@@ -3832,7 +3832,6 @@ function transitiveUnknowns(
       if (
         !names.has(s) &&
         s !== 'Missing' &&
-        s !== 'Undefined' &&
         s !== 'Nothing'
       )
         out.add(s);

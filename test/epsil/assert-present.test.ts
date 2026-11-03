@@ -92,9 +92,12 @@ describe('x?! — evaluation', () => {
 describe('x?! — the static check', () => {
   const F = 'function f(p: string) { p }\n';
 
-  test('a possibly absent read at a strict parameter is reported without it', () => {
+  // The static check no longer reports a read that may be absent: a type
+  // does not show that a read may be absent (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only").
+  test('a possibly absent read at a strict parameter is not reported', () => {
     const r = run(`${F}${XS}let i: integer = 1\nf(xs[i])`);
-    expect(r.diagnostics.join(' ')).toContain('missing | string');
+    expect(r.diagnostics).toEqual([]);
   });
 
   test('the asserted read is accepted', () => {
@@ -113,5 +116,21 @@ describe('x?! — the static check', () => {
     const r = run(`${XS}let i: integer = 1\nlet y: string = xs[i]?!\ny`);
     expect(r.diagnostics).toEqual([]);
     expect(r.value).toBe('"a"');
+  });
+
+  // `Missing` is a result only: a typed declaration accepts an absent read
+  // where it accepts a present value (`docs/ERROR-MODEL.md`, "`Missing` is
+  // a result only"), and still refuses a value of another type.
+  test('a typed declaration accepts an absent read without the assertion', () => {
+    for (const read of ['xs[5]', 'xs[i]']) {
+      const r = run(`${XS}let i: integer = 5\nlet y: string = ${read}\ny`);
+      expect(r.diagnostics).toEqual([]);
+      expect(r.value).toBe('"Missing"');
+    }
+    const r = run(`${XS}let y: string = "c"\ny = xs[5]\ny`);
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value).toBe('"Missing"');
+    const bad = run('let y: list<string> = [5, Missing]\ny');
+    expect(bad.diagnostics.join('\n')).toMatch(/not compatible/);
   });
 });

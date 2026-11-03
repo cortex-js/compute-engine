@@ -105,8 +105,19 @@ describe('JavaScript: a chained At compiles as the nested access', () => {
     for (const mode of ['auto', 'strict'] as const)
       test.each(READS.map((json) => [JSON.stringify(json), json]))(
         `${type}, ${mode}: %s`,
-        (_, json) => {
+        (label, json) => {
           const ce = engine(type);
+          // A read proved out of range in a base of static shape declines:
+          // the chained access `R[1, 3]` is typed `real` (the absence marker
+          // is implicit in the type of a read), and the nested access
+          // `R[1][3]` is typed `nan`, which is not a subtype of `real`. The
+          // interpreter gives `NaN`.
+          if (label === '["At","R",1,3]' && type !== 'list<list<real>>') {
+            expect(() =>
+              compile(ce.box(json as never), { fallback: false, mode })
+            ).toThrow(/not a subtype/);
+            return;
+          }
           const r = compile(ce.box(json as never), {
             fallback: false,
             mode,
@@ -214,8 +225,8 @@ describe('Shader targets read a chained At as the nested access', () => {
   test.each([
     ['glsl', 'matrix<real^2x2>', /multi-axis/],
     ['wgsl', 'matrix<real^2x2>', /multi-axis/],
-    ['glsl', 'list<list<real>>', /not a statically counted collection/],
-    ['wgsl', 'list<list<real>>', /not a statically counted collection/],
+    ['glsl', 'list<list<real>>', /no statically known length/],
+    ['wgsl', 'list<list<real>>', /no statically known length/],
   ] as const)('%s, %s', (to, type, message) => {
     const ce = engine(type);
     expect(() =>
@@ -239,8 +250,25 @@ describePython('Python: a chained At compiles as the nested access', () => {
   // Python has no lowering of a call of an engine-level function, and no
   // arithmetic on a row, so only the reads are compiled here. The gather
   // `R[[2, 1], 1]` declines on Python (see the test below).
-  const reads = READS.slice(0, 5);
   test.each(BASES.map(([t, v]) => [t, v]))('%s', (type, value) => {
+    // A read proved out of range in a base of static shape declines, as on
+    // JavaScript: the chained access `R[1, 3]` has the static type of an
+    // element, and the nested access `R[1][3]` has the type of the absence
+    // marker (`nan` or `missing`), which is not a subtype of it.
+    let reads = READS.slice(0, 5);
+    if (type !== 'list<list<real>>') {
+      const outOfRange = ['At', 'R', 1, 3];
+      expect(() =>
+        new PythonTarget().compileFunction(
+          engine(type).box(outOfRange as never),
+          'g',
+          ['R', 'n']
+        )
+      ).toThrow(/not a subtype/);
+      reads = reads.filter(
+        (r) => JSON.stringify(r) !== JSON.stringify(outOfRange)
+      );
+    }
     const lines: string[] = ['import numpy as np', 'import math'];
     const expected: string[] = [];
     reads.forEach((json, i) => {

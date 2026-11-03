@@ -3,8 +3,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 // A restricted collection, `[1,3,5]{0<t}`, is ONE held restriction over the list
 // (user decision 2026-09-25). A collection operator threads it whole: the
 // result is computed on the present list and restricted by the condition, so
-// it is absent as a whole (`Missing`, or `NaN` for a number) once the
-// condition fails. Before, the lazy operators with a source slot (`TakeWhile`,
+// it is absent as a whole (`Missing`, also for a number: an operator over
+// `Missing` gives `Missing`, `docs/ERROR-MODEL.md`, "`Missing` is a result
+// only") once the condition fails. Before, the lazy operators with a source slot (`TakeWhile`,
 // `DropWhile`, `Scan`, `ArgMax`, `ArgMin`, `Differences`) refused the held
 // restriction before the condition was threaded (step 2c'' of the evaluation,
 // `heldEagerSources()` in `boxed-expression/boxed-function.ts`), and the
@@ -50,17 +51,17 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'ArgMax',
     ['ArgMax', 'L'],
     '\\operatorname{ArgMax}(L)',
-    'If(0 < t, 3)',
+    'If(0 < t, 3, "Missing")',
     '3',
-    'NaN',
+    '"Missing"',
   ],
   [
     'ArgMin',
     ['ArgMin', 'L'],
     '\\operatorname{ArgMin}(L)',
-    'If(0 < t, 1)',
+    'If(0 < t, 1, "Missing")',
     '1',
-    'NaN',
+    '"Missing"',
   ],
   [
     'Differences',
@@ -82,17 +83,17 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'IndexWhere',
     ['IndexWhere', 'L', gt2],
     '\\operatorname{IndexWhere}(L, x\\mapsto x>2)',
-    'If(0 < t, 2)',
+    'If(0 < t, 2, "Missing")',
     '2',
-    'NaN',
+    '"Missing"',
   ],
   [
     'CountIf',
     ['CountIf', 'L', gt2],
     '\\operatorname{CountIf}(L, x\\mapsto x>2)',
-    'If(0 < t, 2)',
+    'If(0 < t, 2, "Missing")',
     '2',
-    'NaN',
+    '"Missing"',
   ],
   [
     'RotateLeft',
@@ -162,7 +163,10 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'TupleFrom',
     ['TupleFrom', 'L'],
     '\\operatorname{TupleFrom}(L)',
-    'If(0 < t, (1, 3, 5))',
+    // A tuple of numbers is a point, and a false restriction of a point is
+    // the point of `NaN` coordinates; the list here is absent as a whole,
+    // so the held form keeps `Missing` as its else branch.
+    'If(0 < t, (1, 3, 5), "Missing")',
     '(1, 3, 5)',
     '"Missing"',
   ],
@@ -295,7 +299,7 @@ describe('Partition over an absent collection', () => {
   ])('the %s form answers Missing', (_form, json) => {
     const e = engine().box(json as never);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('list<list<any>> | missing');
+    expect(e.type.toString()).toBe('missing');
     expect(e.evaluate().toString()).toBe('"Missing"');
   });
 

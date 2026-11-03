@@ -505,6 +505,187 @@ type with a `missing` arm. (4) The values fixed here stay: the relation cell
 relation `False`, and the scalar no-match `Missing` of `Which` (Tycho reads
 it).
 
+3.4.2 **`Missing` as a result only** (options page 1, option A). Staged
+2026-11-03, session compute-engine-c0, base `585acfab5`, not committed (the
+record is at the end of this item). A declared type cannot name `missing`;
+`Missing` is produced only by a selection with no match, an accessor out of
+range and the written symbol, and its value follows the domain (`NaN` for a
+number, the point of `NaN` coordinates for a point, `Missing` otherwise);
+the readers (`IsMissing`, `Coalesce`, `AssertPresent`, a branch, a default
+parameter, the position-preserving accessors) keep their answers and read
+`NaN`, a `NaN` point and `Missing` as absent; every other operator over
+`Missing` gives `Missing`; `Undefined` is an ordinary unknown symbol; the
+type `missing` is a marker, implicit in signatures (`docs/ERROR-MODEL.md`,
+section "`Missing` is a result only — user decision of 2026-11-02").
+
+- **Tycho's answers** (tycho-f9, 2026-11-03, a reading of Tycho main, no
+  tests run). (a) No Tycho builder writes `missing` in a type literal, but
+  three sites copy an INFERRED type into a declaration and now fail:
+  `ce.declare(symbol, { type: definition.type }, scope)` in
+  `document-ce-manager.ts` (about 13866–13871; a throw is caught by
+  `_deriveValueType`, whose type falls back to `unknown`, which can change a
+  row's classification), `ce.declare(name, { type: body.type })` for a colour
+  value in `style-expressions.ts` (about 841; a throw skips that colour
+  definition and its dependents; what the row then draws is not traced), and
+  the GLSL colour helper's `Typed` parameters and signature string (about
+  858–871; a `missing` parameter type declines). Tycho strips the `missing`
+  member there (`withoutMissingMember`) at adoption. (b) No Tycho reader or
+  builder uses the `Undefined` symbol; two name sets list it
+  (`normalize-restrictions.ts` 237, `undrawn-rows.ts` 323) and lose it at
+  adoption. (c) Tycho's point readers accept a `NaN` point from an accessor
+  out of range (the 3-D routes drop a non-finite point; `at-index-semantics.ts`
+  already uses `NaN` as the hole). Tycho's own `At` compile handler wrote
+  `_SYS.atNoWrap(base, i)`, which reads `undefined` out of range; with the
+  accessor types now without a marker arm its coordinate reads threw. At
+  adoption the handler emits `_SYS.atPointNoWrap(base, position, n)` for
+  every index form when the base's element type is a point of 2 or 3
+  coordinates (a new runtime helper: a scalar index, a gather and a boolean
+  mask, a fresh `NaN` point out of range); Tycho recorded three tests. (c')
+  A false restriction of one point now gives a `NaN` point (below); Tycho's
+  readers accept it with two changes of behavior: a 2-D polygon with a
+  restricted vertex, `polygon(A, B\{c\}, C)`, splits into runs at the
+  vertex instead of not being drawn (Tycho checks it against Desmos at
+  adoption; no corpus record of the audit is such a polygon), and a row
+  whose restriction is false when Tycho classifies it now classifies as a
+  point row with `NaN` coordinates (same picture, another route). Not
+  traced: the drag path of a movable point whose restriction is false.
+- **Decisions in this item, each with its alternative.**
+  (1) User, 2026-11-03, after review: a false restriction of one point,
+  `If(c, (1, 2))` with `c` false, gives `(NaN, NaN)` (rule 2), in the
+  interpreter and in compiled JavaScript, Python and interval code (GLSL and
+  WGSL already gave a `NaN` vector). The alternative was to keep `Missing`
+  and do it later in its own step. `Sin(If(c, (0, 1)))` and
+  `First(If(c, [(1,2),(3,4)]))` give `(NaN, NaN)`; a false restriction of a
+  whole list stays `Missing` (item 3.3, rule 4); the scalar no-match of
+  `Which` stays `Missing` (Tycho reads it).
+  (2) User, 2026-11-03, after review: compiled code treats every point-typed
+  value as possibly absent at a default fill and at `AssertPresent`, as it
+  already treats a `real` scalar, and emits one `NaN`-point test chosen from
+  the static type. The alternatives were a decline, or a static proof of
+  which points can be `NaN`, which three review rounds each found a new hole
+  in.
+  (3) The readers and a default read a `NaN` point as absent (options page
+  1: `IsMissing` reads all three), so `Coalesce(At(ps, 9), (0, 0))` stays
+  `(0, 0)`. A point whose coordinates became `NaN` by arithmetic also reads
+  as absent.
+  (4) The `ce.assign` site of rule 5: an assignment (`ce.assign`, `Assign`,
+  `Declare` with a value, an Epsil typed `let`) accepts a value that holds
+  the marker where the declared type accepts the present value
+  (`matchesOrAbsent()` in `effects-inference.ts`); `matches` stays strict.
+  Witness `plausible` (Epsil `let y: string = xs[5]`). `x: real` still
+  refuses the `NaN` of an out-of-range read (documented: `real` excludes
+  `NaN`; declare `real | nan` or `number`).
+  (5) A call with `Missing` at a declared or annotated numeric or point
+  parameter gives `Missing` without running the body, unless the parameter
+  has a default (filled) or the call is a partial application:
+  `Map((x: integer) ↦ x > 0, [1, Missing])` is `[True, Missing]`. The
+  alternative (bind `Missing` and run the body) gave values whose type did
+  not hold them. A `NaN` point at a point parameter is accepted, as `NaN`
+  is at a numeric parameter.
+  (6) A coordinate (`PointX/Y/Z`) of an absent point or point cell is `NaN`
+  on every route; `Length` of an absent collection is `Missing`;
+  `IsPrime(Missing)` is `Missing`; `Element(Missing, [1, Missing])` stays
+  `True` (the 2026-09-26 rule); an error datum outranks `Missing` in the
+  statistics, `Quantile` and `Distance`.
+  (7) Accepted, not changed: a declared symbol's type does not show a
+  marker its value may hold (`Norm(P)` with `P: list<tuple<real, real>>`
+  holding a restricted point is typed `list<number>` and gives
+  `[Missing, 5]`), as `NaN` sits outside `real`; aggregates (`Sum`, `Mean`,
+  `Max`) are typed `number` with the marker implicit; a matrix product with
+  a `Missing` cell gives `NaN` cells (the packed kernels; witness `crafted`;
+  its type has a `nan` arm); `Dot((1, Missing), (1, 1))` is typed
+  `integer<1..1> | missing`; the interval target gives the interval
+  `entire` for `Length(g7(rows)[2][1])`, where it declined.
+  (8) `Append`'s signature is `(collection<any>, any+)`; `OPERATORS.json`
+  was edited by hand for the entries of this item (a full regeneration
+  changes 87 unrelated lines; the file was already out of date).
+- **The compiler side.** A declaration that names `missing` declines (the
+  type comes from `ce.declare`, which throws, or `Typed`, an error
+  expression). An out-of-range read of a point list gives a `NaN` point in
+  JavaScript (`_SYS.atPoint`/`atPointNoWrap`, chosen from the element type,
+  no run-time type test) and Python. `hostPointRead()` (a wrapper of a
+  host's `At` handler) was written and removed: Tycho changes its handler
+  instead. Kept for step 4, row 2: `compile-absence.ts` and
+  `absent-tuple-read.ts`, which a declared absent input reached and which now
+  serve only inferred types and producers; the `point` axis added to
+  `CompileTarget.absence` joins them.
+- **The corpus measure** (Tycho frozen at `44a25d4e3`, plus a copy whose `At`
+  handler emits `_SYS.atPointNoWrap` as Tycho will at adoption; the tools of
+  3.4.1 with records keyed by MathJSON; base: the 3.4.1 run `new3`, whose
+  source equals `585acfab5`). Without the handler change: 175 values in 23
+  records threw (njncrg9fkv, 2ki2hjsouf, mavxszbvzk), all in Tycho's own
+  `At` handler; they are changes at adoption. With it: 17,655 records
+  (17,690 at the base: 35 records that declined at the base are no longer
+  submitted by Tycho, digxkh3uk8 and euwzbzyrhn `m(P,1,1)` error inputs,
+  uussbs3e0g `D_0(i)`, 2ki2hjsouf, epq7yidtim; Tycho checks at adoption that
+  those rows draw); 77,130 values compared, no new throw. Declines:
+  javascript 66 → 44, glsl 47 → 47, interval-js 90 → 70 (mostly the
+  records no longer submitted); 2 rows that declined now compile
+  (2ki2hjsouf `0.7C[C_{i}]+A_{xisPos}`, epq7yidtim
+  `0.4(N_n(u))[A_n+1]+…`); 1 new decline, neyret/po7rdhtoth
+  `asOklab(c_d)`, from Tycho's own `ce.declare('c_d', 'list<color |
+  missing>')` (Tycho site (a)). Values: 131 values in 31 records changed,
+  each of the expected kinds: 29 records `undefined` → a `NaN` point (a
+  false restricted point: 91lvyfqcdd, bpnkluuy7y, lrfx01y3cv, n7uhaaoq1q,
+  njncrg9fkv, skz0syspxp, b0mdkqnyra, epq7yidtim; an out-of-range point
+  read: epq7yidtim `[…][H_{ighDetail}]` and two more), gy1wdjvm2a and
+  u1bpof8xfg `join(…)` (their `undefined` slots → `NaN` points), and
+  lizeqlnn5e (`Length` of an out-of-range point read is now 2, the length
+  of the `NaN` point, which the interpreter also gives). No other value
+  changed. The last measure ran before the final fix (a quadratic walk
+  replaced by a memoized one in the declaration check), which changes no
+  value.
+- **Code lines** (not blank, `//` or `*`): `library` 77,903 → 78,052,
+  `boxed-expression` 83,962 → 84,247, `common/type` 14,680 → 14,652,
+  `compilation` 92,419 → 92,785. Source: 85 files, 2,949 insertions, 1,460
+  deletions. Tests: 201 files changed (4,028 insertions, 6,005 deletions),
+  none deleted, one new file `test/compute-engine/missing-result-only.test.ts`
+  (1,518 lines); about 196 test files were migrated (a declaring test moved
+  to a producer or to one assertion of the static error); no snapshot
+  changed.
+- **Review**: Claude and Codex, four rounds (the fourth on the user's two
+  decisions only, after two rounds in a row found a new high finding in the
+  fixes of the round before; the user chose the simple sound design). Fixed:
+  round 1, the readers did not read a `NaN` point (high), routes of a
+  coordinate read that disagreed, the `NaN` point at a point parameter,
+  `Norm`/`Dot`/`Distance` types, a default ignored by the always-absent
+  typing, a comparison proved `True` over a read, the declaration check of
+  nested signatures, comments; round 2, a point parameter mapping over a
+  `NaN`-point cell (high), compiled default fills and `AssertPresent` of a
+  point (the static proof), a signature default; round 3, the static proof
+  again (two high findings), a literal default before the `Missing`
+  short-circuit, the operator-backed lambda route; round 4, a partial
+  application over `Missing`, a point default in a compiled point-list call,
+  comments, one `nanPoint()` helper. Not reviewed: the round-4 fixes and
+  the last fix (the memoized walk of `declaredTypeNamesMissing()`, found by
+  the full suite as a hang: a chain of 20 aliases cost about 5^20 steps).
+  Not fixed, each `crafted`: an untyped parameter `p = O` in a direct call
+  over a list of points does not fill a `NaN` point while `Map` with the
+  same function does; `Reverse(If(0 < t, L))` gives `Missing` with `t` free
+  (older code, the same at `585acfab5`).
+- **Checks** on the final tree: typecheck, lint, `check:deps`, the full
+  suite (1,800 suites, 77,844 tests, 0 failed), `npm run test:python` (2,959 tests, 0 failed, on the tree
+  before the last fix, which touches no compiled code), the corpus measure
+  above. `compile-three-valued-connectives.test.ts` takes this item's
+  version over the nightly fix `19d1c6e6f`: that fix rewrote two Python
+  tests over symbols declared `number | missing`, a declaration that is now
+  an error; this item's version keeps the same `And`/`Or` cases over `real`
+  symbols.
+
+What 3.4.3 (the error model, options page 2) needs from this item: (1) the
+dynamic non-value of each domain is now `NaN` for a number, the `NaN` point
+for a point and `Missing` otherwise; `Indeterminate` folded into `NaN` adds
+no new kind. The readers read `NaN`, a `NaN` point and `Missing`; their
+library descriptions (`IsMissing`, `Coalesce`, `AssertPresent` in
+`library/core.ts` and `OPERATORS.json`) still name `Indeterminate`, which
+3.4.3 removes. (2) The precedence of the aggregates is an error, then
+`Missing`, then `NaN` (`Max(NaN, Missing)` is `Missing`); with
+`Indeterminate` folded, `Mean([1, Indeterminate])` is `NaN`. (3) `Nothing`
+is untouched here; a `Missing` cell and a `Nothing` element are distinct.
+(4) The compiled `point` axis of `CompileTarget.absence` and the
+`NaN`-point readers stay; step 4, row 2 (absence) can fold the absent-input
+code into them.
+
 The compiler side of 3.1 to 3.4 in this release is the minimum that keeps
 compiled code equal to the interpreter: the new static errors decline, the
 `NaN` point cell replaces `undefined` in the JavaScript lowering, `When` is

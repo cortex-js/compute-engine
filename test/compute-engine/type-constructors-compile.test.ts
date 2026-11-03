@@ -344,83 +344,16 @@ describe('ERASURE IS FLAG-DRIVEN, never a name table', () => {
   });
 });
 
-describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () => {
-  // `stripMissingFromType` is structural: it does not see through a
-  // `reference`, so an alias of `T | missing` survives the strip intact. If the
-  // strip runs first, the still-unstripped union is not `<: number` and the
-  // JavaScript target picks the OBJECT (null) absence axis for what is a
-  // numeric-domain hole — compiled `IsMissing`/`Coalesce` then disagree with
-  // the interpreter (`IsMissing(NaN)` came out `false`). Unfolding first makes
-  // the alias spelling indistinguishable from the inline one, which is the
-  // erasure rule of this phase.
-  test('an alias of `number | missing` selects the NaN axis, like the inline spelling', () => {
+describe('ABSENCE AXIS — a declared absent type', () => {
+  // `Missing` is a result only (user decision of 2026-11-02): a declared type
+  // cannot name `missing`, through an alias or a nominal type either, so no
+  // compiled input has an absence axis of its own.
+  test('a symbol cannot be declared with a type that names missing', () => {
     const ce = new ComputeEngine();
-    ce.declareType('maybe_n', 'number | missing', { alias: true });
-    ce.declare('x', 'maybe_n');
-    ce.declare('y', 'number | missing');
-
-    expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
-      'Number.isNaN((_.x) ?? Number.NaN)'
-    );
-    expect(axisOf(ce, 'x')).toBe('numeric');
-    expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
-      jsCode(ce, ['IsMissing', 'y']).replace(/_\.y/g, '_.x')
-    );
-    // …and it agrees with the interpreter, which reads a numeric-slot hole as
-    // `NaN` (I6).
-    const isMissing = compile(ce.box(['IsMissing', 'x'])).run!;
-    expect(isMissing({ x: NaN })).toBe(true);
-    expect(isMissing({ x: 5 })).toBe(false);
-    expect(ce.box(['IsMissing', 'NaN']).evaluate().symbol).toBe('True');
-  });
-
-  test('`Coalesce` over an alias of `number | missing` discharges on the NaN axis', () => {
-    const ce = new ComputeEngine();
-    ce.declareType('maybe_n', 'number | missing', { alias: true });
-    ce.declare('x', 'maybe_n');
-    ce.declare('y', 'number | missing');
-
-    expect(jsCode(ce, ['Coalesce', 'x', 0])).toBe(
-      jsCode(ce, ['Coalesce', 'y', 0]).replace(/_\.y/g, '_.x')
-    );
-    // The discharge tests `Number.isNaN` (it coalesces an ABSENT read to
-    // `NaN` first, so it carries a `??` of its own), and a `NaN` operand is
-    // absent.
-    expect(jsCode(ce, ['Coalesce', 'x', 0])).toContain('Number.isNaN');
-    const coalesce = compile(ce.box(['Coalesce', 'x', 0])).run!;
-    expect(coalesce({ x: NaN })).toBe(0);
-    expect(coalesce({ x: 5 })).toBe(5);
-  });
-
-  test('an OBJECT-domain alias still picks the object (null) axis', () => {
-    const ce = new ComputeEngine();
-    ce.declareType('maybe_s', 'string | missing', { alias: true });
-    ce.declare('s', 'maybe_s');
-    ce.declare('t', 'string | missing');
-    expect(jsCode(ce, ['IsMissing', 's'])).toBe(
-      'Number.isNaN((_.s) ?? Number.NaN)'
-    );
-    expect(axisOf(ce, 's')).toBe('object');
-    expect(jsCode(ce, ['IsMissing', 's'])).toBe(
-      jsCode(ce, ['IsMissing', 't']).replace(/_\.t/g, '_.s')
-    );
-    expect(jsCode(ce, ['Coalesce', 's', { str: 'd' }])).toBe(
-      jsCode(ce, ['Coalesce', 't', { str: 'd' }]).replace(/_\.t/g, '_.s')
-    );
-  });
-
-  test('a NOMINAL reference answers the axis from its definition too (D3 is admissibility, not layout)', () => {
-    // Reachable: `IsMissing`/`Coalesce` accept `any`, so opacity does not
-    // reject the operand upstream — the compiler really does get asked the
-    // layout question about a nominal reference.
-    const ce = new ComputeEngine();
-    ce.declareType('mn', 'number | missing');
-    ce.declare('x', 'mn');
-    expect(ce.box('x').type.toString()).toBe('mn');
-    expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
-      'Number.isNaN((_.x) ?? Number.NaN)'
-    );
-    expect(compile(ce.box(['IsMissing', 'x'])).run!({ x: NaN })).toBe(true);
+    expect(() => {
+      ce.declareType('maybe_n', 'number | missing', { alias: true });
+      ce.declare('x', 'maybe_n');
+    }).toThrow(/cannot be declared/);
   });
 });
 

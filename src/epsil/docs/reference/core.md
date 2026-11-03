@@ -56,7 +56,7 @@ Four values mark that a value is absent. They do not behave the same way.
 | `NaN`       | A number that is not defined (Not a Number).                              |
 
 `nothing` disappears where it is written. `missing` keeps its position, and an
-arithmetic operation on it gives `NaN`:
+arithmetic operation on it gives `missing`:
 
 ```epsil
 [12, nothing, 34]
@@ -65,10 +65,10 @@ arithmetic operation on it gives `NaN`:
 
 ```epsil
 [nothing + 1, missing + 1]
-// ➔ [1, NaN]
+// ➔ [1, "Missing"]
 ```
 
-`isMissing` is true for `missing`, `Undefined` and `NaN`. `Coalesce` returns
+`isMissing` is true for `missing` and `NaN`. `Coalesce` returns
 the first operand that is not absent:
 
 ```epsil
@@ -389,7 +389,7 @@ arc(A, B, C)
 
 `(any) -> unknown`
 
-Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.
+Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.
 
 ```epsil
 [1, 2][1]?!
@@ -498,7 +498,7 @@ characters("héllo")
 
 `(any+) -> unknown`
 
-Return the first operand that is not ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.
+Return the first operand that is not ABSENT (`Missing`, `NaN`, or `Indeterminate`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.
 
 ```epsil
 Coalesce(missing, NaN, 3, 4)
@@ -862,7 +862,7 @@ isError(1 + 1)
 
 MathJSON `IsMissing` · `(any) -> boolean`
 
-True for `Missing`, `Undefined`, `NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.
+True for `Missing`, `NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.
 
 ```epsil
 [isMissing(missing), isMissing(NaN), isMissing(0)]
@@ -910,7 +910,7 @@ A value that is absent but whose position is preserved (Julia `missing`, R `NA`)
 
 ```epsil
 missing + 1
-// ➔ NaN
+// ➔ "Missing"
 ```
 
 ### N

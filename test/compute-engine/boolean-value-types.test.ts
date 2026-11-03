@@ -16,7 +16,6 @@ import type { Expression } from '../../src/compute-engine/global-types';
 const ce = new ComputeEngine();
 ce.declare('a', 'real');
 ce.declare('n', 'number');
-ce.declare('m', 'real | missing');
 ce.declare('p', 'real<3<..>');
 ce.declare('q', 'real<..<2>');
 ce.declare('k', 'integer');
@@ -78,12 +77,6 @@ describe('boolean value types — Equal soundness', () => {
 
   test('Equal(n, n) stays `boolean` when n admits NaN (NaN ≠ NaN)', () => {
     expect(typeOf(fn('Equal', [sym('n'), sym('n')]))).toBe('boolean');
-  });
-
-  // An absent `m` makes the comparison `False` (user decision of
-  // 2026-11-02, two-valued comparisons), so no value type is read.
-  test('Equal(m, m) is `boolean` when m may be missing', () => {
-    expect(typeOf(fn('Equal', [sym('m'), sym('m')]))).toBe('boolean');
   });
 
   test('Equal(True, False) makes no claim (both type the bare `boolean`)', () => {

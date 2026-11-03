@@ -22,7 +22,10 @@ import { ComputeEngine } from '../../src/compute-engine';
  * The rule for the absence marker is in `docs/ERROR-MODEL.md` (an absent
  * operand answers the marker of the application's codomain: `NaN` for a
  * numeric type, `Missing` otherwise; an absent factor beside a point makes
- * the whole point absent).
+ * the whole point absent). Since 2026-11-03 a false restriction of a point is
+ * the point of `NaN` coordinates, not `Missing` (`docs/ERROR-MODEL.md`,
+ * "`Missing` is a result only", rule 2), so a broadcast over it gives a
+ * point of `NaN` coordinates.
  */
 
 const P = String.raw`\operatorname{PointList}(0,1)`;
@@ -83,10 +86,10 @@ describe('a broadcast over a restricted point keeps the point and the absence', 
     const r = probe(latex);
     expect(r.type).toBe(type);
     expect(r.present).toBe(present);
-    // The value when the restriction does not hold is the absent point, the
-    // marker of a point codomain. It was `NaN` for `Sin`, `Power` and the
-    // scalar factor.
-    expect(r.absent).toBe('"Missing"');
+    // The value when the restriction does not hold is the point of `NaN`
+    // coordinates, the absent value of a point. It was `NaN` for `Sin`,
+    // `Power` and the scalar factor, then `Missing`.
+    expect(r.absent).toBe('(NaN, NaN)');
   });
 
   test('the unrestricted point is unchanged', () => {
@@ -100,13 +103,12 @@ describe('a broadcast over a restricted point keeps the point and the absence', 
 
   test('a restricted scalar factor beside a point restricts the whole point', () => {
     // The restriction applies to its whole group, here the whole product
-    // `If(0<t, 2·P)`, so the absent value is the absent point `Missing`.
-    // When the restriction was on the factor alone, it landed in each
-    // coordinate and the absent product was `(NaN, NaN)`.
+    // `If(0<t, 2·P)`, so the absent value is the point of `NaN`
+    // coordinates.
     const r = probe(String.raw`2\left\{0<t\right\}\cdot${P}`);
     expect(r.type).toBe('tuple<integer, integer>');
     expect(r.present).toBe('(0, 2)');
-    expect(r.absent).toBe('"Missing"');
+    expect(r.absent).toBe('(NaN, NaN)');
   });
 });
 
@@ -194,8 +196,11 @@ describe('shapes that are an error for a restricted point', () => {
 });
 
 describe('a list that holds a restricted point or masked points', () => {
-  // A cell whose present value is a point and which is absent is `Missing`,
-  // on every route, and the static type says so:
+  // A cell that holds a false restriction of a point is the point of `NaN`
+  // coordinates (user decision 2026-11-03), on every route; a written
+  // `Missing` cell stays `Missing`. Before that decision, a cell whose
+  // present value is a point and which is absent was `Missing`, on every
+  // route, and the static type said so:
   // `list<missing | tuple<…>>`. Before the fix, the type of such a
   // broadcast dropped the `missing` arm (`Sin([P{c}, (2, 3)])` was typed
   // `list<number>`), and an absent point cell answered `NaN` where the rule
@@ -218,10 +223,10 @@ describe('a list that holds a restricted point or masked points', () => {
   // with integer coordinates: a coordinate is an integer, or `NaN` when an
   // operand is absent.
   const INTEGER_POINTS = 'list<missing | tuple<integer | nan, integer | nan>>';
-  const INTEGER_POINT_PAIR =
-    'list<(missing | tuple<integer | nan, integer | nan>)^2>';
+  // An operator over `Missing` gives `Missing`, so no coordinate is `NaN`.
+  const INTEGER_POINT_PAIR = 'list<(missing | tuple<integer, integer>)^2>';
   const MATRIX_OF_INTEGER_POINTS =
-    'matrix<(missing | tuple<integer | nan, integer | nan>)^(2x2)>';
+    'matrix<(missing | tuple<integer, integer>)^(2x2)>';
   // The type of a 2×2 matrix of such points. A literal of rank 2 whose cells
   // are `missing | tuple<…>` was typed as a list of rank 1,
   // `list<missing | tuple<…>>`, which claimed that its elements are the
@@ -247,35 +252,35 @@ describe('a list that holds a restricted point or masked points', () => {
       'a restricted point plus masked points',
       ['Add', PJ, PTS],
       '[(NaN, NaN),(3, 5)]',
-      '["Missing","Missing"]',
+      '[(NaN, NaN),(NaN, NaN)]',
       MASKED_POINTS,
     ],
     [
       'a restricted point times masked numbers',
       ['Multiply', PJ, NUMS],
       '[(NaN, NaN),(NaN, NaN),(0, 30)]',
-      '["Missing","Missing","Missing"]',
+      '[(NaN, NaN),(NaN, NaN),(NaN, NaN)]',
       'list<tuple<number, number>>',
     ],
     [
       'Sin of a list holding a restricted point',
       ['Sin', ['List', PJ, ['Tuple', 2, 3]]],
       '[(0, sin(1)),(sin(2), sin(3))]',
-      '["Missing",(sin(2), sin(3))]',
+      '[(NaN, NaN),(sin(2), sin(3))]',
       'list<tuple<number, number>^2>',
     ],
     [
       'a scalar times a list holding a restricted point',
       ['Multiply', 2, ['List', PJ, ['Tuple', 2, 3]]],
       '[(0, 2),(4, 6)]',
-      '["Missing",(4, 6)]',
+      '[(NaN, NaN),(4, 6)]',
       'list<tuple<integer, integer>^2>',
     ],
     [
       'a list holding a restricted point plus a point',
       ['Add', ['List', PJ, ['Tuple', 2, 3]], ['Tuple', 1, 1]],
       '[(1, 2),(3, 4)]',
-      '["Missing",(3, 4)]',
+      '[(NaN, NaN),(3, 4)]',
       'list<tuple<integer, integer>>',
     ],
     [
@@ -316,9 +321,13 @@ describe('a list that holds a restricted point or masked points', () => {
     expect(new ComputeEngine().box(json).type.toString()).toBe(
       MATRIX_OF_INTEGER_POINTS
     );
-    expect(at(json, -1)).toBe('[["Missing","Missing"],["Missing","Missing"]]');
+    // The written `Missing` cell stays `Missing`; the other cells are
+    // points of `NaN` coordinates.
+    expect(at(json, -1)).toBe(
+      '[["Missing",(NaN, NaN)],[(NaN, NaN),(NaN, NaN)]]'
+    );
     expect(at(json, -1, true)).toBe(
-      '[["Missing","Missing"],["Missing","Missing"]]'
+      '[["Missing",(NaN, NaN)],[(NaN, NaN),(NaN, NaN)]]'
     );
     // A present point beside the matrix leaves the absent cell `Missing`
     // and computes the others.
@@ -334,19 +343,20 @@ describe('a list that holds a restricted point or masked points', () => {
       const e = ce.parse(expr);
       const v = e.evaluate();
       // The static type of a restriction `If(c, e)` is the type of `e`, with
-      // no `missing` arm, so the type of the value, which holds an absent
-      // cell, has a `missing` arm and does not match it. Only the present
-      // cells are checked against the cell type of the expression.
+      // no `nan` arm, so the point of `NaN` coordinates that a false
+      // restriction gives does not match it, as `NaN` sits outside `real`.
+      // Only the present cells are checked against the cell type of the
+      // expression.
       const cellType = (e.type.type as any).elements;
       for (const row of v.ops!)
         for (const cell of row.ops!)
-          if (cell.symbol !== 'Missing')
+          if (!cell.toString().includes('NaN'))
             expect(cell.type.matches(cellType)).toBe(true);
-      expect(v.toString()).not.toContain('NaN');
-      expect(v.ops![1].ops![1].symbol).toBe('Missing');
+      expect(v.ops![1].ops![1].toString()).toBe('(NaN, NaN)');
     }
     // A restriction applies to its whole group, here the whole statement: the
-    // added point is absent, so the whole value is.
+    // value is a list of lists of points, which is absent as a whole when the
+    // condition is false.
     expect(ce.parse(String.raw`${src}+(1,1)\{t<0\}`).evaluate().symbol).toBe(
       'Missing'
     );
@@ -368,26 +378,26 @@ describe('a list that holds a restricted point or masked points', () => {
     // of the static type do not show the absent point.
     const sin = ce.parse(String.raw`\sin(${L})`);
     expect(sin.type.toString()).toBe('list<tuple<number, number>^2>');
-    expect(sin.evaluate().toString()).toBe('["Missing",(sin(2), sin(3))]');
+    expect(sin.evaluate().toString()).toBe('[(NaN, NaN),(sin(2), sin(3))]');
     const scaled = ce.parse(String.raw`2\cdot${L}`);
     expect(scaled.type.toString()).toBe('list<tuple<integer, integer>^2>');
-    expect(scaled.evaluate().toString()).toBe('["Missing",(4, 6)]');
+    expect(scaled.evaluate().toString()).toBe('[(NaN, NaN),(4, 6)]');
   });
 
-  test('only the cell of an absent restricted point becomes Missing', () => {
-    // The `NaN` marker of each cell is decided from the operand cell at the
-    // same position. A restricted point whose condition is false gives
-    // `Missing`; a `NaN` computed from a present cell stays `NaN`, also in a
-    // list that holds a restricted point.
+  test('only the cell of an absent restricted point becomes a NaN point', () => {
+    // The marker of each cell is decided from the operand cell at the same
+    // position. A restricted point whose condition is false gives the point
+    // of `NaN` coordinates; a `NaN` computed from a present cell stays
+    // `NaN`, also in a list that holds a restricted point.
     const L = String.raw`[(1,2)\left\{0<t\right\}, (3,4)]`;
     const ce = new ComputeEngine();
     ce.assign('t', -1);
     expect(
       ce.parse(String.raw`2\cdot[${PC}, (2,3)]`).evaluate().toString()
-    ).toBe('["Missing",(4, 6)]');
+    ).toBe('[(NaN, NaN),(4, 6)]');
     const json = ['Divide', ce.parse(L).json, ['List', 1, 'x']];
     ce.assign('x', NaN);
-    expect(ce.box(json).evaluate().toString()).toBe('["Missing",NaN]');
+    expect(ce.box(json).evaluate().toString()).toBe('[(NaN, NaN),NaN]');
     const ce2 = new ComputeEngine();
     ce2.assign('t', 1);
     ce2.assign('x', NaN);
@@ -410,11 +420,11 @@ describe('a list that holds a restricted point or masked points', () => {
     });
     const cell = ['If', ['Less', 0, ['TraceCondition']], ['Tuple', 1, 2]];
     const json = ['Multiply', 2, ['List', cell, ['Tuple', 2, 3]]];
-    expect(ce.box(json).evaluate().toString()).toBe('["Missing",(4, 6)]');
+    expect(ce.box(json).evaluate().toString()).toBe('[(NaN, NaN),(4, 6)]');
     expect(calls).toBe(1);
     calls = 0;
     expect((await ce.box(json).evaluateAsync()).toString()).toBe(
-      '["Missing",(4, 6)]'
+      '[(NaN, NaN),(4, 6)]'
     );
     expect(calls).toBe(1);
     // A restricted row of points, beside a list of numbers.
@@ -437,7 +447,7 @@ describe('a list that holds a restricted point or masked points', () => {
     ce.assign('t', -1);
     const e = ce.box(['Multiply', PJ, NUMS]);
     expect((await e.evaluateAsync()).toString()).toBe(
-      '["Missing","Missing","Missing"]'
+      '[(NaN, NaN),(NaN, NaN),(NaN, NaN)]'
     );
   });
 
@@ -450,8 +460,11 @@ describe('a list that holds a restricted point or masked points', () => {
     // (3, 4)])` was `[NaN, (sin(3), sin(4))]`. Two routes reach the generic
     // broadcast with the absent cell: a literal `Missing` cell (the broadcast
     // before evaluation of the operands), and a symbol whose VALUE holds the
-    // absent cell (the broadcast after evaluation of the operands).
+    // absent cell (the broadcast after evaluation of the operands). A false
+    // restriction of a point is not absent: it is the point of `NaN`
+    // coordinates (`restricted()`), and the parse routes below read it so.
     const ROW = ['List', 'Missing', ['Tuple', 3, 4]];
+    const restricted = (s: string) => s.replace('"Missing"', '(NaN, NaN)');
     const MATRIX = ['List', ROW, ['List', ['Tuple', 1, 4], ['Tuple', 9, 16]]];
     const cases: [string, string, string][] = [
       ['Sin', '["Missing",(sin(3), sin(4))]', '\\sin'],
@@ -462,6 +475,22 @@ describe('a list that holds a restricted point or masked points', () => {
       Sin: '[(sin(1), sin(4)),(sin(9), sin(16))]',
       Negate: '[(-1, -4),(-9, -16)]',
       Sqrt: '[(1, 2),(3, 4)]',
+    };
+    // The types of a symbol whose value holds a point of `NaN` coordinates
+    // in place of the restricted point.
+    const RESTRICTED_TYPES: Record<string, [string, string]> = {
+      Sin: [
+        'list<tuple<number, number>^2>',
+        'matrix<tuple<number, number>^(2x2)>',
+      ],
+      Negate: [
+        'list<(tuple<integer, integer> | tuple<nan, nan>)^2>',
+        'matrix<(tuple<integer, integer> | tuple<nan, nan>)^(2x2)>',
+      ],
+      Sqrt: [
+        'list<tuple<number, number>^2>',
+        'matrix<tuple<number, number>^(2x2)>',
+      ],
     };
     // `Negate` keeps integer coordinates; `Sin` and `Sqrt` give numbers.
     const TYPES: Record<string, [string, string]> = {
@@ -513,8 +542,12 @@ describe('a list that holds a restricted point or masked points', () => {
         const call = (x: string) =>
           cmd === '\\sqrt' ? `\\sqrt{${x}}` : `${cmd}(${x})`;
         for (const [src, want, type] of [
-          [call('L'), expected, TYPES[op][0]],
-          [call('M'), `[${expected},${MATRIX_ROW2[op]}]`, TYPES[op][1]],
+          [call('L'), restricted(expected), RESTRICTED_TYPES[op][0]],
+          [
+            call('M'),
+            `[${restricted(expected)},${MATRIX_ROW2[op]}]`,
+            RESTRICTED_TYPES[op][1],
+          ],
         ]) {
           const e = ce.parse(src);
           expect(e.operator).toBe(op);
@@ -524,7 +557,6 @@ describe('a list that holds a restricted point or masked points', () => {
           expect(v.toString()).toBe(want);
           const n = e.N();
           expect(n.type.matches(e.type)).toBe(true);
-          expect(n.toString()).not.toContain('NaN');
           expect((await e.evaluateAsync()).toString()).toBe(want);
         }
       }
@@ -537,42 +569,41 @@ describe('a list that holds a restricted point or masked points', () => {
       // static type of a literal list that holds one has none either.
       const pair = 'list<tuple<number, number>^2>';
       for (const [src, want, type] of [
-        [String.raw`\sin([(1,2)\{0<t\}, (3,4)])`, cases[0][1], pair],
+        [
+          String.raw`\sin([(1,2)\{0<t\}, (3,4)])`,
+          restricted(cases[0][1]),
+          pair,
+        ],
         [
           String.raw`-[(1,2)\{0<t\}, (3,4)]`,
-          cases[1][1],
+          restricted(cases[1][1]),
           'list<tuple<integer, integer>^2>',
         ],
-        [String.raw`\sqrt{[(1,2)\{0<t\}, (3,4)]}`, cases[2][1], pair],
+        [
+          String.raw`\sqrt{[(1,2)\{0<t\}, (3,4)]}`,
+          restricted(cases[2][1]),
+          pair,
+        ],
         [
           String.raw`\sin([[(1,2)\{0<t\}, (3,4)], [(1,4), (9,16)]])`,
-          `[${cases[0][1]},${MATRIX_ROW2.Sin}]`,
+          `[${restricted(cases[0][1])},${MATRIX_ROW2.Sin}]`,
           'matrix<tuple<number, number>^(2x2)>',
         ],
       ]) {
         const e = ce.parse(src);
         expect(e.type.toString()).toBe(type);
         expect(e.evaluate().toString()).toBe(want);
-        expect(e.N().toString()).not.toContain('NaN');
+        expect(e.N().toString()).toContain('(NaN, NaN)');
       }
     });
 
-    test('a numeric list keeps NaN in the absent cell', () => {
+    test('a numeric list keeps Missing in the absent cell', () => {
+      // `Sin(Missing)` is `Missing`.
       const ce = new ComputeEngine();
       const e = ce.box(['Sin', ['List', 'Missing', 1]]);
-      expect(e.type.toString()).toBe('vector<2>');
-      expect(e.evaluate().toString()).toBe('[NaN,sin(1)]');
-      expect(e.N().ops![0].isNaN).toBe(true);
+      expect(e.type.toString()).toBe('list<missing | number^2>');
+      expect(e.evaluate().toString()).toBe('["Missing",sin(1)]');
+      expect(e.N().ops![0].symbol).toBe('Missing');
     });
-  });
-
-  test('an absent coordinate does not make the point absent', () => {
-    // `missing` inside a tuple component is an absent coordinate, not an
-    // absent cell, so the cell type gets no `missing` arm.
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<tuple<number | missing, number>>');
-    expect(ce.box(['Multiply', 2, 'L']).type.toString()).not.toContain(
-      'missing'
-    );
   });
 });

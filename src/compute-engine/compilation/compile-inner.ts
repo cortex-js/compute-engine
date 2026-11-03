@@ -50,6 +50,7 @@ import {
 import { libraryBoundConstantHidden } from './compile-real-analysis.js';
 import { ensureUserFunctionValueRef } from './compile-callbacks.js';
 import { liftWideReference } from './compile-lanes.js';
+import { ABSENT_READS } from '../boxed-expression/conditional-value.js';
 import { tryFoldKnownSymbol } from './compile-folded-values.js';
 import { core } from './compiler-core-hooks.js';
 import {
@@ -161,7 +162,7 @@ export function compileInnerSymbol(
     // We're compiling something like "Add"
     return `(a,b) => a ${op[0]} b`;
   }
-  // A WRITTEN absence symbol (`Missing`, `Undefined`) is a VALUE, not an
+  // A WRITTEN absence symbol (`Missing`) is a VALUE, not an
   // input the caller supplies (2026-09-22). Without this branch it fell
   // through to the free-symbol read `_.Missing`, so the artifact reported
   // `freeSymbols: ["Missing"]` and every absence test ran against whatever
@@ -535,7 +536,13 @@ export function liftWideResult(
   )
     return code;
   const t = node.type?.type;
-  if (t === undefined || isNonRealNumber(t)) return code;
+  // A read (`At`, `First`, `Last`, `PointX`, …) gives the element that the
+  // collection holds, and a collection can hold a plain number although its
+  // element type is `complex`: a local first bound to `[(2, 0)]` and widened
+  // by a later `xs = [...xs, (Sqrt(4d), 0)]` keeps its first elements as
+  // plain numbers. So a read is lifted even when its type is non-real.
+  if (t === undefined) return code;
+  if (isNonRealNumber(t) && !ABSENT_READS.has(h)) return code;
   if (!wideNumericType(t)) return code;
   if (!core.isComplexValued(node)) return code;
   // A call to an emitted user function whose body returns a `{re, im}`

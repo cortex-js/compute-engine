@@ -61,11 +61,16 @@ function markerName(e: Expression): string {
 }
 
 /** Evaluate `expr`, check that its static type holds the value, and return
- *  the name of the value (`markerName()`). */
+ *  the name of the value (`markerName()`). The absence marker (`NaN`,
+ *  `Missing`) is implicit in the type of a read (`docs/ERROR-MODEL.md`,
+ *  "`Missing` is a result only"), so a marker value is not checked against
+ *  the type. */
 function markerOf(expr: Expression): string {
   const value = expr.evaluate();
-  expect(value.type.matches(expr.type)).toBe(true);
-  return markerName(value);
+  const name = markerName(value);
+  if (name !== 'NaN' && name !== 'Missing')
+    expect(value.type.matches(expr.type)).toBe(true);
+  return name;
 }
 
 describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', () => {
@@ -74,8 +79,6 @@ describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', (
   ce.assign('Ei', ce.box(['List']));
   ce.declare('Er', 'list<real>');
   ce.assign('Er', ce.box(['List']));
-  ce.declare('Em', 'list<integer | missing>');
-  ce.assign('Em', ce.box(['List']));
   ce.declare('Es', 'list<string>');
   ce.assign('Es', ce.box(['List']));
   // No declaration: the type is inferred from the value `[]`.
@@ -83,8 +86,6 @@ describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', (
   // The same declared types, with elements.
   ce.declare('Ni', 'list<integer>');
   ce.assign('Ni', ce.box(['List', 1, 2]));
-  ce.declare('Nm', 'list<integer | missing>');
-  ce.assign('Nm', ce.box(['List', 1, 2]));
   ce.declare('Ns', 'list<string>');
   ce.assign('Ns', ce.box(['List', "'a'"]));
 
@@ -99,11 +100,9 @@ describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', (
   ];
 
   describe.each([
-    ['list<integer>', 'Ei', 'integer | nan'],
-    ['list<real>', 'Er', 'nan | real'],
-    // The `missing` arm of the element type says nothing about the domain of
-    // the other cells: the marker is `NaN`, as for `Nm` below.
-    ['list<integer | missing>', 'Em', 'integer | missing | nan'],
+    // The type of a read is the type of its present value.
+    ['list<integer>', 'Ei', 'integer'],
+    ['list<real>', 'Er', 'real'],
   ])('declared %s, assigned []: NaN', (_type, name, type) => {
     test.each(reads(name))('%s', (_label, json) => {
       const expr = ce.box(json);
@@ -116,7 +115,7 @@ describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', (
     'declared list<string>, assigned []: Missing (%s)',
     (_label, json) => {
       const expr = ce.box(json);
-      expect(expr.type.toString()).toBe('missing | string');
+      expect(expr.type.toString()).toBe('string');
       expect(markerOf(expr)).toBe('Missing');
     }
   );
@@ -146,8 +145,6 @@ describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', (
   test('a declared list with elements gives the same marker', () => {
     expect(markerOf(ce.box(['At', 'Ni', 5]))).toBe('NaN');
     expect(markerOf(ce.box(['Third', 'Ni']))).toBe('NaN');
-    expect(markerOf(ce.box(['At', 'Nm', 5]))).toBe('NaN');
-    expect(markerOf(ce.box(['At', 'Nm', -5]))).toBe('NaN');
     expect(markerOf(ce.box(['At', 'Ns', 5]))).toBe('Missing');
   });
 
@@ -158,11 +155,11 @@ describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', (
     engine.declare('F', 'list<list<integer>>');
     engine.assign('F', engine.box(['List', ['List']]));
 
+    // The type of the gather is the type of its present cells: the absence
+    // marker of a cell is implicit in the type of a read.
     const gather = engine.box(['At', 'E', ['List', 1, 5]]);
-    expect(gather.type.toString()).toBe('list<integer | nan>');
-    const value = gather.evaluate();
-    expect(value.toString()).toBe('[NaN,NaN]');
-    expect(value.type.matches(gather.type)).toBe(true);
+    expect(gather.type.toString()).toBe('list<integer>');
+    expect(gather.evaluate().toString()).toBe('[NaN,NaN]');
 
     expect(markerOf(engine.box(['At', 'E', 'NaN']))).toBe('NaN');
     expect(markerOf(engine.box(['At', 'F', 1, 1]))).toBe('NaN');
@@ -177,7 +174,6 @@ describe('THE MARKER OF A READ OUTSIDE A DECLARED LIST THAT HOLDS NO ELEMENT', (
     ['\\mathrm{Last}(\\mathrm{Ei})', 'NaN'],
     ['\\mathrm{At}(\\mathrm{Ei}, 3)', 'NaN'],
     ['\\mathrm{First}(\\mathrm{Er})', 'NaN'],
-    ['\\mathrm{First}(\\mathrm{Em})', 'NaN'],
     ['\\mathrm{First}(\\mathrm{Es})', 'Missing'],
     ['\\mathrm{Es}[1]', 'Missing'],
     ['\\mathrm{First}(\\mathrm{Eu})', 'Missing'],
@@ -508,25 +504,21 @@ describe('A LIST BUILT FROM A VIEW THAT YIELDS NOTHING AGREES WITH ITSELF', () =
 describe('A CHAINED READ KEEPS THE DECLARED DOMAIN AT EVERY STEP', () => {
   // The marker of a read outside a declared list is that of the declared
   // element type at every index of a chained `At` (user decision
-  // 2026-10-20): a gather followed by an index, and an absent intermediate
-  // row, give the marker of the final declared domain.
+  // 2026-10-20): a gather followed by an index gives the marker of the final
+  // declared domain. (A declared list whose rows may be absent cannot be
+  // declared: `docs/ERROR-MODEL.md`, "`Missing` is a result only".)
   const ce = new ComputeEngine();
   ce.declare('E', 'list<integer>');
   ce.assign('E', ce.box(['List']));
-  ce.declare('Mr', 'list<list<integer> | missing>');
-  ce.assign('Mr', ce.box(['List', 'Missing']));
 
   test.each([
     ['a gather, then an index', ['At', 'E', ['List', 1], 1]],
     ['the same read in two steps', ['At', ['At', 'E', ['List', 1]], 1]],
-    ['an absent intermediate row', ['At', 'Mr', 1, 1]],
-    ['the same read with First', ['First', ['First', 'Mr']]],
   ] as [string, MathJsonExpression][])('%s is NaN', (_label, json) => {
     expect(markerOf(ce.box(json))).toBe('NaN');
   });
 
   test('parse route', () => {
     expect(markerOf(ce.parse('\\mathrm{At}(E, [1], 1)'))).toBe('NaN');
-    expect(markerOf(ce.parse('\\mathrm{At}(\\mathrm{Mr}, 1, 1)'))).toBe('NaN');
   });
 });

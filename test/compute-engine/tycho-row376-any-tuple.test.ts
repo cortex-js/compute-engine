@@ -119,12 +119,13 @@ describe('A STRUCTURAL ALIAS of a tuple of any or of unknown', () => {
     expect(d.evaluate().toString()).toBe(value);
   });
 
-  test('an alias of a point that can be absent', () => {
+  // An alias cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing` is a
+  // result only").
+  test('an alias of a point that can be absent is refused', () => {
     const ce = new ComputeEngine();
-    ce.declareType('mpt', 'missing | tuple<number, number>', { alias: true });
-    ce.declare('m', 'mpt');
-    expect(ce.box(['Dot', ['Tuple', 1, 2], 'm']).isValid).toBe(true);
-    expect(ce.box(['Norm', 'm']).isValid).toBe(true);
+    expect(() =>
+      ce.declareType('mpt', 'missing | tuple<number, number>', { alias: true })
+    ).toThrow(/cannot be declared/);
   });
 
   // A nominal type is not a subtype of its definition, so a point of a
@@ -324,11 +325,11 @@ describe('EVALUATION', () => {
     expect(distance.evaluate().toString()).toBe('2sqrt(2)');
   });
 
-  test('an absent component makes the inner product NaN', () => {
+  test('an absent component makes the inner product Missing', () => {
     const ce = engine('any');
     const dot = ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 'x', 'y']]);
     ce.assign('x', ce.box('Missing'));
     ce.assign('y', 4);
-    expect(dot.evaluate().toString()).toBe('NaN');
+    expect(dot.evaluate().toString()).toBe('"Missing"');
   });
 });

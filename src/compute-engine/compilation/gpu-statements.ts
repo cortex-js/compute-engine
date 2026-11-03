@@ -1085,8 +1085,8 @@ export function gpuSelectionIsComplex(
 }
 
 /**
- * True when `value` is a written absence: the symbol `Missing` or
- * `Undefined`, or a real NaN literal. On a shader target each of them is a
+ * True when `value` is a written absence: the symbol `Missing`,
+ * or a real NaN literal. On a shader target each of them is a
  * NaN, and as an arm of a selection it takes the shape of the other arms
  * (`gpuAbsentArm`). A bound name or a key of the caller's `vars` spelled
  * `Missing` is a variable and keeps its meaning, as in
@@ -1096,7 +1096,7 @@ function gpuIsWrittenAbsence(
   value: Expression,
   target: CompileTarget<Expression>
 ): boolean {
-  if (isSymbol(value, 'Missing') || isSymbol(value, 'Undefined'))
+  if (isSymbol(value, 'Missing'))
     return (
       target.boundVars?.has(value.symbol) !== true &&
       target.varsKeys?.has(value.symbol) !== true

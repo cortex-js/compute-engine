@@ -138,13 +138,12 @@ function expectStrictDecline(json: unknown, message: RegExp) {
 }
 
 describe('A complex point given to an engine-level function', () => {
-  // The last entry of a case is true when the call is inlined: the body of
-  // `h` is compiled at the call site with the point itself, which reads
-  // each coordinate in its own lane. Strict mode then compiles the call
-  // and gives the value of the interpreter. A call that is not inlined
-  // gives the point to the emitted definition of `h`, which reads the
-  // first coordinate as real, so strict mode declines it.
-  const cases: [string, unknown, string?, unknown?, unknown?, boolean?][] = [
+  // The body of `h` is compiled at the call site with the point itself,
+  // which reads each coordinate in its own lane, so strict mode compiles
+  // the call and gives the value of the interpreter. The call of `h` over
+  // the result of `first(P)` gives the list `P` to the emitted definition of
+  // `first`, whose parameter `L` is shaped real, so strict mode declines it.
+  const cases: [string, unknown, string?, unknown?, unknown?][] = [
     ['an element of a list of points', ['h', ['At', 'P', 1]]],
     [
       'a nested element',
@@ -164,20 +163,19 @@ describe('A complex point given to an engine-level function', () => {
       'tuple<complex, real>',
       ['Tuple', ['Complex', 1, 1], 2],
       [{ re: 1, im: 1 }, 2],
-      true,
     ],
     ['two coordinates', ['h2', ['At', 'P', 1]]],
   ];
-  for (const [name, body, type, value, jsValue, inlined] of cases) {
+  for (const [name, body, type, value, jsValue] of cases) {
     test(`auto: ${name}`, () =>
       expectSameValue(fn(body, type), value, jsValue));
     test(`strict: ${name}`, () =>
-      inlined
-        ? expectSameValue(fn(body, type), value, jsValue, 'strict')
-        : expectStrictDecline(
+      name === 'the result of a function call'
+        ? expectStrictDecline(
             fn(body, type),
-            /Lane mismatch.*parameter `p`/
-          ));
+            /Lane mismatch.*parameter `L` of `first`/
+          )
+        : expectSameValue(fn(body, type), value, jsValue, 'strict'));
   }
 
   test('a point with real coordinates compiles in strict mode', () => {
@@ -238,7 +236,9 @@ describe('The decline message of an engine-level fold combiner', () => {
 
 describe('Positions of a point parameter', () => {
   // `h3` reads its second coordinate as a real number, and its first as a
-  // complex number. A complex value at the second position is a mismatch.
+  // complex number. A complex value at the second position is a mismatch
+  // for the callback of `Map`. A direct call is compiled at the call site,
+  // which reads each coordinate in its own lane, so strict mode compiles it.
   const CC = 'list<tuple<complex, complex>>';
   const Pcc = ['List', ['Tuple', ['Complex', 1, 1], ['Complex', 0, 2]]];
   const jsPcc = [
@@ -254,10 +254,12 @@ describe('Positions of a point parameter', () => {
   for (const [name, body] of cases) {
     test(`auto: ${name}`, () => expectSameValue(fn(body, CC), Pcc, jsPcc));
     test(`strict: ${name}`, () =>
-      expectStrictDecline(
-        fn(body, CC),
-        /Lane mismatch.*parameter `p` of `h3`/
-      ));
+      name === 'Map'
+        ? expectStrictDecline(
+            fn(body, CC),
+            /Lane mismatch.*parameter `p` of `h3`/
+          )
+        : expectSameValue(fn(body, CC), Pcc, jsPcc, 'strict'));
   }
 
   test('a complex value at the complex position compiles in strict mode', () => {
@@ -305,15 +307,18 @@ describe('A position with no type is read as real', () => {
   // The test does not look at what the body does with a value at a
   // position typed `any` or `unknown`. `Length` reads no coordinate, so
   // `len` is a mismatch that the body does not need: `auto` compiles it in
-  // the complex mode with the same value, and `strict` declines.
+  // the complex mode with the same value, and `strict` declines the
+  // callback of `Map`. A direct call over `P[1]` is compiled at the call
+  // site, which reads each coordinate in its own lane, so strict mode
+  // compiles it and gives the interpreter's value (no message).
   const cases: [string, unknown, RegExp | undefined][] = [
-    ['len(P[1])', ['len', ['At', 'P', 1]], /parameter `L` of `len`/],
+    ['len(P[1])', ['len', ['At', 'P', 1]], undefined],
     ['Map(len, P)', ['Map', 'len', 'P'], /parameter `L` of `len`/],
-    ['gl(P[1])', ['gl', ['At', 'P', 1]], /parameter `p` of `gl`/],
+    ['gl(P[1])', ['gl', ['At', 'P', 1]], undefined],
     ['Map(gl, P)', ['Map', 'gl', 'P'], /parameter `p` of `gl`/],
-    ['gl2(P[1])', ['gl2', ['At', 'P', 1]], /parameter `p` of `gl2`/],
+    ['gl2(P[1])', ['gl2', ['At', 'P', 1]], undefined],
     ['Map(ha, P)', ['Map', 'ha', 'P'], /parameter `p` of `ha`/],
-    ['gu(P[1])', ['gu', ['At', 'P', 1]], /parameter `p` of `gu`/],
+    ['gu(P[1])', ['gu', ['At', 'P', 1]], undefined],
     // A function literal as the combiner is compiled in its own lanes.
     [
       'Reduce with Last',
@@ -327,35 +332,20 @@ describe('A position with no type is read as real', () => {
     ],
   ];
   for (const [name, body, message] of cases) {
-    // `gu` multiplies a parameter declared `U`, an alias of `any`, so the
-    // value of `p` can be a number or a list. Compiled code does not test
-    // the shape at run time, so the compilation declines in every mode
-    // (`assertNoDeclaredTopOperands()`), and the fallback gives the
-    // interpreter's value.
-    if (name === 'gu(P[1])') {
-      test(`auto: ${name} declines`, () => {
-        expect(() =>
-          compile(ce.box(fn(body) as any), { fallback: false })
-        ).toThrow(/declared `any` or `value`/);
-        const interp = ce.box(['Apply', fn(body), P] as any).evaluate();
-        const r = compile(ce.box(fn(body) as any))!;
-        expect(r.success).toBe(false);
-        const out = r.run!(jsP) as unknown[];
-        const expected = [...interp.each()];
-        expect(out.length).toBe(expected.length);
-        expected.forEach((x, i) => {
-          const [re, im] = parts(out[i]);
-          expect(re).toBeCloseTo(x.re, 12);
-          expect(im).toBeCloseTo(x.im, 12);
-        });
-      });
-    } else test(`auto: ${name}`, () => expectSameValue(fn(body)));
-    if (message !== undefined)
-      test(`strict: ${name}`, () => expectStrictDecline(fn(body), message));
+    test(`auto: ${name}`, () => expectSameValue(fn(body)));
+    test(`strict: ${name}`, () =>
+      message !== undefined
+        ? expectStrictDecline(fn(body), message)
+        : expectSameValue(fn(body), P, jsP, 'strict'));
   }
 
+  // `gm` takes the `Max` of a point with a complex coordinate. The lowering
+  // of `Max` is real-only, so strict mode declines at `Max`.
   test('strict: a union that admits a number and a collection', () =>
-    expectStrictDecline(fn(['gm', ['At', 'P', 1]]), /parameter `p` of `gm`/));
+    expectStrictDecline(
+      fn(['gm', ['At', 'P', 1]]),
+      /Could not compile `Max`.*real-only/
+    ));
 });
 
 describe('A type nested deeper than the comparison follows', () => {

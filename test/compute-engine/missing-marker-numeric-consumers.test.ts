@@ -15,12 +15,12 @@ import { ComputeEngine } from '../../src/compute-engine';
  *    that a genuinely non-numeric operand — a string, a heterogeneous tuple —
  *    is still a `Tuple`.
  *
- * 2. Absence absorption in `Add`/`Multiply`. In a numeric slot `Missing` is
- *    normalized to `NaN` at the boundary (`docs/ERROR-MODEL.md` §3). Both
- *    operators are `lazy`, so the driver's missing-value gate saw their
- *    operands UNEVALUATED and absorbed only a `Missing` written in the source;
- *    an absence produced BY the operand evaluation survived as
- *    `Add(Missing, 1)`.
+ * 2. Absence propagation in `Add`/`Multiply`. An arithmetic operator over
+ *    `Missing` gives `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+ *    only"). Both operators are `lazy`, so the driver's missing-value gate
+ *    saw their operands UNEVALUATED and handled only a `Missing` written in
+ *    the source; an absence produced BY the operand evaluation survived as
+ *    the unevaluated `Add(Missing, 1)`.
  *
  * Every case is pinned on the parse route and on the box route: a raw-MathJSON
  * `ce.box(...)` reaches the same handlers by a different path.
@@ -70,11 +70,11 @@ describe('juxtaposition with a `missing | T` operand is a product', () => {
     expect(ce.parse('2\\cdot g(0)').evaluate().toString()).toBe('1');
   });
 
-  test('an absent operand multiplies to `NaN`, not to a `Tuple`', () => {
+  test('an absent operand multiplies to `Missing`, not to a `Tuple`', () => {
     const ce = engineWithPiecewise();
     const expr = ce.parse('2g(3)');
     expect(expr.operator).toBe('Multiply');
-    expect(expr.evaluate().toString()).toBe('NaN');
+    expect(expr.evaluate().toString()).toBe('"Missing"');
   });
 });
 
@@ -103,18 +103,20 @@ describe('juxtaposition with a non-numeric operand stays a `Tuple`', () => {
   });
 });
 
-describe('`Add`/`Multiply` absorb an EVALUATED `Missing` operand', () => {
+describe('`Add`/`Multiply` propagate an EVALUATED `Missing` operand', () => {
   test('parse route: `g(3) + 1`', () => {
     const ce = engineWithPiecewise();
-    expect(ce.parse('g(3)+1').evaluate().toString()).toBe('NaN');
+    expect(ce.parse('g(3)+1').evaluate().toString()).toBe('"Missing"');
   });
 
   test('parse route: `2 \\cdot g(3)`', () => {
     const ce = engineWithPiecewise();
-    expect(ce.parse('2\\cdot g(3)').evaluate().toString()).toBe('NaN');
+    expect(ce.parse('2\\cdot g(3)').evaluate().toString()).toBe('"Missing"');
   });
 
   test('parse route: an else-less `If`', () => {
+    // A selection with no match in a numeric position is `NaN`, the marker
+    // of a number, so the sum is `NaN`.
     const ce = engineWithPiecewise();
     expect(
       ce.parse('\\operatorname{If}(3 < 1, 0.5) + 1').evaluate().toString()
@@ -123,32 +125,32 @@ describe('`Add`/`Multiply` absorb an EVALUATED `Missing` operand', () => {
 
   test('box route: `Add(g(3), 1)` and `Multiply(2, g(3))`', () => {
     const ce = engineWithPiecewise();
-    expect(ce.box(['Add', ['g', 3], 1]).evaluate().toString()).toBe('NaN');
-    expect(ce.box(['Multiply', 2, ['g', 3]]).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['Add', ['g', 3], 1]).evaluate().toString()).toBe('"Missing"');
+    expect(ce.box(['Multiply', 2, ['g', 3]]).evaluate().toString()).toBe('"Missing"');
   });
 
   test('`.N()` agrees with `evaluate()`', () => {
     const ce = engineWithPiecewise();
-    expect(ce.parse('g(3)+1').N().toString()).toBe('NaN');
-    expect(ce.parse('2\\cdot g(3)').N().toString()).toBe('NaN');
+    expect(ce.parse('g(3)+1').N().toString()).toBe('"Missing"');
+    expect(ce.parse('2\\cdot g(3)').N().toString()).toBe('"Missing"');
   });
 
-  test('a literal `Missing` operand is still absorbed', () => {
+  test('a literal `Missing` operand propagates', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Add', 'Missing', 1]).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['Add', 'Missing', 1]).evaluate().toString()).toBe('"Missing"');
     expect(ce.box(['Multiply', 2, 'Missing']).evaluate().toString()).toBe(
-      'NaN'
+      '"Missing"'
     );
   });
 
-  test('Subtract, Divide, Negate and Power absorb it too', () => {
+  test('Subtract, Divide, Negate and Power propagate it too', () => {
     const ce = engineWithPiecewise();
-    expect(ce.parse('g(3)-1').evaluate().toString()).toBe('NaN');
-    expect(ce.parse('1-g(3)').evaluate().toString()).toBe('NaN');
-    expect(ce.parse('\\frac{g(3)}{2}').evaluate().toString()).toBe('NaN');
-    expect(ce.parse('\\frac{2}{g(3)}').evaluate().toString()).toBe('NaN');
-    expect(ce.parse('-g(3)').evaluate().toString()).toBe('NaN');
-    expect(ce.parse('g(3)^2').evaluate().toString()).toBe('NaN');
+    expect(ce.parse('g(3)-1').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('1-g(3)').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('\\frac{g(3)}{2}').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('\\frac{2}{g(3)}').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('-g(3)').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('g(3)^2').evaluate().toString()).toBe('"Missing"');
   });
 
   test('a collection operand still broadcasts the absence per cell', () => {
@@ -157,7 +159,7 @@ describe('`Add`/`Multiply` absorb an EVALUATED `Missing` operand', () => {
     const ce = new ComputeEngine();
     expect(
       ce.box(['Add', 'Missing', ['List', 3, 4]]).evaluate().toString()
-    ).toBe('[NaN,NaN]');
+    ).toBe('["Missing","Missing"]');
     // A `list<number>` symbol with no value yet is destined to broadcast but
     // cannot be enumerated now: the application stays symbolic.
     ce.declare('L', 'list<number>');
@@ -165,40 +167,41 @@ describe('`Add`/`Multiply` absorb an EVALUATED `Missing` operand', () => {
   });
 });
 
-describe('the arithmetic methods read an absent operand as NaN', () => {
-  // User decision of 2026-09-25: arithmetic with an absent operand is `NaN`.
-  // The `Add`/`Multiply` operators already answered `NaN`, but the
-  // `.add()`/`.mul()`/`.div()` methods kept the symbol:
+describe('the arithmetic methods give Missing for an absent operand', () => {
+  // Arithmetic with an absent operand is `Missing`, as the `Add`/`Multiply`
+  // operators answer (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+  // The `.add()`/`.mul()`/`.div()` methods kept the symbol:
   // `Missing.add(1)` was `"Missing" + 1` and `Missing.mul(2)` was
   // `2·"Missing"`.
   const ce = new ComputeEngine();
   const box = (x: any) => ce.box(x);
 
-  test.each(['Missing', 'Undefined'])('%s', (absent) => {
+  test('Missing', () => {
+    const absent = 'Missing';
     const m = box(absent);
     const s = (e: any) => e.toString();
-    expect(s(m.add(box(1)))).toBe('NaN');
-    expect(s(m.add(1))).toBe('NaN');
-    expect(s(m.add(0))).toBe('NaN');
-    expect(s(box(1).add(m))).toBe('NaN');
-    expect(s(box(0).add(m))).toBe('NaN');
-    expect(s(box('x').add(m))).toBe('NaN');
-    expect(s(m.sub(box(1)))).toBe('NaN');
-    expect(s(box(1).sub(m))).toBe('NaN');
-    expect(s(m.mul(box(2)))).toBe('NaN');
-    expect(s(m.mul(2))).toBe('NaN');
-    expect(s(m.mul(1))).toBe('NaN');
-    expect(s(m.mul(0))).toBe('NaN');
-    expect(s(m.mul(-1))).toBe('NaN');
-    expect(s(box(1).mul(m))).toBe('NaN');
-    expect(s(box(-1).mul(m))).toBe('NaN');
-    expect(s(box('x').mul(m))).toBe('NaN');
-    expect(s(box(['Add', 'x', 1]).mul(m))).toBe('NaN');
-    expect(s(m.div(box(2)))).toBe('NaN');
-    expect(s(box(2).div(m))).toBe('NaN');
+    expect(s(m.add(box(1)))).toBe('"Missing"');
+    expect(s(m.add(1))).toBe('"Missing"');
+    expect(s(m.add(0))).toBe('"Missing"');
+    expect(s(box(1).add(m))).toBe('"Missing"');
+    expect(s(box(0).add(m))).toBe('"Missing"');
+    expect(s(box('x').add(m))).toBe('"Missing"');
+    expect(s(m.sub(box(1)))).toBe('"Missing"');
+    expect(s(box(1).sub(m))).toBe('"Missing"');
+    expect(s(m.mul(box(2)))).toBe('"Missing"');
+    expect(s(m.mul(2))).toBe('"Missing"');
+    expect(s(m.mul(1))).toBe('"Missing"');
+    expect(s(m.mul(0))).toBe('"Missing"');
+    expect(s(m.mul(-1))).toBe('"Missing"');
+    expect(s(box(1).mul(m))).toBe('"Missing"');
+    expect(s(box(-1).mul(m))).toBe('"Missing"');
+    expect(s(box('x').mul(m))).toBe('"Missing"');
+    expect(s(box(['Add', 'x', 1]).mul(m))).toBe('"Missing"');
+    expect(s(m.div(box(2)))).toBe('"Missing"');
+    expect(s(box(2).div(m))).toBe('"Missing"');
     // The same answers as the operators.
-    expect(s(box(['Add', absent, 1]).evaluate())).toBe('NaN');
-    expect(s(box(['Multiply', 2, absent]).evaluate())).toBe('NaN');
+    expect(s(box(['Add', absent, 1]).evaluate())).toBe('"Missing"');
+    expect(s(box(['Multiply', 2, absent]).evaluate())).toBe('"Missing"');
   });
 
   test('beside a point, the whole point is absent', () => {
@@ -206,7 +209,7 @@ describe('the arithmetic methods read an absent operand as NaN', () => {
     // result is `Missing`, as the operators answer. `Missing · (1, 2)` was the
     // half-absent point `("Missing", NaN)`.
     const p = box(['Tuple', 1, 2]);
-    for (const absent of ['Missing', 'Undefined']) {
+    for (const absent of ['Missing']) {
       const m = box(absent);
       expect(m.mul(p).toString()).toBe('"Missing"');
       expect(p.mul(m).toString()).toBe('"Missing"');
@@ -227,10 +230,10 @@ describe('the arithmetic methods read an absent operand as NaN', () => {
     ).toBe('"Missing"');
   });
 
-  test('beside a list, each cell is NaN', () => {
+  test('beside a list, each cell is Missing', () => {
     const l = box(['List', 1, 2]);
-    expect(box('Missing').mul(l).toString()).toBe('[NaN,NaN]');
-    expect(l.add(box('Missing')).toString()).toBe('[NaN,NaN]');
+    expect(box('Missing').mul(l).toString()).toBe('["Missing","Missing"]');
+    expect(l.add(box('Missing')).toString()).toBe('["Missing","Missing"]');
     // A list symbol with no value yet keeps the sum and the product inert.
     const ce2 = new ComputeEngine();
     ce2.declare('L', 'list<number>');
@@ -239,33 +242,30 @@ describe('the arithmetic methods read an absent operand as NaN', () => {
   });
 });
 
-describe('canonicalization does not fold an absent operand out of arithmetic', () => {
-  // User decision of 2026-09-25. Removing an identity element (`+ 0`, `· 1`,
-  // `/ 1`) or cancelling (`a/a`, `-(-a)`) turned the arithmetic into the
-  // absent value itself: `Multiply(Missing, 1)` canonicalized to `Missing`
-  // while `Multiply(Missing, 2)` evaluated to `NaN`.
+describe('arithmetic with an absent operand is Missing, also when canonical', () => {
+  // Arithmetic with an absent operand is `Missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"). Removing an identity element (`+ 0`,
+  // `· 1`, `/ 1`) or cancelling (`a/a`, `-(-a)`) at canonicalization gives
+  // the same value as the evaluation of the arithmetic.
   const ce = new ComputeEngine();
 
   test.each([
     ['Multiply', 'Missing', 1],
-    ['Multiply', 1, 'Undefined'],
     ['Multiply', 'Missing', -1, -1],
     ['Multiply', 0, 2, 'Missing'],
     ['Add', 'Missing', 0],
-    ['Add', 'Undefined', 0],
     ['Add', 'Missing', 1, -1],
     ['Subtract', 'Missing', 0],
     ['Divide', 'Missing', 1],
-    ['Divide', 'Undefined', 1],
     ['Divide', 'Missing', 'Missing'],
     ['Divide', 0, 'Missing'],
     ['Divide', 'Missing', 2],
     ['Negate', ['Negate', 'Missing']],
-  ])('%j is NaN', (...json) => {
+  ])('%j is Missing', (...json) => {
     const e = ce.box(json as any);
-    expect(e.toString()).toBe('NaN');
-    expect(e.evaluate().toString()).toBe('NaN');
-    expect(e.N().toString()).toBe('NaN');
+    expect(e.toString()).toBe('"Missing"');
+    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.N().toString()).toBe('"Missing"');
   });
 
   test.each([
@@ -273,21 +273,21 @@ describe('canonicalization does not fold an absent operand out of arithmetic', (
     ['\\operatorname{Missing}\\cdot 1'],
     ['\\frac{\\operatorname{Missing}}{1}'],
     ['\\operatorname{Missing}-0'],
-  ])('parse route: %s is NaN', (latex) => {
-    expect(ce.parse(latex).evaluate().toString()).toBe('NaN');
+  ])('parse route: %s is Missing', (latex) => {
+    expect(ce.parse(latex).evaluate().toString()).toBe('"Missing"');
   });
 
   test('a product or a sum that is not folded keeps its operands', () => {
     // These are not identity folds: the node stays, and evaluation answers
-    // `NaN`.
+    // `Missing`.
     for (const json of [
       ['Multiply', 2, 'Missing'],
       ['Add', 'Missing', 'x'],
       ['Negate', 'Missing'],
     ]) {
       const e = ce.box(json as any);
-      expect(e.toString()).not.toBe('NaN');
-      expect(e.evaluate().toString()).toBe('NaN');
+      expect(e.toString()).not.toBe('"Missing"');
+      expect(e.evaluate().toString()).toBe('"Missing"');
     }
     // A list divided by an absent value keeps its shape.
     expect(
@@ -295,7 +295,7 @@ describe('canonicalization does not fold an absent operand out of arithmetic', (
         .box(['Divide', ['List', 1, 2], 'Missing'])
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN]');
+    ).toBe('["Missing","Missing"]');
   });
 });
 

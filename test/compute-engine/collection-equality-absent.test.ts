@@ -1,6 +1,6 @@
 /**
  * A whole-collection `Equal`/`NotEqual` whose element recursion meets a pair
- * with an absent cell (`Missing`, `Undefined`).
+ * with an absent cell (`Missing`).
  *
  * A comparison is two-valued (user decision of 2026-11-02, two-valued
  * comparisons, `docs/ERROR-MODEL.md`): an absent cell is undefined, as a
@@ -74,14 +74,6 @@ describe('whole-collection Equal with an absent cell', () => {
     const e = ['Equal', ['List', 1, 'Missing', 3], ['List', 2, 'Missing', 3]];
     expect(ev(ce, e)).toBe('"False"');
     expect(js(ce, e)).toBeNaN();
-  });
-
-  test('`Undefined` is an absent cell too', () => {
-    const ce = engine();
-    const e = ['Equal', ['List', 1, 'Undefined'], ['List', 1, 'Undefined']];
-    expect(ev(ce, e)).toBe('"False"');
-    // The compiler folds this constant comparison with the interpreter.
-    expect(js(ce, e)).toBe(false);
   });
 
   test('a nested collection with an absent cell is False', () => {

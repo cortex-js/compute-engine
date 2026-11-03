@@ -446,10 +446,11 @@ describe('Dot of a restricted operand', () => {
 });
 
 describe('Distance of a restricted point', () => {
-  // The distances from a restricted point to a list of points form a LIST,
-  // so an absent point answers `Missing` (`undefined` at run time), as for a
-  // restricted list of points. The distance between two points answers NaN.
-  // A matrix, whose rows are the points, is a list of points too.
+  // A false restriction of a point is the point of `NaN` coordinates (user
+  // decision 2026-11-03), so the distances from it to a list of points are a
+  // list of `NaN`, and the distance between two points is `NaN`, in the
+  // interpreter and in compiled code. A matrix, whose rows are the points,
+  // is a list of points too.
   const L = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
   const M = ['List', ['List', 3, 4], ['List', 6, 8]];
   test.each([
@@ -457,18 +458,19 @@ describe('Distance of a restricted point', () => {
     ['list, point', ['Distance', L, gated(['Tuple', 0, 0])]],
     ['point, matrix', ['Distance', gated(['Tuple', 0, 0]), M]],
     ['matrix, point', ['Distance', M, gated(['Tuple', 0, 0])]],
-  ])('%s: an absent point answers Missing', (_l, json) => {
+  ])('%s: a false restricted point answers a list of NaN', (_l, json) => {
     expect(
       ce
         .box(json as never)
         .subs({ t: 0 })
-        .evaluate().json
-    ).toBe('Missing');
-    expect(run(json, 0)).toBeUndefined();
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,NaN]');
+    expect(run(json, 0)).toEqual([NaN, NaN]);
     expect(run(json, 2)).toEqual([5, 10]);
   });
 
-  test('point, point: an absent point answers NaN', () => {
+  test('point, point: a false restricted point answers NaN', () => {
     const json = ['Distance', gated(['Tuple', 0, 0]), ['Tuple', 3, 4]];
     expect(
       ce
@@ -512,14 +514,16 @@ describe('A restricted collection on the interval target', () => {
   }
 
   /** The interpreter's value at `t`, nested the same way, with the absent
-   * value `Missing` read as `'empty'`. */
+   * value `Missing` and `NaN` read as `'empty'`, the spelling of both on
+   * this target: a false restriction of a point is a point of `NaN`
+   * coordinates, a point of `empty` coordinates on this target. */
   function interpreted(latex: string, t: number): unknown {
     const v = ce2
       .parse(latex)
       .subs({ t, A: ce2.box(['List', ...A]), B: ce2.box(['List', ...B]) })
       .N();
     const toJS = (e: typeof v): unknown =>
-      e.symbol === 'Missing'
+      e.symbol === 'Missing' || e.isNaN === true
         ? 'empty'
         : e.operator === 'List' || e.operator === 'Tuple'
           ? e.ops!.map(toJS)
@@ -644,14 +648,14 @@ describe('The norm of a point with a restricted list component', () => {
     ];
     expect(interpretedAt(tuple, 1)).toEqual(expected);
     expect(compiledAt(tuple, 1, 'javascript')).toEqual(expected);
-    // An absent coordinate makes the norm `NaN`.
-    expect(interpretedAt(tuple, -1)).toBeNaN();
+    // An absent coordinate makes the norm `Missing` (`undefined` here).
+    expect(interpretedAt(tuple, -1)).toBeUndefined();
     // The compiled value of an operator applied to an absent operand is not specified.
   });
 
-  test('an absent restricted list beside another list is one NaN (JavaScript)', () => {
+  test('an absent restricted list beside another list is one Missing (JavaScript)', () => {
     // The interpreter finds the absent coordinate before it broadcasts over
-    // the other list, so the norm is one `NaN`. It is not one `NaN` per
+    // the other list, so the norm is one `Missing`. It is not one value per
     // element of the other list, and not `[]` when that list is empty.
     const gatedL = ['If', ['Less', 0, 't'], 'L'];
     for (const other of [['List', 10, 20, 30], ['List']]) {
@@ -660,7 +664,7 @@ describe('The norm of a point with a restricted list component', () => {
         ['Abs', ['Tuple', gatedL, other]],
         ['Norm', ['Tuple', gatedL, other], 1],
       ]) {
-        expect(interpretedAt(json, -1)).toBeNaN();
+        expect(interpretedAt(json, -1)).toBeUndefined();
         // The compiled value of an operator applied to an absent operand is not specified.
       }
     }

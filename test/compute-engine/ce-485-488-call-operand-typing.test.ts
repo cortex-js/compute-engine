@@ -54,7 +54,7 @@ describe('AN OPERAND TYPED any AT A DECLARED SCALAR PARAMETER (CE-485)', () => {
   test('Map over a list<any> admits a list element', () => {
     const expr = ce.box(['Map', 'k', 'L']);
     expect(expr.type.toString()).toBe(
-      'list<indexed_collection<any> | nan | nothing | real>'
+      'list<indexed_collection<any> | missing | nothing | real>'
     );
     const local = new ComputeEngine();
     local.declare('k', '(real) -> real');
@@ -139,7 +139,7 @@ describe('AN ELEMENT OF A list<unknown> AT A DECLARED SCALAR PARAMETER', () => {
   test.each([
     ['Lu', 'list<indexed_collection<any> | real>'],
     ['LLu', 'list<indexed_collection<any> | real>'],
-    ['LLa', 'list<indexed_collection<any> | nan | real>'],
+    ['LLa', 'list<indexed_collection<any> | missing | real>'],
     ['I', 'list<real>'],
     // An arm with fixed lengths keeps its lengths in the result.
     ['R', 'list<real | vector<real^2>>'],
@@ -227,7 +227,6 @@ describe('A CALL AT A POINT PARAMETER ON THE DESCRIPTOR ROUTE', () => {
       'tuple<number, number> | list<tuple<number, number>>',
       'list<number> | number',
     ],
-    ['list<tuple<number, number>> | missing', 'list<number> | missing'],
   ])('over %s, both routes give %s', (t, expected) => {
     const name = `v${t.length}_${t.charCodeAt(5)}`;
     ce.declare(name, t);
@@ -235,6 +234,20 @@ describe('A CALL AT A POINT PARAMETER ON THE DESCRIPTOR ROUTE', () => {
       expect(ce.box([f, name]).type.toString()).toBe(expected);
       expect(derived(ce, f, [t])).toBe(expected);
     }
+  });
+
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only — user decision of 2026-11-02"), so only the
+  // descriptor route reads an operand type with a `missing` arm, an inferred
+  // type.
+  test('over an operand that may be absent, the descriptor route keeps the arm', () => {
+    expect(() =>
+      ce.declare('vm', 'list<tuple<number, number>> | missing')
+    ).toThrow(/the type `missing` cannot be declared/);
+    for (const f of ['k', 'h'])
+      expect(
+        derived(ce, f, ['list<tuple<number, number>> | missing'])
+      ).toBe('list<number> | missing');
   });
 
   test('the value over a list of points matches the derived type', () => {

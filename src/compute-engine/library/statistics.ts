@@ -37,6 +37,7 @@ import {
 import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
+  isAbsentSymbol,
   isAbsentValue,
   nanOperandAnswer,
   indeterminateFormAnswer,
@@ -2084,6 +2085,10 @@ function collectData(
   // An absent datum was seen: the head answers absent unless a refused datum
   // outranks it later in the walk.
   let absent = false;
+  // A `Missing` datum was seen: the head answers `Missing`, not `NaN`.
+  // `Missing` is a result only, and an operator over it gives `Missing`;
+  // `NaN` is the answer for a `NaN` datum and for empty input.
+  let missing = false;
   // An `Indeterminate` datum was seen: the head answers `Indeterminate`
   // unless an absent datum or a refused datum is seen too.
   let indeterminate = false;
@@ -2118,8 +2123,10 @@ function collectData(
         // of the program, an absent datum is not.
         const failed = failedCellError(v);
         if (failed !== undefined) return failed;
-        if (isAbsentValue(v)) absent = true;
-        else if (v.isIndeterminate) indeterminate = true;
+        if (isAbsentValue(v)) {
+          absent = true;
+          if (isAbsentSymbol(v)) missing = true;
+        } else if (v.isIndeterminate) indeterminate = true;
         else if (isRealConstantDatum(v)) data.push(v);
         else if (!isNumber(v)) {
           // A measurement is not refused: its type `measurement` is not a
@@ -2136,8 +2143,10 @@ function collectData(
       }
     } else {
       sawData = true;
-      if (isAbsentValue(op)) absent = true;
-      else if (op.isIndeterminate) indeterminate = true;
+      if (isAbsentValue(op)) {
+        absent = true;
+        if (isAbsentSymbol(op)) missing = true;
+      } else if (op.isIndeterminate) indeterminate = true;
       else if (isRealConstantDatum(op)) data.push(op);
       else if (!isNumber(op)) {
         // A COLLECTION-typed operand is a container, not a datum, even when
@@ -2158,6 +2167,7 @@ function collectData(
   // Empty input is absent — but only when every operand was decidably finite
   // and enumerable, since an undecidable one may yet hold the data.
   if (!sawData && !undecidable) absent = true;
+  if (missing) return ce.Missing;
   if (absent) return absentAnswer?.(ce, ce.NaN) ?? ce.NaN;
   if (indeterminate) {
     // `NaN` instead when a datum is inexact (a float), as a float operand
@@ -2819,16 +2829,12 @@ function nonRealOperand(
 
 /**
  * The answer when some datum makes the statistic have no value, `undefined`
- * otherwise. The answer is `NaN` when the datum is `NaN` itself, it
- * is ABSENT (the `Missing` symbol), or it is the complex infinity `~oo`, whose
- * imaginary part is infinite and whose real part carries no information (see
- * `realProjection` in `library/statistics-data.ts`).
- *
- * The absent case is §3.C — an aggregate over data with an absent datum is
- * itself absent, normalized to `NaN` in a numeric cell (I6 absorption). It is
- * reached only because `extractPairs` was asked to admit such a datum; before
- * that, `Covariance([1,2,3], [1, Missing, 3])` was refused as MIS-SHAPED data
- * while the identical input spelled with a `NaN` answered `NaN`.
+ * otherwise. The answer is `Missing` when a datum is the `Missing` symbol:
+ * `Missing` is a result only, and an operator over it gives `Missing`
+ * (`Covariance([1, 2, 3], [1, Missing, 3])` is `Missing`). Otherwise the
+ * answer is `NaN` when the datum is `NaN` itself, or the complex infinity
+ * `~oo`, whose imaginary part is infinite and whose real part carries no
+ * information (see `realProjection` in `library/statistics-data.ts`).
  *
  * The answer is `Indeterminate` when a datum is the `Indeterminate` literal
  * and no datum makes it `NaN` or is inexact.
@@ -2836,6 +2842,8 @@ function nonRealOperand(
 function hasNaNDatum(
   ...data: ReadonlyArray<ReadonlyArray<Expression>>
 ): Expression | undefined {
+  for (const vals of data)
+    for (const v of vals) if (isAbsentSymbol(v)) return v.engine.Missing;
   let indeterminate: Expression | undefined = undefined;
   for (const vals of data)
     for (const v of vals) {

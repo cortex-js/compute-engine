@@ -41,7 +41,15 @@ function type(json: unknown): string {
 
 describe('Distance of a restricted point or list of points', () => {
   test.each([
-    ['a restricted point', ['Distance', RP, O], 'If(0 < t, 5)', '5', 'NaN'],
+    [
+      'a restricted point',
+      ['Distance', RP, O],
+      // A false restriction of a point is the point of `NaN` coordinates,
+      // whose distance is `NaN`.
+      'If(0 < t, 5)',
+      '5',
+      'NaN',
+    ],
     [
       'a restricted list of points',
       ['Distance', RL, O],
@@ -52,9 +60,9 @@ describe('Distance of a restricted point or list of points', () => {
     [
       'a list that holds an absent point',
       ['Distance', ['List', ['Tuple', 3, 4], 'Missing'], O],
-      '[5,NaN]',
-      '[5,NaN]',
-      '[5,NaN]',
+      '[5,"Missing"]',
+      '[5,"Missing"]',
+      '[5,"Missing"]',
     ],
     [
       'a list that holds a restricted point',
@@ -73,10 +81,11 @@ describe('Distance of a restricted point or list of points', () => {
     [
       'a piecewise point',
       ['Distance', ['Which', c, ['Tuple', 3, 4]], O],
-      // No default clause: `Distance(Missing, O)` is the last branch.
-      'Which(0 < t, 5, "True", NaN)',
+      // No default clause: `Distance(Missing, O)`, which is `Missing`, is the
+      // last branch.
+      'Which(0 < t, 5, "True", "Missing")',
       '5',
-      'NaN',
+      '"Missing"',
     ],
   ])('%s', (_l, json, free, present, absent) => {
     expect(value(json)).toBe(free);
@@ -94,7 +103,13 @@ describe('Distance of a restricted point or list of points', () => {
 
 describe('Norm of a restricted point or list of points', () => {
   test.each([
-    ['a restricted point', ['Norm', RP], 'If(0 < t, 5)', '5', 'NaN'],
+    [
+      'a restricted point',
+      ['Norm', RP],
+      'If(0 < t, 5)',
+      '5',
+      'NaN',
+    ],
     [
       'a restricted point, order 1',
       ['Norm', RP, 1],
@@ -112,9 +127,9 @@ describe('Norm of a restricted point or list of points', () => {
     [
       'a list that holds an absent point',
       ['Norm', ['List', ['Tuple', 3, 4], 'Missing']],
-      '[5,NaN]',
-      '[5,NaN]',
-      '[5,NaN]',
+      '[5,"Missing"]',
+      '[5,"Missing"]',
+      '[5,"Missing"]',
     ],
     [
       'a list whose first point is restricted',
@@ -141,7 +156,9 @@ describe('Norm of a restricted point or list of points', () => {
   test('a list whose first point is restricted is typed as a list', () => {
     // It was typed `number`, the norm of a vector, while its value is one
     // norm per point.
-    expect(type(['Norm', ['List', RP, ['Tuple', 6, 8]]])).toBe('list<number>');
+    expect(type(['Norm', ['List', RP, ['Tuple', 6, 8]]])).toBe(
+      'list<missing | number>'
+    );
     expect(type(['Norm', RL])).toBe('list<number>');
   });
 });
@@ -165,36 +182,36 @@ describe('The types of element access of a restricted operand', () => {
     expect(value(json, -1)).toBe('NaN');
   });
 
-  test('the coordinate of an absent point is typed as a number', () => {
-    // It was typed `missing` while its value is `NaN`.
-    expect(type(['PointX', 'Missing'])).toBe('number');
+  test('the coordinate of a written Missing is NaN, typed nan', () => {
+    // A coordinate of an absent point is `NaN`: a coordinate is a number
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+    expect(type(['PointX', 'Missing'])).toBe('nan');
     expect(value(['PointX', 'Missing'])).toBe('NaN');
   });
 
-  test('a symbol declared as a restricted point stays symbolic', () => {
+  test('a symbol cannot be declared as a restricted point', () => {
+    // `Missing` is a result only: a declared type cannot name `missing`.
     const ce = new ComputeEngine();
-    ce.declare('q', 'missing | tuple<integer, integer>');
-    for (const op of ['First', 'Last', 'PointX']) {
-      const e = ce.box([op, 'q'] as never);
-      expect(e.evaluate().toString()).toBe(e.toString());
-    }
+    expect(() => ce.declare('q', 'missing | tuple<integer, integer>')).toThrow(
+      /cannot be declared/
+    );
   });
 });
 
 describe('Point accessors over a list whose cells can be absent', () => {
   // A masked cell of a list is `Missing`, and the coordinate of an absent
-  // point of a list is `Missing` too. The type of a restricted point
-  // `If(c, p)` is the type of `p`, so the type of the result is the type of
-  // the present values: the run-time `Missing` sits outside it, as `NaN`
-  // sits outside `real`. A written `Missing` cell, and a cell masked by a
-  // list of conditions, keep their `missing` arm.
+  // point of a list is `NaN`: a coordinate is a number, and the absent value
+  // of a number is `NaN` (`docs/ERROR-MODEL.md`, "`Missing` is a result
+  // only"). The coordinate list of a list that holds a restricted or an
+  // absent point is typed with a `nan` arm on its cells. `First` and `Last`
+  // read the cell itself, so an absent cell gives `Missing`.
   const P3 = (a: number, b: number, z: number) => ['Tuple', a, b, z];
   const RF = ['List', RP, ['Tuple', 6, 8]];
   const RLast = ['List', ['Tuple', 6, 8], RP];
   const AF = ['List', 'Missing', ['Tuple', 6, 8]];
-  const V = 'vector<integer^2>';
+  const V = 'list<integer | nan^2>';
   const T = 'tuple<integer, integer>';
-  const MV = 'list<integer | missing | nan^2>';
+  const MV = 'list<integer | nan^2>';
   const MT = 'missing | tuple<integer, integer>';
   const ML = 'list<integer | missing | nan>';
   // The operation, its type, its value with `t = 2`, its value with
@@ -205,21 +222,21 @@ describe('Point accessors over a list whose cells can be absent', () => {
       ['PointX', RF],
       V,
       '[3,6]',
-      '["Missing",6]',
+      '[NaN,6]',
     ],
     [
       'PointY of a restricted first point',
       ['PointY', RF],
       V,
       '[4,8]',
-      '["Missing",8]',
+      '[NaN,8]',
     ],
     [
       'First of a restricted first point',
       ['First', RF],
       T,
       '(3, 4)',
-      '"Missing"',
+      '(NaN, NaN)',
     ],
     ['Last of a restricted first point', ['Last', RF], T, '(6, 8)', '(6, 8)'],
     [
@@ -227,14 +244,14 @@ describe('Point accessors over a list whose cells can be absent', () => {
       ['PointX', RLast],
       V,
       '[6,3]',
-      '[6,"Missing"]',
+      '[6,NaN]',
     ],
     [
       'PointY of a restricted last point',
       ['PointY', RLast],
       V,
       '[8,4]',
-      '[8,"Missing"]',
+      '[8,NaN]',
     ],
     [
       'First of a restricted last point',
@@ -248,21 +265,21 @@ describe('Point accessors over a list whose cells can be absent', () => {
       ['Last', RLast],
       T,
       '(3, 4)',
-      '"Missing"',
+      '(NaN, NaN)',
     ],
     [
       'PointX of an absent first point',
       ['PointX', AF],
       MV,
-      '["Missing",6]',
-      '["Missing",6]',
+      '[NaN,6]',
+      '[NaN,6]',
     ],
     [
       'PointY of an absent first point',
       ['PointY', AF],
       MV,
-      '["Missing",8]',
-      '["Missing",8]',
+      '[NaN,8]',
+      '[NaN,8]',
     ],
     [
       'First of an absent first point',
@@ -292,14 +309,14 @@ describe('Point accessors over a list whose cells can be absent', () => {
     [
       'First of an element-wise restriction',
       ['First', LE],
-      'missing | tuple<number, number>',
+      'tuple<number, number>',
       '(3, 4)',
       '(NaN, NaN)',
     ],
     [
       'Last of an element-wise restriction',
       ['Last', LE],
-      'missing | tuple<number, number>',
+      'tuple<number, number>',
       '(NaN, NaN)',
       '(6, 8)',
     ],
@@ -308,7 +325,7 @@ describe('Point accessors over a list whose cells can be absent', () => {
       ['PointZ', ['List', W(P3(1, 2, 3)), P3(3, 4, 5)]],
       V,
       '[3,5]',
-      '["Missing",5]',
+      '[NaN,5]',
     ],
   ];
   test.each(cases)('%s', (_l, json, t, present, absent) => {
@@ -319,18 +336,22 @@ describe('Point accessors over a list whose cells can be absent', () => {
 
   test('the coordinate list', () => {
     expect(type(['PointY', ['List', RP, ['Tuple', 6, 8]]])).toBe(
-      'vector<integer^2>'
+      'list<integer | nan^2>'
     );
     expect(value(['PointY', ['List', RP, ['Tuple', 6, 8]]], -1)).toBe(
-      '["Missing",8]'
+      '[NaN,8]'
     );
   });
 
-  test('Distance and Norm keep the numeric marker in the cell', () => {
+  // An operator over `Missing` gives `Missing`: the cell of an absent point
+  // is `Missing`, and the cell type has a `missing` arm.
+  test('Distance and Norm give Missing for an absent point', () => {
     expect(type(['Distance', ['List', RP, ['Tuple', 6, 8]], O])).toBe(
-      'list<number>'
+      'list<missing | number>'
     );
-    expect(type(['Norm', ['List', RP, ['Tuple', 6, 8]]])).toBe('list<number>');
+    expect(type(['Norm', ['List', RP, ['Tuple', 6, 8]]])).toBe(
+      'list<missing | number>'
+    );
   });
 });
 
@@ -362,7 +383,7 @@ describe('A custom operator that sets the flag', () => {
     ce.assign('t', 2);
     expect(e.evaluate().toString()).toBe('(1, 2)');
     ce.assign('t', -1);
-    expect(e.evaluate().json).toBe('Missing');
+    expect(e.evaluate().toString()).toBe('(NaN, NaN)');
   });
 
   test('without the flag, the handler receives the restriction', () => {
@@ -425,10 +446,10 @@ describe('A threaded operand whose present result type is unknown', () => {
   // The absent case of a `handle` operator is added to the result type.
   // When the present result is `unknown`, the result must stay `unknown`:
   // `missing` alone would claim the application is always absent.
-  test('At of a possibly absent unrestricted collection is any', () => {
+  test('At of an unrestricted collection is any', () => {
     const ce = new ComputeEngine();
     // A bare list has unrestricted contents, just like list<any>.
-    ce.declare('q', 'list | missing');
+    ce.declare('q', 'list');
     expect(ce.box(['At', 'q', 2]).type.toString()).toBe('any');
     // DECLARED `any` elements give `any`, not `unknown`. `any` admits the
     // absence markers, so no marker is added. `unknown` also holds points
@@ -436,8 +457,8 @@ describe('A threaded operand whose present result type is unknown', () => {
     // number, while an `any` operand contributes itself
     // (`broadcastableResultTypeOfOperands()`, `library/arithmetic.ts`;
     // `elementReadType()`, `library/collections.ts`). This expectation was
-    // `unknown` before that fix. `missing` alone is still not the answer.
-    ce.declare('r', 'dictionary<any> | indexed_collection<any> | missing');
+    // `unknown` before that fix.
+    ce.declare('r', 'dictionary<any> | indexed_collection<any>');
     expect(ce.box(['At', 'r', 2]).type.toString()).toBe('any');
   });
 
@@ -715,7 +736,7 @@ describe('A search for a restricted value', () => {
   test('a restricted collection is still threaded', () => {
     expect(value(['Contains', W(L), 2])).toBe('If(0 < t, "True")');
     expect(value(['Contains', W(L), 2], -1)).toBe('"False"');
-    expect(value(['IndexOf', W(L), 2], -1)).toBe('NaN');
+    expect(value(['IndexOf', W(L), 2], -1)).toBe('"Missing"');
   });
 
   test('compiled to JavaScript', () => {

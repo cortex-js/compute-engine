@@ -621,14 +621,14 @@ export class BoxedNumber
       if (realInfinity(this) && finiteComplex(rhs)) return this;
       if (realInfinity(rhs) && finiteComplex(this)) return rhs;
     }
-    // `0 + x` is `x`, but `0 + Missing` is `NaN`, not the absent symbol:
-    // arithmetic with an absent operand is `NaN` (user decision of
-    // 2026-09-25). A negation or product of an absent value (`-Missing`,
-    // `Missing·L`) goes to `add()`, which reads it as `NaN` too, except when
-    // the term may be a collection: then the sum stays inert, so that the
-    // absence can later land in each cell.
+    // `0 + x` is `x`, and `0 + Missing` is `Missing`: arithmetic with an
+    // absent operand is `Missing` (`docs/ERROR-MODEL.md`, "`Missing` is a
+    // result only", rule 3). A negation or product of an absent value
+    // (`-Missing`, `Missing·L`) goes to `add()`, which gives `Missing` too,
+    // except when the term may be a collection: then the sum stays inert, so
+    // that the absence can later land in each cell.
     if (this.isSame(0) && typeof rhs !== 'number') {
-      if (isAbsentSymbol(rhs)) return ce.NaN;
+      if (isAbsentSymbol(rhs)) return ce.Missing;
       if (isAbsentArithmeticOperand(rhs)) return add(this, rhs.canonical);
     }
     // Only an exact 0 is an identity here. A float 0 (the literal `0.0`)
@@ -678,16 +678,16 @@ export class BoxedNumber
           : rhs,
       ]);
     }
-    // `1 · x` is `x` and `-1 · x` is `-x`, but a product with an absent
-    // operand is `NaN` (see `add()`). A negation or product of an absent
-    // value goes to `mul()`, which reads it as `NaN` too, except when a
-    // factor may be a collection (the product then stays inert).
+    // `1 · x` is `x` and `-1 · x` is `-x`, and a product with an absent
+    // operand is `Missing` (see `add()`). A negation or product of an absent
+    // value goes to `mul()`, which gives `Missing` too, except when a factor
+    // may be a collection (the product then stays inert).
     if (
       (this.isSame(1) || this.isSame(-1)) &&
       typeof rhs !== 'number' &&
       !(rhs instanceof NumericValue)
     ) {
-      if (isAbsentSymbol(rhs)) return this.engine.NaN;
+      if (isAbsentSymbol(rhs)) return this.engine.Missing;
       if (isAbsentArithmeticOperand(rhs)) return mul(this, rhs);
     }
     // Only an exact 1 or -1 is an identity here. A float 1 (the literal

@@ -37,13 +37,20 @@ describe('AssertPresent — evaluation', () => {
 
   test.each([
     ['Missing', 'Missing'],
-    ['Undefined', 'Undefined'],
     ['NaN', 'NaN'],
     [['Divide', 0, 0], 'Indeterminate'],
   ])('%s fails the assertion', (input, _label) => {
     const v = ce.box(['AssertPresent', input as any]).evaluate();
     expect(v.operator).toBe('Error');
     expect(v.op1.toString()).toBe('"expected-present"');
+  });
+
+  test('Undefined is not an absent value: the assertion is held', () => {
+    // `Missing` is the one absent symbol (`docs/ERROR-MODEL.md`, "`Missing`
+    // is a result only"); `Undefined` is an ordinary symbol with no value.
+    expect(ce.box(['AssertPresent', 'Undefined']).evaluate().operator).toBe(
+      'AssertPresent'
+    );
   });
 
   test('Nothing passes through: omission is not missing data', () => {
@@ -122,7 +129,7 @@ describe('AssertPresent — type', () => {
   });
 
   test('`nothing` stays: the assertion does not check omission', () => {
-    ce.declare('u', 'integer | nothing | missing');
+    ce.declare('u', 'integer | nothing');
     expect(ce.box(['AssertPresent', 'u']).type.toString()).toBe(
       'integer | nothing'
     );
@@ -169,11 +176,14 @@ describe('AssertPresent — compiled (JavaScript)', () => {
     expect(() => r.run({ i: 7 })).toThrow(/expected-present/);
   });
 
-  test('a proved-present operand compiles with no check', () => {
-    // A declared length proves the position, and `string` admits no `nan`.
+  test('a read is never proved present: the check stays', () => {
+    // A type does not show that a read may be absent, so an expression that
+    // holds a read is not proved present by its type, also when a declared
+    // length proves the position (`docs/ERROR-MODEL.md`, "`Missing` is a
+    // result only").
     ce.declare('ys', 'list<string^3>');
     const r = js(ce.box(['AssertPresent', ['At', 'ys', 2]]));
-    expect(String(r.code)).not.toContain('expected-present');
+    expect(String(r.code)).toContain('expected-present');
   });
 
   test('a numeric cell keeps the check: `number` admits NaN', () => {
@@ -204,16 +214,19 @@ describe('AssertPresent — compiled (JavaScript)', () => {
   });
 
   test('Python binds the operand once: an effectful operand runs once', () => {
-    ce.declare('s', 'string | missing');
-    const py = compile(ce.box(['AssertPresent', 's']), { to: 'python' });
+    ce.declare('ss', 'list<string>');
+    ce.declare('k', 'integer');
+    const py = compile(ce.box(['AssertPresent', ['At', 'ss', 'k']]), {
+      to: 'python',
+    });
     expect(py.success).toBe(true);
     const code = String(py.code);
     expect(code).toContain('expected-present');
-    // Outside the error message text, the operand `s` appears once, as the
-    // argument of the binding lambda; the test and the result branch read
-    // the bound parameter `_c`.
-    const outsideMessage = code.replace(/"expected-present[^"]*"/, '""');
-    expect(outsideMessage.match(/\bs\b/g)?.length).toBe(1);
+    // Outside the error message text, the operand `ss[k]` appears once, as
+    // the argument of the binding lambda; the test and the result branch
+    // read the bound parameter `_c`.
+    const outsideMessage = code.replace(/"expected-present.*? is absent"/, '""');
+    expect(outsideMessage.match(/\bss\b/g)?.length).toBe(1);
   });
 
   test('the interval target raises too: the assertion is not removed', () => {

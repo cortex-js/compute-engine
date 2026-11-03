@@ -9,7 +9,8 @@ import { ComputeEngine } from '../../src/compute-engine';
  * the fix, the lowered loop read it as a failed level and put the absence
  * marker `NaN` in its place.
  *
- * The `Missing` row matters: without it, the type of `x` is `list<tuple>`, and
+ * The `Missing` row gives `Missing` (an operator over `Missing` gives
+ * `Missing`). The `Missing` row matters: without it, the type of `x` is `list<tuple>`, and
  * the body is already an error when the `Map` is made canonical.
  */
 
@@ -21,7 +22,7 @@ describe('CE-76: Map over a nested list with a Missing row', () => {
   test('the lowered route keeps the failed cell of the first row', () => {
     const e = ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], SOURCE]);
     expect(e.evaluate().toString()).toBe(
-      `[[Error(ErrorCode("incompatible-type", "tuple", "number"))],NaN]`
+      `[[Error(ErrorCode("incompatible-type", "tuple", "number"))],"Missing"]`
     );
     // `at()` reads one element through the same runner.
     expect(e.at(1)?.toString()).toBe(
@@ -50,7 +51,7 @@ describe('CE-76: Map over a nested list with a Missing row', () => {
       '\\mathrm{Map}(x\\mapsto x+1, [[(1,2)], \\mathrm{Missing}])'
     );
     expect(e.evaluate().toString()).toBe(
-      `[[Error(ErrorCode("incompatible-type", "tuple", "number"))],NaN]`
+      `[[Error(ErrorCode("incompatible-type", "tuple", "number"))],"Missing"]`
     );
   });
 });

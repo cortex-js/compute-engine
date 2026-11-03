@@ -1870,9 +1870,9 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
     const b = ce.box(['Apply', without, 1, 'Missing']).evaluate();
     // A default fills a supplied `Missing` (R6 of
     // docs/plans/2026-11-01-absent-value-contract.md), so the values differ;
-    // neither call refuses its argument.
+    // neither call refuses its argument. `x·Missing` is `Missing`.
     expect(a.toString()).toBe('2');
-    expect(b.toString()).toBe('NaN');
+    expect(b.toString()).toBe('"Missing"');
     expect(a.operator).not.toBe('Error');
     expect(b.operator).not.toBe('Error');
   });

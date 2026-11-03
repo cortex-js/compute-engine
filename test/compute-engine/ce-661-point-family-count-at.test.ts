@@ -194,8 +194,9 @@ describe('CE-661: count and at() of a family of points', () => {
       const sum = ce.box(['Add', L, ['PointList', 1.8, 0]]);
       expect(sum.count).toBe(3);
       expectElementsAgree(sum, 3);
-      expect(sum.evaluate().at(2)!.symbol).toBe('Missing');
-      expect(sum.at(2)!.evaluate().symbol).toBe('Missing');
+      // A false restriction of a point is the point of `NaN` coordinates.
+      expect(sum.evaluate().at(2)!.toString()).toBe('(NaN, NaN)');
+      expect(sum.at(2)!.evaluate().toString()).toBe('(NaN, NaN)');
 
       const x = ce.box(['PointX', L]);
       expect(x.count).toBe(3);

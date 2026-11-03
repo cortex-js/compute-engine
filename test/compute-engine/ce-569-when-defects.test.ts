@@ -409,14 +409,16 @@ describe('CE-569 — the cases the fixes do not change', () => {
     }
   });
 
-  it('a point value: the interpreter gives Missing, javascript undefined', () => {
+  it('a point value: the interpreter and javascript give the NaN point', () => {
     const ce = engine();
     const expr = ce.box(['If', ['Greater', 'x', 0], ['Tuple', 'x', 'y']]);
     expect(expr.subs({ x: 1, y: 2 }).evaluate().toString()).toBe('(1, 2)');
-    expect(expr.subs({ x: -1, y: 2 }).evaluate().symbol).toBe('Missing');
+    expect(expr.subs({ x: -1, y: 2 }).evaluate().toString()).toBe(
+      '(NaN, NaN)'
+    );
     const f = compile(expr, { to: 'javascript', fallback: false });
     expect(f.run!({ x: 1, y: 2 })).toEqual([1, 2]);
-    expect(f.run!({ x: -1, y: 2 })).toBeUndefined();
+    expect(f.run!({ x: -1, y: 2 })).toEqual([NaN, NaN]);
   });
 
   it('a complex value: the masked value is the complex NaN', () => {

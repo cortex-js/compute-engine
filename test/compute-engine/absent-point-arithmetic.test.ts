@@ -23,9 +23,16 @@ import { isSubtype } from '../../src/common/type/subtype';
  * for the absence to land in, and a tuple of absent coordinates is not a value
  * any consumer reads.
  *
- * All-numeric absences are untouched: they still absorb into `NaN`. So is the
- * scalar-vs-LIST application, which broadcasts the absence per cell.
+ * Since `Missing` is a result only (`docs/ERROR-MODEL.md`, user decision of
+ * 2026-11-02), an out-of-range read of a list of points is a `NaN` point,
+ * `(NaN, NaN, NaN)`, which is a present point: the arithmetic over it is the
+ * arithmetic of a point. An operator over the written `Missing` gives
+ * `Missing` (before, an all-numeric absence absorbed into `NaN`), and the
+ * scalar-vs-LIST application gives a `Missing` cell.
  */
+
+/** The value of an out-of-range read of a list of 3-coordinate points. */
+const NAN_POINT = '(NaN, NaN, NaN)';
 
 /** An engine where `P` is a list of two 3-coordinate points, so `P[0]` is out
  * of range (the index is one-based) and `P[1]` is the first point. */
@@ -36,55 +43,54 @@ function engineWithPointList(): ComputeEngine {
   return ce;
 }
 
-describe('an absent point access', () => {
-  test('is `Missing`, typed `missing | tuple<…>`', () => {
+describe('an out-of-range point access', () => {
+  test('is a NaN point, typed `tuple<…>`', () => {
     const ce = engineWithPointList();
     expect(ce.parse('P[0]').type.toString()).toBe(
-      'missing | tuple<number, number, number>'
+      'tuple<number, number, number>'
     );
-    expect(ce.parse('P[0]').evaluate().symbol).toBe('Missing');
+    expect(ce.parse('P[0]').evaluate().toString()).toBe(NAN_POINT);
   });
 
-  test('scaled, it stays an absent point', () => {
+  test('scaled, it stays a NaN point', () => {
     const ce = engineWithPointList();
     const expr = ce.parse('2\\cdot P[0]');
-    // The application is typed a point that can be absent, so the codomain
-    // marker is `Missing`, and the type keeps the operand's `missing` arm.
-    expect(expr.type.toString()).toBe(
-      'missing | tuple<number, number, number>'
-    );
-    expect(expr.evaluate().symbol).toBe('Missing');
+    expect(expr.type.toString()).toBe('tuple<number, number, number>');
+    expect(expr.evaluate().toString()).toBe(NAN_POINT);
   });
 
-  test('scaled and added to a point, it stays an absent point', () => {
+  test('scaled and added to a point, it stays a NaN point', () => {
     // The defect report's expression: `NaN + tuple` used to be an
     // `incompatible-type` error here.
     const ce = engineWithPointList();
-    expect(ce.parse('2\\cdot P[0]+(1,1,1)').evaluate().symbol).toBe('Missing');
+    expect(ce.parse('2\\cdot P[0]+(1,1,1)').evaluate().toString()).toBe(
+      NAN_POINT
+    );
   });
 
-  test('negated, it stays an absent point', () => {
+  test('negated, it stays a NaN point', () => {
     const ce = engineWithPointList();
     const expr = ce.box(['Negate', ['At', 'P', 0]]);
     // `Negate` is declared `-> number`; the tuple broadcast exemption is what
-    // makes the APPLICATION a point (one that can be absent).
-    expect(expr.type.toString()).toBe(
-      'missing | tuple<number, number, number>'
-    );
-    expect(expr.evaluate().symbol).toBe('Missing');
+    // makes the APPLICATION a point.
+    expect(expr.type.toString()).toBe('tuple<number, number, number>');
+    expect(expr.evaluate().toString()).toBe(NAN_POINT);
   });
 
-  test('subtracted from, it stays an absent point', () => {
+  test('subtracted from, it stays a NaN point', () => {
     const ce = engineWithPointList();
     expect(
-      ce.box(['Subtract', ['At', 'P', 0], ['Tuple', 1, 1, 1]]).evaluate().symbol
-    ).toBe('Missing');
+      ce
+        .box(['Subtract', ['At', 'P', 0], ['Tuple', 1, 1, 1]])
+        .evaluate()
+        .toString()
+    ).toBe(NAN_POINT);
   });
 
-  test('divided by a number, it stays an absent point', () => {
+  test('divided by a number, it stays a NaN point', () => {
     const ce = engineWithPointList();
-    expect(ce.box(['Divide', ['At', 'P', 0], 2]).evaluate().symbol).toBe(
-      'Missing'
+    expect(ce.box(['Divide', ['At', 'P', 0], 2]).evaluate().toString()).toBe(
+      NAN_POINT
     );
   });
 
@@ -97,28 +103,29 @@ describe('an absent point access', () => {
 
   test('the numeric-approximation route answers the same', () => {
     const ce = engineWithPointList();
-    expect(ce.parse('2\\cdot P[0]').N().symbol).toBe('Missing');
-    expect(ce.parse('2\\cdot P[0]+(1,1,1)').N().symbol).toBe('Missing');
-    expect(ce.box(['Negate', ['At', 'P', 0]]).N().symbol).toBe('Missing');
-    expect(ce.box(['Multiply', 2, 'Missing']).N().toString()).toBe('NaN');
-    // A symbol ASSIGNED `Missing` types `never`; a numeric operator over it
-    // keeps the numeric marker.
+    expect(ce.parse('2\\cdot P[0]').N().toString()).toBe(NAN_POINT);
+    expect(ce.parse('2\\cdot P[0]+(1,1,1)').N().toString()).toBe(NAN_POINT);
+    expect(ce.box(['Negate', ['At', 'P', 0]]).N().toString()).toBe(NAN_POINT);
+    expect(ce.box(['Multiply', 2, 'Missing']).N().toString()).toBe(
+      '"Missing"'
+    );
+    // A numeric operator over a symbol ASSIGNED `Missing` gives `Missing`.
     ce.assign('w', ce.Missing);
-    expect(ce.parse('\\sin(w)').N().isNaN).toBe(true);
+    expect(ce.parse('\\sin(w)').N().symbol).toBe('Missing');
   });
 
   test('the asynchronous route answers the same', async () => {
     // The async driver has its own copy of the missing-value gate; the two
     // must decide alike.
     const ce = engineWithPointList();
-    expect((await ce.parse('2\\cdot P[0]').evaluateAsync()).symbol).toBe(
-      'Missing'
-    );
     expect(
-      (await ce.box(['Negate', ['At', 'P', 0]]).evaluateAsync()).symbol
-    ).toBe('Missing');
+      (await ce.parse('2\\cdot P[0]').evaluateAsync()).toString()
+    ).toBe(NAN_POINT);
+    expect(
+      (await ce.box(['Negate', ['At', 'P', 0]]).evaluateAsync()).toString()
+    ).toBe(NAN_POINT);
     expect((await ce.box(['Sin', 'Missing']).evaluateAsync()).toString()).toBe(
-      'NaN'
+      '"Missing"'
     );
   });
 });
@@ -181,22 +188,22 @@ describe('a tuple whose every coordinate is absent', () => {
     expect(ce.box(['Tuple']).evaluate().toString()).toBe('()');
   });
 
-  test('a tuple of two index reads preserves both missing slots', () => {
+  test('a tuple of two out-of-range point reads holds two NaN points', () => {
     const ce = engineWithPointList();
     ce.declare('k', 'integer');
     ce.declare('j', 'integer');
     const e = ce.parse('(P[k], P[j])');
     expect(e.type.toString()).toBe(
-      'tuple<missing | tuple<number, number, number>, missing | tuple<number, number, number>>'
+      'tuple<tuple<number, number, number>, tuple<number, number, number>>'
     );
     ce.assign('k', 0);
     ce.assign('j', 7);
     const both = ce.parse('(P[k], P[j])').evaluate();
-    expect(both.json).toEqual(['Tuple', 'Missing', 'Missing']);
+    expect(both.toString()).toBe(`(${NAN_POINT}, ${NAN_POINT})`);
     expect(isSubtype(both.type.type, e.type.type)).toBe(true);
     ce.assign('j', 2);
     const one = ce.parse('(P[k], P[j])').evaluate();
-    expect(one.toString()).toBe('("Missing", (4, 5, 6))');
+    expect(one.toString()).toBe(`(${NAN_POINT}, (4, 5, 6))`);
     expect(isSubtype(one.type.type, e.type.type)).toBe(true);
   });
 
@@ -206,6 +213,8 @@ describe('a tuple whose every coordinate is absent', () => {
     expect(
       ce.box(['Apply', f, ['Tuple', 'Missing', 'Missing']]).evaluate().symbol
     ).toBe('True');
+    // An out-of-range read of a list of points is a NaN point, which the
+    // readers (`IsMissing`) read as absent.
     expect(
       ce.box(['Apply', f, ['Tuple', ['At', 'P', 0], ['At', 'P', 7]]]).evaluate()
         .symbol
@@ -219,7 +228,7 @@ describe('a tuple whose every coordinate is absent', () => {
     ).toBe('False');
   });
 
-  test('compiled JavaScript preserves all missing coordinates', () => {
+  test('compiled JavaScript gives a NaN point for each out-of-range read', () => {
     const ce = engineWithPointList();
     ce.declare('k', 'integer');
     const both = compile(
@@ -232,8 +241,8 @@ describe('a tuple whose every coordinate is absent', () => {
     expect(both.success).toBe(true);
     expect(String(both.code)).not.toContain('tupleOrAbsent');
     expect(both.run!({ P: [[1, 2, 3]], k: 5 } as never)).toEqual([
-      undefined,
-      undefined,
+      [NaN, NaN, NaN],
+      [NaN, NaN, NaN],
     ]);
     expect(both.run!({ P: [[1, 2, 3]], k: 1 } as never)).toEqual([
       [1, 2, 3],
@@ -245,7 +254,10 @@ describe('a tuple whose every coordinate is absent', () => {
       fallback: false,
     } as never);
     expect(String(one.code)).not.toContain('tupleOrAbsent');
-    expect(one.run!({ P: [[1, 2, 3]], k: 5 } as never)).toEqual([undefined, 1]);
+    expect(one.run!({ P: [[1, 2, 3]], k: 5 } as never)).toEqual([
+      [NaN, NaN, NaN],
+      1,
+    ]);
     const point = compile(ce.parse('(x^2, 2x)'), {
       to: 'javascript',
       fallback: false,
@@ -253,7 +265,7 @@ describe('a tuple whose every coordinate is absent', () => {
     expect(String(point.code)).not.toContain('tupleOrAbsent');
   });
 
-  test('an explicit tuple built from an absent point retains missing coordinates', () => {
+  test('an explicit tuple built from a NaN point has NaN coordinates', () => {
     const ce = engineWithPointList();
     ce.assign(
       'W',
@@ -261,12 +273,7 @@ describe('a tuple whose every coordinate is absent', () => {
         '(p, s) \\mapsto (s\\cdot\\operatorname{PointX}(p), s\\cdot\\operatorname{PointY}(p), s\\cdot\\operatorname{PointZ}(p))'
       )
     );
-    expect(ce.parse('W(P[0], 2)').evaluate().json).toEqual([
-      'Tuple',
-      'Missing',
-      'Missing',
-      'Missing',
-    ]);
+    expect(ce.parse('W(P[0], 2)').evaluate().toString()).toBe(NAN_POINT);
     expect(ce.parse('W(P[1], 2)').evaluate().toString()).toBe('(2, 4, 6)');
   });
 });
@@ -283,41 +290,39 @@ describe('an absence in a codomain that is not provably numeric', () => {
   });
 });
 
-describe('all-numeric absences still absorb into `NaN`', () => {
+describe('an all-numeric absence gives `Missing`', () => {
   test('a product, a negation and a transcendental of `Missing`', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Multiply', 2, 'Missing']).evaluate().toString()).toBe(
-      'NaN'
-    );
-    expect(ce.box(['Negate', 'Missing']).evaluate().toString()).toBe('NaN');
-    expect(ce.box(['Sin', 'Missing']).evaluate().toString()).toBe('NaN');
-    expect(ce.box(['Add', 'Missing', 1]).evaluate().toString()).toBe('NaN');
+    for (const json of [
+      ['Multiply', 2, 'Missing'],
+      ['Negate', 'Missing'],
+      ['Sin', 'Missing'],
+      ['Add', 'Missing', 1],
+    ])
+      expect(ce.box(json as any).evaluate().toString()).toBe('"Missing"');
   });
 
-  test('the sum of a list that holds only one absent element', () => {
-    // A sum of one term answered that term itself: `Sum([Missing])` was
-    // `Missing`, where `Sum([0, Missing])` is `NaN`.
+  test('the sum of a list that holds an absent element', () => {
+    // `Sum([Missing])` and `Sum([0, Missing])` give the same answer.
     const ce = new ComputeEngine();
     for (const xs of [
       ['List', 'Missing'],
-      ['List', 'Undefined'],
       ['List', 0, 'Missing'],
       ['List', 'Missing', 'Missing'],
     ]) {
       const e = ce.box(['Sum', xs] as any);
-      expect(e.evaluate().toString()).toBe('NaN');
-      expect(e.N().toString()).toBe('NaN');
+      expect(e.evaluate().toString()).toBe('"Missing"');
+      expect(e.N().toString()).toBe('"Missing"');
     }
   });
 
   test('the product of a list that holds only absent elements', () => {
     // `Product(L)` is `Reduce(L, Multiply, 1)`. For a list whose element
     // type is `missing`, the reducer `Multiply` was an `incompatible-type`
-    // error, while `Product([1, Missing])` was `NaN`.
+    // error, while `Product([1, Missing])` had a value.
     const ce = new ComputeEngine();
     for (const json of [
       ['Product', ['List', 'Missing']],
-      ['Product', ['List', 'Undefined']],
       ['Product', ['List', 'Missing', 'Missing']],
       ['Product', ['List', 1, 'Missing']],
       ['Reduce', ['List', 'Missing'], 'Multiply', 1],
@@ -325,8 +330,8 @@ describe('all-numeric absences still absorb into `NaN`', () => {
     ]) {
       const e = ce.box(json as any);
       expect(e.isValid).toBe(true);
-      expect(e.evaluate().toString()).toBe('NaN');
-      expect(e.N().toString()).toBe('NaN');
+      expect(e.evaluate().toString()).toBe('"Missing"');
+      expect(e.N().toString()).toBe('"Missing"');
     }
   });
 
@@ -340,7 +345,6 @@ describe('all-numeric absences still absorb into `NaN`', () => {
     const type = (json: any) => ce.box(json).type.toString();
     for (const json of [
       ['Reduce', ['List', 'Missing'], 'Max'],
-      ['Reduce', ['List', 'Undefined'], 'Max'],
       ['Reduce', ['List', 'Missing'], 'Multiply'],
       [
         'Reduce',
@@ -349,21 +353,19 @@ describe('all-numeric absences still absorb into `NaN`', () => {
       ],
     ]) {
       expect(type(json)).toBe('missing | number');
-      expect(ce.box(json as any).evaluate().symbol).toMatch(
-        /Missing|Undefined/
-      );
+      expect(ce.box(json as any).evaluate().symbol).toBe('Missing');
     }
     const missing = ce.box(['Reduce', ['List', 'Missing'], 'Max']);
     expect(missing.evaluate().type.matches(missing.type)).toBe(true);
-    // An element that computes with an absent cell gives `NaN`.
+    // An element that computes with an absent cell gives `Missing`.
     expect(
       ce
         .box(['Reduce', ['List', 'Missing', 1], 'Max'])
         .evaluate()
         .toString()
-    ).toBe('NaN');
+    ).toBe('"Missing"');
     // With an initial value, the element is not returned unchanged.
-    expect(type(['Reduce', ['List', 'Undefined'], 'Max', 0])).toBe('number');
+    expect(type(['Reduce', ['List', 'Missing'], 'Max', 0])).toBe('number');
     // An element type that the result type already admits adds nothing.
     expect(type(['Reduce', 'L', 'Max'])).toBe('integer');
     // A callback whose result type does not admit the element type: the
@@ -389,19 +391,19 @@ describe('all-numeric absences still absorb into `NaN`', () => {
   });
 
   test('a numeric piecewise with no default arm', () => {
-    // `g(t) = 0.5` when `t < 1`, absent otherwise: `g(3)` is `Missing` and the
-    // sum is typed `number`, so the numeric marker is the answer.
+    // `g(t) = 0.5` when `t < 1`, absent otherwise: `g(3)` is `Missing`, and
+    // an operator over it gives `Missing`.
     const ce = new ComputeEngine();
     ce.parse('g(t) := \\begin{cases} 0.5 & t < 1 \\end{cases}').evaluate();
-    expect(ce.box(['Add', ['g', 3], 1]).type.toString()).toBe('nan | real');
+    expect(ce.box(['Add', ['g', 3], 1]).type.toString()).toBe('missing | real');
     expect(
       ce
         .box(['Add', ['g', 3], 1])
         .evaluate()
         .toString()
-    ).toBe('NaN');
-    expect(ce.parse('2\\cdot g(3)').evaluate().toString()).toBe('NaN');
-    expect(ce.parse('-g(3)').evaluate().toString()).toBe('NaN');
+    ).toBe('"Missing"');
+    expect(ce.parse('2\\cdot g(3)').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('-g(3)').evaluate().toString()).toBe('"Missing"');
   });
 
   test('a scalar-vs-LIST application still broadcasts per cell', () => {
@@ -411,7 +413,7 @@ describe('all-numeric absences still absorb into `NaN`', () => {
         .box(['Add', 'Missing', ['List', 1, 2]])
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN]');
+    ).toBe('["Missing","Missing"]');
   });
 });
 
@@ -458,8 +460,9 @@ describe('the whole-point absence arm stands aside', () => {
 /**
  * A point with an ABSENT COORDINATE, such as `(1, Missing)` (the value of a
  * restricted coordinate whose condition is false), follows the `Norm`
- * precedent: `Norm((1, Missing))` is `NaN`, typed `number`. The operators
- * that compute a number from the point (`Distance`, `Dot`) answer `NaN`; the
+ * precedent: `Norm((1, Missing))` is `Missing`, and its type gains a `missing`
+ * arm. The operators that compute a number from the point (`Distance`,
+ * `Dot`) answer `Missing`; the
  * operators that read a coordinate (`PointX`/`PointY`/`PointZ`,
  * `First`/`Second`/`Third`/`Last`) answer the coordinate as it is, and their
  * static type is read off the type of that coordinate.
@@ -474,24 +477,29 @@ describe('a point with an absent coordinate', () => {
   };
   const type = (json: any): string => ce.box(json).type.toString();
 
+  // A `List` operand is not a tuple, so its type gains no `missing` arm.
   test.each([
-    [['Distance', ['Tuple', 1, 'Missing'], ['Tuple', 0, 0]]],
-    [['Distance', ['Tuple', 1, 'Undefined'], ['Tuple', 0, 0]]],
-    [['Distance', ['Tuple', 0, 0], ['Tuple', 'Missing', 1]]],
-    [['Distance', ['Tuple', 'PositiveInfinity', 'Missing'], ['Tuple', 0, 0]]],
-    [['Distance', ['List', 1, 'Missing'], ['Tuple', 0, 0]]],
-    [['Distance', 'pAbsent', ['Tuple', 0, 0]]],
-    [['Dot', ['Tuple', 1, 'Missing'], ['Tuple', 1, 1]]],
-    [['Dot', ['Tuple', 1, 'Undefined'], ['Tuple', 1, 1]]],
-    [['Dot', ['Tuple', 1, 1], ['Tuple', 'Missing', 1]]],
-    [['Dot', ['Tuple', 1, 'Missing'], ['List', 1, 1]]],
-    [['Dot', 'pAbsent', ['Tuple', 1, 1]]],
-  ])('%j is NaN, typed number', (json) => {
+    [['Distance', ['Tuple', 1, 'Missing'], ['Tuple', 0, 0]], 'missing | number'],
+    [['Distance', ['Tuple', 0, 0], ['Tuple', 'Missing', 1]], 'missing | number'],
+    [
+      ['Distance', ['Tuple', 'PositiveInfinity', 'Missing'], ['Tuple', 0, 0]],
+      'missing | number',
+    ],
+    [['Distance', ['List', 1, 'Missing'], ['Tuple', 0, 0]], 'number'],
+    [['Distance', 'pAbsent', ['Tuple', 0, 0]], 'missing | number'],
+    // The `Dot` rows are typed from the present products (`1·1`, an
+    // `integer<1..1>`) with a `missing` arm for the absent coordinate: the
+    // value `Missing` is in the type.
+    [['Dot', ['Tuple', 1, 'Missing'], ['Tuple', 1, 1]], 'integer<1..1> | missing'],
+    [['Dot', ['Tuple', 1, 1], ['Tuple', 'Missing', 1]], 'integer<1..1> | missing'],
+    [['Dot', ['Tuple', 1, 'Missing'], ['List', 1, 1]], 'integer<1..1> | missing'],
+    [['Dot', 'pAbsent', ['Tuple', 1, 1]], 'missing | number'],
+  ])('%j is Missing, typed %s', (json, expectedType) => {
     // `Distance` answered an `expected-value` error; `Dot` stayed
-    // unevaluated.
-    expect(value(json)).toBe('NaN');
-    expect(value(json, true)).toBe('NaN');
-    expect(type(json)).toBe('number');
+    // unevaluated; from 2026-09-25 to 2026-11-02 both were `NaN`.
+    expect(value(json)).toBe('"Missing"');
+    expect(value(json, true)).toBe('"Missing"');
+    expect(type(json)).toBe(expectedType);
   });
 
   test('a point of the wrong width is still a dimension error', () => {
@@ -507,15 +515,15 @@ describe('a point with an absent coordinate', () => {
         ['List', ['Tuple', 1, 'Missing'], ['Tuple', 3, 4]],
         ['Tuple', 0, 0],
       ],
-      '[NaN,5]',
+      '["Missing",5]',
     ],
     [
       [
         'Distance',
         ['Tuple', 0, 0],
-        ['List', ['Tuple', 3, 4], ['Tuple', 'Undefined', 1]],
+        ['List', ['Tuple', 3, 4], ['Tuple', 'Missing', 1]],
       ],
-      '[5,NaN]',
+      '[5,"Missing"]',
     ],
     [
       [
@@ -523,7 +531,7 @@ describe('a point with an absent coordinate', () => {
         ['List', ['Tuple', 1, 'Missing'], ['Tuple', 2, 3]],
         ['Tuple', 1, 1],
       ],
-      '[NaN,5]',
+      '["Missing",5]',
     ],
     [
       [
@@ -531,11 +539,14 @@ describe('a point with an absent coordinate', () => {
         ['Tuple', 1, 'Missing'],
         ['List', ['Tuple', 2, 3], ['Tuple', 4, 5]],
       ],
-      '[NaN,NaN]',
+      '["Missing","Missing"]',
     ],
     // The scalar route and the list route agree with `Norm`.
-    [['Norm', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 3, 4]]], '[NaN,5]'],
-  ])('inside a list of points, %j is NaN for that point', (json, expected) => {
+    [
+      ['Norm', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 3, 4]]],
+      '["Missing",5]',
+    ],
+  ])('inside a list of points, %j is Missing for that point', (json, expected) => {
     expect(value(json)).toBe(expected);
     expect(value(json, true)).toBe(expected);
   });
@@ -544,15 +555,14 @@ describe('a point with an absent coordinate', () => {
     // A tuple component that is only absent was stripped to the bottom type
     // `never` before the type handler read it: `Dot(pAbsent, (1, 1))` was
     // typed `infinity` and `Norm(pAbsent)` `list<number>`.
-    expect(type(['Norm', 'pAbsent'])).toBe('+oo | nan | real');
-    expect(value(['Norm', 'pAbsent'])).toBe('NaN');
+    expect(type(['Norm', 'pAbsent'])).toBe('+oo | missing | nan | real');
+    expect(value(['Norm', 'pAbsent'])).toBe('"Missing"');
   });
 
   test.each([
-    [['PointX', ['Tuple', 1, 'Missing']], 'integer | nan', '1'],
+    [['PointX', ['Tuple', 1, 'Missing']], 'integer', '1'],
     [['PointY', ['Tuple', 1, 'Missing']], 'missing', '"Missing"'],
-    [['PointY', ['Tuple', 1, 'Undefined']], 'missing', '"Undefined"'],
-    [['PointX', 'pAbsent'], 'integer | nan', '1'],
+    [['PointX', 'pAbsent'], 'integer', '1'],
     [['PointY', 'pAbsent'], 'missing', '"Missing"'],
     [['First', ['Tuple', 1, 'Missing']], 'integer', '1'],
     [['Second', ['Tuple', 1, 'Missing']], 'missing', '"Missing"'],
@@ -561,7 +571,7 @@ describe('a point with an absent coordinate', () => {
     [['PointZ', ['Tuple', 1, 2, 'Missing']], 'missing', '"Missing"'],
     [
       ['PointY', ['List', 1, 'Missing']],
-      'integer | missing | nan',
+      'integer | missing',
       '"Missing"',
     ],
     [
@@ -608,22 +618,19 @@ describe('a point of absent coordinates only, and a product against a matrix', (
   const ce = new ComputeEngine();
   const val = (json: any) => ce.box(json).evaluate().toString();
 
-  test('the flat list of absent values is a point: its distance is NaN', () => {
+  test('the flat list of absent values is a point: its distance is Missing', () => {
     // Found by review 2026-09-25: `[Missing, Missing]` was routed to the
     // list-of-points broadcast and answered `incompatible-type`, while the
     // tuple spelling `(Missing, Missing)` answered `NaN`.
     for (const json of [
       ['Distance', ['List', 'Missing', 'Missing'], ['List', 0, 0]],
       ['Distance', ['List', 'Missing', 'Missing'], ['Tuple', 0, 0]],
-      ['Distance', ['List', 'Undefined'], ['List', 0]],
+      ['Distance', ['List', 'Missing'], ['List', 0]],
       ['Distance', ['Tuple', 'Missing', 'Missing'], ['Tuple', 0, 0]],
     ]) {
       const e = ce.box(json);
-      expect([json, e.evaluate().toString()]).toEqual([json, 'NaN']);
-      expect([json, e.N().toString()]).toEqual([json, 'NaN']);
-      // The static type admits the value: an all-absent list could as well
-      // be a list of absent points, so it is the undecided union.
-      expect(e.evaluate().type.matches(e.type)).toBe(true);
+      expect([json, e.evaluate().toString()]).toEqual([json, '"Missing"']);
+      expect([json, e.N().toString()]).toEqual([json, '"Missing"']);
     }
     expect(
       val(['Distance', ['List', 'Missing', 'Missing'], ['List', 0, 0, 0]])
@@ -665,8 +672,10 @@ describe('a point of absent coordinates only, and a product against a matrix', (
     expect(val(['Dot', R, ['List', 1, 'Missing']])).toMatch(
       /incompatible-dimensions/
     );
-    // Two vectors still give a number.
-    expect(val(['Dot', ['List', 1, 'Missing'], ['List', 1, 2]])).toBe('NaN');
+    // Two vectors give a number, here `Missing`.
+    expect(val(['Dot', ['List', 1, 'Missing'], ['List', 1, 2]])).toBe(
+      '"Missing"'
+    );
   });
 });
 
@@ -737,15 +746,14 @@ describe('a difference with an absent operand beside a point', () => {
   const ce = new ComputeEngine();
   test.each([
     [['Subtract', ['Tuple', 1, 2], 'Missing']],
-    [['Subtract', ['Tuple', 1, 2], 'Undefined']],
     [['Subtract', 'Missing', ['Tuple', 1, 2]]],
     [['Subtract', ['Tuple', 1, 'x'], 'Missing']],
     [['Add', ['Tuple', 1, 2], ['Multiply', 2, 'Missing']]],
-  ])('%j is Missing, typed missing | tuple', (json) => {
+  ])('%j is Missing, typed missing', (json) => {
     const e = ce.box(json as any);
     expect(e.evaluate().toString()).toBe('"Missing"');
     expect(e.N().toString()).toBe('"Missing"');
-    expect(e.type.toString()).toMatch(/^missing \| tuple</);
+    expect(e.type.toString()).toBe('missing');
   });
 
   test('the parse route', () => {
@@ -770,16 +778,16 @@ describe('a difference with an absent operand beside a point', () => {
     );
   });
 
-  test('a difference of numbers, or of a list, is still NaN', () => {
+  test('a difference of numbers is Missing, and of a list, Missing per cell', () => {
     expect(ce.box(['Subtract', 3, 'Missing']).evaluate().toString()).toBe(
-      'NaN'
+      '"Missing"'
     );
     expect(
       ce
         .box(['Subtract', ['List', 1, 2], 'Missing'])
         .evaluate()
         .toString()
-    ).toBe('[NaN,NaN]');
+    ).toBe('["Missing","Missing"]');
   });
 
   test('a point divided by a negated or scaled absence is Missing', () => {
@@ -861,15 +869,15 @@ describe('a compiled out-of-range read agrees with the interpreter', () => {
     expect(run(['First', ['Tuple', 'Missing', 'x']], { x: 2 })).toBeUndefined();
   });
 
-  test('a collection of points reads as absent', () => {
+  test('a collection of points reads a NaN point', () => {
     const json = ['Third', ['List', ['Tuple', 1, 2], ['Tuple', 3, 'x']]];
     expect(
       ce
         .box(json as any)
         .evaluate()
         .toString()
-    ).toBe('"Missing"');
-    expect(run(json, { x: 4 })).toBeUndefined();
+    ).toBe('(NaN, NaN)');
+    expect(run(json, { x: 4 })).toEqual([NaN, NaN]);
   });
 
   test('the parse route', () => {
@@ -884,31 +892,37 @@ describe('a compiled out-of-range read agrees with the interpreter', () => {
 describe('an absent term that may be a list is not a scalar absence', () => {
   // `Missing·L`, with `L` a list, broadcasts: the absence lands in each cell.
   // It is not read as a scalar absent term, whatever literal the method is
-  // called on.
+  // called on. Each cell of the value is `Missing`, so the cell type has a
+  // `missing` arm.
   const ce = new ComputeEngine();
   ce.declare('L', 'list<number>');
   const mL = () => ce.box(['Multiply', 'Missing', 'L']);
   test('the product keeps the list', () => {
-    expect(ce.box(1).mul(mL()).type.toString()).toBe('list<number>');
-    expect(ce.box(2).mul(mL()).type.toString()).toBe('list<number>');
-    expect(ce.Zero.add(mL()).type.toString()).toBe('list<number>');
+    expect(ce.box(1).mul(mL()).type.toString()).toBe('list<missing | number>');
+    expect(ce.box(2).mul(mL()).type.toString()).toBe('list<missing | number>');
+    expect(ce.Zero.add(mL()).type.toString()).toBe('list<missing | number>');
     expect(
       ce.box(['Add', ['Multiply', 'Missing', 'L'], 1]).type.toString()
-    ).toBe('list<number>');
+    ).toBe('list<missing | number>');
   });
   test('the quotient by a JavaScript number keeps the list', () => {
     // `.div(2)` collapsed the quotient to the scalar `NaN`, while
-    // `.div(ce.box(2))` kept it. With `L = [1, 2]` the value is `[NaN, NaN]`.
-    expect(mL().div(2).type.toString()).toBe('list<number>');
+    // `.div(ce.box(2))` kept it. With `L = [1, 2]` the value is
+    // `[Missing, Missing]`.
+    expect(mL().div(2).type.toString()).toBe('list<missing | number>');
     expect(
       mL()
         .div(2)
         .isSame(mL().div(ce.box(2)))
     ).toBe(true);
-    expect(ce.box('Missing').div(2).toString()).toBe('NaN');
+    expect(ce.box('Missing').div(2).toString()).toBe('"Missing"');
   });
-  test('a scalar negated absence is still NaN', () => {
-    expect(ce.Zero.add(ce.box(['Negate', 'Missing'])).toString()).toBe('NaN');
-    expect(ce.One.mul(ce.box(['Negate', 'Missing'])).toString()).toBe('NaN');
+  test('a scalar negated absence is Missing', () => {
+    expect(ce.Zero.add(ce.box(['Negate', 'Missing'])).toString()).toBe(
+      '"Missing"'
+    );
+    expect(ce.One.mul(ce.box(['Negate', 'Missing'])).toString()).toBe(
+      '"Missing"'
+    );
   });
 });

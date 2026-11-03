@@ -305,13 +305,13 @@ type Reducer = (
   options: { engine: ComputeEngine }
 ) => Expression | undefined;
 
-/** Is `v` `False`, or an absent value (`Missing`, `Undefined`), which a
+/** Is `v` `False`, or an absent value (`Missing`), which a
  * connective reads as `False`? The logic is two-valued: an absent value is
  * not a third truth value (user decision 2026-11-02, `docs/ERROR-MODEL.md`,
  * two-valued comparisons). */
 function readsFalse(v: Expression): boolean {
   const s = sym(v);
-  return s === 'False' || s === 'Missing' || s === 'Undefined';
+  return s === 'False' || s === 'Missing';
 }
 /** `And` stops at the first `False` (result `False`). */
 const decideAnd: Decider = (ce, v) => (readsFalse(v) ? ce.False : undefined);
@@ -914,7 +914,7 @@ function evaluateForAll(
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
     // Body doesn't depend on x, so ∀x. P ≡ P. A quantifier is two-valued:
-    // an absent body (`Missing`, `Undefined`) is `False`, as the body of
+    // an absent body (`Missing`) is `False`, as the body of
     // a quantifier over a finite domain is (user decision 2026-11-02,
     // two-valued comparisons).
     const value = canonicalBody.evaluate(evalOptions);
@@ -1073,14 +1073,14 @@ function evaluateExistsUnique(
         [domainResult.variable]: value,
       }).canonical;
       const result = substituted.evaluate(evalOptions);
-      // An absent answer (`Missing`, `Undefined`) reads as `False`, as for
+      // An absent answer (`Missing`) reads as `False`, as for
       // `ForAll`/`Exists` (`foldQuantifierAnswers`): the logic is two-valued.
       const s = sym(result);
 
       if (s === 'True') {
         count++;
         if (count > 1) return ce.False; // More than one witness
-      } else if (s !== 'False' && s !== 'Missing' && s !== 'Undefined') {
+      } else if (s !== 'False' && s !== 'Missing') {
         // A second witness after this answer still decides (`False`), so
         // the walk goes on. Otherwise the first failed answer is the result,
         // and an undetermined answer keeps the quantifier unevaluated, as

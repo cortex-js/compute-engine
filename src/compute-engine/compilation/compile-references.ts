@@ -1467,7 +1467,7 @@ export function buildInterpreterFallback<T extends string>(
       alpha,
     };
   };
-  // The value an ABSENT interpreter result (`Missing`, `Undefined`) takes in
+  // The value an ABSENT interpreter result (`Missing`) takes in
   // the compiled-runner value contract. Compiled code spells an absent value
   // by the kind of the position that holds it (`docs/ERROR-MODEL.md` §3): the
   // numeric marker `NaN` in a numeric position, and the target's object null
@@ -1483,8 +1483,7 @@ export function buildInterpreterFallback<T extends string>(
   // The kind is read from the static type `t` of the position. When that
   // type says nothing (`unknown`, `any`, or no type), `hint` gives the kind
   // of the present sibling cells of the same collection; with no hint the
-  // value is the spelling of a WRITTEN absence symbol on the target, since
-  // a bare `Undefined` is typed `unknown` and compiles to that spelling
+  // value is the spelling of a WRITTEN absence symbol on the target
   // (`undefined` on JavaScript). A target that declares an absence
   // capability without an object axis (the shader targets, the interval
   // target) spells every absent value with its numeric marker, so the
@@ -1564,7 +1563,7 @@ export function buildInterpreterFallback<T extends string>(
     return collectionElementType(r) ?? r;
   };
   const isAbsentValue = (e: Expression): boolean =>
-    isSymbol(e, 'Missing') || isSymbol(e, 'Undefined');
+    isSymbol(e, 'Missing');
   // Materialize an interpreted result matching the compiled-runner value
   // contract: a scalar yields a `number` (imaginary part exactly zero), a
   // `{re, im}` object (otherwise) or a boolean; a finite indexed collection

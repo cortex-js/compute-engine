@@ -41,7 +41,6 @@ import {
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
 import {
-  absorbNumericAbsence,
   broadcastElementType,
   collectionElementType,
   isNumericScalarType,
@@ -566,12 +565,33 @@ export function gatedCollectionPresentType(t: Type): Type | undefined {
   return arms.length === 1 ? arms[0] : widen(...arms);
 }
 
+/** The type of the application `v` without its collection arms, when it is
+ * a union of a top type, absence markers and collections with at least one
+ * collection arm (`topTypeBesideAbsence`), and `undefined` otherwise. */
+function openApplicationType(v: BroadcastOperandView): Type | undefined {
+  if (!v.isApplication || topTypeBesideAbsence(v.type) === undefined)
+    return undefined;
+  const r = resolveTypeAlias(v.type);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  const arms = r.types.filter((b) => !isSubtype(b, 'collection'));
+  if (arms.length === r.types.length) return undefined;
+  return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+}
+
 /** `v` with a gated collection type (`gatedCollectionPresentType`) replaced
  * by its present part, and with each `range` element of a collection read
  * as a `list<integer>` (`rangeElementsAsLists`). Every other fact is read
- * from `v`. */
+ * from `v`.
+ *
+ * The type of an application that is a top type beside collections
+ * (`topTypeBesideAbsence`) is read without its collection arms. With
+ * `g: (unknown) -> list<unknown>` and `x: any`, `g(x)[1]` is typed
+ * `list<unknown> | unknown`. Its value can be a number, a list of any depth
+ * or a point, as for an operand typed `unknown`. Read by its `list` arm, it
+ * was typed as a list of one cell, and `Sin(g(x)[1])` lost its `tuple` arms,
+ * although `g((1, 2))[1]` is the point `(1, 2)`. */
 function presentView(v: BroadcastOperandView): BroadcastOperandView {
-  const present = gatedCollectionPresentType(v.type);
+  const present = gatedCollectionPresentType(v.type) ?? openApplicationType(v);
   const t = rangeElementsAsLists(present ?? v.type);
   if (t === v.type) return v;
   return {
@@ -625,16 +645,17 @@ function hasTopLevelMissing(t: Type): boolean {
 }
 
 /**
- * The operators whose result cell for an ABSENT cell of a collection operand
- * is `Missing`, whatever the type of the cell: the point-coordinate
- * accessors. They read the coordinate of each point of a list of points,
- * and the coordinate of an absent point (`Missing`, the masked cell of a
- * restriction whose condition is false) is itself `Missing`, as the masked
- * cell of a list is (`docs/ERROR-MODEL.md`: a masked list cell is `Missing`
- * and the list is typed `list<T | missing>`). The operators that COMPUTE a
- * number from each point (`Distance`, `Norm`, `Dot`) answer the numeric
- * marker `NaN` there instead, which the numeric absorption of
- * `absorbOperandAbsence` describes.
+ * The operators that READ a cell of a collection operand rather than
+ * computing a value from it: the point-coordinate accessors. They read the
+ * coordinate of each point of a list of points. The coordinate of an absent
+ * point (`Missing`, the masked cell of a restriction whose condition is
+ * false) is a number, so it is `NaN`, the absent value of a number
+ * (`PointY([(1, 2), Missing])` is `[2, NaN]`), and an absent coordinate of
+ * a point is read as it is (`PointY((1, Missing))` is `Missing`). The
+ * operators that COMPUTE a number from each point (`Distance`, `Norm`,
+ * `Dot`) give `Missing` for an absent point instead, as an operator over
+ * `Missing` does. The name of the set is older than the rule that the
+ * coordinate of an absent point is `NaN`.
  */
 export const ABSENT_CELLS_STAY_MISSING: ReadonlySet<string> = new Set([
   'PointX',
@@ -908,62 +929,54 @@ function isCellCollectionType(t: Type): boolean {
  * the result the type handler, the signature or the broadcast lift computed
  * for the present operands.
  *
- * At run time, an operand that evaluates to `Missing` beside operands that
- * are not collections makes the whole application answer the codomain
- * marker of its own type (`absentScalarMarker()` in `validate.ts`): `NaN`
- * when the type, less its `missing` arm, is numeric, and `Missing`
- * otherwise. So when a whole-value absence reaches a result that is not
- * numeric, the type must keep a `missing` arm, or the marker is computed
- * from a type that says the value is always present. This function adds
- * the arm when an operand can be absent as a whole (a top-level `missing`
- * arm), no other operand is a collection that is not a tuple, and the
- * result, less its `missing` arm, is not a subtype of `number`. Examples:
+ * An operator over `Missing` gives `Missing`: `Missing` is a result only
+ * (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user decision of
+ * 2026-11-02"). A numeric result does not gain a `nan` arm for an absent
+ * operand and is not widened to `number`: an absent operand is not `NaN`.
+ * The rules:
  *
- * - A GATED collection operand (`gatedCollectionPresentType`: a restricted
- *   point or list). `Sin(If(c, (0, 1)))` is
- *   `missing | tuple<number, number>` and answers `Missing` when `c` is
- *   false; `Sin(If(c, [1, 2, 3]))` is `missing | list<number>` (the
- *   operand is `missing | list<integer | missing>`, absent as a whole or
- *   cell by cell, and both absences are absorbed).
- * - A point result. `2{c} · (0, 1)` is `missing | tuple<…>`, because an
- *   absent factor beside a point makes the whole point absent
- *   (`docs/ERROR-MODEL.md`, the section on `Missing` in a numeric slot).
- * - A result that is a number OR a collection. With `PointX(V)` typed
- *   `list<number> | missing | number | tuple<number, number>`,
- *   `PointX(V)^2` is `list<number> | missing | number`: when `PointX(V)` is
- *   `Missing` the application answers `Missing`, because its type is not
- *   provably numeric.
+ * - An operand that is always absent (typed `missing`) beside operands that
+ *   are not collections makes the result `missing`: `Missing + 2` and
+ *   `Sin(Missing)` are typed `missing` and give `Missing`.
+ * - An operand that may be absent as a whole (a top-level `missing` arm)
+ *   beside operands that are not collections adds a `missing` arm to the
+ *   result.
+ * - An operand absent as a whole beside a list, at a BROADCASTABLE operator
+ *   (`broadcastable`): the absence spreads over the cells of the list, and
+ *   each leaf cell of the result gains a `missing` arm:
+ *   `[1, 2, 3] + Missing` is `[Missing, Missing, Missing]`, typed
+ *   `list<integer | missing>`. An operator that threads its conditional
+ *   operands whole, such as `Dot`, gives `Missing` for an absent operand
+ *   beside a list, and its result keeps a `missing` arm.
+ * - An absent CELL of a collection operand (`list<T | missing>`) gives an
+ *   absent result cell, and the result cell at that depth gains a `missing`
+ *   arm: `Sin([1, Missing])` is `[Sin(1), Missing]`, typed
+ *   `list<number | missing>`, and `[[1, 2], Missing] + 1` is
+ *   `[[2, 3], Missing]`. When the absent cell meets a row of another
+ *   operand, the kernel maps the absence over that row, and each leaf below
+ *   that depth gains the arm instead (`[[1, 2], Missing] + [[1, 2], [3, 4]]`
+ *   is `[[2, 4], [Missing, Missing]]`). A result cell that is a point gains
+ *   the arm as a whole (`withAbsentPointCells`): `Sin([(0, 1), Missing])` is
+ *   `list<missing | tuple<number, number>>`.
+ * - An absent COORDINATE of a point operand (`tuple<integer, missing>`)
+ *   gives an absent coordinate, or an absent result for an operator that
+ *   computes one value from the coordinates (`withAbsentCoordinates`).
  *
- * The exception for an operand beside a list, for a BROADCASTABLE operator
- * (`broadcastable`): the absence broadcasts over the list's cells
- * (`[1, 2, 3] + 2{c}` is `[NaN, NaN, NaN]` when `c` is false). An operator
- * that threads its conditional operands whole, such as `Dot`, answers
- * `Missing` for an absent operand beside a list and keeps the `missing` arm.
+ * `absentCellsStayMissing` is set for an operator that READS a cell rather
+ * than computing a value from it (`ABSENT_CELLS_STAY_MISSING`, the
+ * coordinate accessors). The coordinate of an absent point of a list is
+ * `NaN`, the absent value of a number: `PointY([(1, 2), Missing])` is
+ * `[2, NaN]`, and the result cell at the depth of the absent cell gains a
+ * `nan` arm. An absent coordinate of a point is not absorbed: it is read as
+ * it is, so `PointY((1, Missing))` is typed `missing`. A coordinate accessor
+ * over an operand absent as a whole gives `NaN` when its result is a number
+ * (`absentScalarMarker()`, `validate.ts`), so a numeric result gains a `nan`
+ * arm, and is `nan` when the operand is always absent.
  *
- * Every other absence takes the numeric absorption (`absorbNumericAbsence`):
- * every `missing` arm is removed and every numeric cell widens to `number`,
- * because an absent numeric cell contributes `NaN`. That is the case for a
- * `missing` cell inside a collection operand (`list<integer | missing>`), for
- * an absent operand beside a list, and for a numeric result
- * (`Sin(2{c})` is `number`).
- *
- * One exception to the numeric absorption: a result cell that is a POINT.
- * When an absence can replace a whole cell of an operand (a `missing` cell
- * in a list, or an absent operand beside a list) and the result is a
- * collection of points, an absent cell makes its point absent, so the cell
- * answers `Missing` and its type keeps a `missing` arm
- * (`withAbsentPointCells`): `Sin([P{c}, (2, 3)])` and `2 · [P{c}, (2, 3)]`
- * are `list<missing | tuple<…>>`. An absence inside a point's coordinate
- * (`tuple<integer | missing, integer>`) does not make the point absent.
- *
- * `absentCellsStayMissing` extends that exception to every result cell,
- * numeric ones included, for an operator that READS each cell rather than
- * computing a number from it (`ABSENT_CELLS_STAY_MISSING`): the coordinate
- * of an absent point of a list is `Missing`, as the masked cell is, so
- * `PointY([P{c}, (3, 4)])` is `list<number | missing>`. For such an
- * operator, an absent coordinate of a point (`tuple<integer, missing>`) is
- * not absorbed at all: the coordinate is read as it is, so
- * `PointY((1, Missing))` is typed `missing`.
+ * A restriction (`If(c, x)`) is typed as its value `x`, with no `missing`
+ * arm, so this function does not see it; where its condition fails, its
+ * value is the absent value of its domain (`Sin(If(c, 2))` is `NaN` when
+ * `c` is false).
  */
 export function absorbOperandAbsence(
   t: Type,
@@ -971,20 +984,29 @@ export function absorbOperandAbsence(
   absentCellsStayMissing = false,
   broadcastable = true
 ): Type {
-  let cells = false;
   let wholeCells = false;
+  // An operand absent as a whole beside a collection, at a broadcastable
+  // operator: the absence spreads over every cell of the result.
+  let besideCells = false;
   let absentCell = false;
   let whole = false;
-  let notNumeric: boolean | undefined;
+  // An operand typed `missing` alone, not beside a collection: the value of
+  // the application is always `Missing`.
+  let alwaysAbsent = false;
   // The depths at which an operand has an absent cell (1 for the cells of
   // the operand, 2 for the cells of those cells), one set per operand, read
   // by `withAbsentCellMarkers` below.
   const absentDepths: Array<Set<number> | undefined> = [];
+  // The absent coordinates of the operands that are tuples, read by
+  // `withAbsentCoordinates` below.
+  const coordinates: AbsentCoordinate[][] = [];
   for (let i = 0; i < operandTypes.length; i++) {
     const ot = operandTypes[i];
     if (!typeContainsMissing(ot)) continue;
     const wholeAbsence = hasTopLevelMissing(ot);
     const present = wholeAbsence ? stripTopMissing(ot) : ot;
+    const coords = absentCoordinates(present);
+    if (coords !== undefined) coordinates.push(coords);
     const depths = new Set<number>();
     collectAbsentCellDepths(present, 0, depths);
     if (depths.size > 0) absentDepths[i] = depths;
@@ -1002,15 +1024,11 @@ export function absorbOperandAbsence(
     // absorbed for an operator that reads coordinates
     // (`absentCellsStayMissing`): its handler saw the component as it is and
     // typed the coordinate it answers, `Missing` included.
-    if (typeContainsMissing(present)) {
-      if (missingOutsideTuples(present)) {
-        cells = true;
-        wholeCells = true;
-        absentCell = true;
-      } else if (!absentCellsStayMissing) cells = true;
+    if (typeContainsMissing(present) && missingOutsideTuples(present)) {
+      wholeCells = true;
+      absentCell = true;
     }
     if (!wholeAbsence) continue;
-    notNumeric ??= !isSubtype(stripMissingFromType(t), 'number');
     // Only a BROADCASTABLE operator spreads an absent operand over the cells
     // of a list beside it (`[1, 2, 3] + 2{c}` is `[NaN, NaN, NaN]`). An
     // operator that threads its conditional operands whole (`Dot`, a
@@ -1026,25 +1044,39 @@ export function absorbOperandAbsence(
           isCellCollectionType(other) &&
           gatedCollectionPresentType(other) === undefined
       );
-    if (!besideCollection && notNumeric) whole = true;
-    else {
-      cells = true;
+    if (!besideCollection) {
+      whole = true;
+      if (present === 'never') alwaysAbsent = true;
+    } else {
       wholeCells = true;
+      besideCells = true;
     }
   }
-  let result = cells ? absorbNumericAbsence(t) : t;
-  if (wholeCells) result = withAbsentPointCells(result, absentCellsStayMissing);
-  // An absent cell whose result cell is a collection (the `Missing` row of
-  // `[[1, 2], Missing] + 1`) is not a numeric leaf, so the absorption above
-  // does not describe it: the element-wise kernel answers `NaN` for it, or
-  // `Missing` when the cells of the result are points
-  // (`absentCellsArePoints`). The result cell at that depth gains the arm of
-  // that marker. An absent cell that meets a row of another operand is not
-  // marked: the kernel maps the absence over that row
-  // (`[[1, 2], Missing] + [[1, 2], [3, 4]]` is `[[2, 4], [NaN, NaN]]`), and
-  // the absorption above already gave the leaves of that row their marker.
+  let result = t;
+  // An operand absent as a whole beside a list makes every leaf cell of the
+  // result `Missing` (`[1, 2, 3] / Missing` is `[Missing, Missing,
+  // Missing]`), whatever the cell type: each leaf cell gains a `missing` arm.
+  // The type handler of `Add` and `Multiply` adds that arm itself, but the
+  // handlers of `Divide`, `Power` and `Root` do not.
+  if (besideCells) result = withAbsentPointCells(result, true);
+  else if (wholeCells && absentCellsStayMissing) {
+    // The coordinate of an absent point of a list is `NaN`, the absent value
+    // of a number (`PointY([(1, 2), Missing])` is `[2, NaN]`): the result
+    // cell at the depth of each absent cell gains a `nan` arm.
+    const depths = new Set<number>();
+    for (const ds of absentDepths) ds?.forEach((d) => depths.add(d));
+    if (depths.size > 0) result = withAbsentCellMarkers(result, depths, 'nan');
+  } else if (wholeCells) result = withAbsentPointCells(result, false);
+  // An absent cell gives a `Missing` result cell (`[[1, 2], Missing] + 1` is
+  // `[[2, 3], Missing]`): the result cell at that depth gains a `missing`
+  // arm. An absent cell that meets a row of another operand is not marked
+  // itself: the kernel maps the absence over that row
+  // (`[[1, 2], Missing] + [[1, 2], [3, 4]]` is `[[2, 4], [Missing,
+  // Missing]]`), so each leaf below that depth gains the `missing` arm
+  // instead.
   if (absentDepths.length > 0 && broadcastable && !absentCellsStayMissing) {
     const marked = new Set<number>();
+    let leavesBelow: number | undefined;
     absentDepths.forEach((depths, i) => {
       if (depths === undefined) return;
       for (const d of depths)
@@ -1054,30 +1086,105 @@ export function absorbOperandAbsence(
           )
         )
           marked.add(d);
+        else leavesBelow = Math.min(leavesBelow ?? d, d);
     });
     if (marked.size > 0)
-      result = withAbsentCellMarkers(
-        result,
-        marked,
-        absentCellsArePoints(result) ? 'missing' : 'nan'
-      );
+      result = withAbsentCellMarkers(result, marked, 'missing');
+    if (leavesBelow !== undefined)
+      result = withMissingLeavesBelow(result, leavesBelow);
   }
   // An operator that reads cells and answers ONE of them (`PointY([1,
   // Missing])` reads the flat point `[1, Missing]` and answers its second
   // cell) answers `Missing` when that cell is absent, so a result that is not
   // provably a collection keeps a `missing` arm too. This is for an absent
   // CELL of an operand only: an operand absent as a whole (`PointX(Missing)`)
-  // is answered `NaN` by the absence gate.
+  // is answered `NaN` by the absence gate (`absentScalarMarker()`,
+  // `validate.ts`) when the result is a number, so a numeric result gains
+  // a `nan` arm, and is `nan` when the operand is always absent.
   if (
     absentCell &&
     absentCellsStayMissing &&
     !isSubtype(result, COLLECTION_SHAPE_TYPE)
   )
     result = withMissingArm(result);
+  if (coordinates.length > 0 && !absentCellsStayMissing)
+    result = withAbsentCoordinates(result, coordinates, broadcastable);
   if (!whole) return result;
-  if (isSubtype(stripMissingFromType(result), 'number'))
-    return absorbNumericAbsence(result);
+  // A coordinate accessor (`absentCellsStayMissing`) answers `NaN` for an
+  // operand absent as a whole when its result is a number (see above).
+  if (absentCellsStayMissing && alwaysAbsent) return 'nan';
+  if (absentCellsStayMissing && isSubtype(result, 'number'))
+    return widen(result, 'nan');
+  if (alwaysAbsent) return 'missing';
   return withMissingArm(result);
+}
+
+/** One component of a tuple operand that can hold `Missing`: `'absent'` when
+ * the component is `missing` alone, `'maybe'` when it has a `missing` arm
+ * beside a present type, `undefined` when it cannot be absent. */
+type AbsentCoordinate = 'absent' | 'maybe' | undefined;
+
+/** The absent coordinates of `t` when `t` is a tuple with at least one
+ * component that can hold `Missing` (`tuple<integer, missing>`), and
+ * `undefined` otherwise. */
+function absentCoordinates(t: Type): AbsentCoordinate[] | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'tuple') return undefined;
+  const coords = r.elements.map((e): AbsentCoordinate => {
+    if (!typeContainsMissing(e.type)) return undefined;
+    return stripMissingFromType(e.type) === 'never' ? 'absent' : 'maybe';
+  });
+  return coords.some((c) => c !== undefined) ? coords : undefined;
+}
+
+/**
+ * `t`, the result of an operator over a tuple operand with an absent
+ * coordinate, adjusted to the value that the operator gives: `Missing` is a
+ * result only, and an operator over `Missing` gives `Missing`
+ * (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user decision of
+ * 2026-11-02").
+ *
+ * The type handler sees an absent coordinate as `nan` (the operand type is
+ * stripped with `stripMissingFromType(…, 'nan')`, because a handler needs a
+ * numeric component to compute with), so a component of its result can carry
+ * a `nan` arm that the value does not have: `(1, Missing) + (1, 1)` is
+ * `(2, Missing)`, not `(2, NaN)`.
+ *
+ * - A BROADCASTABLE operator computes a tuple component by component. When
+ *   the result is a tuple of the same length as the operand, each result
+ *   component follows the operand components at the same position: it is
+ *   `missing` where an operand component is `missing` alone (the
+ *   handler's `nan` for it is dropped), and it gains a `missing` arm where
+ *   an operand component may be absent. `(1, Missing) + (1, 1)` and
+ *   `2 · (1, Missing)` are typed `tuple<integer, missing>`.
+ * - Any other result (a number, as for `Norm((1, Missing))`, or a tuple
+ *   computed from several components, as for `Cross`) gains a `missing`
+ *   arm: its value is `Missing` when a coordinate it reads is absent.
+ */
+function withAbsentCoordinates(
+  t: Type,
+  coordinates: ReadonlyArray<ReadonlyArray<AbsentCoordinate>>,
+  broadcastable: boolean
+): Type {
+  const r = resolveTypeAlias(t);
+  const n = coordinates[0].length;
+  if (
+    !broadcastable ||
+    typeof r === 'string' ||
+    r.kind !== 'tuple' ||
+    r.elements.length !== n ||
+    coordinates.some((c) => c.length !== n)
+  )
+    return withMissingArm(t);
+  return {
+    ...r,
+    elements: r.elements.map((e, k) => {
+      const marks = coordinates.map((c) => c[k]);
+      if (marks.includes('absent')) return { ...e, type: 'missing' };
+      if (marks.includes('maybe')) return { ...e, type: withMissingArm(e.type) };
+      return e;
+    }),
+  };
 }
 
 /**
@@ -1397,6 +1504,48 @@ export function cellsArePoints(t: Type): boolean {
 }
 
 /**
+ * `t` with a `missing` arm added to each leaf cell (a cell that is not a
+ * list) deeper than `below`. An absent cell of an operand at depth `below`
+ * that meets a row of another operand is mapped over that row, so each
+ * leaf of the result row can be `Missing`: `[[1, 2], Missing] + [[1, 2],
+ * [3, 4]]` is `[[2, 4], [Missing, Missing]]`, typed
+ * `list<vector<integer | missing^2>>`. The walk unfolds an alias under the
+ * descent guard, and keeps a cut as it is.
+ */
+function withMissingLeavesBelow(
+  t: Type,
+  below: number,
+  depth = 0,
+  seen?: AliasDescent
+): Type {
+  if (depth >= MAX_CELL_DEPTH) return t;
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return t;
+  const r = unfolded.type;
+  if (typeof r !== 'string' && r.kind === 'union') {
+    const arms = r.types.map((x) =>
+      withMissingLeavesBelow(x, below, depth, unfolded.seen)
+    );
+    if (arms.every((x, i) => x === r.types[i])) return t;
+    // Reduced, so that an arm that is `missing` already and an arm that
+    // gained a `missing` arm give one `missing` arm.
+    return reduceType({ kind: 'union', types: arms });
+  }
+  if (typeof r === 'string' || !isCellListKind(r)) {
+    if (depth <= below || isSubtype('missing', t)) return t;
+    return withMissingArm(t);
+  }
+  const cell = withMissingLeavesBelow(
+    r.elements,
+    below,
+    depth + collectionLevels(r),
+    descendIntoConstructor(unfolded.seen)
+  );
+  if (cell === r.elements) return t;
+  return withCellType(r, cell);
+}
+
+/**
  * `t` with the absence marker `marker` added to each cell at a depth of
  * `depths` (`collectAbsentCellDepths`) that does not admit it. An absent
  * operand cell gives an absent result cell, and the element-wise kernel
@@ -1413,7 +1562,7 @@ export function cellsArePoints(t: Type): boolean {
  * (`list<list<number> | nan>`). The walk unfolds an alias under the descent
  * guard, and keeps a cut as it is.
  */
-function withAbsentCellMarkers(
+export function withAbsentCellMarkers(
   t: Type,
   depths: ReadonlySet<number>,
   marker: 'nan' | 'missing',

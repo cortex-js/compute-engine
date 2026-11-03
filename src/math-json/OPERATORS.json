@@ -294,7 +294,7 @@
       "name": "Append",
       "category": "Collections",
       "arity": "variadic",
-      "signature": "(collection<any>, (value | missing)+) -> collection",
+      "signature": "(collection<any>, any+) -> collection",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -721,7 +721,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.",
+      "description": "Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, a point whose coordinates are all `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.",
       "examples": [
         "[1, 2][1]?!"
       ]
@@ -1348,7 +1348,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the first operand that is not ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.",
+      "description": "Return the first operand that is not ABSENT (`Missing`, `NaN`, a point whose coordinates are all `NaN`, or `Indeterminate`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.",
       "examples": [
         "Coalesce(Missing, NaN, 3, 4)"
       ]
@@ -4240,7 +4240,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "True for `Missing`, `Undefined`, `NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.",
+      "description": "True for `Missing`, `NaN`, a point whose coordinates are all `NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.",
       "examples": [
         "[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]"
       ]

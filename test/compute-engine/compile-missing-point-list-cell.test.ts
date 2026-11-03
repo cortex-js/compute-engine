@@ -110,10 +110,10 @@ describe('COMPILED LIST CELL OF AN UNMATCHED POINT', () => {
 // spelling (R3 of `docs/plans/2026-11-01-absent-value-contract.md`): the
 // compiled `undefined` of a read past the end of a list of points, and the
 // `NaN` of a missing number or complex cell. The point cell that a selection
-// over a list of conditions does not select is not absent: it is the NaN
-// point, which a discharge reads as present (the selection rule of
-// 2026-11-02, `docs/BROADCAST-MODEL.md`). Each program computes the
-// interpreter's value.
+// over a list of conditions does not select is the NaN point (the selection
+// rule of 2026-11-02, `docs/BROADCAST-MODEL.md`), and a discharge reads a
+// NaN point as absent (`docs/ERROR-MODEL.md`, "`Missing` is a result
+// only"). Each program computes the interpreter's value.
 describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
   const engine = new ComputeEngine();
   engine.declare('v', 'list<real>');
@@ -146,8 +146,8 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
           ['Last', ['Which', ['Greater', 'v', 0], ['Tuple', 1, 2]]],
         ],
       ],
-      '0',
-      0,
+      '1',
+      1,
     ],
     [
       'Coalesce of the unmatched first cell of the rest',
@@ -156,9 +156,12 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
         ['First', ['Rest', ['Which', ['Greater', 'v', 0], ['Tuple', 1, 2]]]],
         ['Tuple', 9, 9],
       ],
-      '(NaN, NaN)',
-      [NaN, NaN],
+      '(9, 9)',
+      [9, 9],
     ],
+    // A read past the end of a list of points is a point whose coordinates
+    // are `NaN` (`docs/ERROR-MODEL.md`, "`Missing` is a result only"), which
+    // `Coalesce` reads as absent, as for the unmatched cell above.
     [
       'Coalesce of a read past the end of a list of points',
       ['Coalesce', ['At', 'P', 5], ['Tuple', 0, 0]],
@@ -240,10 +243,14 @@ describePython('Python: a discharge reads None and NaN', () => {
 
   const engine = new ComputeEngine();
   engine.declare('P', 'list<tuple<real, real>>');
-  engine.declare('u', 'real | string | missing');
-  engine.declare('z', 'complex | missing');
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"), so `u` and `z` hold present values only.
+  engine.declare('u', 'real | string');
+  engine.declare('z', 'complex');
 
   test.each([
+    // A read past the end of a list of points is a point whose coordinates
+    // are `NaN`, which `Coalesce` reads as absent.
     [
       'Coalesce of a read past the end of a list of points',
       ['Coalesce', ['At', 'P', 5], ['Tuple', 0, 0]],
@@ -274,7 +281,6 @@ describePython('Python: a discharge reads None and NaN', () => {
     ],
     // `math.isnan("ab")` raised a `TypeError` here.
     ['IsMissing of a string', ['IsMissing', 'u'], 'u', '"ab"', 'False'],
-    ['IsMissing of an absent value', ['IsMissing', 'u'], 'u', 'None', 'True'],
     // `math.isnan(1+2j)` raised a `TypeError` here.
     ['IsMissing of a complex number', ['IsMissing', 'z'], 'z', '1+2j', 'False'],
     [

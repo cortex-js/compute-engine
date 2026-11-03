@@ -659,19 +659,16 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
     expect(ce.box(['Add', 'L', 'L']).type.toString()).toBe(
       'list<tuple<number, number>>'
     );
-    // A list element that may be absent (a masked point) keeps its
-    // `missing` arm through the join; the absent cell is not an arm.
-    ce.declare('R', { type: 'list<missing | tuple<number, number>>' });
-    expect(ce.box(['Sin', 'R']).type.toString()).toBe(
-      'list<missing | tuple<number, number>>'
-    );
     // A tuple whose component could be a collection is not shaped: the
     // one-cell typing stands (`point-list-lift-and-binder-authority`).
     ce.declare('X', { type: 'list<tuple<number, number | list<number>>>' });
     expect(ce.box(['Sqrt', 'X']).type.toString()).toBe('list<number>');
   });
 
-  test('two list branches of one operand are shaped apart, and a list of absent cells survives', () => {
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"): the cases of a declared list of absent
+  // cells were removed.
+  test('two list branches of one operand are shaped apart', () => {
     // Each collection branch of a union is its own group: the answers of
     // one branch's element arms are joined under that branch's wrap, never
     // under another branch's (Codex second pass).
@@ -682,29 +679,6 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
     expect(ce.box(['Power', 'K', 2]).type.toString()).toBe(
       'list<number> | list<tuple<number, number>> | number'
     );
-    // A list whose cells are all absent (`list<missing>`) has no present
-    // cell to split and is one arm as it stands, so its branch survives.
-    ce.declare('u', { type: 'tuple<number, number> | list<missing>' });
-    expect(ce.box(['Sin', 'u']).type.toString()).toBe(
-      'list<number> | tuple<number, number>'
-    );
-    // An absent NUMBER cell evaluates to `NaN`, a number, so only a point
-    // cell keeps a `missing` arm (`withAbsentPointCells`,
-    // `broadcast-lift-type.ts`): `[Missing, 3]` squared is `[NaN, 9]`. The
-    // point cell has a `nan` arm too: the result is a list of points OR a
-    // list of numbers, so an absent cell of a list value stays `NaN`
-    // (`absentCellsArePoints` is false for this union), and the typing does
-    // not tell which arm of the operand an absent cell came from.
-    ce.declare('G', {
-      type: 'number | list<tuple<number, number>> | list<missing | number>',
-    });
-    const sq = ce.box(['Power', 'G', 2]);
-    expect(sq.type.toString()).toBe(
-      'list<missing | nan | tuple<number, number>> | list<nan | number> | number'
-    );
-    ce.assign('G', ce.box(['List', 'Missing', 3]));
-    expect(sq.evaluate().toString()).toBe('[NaN,9]');
-    expect(sq.evaluate().type.matches(sq.type)).toBe(true);
   });
 
   test('a mixed list of numbers and points is admitted by the joined type', () => {
@@ -714,59 +688,6 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
     ce.assign('p', ce.box(['List', 1, ['Tuple', 3, 4]]));
     expect(sq.evaluate().toString()).toBe('[1,(9, 16)]');
     expect(sq.evaluate().type.matches(sq.type)).toBe(true);
-  });
-});
-
-describe('a sum of two point-or-point-list unions admits the type of every pair of arms', () => {
-  // `B` is a zipped tuple `P=(L,Y)` as a graphing consumer declares it, and
-  // `D` is the point-or-point-list result of a point function whose list
-  // may hold absent points. The sum is typed arm by arm. The cell of
-  // `B`'s bare `tuple` arm beside `D`'s list arm is `missing | tuple`: an
-  // absent cell of `D` makes its point absent. The numeric absorption of
-  // `missing` read that cell as numeric, because the bare `tuple` was not
-  // counted as a point, and the sum typed `list<number | tuple> | tuple`,
-  // which does not admit a list with an absent point.
-  const B_ARMS = ['list<tuple<number, number>>', 'tuple'];
-  const D_ARMS = ['list<missing | tuple<number, number>>', 'tuple<number, number>'];
-  const ce = new ComputeEngine();
-  ce.declare('B', B_ARMS.join(' | '));
-  ce.declare('D', D_ARMS.join(' | '));
-  B_ARMS.forEach((t, i) => ce.declare(`B${i}`, t));
-  D_ARMS.forEach((t, j) => ce.declare(`D${j}`, t));
-
-  test.each([
-    ['Add', 'list<missing | tuple> | tuple'],
-    ['Subtract', 'list<missing | tuple> | tuple'],
-  ])('%s(B, D) admits every pair', (op, expected) => {
-    const whole = ce.box([op, 'B', 'D']).type;
-    expect(whole.toString()).toBe(expected);
-    expect(ce.box([op, 'D', 'B']).type.toString()).toBe(expected);
-    for (let i = 0; i < B_ARMS.length; i++)
-      for (let j = 0; j < D_ARMS.length; j++) {
-        const pair = ce.box([op, `B${i}`, `D${j}`]).type;
-        expect([pair.toString(), pair.matches(whole)]).toEqual([
-          pair.toString(),
-          true,
-        ]);
-      }
-  });
-
-  test('a bare tuple beside a list with absent points keeps the absent cell', () => {
-    expect(ce.box(['Add', 'B1', 'D0']).type.toString()).toBe(
-      'list<missing | tuple>'
-    );
-  });
-
-  test('the value of the sum is admitted by its type', () => {
-    const t = ce.box(['Add', 'B', 'D']).type;
-    const ce2 = new ComputeEngine();
-    ce2.declare('B', B_ARMS.join(' | '));
-    ce2.declare('D', D_ARMS.join(' | '));
-    ce2.assign('B', ce2.box(['Tuple', 1, 2]));
-    ce2.assign('D', ce2.box(['List', ['Tuple', 3, 4], 'Missing']));
-    const v = ce2.box(['Add', 'B', 'D']).evaluate();
-    expect(v.toString()).toBe('[(4, 6),"Missing"]');
-    expect(v.type.matches(t)).toBe(true);
   });
 });
 

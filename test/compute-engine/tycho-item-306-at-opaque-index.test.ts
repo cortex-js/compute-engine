@@ -105,7 +105,7 @@ describe('At with a valid index is not affected (Tycho item 306)', () => {
   test('a range index is a gather', () => {
     const e = ce.parse('[1,2,3][1...2]');
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('list<integer | nan>');
+    expect(e.type.toString()).toBe('list<integer>');
     expect(e.evaluate().toString()).toBe('[1,2]');
   });
 

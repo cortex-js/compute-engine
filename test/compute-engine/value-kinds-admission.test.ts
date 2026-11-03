@@ -98,12 +98,14 @@ function errorOf(expr: {
 }
 
 describe('VALUE KINDS ADMISSION: group 1, the arithmetic operators', () => {
-  test('a kind value beside numbers, absent, or in a list is admitted at `Add`', () => {
+  test('a kind value beside numbers or in a list is admitted at `Add`', () => {
     const ce = kindEngine();
     ce.declare('a', 'integer | gf8');
-    ce.declare('b', 'gf8 | missing');
+    // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
+    // "`Missing` is a result only").
+    expect(() => ce.declare('b', 'gf8 | missing')).toThrow();
     ce.declare('c', 'list<integer | gf8>');
-    for (const x of ['a', 'b', 'c'])
+    for (const x of ['a', 'c'])
       expect([x, ce.box(['Add', x, 1]).isValid]).toEqual([x, true]);
     expect(ce.box(['Add', ['GF8', 1], 1]).isValid).toBe(true);
   });

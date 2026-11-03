@@ -126,8 +126,11 @@ describe.each([1, 2])(
 
     test('NaN and an absent value at a numeric parameter', () => {
       expect(late('(integer) -> unknown', INC, 'NaN', assignments)).toBe('NaN');
+      // An absent argument at a numeric parameter gives `Missing` without
+      // running the body (`docs/ERROR-MODEL.md`, "`Missing` is a result
+      // only").
       expect(late('(number) -> unknown', INC, 'Missing', assignments)).toBe(
-        'NaN'
+        '"Missing"'
       );
     });
 

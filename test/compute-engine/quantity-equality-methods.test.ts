@@ -912,16 +912,6 @@ describe('QUANTITIES OF DIFFERENT DIMENSIONS', () => {
     expect(evalStr(['Equal', Q(6, 'dB'), 6])).toBe('Equal');
     expect(evalStr(['Equal', Q(1, 'dB'), Q(1, 'Np')])).toBe('Equal');
     expect(evalStr(['Equal', Q('Missing', 'm'), Q(6, 's')])).not.toBe('False');
-    // `Undefined` is an absent magnitude too
-    expect(q('Undefined', 'm').isEqual(q(6, 's'))).toBe(undefined);
-    expect(q(6, 's').isEqual(q('Undefined', 'm'))).toBe(undefined);
-    expect(q('Undefined', 'm').isEqual(ce.box(5))).toBe(undefined);
-    expect(evalStr(['Equal', Q('Undefined', 'm'), Q(6, 's')])).not.toBe(
-      'False'
-    );
-    expect(evalStr(['NotEqual', Q('Undefined', 'm'), Q(6, 's')])).not.toBe(
-      'True'
-    );
   });
 
   // Two dimensionless units compare by value

@@ -654,9 +654,10 @@ describe('non-regressions', () => {
       'f',
       ['Function', ['Add', ['At', 'L', 't'], 1], 't'],
     ]).evaluate();
-    // The body's indexed read types `integer | nan` (the out-of-band access
-    // marker of a numeric element type), and adding `1` keeps both arms.
-    expect(ce.box('f').type.toString()).toBe('(t: unknown) -> integer | nan');
+    // The body's indexed read types `integer`: the marker of a read that may
+    // find nothing is implicit (`docs/ERROR-MODEL.md`, "`Missing` is a result
+    // only").
+    expect(ce.box('f').type.toString()).toBe('(t: unknown) -> integer');
     expect(ce.box(['f', 2]).evaluate().toString()).toBe('21');
   });
 });

@@ -70,14 +70,14 @@ const parsed = (decl: string, value: unknown, latex: string): Reading =>
 
 const POINT = 'broadcastable<tuple<number, number>>';
 const POINT_ELEMENT =
-  'missing | number | tensor<tuple<number, number>> | tuple<number, number>';
+  'number | tensor<tuple<number, number>> | tuple<number, number>';
 const POINT_SELECTION =
   'list<number | tensor<tuple<number, number>> | tuple<number, number>>';
 const ONE_POINT = ['Tuple', 1, 2];
 const TWO_POINTS = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
 
 const TEXT = 'broadcastable<string>';
-const TEXT_ELEMENT = 'character | missing | string | tensor<string>';
+const TEXT_ELEMENT = 'character | string | tensor<string>';
 // A selector of one string is a string; a selector of a tensor of strings
 // is a list of its elements, which are strings or tensors of strings.
 const TEXT_SELECTION = 'list<string | tensor<string>> | string';
@@ -124,9 +124,11 @@ describe('an index into broadcastable<tuple<number, number>>', () => {
     });
   });
 
-  test('an index past the end of a list of points is Missing', () => {
+  test('an index past the end of a list of points is a NaN point', () => {
+    // The absent value follows the domain of the position: a point whose
+    // coordinates are `NaN`.
     expect(boxed(POINT, TWO_POINTS, ['At', 'p', 3])).toEqual({
-      value: '"Missing"',
+      value: '(NaN, NaN)',
       type: POINT_ELEMENT,
       holds: true,
     });
@@ -171,7 +173,7 @@ describe('an index into broadcastable<tuple<number, number>>', () => {
   test('a tuple with slots of two types', () => {
     const decl = 'broadcastable<tuple<integer, string>>';
     const element =
-      'integer | missing | nan | string | tensor<tuple<integer, string>> | tuple<integer, string>';
+      'integer | string | tensor<tuple<integer, string>> | tuple<integer, string>';
     const value = ['Tuple', 1, { str: 'x' }];
     expect(boxed(decl, value, ['At', 'p', 1])).toEqual({
       value: '1',
@@ -197,7 +199,7 @@ describe('an index into broadcastable<tuple<number, number>>', () => {
     const value = ['Tuple', 1, { str: 'x' }];
     expect(boxed(decl, value, ['At', 'p', 2])).toEqual({
       value: '"x"',
-      type: 'missing | number | string | tuple<integer, string> | vector<2>',
+      type: 'number | string | tuple<integer, string> | vector<2>',
       holds: true,
     });
     for (const json of [
@@ -214,7 +216,7 @@ describe('an index into broadcastable<tuple<number, number>>', () => {
     const decl = 'broadcastable<tuple<nothing, nothing>>';
     expect(boxed(decl, ['Tuple', 'Nothing', 'Nothing'], ['At', 'p', 1])).toEqual({
       value: '"Nothing"',
-      type: 'missing | nothing | tensor<tuple<nothing, nothing>> | tuple<nothing, nothing>',
+      type: 'nothing | tensor<tuple<nothing, nothing>> | tuple<nothing, nothing>',
       holds: true,
     });
   });
@@ -243,10 +245,12 @@ describe('an index into broadcastable<string>', () => {
   });
 
   test('an index past the end of one string is Missing', () => {
+    // The result type of an accessor describes the present values and
+    // leaves the marker implicit, so it does not match `Missing` strictly.
     expect(boxed(TEXT, ONE_STRING, ['At', 'p', 5])).toEqual({
       value: '"Missing"',
       type: TEXT_ELEMENT,
-      holds: true,
+      holds: false,
     });
   });
 
@@ -304,7 +308,7 @@ describe('an index into broadcastable<string>', () => {
     ]);
     expect(r).toEqual({
       value: '"a"',
-      type: 'character | integer | missing | nan | string | tensor<integer | string>',
+      type: 'character | integer | string | tensor<integer | string>',
       holds: true,
     });
   });
@@ -320,7 +324,7 @@ describe('an index by key into broadcastable<record> and broadcastable<dictionar
       )
     ).toEqual({
       value: '1',
-      type: 'integer | missing | nan | record{a: integer, b: integer} | tensor<record{a: integer, b: integer}>',
+      type: 'integer | record{a: integer, b: integer} | tensor<record{a: integer, b: integer}>',
       holds: true,
     });
   });
@@ -328,7 +332,7 @@ describe('an index by key into broadcastable<record> and broadcastable<dictionar
   test('a record with an unknown field', () => {
     // The field types were joined with `widen`, which drops `unknown`
     // beside `integer`: the type excluded the string that field `a` holds.
-    // The `unknown` arm absorbs the value arms when the union is reduced.
+    // The `unknown` arm holds the string.
     expect(
       boxed(
         'broadcastable<record{a: unknown, b: integer}>',
@@ -339,7 +343,7 @@ describe('an index by key into broadcastable<record> and broadcastable<dictionar
         ],
         ['At', 'p', { str: 'a' }]
       )
-    ).toEqual({ value: '"hello"', type: 'missing | unknown', holds: true });
+    ).toEqual({ value: '"hello"', type: 'integer | unknown', holds: true });
   });
 
   test('a dictionary', () => {
@@ -351,7 +355,7 @@ describe('an index by key into broadcastable<record> and broadcastable<dictionar
       )
     ).toEqual({
       value: '1',
-      type: 'dictionary<integer> | integer | missing | nan | tensor<dictionary<integer>>',
+      type: 'dictionary<integer> | integer | tensor<dictionary<integer>>',
       holds: true,
     });
   });

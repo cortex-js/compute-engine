@@ -96,6 +96,8 @@ import {
 } from './function-literal.js';
 import {
   broadcastCellType,
+  DECLARED_MISSING_MESSAGE,
+  declaredTypeNamesMissing,
   functionResult,
   signatureArms,
   withoutKindArms,
@@ -1207,6 +1209,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         normalizeSignatureField(def.signature),
         ce._typeResolver
       );
+      // A parameter of a declared signature may not name the marker
+      // `missing`: `Missing` is a result only (`declaredTypeNamesMissing()`).
+      // The same channel as a signature that does not parse: it throws.
+      if (declaredTypeNamesMissing(signature.type))
+        throw new Error(
+          `Operator "${name}": the signature "${signature.toString()}" is invalid: ${DECLARED_MISSING_MESSAGE}`
+        );
       this._setSignature(() => signature);
     } else {
       const signature = new BoxedType('(any*) -> unknown');
@@ -1362,7 +1371,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   }
 
   /**
-   * Whether an absent scalar operand (`Missing`, `Undefined`) at position
+   * Whether an absent scalar operand (`Missing`) at position
    * `i` is refused at evaluation with an `incompatible-type` error naming
    * the parameter's type. This is the one default for a parameter that
    * excludes absence (rule R3, user decision P2 of

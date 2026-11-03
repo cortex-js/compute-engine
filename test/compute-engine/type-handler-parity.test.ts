@@ -103,12 +103,15 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // type-derivation call site folds the missing-strip override into
     // descriptors only for `propagate` operators for exactly this reason:
     // a `handle` operator's handler owns the absence semantics.
-    ce.declare('m', 'integer | missing');
-    expect(ce.box(['Coalesce', 1, 'm'] as any).type.toString()).toBe(
+    // A declared type cannot name `missing`, so the operand that holds the
+    // arm is the symbol `Missing`, typed `missing`.
+    expect(ce.box(['Coalesce', 1, 'Missing'] as any).type.toString()).toBe(
       'integer | missing'
     );
     // At a NON-last position the arm is stripped by the handler itself.
-    expect(ce.box(['Coalesce', 'm', 1] as any).type.toString()).toBe('integer');
+    expect(ce.box(['Coalesce', 'Missing', 1] as any).type.toString()).toBe(
+      'integer'
+    );
   });
 
   test('the regularized gamma/beta claim real only on their proven domain', () => {

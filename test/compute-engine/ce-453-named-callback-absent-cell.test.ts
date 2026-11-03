@@ -9,6 +9,10 @@
  * handler when an element of the source can be absent. Since the user
  * decision of 2026-10-25 (ROADMAP CE-45.2), the handler types the named
  * callback over elements that cannot be absent too.
+ *
+ * Since `Missing` is a result only (`docs/ERROR-MODEL.md`), an operator over
+ * the absent cell gives `Missing`, and the lambda spelling is typed with a
+ * `missing` arm: `list<integer<0..> | missing^3>` for `Abs`.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
@@ -16,16 +20,19 @@ import { isSubtype } from '../../src/common/type/subtype';
 const ce = new ComputeEngine();
 
 describe('A NAMED NUMERIC CALLBACK OVER AN ABSENT CELL (CE-453)', () => {
-  test.each(['Abs', 'Negate'])(
+  test.each([
+    ['Abs', 'list<integer<0..> | missing^3>'],
+    ['Negate', 'list<integer | missing^3>'],
+  ])(
     'Map(%s, [1, Missing, 2]) is typed as the lambda spelling',
-    (op) => {
+    (op, type) => {
       const named = ce.box(['Map', op, ['List', 1, 'Missing', 2]]);
       const lambda = ce.box([
         'Map',
         ['Function', [op, 'x'], 'x'],
         ['List', 1, 'Missing', 2],
       ]);
-      expect(named.type.toString()).toBe('list<integer | nan^3>');
+      expect(lambda.type.toString()).toBe(type);
       expect(named.type.toString()).toBe(lambda.type.toString());
       expect(named.evaluate().type.matches(named.type)).toBe(true);
     }

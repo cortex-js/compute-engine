@@ -98,7 +98,8 @@ describe('At over a gather with a NaN or infinite entry', () => {
   // A NaN or infinite entry of an index list names no position. It gives the
   // hole the scalar index gives, in its own slot, and the other entries are
   // read as usual (Tycho ledger row 401). The hole is the one an out-of-range
-  // entry gives: `NaN` over numbers, `Missing` over points.
+  // entry gives: `NaN` over numbers, a point whose coordinates are `NaN`
+  // over points (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
   const ce = new ComputeEngine();
   const ev = (json: any) => ce.box(json).evaluate().json;
   const P = ['List', 10, 20, 30];
@@ -107,10 +108,10 @@ describe('At over a gather with a NaN or infinite entry', () => {
   test('the reference holes: scalar NaN and out-of-range entry', () => {
     expect(ev(['At', P, 'NaN'])).toEqual('NaN');
     expect(ev(['At', P, ['List', 0, 1]])).toEqual(['List', 'NaN', 10]);
-    expect(ev(['At', T, 'NaN'])).toEqual('Missing');
+    expect(ev(['At', T, 'NaN'])).toEqual(['Tuple', 'NaN', 'NaN']);
     expect(ev(['At', T, ['List', 0, 1]])).toEqual([
       'List',
-      'Missing',
+      ['Tuple', 'NaN', 'NaN'],
       ['Tuple', 1, 2],
     ]);
   });
@@ -145,7 +146,7 @@ describe('At over a gather with a NaN or infinite entry', () => {
   test('a NaN entry over points', () => {
     expect(ev(['At', T, ['List', 'NaN', 1]])).toEqual([
       'List',
-      'Missing',
+      ['Tuple', 'NaN', 'NaN'],
       ['Tuple', 1, 2],
     ]);
   });
@@ -156,7 +157,7 @@ describe('At over a gather with a NaN or infinite entry', () => {
     expect(p('[10,20,30][[\\infty,1]]')).toBe('[NaN,10]');
     expect(p('[10,20,30][[-\\infty,1]]')).toBe('[NaN,10]');
     expect(p('[(1,2),(3,4)][[\\operatorname{NaN},1]]')).toBe(
-      '["Missing",(1, 2)]'
+      '[(NaN, NaN),(1, 2)]'
     );
   });
 });

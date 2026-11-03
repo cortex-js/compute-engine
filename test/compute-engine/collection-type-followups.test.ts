@@ -60,8 +60,9 @@ const POSITIVE: MathJsonExpression = ['Function', ['Greater', 'x', 0], 'x'];
 describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
   // The callback gets an absent cell as it is: `x ↦ [x, x]` gives
   // `[Missing, Missing]` for it. Before, the result was typed `list<number>`.
+  // The source is typed from its value, `list<integer | missing>`: a declared
+  // type cannot name `missing`.
   const engine = new ComputeEngine();
-  engine.declare('l', 'list<integer | missing>');
   engine.assign('l', engine.box(['List', 1, 'Missing']));
 
   test.each([
@@ -71,23 +72,23 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
       '[1,1,"Missing","Missing"]',
     ],
     [['Function', 'x', 'x'], 'list<missing | unknown>', '[1,"Missing"]'],
-    [['Function', ['Add', 'x', 1], 'x'], 'list<integer | nan>', '[2,NaN]'],
-    ['Sqrt', 'list<complex | infinity | nan>', '[1,NaN]'],
+    [['Function', ['Add', 'x', 1], 'x'], 'list<integer | missing>', '[2,"Missing"]'],
+    ['Sqrt', 'list<complex | infinity | missing>', '[1,"Missing"]'],
     // `IsPrime(Missing)` is `Missing`: before, typed `list<boolean>`.
     ['IsPrime', 'list<boolean | missing>', '["False","Missing"]'],
-    // An annotated parameter refuses the absent cell, which gives `NaN`: the
-    // result is widened as for a declared callback.
+    // A call with `Missing` at an annotated numeric parameter is `Missing`,
+    // spliced as one element, and the result type has a `missing` arm.
     [
       ['Function', ['List', 'x'], ['Typed', 'x', "'integer'"]],
-      'list<integer | nan>',
-      '[1,NaN]',
+      'list<integer | missing>',
+      '[1,"Missing"]',
     ],
     // A `Missing` the callback returns for a present cell is kept beside the
-    // `NaN` of the absent cell.
+    // `Missing` of the absent cell.
     [
       ['Function', ['List', 'x', 'Missing'], ['Typed', 'x', "'integer'"]],
-      'list<integer | missing | nan>',
-      '[1,"Missing",NaN,"Missing"]',
+      'list<integer | missing>',
+      '[1,"Missing","Missing"]',
     ],
   ] as [MathJsonExpression, string, string][])('%j', (fn, type, value) => {
     expect(
@@ -109,9 +110,9 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
         engine.parse(
           '\\operatorname{FlatMap}(l, (x: \\mathrm{integer}) \\mapsto [x])'
         ),
-        'list<integer | nan>'
+        'list<integer | missing>'
       )
-    ).toBe('[1,NaN]');
+    ).toBe('[1,"Missing"]');
   });
 
   test('the parse route: a returned Missing beside an absent cell', () => {
@@ -121,15 +122,15 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
         engine.parse(
           '\\operatorname{FlatMap}(l, (x: \\mathrm{integer}) \\mapsto [x, \\mathrm{Missing}])'
         ),
-        'list<integer | missing | nan>'
+        'list<integer | missing>'
       )
-    ).toBe('[1,"Missing",NaN,"Missing"]');
+    ).toBe('[1,"Missing","Missing"]');
   });
 
   test('the Epsil route', () => {
     expect(
       epsil(
-        'let l: list<integer | missing> = [1, Missing]\nflatMap(l, x => [x, x])'
+        'let l = [1, Missing]\nflatMap(l, x => [x, x])'
       )
     ).toEqual(['[1,1,"Missing","Missing"]', 'list<integer | missing>']);
   });
@@ -180,10 +181,11 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
 });
 
 describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', () => {
-  // The annotation gives the body `NaN` for an absent cell. Before,
-  // `Map((x: integer) ↦ x + 1, m)` was typed `list<integer>` for `[2, NaN]`.
+  // A call with `Missing` at an annotated numeric parameter is `Missing`,
+  // whatever the body, as an operator over `Missing` is:
+  // `Map((x: integer) ↦ x + 1, m)` is `[2, Missing]`, typed
+  // `list<integer | missing>`.
   const engine = new ComputeEngine();
-  engine.declare('m', 'list<integer | missing>');
   engine.assign('m', engine.box(['List', 1, 'Missing']));
   const annotated = (body: MathJsonExpression): MathJsonExpression => [
     'Function',
@@ -192,18 +194,16 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
   ];
 
   test.each([
-    [['Add', 'x', 1], 'list<integer | nan>', '[2,NaN]'],
-    [['List', 'x'], 'list<list<integer | nan^1>>', '[[1],[NaN]]'],
-    // A `Missing` that the body returns for a present cell is kept. For the
-    // absent cell `x` is `NaN`, and `NaN > 0` is `False` (user decision
-    // 2026-10-20), so the else arm gives `NaN` (before the decision the `If`
-    // took no arm and gave `Missing`).
+    [['Add', 'x', 1], 'list<integer | missing>', '[2,"Missing"]'],
+    [['List', 'x'], 'list<missing | vector<integer^1>>', '[[1],"Missing"]'],
+    // A `Missing` that the body returns for a present cell is kept beside the
+    // `Missing` of the absent cell.
     [
       ['If', ['Greater', 'x', 0], 'Missing', 'x'],
-      'list<integer | missing | nan>',
-      '["Missing",NaN]',
+      'list<integer | missing>',
+      '["Missing","Missing"]',
     ],
-    [['Greater', 'x', 0], 'list<boolean>', '["True","False"]'],
+    [['Greater', 'x', 0], 'list<boolean | missing>', '["True","Missing"]'],
   ] as [MathJsonExpression, string, string][])('%j', (body, type, value) => {
     expect(
       expectTypeHoldsValue(
@@ -216,12 +216,14 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
 
   test('several sources of an abstract collection type', () => {
     // The result is an `indexed_collection`: the `Missing` that the body
-    // returns for a present cell is kept. The absent cell gives `NaN`: the
-    // else arm of `NaN > 0` (user decision 2026-10-20).
+    // returns for a present cell is kept beside the `Missing` of the absent
+    // cell.
+    // A store into a declared name accepts a value that holds `Missing`
+    // where the declared type accepts a present value.
     const e = new ComputeEngine();
-    e.declare('ca', 'collection<integer | missing>');
+    e.declare('ca', 'collection<integer>');
     e.assign('ca', e.box(['List', 1, 'Missing']));
-    e.declare('cb', 'collection<integer | missing>');
+    e.declare('cb', 'collection<integer>');
     e.assign('cb', e.box(['List', 2, 3]));
     for (const expr of [
       e.box([
@@ -243,9 +245,9 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
         expectTypeHoldsValue(
           e,
           expr,
-          'indexed_collection<integer | missing | nan>'
+          'indexed_collection<integer | missing>'
         )
-      ).toBe('["Missing",NaN]');
+      ).toBe('["Missing","Missing"]');
   });
 
   test('the parse route', () => {
@@ -255,39 +257,17 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
         engine.parse(
           '\\operatorname{Map}((x: \\mathrm{integer}) \\mapsto x + 1, m)'
         ),
-        'list<integer | nan>'
+        'list<integer | missing>'
       )
-    ).toBe('[2,NaN]');
+    ).toBe('[2,"Missing"]');
   });
 });
 
-describe('2. THE PREVIEW OF A VIEW OVER A SOURCE THAT CAN BE ABSENT', () => {
-  // A view typed `list<integer> | missing` printed as a `Set`.
-  const engine = new ComputeEngine();
-  engine.declare('c', 'missing | list<integer>');
-  engine.assign('c', engine.box(['List', 1, 2]));
-
-  test.each([
-    [['Map', ADD_10, 'c'], '[11,12]'],
-    [['Filter', 'c', POSITIVE], '[1,2]'],
-  ] as [MathJsonExpression, string][])('%j', (json, printed) => {
-    const expr = engine.box(json);
-    expect(expr.type.toString()).toBe('list<integer> | missing');
-    expect(expr.toString()).toBe(printed);
-    expect(expr.evaluate().toString()).toBe(printed);
-  });
-
-  test('the parse route', () => {
-    const expr = engine.parse('\\operatorname{Map}(x \\mapsto x + 10, c)');
-    expect(expr.toString()).toBe('[11,12]');
-    expect(expectTypeHoldsValue(engine, expr, 'list<integer> | missing')).toBe(
-      '[11,12]'
-    );
-  });
-
+describe('2. A VIEW OVER AN ABSENT SOURCE', () => {
+  // A declared type cannot name `missing` (`Missing` is a result only), so a
+  // view over a source typed `list<integer> | missing` is no longer written.
   test('an absent source keeps the view as written', () => {
     const e = new ComputeEngine();
-    e.declare('c', 'missing | list<integer>');
     e.assign('c', 'Missing');
     const expr = e.box(['Map', ADD_10, 'c']);
     expect(expr.toString()).toBe('Map((x) => x + 10, c)');
@@ -302,7 +282,6 @@ describe('3. ALL-ABSENT TUPLES BELONG TO THE COLLECTION FAMILY', () => {
     '%s',
     (op) => {
       const engine = new ComputeEngine();
-      engine.declare('m', 'tuple<missing, missing>');
       engine.assign('m', engine.box(['Tuple', 'Missing', 'Missing']));
       const json: MathJsonExpression =
         op === 'Map'
@@ -413,65 +392,27 @@ describe('6. THE RESULT KIND OVER A STRING HELD BY A SYMBOL OF A WIDER TYPE', ()
   });
 });
 
-describe('7. A SOURCE THAT CAN BE AN ABSENT VALUE OR A STRING', () => {
-  // Before, `missing | string` was an `incompatible-type` error at `Dedup`,
-  // `Filter` and `Map`, while `missing | list<integer>` was admitted.
-  test.each([
-    [['Dedup', 'c'], 'missing | string', '"ab"'],
-    [['Filter', 'c', ['Function', 'True', 'x']], 'missing | string', '"aab"'],
-    [
-      ['Map', ['Function', 'x', 'x'], 'c'],
-      'list<character> | missing',
-      '["a","a","b"]',
-    ],
-  ] as [MathJsonExpression, string, string][])('%j', (json, type, value) => {
+describe('7. A DECLARED SOURCE THAT CAN BE ABSENT', () => {
+  test('a declared type that names missing is an error', () => {
+    // `Missing` is a result only: a symbol cannot be declared absent.
     const engine = new ComputeEngine();
-    engine.declare('c', 'missing | string');
-    engine.assign('c', engine.box("'aab'"));
-    expect(expectTypeHoldsValue(engine, engine.box(json), type)).toBe(value);
-    engine.assign('c', engine.box('Missing'));
-    expect(engine.box(json).evaluate().toString()).toBe('"Missing"');
-  });
-
-  test('the parse route', () => {
-    const engine = new ComputeEngine();
-    engine.declare('c', 'missing | string');
-    engine.assign('c', engine.box("'aab'"));
-    expect(
-      expectTypeHoldsValue(
-        engine,
-        engine.parse('\\operatorname{Dedup}(c)'),
-        'missing | string'
-      )
-    ).toBe('"ab"');
-  });
-
-  test('a union with no collection arm is still refused', () => {
-    const engine = new ComputeEngine();
-    engine.declare('n', 'missing | integer');
-    expect(engine.box(['Dedup', 'n']).isValid).toBe(false);
-  });
-
-  test.each([
-    ['dedup(s)', '"ab"'],
-    ['filter(s, x => true)', '"aab"'],
-    ['map(x => x, s)', '["a","a","b"]'],
-  ])('the Epsil route: %s', (call, value) => {
-    expect(epsil(`let s: missing | string = "aab"\n${call}`)[0]).toBe(value);
+    expect(() => engine.declare('n', 'missing | integer')).toThrow(
+      /cannot be declared/
+    );
   });
 });
 
 describe('8. MAP OVER AN ALIAS OF A TUPLE', () => {
-  // `q: P`, with `P` an alias of `tuple<integer, missing>`, was typed
+  // `q: P`, with `P` an alias of a tuple type, was typed
   // `collection<number>`: the alias was not read as its definition.
   const engine = new ComputeEngine();
-  engine.declareType('P', 'tuple<integer, missing>', { alias: true });
+  engine.declareType('P', 'tuple<integer, integer>', { alias: true });
   engine.declare('q', 'P');
-  engine.assign('q', engine.box(['Tuple', 1, 'Missing']));
+  engine.assign('q', engine.box(['Tuple', 1, 4]));
 
   test.each([
-    [ADD_10, 'list<integer | nan>', '[11,NaN]'],
-    ['Sqrt', 'list<complex | nan>', '[1,NaN]'],
+    [ADD_10, 'list<integer>', '[11,14]'],
+    ['Sqrt', 'list<complex>', '[1,2]'],
   ] as [MathJsonExpression, string, string][])('%j', (fn, type, value) => {
     expect(
       expectTypeHoldsValue(engine, engine.box(['Map', fn, 'q']), type)
@@ -483,9 +424,9 @@ describe('8. MAP OVER AN ALIAS OF A TUPLE', () => {
       expectTypeHoldsValue(
         engine,
         engine.parse('\\operatorname{Map}(x \\mapsto x + 10, q)'),
-        'list<integer | nan>'
+        'list<integer>'
       )
-    ).toBe('[11,NaN]');
+    ).toBe('[11,14]');
   });
 
   test('a self-referential alias does not unfold forever', () => {
@@ -566,7 +507,7 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
 
   test('a dictionary arm of a union', () => {
     const engine = new ComputeEngine();
-    engine.declare('v', 'tuple<integer, missing> | dictionary<integer>');
+    engine.declare('v', 'tuple<integer, integer> | dictionary<integer>');
     engine.assign('v', engine.box(DICT));
     for (const json of [
       ['Filter', 'v', SECOND_POSITIVE],
@@ -618,36 +559,11 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
     }
   );
 
-  test('Map over a dictionary arm whose values can be absent', () => {
-    // A callback can answer the absent value of an entry.
-    const engine = new ComputeEngine();
-    engine.declare(
-      'w',
-      'tuple<integer, missing> | dictionary<integer | missing>'
-    );
-    engine.assign('w', engine.box(['Dictionary', ['Tuple', "'a'", 'Missing']]));
-    for (const expr of [
-      engine.box(['Map', ['Function', ['At', 'x', 2], 'x'], 'w']),
-      engine.parse(
-        '\\operatorname{Map}(x \\mapsto \\operatorname{At}(x, 2), w)'
-      ),
-    ]) {
-      // The type is the join of the `Map` of each arm of the source: the
-      // values of the dictionary arm are `integer | missing`.
-      expect(expr.type.toString()).toBe(
-        'collection<integer | missing> | list<missing | unknown>'
-      );
-      const value = expr.evaluate({ materialization: true });
-      expect(value.toString()).toBe('Set("Missing")');
-      expect(value.type.matches(expr.type)).toBe(true);
-    }
-  });
-
   test('nested views over a dictionary arm of a union', () => {
     // The kind is read through the sources of the inner views: before, the
     // outer view was listed as a `Set` of entries.
     const engine = new ComputeEngine();
-    engine.declare('v', 'tuple<integer, missing> | dictionary<integer>');
+    engine.declare('v', 'tuple<integer, integer> | dictionary<integer>');
     engine.assign('v', engine.box(DICT));
     for (const expr of [
       engine.box([
@@ -692,7 +608,7 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
     // decision 2026-10-23: the reduction is accepted, although it drops the
     // `missing` element arm of the list).
     const engine = new ComputeEngine();
-    engine.declare('v', 'tuple<integer, missing> | dictionary<integer>');
+    engine.declare('v', 'tuple<integer, integer> | dictionary<integer>');
     engine.assign('v', engine.box(DICT));
     for (const expr of [
       engine.box(['Map', ['Function', 'x', 'x'], 'v']),
@@ -719,11 +635,11 @@ describe('10. MAP OF AN OPERATOR WHOSE DECLARED RESULT IS `any`', () => {
   const engine = new ComputeEngine();
 
   test.each([
-    // The elements are characters, or `Missing` for an empty string; a
-    // value that mixes the two is typed with no length.
+    // The elements are characters. The `Missing` that `PointX` gives for an
+    // empty string is implicit in the result type of an accessor.
     [
       ['Map', 'PointX', ['List', "'a'", "'b'"]],
-      'list<character | missing>',
+      'list<character^2>',
       '["a","b"]',
     ],
     [
@@ -731,17 +647,18 @@ describe('10. MAP OF AN OPERATOR WHOSE DECLARED RESULT IS `any`', () => {
       'list<any>',
       '[1,3]',
     ],
-    // The source is typed `list<list<integer>>`, so the call on an element
-    // is typed `integer | nan`. But `First([])` is `Missing`, since the
-    // element `[]` is typed `list<nothing>`: the type admits both markers
-    // (user decision 2026-10-23).
-    [
-      ['Map', 'First', ['List', ['List'], ['List', 3]]],
-      'list<integer | missing | nan>',
-      '["Missing",3]',
-    ],
   ] as [MathJsonExpression, string, string][])('%j', (json, type, value) => {
     expect(expectTypeHoldsValue(engine, engine.box(json), type)).toBe(value);
+  });
+
+  test('First of an empty element is Missing, implicit in the type', () => {
+    // `First([])` is `Missing`, since the element `[]` is typed
+    // `list<nothing>`. The result type of an accessor describes the present
+    // values and leaves the marker implicit, so the type is `list<integer>`
+    // and does not match the value strictly.
+    const expr = engine.box(['Map', 'First', ['List', ['List'], ['List', 3]]]);
+    expect(expr.type.toString()).toBe('list<integer>');
+    expect(expr.evaluate().toString()).toBe('["Missing",3]');
   });
 
   test('the parse route', () => {
@@ -1155,7 +1072,6 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
     ['list<any>', 'list<missing | nothing | unknown>'],
     ['dictionary<any>', 'collection<missing | unknown>'],
     ['record', 'collection<missing | unknown>'],
-    ['dictionary<integer | missing>', 'collection<missing | unknown>'],
   ])('a callback declared `function` over `%s`', (declared, type) => {
     const engine = new ComputeEngine();
     engine.declare('f', 'function');
@@ -1206,9 +1122,9 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
           'ys',
           ['Function', ['List', 'x'], ['Typed', 'x', "'integer'"]],
         ]),
-        'list<integer | nan>'
+        'list<integer | missing>'
       )
-    ).toBe('[1,NaN]');
+    ).toBe('[1,"Missing"]');
     expect(
       expectTypeHoldsValue(
         engine,
@@ -1220,7 +1136,6 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
 
   test('Map of an annotated literal over a set with an absent element', () => {
     const engine = new ComputeEngine();
-    engine.declare('s', 'set<integer | missing>');
     engine.assign('s', engine.box(['Set', 1, -2, 'Missing']));
     const expr = engine.box([
       'Map',
@@ -1231,9 +1146,9 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
       ],
       's',
     ]);
-    expect(expr.type.toString()).toBe('set<integer | missing | nan>');
+    expect(expr.type.toString()).toBe('set<integer | missing>');
     const v = expr.evaluate({ materialization: true });
-    expect(v.toString()).toBe('Set(-2, NaN, "Missing")');
+    expect(v.toString()).toBe('Set(-2, "Missing")');
     expect(v.type.matches(expr.type)).toBe(true);
   });
 

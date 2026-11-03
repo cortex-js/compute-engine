@@ -380,8 +380,7 @@ describe('CE-712.2: a parameter declared with a union of shapes', () => {
 });
 
 describe('CE-712.2: absent values and deeper lists at a declared union', () => {
-  // `f: (real) -> real`, so the interpreter maps the call over a list and
-  // reads an absent argument as `NaN`.
+  // `f: (real) -> real`, so the interpreter maps the call over a list.
   function absentEngine(type: string): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('f', { signature: '(real) -> real' });
@@ -398,27 +397,12 @@ describe('CE-712.2: absent values and deeper lists at a declared union', () => {
     return r.isNaN ? NaN : plain(r);
   }
 
-  test.each([
-    'list<real> | missing',
-    'real | list<real> | missing',
-    'list<real> | list<list<real>> | missing',
-  ])('an absent `L: %s` gives the interpreter value', (type) => {
-    const r = compile(absentEngine(type).parse('f(L)'), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(interpretedWith(type, 'Missing')).toBeNaN();
-    expect(r.run!({ L: undefined } as any)).toBeNaN();
-  });
-
-  test('a present value of a union with `missing` selects its member', () => {
-    const type = 'list<real> | list<list<real>> | missing';
-    const r = compile(absentEngine(type).parse('f(L)'), { fallback: false });
-    expect(r.success).toBe(true);
-    // An absent value goes to the deepest member; the test holds for it.
-    expect(r.code).toContain('_.L == null ||');
-    for (const v of [[1, 2], [[1], [2, 3]], []] as Value[])
-      expect(r.run!({ L: v } as any)).toEqual(
-        interpretedWith(type, boxed(v, false))
-      );
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so a declared union has no absent member.
+  test('a union with a `missing` member cannot be declared', () => {
+    expect(() => absentEngine('list<real> | list<list<real>> | missing')).toThrow(
+      /cannot be declared/
+    );
   });
 
   test('three depths: a scalar, a list and a list of lists', () => {
@@ -429,27 +413,6 @@ describe('CE-712.2: absent values and deeper lists at a declared union', () => {
       expect(r.run!({ L: v } as any)).toEqual(
         interpretedWith(type, boxed(v, false))
       );
-  });
-
-  test('a list with absent numbers and a list of lists', () => {
-    // The first element of a list of lists is a list, never absent, so an
-    // absent first element selects the list of numbers.
-    const type = 'list<missing | real> | list<list<real>>';
-    const r = compile(absentEngine(type).parse('f(L)'), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ L: [[1], [2, 3]] } as any)).toEqual(
-      interpretedWith(type, boxed([[1], [2, 3]], false))
-    );
-    expect(r.run!({ L: [4, 5] } as any)).toEqual(
-      interpretedWith(type, boxed([4, 5], false))
-    );
-  });
-
-  test('two members whose lists can both hold an absent first element decline', () => {
-    // `[Missing, 2]` and `[Missing, [2]]` have the same first element, so no
-    // test of the first element tells the members apart.
-    const ce = absentEngine('list<missing | real> | list<missing | list<real>>');
-    expect(declineCode(ce.parse('f(L)'), 'javascript')).toBe('union-dispatch');
   });
 
   test.each(['javascript', 'interval-js', 'python'] as const)(
@@ -491,7 +454,6 @@ describe('CE-712.2: `nothing` in a declared union of a list and a number', () =>
     ['list<integer | nothing> | integer', [[1, 2], 3, []]],
     ['list<real | nothing> | real', [[1.5, 2], -0.5]],
     ['list<integer> | integer | nothing', [[1, 2], 3]],
-    ['list<integer | missing> | integer', [[1, 2], 3]],
   ];
 
   test.each(CASES)('javascript: x: %s', (type, values) => {

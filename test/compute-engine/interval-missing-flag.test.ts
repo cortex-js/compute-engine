@@ -64,7 +64,10 @@ describe('interval-js: an integral of an integrand with no value', () => {
     expect(js!.run!({ x: 0.5 } as never)).toBe(0);
   });
 
-  test('the interpreter: an accumulation of absent values is NaN', () => {
+  // `NIntegrate` of absent values is `NaN`; the `Sum` of absent values is
+  // `Missing`, since an operator over `Missing` gives `Missing`
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+  test('the interpreter: an accumulation of absent values has no value', () => {
     const ce = new ComputeEngine();
     const nintegrate = ['NIntegrate', ['Function', WHICH_T, 't'], 0, 1];
     expect(ce.box(nintegrate).evaluate().isNaN).toBe(true);
@@ -74,7 +77,7 @@ describe('interval-js: an integral of an integrand with no value', () => {
       ['Which', ['Greater', 'n', 5], 1],
       ['Limits', 'n', 1, 3],
     ];
-    expect(ce.box(sum).evaluate().isNaN).toBe(true);
+    expect(ce.box(sum).evaluate().symbol).toBe('Missing');
     expect(ce.box(['Greater', sum, 0]).evaluate().symbol).toBe('False');
     // Arithmetic over the absent value.
     ce.assign('x', 0.5);

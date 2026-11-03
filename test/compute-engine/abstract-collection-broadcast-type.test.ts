@@ -357,8 +357,15 @@ describe('ABSTRACT COLLECTION: AN ELEMENT THAT IS A COLLECTION', () => {
 });
 
 describe('ABSTRACT COLLECTION: WITH AN ABSENCE ARM OR SCALAR ARMS', () => {
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only").
+  test('m declared collection<number> | missing is a static error', () => {
+    expect(() =>
+      new ComputeEngine().declare('m', 'collection<number> | missing')
+    ).toThrow();
+  });
+
   test.each([
-    ['collection<number> | missing', 'broadcastable<number> | missing'],
     ['number | collection<number>', 'broadcastable<number>'],
   ])('Sin(m) with m: %s', (decl, expected) => {
     const ce = new ComputeEngine();
@@ -367,7 +374,6 @@ describe('ABSTRACT COLLECTION: WITH AN ABSENCE ARM OR SCALAR ARMS', () => {
   });
 
   test.each([
-    ['collection<number> | missing', ['List', 1, 2]],
     ['number | collection<number>', ['List', 1, 2]],
     ['number | collection<number>', 3],
   ])('Sin(m) with m: %s holding %j admits the value', (decl, value) => {

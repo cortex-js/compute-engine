@@ -22,8 +22,6 @@ function engine(): ComputeEngine {
   ce.declare('U', 'list<number | vector<2>>');
   ce.declare('T', 'list<tuple<number, number>>');
   ce.declare('M', 'list<number>');
-  ce.declare('LM', 'list<unknown | missing>');
-  ce.declare('VM', 'list<vector<2> | missing>');
   return ce;
 }
 
@@ -40,11 +38,6 @@ describe('A SEEDED ADD OR MULTIPLY FOLD IS TYPED AS SUM OR PRODUCT (CE-374)', ()
     [['Reduce', 'V', 'Add', 0], 'integer | vector<2>'],
     // Numbers or rows (the shape the rule read before).
     [['Reduce', 'U', 'Add', 0], 'number | vector<2>'],
-    // Elements that may be absent: the `missing` arm is dropped before the
-    // elements are read, and an absent cell gives `NaN`.
-    [['Product', ['Rest', 'LM']], 'broadcastable<number>'],
-    [['Reduce', 'LM', 'Add', 0], 'broadcastable<number>'],
-    [['Reduce', 'VM', 'Multiply', 1], 'integer | nan | vector<2>'],
     // Numbers only: unchanged.
     [['Reduce', 'M', 'Add', 0], 'number'],
     [['Reduce', 'M', 'Multiply', 1], 'number'],

@@ -12,8 +12,8 @@ import { parseType } from '../../src/common/type/parse';
  * Consistency of the subtype relation (`matches`) and of the overlap
  * predicate (`couldMatch`), and three typing gaps found with them: the
  * type-variable solver and an operand typed with an alias, the element
- * union of a broadcast over a list whose cells can be absent, and an
- * `Undefined` element of a list literal.
+ * union of a broadcast over a list whose cells can be absent, and a
+ * `Missing` element of a list literal.
  *
  * For the typing cases, the static type of the expression must hold its
  * value: `value.type.matches(staticType)`, on the box route and on the parse
@@ -202,38 +202,24 @@ describe('THE SUBTYPE RELATION ON A SAMPLE OF TYPES', () => {
     // `list<unknown>` and a `list<expression>`.
     const ce = new ComputeEngine();
     ce.declareType('R', 'list<R>', { alias: true });
-    ce.declareType('J', 'list<J> | missing', { alias: true });
-    ce.declareType('M', 'list<M | missing>', { alias: true });
     expect(ce.type('R').matches('list')).toBe(true);
     expect(ce.type('R').matches('list<unknown>')).toBe(true);
     expect(ce.type('R').matches('list<list<unknown>>')).toBe(true);
     expect(ce.type('R').matches('list<expression>')).toBe(true);
     expect(ce.type('R').matches('value')).toBe(true);
     expect(ce.type('R').matches('integer')).toBe(false);
-    // An absence marker in the body, at the top level or in a cell, is seen
-    // by the `expression` contract; `unknown` restricts nothing (user
-    // decision D1, 2026-10-21).
-    expect(ce.type('J').matches('expression')).toBe(false);
-    expect(ce.type('J').matches('unknown')).toBe(true);
-    expect(ce.type('M').matches('list')).toBe(true);
-    expect(ce.type('M').matches('list<any>')).toBe(true);
-    expect(ce.type('M').matches('list<expression>')).toBe(false);
+    // An alias whose body names `missing` (`list<J> | missing`,
+    // `list<M | missing>`) cannot be declared since 2026-11-02
+    // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+    expect(() =>
+      ce.declareType('J', 'list<J> | missing', { alias: true })
+    ).toThrow(/cannot be declared/);
   });
 
   it('a mutually recursive alias is checked against each new target', () => {
-    // `A = B`, `B = list<A> | missing`: `[Missing]` is an `A`, and it is not a
-    // `list<expression> | missing`. The check reaches `A <: expression` while
-    // `A` and `B` are being unfolded against another target; that is a new
-    // question, which the `missing` arm of `B` answers. (`list<unknown> |
-    // missing` restricts nothing, so `A` fits it: user decision D1,
-    // 2026-10-21.)
+    // The case `A = B`, `B = list<A> | missing` cannot be declared since
+    // 2026-11-02 (a declared type cannot name `missing`).
     const ce = new ComputeEngine();
-    ce.declareType('B', 'list<type A> | missing', { alias: true });
-    ce.declareType('A', 'B', { alias: true });
-    expect(ce.box(['List', 'Missing']).type.matches('A')).toBe(true);
-    expect(ce.type('A').matches('list<expression> | missing')).toBe(false);
-    expect(ce.type('A').matches('list<unknown> | missing')).toBe(true);
-    expect(ce.type('A').matches('list<any> | missing')).toBe(true);
     // Two aliases that each hold a list of the other are the same type.
     ce.declareType('ma', 'list<type mb>', { alias: true });
     ce.declareType('mb', 'list<ma>', { alias: true });
@@ -889,25 +875,28 @@ function materializedType(e: Expression): string {
 }
 
 describe('THE TYPE-VARIABLE SOLVER AND AN ALIAS OPERAND', () => {
+  // The element type of the alias was `integer | missing` until a declared
+  // type could no longer name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"); any union element type shows the same binding.
   const ce = new ComputeEngine();
-  ce.declareType('L', 'list<integer | missing>', { alias: true });
+  ce.declareType('L', 'list<integer | string>', { alias: true });
   ce.declareType('Q', 'list<integer>', { alias: true });
   ce.declare('a', 'L');
-  ce.assign('a', ce.box(['List', 3, 'Missing']));
+  ce.assign('a', ce.box(['List', 3, "'x'"]));
   ce.declare('b', 'Q');
-  ce.declare('c', 'list<integer | missing>');
-  ce.assign('c', ce.box(['List', 3, 'Missing']));
+  ce.declare('c', 'list<integer | string>');
+  ce.assign('c', ce.box(['List', 3, "'x'"]));
 
   it('binds the element type of an alias of a list (box route)', () => {
     const e = ce.box(['Sort', 'a']);
-    expect(e.type.toString()).toBe('list<integer | missing>');
+    expect(e.type.toString()).toBe('list<integer | string>');
     expectSound(e);
     expect(ce.box(['Sort', 'b']).type.toString()).toBe('list<integer>');
   });
 
   it('binds the element type of an alias of a list (parse route)', () => {
     const e = ce.parse('\\mathrm{Sort}(a)');
-    expect(e.type.toString()).toBe('list<integer | missing>');
+    expect(e.type.toString()).toBe('list<integer | string>');
     expectSound(e);
     expect(ce.parse('\\mathrm{Sort}(b)').type.toString()).toBe('list<integer>');
   });
@@ -929,7 +918,7 @@ describe('THE TYPE-VARIABLE SOLVER AND AN ALIAS OPERAND', () => {
     ce.declare('r', 'R');
     ce.declare('j', 'list<J>');
     expect(ce.box(['Sort', 'r']).type.toString()).toBe('list<R>');
-    expect(ce.box(['First', 'r']).type.toString()).toBe('R | missing');
+    expect(ce.box(['First', 'r']).type.toString()).toBe('R');
     expect(ce.box(['Sort', 'j']).type.toString()).toBe('list<J>');
     ce.assign('j', ce.box(['List', 3, ['List', 1, 2]]));
     expectSound(ce.box(['Sort', 'j']));
@@ -954,57 +943,52 @@ describe('THE TYPE-VARIABLE SOLVER AND AN ALIAS OPERAND', () => {
 });
 
 describe('A BROADCAST OVER A LIST WHOSE CELLS CAN BE ABSENT', () => {
+  // A declared type cannot name `missing`, so the absent cells are written in
+  // the operand.
   const ce = new ComputeEngine();
-  ce.declare('b', 'list<missing | unknown>');
-  ce.declare('b2', 'list<missing | unknown>');
-  ce.assign('b2', ce.box(['List', 1, 'Missing', 3]));
-  ce.declare('t', 'tuple<integer, missing>');
+  const b2 = ['List', 1, 'Missing', 3];
 
   it('reduces the cell of an undeclared function to `any` (box route)', () => {
-    expect(ce.box(['Total', 'b']).type.toString()).toBe('list<any>');
     expect(
-      ce.box(['Total', ['Map', ['Function', 'x', 'x'], 't']]).type.toString()
+      ce
+        .box(['Total', ['Map', ['Function', 'x', 'x'], ['Tuple', 1, 'Missing']]])
+        .type.toString()
     ).toBe('list<any>');
-    expectSound(ce.box(['Total', 'b2']));
+    expectSound(ce.box(['Total', b2] as any));
   });
 
   it('reduces the cell of an undeclared function to `any` (parse route)', () => {
-    expect(ce.parse('\\mathrm{Total}(b)').type.toString()).toBe('list<any>');
-    expectSound(ce.parse('\\mathrm{Total}(b2)'));
+    expectSound(ce.parse('\\mathrm{Total}([1, \\mathrm{Missing}, 3])'));
   });
 });
 
-describe('AN `Undefined` ELEMENT OF A LIST LITERAL', () => {
+// `Undefined` is not an absent value since 2026-11-02 (`docs/ERROR-MODEL.md`,
+// "`Missing` is a result only"): these cases use `Missing`.
+describe('A `Missing` ELEMENT OF A LIST LITERAL', () => {
   // A row of `Zip` whose coordinates are all absent stays a tuple (it is not
   // one `Missing`), so the element type has no whole-element `missing` arm.
   it('is an absent element for `Zip` (box route)', () => {
     const e = ce.box([
       'Zip',
-      ['List', 1, 'Undefined'],
-      ['List', 2, 'Undefined'],
+      ['List', 1, 'Missing'],
+      ['List', 2, 'Missing'],
     ]);
     expect(e.type.toString()).toBe(
       'list<tuple<integer | missing, integer | missing>>'
     );
     expect(ce.type(materializedType(e)).matches(e.type)).toBe(true);
-    const f = ce.box(['Zip', ['List', 1, 'Undefined'], ['List', 2, 3]]);
+    const f = ce.box(['Zip', ['List', 1, 'Missing'], ['List', 2, 3]]);
     expect(ce.type(materializedType(f)).matches(f.type)).toBe(true);
   });
 
   it('is an absent element for `Zip` (parse route)', () => {
     const e = ce.parse(
-      '\\mathrm{Zip}([1, \\mathrm{Undefined}], [2, \\mathrm{Undefined}])'
+      '\\mathrm{Zip}([1, \\mathrm{Missing}], [2, \\mathrm{Missing}])'
     );
     expect(e.type.toString()).toBe(
       'list<tuple<integer | missing, integer | missing>>'
     );
     expect(ce.type(materializedType(e)).matches(e.type)).toBe(true);
-  });
-
-  it('has the same element type as a `Missing` element', () => {
-    const u = ce.box(['Zip', ['List', 1, 'Undefined'], ['List', 2, 3]]);
-    const m = ce.box(['Zip', ['List', 1, 'Missing'], ['List', 2, 3]]);
-    expect(u.type.toString()).toBe(m.type.toString());
   });
 });
 

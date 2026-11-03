@@ -157,7 +157,7 @@ definition of an operator that the language builds by name, such as `+`, `<`,
 (the compiler uses its `compile` handler when it has one); and any call of a
 user function on the Python target.
 
-The absence markers `Nothing`, `Missing` and `Undefined` are the exception:
+The markers `Nothing` and `Missing` are the exception:
 they cannot be rebound, and a binding of one of them is an error
 (`absence-marker-binding`). The engine recognizes them by their name — it
 drops `Nothing` from an argument list and reads a `Missing` operand as

@@ -2,19 +2,19 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
-// A declared type is a contract on EVERY value the symbol takes (user
-// decisions P1 and P1b of
-// `docs/plans/2026-10-21-presence-contracts-and-assertion.md`, 2026-10-21).
-// `s: string` refuses `Missing` and `Undefined` as it refuses `5`; a declared
-// element contract (`list<string>`) refuses a value with an absent cell. An
-// author who wants absence writes it (`string | missing`), or uses a
-// refining declaration (`list`, `list<unknown>`). A `number` declaration
-// admits `NaN`, the numeric absence marker; `real`, `integer` and `complex`
-// hold finite values only and refuse it (write `real | nan`). The Epsil
-// static check, the Epsil runtime and the engine's assignment route agree.
+// A declared type is a contract on the PRESENT values the symbol takes.
+// `Missing` is a result only (user decision of 2026-11-02,
+// `docs/ERROR-MODEL.md`): a declared type cannot name `missing`, and a store
+// into a declared name accepts a value that holds the marker where the
+// declared type accepts a present value. So `s: string` accepts `Missing`
+// and refuses `5`; `list<string>` accepts `["a", Missing]`. A `number`
+// declaration admits `NaN`; `real`, `integer` and `complex` hold finite
+// values only and refuse it (write `real | nan`). The Epsil static check,
+// the Epsil runtime and the engine's assignment route agree.
 //
-// This reverses the rule of 2026-09-09 ("assignment admits `missing` into a
-// declared type"), recorded in `docs/ERROR-MODEL.md`.
+// This replaces the rule of 2026-10-21 (a declared type refuses `Missing`,
+// decisions P1 and P1b of
+// `docs/plans/2026-10-21-presence-contracts-and-assertion.md`).
 //
 
 let ce: ComputeEngine;
@@ -33,22 +33,21 @@ function run(source: string): { value: string; diagnostics: string[] } {
 }
 
 describe('the engine assignment route', () => {
-  test('a declared `string` refuses the absence symbols', () => {
+  test('a declared `string` accepts Missing and refuses a number', () => {
     ce.declare('s', 'string');
-    expect(() => ce.assign('s', ce.Missing)).toThrow(
-      /not compatible with the type "string"/
-    );
-    expect(() => ce.assign('s', ce.box('Undefined'))).toThrow(
+    expect(() => ce.assign('s', ce.number(5))).toThrow(
       /not compatible with the type "string"/
     );
     // The refusal leaves the symbol valueless.
     expect(ce.box('s').evaluate().symbol).toBe('s');
+    ce.assign('s', ce.Missing);
+    expect(ce.box('s').evaluate().symbol).toBe('Missing');
   });
 
-  test('a declaration that admits absence takes the symbol', () => {
-    ce.declare('om', 'string | missing');
-    ce.assign('om', ce.Missing);
-    expect(ce.box('om').evaluate().symbol).toBe('Missing');
+  test('a declaration cannot name missing', () => {
+    expect(() => ce.declare('om', 'string | missing')).toThrow(
+      /cannot be declared/
+    );
     ce.declare('a', 'any');
     ce.assign('a', ce.Missing);
     expect(ce.box('a').evaluate().symbol).toBe('Missing');
@@ -69,9 +68,12 @@ describe('the engine assignment route', () => {
     expect(gated.type.toString()).toBe('tuple<integer, integer>');
     ce.assign('p', gated);
     expect(ce.box('p').evaluate().toString()).toBe('If(0 < a, (1, 2))');
-    // The value when the condition fails is the absent value.
+    // The value when the condition fails is the absent value. For a point,
+    // the absent value is the `NaN` point `(NaN, NaN)`, which the readers of
+    // a point read as absent; a restriction of a string or a list gives
+    // `Missing`.
     ce.assign('a', -1);
-    expect(gated.evaluate().symbol).toBe('Missing');
+    expect(gated.evaluate().toString()).toBe('(NaN, NaN)');
   });
 
   test('a numeric restriction has the type of its value and binds to a numeric declaration', () => {
@@ -86,15 +88,16 @@ describe('the engine assignment route', () => {
     expect(gated.evaluate().toString()).toBe('NaN');
   });
 
-  test('a declared element contract is checked (P1b)', () => {
+  test('a declared element contract accepts an absent cell', () => {
     ce.declare('xs', 'list<string>');
-    expect(() => ce.assign('xs', ce.box(['List', "'a'", 'Missing']))).toThrow(
-      /list<missing \| string>.*not compatible with the type "list<string>"/
+    ce.assign('xs', ce.box(['List', "'a'", 'Missing']));
+    expect(ce.box('xs').evaluate().toString()).toBe('["a","Missing"]');
+    expect(() =>
+      ce.assign('xs', ce.box(['List', "'a'", 5]))
+    ).toThrow(/not compatible/);
+    expect(() => ce.declare('xm', 'list<string | missing>')).toThrow(
+      /cannot be declared/
     );
-    expect(() => ce.assign('xs', ce.Missing)).toThrow(/not compatible/);
-    ce.declare('xm', 'list<string | missing>');
-    ce.assign('xm', ce.box(['List', "'a'", 'Missing']));
-    expect(ce.box('xm').evaluate().toString()).toBe('["a","Missing"]');
   });
 
   test('a refining declaration keeps refining', () => {
@@ -110,42 +113,41 @@ describe('the engine assignment route', () => {
 });
 
 describe('the Epsil routes', () => {
-  test('`let s: string = Missing` is reported and refused', () => {
-    const r = run('let s: string = Missing\ns');
-    expect(r.diagnostics.some((d) => d.startsWith('static-type-error'))).toBe(
-      true
-    );
-    expect(r.diagnostics.some((d) => d.startsWith('runtime-error'))).toBe(
-      true
-    );
+  test('`let s: string = Missing` is accepted', () => {
+    expect(run('let s: string = Missing\ns')).toEqual({
+      value: '"Missing"',
+      diagnostics: [],
+    });
   });
 
-  test('a later `s := Missing` is refused at run time', () => {
-    const r = run('let s: string = "a"\ns := Missing\ns');
-    expect(r.diagnostics.join(' ')).toContain('incompatible-type');
-    expect(r.value).toBe('"a"');
+  test('a later `s := Missing` is accepted', () => {
+    expect(run('let s: string = "a"\ns := Missing\ns')).toEqual({
+      value: '"Missing"',
+      diagnostics: [],
+    });
   });
 
-  test('a list literal with an absent cell is reported and refused', () => {
-    const r = run('let xs: list<string> = ["a", Missing]\nxs');
-    expect(r.diagnostics.join(' ')).toContain('list<missing | string>');
-    expect(run('let xs: list<string | missing> = ["a", Missing]\nxs')).toEqual(
-      { value: '["a","Missing"]', diagnostics: [] }
-    );
+  test('a list literal with an absent cell is accepted', () => {
+    expect(run('let xs: list<string> = ["a", Missing]\nxs')).toEqual({
+      value: '["a","Missing"]',
+      diagnostics: [],
+    });
+    expect(
+      run('let xs: list<string | missing> = ["a", Missing]\nxs')
+        .diagnostics.join(' ')
+    ).toContain('type-annotation-error');
   });
 
-  test('a possibly absent initializer at a strict declaration is reported, and its discharges are not', () => {
+  test('a possibly absent initializer at a declaration is not reported', () => {
     const base = 'let xs: list<string> = ["a"]\nlet i: integer = 1\n';
-    const r = run(`${base}let y: string = xs[i]\ny`);
-    expect(r.diagnostics.join(' ')).toContain('may be absent');
-    expect(r.diagnostics.join(' ')).toContain('xs[i]?!');
+    expect(run(`${base}let y: string = xs[i]\ny`)).toEqual({
+      value: '"a"',
+      diagnostics: [],
+    });
     expect(run(`${base}let y: string = xs[i]?!\ny`).diagnostics).toEqual([]);
     expect(run(`${base}let y: string = xs[i] ?? "d"\ny`).diagnostics).toEqual(
       []
     );
-    expect(
-      run(`${base}let y: string | missing = xs[i]\ny`).diagnostics
-    ).toEqual([]);
   });
 
   test('a `number` declaration admits NaN and a numeric read', () => {
@@ -167,14 +169,13 @@ describe('the Epsil routes', () => {
     ce.assign('rn', ce.NaN);
     expect(ce.box('rn').evaluate().isNaN).toBe(true);
 
-    // A read whose only misfit is the `nan` arm is reported statically, as
-    // the run time refuses it.
+    // A read is typed as its element (`zs[i]` is `real`): the absence
+    // marker `NaN` of a read past the end is implicit in its type, so there
+    // is no static report. The run time still refuses the `NaN`.
     const r = run(
       'let zs: list<real> = [4.5]\nlet i: integer = 3\nlet r: real = zs[i]\nr'
     );
-    expect(r.diagnostics.join('\n')).toMatch(
-      /may be `NaN`, and the declared type "real" excludes `NaN`[^]*`zs\[i\]\?!`[^]*declare `real \| nan`/
-    );
+    expect(r.diagnostics.join('\n')).not.toMatch(/may be `NaN`/);
     expect(r.diagnostics.join('\n')).toMatch(/expected `real`, got `NaN`/);
 
     // The discharges.
@@ -192,13 +193,14 @@ describe('the Epsil routes', () => {
     ).toEqual({ value: '2/3', diagnostics: [] });
   });
 
-  test('a possible-NaN report does not hide the later checks of the name', () => {
+  test('a declaration from a read does not hide the later checks of the name', () => {
     // The run time installs the binding when the read is in range, so a
-    // later write to the constant and a later use are still checked.
+    // later write to the constant and a later use are still checked. The
+    // read is typed `real`, so there is no static report on the read.
     const c = run(
       'let zs: list<real> = [4.5]\nlet i: integer = 1\nconst r: real = zs[i]\nr = 3\nr'
     );
-    expect(c.diagnostics.join('\n')).toMatch(/may be `NaN`/);
+    expect(c.diagnostics.join('\n')).not.toMatch(/may be `NaN`/);
     expect(c.diagnostics.join('\n')).toMatch(/constant-assignment/);
 
     const u = run(
@@ -207,18 +209,5 @@ describe('the Epsil routes', () => {
     expect(u.diagnostics.join('\n')).toMatch(
       /static-type-error The value "r" of type "real" is not compatible with the declared type "string"/
     );
-  });
-
-  test('a value that may be absent or NaN suggests a declaration with both', () => {
-    const r = run(
-      'let ws: list<real | missing> = [4.5]\nlet i: integer = 1\nlet r: real = ws[i]\nr'
-    );
-    expect(r.diagnostics.join('\n')).toMatch(/declare `real \| missing \| nan`/);
-  });
-
-  test('a numeric declaration refuses a value with a `missing` arm', () => {
-    const r = run('let m: number | missing = Missing\nlet n: number = m\nn');
-    expect(r.diagnostics.join(' ')).toContain('may be absent');
-    expect(r.diagnostics.join(' ')).toContain('m?!');
   });
 });

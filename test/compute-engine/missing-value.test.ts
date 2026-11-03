@@ -1,4 +1,3 @@
-import { BoxedType } from '../../src/common/type/boxed-type';
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
 import { parseType } from '../../src/common/type/parse';
@@ -231,11 +230,12 @@ describe('P1 — out-of-band access markers (§3.C)', () => {
     );
   });
 
-  test('First(list<integer>) : integer | nan (T | marker(T), additive)', () => {
+  test('First(list<integer>) : integer (the marker is implicit)', () => {
     // The length of a filter's result is not known before evaluation, so
-    // its first element may be absent.
+    // its first element may be absent. The result type does not name the
+    // marker: it describes the values of a read that finds an element.
     const kept = ['Filter', ['List', 1, 2, 3], ['Function', ['Less', 'x', 9], 'x']];
-    expect(ce.box(['First', kept]).type.toString()).toBe('integer | nan');
+    expect(ce.box(['First', kept]).type.toString()).toBe('integer');
   });
 
   test('First of a list proved to hold an element : integer', () => {
@@ -298,79 +298,55 @@ describe('P2 — missingBehavior resolution (§3.A)', () => {
 });
 
 describe('P2 — strip & absorption (§3.B, propagate)', () => {
-  test('Sin(Missing) : number = NaN', () => {
+  test('Sin(Missing) : missing = Missing', () => {
     const e = ce.box(['Sin', 'Missing']);
-    expect(e.type.toString()).toBe('number');
-    expect(e.evaluate().isNaN).toBe(true);
+    expect(e.type.toString()).toBe('missing');
+    expect(e.evaluate().symbol).toBe('Missing');
   });
 
-  test('Add(Missing, 1) : number = NaN', () => {
+  test('Add(Missing, 1) : missing = Missing', () => {
     const e = ce.box(['Add', 'Missing', 1]);
-    expect(e.type.toString()).toBe('integer | nan');
-    expect(e.evaluate().isNaN).toBe(true);
+    expect(e.type.toString()).toBe('missing');
+    expect(e.evaluate().symbol).toBe('Missing');
   });
 
-  test('Negate(Missing) : number = NaN (bare-missing base widens)', () => {
+  test('Negate(Missing) : missing = Missing', () => {
     const e = ce.box(['Negate', 'Missing']);
-    expect(e.type.toString()).toBe('nan');
-    expect(e.evaluate().isNaN).toBe(true);
+    expect(e.type.toString()).toBe('missing');
+    expect(e.evaluate().symbol).toBe('Missing');
   });
 
-  test('Power/Root/Sqrt/Multiply(Missing, …) evaluate to NaN', () => {
-    expect(ce.box(['Power', 'Missing', 2]).evaluate().isNaN).toBe(true);
-    expect(ce.box(['Root', 'Missing', 3]).evaluate().isNaN).toBe(true);
-    expect(ce.box(['Sqrt', 'Missing']).evaluate().isNaN).toBe(true);
-    expect(ce.box(['Multiply', 'Missing', 2]).evaluate().isNaN).toBe(true);
+  test('Power/Root/Sqrt/Multiply(Missing, …) evaluate to Missing', () => {
+    expect(ce.box(['Power', 'Missing', 2]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['Root', 'Missing', 3]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['Sqrt', 'Missing']).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['Multiply', 'Missing', 2]).evaluate().symbol).toBe(
+      'Missing'
+    );
   });
 
-  test('Sin(x : number | missing) : number (absorption, no arm)', () => {
+  test('a declared type cannot name missing', () => {
+    // `Missing` is a result only (`docs/ERROR-MODEL.md`): a declaration
+    // that names `missing`, at any depth, throws.
     const e = new ComputeEngine();
-    e.declare('q', 'number | missing');
-    expect(e.box(['Sin', 'q']).type.toString()).toBe('number');
+    expect(() => e.declare('q', 'number | missing')).toThrow(
+      /cannot be declared/
+    );
+    expect(() => e.declare('L', 'list<number | missing>')).toThrow(
+      /cannot be declared/
+    );
   });
 
-  test('Sin(list<number | missing>) : list<number>', () => {
-    const e = new ComputeEngine();
-    e.declare('L', 'list<number | missing>');
-    expect(e.box(['Sin', 'L']).type.toString()).toBe('list<number>');
-  });
-
-  test('Sin(list<missing>) : list<number> = [NaN, …]', () => {
-    const e = new ComputeEngine();
-    e.declare('LM', 'list<missing>');
-    expect(e.box(['Sin', 'LM']).type.toString()).toBe('list<number>');
-  });
-
-  test('Add(Missing, matrix) — every cell NaN', () => {
+  test('Add(Missing, matrix) — every cell Missing', () => {
     const m = ce.box([
       'Add',
       'Missing',
       ['List', ['List', 1, 2], ['List', 3, 4]],
     ]);
-    expect(m.type.toString()).toBe('matrix<integer | nan^(2x2)>');
+    expect(m.type.toString()).toBe('matrix<integer | missing^(2x2)>');
     const v = m.evaluate();
     for (const row of v.each())
-      for (const cell of row.each()) expect(cell.isNaN).toBe(true);
-  });
-
-  test('the stripped operand type reaches a per-operator type handler', () => {
-    // A custom `propagate` operator whose `type` handler reads its operand's
-    // descriptor: the strip is folded into the descriptor's type.
-    const e = new ComputeEngine();
-    let seen: string | undefined;
-    e.declare('Probe', {
-      signature: '(number) -> number',
-      missingBehavior: 'propagate',
-      type: ([x]) => {
-        seen = e.type(x.type).toString();
-        return BoxedType.forResult('number');
-      },
-      evaluate: ([x]) => x,
-    });
-    e.declare('q', 'number | missing');
-    e.box(['Probe', 'q']).type.toString();
-    // The stripped operand type (`number|missing` → `number`) is conveyed.
-    expect(seen).toBe('number');
+      for (const cell of row.each()) expect(cell.symbol).toBe('Missing');
   });
 
   test('I4 — an unconstrained symbol infers the bare param, never |missing', () => {
@@ -390,36 +366,38 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
 });
 
 describe('P2 — runtime gate: element level & short path (§3.E)', () => {
-  test('Sin([1, Missing, 3]) = [Sin(1), NaN, Sin(3)]', () => {
+  test('Sin([1, Missing, 3]) = [Sin(1), Missing, Sin(3)]', () => {
     const v = ce.box(['Sin', ['List', 1, 'Missing', 3]]).evaluate();
     expect(v.operator).toBe('List');
     expect(v.op1.isSame(ce.box(['Sin', 1]))).toBe(true);
-    expect(v.op2.isNaN).toBe(true);
+    expect(v.op2.symbol).toBe('Missing');
     expect(v.op3.isSame(ce.box(['Sin', 3]))).toBe(true);
   });
 
-  test('Add([1, Missing], [10, 20]) = [11, NaN] (packing demotion)', () => {
+  test('Add([1, Missing], [10, 20]) = [11, Missing] (packing demotion)', () => {
     const e = ce.box(['Add', ['List', 1, 'Missing'], ['List', 10, 20]]);
-    // The (unevaluated) static type absorbs to a numeric vector of the
-    // length of the operands.
-    expect(e.type.toString()).toBe('list<integer | nan^2>');
+    // The (unevaluated) static type is a vector of the length of the
+    // operands, with a `missing` arm for the absent cell.
+    expect(e.type.toString()).toBe('list<integer | missing^2>');
     const v = e.evaluate();
     expect(v.op1.re).toBe(11);
-    expect(v.op2.isNaN).toBe(true);
+    expect(v.op2.symbol).toBe('Missing');
   });
 
-  test('short-path parity: box / function / _fn all give NaN', () => {
-    expect(ce.box(['Add', 'Missing', 1]).evaluate().isNaN).toBe(true);
-    expect(ce.function('Add', [ce.Missing, ce.One]).evaluate().isNaN).toBe(
-      true
+  test('short-path parity: box / function / _fn all give Missing', () => {
+    expect(ce.box(['Add', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.function('Add', [ce.Missing, ce.One]).evaluate().symbol).toBe(
+      'Missing'
     );
-    expect(ce._fn('Add', [ce.Missing, ce.One]).evaluate().isNaN).toBe(true);
+    expect(ce._fn('Add', [ce.Missing, ce.One]).evaluate().symbol).toBe(
+      'Missing'
+    );
   });
 
   test('parse route: an assigned-Missing symbol propagates', () => {
     const e = new ComputeEngine();
     e.assign('w', e.Missing);
-    expect(e.parse('\\sin(w)').evaluate().isNaN).toBe(true);
+    expect(e.parse('\\sin(w)').evaluate().symbol).toBe('Missing');
   });
 
   test('a NaN operand is NOT hijacked by the gate (native handling)', () => {
@@ -465,22 +443,6 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
 
-  test('Add(x:number|missing, 1) compiles guard-free to native x+1', () => {
-    const e = new ComputeEngine();
-    e.declare('x', 'number | missing');
-    const r = compile(e.box(['Add', 'x', 1]));
-    expect(r.code).not.toMatch(/isNaN|\?\?/);
-    expect(Number.isNaN(r.run({ x: NaN }))).toBe(true);
-    expect(r.run({ x: 5 })).toBe(6);
-  });
-
-  test('Sin(list<number|missing>) maps natively (no guard)', () => {
-    const e = new ComputeEngine();
-    e.declare('L', 'list<number | missing>');
-    const r = compile(e.box(['Sin', 'L']), { fallback: true });
-    expect(r.success).toBe(true);
-  });
-
   test('an object-domain missing on JS (has object axis) compiles', () => {
     const e = new ComputeEngine();
     e.declare('S', 'list<string>');
@@ -488,14 +450,12 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
     expect(r.success).toBe(true);
   });
 
-  test('an object-domain missing on a target w/o object axis is a compile error', () => {
+  test('a read of a list of strings on a target w/o object axis declines', () => {
     const e = new ComputeEngine();
     e.declare('S', 'list<string>');
-    for (const to of ['glsl', 'interval-js']) {
-      const r = compile(e.box(['At', 'S', 9]), { to, fallback: true });
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/object-domain absent/);
-    }
+    const r = compile(e.box(['At', 'S', 9]), { to: 'glsl', fallback: true });
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/Could not compile/);
   });
 
   test('every executable target exposes the numeric absence capability', () => {
@@ -562,15 +522,13 @@ describe('P3 — aggregate absent-datum / empty-input gate (§3.C)', () => {
       );
   });
 
-  test('a scalar Missing datum ⇒ NaN (both call shapes)', () => {
-    expect(ce.box(['Max', 1, 'Missing', 3]).evaluate().isNaN).toBe(true);
-    expect(ce.box(['Max', ['List', 1, 'Missing', 3]]).evaluate().isNaN).toBe(
-      true
-    );
-    expect(ce.box(['Mean', 1, 'Missing', 3]).evaluate().isNaN).toBe(true);
-    expect(ce.box(['Mean', ['List', 1, 'Missing', 3]]).evaluate().isNaN).toBe(
-      true
-    );
+  test('a scalar Missing datum ⇒ Missing (both call shapes)', () => {
+    for (const op of ['Max', 'Mean']) {
+      expect(ce.box([op, 1, 'Missing', 3]).evaluate().symbol).toBe('Missing');
+      expect(
+        ce.box([op, ['List', 1, 'Missing', 3]]).evaluate().symbol
+      ).toBe('Missing');
+    }
   });
 
   test('a NaN datum ⇒ NaN', () => {
@@ -583,10 +541,10 @@ describe('P3 — aggregate absent-datum / empty-input gate (§3.C)', () => {
       expect(ce.box([op, ['List']]).evaluate().isNaN).toBe(true);
   });
 
-  test('Max(1, Missing, 3) : number = NaN', () => {
+  test('Max(1, Missing, 3) : number = Missing (the marker is implicit)', () => {
     const e = ce.box(['Max', 1, 'Missing', 3]);
     expect(e.type.toString()).toBe('number');
-    expect(e.evaluate().isNaN).toBe(true);
+    expect(e.evaluate().symbol).toBe('Missing');
   });
 
   test('Max([]) = NaN (was ∓∞)', () => {
@@ -601,10 +559,9 @@ describe('P3 — aggregate absent-datum / empty-input gate (§3.C)', () => {
     for (const c of q.ops!) expect(c.isNaN).toBe(true);
   });
 
-  test('Quartiles with a Missing datum = (NaN, NaN, NaN)', () => {
+  test('Quartiles with a Missing datum = Missing', () => {
     const q = ce.box(['Quartiles', ['List', 1, 'Missing', 3]]).evaluate();
-    expect(q.nops).toBe(3);
-    for (const c of q.ops!) expect(c.isNaN).toBe(true);
+    expect(q.symbol).toBe('Missing');
   });
 
   test('Mode([]) = NaN', () => {
@@ -734,17 +691,20 @@ describe('P3 — Coalesce (§3.D)', () => {
     expect(ran).toEqual([]);
   });
 
-  test('result type T₁° | … | Tₙ₋₁° | Tₙ (stripped arms except last)', () => {
+  test('result type: the type of the present values', () => {
+    // A read that may be absent is typed by its present values (the marker
+    // is implicit), and so is the `Coalesce` over it.
     const e = new ComputeEngine();
-    e.declare('q', 'number | missing');
+    e.declare('xs', 'list<number>');
+    e.declare('ss', 'list<string>');
+    e.declare('k', 'integer');
     e.declare('d', 'number');
-    expect(e.box(['Coalesce', 'q', 'd']).type.toString()).toBe('number');
-    // A non-numeric object arm stays visible only in the last operand.
-    e.declare('s', 'string | missing');
-    e.declare('t', 'string | missing');
-    expect(e.box(['Coalesce', 's', 't']).type.matches('string | missing')).toBe(
-      true
+    expect(e.box(['Coalesce', ['At', 'xs', 'k'], 'd']).type.toString()).toBe(
+      'number'
     );
+    expect(
+      e.box(['Coalesce', ['At', 'ss', 'k'], ['At', 'ss', 'k']]).type.toString()
+    ).toBe('string');
   });
 
   test('box AND parse routes both work (lazy + canonical trap)', () => {
@@ -824,14 +784,10 @@ describe('P3 — relational absence: IEEE over NaN, and Missing is read as NaN',
 
   test('result type: boolean, also with an absent operand (family-wide)', () => {
     const e = new ComputeEngine();
-    e.declare('q', 'number | missing');
     // A definite Missing operand → boolean.
     expect(e.box(['Equal', 'x', 'Missing']).type.toString()).toBe('boolean');
     expect(e.box(['Less', 'x', 'Missing']).type.toString()).toBe('boolean');
     expect(e.box(['NotEqual', 'x', 'Missing']).type.toString()).toBe('boolean');
-    // A `missing`-arm operand → boolean.
-    expect(e.box(['Equal', 'q', 2]).type.toString()).toBe('boolean');
-    expect(e.box(['Less', 'q', 2]).type.toString()).toBe('boolean');
     // Otherwise the comparison's own answer: a closed comparison over
     // literals is decided by its type (boolean value types), and an
     // undecided one keeps `boolean`.
@@ -861,11 +817,12 @@ describe('P3 — compile discharge (§3.F)', () => {
 
   test('IsMissing lowers via numeric isAbsent; interpreter/compiled agree', () => {
     const e = new ComputeEngine();
-    e.declare('x', 'number | missing');
-    const r = compile(e.box(['IsMissing', 'x']));
+    e.declare('xs', 'list<number>');
+    e.declare('k', 'integer');
+    const r = compile(e.box(['IsMissing', ['At', 'xs', 'k']]));
     expect(r.code).toMatch(/isNaN/);
-    expect(r.run({ x: NaN })).toBe(true);
-    expect(r.run({ x: 5 })).toBe(false);
+    expect(r.run({ xs: [1, 2], k: 5 })).toBe(true);
+    expect(r.run({ xs: [1, 2], k: 1 })).toBe(false);
     // interpreter parity
     expect(e.box(['IsMissing', 'NaN']).evaluate().symbol).toBe('True');
   });
@@ -893,8 +850,8 @@ describe('P3 — compile discharge (§3.F)', () => {
     // interpreter/compiled agree by construction — no guard is emitted, and
     // `NaN == NaN` compiles to `false` (matching the interpreter).
     const e = new ComputeEngine();
-    e.declare('a', 'number | missing');
-    e.declare('b', 'number | missing');
+    e.declare('a', 'number');
+    e.declare('b', 'number');
     const r = compile(e.box(['Equal', 'a', 'b']));
     expect(r.code).not.toMatch(/isNaN|\?\?/);
     expect(r.run({ a: NaN, b: NaN })).toBe(false); // IEEE, matches interpreter
@@ -911,11 +868,11 @@ describe('P3 — compile discharge (§3.F)', () => {
     // `If` reads it the same way. From 2026-10-23 (ROADMAP CE-93) to
     // 2026-11-02 it was `Missing`. On a GPU target an absent number is
     // `NaN`, so the comparison compiles there, guard-free, with the IEEE
-    // reading.
+    // reading. A declared name accepts the absence marker as a value.
     const e = new ComputeEngine();
-    e.declare('a', 'number | missing');
-    e.declare('b', 'number | missing');
-    e.declare('s', 'string | missing');
+    e.declare('a', 'number');
+    e.declare('b', 'number');
+    e.declare('s', 'string');
 
     expect(e.box(['Equal', 'a', 'b']).type.toString()).toBe('boolean');
     expect(e.box(['Less', 'a', 1]).type.toString()).toBe('boolean');
@@ -932,13 +889,17 @@ describe('P3 — compile discharge (§3.F)', () => {
       'False'
     );
 
-    // GPU: compiles guard-free.
+    // GPU: compiles guard-free. A fresh engine: a symbol whose held value
+    // is `Missing` does not compile as a `number`.
+    const gpu = new ComputeEngine();
+    gpu.declare('a', 'number');
+    gpu.declare('b', 'number');
     for (const expr of [
       ['Equal', 'a', 'b'],
       ['Less', 'a', 1],
       ['If', ['Less', 'a', 1], 1, 0],
     ] as const) {
-      const r = compile(e.box(expr as any), { to: 'glsl', fallback: false });
+      const r = compile(gpu.box(expr as any), { to: 'glsl', fallback: false });
       expect(r.success).toBe(true);
       expect(r.code).not.toMatch(/isnan/);
     }
@@ -956,39 +917,13 @@ describe('P3 — compile discharge (§3.F)', () => {
     // "Everything computed from an absent value, except at a discharge"; R4
     // of `docs/plans/2026-11-01-absent-value-contract.md`).
     const ce2 = new ComputeEngine();
-    ce2.declare('a', 'number | missing');
+    ce2.declare('a', 'number');
     const js = compile(ce2.box(['Less', 'a', 1]), {
       to: 'javascript',
       fallback: false,
     });
     expect(js.run!({ a: 0.5 } as never)).toBe(true);
     expect(js.run!({ a: NaN } as never)).toBe(false);
-  });
-
-  test('an object-domain (string|missing) Equal declines on JS, and the fallback answers', () => {
-    // Until 2026-11-01 a guarded (Kleene) form compiled the pair, with the
-    // object null for an absent side and a strict `===` for the present
-    // one. The compiled value with an absent operand is no longer specified
-    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
-    // "Everything computed from an absent value, except at a discharge"),
-    // and the form was removed. Neither operand is provably a string, so
-    // the string gate declines (never the numeric tolerance kernel, which
-    // answers `false` for every pair of present strings), and the
-    // interpreter fallback answers.
-    const e = new ComputeEngine();
-    e.declare('s', 'string | missing');
-    e.declare('t', 'string | missing');
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const r = compile(e.box(['Equal', 's', 't']), { to: 'javascript' });
-    warn.mockRestore();
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/string-valued operands/);
-    const run = r.run as unknown as (vars: {
-      s: string | undefined;
-      t: string | undefined;
-    }) => boolean | undefined;
-    expect(run({ s: 'x', t: 'x' })).toBe(true);
-    expect(run({ s: 'x', t: 'y' })).toBe(false);
   });
 
   test('a Missing-free Equal is NOT pessimized (no guard)', () => {
@@ -1012,8 +947,9 @@ describe('P3 — compile discharge (§3.F)', () => {
 
   test('IsMissing on a GPU target (no isAbsent) is a compile error', () => {
     const e = new ComputeEngine();
-    e.declare('x', 'number | missing');
-    const r = compile(e.box(['IsMissing', 'x']), {
+    e.declare('xs', 'list<number>');
+    e.declare('k', 'integer');
+    const r = compile(e.box(['IsMissing', ['At', 'xs', 'k']]), {
       to: 'glsl',
       fallback: true,
     });
@@ -1034,7 +970,7 @@ describe('P3 — an absent If/Which condition is False', () => {
 
   test('from ordinary data: an object-domain comparison as condition', () => {
     const e = new ComputeEngine();
-    e.declare('s', 'string | missing');
+    e.declare('s', 'string');
     e.assign('s', e.Missing);
     const r = e.box(['If', ['Equal', 's', { str: 'a' }], 1, 2]).evaluate();
     expect(r.re).toBe(2);
@@ -1047,7 +983,7 @@ describe('P3 — an absent If/Which condition is False', () => {
 
   test('discharge restores branching', () => {
     const e = new ComputeEngine();
-    e.declare('s', 'string | missing');
+    e.declare('s', 'string');
     e.assign('s', e.Missing);
     const cond = ['Equal', 's', { str: 'a' }];
     const r = e.box(['If', ['Coalesce', cond, 'False'], 1, 2]).evaluate();

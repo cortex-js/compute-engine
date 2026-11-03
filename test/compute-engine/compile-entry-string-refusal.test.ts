@@ -412,17 +412,11 @@ describe('COMPILE entry: a body error caused by a scalar in an array-read bindin
       `${label} \\(type \`${type.replace(/[<>|]/g, (c) => `\\${c}`)}\`\\) received ${kind}: compiled code reads such a binding as a JavaScript array, and the compiled body failed \\(.*\\)\\. Pass an array\\.`
     );
 
-  it('Sum over `missing | list<number>` given a number', () => {
-    const r = compiled('missing | list<number>', ['Sum', 'S']);
-    expect(r.success).toBe(true);
-    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(6);
-    expect(r.run!({ S: undefined } as any)).toBeNaN();
-    expect(() => r.run!({ S: 5 } as any)).toThrow(
-      named('"S"', 'list<number> | missing', 'a number')
-    );
-    expect(() => r.run!({ S: null } as any)).toThrow(
-      named('"S"', 'list<number> | missing', 'null')
-    );
+  // A binding cannot be declared `missing | list<number>` (a declared type
+  // cannot name `missing`, `docs/ERROR-MODEL.md`, "`Missing` is a result
+  // only").
+  it('a binding declared `missing | list<number>` is refused', () => {
+    expect(() => engine('missing | list<number>')).toThrow(/cannot be declared/);
   });
 
   it('Sum over `list<number>` given a number', () => {

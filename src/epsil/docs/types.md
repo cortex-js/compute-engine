@@ -716,10 +716,12 @@ at exactly its argument type.
 ### Optional payloads
 
 A type variable may stand in one arm of a union, which is what makes an
-optional payload expressible:
+optional payload expressible. The ground arm marks the case with no payload;
+here it is `boolean`, since a declared type cannot name `missing` (see
+[Absence values](#absence-values)):
 
 ```epsil-live
-type opt<T> = T | missing
+type opt<T> = T | boolean
 let a = opt(1)
 type(a)
 // ➔ TypeFrom("opt<integer>")
@@ -730,8 +732,8 @@ nothing about `T`, so `T` is solved to `never` — the narrowest member of the
 family, and (under `out`) a subtype of every other:
 
 ```epsil-live
-type opt<T> = T | missing
-let b = opt(missing)
+type opt<T> = T | boolean
+let b = opt(False)
 type(b)
 // ➔ TypeFrom("opt<never>")
 ```
@@ -815,9 +817,13 @@ Epsil distinguishes three related kinds of absence:
 - `nothing` means “no value here” and is removed from function arguments and
   collection literals.
 - `missing` is a position-preserving missing value. Its type is `missing`.
+  It is a result only: a selection with no match, a read past the end of a
+  collection, or the written `missing`. A declared type cannot name it.
 - `NaN` is the numeric form of an absent or undefined result. Its type is
-  `nan`, which sits outside `real` and `complex` and inside `number`. Numeric
-  operations and missing numeric fields generally normalize absence to `NaN`.
+  `nan`, which sits outside `real` and `complex` and inside `number`. A read
+  past the end of a list of numbers and a missing numeric field give `NaN`;
+  a read past the end of a list of points gives a point whose coordinates
+  are `NaN`.
 
 `isMissing(x)` recognizes both `missing` and `NaN`, regardless of how the
 value arose. `Coalesce(a, b, ...)` evaluates from left to right and returns the
@@ -827,7 +833,7 @@ last one unchanged.
 ```epsil-live
 (length([1, missing, 3]), isMissing(missing), isMissing(NaN),
   Coalesce(missing, 0), missing + 1)
-// ➔ (3, True, True, 0, NaN)
+// ➔ (3, True, True, 0, "Missing")
 ```
 
 A missing dictionary field follows the expected value domain: a numeric field
@@ -836,8 +842,7 @@ Use `isMissing` when the distinction between those representations is not
 important, and [`??`](/epsil/operators/#absence-coalescing) — the operator form
 of `Coalesce` — to supply a fallback.
 
-Three ways discharge a possibly absent value, and the static check accepts
-each of them where it reports the plain read:
+Three ways read a possibly absent value:
 
 - `x ?? fallback` replaces an absent value;
 - `if isMissing(x) { … } else { … }` branches, and the symbol is known
@@ -846,34 +851,35 @@ each of them where it reports the plain read:
   and fails with an `expected-present` error when it is not. Use it where
   absence is a violated precondition rather than a case to handle.
 
-A default parameter is a fourth discharge: `(k: real | missing = 2) => k`
-gives 2 when the argument is left out, when it is `missing`, and when it is
-`NaN`, as `??` would.
+A default parameter is a fourth reader: `(k: real = 2) => k` gives 2 when
+the argument is left out, when it is `missing`, and when it is `NaN`, as
+`??` would.
 
-Discharge before you compute. The interpreter carries `missing` through
-other operators as a convenience (`missing + 1` is `NaN`, `missing > 0` is
-`missing`), but compiled code promises only the discharges above and the
+Read the absent value before you compute. In the interpreter, any other
+operator over `missing` gives `missing` (`missing + 1` is `missing`), and a
+comparison gives `False` (`missing > 0` is `False`), but compiled code
+promises only the readers above and the
 accessors that move a value without computing on it (`xs[i]`, `first`,
 `last`, `rest`, `length`). Any other operator applied to a possibly absent
 value gives the target's own answer when the program is compiled
 (`undefined > 0` is `false` in JavaScript), so `isMissing(w > 0)` can differ
 between the interpreter and compiled code, and `isMissing(w)` cannot.
 
-**A declared type is a contract on every value the symbol takes.** `let s:
-string = missing` is an error, as `let s: string = 5` is, and so is a later
-`s := missing`; `let xs: list<string> = ["a", missing]` is an error too,
-because the element contract excludes absence. Write the absence into the
-type when it is possible: `let s: string | missing = missing`, `let xs:
-list<string | missing> = ["a", missing]`, or let the type be inferred (`let
-xs = ["a", missing]` is a `list<string | missing>`). A `number` declaration
-admits `NaN`, the numeric absence marker: `let n: number = NaN` is fine, and
-so is `let n: number = zs[i]` for `zs: list<number>`. The types `real`,
-`integer` and `complex` hold finite values only, so `let r: real = zs[i]`
-for `zs: list<real>` is reported: the read is typed `nan | real`. Discharge
-it the same way (`zs[i]?!`, `zs[i] ?? 0`), or declare `real | nan`. A declaration that
-excludes absence and is initialized from a possibly absent value (`let y:
-string = xs[i]`) is reported by the static check; discharge the read with
-`?!`, `??`, or declare `string | missing`.
+**A declared type is a contract on the present values the symbol takes, and
+it cannot name `missing`.** `let s: string | missing = …` and
+`xs: list<string | missing>` are `type-annotation-error`s. A read is typed by
+the element it reads: with `xs: list<string>`, `xs[i]` is typed `string`, and
+it gives `missing` when `i` is past the end. A declaration accepts that
+value where its type accepts a present value: `let y: string = xs[i]` gives
+`missing` past the end, with no diagnostic, and so do `let s: string =
+missing`, a later `s := missing`, and `let xs: list<string> = ["a",
+missing]`. A value of another type is still refused: `let s: string = 5` is
+an error. `NaN` is not absorbed this way: a `number` declaration admits it
+(`let n: number = NaN`, `let n: number = zs[i]` for `zs: list<number>`), but
+the types `real`, `integer` and `complex` hold finite values only, so `let r:
+real = zs[i]` for `zs: list<real>` is an `incompatible-type` error when `i`
+is past the end, since the read is `NaN`. Read the value first (`zs[i]?!`,
+`zs[i] ?? 0`, `isMissing(zs[i])`), or declare `number`.
 
 ```epsil-live
 let xs: list<string> = ["a", "b"]

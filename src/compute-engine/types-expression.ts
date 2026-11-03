@@ -508,7 +508,7 @@ interface BoxedOperatorDefinition
    * for an overload set or a position past a non-variadic signature. */
   declaredParameterTypeAt(i: number): Type | undefined;
 
-  /** True when an absent scalar operand (`Missing`, `Undefined`) at position
+  /** True when an absent scalar operand (`Missing`) at position
    * `i` is refused at evaluation with an `incompatible-type` error naming the
    * parameter's type (user decision P2, 2026-10-21). */
   refusesAbsentOperandAt(i: number): boolean;

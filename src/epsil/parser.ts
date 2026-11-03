@@ -17,6 +17,10 @@ import type {
   TypeResolver,
 } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
+import {
+  DECLARED_MISSING_MESSAGE,
+  declaredTypeNamesMissing,
+} from '../common/type/utils.js';
 import { TypeVariableError } from '../common/type/instantiate.js';
 import {
   isStringObject,
@@ -1283,7 +1287,10 @@ export class Parser {
       }
       // A standalone annotation IS the whole type, so it may carry a trailing
       // `where` clause (`let f: (T) -> T where T: number = …`).
-      const t = this.parseTypeAnnotation({ allowWhere: true });
+      const t = this.parseTypeAnnotation({
+        allowWhere: true,
+        declaration: true,
+      });
       if (t === null) {
         // Diagnosed, cursor still at the error: skip the rest of the
         // declaration (ONCE) so the next statement still parses.
@@ -6013,7 +6020,7 @@ export class Parser {
           const hits = quantified !== undefined ? new Set<string>() : null;
           const outerHits = this.typeParamHits;
           this.typeParamHits = hits;
-          const annotation = this.parseTypeAnnotation();
+          const annotation = this.parseTypeAnnotation({ declaration: true });
           this.typeParamHits = outerHits;
           if (annotation !== null)
             params.push(
@@ -6321,13 +6328,33 @@ export class Parser {
    *
    * `options.allowWhere` — see {@link parseTypeBody}.
    */
-  private parseTypeAnnotation(options?: { allowWhere?: boolean }): {
+  private parseTypeAnnotation(options?: {
+    allowWhere?: boolean;
+    declaration?: boolean;
+  }): {
     node: MathJsonExpression;
     end: number;
     type: Type;
   } | null {
     const colonTok = this.advance(); // ':'
-    return this.parseTypeBody(colonTok.end, options);
+    const result = this.parseTypeBody(colonTok.end, options);
+    // The declared type of a variable or a parameter may not name the marker
+    // `missing`: `Missing` is a result only (`declaredTypeNamesMissing()`).
+    // A pattern annotation is a type test, not a declaration, and is not
+    // checked.
+    if (
+      result !== null &&
+      options?.declaration === true &&
+      declaredTypeNamesMissing(result.type)
+    ) {
+      this.error(
+        ['type-annotation-error', DECLARED_MISSING_MESSAGE],
+        colonTok.end,
+        result.end
+      );
+      return null;
+    }
+    return result;
   }
 
   /** Parse a type starting at the (local) source offset `typeSourceStart` —
@@ -9314,7 +9341,7 @@ export class Parser {
           this.current.text === ':'
         ) {
           const start = this.outerStart(expr) ?? this.current.start;
-          const annotation = this.parseTypeAnnotation();
+          const annotation = this.parseTypeAnnotation({ declaration: true });
           if (annotation !== null) {
             element = this.wrap(
               ['Typed', expr, annotation.node] as MathJsonExpression[],

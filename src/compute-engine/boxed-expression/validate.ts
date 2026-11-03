@@ -1,5 +1,4 @@
-import { isDeclaredLocal } from './declared-local.js';
-import { isRestriction } from './conditional-value.js';
+import { isRestriction, mayHoldRestriction } from './conditional-value.js';
 import {
   broadcastCellTypeOf,
   couldBeUnkeyedCollectionOperand,
@@ -15,6 +14,7 @@ import {
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
   typeIsProvablyNonNumericCollection,
+  pointArity,
 } from '../collection-utils.js';
 
 import {
@@ -149,6 +149,7 @@ import {
   isNumber,
   isString,
   isAbsentSymbol,
+  isNaNPointValue,
   isContinuationOperand,
   containsContinuationOperand,
 } from './type-guards.js';
@@ -695,7 +696,7 @@ export function checkCollectionOperand(
   if (arg === undefined || arg === null) return engine.error('missing');
   const x = arg.canonical;
   if (!x.isValid) return x;
-  // An ABSENT operand (`Missing`, `Undefined`) is admitted: every collection
+  // An ABSENT operand (`Missing`) is admitted: every collection
   // operator propagates absence (`signatureParamsPropagateAbsence`,
   // `boxed-operator-definition.ts`, user decision 2026-09-25), so the
   // evaluation driver answers the marker of the codomain for it (`Missing`
@@ -1919,11 +1920,12 @@ export function listCoordinateTupleOperandError(
 /**
  * Whether the operands carry a SCALAR absence, the condition under which an
  * operator with `missingBehavior` `propagate` or `reject` answers instead of
- * running its handler (`docs/ERROR-MODEL.md` §3: in a numeric slot `Missing`
- * is normalized to `NaN` at the boundary).
+ * running its handler: an operator over `Missing` gives `Missing`
+ * (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user decision of
+ * 2026-11-02"), and a `reject` operator gives an error.
  *
- * The absence has to be an absence SYMBOL — `Missing` or `Undefined`, the two
- * names {@link isAbsentScalarSymbol} accepts. A `NaN` operand already
+ * The absence has to be an absence SYMBOL — `Missing`, the name
+ * {@link isAbsentScalarSymbol} accepts. A `NaN` operand already
  * propagates through numeric evaluation natively, and some operators give a
  * literal `NaN` operand a bespoke meaning.
  *
@@ -1951,26 +1953,11 @@ export function hasAbsentScalarOperand(
 }
 
 /**
- * Is this operand one of the two symbols that stand for an absent scalar in a
- * numeric slot — `Missing` or `Undefined`?
- *
+ * Is this operand the `Missing` symbol, the absent scalar of a numeric slot?
  * `Missing` is the position-preserving absent datum of
- * `docs/ERROR-MODEL.md` §1. `Undefined` is the symbol the engine writes for a
- * value that does not exist, and a user can write it directly. The two names
- * take the same route through the numeric absence gate, so `Cos(Undefined)`
- * answers `NaN` exactly as `Cos(Missing)` does (user ruling of 2026-09-21).
- * Before that ruling only `Missing` was recognized here, and an `Undefined`
- * operand stayed symbolic (`cos("Undefined")`) while the compiled lanes
- * already answered `NaN` for the same row.
- *
- * The two names are read as the same absence everywhere else too: the
- * operators that OWN their absence semantics — the ones declared
- * `missingBehavior: 'handle'` — share this predicate's
- * {@link isAbsentSymbol} test. Arithmetic consumers use `isAbsentValue`;
+ * `docs/ERROR-MODEL.md` §1. Arithmetic consumers use `isAbsentValue`;
  * explicit checks and fallbacks (`IsMissing`, `Coalesce`) use
  * `isMissingValue`, which also includes exact `Indeterminate`.
- * `Undefined` keeps its own meaning outside an absence test: its declared
- * type is still `unknown`, and a bare `Undefined` evaluates to itself.
  */
 export function isAbsentScalarSymbol(x: Expression): boolean {
   return isAbsentSymbol(x);
@@ -1978,7 +1965,7 @@ export function isAbsentScalarSymbol(x: Expression): boolean {
 
 /**
  * The boolean predicates of the collection and set libraries, each with the
- * value it answers when an operand is absent (`Missing`, `Undefined`, or a
+ * value it answers when an operand is absent (`Missing`, or a
  * restriction whose condition is false). Such a predicate is two-valued, as a
  * comparison is: an absent operand makes it `False`, and its negated form
  * (`NotElement`, `NotSubset`, ...) is `True`, as `NotEqual` is `Not(Equal)`.
@@ -1994,8 +1981,7 @@ export function isAbsentScalarSymbol(x: Expression): boolean {
  * (user decision 2026-09-26, `SEARCHED_VALUE_POLICY` in
  * `library/collections.ts`). So `Element(Missing, [1, Missing])` is `True`,
  * `Element(Missing, Integers)` is `False`, and a membership that the search
- * cannot decide stays held: `Element(Missing, Set(7))` and
- * `Element(Undefined, Integers)`.
+ * cannot decide stays held: `Element(Missing, Set(7))`.
  *
  * The other boolean operators that propagate absence (the number-theory
  * predicates `IsPrime`, `IsEven`, `Divides`, ..., and `Congruent`) still
@@ -2032,112 +2018,58 @@ export function absentPredicateAnswer(operator: string): boolean | undefined {
 
 /**
  * The value an operator with missing behavior `propagate` answers when
- * {@link hasAbsentScalarOperand} is true for its operands. The marker speaks
- * the codomain's vocabulary (`docs/ERROR-MODEL.md` §2 rule 4): `NaN` when the
- * application's own type, with its `missing` arm stripped, is a subtype of
- * `number`; the position-preserving `Missing` otherwise.
+ * {@link hasAbsentScalarOperand} is true for its operands: `Missing`.
  *
- * The APPLICATION's type is read, not the operator's declared result:
- * `Negate` is declared `-> number`, yet `Negate(P[0])` for
- * `P: list<tuple<number, number, number>>` is typed
- * `tuple<number, number, number>` through the tuple broadcast exemption, and
- * its absent operand is an absent POINT, which `NaN` — a number — cannot
- * stand for (`2 · P[0] + (1, 1, 1)` then failed as `NaN + tuple`).
- *
- * A type that is not provably numeric (`unknown`, `broadcastable<number>`)
- * also keeps `Missing`: absorbing into `NaN` is an information loss that is
- * only licensed inside a numeric domain. When no application node is
- * available the answer is `NaN`, the behavior before this rule.
- *
- * An application whose type strips to `never` answers `NaN`. That type is
- * what a numeric operator over a symbol ASSIGNED `Missing` reports (`w :=
- * Missing`, then `sin(w)` and `2w` are typed `never`): the value is absent in
- * every case, and the operator's own domain is numeric, so the numeric marker
- * of the 2026-07-24 absence ruling (`Sin(Missing)` is `NaN`) is the answer.
- * `never` is a subtype of `number`, so the numeric reading would fall
- * through on its own; the explicit `never` arm below exists for the OTHER
- * operators (since 2026-09-25 collection operators propagate absence too):
- * `Sort(Missing)` is typed `missing`, which strips to `never` as well, and
- * its marker is `Missing`. The arm reads the operator's declared result to
- * tell the two apart.
+ * `Missing` is a result only, and any operator other than a reader
+ * (`IsMissing`, `Coalesce`, `AssertPresent`, a branch, a
+ * position-preserving accessor) gives `Missing` for an absent operand:
+ * `Missing + 2`, `Sin(Missing)` and `Sort(Missing)` are `Missing`. A
+ * numeric operator does not turn the absent value into `NaN`: `NaN` is the
+ * value of a read outside a list of numbers, not of an operator over an
+ * absent value. When no application node is available the answer is
+ * `Missing` too.
  *
  * A boolean predicate of the collection and set libraries
- * ({@link absentPredicateAnswer}) answers a boolean, not `Missing`.
+ * ({@link absentPredicateAnswer}) answers a boolean, not `Missing`: such a
+ * predicate is two-valued, as a comparison is.
+ *
+ * A coordinate accessor (`PointX`, `PointY`, `PointZ`) whose application
+ * is typed as a number answers `NaN`: a coordinate is a number, and a
+ * coordinate of an absent point is `NaN`, as `First` and `At` give for a
+ * read with no element. So `PointX(Missing)` and `PointX(If(c, (1, 2)))`
+ * after `c := False` are `NaN`, the value that the held form `If(c, 1)`
+ * gives there. The coordinates of an absent LIST of points (an application
+ * typed as a list) are `Missing`, as the held form `If(c, [1, 3])` gives.
+ *
+ * Source: `docs/ERROR-MODEL.md`, "`Missing` is a result only — user
+ * decision of 2026-11-02", which replaces the reading of 2026-07-24 and
+ * 2026-09-25 that a numeric operator over `Missing` is `NaN`.
  */
 export function absentScalarMarker(
   ce: ComputeEngine,
   expression: Expression | undefined
 ): Expression {
-  if (expression === undefined) return ce.NaN;
+  if (expression === undefined) return ce.Missing;
   const answer = absentPredicateAnswer(expression.operator);
   if (answer !== undefined) return answer ? ce.True : ce.False;
-  return absentMarkerIsNumeric(
-    expression.type.type,
-    expression.operatorDefinition?.signature.type
+  if (
+    (expression.operator === 'PointX' ||
+      expression.operator === 'PointY' ||
+      expression.operator === 'PointZ') &&
+    isSubtype(stripMissingFromType(expression.type.type), 'number')
   )
-    ? ce.NaN
-    : ce.Missing;
-}
-
-/** Whether `x` is a symbol whose DECLARED type is `any` (a declaration, or
- * a block local declared `any`), or the literal `Missing` or `Undefined`.
- * An inferred type is not a declaration: a block local that holds the read
- * of a list element is typed `unknown`, and its absent value is the absent
- * result of that read. */
-function isDeclaredAnySymbol(x: Expression): boolean {
-  if (!isSymbol(x)) return false;
-  if (isAbsentScalarSymbol(x)) return true;
-  const def = x.valueDefinition;
-  if (def === undefined || def.type.type !== 'any') return false;
-  return !def.inferredType || isDeclaredLocal(def);
+    return ce.NaN;
+  return ce.Missing;
 }
 
 /**
- * The value that an arithmetic application answers for an absent operand,
- * given its operands as written (`written`) and as evaluated (`evaluated`).
- *
- * It is {@link absentScalarMarker}, except for an absent value that a
- * symbol DECLARED `any` holds (`isDeclaredAnySymbol`), beside operands
- * that are numbers, in an application whose
- * type states nothing (`any` or `unknown`): the answer is `NaN`. With `p`
- * declared `any` and assigned `Missing`, `p + 1` is typed `any`, and the
- * codomain marker of that type is `Missing`; but the same sum is `NaN`
- * after `subs({p: Missing})` (the sum is then typed `integer | nan`) and in
- * compiled code (`undefined + 1`), and a host input typed `any` is read as
- * `NaN` at a numeric parameter (`docs/ERROR-MODEL.md`, "A Python caller
- * passes `None` for an absent INPUT", ROADMAP CE-395). An absent value
- * that an APPLICATION gives keeps the codomain marker: `s · PointX(p)` for
- * an absent point `p` is `Missing` (ROADMAP CE-229), and so is an absent
- * row or point beside a number, and the value of a symbol whose type is
- * inferred (a block local that holds such a read, ROADMAP CE-360).
- */
-export function absentArithmeticMarker(
-  ce: ComputeEngine,
-  expression: Expression | undefined,
-  written: ReadonlyArray<Expression>,
-  evaluated: ReadonlyArray<Expression>
-): Expression {
-  if (expression !== undefined && written.length === evaluated.length) {
-    const t = stripMissingFromType(expression.type.type);
-    if (
-      (t === 'any' || t === 'unknown') &&
-      evaluated.every((x, i) =>
-        isAbsentScalarSymbol(x) ? isDeclaredAnySymbol(written[i]) : isNumber(x)
-      )
-    )
-      return ce.NaN;
-  }
-  return absentScalarMarker(ce, expression);
-}
-
-/**
- * The decision behind {@link absentScalarMarker}: whether the marker an
- * application answers for an absent operand is the numeric `NaN` (true) or
- * the position-preserving `Missing` (false). `applicationType` is the type
- * of the application as written, `signature` the operator's signature. The
- * user-function call typing (`callResultType`, `call-result-type.ts`) makes
- * the same decision for a body typed under an absent parameter, so the two
- * cannot diverge.
+ * Whether the value of a read at a position that does not exist is the
+ * numeric `NaN` (true) or `Missing` (false), given `applicationType`, the
+ * type of the read, and `signature`, the signature of its operator. The
+ * accessors use it when the element type of the collection does not decide
+ * (`absenceMarker()`, `library/collections.ts`). An operator over an
+ * absent operand does not use it: its value is `Missing`
+ * ({@link absentScalarMarker}).
  *
  * An application typed `missing` alone (`Sort(Missing)`), or `never` (a
  * numeric operator over a symbol assigned `Missing`, which types `never`),
@@ -2181,7 +2113,13 @@ export function absentMarkerIsNumeric(
  */
 export function isAbsentableCollectionOperand(op: Expression): boolean {
   if (isAbsentScalarSymbol(op)) return false;
-  const present = isRestriction(op)
+  // A restriction, and an expression that holds a read (`At(x, i)`,
+  // `Sort(At(x, i))`), are typed as their present value: the absence marker
+  // of a read is implicit in its type (`mayHoldRestriction()`), so the type
+  // alone does not show that such an operand can be absent.
+  // An operand typed `missing` alone (`Map(f, Missing)`) is always absent.
+  if (op.type.type === 'missing') return op.isPure;
+  const present = mayHoldRestriction(op)
     ? op.type.type
     : threadedPresentType(op.type.type);
   if (present === undefined || !typeCouldBeCollection(present)) return false;
@@ -2191,7 +2129,7 @@ export function isAbsentableCollectionOperand(op: Expression): boolean {
 /**
  * The value of an operand admitted by `isAbsentableCollectionOperand`, once
  * evaluated, when that value settles the question: the absent value
- * (`Missing` or `Undefined`, tested with `isAbsentScalarSymbol`), or a
+ * (`Missing`, tested with `isAbsentScalarSymbol`), or a
  * collection that cannot be absent. `undefined` otherwise: an operand that
  * does not evaluate yet, and a restricted list whose condition is not
  * decided, which is still a restriction `If(c, xs)`; the caller then keeps
@@ -3995,8 +3933,11 @@ function admitsProvisionalCollectionOperands(
  * its static type is `nan`: a function application reports `isNaN` only
  * once it is evaluated, so `f(g())` with `g: () -> nan` was refused at
  * boxing where `f(NaN)` was accepted. The argument is not evaluated here.
- * An argument typed `missing` (the literal `Missing`) is accepted too: a
- * numeric parameter reads an absent value as `NaN`.
+ * An argument typed `missing` (the literal `Missing`) is accepted too: the
+ * call of a user function with an absent argument at a numeric parameter is
+ * `Missing`, whatever the body (`apply()`, `function-utils.ts`), as an
+ * operator over `Missing` is `Missing`. A parameter with a default value
+ * receives its default in place of the absent argument.
  */
 function acceptsNaNArgument(
   op: Expression,
@@ -4004,11 +3945,27 @@ function acceptsNaNArgument(
   internals: ValidateArgumentsInternals | undefined
 ): boolean {
   if (internals?.userFunction !== true) return false;
-  if (!isSubtype(param, 'number')) return false;
-  // An absent argument (the literal `Missing`, typed `missing`) is read as
-  // `NaN` at a numeric parameter of a user function (`docs/ERROR-MODEL.md`,
-  // ruling of 2026-09-30 on an absent argument at an annotated parameter),
-  // so it is accepted there as `NaN` is.
+  // The absent value at a point parameter (a tuple of numbers,
+  // `pointArity()`) makes the call `Missing`, as at a numeric parameter. A
+  // `NaN` point (a tuple whose coordinates are all `NaN`, the value of a
+  // read past the end of a list of points) is accepted there, as `NaN` is
+  // at a numeric parameter. The scalar `NaN` is still refused: it is not a
+  // point.
+  if (!isSubtype(param, 'number')) {
+    if (pointArity(param) === undefined) return false;
+    const opType = resolveTypeAlias(op.type.type);
+    return (
+      opType === 'missing' ||
+      isNaNPointValue(op) ||
+      (typeof opType !== 'string' &&
+        opType.kind === 'tuple' &&
+        opType.elements.length > 0 &&
+        opType.elements.every((x) => isSubtype(x.type, 'nan')))
+    );
+  }
+  // An absent argument (the literal `Missing`, typed `missing`) is accepted
+  // at a numeric parameter of a user function, as `NaN` is: the call is
+  // `Missing` (see above).
   return (
     op.isNaN === true ||
     op.type.matches('nan') ||
@@ -4022,9 +3979,9 @@ function acceptsNaNArgument(
  *
  * At evaluation, a function literal answers an `incompatible-type` error for
  * an absent argument (`Missing`) at a parameter annotated with a type that
- * is not numeric and has no `missing` member (`apply()`,
- * `function-utils.ts`; a numeric parameter reads the absent value as `NaN`,
- * which it accepts). Two cases are refused here, at boxing:
+ * is not numeric, is not a point and has no `missing` member (`apply()`,
+ * `function-utils.ts`; at a numeric or a point parameter the call is
+ * `Missing`). Two cases are refused here, at boxing:
  *
  * - The argument is typed `missing`: it is absent on every route, so the
  *   call is an error whenever it runs.
@@ -4070,7 +4027,8 @@ export function refusesAbsentArgument(
   if (
     param === 'unknown' ||
     isSubtype('missing', param) ||
-    isSubtype(param, 'number')
+    isSubtype(param, 'number') ||
+    pointArity(param) !== undefined
   )
     return false;
   const t = resolveTypeAlias(op.type.type);

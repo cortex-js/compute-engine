@@ -386,56 +386,20 @@ describe('CE-712.2: a bound variable holds one scalar', () => {
 });
 
 describe('CE-712.2: an absent value at a mapped level', () => {
-  // `Apply(t ↦ 7, L)`: the interpreter applies the function to an absent
-  // value, and gives 7. The map does not iterate an absent value (`None`
-  // on Python), the whole argument or an element above the level of the
-  // function. Before, the Python comprehension iterated `None` and raised
-  // a `TypeError`.
-  function absentEngine(): ComputeEngine {
+  // An input whose declared type admits an absent value or an absent
+  // element (`list<real> | missing`, `list<list<real> | missing>`) is
+  // refused at its declaration: `Missing` is a result only
+  // (`docs/ERROR-MODEL.md`, user decision of 2026-11-02). The compiled map
+  // over such an input is not reached.
+  test('a declared input cannot name missing', () => {
     const ce = new ComputeEngine();
-    ce.declare('L', 'list<real> | missing');
-    ce.declare('LL', 'list<list<real> | missing>');
-    return ce;
-  }
-  const seven = (arg: string) => [
-    'Apply',
-    ['Function', 7, 't'],
-    arg,
-  ];
-
-  test.each([
-    ['L', 'Missing', null, 7],
-    ['L', ['List', 1, 2], [1, 2], [7, 7]],
-    ['LL', ['List', ['List', 1, 2], 'Missing'], [[1, 2], null], [[7, 7], 7]],
-  ] as [string, unknown, unknown, Value][])(
-    'Apply(t ↦ 7, %s) for %j',
-    (name, json, value, expected) => {
-      const ce = absentEngine();
-      const expr = ce.box(seven(name) as any);
-      expect(
-        plain(expr.subs({ [name]: ce.box(json as any) }).evaluate())
-      ).toEqual(expected);
-      const js = compile(expr, { fallback: false });
-      expect(js.success).toBe(true);
-      expect(
-        js.run!({ [name]: value === null ? undefined : value } as any)
-      ).toEqual(expected);
-      const py = compile(expr, { to: 'python', fallback: false });
-      expect(py.success).toBe(true);
-      expect(py.code).toContain(' is None else ');
-      if (TEST_PYTHON === undefined) return;
-      const script = [
-        'import json, math',
-        `${name} = json.loads(${JSON.stringify(JSON.stringify(value))})`,
-        `print(json.dumps(${py.code}))`,
-      ].join('\n');
-      expect(
-        JSON.parse(
-          execFileSync(TEST_PYTHON, ['-c', script], { encoding: 'utf8' })
-        )
-      ).toEqual(expected);
-    }
-  );
+    expect(() => ce.declare('L', 'list<real> | missing')).toThrow(
+      /cannot be declared/
+    );
+    expect(() => ce.declare('LL', 'list<list<real> | missing>')).toThrow(
+      /cannot be declared/
+    );
+  });
 });
 
 describe('CE-712.2: a map over the NaN of a length mismatch', () => {
@@ -457,34 +421,5 @@ describe('CE-712.2: a map over the NaN of a length mismatch', () => {
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.mapFn(_fn_f, [1], ');
     expect(r.run!(vars as any)).toBeNaN();
-  });
-});
-
-describe('CE-712.2: an absent element in a callback map', () => {
-  // `Map(f, LL)` with `f := t ↦ 7` and `LL: list<list<real> | missing>`:
-  // the interpreter maps a function defined on the engine whose parameters
-  // are scalar over a list element (user decision of 2026-09-22), and
-  // applies it to an absent element whole. It gives `[[7, 7], 7]` for
-  // `[[1, 2], Missing]`. The static map gives an absent element to the
-  // function unchanged. Python has no lowering of a function defined on
-  // the engine as a `Map` callback, so only the JavaScript value is
-  // compared here.
-  test('Map(f, LL) for [[1, 2], Missing]', () => {
-    const ce = new ComputeEngine();
-    ce.declare('LL', 'list<list<real> | missing>');
-    ce.assign('f', ce.box(['Function', 7, 't'] as any));
-    const expr = ce.box(['Map', 'f', 'LL'] as any);
-    const expected = [[7, 7], 7];
-    // `Map` evaluates to a lazy collection: its elements are read one by
-    // one.
-    const lazy = expr
-      .subs({ LL: ce.box(['List', ['List', 1, 2], 'Missing'] as any) })
-      .evaluate();
-    expect([...lazy.each()].map((x) => plain(x.evaluate()))).toEqual(
-      expected
-    );
-    const js = compile(expr, { fallback: false });
-    expect(js.success).toBe(true);
-    expect(js.run!({ LL: [[1, 2], undefined] } as any)).toEqual(expected);
   });
 });

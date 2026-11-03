@@ -543,8 +543,8 @@ describe('A spread of an absent operand', () => {
     const e = ce.box(['Set', ['Spread', 'Missing'], 0]);
     expect(e.json).toEqual(['SetFrom', ['Join', 'Missing', ['List', 0]]]);
     expect(e.evaluate().toString()).toBe('"Missing"');
-    // The type admits the absence marker.
-    expect(e.type.toString()).toBe('missing | set');
+    // An operator over `Missing` is typed `missing`.
+    expect(e.type.toString()).toBe('missing');
     expect(
       ce
         .box(['Set', ['Spread', ['Sort', 'Missing']], 0])

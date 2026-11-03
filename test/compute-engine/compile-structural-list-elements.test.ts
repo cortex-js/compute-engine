@@ -145,7 +145,6 @@ describe('element types that still fail closed', () => {
   test.each([
     ['list<tuple<integer, integer>>', 'Contains'],
     ['list<list<complex>>', 'Unique'],
-    ['list<list<integer | missing>>', 'Unique'],
     ['list<list<any>>', 'Unique'],
   ])('%s under %s', (type, op) => {
     const ce = new ComputeEngine();

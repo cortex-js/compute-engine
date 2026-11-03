@@ -46,6 +46,7 @@ import {
   isCharacter,
 } from '../boxed-expression/type-guards.js';
 import { restrictionParts } from '../boxed-expression/conditional-value.js';
+import { pointArity } from '../collection-utils.js';
 import {
   collectionElementType,
   kindArmNames,
@@ -552,8 +553,8 @@ function compileIntervalLinspace(
  * another sort — a boolean, a string, a point — has none.
  *
  * A written `Missing` has one: it compiles to the absent value `{ kind:
- * 'empty' }`, as `Undefined` does. Its type is `missing`, not `number`, so
- * without this test `[1, Missing]` declined where `[1, Undefined]` compiled.
+ * 'empty' }`. Its type is `missing`, not `number`, so without this test
+ * `[1, Missing]` would decline.
  */
 function hasIntervalReading(x: Expression): boolean {
   if (x.type.matches('number') || isProvablyNumericListOperand(x)) return true;
@@ -1105,6 +1106,18 @@ function compileIntervalSelectionValue(
 }
 
 /**
+ * The third argument of `_IA.restrict` for the restricted value `value`:
+ * the number of coordinates when `value` is a point (`pointArity()`), so
+ * that a false condition gives a point of `empty` coordinates, as the
+ * interpreter gives the point of `NaN` coordinates
+ * (`maskedValue()`, `library/control-structures.ts`); empty otherwise.
+ */
+function restrictArity(value: Expression): string {
+  const n = pointArity(value.type.type);
+  return n === undefined ? '' : `, ${n}`;
+}
+
+/**
  * A restriction `If(condition, value)` at a consuming position (see
  * `compileIntervalCollectionValue`): `_IA.restrict` over the collection
  * spelling of `value`, the same run-time call the `If` handler emits for a
@@ -1135,7 +1148,7 @@ function compileIntervalRestrictedValue(
   });
   if (present === undefined) return undefined;
   BaseCompiler.assertScalarCondition(cond, target);
-  return `_IA.restrict(${BaseCompiler.compileValueOperand(cond, target)}, () => ${spelled})`;
+  return `_IA.restrict(${BaseCompiler.compileValueOperand(cond, target)}, () => ${spelled}${restrictArity(value)})`;
 }
 
 /**
@@ -1233,7 +1246,7 @@ const INTERVAL_ABSENCE = '{ lo: NaN, hi: NaN }';
  * The emitted spelling of an ABSENT value on this target: the `empty`
  * result, the value a restriction whose condition fails (`_IA.restrict`)
  * gives. An `At` whose index selects nothing compiles to it, and so does a
- * written absence symbol (`Missing`, `Undefined`), so that a host reads one
+ * written absence symbol (`Missing`), so that a host reads one
  * spelling of "no value" (the interpreter fallback gives `empty` too). The whole-NaN bare
  * interval `INTERVAL_ABSENCE` has no `kind`, and so is not an interval result.
  * `_IA.isAbsent` and `_IA.coalesce` read both as absent.
@@ -3788,7 +3801,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `_IA.and(${c}, ${compile(args[1], 1)}))`
         );
       }
-      return `_IA.restrict(${compile(args[0])}, () => ${compile(args[1], 1)})`;
+      return `_IA.restrict(${compile(args[0])}, () => ${compile(args[1], 1)}${restrictArity(args[1])})`;
     }
     const buildPiecewise = (i: number, bounds: IntervalArmBounds): string => {
       if (i >= args.length) return `(${INTERVAL_EMPTY})`;
@@ -6669,7 +6682,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
    * is; an array is a tuple for a `tuple` parameter, else a list. For a
    * parameter of a boolean type (`BaseCompiler.isBooleanBindingType`), the
    * strings `'true'` and `'false'` are booleans, and `'maybe'` is
-   * `Undefined` and makes the call wide, as for a boolean variable. The
+   * `Missing` and makes the call wide, as for a boolean variable. The
    * value is wrapped by `toIntervalValue`, as on the other fallback; a
    * function value is `entire`.
    */
@@ -6716,7 +6729,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
           v.map((x) => box(x, elements))
         );
       }
-      return ce.symbol('Undefined');
+      return ce.Missing;
     };
     const run: CompiledRunner<IntervalValue, IntervalInput> = (
       ...args: unknown[]
@@ -6733,7 +6746,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
           if (a === 'false') return ce.False;
           if (a === 'maybe') {
             maybe = true;
-            return ce.symbol('Undefined');
+            return ce.Missing;
           }
         }
         return box(collapseIntervalInput(a), type);

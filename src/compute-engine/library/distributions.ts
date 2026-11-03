@@ -8,6 +8,7 @@ import {
 } from '../numerics/special-functions.js';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
+  isAbsentSymbol,
   isAbsentValue,
   nanOperandAnswer,
   indeterminateFormAnswer,
@@ -1379,8 +1380,10 @@ function empiricalQuantile(
   //   it is refused. The constraint names `number`, not `real`: the value is
   //   not a number AT ALL. The `real` rejection below is for a NUMERIC datum
   //   with no finite real reading.
-  // - An ABSENT datum (`Missing`, `NaN`) makes the whole aggregate `NaN`
-  //   (§3.C of `docs/ERROR-MODEL.md`). It also has to be caught before the
+  // - A `NaN` datum makes the whole aggregate `NaN`, and a `Missing`
+  //   datum makes it `Missing` (`Missing` is a result only, and an operator
+  //   over it gives `Missing`, `docs/ERROR-MODEL.md`). It also has to be
+  //   caught before the
   //   sort, which a `NaN` comparator silently leaves unordered. The signed
   //   infinities are NOT absorbed — they are ordinary points of the extended
   //   real line and sort correctly.
@@ -1392,10 +1395,14 @@ function empiricalQuantile(
   //   `Indeterminate` when no datum is absent, `NaN` or inexact, as it does
   //   for the statistics family (`collectData`).
   let absent = false;
+  let missing = false;
   let indeterminate = false;
   let inert = false;
   for (const v of data) {
-    if (isAbsentValue(v)) absent = true;
+    // A refused datum later in the data still gives the error, which
+    // outranks an absent datum, so `Missing` is answered after the walk.
+    if (isAbsentSymbol(v)) missing = true;
+    else if (isAbsentValue(v)) absent = true;
     else if (v.isIndeterminate) indeterminate = true;
     else if (!isNumber(v)) {
       // An `error` datum is exempt from the refusal: it already speaks the
@@ -1405,6 +1412,7 @@ function empiricalQuantile(
       inert = true;
     }
   }
+  if (missing) return ce.Missing;
   if (absent) return ce.NaN;
   if (indeterminate) return nanOperandAnswer(ce, data);
   if (inert) return undefined;

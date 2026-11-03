@@ -602,16 +602,16 @@ describe('At — every declining shape names its OWN cause', () => {
     expect(new Set(msgs).size).toBe(msgs.length);
   });
 
-  // A base whose ELEMENTS are object-domain never reaches the `At` entry: the
-  // §3.F absence gate (`base-compiler.ts`) intercepts the node's
-  // `T | missing` type first, with its own message. Stated here so nobody
-  // hunts for a missing `At` reason.
-  test('an object-domain element base is pre-empted by the §3.F gate', () => {
+  // A base whose ELEMENTS are object-domain reaches the `At` entry: the type
+  // of a read does not name the absence marker (`docs/ERROR-MODEL.md`,
+  // "`Missing` is a result only"), so the §3.F absence gate does not
+  // intercept it, and `At` names its own reason.
+  test('an object-domain element base declines in the `At` entry', () => {
     // A run-time index, for the reason given on the complex element above.
     expect(why(['At', ['List', 'True', 'False', 'True'], 'k'])).toMatch(
-      /object-domain absent \('missing'\) position .* Discharge with 'Coalesce'/
+      /not provably scalar numeric/
     );
-    expect(why(['At', 'sl', 1])).toMatch(/object-domain absent/);
+    expect(why(['At', 'sl', 1])).toMatch(/Could not compile `At`/);
   });
 });
 

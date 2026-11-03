@@ -193,8 +193,10 @@ export function emitUserFunctionCall(
    */
   held: ReadonlyArray<string> = [],
   /**
-   * The compiled default of each parameter with a default value, by
-   * position (`undefined` for a parameter without one), read only when the
+   * The fill of each parameter with a default value, by position
+   * (`undefined` for a parameter without one): a function of the code of
+   * the argument that gives the argument, or the default when it is
+   * absent. Read only when the
    * call maps the function over a list on the JavaScript target. The
    * mapped function then fills each element that is absent with its
    * default, with the target's `Coalesce` (`targetCoalesce()`), as the
@@ -203,7 +205,7 @@ export function emitUserFunctionCall(
    * The call site fills a scalar argument (`absentFilledArguments()`); a
    * list argument is present, and its cells are filled here.
    */
-  mapDefaults?: () => ReadonlyArray<string | undefined>
+  mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
 ): TargetSource {
   // The rank of each argument: the number of list levels that the call
   // maps over. A callee with a parameter that binds a collection whole
@@ -284,9 +286,8 @@ export function emitUserFunctionCall(
     );
   // With no argument to coerce, no held value and no default to fill, the
   // mapped function is the callee itself, not an arrow that only calls it.
-  const coalesce = targetCoalesce(target);
   const fills =
-    target.language === 'javascript' && coalesce !== undefined
+    target.language === 'javascript' && targetCoalesce(target) !== undefined
       ? (mapDefaults?.() ?? [])
       : [];
   let fn = name;
@@ -297,7 +298,7 @@ export function emitUserFunctionCall(
   ) {
     const params = args.map(() => tempVar(target));
     const filled = params.map((p, i) =>
-      fills[i] === undefined ? p : coalesce!(p, fills[i]!)
+      fills[i] === undefined ? p : fills[i]!(p)
     );
     fn =
       `((${params.join(', ')}) => ` +

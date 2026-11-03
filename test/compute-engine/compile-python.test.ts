@@ -876,22 +876,19 @@ describe('PYTHON TARGET', () => {
       expect(code).toBe('((-1) if (x < 0) else ((1)))');
     });
 
-    it('an undecided condition takes NO arm and answers float(nan)', () => {
+    it('a relation with a NaN operand is decided and takes no test', () => {
       // The ruling: the Python target follows the same undecided-condition
       // rule as the JavaScript one. A NaN operand decides every relation (user
       // decisions 2026-10-20 and 2026-10-23): an ordered comparison or an
       // `Equal` is false, a `NotEqual` is true (`nan != 0` is `True` in
-      // Python, as IEEE answers), so neither takes a test. Only an ABSENT
-      // operand leaves a relation undecided: a symbol declared
-      // `number | missing` whose value is `None`. Its NaN value is a present
-      // value and decides the relation (two-valued comparisons, user decision
-      // 2026-11-02), so the test is for `None` only. There is no Python
+      // Python, as IEEE answers), so neither takes a test. A declared type
+      // cannot name `missing` (`Missing` is a result only, user decision
+      // 2026-11-02), so no input is absent. There is no Python
       // execution harness in this suite, so the pins are on the emitted
       // SOURCE; its behavior was checked by running the emitted shapes under
       // CPython.
       const e = new ComputeEngine();
       e.declare('x', 'number');
-      e.declare('m', 'number | missing');
       const code = (json: any): string => python.compile(e.box(json)).code!;
       expect(code(['If', ['NotEqual', 'x', 0], 1, -1])).toBe(
         '((1) if (((x) != (0))) else (-1))'
@@ -899,52 +896,21 @@ describe('PYTHON TARGET', () => {
       expect(code(['If', ['Greater', 'x', 0], 1, -1])).toBe(
         '((1) if (0 < x) else (-1))'
       );
-      expect(code(['If', ['Greater', 'm', 0], 1, -1])).toBe(
-        '(((1) if (0 < m) ' +
-          "else (-1)) if (not (m is None)) else float('nan'))"
-      );
       // A costly operand is computed ONCE.
       const sin = code(['If', ['NotEqual', ['Sin', 'x'], 0], 1, -1]);
       expect(sin).toBe('((1) if (((np.sin(x)) != (0))) else (-1))');
       expect(sin.split('np.sin').length - 1).toBe(1);
     });
 
-    it('a condition whose VALUE may not be a boolean is tested for its kind', () => {
-      // A Python `1` is not a condition, and `1 == True` is true in Python —
-      // so the test is on the value's KIND, not on `== True`. A NumPy boolean
-      // (what a relation lowers to) counts as a boolean. `b` may be absent;
-      // a symbol declared `boolean` is read by its truthiness.
+    it('`Not` over a relation with a NaN operand takes no test', () => {
+      // A NaN operand decides the relation (user decisions 2026-10-20 and
+      // 2026-10-23), so over a `number` symbol neither `Not(x ≠ 0)` nor
+      // `Not(x > 0)` takes a test.
       const e = new ComputeEngine();
-      e.declare('b', 'boolean | missing');
-      expect(python.compile(e.box(['If', 'b', 1, -1])).code).toBe(
-        "((1) if (isinstance(b, (bool, np.bool_)) and b) else ((-1) if isinstance(b, (bool, np.bool_)) else float('nan')))"
-      );
-    });
-
-    it('`Not` negates a DECIDED verdict, never an undecided value', () => {
-      // `np.logical_not` of a non-boolean would answer a confident boolean,
-      // which is the answer the ruling forbids. The `Not` is lowered by
-      // exchanging the arms of the decided test instead, so it is not emitted.
-      const e = new ComputeEngine();
-      e.declare('b', 'boolean | missing');
       e.declare('x', 'number');
-      const notB = python.compile(e.box(['If', ['Not', 'b'], 1, 2])).code!;
-      expect(notB).toBe(
-        "((1) if (isinstance(b, (bool, np.bool_)) and not b) else ((2) if isinstance(b, (bool, np.bool_)) else float('nan')))"
-      );
-      expect(notB).not.toContain('logical_not');
-      // A `Not` over a RELATION keeps the operand test: `Not` changes neither
-      // operand of the comparison under it. A NaN operand decides the
-      // relation (user decisions 2026-10-20 and 2026-10-23), so over a
-      // `number` symbol neither `Not(x ≠ 0)` nor `Not(x > 0)` takes a test,
-      // and over a `number | missing` symbol the test stays.
-      e.declare('m', 'number | missing');
       expect(
         python.compile(e.box(['If', ['Not', ['NotEqual', 'x', 0]], 1, 2])).code
       ).toBe('((1) if (not ((x) != (0))) else (2))');
-      expect(
-        python.compile(e.box(['If', ['Not', ['Greater', 'm', 0]], 1, 2])).code
-      ).toContain("if (not (m is None)) else float('nan'))");
       expect(
         python.compile(e.box(['If', ['Not', ['Greater', 'x', 0]], 1, 2])).code
       ).toBe('((1) if (not (0 < x)) else (2))');
@@ -971,26 +937,11 @@ describe('PYTHON TARGET', () => {
       // first has not already settled the `and`. See
       // `compile-three-valued-connectives.test.ts` for the full table, the
       // short-circuit pins and the execution parity.
-      // The first leaf reads `m: number | missing`, whose absent value leaves
-      // it undecided; the second, `x < 2`, is decided by construction since
+      // A relation over a `number` symbol is decided by construction since
       // the user decision of 2026-10-20 (a NaN operand makes it false), so it
       // takes no test.
       const e = new ComputeEngine();
       e.declare('x', 'number');
-      e.declare('m', 'number | missing');
-      expect(
-        python.compile(
-          e.box(['If', ['And', ['Greater', 'm', 0], ['Less', 'x', 2]], 1, 2])
-        ).code
-      ).toBe(
-        '(lambda _CND: ((1) if (isinstance(_CND, (bool, np.bool_)) and _CND) ' +
-          "else ((2) if isinstance(_CND, (bool, np.bool_)) else float('nan'))))" +
-          '((lambda _tv1: (False if _tv1 is not None and not _tv1 else ' +
-          '(lambda _tv2: (_tv2 if _tv1 is not None and _tv1 else ' +
-          '(False if _tv2 is not None and not _tv2 else None)))' +
-          '((x < 2))))(((0 < m) ' +
-          'if not (m is None) else None)))'
-      );
       // A `NotEqual` with a NaN operand is decided too (user decision
       // 2026-10-23): the plain conditional.
       expect(
@@ -1037,13 +988,6 @@ describe('PYTHON TARGET', () => {
       const which = python.compile(e.box(['Which', 'c', { str: 's' }])).code;
       expect(which).toContain('None');
       expect(which).not.toContain("float('nan')");
-      // An `If` with an else arm has no value only for a condition that may
-      // be absent.
-      e.declare('m', 'boolean | missing');
-      const ifElse = python.compile(
-        e.box(['If', 'm', { str: 's' }, { str: 't' }])
-      ).code;
-      expect(ifElse).toContain('else None');
       // Mixed string and number arms stay numeric.
       expect(
         python.compile(e.box(['Which', 'c', { str: 's' }, 'c', 1])).code
@@ -1259,7 +1203,7 @@ describe('PYTHON TARGET', () => {
       // The interpreter recurses into a nested list.
       scoped.declare('nested', 'list<list<real>>');
       // An absent element is not a number.
-      scoped.declare('gappy', 'list<real | missing>');
+      scoped.assign('gappy', scoped.box(['List', 1, 'Missing']));
       // A companion that may itself be a list.
       scoped.declare('xs', 'list<real>');
       scoped.declare('b', 'broadcastable<number>');
@@ -2019,27 +1963,10 @@ describe('PYTHON TARGET', () => {
         ] as any);
         return python.compileFunction(expr, 'f', ['x']);
       };
-      // `not (x is None)` is the decidedness test of an operand declared
-      // `number | missing` (its NaN value decides the relation, two-valued
-      // comparisons, user decision 2026-11-02): a condition that is not exactly `True`
-      // or `False` when the function runs takes NEITHER branch, so `r` keeps
-      // its initial 0. With an else branch that test guards both arms, so it
-      // is a second `if` wrapped around the selection — the shape the
-      // JavaScript statement form uses (`BaseCompiler.compileLoopBody`). A
-      // NaN operand of a `number` symbol decides every relation (user
-      // decisions 2026-10-20 and 2026-10-23), so only an absent-capable
-      // operand takes the test.
-      const code = fn('Greater', 'number | missing');
-      expect(code).toBe(
-        'def f(x):\n' +
-          '    r = 0\n' +
-          '    if not (x is None):\n' +
-          '        if 0 < x:\n' +
-          '            r = 1\n' +
-          '        else:\n' +
-          '            r = 2\n' +
-          '    return r\n'
-      );
+      // A NaN operand of a `real` symbol decides every relation (user
+      // decisions 2026-10-20 and 2026-10-23), so the condition takes no
+      // decidedness test.
+      const code = fn('Greater');
       expect(fn('NotEqual')).toBe(
         'def f(x):\n' +
           '    r = 0\n' +
@@ -2209,15 +2136,23 @@ describe('PYTHON TARGET — the absence marker of an element read', () => {
       'At of a restricted matrix (a row)',
       ['At', W(['List', ['List', 1, 2], ['List', 3, 4]]), 2],
     ],
+  ])('%s uses None', (_label, json) => {
+    const c = code(json);
+    expect(c).toContain('None if _l is None');
+  });
+
+  // The absent value of a point position is the point whose coordinates are
+  // `NaN`.
+  test.each([
     [
       'First of a restricted list of points',
       ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])],
     ],
     ['At of a list of points', ['At', ['List', ['Tuple', 1, 2]], 5]],
     ['Third of a list of points', ['Third', ['List', ['Tuple', 1, 2]]]],
-  ])('%s uses None', (_label, json) => {
+  ])('%s uses the NaN point', (_label, json) => {
     const c = code(json);
-    expect(c).toContain('None if _l is None');
+    expect(c).toContain("(float('nan'), float('nan')) if _l is None");
   });
 });
 
@@ -2234,7 +2169,6 @@ describe('PYTHON TARGET — a search whose value may be Missing fails closed', (
     const target = new PythonTarget();
     for (const expr of [
       ['IndexOf', ['List', 1, 'NaN'], 'Missing'],
-      ['Contains', ['List', 1, 2], 'Undefined'],
       [
         'IndexOf',
         ['List', 1, 'NaN', 2],
@@ -2257,7 +2191,7 @@ describe('PYTHON TARGET — a search whose value may be Missing fails closed', (
     const target = new PythonTarget();
     for (const expr of [
       ['IndexOf', ['List', 1, 'Missing'], 'NaN'],
-      ['IndexOf', ['List', 1, 'Undefined'], 'x'],
+      ['IndexOf', ['List', 1, 'Missing'], 'x'],
     ])
       expect(() => target.compile(ce2.box(expr as never))).toThrow(
         /an element of the collection may be absent/
@@ -2265,7 +2199,7 @@ describe('PYTHON TARGET — a search whose value may be Missing fails closed', (
     // `Contains` and `Element` refuse such a list earlier, since they require
     // primitive elements and a `missing` arm is not one.
     for (const expr of [
-      ['Contains', ['List', 1, 'Undefined'], 'x'],
+      ['Contains', ['List', 1, 'Missing'], 'x'],
       ['Element', 'x', ['List', 1, 'Missing']],
     ])
       expect(() => target.compile(ce2.box(expr as never))).toThrow();

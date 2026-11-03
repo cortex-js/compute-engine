@@ -832,9 +832,8 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     ce.declare('S', 'list<tuple<string, number>>');
     ce.declare('T', 'tuple<string, number>');
     declines(ce, ['PointX', 'S'], /coordinate is not a number/);
-    // The single point is refused one step earlier, by the object-domain
-    // absence gate: the accessor's own type is `missing | string`.
-    declines(ce, ['PointX', 'T'], /object-domain absent/);
+    // The single point declines the same way.
+    declines(ce, ['PointX', 'T'], /coordinate is not a number/);
     // The numeric coordinate of the same points compiles, and the proven
     // list-of-points reading is stated to the helper: a point whose first
     // coordinate is text would otherwise fail its row test at run time.

@@ -1969,6 +1969,20 @@ export interface CompileTarget<Expr = unknown> {
       coalesce: (x: TargetSource, d: TargetSource) => TargetSource;
     };
     /**
+     * The tests of a discharge (`IsMissing`, `Coalesce`, `AssertPresent`, a
+     * parameter default) at a position whose static type is a point of `n`
+     * coordinates (`pointArity()`). They read as absent what the tests of
+     * the other axes read, and also a `NaN` point: a point whose `n`
+     * coordinates are all `NaN`, the value of a read past the end of a list
+     * of points. The compiler picks this axis from the static type, so the
+     * emitted code tests no type at run time. A target without it uses its
+     * other axes for a point position.
+     */
+    point?: {
+      isAbsent: (x: TargetSource, n: number) => TargetSource;
+      coalesce: (x: TargetSource, d: TargetSource, n: number) => TargetSource;
+    };
+    /**
      * An EXPRESSION that raises a run-time error carrying `message` (a
      * target string literal). The presence assertion `AssertPresent(x)`
      * (Epsil `x?!`) lowers to "`x` unless absent, else raise". A target that
@@ -1980,7 +1994,7 @@ export interface CompileTarget<Expr = unknown> {
      */
     raise?: (message: TargetSource) => TargetSource;
     /**
-     * How a WRITTEN absence symbol (`Missing`, `Undefined`) is spelled when
+     * How a WRITTEN absence symbol (`Missing`) is spelled when
      * the target has both axes. The default is the object null, which keeps
      * an absent list cell distinct from a `NaN` cell for the collection
      * equality rule. A target whose numeric library raises on its null (the

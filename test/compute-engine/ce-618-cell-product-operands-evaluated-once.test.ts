@@ -205,22 +205,17 @@ describe('CE-618: the values and errors of a list of integrals times a scalar', 
     [
       'a Missing cell',
       ['Multiply', 2, ['List', 'Missing', I]],
-      ['List', 'NaN', ['Multiply', 2, canonicalI]],
-    ],
-    [
-      'an Undefined cell',
-      ['Multiply', 'y', ['List', 'Undefined', I]],
-      ['List', 'NaN', ['Multiply', 'y', canonicalI]],
+      ['List', 'Missing', ['Multiply', 2, canonicalI]],
     ],
     [
       'a Missing scalar',
       ['Multiply', 'Missing', ['List', I, 1]],
-      ['List', 'NaN', 'NaN'],
+      ['List', 'Missing', 'Missing'],
     ],
     [
       'a Missing cell in an element-wise product',
       ['Multiply', ['List', I, 'Missing'], ['List', 2, 3]],
-      ['List', ['Multiply', 2, canonicalI], 'NaN'],
+      ['List', ['Multiply', 2, canonicalI], 'Missing'],
     ],
     [
       'a Missing cell in a matrix',
@@ -228,7 +223,7 @@ describe('CE-618: the values and errors of a list of integrals times a scalar', 
       [
         'List',
         ['List', ['Multiply', 'y', canonicalI], 'y'],
-        ['List', ['Multiply', 2, 'y'], 'NaN'],
+        ['List', ['Multiply', 2, 'y'], 'Missing'],
       ],
     ],
     [

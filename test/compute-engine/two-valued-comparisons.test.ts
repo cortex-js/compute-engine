@@ -211,47 +211,15 @@ describe('corpus row neyret/xhlkk7k9aq #1752170633', () => {
 });
 
 describe('the type of a comparison with an operand absent as a whole', () => {
-  // An absent list makes a comparison or a connective the scalar `False`
-  // (`True` for `NotEqual` and `Not`), never `Missing`: the type has a
-  // `boolean` arm, not a `missing` arm, and it holds the value.
-  test.each([
-    [['Less', 'L', 3], 'boolean | list<boolean>'],
-    [['Equal', 'L', 3], 'boolean | list<boolean>'],
-    [['NotEqual', 'L', 3], 'boolean | list<boolean>'],
-    [['Less', 'L', 'Undefined'], 'boolean | list<boolean>'],
-    [['Not', 'B'], 'boolean | list<boolean>'],
-    [['And', 'B', 'True'], 'boolean | list<boolean>'],
-    [['Or', 'B', 'False'], 'boolean | list<boolean>'],
-    [['Less', 'Y', 3], 'broadcastable<boolean>'],
-  ])('%j is typed %s and holds its value', (json, type) => {
+  // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
+  // is a result only"), so an operand cannot be declared absent as a whole.
+  // The value of a comparison over the written `Missing` is `False`.
+  test('an operand cannot be declared `list<integer> | missing`', () => {
     const e = new ComputeEngine();
-    e.declare('L', 'list<integer> | missing');
-    e.declare('B', 'list<boolean> | missing');
-    e.declare('Y', 'collection | integer | missing');
-    const expr = e.box(json as MathJsonExpression);
-    expect(expr.type.toString()).toBe(type);
-    for (const s of ['L', 'B', 'Y']) e.assign(s, e.Missing);
-    const v = expr.evaluate();
-    expect(['"True"', '"False"']).toContain(v.toString());
-    expect(v.type.matches(expr.type)).toBe(true);
-  });
-
-  test('a present list keeps the cells of the comparison', () => {
-    const e = new ComputeEngine();
-    e.declare('L', 'list<integer> | missing');
-    const expr = e.box(['Less', 'L', 3]);
-    e.assign('L', e.box(['List', 1, 5]));
-    const v = expr.evaluate();
-    expect(v.toString()).toBe('["True","False"]');
-    expect(v.type.matches(expr.type)).toBe(true);
-  });
-
-  test('an operator that is not a comparison keeps its missing arm', () => {
-    // The value of a non-boolean operator over an absent collection is a
-    // later item (3.4.2 of `docs/plans/2026-11-02-compiler-contraction-plan.md`).
-    const e = new ComputeEngine();
-    e.declare('L', 'list<integer> | missing');
-    expect(e.box(['Reverse', 'L']).type.toString()).toContain('missing');
+    expect(() => e.declare('L', 'list<integer> | missing')).toThrow(
+      /cannot be declared/
+    );
+    expect(e.box(['Less', 'Missing', 3]).evaluate().symbol).toBe('False');
   });
 });
 
@@ -365,7 +333,7 @@ describe('a negated predicate over a restricted collection', () => {
 });
 
 describe('an absent cell of a list of conditions is False', () => {
-  test.each(['Missing', 'Undefined'])(
+  test.each(['Missing'])(
     'If(L, 1, 2) with L = [%s, True] is [2, 1]',
     (absent) => {
       const e = new ComputeEngine();
@@ -376,13 +344,15 @@ describe('an absent cell of a list of conditions is False', () => {
   );
 });
 
-describe('a NaN value of an operand that can be absent decides a comparison', () => {
-  // With `w: number | missing`, `w = NaN` is a present value: `w > 0` is
-  // `False`, and the compiled code emits the plain comparison, with no NaN
-  // test, so it gives the else arm as the interpreter does.
+describe('a NaN value of a number operand decides a comparison', () => {
+  // With `w: number`, `w = NaN` is a present value: `w > 0` is `False`, and
+  // the compiled code emits the plain comparison, with no NaN test, so it
+  // gives the else arm as the interpreter does. (The declaration was
+  // `number | missing` before a declared type could no longer name
+  // `missing`.)
   const engine = () => {
     const e = new ComputeEngine();
-    e.declare('w', 'number | missing');
+    e.declare('w', 'number');
     return e;
   };
   const json: MathJsonExpression = ['If', ['Greater', 'w', 0], 1, 0];
@@ -420,9 +390,7 @@ describe('a NaN value of an operand that can be absent decides a comparison', ()
 describe('a quantifier whose body does not use its variable', () => {
   test.each([
     ['ForAll', 'Missing'],
-    ['ForAll', 'Undefined'],
     ['Exists', 'Missing'],
-    ['Exists', 'Undefined'],
   ])('%s with the absent body %s is False', (op, body) => {
     expect(value([op, ['Element', 'x', ['List', 1, 2]], body])).toBe('False');
   });

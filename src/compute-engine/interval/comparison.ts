@@ -390,12 +390,24 @@ export function hull(a: unknown, b: unknown): IntervalModelValue {
  * the domain edge) or a hard branch pick. `domainClipped: 'both'` is a
  * conservative "some clipping occurred" — which end(s) of the input are
  * outside the condition is not derivable from the tri-state alone.
+ *
+ * `arity` is given when the value is a point of that many coordinates
+ * (`pointArity()`). Where the condition does not hold, the value is then a
+ * point whose every coordinate is `empty`, the spelling on this target of
+ * the point of `NaN` coordinates that the interpreter gives for a false
+ * restriction of a point.
  */
 export function restrict(
   cond: BoolInterval,
-  value: () => unknown
+  value: () => unknown,
+  arity?: number
 ): IntervalModelValue {
-  if (cond === 'false') return { kind: 'empty' };
+  if (cond === 'false')
+    return arity === undefined
+      ? { kind: 'empty' }
+      : (Array.from({ length: arity }, () => ({
+          kind: 'empty',
+        })) as unknown as IntervalModelValue);
   const raw = value();
   // A restricted RELATION (`y ≤ K(x) {K(x) > 0}` as one row) is a verdict:
   // where the restriction fails the relation holds nowhere, where it is

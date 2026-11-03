@@ -24,7 +24,6 @@ const ce = new ComputeEngine();
 ce.declare('a', 'real');
 ce.declare('b', 'real');
 ce.declare('P', 'boolean');
-ce.declare('M', 'number | missing');
 
 /** The static type, after checking that every evaluated value fits it. */
 function staticType(expr: Expression): string {
@@ -199,16 +198,18 @@ describe('TRIGREDUCE RESULT TYPE', () => {
 
 describe('TRIG REWRITES OF AN OPERAND THAT MAY NOT BE A VALUE', () => {
   // An operand whose type is not below `value` (`Missing`, a symbol with no
-  // type, a possibly absent symbol) gives its own type: the declared result
-  // `value` does not hold such a value. A tuple keeps the declared `value`.
+  // type) gives its own type: the declared result `value` does not hold such
+  // a value. A tuple keeps the declared `value`. A symbol cannot be declared
+  // possibly absent: a declared type cannot name `missing`
+  // (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+  test('a symbol declared with missing is a static error', () => {
+    expect(() =>
+      new ComputeEngine().declare('M', 'number | missing')
+    ).toThrow();
+  });
+
   test.each<[string, unknown, string, string]>([
     ['Missing', ['TrigExpand', 'Missing'], 'missing', 'missing'],
-    [
-      'possibly absent symbol',
-      ['TrigExpand', 'M'],
-      'missing | number',
-      'missing | number',
-    ],
     ['symbol with no type', ['TrigToExp', 'zz'], 'unknown', 'unknown'],
     [
       'tuple under TrigReduce',
@@ -250,7 +251,6 @@ describe('TUPLEFROM RESULT TYPE', () => {
   ce.assign('Ln', ce.box(['List', 'u', 'v']));
   ce.declare('Lr', 'list<real^2>');
   ce.assign('Lr', ce.box(['List', 1.5, 'Pi']));
-  ce.declare('Lm', 'list<integer^3> | missing');
   ce.declare('T2', 'tuple<integer, string>');
   ce.assign('T2', ce.box(['Tuple', 1, "'a'"]));
   ce.declare('n', 'integer');
@@ -269,11 +269,6 @@ describe('TUPLEFROM RESULT TYPE', () => {
       'absent cell',
       ['TupleFrom', ['List', 1, 'Missing', 3]],
       'tuple<integer, missing, integer>',
-    ],
-    [
-      'Undefined cell',
-      ['TupleFrom', ['List', 1, 'Undefined']],
-      'tuple<integer, missing>',
     ],
     [
       'Nothing cell',
@@ -325,16 +320,6 @@ describe('TUPLEFROM RESULT TYPE', () => {
     ],
     // `Abs(x)` is `real<0..>`, and its value `0.5` is a `real` component.
     ['ranged component', ['TupleFrom', ['Abs', 'x']], 'tuple<real>'],
-    [
-      'possibly absent operand',
-      ['TupleFrom', 'Lm'],
-      'missing | tuple<integer, integer, integer>',
-    ],
-    [
-      'restricted list',
-      ['TupleFrom', ['If', ['Greater', 'n', 0], ['List', 1, 2]]],
-      'tuple<integer, integer>',
-    ],
     // The operand types do not give the components: the declared `tuple`.
     ['list of unknown length', ['TupleFrom', 'Lu'], 'tuple'],
     // `L := [u, v]` matches `list<number^2>`, and its components are `u` and
@@ -369,9 +354,28 @@ describe('TUPLEFROM RESULT TYPE', () => {
     // The literal list does not infer its free symbols (CE-663), and the
     // components of the tuple are read from the elements.
     ['symbols with no type', ['TupleFrom', ['List', 'p', 'q']], 'tuple'],
-    ['Missing', ['TupleFrom', 'Missing'], 'missing | tuple'],
+    // An operator over an operand typed `missing` is typed `missing`.
+    ['Missing', ['TupleFrom', 'Missing'], 'missing'],
   ])('%s', (_label, json, expected) => {
     expect(staticType(ce.box(json as any))).toBe(expected);
+  });
+
+  test('restricted list', () => {
+    // The static type of a restriction is the type of its arm, with no
+    // `missing` arm (the `Missing` of a false condition sits outside it, as
+    // `NaN` sits outside `real`). With `n` free, the held value is
+    // `If(0 < n, (1, 2), Missing)`: a tuple of numbers is a point, whose false
+    // restriction is the point of `NaN` coordinates, so the held form names
+    // the `Missing` of the absent list, and its type has that arm.
+    const e = ce.box([
+      'TupleFrom',
+      ['If', ['Greater', 'n', 0], ['List', 1, 2]],
+    ]);
+    expect(e.type.toString()).toBe('tuple<integer, integer>');
+    for (const v of [e.evaluate(), e.N()]) {
+      expect(v.toString()).toBe('If(0 < n, (1, 2), "Missing")');
+      expect(v.type.toString()).toBe('missing | tuple<integer, integer>');
+    }
   });
 
   test('an empty list gives the empty tuple', () => {
