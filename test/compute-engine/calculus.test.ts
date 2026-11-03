@@ -2200,15 +2200,15 @@ describe('INTEGRATE: interior pole', () => {
   // integrand blows up at a point STRICTLY INSIDE the bounds, differencing an
   // antiderivative reports a finite value for a divergent integral. The
   // `Integrate` handler answers `+∞`/`−∞` when the integrand keeps one sign
-  // across the pole, and `Indeterminate` when it changes sign (the integral
+  // across the pole, and `NaN` when it changes sign (the integral
   // has no value).
 
   const evaluated = (latex: string) =>
     new ComputeEngine().parse(latex).evaluate();
 
-  test('1/t across zero is Indeterminate (was 0)', () => {
+  test('1/t across zero is NaN (was 0)', () => {
     const result = evaluated('\\int_{-1}^{1} \\frac{1}{t} dt');
-    expect(result.toString()).toBe('Indeterminate');
+    expect(result.toString()).toBe('NaN');
   });
 
   test('1/t^2 across zero diverges to +∞ (was -2)', () => {
@@ -2216,19 +2216,19 @@ describe('INTEGRATE: interior pole', () => {
     expect(result.toString()).toBe('+oo');
   });
 
-  test('t^-3 across zero is Indeterminate (negative Power exponent)', () => {
+  test('t^-3 across zero is NaN (negative Power exponent)', () => {
     const result = evaluated('\\int_{-1}^{1} t^{-3} dt');
-    expect(result.toString()).toBe('Indeterminate');
+    expect(result.toString()).toBe('NaN');
   });
 
-  test('1/(t-1) across its pole is Indeterminate (was -ln(2))', () => {
+  test('1/(t-1) across its pole is NaN (was -ln(2))', () => {
     const result = evaluated('\\int_{-1}^{2} \\frac{1}{t-1} dt');
-    expect(result.toString()).toBe('Indeterminate');
+    expect(result.toString()).toBe('NaN');
   });
 
-  test('1/(t^2-1) across both poles is Indeterminate (was -ln(3))', () => {
+  test('1/(t^2-1) across both poles is NaN (was -ln(3))', () => {
     const result = evaluated('\\int_{-2}^{2} \\frac{1}{t^2-1} dt');
-    expect(result.toString()).toBe('Indeterminate');
+    expect(result.toString()).toBe('NaN');
   });
 
   test('pole outside the bounds keeps its closed form', () => {
@@ -2287,13 +2287,13 @@ describe('INTEGRATE: interior pole', () => {
     // tan/sec blow up at π/2 + kπ, cot/csc and a sin/cos denominator at kπ.
     // Each one changes sign across its pole: the integral has no value.
     expect(evaluated('\\int_{0}^{2} \\tan t \\, dt').toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     expect(evaluated('\\int_{0}^{2} \\sec t \\, dt').toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     expect(evaluated('\\int_{1}^{4} \\cot t \\, dt').toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     // No antiderivative is found for these two: they stay unevaluated.
     expect(evaluated('\\int_{0}^{2} \\frac{1}{\\cos t} dt').operator).toBe(
@@ -2323,7 +2323,7 @@ describe('INTEGRATE: interior pole', () => {
         .box(['Integrate', ['Divide', 1, 'x'], ['Limits', 'x', -1, 1]])
         .evaluate()
         .toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
     expect(
       ce
         .box(['Integrate', ['Divide', 1, 'x'], ['Limits', 'x', 1, 2]])
@@ -2335,7 +2335,7 @@ describe('INTEGRATE: interior pole', () => {
     assigned.assign('t', 5);
     expect(
       assigned.parse('\\int_{-1}^{1} \\frac{1}{t} dt').evaluate().toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
     expect(
       assigned.parse('\\int_{1}^{2} \\frac{1}{t} dt').evaluate().toString()
     ).toBe('ln(2)');
@@ -2445,7 +2445,7 @@ describe('INTEGRATE: interior pole — hyperbolic, reciprocal and near-bound fam
     // coth changes sign across its pole: the integral has no value.
     expect(
       ce.parse('\\int_{-1}^{1} \\coth t\\,dt').evaluate().toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
     expect(inert('\\int_{-1}^{1} \\frac{1}{\\sinh t} dt')).toBe(true);
   });
 
@@ -2495,30 +2495,29 @@ describe('INTEGRATE: a divergent integral is reported as such by evaluate() and 
     );
   });
 
-  test('sign-changing across the pole: Indeterminate under evaluate(), NaN under N()', () => {
+  test('sign-changing across the pole: NaN under evaluate(), NaN under N()', () => {
     // The Cauchy principal value of ∫₋₁¹ dt/t is 0, but the integral itself
     // has no value; the quadrature used to report `−1.4 ± 3.6`.
     expect(
       ce.parse('\\int_{-1}^{1} \\frac{1}{t} dt').evaluate().toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
     expect(ce.parse('\\int_{-1}^{1} \\frac{1}{t} dt').N().isNaN).toBe(true);
     // sec is positive before π/2 and negative after: +∞ − ∞.
     expect(ce.parse('\\int_0^2 \\sec t\\,dt').N().isNaN).toBe(true);
   });
 
-  test('a float in a bound makes the answer NaN, not Indeterminate', () => {
+  test('a float in a bound gives NaN', () => {
     // A float nested in a bound, or held by a bound symbol, was not seen.
     const engine = new ComputeEngine();
     const at = (lower: unknown) =>
       engine
         .box(['Integrate', ['Divide', 1, 't'], ['Limits', 't', lower, 1]] as any)
         .evaluate();
-    expect(at(-1).isIndeterminate).toBe(true);
+    expect(at(-1).isNaN).toBe(true);
     for (const lower of [-1.5, ['Negate', ['Sin', 1.5]], 'b']) {
       if (lower === 'b') engine.assign('b', -1.5);
       const value = at(lower);
       expect(value.isNaN).toBe(true);
-      expect(value.isIndeterminate).toBe(false);
     }
   });
 
@@ -2620,7 +2619,7 @@ describe('INTEGRATE: interior pole with an infinite bound', () => {
   const n = (latex: string) => ce.parse(latex).N().toString();
 
   test('a sign change across the pole has no value (was 1/2)', () => {
-    expect(ev('\\int_{-1}^{\\infty} \\frac{1}{x^3} dx')).toBe('Indeterminate');
+    expect(ev('\\int_{-1}^{\\infty} \\frac{1}{x^3} dx')).toBe('NaN');
     expect(n('\\int_{-1}^{\\infty} \\frac{1}{x^3} dx')).toBe('NaN');
   });
 
@@ -2641,7 +2640,7 @@ describe('INTEGRATE: interior pole with an infinite bound', () => {
   });
 
   test('a pole lattice in an infinite range is found', () => {
-    expect(ev('\\int_{1}^{\\infty} \\tan(x) dx')).toBe('Indeterminate');
+    expect(ev('\\int_{1}^{\\infty} \\tan(x) dx')).toBe('NaN');
   });
 
   test('a tail that diverges with the other sign leaves no direction', () => {
@@ -3342,7 +3341,7 @@ describe('INTEGRATE: a pole at a constant such as π', () => {
 
   test('a sign change across a pole at π leaves no value', () => {
     const e = integral(['Divide', 1, ['Subtract', 'y', 'Pi']], 0, 4);
-    expect(e.evaluate().toString()).toBe('Indeterminate');
+    expect(e.evaluate().toString()).toBe('NaN');
     expect(e.N().isNaN).toBe(true);
   });
 

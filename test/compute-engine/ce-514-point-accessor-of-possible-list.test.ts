@@ -225,7 +225,7 @@ describe('the type of a call with a list of points (CE-514)', () => {
 // When the arguments fit the inferred signature and its result is a scalar,
 // the inferred result stays the type of the call: the walk of the body can be
 // narrower than the value (`Mod(x, y)` is typed `real`, and is NaN or
-// `Indeterminate` for `y = 0`).
+// `NaN` for `y = 0`).
 describe('an inferred scalar result is kept when the arguments fit it', () => {
   test('Mod with a zero divisor', () => {
     const ce = new ComputeEngine();

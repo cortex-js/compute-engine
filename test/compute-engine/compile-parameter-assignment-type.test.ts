@@ -41,7 +41,7 @@ describe('COMPILE an assignment to a typed parameter', () => {
     );
     expect(r.interpreted).toMatch(/incompatible-type/);
     expect(r.error).toMatch(
-      /assigns `Indeterminate`.*parameter `q` of type `integer`/
+      /assigns `NaN`.*parameter `q` of type `integer`/
     );
   });
 

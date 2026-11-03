@@ -184,7 +184,6 @@ export class BoxedDictionary
         this._reportError('a non-empty string key', '');
         return;
       }
-      // A `Nothing` VALUE erases the whole entry (§3.G).
       const v = dictionaryValueToBoxedExpression(
         this.engine,
         keyValues[key],
@@ -203,7 +202,7 @@ export class BoxedDictionary
         this._constructionError ??= v;
         return;
       }
-      if (!isSymbol(v, 'Nothing')) this._keyValues[key] = v;
+      this._keyValues[key] = v;
     }
   }
 
@@ -251,9 +250,8 @@ export class BoxedDictionary
         return;
       }
 
-      // A `Nothing` VALUE erases the whole entry (§3.G).
       const v = value.canonical;
-      if (!isSymbol(v, 'Nothing')) this._keyValues[k] = v;
+      this._keyValues[k] = v;
       return;
     }
 
@@ -299,9 +297,8 @@ export class BoxedDictionary
             return;
           }
 
-          // A `Nothing` VALUE erases the whole entry (§3.G).
           const v = value.canonical;
-          if (!isSymbol(v, 'Nothing')) this._keyValues[k] = v;
+          this._keyValues[k] = v;
         } else {
           this._reportError('tuple<string, unknown>', pair);
           return;
@@ -857,10 +854,7 @@ function isEvaluatedValue(
   numericApproximation: boolean
 ): boolean {
   if (isString(v)) return true;
-  // An `Indeterminate` literal is not numeric yet: its numeric
-  // approximation is `NaN`.
-  if (isNumber(v))
-    return !numericApproximation || (!v.isExact && !v.isIndeterminate);
+  if (isNumber(v)) return !numericApproximation || !v.isExact;
   return false;
 }
 

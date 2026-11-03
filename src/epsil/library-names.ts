@@ -156,8 +156,8 @@ export const ENGINE_INTERNAL_NAMES: ReadonlySet<string> = new Set([
 
 /**
  * Constants that Epsil writes as literal words: `true`, `false`, `NaN`
- * (with `nan` naming the not-a-number TYPE), `Indeterminate`, `Infinity` and
- * `oo`.
+ * (with `nan` naming the not-a-number TYPE), `Infinity` and `oo`.
+ * `Indeterminate` is an input spelling of `NaN`.
  */
 const LITERAL_CONSTANTS: ReadonlySet<string> = new Set([
   'True',

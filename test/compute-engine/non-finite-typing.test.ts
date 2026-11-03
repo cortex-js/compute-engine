@@ -289,12 +289,12 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Round', 'ComplexInfinity'])).toBe('infinity');
     });
 
-    test('∞/∞ folds to the Indeterminate value, which widens to nan', () => {
-      // The canonical route folds this to the `Indeterminate` VALUE, so the
+    test('∞/∞ folds to the NaN value, which widens to nan', () => {
+      // The canonical route folds this to the `NaN` VALUE, so the
       // type read is the literal's, not a handler claim: the literal types
-      // as the `Indeterminate` value type and widens to the `nan` tier.
+      // as the `NaN` value type and widens to the `nan` tier.
       const e = ce.box(['Divide', 'PositiveInfinity', 'PositiveInfinity']);
-      expect(e.type.toString()).toBe('Indeterminate');
+      expect(e.type.toString()).toBe('NaN');
       expect(e.type.matches('nan')).toBe(true);
       expect(e.type.matches('real')).toBe(false);
     });
@@ -354,7 +354,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(v(['Multiply', 2, ['Ln', 0]])).toBe('-oo');
       // The indeterminate form is untouched, and so are the SIGNED infinities:
       // only an undirected factor skips the sign rule.
-      expect(v(['Multiply', 0, 'ComplexInfinity'])).toBe('Indeterminate');
+      expect(v(['Multiply', 0, 'ComplexInfinity'])).toBe('NaN');
       // NaN poisons the product in BOTH operand orders — `~oo` absorbs
       // factors, but not this one. Both orders are asserted because the two
       // numeric-value lanes differ in where they test the receiver's own NaN.
@@ -386,7 +386,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       ).toBe('~oo');
       // Controls: two REAL infinities keep their own rules.
       expect(v(['Add', 'PositiveInfinity', 'NegativeInfinity'])).toBe(
-        'Indeterminate'
+        'NaN'
       );
       expect(v(['Add', 'PositiveInfinity', 2])).toBe('+oo');
     });
@@ -630,9 +630,9 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Divide', 1, 'nf_sym'])).toBe('0');
       // ∞/∞ is indeterminate.
       // ∞/∞ is indeterminate: `canonicalDivide` folds it to the
-      // `Indeterminate` VALUE, whose type is the `Indeterminate` value type
+      // `NaN` VALUE, whose type is the `NaN` value type
       // (widening to the `nan` tier).
-      expect(typeOf(['Divide', 'nf_sym', 'nf_sym'])).toBe('Indeterminate');
+      expect(typeOf(['Divide', 'nf_sym', 'nf_sym'])).toBe('NaN');
     });
 
     test('arithmetic over a type-only-provable ±∞ function types soundly', () => {

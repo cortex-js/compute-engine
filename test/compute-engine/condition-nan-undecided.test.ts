@@ -9,7 +9,7 @@ import { TEST_PYTHON } from './test-python';
  * User decision of 2026-10-20 (Tycho ledger rows 411 and 413; Desmos and
  * IEEE 754 parity): an ordered comparison (`Less`, `LessEqual`, `Greater`,
  * `GreaterEqual`) or an `Equal` whose operand is an undefined numeric value
- * (`NaN`, `Indeterminate`) is `False`, in a branch condition as everywhere
+ * (`NaN`, `NaN`) is `False`, in a branch condition as everywhere
  * else, so the `If`/`Which` takes its next arm. This holds on the interpreter
  * and on the `javascript`, `python` and `interval-js` targets (on
  * `interval-js`, for an operand that is `empty` over the whole cell).
@@ -479,7 +479,7 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
   });
 
   test("row 413: Tycho's bar, a sum of a piecewise over a function undefined at 0", () => {
-    // `K(0)` is `0^0`, `Indeterminate`; every other `K(n)` is 1. So `M(0)`
+    // `K(0)` is `0^0`, `NaN`; every other `K(n)` is 1. So `M(0)`
     // is 0 and `N` counts the 10 000 positive terms.
     const e = new ComputeEngine();
     e.parse('K(n) := n^0').evaluate();

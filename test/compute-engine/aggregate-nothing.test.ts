@@ -52,49 +52,9 @@ function sameNumeric(actual: Expression, expected: Expression) {
   else expect(actual.isSame(expected)).toBe(true);
 }
 
-describe('numeric aggregates skip immediate Nothing without compacting the source', () => {
-  test.each(aggregates)(
-    '%s agrees with explicitly retained data in one traversal',
-    (op) => {
-      const { ce, source, reads } = fixture([1, 'Nothing', 3, 4, 5, 5]);
-      const actual = ce.function(op, [source]).evaluate();
-      const expected = ce.box([op, ['List', 1, 3, 4, 5, 5]]).evaluate();
-      sameNumeric(actual, expected);
-      expect(reads()).toBe(6);
-      expect(source.count).toBe(6);
-      expect(reads()).toBe(6);
-    }
-  );
-
-  test.each(aggregates)(
-    '%s uses its ordinary empty-input rule for all-omitted data',
-    (op) => {
-      const { ce, source, reads } = fixture(['Nothing', 'Nothing', 'Nothing']);
-      const actual = ce.function(op, [source]).evaluate();
-      const expected = ce.box([op, ['List']]).evaluate();
-      sameNumeric(actual, expected);
-      expect(reads()).toBe(3);
-    }
-  );
-
-  test.each(['machine', 50] as const)(
-    'numeric precision %s uses retained observations',
-    (precision) => {
-      for (const op of aggregates) {
-        const { ce, source, reads } = fixture(
-          [1.5, 'Nothing', 3.5, 4.5, 5.5],
-          precision
-        );
-        const actual = ce.function(op, [source]).N();
-        const expected = ce.box([op, ['List', 1.5, 3.5, 4.5, 5.5]]).N();
-        sameNumeric(actual, expected);
-        expect(reads()).toBe(5);
-      }
-    }
-  );
-
+describe('numeric aggregates over a Nothing element', () => {
   test.each(aggregates)('%s still propagates retained Missing', (op) => {
-    const { ce, source } = fixture([1, 'Nothing', 'Missing', 3]);
+    const { ce, source } = fixture([1, 'Missing', 3]);
     sameNumeric(
       ce.function(op, [source]).evaluate(),
       ce.box([op, ['List', 1, 'Missing', 3]]).evaluate()
@@ -104,69 +64,65 @@ describe('numeric aggregates skip immediate Nothing without compacting the sourc
   test.each(statistics)(
     '%s does not silently drop a nonnumeric datum',
     (op) => {
-      const { ce, source } = fixture([1, 'Nothing', 'True', 3]);
+      const { ce, source } = fixture([1, 'True', 3]);
       expect(ce.function(op, [source]).evaluate().operator).toBe('Error');
     }
   );
 
-  test('Mean counts retained values, while Length and ListFrom keep their separate rules', () => {
+  test('a Nothing element is kept: Length and ListFrom count it, Mean gives an incompatible-type error', () => {
     const { ce, source } = fixture([1, 'Nothing', 3]);
     expect(ce.function('Length', [source]).evaluate().re).toBe(3);
-    expect(ce.function('Mean', [source]).evaluate().re).toBe(2);
+    const mean = ce.function('Mean', [source]).evaluate();
+    expect(mean.operator).toBe('Error');
+    expect(JSON.stringify(mean.json)).toMatch(/incompatible-type/);
     expect(ce.function('ListFrom', [source]).evaluate().json).toEqual([
       'List',
       1,
+      'Nothing',
       3,
     ]);
   });
 
-  test('Mean does not treat a nested collection as an omitted datum', () => {
+  test('a sum or product of one Nothing term gives the error of two terms', () => {
+    const ce = new ComputeEngine();
+    for (const op of ['Sum', 'Product']) {
+      const one = ce.box([op, ['List', 'Nothing']]).evaluate();
+      const two = ce.box([op, ['List', 1, 'Nothing']]).evaluate();
+      expect(one.operator).toBe('Error');
+      expect(one.op1.json).toEqual(two.op1.json);
+    }
+  });
+
+  test.each(['Max', 'Min', 'Supremum', 'Infimum'])(
+    '%s: a Nothing datum is an error, which outranks NaN',
+    (op) => {
+      const ce = new ComputeEngine();
+      const result = ce.box([op, ['List', 'NaN', 'Nothing']]).evaluate();
+      expect(result.operator).toBe('Error');
+      expect(JSON.stringify(result.json)).toMatch(/incompatible-type/);
+    }
+  );
+
+  test('Mean does not treat a nested collection as a number', () => {
     const ce = new ComputeEngine();
     const nested = ce.box(['List', ['List', 1, 3], 5]);
     expect(ce.function('Mean', [nested]).evaluate().operator).toBe('Error');
   });
 
-  test('retained errors still outrank numeric absence', () => {
-    const ce = new ComputeEngine();
-    ce.declare('Datum', {
-      signature: '(integer) -> any',
-      pure: false,
-      evaluate: ([i]) =>
-        i.re === 1
-          ? ce.Nothing
-          : i.re === 2
-            ? ce.NaN
-            : ce.error('unexpected-argument'),
-    });
-    const source = ce.box(['Map', 'Datum', ['Range', 1, 3]]);
-    expect(ce.function('Mean', [source]).evaluate().operator).toBe('Error');
-  });
-
-  test('Mean, Sum and Product derive numeric types from retained scalar elements', () => {
-    const ce = new ComputeEngine();
-    ce.declare('xs', 'list<integer | nothing>');
-    expectTypeBetween(ce.box(['Mean', 'xs']), { atMost: 'rational | nan' });
-    expectTypeBetween(ce.box(['Sum', 'xs']), { atMost: 'integer' });
-    expectTypeBetween(ce.box(['Product', 'xs']), { atMost: 'integer' });
-    ce.declare('omitted', 'list<nothing>');
-    expectTypeBetween(ce.box(['Product', 'omitted']), { atMost: 'integer' });
-    expectTypeBetween(ce.box(['Sum', 'omitted']), { atMost: 'integer' });
-    expectTypeBetween(ce.box(['Mean', 'omitted']), {
-      atMost: 'rational | nan',
-    });
-  });
-
-  test.each(aggregates)('%s refuses compiled omission-capable inputs', (op) => {
-    const ce = new ComputeEngine();
-    ce.declare('xs', 'list<integer | nothing>');
-    for (const to of ['javascript', 'python'] as const) {
-      const result = compile(ce.box([op, 'xs']), { to });
-      expect(result.success).toBe(false);
-      // Some targets do not support the operator at all; either refusal is sound.
-      if (op !== 'Infimum' && op !== 'Supremum')
-        expect(result.error).toMatch(/Nothing/);
+  test.each(aggregates)(
+    '%s refuses compiled inputs that can hold Nothing',
+    (op) => {
+      const ce = new ComputeEngine();
+      ce.declare('xs', 'list<integer | nothing>');
+      for (const to of ['javascript', 'python'] as const) {
+        const result = compile(ce.box([op, 'xs']), { to });
+        expect(result.success).toBe(false);
+        // Some targets do not support the operator at all; either refusal is sound.
+        if (op !== 'Infimum' && op !== 'Supremum')
+          expect(result.error).toMatch(/Nothing/);
+      }
     }
-  });
+  );
 
   test('compiled union sources are checked arm by arm', () => {
     const ce = new ComputeEngine();
@@ -174,25 +130,13 @@ describe('numeric aggregates skip immediate Nothing without compacting the sourc
     expect(compile(ce.box(['Mean', 'xs'])).success).toBe(false);
   });
 
-  test('compiled tuple sources cannot hide omission through their common element type', () => {
+  test('compiled tuple sources cannot hide Nothing through their common element type', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'tuple<integer | nothing, integer>');
     const result = compile(ce.box(['Mean', 'xs']));
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Nothing/);
   });
-
-  test.each(['Sum', 'Product', 'Mean'])(
-    '%s keeps the omission rule under evaluateAsync',
-    async (op) => {
-      const { ce, source, reads } = fixture([1, 'Nothing', 3]);
-      sameNumeric(
-        await ce.function(op, [source]).evaluateAsync(),
-        ce.box([op, ['List', 1, 3]]).evaluate()
-      );
-      expect(reads()).toBe(3);
-    }
-  );
 
   test.each(['row', 'call'] as const)(
     'Sum of a collection-valued %s keeps its numeric type and compile refusal',

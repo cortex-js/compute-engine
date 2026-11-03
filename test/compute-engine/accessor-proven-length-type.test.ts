@@ -212,41 +212,40 @@ describe('an access that can find nothing keeps its absent member', () => {
     expect(t).toBe('integer');
   });
 
-  test('a literal element that may evaluate to Nothing does not prove a length', () => {
-    // The list erases an element that evaluates to `Nothing`, so
-    // `[If(c, "a", Nothing)]` is `[]` when `c` is false, and `First` of it
-    // is `Missing`. Before, the literal was typed `list<string^1>`. The
-    // `First` of it is typed `string`: the marker of an accessor is
-    // implicit in its type.
+  test('a literal element that may evaluate to Nothing still counts for the length', () => {
+    // The list keeps an element that evaluates to `Nothing`, so
+    // `[If(c, "a", Nothing)]` is `[Nothing]` when `c` is false, and `First`
+    // of it is `Nothing`. The `First` of it is typed `string`: the type
+    // `nothing` is the bottom type, so the type of the element is `string`.
     const ce = engine();
     ce.declare('c', 'boolean');
     const list = ['List', ['If', 'c', "'a'", 'Nothing']];
-    expect(typeOf(ce, list)).toBe('list<string>');
+    expect(typeOf(ce, list)).toBe('list<string^1>');
     expect(typeOf(ce, ['First', list])).toBe('string');
     expect(
       typeOf(ce, ['First', ['List', ['Which', 'c', "'a'", 'True', 'Nothing']]])
     ).toBe('string');
     ce.assign('c', false);
-    expect(ce.box(['First', list]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['First', list]).evaluate().symbol).toBe('Nothing');
     // A conditional with no `Nothing` branch still proves the length.
     expect(typeOf(ce, ['First', ['List', ['If', 'c', "'a'", "'b'"]]])).toBe(
       'string'
     );
   });
 
-  test('no length or shape is derived from such a literal', () => {
+  test('the length and shape of such a literal are derived', () => {
     // The consumers that read a list literal's structure (a matrix row, a
     // sum of lists, a broadcast, a vector operator) read its type, which has
-    // no length, so none of them claims a length or a shape.
+    // a length, since the element is kept.
     const ce = engine();
     ce.declare('c', 'boolean');
     const v = ['List', ['If', 'c', 1, 'Nothing'], 2];
     const rows = ['List', v, ['List', 3, 4]];
-    expect(typeOf(ce, rows)).toBe('list<list<integer>>');
-    expect(typeOf(ce, ['Add', v, ['List', 10, 20]])).toBe('list<integer>');
-    expect(typeOf(ce, ['Multiply', v, 3])).toBe('list<integer>');
-    expect(typeOf(ce, ['Sin', v])).toBe('list<number>');
-    expect(typeOf(ce, ['Transpose', rows])).toBe('list<list<integer>>');
+    expect(typeOf(ce, rows)).toBe('matrix<integer^(2x2)>');
+    expect(typeOf(ce, ['Add', v, ['List', 10, 20]])).toBe('vector<integer^2>');
+    expect(typeOf(ce, ['Multiply', v, 3])).toBe('vector<integer^2>');
+    expect(typeOf(ce, ['Sin', v])).toBe('vector<2>');
+    expect(typeOf(ce, ['Transpose', rows])).toBe('matrix<integer^(2x2)>');
   });
 
   test('a tuple coordinate that may evaluate to Nothing keeps its position', () => {
@@ -262,9 +261,8 @@ describe('an access that can find nothing keeps its absent member', () => {
 
 describe('a broadcast over a list literal with an element that may evaluate to Nothing', () => {
   // The broadcast, a lazy `Map` and the collection handlers of the literal
-  // walked its operands, and evaluated each one in its own cell, so the list
-  // never erased the element: with `c` false, `Sin([If(c, 1, Nothing), 2])`
-  // was `[Sin(Nothing), Sin(2)]`. They now walk the elements of its value.
+  // keep the element: with `c` false, `Sin([If(c, 1, Nothing), 2])` applies
+  // `Sin` to `Nothing`, which is an `incompatible-type` error.
   const v = ['List', ['If', 'c', 1, 'Nothing'], 2];
   const value = (ce: ComputeEngine, json: unknown) =>
     ce
@@ -273,15 +271,15 @@ describe('a broadcast over a list literal with an element that may evaluate to N
       .toString();
 
   test.each([
-    [false, ['Sin', v], '[sin(2)]'],
-    [false, ['Power', v, 2], '[4]'],
-    [false, ['Abs', v], '[2]'],
-    [false, ['Sqrt', v], '[sqrt(2)]'],
-    [false, ['Add', v, 1], '[3]'],
-    [false, ['Map', 'Sin', v], '[sin(2)]'],
-    [false, ['Map', ['Function', ['Sin', 'x'], 'x'], v], '[sin(2)]'],
-    [false, ['Filter', v, ['Function', 'True', 'x']], '[2]'],
-    [false, ['Sin', ['List', v, ['List', 3, 4]]], '[[sin(2)],[sin(3),sin(4)]]'],
+    [false, ['Sin', v], '[Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing"),sin(2)]'],
+    [false, ['Power', v, 2], '[Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing"),4]'],
+    [false, ['Abs', v], '[Error(ErrorCode("incompatible-type", "complex | infinity | quantity", "nothing"), "Nothing"),2]'],
+    [false, ['Sqrt', v], '[Error(ErrorCode("incompatible-type", "complex | infinity", "nothing"), "Nothing"),sqrt(2)]'],
+    [false, ['Add', v, 1], '[Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing"),3]'],
+    [false, ['Map', 'Sin', v], '[Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing"),sin(2)]'],
+    [false, ['Map', ['Function', ['Sin', 'x'], 'x'], v], '[Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing"),sin(2)]'],
+    [false, ['Filter', v, ['Function', 'True', 'x']], '[Error(ErrorCode("incompatible-type", "integer", "nothing"), "Nothing"),2]'],
+    [false, ['Sin', ['List', v, ['List', 3, 4]]], '[[Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing"),sin(2)],[sin(3),sin(4)]]'],
     [true, ['Sin', v], '[sin(1),sin(2)]'],
     [true, ['Power', v, 2], '[1,4]'],
     [true, ['Map', 'Sin', v], '[sin(1),sin(2)]'],
@@ -292,16 +290,17 @@ describe('a broadcast over a list literal with an element that may evaluate to N
     expect(value(ce, json)).toBe(expected);
   });
 
-  test('the literal counts and indexes the elements of its value', () => {
+  test('the literal counts and indexes its elements', () => {
     const ce = new ComputeEngine();
     ce.declare('c', 'boolean');
     ce.assign('c', false);
     const literal = ce.box(v as any);
-    expect(literal.count).toBe(1);
-    expect(literal.at(1)?.toString()).toBe('2');
+    expect(literal.count).toBe(2);
+    expect(literal.at(1)?.evaluate().symbol).toBe('Nothing');
+    expect(literal.at(2)?.toString()).toBe('2');
   });
 
-  test('the literal is scanned once for an element that may be erased, not on every access', () => {
+  test('the literal reads the type of each element at most once over n accesses', () => {
     // Each collection handler of a literal (`at`, the iterator, `contains`)
     // asks whether an element may evaluate to `Nothing`, and the scan reads
     // the type of every element. A loop of `at(1)` … `at(n)` read n² types.
@@ -333,31 +332,16 @@ describe('a broadcast over a list literal with an element that may evaluate to N
     expect(reads).toBeLessThanOrEqual(n);
   });
 
-  test('an assignment after a first access is seen by the next access', () => {
+  test('the compilation declines: Nothing is not a value', () => {
     const ce = new ComputeEngine();
     ce.declare('c', 'boolean');
-    ce.assign('c', false);
-    const literal = ce.box(v as any);
-    expect(literal.count).toBe(1);
-    ce.assign('c', true);
-    expect(literal.count).toBe(2);
-    expect(literal.at(1)?.toString()).toBe('1');
-  });
-
-  test('the compiled code agrees', () => {
-    for (const c of [false, true]) {
-      const ce = new ComputeEngine();
-      ce.declare('c', 'boolean');
-      ce.assign('c', c);
-      const expected = c ? [Math.sin(1), Math.sin(2)] : [Math.sin(2)];
-      for (const json of [
-        ['Sin', v],
-        ['Map', 'Sin', v],
-      ]) {
-        const f = compile(ce.box(json as any));
-        expect(f.success).toBe(true);
-        expect(f.run!({ c })).toEqual(expected);
-      }
+    for (const json of [
+      ['Sin', v],
+      ['Map', 'Sin', v],
+    ]) {
+      const f = compile(ce.box(json as any));
+      expect(f.success).toBe(false);
+      expect(f.error).toMatch(/Nothing/);
     }
   });
 });

@@ -499,14 +499,14 @@ describe('MULTIPLY', () => {
           .toString()
       ).toBe('+oo');
     });
-    test('0 · +∞ = Indeterminate', () => {
+    test('0 · +∞ = NaN', () => {
       const c = new ComputeEngine();
       expect(
         c
           .box(['Multiply', 0, { num: '+Infinity' }])
           .evaluate()
           .toString()
-      ).toBe('Indeterminate');
+      ).toBe('NaN');
     });
   });
 });
@@ -1034,7 +1034,7 @@ describe('Log with a collection operand threads', () => {
     [
       'Log(1, [2, 1])',
       ['Log', 1, ['List', 2, 1]],
-      '[0,Indeterminate]',
+      '[0,NaN]',
       '[0,NaN]',
     ],
     ['Log(0, [2, 4])', ['Log', 0, ['List', 2, 4]], '[-oo,-oo]', '[-oo,-oo]'],
@@ -1860,7 +1860,7 @@ describe('SUM', () => {
   });
 
   // With an infinite upper bound the rule gives the limit of `n/(n+1)`,
-  // which is 1; substituting `n = +∞` gave `Indeterminate`.
+  // which is 1; substituting `n = +∞` gave `NaN`.
   it('should simplify the infinite telescoping sum to 1', () => {
     expect(
       ce.parse('\\sum_{k=1}^{\\infty} \\frac{1}{k(k+1)}').simplify().json
@@ -1884,11 +1884,11 @@ describe('SUM', () => {
 
   // A shared factor of the body that is 0 at one index of the domain:
   // `simplify()` cancels it and gives the closed form, and the finite sum is
-  // `Indeterminate` at that index. This is the decision Mathematica takes
+  // `NaN` at that index. This is the decision Mathematica takes
   // too (checked with the Wolfram Engine):
   // `Sum[(k-4)/((k-4) k (k+1)), {k, 1, n}]` is `1 - 1/(1 + n)`, and
-  // `Sum[(k-4)/((k-4) k (k+1)), {k, 1, 10}]` is `Indeterminate`.
-  it('simplifies a sum whose body has a cancelling factor, and the finite sum is Indeterminate', () => {
+  // `Sum[(k-4)/((k-4) k (k+1)), {k, 1, 10}]` is `NaN`.
+  it('simplifies a sum whose body has a cancelling factor, and the finite sum is NaN', () => {
     expect(
       ce
         .parse('\\sum_{k=1}^{n} \\frac{k-4}{(k-4)k(k+1)}')
@@ -1900,7 +1900,7 @@ describe('SUM', () => {
         .parse('\\sum_{k=1}^{10} \\frac{k-4}{(k-4)k(k+1)}')
         .evaluate()
         .toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
   });
 
   // Partial fractions / telescoping with k*(k-1): Sum(1/(k*(k-1)), [k, 2, n]) = (n-1)/n
@@ -3115,23 +3115,23 @@ describe('the Γ family at ±∞', () => {
     }
   });
 
-  it('has no limit at −∞, so the value is Indeterminate (NaN under N())', () => {
+  it('has no limit at −∞, so the value is NaN (NaN under N())', () => {
     for (const head of ['Factorial', 'Factorial2', 'Gamma', 'GammaLn']) {
-      expect(value([head, 'NegativeInfinity'])).toBe('Indeterminate');
+      expect(value([head, 'NegativeInfinity'])).toBe('NaN');
       expect(numeric([head, 'NegativeInfinity'])).toBe('NaN');
     }
   });
 
-  it('has no limit at the unsigned ~∞ either, so the value is Indeterminate', () => {
+  it('has no limit at the unsigned ~∞ either, so the value is NaN', () => {
     // An argument approaching the single point at infinity from no fixed
-    // direction has no limit, so the answer is `Indeterminate` (`NaN` under
+    // direction has no limit, so the answer is `NaN` (`NaN` under
     // N()) for the whole family.
     // `Gamma`, `GammaLn` and `Factorial` already reached NaN here through
     // their own numeric routes; `Factorial2` used to stop at its
     // integrality test and stay inert, which `docs/ERROR-MODEL.md` §1
     // forbids as the terminal answer to a decided question.
     for (const head of ['Factorial', 'Factorial2', 'Gamma', 'GammaLn']) {
-      expect(value([head, 'ComplexInfinity'])).toBe('Indeterminate');
+      expect(value([head, 'ComplexInfinity'])).toBe('NaN');
       expect(numeric([head, 'ComplexInfinity'])).toBe('NaN');
     }
   });
@@ -3247,7 +3247,7 @@ describe('Infinite-symbol times zero (REVIEW.md A13)', () => {
     e.assign('bigval', e.PositiveInfinity);
     const product = e.expr('bigval').mul(0);
     expect(product.json).toEqual(['Multiply', 0, 'bigval']);
-    expect(product.evaluate().toString()).toBe('Indeterminate');
+    expect(product.evaluate().toString()).toBe('NaN');
   });
   it('a free symbol keeps the conventional ·0 → 0', () => {
     const e = new ComputeEngine();

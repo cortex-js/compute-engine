@@ -575,7 +575,7 @@ describe('CONTRACT 4: re-binding of a cached boxed expression', () => {
     // Cached already folded to 1 — it cannot observe the indeterminate 0/0.
     expect(cached.evaluate().toString()).toBe('1');
     // Re-boxing after the assignment yields the indeterminate form.
-    expect(ce.box(json as any).evaluate().toString()).toBe('Indeterminate');
+    expect(ce.box(json as any).evaluate().toString()).toBe('NaN');
   });
 
   test('re-box REQUIRED: Subscript(a,1) stays a symbol until a is a collection', () => {

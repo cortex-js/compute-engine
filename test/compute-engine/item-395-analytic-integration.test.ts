@@ -107,9 +107,9 @@ describe('DirichletEta and DirichletBeta at +∞', () => {
       );
       expect(ce.expr([head, 'PositiveInfinity']).N().toString()).toBe('1');
     });
-    test(`${head}(−∞) is Indeterminate`, () => {
+    test(`${head}(−∞) is NaN`, () => {
       expect(ce.expr([head, 'NegativeInfinity']).evaluate().toString()).toBe(
-        'Indeterminate'
+        'NaN'
       );
     });
   }

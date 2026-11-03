@@ -30,9 +30,6 @@ import { MACHINE_PRECISION } from '../numerics/numeric.js';
  */
 export function machineNumberOf(target: Expression): number | undefined {
   if (!isNumber(target)) return undefined;
-  // `Indeterminate` has the double value `NaN`, but `ce.number(NaN)` is the
-  // `NaN` literal, a different value: a store would lose its kind.
-  if (target.isIndeterminate) return undefined;
   const nv = target.numericValue;
   if (typeof nv === 'number') return nv;
   if (nv.isComplex) return undefined;

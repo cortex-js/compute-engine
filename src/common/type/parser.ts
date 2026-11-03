@@ -34,7 +34,6 @@ import {
 } from './ast-nodes.js';
 import {
   COMPLEX_INFINITY_VALUE,
-  INDETERMINATE_VALUE,
   EffectLabel,
   EffectSet,
   ParameterDefault,
@@ -211,7 +210,7 @@ function normalizedTypeName(value: string): string {
    come before the optional arguments without one, and a default cannot name
    a parameter of the same signature. An identifier is a SYMBOL name here,
    not a type name; `True` and `False` are the booleans. `Nothing`,
-   `Missing`, `Indeterminate` and `~oo` are refused. A `=` is allowed only in
+   `Missing` and `~oo` are refused. A `=` is allowed only in
    the argument list of a function signature, not in a tuple type. *)
 <default_value> ::= <value> | <identifier> | <verbatim_string> | "[" "]" | "{" "}"
 
@@ -1514,10 +1513,9 @@ export class Parser {
    *   so the two spellings have one identity key;
    * - `[]` or `{}`, the empty list and the empty dictionary.
    *
-   * Refused: `Nothing` and `Missing` (the canonical form drops a `Nothing`
-   * operand, so an inserted default would disappear), and `Indeterminate` and
-   * `~oo`, which a JavaScript `number` cannot hold apart from `NaN` and the
-   * signed infinities. A list or a dictionary with contents is not spelled:
+   * Refused: `Nothing` and `Missing` (`Nothing` is the value of an empty
+   * block, not an argument value, and `Missing` is a result only), and `~oo`, which a
+   * JavaScript `number` cannot hold apart from the signed infinities. A list or a dictionary with contents is not spelled:
    * the type grammar has no expressions. A default that names a parameter of
    * the same signature is refused by `parseFunctionSignature()`, which knows
    * every parameter name.
@@ -1548,7 +1546,6 @@ export class Parser {
       case 'MINUS_INFINITY':
         this.advance();
         return { kind: 'value', value: -Infinity };
-      case 'INDETERMINATE':
       case 'COMPLEX_INFINITY':
         return this.error(
           `\`${token.value}\` is not a default value`,
@@ -2815,14 +2812,6 @@ export class Parser {
         this.advance();
         value = NaN;
         valueType = 'nan';
-        break;
-      case 'INDETERMINATE':
-        // `Indeterminate` has the double value `NaN` but is a different
-        // value, so it carries the `INDETERMINATE_VALUE` sentinel, recognized
-        // with `isIndeterminateValue()`.
-        this.advance();
-        value = INDETERMINATE_VALUE;
-        valueType = 'indeterminate';
         break;
       case 'INFINITY':
       case 'PLUS_INFINITY':

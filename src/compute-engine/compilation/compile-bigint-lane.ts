@@ -234,8 +234,8 @@ export interface BigintLaneRecord {
   rational?: { p: bigint; q: bigint };
   /** Set on a `folded` node whose value is a pole (§3.4): the `number`
    * that the emitted code throws in a `NonFiniteValue` where the node is
-   * evaluated, `Infinity` for an infinite value and `NaN` for
-   * `Indeterminate` (`LaneAnalyzer.constantPole`). */
+   * evaluated, `Infinity` for an infinite value and `NaN` for `NaN`
+   * (`LaneAnalyzer.constantPole`). */
   pole?: number;
   /**
    * A comparison with a rational constant operand (§3.3): the operand at
@@ -435,7 +435,7 @@ const PLAIN_LANE_HEADS: ReadonlySet<string> = new Set([
  * `Abs(0)^0`), and `Divide` with a divisor whose value is zero
  * (`1/Fibonacci(0)`). The canonical form of a literal zero base or
  * divisor (`0^(−1)`, `1/0`) is a non-finite literal (`~oo`,
- * `Indeterminate`), not an application of these heads: the analysis of
+ * `NaN`), not an application of these heads: the analysis of
  * a number literal folds it as a pole (`LaneAnalyzer.numberLiteral`). `Factorial2` is not one of them: its
  * operand must be typed `integer<0..>`, and its helper throws a
  * `RangeError` for a negative operand. */
@@ -769,7 +769,7 @@ class LaneAnalyzer {
     // A non-finite literal (`~oo`, `+oo`, `−oo`, `NaN`) is a pole
     // (§3.4): its code throws where the node is evaluated. The canonical
     // form of `0^(−1)` and `1/0` is `~oo`, and of `0^0` it is
-    // `Indeterminate`, so these nodes give the same result as the same
+    // `NaN`, so these nodes give the same result as the same
     // operation on inputs.
     if (bigintLane(t) && hasNonFiniteMember(t))
       return this.pole(
@@ -907,10 +907,9 @@ class LaneAnalyzer {
    * The pole of a constant node, or `undefined`. A constant node has a pole
    * when its head is a head of the lane that has poles (§3.4), every
    * operand is an exact integer constant, and the value of `evaluate()` is
-   * not finite: `(−1)!` is `~oo`, `Mod(5, 0)` is `Indeterminate`. The
-   * result is the `number` that the helper of the head throws for the same
-   * operands at run time: `NaN` for `Indeterminate`, `Infinity` for every
-   * infinite value.
+   * not finite: `(−1)!` is `~oo`, `Mod(5, 0)` is `NaN`. The result is the
+   * `number` that the helper of the head throws for the same operands at
+   * run time: `NaN` for `NaN`, `Infinity` for every infinite value.
    *
    * The engine types some of these nodes as `number` (`(−1)!`), and such a
    * node is not on the lane as an application. The analysis folds it as a

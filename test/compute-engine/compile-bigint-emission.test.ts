@@ -733,7 +733,7 @@ describe('constant folding (§3.7)', () => {
     });
 
     // The canonical form of `0^(−1)` and `1/0` is `~oo`, and of `0^0` it
-    // is `Indeterminate`: a non-finite literal is a pole, as is a
+    // is `NaN`: a non-finite literal is a pole, as is a
     // `Divide` whose divisor has the value zero.
     it.each([
       ['0^(−1)', ['Power', 0, -1], Infinity],

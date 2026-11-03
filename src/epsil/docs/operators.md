@@ -284,8 +284,8 @@ Write `{a -> 1, b -> (x ?? 2)}` instead. It is also looser than `||` and `&&`
 ## Presence assertion: `?!` {#presence-assertion}
 
 `x?!` is `AssertPresent(x)`: the value of `x`, or an `expected-present` error
-when `x` is **absent** (`missing`, `NaN`, an indeterminate form such as
-`0/0`). It is the third way to discharge a possibly absent value, beside a
+when `x` is **absent** (`missing`, or `NaN`, which is also the value of an
+indeterminate form such as `0/0`). It is the third way to discharge a possibly absent value, beside a
 fallback (`??`) and a guard (`isMissing`): use it where absence is a violated
 precondition and an invented replacement would hide a bug.
 
@@ -301,8 +301,8 @@ the element it reads, and the absent value is not part of its type. The
 assertion turns an absent value into an error at the read, before it reaches
 a parameter or a declaration. Only the value itself is checked, never the cells of a
 collection: `xs?!` asserts that the list is there, not that no cell is
-absent. `Nothing` is an omission marker, not an absent datum, and passes
-through; an error operand propagates unchanged.
+absent. `Nothing` is the value of an empty block, not an absent datum, and
+passes through; an error operand propagates unchanged.
 
 `?!` is a postfix operator at the factorial's precedence (110). It must abut
 its operand, like `!`, and a following operator needs a space, because an

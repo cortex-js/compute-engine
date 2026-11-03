@@ -131,9 +131,14 @@ describe('Append to a list literal folds into one list literal', () => {
   });
 
   test('an invalid appended value declines the fold', () => {
-    const e = ce.box(['Append', ['List', 1, 2], 'Nothing']);
+    const e = ce.box(['Append', ['List', 1, 2], ['Error', "'missing'"]]);
     expect(e.isValid).toBe(false);
     expect(e.operator).toBe('Append');
+  });
+
+  test('a Nothing appended value is an element, and folds', () => {
+    const e = ce.box(['Append', ['List', 1, 2], 'Nothing']);
+    expect(e.json).toEqual(['List', 1, 2, 'Nothing']);
   });
 
   test('past the collection size cap the lazy view is kept', () => {

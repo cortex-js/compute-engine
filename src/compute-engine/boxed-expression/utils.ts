@@ -38,8 +38,6 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import {
-  isAbsentSymbol,
-  isInexactOperand,
   isNumber,
   isFunction,
   isSymbol,
@@ -60,7 +58,6 @@ import {
   boundVariableNames,
   boundVariableNamesInOperand,
   callableBindingInContext,
-  isShield,
   markShieldDeclaration,
   rewriteWithBinders,
   withCallableBinding,
@@ -1346,47 +1343,6 @@ export function hasAssignedVariable(expr: Expression): boolean {
       return true;
   }
   return false;
-}
-
-/**
- * Whether the answer of an operation on `ops`, one of which is the
- * `Indeterminate` literal, depends on the value that a variable holds. That
- * answer is `NaN` when an operand is a float, the `NaN` literal or absent,
- * and `Indeterminate` otherwise (`nanOperandAnswer()`). An operand that reads
- * a variable with an assigned value (`hasAssignedVariable()`) can hold a
- * float or `NaN` when it is evaluated, so a fold that builds an expression
- * keeps the operation and lets `evaluate()` read the value then. With
- * `w := NaN`, `Indeterminate / w` was folded to `NaN`, and it stayed `NaN`
- * after `w := 2`.
- *
- * A symbol whose value is hidden by a shield (`markShieldDeclaration()`,
- * `binders.ts`) counts as one with an assigned value: `simplify()` hides the
- * value of each assigned variable behind a shield, and without this
- * `Indeterminate + w` with `w := 1.5` simplified to `Indeterminate` while
- * it evaluates to `NaN`.
- *
- * False when no operand is the `Indeterminate` literal, and when a literal
- * operand already makes the answer `NaN`.
- */
-export function indeterminateAnswerReadsVariable(
-  ops: ReadonlyArray<Expression>
-): boolean {
-  if (!ops.some((x) => isNumber(x) && x.isIndeterminate)) return false;
-  if (ops.some((x) => isInexactOperand(x) || isAbsentSymbol(x))) return false;
-  return ops.some(
-    (x) => !isNumber(x) && (hasAssignedVariable(x) || readsShieldedValue(x))
-  );
-}
-
-/** True when a free symbol of `expr` is bound to a shield, a valueless
- * declaration that hides the value of an enclosing variable
- * (`markShieldDeclaration()`, `binders.ts`). */
-function readsShieldedValue(expr: Expression): boolean {
-  const ce = expr.engine;
-  return expr.symbols.some((name) => {
-    const def = ce.lookupDefinition(name);
-    return isValueDef(def) && isShield(def.value);
-  });
 }
 
 /**

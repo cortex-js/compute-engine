@@ -422,11 +422,6 @@ describe('Append: invalid operands decline the flatten', () => {
   // Captured BEFORE the variadic change; these must not move.
   const cases: [string, Expression, Expression][] = [
     [
-      'a Nothing appended value',
-      ['Append', ['Range', 1, 2], 'Nothing'],
-      ['Append', ['Range', 1, 2], ['Error', "'missing'"]],
-    ],
-    [
       'a missing appended value',
       ['Append', ['Range', 1, 2]],
       ['Append', ['Range', 1, 2], ['Error', "'missing'"]],
@@ -453,8 +448,14 @@ describe('Append: invalid operands decline the flatten', () => {
       expect(e.json).toEqual(expected);
     });
 
+  test('a Nothing appended value is an element', () => {
+    const e = ce.box(['Append', ['Range', 1, 2], 'Nothing']);
+    expect(e.isValid).toBe(true);
+    expect(e.json).toEqual(['Append', ['Range', 1, 2], 'Nothing']);
+  });
+
   test('an invalid INNER Append is not spliced into the outer one', () => {
-    const e = ce.box(['Append', ['Append', ['Range', 1, 2], 'Nothing'], 5]);
+    const e = ce.box(['Append', ['Append', ['Range', 1, 2]], 5]);
     expect(e.isValid).toBe(false);
     expect(e.nops).toBe(2);
     expect(e.op1.operator).toBe('Append');
@@ -466,18 +467,19 @@ describe('Append: invalid operands decline the flatten', () => {
   });
 
   test('an invalid OUTER appended value declines the flatten', () => {
-    const e = ce.box(['Append', ['Append', ['Range', 1, 2], 3], 'Nothing']);
+    const e = ce.box([
+      'Append',
+      ['Append', ['Range', 1, 2], 3],
+      ['Error', "'missing'"],
+    ]);
     expect(e.isValid).toBe(false);
     expect(e.nops).toBe(2);
     expect(e.op1.operator).toBe('Append');
   });
 
   test('route parity for the error results', () => {
-    const viaBox = ce.box(['Append', ['Range', 1, 2], 'Nothing']);
-    const viaFn = ce.function('Append', [
-      ce.box(['Range', 1, 2]),
-      ce.box('Nothing'),
-    ]);
+    const viaBox = ce.box(['Append', 3, 4]);
+    const viaFn = ce.function('Append', [ce.number(3), ce.number(4)]);
     expect(viaFn.isValid).toBe(false);
     expect(viaFn.json).toEqual(viaBox.json);
   });

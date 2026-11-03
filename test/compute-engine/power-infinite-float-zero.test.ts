@@ -196,11 +196,11 @@ describe('POWER — a literal base near 1 to an infinity is compared exactly', (
     ).toBe('+oo');
   });
 
-  test('an exact 1 or −1 to an infinity stays Indeterminate', () => {
+  test('an exact 1 or −1 to an infinity stays NaN', () => {
     for (const base of [1, -1])
       for (const inf of ['PositiveInfinity', 'NegativeInfinity'])
         expect(ce.box(['Power', base, inf]).evaluate().toString()).toBe(
-          'Indeterminate'
+          'NaN'
         );
   });
 });

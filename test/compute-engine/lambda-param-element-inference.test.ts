@@ -761,9 +761,15 @@ describe('§6.4: a BARE parameter imposes no constraint (ruled 2026-08-09)', () 
     // (the seedless `Scan` seeds `a` with the first element, not `Nothing`)
     expect(expr.evaluate().toString()).toBe('[1,3,6]');
 
-    // The direct probe: the bare slot takes a `nothing` argument.
+    // The direct probe: the bare slot takes a `nothing` argument. The
+    // application is valid; its body `a + x` then gives the
+    // `incompatible-type` error of `Add`.
     const lit = expr.ops[1];
-    expect(ce.box(['Apply', lit, 'Nothing', 2]).evaluate().isValid).toBe(true);
+    const applied = ce.box(['Apply', lit, 'Nothing', 2]);
+    expect(applied.isValid).toBe(true);
+    expect(applied.evaluate().toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing")'
+    );
   });
 
   test('a GENERIC literal is not relaxed: the polytype is the contract', () => {

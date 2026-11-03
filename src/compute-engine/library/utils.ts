@@ -877,8 +877,8 @@ function termAtBound(
   const folded = value.evaluate();
   // A term that folds to a number with a value at the infinite bound is that
   // number (its limit): `−1/(x + 1 + ∞)` is `0`, and the closed form must not
-  // keep the infinity in an unfolded quotient. A term that folds to `NaN` or
-  // `Indeterminate` (`(∞ + x)/(∞ + x + 1)` is `∞/∞`) has no limit by
+  // keep the infinity in an unfolded quotient. A term that folds to
+  // `NaN` (`(∞ + x)/(∞ + x + 1)` is `∞/∞`) has no limit by
   // substitution: its limit is read from the degrees of its numerator and
   // denominator when it is a rational function of the index.
   if (isNumber(folded)) {

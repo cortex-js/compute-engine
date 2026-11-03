@@ -33,9 +33,9 @@ The check runs twice by design: once statically, when the program is canonicaliz
 
 ## `expected-present`
 
-A presence assertion `x?!` (`AssertPresent(x)`) was evaluated on an absent value: `missing`, `NaN`, or an indeterminate form such as `0/0`. The assertion says "this value is present, fail otherwise", and it failed; the error names the operand as written.
+A presence assertion `x?!` (`AssertPresent(x)`) was evaluated on an absent value: `missing` or `NaN` (an indeterminate form such as `0/0` is `NaN`). The assertion says "this value is present, fail otherwise", and it failed; the error names the operand as written.
 
-An absent value is a data state, not a bug in itself: an index out of range (`xs[i]`), a `first(filter(…))` that found nothing, a restricted value whose condition did not hold. Decide what the program should do when it happens. Write `x ?? fallback` to replace the absent value, test it with `isMissing(x)` and branch, or keep the assertion where absence really is a violated precondition and let the error propagate (`if let v: !error = …` catches it). `Nothing` is an omission marker, not an absent datum, and passes the assertion.
+An absent value is a data state, not a bug in itself: an index out of range (`xs[i]`), a `first(filter(…))` that found nothing, a restricted value whose condition did not hold. Decide what the program should do when it happens. Write `x ?? fallback` to replace the absent value, test it with `isMissing(x)` and branch, or keep the assertion where absence really is a violated precondition and let the error propagate (`if let v: !error = …` catches it). `Nothing` is the value of an empty block, not an absent datum, and passes the assertion.
 
 ## `no-product-between-points`
 
@@ -138,7 +138,7 @@ A parameter's default value (the part after `=` in `function f(x, k: number = 2)
 The message gives the reason:
 - Any other expression (`k = x + 1`, `xs = [1, 2]`) has no spelling in a signature. For a computed or non-empty default, declare a constant (`const weights = [1, 2, 3]`) and use its name as the default: the name is read when the call is evaluated, as if the caller had written it.
 - A default that names a parameter of the same list (`(x, k = x) => …`) is refused: the default is read as if the CALLER had written it, where the parameter does not exist.
-- `Nothing` and `Missing` are refused: an absent argument is dropped from a call, so the default would disappear.
+- `Missing` is refused: it is a result only, not a value that a call supplies.
 - A `bind` parameter of a `hold` definition cannot have a default: it names a variable that the caller writes.
 - A default beside a literal parameter (`function f(0, k = 2)`) is refused: a literal parameter makes the definition a clause of a multi-clause function, and a default in a multi-clause function is not supported yet, because the clause that receives a call is not always known when the call is completed with the default. For the same reason, adding a second clause to a function with a default (or a clause with a default to a function that has several) is refused when the definition runs.
 
@@ -230,7 +230,7 @@ Rename one side so the two agree — the quick fix renames the annotation's para
 
 ## `absence-marker-binding`
 
-A binding names one of the markers `Nothing` or `Missing`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — `Nothing` is dropped from an argument list, and an operand named `Missing` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound in any scope. Every other one, including `Pi` and `Square`, is shadowed by a user binding, with one exception: at the top level of a program, a `let` or `const` of a library constant that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`) is refused with a run-time error, because a result built with the library constant would read the user value when its MathJSON is boxed again.
+A binding names one of the markers `Nothing` or `Missing`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — an empty block evaluates to `Nothing`, and an operand named `Missing` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound in any scope. Every other one, including `Pi` and `Square`, is shadowed by a user binding, with one exception: at the top level of a program, a `let` or `const` of a library constant that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`) is refused with a run-time error, because a result built with the library constant would read the user value when its MathJSON is boxed again.
 
 Choose another name. In a `match`, a bare name is a new variable, not a comparison: to test for the marker, write `== Missing`.
 

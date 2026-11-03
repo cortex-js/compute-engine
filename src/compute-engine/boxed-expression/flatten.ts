@@ -3,7 +3,6 @@ import {
   isFoldBarrierProduct,
   isFunction,
   isNotationalProduct,
-  isSymbol,
 } from './type-guards.js';
 
 /**
@@ -17,28 +16,17 @@ import {
  * with the same operator.
  *  e.g. `["f", a, ["f", b, c]]` -> `["f", a, b, c]`
  *
- * `preserveNothing` retains tuple coordinates; explicit Sequences still splice
- * and omit Nothing under their ordinary rules.
+ * `Nothing` is an operand like any other and is kept: `[1, Nothing]` has two
+ * elements. A `Sequence` operand is spliced: `Add(1, Sequence())` has the one
+ * operand `1`.
  *
  * Note: *not* recursive
  */
 export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
   ops: T,
   operator?: string,
-  canonicalize = true,
-  preserveNothing = false
+  canonicalize = true
 ): T {
-  // An explicit Sequence still splices (and uses its own omission rules),
-  // even when it canonicalizes to Nothing before the outer tuple is built.
-  if (preserveNothing && ops.some((x) => isFunction(x, 'Sequence'))) {
-    const spliced: Expression[] = [];
-    for (const x of ops) {
-      if (isFunction(x, 'Sequence')) {
-        for (const y of flatten([x], operator, canonicalize)) spliced.push(y);
-      } else spliced.push(x);
-    }
-    return flatten(spliced, operator, canonicalize, true) as T;
-  }
   // Optionally make all the arguments canonical.
   const xs: ReadonlyArray<Expression> =
     !canonicalize || ops.every((x) => x.isCanonical)
@@ -47,9 +35,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
 
   if (operator) {
     const shouldFlatten = (x: Expression) =>
-      (!preserveNothing && isSymbol(x, 'Nothing')) ||
-      x.operator === operator ||
-      x.operator === 'Sequence';
+      x.operator === operator || x.operator === 'Sequence';
 
     // Bypass memory allocation for the common case where there is nothing to flatten
     if (xs.every((x) => !shouldFlatten(x))) return xs as T;
@@ -57,42 +43,25 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
     // Iterate over the list of expressions and flatten them
     const ys: Expression[] = [];
     for (const x of xs) {
-      // Skip Nothing
-      if (!preserveNothing && isSymbol(x, 'Nothing')) continue;
-
       // If the operator matches, flatten the expression
       if (
         isFunction(x) &&
         (x.operator === operator || x.operator === 'Sequence')
       )
-        for (const y of flatten(x.ops, operator, canonicalize, preserveNothing))
-          ys.push(y);
+        for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
       else ys.push(x);
     }
     return ys as T;
   }
 
-  if (
-    xs.every(
-      (x) =>
-        !(
-          (!preserveNothing && isSymbol(x, 'Nothing')) ||
-          x.operator === 'Sequence'
-        )
-    )
-  )
-    return xs as T;
+  if (xs.every((x) => x.operator !== 'Sequence')) return xs as T;
 
   // Iterate over the list of expressions and flatten them
   const ys: Expression[] = [];
   for (const x of xs) {
-    // Skip Nothing
-    if (!preserveNothing && isSymbol(x, 'Nothing')) continue;
-
     // If the operator matches, flatten the expression
     if (isFunction(x, 'Sequence'))
-      for (const y of flatten(x.ops, operator, canonicalize, preserveNothing))
-        ys.push(y);
+      for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
     else ys.push(x);
   }
   return ys as T;
@@ -101,7 +70,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
 /**
  * Like {@link flatten}, but ellipsis-fold barriers are held back.
  *
- * Lifts `Sequence`/`Nothing` and nested `operator` applications recursively,
+ * Lifts `Sequence` and nested `operator` applications recursively,
  * exactly like `flatten`, EXCEPT that an operand which is a fold-barrier
  * product (a `Multiply` carrying a `ContinuationPlaceholder` at any depth) is
  * pushed back WHOLE: splicing it would smuggle the placeholder into the
@@ -127,8 +96,6 @@ export function flattenHoldingBarriers<
       ys.push(x);
       continue;
     }
-    // Skip Nothing
-    if (isSymbol(x, 'Nothing')) continue;
     // Lift the requested operator and `Sequence`, still holding barriers back
     if (isFunction(x) && (x.operator === operator || x.operator === 'Sequence'))
       for (const y of flattenHoldingBarriers(x.ops, operator, canonicalize))
@@ -155,7 +122,6 @@ export function flattenKeepingNotationalProducts(
   const ys: Expression[] = [];
   for (const x of ops) {
     if (isNotationalProduct(x)) ys.push(x);
-    else if (isSymbol(x, 'Nothing')) continue;
     else if (
       isFunction(x) &&
       (x.operator === operator || x.operator === 'Sequence')

@@ -1,7 +1,7 @@
 /**
  * `simplify()` gives the answer of `evaluate()` for a `NaN` operand that the
  * operator's own `evaluate` handler reads (a position whose NaN policy is
- * `inert` or `handle`), when that answer is `NaN` or `Indeterminate`.
+ * `inert` or `handle`), when that answer is `NaN` or `NaN`.
  * `Max` and `Min` are of this kind. Before 2026-09-30
  * `Max(x, NaN).simplify()` stayed `max(x, NaN)` while `evaluate()` answered
  * `NaN`.
@@ -14,7 +14,7 @@ describe('SIMPLIFY WITH A NaN OPERAND THE HANDLER READS', () => {
   test.each([
     [['Max', 'x', 'NaN'], 'NaN'],
     [['Min', 'NaN', 'x'], 'NaN'],
-    [['Max', 'x', 'Indeterminate'], 'Indeterminate'],
+    [['Max', 'x', 'NaN'], 'NaN'],
   ])('%j', (input, expected) => {
     const e = ce.box(input as any);
     expect(e.simplify().toString()).toBe(expected);

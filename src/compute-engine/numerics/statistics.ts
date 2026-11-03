@@ -165,7 +165,7 @@ function bigVarImpl(
   const { n, m2 } = bigWelford(values);
   if (n === 0) return BigDecimal.NAN;
   // The sample variance of one datum is `0/0`, which has no value: `NaN`,
-  // as the machine version and the exact route (`Indeterminate`) give.
+  // as the machine version and the exact route give.
   if (n === 1 && !population) return BigDecimal.NAN;
   return m2.div(new BigDecimal(population ? n : n - 1));
 }
@@ -238,8 +238,7 @@ export function bigPopulationStandardDeviation(
  * machine numbers, or `undefined` when the moment ratios have no value: the
  * stream is empty, a datum is not finite, or all the data are equal (one
  * datum included). When all the data are equal, every deviation from the
- * mean is zero, so the moment ratio is `0/0`, which has no value: `NaN`, as
- * the exact route gives `Indeterminate`. The test is made on the data, the
+ * mean is zero, so the moment ratio is `0/0`, which has no value: `NaN`. The test is made on the data, the
  * same test as in `bigCentralMoments()`. In that version, the update can
  * give a small `M2` that is not zero: a division rounds to the working
  * precision, and a datum such as `√2` has more digits than that.

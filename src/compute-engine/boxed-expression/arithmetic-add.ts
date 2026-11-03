@@ -1,7 +1,6 @@
 import type { BigDecimal } from '../../big-decimal/index.js';
 import {
   getImaginaryFactor,
-  indeterminateAnswerReadsVariable,
 } from './utils.js';
 
 import { flatten } from './flatten.js';
@@ -44,8 +43,6 @@ import {
   isAbsentSymbol,
   isAbsentArithmeticOperand,
   isContinuationOperand,
-  nanOperandAnswer,
-  indeterminateFormAnswer,
 } from './type-guards.js';
 import {
   isImaginaryPartSafeInteger,
@@ -757,13 +754,6 @@ export function addArray(xs: ReadonlyArray<Expression>): Expression {
       xs.map((x) => x.canonical)
     );
 
-  // An `Indeterminate` term beside a term that reads a variable with an
-  // assigned value: the answer is `NaN` or `Indeterminate` depending on the
-  // value the variable holds when the sum is evaluated, so the sum is kept
-  // (`indeterminateAnswerReadsVariable()`).
-  if (indeterminateAnswerReadsVariable(xs))
-    return xs[0].engine.function('Add', [...xs]);
-
   // A term that is collection-TYPED but has no collection value yet (a
   // declared-but-unassigned `list<number>` symbol) is not a broadcast
   // participant, so each branch below would splice it whole into every cell as
@@ -1312,18 +1302,14 @@ export class Terms {
       // `Add` of many terms, that type walk made each addition cost as much
       // as the number of terms.
       //
-      // The answer is `NaN`, except that an `Indeterminate` term makes the
-      // sum `Indeterminate` when no term is `NaN`, a float or absent: every
-      // term is read (`nanOperandAnswer()`), not only the ones before this
-      // one, so that `Indeterminate + 1.5` is `NaN` as a float operand makes
-      // a numeric result a float, and `Indeterminate + 1` is `Indeterminate`.
+      // The answer is `NaN`.
       //
       // Only a NUMBER LITERAL is read here: `isNaN` of a symbol reads its
       // current value, and a sum built from the symbol must not depend on it
       // (with `w := NaN`, `w + 1` stayed `NaN` after `w := 4`). The symbol
       // stays a term, and `evaluate()` reads its value.
       if (isNumber(term) && term.isNaN) {
-        this.terms = [{ term: nanOperandAnswer(ce, terms), coef: [] }];
+        this.terms = [{ term: ce.NaN, coef: [] }];
         return;
       }
 
@@ -1365,16 +1351,15 @@ export class Terms {
           coef.some((v) => v.isPositiveInfinity) &&
           coef.some((v) => v.isNegativeInfinity)
         ) {
-          this.terms = [{ term: indeterminateFormAnswer(ce, terms), coef: [] }];
+          this.terms = [{ term: ce.NaN, coef: [] }];
           return;
         }
       }
     }
 
-    // `∞ − ∞` is the indeterminate form: `Indeterminate`, or `NaN` when a
-    // term is a float (`indeterminateFormAnswer()`).
+    // `∞ − ∞` is the indeterminate form: `NaN`.
     if (posInfinityCount > 0 && negInfinityCount > 0) {
-      this.terms = [{ term: indeterminateFormAnswer(ce, terms), coef: [] }];
+      this.terms = [{ term: ce.NaN, coef: [] }];
       return;
     }
     // A signed infinity absorbs the sum only when no term `±∞·c` of unknown

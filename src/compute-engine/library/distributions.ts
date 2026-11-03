@@ -10,8 +10,6 @@ import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
   isAbsentSymbol,
   isAbsentValue,
-  nanOperandAnswer,
-  indeterminateFormAnswer,
   isFunction,
   isNumber,
 } from '../boxed-expression/type-guards.js';
@@ -277,7 +275,7 @@ function gammaIsPositiveAt(a: Expression): boolean {
  *   and where `Γ(a)` is a pole `Q` is identically 0 anyway. An `a` whose
  *   finiteness is NOT proven — a symbol whose type admits an infinity — stays
  *   symbolic, because the value at an infinite `a` is different
- *   (`Indeterminate`) and
+ *   (`NaN`) and
  *   the fold could not be taken back.
  * - `Q(+∞, z) = 1` for every provably finite `z`, negative `z` included
  *   (`Q(10⁶, −5) = 1`): the mass of `Γ(a, ·)` moves out past any fixed `z`.
@@ -302,14 +300,13 @@ function gammaIsPositiveAt(a: Expression): boolean {
  *   literal stays SYMBOLIC — a symbol declared `integer` may hold a positive
  *   integer, whose value is `±∞` by the rows above, and `~oo` could not be
  *   taken back.
- * - `Q(−∞, z)`: `Indeterminate`. `Q` is identically 0 at every negative integer `a`
+ * - `Q(−∞, z)`: `NaN`. `Q` is identically 0 at every negative integer `a`
  *   (a pole of `Γ(a)`) and diverges to `−∞` between consecutive poles
  *   (`Q(−10⁶−¼, 2) = −7·10^5264672`), so there is no limit.
- * - `~oo` in either slot, or two infinite operands: `Indeterminate`.
+ * - `~oo` in either slot, or two infinite operands: `NaN`.
  *
- * `Indeterminate` is the exact answer to a form with no value; a float
- * operand makes it `NaN` (`indeterminateFormAnswer()`). `Q(a, −∞)` for a
- * non-integer `a` is `~oo`, not `Indeterminate`: there the value is complex
+ * `Q(a, −∞)` for a
+ * non-integer `a` is `~oo`, not `NaN`: there the value is complex
  * with an unbounded modulus, not a form with no value.
  */
 function gammaRegularizedValueAtInfinity(
@@ -321,7 +318,7 @@ function gammaRegularizedValueAtInfinity(
   const pz = infinitePoint(z);
   if (pa === undefined && pz === undefined) return undefined;
   if (pa !== undefined && pz !== undefined)
-    return indeterminateFormAnswer(ce, [a, z]);
+    return ce.NaN;
   if (pz === '+oo') return isProvablyFinite(a) ? ce.Zero : undefined;
   if (pz === '-oo') {
     // Only a LITERAL `a` is classified. A symbol — declared `integer`, or
@@ -344,9 +341,9 @@ function gammaRegularizedValueAtInfinity(
     if (a.isInteger === false) return ce.ComplexInfinity;
     return undefined;
   }
-  if (pz !== undefined) return indeterminateFormAnswer(ce, [a, z]);
+  if (pz !== undefined) return ce.NaN;
   if (pa === '+oo') return isProvablyFinite(z) ? ce.One : undefined;
-  return indeterminateFormAnswer(ce, [a, z]);
+  return ce.NaN;
 }
 
 /**
@@ -1391,19 +1388,14 @@ function empiricalQuantile(
   //   numeric expression such as `Sqrt(-2)` that stays symbolic — overlaps
   //   `number`, so the application stays INERT and a later assignment or a
   //   `.N()` can still answer it.
-  // - An `Indeterminate` datum is not absent, but it makes the quantile
-  //   `Indeterminate` when no datum is absent, `NaN` or inexact, as it does
-  //   for the statistics family (`collectData`).
   let absent = false;
   let missing = false;
-  let indeterminate = false;
   let inert = false;
   for (const v of data) {
     // A refused datum later in the data still gives the error, which
     // outranks an absent datum, so `Missing` is answered after the walk.
     if (isAbsentSymbol(v)) missing = true;
     else if (isAbsentValue(v)) absent = true;
-    else if (v.isIndeterminate) indeterminate = true;
     else if (!isNumber(v)) {
       // An `error` datum is exempt from the refusal: it already speaks the
       // Error channel and the engine propagates it on its own.
@@ -1414,7 +1406,6 @@ function empiricalQuantile(
   }
   if (missing) return ce.Missing;
   if (absent) return ce.NaN;
-  if (indeterminate) return nanOperandAnswer(ce, data);
   if (inert) return undefined;
 
   // A quantile is an order statistic and the complex numbers have no

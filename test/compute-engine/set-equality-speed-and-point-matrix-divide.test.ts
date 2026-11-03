@@ -462,7 +462,7 @@ describe('a point divided by a collection with a zero cell', () => {
     [
       ['Divide', P0, ['List', 1, 0]],
       'list<tuple<nan, infinity> | tuple<rational, rational>>',
-      '[(0, 2),(Indeterminate, ~oo)]',
+      '[(0, 2),(NaN, ~oo)]',
     ],
     [
       ['Divide', P, ['List', ['List', 1, 0], ['List', 3, 4]]],
@@ -472,7 +472,7 @@ describe('a point divided by a collection with a zero cell', () => {
     [
       ['Divide', P0, ['List', ['List', 1, 0], ['List', 3, 4]]],
       'matrix<(tuple<nan, infinity> | tuple<rational, rational>)^(2x2)>',
-      '[[(0, 2),(Indeterminate, ~oo)],[(0, 2/3),(0, 1/2)]]',
+      '[[(0, 2),(NaN, ~oo)],[(0, 2/3),(0, 1/2)]]',
     ],
     [
       ['Divide', P, ['Range', -1, 1]],

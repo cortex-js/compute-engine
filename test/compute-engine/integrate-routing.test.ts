@@ -72,7 +72,7 @@ test.each([1, 2, 3])(
         const value = ce
           .box(['Integrate', f, ['Limits', 'x', a, b]])
           .evaluate();
-        expect(value.toString()).toBe('Indeterminate');
+        expect(value.toString()).toBe('NaN');
       }
     }
   }

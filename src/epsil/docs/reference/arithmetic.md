@@ -179,12 +179,11 @@ apart.
   direction. Arithmetic on a signed
   infinity (`oo`, `-oo`) gives a signed infinity.
 - An **indeterminate form**, such as `0/0`, `oo - oo` or `oo * 0`, gives
-  `Indeterminate`: an exact question with no value. With a float operand
-  (`0.0/0.0`), and under `N`, it gives `NaN`.
+  `NaN`: a question with no value.
 
 ```epsil
 [1/0, 0/0, oo + 1, oo - oo, oo * 0, 1/oo]
-// ➔ [~oo, Indeterminate, +oo, Indeterminate, Indeterminate, 0]
+// ➔ [~oo, NaN, +oo, NaN, NaN, 0]
 ```
 
 `NaN` propagates: a numeric function of `NaN` is `NaN`. This is true for
@@ -874,20 +873,20 @@ The imaginary unit, whose square is −1.
 
 ### Indeterminate
 
-constant `number` = `Indeterminate`
+constant `number` = `NaN`
 
-Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. Its numeric approximation is NaN.
+An input spelling of NaN.
 
 ```epsil
-[0/0, Indeterminate + 1, N(0/0)]
-// ➔ [Indeterminate,Indeterminate,NaN]
+[Indeterminate, Indeterminate + 1]
+// ➔ [NaN,NaN]
 ```
 
 ### infimum
 
 MathJSON `Infimum` · `(value*) -> number`
 
-Like Min, but defined for open sets. Nothing data are omitted.
+Like Min, but defined for open sets.
 
 ```epsil
 [infimum(1, 3, 2), infimum(interval(0, 1))]
@@ -1068,7 +1067,7 @@ N(machineEpsilon)
 
 MathJSON `Max` · `(value*) -> number`
 
-Maximum of two or more numbers. Nothing data are omitted.
+Maximum of two or more numbers.
 
 ```epsil
 [max(3, 7, 2), max([3, 7, 2])]
@@ -1095,7 +1094,7 @@ N(measurement(5, 0.2) * measurement(3, 0.4))
 
 MathJSON `Min` · `(value+) -> number`
 
-Minimum of two or more numbers. Nothing data are omitted.
+Minimum of two or more numbers.
 
 ```epsil
 [min(3, 7, 2), min([3, 7, 2])]
@@ -1128,11 +1127,11 @@ Product of two or more values.
 
 constant `number` = `NaN`
 
-Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. An exact form with no value, such as 0/0, is Indeterminate.
+Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0, or of an exact form with no value, such as 0/0.
 
 ```epsil
-[NaN + 1, 0.0/0.0]
-// ➔ [NaN,NaN]
+[NaN + 1, 0.0/0.0, 0/0]
+// ➔ [NaN,NaN,NaN]
 ```
 
 ### Negate
@@ -1249,7 +1248,7 @@ PreIncrement(5)
 
 MathJSON `Product` · `(any, tuple*) -> number`
 
-`Product(f, a, b)` computes the product of `f` from `a` to `b`. Nothing factors are omitted.
+`Product(f, a, b)` computes the product of `f` from `a` to `b`.
 
 ```epsil
 product(k, (k, 1, 5))
@@ -1402,7 +1401,7 @@ Difference between two or more values.
 
 MathJSON `Sum` · `(any, tuple*) -> number`
 
-`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. Nothing terms are omitted.
+`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`.
 
 ```epsil
 sum(k^2, (k, 1, 10))
@@ -1418,7 +1417,7 @@ sum(1/k^2, (k, 1, oo))
 
 MathJSON `Supremum` · `(value*) -> number`
 
-Like Max, but defined for open sets. Nothing data are omitted.
+Like Max, but defined for open sets.
 
 ```epsil
 [supremum(1, 3, 2), supremum(interval(0, 1))]

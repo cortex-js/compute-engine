@@ -404,10 +404,9 @@ describe('OPERATOR divide', () => {
 
 describe('OPERATOR partial derivative', () => {
   test('\\partial f', () =>
-    expect(check('\\partial f')).toMatchInlineSnapshot(`
-      box       = ["PartialDerivative", "f", "Nothing"]
-      canonical = ["PartialDerivative", "f"]
-    `));
+    expect(check('\\partial f')).toMatchInlineSnapshot(
+      `["PartialDerivative", "f"]`
+    ));
 
   test('\\partial_x f', () =>
     expect(check('\\partial_x f')).toMatchInlineSnapshot(`

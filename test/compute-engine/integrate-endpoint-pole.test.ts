@@ -109,9 +109,9 @@ describe('INTEGRAL WITH A POLE AT A BOUND', () => {
       0,
       1
     );
-    // `Indeterminate` under evaluate(), as for an interior pole across
+    // `NaN` under evaluate(), as for an interior pole across
     // which the integrand changes sign.
-    expect(e.evaluate().toString()).toBe('Indeterminate');
+    expect(e.evaluate().toString()).toBe('NaN');
     expect(e.N().isNaN).toBe(true);
   });
 });
@@ -238,7 +238,7 @@ describe('A LOGARITHM IN A DENOMINATOR', () => {
   test('∫ from ½ to 2 of 1/ln t has no value', () => {
     // `1/ln t` changes sign across `t = 1`.
     const e = integral(['Divide', 1, ['Ln', 't']], 't', ['Rational', 1, 2], 2);
-    expect(e.evaluate().toString()).toBe('Indeterminate');
+    expect(e.evaluate().toString()).toBe('NaN');
     expect(e.N().isNaN).toBe(true);
   });
 });

@@ -922,13 +922,15 @@ function matchCommutativeWithAnchors(
 
     for (let count = maxCapture; count >= 0; count--) {
       if (count === 0) {
-        // Capture identity element
+        // Capture identity element: an empty `Sequence` for an operator
+        // other than `Add` and `Multiply`, which a substitution splices out
+        // of the operands (`Nothing` would be kept as an operand).
         const identity =
           expr.operator === 'Add'
             ? ce.Zero
             : expr.operator === 'Multiply'
               ? ce.One
-              : ce.Nothing;
+              : ce._fn('Sequence', []);
         const newSub = captureWildcard(wcName, identity, sub);
         if (newSub !== null) {
           const result = tryAssignWildcards(restWildcards, remaining, newSub);
@@ -1272,7 +1274,7 @@ function matchArguments(
         // Otherwise must be an optional-sequence match: this is permitted.
         if (expr.operator === 'Add') value = ce.Zero;
         else if (expr.operator === 'Multiply') value = ce.One;
-        else value = ce.Nothing;
+        else value = ce._fn('Sequence', []);
       } else if (qty === 1) {
         // Capturing a single element/operand
         value = ops.shift()!;

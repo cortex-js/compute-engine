@@ -47,9 +47,7 @@ import {
   isExpression,
   isFunction,
   isNumber,
-  indeterminateFormAnswer,
   isSymbol,
-  nanOperandAnswer,
   sym,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -1523,8 +1521,8 @@ const exactDivergenceChecks = new WeakMap<object, Set<string>>();
 /**
  * The value that the exact route gives to a definite integral that the
  * numeric route found divergent, or whose quadrature overflowed, with no
- * sign: `+∞` or `−∞`, or `NaN` for an integral with no value (the exact
- * route gives `Indeterminate`). `undefined` when the exact route gives
+ * sign: `+∞` or `−∞`, or `NaN` for an integral with no value.
+ * `undefined` when the exact route gives
  * anything else (an unevaluated integral, a finite value): the numeric
  * answer then stands.
  *
@@ -1785,70 +1783,6 @@ function provenRealOnInterval(
   if (order === undefined) return false;
   const [lo, hi] = order < 0 ? [upper, lower] : [lower, upper];
   return continuousRange(integrand, variable, lo, hi) !== undefined;
-}
-
-/**
- * The exact-route value of a definite integral that has no value, not even
- * an infinite one: the integrand changes sign across a pole inside the
- * bounds (`∫₋₁¹ dt/t`), or has poles at both bounds that diverge with
- * different signs (`∫₀¹ (1/t − 1/(1 − t)) dt`). It is `Indeterminate` when
- * the bounds and every number literal of the integrand are exact, and `NaN`
- * when one of them is a float (`∫₋₁¹ 1.5/t dt`), as for any exact form with
- * no value (see `indeterminateFormAnswer`).
- *
- * `integrand` must be the integrand with the values of the assigned symbols
- * substituted (`withAssignedValues`), so that a float held by a symbol
- * counts as a float operand. The values of the assigned symbols of the
- * bounds are substituted here.
- */
-function noValueIntegral(
-  ce: ComputeEngine,
-  integrand: Expression,
-  lower: Expression,
-  upper: Expression
-): Expression {
-  const operands: Expression[] = [];
-  const collect = (e: Expression): void => {
-    if (isNumber(e)) operands.push(e);
-    else if (isFunction(e)) for (const op of e.ops) collect(op);
-  };
-  // A bound counts with its number literals at any depth (`-sin(1.5)`) and
-  // with the value of an assigned symbol (`b := -1.5`). Its symbols are
-  // kept too: an absent bound (`Missing`) makes the answer `NaN`.
-  const collectBound = (e: Expression): void => {
-    if (isNumber(e) || isSymbol(e)) operands.push(e);
-    else if (isFunction(e)) for (const op of e.ops) collectBound(op);
-  };
-  collectBound(withAssignedValues(ce, lower, []));
-  collectBound(withAssignedValues(ce, upper, []));
-  collect(integrand);
-  return indeterminateFormAnswer(ce, operands);
-}
-
-/**
- * The value of a contour integral (`ContourIntegrate`, `CircularIntegrate`)
- * that has no value: `Indeterminate` when the contour and every number
- * literal of the integrand are exact, and `NaN` when one of them is a float,
- * as for `noValueIntegral()`.
- *
- * The values of the assigned symbols other than the integration variable
- * `variable` are substituted first, so that a float held by a symbol
- * (`a := 1.5` in `a/(z − 1)`) counts as a float operand.
- */
-function noValueContourIntegral(
-  ce: ComputeEngine,
-  integrand: Expression,
-  variable: string,
-  contour: Expression
-): Expression {
-  const operands: Expression[] = [];
-  const collect = (e: Expression): void => {
-    if (isNumber(e)) operands.push(e);
-    else if (isFunction(e)) for (const op of e.ops) collect(op);
-  };
-  collect(withAssignedValues(ce, integrand, [variable]));
-  collect(withAssignedValues(ce, contour, [variable]));
-  return indeterminateFormAnswer(ce, operands);
 }
 
 /**
@@ -6367,15 +6301,8 @@ volumes
         const integrand = contourIntegrand(ce, ops[0], variable.symbol);
         if (integrand === undefined) return undefined;
         const r = ce.contourIntegrate(integrand, variable.symbol, contour);
-        let value =
+        const value =
           r.status === 'pole-on-contour' ? singularPathValue(ce, r) : r.value;
-        if (value?.isIndeterminate === true)
-          value = noValueContourIntegral(
-            ce,
-            integrand,
-            variable.symbol,
-            contour
-          );
         return numericApproximation ? value?.N() : value;
       },
     },
@@ -6423,10 +6350,8 @@ volumes
         const integrand = contourIntegrand(ce, f, variable);
         if (integrand === undefined) return undefined;
         const r = ce.contourIntegrate(integrand, variable, contour);
-        let value =
+        const value =
           r.status === 'pole-on-contour' ? singularPathValue(ce, r) : r.value;
-        if (value?.isIndeterminate === true)
-          value = noValueContourIntegral(ce, integrand, variable, contour);
         return numericApproximation ? value?.N() : value;
       },
     },
@@ -6922,13 +6847,10 @@ volumes
           }
         }
 
-        // An integrand that is the `NaN` or `Indeterminate` literal: the
+        // An integrand that is the `NaN` literal: the
         // integral has no value, on the exact and the numeric route alike,
         // with or without bounds. `Integrate` is lazy, so the NaN-policy
-        // step of evaluation does not run for it. The answer follows
-        // `nanOperandAnswer()`: `Indeterminate` when the integrand is
-        // `Indeterminate` and no bound is a float, `NaN` otherwise, and
-        // always `NaN` under `N()`.
+        // step of evaluation does not run for it. The answer is `NaN`.
         // A held integrand can be the raw symbol `NaN`: `.canonical` makes
         // it the number literal (and does not substitute assigned values).
         // The body of a function literal can be a `Block` of one expression.
@@ -6953,13 +6875,7 @@ volumes
                 (isSubtype(l.op2.type.type, 'list<any>') ||
                   isSubtype(l.op3.type.type, 'list<any>'))
             );
-          if (!hasListBound) {
-            if (numericApproximation) return ce.NaN;
-            const bounds = ops
-              .slice(1)
-              .flatMap((l) => (isFunction(l, 'Limits') ? [l.op2, l.op3] : []));
-            return nanOperandAnswer(ce, [body, ...bounds]);
-          }
+          if (!hasListBound) return ce.NaN;
           const limitValues = ops
             .slice(1)
             .map((l) =>
@@ -6988,14 +6904,7 @@ volumes
           if (count === undefined) return undefined;
           const results: Expression[] = [];
           for (let i = 0; i < count; i++) {
-            if (numericApproximation) {
-              results.push(ce.NaN);
-              continue;
-            }
-            const bounds = limitValues.flatMap((values) =>
-              values.map((b) => (isFunction(b, 'List') ? b.ops[i] : b))
-            );
-            results.push(nanOperandAnswer(ce, [body, ...bounds]));
+            results.push(ce.NaN);
           }
           return ce.function('List', results);
         }
@@ -7119,7 +7028,7 @@ volumes
             // integrand keeps one sign next to every such pole, and has no
             // value when it changes sign. When neither could be decided, the
             // other methods below are tried.
-            let divergent =
+            const divergent =
               r.status === 'pole-on-contour'
                 ? divergentIntegralValue(
                     ce,
@@ -7127,8 +7036,6 @@ volumes
                     lo.sgn === 'negative'
                   )
                 : undefined;
-            if (divergent?.isIndeterminate === true)
-              divergent = noValueIntegral(ce, liftIntegrand(ops[0]), lo, hi);
             if (divergent)
               return numericApproximation ? divergent.N() : divergent;
             if (r.value) {
@@ -7147,14 +7054,12 @@ volumes
             sym(lo) !== 'Nothing' &&
             sym(hi) !== 'Nothing'
           ) {
-            let value = definiteIntegralByResidues(
+            const value = definiteIntegralByResidues(
               liftIntegrand(ops[0]),
               variable,
               lo,
               hi
             );
-            if (value?.isIndeterminate === true)
-              value = noValueIntegral(ce, liftIntegrand(ops[0]), lo, hi);
             if (value) return numericApproximation ? value.N() : value;
           }
         }
@@ -7791,7 +7696,7 @@ volumes
                 constantFactorPoleVerdict(ce, original, variable, lower, upper);
               if (verdict) {
                 if (verdict.sign === 'mixed')
-                  return noValueIntegral(ce, original, lower, upper);
+                  return ce.NaN;
                 if (verdict.sign === 'positive') return ce.PositiveInfinity;
                 if (verdict.sign === 'negative') return ce.NegativeInfinity;
                 return undefined;
@@ -8052,8 +7957,7 @@ volumes
               // sign on both sides of every pole the integral diverges to that
               // infinity (∫₋₁¹ dt/t² → +∞, as ∫₀¹ dt/t → +∞ already does).
               // When it changes sign (`mixed`) the integral has no value, not
-              // even an infinite one: `Indeterminate`, or `NaN` with a float
-              // operand (see `noValueIntegral`). When the direction of the
+              // even an infinite one: `NaN`. When the direction of the
               // divergence is not established (`unknown`) the integral stays
               // inert, as the "antiderivative not fully found" arm above
               // does. `interiorPoleVerdict` only answers for a proven pole,
@@ -8065,12 +7969,7 @@ volumes
                   : pole.sign === 'negative'
                     ? ce.NegativeInfinity
                     : pole.sign === 'mixed'
-                      ? noValueIntegral(
-                          ce,
-                          withAssignedValues(ce, integrand, [variable]),
-                          lower,
-                          upper
-                        )
+                      ? ce.NaN
                       : ce.function('Integrate', [
                           expr,
                           ce.function('Limits', [
@@ -8147,11 +8046,8 @@ volumes
               // sign. The integral is the one-sided limit from inside the
               // interval, which diverges with the sign of the integrand next
               // to the bound (`∫₀¹ t⁻² dt` is `+∞`). Poles at both bounds with
-              // different signs give an integral with no value:
-              // `Indeterminate`, or `NaN` with a float operand, as for an
-              // interior pole that changes sign (see `noValueIntegral`). The
-              // check
-              // runs only when the antiderivative difference is not finite:
+              // different signs give an integral with no value, `NaN`, as
+              // for an interior pole that changes sign. The check runs only when the antiderivative difference is not finite:
               // it alone cannot tell an integrable singularity of order
               // close to 1 (`t^(−0.95)`) from a pole (see
               // `endpointPoleVerdict`).
@@ -8177,7 +8073,7 @@ volumes
                     upper
                   );
                 if (endpoint?.sign === 'mixed')
-                  noValue = noValueIntegral(ce, integrandValue, lower, upper);
+                  noValue = ce.NaN;
                 else if (endpoint !== undefined)
                   raw = poleVerdictValue(ce, endpoint);
                 // A complex infinity (`~∞`) is not the value of the integral

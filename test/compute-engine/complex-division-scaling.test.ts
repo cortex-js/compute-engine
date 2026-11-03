@@ -304,10 +304,10 @@ describe('SCALED COMPLEX DIVISION: helpers', () => {
 describe('SCALED COMPLEX DIVISION: zero, infinite and NaN operands keep their values', () => {
   // Measured before the scaled division was introduced (2026-09-27). The
   // fourth entry, when present, is the answer of evaluate() where it differs
-  // from N(): the exact indeterminate form `0/0` is `Indeterminate`.
+  // from N(): the exact indeterminate form `0/0` is `NaN`.
   const cases: [string, any, string, string?][] = [
     ['(1 + i) / 0', ['Divide', ['Complex', 1, 1], 0], '~oo'],
-    ['0 / 0', ['Divide', 0, 0], 'NaN', 'Indeterminate'],
+    ['0 / 0', ['Divide', 0, 0], 'NaN', 'NaN'],
     ['(1 + i) / NaN', ['Divide', ['Complex', 1, 1], 'NaN'], 'NaN'],
     ['NaN / (1 + i)', ['Divide', 'NaN', ['Complex', 1, 1]], 'NaN'],
     ['(1 + i) / +oo', ['Divide', ['Complex', 1, 1], 'PositiveInfinity'], '0'],

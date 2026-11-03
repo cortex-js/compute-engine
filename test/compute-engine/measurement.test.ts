@@ -898,28 +898,24 @@ describe('Measurement — ordered by the nominal in the extremum operators', () 
 
   // Decision 13 of `docs/plans/2026-10-26-value-kinds.md`, section 13: a
   // measurement is inexact (the `isExact` hook of its kind), whatever its
-  // nominal, so `Indeterminate` beside it becomes `NaN` (an exact nominal
-  // gave `Indeterminate`).
+  // nominal, so `NaN` beside it becomes `NaN` (an exact nominal
+  // gave `NaN`).
   test('ElementMax reads inexactness off the kind, as Max does', () => {
-    const r = ce.box(['ElementMax', ['Measurement', 1.5, 0.1], 'Indeterminate']).evaluate();
+    const r = ce.box(['ElementMax', ['Measurement', 1.5, 0.1], 'NaN']).evaluate();
     expect(r.isNaN).toBe(true);
-    expect(r.isIndeterminate).toBe(false);
     const exact = ce
-      .box(['ElementMax', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'Indeterminate'])
+      .box(['ElementMax', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'NaN'])
       .evaluate();
     expect(exact.isNaN).toBe(true);
-    expect(exact.isIndeterminate).toBe(false);
   });
 
-  test('a measurement makes the extremum inexact: Indeterminate becomes NaN', () => {
-    const inexact = ce.box(['Max', ['Measurement', 1.5, 0.1], 'Indeterminate']).evaluate();
+  test('a measurement beside NaN gives NaN', () => {
+    const inexact = ce.box(['Max', ['Measurement', 1.5, 0.1], 'NaN']).evaluate();
     expect(inexact.isNaN).toBe(true);
-    expect(inexact.isIndeterminate).toBe(false);
     const exact = ce
-      .box(['Max', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'Indeterminate'])
+      .box(['Max', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'NaN'])
       .evaluate();
     expect(exact.isNaN).toBe(true);
-    expect(exact.isIndeterminate).toBe(false);
   });
 
   test('a Measurement with an error below 1e-100 prints (CE-185.8)', () => {

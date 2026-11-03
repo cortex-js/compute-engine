@@ -52,14 +52,14 @@ function bothAsPos(ce: ComputeEngine, expr: any): void {
 
 /** Assert that `expr` gives the same answer on `evaluate()` and on `.N()`.
  * The check `'indeterminate'` is a point with no limit and exact operands:
- * `Indeterminate` under `evaluate()`, `NaN` under `.N()`. */
+ * `NaN` under `evaluate()`, `NaN` under `.N()`. */
 function bothRoutes(
   ce: ComputeEngine,
   expr: any,
   check: ((v: Expression) => boolean) | 'indeterminate'
 ): void {
   if (check === 'indeterminate') {
-    expect(ce.box(expr).evaluate().isSame(ce.Indeterminate)).toBe(true);
+    expect(ce.box(expr).evaluate().isSame(ce.NaN)).toBe(true);
     expect(ce.box(expr).N().isSame(ce.NaN)).toBe(true);
     return;
   }
@@ -141,7 +141,7 @@ describe('Binomial / Choose at the infinite points', () => {
       // For n ≤ −1 the power diverges while the sine oscillates: no limit
       // (C(−2.5, 10⁶) = 7.5·10⁸ against C(−2.5, 10⁶+0.5) = 0; C(−1, k) is
       // (−1)^k).
-      // `Indeterminate` for exact operands, `NaN` for the float `-2.5`.
+      // `NaN` for exact operands, `NaN` for the float `-2.5`.
       bothRoutes(ce, [h, -1, POS], 'indeterminate');
       bothRoutes(ce, [h, -2.5, POS], isNaNv);
       bothRoutes(ce, [h, -3, POS], 'indeterminate');
@@ -149,7 +149,7 @@ describe('Binomial / Choose at the infinite points', () => {
     }
   });
 
-  test('C(n, ~oo) and two infinite operands are Indeterminate, ∞ + i is +∞', () => {
+  test('C(n, ~oo) and two infinite operands are NaN, ∞ + i is +∞', () => {
     for (const h of heads) {
       // The modulus wanders with the direction (C(5, 10⁶·e^i) = 10¹¹⁴⁸⁰⁴⁸
       // against C(5, −10⁶) = 1.5·10⁻⁴⁴).
@@ -188,7 +188,7 @@ describe('the simplify twins of the Binomial value rules', () => {
   test('C(n, n) → 1 no longer fires at a non-finite literal', () => {
     for (const h of ['Binomial', 'Choose'])
       for (const n of [POS, NEG, COO, 'NaN', ANON]) {
-        // evaluate() answers Indeterminate on the diagonal at every exact
+        // evaluate() answers NaN on the diagonal at every exact
         // infinite point (C(10⁶, 10⁶+d) is 0 or unbounded depending on d,
         // so there is no limit), `∞ + i` included (it is boxed as `+∞`),
         // and propagates a NaN operand. simplify() used to
@@ -199,9 +199,6 @@ describe('the simplify twins of the Binomial value rules', () => {
         expect(simplified.isSame(1)).toBe(false);
         expect(simplified.isNaN).toBe(true);
         expect(ce.box([h, n, n] as any).evaluate().isNaN).toBe(true);
-        expect(ce.box([h, n, n] as any).evaluate().isIndeterminate).toBe(
-          n !== 'NaN'
-        );
       }
   });
 
@@ -457,7 +454,7 @@ describe('GammaRegularized', () => {
     bothRoutes(ce, ['GammaRegularized', 0.5, NEG], isValue(ce.ComplexInfinity));
     // Q(−∞, z): identically 0 at every negative integer a, diverging to −∞
     // between consecutive poles (Q(−10⁶−¼, 2) = −7·10^5264672).
-    // The points with no limit are Indeterminate (NaN under N()).
+    // The points with no limit are NaN (NaN under N()).
     bothRoutes(ce, ['GammaRegularized', NEG, 2], 'indeterminate');
     bothRoutes(ce, ['GammaRegularized', COO, 2], 'indeterminate');
     bothRoutes(ce, ['GammaRegularized', 2, COO], 'indeterminate');

@@ -233,7 +233,7 @@ function clusterIndexOfOffset(s: string): ClusterMap {
  *   cluster would make `Slice(subject, m.range)` return the WHOLE family
  *   emoji while `match` is the single component. That silently breaks the
  *   composition law `range` exists for, so there is no honest span to report
- *   and the field is `Nothing` instead. `match` still carries the exact text
+ *   and the record has no `range` field. `match` still carries the exact text
  *   the host matched, so nothing is lost — only the span is unavailable.
  */
 function clusterSpan(
@@ -261,12 +261,11 @@ function clusterSpan(
  *             {@linkcode clusterSpan} for the two cases that have no span (an
  *             empty match, and one that starts or ends inside a cluster).
  *             Where there is none the key is ABSENT, so reading it answers
- *             `Missing`: a `Nothing` value is erased from a dictionary by the
- *             engine's own literal rule, and `Missing` is precisely the
- *             "absent but meaningful" marker. Test it before slicing.
+ *             `Missing`, the "absent but meaningful" marker. Test it before
+ *             slicing.
  * - `groups`  the numbered captures, in order. ALWAYS present (empty for a
  *             pattern with no groups); a group that did not participate is
- *             `Nothing`.
+ *             `Missing`.
  * - `names`   the named captures as a dictionary. ALWAYS present (empty for a
  *             pattern with no named groups).
  */
@@ -279,16 +278,12 @@ function matchRecord(
   const span = clusterSpan(subject, m.index, m[0].length, map?.());
   const range =
     span === undefined
-      ? ce.Nothing
+      ? undefined
       : ce.function('Range', [ce.number(span[0]), ce.number(span[1])]);
 
-  // `Missing`, never `Nothing`, for a group that did not participate:
-  // `Nothing` is the empty-sequence marker and is ERASED when the `List` is
-  // built, which COLLAPSES the slot. With it, `(a)|(b)` reported a
-  // one-element `groups` for both `"a"` and `"b"`, so a caller could not tell
-  // which alternative fired — destroying exactly the positional information
-  // numbered captures exist to carry. `Missing` is the "absent but
-  // positioned" marker and survives the list.
+  // `Missing` for a group that did not participate: it is the "absent but
+  // positioned" marker, so `(a)|(b)` reports a two-element `groups` for both
+  // `"a"` and `"b"`, and a caller can tell which alternative fired.
   const groups = ce.function(
     'List',
     m.slice(1).map((g) => (g === undefined ? ce.Missing : ce.string(g)))
@@ -305,7 +300,9 @@ function matchRecord(
 
   return ce.function('Dictionary', [
     ce.function('KeyValuePair', [ce.string('match'), ce.string(m[0])]),
-    ce.function('KeyValuePair', [ce.string('range'), range]),
+    ...(range === undefined
+      ? []
+      : [ce.function('KeyValuePair', [ce.string('range'), range])]),
     ce.function('KeyValuePair', [ce.string('groups'), groups]),
     ce.function('KeyValuePair', [
       ce.string('names'),

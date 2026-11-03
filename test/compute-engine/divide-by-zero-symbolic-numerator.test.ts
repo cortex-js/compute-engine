@@ -58,12 +58,12 @@ describe('x/0 with a numerator that may be zero', () => {
         .subs({ x: 0 })
         .evaluate()
         .toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
     // `1/(x/0)` is not `(1·0)/x`: at `x = 0` it has no value.
     const r = ce.function('Divide', [ce.One, q]);
     expect(r.json).toEqual(['Divide', 1, ['Divide', 'x', 0]]);
     expect(ce.One.div(q).json).toEqual(['Divide', 1, ['Divide', 'x', 0]]);
-    expect(r.subs({ x: 0 }).evaluate().toString()).toBe('Indeterminate');
+    expect(r.subs({ x: 0 }).evaluate().toString()).toBe('NaN');
     expect(r.subs({ x: 2 }).evaluate().toString()).toBe('0');
   });
 
@@ -71,10 +71,10 @@ describe('x/0 with a numerator that may be zero', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const q = ce.parse('\\frac{x}{0}');
-    expect(q.subs({ x: 0 }).evaluate().toString()).toBe('Indeterminate');
+    expect(q.subs({ x: 0 }).evaluate().toString()).toBe('NaN');
     expect(q.subs({ x: 2 }).evaluate().toString()).toBe('~oo');
     ce.assign('x', 0);
-    expect(q.evaluate().toString()).toBe('Indeterminate');
+    expect(q.evaluate().toString()).toBe('NaN');
     ce.assign('x', 3);
     expect(q.evaluate().toString()).toBe('~oo');
   });
@@ -88,7 +88,7 @@ describe('x/0 with a numerator that may be zero', () => {
     expect(q.json).toEqual(['Divide', 'a', 0]);
     expect(q.evaluate().toString()).toBe('~oo');
     ce.assign('a', 0);
-    expect(q.evaluate().toString()).toBe('Indeterminate');
+    expect(q.evaluate().toString()).toBe('NaN');
   });
 
   test('a numerator that is provably not zero is a pole', () => {
@@ -103,7 +103,7 @@ describe('x/0 with a numerator that may be zero', () => {
       '\\frac{e^x}{0}',
     ])
       expect(ce.parse(s).json).toBe('ComplexInfinity');
-    expect(ce.parse('\\frac{0}{0}').json).toBe('Indeterminate');
+    expect(ce.parse('\\frac{0}{0}').json).toBe('NaN');
   });
 
   test('a numerator declared or assumed not zero is a pole', () => {

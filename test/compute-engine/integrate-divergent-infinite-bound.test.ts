@@ -92,7 +92,7 @@ describe('a divergent integral over an infinite bound', () => {
     ['\\frac{1}{x^3}', 'NegativeInfinity', 0, 'NegativeInfinity'],
     ['\\frac{1}{x^3}', 0, 'NegativeInfinity', 'PositiveInfinity'],
     ['-\\frac{1}{x^3}', 'PositiveInfinity', 0, 'PositiveInfinity'],
-    ['\\frac{x-1}{x^2}', 0, 'PositiveInfinity', 'Indeterminate'],
+    ['\\frac{x-1}{x^2}', 0, 'PositiveInfinity', 'NaN'],
   ])(
     'evaluate() of ∫ %s from %s to %s, a pole at the finite bound, is %s',
     (latex, lo, hi, expected) => {

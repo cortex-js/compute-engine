@@ -22,7 +22,7 @@ describe('whole-value absence checks and fallbacks', () => {
     expect(ce.box(['IsMissing', 'Undefined']).evaluate().symbol).toBe('False');
   });
 
-  test.each(['Missing', 'NaN', 'Indeterminate'])(
+  test.each(['Missing', 'NaN', 'NaN'])(
     '%s selects a fallback and the final absent operand is retained',
     (marker) => {
       const ce = new ComputeEngine();
@@ -57,8 +57,10 @@ describe('whole-value absence checks and fallbacks', () => {
     expect(ce.box(['IsMissing', ['Sequence', 1, 2]]).evaluate().operator).toBe(
       'Error'
     );
-    // An empty Sequence canonicalizes to Nothing before reaching this operator.
-    expect(ce.box(['IsMissing', ['Sequence']]).evaluate().symbol).toBe('False');
+    // An empty Sequence is spliced out: the call has no operand.
+    expect(ce.box(['IsMissing', ['Sequence']]).evaluate().toString()).toBe(
+      'Error("missing")'
+    );
     expect(
       ce.box(['IsMissing', ['Sequence', 'Nothing']]).evaluate().symbol
     ).toBe('False');
@@ -66,12 +68,12 @@ describe('whole-value absence checks and fallbacks', () => {
 
   test.each([
     ['Divide', 0, 0],
-    ['Mean', ['List', 1, 'Indeterminate']],
-    ['Max', 1, 'Indeterminate'],
-  ])('exact arithmetic remains Indeterminate: %j', (...value) => {
+    ['Mean', ['List', 1, 'NaN']],
+    ['Max', 1, 'NaN'],
+  ])('exact arithmetic remains NaN: %j', (...value) => {
     const ce = new ComputeEngine();
     const expression = ce.box(value);
-    expect(expression.evaluate().isIndeterminate).toBe(true);
+    expect(expression.evaluate().isNaN).toBe(true);
     expect(ce.function('IsMissing', [expression]).evaluate().symbol).toBe(
       'True'
     );
@@ -92,7 +94,7 @@ describe('whole-value absence checks and fallbacks', () => {
       },
     });
     expect(
-      ce.box(['Coalesce', 'Indeterminate', 3, ['TraceFallback']]).evaluate().re
+      ce.box(['Coalesce', 'NaN', 3, ['TraceFallback']]).evaluate().re
     ).toBe(3);
     expect(calls).toBe(0);
     expect(
@@ -100,7 +102,7 @@ describe('whole-value absence checks and fallbacks', () => {
     ).toBe('Coalesce');
     expect(calls).toBe(0);
     expect(
-      ce.box(['Coalesce', 'Indeterminate', ['TraceFallback']]).evaluate().re
+      ce.box(['Coalesce', 'NaN', ['TraceFallback']]).evaluate().re
     ).toBe(7);
     expect(calls).toBe(1);
   });
@@ -267,11 +269,11 @@ describe('compiled numeric absence', () => {
     const compiled = compile(expr, { to: 'javascript' });
     expect(compiled.success).toBe(true);
     expect(compiled.run!({ marker: NaN })).toBe('fallback');
-    ce.assign('marker', ce.Indeterminate);
+    ce.assign('marker', ce.NaN);
     expect(expr.evaluate().string).toBe('fallback');
   });
 
-  test.each(['NaN', 'Indeterminate'])(
+  test.each(['NaN', 'NaN'])(
     '%s agrees with the JavaScript interpreter semantics',
     (marker) => {
       const ce = new ComputeEngine();

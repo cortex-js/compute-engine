@@ -307,10 +307,9 @@ describe('DELIMITERS PARSING', () => {
     `);
     // An empty coordinate parses as Nothing and retains its tuple slot.
     expect(check('(a,,b)')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "Nothing", "b"], "(,)"]
-      canonical = ["Triple", "a", "Nothing", "b"]
-      box-latex = (a,\\mathrm{Nothing},b)
-      latex     = (a,\\mathrm{Nothing},b)
+      ["Delimiter", ["Sequence", "a", ["Error", "'missing'"], "b"], "(,)"]
+      box-latex = (a,\\error{\\blacksquare},b)
+      latex     = (a,\\error{\\blacksquare},b)
     `);
   });
 
@@ -322,26 +321,19 @@ describe('DELIMITERS PARSING', () => {
       latex     = (a,b,c)
     `);
     expect(check('(a, b; c, d, ;; n ,, m)')).toMatchInlineSnapshot(`
-      box       = [
+      [
         "Delimiter",
         [
           "Sequence",
           ["Delimiter", ["Sequence", "a", "b"], ","],
-          ["Delimiter", ["Sequence", "c", "d", "Nothing"], ","],
+          ["Delimiter", ["Sequence", "c", "d", ["Error", "'missing'"]], ","],
           "Nothing",
-          ["Delimiter", ["Sequence", "n", "Nothing", "m"], ","]
+          ["Delimiter", ["Sequence", "n", ["Error", "'missing'"], "m"], ","]
         ],
         "(;)"
       ]
-      canonical = [
-        "Tuple",
-        ["Pair", "a", "b"],
-        ["Triple", "c", "d", "Nothing"],
-        "Nothing",
-        ["Triple", "n", "Nothing", "m"]
-      ]
-      box-latex = (a,b;c,d,\\mathrm{Nothing};\\mathrm{Nothing};n,\\mathrm{Nothing},m)
-      latex     = ((a,b),(c,d,\\mathrm{Nothing}),\\mathrm{Nothing},(n,\\mathrm{Nothing},m))
+      box-latex = (a,b;c,d,\\error{\\blacksquare};\\mathrm{Nothing};n,\\error{\\blacksquare},m)
+      latex     = (a,b;c,d,\\error{\\blacksquare};\\mathrm{Nothing};n,\\error{\\blacksquare},m)
     `);
     expect(check('(a, (b, c))')).toMatchInlineSnapshot(`
       box       = [
@@ -373,24 +365,22 @@ describe('DELIMITERS PARSING', () => {
     `);
     // Sequence with missing element
     expect(check('a,, c')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "Nothing", "c"], ","]
-      canonical = ["Triple", "a", "Nothing", "c"]
-      box-latex = a,\\mathrm{Nothing},c
-      latex     = (a,\\mathrm{Nothing},c)
+      ["Delimiter", ["Sequence", "a", ["Error", "'missing'"], "c"], ","]
+      box-latex = a,\\error{\\blacksquare},c
+      latex     = a,\\error{\\blacksquare},c
     `);
     // Sequence with missing final element
     expect(check('a,c,')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "a", "c", "Nothing"], ","]
-      canonical = ["Triple", "a", "c", "Nothing"]
-      box-latex = a,c,\\mathrm{Nothing}
-      latex     = (a,c,\\mathrm{Nothing})
+      box       = ["Delimiter", ["Sequence", "a", "c"], ","]
+      canonical = ["Pair", "a", "c"]
+      box-latex = a,c
+      latex     = (a,c)
     `);
     // Sequence with missing initial element
     expect(check(',c,b')).toMatchInlineSnapshot(`
-      box       = ["Delimiter", ["Sequence", "Nothing", "c", "b"], ","]
-      canonical = ["Triple", "Nothing", "c", "b"]
-      box-latex = \\mathrm{Nothing},c,b
-      latex     = (\\mathrm{Nothing},c,b)
+      ["Delimiter", ["Sequence", ["Error", "'missing'"], "c", "b"], ","]
+      box-latex = \\error{\\blacksquare},c,b
+      latex     = \\error{\\blacksquare},c,b
     `);
   });
   test('Subsequences', () => {

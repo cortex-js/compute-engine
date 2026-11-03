@@ -100,10 +100,9 @@ export function wildcardType(
  *
  * Numbers compare by mathematical equality (`isEqual`), so `1.0` matches `1`.
  * `isEqual` follows IEEE for a value with no number (`NaN` is not equal to
- * itself), so a pattern or a subject that is `NaN` or `Indeterminate`
- * compares structurally (`isSame`) instead: `NaN` matches `NaN` and
- * `Indeterminate` matches `Indeterminate`, but not each other, and neither
- * matches any other number.
+ * itself), so a pattern or a subject that is `NaN`
+ * compares structurally (`isSame`) instead: `NaN` matches `NaN` and no
+ * other number.
  */
 export function numberPatternMatches(
   pattern: Expression,

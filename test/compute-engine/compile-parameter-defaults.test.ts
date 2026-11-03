@@ -7,7 +7,7 @@
 // A default fills an absent argument as it fills an argument that the call
 // leaves out: `(k: real = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
 // and `f(At(L, 100))`. The test of absence is the one of `Coalesce`:
-// `Missing`, `Undefined`, `NaN` and `Indeterminate` in the interpreter;
+// `Missing`, `Undefined`, `NaN` and `NaN` in the interpreter;
 // `undefined`, `null` and `NaN` in compiled JavaScript; `None` and a float or
 // complex `NaN` in compiled Python. So the compiled code fills a default in
 // the body, not with a native default parameter, which fills only an
@@ -717,7 +717,7 @@ function runPython(python: string, lines: string[]): unknown {
 
 // A default fills an absent argument, supplied or left out: the default is a
 // discharge of absence, with the absence test of `Coalesce` (`Missing`,
-// `Undefined`, `NaN`, `Indeterminate` in the interpreter; `undefined`, `null`,
+// `Undefined`, `NaN`, `NaN` in the interpreter; `undefined`, `null`,
 // `NaN` in JavaScript; `None` and a float `NaN` in Python). A read past the
 // end of a list of numbers gives `NaN` in compiled code. `Nothing` is not an
 // argument: it is removed from the call, so the parameter is left out (R6 of
@@ -754,7 +754,6 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
     ['f()', ['Apply', K], 2],
     ['f(Missing)', ['Apply', K, 'Missing'], 2],
     ['f(At(L, 100))', ['Apply', K, ['At', 'L', 100]], 2],
-    ['f(Nothing)', ['Apply', K, 'Nothing'], 2],
     ['g(0/0) with k: real', ['Apply', KR, ['Divide', 0, 0]], 2],
     ['g(NaN) with k: real', ['Apply', KR, 'NaN'], 2],
     ['g(5) with k: real', ['Apply', KR, 5], 5],

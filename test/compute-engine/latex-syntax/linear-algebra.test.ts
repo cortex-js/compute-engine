@@ -349,6 +349,12 @@ describe('Kernel/Dimension/Degree/Hom LaTeX', () => {
     expect(result.latex).toBe('\\deg p');
   });
 
+  it('should leave out an empty cell that ends a row or the environment', () => {
+    expect(
+      ce.parse('\\begin{bmatrix} 1 & 2 & \\\\ 3 & 4 & \\end{bmatrix}').json
+    ).toEqual(['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]], "'[]'"]);
+  });
+
   it('should serialize multiple hom arguments without dropping any', () => {
     const result = ce.expr(['Hom', 'V', 'W']);
     expect(result.latex).toMatchInlineSnapshot(`\\hom(V, W)`);

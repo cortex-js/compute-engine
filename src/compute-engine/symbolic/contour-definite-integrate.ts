@@ -45,7 +45,7 @@ function angleMultiple(e: Expression, variable: string): number | undefined {
 
 /** The value of a real integral whose path goes through a pole, from the
  * `divergence` of the residue report: `+∞` or `-∞` (negated when `forward`
- * is false, that is, when the bounds are reversed), `Indeterminate` when the
+ * is false, that is, when the bounds are reversed), `NaN` when the
  * integral has no value, and `undefined` when this could not be decided. */
 export function divergentIntegralValue(
   ce: IComputeEngine,
@@ -56,7 +56,7 @@ export function divergentIntegralValue(
     return (divergence === 'positive-infinity') === forward
       ? ce.PositiveInfinity
       : ce.NegativeInfinity;
-  return divergence === 'no-value' ? ce.Indeterminate : undefined;
+  return divergence === 'no-value' ? ce.NaN : undefined;
 }
 
 /** The value of a contour integral, from `ContourIntegrate` or
@@ -64,7 +64,7 @@ export function divergentIntegralValue(
  * line, it is the value given by the `divergence` of the report. On a closed
  * contour, a pole of order m ≥ 1 on the path grows like 1/|z - p|^m, which is
  * not integrable along the path, so the integral has no value
- * (`Indeterminate`). An essential singularity on the path can have a finite
+ * (`NaN`). An essential singularity on the path can have a finite
  * integral: exp(1/z) stays bounded on |z - 1| = 1, which goes through 0. So
  * when a singularity on the path is not a pole, the result is `undefined`
  * and the integral stays unevaluated. */
@@ -78,7 +78,7 @@ export function singularPathValue(
     (p) => p.location === 'boundary' && p.kind !== 'removable'
   );
   return onPath.length > 0 && onPath.every((p) => p.kind === 'pole')
-    ? ce.Indeterminate
+    ? ce.NaN
     : undefined;
 }
 

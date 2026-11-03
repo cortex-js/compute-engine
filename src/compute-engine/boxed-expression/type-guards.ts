@@ -101,24 +101,20 @@ export function isAbsentArithmeticOperand(
  * the ones declared `missingBehavior: 'handle'`, such as the statistics
  * reducers and `Min`/`Max`. `Mean([1, Missing, 3])` is `Missing`.
  *
- * The `Indeterminate` literal is NOT absent, although its value is `NaN`: it
- * is the exact answer to an indeterminate form (`0/0`), a value with no
- * number, not a missing entry. The reducers above forward it
- * (`Mean([1, Indeterminate])` is `Indeterminate`, see `nanOperandAnswer()`).
  * Explicit absence checks and fallbacks instead use `isMissingValue`,
- * which handles both numeric markers.
+ * which also counts a `NaN` point.
  */
 export function isAbsentValue(expr: Expression | null | undefined): boolean {
   return (
     isAbsentSymbol(expr) ||
-    (isNumber(expr) && expr.isNaN === true && !expr.isIndeterminate)
+    (isNumber(expr) && expr.isNaN === true)
   );
 }
 
 /**
  * Absence handled by `IsMissing` and `Coalesce`. Both numeric markers count
  * as absent here; arithmetic consumers keep their distinct propagation rules.
- * `Nothing` is an omission marker and passes through these operations.
+ * `Nothing` is not absent and passes through these operations.
  *
  * A `NaN` point (a tuple whose coordinates are all `NaN` numbers) is also
  * absent here: an accessor out of range over a list of points gives it in
@@ -151,6 +147,9 @@ export function isNaNPointValue(expr: Expression | null | undefined): boolean {
  * a value kind (a call of a head whose bound definition declares
  * `arithmetic`): `true` when the kind has no `isExact` hook, `undefined`
  * when `x` is not a kind value.
+ *
+ * The engine does not read the `isExact` hook now (only
+ * `isInexactOperand()` calls this function). It is kept for compatibility.
  */
 function kindValueIsExact(x: Expression): boolean | undefined {
   if (!isFunction(x)) return undefined;
@@ -178,95 +177,22 @@ export function kindValueIsNaN(x: Expression): boolean {
 
 /**
  * Does the operand make a numeric result inexact: the `NaN` literal, or a
- * finite float (a machine or big-decimal number that is not exact)? The
- * `Indeterminate` literal is not inexact (it is the answer of an exact
- * computation), and neither is an exact number or an infinity.
+ * finite float (a machine or big-decimal number that is not exact)? An exact
+ * number or an infinity is not inexact.
  *
- * This is the test of the rule that a float operand makes a numeric result a
- * float (user decision of 2026-09-27), applied to `Indeterminate`: an
- * operation with an `Indeterminate` operand answers `Indeterminate` only when
- * no operand is inexact, and `NaN` otherwise (`Indeterminate + 1.5` is
- * `NaN`).
+ * The engine does not read the `isExact` hook now: this function is called
+ * only by the `isExact` hook of the quantity kind. It is kept for
+ * compatibility.
  */
 export function isInexactOperand(x: Expression): boolean {
   // A value of a kind is inexact when the `isExact` hook of its kind says
-  // so (`ArithmeticDefinition.isExact`): a measurement is never exact, so
-  // `Max(Measurement(3/2, 1/10), Indeterminate)` is `NaN`, as
-  // `Max(1.5, Indeterminate)` is, and a quantity is as exact as its
-  // magnitude (`Max(Quantity(1.5, m), Indeterminate)` is `NaN`). A kind
-  // without the hook is exact.
+  // so (`ArithmeticDefinition.isExact`): a measurement is never exact, and a
+  // quantity is as exact as its magnitude. A kind without the hook is exact.
   const exact = kindValueIsExact(x);
   if (exact !== undefined) return !exact;
-  if (!isNumber(x) || x.isIndeterminate) return false;
+  if (!isNumber(x)) return false;
   if (x.isNaN === true) return true;
   return x.isFinite === true && !x.isExact;
-}
-
-/**
- * The answer of an operation that has at least one operand whose value is
- * `NaN` and that propagates it (the `propagate` policy of the evaluation
- * gate, the `Add`/`Multiply` folds, the reducers `Max`, `Min`, `Mean` and
- * the others): `Indeterminate` when an operand is the `Indeterminate` literal
- * and no operand is inexact (`isInexactOperand()`: the `NaN` literal or a
- * float), and `NaN` otherwise. So `Sqrt(Indeterminate)` and
- * `Max(1, Indeterminate)` are `Indeterminate`, `Max(Indeterminate, NaN)` and
- * `Arctan2(Indeterminate, 1.5)` are `NaN`.
- *
- * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4.
- */
-export function nanOperandAnswer(
-  ce: Expression['engine'],
-  ops: ReadonlyArray<Expression>
-): Expression {
-  let sawIndeterminate = false;
-  for (const x of ops) {
-    // A value of a kind that is not exact (a measurement) makes the answer
-    // `NaN`, as a float does (`isInexactOperand()`).
-    if (kindValueIsExact(x) === false) return ce.NaN;
-    if (isNumber(x)) {
-      if (x.isIndeterminate) sawIndeterminate = true;
-      else if (isInexactOperand(x)) return ce.NaN;
-    } else if (isSymbol(x) && (isAbsentSymbol(x) || x.isNaN === true)) {
-      // An absent operand (`Missing`) makes the answer `NaN`,
-      // the absence marker; so does a symbol whose value is `NaN`, which
-      // is not the `Indeterminate` literal. (A function operand is not
-      // asked: the question would compute its type, and a function
-      // expression never answers `isNaN === true`.)
-      return ce.NaN;
-    }
-  }
-  return sawIndeterminate ? ce.Indeterminate : ce.NaN;
-}
-
-/**
- * The answer of an exact indeterminate form, such as `0/0`, `0·∞`, `∞ − ∞`,
- * `0^0` or `Mod(5, 0)`: an operation whose operands have values but whose
- * result has none. The answer is `Indeterminate` when every operand is exact
- * (an exact number, an infinity, or `Indeterminate` itself), and `NaN` when
- * any operand is inexact (`isInexactOperand()`: a float or the `NaN`
- * literal), absent (`Missing`) or a symbol whose value is
- * `NaN`. So `0/0` is `Indeterminate`, and `0/0.0` and `0.0·∞` are `NaN`, as a
- * float operand makes a numeric result a float.
- *
- * `ops` are the operands of the form, not the arguments of the whole
- * expression. A caller must use this only where the form has no value: a
- * pole (`5/0` is `~oo`), a value outside the domain of a function, or a
- * failure of a numeric kernel stays `NaN`.
- *
- * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §6, Phase 2.
- */
-export function indeterminateFormAnswer(
-  ce: Expression['engine'],
-  ops: ReadonlyArray<Expression>
-): Expression {
-  for (const x of ops) {
-    if (isNumber(x)) {
-      if (isInexactOperand(x)) return ce.NaN;
-    } else if (isSymbol(x) && (isAbsentSymbol(x) || x.isNaN === true)) {
-      return ce.NaN;
-    }
-  }
-  return ce.Indeterminate;
 }
 
 export function isFunction(

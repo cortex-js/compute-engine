@@ -45,7 +45,7 @@ describe('A DIVISOR THAT MAY BE ZERO', () => {
     [
       ['Divide', 'Q', 'x'],
       `list<tuple<${POSSIBLY_ZERO}, ${POSSIBLY_ZERO}>>`,
-      '[(Indeterminate, ~oo)]',
+      '[(NaN, ~oo)]',
     ],
     [['Divide', 'ImaginaryUnit', 'x'], 'imaginary | infinity', '~oo'],
     [['Divide', 'z', 'x'], 'imaginary | infinity', '~oo'],
@@ -112,7 +112,7 @@ describe('A COLLECTION DIVIDED BY ITSELF', () => {
     expect(ce.box(['Divide', 'L', 'L']).evaluate().toString()).toBe('[1,1]');
     ce.assign('L', ce.box(['List', 0, 2]));
     expect(ce.box(['Divide', 'L', 'L']).evaluate().toString()).toBe(
-      '[Indeterminate,1]'
+      '[NaN,1]'
     );
   });
 
@@ -168,7 +168,7 @@ describe('A NUMERATOR THAT MAY BE INFINITE', () => {
 
 describe('A POINT DIVIDED BY A LIST WITH A CELL THAT MAY BE ZERO', () => {
   test('the type states no length, as the type of the value', () => {
-    // `[(Indeterminate, ~oo), (0, 1)]` has points of two tuple types, and
+    // `[(NaN, ~oo), (0, 1)]` has points of two tuple types, and
     // the type of such a list states no length.
     const ce = new ComputeEngine();
     ce.declare('v', 'vector<integer^2>');

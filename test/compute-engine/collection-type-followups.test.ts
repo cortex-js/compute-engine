@@ -688,7 +688,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
       expectTypeHoldsValue(
         engine,
         engine.box(['Map', ['Function', ['Sqrt', 'x'], 'x'], 'U']),
-        'list<indexed_collection<any> | nothing | number>'
+        'list<indexed_collection<any> | number>'
       )
     ).toBe('[[1,2],[3]]');
   });
@@ -698,7 +698,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
       expectTypeHoldsValue(
         engine,
         engine.parse('\\operatorname{Map}(x \\mapsto \\sqrt{x}, U)'),
-        'list<indexed_collection<any> | nothing | number>'
+        'list<indexed_collection<any> | number>'
       )
     ).toBe('[[1,2],[3]]');
   });
@@ -709,7 +709,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
     [
       ['Function', 1, 'x'],
       '\\operatorname{Map}(x \\mapsto 1, U)',
-      'list<nothing | number>',
+      'list<number>',
       '[1,1]',
     ],
     // A parameter whose type the literal states from its use (`collection`,
@@ -717,7 +717,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
     [
       ['Function', ['Length', 'x'], 'x'],
       '\\operatorname{Map}(x \\mapsto \\operatorname{Length}(x), U)',
-      'list<integer | nothing | signed_infinity>',
+      'list<integer | signed_infinity>',
       '[2,1]',
     ],
   ] as [MathJsonExpression, string, string, string][])(
@@ -1069,7 +1069,7 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
   // can be absent (`any` can be). Before, the `unknown` arm was widened to
   // `number`, for a callback that can answer a string.
   test.each([
-    ['list<any>', 'list<missing | nothing | unknown>'],
+    ['list<any>', 'list<missing | unknown>'],
     ['dictionary<any>', 'collection<missing | unknown>'],
     ['record', 'collection<missing | unknown>'],
   ])('a callback declared `function` over `%s`', (declared, type) => {
@@ -1089,7 +1089,7 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
       expectTypeHoldsValue(
         engine,
         engine.box(['Map', 'f', 'xs']),
-        'list<missing | nothing | unknown>'
+        'list<missing | unknown>'
       )
     ).toBe('["s","s"]');
   });

@@ -19,8 +19,8 @@
  *    and one a value contradicts is worse than the bare `number` these heads
  *    used to claim.
  *
- * The operand carrier of all fourteen is `collection<nothing | number>`
- * (`collection<nothing | number | tuple>` for the first operand of the
+ * The operand carrier of all fourteen is `collection<number>`
+ * (`collection<number | tuple>` for the first operand of the
  * bivariate statistics, which also takes a collection of pairs). It holds
  * number elements, so a matrix, whose elements are rows, and data that is
  * not numeric are refused when the expression is boxed (ROADMAP CE-13).
@@ -57,9 +57,9 @@ function appliedType(ce: ComputeEngine, expr: any): string {
 
 /** A datum that is not a number: the signature refuses its collection when
  * the expression is boxed (ROADMAP CE-13), and the error names the data
- * parameter, `collection<nothing | number>` or the bivariate
- * `collection<nothing | number | tuple>`. */
-const NON_NUMERIC = /incompatible-type", "collection<nothing \| number/;
+ * parameter, `collection<number>` or the bivariate
+ * `collection<number | tuple>`. */
+const NON_NUMERIC = /incompatible-type", "collection<number/;
 const NON_REAL = /incompatible-type", "real"/;
 
 describe('Mean', () => {
@@ -67,7 +67,7 @@ describe('Mean', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Mean')).toBe(
-      '((collection<nothing | number> | distribution | number)+) -> number'
+      '((collection<number> | distribution | number)+) -> number'
     );
     expect(policiesOf(ce, 'Mean')).toBe('nan=handle missing=handle');
   });
@@ -124,7 +124,7 @@ describe('Median', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Median')).toBe(
-      '((collection<nothing | number> | number)+) -> nan | real | signed_infinity'
+      '((collection<number> | number)+) -> nan | real | signed_infinity'
     );
     expect(policiesOf(ce, 'Median')).toBe('nan=handle missing=handle');
   });
@@ -180,7 +180,7 @@ describe('the variance family', () => {
     for (const h of HEADS) {
       const distribution = h.startsWith('Population') ? '' : 'distribution | ';
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: ((collection<nothing | number> | ${distribution}number)+) -> nan | real<0..>`
+        `${h}: ((collection<number> | ${distribution}number)+) -> nan | real<0..>`
       );
       expect(`${h}: ${policiesOf(ce, h)}`).toBe(
         `${h}: nan=handle missing=handle`
@@ -202,19 +202,19 @@ describe('the variance family', () => {
 
   test('infinite data has no variance — the `nan` arm, not an infinite one', () => {
     // Every deviation from an infinite mean is `∞ − ∞`, the indeterminate
-    // form: `Indeterminate`, or `NaN` with a float datum. This is why the
+    // form: `NaN`, or `NaN` with a float datum. This is why the
     // declared result has no infinite arm where `Median` and `Mode` do.
     const ce = new ComputeEngine();
     for (const h of HEADS) {
       expect(
         `${h}: ${evaluated(ce, [h, ['List', 1, 'PositiveInfinity', 3]])}`
-      ).toBe(`${h}: Indeterminate`);
+      ).toBe(`${h}: NaN`);
       expect(
         `${h}: ${evaluated(ce, [
           h,
           ['List', 'PositiveInfinity', 'PositiveInfinity'],
         ])}`
-      ).toBe(`${h}: Indeterminate`);
+      ).toBe(`${h}: NaN`);
       expect(
         `${h}: ${evaluated(ce, [
           h,
@@ -227,7 +227,7 @@ describe('the variance family', () => {
   test('infinite data next to complex data has no variance either', () => {
     // The complex-data branch answered `NaN` for every datum that is not
     // finite, before the infinite-data rule could see it: an infinite datum
-    // next to an EXACT complex datum was `NaN`, not `Indeterminate`.
+    // next to an EXACT complex datum was `NaN`, not `NaN`.
     const ce = new ComputeEngine();
     for (const h of HEADS) {
       expect(
@@ -235,7 +235,7 @@ describe('the variance family', () => {
           h,
           ['List', ['Complex', 1, 1], 'PositiveInfinity'],
         ])}`
-      ).toBe(`${h}: Indeterminate`);
+      ).toBe(`${h}: NaN`);
       expect(
         `${h}: ${evaluated(ce, [
           h,
@@ -261,13 +261,13 @@ describe('the variance family', () => {
     }
   });
 
-  test('the sample forms are Indeterminate for one datum, the population forms 0', () => {
+  test('the sample forms are NaN for one datum, the population forms 0', () => {
     // `n − 1` is zero for a single datum: the sample variance genuinely has
-    // no value (the exact form `0/0`, `Indeterminate`), which the `nan` arm
+    // no value (the exact form `0/0`, `NaN`), which the `nan` arm
     // covers. The population divisor is `n`.
     const ce = new ComputeEngine();
-    expect(evaluated(ce, ['Variance', 5])).toBe('Indeterminate');
-    expect(evaluated(ce, ['StandardDeviation', 5])).toBe('Indeterminate');
+    expect(evaluated(ce, ['Variance', 5])).toBe('NaN');
+    expect(evaluated(ce, ['StandardDeviation', 5])).toBe('NaN');
     expect(evaluated(ce, ['PopulationVariance', 5])).toBe('0');
     expect(evaluated(ce, ['PopulationStandardDeviation', 5])).toBe('0');
   });
@@ -275,7 +275,7 @@ describe('the variance family', () => {
   test('one datum and equal data agree between the exact route, .N() and compiled JavaScript', () => {
     // The sample variance of one datum, and the skewness and kurtosis of data
     // whose values are all equal (one datum included), are `0/0`:
-    // `Indeterminate` on the exact route, `NaN` under `.N()` and in compiled
+    // `NaN` on the exact route, `NaN` under `.N()` and in compiled
     // code. The population variance of such data is 0. A datum such as `√2`
     // has more digits than the working precision, so the moment sums used
     // to cancel with a rounding error and gave `+∞`, `-∞` or a tiny number.
@@ -283,24 +283,24 @@ describe('the variance family', () => {
     ce.declare('x', 'real');
     ce.assign('x', 2);
     const cases: [string, any, string, string][] = [
-      ['Variance', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
-      ['StandardDeviation', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
-      ['Skewness', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
-      ['Kurtosis', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
-      ['Kurtosis', 2, 'Indeterminate', 'NaN'],
+      ['Variance', ['Sqrt', 'x'], 'NaN', 'NaN'],
+      ['StandardDeviation', ['Sqrt', 'x'], 'NaN', 'NaN'],
+      ['Skewness', ['Sqrt', 'x'], 'NaN', 'NaN'],
+      ['Kurtosis', ['Sqrt', 'x'], 'NaN', 'NaN'],
+      ['Kurtosis', 2, 'NaN', 'NaN'],
       ['PopulationVariance', ['Sqrt', 'x'], '0', '0'],
       ['PopulationStandardDeviation', ['Sqrt', 'x'], '0', '0'],
       ['Variance', ['List', ['Sqrt', 2], ['Sqrt', 2], ['Sqrt', 2]], '0', '0'],
       [
         'Skewness',
         ['List', ['Sqrt', 2], ['Sqrt', 2], ['Sqrt', 2]],
-        'Indeterminate',
+        'NaN',
         'NaN',
       ],
       [
         'Kurtosis',
         ['List', ['Sqrt', 2], ['Sqrt', 2], ['Sqrt', 2]],
-        'Indeterminate',
+        'NaN',
         'NaN',
       ],
     ];
@@ -421,7 +421,7 @@ describe('Kurtosis and Skewness', () => {
   test('declaration', () => {
     for (const h of ['Kurtosis', 'Skewness']) {
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: ((collection<nothing | number> | number)+) -> nan | real`
+        `${h}: ((collection<number> | number)+) -> nan | real`
       );
       expect(`${h}: ${policiesOf(ce, h)}`).toBe(
         `${h}: nan=handle missing=handle`
@@ -432,11 +432,11 @@ describe('Kurtosis and Skewness', () => {
   test('a standardized moment has no infinite arm', () => {
     // The numerator and the denominator are both non-finite for infinite
     // data, so the quotient is the indeterminate form rather than an
-    // infinity: `Indeterminate`, or `NaN` with a float datum.
+    // infinity: `NaN`, or `NaN` with a float datum.
     for (const h of ['Kurtosis', 'Skewness']) {
       expect(
         `${h}: ${evaluated(ce, [h, ['List', 1, 'PositiveInfinity', 3]])}`
-      ).toBe(`${h}: Indeterminate`);
+      ).toBe(`${h}: NaN`);
       expect(
         `${h}: ${evaluated(ce, [h, ['List', { num: '1.5' }, 'PositiveInfinity', 3]])}`
       ).toBe(`${h}: NaN`);
@@ -476,7 +476,7 @@ describe('Mode', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Mode')).toBe(
-      '((collection<nothing | number> | number)+) -> nan | real | signed_infinity'
+      '((collection<number> | number)+) -> nan | real | signed_infinity'
     );
     expect(policiesOf(ce, 'Mode')).toBe('nan=handle missing=handle');
   });
@@ -506,7 +506,7 @@ describe('Quartiles', () => {
     // They used to read `mid, lower, upper` against a handler that built
     // `(Q1, Q2, Q3)`, so every name was attached to the wrong component.
     expect(signatureOf(ce, 'Quartiles')).toBe(
-      '((collection<nothing | number> | number)+) -> ' +
+      '((collection<number> | number)+) -> ' +
         'tuple<lower: nan | real | signed_infinity, ' +
         'mid: nan | real | signed_infinity, ' +
         'upper: nan | real | signed_infinity>'
@@ -552,7 +552,7 @@ describe('InterquartileRange', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'InterquartileRange')).toBe(
-      '((collection<nothing | number> | number)+) -> +oo | nan | real<0..>'
+      '((collection<number> | number)+) -> +oo | nan | real<0..>'
     );
     expect(policiesOf(ce, 'InterquartileRange')).toBe(
       'nan=handle missing=handle'
@@ -609,7 +609,7 @@ describe('a refused datum outranks an absent one', () => {
   // keeps the enumeration count at one per datum (ruling B8). Since ROADMAP
   // CE-402 the signature refuses such a literal before the walk, when the
   // expression is boxed: `list<missing | string>` shares only the empty
-  // collection with the data parameter `collection<nothing | number>`.
+  // collection with the data parameter `collection<number>`.
   const ce = new ComputeEngine();
 
   test('Mean of a Missing beside a string', () => {
@@ -651,7 +651,7 @@ describe('the bivariate statistics', () => {
       // precision, so `Correlation` alone declares the range.
       const real = h === 'Correlation' ? 'real<-1..1>' : 'real';
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: (collection<nothing | number | tuple>, collection<nothing | number>?) -> nan | ${real}`
+        `${h}: (collection<number | tuple>, collection<number>?) -> nan | ${real}`
       );
       // The DERIVED policies here are `reject` (a `collection` slot) and
       // `pass-through`; neither describes a head that answers `NaN` for a

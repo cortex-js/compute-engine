@@ -37,8 +37,7 @@
  *
  * AN EMPTY IMAGE. There is no empty enclosure: an image with no real value
  * (`Ln(Enclosure(-2, -1))`, `1 / Enclosure(0, 0)`), or an infinite singleton
- * (`Enclosure(0, 1) + +oo`), is the indeterminate value: `Indeterminate`
- * under `evaluate()` with exact endpoints, `NaN` otherwise.
+ * (`Enclosure(0, 1) + +oo`), is `NaN`.
  *
  * THE HULL. A function with a pole inside the enclosure gives the whole line
  * `Enclosure(-oo, +oo)` (one connected value); a pole at an endpoint gives a
@@ -516,18 +515,9 @@ function fromResult(
   }
 }
 
-/** The indeterminate value of a hook: `Indeterminate` under `evaluate()`
- * with exact operands, `NaN` under `.N()` or with a float operand (the
- * exact-twin rule of `NaN`). */
-function indeterminate(
-  ce: ComputeEngine,
-  numericApproximation: boolean,
-  ranges: ReadonlyArray<Range>
-): () => Expression {
-  return () =>
-    numericApproximation || ranges.some((r) => !r.exact)
-      ? ce.NaN
-      : ce.Indeterminate;
+/** The indeterminate value of a hook: `NaN`. */
+function indeterminate(ce: ComputeEngine): () => Expression {
+  return () => ce.NaN;
 }
 
 /**
@@ -706,7 +696,7 @@ function sumFolds(
   const operands = foldableOperands(ops, numericApproximation);
   if (operands === undefined) return undefined;
   const { indices, ranges, infinite } = operands;
-  const nan = indeterminate(ce, numericApproximation, ranges);
+  const nan = indeterminate(ce);
   // `x + (±oo)` would be an infinite singleton, which is no enclosure.
   if (infinite) return [{ value: nan(), operands: indices }];
   const value = compute(
@@ -746,7 +736,7 @@ function productFolds(
   const operands = foldableOperands(ops, numericApproximation);
   if (operands === undefined) return undefined;
   const { indices, ranges, infinite } = operands;
-  const nan = indeterminate(ce, numericApproximation, ranges);
+  const nan = indeterminate(ce);
   if (infinite) return [{ value: nan(), operands: indices }];
   const value = compute(
     ranges,
@@ -776,7 +766,7 @@ function negateHook(
   if (!isEnclosure(x.evaluated)) return undefined;
   const r = enclosureRange(x.evaluated);
   if (r === undefined) return undefined;
-  const nan = indeterminate(ce, numericApproximation, [r]);
+  const nan = indeterminate(ce);
   return compute(
     [r],
     numericApproximation,
@@ -811,8 +801,7 @@ function divideHook(
   const operands = binaryRanges(a, b, numericApproximation);
   if (operands === undefined) return undefined;
   const [x, y] = operands;
-  const ranges = [x, y].filter((r): r is Range => r !== INFINITE);
-  const nan = indeterminate(ce, numericApproximation, ranges);
+  const nan = indeterminate(ce);
   if (x === INFINITE || y === INFINITE) return nan();
   return compute(
     [x, y],
@@ -932,9 +921,7 @@ function powerByPoint(
 ): Expression | undefined {
   const form = exponentForm(e);
   if (form === undefined) return undefined;
-  const nan = indeterminate(ce, numericApproximation || isInexactEndpoint(e), [
-    x,
-  ]);
+  const nan = indeterminate(ce);
   const exactExponent =
     form.kind === 'integer' ? form.exact : form.kind !== 'float';
   // A power of `e` (what `Exp(x)` canonicalizes to) uses `exp` on both
@@ -1065,7 +1052,7 @@ function powerByEnclosure(
 ): Expression | undefined {
   const base = b.evaluated;
   if (isEulerBase(b)) {
-    const nan = indeterminate(ce, numericApproximation, [y]);
+    const nan = indeterminate(ce);
     return compute(
       [y],
       numericApproximation,
@@ -1076,11 +1063,7 @@ function powerByEnclosure(
   }
   const x = operandRange(base, b.exact, numericApproximation);
   if (x === undefined) return undefined;
-  const nan = indeterminate(
-    ce,
-    numericApproximation,
-    x === INFINITE ? [y] : [x, y]
-  );
+  const nan = indeterminate(ce);
   if (x === INFINITE) return nan();
   // The base must be provably positive: a negative base with a non-point
   // exponent has no real-branch rule here, and the call stays unevaluated,
@@ -1129,7 +1112,7 @@ function powerHook(
       return powerByEnclosure(ce, base, y, numericApproximation);
     const x = operandRange(base.evaluated, base.exact, numericApproximation);
     if (x === undefined) return undefined;
-    if (x === INFINITE) return indeterminate(ce, numericApproximation, [y])();
+    if (x === INFINITE) return indeterminate(ce)();
     return powerByPoint(
       ce,
       isEulerBase(base) ? ce.E : base.evaluated,
@@ -1149,7 +1132,7 @@ function powerHook(
     if (isNumber(exact) || endpointClass(exact) === 2) point = exact;
   }
   if (isNumber(point) && point.isFinite === false && point.isNaN !== true)
-    return indeterminate(ce, numericApproximation, [x])();
+    return indeterminate(ce)();
   return powerByPoint(ce, base.evaluated, x, point, numericApproximation);
 }
 
@@ -1624,7 +1607,7 @@ function unaryApply(
 ): Expression | undefined {
   const r = enclosureRange(x);
   if (r === undefined) return undefined;
-  const nan = indeterminate(ce, numericApproximation, [r]);
+  const nan = indeterminate(ce);
   if (!numericApproximation && r.exact && r.ordered) {
     try {
       return rule.exact(ce, r, nan);
@@ -1673,7 +1656,7 @@ function roundingApply(
     step = s;
   }
   const ranges = step === undefined ? [r] : [r, step];
-  const nan = indeterminate(ce, numericApproximation, ranges);
+  const nan = indeterminate(ce);
   // A zero step has no multiple to round to (`roundingStepDefined()`).
   if (step !== undefined && endpointOrder(step.lo, ce.Zero) === 0) return nan();
   const kernel = (v: Interval): IntervalResult => {
@@ -1740,7 +1723,7 @@ function modApply(
   if (r === undefined) return undefined;
   const m = pointOperand(ops, 1, numericApproximation);
   if (m === undefined || m === INFINITE) return undefined;
-  const nan = indeterminate(ce, numericApproximation, [r, m]);
+  const nan = indeterminate(ce);
   // `Mod(x, 0)` has no value, as for a number.
   if (endpointOrder(m.lo, ce.Zero) === 0) return nan();
   return compute(
@@ -1778,7 +1761,7 @@ function logApply(
   const r = enclosureRange(x);
   if (r === undefined) return undefined;
   if (ops.evaluated.length === 1) {
-    const nan = indeterminate(ce, numericApproximation, [r]);
+    const nan = indeterminate(ce);
     return compute(
       [r],
       numericApproximation,
@@ -1793,7 +1776,7 @@ function logApply(
     if (infinitySign(ops.exact(1)) < 0) return undefined;
     return ce._fn('Enclosure', [ce.Zero, ce.Zero]);
   }
-  const nan = indeterminate(ce, numericApproximation, [r, b]);
+  const nan = indeterminate(ce);
   // A base that is not positive, or that is `1`, leaves the call
   // unevaluated.
   const sign = endpointOrder(b.lo, ce.Zero);
@@ -1872,8 +1855,7 @@ function hypotApply(
   const operands = pairOperands(ops, numericApproximation);
   if (operands === undefined) return undefined;
   const [x, y] = operands;
-  const ranges = [x, y].filter((r): r is Range => r !== INFINITE);
-  const nan = indeterminate(ce, numericApproximation, ranges);
+  const nan = indeterminate(ce);
   // An infinite point gives an infinite singleton.
   if (x === INFINITE || y === INFINITE) return nan();
   return compute(
@@ -1918,7 +1900,7 @@ function arctan2Apply(
   const y = read(0);
   const x = read(1);
   if (y === undefined || x === undefined) return undefined;
-  const nan = indeterminate(ce, numericApproximation, [y, x]);
+  const nan = indeterminate(ce);
   return compute(
     [y, x],
     numericApproximation,
@@ -1968,7 +1950,7 @@ function meanApply(
     if (r === INFINITE) infinite = true;
     else ranges.push(r);
   }
-  const nan = indeterminate(ce, numericApproximation, ranges);
+  const nan = indeterminate(ce);
   if (infinite) return nan();
   const n = ce.number(ranges.length);
   return compute(
@@ -2139,7 +2121,7 @@ function enclosureExtremum(
     ranges.push(r);
   }
   if (ranges.length === 0) return undefined;
-  const nan = indeterminate(ce, false, ranges);
+  const nan = indeterminate(ce);
   const pick = which === 'max' ? exactMax : exactMin;
   return compute(
     ranges,

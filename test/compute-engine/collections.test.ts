@@ -4973,19 +4973,25 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
   });
 
   // The peek handlers must run the framework's default flatten step
-  // (Sequence-splice + Nothing-drop) they would otherwise short-circuit, so a
+  // (the `Sequence` splice) they would otherwise short-circuit, so a
   // peeked operator behaves identically to a non-peeked one (e.g. `First`).
   // Compare argument handling (json without the head) against `First`, since
   // the operator names naturally differ.
   const args = (e: ReturnType<typeof ce.box>) =>
     (e.json as Expression[]).slice(1);
 
-  test('Length(Nothing) flattens like a non-peeked operator (First)', () => {
+  test('Length(Nothing) is checked as Length(5)', () => {
+    // `Nothing` is an operand like any other: it is kept, and the evaluation
+    // reports the ordinary type error, as for any value that is not a
+    // collection.
     const length = ce.box(['Length', 'Nothing']);
-    const first = ce.box(['First', 'Nothing']);
-    // Nothing is dropped by flatten -> a missing-argument error, matching First.
-    expect(args(length)).toEqual(args(first));
-    expect(length.isValid).toBe(false);
+    expect(args(length)).toEqual(['Nothing']);
+    expect(length.evaluate().json).toEqual([
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'collection'", "'nothing'"],
+      'Nothing',
+      ['ErrorTrace', ['ErrorFrame', "'Length'", 1]],
+    ]);
   });
 
   test('Count(Sequence(...)) splices like a non-peeked operator (Contains)', () => {
@@ -5296,7 +5302,7 @@ describe('Partition and Fill with an unresolved argument', () => {
   });
 });
 
-describe('Indeterminate collection facets stay coherent (review round)', () => {
+describe('NaN collection facets stay coherent (review round)', () => {
   function fresh() {
     const ce = new ComputeEngine();
     ce.assign('Sz', ce.box(['List', 1, 2, 3]));

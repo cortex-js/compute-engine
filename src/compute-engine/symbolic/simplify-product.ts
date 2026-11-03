@@ -224,7 +224,7 @@ function simplifyProductRules(x: Expression): RuleStep | undefined {
     // A negative integer `c` is excluded: `c!` is a pole there, and the
     // product has a zero factor at `n = −c` only when `b ≥ −c`, so the
     // quotient is not the product (`Π_{k=1}^n (k−3)` became `0`, which is
-    // wrong for n = 1 and n = 2, and the infinite product `Indeterminate`
+    // wrong for n = 1 and n = 2, and the infinite product `NaN`
     // instead of `0`).
     if (
       indexTerm &&

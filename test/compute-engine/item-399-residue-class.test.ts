@@ -1156,12 +1156,12 @@ describe('ResidueClass: one guard for every route (#399)', () => {
     }
   });
 
-  describe('Indeterminate beside a class', () => {
+  describe('NaN beside a class', () => {
     for (const op of ['Add', 'Multiply']) {
-      test(`${op}(Indeterminate, 2 mod 5)`, () => {
-        const boxed = ce.box([op, 'Indeterminate', RC(2, 5)] as Expression);
-        expect(boxed.evaluate().json).toBe('Indeterminate');
-        expect(boxed.simplify().json).toBe('Indeterminate');
+      test(`${op}(NaN, 2 mod 5)`, () => {
+        const boxed = ce.box([op, 'NaN', RC(2, 5)] as Expression);
+        expect(boxed.evaluate().json).toBe('NaN');
+        expect(boxed.simplify().json).toBe('NaN');
         expect(boxed.N().json).toBe('NaN');
       });
     }
@@ -1479,13 +1479,13 @@ describe('ResidueClass: last review round (#399)', () => {
     expect(q.simplify().json).toEqual(q.json);
   });
 
-  test('NaN and Indeterminate in a power of a class', () => {
+  test('NaN in a power of a class', () => {
     const C = ce.box(RC(2, 5) as Expression);
-    expect(C.pow(ce.Indeterminate).json).toBe('Indeterminate');
     expect(C.pow(ce.NaN).json).toBe('NaN');
-    expect(C.div(ce.Indeterminate).json).toBe('Indeterminate');
+    expect(C.pow(ce.NaN).json).toBe('NaN');
     expect(C.div(ce.NaN).json).toBe('NaN');
-    for (const e of ['NaN', 'Indeterminate']) {
+    expect(C.div(ce.NaN).json).toBe('NaN');
+    for (const e of ['NaN', 'NaN']) {
       const boxed = ce.box(['Power', RC(2, 5), e] as Expression);
       expect(boxed.evaluate().json).toBe(e);
       expect(boxed.N().json).toBe('NaN');

@@ -5,7 +5,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // `lower + k·step` (`linspaceSample`, `library/collections.ts`): the usual
 // form `lower + span·k/denom` rounds the product past 2⁵³ for a long grid.
 // The extremum test for an inexact sample (`linspaceHasInexactSample`,
-// `library/arithmetic.ts`) then needs no walk: `Max(Indeterminate,
+// `library/arithmetic.ts`) then needs no walk: `Max(NaN,
 // Linspace(0, 10⁹ − 1, 10⁹))` read a billion samples (1.3 s) to answer.
 describe('a Linspace on an integer grid', () => {
   const ce = new ComputeEngine();
@@ -37,19 +37,19 @@ describe('a Linspace on an integer grid', () => {
     expect(ce.box(['At', ['Linspace', 1, 10, 4], 2]).evaluate().json).toBe(4);
   });
 
-  test('an extremum with an Indeterminate operand does not walk the grid', () => {
+  test('an extremum with an NaN operand does not walk the grid', () => {
     const start = Date.now();
-    expect(ce.box(['Max', 'Indeterminate', grid]).evaluate().toString()).toBe(
-      'Indeterminate'
+    expect(ce.box(['Max', 'NaN', grid]).evaluate().toString()).toBe(
+      'NaN'
     );
-    expect(ce.box(['Min', 'Indeterminate', grid]).evaluate().toString()).toBe(
-      'Indeterminate'
+    expect(ce.box(['Min', 'NaN', grid]).evaluate().toString()).toBe(
+      'NaN'
     );
     expect(Date.now() - start).toBeLessThan(500);
     // A grid with inexact samples still makes the result `NaN`.
     expect(
       ce
-        .box(['Max', 'Indeterminate', ['Linspace', 0, 10, 1000000000]])
+        .box(['Max', 'NaN', ['Linspace', 0, 10, 1000000000]])
         .evaluate().isNaN
     ).toBe(true);
   });

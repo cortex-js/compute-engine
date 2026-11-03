@@ -109,7 +109,7 @@ describe('CE-670: A LIST WITH A FAILED CELL EVALUATES ITS OTHER CELLS', () => {
     expect(
       ce.box(['Length', ['List', 'a', ['Error', "'x'"]]]).evaluate().json
     ).toBe(2);
-    // A cell that evaluates to `Nothing` is removed, as in a list with no
+    // A cell that evaluates to `Nothing` is kept, as in a list with no
     // failed cell.
     expect(
       ce
@@ -118,7 +118,7 @@ describe('CE-670: A LIST WITH A FAILED CELL EVALUATES ITS OTHER CELLS', () => {
           ['List', ['If', 'True', 'Nothing', 1], ['Error', "'x'"]],
         ])
         .evaluate().json
-    ).toBe(1);
+    ).toBe(2);
   });
 
   test('a finite lazy cell is listed, as in a list with no failed cell', async () => {

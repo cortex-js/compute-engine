@@ -221,8 +221,8 @@ function hasInfinity(e: Expression): boolean {
  * `Σ_{k≥1} (1 + x·k)` is +∞ for `x > 0` and −∞ for `x < 0`, but the closed
  * form folded to `+∞`; `Σ_{k≥1} k·x` gave `+∞·x`, which is wrong at `x = 0`.
  * So a step whose value has an infinity is kept only when the body has no
- * free symbol other than the index. A step with no value (`NaN`, or
- * `Indeterminate` from `∞ − ∞` or `0·∞`) is never kept: `evaluate()` keeps
+ * free symbol other than the index. A step with no value (`NaN`,
+ * as from `∞ − ∞` or `0·∞`) is never kept: `evaluate()` keeps
  * such a sum as it is.
  */
 export function keepInfiniteRangeStep(

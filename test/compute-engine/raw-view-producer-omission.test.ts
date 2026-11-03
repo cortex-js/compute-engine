@@ -10,9 +10,9 @@ function first(view: Expression, n: number): unknown[] {
   return Array.from({ length: n }, () => it.next().value?.json);
 }
 
-describe('raw producer omission', () => {
+describe('a producer whose callback gives Nothing', () => {
   test.each(['Tabulate', 'Table'])(
-    '%s preserves positions and compacts only at ListFrom',
+    '%s keeps the Nothing element, also at ListFrom',
     (head) => {
       const ce = new ComputeEngine();
       const view = ce.box([
@@ -29,13 +29,14 @@ describe('raw producer omission', () => {
       expect(ce.box(['ListFrom', view]).evaluate().json).toEqual([
         'List',
         1,
+        'Nothing',
         3,
       ]);
       expect(compile(view).success).toBe(false);
     }
   );
 
-  test('2-D Tabulate keeps each row lazy and omits only when that row is collected', () => {
+  test('2-D Tabulate keeps each row lazy, and a collected row keeps its Nothing cell', () => {
     const ce = new ComputeEngine();
     let calls = 0;
     ce.declare('cell', {
@@ -56,7 +57,12 @@ describe('raw producer omission', () => {
     const rowType = collectionElementType(view.type.type)!;
     expect(isSubtype('nothing', rowType)).toBe(false);
     expect(isSubtype('nothing', collectionElementType(rowType)!)).toBe(true);
-    expect(ce.box(['ListFrom', row]).evaluate().json).toEqual(['List', 2, 4]);
+    expect(ce.box(['ListFrom', row]).evaluate().json).toEqual([
+      'List',
+      2,
+      'Nothing',
+      4,
+    ]);
     expect(compile(view).success).toBe(false);
   });
 
@@ -74,11 +80,16 @@ describe('raw producer omission', () => {
     expect(isSubtype('nothing', collectionElementType(view.type.type)!)).toBe(
       true
     );
-    expect(ce.box(['ListFrom', view]).evaluate().json).toEqual(['List', 1, 3]);
+    expect(ce.box(['ListFrom', view]).evaluate().json).toEqual([
+      'List',
+      1,
+      'Nothing',
+      3,
+    ]);
     expect(compile(view).success).toBe(false);
   });
 
-  test('Iterate preserves omitted positions in a bounded demand', () => {
+  test('Iterate keeps Nothing elements in a bounded demand', () => {
     const ce = new ComputeEngine();
     const view = ce.box([
       'Iterate',
@@ -94,6 +105,7 @@ describe('raw producer omission', () => {
     expect(ce.box(['ListFrom', ['Take', view, 3]]).evaluate().json).toEqual([
       'List',
       1,
+      'Nothing',
       3,
     ]);
     expect(compile(ce.box(['Take', view, 3])).success).toBe(false);
@@ -121,7 +133,7 @@ describe('raw producer omission', () => {
   );
 });
 
-describe('producer compilation retains its omission boundary', () => {
+describe('producer compilation refuses a possible Nothing', () => {
   test.each(['javascript', 'python'] as const)(
     'opaque callback results refuse %s compilation',
     (target) => {
@@ -156,7 +168,7 @@ describe('producer compilation retains its omission boundary', () => {
     expect(first(view.at(2)!, 3)).toEqual([3, 4, 5]);
   });
 
-  test('Iterate which always returns Nothing reports and retains omitted cells', () => {
+  test('Iterate which always returns Nothing reports and keeps its Nothing cells', () => {
     const ce = new ComputeEngine();
     const view = ce.box(['Iterate', ['Function', 'Nothing', 'x'], 0]);
     expect(isSubtype('nothing', collectionElementType(view.type.type)!)).toBe(
@@ -165,6 +177,9 @@ describe('producer compilation retains its omission boundary', () => {
     expect(first(view, 3)).toEqual(['Nothing', 'Nothing', 'Nothing']);
     expect(ce.box(['ListFrom', ['Take', view, 3]]).evaluate().json).toEqual([
       'List',
+      'Nothing',
+      'Nothing',
+      'Nothing',
     ]);
   });
 });
@@ -214,7 +229,7 @@ test('a generated row has the outer tabulation element contract', () => {
   ).toBe(true);
 });
 
-test('two-dimensional iterator Table preserves omitted coordinates in its rows', () => {
+test('two-dimensional iterator Table keeps Nothing coordinates in its rows', () => {
   const ce = new ComputeEngine();
   const table = ce.box([
     'Table',
@@ -304,7 +319,7 @@ test.each([[3], [2, 3]])(
   }
 );
 
-test('Shape preserves omissions from an opaque scalar producer', () => {
+test('Shape keeps a possible Nothing from an opaque scalar producer', () => {
   const ce = new ComputeEngine();
   ce.declare('opaque', {
     signature: '(integer) -> any',
@@ -314,7 +329,7 @@ test('Shape preserves omissions from an opaque scalar producer', () => {
   expect(ce.box(['Shape', view]).evaluate().json).toEqual(['Tuple', 3]);
 });
 
-test('Shape treats tuple cells as scalars beside omitted coordinates', () => {
+test('Shape treats tuple cells as scalars beside Nothing coordinates', () => {
   const ce = new ComputeEngine();
   ce.declare('opaque', {
     signature: '(integer) -> any',

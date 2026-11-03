@@ -198,7 +198,7 @@ describe('RangeOf — the `from` parameter', () => {
   });
 
   test('a SYMBOLIC `from` leaves the expression unevaluated', () => {
-    // Indeterminate, never the default: substituting 1 would answer a span
+    // NaN, never the default: substituting 1 would answer a span
     // for a search the caller did not ask for.
     ce.declare('k', 'integer');
     expect(span(['RangeOf', str('abc'), str('a'), 'k'])).toContain('symbolic:');
@@ -527,9 +527,7 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
         ])
         .evaluate().symbol
     ).toBe('Nothing');
-    // A literal `Nothing` span folds at canonicalization — it must not be
-    // read as an OMITTED argument, which is what a bare `Nothing` operand
-    // means everywhere else in the engine (`flatten` drops it).
+    // A literal `Nothing` span folds at canonicalization.
     expect(ce.box(['Slice', str('abcd'), 'Nothing']).type.toString()).toBe(
       'nothing'
     );

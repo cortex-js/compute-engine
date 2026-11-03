@@ -77,10 +77,10 @@ read an `unknown` parameter as evidence for a type variable
 `value` accepts data values, including scalars, collections, objects and
 opaque values such as regular expressions. `expression` also accepts
 functions and symbols. Both exclude the immediate `missing`, `nothing` and
-`error` types, but include numeric `nan`, and therefore `NaN` and
-`Indeterminate`. These contracts alone do not establish presence for
+`error` types, but include numeric `nan`, and therefore `NaN`. These
+contracts alone do not establish presence for
 `IsMissing`, `??` or the presence assertion `x?!`; the absence predicate
-(`isMissingValue`) includes both numeric markers. See the
+(`isMissingValue`) includes `NaN`. See the
 [numeric absence amendment](ERROR-MODEL.md#numeric-absence-handling--agreed-change-of-2026-10-20).
 
 As a declaration, an `unknown` element or slot asks for refinement: bare
@@ -174,8 +174,8 @@ an instance of that family.
 Use `list<integer>` for integer elements, `list<expression>` to exclude
 immediate `missing`, `nothing` and `error`, or `list<value>` to exclude
 immediate functions and symbols as well. These restrictions are immediate:
-a nested collection is itself a value. Numeric `NaN` and `Indeterminate`
-remain numeric outcomes, even where named absence markers are excluded.
+a nested collection is itself a value. Numeric `NaN` remains a numeric
+outcome, even where named absence markers are excluded.
 
 Explicit element arguments remain explicit through parsing, reduction and
 serialization. In particular, `<unknown>` no longer collapses into a bare
@@ -190,10 +190,10 @@ defaults and rank constraints of vector, matrix and tensor spellings remain;
 the next section gives their rules.
 
 Compiler shape checks cannot use a bare kind as proof that its elements
-exclude Nothing. A raw lazy collection can retain omitted positions. Until
-compiled targets have a distinct omission representation, operations that
-need that distinction require an explicit omission-free content contract,
-a structural proof, or a compilation refusal.
+exclude `Nothing`. A list, a tuple and a lazy view keep a `Nothing` element
+in its position. The compiled targets have no representation of `Nothing`,
+so an operation that can meet one requires an explicit content contract
+that excludes it, a structural proof, or a compilation refusal.
 
 Some type tests that look exact are not. A check on the element type of a
 collection must allow for these facts:
@@ -680,13 +680,14 @@ optional, as for any parameter: `(number, number = 2) -> number`.
   a tuple type (`tuple<x: number, k: number = 2>`, or `(number, number = 2)`
   with no arrow) it is a parse error.
 - The values: a number that a JavaScript `number` holds (`2`, `-1`, `1.5`,
-  `NaN`, `+oo`, `-oo`), a string (`"abc"`), `true` or `false`, a symbol
+  `NaN`, `+oo`, `-oo`; the word `Indeterminate` is read as `NaN`), a
+  string (`"abc"`), `true` or `false`, a symbol
   (`Integers`, or a backticked name), the empty list `[]` and the empty
   dictionary `{}`. An identifier in default position is a symbol name, not a
   type name. `True` and `False` are read as the booleans `true` and `false`,
   so `flag: boolean = True` prints as `flag: boolean = true`.
 - Refused values: `Nothing` and `Missing` (leave the parameter optional
-  instead), `Indeterminate` and `~oo`, a list or a dictionary with contents,
+  instead), `~oo`, a list or a dictionary with contents,
   and a symbol that names a parameter of the same signature
   (`(x: number, k: number = x)`). For a list with contents, declare a
   constant symbol and use its name as the default.
@@ -1251,10 +1252,8 @@ are in the guide; the ones that interact with types are:
   equal to a bound. `compare` receives `context.tolerance` from `.is()` (its
   `tolerance` argument, or `engine.tolerance`), and `undefined` from every
   other comparison.
-- `isExact(value)` of the kind says whether a value is exact, for the rule
-  that an inexact operand turns `Indeterminate` into `NaN`
-  (`isInexactOperand()`, `nanOperandAnswer()`). Absent, the values are
-  exact.
+- `isExact(value)` of the kind says whether a value is exact
+  (`isInexactOperand()`). Absent, the values are exact.
 - `isNaN(value)` of the kind says whether a value stands for no value (a
   measurement with a `NaN` nominal, a quantity with a `NaN` magnitude;
   `kindValueIsNaN()`). Such a value follows the rule of the number `NaN`

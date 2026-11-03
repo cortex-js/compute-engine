@@ -988,10 +988,9 @@ export function refusedCollectionSourceOperands(
 export function checkArity(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  count: number,
-  preserveNothing = false
+  count: number
 ): ReadonlyArray<Expression> {
-  ops = flatten(ops, undefined, true, preserveNothing);
+  ops = flatten(ops);
 
   // @fastpath
   if (!ce.strict) {
@@ -1784,7 +1783,11 @@ export function checkNumericArgs(
  * broadcast over one. The exemptions, and why each stays silent:
  * - `broadcastable<number>`: could be a number, or a collection consumed by
  *   broadcast;
- * - `missing | nothing`: absence markers propagate as `NaN`, never error;
+ * - `missing`: an absent value propagates (as `Missing`), never an error.
+ *   The VALUE `Nothing` is not exempt: it is not a number, so `Add(2, y)`
+ *   with `y := Nothing` is the same `incompatible-type` error as the boxed
+ *   `Add(2, Nothing)`. The test reads the symbol, not the type, because the
+ *   type `nothing` is the bottom type and so is below `number`;
  * - `function`: a function-valued symbol in a numeric position stays a
  *   symbolic term throughout the engine, in EVERY operator, not only as a
  *   product factor: at boxing time `checkNumericArgs` devolves an unapplied
@@ -1855,9 +1858,10 @@ export function nonNumericOperandError(
     (x) =>
       x.isValid &&
       !isNumber(x) &&
-      (((x.type.type === 'never' || !x.type.facts.belowNumber) &&
-        x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE) &&
-        !hasKindArm(x.type.type, kinds)) ||
+      (isSymbol(x, 'Nothing') ||
+        ((x.type.type === 'never' || !x.type.facts.belowNumber) &&
+          x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE) &&
+          !hasKindArm(x.type.type, kinds)) ||
         isNonNumericTupleType(x.type.type))
   );
   if (bad === undefined) return undefined;
@@ -1957,7 +1961,7 @@ export function hasAbsentScalarOperand(
  * `Missing` is the position-preserving absent datum of
  * `docs/ERROR-MODEL.md` §1. Arithmetic consumers use `isAbsentValue`;
  * explicit checks and fallbacks (`IsMissing`, `Coalesce`) use
- * `isMissingValue`, which also includes exact `Indeterminate`.
+ * `isMissingValue`, which also counts a `NaN` point.
  */
 export function isAbsentScalarSymbol(x: Expression): boolean {
   return isAbsentSymbol(x);
@@ -2187,10 +2191,7 @@ export function markAbsentPointCells(
   // points) has its absent points in the inner lists. A `NaN` is looked for
   // in nested `List`s only, never inside a `Tuple`, where it is a coordinate
   // of a present point.
-  // An `Indeterminate` cell is a value (the exact answer to an indeterminate
-  // form), not an absent point, so it is kept.
-  const isNaNCell = (x: Expression) =>
-    isNumber(x) && x.isNaN && !x.isIndeterminate;
+  const isNaNCell = (x: Expression) => isNumber(x) && x.isNaN === true;
   // The walk is not bounded by the type: a list type without dimensions
   // (`list<missing | tuple<…>>`) describes the leaf cells at ANY depth, so a
   // matrix of points can carry it, and the value's own nesting is the only
@@ -2756,7 +2757,8 @@ function elementIsBareOrGround(param: Type | undefined): boolean {
  * A union parameter (`collection<nothing | number> | number` at `Median`)
  * distributes the element type of its one arm that admits a list literal,
  * and nothing when several arms admit one. A valueless symbol cell gets the
- * element type without its `nothing` member (`symbolCellType()`).
+ * element type without its `nothing` member, and a symbol cell that holds a
+ * value gets no type (`symbolCellType()`).
  */
 function distributeLiteralElementInference(op: Expression, param: Type): void {
   if (!isFunction(op, 'List') && !isFunction(op, 'Tuple')) return;
@@ -2794,7 +2796,8 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
       if (slot === 'unknown' || slot === 'any') return;
       if (isSymbol(el)) {
         const cell = symbolCellType(el, slot);
-        if (cell !== 'never') el._infer(() => cell, 'narrow');
+        if (cell !== undefined && cell !== 'never')
+          el._infer(() => cell, 'narrow');
       } else distributeLiteralElementInference(el, slot);
     });
     return;
@@ -2805,7 +2808,8 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
   for (const el of op.ops)
     if (isSymbol(el)) {
       const cell = symbolCellType(el, element);
-      if (cell !== 'never') el._infer(() => cell, 'narrow');
+      if (cell !== undefined && cell !== 'never')
+        el._infer(() => cell, 'narrow');
     } else distributeLiteralElementInference(el, element);
 }
 
@@ -2816,13 +2820,17 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
  * A `nothing` member of the element type (`collection<nothing | number>` at
  * `Mean`) admits a cell that is omitted, but the use of a valueless symbol
  * there is no evidence that the symbol holds `Nothing`: `Mean([p, q])` gives
- * `p` the type `number`, not `nothing | number`. A symbol that holds a value
- * gets the element type unchanged: after `p := Nothing`, `Mean([p, 1])`
- * keeps the type `nothing` of `p` (the meet of `nothing` and `number` would
- * be `never`, a type that does not hold its value).
+ * `p` the type `number`, not `nothing | number`.
+ *
+ * A symbol that holds a value gets no type (the result is `undefined`): the
+ * type of its value is the evidence, not the parameter it fills. After
+ * `p := Nothing`, `Mean([p, 1])` keeps the type `nothing` of `p`; the meet of
+ * `nothing` and `number` is `never`, a type that does not hold its value.
+ * The call is then checked against the value as usual.
  */
-function symbolCellType(el: Expression, element: Type): Type {
-  if (isSymbol(el) && el.valueDefinition?.value !== undefined) return element;
+function symbolCellType(el: Expression, element: Type): Type | undefined {
+  if (isSymbol(el) && el.valueDefinition?.value !== undefined)
+    return undefined;
   return withoutNothing(element);
 }
 
@@ -3887,8 +3895,7 @@ export interface ValidateArgumentsInternals {
    * definition, a function held as a value). A `NaN` argument is accepted
    * at a parameter whose whole type is a subtype of `number` (`integer`,
    * `real`, `number`) — see `acceptsNaNArgument`. A union with a member
-   * that is not numeric, and a collection of numbers, are checked as usual.
-   * `Indeterminate` is accepted too: it reports `isNaN`. Library operators
+   * that is not numeric, and a collection of numbers, are checked as usual. Library operators
    * leave this unset: their `NaN` policy is `nanPolicyAt`. */
   userFunction?: boolean;
   /** The callee is a function literal whose parameter annotations are

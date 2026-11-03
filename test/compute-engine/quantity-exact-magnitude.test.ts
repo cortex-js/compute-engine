@@ -167,7 +167,7 @@ describe('AN INEXACT CONVERSION OF AN EXACT MAGNITUDE GIVES A FLOAT', () => {
 describe('AN INFINITE MAGNITUDE HAS NO ERROR TERM', () => {
   // The error terms of the Measurement arithmetic multiply the square of the
   // magnitude by the square of a zero error: for an infinite magnitude that
-  // product is `Indeterminate`.
+  // product is `NaN`.
   test.each([
     [['Multiply', 2, ['Quantity', 'PositiveInfinity', 'm']], '+oo m'],
     [['Divide', ['Quantity', 'PositiveInfinity', 'm'], 2], '+oo m'],

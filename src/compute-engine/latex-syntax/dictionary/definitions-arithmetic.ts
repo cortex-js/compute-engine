@@ -3108,14 +3108,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\tilde', '<{>', '\\infty', '<}>'],
     parse: 'ComplexInfinity',
   },
-  // The exact answer to an indeterminate form (`0/0`). `NaN` is spelled by
-  // the `notANumber` serializer option instead of an entry; `Indeterminate`
-  // has no option of its own, so this entry both parses and serializes it.
+  // `Indeterminate` is an input spelling of `NaN`: it parses to the symbol
+  // `Indeterminate`, which boxes to the `NaN` literal. It is never written:
+  // `NaN` is spelled by the `notANumber` serializer option.
   {
-    name: 'Indeterminate',
-    standaloneSymbol: true,
     latexTrigger: '\\operatorname{Indeterminate}',
-    serialize: '\\operatorname{Indeterminate}',
+    parse: 'Indeterminate',
   },
   {
     latexTrigger: '\\mathrm{Indeterminate}',
@@ -5313,7 +5311,16 @@ function parseLog(
 ): MathJsonExpression | null {
   let sub: MathJsonExpression | null = null;
 
-  if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
+  // An empty base (`\log_{}(x)`, also with spaces: `\log_{ }(x)`,
+  // `\log_ {}(x)`) is no base: it is `\log(x)`. The parser reads an empty
+  // group as `Nothing`, which is not a number, so a base that parses to
+  // `Nothing` and whose source does not spell `Nothing` is dropped.
+  if (parser.match('_')) {
+    const start = parser.index;
+    sub = parser.parseGroup() ?? parser.parseToken();
+    if (sub === 'Nothing' && !parser.latex(start, parser.index).includes('Nothing'))
+      sub = null;
+  }
 
   // Optional power/inverse superscript, e.g. `\log_2^2 x` → `(\log_2 x)^2`,
   // `\ln^2 x` → `(\ln x)^2`, `\ln^{-1} x` → the inverse (`exp`).

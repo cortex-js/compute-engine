@@ -2724,14 +2724,19 @@ export class _Parser implements Parser {
    * Parse an expression in a tabular format, where rows are separated by `\\`
    * and columns by `&`.
    *
-   * Return rows of sparse columns: empty rows are indicated with `Nothing`,
-   * and empty cells are also indicated with `Nothing`.
+   * Return rows of sparse columns: an empty cell followed by `&` is
+   * indicated with `Nothing`. An empty cell that ends a row or the
+   * environment is left out, and a row with no cell that holds an
+   * expression (`\\ & \\`) is an empty row.
    */
   parseTabular(): null | MathJsonExpression[][] {
     const result: MathJsonExpression[][] = [];
 
     let row: MathJsonExpression[] = [];
     let expr: MathJsonExpression | null = null;
+    // Whether a cell of the current row holds an expression, and not only
+    // the `Nothing` placeholder of an empty cell.
+    let rowHasCell = false;
     while (!this.atBoundary) {
       this.skipSpace();
 
@@ -2748,9 +2753,10 @@ export class _Parser implements Parser {
         this.parseOptionalGroup();
 
         if (expr !== null) row.push(expr);
-        result.push(row);
+        result.push(rowHasCell ? row : []);
         row = [];
         expr = null;
+        rowHasCell = false;
       } else {
         const cell: MathJsonExpression[] = [];
         let peek = this.peek;
@@ -2785,13 +2791,16 @@ export class _Parser implements Parser {
           this.skipSpace();
           peek = this.peek;
         }
+        if (cell.length > 0) rowHasCell = true;
         if (cell.length > 1) expr = ['Sequence', ...cell];
-        else expr = cell[0] ?? 'Nothing';
+        // An empty cell that ends the environment is left out, as an empty
+        // cell that ends a row is.
+        else expr = cell[0] ?? (this.atBoundary ? null : 'Nothing');
       }
     }
     // Capture any leftover columns or row
     if (expr !== null) row.push(expr);
-    if (row.length > 0) result.push(row);
+    if (row.length > 0) result.push(rowHasCell ? row : []);
 
     return result;
   }

@@ -13,7 +13,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  *   enclosing integral is examined over its range.
  * - A pole across which the integrand changes sign, or poles at both bounds
  *   with different signs: the integral has no value. `evaluate()` gives
- *   `Indeterminate` for an exact integrand, and `NaN` with a float.
+ *   `NaN` for an exact integrand, and `NaN` with a float.
  * - The flat MathJSON form `["Integrate", f, "y", lower, upper]` reads the
  *   bounds for any bound expressions.
  * - `NIntegrate(f, lower, upper)`: a `Tuple` of bounds is an error.
@@ -148,25 +148,22 @@ describe('AN ITERATED INTEGRAL WITH A POLE THAT MOVES WITH THE OUTER VARIABLE', 
   });
 });
 
-describe('AN INTEGRAL WITH NO VALUE: Indeterminate OR NaN', () => {
+describe('AN INTEGRAL WITH NO VALUE: NaN', () => {
   const ce = new ComputeEngine();
   const reciprocal = (numerator: number, a: number, b: number) =>
     integral(ce, ['Divide', numerator, 't'], [['t', a, b]]);
 
   test('an exact integrand that changes sign across a pole', () => {
     const value = reciprocal(1, -1, 1).evaluate();
-    expect(value.isIndeterminate).toBe(true);
+    expect(value.isNaN).toBe(true);
     expect(reciprocal(1, -1, 1).N().isNaN).toBe(true);
-    expect(reciprocal(1, -1, 1).N().isIndeterminate).toBe(false);
   });
 
   test('a float operand gives NaN', () => {
     const coefficient = reciprocal(1.5, -1, 1).evaluate();
     expect(coefficient.isNaN).toBe(true);
-    expect(coefficient.isIndeterminate).toBe(false);
     const bound = reciprocal(1, -0.5, 1).evaluate();
     expect(bound.isNaN).toBe(true);
-    expect(bound.isIndeterminate).toBe(false);
   });
 
   test('poles at both bounds with different signs', () => {
@@ -176,11 +173,10 @@ describe('AN INTEGRAL WITH NO VALUE: Indeterminate OR NaN', () => {
       ['Divide', c, ['Subtract', 1, 't']],
     ];
     expect(
-      integral(ce, body(1), [['t', 0, 1]]).evaluate().isIndeterminate
+      integral(ce, body(1), [['t', 0, 1]]).evaluate().isNaN
     ).toBe(true);
     const float = integral(ce, body(1.5), [['t', 0, 1]]).evaluate();
     expect(float.isNaN).toBe(true);
-    expect(float.isIndeterminate).toBe(false);
   });
 
   test('a one-sign pole is unchanged', () => {
@@ -196,7 +192,6 @@ describe('AN INTEGRAL WITH NO VALUE: Indeterminate OR NaN', () => {
       .box(['NIntegrate', ['Function', ['Divide', 1, 't'], 't'], -1, 1])
       .evaluate();
     expect(value.isNaN).toBe(true);
-    expect(value.isIndeterminate).toBe(false);
   });
 });
 
@@ -220,16 +215,15 @@ describe('A POLE AT A NUMBER, WITH A FREE SYMBOL IN A CONSTANT FACTOR', () => {
   test('a sign change across the pole: no value', () => {
     // For a ≠ 0 the integrand changes sign across 0; for a = 0 it is
     // undefined everywhere. In both cases the integral has no value.
-    expect(at('a', 1, -1, 1).evaluate().isIndeterminate).toBe(true);
-    expect(at('a', 3, -1, 1).evaluate().isIndeterminate).toBe(true);
-    expect(at(['Add', 'a', 1], 1, -1, 1).evaluate().isIndeterminate).toBe(true);
+    expect(at('a', 1, -1, 1).evaluate().isNaN).toBe(true);
+    expect(at('a', 3, -1, 1).evaluate().isNaN).toBe(true);
+    expect(at(['Add', 'a', 1], 1, -1, 1).evaluate().isNaN).toBe(true);
     const float = integral(
       ce,
       ['Divide', 1.5, ['Multiply', 'a', 't']],
       [['t', -1, 1]]
     ).evaluate();
     expect(float.isNaN).toBe(true);
-    expect(float.isIndeterminate).toBe(false);
   });
 
   test('a factor that may be zero: unevaluated', () => {

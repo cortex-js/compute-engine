@@ -505,3 +505,10 @@ describe('POWER BASE', () => {
     ).toBe('(a + b) * c');
   });
 });
+
+describe('SEQUENCES', () => {
+  test('An empty Sequence prints by its name; a list splices it out', () => {
+    expect(check(['Sequence'])).toBe('Sequence()');
+    expect(check(['List', 1, ['Sequence'], 2])).toBe('[1,2]');
+  });
+});

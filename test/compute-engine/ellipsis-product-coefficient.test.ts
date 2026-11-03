@@ -123,7 +123,7 @@ describe('A zero or NaN coefficient times a product with an ellipsis', () => {
   test('mul()', () => {
     expect(scaled().mul(ce.Zero).json).toEqual(0);
     expect(scaled().mul(ce.NaN).isNaN).toBe(true);
-    expect(scaled().mul(ce.Indeterminate).isIndeterminate).toBe(true);
+    expect(scaled().mul(ce.NaN).isNaN).toBe(true);
   });
 
   test('evaluate()', () => {
@@ -137,8 +137,8 @@ describe('A zero or NaN coefficient times a product with an ellipsis', () => {
       ce.function('Multiply', [ce.NaN, scaled()]).evaluate().isNaN
     ).toBe(true);
     expect(
-      ce.function('Multiply', [ce.Indeterminate, scaled()]).evaluate()
-        .isIndeterminate
+      ce.function('Multiply', [ce.NaN, scaled()]).evaluate()
+        .isNaN
     ).toBe(true);
   });
 
@@ -146,7 +146,7 @@ describe('A zero or NaN coefficient times a product with an ellipsis', () => {
     expect(ce.function('Multiply', [ce.Zero, scaled()]).N().json).toEqual(0);
     expect(ce.function('Multiply', [ce.NaN, scaled()]).N().isNaN).toBe(true);
     const indeterminate = ce
-      .function('Multiply', [ce.Indeterminate, scaled()])
+      .function('Multiply', [ce.NaN, scaled()])
       .N();
     expect(indeterminate.isNaN).toBe(true);
   });

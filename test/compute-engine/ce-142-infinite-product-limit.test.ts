@@ -89,7 +89,7 @@ describe('Product of k + c with a negative integer c under simplify()', () => {
     const e = ce.parse('\\prod_{k=1}^n (k-3)');
     expect(e.simplify().toString()).not.toBe('0');
   });
-  test('an infinite upper bound is not Indeterminate', () => {
+  test('an infinite upper bound is not NaN', () => {
     const e = ce.parse('\\prod_{k=1}^\\infty (k-3)');
     expect(e.simplify().isNaN).not.toBe(true);
   });

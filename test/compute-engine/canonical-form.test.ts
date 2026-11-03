@@ -309,8 +309,8 @@ describe('CANONICAL FORMS', () => {
     test('0^x', () => {
       expect(checkPower('0^0')).toMatchInlineSnapshot(`
         box        = ["Power", 0, 0]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
       expect(checkPower('0^{1.1}')).toMatchInlineSnapshot(`
         box        = ["Power", 0, 1.1]
@@ -342,8 +342,8 @@ describe('CANONICAL FORMS', () => {
     test('x^0', () => {
       expect(checkPower('\\infty^0')).toMatchInlineSnapshot(`
         box        = ["Power", "PositiveInfinity", 0]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
       expect(checkPower('\\operatorname{NaN}^0')).toMatchInlineSnapshot(`
         box        = ["Power", "NaN", 0]
@@ -386,8 +386,8 @@ describe('CANONICAL FORMS', () => {
     test('1^x', () => {
       expect(checkPower('1^{\\infty}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "PositiveInfinity"]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
       expect(checkPower('1^{0}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, 0]
@@ -501,13 +501,13 @@ describe('CANONICAL FORMS', () => {
       `);
       expect(checkPower('1^\\infty')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "PositiveInfinity"]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
       expect(checkPower('{-1}^\\infty')).toMatchInlineSnapshot(`
         box        = ["Power", -1, "PositiveInfinity"]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
       // `(+∞)^∞` keeps its DIRECTION: nⁿ grows through +∞ without ever
       // changing sign (10¹⁰, 100¹⁰⁰ = 10²⁰⁰, 1000¹⁰⁰⁰ overflows the double
@@ -543,8 +543,8 @@ describe('CANONICAL FORMS', () => {
       // p === +Infinity (& 'holdUntil: never')
       expect(checkPower('1^{p}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, "p"]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
     });
 
@@ -561,13 +561,13 @@ describe('CANONICAL FORMS', () => {
       `);
       expect(checkPower('1^{-\\infty}')).toMatchInlineSnapshot(`
         box        = ["Power", 1, ["Negate", "PositiveInfinity"]]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
       expect(checkPower('{-1}^{-\\infty}')).toMatchInlineSnapshot(`
         box        = ["Power", -1, ["Negate", "PositiveInfinity"]]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
       expect(checkPower('{-\\infty}^{-\\infty}')).toMatchInlineSnapshot(`
         box        = [
@@ -657,15 +657,15 @@ describe('CANONICAL FORMS', () => {
 
       expect(check('\\infty^i')).toMatchInlineSnapshot(`
         box        = ["Power", "PositiveInfinity", "i"]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
 
       expect(check('{\\operatorname{ComplexInfinity}}^{-3i}'))
         .toMatchInlineSnapshot(`
         box        = ["Power", "ComplexInfinity", ["InvisibleOperator", -3, "i"]]
-        canonForms = Indeterminate
-        canonical  = Indeterminate
+        canonForms = NaN
+        canonical  = NaN
       `);
 
       //Include 'Add' in order that complex-numbers may be identified for these cases.

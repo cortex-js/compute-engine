@@ -562,8 +562,8 @@ export function isExactConversion(
  * mapped with plain expression arithmetic: the error term of
  * `measurementAffine()` multiplies the square of the magnitude by the square
  * of a zero error, and for an infinite magnitude that product is
- * `Indeterminate` (`Quantity(+∞, m)` converted to `cm` gave
- * `(+∞ ± Indeterminate) cm`).
+ * `NaN` (`Quantity(+∞, m)` converted to `cm` gave
+ * `(+∞ ± NaN) cm`).
  */
 export function affineMagnitude(
   ce: ComputeEngine,

@@ -1721,7 +1721,7 @@ function restrictionCollectionHandlers(): CollectionHandlers {
 /**
  * The relational heads whose operands a branch condition compares.
  *
- * An undefined numeric operand (`NaN`, `Indeterminate`) of a relation gives
+ * An undefined numeric operand (`NaN`) of a relation gives
  * the relation its IEEE 754 value, and a branch on it uses that value as it
  * uses any other: an ordered comparison (`Less`, `LessEqual`, `Greater`,
  * `GreaterEqual`) or an `Equal` is `False`, so the branch takes its next arm,
@@ -1757,7 +1757,7 @@ function twoValued(value: Expression): Expression {
  * inert symbolic forms included), with an absent value read as `False`
  * (`twoValued`).
  *
- * A relation with an undefined operand (`NaN`, `Indeterminate`, `Missing`)
+ * A relation with an undefined operand (`NaN`, `Missing`)
  * is `False` (`True` for `≠`), and the branch uses that value as it uses
  * any other: `If(0/0 > 0, 1, 0)` is `0` and `If(0/0 ≠ 0, 1, 0)` is `1` (user
  * decisions 2026-10-20, Tycho rows 411 and 413, 2026-10-23 and 2026-11-02).

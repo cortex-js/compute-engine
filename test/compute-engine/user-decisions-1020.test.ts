@@ -222,20 +222,22 @@ describe('THE PRINTED VALUE OF A LAZY VIEW KEEPS A NOTHING RESULT', () => {
     expect(map.evaluate().toString()).toBe('[1,"Nothing"]');
   });
 
-  // A list built from the view erases `Nothing`, as a list literal does
-  // (user decision 2026-10-20).
-  test('Map turned into a list: the list erases Nothing', () => {
+  // A list built from the view keeps `Nothing`, as a list literal does.
+  test('Map turned into a list: the list keeps Nothing', () => {
     const map = ce.box(MAP);
     const listed = map.evaluate({ materialization: true });
     expect(listed.operator).toBe('List');
-    expect(listed.toString()).toBe('[1]');
-    expect(listed.count).toBe(1);
-    expect([...listed.each()].map((x) => x.toString())).toEqual(['1']);
-    expect(ce.box(['Length', listed]).evaluate().toString()).toBe('1');
+    expect(listed.toString()).toBe('[1,"Nothing"]');
+    expect(listed.count).toBe(2);
+    expect([...listed.each()].map((x) => x.toString())).toEqual([
+      '1',
+      '"Nothing"',
+    ]);
+    expect(ce.box(['Length', listed]).evaluate().toString()).toBe('2');
 
     const listFrom = ce.box(['ListFrom', MAP]).evaluate();
-    expect(listFrom.toString()).toBe('[1]');
-    expect(listFrom.count).toBe(1);
+    expect(listFrom.toString()).toBe('[1,"Nothing"]');
+    expect(listFrom.count).toBe(2);
   });
 
   test('Map whose every result is Nothing', () => {
@@ -264,21 +266,24 @@ describe('THE PRINTED VALUE OF A LAZY VIEW KEEPS A NOTHING RESULT', () => {
   });
 
   // A list literal is a value: its evaluation lists the view it holds, and
-  // that list erases `Nothing` (user decision 2026-10-20).
+  // that list keeps `Nothing`.
   test('a list literal that holds the Map', () => {
     const value = ce.box(['List', MAP]).evaluate();
-    expect(value.toString()).toBe('[[1]]');
+    expect(value.toString()).toBe('[[1,"Nothing"]]');
     const inner = value.at(1)!;
-    expect(inner.count).toBe(1);
-    expect([...inner.each()].map((x) => x.toString())).toEqual(['1']);
+    expect(inner.count).toBe(2);
+    expect([...inner.each()].map((x) => x.toString())).toEqual([
+      '1',
+      '"Nothing"',
+    ]);
   });
 
   test('a list literal that holds the Map, turned into a list', () => {
-    // The materialization of the literal lists the view, and the list erases
-    // `Nothing` (user decision 2026-10-20).
+    // The materialization of the literal lists the view, and the list keeps
+    // `Nothing`.
     expect(
       ce.box(['List', MAP]).evaluate({ materialization: true }).toString()
-    ).toBe('[[1]]');
+    ).toBe('[[1,"Nothing"]]');
   });
 
   test('Tabulate and Table', () => {
@@ -321,10 +326,10 @@ describe('THE PRINTED VALUE OF A LAZY VIEW KEEPS A NOTHING RESULT', () => {
     expect(iterate.toString()).toBe('[2,"Nothing"]');
   });
 
-  test('a list literal still erases a Nothing element', () => {
+  test('a list literal keeps a Nothing element', () => {
     const literal = ce.box(['List', 1, 'Nothing']);
-    expect(literal.toString()).toBe('[1]');
-    expect(literal.count).toBe(1);
+    expect(literal.toString()).toBe('[1,"Nothing"]');
+    expect(literal.count).toBe(2);
   });
 
   test('parse route', () => {
@@ -344,8 +349,8 @@ describe('THE PRINTED VALUE OF A LAZY VIEW KEEPS A NOTHING RESULT', () => {
   });
 
   // The printed result of a program is a display of the view, and keeps
-  // `Nothing`. The `--json` output lists the view, and erases it, as a list
-  // does (user decision 2026-10-20).
+  // `Nothing`. The `--json` output lists the view, and keeps it, as a list
+  // does.
   test('Epsil CLI: the printed value and the JSON value', () => {
     const source = 'map(x => Nothing if x > 1 else x, [1, 2])';
     const engine = new ComputeEngine();
@@ -355,16 +360,19 @@ describe('THE PRINTED VALUE OF A LAZY VIEW KEEPS A NOTHING RESULT', () => {
     expect(result.diagnostics).toEqual([]);
     const evaluated = { ...result, source, elapsedMs: 0 };
     expect(formatValue(evaluated, 'value')).toBe('[1,"Nothing"]');
-    expect(JSON.parse(formatValue(evaluated, 'json'))).toEqual(['List', 1]);
+    expect(JSON.parse(formatValue(evaluated, 'json'))).toEqual([
+      'List',
+      1,
+      'Nothing',
+    ]);
   });
 });
 
 describe('A LIST BUILT FROM A VIEW THAT YIELDS NOTHING AGREES WITH ITSELF', () => {
   // Each of these builds a list (or a set) from a lazy view that yields
-  // `Nothing`. A list erases a `Nothing` element as a list literal does, and
-  // a set has no positions, so the printed value, the count and the
-  // elements of the result must all leave `Nothing` out (user decision
-  // 2026-10-20).
+  // `Nothing`. A list keeps a `Nothing` element as a list literal does, and
+  // so does a set, so the printed value, the count and the elements of the
+  // result must all keep `Nothing`.
   const ce = new ComputeEngine();
   const NOTHING_ABOVE_ONE: MathJsonExpression = [
     'Function',
@@ -395,10 +403,10 @@ describe('A LIST BUILT FROM A VIEW THAT YIELDS NOTHING AGREES WITH ITSELF', () =
     ['ListJoin', ['ListJoin', MAP, ['List', 9]]],
   ] as [string, MathJsonExpression][])('%s', (_label, json) => {
     expect(views(json)).toEqual({
-      printed: '[1,9]',
-      count: 2,
-      elements: ['1', '9'],
-      length: '2',
+      printed: '[1,"Nothing","Nothing",9]',
+      count: 4,
+      elements: ['1', '"Nothing"', '"Nothing"', '9'],
+      length: '4',
     });
   });
 
@@ -415,39 +423,46 @@ describe('A LIST BUILT FROM A VIEW THAT YIELDS NOTHING AGREES WITH ITSELF', () =
       ['List', 1, 2],
     ];
     expect(views(json)).toEqual({
-      printed: '[0,1,1]',
-      count: 3,
-      elements: ['0', '1', '1'],
-      length: '3',
+      printed: '[0,1,1,"Nothing","Nothing"]',
+      count: 5,
+      elements: ['0', '1', '1', '"Nothing"', '"Nothing"'],
+      length: '5',
     });
   });
 
   test('Epsil route: a spread', () => {
     const { value } = runEpsil(`[...${EPSIL_MAP}, 9]`);
-    expect(value.toString()).toBe('[1,9]');
-    expect(value.count).toBe(2);
+    expect(value.toString()).toBe('[1,"Nothing","Nothing",9]');
+    expect(value.count).toBe(4);
   });
 
-  test('a set view does not hold Nothing', () => {
+  test('a set view holds Nothing once', () => {
     const set = ce.box(['Map', NOTHING_ABOVE_ONE, ['Set', 1, 2, 3]]);
-    expect(set.toString()).toBe('Set(1)');
-    expect(set.count).toBe(1);
-    expect([...set.each()].map((x) => x.toString())).toEqual(['1']);
+    expect(set.toString()).toBe('Set(1, "Nothing")');
+    expect(set.count).toBe(2);
+    expect([...set.each()].map((x) => x.toString())).toEqual([
+      '1',
+      '"Nothing"',
+    ]);
     const join = ce.box([
       'Join',
       ['Set', 1],
       ['Map', NOTHING_ABOVE_ONE, ['Set', 2, 3]],
     ]);
-    expect(join.count).toBe(1);
-    expect(join.toString()).toBe('Set(1)');
+    expect(join.count).toBe(2);
+    expect(join.toString()).toBe('Set(1, "Nothing")');
   });
 
   test('Tally', () => {
-    expect(ce.box(['Tally', MAP]).evaluate().toString()).toBe('([1], [1])');
-    expect(runEpsil(`tally(${EPSIL_MAP})`).value.toString()).toBe('([1], [1])');
+    expect(ce.box(['Tally', MAP]).evaluate().toString()).toBe(
+      '([1,"Nothing"], [1,2])'
+    );
+    expect(runEpsil(`tally(${EPSIL_MAP})`).value.toString()).toBe(
+      '([1,"Nothing"], [1,2])'
+    );
   });
 
-  test.each([['Sort'], ['RandomShuffle'], ['Unique'], ['Ordering']])(
+  test.each([['RandomShuffle'], ['Unique']])(
     '%s builds a list: its count is the count of its value',
     (op) => {
       const json: MathJsonExpression = [op, MAP];
@@ -458,14 +473,16 @@ describe('A LIST BUILT FROM A VIEW THAT YIELDS NOTHING AGREES WITH ITSELF', () =
     }
   );
 
+  // `Nothing` cannot be ordered against a number, so `Sort` stays
+  // unevaluated, as it does for `[3, True, 1]`. `Length` counts the kept
+  // elements.
   test('Sort: the value and the length', () => {
-    expect(views(['Sort', MAP])).toEqual({
-      printed: '[1]',
-      count: 1,
-      elements: ['1'],
-      length: '1',
-    });
-    expect(views(['Sort', ['Reverse', MAP]]).length).toBe('1');
+    const v = views(['Sort', MAP]);
+    expect(v.printed).toBe(
+      'Sort(Map((x) => If(1 < x, "Nothing", x), [1,2,3]))'
+    );
+    expect(v.length).toBe('3');
+    expect(views(['Sort', ['Reverse', MAP]]).length).toBe('3');
   });
 
   test.each([
@@ -493,11 +510,11 @@ describe('A LIST BUILT FROM A VIEW THAT YIELDS NOTHING AGREES WITH ITSELF', () =
         .parse('\\mathrm{Length}(\\mathrm{Sort}(\\mathrm{Map}(g, [1, 2, 3])))')
         .evaluate()
         .toString()
-    ).toBe('1');
+    ).toBe('3');
   });
 
   test('Epsil route: Sort', () => {
-    expect(runEpsil(`length(sort(${EPSIL_MAP}))`).value.toString()).toBe('1');
+    expect(runEpsil(`length(sort(${EPSIL_MAP}))`).value.toString()).toBe('3');
   });
 });
 

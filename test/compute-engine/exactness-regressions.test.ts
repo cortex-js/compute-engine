@@ -228,7 +228,7 @@ describe('powers of 0, 1 and -1 to a huge integer exponent are evaluated', () =>
 
   test('the base 0 to a zero or a negative exponent is not changed', () => {
     expect(ce.box(['Power', 0, 0]).evaluate().toString()).toEqual(
-      'Indeterminate'
+      'NaN'
     );
     expect(ce.box(['Power', 0, -10_000_000]).evaluate().toString()).toEqual(
       '~oo'

@@ -686,6 +686,276 @@ is untouched here; a `Missing` cell and a `Nothing` element are distinct.
 `NaN`-point readers stay; step 4, row 2 (absence) can fold the absent-input
 code into them.
 
+3.4.3 **The error model** (options page 2, option A). Staged 2026-11-03,
+session compute-engine-0f, base `96c72fb73`, not committed (the record is at
+the end of this item). One static error (`Error`), one dynamic non-value per
+domain (`NaN` for a number, the `NaN` point for a point, `Missing`
+otherwise), and `Nothing` only as the value of an empty block or of a
+statement with no value (`docs/ERROR-MODEL.md`, section "One static error,
+one dynamic non-value per domain — user decision of 2026-11-02").
+`Indeterminate` is no longer a value: the exact route gives `NaN` (`0/0`,
+`∞−∞`, `0^0`, `Mod(5, 0)`, `Variance([3])`, `Mean([1, 0/0])`,
+`Max(1, 0/0)`), and the word is an input spelling of `NaN` (MathJSON,
+`\operatorname{Indeterminate}`, Epsil, `NumberFrom`, the type grammar); the
+serializer writes `NaN`. `Nothing` is kept as an element wherever it
+appears, with no splice, no `Map` bypass, no `Filter` drop, no aggregate or
+statistics skip, no covariance row skip and no view policy; an operator
+that needs a value gives its ordinary `incompatible-type` error.
+
+- **The two table rows of options page 2, under the text of the decision**
+  (no static error): `Map(x ↦ (x > 1 ? x : Nothing), [1, 2])` is
+  `[Nothing, 2]` (it was `[2]` after construction); `Sum` over that view
+  is an `incompatible-type` error at the `Sum` (it was `1`). The table of
+  page 2 is corrected to these values.
+- **Tycho's answers** (tycho-f9, 2026-11-03, a reading of Tycho main, no
+  tests run). (a) `Indeterminate`: no Tycho reader or builder produces,
+  tests or builds it; two name sets list it
+  (`plot-core/classification-shape.ts` 196, `SCALAR_SYMBOLS`;
+  `graph-paper/onboarding/handoff-names.ts` 121) and become dead. `Nothing`:
+  read as "no value" in name sets, refusals, two argument filters and type
+  tests `t.is("nothing")` (still valid: the type is unchanged); produced in
+  `spacing-nodes.ts` 55 (an `InvisibleOperator` left with no operand) and
+  `binder-definition-inline.ts` 311/458 (an internal placeholder, not traced
+  to CE); no Tycho site depends on the splice, the `Map` bypass, the
+  `Filter` drop or the aggregate skip. Two Tycho sites depend on the old
+  parse outputs: `classification-entry-fold.ts` 500–531 drops the `Nothing`
+  hole of `(3,,4)` and reads the point (3, 4) (a deliberate leniency, pinned
+  by two Tycho tests); after this item that row shows a parse error, and
+  Tycho removes the drop and the two tests at adoption.
+  `classify-formula.ts` 1215 and `normalize-restrictions.ts` 79/236 accept
+  the old parse of a trailing comma in a piecewise; the new parse is already
+  accepted. (b) The corpus (103 Desmos states, 585 neyret states, 8,387
+  LaTeX strings) has no empty slot and no trailing comma in a piecewise
+  (control: 1,068 piecewise and 5,915 parenthesized strings); Tycho's own
+  showcase and user documents were not scanned.
+- **Choices beyond the rule, each reversible.**
+  (1) The trailing comma in a piecewise gives the parse of a piecewise with
+  no default, which is `Which(c, v)`, not `If(c, v)`: the rule said "parses
+  as `If(c, v)`, as with no default", but the parse with no default is
+  `Which(c, v)` today (`\{x>0: x,\}` was already `Which(0<x, x)`). Making
+  every piecewise with no default an `If` changes 1,068 corpus piecewise
+  strings and is not part of this item. In `cases`, an empty row and a
+  trailing comma in a condition cell give the same parse.
+  (2) An empty `Sequence()` stays `Sequence()` in canonical form (it was
+  `Nothing`) and prints as `Sequence()`; a list or an argument list splices
+  it. Witness `plausible`: the Epsil idiom `[h, ...t]` with `xs = [t]`
+  (`test/epsil/while-let.test.ts`) ended because the empty rest was
+  `Nothing`, which the list removed; with `Nothing` kept, the loop did not
+  end. The alternative, `Sequence()` → `Nothing`, breaks the idiom.
+  (3) One check in `nonNumericOperandError()` and one in
+  `processMinMaxItem()` read the symbol `Nothing`, because the type
+  `nothing` passes the numeric test: without them `Multiply(2, y)` with
+  `y := Nothing` stays inert while a string gives an error, and
+  `Max([NaN, Nothing])` gives `NaN` where an error must outrank `NaN`. The
+  alternative is no check (the inert form and `NaN`).
+  (4) A default value of `Nothing` stays refused, with the reason "the value
+  of an empty block, not an argument value".
+  (5) The type of `[1, Nothing, 3]` stays `list<integer>` (the type
+  `nothing` is untouched), so `Filter([1, Nothing, 3], x ↦ True)` gives an
+  `incompatible-type` cell for `Nothing` (witness `crafted`).
+  (6) An empty slot `(3,,4)`, `[3,,4]`, `f(3,,4)` holds `["Error",
+  "'missing'"]`, the parser's error for a missing operand; a trailing comma
+  `[1,2,]` is dropped; an empty last cell before `\end{bmatrix}` is
+  dropped, as before `\\`; an empty `Log` base (`\log_{}(x)`, `\log_{ }(x)`)
+  is no base.
+  (7) `ArithmeticDefinition.isExact` (public API) is marked `@deprecated`:
+  it chose between `NaN` and `Indeterminate`, and the engine no longer reads
+  it. Its removal is proposed to the user, not done.
+  (8) `Slice(xs, Nothing)` → `Nothing` stays: it makes a failed search
+  `Slice(xs, RangeOf(xs, needle))` give `Nothing` (user decision of
+  2026-08-16, `test/compute-engine/sequence-search.test.ts`). It is a
+  `Nothing` handler against the new rule; the user decides (below).
+- **GitHub issue #355** (the origin of `Indeterminate`): the comment for the
+  release is `docs/plans/2026-11-03-issue-355-comment.md`. At the release
+  the user runs, in this repo,
+  `gh issue comment 355 --body-file docs/plans/2026-11-03-issue-355-comment.md`.
+  It says that the exact and the float no-values merged back into `NaN`,
+  that the spellings still parse, and why.
+- **The compiler side.** No compiled code changed (two comments in the
+  bigint lane). Compiled code already gave `NaN` for every exact form with
+  no value; a list literal with a `Nothing` element, an aggregate over one
+  and a `Map`/`Filter` whose callback may give `Nothing` already declined,
+  and still decline. The refusals "when source element types admit
+  omission" and the omission tests of callback results stay for step 4,
+  row 7.
+- **The corpus measure** (Tycho frozen at `44a25d4e3` with the `At` handler
+  of 3.4.2 patched to `_SYS.atPointNoWrap`, the copy that 3.4.2 used; the
+  tools of 3.4.1 with records keyed by MathJSON; base: a new run on
+  `a7d3fb979`, the base of the change at the time of the measure, since
+  CE-791 changed compiled code after 3.4.2's run). 17,655 records and
+  17,835 compiles in both runs. Declines: javascript 44, glsl 47,
+  interval-js 70 in both runs; no new decline and none removed. Values:
+  77,138 values in 13,719 keys compared, none changed. 9 records changed
+  their key only: the compiled expression held `Indeterminate` (Tycho
+  receives the exact `0/0` of a Desmos `undefined`) and now holds `NaN`
+  (neyret documents with `\operatorname{Indeterminate}` in a piecewise arm,
+  a `PointList(0, Indeterminate)` separator and a `join` of
+  `[Indeterminate, …]`); their 36 values are equal. No `Nothing` element
+  reached a compiled record. Tycho main now has its build-only-`If` commit
+  `6599982fe`; the measure kept `44a25d4e3` so that the base run of the
+  3.4.2 copy could be compared.
+- **Code lines** (not blank, `//` or `*`; base `a7d3fb979`): `library`
+  78,052 → 77,707, `boxed-expression` 84,247 → 83,775, `common/type` 14,659
+  → 14,625, `latex-syntax` 25,832 → 25,843, `numerics` 23,133 and
+  `compilation` 92,790 unchanged (round-1 and round-2 fixes not counted).
+  Source: 93 files, 838 insertions, 2,575 deletions;
+  `boxed-expression/nothing-erasure.ts` deleted. Tests: 121 files changed,
+  one deleted (`erasing-literal-numeric-request.test.ts`, 13 tests that
+  pinned the erasure under `.N()`); the blocks of `indeterminate.test.ts`
+  that pinned the distinction of the two values were deleted (1,724 → about
+  760 lines), and erasure-only tests were deleted in the `Nothing` files
+  (aggregate 41, statistics 8, filter 4, and others); 7 inline snapshots
+  changed (5 parser outputs, 2 `Sequence()`), about 38 inline snapshots
+  `Indeterminate` → `NaN`; none marked `@fixme`.
+- **Review**: Claude and Codex, three rounds. Round 1 (9 findings): `Sum([Nothing])`
+  returned `Nothing`, `Max([NaN, Nothing])` returned `NaN`, an empty `cases`
+  row added a `Nothing` default, a trailing `&` made a matrix ragged
+  (`plausible`), a `Nothing` default refused with a wrong message, comments
+  of the erasure, the `isExact` hook, the display of `Sequence()`, dead
+  conditionals. Round 2 (5 findings, one from both): an empty `Log` base
+  with a space, three comments, the deprecation of `isExact`. Round 3
+  (Codex, on the `Log` fix): no finding.
+- **Checks** on the final tree: typecheck, lint, `check:deps`, the full
+  suite (1,801 suites, 77,705 tests, 0 failed, at `96c72fb73`), the corpus measure above (run before the review
+  fixes, which change no compiled code). `npm run test:python` was not run:
+  no compiled code changed.
+
+What 3.4.4 (block locals, options page 4, option A′) needs from this item:
+(1) `Nothing` is only the value of an empty block or of a statement with no
+value, and no list or argument removes it any more: `Block()` is `Nothing`
+and `[1, Block()]` is `[1, Nothing]` (it was `[1]`). Today a block that ends
+in an assignment gives the assigned value (`Block(Assign(b, 2))` is `2`);
+under A′ an assignment is a statement, so if 3.4.4 gives such a block the
+value `Nothing`, that value is kept where the block is used. (2) An empty
+`Sequence()` is no longer `Nothing`: a rest capture of an empty list keeps
+its value through a variable, so a block that returns it returns
+`Sequence()`. (3) The compiler's `Nothing` refusals and omission tests stay
+for step 4, row 7, and the absent-value code for step 4, row 2.
+
+3.4.6 **The complex lane** (options page 6, option A in its strict form).
+In progress 2026-11-03, session compute-engine-ee, base `2341d6f31`, in
+parallel with 3.4.3. `strict` is the only discipline and the default of
+every target; `mode: 'auto'` declines with `unsupported-mode`; the
+`promoted` and `escalation` result fields go; `mode: 'complex'` and
+`mode: 'bigint'` are unchanged; in the real lane an operation whose exact
+value is complex gives the target's `NaN`.
+
+- **Tycho's answers** (tycho-f9, 2026-11-03, a reading of Tycho main and of
+  its last codegen audit, Tycho `58b767d19` on the CE 3.3 build). (a) The
+  change from `mode: 'auto'` to `mode: 'complex'` is not on a Tycho branch
+  or commit yet; Tycho makes it at adoption. The sites:
+  `samplingModeOptions()` in `src/plot-core/ce-module-registry.ts` (about
+  line 602, return type at 600; read by `src/plot/ce-compile.ts` and
+  others), and the colour lane, three `mode: "auto"` literals in
+  `src/graph-paper/graph/style-expressions.ts` (about 2168, 2386, 2462 in
+  `44a25d4e3`). Two cache keys hold the string `"auto"` and change with
+  them, with no effect on a compile (`src/plot-core/compiled-body.ts`
+  about 3424, `src/plot/series/implicit-series.ts` about 2156). (b) The 9
+  documents with `promoted: true` (12 records, all `javascript`, requested
+  `auto`, result `complex`): showcase/cie-chromaticity, art/dlxysxelnj,
+  art/guvicl57aa, art/lrhjtkkyls, art/s8ishknvhe (2 records),
+  art/sqpmxjhvts (2 records, broadcast), art/tpalesypcc,
+  neyret/hbvzf9yk1r (broadcast), neyret/wsne0l2tcv. The only sources of
+  `mode: "auto"` in Tycho are the sites of (a), so each record comes
+  through one of the two routes, which both become `complex`; Tycho did not
+  trace which route each record takes. Tycho asked to receive the record of
+  any of the 9 that changes value or declines under `complex`.
+- **The corpus measure** uses the frozen Tycho `44a25d4e3` with the `At`
+  handler of 3.4.2, and the four `mode` sites and the two cache keys of
+  (a) patched to `complex`.
+- **The assumption of options page 6 (Tycho's change from `auto` to
+  `complex` keeps its values) is false on CE `2341d6f31`.** The adoption
+  alone changes values on the base (measured 2026-11-03, Tycho `44a25d4e3`:
+  CE `2341d6f31` with Tycho on `complex`, run `base-cx`, compared with the
+  3.4.2 final run, Tycho on `auto`; the value key holds the compile
+  options, so the 447 records whose mode changed were paired by LaTeX and
+  target: 3,576 values compared). Under `auto`, 467 of Tycho's 485 `auto`
+  records compiled in `strict` (no promotion), 12 in `complex` (the 9
+  documents) and 6 declined. Under `complex` every one of them compiles in
+  complex mode, which lifts a parameter typed `number` to a complex object,
+  and 64 values in 6 documents change (first counted as 11 records of 8
+  documents: the pairing by LaTeX joined `asOklab(h)` and `asOklab(g)` of
+  two documents each; neyret/vivplujz8i and neyret/wsne0l2tcv have no
+  changed value): neyret/crmswfhqrd
+  `g(x)=\frac{a}{100}(f(x))^2` with `f(x)=\sin(bx)`, 0.4627 → `NaN` (8
+  values); the colour lane `asOklab(…)`, a real colour → an oklab colour
+  of `NaN` channels, in neyret/l49l5stdag (8 rows, 36 values),
+  neyret/4d9knkydej (7 values) and art/hyvhlz4chj (8 values);
+  art/hltzcphymj `0^{x+y-z}` (4 values), `Infinity` →
+  `{re: Infinity, im: Infinity}`; neyret/woeywky0kj, `NaN` points → complex
+  `NaN` objects (1 value, at `N = 0`; no value in either case). One new decline: art/ur34gk3p8x
+  `asOklab(c_2)` ("a point with a complex-valued coordinate"). No other
+  value of the 9 promoted documents changed. These are defects of
+  `mode: 'complex'` with `corpus` witnesses; choice of this item (reversible,
+  reported to the user 2026-11-03): they are fixed here, so that Tycho's
+  change from `auto` to `complex` keeps its values. The other options were a
+  ROADMAP entry per defect with the values changed at adoption, or `strict`
+  for Tycho's colour lane (which keeps the 467 `strict` values but gives
+  `NaN` or a decline in the colour records that promoted).
+- **Which documents are complex-mode** (tycho-f9, 2026-11-03, read from
+  the `graph.complex` flag of the Desmos states): neyret/crmswfhqrd and
+  art/hltzcphymj only; the other 7 are real-mode documents, and each of
+  their changed records comes through the colour lane (`samplingModeOptions`
+  gives `strict` in a real-mode document). The colour lane uses `auto` for
+  the domain colouring of art/guvicl57aa (D-263), itself a complex-mode
+  document. **The split, measured** (run `base-split`, CE `2341d6f31`, Tycho
+  `44a25d4e3` with the colour lane at
+  `isDocumentComplexMode(ce) ? "complex" : "strict"` and sampling as in
+  (a)): no new decline; 12 values in 2 records change, both in the
+  complex-mode documents (crmswfhqrd `\frac{1}{100}af(x)^2`, 8 values;
+  hltzcphymj `0^{x+y-z}`, 4 values); the colour records of the real-mode
+  documents keep their values. So at adoption Tycho can use the split, and
+  the colour lane of a real-mode document then needs no change in CE; the
+  defects of `complex` mode are fixed in CE in either case.
+- **The candidate measure** (runs `cand-cx` and `cand-split`: the removal
+  of `auto` on base `2341d6f31`, before the fixes of `complex` mode,
+  compared with `base-cx` and `base-split`, the same Tycho on each side).
+  Values: none changed (77,210 and 77,218 values compared). Declines:
+  javascript and glsl unchanged; interval-js 70 → 74, all on rows that Tycho
+  did not submit at the base: neyret/hbvzf9yk1r `\sin(\Re(Z))=0` and
+  `\sin(\Im(Z))=0` (no interval lowering of `Real`/`Imaginary`). The rows
+  are submitted now because Tycho reads the removed `promoted` field
+  (`src/plot/ce-compile.ts`, about 11 sites, and `src/plot/resolve-fn.ts`
+  523, 1118, 2258 at `44a25d4e3`) to keep a promoted row on its scalar CPU
+  route and to give it no interval band. Without the field, these rows also
+  compile for `glsl`, in `strict`, whose values the audit does not sample.
+  Tycho needs a replacement at adoption. tycho-f9 (2026-11-03) put three
+  options to the user, no choice yet: (A) `result.mode === 'complex'`, no
+  GPU or interval leg for any row of a complex-mode document (safe; real
+  rows of those documents draw more slowly); (B) Tycho compiles a row of a
+  complex-mode document in `strict` first, uses the GPU and interval legs
+  only when that succeeds, and else compiles `complex` for the CPU route
+  (one extra compile per row, no CE change); (C) CE reports whether the
+  kernel is complex, a new result field and a CE decision. 3.4.6 does not
+  wait for it: A and B need only `mode` from CE.
+- **Code lines** of `compilation` (not blank, `//` or `*`): 92,785 →
+  92,665 for the removal of `auto`, before the fixes of `complex` mode.
+- **The causes** (diagnosis 2026-11-03, each reproduced in plain CE except
+  the second mismatch of hyvhlz4chj). In each, the lane analysis
+  (`isComplexValued` and its helpers) and an emitter disagree, so a
+  `{re, im}` object reaches real code and gives `NaN` or a string:
+  (A) `Power` of a base that is complex under a node type that is real
+  (`_isComplexValuedFunction` answers from the type; the emitter reads the
+  base): crmswfhqrd, 8 values; (B) the element lane of an element-wise head
+  (`operandElementLane` says real for `10^i` over a list; the element
+  closure emits `_SYS.cpow`): l49l5stdag, 36 values, and `Sqrt(Power(L, 2))`
+  with `L: list<real>`; (C) `Sqrt`/`Ln`/`Log` of a wide type (the analysis
+  says complex, the emitter keeps `Math.sqrt`): 4d9knkydej, 7 values; (D) a
+  complex argument at a call of a user function whose definition reads the
+  parameter on the real lane (`realProjection` converts only at a declared
+  real parameter): hyvhlz4chj, 8 values; (E) the `Product` fold over a
+  shared `Map` (`foldLaneIsComplex` lacks the wide-element rule of
+  `collectionFoldsReal`): no corpus record, `plausible`
+  (`Sum(Map(f,P)) + Product(Map(f,P))` with `P: list<real>`,
+  `f(t) := t^2`, gives `NaN` for 50). Not defects: hltzcphymj
+  (`{re: Infinity, im: Infinity}` is the complex lane's `~oo`, the
+  interpreter's value), woeywky0kj (no value in either case), the decline
+  of ur34gk3p8x (a wide coordinate counts as complex and forces an inlining
+  that is refused). The `_SYS.eq` call of l49l5stdag is not a cause.
+  **Decision (user, 2026-11-03):** A, B, C and E are fixed in this item; D
+  is a ROADMAP entry with its witness, fixed before the language release.
+  Tycho's split never reaches D, and with the split only A is in the corpus.
+
 The compiler side of 3.1 to 3.4 in this release is the minimum that keeps
 compiled code equal to the interpreter: the new static errors decline, the
 `NaN` point cell replaces `undefined` in the JavaScript lowering, `When` is

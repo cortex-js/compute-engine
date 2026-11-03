@@ -159,8 +159,8 @@ user function on the Python target.
 
 The markers `Nothing` and `Missing` are the exception:
 they cannot be rebound, and a binding of one of them is an error
-(`absence-marker-binding`). The engine recognizes them by their name — it
-drops `Nothing` from an argument list and reads a `Missing` operand as
+(`absence-marker-binding`). The engine recognizes them by their name — an
+empty block evaluates to `Nothing`, and a `Missing` operand is read as
 absent — so a binding could never behave like the value it holds. In a
 `match`, test for a marker with `== Missing`: a bare `Missing` there would
 be a new variable.

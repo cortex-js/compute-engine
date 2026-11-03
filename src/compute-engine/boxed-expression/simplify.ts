@@ -22,7 +22,6 @@ import {
   rebindEscaping,
   hasAssignedVariable,
   assignedVariableNames,
-  indeterminateAnswerReadsVariable,
   isOperatorDef,
   isValueDef,
 } from './utils.js';
@@ -50,7 +49,6 @@ import {
   isFunction,
   isString,
   isContinuationOperand,
-  nanOperandAnswer,
 } from './type-guards.js';
 
 type InternalSimplifyOptions = SimplifyOptions & {
@@ -1380,10 +1378,8 @@ function simplifyExpression(
     ];
   }
 
-  // A `NaN` or `Indeterminate` operand at a position whose NaN policy is
-  // `propagate` decides the value, as it does for `evaluate()`:
-  // `sin(NaN)` simplifies to `NaN` and `sin(Indeterminate)` to
-  // `Indeterminate`.
+  // A `NaN` operand at a position whose NaN policy is `propagate` decides
+  // the value, as it does for `evaluate()`: `sin(NaN)` simplifies to `NaN`.
   const nanAnswer = propagatedNanOperand(expr) ?? handledNanOperand(expr);
   if (nanAnswer !== undefined)
     return [...steps, { value: nanAnswer, because: 'NaN operand' }];
@@ -1472,8 +1468,8 @@ function operandMayActOrFail(x: Expression): boolean {
 }
 
 /**
- * The value of a function expression that has a `NaN` or `Indeterminate`
- * number-literal operand at a position whose NaN policy is `propagate`, or
+ * The value of a function expression that has a `NaN` number-literal
+ * operand at a position whose NaN policy is `propagate`, or
  * `undefined` when no such operand decides the value.
  *
  * This applies to `simplify()` the NaN-policy step of evaluation
@@ -1485,20 +1481,13 @@ function operandMayActOrFail(x: Expression): boolean {
  * position whose policy is `reject` leaves the expression to `evaluate()`,
  * which reports the error. An operand that can have an effect or give an
  * error (`operandMayActOrFail()`) leaves the expression to `evaluate()`
- * too. The answer is `nanOperandAnswer()`:
- * `Indeterminate` when an operand is `Indeterminate` and no operand is
- * inexact, `NaN` otherwise.
+ * too. The answer is `NaN`.
  */
 function propagatedNanOperand(expr: Expression): Expression | undefined {
   if (!isFunction(expr)) return undefined;
   const ops = expr.ops;
   if (!ops.some((x) => isNumber(x) && x.isNaN === true)) return undefined;
   if (ops.some((x) => operandMayActOrFail(x))) return undefined;
-  // `Indeterminate` with an operand that reads an assigned variable: the
-  // answer depends on the value (a float makes it `NaN`), which `simplify()`
-  // does not read. The expression is left to `evaluate()`, as the `Add` and
-  // `Multiply` folds do.
-  if (indeterminateAnswerReadsVariable(ops)) return undefined;
   const def = expr.operatorDefinition;
   if (!def || def.lazy === true || def.isUserFunctionDefinition)
     return undefined;
@@ -1515,14 +1504,14 @@ function propagatedNanOperand(expr: Expression): Expression | undefined {
     if (policy === 'reject') return undefined;
     if (policy === 'propagate') sawPropagate = true;
   }
-  return sawPropagate ? nanOperandAnswer(expr.engine, ops) : undefined;
+  return sawPropagate ? expr.engine.NaN : undefined;
 }
 
 /**
- * The value of a function expression that has a `NaN` or `Indeterminate`
- * number-literal operand at a position whose NaN policy is `inert` or
- * `handle`, when the operator's own `evaluate` handler answers `NaN` or
- * `Indeterminate` for it. Otherwise `undefined`.
+ * The value of a function expression that has a `NaN` number-literal
+ * operand at a position whose NaN policy is `inert` or `handle`, when the
+ * operator's own `evaluate` handler answers `NaN` for it. Otherwise
+ * `undefined`.
  *
  * Under such a policy the framework does not decide the value: the handler
  * reads the `NaN` operand itself. `Max` and `Min` are of this kind:
@@ -1566,9 +1555,6 @@ function handledNanOperand(expr: Expression): Expression | undefined {
   // `Map`), so an operand that can have an effect or give an error must not
   // reach it here.
   if (ops.some((x) => operandMayActOrFail(x))) return undefined;
-  // As in `propagatedNanOperand()`: an answer that depends on the value of
-  // an assigned variable is left to `evaluate()`.
-  if (indeterminateAnswerReadsVariable(ops)) return undefined;
   if (
     def.broadcastable === true &&
     ops.some((x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE))

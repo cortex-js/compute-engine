@@ -250,9 +250,8 @@ function shapeOfOperand(
   if (count > MAX_LAZY_SHAPE_ELEMENTS) return undefined;
   if (!isFiniteIndexedCollection(xs)) return undefined;
   const rows = [...xs.each()];
-  // Nothing occupies a raw position. Building a List would erase it before
-  // measuring the extent; a mixture of omitted scalars and rows has no
-  // rectangular shape.
+  // A `Nothing` element occupies its position as a scalar: a mixture of
+  // `Nothing` and rows has no rectangular shape.
   if (rows.some((row) => isSymbol(row, 'Nothing')))
     return rows.every(
       (row) => row.isCollection !== true || isTupleShapedType(row.type.type)
@@ -5525,10 +5524,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // A broadcasting component that is EMPTY zips zero points, so the
           // norm is the empty list — one norm per point, of no points — the
           // answer an empty LIST of points gets below. Decided before the
-          // folds: `Abs([])` evaluates to `Nothing`, the erasure marker,
-          // which the sum and product folds erase, so `‖([], 3)‖` answered
-          // `√(1 + 9)` — the empty product for the erased component, plus
-          // the other component — the norm of a different point. A TUPLE
+          // folds: `Abs([])` evaluates to `Nothing`, which is not a
+          // component norm, and `‖([], 3)‖` answered `√(1 + 9)`, the norm of
+          // a different point. A TUPLE
           // component is a nested point, atomic, never a broadcast source:
           // an empty one has norm 0 and takes the folds below.
           for (const el of elements)

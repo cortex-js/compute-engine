@@ -215,10 +215,6 @@ describe('PARAMETER DEFAULT VALUES: PARSE ERRORS', () => {
       '(x: number, k: number = Missing) -> number',
       '`Missing` is not a default value; leave the parameter optional instead',
     ],
-    [
-      '(x: number, k: number = Indeterminate) -> number',
-      '`Indeterminate` is not a default value',
-    ],
     ['(x: number, k: number = ~oo) -> number', '`~oo` is not a default value'],
     [
       '(x: number, xs: list = [1]) -> number',
@@ -767,14 +763,21 @@ describe('PARAMETER DEFAULT VALUES: THE FILL', () => {
     ).toEqual(['Scaled', 3, 5]);
   });
 
-  test('a named argument with the value `Nothing` takes the default', () => {
+  // `Nothing` is not a number: the `number` parameter refuses it.
+  const NOTHING_REFUSED = ['Error', ['ErrorCode', "'incompatible-type'", "'number'", "'nothing'"], 'Nothing'];
+
+  test('a named argument with the value `Nothing` fills its slot', () => {
     expect(
       ce.box(['Scaled', 3, ['NamedArgument', "'factor'", 'Nothing']]).json
-    ).toEqual(['Scaled', 3, 2]);
+    ).toEqual(['Scaled', 3, NOTHING_REFUSED]);
   });
 
-  test('a positional `Nothing` is dropped before the fill', () => {
-    expect(ce.box(['Scaled', 3, 'Nothing']).json).toEqual(['Scaled', 3, 2]);
+  test('a positional `Nothing` fills its slot', () => {
+    expect(ce.box(['Scaled', 3, 'Nothing']).json).toEqual([
+      'Scaled',
+      3,
+      NOTHING_REFUSED,
+    ]);
   });
 
   test('a call with an empty required parameter is not filled', () => {
@@ -873,9 +876,9 @@ describe('PARAMETER DEFAULT VALUES: ROUTES OF THE FILL', () => {
     seen.length = 0;
     ce.box(['Eager', ['Sequence']]);
     ce.box(['Lazy', ['Sequence']]);
-    // The eager operand canonicalizes to `Nothing`, which is removed for a
-    // callee with a default; the lazy operand is held as written.
-    expect(seen).toEqual([[], [['Sequence']]]);
+    // The operands of a handler are not flattened, and the canonical form of
+    // an empty `Sequence` is the empty `Sequence`: both handlers see it.
+    expect(seen).toEqual([[['Sequence']], [['Sequence']]]);
   });
 
   test('a lazy operator sees the default, after the written operands', () => {
@@ -1062,7 +1065,13 @@ describe('PARAMETER DEFAULT VALUES: NAMED ARGUMENTS AND HOLES', () => {
         ['NamedArgument', "'density'", 'Nothing'],
         ['NamedArgument', "'factor'", 5],
       ]).json
-    ).toEqual(['Holes', 3, 1, 5]);
+    ).toEqual([
+      'Holes',
+      3,
+      // A named `Nothing` fills its slot, and the `number` parameter refuses it.
+      ['Error', ['ErrorCode', "'incompatible-type'", "'number'", "'nothing'"], 'Nothing'],
+      5,
+    ]);
   });
 
   test('a hole at an optional parameter without a default is still `argument-optional-skipped`', () => {
@@ -1135,7 +1144,7 @@ describe('PARAMETER DEFAULT VALUES: SYMBOL DEFAULTS', () => {
 });
 
 describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF THE FILL', () => {
-  test('a positional `Nothing` in a named call is an absent operand: a required slot is `missing`', () => {
+  test('a positional `Nothing` in a named call fills its slot', () => {
     const ce = new ComputeEngine();
     ce.declare('Holes', {
       signature:
@@ -1143,13 +1152,14 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF THE FILL', () => {
     });
     const e = ce.box(['Holes', 'Nothing', ['NamedArgument', "'factor'", 5]]);
     expect(e.isValid).toBe(false);
-    expect(JSON.stringify(e.json)).toMatch(/missing/);
-    expect(JSON.stringify(e.json)).toMatch(/`x`/);
-    // A positional `Nothing` before another positional argument is removed,
-    // as `flatten` removes it: the next argument takes its slot.
+    // `Nothing` is not a number: the `number` parameter `x` refuses it.
+    const refused = ['Error', ['ErrorCode', "'incompatible-type'", "'number'", "'nothing'"], 'Nothing'];
+    expect(e.json).toEqual(['Holes', refused, 1, 5]);
+    // A positional `Nothing` before another positional argument keeps its
+    // slot: the next argument takes the next slot.
     expect(
       ce.box(['Holes', 'Nothing', 3, ['NamedArgument', "'factor'", 5]]).json
-    ).toEqual(['Holes', 3, 1, 5]);
+    ).toEqual(['Holes', refused, 3, 5]);
   });
 
   test('a replaceable operator: a call made before the assignment of a function literal is filled again', () => {
@@ -1221,36 +1231,71 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF THE FILL, ROUND 2', () => {
     value,
   ];
 
-  test('a positional `Nothing` in a named call to an overload set fills no slot', () => {
+  test('a positional `Nothing` in a named call to an overload set fills a slot', () => {
     const ce = new ComputeEngine();
     ce.declare('Ov', {
       signature:
         '((x: number, y: number, z: number?) -> number) & ((a: number, b: number, c: number?) -> number)',
     });
+    // `Nothing` fills `x`, so the named `x` is a duplicate.
     expect(
       ce.box(['Ov', 'Nothing', named('x', 1), named('y', 2)] as any).json
-    ).toEqual(['Ov', 1, 2]);
+    ).toEqual([
+      'Ov',
+      'Nothing',
+      [
+        'Error',
+        [
+          'ErrorCode',
+          "'argument-name-duplicate'",
+          "'x'",
+          "'that parameter is already filled by a positional argument'",
+        ],
+      ],
+      2,
+    ]);
     // Two arms that read the call in different orders.
     ce.declare('Swap', {
       signature:
         '((a: number, b: number) -> number) & ((b: number, a: number) -> number)',
     });
-    expect(ce.box(['Swap', 'Nothing', 3, named('b', 4)] as any).json).toEqual(
-      ce.box(['Swap', 3, named('b', 4)] as any).json
-    );
+    expect(ce.box(['Swap', 'Nothing', 3, named('b', 4)] as any).json).toEqual([
+      'Swap',
+      'Nothing',
+      3,
+      [
+        'Error',
+        [
+          'ErrorCode',
+          "'argument-name-duplicate'",
+          "'b'",
+          "'that parameter is already filled by a positional argument'",
+        ],
+      ],
+    ]);
   });
 
-  test('a positional `Nothing` in a named call without defaults', () => {
+  test('a positional `Nothing` in a named call without defaults fills a slot', () => {
     const ce = new ComputeEngine();
     ce.declare('G', { signature: '(a: number, b: number) -> number' });
+    // `Nothing` fills `a` and `3` fills `b`, so the named `b` is a duplicate.
     expect(ce.box(['G', 'Nothing', 3, named('b', 4)] as any).json).toEqual([
       'G',
+      'Nothing',
       3,
-      4,
+      [
+        'Error',
+        [
+          'ErrorCode',
+          "'argument-name-duplicate'",
+          "'b'",
+          "'that parameter is already filled by a positional argument'",
+        ],
+      ],
     ]);
     const e = ce.box(['G', 'Nothing', named('b', 4)] as any);
     expect(e.isValid).toBe(false);
-    expect(JSON.stringify(e.json)).toMatch(/missing/);
+    expect(JSON.stringify(e.json)).toMatch(/incompatible-type/);
   });
 
   test('a call boxed again after its callee changed reads a symbol default in the scope of the call', () => {

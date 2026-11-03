@@ -62,37 +62,7 @@ type WrittenArgument = {
   name: string | undefined;
   value: ExpressionInput;
   index: number;
-  /** Its position among the arguments that FILL a slot, or -1 when the
-   * argument is OMITTED — an argument, named or positional, whose value is
-   * `Nothing` ({@link isOmitted}). An omitted argument is written, so every check that
-   * judges the call AS WRITTEN sees it, but it supplies no operand: it is
-   * absent from the emitted call and from the operand list the overload
-   * machinery resolves against, which is the index space this counts in. */
-  fillIndex: number;
 };
-
-/** True when the written argument supplies no value: `f(x: Nothing)`, or a
- * positional `Nothing` in a named call.
- *
- * `Nothing` is the engine's absent-value marker, and it cannot be passed
- * positionally in any case — `flatten` drops it unconditionally, which would
- * shift every later argument one slot left and bind it to the wrong
- * parameter. A positional `Nothing` fills no slot, and the next positional
- * argument takes the slot. For a named `x: Nothing`, the slot its name
- * selects is simply left unfilled and the
- * ordinary rules below apply to it: a required slot becomes `missing`, an
- * optional one declared before a supplied optional becomes an R1 hole, and a
- * trailing optional is just not supplied. */
-function isOmitted(a: WrittenArgument): boolean {
-  return a.fillIndex < 0;
-}
-
-/** The written arguments that supply an operand, in written order: `args`
- * minus the omitted ones. This is the list `permutation` indexes into, and the
- * one the overload machinery boxes and resolves against. */
-function fillingArguments(split: NamedArgumentSplit): WrittenArgument[] {
-  return split.args.filter((a) => !isOmitted(a));
-}
 
 export type NamedArgumentSplit = {
   args: WrittenArgument[];
@@ -126,7 +96,7 @@ export type NamedArgumentNormalization =
  * overload set's arm, or the whole callee when it has a single signature.
  *
  * The `permutation` maps each SOURCE slot (the position of the argument in
- * {@link fillingArguments}) to the declaration slot it fills. Every argument
+ * the written argument list) to the declaration slot it fills. Every argument
  * that supplies a value fills exactly one slot, a required slot left unfilled
  * is a `missing` error, and an optional HOLE is rejected outright (sub-ruling
  * R1) unless the parameter has a default value, which then fills the hole.
@@ -160,17 +130,6 @@ function isSpread(x: ExpressionInput): boolean {
   if (Array.isArray(x)) return x[0] === 'Spread';
   if ('fn' in x)
     return (x as { fn: ReadonlyArray<unknown> }).fn[0] === 'Spread';
-  return false;
-}
-
-/** True when the raw (unboxed) operand is the symbol `Nothing`, in any input
- * spelling: a boxed symbol, the MathJSON string `"Nothing"`, or the explicit
- * `{ sym: 'Nothing' }` object form. */
-function isNothing(x: ExpressionInput): boolean {
-  if (x instanceof _BoxedExpression) return x.symbol === 'Nothing';
-  if (typeof x === 'string') return x === 'Nothing';
-  if (typeof x !== 'object' || x === null) return false;
-  if ('sym' in x) return (x as { sym: unknown }).sym === 'Nothing';
   return false;
 }
 
@@ -408,19 +367,10 @@ export function splitNamedArguments(
   // `hasNamedArguments(ops)` said yes.
   const args: WrittenArgument[] = [];
   let malformed = false;
-  /** The next {@link WrittenArgument.fillIndex} to hand out. */
-  let fill = 0;
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     if (!isCarrier(op)) {
-      // A positional `Nothing` is an absent operand, as `flatten` treats it:
-      // like a named `x: Nothing`, it fills no slot ({@link isOmitted}).
-      args.push({
-        name: undefined,
-        value: op,
-        index: i,
-        fillIndex: isNothing(op) ? -1 : fill++,
-      });
+      args.push({ name: undefined, value: op, index: i });
       continue;
     }
     const operands = carrierOperands(op);
@@ -436,27 +386,17 @@ export function splitNamedArguments(
       operands[1] === undefined
     ) {
       malformed = true;
-      args.push({ name: undefined, value: op, index: i, fillIndex: fill++ });
+      args.push({ name: undefined, value: op, index: i });
       continue;
     }
-    // `x: Nothing` is an argument the author wrote but did not supply: it
-    // stays in the list, so every check that judges the call as written sees
-    // it, and takes no `fillIndex`, so it fills no slot. See {@link
-    // isOmitted} for why `Nothing` cannot be passed positionally.
-    args.push({
-      name,
-      value: operands[1],
-      index: i,
-      fillIndex: isNothing(operands[1]) ? -1 : fill++,
-    });
+    args.push({ name, value: operands[1], index: i });
   }
   return { args, malformed };
 }
 
 /** One written argument of a named call, in written order: its name
  * (`undefined` for a positional argument) and the index of the operand of the
- * normalized call that holds its value, or -1 for an argument written with
- * the value `Nothing`, which fills no slot. */
+ * normalized call that holds its value. */
 export type WrittenArgumentSlot = { name: string | undefined; slot: number };
 
 /** The written arguments of `split`, with the operand that each one fills
@@ -470,7 +410,7 @@ export function writtenArgumentSlots(
 ): WrittenArgumentSlot[] {
   return split.args.map((a) => ({
     name: a.name,
-    slot: isOmitted(a) ? -1 : permutation[a.fillIndex],
+    slot: permutation[a.index],
   }));
 }
 
@@ -803,17 +743,13 @@ function normalizeAgainstSignature(
     undefined
   );
   /** The written argument that CLAIMED each slot, for the duplicate message,
-   * `undefined` for a slot no argument has claimed yet. An omitted argument
-   * (`x: Nothing`) claims its slot without filling it, so writing the same
-   * name twice is a duplicate whichever of the two supplies a value. */
+   * `undefined` for a slot no argument has claimed yet. */
   const filledBy: ('position' | string | undefined)[] = new Array(slots).fill(
     undefined
   );
   /** Source slot → declaration slot, filled in as each written argument finds
    * its parameter. Only meaningful once every step below has succeeded. */
-  const permutation: number[] = new Array(fillingArguments(split).length).fill(
-    -1
-  );
+  const permutation: number[] = new Array(split.args.length).fill(-1);
 
   //
   // Step 2: the positional prefix fills slots left to right, in `paramAt`
@@ -826,16 +762,6 @@ function normalizeAgainstSignature(
   for (let j = 0; j < split.args.length; j++) {
     const a = split.args[j];
     if (a.name !== undefined) break;
-    // A positional `Nothing` is an absent operand, as `flatten` treats it: it
-    // fills no slot, and the next positional argument takes the slot. This
-    // must happen before the named arguments take their slots and before the
-    // hole fill of step 5. Otherwise, with `(x, density = 1, factor = 2)`,
-    // `f(Nothing, factor: 5)` would become `f(Nothing, 1, 5)`, `flatten`
-    // would then remove `Nothing`, and the default of `density` would move
-    // into the required slot `x`. It has no entry in `permutation`
-    // ({@link splitNamedArguments} gives it no `fillIndex`), so the call is
-    // written again with `Nothing` at that position.
-    if (isOmitted(a)) continue;
     if (next >= slots) {
       return {
         kind: 'error',
@@ -853,7 +779,7 @@ function normalizeAgainstSignature(
     }
     filled[next] = a.value;
     filledBy[next] = 'position';
-    permutation[a.fillIndex] = next;
+    permutation[a.index] = next;
     next += 1;
   }
 
@@ -884,12 +810,8 @@ function normalizeAgainstSignature(
       };
     }
     filledBy[slot] = a.name;
-    // An OMITTED argument (`x: Nothing`) has claimed its slot — so writing the
-    // name again is still a duplicate — but supplies no value, leaving the
-    // slot to the ordinary rules below ({@link isOmitted}).
-    if (isOmitted(a)) continue;
     filled[slot] = a.value;
-    permutation[a.fillIndex] = slot;
+    permutation[a.index] = slot;
   }
 
   //
@@ -927,10 +849,9 @@ function normalizeAgainstSignature(
   //
   // Step 5: no optional holes (sub-ruling R1). A named optional may be
   // supplied only if every optional declared before it is also supplied. The
-  // engine has no absent-argument placeholder that survives canonicalization
-  // (`flatten` DROPS `Nothing`), so a hole would silently shift every later
-  // argument one slot left — the exact failure class named arguments exist to
-  // prevent.
+  // engine has no absent-argument placeholder (`Nothing` is a value like any
+  // other), so a hole would silently shift every later argument one slot
+  // left — the exact failure class named arguments exist to prevent.
   //
   // A hole at an optional parameter that has a default value is not an
   // error: the slot receives the default operand. With
@@ -1032,13 +953,13 @@ function lastFilled(filled: readonly (ExpressionInput | undefined)[]): number {
 //
 
 /** The written arguments reordered by `permutation` (source slot →
- * declaration slot). The permutation is a bijection over
- * {@link fillingArguments}, so no slot is left unwritten. */
+ * declaration slot). The permutation is a bijection over the written
+ * arguments, so no slot is left unwritten. */
 function applyPermutation(
   split: NamedArgumentSplit,
   permutation: ReadonlyArray<number>
 ): ExpressionInput[] {
-  const filling = fillingArguments(split);
+  const filling = split.args;
   const ops = new Array<ExpressionInput>(permutation.length);
   for (let j = 0; j < permutation.length; j++)
     ops[permutation[j]] = filling[j].value;
@@ -1128,7 +1049,7 @@ function normalizeAgainstArms(
   // back is the RAW one, so the ordinary path below the seam boxes each
   // argument in its own context (contextual callback annotation, the binder
   // pre-phase) as it always does.
-  const ops = fillingArguments(split).map((a) => ce.expr(a.value));
+  const ops = split.args.map((a) => ce.expr(a.value));
 
   let winner: number[];
   if (agree) {

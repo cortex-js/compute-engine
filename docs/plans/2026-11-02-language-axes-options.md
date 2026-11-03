@@ -140,8 +140,13 @@ keeps its internal form. `Error` and `NaN` stay as they are.
 | ---------------------------------- | ----------------------------------- | ----------------------- |
 | `0/0` on the exact route           | `Indeterminate`                     | `NaN`                   |
 | `Mean([1, Indeterminate])`         | `Indeterminate`, exact              | `NaN`                   |
-| `Map(x ↦ (x > 1 ? x : Nothing), [1, 2])` | `[2]` after construction       | static error            |
-| `Sum(view exposing [1, Nothing])`  | `1`                                 | static error at the callback |
+| `Map(x ↦ (x > 1 ? x : Nothing), [1, 2])` | `[2]` after construction       | `[Nothing, 2]`          |
+| `Sum(view exposing [1, Nothing])`  | `1`                                 | `incompatible-type` error at the `Sum` |
+
+The last two rows were corrected by item 3.4.3 of
+`docs/plans/2026-11-02-compiler-contraction-plan.md`: the text of option A
+(no static error) governs, and an operator that meets `Nothing` gives its
+ordinary error.
 
 Removes: the `Indeterminate` producers and `isIndeterminate`; the `Nothing`
 omission checks in `Map`, `Filter`, the statistics and the raw views; in the

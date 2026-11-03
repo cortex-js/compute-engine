@@ -678,30 +678,6 @@ function parseBareOperatorElement(
 }
 
 /**
- * The `Sequence` arrays built by the comma parselets whose LAST element came
- * from an EMPTY token segment — a trailing comma, as in `{1, 2,}` — rather
- * than from an authored expression. Both spellings push the symbol `Nothing`,
- * so a consumer that must tell them apart asks here: the `Set` matchfix
- * handler drops a trailing comma but keeps an authored `\mathrm{Nothing}`
- * (`{x < 0 : 1, \mathrm{Nothing}}` is a piecewise with an explicit default,
- * `{x < 0 : 1, x,}` a piecewise with a trailing comma). The record is keyed
- * by the array object itself, so it lives exactly as long as the parse result
- * and needs no reset between parses.
- */
-const TRAILING_EMPTY_SEQUENCES = new WeakSet<object>();
-
-/** Did the last element of this comma-separated `Sequence` come from a
- * trailing comma (an empty token segment) rather than from an authored
- * expression? `false` for anything the comma parselets did not build. */
-export function hasTrailingEmptySegment(
-  seq: MathJsonExpression | null
-): boolean {
-  return (
-    typeof seq === 'object' && seq !== null && TRAILING_EMPTY_SEQUENCES.has(seq)
-  );
-}
-
-/**
  * The positions of the empty segments of a `Sequence` array that the `;`
  * parselet built, as operand indices (the first operand is `1`). An empty
  * segment (`[1;;2]`) and an authored `\mathrm{Nothing}`
@@ -738,6 +714,11 @@ function isEmptySegment(
  *
  * `out.emptyIndices`, when given, receives the index in the result of each
  * element that came from an empty token segment, at any position.
+ *
+ * With `out.emptyIsError`, an empty segment that is not the last one (the
+ * empty slot of `(3,,4)`, or the leading one of `(,4)`) is the parse error
+ * `missing`, not the symbol `Nothing`. The last empty segment (a trailing
+ * `sep`) is still the symbol `Nothing`, and `out.trailingEmpty` reports it.
  */
 function parseSequence(
   parser: Parser,
@@ -745,7 +726,11 @@ function parseSequence(
   lhs: MathJsonExpression | null,
   prec: number,
   sep: string,
-  out?: { trailingEmpty: boolean; emptyIndices?: Set<number> }
+  out?: {
+    trailingEmpty: boolean;
+    emptyIndices?: Set<number>;
+    emptyIsError?: boolean;
+  }
 ): MathJsonExpression[] | null {
   if (terminator && terminator.minPrec >= prec) return null;
 
@@ -759,9 +744,13 @@ function parseSequence(
   };
 
   const result: MathJsonExpression[] = [];
-  const pushEmpty = () => {
+  const pushEmpty = (trailing = false) => {
     out?.emptyIndices?.add(result.length);
-    result.push('Nothing');
+    result.push(
+      out?.emptyIsError && !trailing
+        ? parser.error('missing', parser.index)
+        : 'Nothing'
+    );
   };
   if (lhs) push(lhs);
   else pushEmpty();
@@ -779,7 +768,7 @@ function parseSequence(
     if (parser.atTerminator(terminator)) {
       // An empty segment at the very end of the sequence. `done` is still
       // `true`, so this is necessarily the last element.
-      pushEmpty();
+      pushEmpty(true);
       if (out) out.trailingEmpty = true;
     } else {
       const bareOp = parseBareOperatorElement(parser, terminator, sep);
@@ -3148,15 +3137,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       lhs: MathJsonExpression,
       terminator: Readonly<Terminator>
     ): MathJsonExpression | null => {
-      const spelling = { trailingEmpty: false };
+      // An empty slot (`(3,,4)`) is the parse error `missing`. A trailing
+      // comma (`[1, 2,]`, `(3,)`) is dropped: `(3,)` is a singleton tuple.
+      // An authored `\mathrm{Nothing}` remains an actual element.
+      const spelling = { trailingEmpty: false, emptyIsError: true };
       const seq = parseSequence(parser, terminator, lhs, 20, ',', spelling);
       if (seq === null) return null;
-      // A sole trailing comma spells a singleton tuple, not an omitted
-      // second coordinate. An authored Nothing remains an actual coordinate.
-      if (spelling.trailingEmpty && seq.length === 2) seq.pop();
-      const sequence: MathJsonExpression = ['Sequence', ...seq];
-      if (spelling.trailingEmpty) TRAILING_EMPTY_SEQUENCES.add(sequence);
-      return ['Delimiter', sequence, { str: ',' }];
+      if (spelling.trailingEmpty && seq.length > 1) seq.pop();
+      return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
     },
   },
   // Entry to handle the case of a single comma
@@ -3166,12 +3154,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'prefix',
     precedence: 20,
     parse: (parser, terminator): MathJsonExpression | null => {
-      const spelling = { trailingEmpty: false };
+      // As in the infix entry: the leading empty slot is the parse error
+      // `missing`, and a trailing comma is dropped.
+      const spelling = { trailingEmpty: false, emptyIsError: true };
       const seq = parseSequence(parser, terminator, null, 20, ',', spelling);
       if (seq === null) return null;
-      const sequence: MathJsonExpression = ['Sequence', ...seq];
-      if (spelling.trailingEmpty) TRAILING_EMPTY_SEQUENCES.add(sequence);
-      return ['Delimiter', sequence, { str: ',' }];
+      if (spelling.trailingEmpty && seq.length > 1) seq.pop();
+      return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
     },
   },
   {
@@ -6673,20 +6662,38 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
       result.push('True');
       result.push(row[0]);
     } else if (row.length === 2) {
+      // A row whose two cells are empty (`x & x > 0 \\ &`) is not a clause:
+      // the piecewise has no default, as when the row is not written.
+      if (row[0] === 'Nothing' && row[1] === 'Nothing') continue;
       const s = stringValue(row[1]);
       // A text cell (`otherwise`, `else`) is the default clause. So is an
       // empty condition cell — a row written `3x^2 & \\` with a trailing
-      // `&` — which the tabular parser hands over as `Nothing`, the erasure
-      // marker, not as an absent element. `Nothing` is not a boolean, so a
-      // row that keeps it gives `Which` a condition that never holds, and
-      // boxing reports an `incompatible-type` error. Map it to `True`, the
-      // default clause the notation means.
-      const cond = s ? null : stripText(row[1]);
+      // `&` — which the tabular parser hands over as `Nothing`. `Nothing` is
+      // not a boolean, so a row that keeps it gives `Which` a condition that
+      // never holds, and boxing reports an `incompatible-type` error. Map it
+      // to `True`, the default clause the notation means.
+      const cond = s ? null : withoutTrailingComma(stripText(row[1]));
       result.push(cond === null || cond === 'Nothing' ? 'True' : cond);
       result.push(row[0]);
     }
   }
   return ['Which', ...result];
+}
+
+/**
+ * The condition cell `cond` of a piecewise row without a trailing comma: a
+ * cell written `x > 0,` parses as a sequence of one element, which is read
+ * as that element (`x > 0`). Any other cell is returned as it is.
+ */
+function withoutTrailingComma(
+  cond: MathJsonExpression | null
+): MathJsonExpression | null {
+  if (cond === null || operator(cond) !== 'Delimiter') return cond;
+  const body = operand(cond, 1);
+  if (operator(body) !== 'Sequence' || nops(body) !== 1) return cond;
+  const delim = operand(cond, 2);
+  if (delim !== null && stringValue(delim) !== ',') return cond;
+  return operand(body, 1);
 }
 
 /**

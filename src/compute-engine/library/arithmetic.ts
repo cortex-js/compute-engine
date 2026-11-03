@@ -477,10 +477,7 @@ import {
   isAbsentValue,
   isAbsentSymbol,
   isAbsentArithmeticOperand,
-  isInexactOperand,
   kindValueIsNaN,
-  nanOperandAnswer,
-  indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import {
   isRestriction,
@@ -580,15 +577,13 @@ References:
 
 /**
  * The operands of a `Numerator`, `Denominator` or `NumeratorDenominator`
- * call as the handlers read them: a `Sequence` operand is spliced and a
- * `Nothing` operand is dropped, as the generic canonical form does for every
- * operator, so that `Numerator(a/b, Sequence())` is the one-operand call
- * `Numerator(a/b)` and takes the quotient shortcut.
+ * call as the handlers read them: a `Sequence` operand is spliced, as the
+ * generic canonical form does for every operator.
  */
 function accessorOperands(
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
-  return flattenSequence(ops).filter((op) => !isSymbol(op, 'Nothing'));
+  return flattenSequence(ops);
 }
 
 /** Computes the Sign of a number */
@@ -1465,7 +1460,7 @@ function roundingType(
   if (x === undefined) return undefined;
   const resolver = context.engine._typeResolver;
   const xType = broadcastCellType(x.type);
-  // A step that is `NaN` or zero gives `NaN` (`Indeterminate`) for every `x`.
+  // A step that is `NaN` or zero gives `NaN` for every `x`.
   if (
     step !== undefined &&
     (isSubtype(broadcastCellType(step.type), 'nan') ||
@@ -1528,8 +1523,7 @@ function roundingType(
 
 /**
  * The domain condition of the step form of `Floor`, `Ceil`, `Truncate` and
- * `Round` (`definedWhen`): the step is not zero. `Floor(x, 0)` is `Indeterminate`
- * (`NaN` with a float operand), as `Mod(x, 0)` is. The one-argument form is
+ * `Round` (`definedWhen`): the step is not zero. `Floor(x, 0)` is `NaN`, as `Mod(x, 0)` is. The one-argument form is
  * defined at every point of its carrier. As for `Mod`, the step is read from
  * its static type (its element type under a broadcast), and a step that is
  * not proven real is not decided here: the carrier refuses it.
@@ -1637,7 +1631,7 @@ function roundToStep(
     return numericApproximation ? r.mul(k.N()) : r.mul(k);
   }
   if (step.isComplex || step.isFinite !== true) return undefined;
-  if (step.isSame(0)) return indeterminateFormAnswer(ce, [x, step]);
+  if (step.isSame(0)) return ce.NaN;
   const k = step.isNegative ? step.neg() : step;
   if (numericApproximation && isExactRealLiteral(k)) {
     const quotient = x.div(k);
@@ -2284,7 +2278,7 @@ function pointOverCollectionQuotientType(
     // (`shapedListTypeD`, `library/collections.ts`). A divisor with a cell
     // that may be zero can give such a list even when the cell types reduce
     // to one tuple type: `(1, 2) / v` with `v = [0, 1]` is
-    // `[(Indeterminate, ~oo), (0, 1)]`, typed with no length.
+    // `[(NaN, ~oo), (0, 1)]`, typed with no length.
     if (
       dims?.length === 1 &&
       ((typeof cell === 'object' && cell.kind === 'union') || zero !== 'none')
@@ -2361,8 +2355,8 @@ function divisorCellZero(
  * The type of the point `num` (of type `point`) divided by a cell that is
  * zero (`zero` is `'literal'`) or may be zero (`'maybe'`), by the rule of a
  * scalar quotient. A component divided by zero is `~oo` (type `infinity`),
- * and `0/0` is `Indeterminate` (type `nan`): `(1, 2) / 0` is
- * `(~oo, ~oo)`, and `(0, 1) / 0` is `(Indeterminate, ~oo)`. A component
+ * and `0/0` is `NaN` (type `nan`): `(1, 2) / 0` is
+ * `(~oo, ~oo)`, and `(0, 1) / 0` is `(NaN, ~oo)`. A component
  * divided by a cell that may be zero is a real, `~oo` or `NaN`, as `1 / n`
  * for `n: integer` is.
  */
@@ -4912,8 +4906,7 @@ function literalPredicateType(
  *   past the double range between x = 171 and x = 1000, Γ(x+1) does the
  *   same one step later, and ln Γ(10⁶) ≈ 1.28·10⁷ while
  *   ln Γ(10¹²) ≈ 2.66·10¹³.
- * - At `−∞` there is NO limit, so the value is `Indeterminate` (`NaN`
- *   under `.N()`, see `indeterminateFormAnswer()`). Γ has a pole at
+ * - At `−∞` there is NO limit, so the value is `NaN`. Γ has a pole at
  *   every non-positive integer, so the function is undefined at infinitely
  *   many points of any neighbourhood of `−∞`, and between consecutive
  *   poles its sign alternates (Γ(−5.5) ≈ +1.09·10⁻², Γ(−10.5) ≈
@@ -4921,7 +4914,7 @@ function literalPredicateType(
  *   the negative axis in this implementation.
  * - At the unsigned `~∞` there is no limit either — an argument approaching
  *   the single point at infinity from no fixed direction has none — so the
- *   value is `Indeterminate` as well. This arm makes the family uniform: `Gamma`,
+ *   value is `NaN` as well. This arm makes the family uniform: `Gamma`,
  *   `GammaLn` and `Factorial` already reached `NaN` at `~∞` through their
  *   own numeric routes, while `Factorial2` stopped at its integrality test
  *   and stayed inert, which `docs/ERROR-MODEL.md` §1 forbids as the
@@ -4930,7 +4923,7 @@ function literalPredicateType(
  * The four heads declare the carrier `complex | infinity`, so every one of
  * these points is IN the carrier and the answer is a value, never a
  * boxing error (the Γ-family convention: the direction with a limit gets
- * it, the direction without one gets `Indeterminate`; ruling recorded in
+ * it, the direction without one gets `NaN`; ruling recorded in
  * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8).
  */
 export function infiniteGammaFamilyValue(
@@ -4940,7 +4933,7 @@ export function infiniteGammaFamilyValue(
   const point = infinitePoint(x);
   if (point === undefined) return undefined;
   if (point === '+oo') return ce.PositiveInfinity;
-  return indeterminateFormAnswer(ce, [x]);
+  return ce.NaN;
 }
 
 /**
@@ -4956,7 +4949,7 @@ export function infiniteGammaFamilyValue(
  *   ψ₃ = 2·10⁻¹⁸). The Fungrim identity 1cbe83 states the same.
  * - `−∞` and `~∞`: no limit — the poles at the non-positive integers
  *   accumulate there, and between consecutive poles ψ₁ returns to ≈ π²
- *   (ψ₁(−10⁶ − ½) = 9.87) — so the value is `Indeterminate`.
+ *   (ψ₁(−10⁶ − ½) = 9.87) — so the value is `NaN`.
  * - A pole (a non-positive integer): `~∞` for every order. Near `−k`,
  *   `ψ⁽ⁿ⁾(x) ≈ (−1)ⁿ⁺¹ n!/(x + k)ⁿ⁺¹`; the engine spells such a pole
  *   `~∞` whatever the parity of n + 1, exactly as it folds `1/0²` to
@@ -4972,19 +4965,11 @@ export function infiniteGammaFamilyValue(
 function polygammaValueAtExceptionalPoint(
   order: number | null,
   x: Expression,
-  ce: ComputeEngine,
-  orderExpr?: Expression
+  ce: ComputeEngine
 ): Expression | undefined {
   if (!isNumber(x)) return undefined;
   const point = infinitePoint(x);
-  // `orderExpr` is the order as an expression, when the caller has one: a
-  // float order (`PolyGamma(1.0, −∞)`) makes the answer `NaN`, which the
-  // JavaScript number `order` cannot tell.
-  if (point !== undefined && point !== '+oo')
-    return indeterminateFormAnswer(
-      ce,
-      orderExpr === undefined ? [x] : [orderExpr, x]
-    );
+  if (point !== undefined && point !== '+oo') return ce.NaN;
   if (order === null || order < 0) return undefined;
   if (point === '+oo') return order === 0 ? ce.PositiveInfinity : ce.Zero;
   if (!x.isComplex && x.isInteger === true && x.isNonPositive === true)
@@ -5009,7 +4994,7 @@ function polygammaValueAtExceptionalPoint(
  *   whose modulus grows without bound in the imaginary direction: an
  *   infinite value in a non-real direction, which the engine spells `~∞`
  *   (`i·∞` itself boxes to `~∞`).
- * - `~∞`: `Indeterminate`. Every Bessel function grows
+ * - `~∞`: `NaN`. Every Bessel function grows
  *   exponentially in some direction of the complex plane and decays in
  *   another (`J_n(iy) = iⁿ I_n(y)`), so there is no value at the
  *   direction-less point.
@@ -5024,14 +5009,11 @@ function besselValueAtExceptionalPoint(
   kind: 'J' | 'Y' | 'I' | 'K',
   n: number,
   x: Expression,
-  ce: ComputeEngine,
-  orderExpr: Expression
+  ce: ComputeEngine
 ): Expression | undefined {
   if (!isNumber(x)) return undefined;
   const point = infinitePoint(x);
-  // The order is read as an expression too: a float order
-  // (`BesselJ(0.0, ~oo)`) makes the answer `NaN`.
-  if (point === '~oo') return indeterminateFormAnswer(ce, [orderExpr, x]);
+  if (point === '~oo') return ce.NaN;
   if (point === '+oo') return kind === 'I' ? ce.PositiveInfinity : ce.Zero;
   if (point === '-oo') {
     if (kind === 'J' || kind === 'Y') return ce.Zero;
@@ -5087,7 +5069,7 @@ function evaluateBessel(
   if (!isNumber(n) || !isNumber(x)) return undefined;
   const order = asSmallInteger(n);
   if (order === null) return undefined;
-  const special = besselValueAtExceptionalPoint(kind, order, x, ce, n);
+  const special = besselValueAtExceptionalPoint(kind, order, x, ce);
   if (special !== undefined) return special;
   if (!shouldNumericize(numericApproximation, n, x)) return undefined;
   if (
@@ -5155,8 +5137,8 @@ function evaluateBessel(
  * - `−∞`: `Ai` and `Bi` oscillate with an amplitude that decays like
  *   `|x|^(−1/4)`, so both tend to 0 (Ai(−10⁶) = −0.002). `Ai′` and `Bi′`
  *   oscillate with an amplitude that GROWS like `|x|^(1/4)` (Ai′(−10⁶) =
- *   17.7), so they have no limit: `Indeterminate`.
- * - `~∞`: `Indeterminate` — the Airy functions grow
+ *   17.7), so they have no limit: `NaN`.
+ * - `~∞`: `NaN` — the Airy functions grow
  *   exponentially in some sectors of the complex plane and decay in others.
  */
 function airyValueAtInfinity(
@@ -5171,8 +5153,8 @@ function airyValueAtInfinity(
   if (point === '-oo')
     return kind === 'Ai' || kind === 'Bi'
       ? ce.Zero
-      : indeterminateFormAnswer(ce, [x]);
-  return indeterminateFormAnswer(ce, [x]);
+      : ce.NaN;
+  return ce.NaN;
 }
 
 /**
@@ -5238,13 +5220,13 @@ function evaluateAiry(
  *   - for a non-real b with a zero real part, the value stays bounded and
  *     turns without a limit (B(10³, i) = −0.42 − 0.31i, B(10⁶, i) =
  *     −0.52 − 0.01i): `NaN`.
- * - `−∞` and `~∞` otherwise: `Indeterminate`. The Γ-poles of the first
+ * - `−∞` and `~∞` otherwise: `NaN`. The Γ-poles of the first
  *   operand accumulate at `−∞`, so there is no limit.
  * - Two infinite operands: `B(+∞, +∞) = 0` (`B(a, b) ≤ 1/a` for `b ≥ 1`;
  *   `B(10⁶, 10⁶) = 3.6·10⁻⁶⁰²⁰⁶³`, `B(10³, 10⁹) = 4.0·10⁻⁶⁴³⁶`); every
  *   other pair (`B(+∞, −∞)`, `B(+∞, ~∞)`, `B(−∞, +∞)`) has no limit
  *   (`B(10⁶, −10⁶ + ½) = 1.8·10⁻³` against `B(10⁶, −10⁶ − ¼) = 2.9·10⁻⁸`,
- *   with a pole at every integer in between): `Indeterminate`.
+ *   with a pole at every integer in between): `NaN`.
  */
 function betaValueAtInfinity(
   a: Expression,
@@ -5278,13 +5260,13 @@ function betaValueAtInfinity(
   if (pa !== undefined && pb !== undefined)
     return pa === '+oo' && pb === '+oo'
       ? ce.Zero
-      : indeterminateFormAnswer(ce, [a, b]);
+      : ce.NaN;
   // One infinite operand. `B(+∞, b)` for a finite `b` with a non-positive
   // real part: see above. At `−∞` and `~oo` there is no limit: the
   // indeterminate form.
   if (pa === '+oo' || pb === '+oo')
     return betaAtPositiveInfinity(pa === '+oo' ? b : a, ce);
-  return indeterminateFormAnswer(ce, [a, b]);
+  return ce.NaN;
 }
 
 /**
@@ -5337,7 +5319,7 @@ function betaAtPositiveInfinity(b: Expression, ce: ComputeEngine): Expression {
  *   unbounded. Measured with mpmath: Γ(0, −100) = −2.7·10⁴¹ − πi,
  *   Γ(0, −1000) = −2.0·10⁴³¹ − πi, Γ(−1, −100) = 2.7·10³⁹ + πi,
  *   Γ(−3, −1000) = 2.0·10⁴²² + 0.52i.
- * - `~∞` or two infinite operands: `Indeterminate` (`Γ(∞, ∞)` is an
+ * - `~∞` or two infinite operands: `NaN` (`Γ(∞, ∞)` is an
  *   indeterminate form).
  */
 function incompleteGammaValueAtInfinity(
@@ -5349,9 +5331,9 @@ function incompleteGammaValueAtInfinity(
   const pz = infinitePoint(z);
   if (ps === undefined && pz === undefined) return undefined;
   if (ps !== undefined && pz !== undefined)
-    return indeterminateFormAnswer(ce, [s, z]);
+    return ce.NaN;
   if (pz === '+oo')
-    return s.isFinite === false ? indeterminateFormAnswer(ce, [s, z]) : ce.Zero;
+    return s.isFinite === false ? ce.NaN : ce.Zero;
   // `Γ(s, −∞)`: see above. `Γ(s, ~oo)` has no limit: the indeterminate
   // form.
   if (pz === '-oo') {
@@ -5365,9 +5347,9 @@ function incompleteGammaValueAtInfinity(
     return ce.NaN;
   }
   if (pz !== undefined)
-    return isNumber(s) ? indeterminateFormAnswer(ce, [s, z]) : undefined;
+    return isNumber(s) ? ce.NaN : undefined;
   // s is the infinite operand and z is finite.
-  if (ps === '~oo') return indeterminateFormAnswer(ce, [s, z]);
+  if (ps === '~oo') return ce.NaN;
   if (!isNumber(z) || z.isComplex || z.isPositive !== true) return undefined;
   if (ps === '+oo') return ce.PositiveInfinity;
   if (z.isGreaterEqual(1) === true) return ce.Zero;
@@ -5841,7 +5823,7 @@ function zetaAtInfiniteOperand(
   if (sPoint !== undefined && aPoint !== undefined) return null;
   if (sPoint !== undefined) {
     if (!isFiniteNumberLiteral(a)) return null;
-    if (sPoint !== '+oo') return indeterminateFormAnswer(engine, [s, a]);
+    if (sPoint !== '+oo') return engine.NaN;
     if (a.isComplex || !(a.re > 0)) return null;
     if (a.re > 1) return engine.Zero;
     if (a.re === 1) return engine.One;
@@ -6627,7 +6609,7 @@ function evaluateDirichletEta(
   const point = isNumber(s) ? infinitePoint(s) : undefined;
   if (point === '+oo') return engine.One;
   // No limit at −∞ or ~oo, as for ζ: the indeterminate form.
-  if (point !== undefined) return indeterminateFormAnswer(engine, [s]);
+  if (point !== undefined) return engine.NaN;
   if (!isFiniteNumberLiteral(s)) return undefined;
   const numeric = shouldNumericize(numericApproximation, s);
   const finish = (e: Expression) => (numeric ? e.N() : e.evaluate());
@@ -6724,7 +6706,7 @@ function evaluateDirichletBeta(
   const point = isNumber(s) ? infinitePoint(s) : undefined;
   if (point === '+oo') return engine.One;
   // No limit at −∞ or ~oo, as for ζ: the indeterminate form.
-  if (point !== undefined) return indeterminateFormAnswer(engine, [s]);
+  if (point !== undefined) return engine.NaN;
   if (!isFiniteNumberLiteral(s)) return undefined;
   const numeric = shouldNumericize(numericApproximation, s);
 
@@ -8277,10 +8259,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `∞ − floor(∞)` is `∞ − ∞`, and `x − floor(x)` has no limit at
       // either end (it sweeps `[0, 1)` forever), so `definedWhen` names the
       // finiteness condition and the gate answers the codomain marker,
-      // `Indeterminate` (the form `∞ − ∞`, as `x − Floor(x)` composes).
+      // `NaN` (the form `∞ − ∞`, as `x − Floor(x)` composes).
       // `~oo` is in the carrier too, as for `Floor`, and it has no
-      // fractional part either: the handler answers `Indeterminate` for it
-      // (`NaN` under `.N()`). `NaN` propagates. The
+      // fractional part either: the handler answers `NaN` for it.
+      // `NaN` propagates. The
       // successes lie in `[0, 1)`; `real<0..1>` is the closest declared
       // spelling, and it is sharp enough that no type handler is needed —
       // the framework adds `| nan` while the operand is not proven finite.
@@ -8370,9 +8352,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // `~oo` has no fractional part: `~oo − Floor(~oo)` is `~oo − ~oo`.
         if (infinitePoint(x) === '~oo')
-          return numericApproximation
-            ? ce.NaN
-            : indeterminateFormAnswer(ce, [x]);
+          return ce.NaN;
         return apply(
           x,
           (x) => x - Math.floor(x),
@@ -8640,7 +8620,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: guardDigitsN(([n, x], { numericApproximation, engine }) => {
         const order = asSmallInteger(n);
-        const special = polygammaValueAtExceptionalPoint(order, x, engine, n);
+        const special = polygammaValueAtExceptionalPoint(order, x, engine);
         if (special !== undefined) return special;
         // ψ⁽⁻¹⁾(z) = ln Γ(z), Wolfram's and mpmath's convention for the
         // antiderivative of the digamma: the continuation `LogGamma`
@@ -8691,7 +8671,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // finite complex point (the pole `~oo` at 1 — `ζ(1 ± 10⁻⁹) = ±10⁹`,
       // so the pole has no sign), and the infinite points are in the
       // carrier: `ζ(+∞) = 1` (ζ(100) = 1 to 30 digits), and
-      // `Indeterminate` at `−∞` (the trivial zeros at the even negative
+      // `NaN` at `−∞` (the trivial zeros at the even negative
       // integers alternate with values like ζ(−10⁶ − ½) = −10^4767531: no
       // limit) and at `~oo`. `NaN` propagates (explicit: the carrier is
       // not a subtype of `complex`). No `canonical` handler, so a proven
@@ -8749,7 +8729,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const point = infinitePoint(x);
           if (point === '+oo') return engine.One;
           // No limit at `−∞` or `~oo`: the indeterminate form.
-          if (point !== undefined) return indeterminateFormAnswer(engine, [x]);
+          if (point !== undefined) return engine.NaN;
           if (!x.isComplex && x.isSame(1)) return engine.ComplexInfinity;
         }
         if (shouldNumericize(numericApproximation, x))
@@ -9655,7 +9635,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // handler, no fast path), where it used to answer `NaN`. `NaN`
       // propagates. The one failure INSIDE the carrier is the zero modulus,
       // named by `definedWhen` below, which the gate routes to the codomain
-      // marker (`Mod(1, 0)` → `Indeterminate`, `NaN` with a float operand),
+      // marker (`Mod(1, 0)` → `NaN`),
       // never to `Error`.
       signature: '(real, real) -> real',
       examples: ['[7 % 3, -7 % 3]'],
@@ -9663,7 +9643,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The named domain condition (Contract B, `docs/ERROR-MODEL.md` §4):
       // inside the carrier, a floored remainder exists exactly for a
       // non-zero modulus. `false` routes to the codomain marker
-      // (`Mod(1, 0)` → `Indeterminate`), never to `Error`; an undecidable modulus (a
+      // (`Mod(1, 0)` → `NaN`), never to `Error`; an undecidable modulus (a
       // symbol of unknown sign, a collection) answers `undefined`. The
       // operands are read from their STATIC types — the value predicates
       // are type-blind on compounds — and under a broadcast lift from the
@@ -12128,8 +12108,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(T, T) -> T where T: number',
       examples: ['[Remainder(7, 3), Remainder(-7, 3)]'],
       // A zero divisor has no remainder, as for `Mod(5, 0)`: the
-      // indeterminate form `Indeterminate`, or `NaN` with a float operand
-      // (`indeterminateFormAnswer()`). This is decided here, not with a
+      // indeterminate form `NaN`. This is decided here, not with a
       // `definedWhen` predicate as for `Mod`: the codomain marker of that
       // predicate is read from the declared result, and the polytype `T`
       // of this signature is not provably a number, so it would answer
@@ -12187,7 +12166,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([a, b], { engine, numericApproximation, expression }) => {
         if (isNumber(b) && b.isSame(0))
-          return indeterminateFormAnswer(engine, [a, b]);
+          return engine.NaN;
         // `Remainder` jumps where `a/b` is a half-integer, so exact operands
         // are read exactly, as for `Mod`: `exactRemainderUnderN()` under
         // `.N()`, and the exact remainder otherwise. A float operand takes
@@ -12234,7 +12213,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // a `NaN` argument propagates through the generic gate (an
       // extended-real carrier derives `reject`, hence the explicit
       // declaration). The signature, the domain condition (a zero step is
-      // `Indeterminate`) and the `type` handler are those of `Floor`, `Ceil`
+      // `NaN`) and the `type` handler are those of `Floor`, `Ceil`
       // and `Truncate` (`ROUNDING_STEP_SIGNATURE`, `roundingStepDefined()`,
       // `roundingType()`). (`docs/ERROR-MODEL.md` §4.)
       signature: ROUNDING_STEP_SIGNATURE,
@@ -12399,7 +12378,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Sign(3 + 4i)` is `3/5 + 4i/5` — the reading Fungrim (entry
       // 09c107), SymPy and Mathematica share. `~oo` (a pole, `5/0`) is in
       // the carrier, as it is for `Floor`, but it has no direction, so
-      // `Sign(~oo)` is `Indeterminate` (`NaN` under `.N()`). The type
+      // `Sign(~oo)` is `NaN`. The type
       // handler keeps the sharp ranged tier for a proven extended-real
       // argument and answers `complex` otherwise, with a `nan` arm where
       // the argument can be `NaN` or `~oo`.
@@ -12420,7 +12399,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // NaN-free part: the NaN member alone must not turn a real operand
         // into a complex one.
         if (t !== 'never' && factsOf(t).nan) return undefined;
-        // `Sign(~oo)` is `Indeterminate`, typed `nan`.
+        // `Sign(~oo)` is `NaN`, typed `nan`.
         if (t !== 'never' && isSubtype(t, COMPLEX_INFINITY_TYPE))
           return BoxedType.forResult('nan', context.engine._typeResolver);
         const maybeComplexInfinity = couldMatch(t, COMPLEX_INFINITY_TYPE);
@@ -12448,7 +12427,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // that cannot be `~oo` is decided here; `~oo` is not, because under
       // `.N()` it can be the float of an operand whose exact value is finite
       // (`1/(√(10⁴⁰ + 1) − 10²⁰)`): the handler reads the exact operand
-      // first and answers `Indeterminate` for a true `~oo`.
+      // first and answers `NaN` for a true `~oo`.
       definedWhen: ([x]) =>
         x === undefined || couldMatch(x.type.type, COMPLEX_INFINITY_TYPE)
           ? undefined
@@ -12478,9 +12457,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNegative) return engine.NegativeOne;
         // `~oo` has no direction.
         if (infinitePoint(x) === '~oo')
-          return numericApproximation
-            ? engine.NaN
-            : indeterminateFormAnswer(engine, [x]);
+          return engine.NaN;
         // A complex number literal off the real line: `z/|z|`, exact when
         // the modulus is (`Sign(3 + 4i)` is `3/5 + 4i/5`). A symbolic
         // operand stays symbolic.
@@ -12942,26 +12919,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     NaN: {
       description:
-        'Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. An exact form with no value, such as 0/0, is Indeterminate.',
-      examples: ['[NaN + 1, 0.0/0.0]'],
+        'Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0, or of an exact form with no value, such as 0/0.',
+      examples: ['[NaN + 1, 0.0/0.0, 0/0]'],
       type: 'number',
       isConstant: true,
       holdUntil: 'never',
       value: (engine) => engine.NaN,
     },
 
-    // The symbol spelling of the `Indeterminate` number literal. It has its
-    // own definition, of the same shape as `NaN` above, because the value of
-    // the `NaN` symbol is the `NaN` literal: the string `"Indeterminate"`
-    // boxes to this symbol, whose value is `ce.Indeterminate`.
+    // `Indeterminate` is an input spelling of `NaN`: the symbol boxes to the
+    // `NaN` literal, as the symbol `NaN` does.
     Indeterminate: {
-      description:
-        'Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. Its numeric approximation is NaN.',
-      examples: ['[0/0, Indeterminate + 1, N(0/0)]'],
+      description: 'An input spelling of NaN.',
+      examples: ['[Indeterminate, Indeterminate + 1]'],
       type: 'number',
       isConstant: true,
       holdUntil: 'never',
-      value: (engine) => engine.Indeterminate,
+      value: (engine) => engine.NaN,
     },
 
     ContinuationPlaceholder: {
@@ -13516,7 +13490,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   //
   {
     Max: {
-      description: 'Maximum of two or more numbers. Nothing data are omitted.',
+      description: 'Maximum of two or more numbers.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -13567,7 +13541,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Min: {
-      description: 'Minimum of two or more numbers. Nothing data are omitted.',
+      description: 'Minimum of two or more numbers.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -13766,7 +13740,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // t = Clamp((x − e0) / (e1 − e0), 0, 1), exact when the operands are.
         // The differences are evaluated first, so that an infinite edge
-        // gives `∞/∞` and its `Indeterminate`.
+        // gives `∞/∞` and its `NaN`.
         const ratio = ce
           .function('Divide', [
             ce.function('Subtract', [x, e0]).evaluate(),
@@ -13792,7 +13766,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Supremum: {
       description:
-        'Like Max, but defined for open sets. Nothing data are omitted.',
+        'Like Max, but defined for open sets.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -13810,7 +13784,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Infimum: {
       description:
-        'Like Min, but defined for open sets. Nothing data are omitted.',
+        'Like Min, but defined for open sets.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -13981,7 +13955,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Product: {
       description:
-        '`Product(f, a, b)` computes the product of `f` from `a` to `b`. Nothing factors are omitted.',
+        '`Product(f, a, b)` computes the product of `f` from `a` to `b`.',
       wikidata: 'Q901718',
       complexity: 1000,
       broadcastable: false,
@@ -14370,7 +14344,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Sum: {
       description:
-        '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. Nothing terms are omitted.',
+        '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`.',
       keywords: ['summation', 'sigma'],
       wikidata: 'Q218005',
       complexity: 1000,
@@ -15218,7 +15192,6 @@ function productAccumulate(
   term: Expression,
   numericApproximation: boolean | undefined
 ): Expression {
-  if (isSymbol(term, 'Nothing')) return acc;
   const err = reducerElementError(acc, term);
   if (err) return err;
   if (numericApproximation) return roundedToWorkingPrecision(acc.mul(term));
@@ -15372,7 +15345,7 @@ function addSumTerm(
   term: Expression,
   numericApproximation: boolean | undefined
 ): SumTerms {
-  if (acc.error !== undefined || isSymbol(term, 'Nothing')) return acc;
+  if (acc.error !== undefined) return acc;
   if (isString(term) || isCharacter(term)) {
     acc.error = term.engine.typeError('number', term.type);
     return acc;
@@ -15387,6 +15360,14 @@ function addSumTerm(
   // the trace frame of the internal `Add`.
   if (isRefusedSumTerm(term)) {
     acc.error = term.engine.typeError('number', term.type, term);
+    return acc;
+  }
+  // Any other term that is not a number: the non-number check of `Add` is
+  // applied to each term, so a sum of one term gives the error that a sum of
+  // two terms gives (`Sum([Nothing])` and `Sum([1, Nothing])`).
+  const nonNumeric = nonNumericOperandError(term.engine, [term], 'Add');
+  if (nonNumeric !== undefined) {
+    acc.error = nonNumeric;
     return acc;
   }
   // An absent term (`Missing`) is not a number literal, so it is kept as a
@@ -15994,29 +15975,12 @@ export function refusedEnclosureOperands(
   );
 }
 
-/**
- * What the walk of `Max`/`Min` saw that decides between `Indeterminate` and
- * `NaN`: an `Indeterminate` operand gives `Indeterminate` only when no operand
- * is inexact (`isInexactOperand()`). `inexact` records an inexact value met
- * as an operand or an element. A list folded on its doubles
- * (`isMachineDoubleList`) is recorded in `machineLists` instead: its doubles
- * do not say which elements are floats (an exact `1/2` is the double `0.5`),
- * so its elements are read only when an `Indeterminate` was seen. A
- * `Linspace` is recorded there too: its extremum is read off its endpoints,
- * but its other samples can be floats (`Linspace(0.5, 2, 3)` is
- * `[0.5, 1.25, 2]`), so its samples are read when an `Indeterminate` was
- * seen.
- */
-type ExtremumWalk = { inexact: boolean; machineLists: Expression[] };
-
 function processMinMaxItem(
   item: Expression,
-  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum',
-  walk: ExtremumWalk = { inexact: false, machineLists: [] }
+  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
 ): [Expression | undefined, ReadonlyArray<Expression>] {
   const ce = item.engine;
   const upper = mode === 'Max' || mode === 'Supremum';
-  if (isSymbol(item, 'Nothing')) return [undefined, []];
 
   // An ABSENT datum makes the whole extremum absent: a `Missing` datum makes
   // it `Missing` (`Missing` is a result only, and an operator over it gives
@@ -16116,7 +16080,6 @@ function processMinMaxItem(
     // collection: it contributes no value and nothing symbolic, so that
     // `evaluateMinMax` answers `NaN` when no other operand supplies data.
     if (count === 0) return [undefined, []];
-    walk.machineLists.push(item);
     // The value returned is the sample that iterating the collection yields
     // at that endpoint (`at`), not the endpoint operand: the samples are
     // computed from the doubles of the endpoints, so `Min(Linspace(1/3, 1,
@@ -16149,7 +16112,6 @@ function processMinMaxItem(
   // A `List` of machine numbers is folded on its doubles: see
   // `machineExtremum`.
   if (isMachineDoubleList(item)) {
-    walk.machineLists.push(item);
     const extremum = machineExtremum(item.array, upper, ce);
     // The extremum is one of the elements, boxed as the list boxes it: an
     // integer value is a float in a list of floats (`_machineFloats`).
@@ -16192,7 +16154,6 @@ function processMinMaxItem(
     let result: Expression | undefined = undefined;
     const rest: Expression[] = [];
     let walked = 0;
-    let sawIndeterminate = false;
     let sawNaN = false;
     let sawMissing = false;
     for (const op of item.each()) {
@@ -16201,7 +16162,7 @@ function processMinMaxItem(
       // dictionary, as the error of `Sum([1, {"a" -> 3}])` does.
       if (op.operator === 'Dictionary')
         return [ce.typeError('number', op.type, op), []];
-      const [val, others] = processMinMaxItem(op, mode, walk);
+      const [val, others] = processMinMaxItem(op, mode);
       // An error is the answer of the whole extremum.
       if (isFunction(val, 'Error')) return [val, []];
       if (val) {
@@ -16209,12 +16170,6 @@ function processMinMaxItem(
         // element makes the whole extremum indeterminate (Max([1, NaN, 3]) →
         // NaN, matching Max(1, NaN, 3)). Returning NaN as this item's value
         // lets the caller's top-level NaN check absorb it.
-        // An `Indeterminate` element absorbs too, but a `NaN` element
-        // anywhere in the walk still wins: the walk continues, and the
-        // caller (`evaluateMinMax`) answers `Indeterminate` only when no
-        // element is `NaN` or inexact (`Max([1, Indeterminate])` is
-        // `Indeterminate`, `Max([Indeterminate, NaN])` and
-        // `Max([1.5, Indeterminate])` are `NaN`).
         // The walk continues after a `NaN` too, so that an error found
         // later (a dictionary element) is the answer whatever the order of
         // the elements: `Max([NaN, d])` and `Max([d, NaN])` are both the
@@ -16224,11 +16179,9 @@ function processMinMaxItem(
           continue;
         }
         if (val.isNaN) {
-          if (!val.isIndeterminate) sawNaN = true;
-          else sawIndeterminate = true;
+          sawNaN = true;
           continue;
         }
-        if (isInexactOperand(val)) walk.inexact = true;
         result = foldExtremumValue(val, result, rest, upper);
       }
       rest.push(...others);
@@ -16236,7 +16189,6 @@ function processMinMaxItem(
     if (sawMissing) return [ce.Missing, []];
     if (sawNaN) return [ce.NaN, []];
     if (enumerationDeclinedAfterWalk(item, walked)) return [undefined, [item]];
-    if (sawIndeterminate) return [ce.Indeterminate, []];
     return [result, rest];
   }
 
@@ -16253,6 +16205,15 @@ function processMinMaxItem(
   if (item.isConstant && item.type.matches('number')) {
     const value = item.N();
     if (isNumber(value) && !value.isComplex && !value.isNaN) return [item, []];
+  }
+  // A `Nothing` datum (the value of an empty block) is not a number: it is
+  // the ordinary `incompatible-type` error of a non-number operand. An error
+  // outranks `NaN`, so `Max([NaN, Nothing])` is that error, not `NaN`. Any
+  // other operand (a symbol with no value, even one typed as a dictionary)
+  // stays in the unevaluated result.
+  if (isSymbol(item, 'Nothing')) {
+    const nonNumeric = nonNumericOperandError(ce, [item], mode);
+    if (nonNumeric !== undefined) return [nonNumeric, []];
   }
   return [undefined, [item]];
 }
@@ -16468,17 +16429,14 @@ function scalarExtremum(
   numericApproximation: boolean
 ): Expression | undefined {
   const ce = a.engine;
-  // A `NaN` operand gives `NaN`; an `Indeterminate` operand gives
-  // `Indeterminate` when the other operand is neither `NaN` nor inexact
-  // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`;
-  // a value of a kind is inexact when its kind says so, as a measurement
-  // does). A value of a kind (a measurement) is ordered by the `compare`
+  // A `NaN` operand gives `NaN`. A value of a kind (a measurement) is
+  // ordered by the `compare`
   // hook of its kind (`extremumOrder()`, `exactOrder()`), and the winner is
   // the operand itself, uncertainty included. The `isNaN` test also covers
   // a kind value whose `isNaN` hook says it stands for no value
   // (`ArithmeticDefinition.isNaN`: `Measurement(NaN, 0.1)`,
   // `Quantity(NaN, m)`), because `BoxedFunction.isNaN` reads that hook.
-  if (a.isNaN === true || b.isNaN === true) return nanOperandAnswer(ce, [a, b]);
+  if (a.isNaN === true || b.isNaN === true) return ce.NaN;
   if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
     return undefined;
   // A kind that declares an `extremum` hook gives the extremum of the pair
@@ -16602,48 +16560,6 @@ function foldExtremum(
 }
 
 /**
- * True when a sample of the finite `Linspace` `list` is inexact (a float).
- * The `Linspace` handlers box each sample from its double, so a sample is
- * exact exactly when its double is an integer.
- *
- * The samples are not built as an array: a `Linspace` of 10^9 samples would
- * exhaust the memory. When the first and the last samples are safe
- * integers and the step between two samples is an integer, every sample is
- * `lower + k·step`, an exact integer (`linspaceSample` in `collections.ts`),
- * so no sample is inexact.
- * Otherwise the samples are read one at a time, and the read stops at the
- * first inexact one: when the step is not an integer, that is the first or
- * the second sample.
- */
-function linspaceHasInexactSample(list: Expression): boolean {
-  const count = list.count;
-  if (count === 0) return false;
-  const first = list.at(1);
-  if (first !== undefined && isInexactOperand(first)) return true;
-  const last = typeof count === 'number' ? list.at(count) : undefined;
-  if (last !== undefined && isInexactOperand(last)) return true;
-  if (typeof count === 'number' && first !== undefined && last !== undefined) {
-    if (count <= 2) return false;
-    const lower = first.re;
-    const upper = last.re;
-    const span = upper - lower;
-    // An integer grid between safe integers: every sample is
-    // `lower + k·step`, an exact integer (`linspaceSample` in
-    // `collections.ts`), so no sample is read.
-    if (
-      Number.isInteger(lower) &&
-      Number.isInteger(upper) &&
-      Number.isInteger(span / (count - 1)) &&
-      Math.abs(lower) <= Number.MAX_SAFE_INTEGER &&
-      Math.abs(upper) <= Number.MAX_SAFE_INTEGER
-    )
-      return false;
-  }
-  for (const sample of list.each()) if (isInexactOperand(sample)) return true;
-  return false;
-}
-
-/**
  * The type of `Max(…)` or `Min(…)` when an operand is typed as a residue
  * class for certain (`residue`, `set<residue>`): `error`. A residue class has no order, so it is not an
  * operand of an extremum (user decision 2026-10-23,
@@ -16651,8 +16567,7 @@ function linspaceHasInexactSample(list: Expression): boolean {
  * evaluates to an `incompatible-type` error (`processMinMaxItem`), and an
  * expression typed `error` is one that evaluates to an error of its own. The
  * parameters stay declared `value`, so that a collection (`Max([3, 7, 2])`)
- * and an omitted `Nothing` are accepted and a free symbol is inferred from
- * them as before; no parameter type can spell "a value that is not a class",
+ * is accepted and a free symbol is inferred from it as before; no parameter type can spell "a value that is not a class",
  * and a `canonical` handler that refused the class skipped that inference.
  * A class that an operand holds without saying so in its type (a
  * `value`-typed symbol) is refused when the call is evaluated only.
@@ -16774,10 +16689,8 @@ function evaluateMinMax(
 
   let result: Expression | undefined = undefined;
   const rest: Expression[] = [];
-  let sawIndeterminate = false;
   let sawNaN = false;
   let sawMissing = false;
-  const walk: ExtremumWalk = { inexact: false, machineLists: [] };
 
   for (const operand of ops) {
     // A `FlatMap` with no known finiteness over a finite source is listed
@@ -16792,7 +16705,7 @@ function evaluateMinMax(
       if (!isInfiniteListing(listed)) return listed;
     }
     const op = isFunction(listed, 'List') ? listed : operand;
-    const [val, others] = processMinMaxItem(op, mode, walk);
+    const [val, others] = processMinMaxItem(op, mode);
     // An error (a dictionary operand or element) is the answer of the whole
     // extremum, as it is for `Sum`.
     if (isFunction(val, 'Error')) return val;
@@ -16800,13 +16713,6 @@ function evaluateMinMax(
       // NaN absorbs: Min/Max of an indeterminate value is indeterminate.
       // (Comparisons with NaN are themselves indeterminate, so without this
       // guard a NaN operand would be silently dropped.)
-      // The `Indeterminate` literal absorbs as well, unless a `NaN` operand
-      // is found later in the walk: `Max(1, Indeterminate)` is
-      // `Indeterminate`, `Max(Indeterminate, NaN)` and
-      // `Max(NaN, Indeterminate)` are `NaN`, and so is an extremum with an
-      // inexact operand or element (`Max(1.5, Indeterminate)`), as a float
-      // operand makes a numeric result a float
-      // (`docs/plans/2026-09-28-indeterminate-value.md` §4).
       // The walk continues after a `NaN`, so that an error found in a later
       // operand (a dictionary) is the answer whatever the order of the
       // operands: `Max(NaN, d)` and `Max(d, NaN)` are both the error, as for
@@ -16816,26 +16722,15 @@ function evaluateMinMax(
         continue;
       }
       if (val.isNaN) {
-        if (!val.isIndeterminate) sawNaN = true;
-        else sawIndeterminate = true;
+        sawNaN = true;
         continue;
       }
-      if (isInexactOperand(val)) walk.inexact = true;
       result = foldExtremumValue(val, result, rest, upper);
     }
     rest.push(...others);
   }
   if (sawMissing) return ce.Missing;
   if (sawNaN) return ce.NaN;
-  if (sawIndeterminate)
-    return walk.inexact ||
-      walk.machineLists.some((list) =>
-        isFunction(list, 'Linspace')
-          ? linspaceHasInexactSample(list)
-          : isFunction(list) && list.ops.some(isInexactOperand)
-      )
-      ? ce.NaN
-      : ce.Indeterminate;
 
   if (rest.length > 0)
     return ce.expr(result ? [mode, result, ...rest] : [mode, ...rest]);
@@ -17238,9 +17133,7 @@ function floorModFloat(a: Expression, b: Expression): Expression | undefined {
  * - `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`.
  * - `ResidueClass(2, 5) + ∞` and `ResidueClass(2, 4) + ResidueClass(1, 6)`
  *   stay sums.
- * - An operand that is `NaN` or `Indeterminate` decides the result, by the
- *   rule of `nanOperandAnswer()`: `Indeterminate + c` is `Indeterminate`,
- *   and under `.N()` the result is `NaN`.
+ * - An operand that is `NaN` decides the result: `NaN + c` is `NaN`.
  *
  * Under `.N()` a hook reads the exact value of an operand through
  * `exact(i)` and returns its own numeric form: the result of a hook is not
@@ -17255,7 +17148,7 @@ function kindEvaluatedOperands(
   const ce = options.engine!;
   const numericApproximation = options.numericApproximation === true;
   if (evaluated.some((x) => isNumber(x) && x.isNaN))
-    return numericApproximation ? ce.NaN : nanOperandAnswer(ce, evaluated);
+    return ce.NaN;
   return kindSumOrProduct(
     ce,
     operator,

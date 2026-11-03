@@ -39,8 +39,6 @@ import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
   isAbsentSymbol,
   isAbsentValue,
-  nanOperandAnswer,
-  indeterminateFormAnswer,
   isFunction,
   isNumber,
   isString,
@@ -605,7 +603,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // (the real kernel used to answer NaN for ±∞, and `~oo` stayed
         // inert).
         if (infinitePoint(x) !== undefined)
-          return indeterminateFormAnswer(ce, [x]);
+          return ce.NaN;
         // A non-real argument, or a real one outside [−1, 1], has a value
         // the real kernel cannot compute: stay symbolic, under N() too.
         if (x.isComplex) return undefined;
@@ -695,7 +693,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature:
-        '((collection<number | nothing> | number | distribution)+) -> number',
+        '((collection<number> | number | distribution)+) -> number',
       // A data-consuming aggregate (§3.C): result type is the numeric base
       // with NO `| missing` arm (I6 absorption) — `number`, NOT `real`,
       // because every arm of the wide type is reachable. An absent datum or
@@ -705,8 +703,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // Three named arms would be needed to say less, so the base type says
       // it in one token.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -720,8 +718,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       description:
-        'Arithmetic mean (average) of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Arithmetic mean (average) of a collection of numbers.',
       keywords: ['average'],
       evaluate: (ops, { engine, numericApproximation, expression }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
@@ -766,14 +763,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           if (vals) return boxedMean(engine, vals);
         }
         // Data holding both `+∞` and `−∞` sums to the indeterminate form
-        // `∞ − ∞`: `Indeterminate`, or `NaN` with a float datum
-        // (`indeterminateFormAnswer()`). The machine kernel below would
-        // answer the `NaN` literal.
+        // `∞ − ∞`: `NaN`.
         if (
           xs.some((x) => x.isInfinity === true && x.isPositive === true) &&
           xs.some((x) => x.isInfinity === true && x.isNegative === true)
         )
-          return indeterminateFormAnswer(engine, xs);
+          return engine.NaN;
         // A float datum makes the mean a float, even when its value is an
         // integer (`Mean([0.5, 1.5])` is the float `1`); the same holds for
         // the other statistics below, except `Mode`, which returns a datum.
@@ -793,7 +788,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature:
-        '((collection<number | nothing> | number)+) -> real | signed_infinity | nan',
+        '((collection<number> | number)+) -> real | signed_infinity | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -804,16 +799,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy for a carrier that already admits `nan` is `inert`, which
       // would leave unsaid that this head ANSWERS `NaN` for absent data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       description:
-        'Median of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Median of a collection of numbers.',
       examples: ['Median([3, 1, 4, 2])  // 5/2'],
       evaluate: (ops, { engine, numericApproximation, expression }) => {
         // The elements of an exact `Range` are an arithmetic sequence, so its
@@ -862,18 +856,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Variance: {
       description:
-        'Sample variance of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Sample variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature:
-        '((collection<number | nothing> | number | distribution)+) -> real<0..> | nan',
+        '((collection<number> | number | distribution)+) -> real<0..> | nan',
       // The variance is a mean of SQUARED deviations, so it is real and
       // non-negative even for complex data (`Variance([1, 1+2i, 3])` is
       // `8/3` — see `complexVariance`), and infinite data has no variance at
       // all: every infinite datum makes the deviations `∞ − ∞` and the
       // answer the indeterminate form (`Variance([1, +oo, 3])` is
-      // `Indeterminate`, and `NaN` with a float datum; see
+      // `NaN`; see
       // `infiniteDataAnswer`). Absent data and empty input are `NaN`
       // (§3.C). Both values are typed `nan`, the second arm. The `handle` policies say so: the
       // derived NaN policy for a carrier that already admits `nan` is
@@ -891,8 +884,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `real | infinity | nan`); its VALUE is non-negative for every legal
       // parameter, which is what the declaration describes.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -920,10 +913,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
         // Infinite data is tested before complex data, so that an infinite
-        // datum next to an exact complex datum is `Indeterminate`, as next to
-        // an exact real datum (`NaN` with a float datum): the complex branch
+        // datum next to an exact complex datum is `NaN`, as next to
+        // an exact real datum: the complex branch
         // below answers `NaN` for every datum that is not finite.
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        const infinite = infiniteDataAnswer(engine, xs);
         if (infinite) return infinite;
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
@@ -950,19 +943,18 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     PopulationVariance: {
       description:
-        'Population variance of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Population variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature:
-        '((collection<number | nothing> | number)+) -> real<0..> | nan',
+        '((collection<number> | number)+) -> real<0..> | nan',
       // The population variance is the same mean of SQUARED deviations the
       // sample variance is, over the divisor `n`: real and non-negative even
       // for complex data (`PopulationVariance([1, 1+2i, 3])` is `16/9` — see
       // `complexVariance`).
       // Infinite data has no variance at all: every infinite datum makes the
       // deviations `∞ − ∞` and the answer the indeterminate form
-      // (`Indeterminate`, or `NaN` with a float datum; see
+      // (`NaN`; see
       // `infiniteDataAnswer`). Absent data and empty input are `NaN` (§3.C).
       // Both values are typed `nan`, the second arm. The
       // `handle` policies say so: the derived NaN policy for a carrier that
@@ -976,8 +968,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // does not (`Exp(1000)` settles it — ruling L6(a),
       // `docs/SIGNATURE-GUIDELINES.md` §2.4).
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1001,10 +993,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
         // Infinite data is tested before complex data, so that an infinite
-        // datum next to an exact complex datum is `Indeterminate`, as next to
-        // an exact real datum (`NaN` with a float datum): the complex branch
+        // datum next to an exact complex datum is `NaN`, as next to
+        // an exact real datum: the complex branch
         // below answers `NaN` for every datum that is not finite.
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        const infinite = infiniteDataAnswer(engine, xs);
         if (infinite) return infinite;
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
@@ -1033,18 +1025,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description:
-        'Sample Standard Deviation of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Sample Standard Deviation of a collection of numbers.',
       keywords: ['stdev', 'std'],
       signature:
-        '((collection<number | nothing> | number | distribution)+) -> real<0..> | nan',
+        '((collection<number> | number | distribution)+) -> real<0..> | nan',
       // The standard deviation is the square root of a mean of SQUARED
       // deviations, so it is real and non-negative even for complex data
       // (`StandardDeviation([1, 1+2i, 3])` is `2/3·√6` — see
       // `complexVariance`).
       // Infinite data has no standard deviation at all: every infinite datum makes the
       // deviations `∞ − ∞` and the answer the indeterminate form
-      // (`Indeterminate`, or `NaN` with a float datum; see
+      // (`NaN`; see
       // `infiniteDataAnswer`). Absent data and empty input are `NaN` (§3.C).
       // Both values are typed `nan`, the second arm. The
       // `handle` policies say so: the derived NaN policy for a carrier that
@@ -1063,8 +1054,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // while its VALUE is non-negative for every legal parameter — which is
       // what the declaration describes.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1092,10 +1083,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
         // Infinite data is tested before complex data, so that an infinite
-        // datum next to an exact complex datum is `Indeterminate`, as next to
-        // an exact real datum (`NaN` with a float datum): the complex branch
+        // datum next to an exact complex datum is `NaN`, as next to
+        // an exact real datum: the complex branch
         // below answers `NaN` for every datum that is not finite.
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        const infinite = infiniteDataAnswer(engine, xs);
         if (infinite) return infinite;
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
@@ -1129,10 +1120,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description:
-        'Population Standard Deviation of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Population Standard Deviation of a collection of numbers.',
       signature:
-        '((collection<number | nothing> | number)+) -> real<0..> | nan',
+        '((collection<number> | number)+) -> real<0..> | nan',
       // The population standard deviation is the square root of a mean of
       // SQUARED deviations over the divisor `n`, so it is real and
       // non-negative even for complex data
@@ -1140,7 +1130,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `complexVariance`).
       // Infinite data has no standard deviation at all: every infinite datum makes the
       // deviations `∞ − ∞` and the answer the indeterminate form
-      // (`Indeterminate`, or `NaN` with a float datum; see
+      // (`NaN`; see
       // `infiniteDataAnswer`). Absent data and empty input are `NaN` (§3.C).
       // Both values are typed `nan`, the second arm. The
       // `handle` policies say so: the derived NaN policy for a carrier that
@@ -1154,8 +1144,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // does not (`Exp(1000)` settles it — ruling L6(a),
       // `docs/SIGNATURE-GUIDELINES.md` §2.4).
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1178,10 +1168,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
         // Infinite data is tested before complex data, so that an infinite
-        // datum next to an exact complex datum is `Indeterminate`, as next to
-        // an exact real datum (`NaN` with a float datum): the complex branch
+        // datum next to an exact complex datum is `NaN`, as next to
+        // an exact real datum: the complex branch
         // below answers `NaN` for every datum that is not finite.
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        const infinite = infiniteDataAnswer(engine, xs);
         if (infinite) return infinite;
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
@@ -1213,25 +1203,24 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Kurtosis: {
       description:
-        'Kurtosis of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Kurtosis of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<number | nothing> | number)+) -> real | nan',
+      signature: '((collection<number> | number)+) -> real | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
       // this claim. A standardized moment divides by a power of the standard
       // deviation, so an infinite datum makes both parts non-finite and the
       // answer the indeterminate form (`Kurtosis([1, +oo, 3])` is
-      // `Indeterminate`, and `NaN` with a float datum; see
+      // `NaN`; see
       // `infiniteDataAnswer`) — there is no infinite arm. Absent data and empty input are `NaN` too (§3.C).
       // The `handle` policies say so: the derived NaN policy for a carrier
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1247,7 +1236,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Kurtosis', xs);
         if (nonReal) return nonReal;
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        const infinite = infiniteDataAnswer(engine, xs);
         if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
@@ -1267,25 +1256,24 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Skewness: {
       description:
-        'Skewness of a collection of numbers.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Skewness of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<number | nothing> | number)+) -> real | nan',
+      signature: '((collection<number> | number)+) -> real | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
       // this claim. A standardized moment divides by a power of the standard
       // deviation, so an infinite datum makes both parts non-finite and the
       // answer the indeterminate form (`Skewness([1, +oo, 3])` is
-      // `Indeterminate`, and `NaN` with a float datum; see
+      // `NaN`; see
       // `infiniteDataAnswer`) — there is no infinite arm. Absent data and empty input are `NaN` too (§3.C).
       // The `handle` policies say so: the derived NaN policy for a carrier
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1301,7 +1289,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Skewness', xs);
         if (nonReal) return nonReal;
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        const infinite = infiniteDataAnswer(engine, xs);
         if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
@@ -1322,12 +1310,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Mode: {
       examples: ['Mode([1, 2, 2, 3])  // 2'],
       description:
-        'Most frequently occurring value in a collection.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Most frequently occurring value in a collection.',
       complexity: 1200,
       broadcastable: false,
       signature:
-        '((collection<number | nothing> | number)+) -> real | signed_infinity | nan',
+        '((collection<number> | number)+) -> real | signed_infinity | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1338,8 +1325,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy for a carrier that already admits `nan` is `inert`, which
       // would leave unsaid that this head ANSWERS `NaN` for absent data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1379,8 +1366,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Uses the Moore–McCabe (exclusive-hinges) convention: the sample is ' +
         'split at its median, and Q1/Q3 are the medians of the lower/upper ' +
         'halves with the overall median excluded from both halves when the ' +
-        'sample size is odd.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'sample size is odd.',
       keywords: ['percentile'],
       complexity: 1200,
       broadcastable: false,
@@ -1396,13 +1382,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // wrong component and `Quartiles([1,2,3,4]).mid` read the LOWER
       // quartile.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
       signature:
-        '((collection<number | nothing> | number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>',
+        '((collection<number> | number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>',
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
@@ -1460,12 +1446,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     InterquartileRange: {
       description:
-        'Interquartile range (Q3 - Q1) of a collection.' +
-        ' Immediate Nothing data are omitted; sample sizes count retained data.',
+        'Interquartile range (Q3 - Q1) of a collection.',
       complexity: 1200,
       broadcastable: false,
       signature:
-        '((collection<number | nothing> | number)+) -> real<0..> | +oo | nan',
+        '((collection<number> | number)+) -> real<0..> | +oo | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1480,8 +1465,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `inert`, which would leave unsaid that this head ANSWERS `NaN` for
       // absent data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1537,7 +1522,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // (`computeBinning` returns undefined) — width semantics are the
       // importer's to translate (e.g. to explicit bin edges).
       signature:
-        '(collection<number | nothing>, number | list<number>) -> list<tuple<number, integer>>',
+        '(collection<number>, number | list<number>) -> list<tuple<number, integer>>',
       examples: [
         'Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]',
       ],
@@ -1572,7 +1557,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       // Same widened bin spec as Histogram (non-integer counts stay inert).
       signature:
-        '(collection<number | nothing>, number | list<number>) -> list<number>',
+        '(collection<number>, number | list<number>) -> list<number>',
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
       // Decline-only, same `computeBinning` precondition as `Histogram`.
       canEnumerate: canEnumerateFiniteSource,
@@ -1669,13 +1654,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Covariance: {
       description:
         'Sample covariance (n − 1 denominator) of paired data, given as two ' +
-        'equal-length collections or one collection of (x, y) pairs. ' +
-        'An observation is skipped if either coordinate (or the whole row) is Nothing. ' +
-        'Raw source lengths must match before omission; all terms use the same retained observations.',
+        'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
       signature:
-        '(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real | nan',
+        '(collection<number | tuple>, (collection<number>)?) -> real | nan',
       // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
       // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
       // an absent (`Missing`) datum, and empty input all make the answer
@@ -1684,8 +1667,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1705,13 +1688,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     PopulationCovariance: {
       description:
         'Population covariance (n denominator) of paired data, given as two ' +
-        'equal-length collections or one collection of (x, y) pairs. ' +
-        'An observation is skipped if either coordinate (or the whole row) is Nothing. ' +
-        'Raw source lengths must match before omission; all terms use the same retained observations.',
+        'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
       signature:
-        '(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real | nan',
+        '(collection<number | tuple>, (collection<number>)?) -> real | nan',
       // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
       // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
       // an absent (`Missing`) datum, and empty input all make the answer
@@ -1720,8 +1701,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -1741,13 +1722,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Correlation: {
       description:
         "Pearson's correlation coefficient of paired data, given as two " +
-        'equal-length collections or one collection of (x, y) pairs. ' +
-        'An observation is skipped if either coordinate (or the whole row) is Nothing. ' +
-        'Raw source lengths must match before omission; all terms use the same retained observations.',
+        'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
       signature:
-        '(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real<-1..1> | nan',
+        '(collection<number | tuple>, (collection<number>)?) -> real<-1..1> | nan',
       // Pearson's r lies in [−1, 1], and the kernel keeps it there at every
       // precision: two-pass centered sums, then a clip of the rounding
       // residue (`correlation`, `numerics/statistics.ts`). The one-pass
@@ -1762,8 +1741,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The data carrier `collection<number | nothing>` holds number
-      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // The data carrier `collection<number>` holds number
+      // elements, so a matrix,
       // whose elements are rows, is refused when the expression is boxed
       // (ROADMAP CE-13). A collection that may hold Missing cells is still
       // admitted, so the handler can apply the §3.C absent-data rule.
@@ -2006,12 +1985,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
  *   provably non-numeric datum earns, or the ABSENT answer — `NaN` by default,
  *   or whatever `absentAnswer` builds for a head whose codomain is not a
  *   number (`Quartiles` answers the triple `(NaN, NaN, NaN)`).
- * - The `Indeterminate` answer, built the same way (`absentAnswer` receives
- *   the marker): an `Indeterminate` datum is not absent, but it makes the
- *   statistic `Indeterminate` when no datum is absent, `NaN` or inexact
- *   (`Mean([1, Indeterminate])` is `Indeterminate`,
- *   `Mean([Indeterminate, NaN])` is `NaN`). Like absence, it outranks
- *   inertness and is outranked by a refused datum.
  * - `null`: no verdict, so the aggregate must stay INERT.
  *
  * A datum is refused when its type proves it is NOT a number — a string, a
@@ -2055,10 +2028,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
  * `NaN`. Absence in turn beats inertness, so a `Missing` alongside a valueless
  * symbol still answers `NaN`.
  *
- * Immediate `Nothing` results contribute no datum. The raw walk still counts
- * those pulls for enumeration checks; empty-input handling and every sample
- * size use only retained data. Nested data keep their ordinary validation.
- *
  * Collecting the data ONCE is load-bearing, not a tidiness measure. The
  * absence gate, the validation walk, the exact-path walk and the float-path
  * walk used to be separate enumerations of the same operand, so
@@ -2089,9 +2058,6 @@ function collectData(
   // `Missing` is a result only, and an operator over it gives `Missing`;
   // `NaN` is the answer for a `NaN` datum and for empty input.
   let missing = false;
-  // An `Indeterminate` datum was seen: the head answers `Indeterminate`
-  // unless an absent datum or a refused datum is seen too.
-  let indeterminate = false;
   // Some datum has no numeric reading: the head stays inert unless something
   // that outranks inertness is found.
   let inert = false;
@@ -2113,9 +2079,6 @@ function collectData(
       let walked = 0;
       for (const v of op.each()) {
         walked += 1;
-        // Count raw pulls for enumeration checks, but only retained data
-        // participate in the sample and its empty-input rule.
-        if (isSymbol(v, 'Nothing')) continue;
         sawData = true;
         // A failed cell (an element that is, or holds, an `Error`) is a
         // datum the statistic demands, so its error is the answer, as for
@@ -2126,8 +2089,7 @@ function collectData(
         if (isAbsentValue(v)) {
           absent = true;
           if (isAbsentSymbol(v)) missing = true;
-        } else if (v.isIndeterminate) indeterminate = true;
-        else if (isRealConstantDatum(v)) data.push(v);
+        } else if (isRealConstantDatum(v)) data.push(v);
         else if (!isNumber(v)) {
           // A measurement is not refused: its type `measurement` is not a
           // number type, but it is a numeric datum, and the statistic stays
@@ -2146,8 +2108,7 @@ function collectData(
       if (isAbsentValue(op)) {
         absent = true;
         if (isAbsentSymbol(op)) missing = true;
-      } else if (op.isIndeterminate) indeterminate = true;
-      else if (isRealConstantDatum(op)) data.push(op);
+      } else if (isRealConstantDatum(op)) data.push(op);
       else if (!isNumber(op)) {
         // A COLLECTION-typed operand is a container, not a datum, even when
         // it has no value yet to enumerate: `Mean(L)` for a declared but
@@ -2169,12 +2130,6 @@ function collectData(
   if (!sawData && !undecidable) absent = true;
   if (missing) return ce.Missing;
   if (absent) return absentAnswer?.(ce, ce.NaN) ?? ce.NaN;
-  if (indeterminate) {
-    // `NaN` instead when a datum is inexact (a float), as a float operand
-    // makes a numeric result a float (`nanOperandAnswer()`).
-    const marker = nanOperandAnswer(ce, [ce.Indeterminate, ...data]);
-    return absentAnswer?.(ce, marker) ?? marker;
-  }
   if (inert) return null;
   return data;
 }
@@ -2352,22 +2307,16 @@ function hasNonRealInfiniteDatum(vals: ReadonlyArray<Expression>): boolean {
  * datum is infinite, or `undefined` when no datum is.
  *
  * The mean of such data is infinite or the indeterminate form, so at least
- * one deviation is `∞ − ∞` and the statistic is the indeterminate form:
- * `Indeterminate`, or `NaN` when a datum is a float
- * (`indeterminateFormAnswer()`), and always `NaN` under `N()`. The machine
- * kernels would answer the `NaN` literal for all of these, which loses the
- * difference between the two values. This is the rule `Mean` applies to data
- * that holds both `+∞` and `−∞`.
+ * one deviation is `∞ − ∞` and the statistic is the indeterminate form,
+ * `NaN`. This is the rule `Mean` applies to data that holds both `+∞` and
+ * `−∞`.
  */
 function infiniteDataAnswer(
   engine: ComputeEngine,
-  xs: ReadonlyArray<Expression>,
-  numericApproximation: boolean | undefined
+  xs: ReadonlyArray<Expression>
 ): Expression | undefined {
   if (!xs.some((x) => x.isInfinity === true)) return undefined;
-  return numericApproximation
-    ? engine.NaN
-    : indeterminateFormAnswer(engine, xs);
+  return engine.NaN;
 }
 
 /**
@@ -2657,43 +2606,29 @@ function hasUnwalkableDataCollection(ops: ReadonlyArray<Expression>): boolean {
  * `incompatible-dimensions` error, not `NaN`). The least-squares fits do NOT
  * pass it: a fit has no absent-datum convention, and mis-shaped data is what
  * its `Error` reports.
- *
- * `skipNothing` omits whole paired observations, never individual coordinates.
- * Two sources must have equal raw lengths before omission. The retained rows
- * supply every term of the paired statistic. Fits leave this option disabled.
  */
 function extractPairs(
   ops: ReadonlyArray<Expression>,
   walked?: Expression[],
-  admitAbsent = false,
-  skipNothing = false
+  admitAbsent = false
 ): { xs: Expression[]; ys: Expression[] } | null {
   const isDatum = (v: Expression): boolean =>
-    isNumber(v) ||
-    (admitAbsent && isAbsentValue(v)) ||
-    (skipNothing && isSymbol(v, 'Nothing'));
+    isNumber(v) || (admitAbsent && isAbsentValue(v));
   if (ops.length === 1) {
     const arg = ops[0];
     if (!isWalkableFiniteCollection(arg)) return null;
     const xs: Expression[] = [];
     const ys: Expression[] = [];
     for (const el of arg.each()) {
-      if (skipNothing && isSymbol(el, 'Nothing')) continue;
       if (!isWalkableFiniteCollection(el)) {
         walked?.push(el);
         return null;
       }
-      // A pair's coordinates are fixed slots. Walking a Tuple through its
-      // materializing iterator can erase a computed Nothing and shift them.
-      const pair =
-        skipNothing && isFunction(el, 'Tuple')
-          ? el.ops.map((coordinate) => coordinate.evaluate())
-          : [...el.each()];
+      const pair = [...el.each()];
       if (pair.length !== 2) {
         walked?.push(...pair);
         return null;
       }
-      if (skipNothing && pair.some((v) => isSymbol(v, 'Nothing'))) continue;
       walked?.push(...pair);
       if (!isDatum(pair[0]) || !isDatum(pair[1])) return null;
       xs.push(pair[0]);
@@ -2705,30 +2640,8 @@ function extractPairs(
     const [a, b] = ops;
     if (!isWalkableFiniteCollection(a) || !isWalkableFiniteCollection(b))
       return null;
-    let xs = [...a.each()];
-    let ys = [...b.each()];
-    if (
-      skipNothing &&
-      xs.length !== ys.length &&
-      (xs.some((v) => isSymbol(v, 'Nothing')) ||
-        ys.some((v) => isSymbol(v, 'Nothing')))
-    ) {
-      walked?.push(...xs, ...ys);
-      return { xs, ys };
-    }
-    // Keep mismatched raw lengths for the caller's dimension diagnostic.
-    // Only aligned rows may be omitted; independent compaction shifts pairs.
-    if (skipNothing && xs.length === ys.length) {
-      const keptX: Expression[] = [];
-      const keptY: Expression[] = [];
-      for (let i = 0; i < xs.length; i++) {
-        if (isSymbol(xs[i], 'Nothing') || isSymbol(ys[i], 'Nothing')) continue;
-        keptX.push(xs[i]);
-        keptY.push(ys[i]);
-      }
-      xs = keptX;
-      ys = keptY;
-    }
+    const xs = [...a.each()];
+    const ys = [...b.each()];
     walked?.push(...xs, ...ys);
     if (!xs.every(isDatum) || !ys.every(isDatum)) return null;
     return { xs, ys };
@@ -2793,7 +2706,7 @@ function shapeError(
     if (isString(op)) return dataConstraintError(ce, name, op, 'number');
   // Only the ELEMENTS are scanned. An OPERAND of a bivariate statistic is a
   // container, not a datum: its own type (`list<integer>`, or the
-  // `collection<number | nothing>` a bare symbol is inferred to hold
+  // `collection<number>` a bare symbol is inferred to hold
   // from the signature) is disjoint from
   // `number`, so scanning it would refuse every well-formed input and turn
   // `Covariance(xs, ys)` over undeclared symbols into a type error.
@@ -2835,31 +2748,19 @@ function nonRealOperand(
  * answer is `NaN` when the datum is `NaN` itself, or the complex infinity
  * `~oo`, whose imaginary part is infinite and whose real part carries no
  * information (see `realProjection` in `library/statistics-data.ts`).
- *
- * The answer is `Indeterminate` when a datum is the `Indeterminate` literal
- * and no datum makes it `NaN` or is inexact.
  */
 function hasNaNDatum(
   ...data: ReadonlyArray<ReadonlyArray<Expression>>
 ): Expression | undefined {
   for (const vals of data)
     for (const v of vals) if (isAbsentSymbol(v)) return v.engine.Missing;
-  let indeterminate: Expression | undefined = undefined;
   for (const vals of data)
     for (const v of vals) {
-      // An `Indeterminate` datum makes the statistic `Indeterminate`, unless
-      // another datum makes it `NaN` or is inexact (the rule of
-      // `collectData`).
-      if (v.isIndeterminate) {
-        indeterminate = v;
-        continue;
-      }
       if (isAbsentValue(v)) return v.engine.NaN;
       if (isNumber(v) && (v.isNaN === true || !hasFiniteImaginaryPart(v)))
         return v.engine.NaN;
     }
-  if (indeterminate === undefined) return undefined;
-  return nanOperandAnswer(indeterminate.engine, data.flat());
+  return undefined;
 }
 
 /**
@@ -2905,7 +2806,7 @@ function evaluateCovariance(
   const walked: Expression[] = [];
   // `true`: an absent (`Missing`) datum is admitted as data so the §3.C
   // verdict below is reached, AFTER the shape checks — see `extractPairs`.
-  const pairs = extractPairs(ops, walked, true, true);
+  const pairs = extractPairs(ops, walked, true);
   if (!pairs) return shapeError(ce, name, ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`):
@@ -2961,7 +2862,7 @@ function evaluateCorrelation(
   const walked: Expression[] = [];
   // `true`: as in `evaluateCovariance` — an absent datum is data here, and
   // §3.C makes it the answer's `NaN`.
-  const pairs = extractPairs(ops, walked, true, true);
+  const pairs = extractPairs(ops, walked, true);
   if (!pairs) return shapeError(ce, 'Correlation', ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`).

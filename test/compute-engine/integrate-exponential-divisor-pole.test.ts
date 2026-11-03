@@ -12,7 +12,7 @@ describe('INTEGRATE: zero of an exponential divisor strictly inside the bounds',
   test('∫₋₁¹ eˣ/(eˣ − 1) dx has no value: the integrand changes sign at the pole', () => {
     const v = evaluate('\\int_{-1}^{1} \\frac{e^{x}}{e^{x}-1} dx');
     expect(v.isNaN).toBe(true);
-    expect(v.toString()).toBe('Indeterminate');
+    expect(v.toString()).toBe('NaN');
   });
 
   test('∫₀² eˣ/(eˣ − 1) dx: the pole AT the lower bound is an endpoint singularity, +∞', () => {

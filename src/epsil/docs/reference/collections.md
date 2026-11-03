@@ -718,10 +718,6 @@ Return the elements of the collection for which the predicate function returns T
 
 Equivalent to `[x for x in xs if p(x)]`.
 
-Immediate `Nothing` inputs are dropped without calling the predicate.
-
-`Missing` and markers nested inside a datum still reach the predicate.
-
 ```epsil
 filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
 // ➔ [2,4,6]
@@ -1019,10 +1015,6 @@ Return the collection where each element has been transformed by the mapping fun
 With a single collection, equivalent to `[f(x) for x in xs]`. With multiple collections, combines them element-wise (like `zipWith`): 
 
 `Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the shortest input. The mapping function is always the FIRST argument.
-
-An immediate `Nothing` input bypasses the callback and remains `Nothing` at that position. With multiple sources, any `Nothing` coordinate bypasses the whole callback. Nested `Nothing` and `Missing` are passed to the callback.
-
-The view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.
 
 ```epsil
 map(x => x^2, [1, 2, 3])

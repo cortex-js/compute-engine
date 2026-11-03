@@ -26,7 +26,7 @@ describe('A CONSTANT MAGNITUDE JUXTAPOSED WITH A UNIT', () => {
     ['\\sqrt{-1}\\,\\mathrm{m}', ['Multiply', ['Complex', 0, 1], 'm']],
     ['2\\sqrt{-1}\\,\\mathrm{m}', ['Multiply', ['Complex', 0, 2], 'm']],
     ['\\frac{1}{0}\\,\\mathrm{m}', ['Multiply', 'ComplexInfinity', 'm']],
-    ['\\frac{0}{0}\\,\\mathrm{m}', ['Multiply', 'Indeterminate', 'm']],
+    ['\\frac{0}{0}\\,\\mathrm{m}', ['Multiply', 'NaN', 'm']],
   ])(
     '%s is not a quantity: the value is not real and finite',
     (latex, expected) => {

@@ -1,5 +1,7 @@
 # `Indeterminate`: an exact value for an exact question with no answer
 
+**Removed:** the user decision of 2026-11-02 (page 2 of `docs/plans/2026-11-02-language-axes-options.md`, option A) removed the `Indeterminate` value in item 3.4.3 of `docs/plans/2026-11-02-compiler-contraction-plan.md`; its spellings now parse to `NaN`, and this file is kept as the design record.
+
 **Status:** Decided 2026-09-28. The user took the recommended option of every
 decision in §7 (D1 two values; D2 a marked second literal with `isExact`
 false; D3 contact with an inexact operand gives `NaN`; D4 the

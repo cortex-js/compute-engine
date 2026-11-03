@@ -84,20 +84,6 @@ function setBound(x: Expression): [Expression, boolean] {
   return [x, false];
 }
 
-/** The indeterminate value: `Indeterminate` when every operand is exact,
- * `NaN` when one is a float or `NaN` (the exact-twin rule of `NaN`). */
-function indeterminateOf(
-  ce: ComputeEngine,
-  xs: ReadonlyArray<Expression>
-): Expression {
-  return xs.some(
-    (x) =>
-      isNumber(x) && (x.isNaN === true || (x.isFinite === true && !x.isExact))
-  )
-    ? ce.NaN
-    : ce.Indeterminate;
-}
-
 /** True when `a` and `b` are the same infinity. */
 function sameInfinity(a: Expression, b: Expression): boolean {
   return (
@@ -125,7 +111,7 @@ function enclosureOf(
   numericApproximation: boolean
 ): Expression {
   if (a.isNaN === true || b.isNaN === true || sameInfinity(a, b))
-    return numericApproximation ? ce.NaN : indeterminateOf(ce, [a, b]);
+    return ce.NaN;
   const o = enclosureEndpointOrder(a, b);
   const [lo, hi] = o !== undefined && o > 0 ? [b, a] : [a, b];
   if (numericApproximation) {
@@ -153,8 +139,7 @@ function enclosureOfSet(
     return undefined;
   const o = enclosureEndpointOrder(lo, hi);
   if (o === undefined) return undefined;
-  if (o > 0 || (o === 0 && (loOpen || hiOpen)))
-    return numericApproximation ? ce.NaN : indeterminateOf(ce, [lo, hi]);
+  if (o > 0 || (o === 0 && (loOpen || hiOpen))) return ce.NaN;
   return enclosureOf(ce, lo, hi, numericApproximation);
 }
 

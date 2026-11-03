@@ -250,7 +250,7 @@ const SYMBOLS: Record<string, string> = {
   NegativeInfinity: '-oo',
   ComplexInfinity: '~oo',
   NaN: 'NaN',
-  Indeterminate: 'Indeterminate',
+  Indeterminate: 'NaN',
   Pi: 'pi',
   ExponentialE: 'e',
   ImaginaryUnit: 'i',
@@ -664,7 +664,10 @@ const FUNCTIONS: Record<
   },
   Sequence: (expr_: Expression, serialize) => {
     const expr = expr_ as FnExpr;
-    if (expr.nops === 0) return '';
+    // An empty `Sequence` is spelled by its name: an empty string would
+    // not show it. A canonical list or call splices it out first, so
+    // `[1, Sequence(), 2]` prints `[1,2]`.
+    if (expr.nops === 0) return 'Sequence()';
     return expr.ops.map((x) => serialize(x)).join(' ');
   },
 
@@ -1140,8 +1143,6 @@ export function toAsciiMath(
   //
   if (isNumber(expr)) {
     const num = expr.numericValue;
-    // `Indeterminate` has the value `NaN` but its own spelling.
-    if (expr.isIndeterminate) return serializeSymbol('Indeterminate', options);
     if (expr.isNaN) return serializeSymbol('NaN', options);
     if (expr.isFinite === false) {
       if (expr.isNegative !== true && expr.isPositive !== true)

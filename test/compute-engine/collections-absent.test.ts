@@ -149,8 +149,11 @@ describe('Rule B: aggregates propagate an absent cell', () => {
     // The empty collection answers the identity, not a marker.
     [['Sum', L()], '0'],
     [['Product', L()], '1'],
-    // `Nothing` is erased, not absent.
-    [['Sum', L(1, 'Nothing', 3)], '4'],
+    // `Nothing` is kept, and it is not a number.
+    [
+      ['Sum', L(1, 'Nothing', 3)],
+      'Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing")',
+    ],
   ])('%j', (json, expected) => {
     expect(value(json)).toBe(expected);
   });

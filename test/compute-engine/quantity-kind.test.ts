@@ -311,13 +311,10 @@ describe('COMPARISONS', () => {
 
   // Decision 13: a quantity is as exact as its magnitude
   test('the `isExact` hook', () => {
-    expect(value(['Max', Q(1.5, 'm'), 'Indeterminate']).isIndeterminate).toBe(
-      false
-    );
-    expect(value(['Max', Q(1.5, 'm'), 'Indeterminate']).isNaN).toBe(true);
+    expect(value(['Max', Q(1.5, 'm'), 'NaN']).isNaN).toBe(true);
     expect(
-      value(['Max', Q(['Rational', 3, 2], 'm'), 'Indeterminate'])
-        .isIndeterminate
+      value(['Max', Q(['Rational', 3, 2], 'm'), 'NaN'])
+        .isNaN
     ).toBe(true);
   });
 });

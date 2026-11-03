@@ -1007,9 +1007,9 @@ export function canonicalFunctionLiteralArguments(
       if (isFunction(target, 'Error')) return target;
     } else return ce.error('expected-a-symbol', inner.toString());
     // `Nothing` and `Missing` are not values a call can receive in place of
-    // an argument: a written `Nothing` is removed from a call, so the
-    // inserted default would disappear. A default that names a parameter of
-    // this literal is refused (see `writtenParameterNames`).
+    // an argument: `Nothing` is the value of an empty block, not an argument
+    // value, and `Missing` is a result only. A default that names a parameter
+    // of this literal is refused (see `writtenParameterNames`).
     const name = sym(x.op2);
     if (name === 'Nothing' || name === 'Missing')
       return ce.error(
@@ -10029,7 +10029,7 @@ function makeLambda(
       // - A pure body evaluated with only the prefix is simplified before the
       //   remaining arguments are known, so the curried value could differ
       //   from the full call: with `M = (x, y) ↦ x·y`, `Apply(Apply(M, 0), ∞)`
-      //   was `0`, but `Apply(M, 0, ∞)` is `Indeterminate`. A block local that
+      //   was `0`, but `Apply(M, 0, ∞)` is `NaN`. A block local that
       //   the body reads was also read at partial application, not at the
       //   call that supplies the last argument.
       //
@@ -10049,33 +10049,11 @@ function makeLambda(
       // — spliced back into an argument run by the enclosing call — rather
       // than as one tuple argument, which the original literal would have
       // collected into a tuple of a tuple.
-      //
-      // A supplied argument whose value is `Nothing` is a COMPUTED `Nothing`
-      // (`docs/ERROR-MODEL.md`), which the full call binds to its parameter.
-      // Written as an operand of the `Apply` below, it would be a WRITTEN
-      // `Nothing`, which the canonical form of `Apply` erases, and each later
-      // argument would move one parameter to the left. So that operand is
-      // the call `Apply(() ↦ Nothing)`, whose value is a computed `Nothing`
-      // when the residual is called, which `Apply` binds to the parameter as
-      // the full call does. With `g = () ↦ Nothing` and `G = (a, b) ↦ b`,
-      // the residual of `G(g())` applied to `5` is `5`, as `G(g(), 5)` is,
-      // and with `A = (a, b) ↦ a`, the residual of `A(g())` applied to `5`
-      // is `Nothing`, as `A(g(), 5)` is. A held form does not work here:
-      // `Evaluate(Hold(Nothing))` and `ReleaseHold(Hold(Nothing))` give
-      // `Hold(Nothing)` as the value of the operand.
       const deferred = ce._fn(
         'Apply',
         [
           fnExpr,
-          ...evaluatedKnownArgs.map((arg) =>
-            isSymbol(arg, 'Nothing')
-              ? ce._fn(
-                  'Apply',
-                  [ce._fn('Function', [arg], { canonical: false })],
-                  { canonical: false }
-                )
-              : arg
-          ),
+          ...evaluatedKnownArgs,
           ...unappliedParams.map((param, i) =>
             isRestParameter(param) ? extras[i] : extraSymbols[i]
           ),

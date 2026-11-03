@@ -229,7 +229,7 @@ describe('CE-618: the values and errors of a list of integrals times a scalar', 
     [
       'an infinite scalar',
       ['Multiply', 'PositiveInfinity', ['List', I, 0]],
-      ['List', ['Multiply', 'PositiveInfinity', canonicalI], 'Indeterminate'],
+      ['List', ['Multiply', 'PositiveInfinity', canonicalI], 'NaN'],
     ],
   ];
   test.each(cases)('%s', (_name, input, expected) => {

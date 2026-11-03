@@ -357,16 +357,15 @@ describe('MEASUREMENT KIND: comparisons', () => {
     expect(max.type.toString()).toBe('integer | measurement');
   });
 
-  test('a measurement is inexact: Indeterminate beside it becomes NaN (decision 13)', () => {
+  test('a measurement beside NaN gives NaN (decision 13)', () => {
     const r = ce
       .box([
         'Max',
         ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]],
-        'Indeterminate',
+        'NaN',
       ])
       .evaluate();
     expect(r.isNaN).toBe(true);
-    expect(r.isIndeterminate).toBe(false);
   });
 
   // A measurement with a `NaN` nominal stands for no value (the `isNaN`

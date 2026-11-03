@@ -410,7 +410,7 @@ export function createNumberExpression(
   // a pole, `~oo`, and `0/0` is the indeterminate form. This is the answer
   // `ce.box(["Rational", n, 0])` gives (`boxed-expression/box.ts`).
   // `canonicalNumber()` returns a machine number or a `NumericValue`, which
-  // cannot hold `~oo` or `Indeterminate`, so the pair is read here first.
+  // cannot hold `~oo`, so the pair is read here first.
   if (
     isRational(value) &&
     value.length === 2 &&
@@ -420,7 +420,7 @@ export function createNumberExpression(
   ) {
     const n = value[0];
     if (typeof n === 'number' && Number.isNaN(n)) return engine.NaN;
-    return n == 0 ? engine.Indeterminate : engine.ComplexInfinity;
+    return n == 0 ? engine.NaN : engine.ComplexInfinity;
   }
 
   // If not a rational, it's always canonical

@@ -224,7 +224,7 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
       'nan | real'
     );
     // A divisor that may be 0 adds `nan` (`Remainder(5, 0)` is
-    // `Indeterminate`); a nonzero literal divisor does not.
+    // `NaN`); a nonzero literal divisor does not.
     expect(ce.box(['Remainder', 'remN', 'remR']).type.toString()).toBe(
       'nan | real'
     );

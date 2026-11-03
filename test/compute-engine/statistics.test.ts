@@ -289,7 +289,7 @@ describe('Bivariate statistics reject non-real data', () => {
     // expression is boxed (ROADMAP CE-13), and the error names the data
     // parameter and the operand type.
     expect(r.toString()).toMatch(
-      /incompatible-type", "collection<nothing \| number \| tuple>", "list<integer \| string>"/
+      /incompatible-type", "collection<number \| tuple>", "list<integer \| string>"/
     );
     // The least-squares fits share `shapeError`, so they gained the same
     // diagnosis.

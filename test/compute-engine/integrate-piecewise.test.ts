@@ -535,10 +535,18 @@ describe('A PIECEWISE INTEGRAND WITH A NOTHING BRANCH', () => {
     );
   });
 
-  test('Nothing in a sum or a product is erased, as at each point', () => {
+  test('Nothing in a sum or a product is an incompatible-type error', () => {
     const w = ['Which', ['Less', 'x', 0.5], 'x', 'True', 'Nothing'];
-    expect(integral(['Add', w, 1]).evaluate().re).toBeCloseTo(1.125, 12);
-    expect(integral(['Multiply', w, 2]).evaluate().re).toBeCloseTo(1.25, 12);
+    for (const body of [
+      ['Add', w, 1],
+      ['Multiply', w, 2],
+    ]) {
+      const e = integral(body as ExpressionInput);
+      expect(e.evaluate().toString()).toBe(
+        'Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing")'
+      );
+      expect(e.N().isNaN).toBe(true);
+    }
   });
 });
 

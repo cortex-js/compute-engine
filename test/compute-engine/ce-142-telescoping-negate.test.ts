@@ -35,8 +35,8 @@ describe('CE-142.4 telescoping sum without a Negate term', () => {
     }
   });
 
-  // The term at the infinite bound folds to `∞/∞` (`Indeterminate`); its
-  // limit is the ratio of the leading coefficients, 1, not `Indeterminate`.
+  // The term at the infinite bound folds to `∞/∞` (`NaN`); its
+  // limit is the ratio of the leading coefficients, 1, not `NaN`.
   test('a term whose substitution at infinity is indeterminate', () => {
     const partial = (f: (k: number) => number) => {
       let s = 0;
@@ -49,7 +49,7 @@ describe('CE-142.4 telescoping sum without a Negate term', () => {
         '\\sum_{k=1}^{\\infty} \\left(\\frac{k+x+1}{k+x+2} - \\frac{k+x}{k+x+1}\\right)'
       )
       .evaluate();
-    expect(a.toString()).not.toMatch(/Indeterminate|NaN/);
+    expect(a.toString()).not.toMatch(/NaN|NaN/);
     expect(a.subs({ x }).N().re).toBeCloseTo(1 / (x + 2), 12);
     expect(a.subs({ x }).N().re).toBeCloseTo(
       partial((k) => (k + x + 1) / (k + x + 2) - (k + x) / (k + x + 1)),
@@ -62,7 +62,7 @@ describe('CE-142.4 telescoping sum without a Negate term', () => {
         '\\sum_{k=1}^{\\infty} \\left(\\frac{k+1}{k+x+1} - \\frac{k}{k+x}\\right)'
       )
       .evaluate();
-    expect(b.toString()).not.toMatch(/Indeterminate|NaN/);
+    expect(b.toString()).not.toMatch(/NaN|NaN/);
     expect(b.subs({ x }).N().re).toBeCloseTo(x / (x + 1), 12);
     expect(b.subs({ x }).N().re).toBeCloseTo(
       partial((k) => (k + 1) / (k + x + 1) - k / (k + x)),

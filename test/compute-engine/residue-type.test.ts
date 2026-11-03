@@ -272,8 +272,10 @@ describe('operators with no residue arithmetic refuse a class', () => {
     expect(JSON.stringify(r.json)).toContain('incompatible-type');
   });
 
-  test('Max still omits Nothing and reads a collection', () => {
-    expect(ce.box(['Max', 3, 7, 'Nothing']).evaluate().json).toBe(7);
+  test('Max refuses Nothing and reads a collection', () => {
+    expect(
+      JSON.stringify(ce.box(['Max', 3, 7, 'Nothing']).evaluate().json)
+    ).toMatch(/incompatible-type/);
     expect(ce.box(['Max', 3, ['List', 1, 9]]).evaluate().json).toBe(9);
   });
 

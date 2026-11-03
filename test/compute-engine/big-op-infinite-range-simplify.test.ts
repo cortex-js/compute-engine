@@ -10,8 +10,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * The simplification rules are closed forms for a finite range `a..b`. With
  * `b = +∞` they put the infinite bound into the closed form, which is the
  * limit only when the arithmetic with ∞ can decide it. Before these tests:
- * `\sum_k 0` simplified to `Indeterminate` (∞·0), `\sum_k y` to `∞·y`
- * (wrong at y = 0), `\prod_k 1` to `Indeterminate`, `\prod_k y` to
+ * `\sum_k 0` simplified to `NaN` (∞·0), `\sum_k y` to `∞·y`
+ * (wrong at y = 0), `\prod_k 1` to `NaN`, `\prod_k y` to
  * `y^(+∞)`, `\sum_k (1 + xk)` to `+∞` (wrong for x < 0), `\sum_k kx` to
  * `∞·x`, and `\sum_k (1/\sqrt2)^k` to the float `2.414…`.
  */

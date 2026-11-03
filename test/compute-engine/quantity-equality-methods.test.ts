@@ -673,10 +673,10 @@ describe('QUANTITY COMPARISON WITH NO ROUNDING', () => {
   });
 
   // A float magnitude makes the extremum inexact, as a float operand does
-  test('an extremum with a float quantity and Indeterminate', () => {
-    expect(evalStr(['Max', Q(1.5, 'm'), 'Indeterminate'])).toBe('NaN');
-    expect(evalStr(['Max', 1.5, 'Indeterminate'])).toBe('NaN');
-    expect(evalStr(['Max', Q(1, 'm'), 'Indeterminate'])).toBe('Indeterminate');
+  test('an extremum with a float quantity and NaN', () => {
+    expect(evalStr(['Max', Q(1.5, 'm'), 'NaN'])).toBe('NaN');
+    expect(evalStr(['Max', 1.5, 'NaN'])).toBe('NaN');
+    expect(evalStr(['Max', Q(1, 'm'), 'NaN'])).toBe('NaN');
   });
 
   // The units defined by an exact decimal number convert exactly

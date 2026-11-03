@@ -50,11 +50,6 @@ import {
 } from './boxed-expression/machine-number.js';
 import { machineBroadcast } from './boxed-expression/machine-broadcast.js';
 import {
-  literalMayEraseElement,
-  literalWithErasureResolved,
-} from './boxed-expression/nothing-erasure.js';
-import { isTransitivelyPure } from './boxed-expression/transitive-purity.js';
-import {
   isFiniteCount,
   normalizeCount,
   smallCount,
@@ -5891,58 +5886,10 @@ export function collectionSubset(
   return true;
 }
 
-/**
- * The value of the `List` literal `expr` when it has an element
- * that may evaluate to `Nothing` (`literalMayEraseElement()`), and `undefined`
- * otherwise.
- *
- * The literal erases an element that evaluates to `Nothing`, so its operands
- * are not its elements: with `c` false, `[If(c, 1, Nothing), 2]` holds one
- * element. A consumer that walks the literal without evaluating it (a lazy
- * `Map` or `Filter` over it, a count) read two elements, and
- * `Map(Sin, [If(c, 1, Nothing), 2])` was `[Sin(Nothing), Sin(2)]`. The
- * collection handlers of such a literal read its value instead, computed when
- * they are called, as the elements of a lazy view are.
- *
- * The literal is evaluated only when it is pure, so that a count or a walk
- * consumes no random draw. The answer is also `undefined` when the value
- * still has such an element (a condition with no value yet): the handlers
- * then read the operands, as before.
- *
- * The evaluation follows the numeric request of the evaluation that calls
- * the handler (`IComputeEngine._numericRequest`). Without one, the value is
- * the exact value of the literal, so that a handler that compares elements
- * (`contains`, `indexWhere`) reads values. Under `.N()`, only the elements
- * that may erase are evaluated, and the other elements are kept as written
- * (`literalWithErasureResolved`): the caller approximates what it reads, as
- * it does for a literal with no such element, and an exact evaluation of
- * every element could cost much more. With `H = Sum(1/k, k, 1, 6000)`, an
- * exact rational of about 2 600 digits, `Count(Map(Sin, [If(c, 1, Nothing),
- * H])).N()` took 11 s, for two exact evaluations of `H`, where it takes
- * less than 0.1 s without the element that may erase.
- */
-function erasedLiteralValue(
-  expr: Expression
-): (Expression & FunctionInterface) | undefined {
-  if (!isFunction(expr) || expr._numericStore !== undefined) return undefined;
-  if (expr.operator !== 'List') return undefined;
-  if (!literalMayEraseElement(expr)) return undefined;
-  if (!isTransitivelyPure(expr)) return undefined;
-  const value = expr.engine._numericRequest
-    ? literalWithErasureResolved(expr)
-    : expr.evaluate();
-  if (value === undefined || !isFunction(value, expr.operator))
-    return undefined;
-  if (literalMayEraseElement(value)) return undefined;
-  return value;
-}
-
 function basicCollectionIndexWhere(
   expr: Expression,
   predicate: (element: Expression) => boolean
 ): number | undefined {
-  const erased = erasedLiteralValue(expr);
-  if (erased !== undefined) return basicCollectionIndexWhere(erased, predicate);
   if (!isFunction(expr)) return undefined;
   const store = expr._numericStore;
   if (store !== undefined) {
@@ -6044,23 +5991,16 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
     isLazy: (_expr) => false,
 
     count: (expr) => {
-      const erased = erasedLiteralValue(expr);
-      if (erased !== undefined) return erased.nops;
       return isFunction(expr) ? expr.nops : 0;
     },
 
     isEmpty: (expr) => {
-      const erased = erasedLiteralValue(expr);
-      if (erased !== undefined) return erased.nops === 0;
       return !isFunction(expr) || expr.nops === 0;
     },
 
     isFinite: (_expr) => true,
 
     contains: (expr, target) => {
-      if (!isFunction(expr)) return false;
-      const erased = erasedLiteralValue(expr);
-      if (erased !== undefined) expr = erased;
       if (!isFunction(expr)) return false;
       const store = expr._numericStore;
       if (store !== undefined) {
@@ -6077,8 +6017,6 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
     },
 
     iterator: (expr) => {
-      const erased = erasedLiteralValue(expr);
-      if (erased !== undefined) expr = erased;
       if (!isFunction(expr))
         return { next: () => ({ value: undefined, done: true as const }) };
       let index = 1;
@@ -6118,8 +6056,6 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
         !isFunction(expr)
       )
         return undefined;
-      const erased = erasedLiteralValue(expr);
-      if (erased !== undefined) return erased.at(index);
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;
       const store = expr._numericStore;

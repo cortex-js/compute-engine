@@ -3,7 +3,6 @@ import type { Expression } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { collectionElementType } from '../../src/common/type/utils';
 import { isSubtype } from '../../src/common/type/subtype';
-import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { expectTypeBetween } from '../utils';
 
 function rawSource(ce: ComputeEngine): Expression {
@@ -22,10 +21,10 @@ function fixture() {
     pure: false,
     evaluate: ([x]) => {
       seen.push(x);
-      return ce.True;
+      return x.re === 2 ? ce.False : ce.True;
     },
   });
-  const source = rawSource(ce);
+  const source = ce.box(['Map', ['Function', 'x', 'x'], ['List', 1, 2, 3]]);
   return {
     ce,
     seen,
@@ -34,24 +33,21 @@ function fixture() {
   };
 }
 
-describe('Filter drops immediate Nothing without calling its predicate', () => {
-  test('one traversal drops omissions and invokes a strict predicate only for data', () => {
+describe('Filter and Nothing', () => {
+  test('one traversal invokes the predicate once for each datum', () => {
     const { filtered, source, seen } = fixture();
     expect(filtered.isValid).toBe(true);
     expect([...filtered.each()].map((v) => v.re)).toEqual([1, 3]);
-    expect(seen.map((v) => v.re)).toEqual([1, 3]);
+    expect(seen.map((v) => v.re)).toEqual([1, 2, 3]);
     expect(source.count).toBe(3);
     expectTypeBetween(filtered, { atMost: 'list<integer>' });
-    expect(
-      isSubtype('nothing', collectionElementType(filtered.type.type)!)
-    ).toBe(false);
   });
 
   test.each(['box', 'function', 'parse'] as const)(
-    '%s route drops omitted inputs',
+    '%s route keeps a Nothing element',
     (route) => {
       const ce = new ComputeEngine();
-      const predicate = ['Function', 'True', ['Typed', 'x', "'integer'"]];
+      const predicate = ['Function', 'True', 'x'];
       const filtered =
         route === 'box'
           ? ce.box(['Filter', rawSource(ce), predicate])
@@ -61,40 +57,35 @@ describe('Filter drops immediate Nothing without calling its predicate', () => {
                 '\\mathrm{Filter}(\\mathrm{Map}(x \\mapsto \\mathrm{If}(x=2, \\mathrm{Nothing}, x), [1,2,3]), x \\mapsto \\mathrm{True})'
               );
       expect(filtered.isValid).toBe(true);
-      expect([...filtered.evaluate().each()].map((v) => v.re)).toEqual([1, 3]);
+      expect([...filtered.evaluate().each()].map((v) => v.json)).toEqual([
+        1,
+        'Nothing',
+        3,
+      ]);
     }
   );
 
-  test('Epsil accepts an explicitly numeric predicate over an omission-producing view', () => {
-    const result = executeEpsil(
-      new ComputeEngine(),
-      'Filter(Map(x => If(x == 2, Nothing, x), [1, 2, 3]), (x: integer) => True)'
-    );
-    expect(result.diagnostics).toEqual([]);
-    expect([...result.value.each()].map((v) => v.re)).toEqual([1, 3]);
-  });
-
-  test('count consumes each participating datum once', () => {
+  test('count consumes each datum once', () => {
     const { filtered, seen } = fixture();
     expect(filtered.count).toBe(2);
-    expect(seen.map((v) => v.re)).toEqual([1, 3]);
+    expect(seen.map((v) => v.re)).toEqual([1, 2, 3]);
   });
 
-  test('Count(source, predicate) agrees with counting Filter and bypasses omissions', () => {
+  test('Count(source, predicate) agrees with counting Filter', () => {
     const first = fixture();
     const direct = first.ce
       .function('Count', [first.source, first.ce.symbol('Keep')])
       .evaluate();
     expect(direct.re).toBe(2);
-    expect(first.seen.map((v) => v.re)).toEqual([1, 3]);
+    expect(first.seen.map((v) => v.re)).toEqual([1, 2, 3]);
     const second = fixture();
     expect(second.ce.function('Count', [second.filtered]).evaluate().re).toBe(
       2
     );
-    expect(second.seen.map((v) => v.re)).toEqual([1, 3]);
+    expect(second.seen.map((v) => v.re)).toEqual([1, 2, 3]);
   });
 
-  test('compiled predicate Count refuses omission-capable sources', () => {
+  test('compiled predicate Count refuses sources that can hold Nothing', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<integer | nothing>');
     const result = compile(ce.box(['Count', 'xs', ['Function', 'True', 'x']]));
@@ -105,48 +96,13 @@ describe('Filter drops immediate Nothing without calling its predicate', () => {
   test('positive indexing scans only through the requested survivor', () => {
     const { filtered, seen } = fixture();
     expect(filtered.at(2)?.re).toBe(3);
-    expect(seen.map((v) => v.re)).toEqual([1, 3]);
+    expect(seen.map((v) => v.re)).toEqual([1, 2, 3]);
   });
 
   test('negative indexing uses the filtered positions', () => {
-    const { filtered, seen } = fixture();
+    const { filtered } = fixture();
     expect(filtered.at(-1)?.re).toBe(3);
-    expect(seen.map((v) => v.re)).toEqual([1, 3]);
-  });
-
-  test('Nothing is not a member and membership does not invoke the predicate', () => {
-    const { ce, filtered, seen } = fixture();
-    expect(filtered.contains(ce.Nothing)).toBe(false);
-    expect(seen).toEqual([]);
-    expect(filtered.contains(ce.number(3))).toBe(true);
-    expect(seen.map((v) => v.re)).toEqual([3]);
-  });
-
-  test('an all-omitted finite source is empty, with no predicate calls', () => {
-    const { ce, seen } = fixture();
-    const source = ce.box([
-      'Map',
-      ['Function', 'Nothing', 'x'],
-      ['Range', 1, 3],
-    ]);
-    const filtered = ce.function('Filter', [source, ce.symbol('Keep')]);
-    expect([...filtered.each()]).toEqual([]);
-    expect(filtered.isEmptyCollection).toBe(true);
-    expect(filtered.count).toBe(0);
-    expect(seen).toEqual([]);
-  });
-
-  test('omitted pulls still enforce the iteration limit', () => {
-    const { ce, seen } = fixture();
-    ce.iterationLimit = 4;
-    const source = ce.box([
-      'Map',
-      ['Function', 'Nothing', 'x'],
-      ['Range', 1, 'PositiveInfinity'],
-    ]);
-    const filtered = ce.function('Filter', [source, ce.symbol('Keep')]);
-    expect(() => filtered.each().next()).toThrow(/Iteration limit/);
-    expect(seen).toEqual([]);
+    expect(filtered.at(-2)?.re).toBe(1);
   });
 
   test('Missing still reaches a predicate accepting any', () => {
@@ -193,21 +149,21 @@ describe('Filter drops immediate Nothing without calling its predicate', () => {
   });
 
   test.each(['list<integer | nothing>', 'set<integer | nothing>'])(
-    'result type removes only immediate omission from %s',
+    'result type keeps the nothing arm of %s',
     (type) => {
       const ce = new ComputeEngine();
       ce.declare('xs', type);
       const result = ce.box(['Filter', 'xs', ['Function', 'True', 'x']]);
       expect(
         isSubtype('nothing', collectionElementType(result.type.type)!)
-      ).toBe(false);
+      ).toBe(true);
       expect(
         isSubtype('integer', collectionElementType(result.type.type)!)
       ).toBe(true);
     }
   );
 
-  test('nested omission remains in the result element type', () => {
+  test('a nested Nothing remains in the result element type', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<tuple<integer | nothing, integer>>');
     const result = ce.box(['Filter', 'xs', ['Function', 'True', 'x']]);
@@ -217,7 +173,7 @@ describe('Filter drops immediate Nothing without calling its predicate', () => {
   });
 
   test.each(['javascript', 'python'] as const)(
-    '%s refuses possible omissions',
+    '%s refuses a source that can hold Nothing',
     (to) => {
       const ce = new ComputeEngine();
       ce.declare('xs', 'list<integer | nothing>');
@@ -232,7 +188,7 @@ describe('Filter drops immediate Nothing without calling its predicate', () => {
   );
 
   test.each(['javascript', 'python'] as const)(
-    '%s checks every collection alternative for possible omissions',
+    '%s checks every collection alternative for a possible Nothing',
     (to) => {
       const ce = new ComputeEngine();
       ce.declare('xs', 'list<integer | nothing> | list<list<integer>>');
@@ -263,7 +219,7 @@ describe('Filter drops immediate Nothing without calling its predicate', () => {
     }
   );
 
-  test('bounded infinite pipelines refuse omission-capable stream stages', () => {
+  test('bounded infinite pipelines refuse stream stages that can give Nothing', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(integer) -> integer | nothing');
     ce.declare('n', 'integer');

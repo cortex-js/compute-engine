@@ -405,7 +405,7 @@ describe('MatrixPower — Contract B declaration', () => {
   });
 
   // An infinite cell times an exact zero cell is the exact form `0·∞`:
-  // `Indeterminate`, not the IEEE `NaN` (which a NaN cell still gives).
+  // `NaN`, not the IEEE `NaN` (which a NaN cell still gives).
   test('NaN and infinite CELLS propagate through the product', () => {
     const ce = new ComputeEngine();
     expect(
@@ -427,7 +427,7 @@ describe('MatrixPower — Contract B declaration', () => {
         ] as any)
         .evaluate()
         .toString()
-    ).toBe('[[+oo,Indeterminate],[Indeterminate,1]]');
+    ).toBe('[[+oo,NaN],[NaN,1]]');
   });
 
   test('the `A^n` parse route routes to MatrixPower unchanged', () => {

@@ -721,7 +721,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, a point whose coordinates are all `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.",
+      "description": "Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`). `Nothing` is the value of an empty block, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.",
       "examples": [
         "[1, 2][1]?!"
       ]
@@ -1348,7 +1348,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the first operand that is not ABSENT (`Missing`, `NaN`, a point whose coordinates are all `NaN`, or `Indeterminate`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.",
+      "description": "Return the first operand that is not ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.",
       "examples": [
         "Coalesce(Missing, NaN, 3, 4)"
       ]
@@ -1722,7 +1722,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations."
+      "description": "Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs."
     },
     {
       "name": "Cos",
@@ -1857,7 +1857,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations."
+      "description": "Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs."
     },
     {
       "name": "Cross",
@@ -3119,7 +3119,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the elements of the collection for which the predicate function returns True.\n\nEquivalent to `[x for x in xs if p(x)]`.\n\nImmediate `Nothing` inputs are dropped without calling the predicate.\n\n`Missing` and markers nested inside a datum still reach the predicate.",
+      "description": "Return the elements of the collection for which the predicate function returns True.\n\nEquivalent to `[x for x in xs if p(x)]`.",
       "examples": [
         "Filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)"
       ]
@@ -3870,7 +3870,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Like Min, but defined for open sets. Nothing data are omitted.",
+      "description": "Like Min, but defined for open sets.",
       "examples": [
         "[Infimum(1, 3, 2), Infimum(Interval(0, 1))]"
       ]
@@ -3998,7 +3998,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Interquartile range (Q3 - Q1) of a collection. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Interquartile range (Q3 - Q1) of a collection."
     },
     {
       "name": "Intersection",
@@ -4240,7 +4240,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "True for `Missing`, `NaN`, a point whose coordinates are all `NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.",
+      "description": "True for `Missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. `Nothing` is not an absent datum.",
       "examples": [
         "[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]"
       ]
@@ -4571,7 +4571,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Kurtosis of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Kurtosis of a collection of numbers."
     },
     {
       "name": "LambertW",
@@ -5044,7 +5044,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the FIRST argument.\n\nAn immediate `Nothing` input bypasses the callback and remains `Nothing`\n\nat that position. With multiple sources, any `Nothing` coordinate bypasses\n\nthe whole callback. Nested `Nothing` and `Missing` are passed to the callback.\n\nThe view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.",
+      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the FIRST argument.",
       "examples": [
         "Map(x => x^2, [1, 2, 3])"
       ]
@@ -5158,7 +5158,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Maximum of two or more numbers. Nothing data are omitted.",
+      "description": "Maximum of two or more numbers.",
       "examples": [
         "[Max(3, 7, 2), Max([3, 7, 2])]"
       ]
@@ -5188,7 +5188,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Arithmetic mean (average) of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Arithmetic mean (average) of a collection of numbers."
     },
     {
       "name": "Measurement",
@@ -5216,7 +5216,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Median of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.",
+      "description": "Median of a collection of numbers.",
       "examples": [
         "Median([3, 1, 4, 2])  // 5/2"
       ]
@@ -5243,7 +5243,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Minimum of two or more numbers. Nothing data are omitted.",
+      "description": "Minimum of two or more numbers.",
       "examples": [
         "[Min(3, 7, 2), Min([3, 7, 2])]"
       ]
@@ -5313,7 +5313,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Most frequently occurring value in a collection. Immediate Nothing data are omitted; sample sizes count retained data.",
+      "description": "Most frequently occurring value in a collection.",
       "examples": [
         "Mode([1, 2, 2, 3])  // 2"
       ]
@@ -6512,7 +6512,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations."
+      "description": "Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs."
     },
     {
       "name": "PopulationStandardDeviation",
@@ -6524,7 +6524,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Population Standard Deviation of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Population Standard Deviation of a collection of numbers."
     },
     {
       "name": "PopulationVariance",
@@ -6536,7 +6536,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Population variance of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Population variance of a collection of numbers."
     },
     {
       "name": "Position",
@@ -6835,7 +6835,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`Product(f, a, b)` computes the product of `f` from `a` to `b`. Nothing factors are omitted.",
+      "description": "`Product(f, a, b)` computes the product of `f` from `a` to `b`.",
       "wikidata": "Q901718",
       "examples": [
         "Product(k, (k, 1, 5))",
@@ -6976,7 +6976,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Lower quartile, median, and upper quartile of a collection. Uses the Moore–McCabe (exclusive-hinges) convention: the sample is split at its median, and Q1/Q3 are the medians of the lower/upper halves with the overall median excluded from both halves when the sample size is odd. Immediate Nothing data are omitted; sample sizes count retained data.",
+      "description": "Lower quartile, median, and upper quartile of a collection. Uses the Moore–McCabe (exclusive-hinges) convention: the sample is split at its median, and Q1/Q3 are the medians of the lower/upper halves with the overall median excluded from both halves when the sample size is odd.",
       "examples": [
         "Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)"
       ]
@@ -7942,7 +7942,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Skewness of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Skewness of a collection of numbers."
     },
     {
       "name": "Slice",
@@ -8079,7 +8079,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Sample Standard Deviation of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Sample Standard Deviation of a collection of numbers."
     },
     {
       "name": "StartsWith",
@@ -8398,7 +8398,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. Nothing terms are omitted.",
+      "description": "`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`.",
       "wikidata": "Q218005",
       "examples": [
         "Sum(k^2, (k, 1, 10))",
@@ -8445,7 +8445,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Like Max, but defined for open sets. Nothing data are omitted.",
+      "description": "Like Max, but defined for open sets.",
       "examples": [
         "[Supremum(1, 3, 2), Supremum(Interval(0, 1))]"
       ]
@@ -9227,7 +9227,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Sample variance of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data."
+      "description": "Sample variance of a collection of numbers."
     },
     {
       "name": "Vector",
@@ -9535,7 +9535,7 @@
       "name": "Indeterminate",
       "category": "Arithmetic",
       "type": "number",
-      "description": "Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. Its numeric approximation is NaN."
+      "description": "An input spelling of NaN."
     },
     {
       "name": "Integers",
@@ -9561,7 +9561,7 @@
       "name": "NaN",
       "category": "Arithmetic",
       "type": "number",
-      "description": "Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. An exact form with no value, such as 0/0, is Indeterminate."
+      "description": "Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0, or of an exact form with no value, such as 0/0."
     },
     {
       "name": "NegativeInfinity",

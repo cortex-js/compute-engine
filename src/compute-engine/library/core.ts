@@ -402,10 +402,10 @@ import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluatio
  * `incompatible-type` declared-type diagnostic.
  */
 /**
- * The absence markers: `Nothing` (an operand to drop) and `Missing` (an
- * absent value with a position). They cannot be rebound: the engine
- * recognizes each one by its NAME in many places — `Nothing` is erased from
- * operand lists, and arithmetic reads a `Missing` operand as absent
+ * The absence markers: `Nothing` (the value of an empty block) and `Missing`
+ * (an absent value with a position). They cannot be rebound: the engine
+ * recognizes each one by its NAME in many places — an empty block evaluates
+ * to `Nothing`, and arithmetic reads a `Missing` operand as absent
  * whatever it is bound to — so a user binding of one of these names could
  * never behave like the value it holds. A declaration, an assignment or a
  * function definition of one of them evaluates to the
@@ -664,7 +664,7 @@ function delimitedOperands(
 
 /**
  * True when no value of type `t` is absent. The absent values (`Missing`,
- * `NaN`, `Indeterminate`) have the types `missing` and `nan`,
+ * `NaN`) have the types `missing` and `nan`,
  * so a type that admits neither cannot hold one: a `list<…>`, a `tuple<…>`,
  * a `string`, a `dictionary`, a function type, an `integer` or a `real`.
  * Every type is a subtype of `unknown`, so an unresolved type returns false;
@@ -1855,12 +1855,11 @@ function pipeStep(
   // function. With the piped value in its slot, the call is
   // `Map([2], "s")`, which reports `[2]` and its type, as the direct
   // call does. This is the call that the static check canonicalizes
-  // (`pipeStageAsCall`). A piped `Nothing` is erased below, as on the
-  // direct route, so it keeps the placeholder route. The value is the
-  // value the placeholder route gave: an error that the call embeds is
-  // the value of the pipe (`errorValue`), as for the application of a
-  // function literal whose body evaluates to that call.
-  if (stageForMap !== rawStage && !isSymbol(x, 'Nothing')) {
+  // (`pipeStageAsCall`). The value is the value the placeholder route
+  // gave: an error that the call embeds is the value of the pipe
+  // (`errorValue`), as for the application of a function literal whose
+  // body evaluates to that call.
+  if (stageForMap !== rawStage) {
     const completed = pipeStageAsCall(ce, x, rawStage);
     if (completed?.topicAt !== undefined)
       return { kind: 'evaluate', expr: completed.call, embeddedError: true };
@@ -1975,12 +1974,8 @@ function pipeApplicationStep(
   callee: Expression,
   numericApproximation: boolean | undefined
 ): PipeFinalStep {
-  // `Nothing` is ERASED from the call argument list, uniformly on every
-  // application route (error-propagation design §4): `Nothing |> f` is
-  // `f()`, exactly like `f(Nothing)`. Erasure is a rule on the WRITTEN
-  // argument (like `flattenOps` on the direct route and `Apply`'s
-  // canonical handler): a topic that merely *evaluates* to `Nothing` is
-  // bound, as it is by `f(g())`.
+  // A `Nothing` topic is an argument like any other: `Nothing |> f` is
+  // `f(Nothing)`.
   //
   // Under `.N()` the application gets the numeric request, as `f(x)`
   // does under `.N()`, and the written topic is recorded behind the
@@ -1990,15 +1985,14 @@ function pipeApplicationStep(
   // body of a user function read the float bound to the parameter `x`,
   // and the numeric pass over the result (`pipeAfterApplication`) could
   // not undo that.
-  const args = isSymbol(x, 'Nothing') ? [] : [x];
   return {
     kind: 'apply',
     callee,
-    args,
+    args: [x],
     options: numericApproximation
       ? {
           numericApproximation: true,
-          exactSources: exactArgumentSources(ce, args),
+          exactSources: exactArgumentSources(ce, [x]),
         }
       : undefined,
   };
@@ -2043,15 +2037,13 @@ function pipeAfterApplication(
  * only becomes a list when evaluated (`g() |> x ↦ 0`) maps as `Apply` maps
  * it. It used to be `Map(stage, topic)`, which mapped one rank, mapped a
  * literal whose parameter is a collection (`xs |> x ↦ Length(x)`), and
- * mapped a set. Returns `undefined` when the stage is not such a literal,
- * or the topic is the written `Nothing` (erased by the caller).
+ * mapped a set. Returns `undefined` when the stage is not such a literal.
  */
 function pipeImplicitMap(
   ce: ComputeEngine,
   topic: Expression,
   stageForMap: Expression
 ): Expression | undefined {
-  if (isSymbol(topic, 'Nothing')) return undefined;
   const stage =
     isFunction(stageForMap, 'Function') && stageForMap.isCanonical
       ? stageForMap
@@ -5193,10 +5185,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     // The sole member of the unit type, `missing`.
     //
-    // `Nothing` and `Missing` are complementary absence markers:
-    // - `Nothing` is an ERASURE marker (an empty-sequence splice): it is
-    //   elided from operator argument lists (`Nothing + 1` → `1`) and from
-    //   collection literals (`[12, Nothing, 34]` → `[12, 34]`).
+    // `Nothing` and `Missing` are distinct values:
+    // - `Nothing` is the value of an empty block or of a statement with no
+    //   value. It is kept as an operand or an element wherever it appears
+    //   (`[12, Nothing, 34]` has three elements), and an operator that needs
+    //   a value reads it as any other value outside its signature.
     // - `Missing` is a POSITION-PRESERVING marker: "a position exists, its
     //   value is absent" (Julia `missing`, R `NA`). It is never elided, and
     //   it propagates through numeric operations (`Missing + 1` → `NaN`)
@@ -5352,7 +5345,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       canonical: (args, { engine: ce }) => {
         const xs = flatten(args);
-        if (xs.length === 0) return ce.Nothing;
+        // The empty `Sequence()` stays an empty splice: a list or an argument
+        // list that holds it splices it out, and a variable that holds it (an
+        // empty rest capture `[h, ...t]`) keeps that value. It is not
+        // `Nothing`, which is a value of its own and is kept as an element.
+        if (xs.length === 0) return ce._fn('Sequence', []);
         if (xs.length === 1) return xs[0];
         return ce._fn('Sequence', xs);
       },
@@ -5460,9 +5457,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const xs = devolveValueElements(
             ce,
             flatten(
-              canonical(ce, flatten(body.ops, undefined, false, true)),
+              canonical(ce, flatten(body.ops, undefined, false)),
               undefined,
-              true,
               true
             )
           );
@@ -5596,8 +5592,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     IsMissing: {
       description:
-        'True for `Missing`, `NaN`, a point whose coordinates are all ' +
-        '`NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.',
+        'True for `Missing`, `NaN`, or a point whose coordinates are all ' +
+        '`NaN`, regardless of provenance. `Nothing` is not an absent datum.',
       complexity: 500,
       signature: '(any) -> boolean',
       examples: ['[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]'],
@@ -5606,7 +5602,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const xs = flattenSequence(args);
         if (xs.length === 1 || (!ce.strict && xs.length > 0))
           return ce._fn('IsMissing', xs);
-        // checkArity also erases Nothing, which must count as an argument here.
         return ce._fn('IsMissing', [
           xs[0] ?? ce.error('missing'),
           ...xs
@@ -5628,8 +5623,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Coalesce: {
       description:
         'Return the first operand that is not ABSENT (`Missing`, ' +
-        '`NaN`, a point whose coordinates are all `NaN`, or ' +
-        '`Indeterminate`), evaluated left-to-right. ' +
+        '`NaN`, or a point whose coordinates are all `NaN`), evaluated ' +
+        'left-to-right. ' +
         'If every operand ' +
         'is absent, the last operand’s value is returned verbatim (still ' +
         'absent). `Nothing` passes through without selecting a fallback.',
@@ -5703,8 +5698,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Assert that a value is present: return it unchanged, or an ' +
         '`expected-present` error when it is ABSENT (`Missing`, ' +
-        '`NaN`, a point whose coordinates are all `NaN`, or ' +
-        '`Indeterminate`). `Nothing` is an omission marker, not an ' +
+        '`NaN`, or a point whose coordinates are all `NaN`). `Nothing` is ' +
+        'the value of an empty block, not an ' +
         'absent datum, and passes through; an error operand propagates. ' +
         'Epsil spells it `x?!`. Only the value itself is checked, never the ' +
         'cells of a collection.',
@@ -5730,8 +5725,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const xs = flattenSequence(args);
         if (xs.length === 1 || (!ce.strict && xs.length > 0))
           return ce._fn('AssertPresent', canonical(ce, xs, scope));
-        // `checkArity` also erases `Nothing`, which must count as an argument
-        // here: a written `Nothing?!` passes `Nothing` through.
+        // A written `Nothing?!` passes `Nothing` through.
         return ce._fn('AssertPresent', [
           xs[0] === undefined
             ? ce.error('missing')
@@ -5754,7 +5748,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // of its free variables, so `AssertPresent([x, 1])` is `[x, 1]` and
         // `Length(AssertPresent([x, 1]))` reduces to 2. The test reads the
         // type: `missing` and `nan` are the absent outcomes (`Missing`,
-        // `NaN`, `Indeterminate`), so a type that admits
+        // `NaN`), so a type that admits
         // neither is present. Every type is a subtype of `unknown`, so an
         // unresolved symbol keeps the assertion; so does `number`, which
         // admits `nan`. A held restriction (`If(c, 3)` with `c` undecided)
@@ -6584,9 +6578,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // at all (`apply()`, `boxed-expression/function-utils.ts`). The
       // declared parameter says so, because the boxing validation seam
       // checks a canonical-handler head against its declaration. The
-      // arguments are `any` as well: an argument that only EVALUATES to
-      // `Nothing` (a call typed `nothing`) is bound, never erased — erasure
-      // is a rule on the WRITTEN argument.
+      // arguments are `any` as well: a `Nothing` argument is bound like any
+      // other.
       signature: '(name:any, arguments:any*) -> unknown',
       examples: ['Apply(Sqrt, 16)'],
       // An ANONYMOUS application instantiates its callee's `where` clause here
@@ -6636,21 +6629,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           markBodyCopyAsForwardCall(ce, s);
           return ce.function(s, args.slice(1));
         }
-        // `Nothing` is ERASED from the call argument list, uniformly on every
-        // application route (error-propagation design §4): `Apply(f, Nothing)`
-        // is `f()`. The `f(Nothing)` route erases at canonicalization
-        // (`flattenOps`); this is the same ruling for a callee that is not a
-        // bare symbol (a `Function` literal), which never reaches that path.
-        //
-        // Erasure belongs HERE, on the written argument, not in `evaluate`:
-        // `Apply` is strict, so by evaluation time an argument that merely
-        // *evaluated* to `Nothing` (`Apply(f, g())`) is indistinguishable
-        // from a literal one, and erasing it would make `Apply(f, g())` —
-        // and therefore `g() |> f`, which `Pipe` holds — differ from
-        // `f(g())`, which binds it. §3 pins `x |> f ≡ f(x)`.
-        let callArgs: ReadonlyArray<Expression> = args
-          .slice(1)
-          .filter((x) => !isSymbol(x, 'Nothing'));
+        // A `Nothing` argument is bound like any other: `Apply(f, Nothing)`
+        // is `f(Nothing)`.
+        let callArgs: ReadonlyArray<Expression> = args.slice(1);
         // An inline literal callee with parameters that have a default value
         // (`((x, k = 2) => x * k)(3)`): a call that supplies the required
         // parameters receives the default of each parameter it leaves out,
@@ -8897,7 +8878,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // irrational bound, such as `∫₂^√5 4 dx`, lost its exact value.
           // The difference is evaluated so that the special values that the
           // definite-integral evaluator tests for are folded: `∞ − ∞` is
-          // `Indeterminate` (a NaN), and `~∞ − 1` is `~∞`. The options of the
+          // `NaN`, and `~∞ − 1` is `~∞`. The options of the
           // caller are passed on: under `.N()` the difference is a float, and
           // a cancellation signal also stops this evaluation.
           return ce.function('Subtract', [fUpper, fLower]).evaluate(options);
@@ -11359,9 +11340,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         if (text === 'NaN') return ce.NaN;
-        // The spelling `String(Indeterminate)` produces reads back as the
-        // `Indeterminate` value, as `"NaN"` reads back as `NaN`.
-        if (text === 'Indeterminate') return ce.Indeterminate;
+        // `Indeterminate` is an input spelling of `NaN`.
+        if (text === 'Indeterminate') return ce.NaN;
         if (text === 'oo' || text === '+oo') return ce.PositiveInfinity;
         if (text === '-oo') return ce.NegativeInfinity;
 

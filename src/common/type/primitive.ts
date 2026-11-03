@@ -557,7 +557,7 @@ export function cellTypeCanHoldANumber(t: Type): boolean {
     case 'numeric':
       return true;
     case 'value':
-      // A number, or one of the sentinel values (`~oo`, `Indeterminate`);
+      // A number, or one of the sentinel value `~oo`;
       // not a string or a boolean literal.
       return typeof t.value !== 'string' && typeof t.value !== 'boolean';
     case 'union':

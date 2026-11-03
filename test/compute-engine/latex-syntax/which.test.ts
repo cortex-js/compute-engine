@@ -43,4 +43,15 @@ describe('WHICH', () => {
     expect(withKeywordOtherwise).toEqual(withText);
     expect(withKeywordElse).toEqual(withText);
   });
+
+  test('An entirely empty row is not a clause; an authored Nothing default is kept', () => {
+    expect(ce.parse('\\begin{cases}x & x>0 \\\\ &\\end{cases}').json).toEqual(
+      ['Which', ['Less', 0, 'x'], 'x']
+    );
+    expect(
+      ce.parse(
+        '\\begin{cases}x & x>0 \\\\ \\operatorname{Nothing} & \\text{otherwise}\\end{cases}'
+      ).json
+    ).toEqual(['Which', ['Less', 0, 'x'], 'x', 'True', 'Nothing']);
+  });
 });

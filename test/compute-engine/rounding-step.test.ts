@@ -12,7 +12,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * `Truncate(x, step)` the multiple nearest to `x` in the direction of zero.
  * The sign of the step does not matter: the multiples of `−2` are the
  * multiples of `2`. A zero step has no multiple to round to: the result is
- * `Indeterminate` (`NaN` with a float operand), as for `Mod(x, 0)`.
+ * `NaN` (`NaN` with a float operand), as for `Mod(x, 0)`.
  *
  * Requested in cortex-js/compute-engine#417 (`Floor[226, 10]` is `220` in
  * Mathematica).
@@ -53,8 +53,8 @@ describe('the value of the step form', () => {
     expect(r.isExact).toBe(false);
   });
 
-  test('a zero step is Indeterminate, or NaN with a float operand', () => {
-    expect(value(['Floor', 5, 0])).toBe('Indeterminate');
+  test('a zero step is NaN, or NaN with a float operand', () => {
+    expect(value(['Floor', 5, 0])).toBe('NaN');
     expect(value(['Ceil', 5.5, 0])).toBe('NaN');
   });
 

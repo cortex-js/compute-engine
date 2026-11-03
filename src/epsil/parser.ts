@@ -4283,11 +4283,9 @@ export class Parser {
     // fell through to the binding rule and matched ANYTHING.
     if (name === 'true') return this.wrap({ sym: 'True' }, start, end);
     if (name === 'false') return this.wrap({ sym: 'False' }, start, end);
-    if (name === 'NaN') return this.wrap({ num: 'NaN' }, start, end);
-    // `Indeterminate` is a symbol in MathJSON, whose value is the
-    // `Indeterminate` number literal.
-    if (name === 'Indeterminate')
-      return this.wrap({ sym: 'Indeterminate' }, start, end);
+    // `Indeterminate` is an input spelling of `NaN`.
+    if (name === 'NaN' || name === 'Indeterminate')
+      return this.wrap({ num: 'NaN' }, start, end);
     if (name === 'Infinity' || name === 'oo')
       return this.wrap({ num: '+Infinity' }, start, end);
 
@@ -6096,8 +6094,9 @@ export class Parser {
    * - a symbol that names a parameter of the same list: a default is read
    *   as if the caller had written it in the call, so it would not mean the
    *   parameter;
-   * - `Nothing` and `Missing`: an absent operand is dropped from a call, so
-   *   the inserted default would disappear;
+   * - `Nothing` and `Missing`: `Nothing` is the value of an empty block, not
+   *   an argument value, and `Missing` is a result only, not a value that a
+   *   call supplies;
    * - a default on a `bind` parameter of a `hold` definition: the parameter
    *   names a variable that the caller writes;
    * - a default in a parameter list that has a literal parameter
@@ -6202,17 +6201,17 @@ export class Parser {
     ) {
       // The type grammar spells the infinity value types `oo` / `-oo`.
       typeText = negative ? '-oo' : 'oo';
-    } else if (tok.type === 'SYMBOL' && tok.text === 'NaN') {
+    } else if (
+      tok.type === 'SYMBOL' &&
+      (tok.text === 'NaN' || tok.text === 'Indeterminate')
+    ) {
       // The NaN value type admits exactly NaN (amended D1 — "match only
       // themselves", like the infinities). The spelling must be the
       // CAPITALIZED `NaN`: the type grammar reads the lowercase `nan` as the
       // name of the not-a-number PRIMITIVE type, which admits NaN as a member
       // of a tier rather than as the literal a clause dispatches on.
+      // `Indeterminate` is an input spelling of `NaN`.
       typeText = 'NaN';
-    } else if (tok.type === 'SYMBOL' && tok.text === 'Indeterminate') {
-      // The `Indeterminate` value type admits exactly the `Indeterminate`
-      // literal, as the `NaN` value type admits exactly `NaN`.
-      typeText = 'Indeterminate';
     } else if (tok.type === 'STRING') {
       // Only a plain string is a literal — an interpolation hole is an
       // expression, and expressions are not parameters.
@@ -8636,14 +8635,9 @@ export class Parser {
     // `NaN` and `Infinity` are numeric constants, not plain symbols. `oo`
     // is an input alias for `Infinity` (the type grammar's spelling; the
     // serializer emits the canonical `Infinity`).
-    if (token.text === 'NaN')
+    // `Indeterminate` is an input spelling of `NaN`.
+    if (token.text === 'NaN' || token.text === 'Indeterminate')
       return this.wrap({ num: 'NaN' }, token.start, token.end);
-    // `Indeterminate` is the literal word of the exact indeterminate form. In
-    // MathJSON it is the symbol `Indeterminate`, whose value is the
-    // `Indeterminate` number literal (`{num: "Indeterminate"}` is not a
-    // number spelling).
-    if (token.text === 'Indeterminate')
-      return this.wrap({ sym: 'Indeterminate' }, token.start, token.end);
     if (token.text === 'Infinity' || token.text === 'oo')
       return this.wrap({ num: '+Infinity' }, token.start, token.end);
 

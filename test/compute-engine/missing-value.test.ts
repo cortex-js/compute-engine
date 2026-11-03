@@ -83,18 +83,20 @@ describe('P0 — subtype union-self-membership fix (prerequisite)', () => {
 const isMarker = (x: any): boolean =>
   x.isNaN === true || x.symbol === 'Missing';
 
-describe('P1 — `Nothing` erasure (§3.G)', () => {
-  test('List / Set / Sequence omit Nothing; Tuple preserves its slot', () => {
-    expect(ce.box(['List', 1, 'Nothing', 3]).toString()).toBe('[1,3]');
-    expect(ce.box(['Set', 1, 'Nothing', 3]).toString()).toBe('Set(1, 3)');
+describe('P1 — `Nothing` is kept as an element (§3.G)', () => {
+  test('List / Set / Sequence / Tuple keep Nothing', () => {
+    expect(ce.box(['List', 1, 'Nothing', 3]).toString()).toBe('[1,"Nothing",3]');
+    expect(ce.box(['Set', 1, 'Nothing', 3]).toString()).toBe(
+      'Set(1, 3, "Nothing")'
+    );
     expect(ce.box(['Tuple', 1, 'Nothing', 3]).toString()).toBe('(1, "Nothing", 3)');
-    // A Sequence splices into its host operator list (Add erases too).
+    // A Sequence splices into its host operator list.
     expect(ce.box(['List', 1, ['Sequence', 'Nothing', 2], 3]).toString()).toBe(
-      '[1,2,3]'
+      '[1,"Nothing",2,3]'
     );
   });
 
-  test('erasure applies to an operand that EVALUATES to `Nothing` (route parity)', () => {
+  test('an operand that EVALUATES to `Nothing` is kept too (route parity)', () => {
     // `First([])`... is a marker, not Nothing; use an explicit Nothing-valued
     // computation: an element of a list literal that evaluates to `Nothing`.
     const engine = new ComputeEngine();
@@ -105,17 +107,19 @@ describe('P1 — `Nothing` erasure (§3.G)', () => {
       3,
     ]);
     engine.assign('x', 1);
-    expect(literal.evaluate().toString()).toBe('[1,3]');
+    expect(literal.evaluate().toString()).toBe('[1,"Nothing",3]');
 
     // A lazy `Map` whose callback answers `Nothing` is not a literal: it has
     // 3 elements (`Length`, `.at()`, `.each()`), and its printed value keeps
-    // them. Before, it printed `[]`. Turning the view into a list erases
-    // them, as a list literal does (user decision 2026-10-20).
+    // them. Before, it printed `[]`. Turning the view into a list keeps
+    // them, as a list literal does.
     const mapped = ce
       .box(['Map', ['Function', 'Nothing', 'x'], ['List', 1, 2, 3]])
       .evaluate();
     expect(mapped.toString()).toBe('["Nothing","Nothing","Nothing"]');
-    expect(mapped.evaluate({ materialization: true }).toString()).toBe('[]');
+    expect(mapped.evaluate({ materialization: true }).toString()).toBe(
+      '["Nothing","Nothing","Nothing"]'
+    );
   });
 
   test('a literal `Missing` is PRESERVED (position kept)', () => {
@@ -124,10 +128,9 @@ describe('P1 — `Nothing` erasure (§3.G)', () => {
     expect(l.evaluate().ops?.length).toBe(3);
   });
 
-  test('a dictionary entry whose VALUE is `Nothing` is erased; a `Missing` value is kept', () => {
+  test('a dictionary entry whose VALUE is `Nothing` or `Missing` is kept', () => {
     const d = ce.box(['Dictionary', ['Tuple', { str: 'a' }, 'Nothing']]);
-    // The Nothing value erases the entry.
-    expect(d.evaluate().get?.('a')).toBeUndefined();
+    expect(d.evaluate().get?.('a')?.symbol).toBe('Nothing');
     const d2 = ce.box(['Dictionary', ['Tuple', { str: 'a' }, 'Missing']]);
     expect(d2.get?.('a')?.symbol).toBe('Missing');
   });

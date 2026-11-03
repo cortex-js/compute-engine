@@ -231,12 +231,11 @@ describe('Numerator, Denominator and NumeratorDenominator keep extra operands', 
     }
   );
 
-  // An empty `Sequence` or a `Nothing` operand is not an operand, as in the
-  // canonical form of every operator: the call is a one-operand call.
+  // An empty `Sequence` operand is not an operand, as in the canonical form
+  // of every operator: the call is a one-operand call. (A `Nothing` operand
+  // is an operand like any other.)
   test.each([
     [['Numerator', ['Divide', 'a', 'b'], ['Sequence']], 'a'],
-    [['Numerator', ['Divide', 'a', 'b'], 'Nothing'], 'a'],
-    [['Denominator', 5, 'Nothing'], 1],
     [
       ['NumeratorDenominator', ['Divide', 'a', 'b'], ['Sequence']],
       ['Tuple', 'a', 'b'],

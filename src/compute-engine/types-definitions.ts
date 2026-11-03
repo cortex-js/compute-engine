@@ -2246,10 +2246,14 @@ export interface ArithmeticDefinition {
   ): Expression | undefined;
 
   /**
-   * Whether the value `value` of this kind is exact, for the rule that an
-   * inexact operand turns an `Indeterminate` answer into `NaN`
-   * (`Max(x, Indeterminate)` is `NaN` when `x` is inexact). Absent: a value
+   * Whether the value `value` of this kind is exact. Absent: a value
    * of the kind is exact. A measurement is never exact.
+   *
+   * The engine does not read this hook now. It is kept for compatibility
+   * with kind definitions that declare it.
+   *
+   * @deprecated The engine does not read it: an exact form with no value
+   * gives `NaN`, whether its operands are exact or not.
    */
   isExact?(value: Expression): boolean;
 

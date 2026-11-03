@@ -156,7 +156,7 @@ function convertMagnitude(
 
 // The error terms of the `Measurement` combinators multiply a value by the
 // square of a zero error, and for an infinite value that product is
-// `Indeterminate`: `2 · Quantity(+∞, m)` gave `(+∞ ± Indeterminate) m`. The
+// `NaN`: `2 · Quantity(+∞, m)` gave `(+∞ ± NaN) m`. The
 // helpers below use the combinators only when an operand is a `Measurement`,
 // and plain expression arithmetic otherwise.
 

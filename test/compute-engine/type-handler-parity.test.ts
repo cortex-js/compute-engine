@@ -245,7 +245,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // `Sign` keeps the ranged tier for a proven extended real, and takes the
     // complex sign `z/|z|` off the real line (carrier
     // `complex | signed_infinity | ~oo`, result `complex` there); `~oo` has
-    // no direction, so `Sign(~oo)` is `Indeterminate`, typed `nan`.
+    // no direction, so `Sign(~oo)` is `NaN`, typed `nan`.
     expect(ce.box(['Sign', -2] as any).type.toString()).toBe('integer<-1..1>');
     expect(ce.box(['Sign', 's'] as any).type.toString()).toBe('integer<-1..1>');
     expect(ce.box(['Sign', NAN] as any).type.toString()).toBe('nan');

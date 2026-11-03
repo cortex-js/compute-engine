@@ -38,7 +38,7 @@ describe('off the real line', () => {
   test('complex infinity has no direction', () => {
     const e = ce.box(['Sign', 'ComplexInfinity']);
     expect(e.isValid).toBe(true);
-    expect(e.evaluate().toString()).toBe('Indeterminate');
+    expect(e.evaluate().toString()).toBe('NaN');
     expect(e.N().toString()).toBe('NaN');
   });
 

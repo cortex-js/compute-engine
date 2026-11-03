@@ -442,12 +442,23 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         if (terms.length === 1) items.push(terms[0].written);
         else items.push(...termVariables());
       }
-      if (items.length === 1)
-        return ['PartialDerivative', items[0], sup] as MathJsonExpression;
+      // A marker with no degree (`\partial f`) has no degree operand, and
+      // a marker with no variable (`2\partial`) has no variable operand: a
+      // `Nothing` there would be kept as an operand.
+      const degree = sup === 'Nothing' ? [] : [sup];
+      const variables = items.filter((x) => x !== 'Nothing');
+      if (variables.length === 0)
+        return ['PartialDerivative', ...degree] as MathJsonExpression;
+      if (variables.length === 1)
+        return [
+          'PartialDerivative',
+          variables[0],
+          ...degree,
+        ] as MathJsonExpression;
       return [
         'PartialDerivative',
-        ['List', ...items],
-        sup,
+        ['List', ...variables],
+        ...degree,
       ] as MathJsonExpression;
     },
     precedence: 740,

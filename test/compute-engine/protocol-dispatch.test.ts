@@ -867,7 +867,7 @@ let q = Comparable.compare("a", "b")`
     // reference, `checkNumericArgs`' "primitive unknown → infer later" gate
     // missed it, and the multiplication rejected the operand with
     // `incompatible-type number/unknown` while the identical shape through a
-    // plain declared function worked. `unwrapIndeterminateSelf`
+    // plain declared function worked. `unwrapNaNSelf`
     // (engine-protocols.ts) reduces the top-level wrapper to the primitive.
     const e = new ComputeEngine();
     run(

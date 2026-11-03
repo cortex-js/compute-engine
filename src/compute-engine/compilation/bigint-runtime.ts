@@ -10,7 +10,7 @@
  * (a "pole": `n!` at `n < 0`, a division by zero, `0^0`) has no `bigint`
  * form, so the helper throws a `NonFiniteValue` that carries the `number`
  * the double mode gives for it: `Infinity` for the interpreter's `~oo`, and
- * `NaN` for its `Indeterminate`. The compiled entry catches it and returns
+ * `NaN` for its `NaN`. The compiled entry catches it and returns
  * that `number`. Every helper tests a zero divisor itself, so the native
  * `RangeError` of a `bigint` division by `0n` is never thrown.
  *

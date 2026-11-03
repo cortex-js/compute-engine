@@ -236,8 +236,8 @@ describe('Same-base products need no non-zero base (#415)', () => {
     // Canonicalization reduces 0^{-1} to ComplexInfinity, so the product is
     // 0·∞, which is indeterminate. It must not become 0^0 or 1.
     const expr = engine.box(['Multiply', ['Power', 0, 1], ['Power', 0, -1]]);
-    expect(expr.simplify().json).toEqual('Indeterminate');
-    expect(expr.evaluate().json).toEqual('Indeterminate');
+    expect(expr.simplify().json).toEqual('NaN');
+    expect(expr.evaluate().json).toEqual('NaN');
   });
 
   test('a provably infinite base is not combined', () => {

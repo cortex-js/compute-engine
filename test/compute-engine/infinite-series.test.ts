@@ -658,7 +658,7 @@ describe('Infinite product closed forms', () => {
 
     test('a common factor that hides a 0/0 factor declines', () => {
       // (k − 5)(k² − 1) / ((k − 5)k²) is the telescoping body with a hole
-      // at k = 5: the finite product over k = 2…10 is Indeterminate, so the
+      // at k = 5: the finite product over k = 2…10 is NaN, so the
       // infinite product must not be (a − 1)/a. The same with the factor
       // expanded away: (4k³ − 16k² − k + 4)/(4k³ − 16k²) = (4k² − 1)(k − 4)
       // / (4k²(k − 4)) is the Wallis body with a hole at k = 4.

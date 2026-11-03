@@ -72,8 +72,10 @@ describe('non-numeric value in a numeric evaluate handler errors', () => {
       2,
       3,
     ]);
-    // Absence markers propagate (here: lifted at flatten), never error.
-    expect(ce.box(['Multiply', 0, 'Nothing']).evaluate().json).toEqual(0);
+    // `Nothing` is not a number: it is an `incompatible-type` error.
+    expect(
+      JSON.stringify(ce.box(['Multiply', 0, 'Nothing']).evaluate().json)
+    ).toMatch(/incompatible-type/);
   });
 
   test('Epsil route: a branch-hidden string binding still surfaces an error', () => {

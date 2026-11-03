@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 // `Floor`, `Ceil`, `Round` and `Truncate` of `~oo` (a pole: `5/0`,
 // `Tan(π/2)`) are `~oo`, as the rounding of `±∞` is `±∞`. `Fract` and
-// `Sign` have no value at `~oo`: `Indeterminate` on the exact route, `NaN`
+// `Sign` have no value at `~oo`: `NaN` on the exact route, `NaN`
 // under `.N()`. Before 2026-10-17, each of these was an
 // `incompatible-type` error, because `~oo` was outside the carrier.
 //
@@ -95,7 +95,7 @@ describe('Fract and Sign have no value at ~oo', () => {
       test(`${op}(${name})`, () => {
         const e = box([op, pole]);
         expect(e.isValid).toBe(true);
-        expect(e.evaluate().toString()).toBe('Indeterminate');
+        expect(e.evaluate().toString()).toBe('NaN');
         expect(e.N().toString()).toBe('NaN');
       });
 

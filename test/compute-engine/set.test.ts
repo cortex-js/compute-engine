@@ -156,7 +156,7 @@ describe('ELEMENT', () => {
   // set must stay unevaluated (three-valued logic), not collapse to `False`.
   test('Element of a symbol of indeterminate type stays unevaluated', () => {
     ce.declare('g3a', 'unknown');
-    // Indeterminate: g3a could be a real / integer, so neither True nor False.
+    // NaN: g3a could be a real / integer, so neither True nor False.
     expect(ce.expr(['Element', 'g3a', 'RealNumbers']).evaluate().json).toEqual([
       'Element',
       'g3a',

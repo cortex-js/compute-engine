@@ -1444,7 +1444,7 @@ describe('a valueless collection-typed operand of a lazy collection operator', (
         .box(['Join', ['List', 1], 'Nothing'])
         .evaluate()
         .toString()
-    ).toBe('[1]');
+    ).toBe('[1,"Nothing"]');
     expect(
       ce
         .box(['Join', ['List', 1], ['List']])

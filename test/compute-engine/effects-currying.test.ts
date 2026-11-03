@@ -20,7 +20,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * only the prefix was simplified before the remaining arguments were known,
  * so the curried value could differ from the full call (`(x, y) ↦ x·y`
  * applied to `0`, then to `∞`, gave `0`; the full call is
- * `Indeterminate`). The branch never throws: `makeLambda` declines by
+ * `NaN`). The branch never throws: `makeLambda` declines by
  * returning `undefined`, and the currying branch always returns a residual
  * `Function` literal.
  *

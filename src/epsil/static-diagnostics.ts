@@ -1616,7 +1616,7 @@ function variableRedeclarationDiagnostic(
 /**
  * The names a `Declare` statement declares, read from the raw AST: the symbol
  * target, or each leaf of a destructuring tuple pattern (`let (p, q) = t`).
- * `_` discards a component and `Nothing` is the erasure marker; neither
+ * `_` discards a component and `Nothing` is a value, not a name; neither
  * declares. Empty for any other statement — assignment (`x = …`) is not a
  * declaration. Shared by the static pass and the runtime tier of
  * `executeEpsil`, so the two describe the same statement.

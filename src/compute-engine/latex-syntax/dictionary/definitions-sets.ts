@@ -22,7 +22,6 @@ import {
   POSTFIX_PRECEDENCE,
 } from '../types.js';
 import {
-  hasTrailingEmptySegment,
   tryInferRangeFromElements,
 } from './definitions-core.js';
 import { OPEN_DELIMITER_PREFIX } from '../parse.js';
@@ -1305,16 +1304,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       // LHS (mirrors the single-Colon discriminator above). A final non-Colon
       // element, if present, becomes the default: True, default.
       if (h === 'Sequence') {
-        // A trailing comma (`{1, 2,}`, `{x < 0 : 1, x,}`) arrives as a final
-        // `Nothing` element. Drop it here so it neither breaks the piecewise
-        // detection below nor lands inside a set-builder condition. The
-        // marker is recognized from the SPELLING (an empty token segment,
-        // recorded by the comma parselet), never from the parsed value being
-        // the symbol `Nothing`: an authored `{x < 0 : 1, \mathrm{Nothing}}` is
-        // a piecewise with an explicit default and must keep it.
-        let elements = operands(body);
-        if (elements.length > 1 && hasTrailingEmptySegment(body))
-          elements = elements.slice(0, -1);
+        // A trailing comma (`{1, 2,}`, `{x < 0 : 1, x,}`) is dropped by the
+        // comma parselet. An authored `{x < 0 : 1, \mathrm{Nothing}}` is a
+        // piecewise with an explicit default and keeps it.
+        const elements = operands(body);
         const colonElements = elements.filter((el) => operator(el) === 'Colon');
         const allPiecewise =
           colonElements.length > 0 &&

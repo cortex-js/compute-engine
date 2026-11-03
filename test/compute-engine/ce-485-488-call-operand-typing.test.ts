@@ -54,7 +54,7 @@ describe('AN OPERAND TYPED any AT A DECLARED SCALAR PARAMETER (CE-485)', () => {
   test('Map over a list<any> admits a list element', () => {
     const expr = ce.box(['Map', 'k', 'L']);
     expect(expr.type.toString()).toBe(
-      'list<indexed_collection<any> | missing | nothing | real>'
+      'list<indexed_collection<any> | missing | real>'
     );
     const local = new ComputeEngine();
     local.declare('k', '(real) -> real');

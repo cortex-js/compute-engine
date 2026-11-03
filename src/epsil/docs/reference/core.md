@@ -50,22 +50,23 @@ Four values mark that a value is absent. They do not behave the same way.
 
 | Value       | Meaning                                                                   |
 | :---------- | :------------------------------------------------------------------------ |
-| `nothing`   | No value at all. It is removed from argument lists and collection literals. |
+| `nothing`   | The value of an empty block or of a statement with no value. It is kept where it is written. |
 | `missing`   | A position exists, but its value is absent (R `NA`, Julia `missing`).      |
 | `Undefined` | The result is not defined.                                                 |
 | `NaN`       | A number that is not defined (Not a Number).                              |
 
-`nothing` disappears where it is written. `missing` keeps its position, and an
-arithmetic operation on it gives `missing`:
+`nothing` is kept where it is written, and an arithmetic operation on it is a
+type error. `missing` keeps its position, and an arithmetic operation on it
+gives `missing`:
 
 ```epsil
 [12, nothing, 34]
-// ➔ [12, 34]
+// ➔ [12,"Nothing",34]
 ```
 
 ```epsil
-[nothing + 1, missing + 1]
-// ➔ [1, "Missing"]
+[missing + 1, 2]
+// ➔ ["Missing",2]
 ```
 
 `isMissing` is true for `missing` and `NaN`. `Coalesce` returns
@@ -389,7 +390,7 @@ arc(A, B, C)
 
 `(any) -> unknown`
 
-Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.
+Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`). `Nothing` is the value of an empty block, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.
 
 ```epsil
 [1, 2][1]?!
@@ -498,7 +499,7 @@ characters("héllo")
 
 `(any+) -> unknown`
 
-Return the first operand that is not ABSENT (`Missing`, `NaN`, or `Indeterminate`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.
+Return the first operand that is not ABSENT (`Missing`, `NaN`, or a point whose coordinates are all `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent). `Nothing` passes through without selecting a fallback.
 
 ```epsil
 Coalesce(missing, NaN, 3, 4)
@@ -862,7 +863,7 @@ isError(1 + 1)
 
 MathJSON `IsMissing` · `(any) -> boolean`
 
-True for `Missing`, `NaN`, or `Indeterminate`, regardless of provenance. `Nothing` is not an absent datum.
+True for `Missing`, `NaN`, or a point whose coordinates are all `NaN`, regardless of provenance. `Nothing` is not an absent datum.
 
 ```epsil
 [isMissing(missing), isMissing(NaN), isMissing(0)]
@@ -970,11 +971,12 @@ Reaching this definition therefore means the carrier was NOT consumed — the ca
 
 MathJSON `Nothing` · variable `nothing`
 
-The absence of a value; the sole member of the unit type.
+The value of an empty block or of a statement with no value; the sole member
+of the unit type. A list keeps it as an element.
 
 ```epsil
 [1, nothing, 2]
-// ➔ [1,2]
+// ➔ [1,"Nothing",2]
 ```
 
 ### numberFrom

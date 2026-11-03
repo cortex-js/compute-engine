@@ -1,5 +1,5 @@
 import type { Expression } from '../global-types.js';
-import { isNumber, isSymbol, indeterminateFormAnswer } from './type-guards.js';
+import { isNumber, isSymbol } from './type-guards.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 import { typeCouldBeUnkeyedCollection } from '../collection-utils.js';
 
@@ -92,10 +92,9 @@ function lnBaseSign(base: Expression): 'positive' | 'negative' | 'complex' {
  * a value is the real infinity `+∞`),
  * `ln(~oo) = ~oo` (the modulus grows without bound in every direction), and
  * the quotient rules `finite/0 = ~oo`, `finite/∞ = 0`, and the
- * indeterminate forms `∞/∞` and `0/0` (`Indeterminate`, or `NaN` with a
- * float operand). So `Log(8, 1) = ~oo`, `Log(8, 0) = 0`,
- * `Log(0, 1/2) = +∞`, `Log(+∞, +∞) = Indeterminate`,
- * `Log(1, 1) = Indeterminate`, `Log(8, ~oo) = 0`.
+ * indeterminate forms `∞/∞` and `0/0` (`NaN`). So `Log(8, 1) = ~oo`, `Log(8, 0) = 0`,
+ * `Log(0, 1/2) = +∞`, `Log(+∞, +∞) = NaN`,
+ * `Log(1, 1) = NaN`, `Log(8, ~oo) = 0`.
  *
  * `NaN` in either operand propagates. An operand with no known value has
  * no exceptional-point answer, with one generic-point exception: `Log(1, b)`
@@ -144,17 +143,16 @@ export function logarithmAtExceptionalPoint(
   }
 
   // `ln base = 0` (base 1): a non-zero numerator over 0 is `~oo`; `0/0` is
-  // the indeterminate form (`Indeterminate`, or `NaN` with a float operand,
-  // see `indeterminateFormAnswer()`).
+  // the indeterminate form (`NaN`).
   if (d === 'one')
     return n === 'one'
-      ? indeterminateFormAnswer(ce, [x, base!])
+      ? ce.NaN
       : ce.ComplexInfinity;
 
   // An infinite `ln base` (base 0, ±∞, or ~oo): a finite numerator gives 0,
   // an infinite one the indeterminate form `∞/∞`.
   if (isInfinitePoint(d!))
-    return isInfinitePoint(n) ? indeterminateFormAnswer(ce, [x, base!]) : zero;
+    return isInfinitePoint(n) ? ce.NaN : zero;
 
   // A finite base other than 0 and 1: `ln base` is finite and non-zero.
   if (n === 'finite') return undefined;

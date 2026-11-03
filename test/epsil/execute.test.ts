@@ -983,16 +983,14 @@ describe('EPSIL EXECUTE — error propagation', () => {
     expect(value.re).toBe(99);
   });
 
-  test('`Nothing` is erased from the argument list on every route', () => {
-    const nullary = run('let f = x => x + 1\nf()').value.toString();
-    expect(run('let f = x => x + 1\nf(Nothing)').value.toString()).toBe(
-      nullary
-    );
+  test('`Nothing` is an argument like any other on every route', () => {
+    const direct = run('let f = x => x + 1\nf(Nothing)').value.toString();
+    expect(direct).not.toBe(run('let f = x => x + 1\nf()').value.toString());
     expect(run('let f = x => x + 1\nNothing |> f').value.toString()).toBe(
-      nullary
+      direct
     );
     expect(run('let f = x => x + 1\nApply(f, Nothing)').value.toString()).toBe(
-      nullary
+      direct
     );
   });
 });
@@ -1368,8 +1366,10 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
     expect(run('[0, ...(1..oo)] |> Take(3)').value.toString()).toBe('[0,1,2]');
   });
 
-  test('`Nothing` erasure still applies around spreads', () => {
-    expect(run('[1, Nothing, ...[2]]').value.toString()).toBe('[1,2]');
+  test('a `Nothing` element is kept around spreads', () => {
+    expect(run('[1, Nothing, ...[2]]').value.toString()).toBe(
+      '[1,"Nothing",2]'
+    );
   });
 
   test('set spread splices and deduplicates', () => {

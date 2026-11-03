@@ -210,7 +210,7 @@ describe('Tycho row 428: a Gaussian with a symbolic coefficient', () => {
 
     test('∞·c − ∞·c is the indeterminate form', () => {
       expect(ce.parse('\\infty c - \\infty c').evaluate().toString()).toBe(
-        'Indeterminate'
+        'NaN'
       );
     });
 
@@ -219,7 +219,7 @@ describe('Tycho row 428: a Gaussian with a symbolic coefficient', () => {
       expect(ce.parse('\\infty c + \\infty').evaluate().toString()).toBe('+oo * c + oo');
       expect(ce.parse('\\infty c - \\infty').evaluate().toString()).toBe('+oo * c - oo');
       expect(ce.parse('\\infty c + \\infty - \\infty').evaluate().toString()).toBe(
-        'Indeterminate'
+        'NaN'
       );
     });
 

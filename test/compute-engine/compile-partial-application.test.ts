@@ -155,18 +155,18 @@ describe('PARTIAL APPLICATION — the interpreter', () => {
     const ce = engine();
     const value = (json: MathJsonExpression) => ce.box(json).evaluate().json;
     expect(value(['Apply', ['Apply', M, 0], 'PositiveInfinity'])).toBe(
-      'Indeterminate'
+      'NaN'
     );
-    expect(value(['Apply', M, 0, 'PositiveInfinity'])).toBe('Indeterminate');
-    expect(value(['Apply', ['Apply', D, 2], 0])).toBe('Indeterminate');
-    expect(value(['Apply', D, 2, 0])).toBe('Indeterminate');
+    expect(value(['Apply', M, 0, 'PositiveInfinity'])).toBe('NaN');
+    expect(value(['Apply', ['Apply', D, 2], 0])).toBe('NaN');
+    expect(value(['Apply', D, 2, 0])).toBe('NaN');
     // A chain of two currying steps: the second step curries the residual
     // of the first one the same way. Before, the residual was pure for the
     // interpreter and `F(1)(0)(∞)` was `1`.
     expect(
       value(['Apply', ['Apply', ['Apply', F, 1], 0], 'PositiveInfinity'])
-    ).toBe('Indeterminate');
-    expect(value(['Apply', F, 1, 0, 'PositiveInfinity'])).toBe('Indeterminate');
+    ).toBe('NaN');
+    expect(value(['Apply', F, 1, 0, 'PositiveInfinity'])).toBe('NaN');
     expect(value(['Apply', ['Apply', ['Apply', F, 1], 2], 3])).toBe(7);
   });
 

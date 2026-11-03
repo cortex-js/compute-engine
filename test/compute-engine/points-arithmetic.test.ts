@@ -2559,14 +2559,14 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
     ).toBe('[~oo,~oo]');
   });
 
-  test('each element takes its own degenerate answer: 0/0 = Indeterminate per slot', () => {
+  test('each element takes its own degenerate answer: 0/0 = NaN per slot', () => {
     const ce = new ComputeEngine();
     expect(
       ce
         .box(['Divide', ['List', 0, 1], 0])
         .evaluate()
         .toString()
-    ).toBe('[Indeterminate,~oo]');
+    ).toBe('[NaN,~oo]');
   });
 
   test('a vector and a matrix numerator broadcast recursively', () => {
@@ -2689,7 +2689,7 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
     const ce = new ComputeEngine();
     expect(ce.box(['Divide', 1, 0]).evaluate().toString()).toBe('~oo');
     expect(ce.box(['Divide', 0, 0]).evaluate().toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     // `x` may be zero, so the quotient waits for its value (ROADMAP CE-95).
     expect(ce.box(['Divide', 'x', 0]).evaluate().toString()).toBe('x / 0');
@@ -2702,7 +2702,7 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
 describe('A zero element times a non-finite factor has no value on every route', () => {
   /**
    * The product twin of the degenerate-divisor suite above. `0 · ±∞` and
-   * `0 · ~oo` are indeterminate forms (`Indeterminate`; `NaN` under N()),
+   * `0 · ~oo` are indeterminate forms (`NaN`; `NaN` under N()),
    * and `0 · NaN` is `NaN`: the scalar canonical
    * fold answered NaN, but three sibling routes answered `0` — the
    * `Product.mul` zero arm did not recognize the unsigned `~oo` in its
@@ -2711,20 +2711,20 @@ describe('A zero element times a non-finite factor has no value on every route',
    * fastpaths annihilated a non-finite cofactor with zero.
    */
 
-  test('the broadcast element answers Indeterminate, like the scalar product', () => {
+  test('the broadcast element answers NaN, like the scalar product', () => {
     const ce = new ComputeEngine();
     expect(
       ce
         .box(['Multiply', ['List', 0, 1], 'ComplexInfinity'])
         .evaluate()
         .toString()
-    ).toBe('[Indeterminate,~oo]');
+    ).toBe('[NaN,~oo]');
     expect(
       ce
         .box(['Multiply', ['List', 0, 1], 'PositiveInfinity'])
         .evaluate()
         .toString()
-    ).toBe('[Indeterminate,+oo]');
+    ).toBe('[NaN,+oo]');
     expect(
       ce
         .box(['Multiply', ['List', 0, 1], 'ComplexInfinity'])
@@ -2745,27 +2745,27 @@ describe('A zero element times a non-finite factor has no value on every route',
     const zero = ce.number(0);
     const coo = ce.ComplexInfinity;
     expect(ce._fn('Multiply', [coo, zero]).evaluate().toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     expect(ce._fn('Multiply', [zero, coo]).evaluate().toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
   });
 
-  test('the .mul() method routes answer Indeterminate for an infinite cofactor, NaN for NaN', () => {
+  test('the .mul() method routes answer NaN for an infinite cofactor, NaN for NaN', () => {
     const ce = new ComputeEngine();
     const zero = ce.number(0);
     // Boxed-expression right-hand sides.
     expect(zero.mul(ce.box('PositiveInfinity')).toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
-    expect(zero.mul(ce.ComplexInfinity).toString()).toBe('Indeterminate');
+    expect(zero.mul(ce.ComplexInfinity).toString()).toBe('NaN');
     expect(zero.mul(ce.NaN).toString()).toBe('NaN');
     // JS-number right-hand sides.
-    expect(ce.box('PositiveInfinity').mul(0).toString()).toBe('Indeterminate');
-    expect(ce.ComplexInfinity.mul(0).toString()).toBe('Indeterminate');
+    expect(ce.box('PositiveInfinity').mul(0).toString()).toBe('NaN');
+    expect(ce.ComplexInfinity.mul(0).toString()).toBe('NaN');
     expect(ce.NaN.mul(0).toString()).toBe('NaN');
-    expect(zero.mul(Infinity).toString()).toBe('Indeterminate');
+    expect(zero.mul(Infinity).toString()).toBe('NaN');
     // Finite cofactors still annihilate.
     expect(zero.mul(5).toString()).toBe('0');
     expect(ce.number(5).mul(0).toString()).toBe('0');

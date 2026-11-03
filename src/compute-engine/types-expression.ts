@@ -2345,13 +2345,11 @@ export interface Expression {
 
   /**
    * If true, the value of this expression is a number with no value: either
-   * `NaN` or `Indeterminate`.
+   * `NaN`.
    *
    * `NaN` ("Not a Number", from the floating point format standard IEEE-754)
-   * is the result of a floating-point computation with no value, such as
-   * `0.0/0.0`, and the marker of an absent numeric operand. `Indeterminate`
-   * is the result of an exact form with no value, such as `0/0`. Both report
-   * `isNaN === true`; `isIndeterminate` tells them apart.
+   * is the result of a computation with no value, such as `0.0/0.0` or
+   * `0/0`, and the marker of an absent numeric operand.
    *
    * Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
    * number).
@@ -2360,23 +2358,6 @@ export interface Expression {
    *
    */
   readonly isNaN: boolean | undefined;
-
-  /**
-   * If true, this expression is the `Indeterminate` number literal
-   * (`ce.Indeterminate`): the exact answer to an indeterminate form such as
-   * `0/0`, a number with no value.
-   *
-   * Its double value is `NaN`, so `isNaN` is also true. It differs from the
-   * `NaN` literal, which is the result of a floating-point computation that
-   * failed: the two are different values (`isSame` is false between them).
-   * A numeric approximation (`.N()`) of `Indeterminate` is `NaN`.
-   *
-   * `false` for every other expression, including an unevaluated expression
-   * whose value would be `Indeterminate`.
-   *
-   * @category Numeric Expression
-   */
-  readonly isIndeterminate: boolean;
 
   /**
    * The numeric value of this expression is `±Infinity` or ComplexInfinity.

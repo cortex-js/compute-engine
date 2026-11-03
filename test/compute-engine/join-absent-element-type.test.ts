@@ -331,7 +331,7 @@ describe('A DECLARED CALLBACK ON AN ABSENT CELL', () => {
     // missing>`, but it holds the value.
     [
       ['Map', 'Sqrt', ['Take', 'L', 3]],
-      'list<complex | indexed_collection<any> | infinity | missing | nothing>',
+      'list<complex | indexed_collection<any> | infinity | missing>',
       '[1,"Missing",sqrt(3)]',
     ],
     // An absent point gives an absent point.
@@ -500,13 +500,13 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
     // `Sqrt` maps over: the element of the result is a number or a list.
     [
       ['Map', 'Sqrt', 'B'],
-      'list<complex | indexed_collection<any> | infinity | missing | nothing>',
+      'list<complex | indexed_collection<any> | infinity | missing>',
     ],
     // `g` has only scalar parameters, so it maps over an element that is a
     // list, as `Sqrt` does (ROADMAP CE-485).
     [
       ['Map', 'g', 'B'],
-      'list<indexed_collection<any> | integer | missing | nothing>',
+      'list<indexed_collection<any> | integer | missing>',
     ],
   ])('%j', (json, type) => {
     const expr = ce4.box(json as any);

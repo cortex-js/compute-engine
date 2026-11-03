@@ -5,9 +5,9 @@ import { isSubtype } from '../../src/common/type/subtype';
 import { expectTypeBetween } from '../utils';
 import { parseEpsil, resolveLibraryNames } from '../../src/epsil';
 
-describe('Map omission inference preserves the remaining data contract', () => {
+describe('Map result-type inference preserves the remaining data contract', () => {
   test.each(['any', 'list<any>'])(
-    '%s retains nested collections, missing data and omission',
+    '%s retains nested collections and missing data',
     (type) => {
       const ce = new ComputeEngine();
       ce.declare('xs', type);
@@ -15,10 +15,10 @@ describe('Map omission inference preserves the remaining data contract', () => {
       const map = ce.box(['Map', 'Sqrt', 'xs']);
       // `Sqrt(Missing)` is `Missing`, so the elements can be absent.
       expectTypeBetween(map, {
-        atMost: 'list<indexed_collection<any> | missing | number | nothing>',
+        atMost: 'list<indexed_collection<any> | missing | number>',
       });
       expect(isSubtype('nothing', collectionElementType(map.type.type)!)).toBe(
-        true
+        false
       );
       const value = map.evaluate({ materialization: true });
       expect(isSubtype(value.type.type, map.type.type)).toBe(true);
@@ -55,7 +55,7 @@ describe('Map omission inference preserves the remaining data contract', () => {
   );
 });
 
-describe('compiled Map proves omission separately from a broad result type', () => {
+describe('compiled Map proves a possible Nothing separately from a broad result type', () => {
   test.each([[7], [['Multiply', 2, 'u']]])(
     'a tuple callback returning %j compiles',
     (body) => {
@@ -89,7 +89,7 @@ describe('compiled Map proves omission separately from a broad result type', () 
       ['Block', ['If', 'c', ['Return', 'Nothing']], 7],
       ['Return', ['Block', ['If', 'c', ['Return', 'Nothing']], 7]],
     ].map((body) => [body])
-  )('an omission on a return path remains refused: %j', (body) => {
+  )('a Nothing on a return path remains refused: %j', (body) => {
     const ce = new ComputeEngine();
     ce.declare('c', 'boolean');
     const map = ce.box(['Map', ['Function', body, 'u'], ['List', 1, 2]]);
@@ -203,7 +203,7 @@ describe('compiled Map proves omission separately from a broad result type', () 
     expect(numeric.run!({ flag: true })).toEqual([9, 9]);
   });
 
-  test('a numeric callback does not justify an omission-capable source', () => {
+  test('a numeric callback does not justify a source that can hold Nothing', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<any>');
     expect(compile(ce.box(['Map', ['Function', 7, 'u'], 'xs'])).success).toBe(
@@ -211,9 +211,13 @@ describe('compiled Map proves omission separately from a broad result type', () 
     );
   });
 
-  test('unconstrained aggregate parameters still need a non-omitting contract', () => {
+  test('an aggregate over an undeclared input compiles with the inferred numeric elements', () => {
     const ce = new ComputeEngine();
-    expect(compile(ce.box(['Mean', 'x'])).success).toBe(false);
+    // `x` is inferred `collection<number> | distribution | number` from the
+    // parameter of `Mean`: its elements cannot be `Nothing`.
+    const mean = compile(ce.box(['Mean', 'x']));
+    expect(mean.success).toBe(true);
+    expect(mean.run!({ x: [1, 3] })).toBe(2);
     ce.declare('ys', 'list<real>');
     expect(compile(ce.box(['Mean', 'ys'])).success).toBe(true);
   });

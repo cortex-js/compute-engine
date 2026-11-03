@@ -224,7 +224,7 @@ describe('Type-based membership refutation is sound (G15 ↔ G3)', () => {
     ce.pushScope();
     ce.declare('x', 'real');
     const result = ce.expr(['Element', 'x', 'Integers']).evaluate();
-    // Indeterminate: a finite real may or may not be an integer
+    // NaN: a finite real may or may not be an integer
     expect(result.symbol).not.toBe('True');
     expect(result.symbol).not.toBe('False');
     ce.popScope();

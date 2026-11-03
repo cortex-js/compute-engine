@@ -378,19 +378,10 @@ export function listedElement(
   // does (`materialize`, `boxed-function.ts`).
   if (isKeyed) return ce.function('Dictionary', elements);
   if (isSet) return ce.function('Set', elements);
-  // The listing turns the view into a list, and a list erases a `Nothing`
-  // element as a list literal does: with `m` the view
-  // `Map(x ↦ If(x > 1, Nothing, x), [1, 2])`, `[m]` is `[[1]]`, and the
-  // inner list has one element. The view itself keeps the `Nothing`
-  // (`m.count` is 2), and so does its display preview (`materializationSteps`
-  // in `boxed-function.ts`); no caller of this function is a display. With
-  // the `Nothing` kept, the inner list printed two elements but counted one,
-  // because the collection handlers of a `List` read it as a literal whose
-  // `Nothing` elements are erased (user decision 2026-10-20).
-  return ce._fn(
-    'List',
-    elements.filter((x) => !isSymbol(x, 'Nothing'))
-  );
+  // The listing turns the view into a list. A `Nothing` element is kept, as
+  // in a list literal: with `m` the view `Map(x ↦ If(x > 1, Nothing, x),
+  // [1, 2])`, `[m]` is `[[1, Nothing]]`.
+  return ce._fn('List', elements);
 }
 
 /**
@@ -455,8 +446,7 @@ export function listedLiteralElements(
 }
 
 /**
- * Splice the `Sequence` operands of a list literal into the list, and drop
- * its `Nothing` operands.
+ * Splice the `Sequence` operands of a list literal into the list.
  *
  * A collection operand (lazy or eager) is ONE element of the list, and stays
  * one element: `List(Range(1, 3))` has the count 1, so materializing it gives
@@ -467,7 +457,6 @@ export function listedLiteralElements(
 function enlist(xs: ReadonlyArray<Expression>): Expression[] {
   const result: Expression[] = [];
   for (const x of xs) {
-    if (isSymbol(x, 'Nothing')) continue;
     if (isFunction(x, 'Sequence')) result.push(...enlist([...x.ops]));
     else result.push(x);
   }
@@ -476,8 +465,7 @@ function enlist(xs: ReadonlyArray<Expression>): Expression[] {
 
 /**
  * The value of the `List` literal with the operands `ops`: each element is
- * evaluated, an element that evaluates to `Nothing` is removed, and each
- * finite lazy element is listed (`listedLiteralElements`). Under a
+ * evaluated, and each finite lazy element is listed (`listedLiteralElements`). Under a
  * materialization, the `Sequence` operands are spliced first (`enlist`), and
  * no element is listed: the materialization of each element does it.
  *
@@ -499,16 +487,9 @@ export function evaluatedListLiteral(
       ? op
       : op.evaluate({ numericApproximation, materialization });
   if (materialization) {
-    return ce._fn(
-      'List',
-      // `Nothing` is an ERASURE marker: an element that *evaluates* to
-      // `Nothing` is spliced out (`enlist` already drops syntactic ones).
-      enlist(ops)
-        .map(value)
-        .filter((op) => !isSymbol(op, 'Nothing'))
-    );
+    return ce._fn('List', enlist(ops).map(value));
   }
-  const elements = ops.map(value).filter((op) => !isSymbol(op, 'Nothing'));
+  const elements = ops.map(value);
   // A literal is a value: each finite lazy element is listed.
   return ce.function(
     'List',
@@ -541,8 +522,7 @@ export async function evaluatedListLiteralAsync(
     const result: Expression[] = [];
     const pacer = new EventLoopPacer();
     for (const op of xs) {
-      const value = keepsCell?.(op) ? op : await op.evaluateAsync(options);
-      if (!isSymbol(value, 'Nothing')) result.push(value);
+      result.push(keepsCell?.(op) ? op : await op.evaluateAsync(options));
       if (pacer.due) {
         await pacer.pace();
         if (options.signal?.aborted)

@@ -257,8 +257,8 @@ export function boxParameterDefault(
  * - A number that a JavaScript `number` holds exactly (a finite number,
  *   `NaN`, `PositiveInfinity`, `NegativeInfinity`) is a value. A rational
  *   (`["Rational", 1, 2]`), a number that a double does not hold exactly
- *   (`1.1234567890123456789`, `1e400`), a complex number,
- *   `ComplexInfinity` and `Indeterminate` are not.
+ *   (`1.1234567890123456789`, `1e400`), a complex number
+ *   and `ComplexInfinity` are not.
  * - `True` and `False` are the booleans; a string is a value.
  * - `["List"]` and `["Dictionary"]` with no operands are the empty list and
  *   the empty dictionary. A collection with elements is not a default value.
@@ -277,8 +277,7 @@ export function literalParameterDefault(
     const value = op.re;
     // The number is held exactly when the machine number prints as the same
     // MathJSON: a decimal with more digits than a double holds, a bignum
-    // integer outside the double range and `Indeterminate` (a NaN that is
-    // printed by its own name) print differently.
+    // integer outside the double range print differently.
     const same =
       JSON.stringify(op.engine.number(value).json) === JSON.stringify(op.json);
     return same ? { kind: 'value', value } : undefined;
@@ -688,7 +687,7 @@ export function signatureDefaultOperands(
  *   `missing` for the required parameter as it does without defaults, and a
  *   default is never moved into a required position.
  * - An operand that is absent (`Missing`, `NaN`,
- *   `Indeterminate`, a `NaN` point: the absence test of `Coalesce`,
+ *   a `NaN` point: the absence test of `Coalesce`,
  *   `isMissingValue()`) at
  *   a parameter with a default is replaced by the default too
  *   (`withAbsentDefaults()`). An operand that is present is never changed.
@@ -724,9 +723,10 @@ export function fillParameterDefaults(
  * leaves out: `(k: real | missing = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
  * and `f(At(L, 100))` with `L` a list of two elements. The default is then a
  * discharge of absence, as `Coalesce` is, and it uses the same absence test
- * (`isMissingValue()`): `Missing`, `NaN`, `Indeterminate` and a `NaN`
- * point are absent. `Nothing` is not: a written `Nothing` operand is removed before the
- * fill, so the parameter is left out and takes its default that way. A
+ * (`isMissingValue()`): `Missing`, `NaN` and a `NaN`
+ * point are absent. `Nothing` is not absent: a written `Nothing` operand is
+ * kept as the argument, so the parameter receives `Nothing` and its default
+ * is not used (`Apply((x, k = 2) ↦ k, 1, Nothing)` is `Nothing`). A
  * caller that needs to pass an absent value through a parameter declares no
  * default for it. (R6 of `docs/plans/2026-11-01-absent-value-contract.md`.)
  *

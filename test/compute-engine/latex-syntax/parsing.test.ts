@@ -896,6 +896,12 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
   });
 
   describe('Bare log with subscript', () => {
+    test('\\log_{}(x) → an empty base is no base', () => {
+      expect(ce.parse('\\log_{}(x)').json).toEqual(['Log', 'x']);
+      expect(ce.parse('\\log_{ }(x)').json).toEqual(['Log', 'x']);
+      expect(ce.parse('\\log_ {}(x)').json).toEqual(['Log', 'x']);
+    });
+
     test('log_2(x) → base 2', () => {
       expect(ce.parse('log_2(x)', { strict: false })).toMatchInlineSnapshot(
         `["Log", "x", 2]`

@@ -25,7 +25,6 @@ import {
   matchesNumber,
   matchesString,
   matchesSymbol,
-  operator as mathJsonOperator,
   stringValue,
   symbol,
 } from '../../math-json/utils.js';
@@ -160,7 +159,6 @@ import {
   isSymbol,
   isAbsentSymbol,
   adoptsForeignEngineObject,
-  indeterminateFormAnswer,
 } from './type-guards.js';
 import {
   functionLiteralParameterType,
@@ -390,9 +388,8 @@ function boxHold(
   // Only an ABSENT operand (`['Hold']`, or a `null` hole in the MathJSON) is
   // reported as missing. A held operand is kept as written: `Nothing` and an
   // empty `Sequence` are values of the held expression, not absent operands.
-  // `ReleaseHold` canonicalizes them later, and only then is `Nothing` erased
-  // from a list or from the arguments of a function (docs/ERROR-MODEL.md,
-  // "Nothing is an erasure marker").
+  // `ReleaseHold` canonicalizes them later, and only then is an empty
+  // `Sequence` spliced out of a list or of the arguments of a function.
   if (expr === null || expr === undefined) return ce.error('missing');
 
   if (typeof expr === 'string') return box(ce, expr, options);
@@ -689,14 +686,11 @@ function boxFunctionInternal(
         const d = asBigint(ops[1]);
         if (d !== null) {
           // Handle division by zero: a/0 = ~∞ (a pole), and 0/0 is the
-          // indeterminate form `Indeterminate`. A float operand (`0.0`) does
+          // indeterminate form `NaN`. A float operand (`0.0`) does
           // not reach this fold (see above).
           if (d === 0n)
             return n === 0n
-              ? indeterminateFormAnswer(ce, [
-                  box(ce, ops[0], options),
-                  box(ce, ops[1], options),
-                ])
+              ? ce.NaN
               : ce.ComplexInfinity;
           return ce.number([n, d], options);
         }
@@ -829,9 +823,6 @@ function boxFunctionInternal(
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof BigDecimal) return ce.number(op1.neg(), options);
       const boxedop1 = ce.expr(op1, options);
-      // `-Indeterminate` is `Indeterminate`: the literal rebuilt from its
-      // value would be the `NaN` literal, a different value.
-      if (isNumber(boxedop1) && boxedop1.isIndeterminate) return boxedop1;
       if (isNumber(boxedop1)) {
         const num = boxedop1.numericValue;
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);
@@ -2960,10 +2951,9 @@ function suppliedOperandCount(xs: ReadonlyArray<Expression>): number {
  * gets no default; `F(Sequence(3))` gets one.
  *
  * `defaults` is `undefined` for an operator whose signature has no default,
- * and the operands are then returned as they are. For an operator with a
- * default, a written `Nothing` operand is removed first, as `flatten` removes
- * it on the route of an operator without a handler: otherwise it would
- * occupy a position and keep the default out.
+ * and the operands are then returned as they are. A written `Nothing`
+ * operand occupies its position, as on the route of an operator without a
+ * handler.
  */
 function withHandlerDefaults(
   xs: ReadonlyArray<Expression>,
@@ -2971,15 +2961,7 @@ function withHandlerDefaults(
   defaults: ReadonlyArray<Expression | undefined> | undefined
 ): ReadonlyArray<Expression> {
   if (defaults === undefined) return xs;
-  const ops = xs.some((x) => isSymbol(x, 'Nothing'))
-    ? xs.filter((x) => !isSymbol(x, 'Nothing'))
-    : xs;
-  return fillParameterDefaults(
-    ops,
-    signature,
-    defaults,
-    suppliedOperandCount(ops)
-  );
+  return fillParameterDefaults(xs, signature, defaults, suppliedOperandCount(xs));
 }
 
 function makeCanonicalFunction(
@@ -3044,7 +3026,7 @@ function makeCanonicalFunctionCore(
   //
   if (name === 'List' && !named && !ops.some(isSpreadOperand)) {
     const boxedOps = boxOperands(ce, ops, RAW_OPERAND);
-    // `flatten` applies the two operand-list rules a collection literal owes
+    // `flatten` applies the operand-list rule a collection literal owes
     // its elements, and must stay in step with `canonicalList`
     // (library/collections.ts), which this fast path bypasses:
     // - `Sequence` is SPLICED — `[1, Sequence(2, 3), 4]` is the 4-element
@@ -3052,14 +3034,14 @@ function makeCanonicalFunctionCore(
     //   inlined here" marker and must never be STORED as an element; leaving
     //   it in place produced a 3-element list whose middle element was a
     //   `tuple<…>`.
-    // - `Nothing` is ERASED — `[12, Nothing, 34]` is a 2-element list. Use
-    //   `Missing` for an absent-but-positioned value.
+    // - `Nothing` is an element like any other: `[12, Nothing, 34]` is a
+    //   3-element list.
     //
     // `canonicalize: false` (the third argument): the operands were just made
     // canonical in `scope`, and `flatten` would otherwise re-canonicalize the
     // whole list in the AMBIENT scope the moment any one of them came back
     // non-canonical (an error node, a declined handler). `flatten` is wanted
-    // here only for the splice-and-erase step.
+    // here only for the splice step.
     let canonicalOps = flatten(
       canonical(ce, boxedOps, scope),
       undefined,
@@ -3902,8 +3884,7 @@ function makeCanonicalFunctionCore(
   // matched against the signature of the record that it holds then
   // (`BoxedFunction._reboxedForCallee()`). `Apply` has a canonical
   // handler, so the call is boxed again from its own operands: the names
-  // index them, so they are kept only when no operand was removed (an
-  // argument `Nothing` is erased).
+  // index them, so they are kept only when no operand was removed.
   if (
     fieldReceiver !== undefined &&
     writtenArguments !== undefined &&
@@ -4416,26 +4397,7 @@ function applyOperatorDefinition(
       ? boxInternal
       : box;
   const xs: Expression[] = [];
-  if (
-    ['Tuple', 'Single', 'Pair', 'Triple'].includes(name) &&
-    !opDef.isUserFunctionDefinition
-  ) {
-    // Expand explicit splices before an empty Sequence canonicalizes to
-    // Nothing. A written Nothing remains one coordinate of these containers.
-    for (const x of ops) {
-      const head =
-        x instanceof _BoxedExpression
-          ? x.operator
-          : mathJsonOperator(x as MathJsonExpression);
-      if (head === 'Sequence') {
-        const raw = boxOperands(ce, [x], RAW_OPERAND);
-        for (const y of flatten(raw, undefined, false, true))
-          xs.push(boxOne(ce, y));
-      } else xs.push(boxOne(ce, x));
-    }
-  } else {
-    for (const x of ops) xs.push(boxOne(ce, x));
-  }
+  for (const x of ops) xs.push(boxOne(ce, x));
 
   // A symbolic `Spread` operand (`f(...p)` where `p` is not a literal tuple
   // — a literal one already spliced to a `Sequence` when the operand
@@ -4665,8 +4627,8 @@ function applyOperatorDefinition(
   // inserted, not the defaults of the old one.
   const writtenArgs = args;
   // A parameter with a default value that the call leaves out receives its
-  // default operand, after `flatten` (which splices a `Sequence` and drops a
-  // written `Nothing`) and before the signature check.
+  // default operand, after `flatten` (which splices a `Sequence`) and before
+  // the signature check.
   if (defaults !== undefined)
     args = fillParameterDefaults(args, opDef.signature.type, defaults);
 

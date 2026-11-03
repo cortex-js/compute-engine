@@ -58,7 +58,7 @@ describe('A COMPLEX VALUE WITH AN INFINITE REAL PART AND A FINITE IMAGINARY PART
     expect(z.type.toString()).toBe('+oo');
     // `0 · ∞` is the indeterminate form (it was `0`)
     expect(ce.box(['Multiply', 0, ['Complex', POS, 1]]).evaluate().json).toBe(
-      'Indeterminate'
+      'NaN'
     );
     // `2 · ∞ = ∞` (it was `NaN`)
     expect(ce.box(['Multiply', 2, ['Complex', POS, 1]]).evaluate().json).toBe(

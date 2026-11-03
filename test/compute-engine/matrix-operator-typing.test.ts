@@ -339,7 +339,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
       'zs',
     ]);
     expect(filter.isValid).toBe(true);
-    expect(filter.type.toString()).toBe('(zs: indexed_collection<any>) -> list<!nothing>');
+    expect(filter.type.toString()).toBe('(zs: indexed_collection<any>) -> list<any>');
     expect(
       ce
         .box(['Apply', filter, ['List', 3, 1, 2]])

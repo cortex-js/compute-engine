@@ -225,15 +225,13 @@ describe('TRIG REWRITES OF AN OPERAND THAT MAY NOT BE A VALUE', () => {
     expect(v.type.matches(expr.type)).toBe(true);
   });
 
-  test('a `Nothing` operand is erased, as for any operator', () => {
-    // The operand is bound at canonicalization, so `Nothing` is erased
-    // from the argument list, as `Sin(Nothing)` is `Sin()`: the call is
-    // the error of a missing argument. It was `Nothing` (`TrigReduce`:
-    // `0`) while the operand stayed unbound.
+  test('a `Nothing` operand is kept, and given back as a string is', () => {
+    // A rewrite gives back an operand that is not a number unchanged:
+    // `TrigExpand("a")` is `"a"`, and `TrigExpand(Nothing)` is `Nothing`.
     for (const op of ['TrigExpand', 'TrigToExp', 'TrigReduce']) {
       const expr = ce.box([op, 'Nothing']);
-      expect(expr.type.toString()).toBe('error');
-      expect(expr.evaluate().toString()).toBe('Error("missing")');
+      expect(expr.type.toString()).toBe('nothing');
+      expect(expr.evaluate().toString()).toBe('"Nothing"');
     }
   });
 });
@@ -271,9 +269,11 @@ describe('TUPLEFROM RESULT TYPE', () => {
       'tuple<integer, missing, integer>',
     ],
     [
+      // The cell is kept. The static type does not name the components (a
+      // sound, wider type); the value is `tuple<integer, nothing, integer>`.
       'Nothing cell',
       ['TupleFrom', ['List', 1, 'Nothing', 3]],
-      'tuple<integer, integer>',
+      'tuple',
     ],
     [
       'mixed list',

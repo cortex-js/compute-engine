@@ -79,9 +79,9 @@ describe('Argument digits past a double', () => {
   test('Argument(∞·i) is unchanged', () => {
     ce.precision = 50;
     const z = ['Multiply', 'PositiveInfinity', ['Complex', 0, 1]];
-    // Indeterminate when exact, NaN as a float
+    // NaN when exact, NaN as a float
     expect(ce.expr(['Argument', z]).evaluate().toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     expect(
       ce

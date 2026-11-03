@@ -36,40 +36,41 @@ A data tuple has fixed positions. `Nothing` occupies a slot rather than
 removing it: `(1, Nothing, 3)` has three coordinates, and its second coordinate
 is `Nothing`. Counting or indexing the tuple does not evaluate earlier
 coordinates to discover which ones survive. Tuple types retain the same slots,
-including `nothing` and possible `nothing` results. `Map` resolves possible
-omission in the coordinate it reads before deciding whether to invoke its
-callback; reading a later index does not scan earlier coordinates.
+including `nothing` and possible `nothing` results.
 
 A tuple whose coordinates are all missing is still present:
 `(Missing, Missing)` is a pair, not a missing whole value. `Zip` constructs one
 such tuple per aligned source position, up to the shortest source length. It
-keeps `Nothing` coordinates and all-missing rows. `ListFrom(Zip(...))` retains
-these rows because each row is a present tuple; omission is immediate, not
-recursive into its coordinates.
+keeps `Nothing` coordinates and all-missing rows, and `ListFrom(Zip(...))`
+keeps these rows: `ListFrom(Zip([1, Nothing], [3, 4]))` is
+`[(1, 3), (Nothing, 4)]`.
 
 The LaTeX spelling `(x,)` still constructs a singleton tuple; its trailing
-comma is syntax. `(x, Nothing)` constructs a pair with an actual omitted
-coordinate. Explicit `Sequence` operands still splice under their ordinary
-omission rules.
+comma is syntax. `(x, Nothing)` constructs a pair whose second coordinate is
+`Nothing`. An explicit empty `Sequence()` operand still splices out.
 `Single`, `Pair` and `Triple` retain `Nothing` slots and validate the resulting
-arity. Lists continue to omit immediate `Nothing` during construction.
-`TupleFrom` retains its existing omission behavior pending a separate decision
-on structural conversions. Ordinary function arguments and the effect/capture
-rules for nested views are separate work. The legacy empty-tuple type reduces
+arity. A list, an argument list and `TupleFrom` keep a `Nothing` element too
+(user decision of 2026-11-02, `docs/ERROR-MODEL.md`, "One static error, one
+dynamic non-value per domain"): `[1, Nothing]` has length 2 and
+`TupleFrom([1, Nothing, 3])` is `(1, Nothing, 3)`. The effect/capture rules
+for nested views are separate work. The legacy empty-tuple type reduces
 to `nothing`; a distinct unit/empty-tuple type remains a design question.
 
 Compilation refuses tuple construction with possible `Nothing` coordinates and
-`Zip` sources with possible immediate `Nothing` until targets can distinguish
-it from missing data. JavaScript and Python preserve explicitly constructed
+`Zip` sources with possible immediate `Nothing`: the targets cannot
+distinguish it from missing data. JavaScript and Python preserve explicitly constructed
 all-missing tuples in their existing tuple representations.
 
 ## Map types and compilation of omission
 
-Removing `Nothing` from the callback input does not make an arbitrary datum
-numeric or scalar. A source declared `list<any>` can still supply nested
-collections and missing data. Its mapped result keeps those possibilities and
-adds `nothing` for bypassed positions. A source declared `any` keeps the same
-possibilities when its value is a collection.
+In this section, "omission" means a `Nothing` element or callback result.
+`Map` calls its callback on every element, `Nothing` included, and keeps a
+`Nothing` result: `ListFrom(Map(x ↦ If(x > 1, x, Nothing), [1, 2]))` is
+`[Nothing, 2]`. A callback that needs a value gives the `incompatible-type`
+error for a `Nothing` element. A source declared `list<any>` can supply
+nested collections, missing data and `Nothing`, and its mapped result keeps
+those possibilities. A source declared `any` keeps the same possibilities
+when its value is a collection.
 
 A callback's output type describes its results. For example, an opaque
 callback declared `(integer) -> any` over a list of integers yields

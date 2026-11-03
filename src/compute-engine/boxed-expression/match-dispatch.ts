@@ -685,13 +685,14 @@ function matchElement(
 }
 
 /** Wrap a captured `___rest` sequence the way the generic matcher does for a
- * non-associative operand (`List`/`Tuple`): empty → `Nothing`, one → the
- * element itself, many → `Sequence(…)`. */
+ * non-associative operand (`List`/`Tuple`): empty → the empty `Sequence`,
+ * which a list that holds the capture splices out (`Nothing` would be kept
+ * as an element), one → the element itself, many → `Sequence(…)`. */
 function wrapRest(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression {
-  if (ops.length === 0) return ce.Nothing;
+  if (ops.length === 0) return ce._fn('Sequence', []);
   if (ops.length === 1) return ops[0];
   return ce.function('Sequence', ops, { form: 'raw' });
 }

@@ -36,37 +36,37 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Mean',
     'mean(xs)',
-    '(xs: collection<nothing | number> | value) -> number',
+    '(xs: collection<number> | value) -> number',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Median',
     'median(xs)',
-    '(xs: collection<nothing | number> | value) -> nan | real | signed_infinity',
+    '(xs: collection<number> | value) -> nan | real | signed_infinity',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Variance',
     'variance(xs)',
-    '(xs: collection<nothing | number> | value) -> nan | real<0..>',
+    '(xs: collection<number> | value) -> nan | real<0..>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'StandardDeviation',
     'standardDeviation(xs)',
-    '(xs: collection<nothing | number> | value) -> nan | real<0..>',
+    '(xs: collection<number> | value) -> nan | real<0..>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Mode',
     'mode(xs)',
-    '(xs: collection<nothing | number> | value) -> nan | real | signed_infinity',
+    '(xs: collection<number> | value) -> nan | real | signed_infinity',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Quartiles',
     'quartiles(xs)',
-    '(xs: collection<nothing | number> | value) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>',
+    '(xs: collection<number> | value) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>',
     [LIST, NESTED, SCALAR],
   ],
   [
@@ -125,12 +125,12 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     // parameter that may hold a list (since 2026-09-29). The result was the
     // bare `any` while the slot was `collection<any> | value` (user decision
     // 2026-10-17, Tycho ledger row 379). Since the data parameter of `Mean`
-    // is `collection<nothing | number>` (ROADMAP CE-13), the elements of the
+    // is `collection<number>` (ROADMAP CE-13), the elements of the
     // collection arm are numbers, and the sum is typed by them and by the
     // `value` arm. A point argument does not reach the result: `mean` of a
     // point is a number, and a number plus a point is an `incompatible-type`
     // error, as it was before.
-    '(xs: collection<nothing | number> | value) -> broadcastable<expression<BinomialDistribution> | expression<ExponentialDistribution> | expression<NormalDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | nothing | number>',
+    '(xs: collection<number> | value) -> broadcastable<expression<BinomialDistribution> | expression<ExponentialDistribution> | expression<NormalDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | number>',
     [LIST, NESTED, SCALAR],
   ],
 ];
@@ -225,23 +225,23 @@ describe('Whole-collection parameter: Epsil route', () => {
 
 // [row, body over `xs`, expected parameter type of the function literal]
 const BOX_CASES: [string, MathJsonExpression, string][] = [
-  ['Mean', ['Mean', 'xs'], 'collection<nothing | number> | value'],
-  ['Median', ['Median', 'xs'], 'collection<nothing | number> | value'],
-  ['Variance', ['Variance', 'xs'], 'collection<nothing | number> | value'],
+  ['Mean', ['Mean', 'xs'], 'collection<number> | value'],
+  ['Median', ['Median', 'xs'], 'collection<number> | value'],
+  ['Variance', ['Variance', 'xs'], 'collection<number> | value'],
   [
     'StandardDeviation',
     ['StandardDeviation', 'xs'],
-    'collection<nothing | number> | value',
+    'collection<number> | value',
   ],
-  ['Mode', ['Mode', 'xs'], 'collection<nothing | number> | value'],
-  ['Quartiles', ['Quartiles', 'xs'], 'collection<nothing | number> | value'],
+  ['Mode', ['Mode', 'xs'], 'collection<number> | value'],
+  ['Quartiles', ['Quartiles', 'xs'], 'collection<number> | value'],
   ['Flatten', ['Flatten', 'xs'], 'collection<any> | value'],
   ['SetFrom', ['SetFrom', 'xs'], 'collection<any> | value'],
   ['TupleFrom', ['TupleFrom', 'xs'], 'collection<any> | value'],
   [
     'mixed use',
     ['Add', ['Mean', 'xs'], 'xs'],
-    'collection<nothing | number> | value',
+    'collection<number> | value',
   ],
 ];
 
@@ -289,7 +289,7 @@ describe('Whole-collection parameter: box route', () => {
   }
 
   test('the lifted slot accepts every argument the unlifted slot accepted', () => {
-    // The slot is `collection<nothing | number> | value`, not the type the
+    // The slot is `collection<number> | value`, not the type the
     // body's uses infer for the parameter: a point, a complex number and a
     // string reach the body, and the call gives what `Mean` gives on that
     // argument. `Mean` refuses the string by its signature (ROADMAP CE-13).
@@ -307,7 +307,7 @@ describe('Whole-collection parameter: box route', () => {
     expect(results).toEqual([
       '3/2',
       '(1 + 2i)',
-      'Error(ErrorCode("incompatible-type", "collection<nothing | number> | distribution | number", "string"), "ab")',
+      'Error(ErrorCode("incompatible-type", "collection<number> | distribution | number", "string"), "ab")',
     ]);
   });
 
@@ -515,7 +515,7 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     'function h(x) { mean(x, 1) }',
     [L123],
     '[1,3/2,2]',
-    'decline',
+    [1, 1.5, 2],
   ],
   ['explicit numeric map of mean over a list', 'function h(x: list<real>) { map((v: real) => mean(v, 1), x) }', [L123], '[1,3/2,2]', [1, 1.5, 2]],
   ['mean(x, 1) over a scalar', 'function h(x) { mean(x, 1) }', [A5], '3', 3],
@@ -617,7 +617,7 @@ describe('Limitations of the rule, as they behave today', () => {
       epsilValue(ce, 'function h(xs) { let ys = xs\nmean(ys) }\nh([1, 2, 3])')
     ).toBe('2');
     expect(ce.symbol('h').type.toString()).toBe(
-      '(xs: collection<nothing | number> | value) -> number'
+      '(xs: collection<number> | value) -> number'
     );
   });
 
@@ -639,7 +639,7 @@ describe('Limitations of the rule, as they behave today', () => {
       const ce = new ComputeEngine();
       expect(epsilValue(ce, `${source}\nk([1, 2, 3])`)).toBe('2');
       expect(ce.symbol('k').type.toString()).toBe(
-        '(xs: collection<nothing | number> | value) -> number'
+        '(xs: collection<number> | value) -> number'
       );
     }
     // The box route, `k` assigned before `h`.
@@ -667,7 +667,7 @@ describe('Limitations of the rule, as they behave today', () => {
     // clause's `number`; it was the broadcast guess `broadcastable<unknown>`
     // that a bare `function` callee gives over a collection argument.
     expect(ce.symbol('r').type.toString()).toBe(
-      '(xs: collection<nothing | number> | value, n: unknown) -> number'
+      '(xs: collection<number> | value, n: unknown) -> number'
     );
   });
 });

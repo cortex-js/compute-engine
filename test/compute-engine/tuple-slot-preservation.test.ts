@@ -83,7 +83,7 @@ describe('data tuples preserve positions', () => {
   });
 
   test.each(['single', 'multi'] as const)(
-    'Map bypasses a computed tuple omission on %s-source indexed and iterator reads',
+    'Map calls its callback for a computed Nothing coordinate on %s-source indexed and iterator reads',
     (mode) => {
       for (const route of ['at', 'each']) {
         const ce = new ComputeEngine();
@@ -111,10 +111,9 @@ describe('data tuples preserve positions', () => {
         if (route === 'at') {
           expect(map.at(2)?.re).toBe(99);
           expect(calls).toBe(1);
-          expect(map.at(1)?.symbol).toBe('Nothing');
-        } else
-          expect([...map.each()].map((x) => x.json)).toEqual(['Nothing', 99]);
-        expect(calls).toBe(1);
+          expect(map.at(1)?.re).toBe(99);
+        } else expect([...map.each()].map((x) => x.json)).toEqual([99, 99]);
+        expect(calls).toBe(2);
       }
     }
   );
@@ -193,7 +192,7 @@ describe('data tuples preserve positions', () => {
     expect(isSubtype('nothing', element)).toBe(true);
   });
 
-  test('Map bypasses omitted tuple cells and Filter drops them', () => {
+  test('Map and Filter give the error of the callback for a Nothing tuple cell', () => {
     const ce = new ComputeEngine();
     const mapped = ce.box([
       'Map',
@@ -201,26 +200,25 @@ describe('data tuples preserve positions', () => {
       ['Tuple', 1, 'Nothing', 3],
     ]);
     expect(mapped.isValid).toBe(true);
-    expect([...mapped.each()].map((x) => x.symbol ?? x.re)).toEqual([
-      2,
-      'Nothing',
-      6,
-    ]);
-    expectTypeBetween(mapped, {
-      atMost: 'list<integer | nothing>',
-      above: 'list<integer>',
-    });
+    const show = (x: any) => (x.operator === 'Error' ? 'Error' : x.re);
+    expect([...mapped.each()].map(show)).toEqual([2, 'Error', 6]);
+    expectTypeBetween(mapped, { atMost: 'list<integer>' });
     const filtered = ce.box([
       'Filter',
       ['Tuple', 1, 'Nothing', 3],
       ['Function', 'True', 'x'],
     ]);
-    expect([...filtered.each()].map((x) => x.re)).toEqual([1, 3]);
+    expect([...filtered.each()].map(show)).toEqual([1, 'Error', 3]);
   });
 
-  test('List and the current TupleFrom conversion still omit Nothing', () => {
+  test('List and the TupleFrom conversion keep Nothing', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['List', 1, 'Nothing', 3]).json).toEqual(['List', 1, 3]);
+    expect(ce.box(['List', 1, 'Nothing', 3]).json).toEqual([
+      'List',
+      1,
+      'Nothing',
+      3,
+    ]);
     const source = ce.box([
       'Map',
       ['Function', ['If', ['Equal', 'x', 2], 'Nothing', 'x'], 'x'],
@@ -229,6 +227,7 @@ describe('data tuples preserve positions', () => {
     expect(ce.function('TupleFrom', [source]).evaluate().json).toEqual([
       'Tuple',
       1,
+      'Nothing',
       3,
     ]);
   });

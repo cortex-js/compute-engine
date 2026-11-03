@@ -148,13 +148,13 @@ describe('LogGamma(z), the continuation of ln Γ', () => {
     });
   });
 
-  test('infinities: +Infinity at +Infinity, Indeterminate at -Infinity (no limit)', () => {
+  test('infinities: +Infinity at +Infinity, NaN at -Infinity (no limit)', () => {
     expect(
       ce.expr(['LogGamma', 'PositiveInfinity']).evaluate().toString()
     ).toBe('+oo');
     expect(
       ce.expr(['LogGamma', 'NegativeInfinity']).evaluate().toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
   });
 
   test('a symbol stays symbolic; a list threads', () => {

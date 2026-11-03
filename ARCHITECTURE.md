@@ -247,15 +247,15 @@ is inserted and the call reports `missing`. A present operand is never changed.
 final, on each route:
 
 - an operator without a `canonical` handler: after named-argument normalization
-  and `flatten` (which drops a written `Nothing`), before the signature check;
+  and `flatten`, before the signature check;
 - an operator with a `canonical` handler, and a lazy operator: the operands are
   not flattened, so a top-level `Sequence` operand counts as each of its
-  elements, and the defaults are appended after the written operands. For an
-  operator with a default only, a written `Nothing` operand is removed first;
+  elements, and the defaults are appended after the written operands. A
+  written `Nothing` operand is a value: it fills its parameter, and the
+  default does not replace it;
 - a named call: an optional parameter that the names skip and that has a
   default receives it (`f(3, factor: 5)` with
-  `(x, density: number = 1, factor: number = 2)` is `f(3, 1, 5)`), and
-  `f(k: Nothing)` leaves `k` to its default. A skipped optional parameter
+  `(x, density: number = 1, factor: number = 2)` is `f(3, 1, 5)`). A skipped optional parameter
   without a default is still `argument-optional-skipped`;
 - a call with a `Spread` operand whose positions are unknown (`f(...p)`) is not
   filled; the call boxed again at evaluation, after the splice, is;
@@ -296,7 +296,7 @@ trade exactness at a measure-zero point for a simpler canonical form.
 
 The cancellation **asserts genericity**: `x/x → 1` treats `x` as a generic
 (hence non-zero) value. This is why the fold survives a later substitution —
-`ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `Indeterminate`, because
+`ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `NaN`, because
 the `.json` is already the literal `1` before the substitution reaches it. To
 recover the true value at an excluded point, keep the expression uncanonicalized
 (`{ canonical: false }`) and evaluate after substituting.
@@ -304,13 +304,12 @@ recover the true value at an excluded point, keep the expression uncanonicalized
 **Constant operands are protected.** These folds fire only on operands that
 carry a free variable. A numerator or denominator that is a _constant
 expression_ is never collapsed by the generic rules; it is evaluated instead, so
-a provably-zero constant denominator surfaces the true indeterminate:
+a provably-zero constant denominator surfaces the form with no value:
 
-- `0 / (1 − 1)` canonicalizes to `Indeterminate` — the denominator evaluates to
+- `0 / (1 − 1)` canonicalizes to `NaN` — the denominator evaluates to
   `0`, giving `0/0` — **not** to `0`: the `0/x → 0` fold does not reach a
   constant zero.
-- `(1 − 1) / 0` and `0 / 0` likewise canonicalize to `Indeterminate`. With a
-  float operand (`0.0 / 0.0`) the canonical form is `NaN`.
+- `(1 − 1) / 0`, `0 / 0` and `0.0 / 0.0` likewise canonicalize to `NaN`.
 - `(π + 1)/(π + 1)` is left as a fraction at canonicalization (a constant, so
   the identical-operand fold is skipped); it reduces to `1` only under
   `.simplify()`, which first proves the denominator non-zero.
@@ -412,8 +411,7 @@ value type `true` or `false` when the operand types prove the answer:
 
 The **values** type onto the new names: `oo` and `-oo` carry the singleton
 value-literal types `+oo`/`-oo` (widening to `infinity`); the value `~oo`
-carries the `~oo` singleton (also below `infinity`); NaN and `Indeterminate`
-type `nan`; a value with an infinite real or imaginary part and a finite other
+carries the `~oo` singleton (also below `infinity`); NaN types `nan`; a value with an infinite real or imaginary part and a finite other
 part (`∞ + i`) types `infinity`. Every spelling of the same value — the
 `ComplexInfinity` constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`,
 `Gamma(-2)`, `Zeta(1)` — types identically. The extended real line is spelled
@@ -422,14 +420,12 @@ part (`∞ + i`) types `infinity`. Every spelling of the same value — the
 `isExtendedReal` — the former `isReal`, renamed when bare `real` became a
 finiteness promise; NaN answers `false` to it.
 
-Three non-finite results are kept apart. A pole is `~oo` (`5/0`, `Gamma(0)`). An
-exact form with no value (`0/0`, `0·∞`, `∞ − ∞`, `0^0`, `Mod(5, 0)`) is
-`Indeterminate` on the exact route. A floating-point failure or an absent
-numeric operand is `NaN` (`0.0/0.0`, `Missing + 2`), and `.N()` and every
-compiled target answer `NaN` for `Indeterminate` too. `Indeterminate` and `NaN`
-are both number literals with `isNaN` true and both type `nan`; only
-`Indeterminate` has `isIndeterminate` true, and `isSame` does not match one with
-the other (design: `docs/plans/2026-09-28-indeterminate-value.md`).
+Two non-finite results are kept apart. A pole is `~oo` (`5/0`, `Gamma(0)`). A
+form with no value (`0/0`, `0·∞`, `∞ − ∞`, `0^0`, `Mod(5, 0)`) and a
+floating-point failure (`0.0/0.0`) are `NaN`, on the exact route, under `.N()`
+and in every compiled target. `Indeterminate` is an input spelling of `NaN`
+only (user decision of 2026-11-02, `docs/ERROR-MODEL.md`, "One static error,
+one dynamic non-value per domain").
 
 On a float-only compile target, a `~oo` lowers to IEEE `+Infinity` (ruled
 2026-08-28): the pole's magnitude survives, and the direction `~oo` never had is
@@ -1411,11 +1407,8 @@ collection contracts. In particular:
   that need factored results. `.add()` and `.mul()` on exact literals can
   produce floats; use `ce.function('Add' | 'Multiply', ...)` for symbolic
   construction.
-- Exact forms without a value produce `Indeterminate`; floating operands and
-  compiled numerical results produce `NaN`. Both satisfy `isNaN`. Use
-  `indeterminateFormAnswer()` at sites that can receive floating operands rather
-  than returning `ce.Indeterminate` unconditionally. Poles such as `5/0` are
-  infinity, not indeterminate forms.
+- Forms without a value produce `NaN` (`ce.NaN`) on every route; test it with
+  `isNaN`. Poles such as `5/0` are infinity, not forms without a value.
 - Rule strings are LaTeX. Patterns are boxed in a clean scope without operator
   definitions. `replace()` catches rule exceptions, and simplification can
   reject a correct rewrite that does not lower the cost.

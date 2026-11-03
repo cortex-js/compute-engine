@@ -637,7 +637,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
       expect(match(['List', 1, 2, '___a', 3], ['List', 1, 2, 3]))
         .toMatchInlineSnapshot(`
         {
-          ___a: Nothing,
+          ___a: ["Sequence"],
         }
       `);
 
@@ -660,8 +660,8 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         )
       ).toMatchInlineSnapshot(`
         {
-          ___v: Nothing,
-          ___x: Nothing,
+          ___v: ["Sequence"],
+          ___x: ["Sequence"],
           __u: ["Sequence", 2, 3],
           __w: ["Sequence", 5, 6],
         }

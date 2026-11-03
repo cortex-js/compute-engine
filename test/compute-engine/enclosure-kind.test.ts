@@ -148,8 +148,8 @@ describe('THE VALUE', () => {
       expect(onRoute(route, E(2, 1)).toString()).toBe('Enclosure(1, 2)');
   });
 
-  test('an exact empty set is `Indeterminate`', () => {
-    expect(ce.box(E(['Interval', 2, 1])).evaluate().isIndeterminate).toBe(true);
+  test('an exact empty set is `NaN`', () => {
+    expect(ce.box(E(['Interval', 2, 1])).evaluate().isNaN).toBe(true);
   });
 
   test('a pair of endpoints whose order is not decided is kept as written', () => {

@@ -608,7 +608,7 @@ describe('Inputs that must not give a wrong value', () => {
       value(
         '\\int_{-\\infty}^{\\infty}\\left(\\frac{1}{x^2}-\\frac{1}{(x-1)^2}\\right)dx'
       ).toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
     // 1 + cos x has a double zero at π, and 1 + cos x ≥ 0.
     expect(value('\\int_0^{2\\pi}\\frac{1}{1+\\cos x}dx').toString()).toBe(
       '+oo'
@@ -618,7 +618,7 @@ describe('Inputs that must not give a wrong value', () => {
     );
     // cos x has simple zeros: the integrand changes sign at each of them.
     expect(value('\\int_0^{2\\pi}\\frac{1}{\\cos x}dx').toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     expect(ce.parse('\\int_0^{2\\pi}\\frac{1}{\\cos x}dx').N().isNaN).toBe(
       true
@@ -684,15 +684,15 @@ describe('Inputs that must not give a wrong value', () => {
         .parse('\\int_{-\\infty}^{\\infty}\\frac{i}{x^2}dx')
         .evaluate()
         .toString()
-    ).toBe('Indeterminate');
-    // A float in the integrand gives NaN, not Indeterminate.
+    ).toBe('NaN');
+    // A float in the integrand gives NaN.
     const pole = (c: number): MathJsonExpression => [
       'ContourIntegrate',
       ['Divide', c, ['Subtract', 'z', 1]],
       'z',
       ['CircleContour', 0, 1],
     ];
-    expect(ce.box(pole(1)).evaluate().toString()).toBe('Indeterminate');
+    expect(ce.box(pole(1)).evaluate().toString()).toBe('NaN');
     expect(ce.box(pole(1.5)).evaluate().isNaN).toBe(true);
   });
 
@@ -784,7 +784,7 @@ describe('Contour integrals read the definitions and values of the caller', () =
 
   // A pole on the contour: the integral has no value. It is `NaN` when an
   // operand is a float, also when a symbol holds this float.
-  test('an assigned float gives NaN, an assigned exact value Indeterminate', () => {
+  test('an assigned float gives NaN, an assigned exact value NaN', () => {
     const engine = new ComputeEngine();
     const pole: MathJsonExpression = [
       'ContourIntegrate',
@@ -801,8 +801,8 @@ describe('Contour integrals read the definitions and values of the caller', () =
     expect(engine.expr(pole).evaluate().isNaN).toBe(true);
     expect(engine.expr(circular).evaluate().isNaN).toBe(true);
     engine.assign('a', engine.parse('3/2'));
-    expect(engine.expr(pole).evaluate().toString()).toBe('Indeterminate');
-    expect(engine.expr(circular).evaluate().toString()).toBe('Indeterminate');
+    expect(engine.expr(pole).evaluate().toString()).toBe('NaN');
+    expect(engine.expr(circular).evaluate().toString()).toBe('NaN');
   });
 });
 

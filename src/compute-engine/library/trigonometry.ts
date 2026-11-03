@@ -58,7 +58,6 @@ import {
   isFunction,
   isNumber,
   isSymbol,
-  indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
@@ -1570,7 +1569,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return holdsShadowedPi(ce, v) ? undefined : v;
         }
         // No limit at `~oo`: the indeterminate form.
-        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
+        if (point !== undefined) return ce.NaN;
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -1645,7 +1644,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return holdsShadowedPi(ce, v) ? undefined : v;
         }
         // No limit at `~oo`: the indeterminate form.
-        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
+        if (point !== undefined) return ce.NaN;
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // On the imaginary axis Ci(iy) = Chi(|y|) + sign(y)·iπ/2, from the
@@ -1713,7 +1712,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.NegativeInfinity;
         // No limit at `~oo`: the indeterminate form.
-        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
+        if (point !== undefined) return ce.NaN;
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -1780,7 +1779,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // `Chi(−∞)` tends to `∞ + iπ`, which is the real infinity `+∞`.
         if (point === '+oo' || point === '-oo') return ce.PositiveInfinity;
         // No limit at `~oo`: the indeterminate form.
-        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
+        if (point !== undefined) return ce.NaN;
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // On the imaginary axis Chi(iy) = Ci(|y|) + sign(y)·iπ/2, from the

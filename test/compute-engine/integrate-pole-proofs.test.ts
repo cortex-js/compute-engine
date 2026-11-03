@@ -324,11 +324,11 @@ describe('eᵃ IS NEVER ZERO', () => {
     const ce = new ComputeEngine();
     // Was unevaluated.
     expect(evaluated(ce, '\\int_{-1}^1 \\frac{1}{e^a t}\\,dt').toString()).toBe(
-      'Indeterminate'
+      'NaN'
     );
     expect(
       evaluated(ce, '\\int_{-1}^1 \\frac{e^{-a}}{t}\\,dt').toString()
-    ).toBe('Indeterminate');
+    ).toBe('NaN');
   });
 });
 
@@ -365,8 +365,8 @@ describe('THE ANTIDERIVATIVE OF ln(ax + b)', () => {
 
 describe('evaluate() AND N() AGREE ON A POLE WITH A CONSTANT FACTOR', () => {
   test.each([
-    ['\\frac{\\pi}{t}', 'Indeterminate', 'NaN'],
-    ['\\frac{e}{t}', 'Indeterminate', 'NaN'],
+    ['\\frac{\\pi}{t}', 'NaN', 'NaN'],
+    ['\\frac{e}{t}', 'NaN', 'NaN'],
     ['\\frac{\\pi}{t^2}', '+oo', '+oo'],
     ['\\frac{-e}{t^2}', '-oo', '-oo'],
   ])('∫₋₁¹ %s dt', (body, exact, numeric) => {

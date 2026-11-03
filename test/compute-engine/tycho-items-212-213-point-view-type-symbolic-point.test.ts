@@ -267,7 +267,7 @@ describe('Tycho item 213: coordinate accessors over a list of SYMBOLIC points st
       ])
       .evaluate();
     // Not `number`: the unknown-element source may be supplying tuples.
-    expect(v.type.toString()).toBe('list<nothing | number>');
+    expect(v.type.toString()).toBe('list<number>');
   });
 
   test('the symbolic coordinate list substitutes to the numeric one', () => {

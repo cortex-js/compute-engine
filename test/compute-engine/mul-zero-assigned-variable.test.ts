@@ -69,16 +69,12 @@ describe('ZERO TIMES A VARIABLE WITH AN ASSIGNED VALUE', () => {
 
   test('a float factor is kept beside the held variable', () => {
     // With `u := ∞`, `0 · 2.5 · u` is `NaN` (a float meets the
-    // indeterminate form), not `Indeterminate`.
+    // indeterminate form), not `NaN`.
     const local = new ComputeEngine();
     local.assign('u', local.PositiveInfinity);
     const u = local.symbol('u');
     const e = mul(local.Zero, local.number(2.5), u);
     expect(e.evaluate().isNaN).toBe(true);
-    expect(e.evaluate().isIndeterminate).toBe(false);
-    expect(
-      local.box(['Multiply', 0, 2.5, 'u']).evaluate().isIndeterminate
-    ).toBe(false);
     local.assign('u', 4);
     expect(e.evaluate().isSame(0)).toBe(true);
   });

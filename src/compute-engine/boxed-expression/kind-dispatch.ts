@@ -33,7 +33,6 @@ import {
   isFunction,
   isNumber,
   isString,
-  nanOperandAnswer,
 } from './type-guards.js';
 import { holdsKindValue } from './residue-class.js';
 import {
@@ -372,10 +371,9 @@ export function kindArithmetic(
   combine?: (ops: ReadonlyArray<Expression>) => Expression
 ): Expression | undefined {
   if (!ops.some(holdsKindValue)) return undefined;
-  // A `NaN` or `Indeterminate` operand decides the result, as for any other
-  // operand (`nanOperandAnswer()`): `c^NaN` is `NaN`, `c/Indeterminate` is
-  // `Indeterminate`.
-  if (ops.some((x) => isNumber(x) && x.isNaN)) return nanOperandAnswer(ce, ops);
+  // A `NaN` operand decides the result, as for any other
+  // operand: `c^NaN` is `NaN`.
+  if (ops.some((x) => isNumber(x) && x.isNaN)) return ce.NaN;
   if (operator === 'Add' || operator === 'Multiply') {
     // A nested sum (product) is flattened, as the canonical form of the
     // operator flattens it, so that `(x + c1).add(c2)` folds the two classes

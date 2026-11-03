@@ -50,11 +50,11 @@ describe('A LIST LITERAL WITH A FAILED CELL IS TYPED AS A COLLECTION', () => {
     expect(ce.box(['Set', ERR, 'Missing']).type.toString()).toBe(
       'set<missing>'
     );
-    // A `NaN` cell is a value, and a `Nothing` cell is erased.
+    // A `NaN` cell is a value, and a `Nothing` cell is kept.
     expect(ce.box(['List', ERR, 'NaN']).type.toString()).toBe('vector<nan^2>');
-    const erased = ce.box(['List', ERR, 'Nothing']);
-    expect(erased.nops).toBe(1);
-    expect(erased.type.toString()).toBe('list<unknown>');
+    const kept = ce.box(['List', ERR, 'Nothing']);
+    expect(kept.nops).toBe(2);
+    expect(kept.type.toString()).toBe('list<nothing>');
     // The failed cell is in place of a row: the nested list gives the cell
     // type.
     expect(ce.box(['List', ERR, ['List', 1, 'Missing']]).type.toString()).toBe(

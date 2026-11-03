@@ -131,13 +131,6 @@ function isNaNValue(ce: ComputeEngine, x: Expression): boolean {
   return x.isSame(ce.NaN);
 }
 
-/** True when the expression is the `Indeterminate` literal: the exact answer
- * of `evaluate()` to a form with no value (`0/0`, `Mod(1, 0)`, `Γ(−∞)`).
- * `.N()` of the same form is `NaN` (`isNaNValue()`). */
-function isIndeterminateValue(ce: ComputeEngine, x: Expression): boolean {
-  return x.isSame(ce.Indeterminate);
-}
-
 /** True when the expression is the `Missing` symbol. */
 function isMissingValue(x: Expression): boolean {
   return isSymbol(x, 'Missing');
@@ -384,9 +377,9 @@ describe('ERROR-MODEL §2 rule 4 — the codomain marker for a domain failure', 
   // `Mod(1, 0)` is a well-formed question with both operands proven finite
   // integers: the failure is the mathematical domain condition `b ≠ 0`, so the
   // answer is the numeric codomain's marker, quietly and with no provenance.
-  // The operands are exact, so the marker is `Indeterminate` under
+  // The operands are exact, so the marker is `NaN` under
   // evaluate() and `NaN` under N().
-  describe('Mod(1, 0) → Indeterminate', () => {
+  describe('Mod(1, 0) → NaN', () => {
     for (const { route, expr } of routes(
       ce,
       ['Mod', 1, 0],
@@ -394,11 +387,11 @@ describe('ERROR-MODEL §2 rule 4 — the codomain marker for a domain failure', 
       'Mod',
       () => [ce.box(1), ce.box(0)]
     )) {
-      test(`[${route}] boxes inertly, evaluate() gives Indeterminate and N() NaN`, () => {
+      test(`[${route}] boxes inertly, evaluate() gives NaN and N() NaN`, () => {
         expect(expr.operator).toBe('Mod');
         expect(expr.isValid).toBe(true);
 
-        expect(isIndeterminateValue(ce, expr.evaluate())).toBe(true);
+        expect(isNaNValue(ce, expr.evaluate())).toBe(true);
         expect(isNaNValue(ce, expr.N())).toBe(true);
         // NaN is admitted only by the top type `number`; every carrier below
         // it excludes NaN (ERROR-MODEL §1, §5, ruled 2026-08-21).
@@ -409,9 +402,9 @@ describe('ERROR-MODEL §2 rule 4 — the codomain marker for a domain failure', 
     }
   });
 
-  test('0 · oo makes Indeterminate out of NaN-free inputs (ERROR-MODEL §4: inside the carriers does not prove success)', () => {
+  test('0 · oo makes NaN out of NaN-free inputs (ERROR-MODEL §4: inside the carriers does not prove success)', () => {
     expect(
-      isIndeterminateValue(
+      isNaNValue(
         ce,
         ce.box(['Multiply', 0, 'PositiveInfinity']).evaluate()
       )
@@ -1274,7 +1267,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // A NON-REAL base at a ±∞ exponent folds by its modulus now (it used
     // to stay symbolic under evaluate() while .N() answered NaN — a route
     // divergence): |b| > 1 spirals out to `~oo`, |b| < 1 spirals into 0,
-    // and |b| = 1 with b ≠ 1 oscillates on the unit circle — Indeterminate
+    // and |b| = 1 with b ≠ 1 oscillates on the unit circle — NaN
     // under evaluate(), NaN under N().
     const onePlusI = ['Add', 1, 'ImaginaryUnit'];
     expect(
@@ -1282,7 +1275,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     ).toBe(true);
     expect(ce2.box(['Power', onePlusI, NEG]).evaluate().isSame(0)).toBe(true);
     expect(
-      isIndeterminateValue(
+      isNaNValue(
         ce2,
         ce2.box(['Power', 'ImaginaryUnit', POS]).evaluate()
       )
@@ -1295,7 +1288,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // (re² + im² computes 1.0000000000000002 in doubles), while
     // `1 + 10⁻¹⁰i` has modulus > 1 (its re² + im² rounds to exactly 1).
     expect(
-      isIndeterminateValue(
+      isNaNValue(
         ce2,
         ce2.box(['Power', ['Divide', ['Complex', 5, 12], 13], POS]).evaluate()
       )
@@ -1350,7 +1343,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     }
 
     // The indeterminate FORMS between admitted operands are
-    // `Indeterminate` (`NaN` under N()), and the genuine extended values are
+    // `NaN` (`NaN` under N()), and the genuine extended values are
     // untouched.
     for (const [a, b] of [
       [0, 0],
@@ -1360,7 +1353,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       [-1, POS],
     ] as const) {
       expect(
-        isIndeterminateValue(ce2, ce2.box(['Power', a, b]).evaluate())
+        isNaNValue(ce2, ce2.box(['Power', a, b]).evaluate())
       ).toBe(true);
       expect(isNaNValue(ce2, ce2.box(['Power', a, b]).N())).toBe(true);
     }
@@ -1406,7 +1399,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const POS = 'PositiveInfinity';
     const NEG = 'NegativeInfinity';
     const COO = 'ComplexInfinity';
-    // `isIndet` is the check of a form with no value: `Indeterminate` under
+    // `isIndet` is the check of a form with no value: `NaN` under
     // evaluate(), `NaN` under N().
     const both = (expr: any, check: (v: any) => boolean) => {
       expect(check(ce2.box(expr).evaluate())).toBe(true);
@@ -1414,7 +1407,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         true
       );
     };
-    const isIndet = (v: any) => isIndeterminateValue(ce2, v);
+    const isIndet = (v: any) => isNaNValue(ce2, v);
     const isCoo = (v: any) => v.isSame(ce2.ComplexInfinity);
     const isNaNv = (v: any) => isNaNValue(ce2, v);
     const is = (n: any) => (v: any) => v.isSame(n);
@@ -1522,7 +1515,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Root', 2, ['Rational', 1, 2]], is(4)); // 2^2; used to stay symbolic
     both(['Root', 'NaN', 2], isNaNv);
     both(['Root', 2, 'NaN'], isNaNv);
-    expect(ce2.box(['Root', 0, POS]).simplify().isSame(ce2.Indeterminate)).toBe(
+    expect(ce2.box(['Root', 0, POS]).simplify().isSame(ce2.NaN)).toBe(
       true
     );
 
@@ -1577,7 +1570,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // "anonymous" infinity that answered NaN on every head here). So each
     // row at `ANON` must give the answer of the same expression at `+∞`.
     const ANON = ['Complex', POS, 1];
-    // `isIndet` is the check of a form with no value: `Indeterminate` under
+    // `isIndet` is the check of a form with no value: `NaN` under
     // evaluate(), `NaN` under N().
     const both = (expr: any, check: (v: any) => boolean) => {
       expect(check(ce2.box(expr).evaluate())).toBe(true);
@@ -1598,7 +1591,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       ).toBe(true);
       expect(ce2.box(expr).N().isSame(ce2.box(asPos(expr)).N())).toBe(true);
     };
-    const isIndet = (v: any) => isIndeterminateValue(ce2, v);
+    const isIndet = (v: any) => isNaNValue(ce2, v);
     const isCoo = (v: any) => v.isSame(ce2.ComplexInfinity);
     const isNaNv = (v: any) => isNaNValue(ce2, v);
     const is = (n: any) => (v: any) => v.isSame(n);
@@ -1908,7 +1901,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // part is `0` (it used to be the finite imaginary part, `1` and `2`).
     const ANON = ['Complex', POS, 1];
     const ANON_NEG = ['Complex', NEG, 2];
-    // `isIndet` is the check of a form with no value: `Indeterminate` under
+    // `isIndet` is the check of a form with no value: `NaN` under
     // evaluate(), `NaN` under N().
     const both = (expr: any, check: (v: any) => boolean) => {
       expect(check(ce2.box(expr).evaluate())).toBe(true);
@@ -1916,7 +1909,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         true
       );
     };
-    const isIndet = (v: any) => isIndeterminateValue(ce2, v);
+    const isIndet = (v: any) => isNaNValue(ce2, v);
     const isNaNv = (v: any) => isNaNValue(ce2, v);
     const is = (n: any) => (v: any) => v.isSame(n);
     const isPos = is(ce2.PositiveInfinity);
@@ -1986,7 +1979,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(ce2.box(['strictConj9', POS]).isValid).toBe(false);
 
     // AbsArg: the pair follows Abs and Argument; NaN is the bare marker
-    // (ruling 4), typed `nan`; the `~oo` pair is `(+∞, Indeterminate)`
+    // (ruling 4), typed `nan`; the `~oo` pair is `(+∞, NaN)`
     // (the argument of `~oo` has no value), claimed
     // exactly; a may-NaN scalar operand widens the TUPLE codomain with a
     // top-level `| nan` arm, never per cell.
@@ -1995,7 +1988,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const absArgCoo = ce2.box(['AbsArg', COO]).evaluate();
     expect(absArgCoo.operator).toBe('Tuple');
     expect(absArgCoo.op1.isSame(ce2.PositiveInfinity)).toBe(true);
-    expect(isIndeterminateValue(ce2, absArgCoo.op2)).toBe(true);
+    expect(isNaNValue(ce2, absArgCoo.op2)).toBe(true);
     expect(ce2.box(['AbsArg', COO]).type.toString()).toBe(
       'tuple<signed_infinity, nan>'
     );
@@ -2068,7 +2061,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     boxError(['Erfi', COO]);
     both(['Erfi', ANON], isPos);
 
-    // ErfInv (ruling 3): no value at any infinity — `Indeterminate` at an
+    // ErfInv (ruling 3): no value at any infinity — `NaN` at an
     // exact one, also at `∞ + i`, which is boxed as `+∞`; `~oo`, an
     // anonymous infinity and a non-real finite argument used to stay inert;
     // the real arguments outside [−1, 1] used to answer NaN and stay
@@ -2117,7 +2110,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const COO = 'ComplexInfinity';
     const ANON = ['Complex', POS, 1];
     const NONREAL = ['Complex', 2, 3];
-    // `isIndet` is the check of a form with no value: `Indeterminate` under
+    // `isIndet` is the check of a form with no value: `NaN` under
     // evaluate(), `NaN` under N().
     const both = (expr: any, check: (v: any) => boolean) => {
       expect(check(ce2.box(expr).evaluate())).toBe(true);
@@ -2125,7 +2118,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         true
       );
     };
-    const isIndet = (v: any) => isIndeterminateValue(ce2, v);
+    const isIndet = (v: any) => isNaNValue(ce2, v);
     const isNaNv = (v: any) => isNaNValue(ce2, v);
     const is = (n: any) => (v: any) => v.isSame(n);
     const isFalse = (v: any) => symbolName(v) === 'False';
@@ -2285,7 +2278,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // OUTSIDE the carrier: `Mod(h, 0)` for a symbol holding `+∞`, and a
     // non-integer term count for `ContinuedFraction` are the carrier's
     // `incompatible-type` errors, never the marker or the precondition
-    // error. `Fract` of a symbol holding `~oo` is `Indeterminate`: `~oo` is
+    // error. `Fract` of a symbol holding `~oo` is `NaN`: `~oo` is
     // in the carrier of `Fract` since 2026-10-17. The lazy accessors are
     // outside that re-test altogether and refuse a non-number themselves.
     // A symbol declared non-integer answers `False` to the parity
@@ -3874,7 +3867,7 @@ describe('the arithmetic core declares its domains', () => {
   //
   // - `Divide` and `Negate` take the EXTENDED COMPLEX plane in every slot
   //   (`complex | infinity`). Every point of that carrier has a value, or
-  //   is an indeterminate FORM whose value is `Indeterminate` (`0/0`, `∞/∞`,
+  //   is an indeterminate FORM whose value is `NaN` (`0/0`, `∞/∞`,
   //   `~oo/~oo`, `~oo/∞`, `∞/~oo`) — the arrangement `Power` makes for
   //   `0^0` — so neither head has an off-carrier point and neither flip
   //   changes any answer. Both declarations are enforced by their
@@ -3897,9 +3890,9 @@ describe('the arithmetic core declares its domains', () => {
 
   test('Divide: the extended complex plane in every slot, no error point', () => {
     const ce = new ComputeEngine();
-    // An indeterminate form: `Indeterminate` under evaluate(), `NaN` under
+    // An indeterminate form: `NaN` under evaluate(), `NaN` under
     // N().
-    const NANQ = ce.Indeterminate;
+    const NANQ = ce.NaN;
     const OO = ce.PositiveInfinity;
     const NOO = ce.NegativeInfinity;
     const COO = ce.ComplexInfinity;

@@ -112,7 +112,7 @@ describe('Map over a tuple yields an ordered list', () => {
     ce1.declare('t', 'tuple');
     expect(
       ce1.box(['Map', ['Function', ['Add', 'x', 10], 'x'], 't']).type.toString()
-    ).toBe('list<indexed_collection<any> | nothing | number>');
+    ).toBe('list<indexed_collection<any> | number>');
 
     // Assigned-symbol callback: its inferred signature `(unknown) -> number`
     // describes a scalar element only. A coordinate of a bare `tuple` can be
@@ -123,7 +123,7 @@ describe('Map over a tuple yields an ordered list', () => {
     ce2.declare('t', 'tuple');
     ce2.assign('g', ce2.parse('x \\mapsto x + 10'));
     expect(ce2.box(['Map', 'g', 't']).type.toString()).toBe(
-      'list<indexed_collection<any> | nothing | number>'
+      'list<indexed_collection<any> | number>'
     );
   });
 

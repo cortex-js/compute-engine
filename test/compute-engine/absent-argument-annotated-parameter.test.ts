@@ -133,7 +133,7 @@ describe('an absent value at an annotated parameter', () => {
 
   test('an exact indeterminate form is accepted and keeps its name', () => {
     const src = 'function f(v: integer) { v + 1 }\nf(0/0)';
-    expect(run(src)).toEqual({ value: 'Indeterminate', diagnostics: [] });
+    expect(run(src)).toEqual({ value: 'NaN', diagnostics: [] });
   });
 
   test('NaN is accepted at a numeric variadic parameter', () => {

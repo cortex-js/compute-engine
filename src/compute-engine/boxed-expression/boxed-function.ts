@@ -144,11 +144,6 @@ import {
   producesKeyed,
 } from './listed-element.js';
 import {
-  literalMayEraseElement,
-  literalWithErasureResolved,
-  literalWithErasureResolvedAsync,
-} from './nothing-erasure.js';
-import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
@@ -239,8 +234,6 @@ import {
   isContinuationOperand,
   isFoldBarrierProduct,
   isNotationalProduct,
-  nanOperandAnswer,
-  indeterminateFormAnswer,
   isUnorderedSet,
   integerRangeElements,
   kindValueIsNaN,
@@ -1153,7 +1146,7 @@ export class BoxedFunction
    * `written` is set for a named call through a variable with an inferred
    * type, and for a named call of a user function: the name of each written
    * argument, in written order, and the index of the operand that holds its
-   * value (-1 for an argument written with the value `Nothing`). The call is
+   * value. The call is
    * boxed again with these names, so that they are matched against the
    * function that the name holds now.
    *
@@ -1278,7 +1271,7 @@ export class BoxedFunction
     if (written === undefined) return ops;
     const ce = this.engine;
     return written.map(({ name, slot }) => {
-      const value = slot < 0 ? ce.symbol('Nothing') : ops[slot];
+      const value = ops[slot];
       if (name === undefined) return value;
       return ce._fn('NamedArgument', [ce.string(name), value], {
         canonical: false,
@@ -3438,8 +3431,11 @@ export class BoxedFunction
   get numeratorDenominator(): [Expression, Expression] {
     if (!(this.isCanonical || this.isStructural))
       return [this, this.engine.One];
-    if (this.isNumber !== true)
-      return [this.engine.Nothing, this.engine.Nothing];
+    // An expression that is not known to be a number is its own numerator,
+    // with the denominator 1, as a symbol is (`_BoxedExpression`). The pair
+    // `[Nothing, Nothing]` it gave before was read as factors by the callers,
+    // which only worked while a `Nothing` factor was dropped from a product.
+    if (this.isNumber !== true) return [this, this.engine.One];
 
     const operator = this.operator;
     if (operator === 'Divide') return [this.op1, this.op2];
@@ -4444,7 +4440,7 @@ export class BoxedFunction
       if (resultHoldsNoIncompleteWalk(result))
         takeBackIncompleteWalks(walksBefore);
       recordEvaluatedError(this, result);
-      const value = numeric ? indeterminateAsNaN(result) : result;
+      const value = result;
       // A lazy callback view created by this evaluation records the context
       // of the function call in progress, so that its callback is called
       // there when the view is read later (`lazy-view-context.ts`). Before
@@ -5491,9 +5487,7 @@ export class BoxedFunction
     return promise
       .then((result) => {
         recordEvaluatedError(this, result);
-        const value = options?.numericApproximation
-          ? indeterminateAsNaN(result)
-          : result;
+        const value = result;
         // As in `evaluate()`, on the stack of this evaluation.
         recordLazyViewContext(this, value, contextStackAtStart);
         return value;
@@ -5862,8 +5856,6 @@ export class BoxedFunction
   }
 
   N(): Expression {
-    // `evaluate()` maps an `Indeterminate` result to `NaN` under a numeric
-    // approximation (`indeterminateAsNaN()`).
     return this.evaluate({ numericApproximation: true });
   }
 
@@ -8295,10 +8287,7 @@ export class BoxedFunction
         // to reject — an absent operand at a `reject` operator, decided by
         // the missing gate below — that Error beats this quiet NaN, so fall
         // through instead of answering.
-        // The answer is `NaN`, except that an `Indeterminate` operand is
-        // forwarded when no operand is `NaN` or a float
-        // (`nanOperandAnswer()`): `Sin(Indeterminate)` is `Indeterminate`.
-        // A numeric approximation always answers `NaN`.
+        // The answer is `NaN`.
         if (
           sawPropagate &&
           !(
@@ -8306,9 +8295,7 @@ export class BoxedFunction
             tail.some(isAbsentScalarSymbol)
           )
         )
-          return numericApproximation
-            ? this.engine.NaN
-            : nanOperandAnswer(this.engine, tail);
+          return this.engine.NaN;
       }
 
       //
@@ -8363,17 +8350,16 @@ export class BoxedFunction
         if (definedVerdict === false) {
           // The codomain marker (`docs/ERROR-MODEL.md` §2 rule 4), read
           // off the RESOLVED arm for an overload set: into a numeric
-          // codomain, the indeterminate form `Indeterminate` (`Mod(5, 0)`,
+          // codomain, the indeterminate form `NaN` (`Mod(5, 0)`,
           // `Fract(∞)`: the operands are inside the carrier, and the
-          // operation has no value there), or `NaN` when an operand is a
-          // float (`indeterminateFormAnswer()`); `Missing` — the one
+          // operation has no value there); `Missing` — the one
           // primitive quiet datum — for a settled non-numeric or
           // indeterminate one.
           const markerArm = contractBArm();
           const resultT =
             functionResult(markerArm ?? def.signature.type) ?? 'unknown';
           return isSubtype(resultT, 'number')
-            ? indeterminateFormAnswer(this.engine, tail)
+            ? this.engine.NaN
             : this.engine.Missing;
         }
       }
@@ -9767,10 +9753,7 @@ export class BoxedFunction
         // to reject — an absent operand at a `reject` operator, decided by
         // the missing gate below — that Error beats this quiet NaN, so fall
         // through instead of answering.
-        // The answer is `NaN`, except that an `Indeterminate` operand is
-        // forwarded when no operand is `NaN` or a float
-        // (`nanOperandAnswer()`): `Sin(Indeterminate)` is `Indeterminate`.
-        // A numeric approximation always answers `NaN`.
+        // The answer is `NaN`.
         if (
           sawPropagate &&
           !(
@@ -9778,9 +9761,7 @@ export class BoxedFunction
             tail.some(isAbsentScalarSymbol)
           )
         )
-          return numericApproximation
-            ? this.engine.NaN
-            : nanOperandAnswer(this.engine, tail);
+          return this.engine.NaN;
       }
 
       //
@@ -9826,17 +9807,16 @@ export class BoxedFunction
         if (definedVerdict === false) {
           // The codomain marker (`docs/ERROR-MODEL.md` §2 rule 4), read
           // off the RESOLVED arm for an overload set: into a numeric
-          // codomain, the indeterminate form `Indeterminate` (`Mod(5, 0)`,
+          // codomain, the indeterminate form `NaN` (`Mod(5, 0)`,
           // `Fract(∞)`: the operands are inside the carrier, and the
-          // operation has no value there), or `NaN` when an operand is a
-          // float (`indeterminateFormAnswer()`); `Missing` — the one
+          // operation has no value there); `Missing` — the one
           // primitive quiet datum — for a settled non-numeric or
           // indeterminate one.
           const markerArm = contractBArm();
           const resultT =
             functionResult(markerArm ?? def.signature.type) ?? 'unknown';
           return isSubtype(resultT, 'number')
-            ? indeterminateFormAnswer(this.engine, tail)
+            ? this.engine.NaN
             : this.engine.Missing;
         }
       }
@@ -11596,32 +11576,19 @@ function evaluateBroadcastLiftsOnce(
   operator: string
 ): ReadonlyArray<Expression> {
   if (
-    !ops.some(
-      (op) =>
-        !isBroadcastParticipant(op) ||
-        literalMayEraseElement(op) ||
-        isRestriction(op)
-    )
+    !ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op))
   )
     return ops;
-  const erasing = erasingLiteralOptions(options, operator);
   // A lift is an operand: evaluated without `materialization`
   // (`operandOptions`), or a lift that reveals a lazy collection (a user
   // function returning `Range(1, n)`) would broadcast over its display
   // preview, placeholder included.
-  //
-  // A list literal with an element that may evaluate to `Nothing` is
-  // evaluated too, so that the broadcast walks the elements the list keeps
-  // (`literalMayEraseElement`); for a jump operator under `.N()` only its
-  // erasure is resolved (`erasingLiteralOptions`).
   const lifted = ops.map((op) =>
     isBroadcastParticipant(op)
-      ? literalMayEraseElement(op)
-        ? erasingLiteralValue(op, erasing, options)
-        : withEvaluatedRestriction(
-            op,
-            restrictionParts(op)?.condition.evaluate(operandOptions(options))
-          )
+      ? withEvaluatedRestriction(
+          op,
+          restrictionParts(op)?.condition.evaluate(operandOptions(options))
+        )
       : normalizeLiftedAbsence(
           op,
           op.evaluate(operandOptions(options)) ?? op,
@@ -11634,7 +11601,7 @@ function evaluateBroadcastLiftsOnce(
   // reached each cell as a float put the cell on the wrong side of a jump:
   // `Floor([1], 1/3).N()` was `[0.999…]` where `Floor(1, 1/3).N()` is `1`,
   // and `Mod([1], 1/3).N()` was `[1e-21]` where `Mod(1, 1/3).N()` is `0`.
-  return isExactJumpLift(erasing, options)
+  return isExactJumpLift(options, operator)
     ? withExactScalarOperands(lifted, ops)
     : lifted;
 }
@@ -11886,28 +11853,20 @@ async function evaluateBroadcastLiftsOnceAsync(
   operator: string
 ): Promise<ReadonlyArray<Expression>> {
   if (
-    !ops.some(
-      (op) =>
-        !isBroadcastParticipant(op) ||
-        literalMayEraseElement(op) ||
-        isRestriction(op)
-    )
+    !ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op))
   )
     return ops;
-  const erasing = erasingLiteralOptions(options, operator);
   // Awaited together, not in sequence: the lifts are independent, and the sync
   // mirror evaluates them without ordering either.
   const lifted = await Promise.all(
     ops.map(async (op) =>
       isBroadcastParticipant(op)
-        ? literalMayEraseElement(op)
-          ? await erasingLiteralValueAsync(op, erasing, options)
-          : withEvaluatedRestriction(
-              op,
-              await restrictionParts(op)?.condition.evaluateAsync(
-                operandOptions(options)
-              )
+        ? withEvaluatedRestriction(
+            op,
+            await restrictionParts(op)?.condition.evaluateAsync(
+              operandOptions(options)
             )
+          )
         : normalizeLiftedAbsence(
             op,
             (await op.evaluateAsync(operandOptions(options))) ?? op,
@@ -11916,116 +11875,23 @@ async function evaluateBroadcastLiftsOnceAsync(
     )
   );
   // The exact scalar lifts of a jump operator, as in the sync mirror.
-  return isExactJumpLift(erasing, options)
+  return isExactJumpLift(options, operator)
     ? withExactScalarOperands(lifted, ops)
     : lifted;
 }
 
 /**
- * The options that `evaluateBroadcastLiftsOnce` evaluates a list literal
- * with an element that may erase (`literalMayEraseElement`) with: the
- * operand options (`operandOptions`), except that for a broadcast of a jump
- * operator (`JUMP_BROADCAST_OPERATORS`) under `.N()` the literal is
- * evaluated EXACTLY. The literal is evaluated here only so that the
- * broadcast walks the elements it keeps; under `.N()` that evaluation also
- * approximated every surviving element, so the cells were built from floats
- * and the handler of each cell had no exact operand to apply its jump rule
- * to: `Floor([If(c, 1, Nothing), q]).N()` with `c := False` and the exact
- * `q = (25! − 1)/24!` was `[25]` where `Floor([q]).N()` and `Floor(q).N()`
- * are `[24]` and `24`, and `Mod([…, q], 1).N()` was `[0]` where `Mod([q],
- * 1).N()` is `[1]`. Evaluated exactly, the literal resolves its erasure the
- * same way (the condition of an `If` is evaluated as it is), its survivors
- * stay exact, and the broadcast that follows builds its cells from the
- * literal as it is, so each cell's handler applies its jump rule to an exact
- * operand before it approximates the result. Only the erasure is resolved,
- * in fact (`erasingLiteralValue`): an exact evaluation of every survivor
- * could cost much more than the cells' own approximation, which reads the
- * exact value only near a jump. (The post-evaluation broadcast
- * of steps 4b and 4t has its own recovery, `exactJumpBroadcastOperands`;
- * the operands returned here never reach it.) For every other operator the
- * approximation of the survivors is kept: the cells need floats, and an
- * exact evaluation can cost much more.
- */
-function erasingLiteralOptions(
-  options: Partial<EvaluateOptions> | undefined,
-  operator: string
-): Partial<EvaluateOptions> | undefined {
-  const base = operandOptions(options);
-  if (
-    options?.numericApproximation !== true ||
-    !JUMP_BROADCAST_OPERATORS.has(operator)
-  )
-    return base;
-  return { ...base, numericApproximation: false };
-}
-
-/**
- * The value that `evaluateBroadcastLiftsOnce` lifts for the list literal
- * `op`, which has an element that may erase, given the options
- * `erasingLiteralOptions` chose. For a jump operator under `.N()` (the
- * chosen options are exact), only the erasure of the literal is
- * resolved (`literalWithErasureResolved`): the elements that may erase are
- * evaluated, and the others are kept as written, so that the cells are those
- * of the same literal without the erased elements. An exact evaluation of
- * the whole literal evaluated every survivor exactly:
- * `Floor([If(c, 1, Nothing), H]).N()` with `H = Sum(1/k, k, 1, 6000)` took
- * 7 s, where `Floor([H]).N()` takes 0.1 s. When the erasure cannot be
- * resolved (a condition with no value yet), the literal is evaluated with
- * the chosen options.
- *
- * The selective resolution applies only to a literal that is transitively
- * pure (`isTransitivelyPure`). It evaluates the elements that may erase
- * before the elements that come before them, and an undecided erasure
- * evaluates the literal a second time. With an impure function `Tick()`
- * that sets `c` to `False` and returns 1, and `c` set to `True`,
- * `Floor([Tick(), If(c, 2, Nothing)]).N()` was `[1, 2]` where the literal
- * has the value `[1]`. Any other literal is evaluated once, in order, with
- * the chosen options.
- */
-function erasingLiteralValue(
-  op: Expression,
-  erasing: Partial<EvaluateOptions> | undefined,
-  options: Partial<EvaluateOptions> | undefined
-): Expression {
-  if (isExactJumpLift(erasing, options) && isTransitivelyPure(op)) {
-    const resolved = literalWithErasureResolved(op, erasing);
-    if (resolved !== undefined) return resolved;
-  }
-  return op.evaluate(erasing) ?? op;
-}
-
-/** Async mirror of `erasingLiteralValue`: the elements are evaluated with
- * `evaluateAsync` (`literalWithErasureResolvedAsync`), so that an element
- * whose condition needs an operator with only an `evaluateAsync` handler
- * gets its value. */
-async function erasingLiteralValueAsync(
-  op: Expression,
-  erasing: Partial<EvaluateOptions> | undefined,
-  options: Partial<EvaluateOptions> | undefined
-): Promise<Expression> {
-  if (isExactJumpLift(erasing, options) && isTransitivelyPure(op)) {
-    const resolved = await literalWithErasureResolvedAsync(op, erasing);
-    if (resolved !== undefined) return resolved;
-  }
-  return (await op.evaluateAsync(erasing)) ?? op;
-}
-
-/**
- * Whether `erasingLiteralOptions` chose the exact options of a jump
- * operator under `.N()`: the caller asked for a numeric approximation and
- * the chosen options do not. The test reads the options, not their
- * identity: with `materialization` set, `operandOptions` returns a new
- * object at each call, so an identity test with it was always false, and
- * the exact scalar operands of a jump operator (`withExactScalarOperands`)
- * were put back for every operator.
+ * Whether `evaluateBroadcastLiftsOnce` puts the exact scalar operands back
+ * (`withExactScalarOperands`): for a broadcast of a jump operator
+ * (`JUMP_BROADCAST_OPERATORS`) under `.N()`.
  */
 function isExactJumpLift(
-  erasing: Partial<EvaluateOptions> | undefined,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  operator: string
 ): boolean {
   return (
     options?.numericApproximation === true &&
-    erasing?.numericApproximation === false
+    JUMP_BROADCAST_OPERATORS.has(operator)
   );
 }
 
@@ -19006,8 +18872,8 @@ function lazyElementFunction(
  *
  * The test is `Contains([Missing], p)`, which is true only for the
  * absence symbol, as `isAbsentScalarSymbol` in the eager loops
- * (`hasAbsentPoint`). `IsMissing` is not used: it is also true for `NaN`
- * and `Indeterminate`, and a declared `broadcastable<tuple<…>>` slot maps
+ * (`hasAbsentPoint`). `IsMissing` is not used: it is also true for `NaN`,
+ * and a declared `broadcastable<tuple<…>>` slot maps
  * any list, so a `NaN` element gave `Missing` on the lazy map and an
  * `incompatible-type` error on the eager loop. `IsSame` is not used either:
  * it holds its operands, and so compares the parameter symbol, not its
@@ -22310,34 +22176,13 @@ function* materializationSteps(
     return expr.engine.function('Dictionary', xs);
   }
 
-  // An element of a lazy indexed view that is `Nothing` (the result of a
-  // `Map` callback that answers `Nothing`) is an element of the view: the
-  // view counts it (`Length`), and `at()` and `each()` give it. So the
-  // display preview of the view (`toString()`, the `latex` getter,
-  // `toLatex()` with no `materialization` option) keeps it, in its position:
-  // `Map(x ↦ If(x > 1, Nothing, x), [1, 2])` prints `[1, Nothing]`, not `[1]`
-  // (user decision 2026-10-20). `_fn` builds that preview list without the
-  // canonical form of a `List` literal, which erases a `Nothing` element.
-  //
-  // Any other materialization (`evaluate({ materialization: true })`, an
-  // explicit bound) turns the view into a list, and a list erases a
-  // `Nothing` element as a list literal does (`[1, Nothing]` is `[1]`).
-  // Keeping it there gave a list that printed two elements but counted one,
-  // because the collection handlers of a `List` read it as a literal whose
-  // `Nothing` elements are erased. A `Set` has no positions, and always
-  // erases it.
-  if (isIndexed && isDisplayPreviewOf(expr, options))
-    return expr.engine._fn('List', xs);
+  // An element of a lazy view that is `Nothing` (the result of a `Map`
+  // callback that answers `Nothing`) is an element like any other, and the
+  // materialized collection keeps it: `Map(x ↦ If(x > 1, Nothing, x), [1, 2])`
+  // is `[1, Nothing]`.
+  if (isIndexed) return expr.engine._fn('List', xs);
 
-  // `Nothing` is an ERASURE marker: a lazy stream element that materialized
-  // as `Nothing` is spliced out of the resulting collection (§3.G).
-  // `Missing` is preserved. (The `ContinuationPlaceholder` sentinel is not
-  // `Nothing`, so it survives.)
-  const materialized = xs.filter((x) => !isSymbol(x, 'Nothing'));
-
-  if (isIndexed) return expr.engine._fn('List', materialized);
-
-  return expr.engine.function('Set', [...materialized]);
+  return expr.engine.function('Set', [...xs]);
 }
 
 /**
@@ -22449,42 +22294,6 @@ installBroadcastLiftHooks({
   isLambda: (def) => isLambdaDef(def),
   lambdaCallType: lambdaCallTypeOverDescriptors,
 });
-
-/**
- * The final map of a numeric approximation: an `Indeterminate` result is the
- * float `NaN`. A numeric route always ends in the IEEE `NaN`, whatever a
- * producer knew about the exactness of its operands; some producers cannot
- * know it, since a product is rebuilt through `Product.asExpression()`
- * without the `numericApproximation` option under `.N()`. Applied to the
- * result of `evaluate({ numericApproximation: true })`, which
- * `BoxedFunction.N()` calls, and of its asynchronous twin
- * (`BoxedNumber.N()` answers `NaN` for the literal itself).
- *
- * The map reaches the cells of a `List` or a `Tuple` result, at any depth:
- * a broadcast or a matrix kernel computes its cells with the arithmetic
- * methods (`.mul()`, `.add()`), which do not know that the route is numeric,
- * so `[0, 1]·∞` and `MatrixPower([[∞, 0], [0, 1]], 2)` would otherwise keep an
- * `Indeterminate` cell under `.N()`. Other heads are not entered: their
- * operands are not values of the result.
- *
- * Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4 and §6
- * (Phase 2).
- */
-function indeterminateAsNaN(result: Expression): Expression {
-  if (result.isIndeterminate) return result.engine.NaN;
-  if (
-    !isFunction(result) ||
-    (result.operator !== 'List' && result.operator !== 'Tuple')
-  )
-    return result;
-  let changed = false;
-  const ops = result.ops.map((x) => {
-    const y = indeterminateAsNaN(x);
-    if (y !== x) changed = true;
-    return y;
-  });
-  return changed ? result.engine.function(result.operator, ops) : result;
-}
 
 /**
  * True when the context stacks `a` and `b` hold the same frames, in the

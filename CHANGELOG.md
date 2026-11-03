@@ -2,6 +2,64 @@
 
 ### Behavior Changes
 
+- **One static error, one dynamic non-value per domain.** An `Error` is the
+  one static failure, `NaN` is the one numeric non-value, and `Missing` is
+  the absent datum of the other domains. `Indeterminate` is no longer a
+  value: the exact route gives `NaN` for a form with no value, as `.N()` and
+  every compiled target already did. `Nothing` is the value of an empty
+  block or of a statement with no value, and it is kept as an element
+  wherever it appears. Compiled code does not change. Breaking changes,
+  each with its replacement:
+  - `ce.Indeterminate`, `INDETERMINATE_VALUE` and `isIndeterminateValue`
+    are removed. Use `ce.NaN`.
+  - `Expression.isIndeterminate` is removed. Use `isNaN`.
+  - The `isExact` hook of an `ArithmeticDefinition` (a value kind) is
+    deprecated: the engine no longer reads it.
+  - A form with no value gives `NaN` on the exact route (it gave
+    `Indeterminate`): `0/0`, `∞ − ∞`, `0^0`, `Mod(5, 0)` and
+    `Variance([3])` are `NaN`, and an operator over `NaN` gives `NaN`:
+    `Mean([1, 0/0])` and `Max(1, 0/0)` are `NaN` (they were the exact
+    `Indeterminate`). `NaN` keeps its IEEE behavior, `IsMissing(0/0)` is
+    still `True` and `Coalesce(0/0, 5)` is still `5`. `Indeterminate` is
+    now an input spelling of `NaN`: the MathJSON symbol `"Indeterminate"`,
+    `\operatorname{Indeterminate}` and `\mathrm{Indeterminate}`, the Epsil
+    name, `NumberFrom("Indeterminate")` and the word in a type string read
+    as `NaN`. The serializer writes `NaN` (`\operatorname{NaN}`), and
+    `String(0/0)` is `"NaN"`.
+  - A `Nothing` element is no longer removed from a list, an argument list
+    or a dictionary: `[1, Nothing]` has length 2, `f(1, Nothing)` has two
+    arguments, and `{a: Nothing}` keeps the key `a`. An operator that needs
+    a value gives an `incompatible-type` error for it: `Add(1, Nothing)` is
+    an error (it was `1`). Write the list without the element, or use
+    `Filter` with an explicit predicate: with `d: list<integer | nothing>`
+    at `[1, Nothing, 3]`, `Filter(d, y ↦ y ≠ Nothing)` is `[1, 3]`.
+  - `Map` calls its callback on a `Nothing` element and keeps a `Nothing`
+    result: `ListFrom(Map(x ↦ If(x > 1, x, Nothing), [1, 2]))` is
+    `[Nothing, 2]` (it was `[2]`). Use `Filter` after `Map`:
+    `Filter(Map(x ↦ If(x > 1, x, Nothing), [1, 2, 3]), y ↦ y ≠ Nothing)` is
+    `[2, 3]`.
+  - `Filter` no longer drops a `Nothing` element without calling its
+    predicate. Use a predicate that tests for it, as above.
+  - `Sum`, `Product`, `Min`, `Max`, `Mean`, the statistics and the
+    covariance family no longer skip a `Nothing` element: `Sum([1,
+    Nothing])` and `Mean([1, Nothing, 3])` are `incompatible-type` errors
+    (they were `1` and `2`), and the error outranks `NaN`: `Max([NaN,
+    Nothing])` is an error. Filter the data first, as above.
+  - An empty slot in LaTeX is a parse error: `(3,,4)`, `[3,,4]` and
+    `f(3,,4)` hold `["Error", "'missing'"]` in the slot (the slot was
+    `Nothing`, which was removed). Write every slot. A trailing comma,
+    `[1, 2,]`, is still dropped. In `cases`, an empty row and a trailing
+    comma in a condition cell give `Which(c, v)`, the parse of a piecewise
+    with no default: `\{x>0: x,\}` is `Which(0 < x, x)`. `\partial f` is
+    `["PartialDerivative", "f"]`.
+  - An empty `Sequence()` stays `Sequence()` in canonical form and prints
+    as `Sequence()` (it printed as `Nothing`). A list or an argument list still splices it
+    out: `[1, Sequence(), 2]` is `[1, 2]`. In Epsil, the rest capture `t` of
+    `[h, ...t]` over a list of one element is the empty `Sequence`, so
+    `[t]` is `[]`.
+  See `docs/ERROR-MODEL.md`, "One static error, one dynamic non-value per
+  domain".
+
 - **`Missing` is a result only.** `Missing` is produced by a selection with
   no match, an accessor out of range and the written symbol, and it can no
   longer be declared. Breaking changes, each with its replacement:

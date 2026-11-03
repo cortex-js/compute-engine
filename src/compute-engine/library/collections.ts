@@ -243,10 +243,6 @@ import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
 import { rangeCount } from '../numerics/range-count.js';
 import {
-  literalMayEraseElement,
-  mayEvaluateToNothingD,
-} from '../boxed-expression/nothing-erasure.js';
-import {
   exactArithmeticRange,
   rationalRangeCount,
   type ArithmeticRange,
@@ -936,14 +932,6 @@ const MEMBERSHIP_PRESERVING_WRAPPERS = [
   'Reverse',
   'Unique',
 ];
-// The wrappers that build a `List` when they are evaluated. A list erases a
-// `Nothing` element as a list literal does, while a lazy source that can
-// yield `Nothing` (`viewMayYieldNothing`) counts it, so such a wrapper is not
-// stripped from that source: with `m = Map(x ↦ If(x > 1, Nothing, x),
-// [1, 2, 3])`, `Sort(m)` is `[1]`, and `Length(Sort(m))` must be 1, not the
-// 3 of `Length(m)` (user decision 2026-10-20). `Reverse` is a lazy view that
-// keeps the `Nothing` in its position, so it is stripped as before.
-const LIST_BUILDING_WRAPPERS = ['Sort', 'RandomShuffle', 'Unique'];
 
 function peekWrappers(
   op: Expression | undefined,
@@ -970,11 +958,7 @@ function peekWrappers(
     // indexed collection; otherwise the consumer evaluates the wrapper, which
     // sorts an untyped list to count it but reports the error for a set.
     (!ORDER_WRAPPERS.includes(result.operator) ||
-      result.op1.type.matches('indexed_collection<any>')) &&
-    !(
-      LIST_BUILDING_WRAPPERS.includes(result.operator) &&
-      viewMayYieldNothing(result.op1)
-    )
+      result.op1.type.matches('indexed_collection<any>'))
   ) {
     result = result.op1;
   }
@@ -1222,56 +1206,7 @@ function hasUnindexedSource(expr: Expression): boolean {
  */
 function elementCountOfIndexedSource(expr: Expression): number | undefined {
   if (hasUnindexedSource(expr)) return undefined;
-  // These operators build a `List` of the elements of their source, and a
-  // list erases a `Nothing` element as a list literal does. A lazy source
-  // that can yield `Nothing` (a `Map` callback that answers `Nothing`) counts
-  // it, so its count is not the count of the result: with
-  // `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2, 3])`, `Sort(m)` is `[1]`, and
-  // `Length(Sort(m))` was 3. The count is then not known without the
-  // evaluation (user decision 2026-10-20).
-  if (isFunction(expr) && viewMayYieldNothing(expr.op1)) return undefined;
   return elementCountOfFiniteSource(expr);
-}
-
-/**
- * Whether the collection `xs` is a lazy view that can yield `Nothing`: a view
- * whose callback is a function literal that names `Nothing`, a function
- * value that names it, or an operator whose declared result admits it, or a
- * view over such a view. A symbol is read through the value it holds. An
- * eager collection (a `List` literal) answers `false`: a literal erases its
- * `Nothing` elements itself. The test reads the structure only and evaluates
- * nothing, as an `elementCount` handler must; it can answer `true` for a
- * callback that never answers `Nothing`, which only costs an evaluation.
- */
-function viewMayYieldNothing(xs: Expression | undefined, depth = 0): boolean {
-  if (xs === undefined || depth > 16) return xs !== undefined;
-  if (isSymbol(xs)) {
-    const def = xs.engine.lookupDefinition(xs.symbol);
-    if (!isValueDef(def)) return false;
-    return viewMayYieldNothing(def.value.value, depth + 1);
-  }
-  if (!isFunction(xs) || xs.isLazyCollection !== true) return false;
-  for (const op of xs.ops) {
-    if (isFunction(op, 'Function')) {
-      if (op.has('Nothing')) return true;
-      continue;
-    }
-    if (isSymbol(op)) {
-      const def = op.engine.lookupDefinition(op.symbol);
-      if (isValueDef(def)) {
-        const value = def.value.value;
-        if (isFunction(value, 'Function') && value.has('Nothing')) return true;
-        if (viewMayYieldNothing(value, depth + 1)) return true;
-      } else if (isOperatorDef(def)) {
-        const result = functionResult(def.operator.signature.type);
-        if (result !== undefined && typeIsNothingOrAdmitsNothing(result))
-          return true;
-      }
-      continue;
-    }
-    if (viewMayYieldNothing(op, depth + 1)) return true;
-  }
-  return false;
 }
 
 /**
@@ -2133,11 +2068,7 @@ function callbackCompatibilityError(
       fnDef.operator.resolvedMissingBehavior === 'handle');
   const elementOf = (src: Expression): Type => {
     const t = collectionElementType(src.type.type) ?? ('any' as Type);
-    const supplied =
-      arity.operator === 'Map' || arity.operator === 'Filter'
-        ? withoutNothing(t)
-        : t;
-    return fnTakesAbsence ? stripMissingFromType(supplied) : supplied;
+    return fnTakesAbsence ? stripMissingFromType(t) : t;
   };
   let supplyArrow: FunctionSignature;
   // Which supply positions carry a SOURCE ELEMENT, as opposed to a parameter
@@ -3073,7 +3004,8 @@ function accumulatorBindingType(literal: Expression): Type | undefined {
   return isSymbol(param) ? param.type.type : undefined;
 }
 
-/** Admit omitted callback cells without broadening the bare tuple family. */
+/** Admit callback cells that may be `Nothing` (the value of an empty block,
+ * kept as an element) without broadening the bare tuple family. */
 function checkCallbackSource(
   engine: ComputeEngine,
   source: Expression | undefined
@@ -3520,32 +3452,22 @@ function iterateArgs(
  * compile targets' collection-valued-body fail-closed gates.
  */
 /**
- * The collection a lazy view walks for the source `xs`: the VALUE of a
- * impure literal, or of a List with an element that may erase, evaluated
- * once per walk, and `xs` itself otherwise. Tuple slots never erase.
+ * The collection a lazy view walks for the source `xs`: the VALUE of an
+ * impure `List` or `Tuple` literal, evaluated once per walk, and `xs` itself
+ * otherwise.
  *
- * The literal's own handlers serve its value when it is pure and may erase
- * an element (`erasedLiteralValue`, `collection-utils.ts`) and the operands
- * as written otherwise, so that a count draws no random number. A view that
- * applies a function to each element (`Filter`, `Map`) evaluates the
- * element in that application anyway, and over the operands it emitted the
- * operand itself (`Random()`, drawn again by every consumer, and a filter's
- * predicate had judged another draw), and an element that evaluates to
- * `Nothing` as `Nothing` (an error element where a List erases it). Map
- * separately resolves possible omission in each retained coordinate. A store-backed list holds numbers only.
+ * The literal's own handlers serve the operands as written, so that a count
+ * draws no random number. A view that applies a function to each element
+ * (`Filter`, `Map`) evaluates the element in that application anyway, and
+ * over the operands it emitted the operand itself (`Random()`, drawn again
+ * by every consumer, and a filter's predicate had judged another draw). A
+ * store-backed list holds numbers only.
  */
 function walkedSource(xs: Expression): Expression {
   if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return xs;
   if (xs._numericStore !== undefined) return xs;
-  if (!literalMayEraseElement(xs) && isTransitivelyPure(xs)) return xs;
+  if (isTransitivelyPure(xs)) return xs;
   return xs.evaluate();
-}
-
-/** Resolve possible omission before a Map callback sees the datum. Other
- * computations stay deferred to the callback, including numeric requests. */
-function mappedElementValue(x: Expression): Expression {
-  if (isNumber(x)) return x;
-  return resultMayBeNothing(describeOperand(x), x.engine) ? x.evaluate() : x;
 }
 
 /**
@@ -4397,69 +4319,23 @@ function resultMayBeNothing(
   );
 }
 
+/** The type handler `handler` of `Map`, with `nothing` added to the element
+ * type of the result when the callback may answer `Nothing`: the result
+ * keeps that element. */
 function withMapOmission(
   handler: OperatorTypeHandlerOnTypes
 ): OperatorTypeHandlerOnTypes {
   return (ops, context) => {
-    const bypass = ops.slice(1).some((d) => {
-      const t = d.facts.elementType ?? collectionElementType(d.type);
-      return (
-        d.type === 'any' || (t !== undefined && provablyAdmits('nothing', t))
-      );
-    });
-    // Excluding omission from any still leaves arbitrary depth and missing
-    // data. Keep that inference envelope instead of turning it into a
-    // negation type that scalar callback derivation mistakes for a scalar.
-    const callbackElement = (t: Type): Type =>
-      t === 'any' ? t : withoutNothing(t);
-    const supplied = bypass
-      ? ops.map((d, i) =>
-          i === 0
-            ? d
-            : {
-                ...d,
-                type: mapImmediateElements(d.type, callbackElement),
-                facts: {
-                  get finite() {
-                    return d.facts.finite;
-                  },
-                  get sgn() {
-                    return d.facts.sgn;
-                  },
-                  get closed() {
-                    return d.facts.closed;
-                  },
-                  get collection() {
-                    return d.facts.collection;
-                  },
-                  get finiteCollection() {
-                    return d.facts.finiteCollection;
-                  },
-                  get indexed() {
-                    return d.facts.indexed;
-                  },
-                  get shape() {
-                    return d.facts.shape;
-                  },
-                  get elementType() {
-                    const t = d.facts.elementType;
-                    return t === undefined ? undefined : callbackElement(t);
-                  },
-                },
-              }
-        )
-      : ops;
-    const answer = handler(supplied, context);
+    const answer = handler(ops, context);
     if (
       answer === undefined ||
-      (!bypass &&
-        (ops[0] === undefined ||
-          !resultMayBeNothing(
-            ops[0],
-            context.engine,
-            true,
-            collectionElementType(answer.type)
-          )))
+      ops[0] === undefined ||
+      !resultMayBeNothing(
+        ops[0],
+        context.engine,
+        true,
+        collectionElementType(answer.type)
+      )
     )
       return answer;
     return BoxedType.forResult(
@@ -5769,10 +5645,7 @@ function provenLengthD(d: OperandDescriptor): number | undefined {
   }
   const s = d.structureOf?.();
   if (s === undefined) return undefined;
-  if (s.kind === 'list-literal')
-    return s.elements.some(mayEvaluateToNothingD)
-      ? undefined
-      : s.elements.length;
+  if (s.kind === 'list-literal') return s.elements.length;
   if (s.kind === 'string') return splitGraphemeClusters(s.text).length;
   if (
     s.kind === 'application' &&
@@ -7258,15 +7131,6 @@ function foldResultTypeD(
         ? t
         : reduceType({ kind: 'union', types: [t, seeded] });
     }
-    // Product(collection) is a seeded Multiply fold. Multiply discards an
-    // omitted factor; an unseeded fold may instead return its first cell.
-    const supplied =
-      s.name === 'Multiply' &&
-      s.system === true &&
-      init !== undefined &&
-      elt !== undefined
-        ? withoutNothing(elt)
-        : elt;
     // A seeded `Add` or `Multiply` fold, with the identity as its seed
     // (`Reduce(p, Add, 0)`, and `Reduce(p, Multiply, 1)`, the form of
     // `Product(p)`), over elements that may be numbers or rows
@@ -7298,12 +7162,12 @@ function foldResultTypeD(
       );
       if (shaped !== 'number' && isSubtype(shaped, 'any')) return shaped;
     }
-    if (supplied === undefined || !isSubtype(supplied, 'number'))
+    if (elt === undefined || !isSubtype(elt, 'number'))
       return undefined;
-    if (init === undefined) return withFirst(absorb(supplied));
+    if (init === undefined) return withFirst(absorb(elt));
     const seed = init.type;
     return isSubtype(seed, 'number')
-      ? absorb(widen(supplied, seed))
+      ? absorb(widen(elt, seed))
       : undefined;
   }
   return withFirst(absorb(callbackResultTypeD(op, engine)));
@@ -8134,11 +7998,10 @@ function nestedPointCoordinateType(
  * - A number literal is a cell of its TIER (`integer`, `real`, …), read off
  *   its structure. The list's type is a stored contract, so the literal's
  *   own value or enclosure type is never part of it, and never built here.
+ * - An element typed `nothing` blocks.
  * - An inference-pending bare SYMBOL (a symbol typed `unknown`) is a cell of
  *   type `number` — the generic-symbol fold; an application typed
  *   `unknown`/`any` blocks, since it could return a collection.
- * - An element that may evaluate to `Nothing` (`mayEvaluateToNothingD()`)
- *   blocks: the list erases it, so the literal's length is not proved.
  * - Any other element whose type is atomic (`isAtomicValueType`) is a cell
  *   of that type.
  * - Anything else blocks.
@@ -8146,8 +8009,10 @@ function nestedPointCoordinateType(
 function classifyCellD(op: OperandDescriptor): Type | null {
   const s = op.structureOf?.();
   if (s?.kind === 'number') return s.tier;
-  if (mayEvaluateToNothingD(op)) return null;
   const t = op.type;
+  // A `Nothing` element is kept, and is not a cell of a tensor: the literal
+  // takes the element type of `literalElementType()`.
+  if (t === 'nothing') return null;
   // A failed cell (an `error` component) blocks the shape claim, and the
   // literal takes the element type of `literalElementType()`.
   if (t === 'error') return null;
@@ -11936,8 +11801,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a length (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
-      // Run the framework's default flatten step (Sequence-splice + Nothing-
-      // drop) that this custom canonical handler would otherwise short-circuit.
+      // Run the framework's default flatten step (Sequence-splice) that this
+      // custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       const stripped = withFirst(peekCountPreserving(ops[0]), ops);
       // The declared parameter is `any` — deliberately tolerant, because a
@@ -12029,7 +11894,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     // Sequence is an explicit splice; Nothing itself occupies one slot.
     canonical: (ops, { engine }) =>
-      tupleOf(engine, flatten(ops, undefined, true, true)),
+      tupleOf(engine, flatten(ops)),
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
@@ -12119,8 +11984,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `PointList([1, 2], (5, 6))` put the whole point in each second
     // coordinate, `[(1, (5, 6)), (2, (5, 6))]`. The signature cannot say "not
     // a tuple", so the refusal is here. The operands arrive
-    // canonical; `flatten` splices a `Sequence` and erases `Nothing`, as the
-    // boxing does for an operator without a `canonical` handler. A component
+    // canonical; `flatten` splices a `Sequence` (a `Nothing` is kept as a
+    // component), as the boxing does for an operator without a `canonical` handler. A component
     // whose type is not provably one of these (`unknown`, a union with a
     // list) is admitted, and its value is checked by `evaluate`. So is a
     // symbol whose type was inferred from its value (a symbol declared
@@ -12582,7 +12447,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             seenLiteralKeys.add(keyName);
           }
           run.push(ce._fn('Tuple', [key, e.op2]));
-        } else if (!isSymbol(e, 'Nothing')) {
+        } else {
           run.push(e); // let `DictionaryFrom` report the malformed entry
         }
       }
@@ -12686,7 +12551,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(value: T) -> tuple<T> where T',
     canonical: (ops, { engine }) =>
-      engine.tuple(...checkArity(engine, ops, 1, true)),
+      engine.tuple(...checkArity(engine, ops, 1)),
   },
 
   Pair: {
@@ -12699,7 +12564,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(first: T, second: U) -> tuple<T, U> where T, U',
     canonical: (ops, { engine }) =>
-      engine.tuple(...checkArity(engine, ops, 2, true)),
+      engine.tuple(...checkArity(engine, ops, 2)),
   },
 
   Triple: {
@@ -12714,7 +12579,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V',
 
     canonical: (ops, { engine }) =>
-      engine.tuple(...checkArity(engine, ops, 3, true)),
+      engine.tuple(...checkArity(engine, ops, 3)),
   },
 
   //
@@ -13633,8 +13498,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Sort/RandomShuffle isn't materialized just to test membership (see
     // `peekMembershipPreserving`).
     canonical: (ops, { engine: ce }) => {
-      // Run the framework's default flatten step (Sequence-splice + Nothing-
-      // drop) that this custom canonical handler would otherwise short-circuit.
+      // Run the framework's default flatten step (Sequence-splice) that this
+      // custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       const stripped = withFirst(peekMembershipPreserving(ops[0]), ops);
       // An absent operand is admitted, as the generic boxing route admits it
@@ -13782,8 +13647,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // impure predicate (one drawing from `Random`), whose result depends on the
     // element ORDER the wrapper establishes, so `ops[0]` is kept as written.
     canonical: (ops, { engine: ce }) => {
-      // Run the framework's default flatten step (Sequence-splice + Nothing-
-      // drop) that this custom canonical handler would otherwise short-circuit.
+      // Run the framework's default flatten step (Sequence-splice) that this
+      // custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
 
       // The 2-arg form is overloaded on the operand's TYPE (`evaluate` below):
@@ -13894,10 +13759,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             let sinceSelected = 0;
             for (const x of walkedSource(filtered.op1).each()) {
               const value = selectedElementValue(x);
-              if (isSymbol(value, 'Nothing')) {
-                if (++sinceSelected > limit) return undefined;
-                continue;
-              }
               const applied = f([value]);
               if (applied === undefined)
                 throw invalidPredicateError(filtered.op2);
@@ -13992,8 +13853,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to test emptiness (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
-      // Run the framework's default flatten step (Sequence-splice + Nothing-
-      // drop) that this custom canonical handler would otherwise short-circuit.
+      // Run the framework's default flatten step (Sequence-splice) that this
+      // custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       const stripped = withFirst(peekCountPreserving(ops[0]), ops);
       // An absent operand is admitted, as the generic boxing route admits it
@@ -14133,10 +13994,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'multiple collections, combines them element-wise (like `zipWith`): ',
       '`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
       'shortest input. The mapping function is always the FIRST argument.',
-      'An immediate `Nothing` input bypasses the callback and remains `Nothing`',
-      'at that position. With multiple sources, any `Nothing` coordinate bypasses',
-      'the whole callback. Nested `Nothing` and `Missing` are passed to the callback.',
-      'The view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.',
     ],
     complexity: 8200,
     // A restricted source, `[1,2]{c}`, is ONE held restriction over the list and
@@ -14600,8 +14457,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Return the elements of the collection for which the predicate function returns True.',
       'Equivalent to `[x for x in xs if p(x)]`.',
-      'Immediate `Nothing` inputs are dropped without calling the predicate.',
-      '`Missing` and markers nested inside a datum still reach the predicate.',
     ],
     complexity: 8200,
     // A restricted source, `[1,2]{c}`, is ONE held restriction over the list and
@@ -14653,7 +14508,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // produce a list, so claiming `string` would be a promise the
       // evaluation cannot keep.
       return BoxedType.forResult(
-        mapImmediateElements(filterResultType(ops[0].type), withoutNothing),
+        filterResultType(ops[0].type),
         context.engine._typeResolver
       );
     },
@@ -14768,7 +14623,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // True for that target. Note: query the source (`op1`), not `expr` —
         // `expr.contains()` would dispatch back into this handler.
         if (!isFunction(expr)) return false;
-        if (isSymbol(target, 'Nothing')) return false;
         // An UNDECIDED source membership must propagate as `undefined`: `??
         // false` here asserted a definite "not a member" about a source that
         // could not answer at all. A definite `false` still refutes.
@@ -14840,11 +14694,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (next.done) return { value: undefined, done: true };
               // The value the predicate judges is the value emitted.
               const value = selectedElementValue(next.value);
-              // Omitted inputs consume source work but never run the predicate.
-              if (isSymbol(value, 'Nothing')) {
-                reject();
-                continue;
-              }
               const pred = f([value]);
               if (!pred) {
                 throw invalidPredicateError(expr.op2);
@@ -16311,16 +16160,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Same-head ONLY. The `Join`/`Append` cross-head rewrites of the v3 draft
     // were refuted and must not be reintroduced: `Append` ENUMERATES a tuple
     // source while `Join` holds a tuple operand ATOMIC (`Append((1,2),3)` has
-    // 3 elements, `Join((1,2),[3])` has 2), and a list-wrapper splice erases
-    // the `Nothing` marker that `Append`'s validation would flag.
+    // 3 elements, `Join((1,2),[3])` has 2).
     //
     // Validation ordering: the rewrite runs AFTER the framework's flatten and
     // signature validation, so an operand that would fail validation (a
     // `Nothing`/missing value, a non-collection source, an error marker)
     // declines the rewrite and keeps today's error result on every route.
     canonical: (ops, { engine: ce }) => {
-      // Run the framework's default flatten step (Sequence-splice + Nothing-
-      // drop) that this custom canonical handler would otherwise short-circuit.
+      // Run the framework's default flatten step (Sequence-splice) that this
+      // custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       // The absent collection is admitted, as the generic boxing route
       // admits it (strip-before-validate): `Append(Missing, 1)` answers
@@ -17561,16 +17409,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         // An absent INDEX (`Missing`/`NaN`) is absorbing too (`At` strips its
         // index position): the result is absence in the final domain.
-        // An `Indeterminate` index is not absent, but it names no position
-        // either, so there is no element to read: the answer is the same
-        // marker, not an inert `At` (a decided question must not stay
-        // unevaluated, `docs/ERROR-MODEL.md` §1). An infinite index (`+∞`,
+        // An infinite index (`+∞`,
         // `-∞`, `~∞`) names no position either, as a non-integer index
         // (`1.5`) does not.
         if (
           isAbsentValue(opAtIndex) ||
-          (isNumber(opAtIndex) &&
-            (opAtIndex.isIndeterminate || opAtIndex.isInfinity === true))
+          (isNumber(opAtIndex) && opAtIndex.isInfinity === true)
         )
           return chainAbsorbMarker(ce, expr.type.type, ops, index, readType);
 
@@ -17716,7 +17560,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 ? collectionElementType(readType)
                 : declaredElementType(index);
             for (const m of indices) {
-              // An absent entry (`NaN`, `Missing`), an `Indeterminate` entry
+              // An absent entry (`NaN`, `Missing`)
               // or an infinite entry names no position. It contributes the
               // absence marker in its own slot, the hole a scalar index of
               // the same kind gives, and the other entries are read as
@@ -17724,7 +17568,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               // unevaluated (Tycho ledger row 401).
               if (
                 isAbsentValue(m) ||
-                (isNumber(m) && (m.isIndeterminate || m.isInfinity === true))
+                (isNumber(m) && m.isInfinity === true)
               ) {
                 picked.push(
                   (marker ??= absenceMarker(ce, expr, gatherReadType))
@@ -18679,13 +18523,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       );
     },
-    // `Slice(xs, Nothing)` folds to `Nothing`, which is why this handler
-    // exists at all: the framework's DEFAULT canonicalization runs `flatten`
-    // first, and `flatten` DROPS a `Nothing` operand outright — it is the
-    // "omitted argument" marker everywhere else in the engine. Without the
-    // interception the call would collapse to a one-operand `Slice` and report
-    // a missing-argument error, which is exactly what a failed `RangeOf`
-    // search produces when its result is fed straight back in.
+    // `Slice(xs, Nothing)` folds to `Nothing`: an absent span (the value of
+    // a `RangeOf` search that found nothing) propagates, so
+    // `Slice(xs, RangeOf(xs, needle))` is `Nothing` when the needle does not
+    // occur (user decision 2026-08-16). The evaluation of such a call builds
+    // the call again from the evaluated operands, which reaches this handler.
     // Everything else is the default path, spelled out: `flatten` (Sequence
     // splice), then `validateArguments` against the declared overload set.
     // `Slice` is neither commutative, involutive, idempotent nor
@@ -18699,8 +18541,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `test/compute-engine/type-variables-collections.test.ts` and
     // `test/compute-engine/collections.test.ts` cover that path.
     canonical: (ops, { engine: ce }) => {
-      // The absence test runs BEFORE `flatten`, which is the whole point:
-      // `flatten` is what drops the `Nothing`.
       if (ops.length === 2 && isSymbol(ops[1], 'Nothing')) return ce.Nothing;
       const args = flatten(ops);
       const resolutionOut: { resolution?: OverloadResolution } = {};
@@ -22114,10 +21954,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           for (const x of walkedElements(xs, i)) elements.push(x);
         }
       }
-      return tupleOf(
-        ce,
-        elements.filter((x) => !isSymbol(x, 'Nothing'))
-      );
+      return tupleOf(ce, elements);
     },
   },
 
@@ -23120,9 +22957,8 @@ function canonicalList(
     const segments: Expression[] = []; // `ListJoin` operands
     let run: Expression[] = []; // current run of ordinary elements
     // The ordinary elements of a run are accumulated as written and flattened
-    // ONCE, when the run is flushed — the same `Sequence`-splice and
-    // `Nothing`-erasure the no-spread path below applies to the whole operand
-    // list. Flattening per element would allocate a throwaway array apiece,
+    // ONCE, when the run is flushed — the same `Sequence`-splice the
+    // no-spread path below applies to the whole operand list. Flattening per element would allocate a throwaway array apiece,
     // and would make this path look like it needed a different rule than that
     // one, which it does not.
     const flushRun = () => {
@@ -23143,7 +22979,7 @@ function canonicalList(
       const x = op.ops[0].canonical;
       if (isFunction(x, 'List')) {
         // A literal list splices eagerly: `[...[1,2], 3]` → `[1,2,3]`.
-        // (Canonicalization already erased any `Nothing` elements.)
+        // A `Nothing` element is spliced as any element is.
         run.push(...x.ops);
       } else if (isAbsentSymbol(x) || mayBeAbsentCollectionOperand(x)) {
         // An absent operand (`Missing`), or one that may be an
@@ -23297,8 +23133,8 @@ function canonicalSet(
   // its syntactic operands (body + indexing set)
   if (parseSetComprehension(ops) !== null) return engine._fn('Set', [...ops]);
 
-  // Check that each element is only present once. (`Nothing` was already
-  // erased by the `flatten` call above.) Two `isSame` elements always have
+  // Check that each element is only present once. (A `Nothing` element is
+  // an element as any other.) Two `isSame` elements always have
   // the same hash, so an element is compared only with the elements already
   // kept that have its hash: the cost is linear in the number of elements
   // when their hashes are distinct, where a comparison with every element
@@ -23915,13 +23751,6 @@ function tally(
   };
 
   for (const op of walk) {
-    // A lazy view can yield `Nothing` (a `Map` callback that answers
-    // `Nothing`). The tallied values form a list, and a list erases a
-    // `Nothing` element as a list literal does, so `Nothing` is not tallied.
-    // Tallied, its count stayed in the list of counts while the list of
-    // values erased it: `Tally(m)` was `([1], [1, 2])` (user decision
-    // 2026-10-20).
-    if (isSymbol(op, 'Nothing')) continue;
     const index = indexOf(op);
     if (index >= 0) counts[index]++;
     else {
@@ -24173,8 +24002,7 @@ function isNonTupleLiteral(e: Expression): boolean {
  * one, no longer change at evaluation: a literal of `isNonTupleLiteral`, or a
  * `Tuple` whose operands are all such literals. A `Tuple` with any other
  * operand can change its arity at evaluation: a spread operand expands
- * into several components, and an operand such as `If(c, 3, Nothing)` can
- * become `Nothing`, which is dropped.
+ * into several components.
  */
 function isSettledLiteral(e: Expression): boolean {
   if (isFunction(e, 'Tuple')) return e.ops.every(isSettledLiteral);
@@ -24307,8 +24135,8 @@ function canonicalJoin(
   head: 'Join' | 'ListJoin',
   ops: ReadonlyArray<Expression>
 ): Expression {
-  // Run the framework's default flatten step (Sequence-splice + Nothing-
-  // drop) that this custom canonical handler would otherwise short-circuit.
+  // Run the framework's default flatten step (Sequence-splice) that this
+  // custom canonical handler would otherwise short-circuit.
   ops = flatten(ops);
   // A provably scalar operand is one element: wrapped as a one-element
   // list BEFORE validation, so the signature admits it and the type and
@@ -24661,14 +24489,6 @@ function snapshotListJoin(
       // is. Only the elements that a spread operand enumerates are listed.
       const isListLiteral = isFunction(op, 'List') && op.isCanonical;
       for (const x of op.each()) {
-        // A lazy operand can yield `Nothing` (a `Map` callback that answers
-        // `Nothing`). The snapshot is a list, and a list erases a `Nothing`
-        // element as a list literal does, so it is skipped: it uses no cell
-        // of the budget. Kept, the list printed `[1, Nothing, 9]` but had 2
-        // elements, because the collection handlers of a `List` read it as a
-        // literal whose `Nothing` elements are erased (user decision
-        // 2026-10-20).
-        if (isSymbol(x, 'Nothing')) continue;
         if (reserved === undefined) {
           if (budget.used >= budget.max) return undefined;
           budget.used += 1;
@@ -24742,8 +24562,7 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     if (levels[0].arity > 1) {
       if (index < 1) return undefined;
       const xs = spine.bases
-        .map((c) => mapSource(c).at(index))
-        .map((x) => (x === undefined ? undefined : mappedElementValue(x)));
+        .map((c) => mapSource(c).at(index));
       if (xs.some((x) => x === undefined)) return undefined;
       items = xs as Expression[];
     } else {
@@ -24751,9 +24570,8 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
       if (source.isIndexedCollection === false) return undefined;
       if (!Number.isFinite(index) || index === 0) return undefined;
       const raw = source.at(index);
-      const item = raw === undefined ? undefined : mappedElementValue(raw);
-      if (!item) return undefined;
-      items = [item];
+      if (!raw) return undefined;
+      items = [raw];
     }
     // A failed level short-circuits the whole access to `undefined` —
     // the general `at` path returns `undefined` (never a marker) as
@@ -24768,10 +24586,8 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     const collections = expr.ops.slice(1);
     if (index < 1) return undefined;
     const items = collections
-      .map((c) => mapSource(c).at(index))
-      .map((x) => (x === undefined ? undefined : mappedElementValue(x)));
+      .map((c) => mapSource(c).at(index));
     if (items.some((x) => x === undefined)) return undefined;
-    if (items.some((x) => isSymbol(x, 'Nothing'))) return expr.engine.Nothing;
     // Each at() access is its own micro-drain (resets the
     // once-per-drain attempt bound, so a cleared `{symbol}` mark can
     // re-attempt on an at()-only access pattern).
@@ -24797,13 +24613,11 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
   if (source.isIndexedCollection === false) return undefined;
   if (!Number.isFinite(index) || index === 0) return undefined;
   const raw = source.at(index);
-  const item = raw === undefined ? undefined : mappedElementValue(raw);
-  if (!item) return undefined;
-  if (isSymbol(item, 'Nothing')) return expr.engine.Nothing;
+  if (!raw) return undefined;
   // Each at() access is its own micro-drain (see the zip form above).
-  const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([item]);
+  const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([raw]);
   if (compiled !== undefined) return compiled;
-  return applicable(expr.op1)?.([item]) ?? failedArgumentError([item]);
+  return applicable(expr.op1)?.([raw]) ?? failedArgumentError([raw]);
 }
 
 /**
@@ -24939,7 +24753,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
             const { value, done } = source.next();
             if (done || value === undefined)
               return { value: undefined, done: true };
-            items.push(mappedElementValue(value));
+            items.push(value);
           }
           // A level that produced no value is a COMPUTATION FAILURE,
           // not an erasure: the runner already substituted the marker,
@@ -24954,7 +24768,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
       next: () => {
         const { value: raw, done } = source.next();
         if (done || raw === undefined) return { value: undefined, done: true };
-        const value = mappedElementValue(raw);
+        const value = raw;
         // See above: a failed mapping is the marker, not an erasure.
         // The runner substitutes it; this fallback is unreachable.
         const v = run([value]) ?? absenceMarker(ce, expr);
@@ -24987,10 +24801,8 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
           const { value, done } = source.next();
           if (done || value === undefined)
             return { value: undefined, done: true };
-          items.push(mappedElementValue(value));
+          items.push(value);
         }
-        if (items.some((v) => isSymbol(v, 'Nothing')))
-          return { value: expr.engine.Nothing, done: false };
         const compiled = auto?.(items);
         if (compiled !== undefined) return { value: compiled, done: false };
         // A mapping function that produced no value is a COMPUTATION
@@ -25016,8 +24828,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
       while (true) {
         const { value: raw, done } = source.next();
         if (done || raw === undefined) return { value: undefined, done: true };
-        const value = mappedElementValue(raw);
-        if (isSymbol(value, 'Nothing')) return { value, done: false };
+        const value = raw;
         const compiled = auto?.([value]);
         if (compiled !== undefined) return { value: compiled, done: false };
         // See above: a failed mapping is the marker, not an erasure.
@@ -25090,7 +24901,7 @@ export function* compiledMapDoublesSteps(
   if (
     (isFunction(xs, 'List') || isFunction(xs, 'Tuple')) &&
     xs._numericStore === undefined &&
-    (literalMayEraseElement(xs) || !isTransitivelyPure(xs))
+    !isTransitivelyPure(xs)
   )
     return undefined;
   const counted = xs.count;
@@ -25287,12 +25098,8 @@ function keyedMergeIterator(
  * one already kept.
  *
  * A `Nothing` that the source yields (a `Map` callback that answers
- * `Nothing`) is not yielded either. A set has no positions, and a `Set`
- * erases a `Nothing` element (`canonicalSet`), so the set that the view
- * denotes does not hold it. Without this, `Map(x ↦ If(x > 1, Nothing, x),
- * Set(1, 2, 3))` printed `Set(1)` but had a count of 2 (user decision
- * 2026-10-20: a lazy INDEXED view keeps `Nothing` in its position, a set
- * view does not). */
+ * `Nothing`) is an element, as in a `Set` literal (`canonicalSet` keeps a
+ * `Nothing` element), and is deduplicated as any other element. */
 function deduplicatingIterator(
   source: Iterator<Expression>,
   limit: number,
@@ -25321,12 +25128,8 @@ function deduplicatingIterator(
         if (done || value === undefined)
           return { value: undefined, done: true };
         const bucket = seen.get(value.hash);
-        if (
-          isSymbol(value, 'Nothing') ||
-          (bucket !== undefined && bucket.some((x) => x.isSame(value)))
-        ) {
-          // A DUPLICATE or a `Nothing`: neither is emitted, so each pull
-          // counts toward the cap.
+        if (bucket !== undefined && bucket.some((x) => x.isSame(value))) {
+          // A DUPLICATE is not emitted, so each pull counts toward the cap.
           if (++sinceEmit > limit)
             throw new CancellationError({
               cause: 'iteration-limit-exceeded',
@@ -26799,10 +26602,7 @@ function isEvaluatedElement(
   numericApproximation: boolean
 ): boolean {
   if (isString(op)) return true;
-  // An `Indeterminate` literal is not numeric yet: its numeric
-  // approximation is `NaN`.
-  if (isNumber(op))
-    return !numericApproximation || (!op.isExact && !op.isIndeterminate);
+  if (isNumber(op)) return !numericApproximation || !op.isExact;
   return false;
 }
 
@@ -27204,11 +27004,11 @@ function tabulateElement(
 ): Expression {
   const ce = expr.engine;
   // No callback result (null/undefined) keeps the position as Missing;
-  // an explicit Nothing result keeps the omission marker itself.
+  // an explicit Nothing result is kept as it is.
   if (dims.length === 1) return fn([ce.number(outerIndex)]) ?? ce.Missing;
   if (!isFunction(expr)) return ce.Missing;
-  // Keep the row lazy. Building a List here erased Nothing coordinates
-  // and evaluated every column merely to access the row.
+  // Keep the row lazy. Building a List here evaluated every column merely
+  // to access the row.
   // A named callback keeps its captured callable binding. Applying it as a
   // data-symbol operand would re-read an unrelated declaration by name.
   const generator = expr.op1;

@@ -8,7 +8,6 @@ export type TokenType =
   | 'TRUE'
   | 'FALSE'
   | 'NAN'
-  | 'INDETERMINATE'
   | 'INFINITY'
   | 'PLUS_INFINITY'
   | 'MINUS_INFINITY'
@@ -474,12 +473,11 @@ export class Lexer {
         // spellings and the `oo`/`∞` symbols stay VALUE literals: they are how
         // a signature writes the singleton `oo`, and nothing names a primitive
         // `NaN` or `Infinity`.
+        // `Indeterminate` is an input spelling of `NaN`: it reads as the
+        // same value literal.
         case 'NaN':
-          return this.createToken('NAN', value);
-        // The value literal of the exact indeterminate form (such as
-        // `0/0`), a second member of `nan` beside `NaN`.
         case 'Indeterminate':
-          return this.createToken('INDETERMINATE', value);
+          return this.createToken('NAN', value);
         case 'Infinity':
         case 'oo':
           return this.createToken('INFINITY', value);

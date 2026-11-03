@@ -32,7 +32,7 @@ test('a Map over a list<any> with an inferred callback', () => {
   ce.declare('L', 'list<any>');
   const map = ce.box(['Map', 'g', 'L']);
   expect(map.type.toString()).toBe(
-    'list<indexed_collection<any> | nothing | number>'
+    'list<indexed_collection<any> | number>'
   );
   ce.assign('L', ce.box(['List', ['List', 1, 2], 3]));
   expect(map.evaluate().toString()).toBe('[[11,12],13]');

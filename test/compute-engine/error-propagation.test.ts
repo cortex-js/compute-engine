@@ -414,15 +414,14 @@ describe('ERROR PROPAGATION — rung 1: IsError', () => {
   });
 });
 
-describe('ERROR PROPAGATION — Nothing: argument-list erasure, route parity', () => {
-  // §4: `Nothing` is ERASURE, not failure. It is erased from the call argument
-  // list uniformly, so every route behaves as `f()` under the existing
-  // nullary-application contract (for a one-parameter literal, that contract
-  // curries: the result is the literal with a fresh parameter).
+describe('ERROR PROPAGATION — Nothing: an argument like any other, route parity', () => {
+  // `Nothing` is a value: it is bound to the parameter on every route, and
+  // `x + 1` then gives the `incompatible-type` error of `Add`.
+  const nullary =
+    'Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing")';
   test('the three routes agree for a named function', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']]).evaluate();
-    const nullary = ce.box(['f']).evaluate().toString();
     expect(ce.box(['f', 'Nothing']).evaluate().toString()).toBe(nullary);
     expect(ce.box(['Pipe', 'Nothing', 'f']).evaluate().toString()).toBe(
       nullary
@@ -435,7 +434,6 @@ describe('ERROR PROPAGATION — Nothing: argument-list erasure, route parity', (
   test('the three routes agree for a `Function` literal callee', () => {
     const ce = new ComputeEngine();
     const lit: MathJsonExpression = ['Function', ['Add', 'x', 1], 'x'];
-    const nullary = ce.box(['Apply', lit]).evaluate().toString();
     expect(ce.box(['Apply', lit, 'Nothing']).evaluate().toString()).toBe(
       nullary
     );
@@ -688,22 +686,16 @@ describe('ERROR PROPAGATION — rung 3: the §8a route-divergence residue is clo
   });
 });
 
-describe('ERROR PROPAGATION — Nothing: erasure is a rule on the WRITTEN argument', () => {
+describe('ERROR PROPAGATION — Nothing: a written or a computed argument is bound', () => {
   /**
-   * §4 erases `Nothing` from the call argument list. Erasure keys on the
-   * argument as WRITTEN — a literal `Nothing` — not on the value it computes
-   * to: `Apply` is strict, so by evaluation time an argument that merely
-   * *evaluated* to `Nothing` is indistinguishable from a literal one, and
-   * erasing it there made `Apply(f, g())` differ from `f(g())` (which binds
-   * it) and, through `apply()`, from the `Pipe` route that holds its topic.
-   * §3 pins `x |> f ≡ f(x)`, so the erasure lives in `Apply`'s CANONICAL
-   * handler — the same place the direct route erases (`flattenOps`).
+   * A `Nothing` argument is bound to its parameter, whether it is written
+   * as a literal or computed by the call `g()`, on every route: `f(x)`,
+   * `Apply(f, x)` and `x |> f` agree.
    */
   const NOTHING_FN: MathJsonExpression = ['Function', ['Type', 'x'], 'x'];
 
   /** A fresh engine with `g() = Nothing` and `f = x => Type(x)`; the body
-   * reports whether the argument was BOUND (`"nothing"`) or ERASED (the
-   * nullary contract curries, giving the literal back). */
+   * reports the type of the argument bound to `x` (`"nothing"`). */
   function nothingSetup(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', 'Nothing']]).evaluate();
@@ -711,9 +703,9 @@ describe('ERROR PROPAGATION — Nothing: erasure is a rule on the WRITTEN argume
     return ce;
   }
 
-  test('a LITERAL `Nothing` is erased on all five routes', () => {
+  test('a LITERAL `Nothing` is bound on all five routes', () => {
     const ce = nothingSetup();
-    const nullary = ce.box(['f']).evaluate().toString();
+    const nullary = 'TypeFrom("nothing")';
     expect(ce.box(['f', 'Nothing']).evaluate().toString()).toBe(nullary);
     expect(ce.box(['Apply', 'f', 'Nothing']).evaluate().toString()).toBe(
       nullary
@@ -753,13 +745,13 @@ describe('ERROR PROPAGATION — Nothing: erasure is a rule on the WRITTEN argume
     );
   });
 
-  test('a middle-position `Nothing` erases, shifting later arguments left', () => {
+  test('a middle-position `Nothing` keeps its position', () => {
     const ce = new ComputeEngine();
-    // `Apply(x, y => x + y, Nothing, 5)`: the `Nothing` is erased, so `5`
-    // binds the FIRST parameter and the second stays unapplied (curried).
+    // `Apply(x, y => x + y, Nothing, 5)`: `Nothing` binds `x` and `5` binds
+    // `y`, so `x + y` is the `incompatible-type` error of `Add`.
     const lit: MathJsonExpression = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
     expect(ce.box(['Apply', lit, 'Nothing', 5]).evaluate().toString()).toBe(
-      ce.box(['Apply', lit, 5]).evaluate().toString()
+      'Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing")'
     );
   });
 });

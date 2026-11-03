@@ -79,9 +79,13 @@ describe('controls', () => {
     expect(held.json).toEqual(['Hold', ['f', 'Nothing']]);
   });
 
-  test('canonical boxing erases Nothing from arguments and lists', () => {
-    expect(ce.box(['f', 'Nothing']).json).toEqual(['f']);
-    expect(ce.box(['List', 1, 'Nothing']).json).toEqual(['List', 1]);
+  test('canonical boxing keeps Nothing in arguments and lists', () => {
+    expect(ce.box(['f', 'Nothing']).json).toEqual(['f', 'Nothing']);
+    expect(ce.box(['List', 1, 'Nothing']).json).toEqual([
+      'List',
+      1,
+      'Nothing',
+    ]);
   });
 
   test('canonical Integrate keeps the Nothing bounds', () => {
@@ -122,10 +126,10 @@ describe('ReleaseHold gives the result of boxing the operand directly', () => {
     expect(released.json).toEqual(direct.json);
   });
 
-  test('the released list erases Nothing', () => {
+  test('the released list keeps Nothing', () => {
     expect(
       ce.box(['ReleaseHold', ['Hold', ['List', 1, 'Nothing']]]).evaluate().json
-    ).toEqual(['List', 1]);
+    ).toEqual(['List', 1, 'Nothing']);
   });
 });
 

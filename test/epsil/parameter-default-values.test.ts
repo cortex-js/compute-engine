@@ -378,9 +378,11 @@ describe('PARAMETER DEFAULT VALUES — evaluate', () => {
         'function f(x, density: number = 1, factor: number = 2) { [x, density, factor] }\nf(3, factor: 5)'
       )
     ).toEqual(['List', 3, 1, 5]);
-    expect(
-      value('function f(x, k: number = 2) { [x, k] }\nf(3, k: Nothing)')
-    ).toEqual(['List', 3, 2]);
+  });
+
+  test('a named argument `Nothing` fills its slot, and a `number` parameter refuses it', () => {
+    const r = run('function f(x, k: number = 2) { [x, k] }\nf(3, k: Nothing)');
+    expect(JSON.stringify(r.diagnostics)).toMatch(/incompatible-type/);
   });
 
   test('a skipped optional parameter without a default is still a diagnostic', () => {

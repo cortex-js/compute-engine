@@ -54,10 +54,10 @@ Use explicit content contracts for those restrictions:
 
 These are immediate-content restrictions, not guarantees about every nested
 element. A collection containing `Missing` is itself a collection value.
-Both `value` and `expression` include numeric `nan`, and therefore `NaN`
-and `Indeterminate`. These contracts alone do not establish presence for
+Both `value` and `expression` include numeric `nan`, and therefore `NaN`.
+These contracts alone do not establish presence for
 `IsMissing`, `??`, or the presence assertion `x?!` (`AssertPresent`); the
-absence predicate (`isMissingValue`) includes both numeric markers.
+absence predicate (`isMissingValue`) includes `NaN`.
 Evaluation failure is separate: an expression with a successful-value
 contract may still fail when evaluated.
 
@@ -69,11 +69,10 @@ could not resolve. The general join is neutral in `unknown`
 `unknown` as "no information yet". `never` is the bottom type, below every content type; it is
 neither an absent datum nor an inference placeholder.
 
-Raw callback results in lazy views (R) are selected, with explicit
-materialization and omission through `ListFrom`. Follow-up decisions select
-aggregates skipping `Nothing`, no implicit compaction from
-storing/passing/nesting views, and preserved data-tuple slots. Open record
-types are retained. Record-field omission remains open.
+A lazy view keeps each raw callback result, and `ListFrom` materializes it
+as a list with the same elements. Storing, passing or nesting a view does
+not compact it, and a data tuple keeps every slot. Open record types are
+retained. Record-field omission remains open.
 
 The presence contracts were decided and implemented on 2026-10-21 (user
 decisions P1 to P5, `docs/plans/2026-10-21-presence-contracts-and-assertion.md`;
@@ -85,7 +84,7 @@ library parameter that excludes absence refuses an absent argument with
 at such a parameter or declaration. The presence assertion is the postfix
 `x?!` (alias `⁈`, MathJSON `AssertPresent`). It is a runtime check that uses
 the same absence predicate as `??`: it fails with `expected-present` for
-`Missing`, `Undefined`, `NaN` and `Indeterminate`, and passes `Nothing`
+`Missing`, `NaN` and a `NaN` point, and passes `Nothing`
 through. Its type is `presentType()` of the operand (`coalesce.ts`), which
 removes those absence forms and keeps `nothing`. A compiler omits the check
 only when the operand's type proves presence; the JavaScript and Python
@@ -99,23 +98,15 @@ propagating it, handling it, or checking it at runtime; it does not make
 
 ### Numeric absence handling — agreed change of 2026-10-20
 
-**Implemented** (the presence assertion since 2026-10-21): treat `NaN` and
-`Indeterminate` alike in `IsMissing`, `Coalesce` / `??`, and the presence
-assertion `x?!`. Both count as absent, both select a fallback, and both
-fail the assertion. `Missing` continues to do so (`Undefined` is no
-longer an absent value: "`Missing` is a result only", above);
-`Nothing` remains an omission marker rather than an absent datum.
-
-This supersedes the earlier D7 rule that exact `Indeterminate` bypasses
-absence handling. The old distinction is migration history; current checks
-and fallbacks handle both numeric markers.
-The invariant is uniform treatment by these three observer, fallback, and
-assertion operations while preserving distinct numeric representations and
-existing exact arithmetic propagation: `Mean([1, Indeterminate])` and
-`Max(1, Indeterminate)` retain exact `Indeterminate`, while
-`Coalesce(Indeterminate, 5)` returns `5`. Consumers may need separate
-policies; this does not prescribe a helper name or mechanically broaden
-every absence gate, nor decide field omission or tuple normalization.
+**Implemented** (the presence assertion since 2026-10-21): `NaN` is absent
+for `IsMissing`, `Coalesce` / `??`, and the presence assertion `x?!`. It
+counts as absent, selects a fallback, and fails the assertion:
+`IsMissing(0/0)` is `True` and `Coalesce(0/0, 5)` is `5`. `Missing`
+continues to do so (`Undefined` is no longer an absent value: "`Missing` is
+a result only", below). `Nothing` is not an absent datum: `IsMissing(Nothing)`
+is `False`. Since the user decision of 2026-11-02 ("One static error, one
+dynamic non-value per domain", below) `NaN` is the one numeric marker; the
+second marker, `Indeterminate`, of this decision is removed.
 
 ### `Missing` is a result only — user decision of 2026-11-02
 
@@ -226,12 +217,90 @@ reads `Undefined` as an absent value (the rulings of 2026-09-21 and
 `T | missing` (`w: real | missing`, `list<expression | missing>`).
 Those passages are kept as history.
 
+### One static error, one dynamic non-value per domain — user decision of 2026-11-02
+
+**Settled, implemented 2026-11-03** (option A of page 2 of
+`docs/plans/2026-11-02-language-axes-options.md`).
+
+1. **`Indeterminate` is not a value.** The exact route gives `NaN` for a
+   form that has no value, as `.N()` and every compiled target do: `0/0`,
+   `∞ − ∞`, `0^0`, `Mod(5, 0)` and `Variance([3])` are `NaN`. An operator
+   over `NaN` gives `NaN`: `Mean([1, 0/0])` and `Max(1, 0/0)` are `NaN`.
+   `NaN` keeps its IEEE behavior. The API has no `ce.Indeterminate`, no
+   `Expression.isIndeterminate`, no `INDETERMINATE_VALUE` and no
+   `isIndeterminateValue`; use `ce.NaN` and `isNaN`.
+2. **`Indeterminate` is an input spelling of `NaN`.** The MathJSON symbol
+   `"Indeterminate"`, the LaTeX `\operatorname{Indeterminate}` and
+   `\mathrm{Indeterminate}`, the Epsil name `Indeterminate`,
+   `NumberFrom("Indeterminate")` and the word `Indeterminate` in a type
+   string (the `NaN` value type) all read as `NaN`. The serializer writes
+   `NaN` (`\operatorname{NaN}` in LaTeX), and `String(0/0)` is `"NaN"`.
+3. **`Nothing` is the value of an empty block or of a statement with no
+   value, and it is kept as an element wherever it appears.** No
+   construction removes it: `[1, Nothing]` has length 2, `f(1, Nothing)`
+   has two arguments, and `{a: Nothing}` keeps the key `a`. `Map` keeps a
+   `Nothing` result: `ListFrom(Map(x ↦ If(x > 1, x, Nothing), [1, 2]))` is
+   `[Nothing, 2]`. `Filter` does not drop a `Nothing` element. `Sum`,
+   `Product`, `Min`, `Max`, `Mean`, the statistics and the covariance
+   family do not skip it, and a lazy view keeps it. There is no static
+   error for `Nothing`: an operator that needs a value and meets `Nothing`
+   gives its ordinary `incompatible-type` error when it is evaluated.
+   `Add(1, Nothing)`, `Sum([1, Nothing])`, `Mean([1, Nothing, 3])`,
+   `Length(Nothing)`, and `2y` with `y` assigned `Nothing`, are
+   `incompatible-type` errors. `Nothing` is not an absent value:
+   `IsMissing(Nothing)` is `False`. The type `nothing` does not change: an
+   action such as `To` keeps it, and the element type of a list literal
+   does not show it (`[1, Nothing, 3]` is typed `list<integer>`).
+4. **An empty `Sequence()` stays `Sequence()`** in canonical form (it was
+   `Nothing`). A list or an argument list splices it out:
+   `[1, Sequence(), 2]` is `[1, 2]`. An Epsil rest capture `[h, ...t]` of
+   a list of one element binds `t` to the empty `Sequence`, so `[t]` is
+   `[]`.
+5. **The parser does not produce `Nothing`.** An empty slot, in `(3,,4)`,
+   `[3,,4]` or `f(3,,4)`, holds the parse error `Error('missing')`. A
+   trailing comma (`[1, 2,]`) is dropped. In `cases`, an empty row and a
+   trailing comma in a condition cell give `Which(c, v)`, the parse of a
+   piecewise with no default: `\{x>0: x,\}` is `Which(0 < x, x)`. `\sum x`
+   is `Sum(x)`, as before, and `\partial f` is `PartialDerivative(f)`.
+6. **`Error`, `NaN`, `Missing` and the `NaN` point do not change.** An
+   aggregate gives the first of these that it meets in this order: an
+   error, then `Missing`, then `NaN`. `Mean([0/0, Missing])` is `Missing`
+   and `Mean([0/0, Error("x")])` is the error. `IsMissing(0/0)` is `True`
+   and `Coalesce(0/0, 5)` is `5`.
+7. **Compiled code does not change.** It already gave `NaN` for every
+   form with no value. A list literal with a `Nothing` element, an
+   aggregate over one, and a `Map` or `Filter` whose callback can give
+   `Nothing`, decline, as before.
+
+| Input | Before | Now |
+| --- | --- | --- |
+| `0/0` on the exact route | `Indeterminate` | `NaN` |
+| `Mean([1, 0/0])` | `Indeterminate`, exact | `NaN` |
+| `Max(1, 0/0)` | `Indeterminate` | `NaN` |
+| `\operatorname{Indeterminate}` | `Indeterminate` | `NaN` |
+| `ListFrom(Map(x ↦ If(x > 1, x, Nothing), [1, 2]))` | `[2]` | `[Nothing, 2]`, no error |
+| `Sum` over the view `Map(x ↦ If(x > 1, x, Nothing), [1, 2])` | `2` (`Nothing` skipped) | `incompatible-type` error at the `Sum`, not a static error |
+| `[1, Nothing]` | `[1]` | `[1, Nothing]`, length 2 |
+| `{a: Nothing}` | `{}` | `{a: Nothing}` |
+| `Add(1, Nothing)` | `1` (`Nothing` spliced out) | `incompatible-type` error |
+| `Sequence()` | `Nothing` | `Sequence()` |
+| `(3,,4)` | `(3, 4)` | `(3, Error('missing'), 4)`, a parse error |
+
+This decision supersedes, in the text below: the second member of `nan`,
+`Indeterminate`, with its exact propagation and its `isIndeterminate`
+test (the amendment of 2026-09-28 in §5, and the dated records here and in
+§7 that name it); the `Nothing` erasure policy (the splice at argument, list and
+dictionary construction, the omission by `ListFrom`, the `Map` bypass, the
+`Filter` drop, and the skip by the aggregates, the statistics and the
+covariance family); and the parse of an empty slot to `Nothing`. Those
+passages are kept as history.
+
 ### A comparison is two-valued — user decision of 2026-11-02
 
 **Settled, implemented 2026-11-02** (option A of page 3 of
 `docs/plans/2026-11-02-language-axes-options.md`). A comparison is `True`
 or `False`, in the interpreter and in every compiled target. An operand
-that does not decide it makes it `False`: `NaN`, `Indeterminate`, an
+that does not decide it makes it `False`: `NaN`, an
 absent value (`Missing`, `Undefined`), a pole, a value with no order.
 `NotEqual` is `Not(Equal)`, so it is `True` there. A connective
 (`And`, `Or`, `Not`, `Xor`, `Equivalent`, `Implies`, `Nand`, `Nor`) and
@@ -291,9 +360,8 @@ assumptions and of set membership (`common/kleene.ts`, `contains()`), which
 answers "unknown" for a question it cannot decide; the reading of an error
 operand by a connective ("The connectives with a failed operand", §3); and
 the value of an operator that is not a boolean predicate over an absent
-collection (`Reverse(Missing)` is still `Missing`, `Length(Missing)` is
-still `NaN`; a later item of
-`docs/plans/2026-11-02-compiler-contraction-plan.md`).
+collection (`Reverse(Missing)` and `Length(Missing)` are `Missing`, by the decision
+"`Missing` is a result only", above).
 
 A boolean predicate of the collection and set libraries is two-valued too:
 an absent operand (`Missing`, `Undefined`, or a restriction whose condition
@@ -639,9 +707,8 @@ not enumerate evaluation failure.
 
 **`NaN` — the in-band numeric indeterminacy value.** `NaN` means *the
 mathematics was performed and has no answer in the numeric codomain*:
-`Mod(1, 0)`, `0 * oo` (on the exact route these two answer the second
-member of `nan`, `Indeterminate`, described below; with a float operand or
-under `.N()` they answer `NaN`). It carries no provenance and follows IEEE 754
+`Mod(1, 0)`, `0 * oo`, on the exact route, with a float operand and
+under `.N()` (described below). It carries no provenance and follows IEEE 754
 semantics: quiet, absorbing through numeric operations, `NaN == NaN` is
 `False`. Within the numeric hierarchy, `NaN` is admitted **by `number`
 and its own type `nan`** — the other numeric branches exclude
@@ -656,45 +723,23 @@ therefore decomposes with nothing left over —
 `src/common/type/types.ts` documents the numeric tower.) By the missing-value ruling of 2026-07-24 (next paragraph) `NaN`
 also serves as the *absence* marker inside numeric domains.
 
-**`Indeterminate` — the exact-route answer to a form with no value**
-(shipped 2026-09-29). The type `nan` has two members. `NaN` is the
-floating-point failure and the numeric absence marker, as described above.
-`Indeterminate` is the answer of the EXACT route to a form that has no
-value: `0/0`, `∞/∞`, `0·∞`, `∞ − ∞`, `0^0`, `∞^0`, `1^∞`, `(−1)^±∞`,
-`Mod(x, 0)`, `Remainder(x, 0)`, `Fract(±∞)`, `Log(1, 1)`, a special
-function at an infinite point where it has no limit (`Gamma(−∞)`), the
-sample variance and standard deviation of one datum (`Variance([5])`), and
-the skewness and kurtosis of data whose values are all equal, one datum
-included (`Skewness([5])`, `Kurtosis([√2, √2])`). The population variance
-of one datum is `0`. The same form with a float operand (`0.0/0.0`,
-`Mod(5.0, 0)`), every form under `.N()` or
-`evaluate({numericApproximation: true})`, and every compiled target answer
-`NaN`: a float operand makes a numeric result a float, and the final step
-of numeric evaluation maps `Indeterminate` to `NaN`. Both values are number
-literals with `isNaN` true; only `Indeterminate` has `isIndeterminate`
-true. `isExact` is `false` for both, so a numeric function of either still
-evaluates and does not stay inert. `isSame` holds for each value only to
-itself (`Indeterminate.isSame(NaN)` is `false`), and `Equal` with either on
-a side is `False`. The spellings are the MathJSON symbol
+**A form with no value is `NaN` on every route** (user decision of
+2026-11-02, "One static error, one dynamic non-value per domain", above).
+The exact route answers `NaN` for a form that has no value: `0/0`, `∞/∞`,
+`0·∞`, `∞ − ∞`, `0^0`, `∞^0`, `1^∞`, `(−1)^±∞`, `Mod(x, 0)`,
+`Remainder(x, 0)`, `Fract(±∞)`, `Log(1, 1)`, a special function at an
+infinite point where it has no limit (`Gamma(−∞)`), the sample variance and
+standard deviation of one datum (`Variance([5])`), and the skewness and
+kurtosis of data whose values are all equal, one datum included
+(`Skewness([5])`, `Kurtosis([√2, √2])`). The population variance of one
+datum is `0`. `.N()` and every compiled target give the same `NaN`.
+`Indeterminate` is an input spelling of `NaN` only: the MathJSON symbol
 `"Indeterminate"`, the LaTeX `\operatorname{Indeterminate}` and the Epsil
-name `Indeterminate`. The float rule reads the operands of a form as they
-are when the form is evaluated, so a float that an infinity absorbed first
-is not seen: `∞ + 0.5`, `2.5^∞` and `2.5·∞` are the exact `∞` (an
-infinity is exact, and no float infinity exists), so `Fract(∞ + 0.5)`,
-`0·(∞ + 0.5)`, `Fract(2.5^∞)` and `Fract(2.5·∞)` are `Indeterminate`, not
-`NaN`. A finite result keeps the float: `2.5/∞`, `0.5^∞` and `∞^{-2.5}` are
-the float `0`. This is accepted: both values
-mean "no value" and both have `isNaN` true, and a sound record of the
-absorption would add work to every evaluation. A consumer that must tell a
-float failure from an exact one reads `isIndeterminate` only as "no float
-was seen by the form". Under `.N()`, a base raised to `±∞` is compared with
-1 after it is rounded to the working precision, so a base closer to 1 than
-that precision can show is read as `1`: at `ce.precision = 21`, with
-`x := (10^{100} + 1)/10^{100}`, `x^∞` evaluates to `+∞` but its `.N()` is
-`NaN`. A pole stays `~oo` (`5/0`, `Gamma(0)`), and an absent
-operand still gives `NaN` (`Missing + 2`, `Length(Missing)`). The design
-and the list of switched producers are in
-`docs/plans/2026-09-28-indeterminate-value.md`.
+name `Indeterminate` parse to `NaN`. Under `.N()`, a base raised to `±∞` is
+compared with 1 after it is rounded to the working precision, so a base
+closer to 1 than that precision can show is read as `1`: at
+`ce.precision = 21`, with `x := (10^{100} + 1)/10^{100}`, `x^∞` evaluates
+to `+∞` but its `.N()` is `NaN`. A pole stays `~oo` (`5/0`, `Gamma(0)`).
 
 **`Missing` — the position-preserving absent datum.** For non-numeric
 domains, "there is no element there" is answered by the `Missing` symbol
@@ -707,9 +752,8 @@ free, whereas a symbolic marker cannot compile. This is an accepted,
 deliberate **information loss** and should be understood as such:
 `IsMissing(NaN) → True` means the engine cannot distinguish "a numeric
 datum was absent" from "a numeric computation produced `NaN`".
-An exact indeterminate form retains its distinct `Indeterminate` result,
-but `IsMissing(0/0)` and `IsMissing(Indeterminate)` are `True`, as on the
-numeric route. The fallback operator handles both numeric markers too.
+`IsMissing(0/0)` is `True`, and the fallback operator selects its fallback
+for it.
 (The
 propagation behavior is analogous to Julia's `missing`; note that Julia
 itself keeps `missing` as a distinct singleton type separate from `NaN` —
@@ -748,61 +792,26 @@ its own exact symbolic form (`Arcsin(2)`, `Ln(2)`): that is a decided exact
 value awaiting numericization under the exactness contract (§2), not a
 pending question.
 
-Distinct from all four: **`Nothing` is an erasure marker, not a failure
-channel.** Current implementation splices it out at argument and collection
-construction boundaries; the agreed direction below narrows those boundaries.
-“Erasure marker” does not imply universal erasure: `Nothing` is retained
-outcome data at specified boundaries and an omission request only at others.
-This boundary policy is distinct from the open question of an ordinary unit
-type and does not require that question to be decided.
-Using it for a failed computation or an out-of-band access
-would silently shorten a result and misalign positional data — that is
-exactly what the `Missing` ruling fixed.
+Distinct from all four: **`Nothing` is the value of an empty block or of a
+statement with no value, not a failure channel** (user decision of
+2026-11-02, "One static error, one dynamic non-value per domain", above).
+It is an ordinary element: no construction removes it, so a list, a tuple,
+an argument list, a dictionary entry and a lazy view keep it in its
+position, and `Map`, `Filter`, the aggregates and the statistics see it as
+any other element. An operator that needs a value and meets it gives the
+`incompatible-type` error: `Sum([1, Nothing])` is an error, not `1`. Using
+`Nothing` for a failed computation or an out-of-band access is wrong: that
+is what `Missing` and `NaN` are for.
 
-The October 20 implementation retains a `Nothing` callback result in an
-indexed lazy view's iteration, indexing, count, and display. Constructing
-a list from that view erases it. Thus a view exposing `[1, Nothing]`
-counts two results, while its constructed list `[1]` counts one.
-“Nothing always erases from collections” is not an accurate description of
-this behavior. The user selected this raw-result model (R), with
-`ListFrom(view)` explicitly materializing a list and omitting `Nothing`.
-**Implemented for numeric aggregates:** sums, products, extrema, and the
-univariate statistics skip `Nothing` data without requiring a materialized list. For a raw
-view exposing `[1, Nothing, Nothing]`, `Length` is 3, while `Sum` and `Mean`
-are 1. The mean counts participating results; an all-omitted input uses the
-ordinary empty-input rule. This does not make `Missing` skippable.
-
-`Map` now bypasses its callback for immediate `Nothing` inputs and preserves
-that raw position. `Filter` drops immediate `Nothing` inputs without calling
-its predicate; its filtered positions and count exclude those inputs. With
-multiple map sources, any omitted coordinate bypasses the whole callback. `Missing` and markers nested inside a datum still reach the
-callback. `Covariance`, `PopulationCovariance`, and `Correlation` skip whole
-observations with an omitted coordinate (or an omitted pair row), after checking
-raw source lengths. Every term uses the same retained observations. Maps,
-filters, predicate counts, and these paired statistics refuse compilation when source element
-types admit omission until the target can preserve that distinction. Maps also
-check whether their callback results may be omitted.
-
-Storing, passing, or nesting a view does not implicitly compact it.
-Data tuples retain `Nothing` in its slot, and ordinary arguments do not
-shift when one evaluates to `Nothing`. This requires changes to current
-construction and assignment paths. Record fields, custom folds, ordering
-operations, and serialization still need detailed policies. See the design
-note; do not assume these follow-up rules or honest element/length typing
-are already implemented.
-
-Current dictionary construction omits an entry whose value is `Nothing`,
-including a value that becomes `Nothing` during evaluation. The user's
-current preference is to omit `Missing` fields instead and retain `Nothing`
-fields. **Open:** this omission candidate is not final; required versus
-optional keys and omission of
-the `Missing` marker versus all absence forms still need explicit rules.
-If omission is adopted, constructing `{a -> f(x)}` when `f(x)` may return
-`Missing` cannot promise a required `a` key.
-An existing key can instead be removed by filtering the
-dictionary's key/value entries and rebuilding with `DictionaryFrom`;
-this constructs a replacement dictionary. Retaining open record types
-does not decide whether a field value erases its key.
+A dictionary entry whose value is `Missing` is kept too (`{a: Missing}`
+keeps the key `a`). **Open:** whether such an entry is omitted, required
+versus optional keys, and omission of the `Missing` marker versus all
+absence forms, still need explicit rules. If omission is adopted,
+constructing `{a -> f(x)}` when `f(x)` may return `Missing` cannot promise
+a required `a` key. An existing key can instead be removed by filtering the
+dictionary's key/value entries and rebuilding with `DictionaryFrom`; this
+constructs a replacement dictionary. Retaining open record types does not
+decide whether a field value erases its key.
 
 **Host exceptions.** The settled core: throws are reserved for API misuse
 by the embedding program, cancellation, and compiled-code boundaries per
@@ -903,8 +912,7 @@ re-check whenever new evidence settles.
    mismatch, an ill-formed index kind are contract violations (`requires`
    conditions, §4) and belong to rules 1/6. The marker is a function of the
    declared result type: `NaN` when the result type is numeric
-   (`Mod(1, 0) → Indeterminate` on the exact route and `NaN` under `.N()`,
-   both members of `nan`, §1), `Missing` when it is a settled non-numeric type
+   (`Mod(1, 0) → NaN` on the exact route and under `.N()`, §1), `Missing` when it is a settled non-numeric type
    (a comparison with it is `False` since the user decision of 2026-11-02,
    where Kleene semantics carried it through comparisons before; discharged
    by `IsMissing`/`Coalesce`), the union of the two when it is
@@ -1237,31 +1245,6 @@ Aggregates propagate it (`Max(1, NaN, 3) → NaN`) and absence-discharge
 operators treat it as absent (`IsMissing(NaN) → True`) — with the
 information loss stated in §1.
 
-**`Indeterminate` propagates as `NaN` does, and keeps its name while no
-float is involved** (shipped 2026-09-29). The propagate gate is the check
-that runs before the handler when an operand of a `propagate` slot is
-`NaN`-valued. It answers `Indeterminate` when every `NaN`-valued operand is
-`Indeterminate` and no operand is inexact, and `NaN` otherwise:
-`Sqrt(Indeterminate)`, `Sin(Indeterminate)` and `Factorial(Indeterminate)`
-are `Indeterminate`, and `Arctan2(Indeterminate, NaN)` is `NaN`. The
-`reject` policy is unchanged (an error). `Add` and `Multiply` are lazy and
-do not run the gate, so their fold classes `Sum` and `Product` apply the
-same rule themselves: `Indeterminate + 1` and `2·Indeterminate` are
-`Indeterminate`; `Indeterminate + 1.5` and `Indeterminate·NaN` are `NaN`.
-The reducers that do not run the gate — `Max`, `Min`, the statistics
-reducers (`Mean`, `Median`, the variance family) and the quantile family —
-apply the rule in their handlers: `Max(1, Indeterminate)` and
-`Mean([1, Indeterminate])` are `Indeterminate`, and
-`Max(Indeterminate, NaN)` is `NaN`. Any other handler that receives an
-`Indeterminate` operand computes through its numeric kernel and answers
-`NaN` (`GCD(Indeterminate, 2)` is `NaN`).
-Absence checks and fallbacks treat `Indeterminate` and `NaN` alike:
-`IsMissing` returns `True` for either, and `Coalesce` selects the fallback.
-This does not change arithmetic propagation. Comparisons
-(`Equal`, `Less`) with `Indeterminate` are `False`, and a Boolean context
-(`And`, `Not`, `If`) rejects it with `incompatible-type`, as for `NaN`.
-Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4 and §5.
-
 **`Missing` makes a comparison `False`** (`Less(Missing, 1) → False`; user
 decision of 2026-11-02, two-valued comparisons; from 2026-07-24 to
 2026-11-02 it propagated by Kleene, `Less(Missing, 1) → Missing`, and an
@@ -1326,13 +1309,9 @@ Whole-point absence still propagates through point arithmetic; further point
 normalization must be specified by the mathematical operation rather than by
 erasing an explicitly constructed data tuple.
 
-`Nothing` is omitted when constructing an ordinary list;
-`Missing`/`NaN` preserve positions. Statistics over a constructed list
-therefore see no erased `Nothing` cells. The selected aggregate policy
-also skips immediate `Nothing` results in raw lazy views, without changing
-their raw counts or indices. This is implemented for sums, products, extrema,
-and univariate statistics. Binning, ordering, and custom-fold policies remain
-separate; see §1 and the design note.
+`Nothing`, `Missing` and `NaN` all keep their position in a constructed list
+and in a lazy view. An aggregate or a statistic does not skip a `Nothing`
+element: it gives the `incompatible-type` error (`Mean([1, Nothing, 3])`).
 
 **`Undefined` in a numeric slot takes the same route as `Missing`** (ruled
 2026-09-21; superseded by "`Missing` is a result only", 2026-11-02:
@@ -1361,10 +1340,8 @@ are `Median`, the variance family, `Max`/`Min`, `Quantile` and `Covariance`.
 `Undefined` cell exactly as a `Missing` one (both count it — neither erases a
 position). Until this ruling those operators read `Undefined` as an ordinary
 value, so `Mean([1, Undefined, 3])` stayed symbolic. Arithmetic consumers use
-`isAbsentValue` (`src/compute-engine/boxed-expression/type-guards.ts`), which
-excludes exact `Indeterminate` so those consumers can preserve it. The
-explicit checks and fallbacks use `isMissingValue`, which includes both
-numeric markers. Both share `isAbsentSymbol` with the numeric gate's
+`isAbsentValue` (`src/compute-engine/boxed-expression/type-guards.ts`). The
+explicit checks and fallbacks use `isMissingValue`, which includes `NaN`. Both share `isAbsentSymbol` with the numeric gate's
 `isAbsentScalarSymbol`; the symbol test recognizes `Missing` and `Undefined`.
 
 SUPERSEDED 2026-11-02 (two-valued comparisons, above): a comparison and a
@@ -1467,8 +1444,7 @@ which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
   `Unique([Missing, Undefined])` keeps both), and `Map` applies the function
   to the cell, which answers by its own absence rule (`Map(x ↦ 2x, [1,
   Missing, 3])` is `[2, NaN, 6]`, typed `list<number>`). Only an explicit
-  removal shortens a collection: `Nothing` in a literal, or a `Filter` on
-  `IsMissing`.
+  removal shortens a collection: a `Filter` on `IsMissing`.
 - **B. Aggregates propagate.** `Sum`, `Product`, `Mean`, `Median`, `Max`,
   `Min`, the variance family, `Quantile`, `Reduce`: one absent cell makes the
   aggregate the marker of its codomain, `NaN`. The empty collection answers
@@ -1696,7 +1672,7 @@ is mandatory:
 3. **A partiality declaration.** Being inside the carrier types does
    **not** prove success — `Mod(1, 0)` has both arguments proven finite
    integers and still has no answer; `0 · oo` makes a `nan` value
-   (`Indeterminate` on the exact route, `NaN` under `.N()`) from
+   (`NaN` on every route) from
    `NaN`-free inputs. Two *distinct* kinds of condition attach to a
    declaration, because they feed different channels — the distinction
    is central to the taxonomy:
@@ -1885,7 +1861,7 @@ recurse on `NaN − 1` until the recursion limit). With the clauses
 the literal `NaN` (`f(NaN) = 0`) still matches `NaN`. The function is
 applied and its body computes with `NaN`: this is not a `propagate`
 policy, and the conservative floor of §4 (a user callable has unknown NaN
-behavior) is unchanged. `Indeterminate` is accepted in the same way. A
+behavior) is unchanged. A
 number that is not `NaN` is checked as before (`1.5` at `integer` is
 refused), and library operators keep their own `NaN` policy.
 
@@ -2176,7 +2152,10 @@ the pins on `matches('real')` for `±oo` flipped with it.
 
 Amendment — the `Indeterminate` value
 (`docs/plans/2026-09-28-indeterminate-value.md`), decided 2026-09-28 and
-shipped 2026-09-29. The word "singleton" above no longer applies to `nan`:
+shipped 2026-09-29. SUPERSEDED by the user decision of 2026-11-02 ("One
+static error, one dynamic non-value per domain", at the top): `nan` has
+the one member `NaN` again, and `Indeterminate` parses to `NaN`. The
+word "singleton" above no longer applies to `nan`:
 the type `nan` has two members, `NaN` (the floating-point failure and the
 numeric absence marker) and `Indeterminate` (the exact-route answer to a
 form with no value, §1). Each literal has its own value type, printed
@@ -2229,11 +2208,10 @@ maps its channels onto it:
   compiled code". Where a paragraph of §3 below says what compiled code
   gives for an operator over an absent operand, it describes the interpreter
   and the compiled code as they are, not a promise of the compiled value.
-- The compiled targets have only the IEEE `NaN`, so an `Indeterminate`
-  constant and every exact indeterminate form compile to the target's
-  `NaN` (`NaN` in JavaScript, `np.nan` in Python, `_gpu_nan()` in the
-  shaders). This agrees with `.N()`, which also answers `NaN` for
-  `Indeterminate` (§1), so it is not a divergence.
+- The compiled targets have only the IEEE `NaN`, so every form with no
+  value compiles to the target's `NaN` (`NaN` in JavaScript, `np.nan` in
+  Python, `_gpu_nan()` in the shaders). This agrees with the interpreter,
+  which also answers `NaN` (§1), so it is not a divergence.
 
 An earlier revision of this document proposed that compiled code "sheds
 the Error channel" and leaves residual failures to target semantics; that
@@ -2267,7 +2245,7 @@ numericization (§1) — it is not rule-7 inertness.
 | `Factorial(-2)` | inert | `~oo` | `~oo` | conforms (rule 3) |
 | `Arcsin(2)` | exact, unreduced | exact, unreduced | complex value | conforms (rule 3) |
 | `Ln(0)` | exact, unreduced | `-oo` | `-oo` | conforms (rule 3) |
-| `Mod(1, 0)` | inert | `Indeterminate` | `NaN` | conforms (rule 4; `Indeterminate` since 2026-09-29, §1) |
+| `Mod(1, 0)` | inert | `NaN` | `NaN` | conforms (rule 4, §1) |
 | `At([1,2], 99)` | inert | `NaN` | `NaN` | conforms (rule 5, numeric elements) |
 | `First([])` | inert | `Missing` | `Missing` | conforms (rule 5) |
 | `First(E)`, `At(E, 5)` with `E: list<integer>` and `E := []` | inert | `NaN` | `NaN` | conforms (rule 5: the element type of the read is the declared one, user decision 2026-10-20; with `E: list<string>`, or `E := []` with no declaration, it is `Missing`) |
@@ -2529,8 +2507,9 @@ answer and the fix landed. An entry with no FIXED date is still open.
   `Factorial` negative-integer pole and the GPU `Gamma` pole guard were
   aligned (they answered `NaN`, so the same pole spelled differently by
   fold and by runtime). `NaN` stays reserved for the indeterminate
-  (`0/0`, `0·∞`, which the interpreter's exact route answers with
-  `Indeterminate` since 2026-09-29) and for `propagate`. Documented as the float-target
+  (`0/0`, `0·∞`, which the interpreter's exact route answered with
+  `Indeterminate` from 2026-09-29 to 2026-11-02, and with `NaN` since)
+  and for `propagate`. Documented as the float-target
   carve-out in `docs/COMPILATION-MODEL.md`; conformed pins in the suite.
 - **RULED 2026-08-30 (pole-encoding extension, shipped): the projection
   also applies at the argument boundary** — a `~oo` value passed into
@@ -2656,7 +2635,7 @@ document's history):
   exists. Before the ruling the two control operators disagreed (measured
   2026-08-26): `Which` answered `Undefined` — a fifth "no answer" citizen
   invented locally before the absence ruling — and `If` answered
-  `Nothing`, the positional erasure marker §1 forbids as a
+  `Nothing`, the value of an empty block, which §1 forbids as a
   failed-selection answer. Unchanged, deliberately: the masking
   `Undefined` of the `When` restriction operator (plot consumers skip
   masked points), decision 9's fall-through for an `Undefined` guard, and

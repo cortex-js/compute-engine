@@ -628,7 +628,7 @@ export function evaluateChainForCondition(
 
 /**
  * True when the adjacent pair `(a, b)` of a chain is `False` because an
- * operand is an undefined number (`NaN`, `Indeterminate`), an absent value
+ * operand is an undefined number (`NaN`), an absent value
  * (`Missing`), or has a value with no order (`nonRealKind()`;
  * with `only: 'pole'`, only the pole, for `Equal`). This is the rule of the
  * verdict (`decideLess`, `decideLessEqual`, `decideEqual`) applied to one
@@ -687,7 +687,7 @@ function inertRelation(
  * evaluated operand of a comparison, has: `'pole'` for `ComplexInfinity`
  * (the value of `1/0`), `'complex'` for a number with a nonzero imaginary
  * part (`i`, `1 + i`), or `undefined`. The real numbers include `+∞` and
- * `−∞`. `NaN` and `Indeterminate` give `undefined`: the comparison handlers
+ * `−∞`. `NaN` gives `undefined`: the comparison handlers
  * test them first, with the IEEE rule.
  *
  * Such a value has no order, so an ordered comparison (`<`, `≤`, `>`, `≥`)

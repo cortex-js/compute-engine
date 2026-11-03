@@ -51,8 +51,8 @@ describe('ADD, SUM AND MEAN AGREE', () => {
 
   test('+oo beside -oo is the indeterminate form', () => {
     const terms = [C(1, 1), 'PositiveInfinity', 'NegativeInfinity'];
-    expect(evaluated(['Sum', ['List', ...terms]])).toBe('Indeterminate');
-    expect(evaluated(['Mean', ['List', ...terms]])).toBe('Indeterminate');
+    expect(evaluated(['Sum', ['List', ...terms]])).toBe('NaN');
+    expect(evaluated(['Mean', ['List', ...terms]])).toBe('NaN');
     expect(numeric(['Mean', ['List', ...terms]])).toBe('NaN');
   });
 

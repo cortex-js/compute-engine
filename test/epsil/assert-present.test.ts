@@ -81,7 +81,7 @@ describe('x?! — evaluation', () => {
   test('NaN and an indeterminate form fail; Nothing passes through', () => {
     expect(run('NaN?!').value).toContain('expected-present');
     expect(run('(0/0)?!').value).toContain('expected-present');
-    expect(run('[1, Nothing?!, 2]').value).toBe('[1,2]');
+    expect(run('[1, Nothing?!, 2]').value).toBe('[1,"Nothing",2]');
   });
 
   test('an error operand propagates unchanged', () => {

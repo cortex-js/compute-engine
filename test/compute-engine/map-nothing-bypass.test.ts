@@ -16,8 +16,8 @@ function source(ce: ComputeEngine): Expression {
     .evaluate();
 }
 
-describe('Map skips callbacks for Nothing while retaining positions', () => {
-  test('count and distant indexing do not scan or invoke bypassed callbacks', () => {
+describe('Map applies its callback to a Nothing element', () => {
+  test('count does not scan, and an indexed Nothing element gives the error of the callback', () => {
     const ce = new ComputeEngine();
     let reads = 0;
     let calls = 0;
@@ -47,22 +47,22 @@ describe('Map skips callbacks for Nothing while retaining positions', () => {
     expect(mapped.isValid).toBe(true);
     expect(mapped.count).toBe(1000000);
     expect([reads, calls]).toEqual([0, 0]);
-    expect(mapped.at(900000)?.symbol).toBe('Nothing');
+    // `UnusedCallback` is declared `(integer) -> integer`: the argument
+    // `Nothing` is refused before its handler runs.
+    expect(mapped.at(900000)?.operator).toBe('Error');
     expect([reads, calls]).toEqual([1, 0]);
   });
 
-  test('an inline strict integer parameter accepts a source with Nothing', () => {
+  test('an inline strict integer parameter gives an error for a Nothing element', () => {
     const ce = new ComputeEngine();
     const result = executeEpsil(
       ce,
       'Map((x: integer) => x * 2, Map(x => If(x == 2, Nothing, x), [1, 2, 3]))'
     );
     expect(result.diagnostics).toEqual([]);
-    expect([...result.value.each()].map((v) => v.symbol ?? v.re)).toEqual([
-      2,
-      'Nothing',
-      6,
-    ]);
+    expect(
+      [...result.value.each()].map((v) => v.operator === 'Error' ? 'Error' : v.re)
+    ).toEqual([2, 'Error', 6]);
   });
 
   test('a named producer retains inferred Nothing in its mapped result', () => {
@@ -144,28 +144,29 @@ describe('Map skips callbacks for Nothing while retaining positions', () => {
       expect(mapped.isValid).toBe(true);
       expect(mapped.count).toBe(3);
       expect(calls).toBe(0);
-      expect(mapped.at(2)?.symbol).toBe('Nothing');
+      // `DoublePresent` is declared `(integer) -> integer`: the argument
+      // `Nothing` is refused before its handler runs.
+      expect(mapped.at(2)?.operator).toBe('Error');
       expect(calls).toBe(0);
       expect(mapped.at(3)?.re).toBe(6);
       expect(calls).toBe(1);
       const before = calls;
       const values = [...mapped.each()];
-      expect(values.map((v) => v.symbol ?? v.re)).toEqual([2, 'Nothing', 6]);
+      expect(
+        values.map((v) => (v.operator === 'Error' ? 'Error' : v.re))
+      ).toEqual([2, 'Error', 6]);
       expect(calls - before).toBe(2);
       expect(ce.function('ListFrom', [mapped]).evaluate().toString()).toBe(
-        '[2,6]'
+        '[2,Error(ErrorCode("incompatible-type", "integer", "nothing"), "Nothing"),6]'
       );
       expect(inner.count).toBe(3);
       const element = collectionElementType(mapped.type.type)!;
-      expect(isSubtype('nothing', element)).toBe(true);
-      expectTypeBetween(mapped, {
-        atMost: 'list<integer | nothing>',
-        above: 'list<integer>',
-      });
+      expect(isSubtype('nothing', element)).toBe(false);
+      expectTypeBetween(mapped, { atMost: 'list<integer>' });
     }
   );
 
-  test('a callback accepting Nothing still cannot replace a bypassed element', () => {
+  test('a callback accepting any is called for a Nothing element', () => {
     const ce = new ComputeEngine();
     let calls = 0;
     ce.declare('ReplaceAnything', {
@@ -179,15 +180,11 @@ describe('Map skips callbacks for Nothing while retaining positions', () => {
     const mapped = ce
       .function('Map', [ce.symbol('ReplaceAnything'), source(ce)])
       .evaluate();
-    expect([...mapped.each()].map((v) => v.symbol ?? v.re)).toEqual([
-      9,
-      'Nothing',
-      9,
-    ]);
-    expect(calls).toBe(2);
+    expect([...mapped.each()].map((v) => v.symbol ?? v.re)).toEqual([9, 9, 9]);
+    expect(calls).toBe(3);
   });
 
-  test('fused and numeric maps preserve bypass at every level', () => {
+  test('fused and numeric maps give the error of the first level for a Nothing element', () => {
     const ce = new ComputeEngine();
     ce.precision = 'machine';
     const double = ce.box(['Function', ['Multiply', 'x', 2], 'x']);
@@ -195,20 +192,14 @@ describe('Map skips callbacks for Nothing while retaining positions', () => {
     const mapped = ce
       .function('Map', [shift, ce.function('Map', [double, source(ce)])])
       .evaluate();
-    expect(mapped.at(2)?.symbol).toBe('Nothing');
-    expect([...mapped.each()].map((v) => v.symbol ?? v.re)).toEqual([
-      3,
-      'Nothing',
-      7,
-    ]);
-    expect([...mapped.N().each()].map((v) => v.symbol ?? v.re)).toEqual([
-      3,
-      'Nothing',
-      7,
-    ]);
+    const show = (v: Expression) =>
+      v.operator === 'Error' ? 'Error' : v.re;
+    expect(mapped.at(2)?.operator).toBe('Error');
+    expect([...mapped.each()].map(show)).toEqual([3, 'Error', 7]);
+    expect([...mapped.N().each()].map(show)).toEqual([3, 'Error', 7]);
   });
 
-  test('zip mapping bypasses a row if any immediate input is Nothing', () => {
+  test('zip mapping gives the error of the callback for a row with a Nothing input', () => {
     const ce = new ComputeEngine();
     let calls = 0;
     ce.declare('AddPresent', {
@@ -226,21 +217,16 @@ describe('Map skips callbacks for Nothing while retaining positions', () => {
         ce.box(['List', 10, 20, 30]),
       ])
       .evaluate();
-    expect(mapped.at(2)?.symbol).toBe('Nothing');
+    expect(mapped.at(2)?.operator).toBe('Error');
     expect(calls).toBe(0);
-    expect([...mapped.each()].map((v) => v.symbol ?? v.re)).toEqual([
-      11,
-      'Nothing',
-      33,
-    ]);
+    expect(
+      [...mapped.each()].map((v) => (v.operator === 'Error' ? 'Error' : v.re))
+    ).toEqual([11, 'Error', 33]);
     expect(calls).toBe(2);
-    expectTypeBetween(mapped, {
-      atMost: 'list<integer | nothing>',
-      above: 'list<integer>',
-    });
+    expectTypeBetween(mapped, { atMost: 'list<integer>' });
   });
 
-  test('Missing is delivered, and Nothing nested in a datum does not bypass it', () => {
+  test('Missing is delivered to the callback', () => {
     const ce = new ComputeEngine();
     let calls = 0;
     ce.declare('Visit', {
@@ -268,7 +254,7 @@ describe('Map skips callbacks for Nothing while retaining positions', () => {
   });
 
   test.each(['javascript', 'python'] as const)(
-    'compilation refuses raw omissions on %s',
+    'compilation refuses a source that can hold Nothing on %s',
     (to) => {
       const ce = new ComputeEngine();
       ce.declare('xs', 'list<integer | nothing>');

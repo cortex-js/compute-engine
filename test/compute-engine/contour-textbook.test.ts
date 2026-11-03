@@ -123,7 +123,7 @@ describe('Textbook reductions: convergence and domain safeguards', () => {
   test.each([
     ['\\frac{1}{1+\\cos z}', '+oo'],
     ['\\frac{1}{1-\\cos z}', '+oo'],
-    ['\\frac{1}{\\cos z}', 'Indeterminate'],
+    ['\\frac{1}{\\cos z}', 'NaN'],
   ])(
     'a pole on a periodic integration path is not a finite answer: %s',
     (f, expected) => {

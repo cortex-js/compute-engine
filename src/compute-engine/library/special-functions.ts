@@ -24,7 +24,6 @@ import {
   isFunction,
   isNumber,
   isSymbol,
-  indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
@@ -263,7 +262,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Carrier, NaN policy and the values at the infinite points as for
       // `GammaLn`: `+∞` at the poles (the non-positive integers), `+∞` at
-      // `+∞`, `Indeterminate` at `−∞` and `~oo`. The value is complex on the
+      // `+∞`, `NaN` at `−∞` and `~oo`. The value is complex on the
       // whole negative axis (Im = π⌊x⌋), so the claim is the top numeric type.
       signature: '(complex | infinity) -> number',
       examples: ['LogGamma(5)', 'N(LogGamma(-2.5 + 1.5i))'],
@@ -1268,7 +1267,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.Zero;
         // No limit at `~oo`: the indeterminate form.
-        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
+        if (point !== undefined) return ce.NaN;
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
@@ -1340,7 +1339,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.ComplexInfinity;
         // No limit at `~oo`: the indeterminate form.
-        if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
+        if (point !== undefined) return ce.NaN;
         // li is real only for x ≥ 0; stay symbolic for complex/negative.
         if (x.isComplex || x.isNegative) return undefined;
         if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);

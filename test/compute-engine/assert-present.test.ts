@@ -5,7 +5,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // `AssertPresent(x)` — the presence assertion (decision P4 of
 // `docs/plans/2026-10-21-presence-contracts-and-assertion.md`, Epsil `x?!`).
 // It evaluates its operand once and returns it unchanged when present; an
-// ABSENT operand (`Missing`, `Undefined`, `NaN`, `Indeterminate`: the set
+// ABSENT operand (`Missing`, `Undefined`, `NaN`, `NaN`: the set
 // `IsMissing` recognizes and `Coalesce` discharges) is an `expected-present`
 // error naming the operand as written. `Nothing` is an omission marker, not
 // an absent datum, and passes through; an error operand propagates. Its type
@@ -38,7 +38,7 @@ describe('AssertPresent — evaluation', () => {
   test.each([
     ['Missing', 'Missing'],
     ['NaN', 'NaN'],
-    [['Divide', 0, 0], 'Indeterminate'],
+    [['Divide', 0, 0], 'NaN'],
   ])('%s fails the assertion', (input, _label) => {
     const v = ce.box(['AssertPresent', input as any]).evaluate();
     expect(v.operator).toBe('Error');

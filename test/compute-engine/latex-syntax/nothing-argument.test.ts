@@ -29,7 +29,13 @@ describe('AN AUTHORED NOTHING IN A LATEX ARGUMENT LIST', () => {
   });
 
   test('a Nothing argument does not break the comma list', () => {
-    expect(raw('f(a, \\mathrm{Nothing}, b)')).toBe(raw('f(a,,b)'));
+    expect(raw('f(a, \\mathrm{Nothing}, b)')).toBe(
+      '["InvisibleOperator","f",["Delimiter",["Sequence","a","Nothing","b"],"\'(,)\'"]]'
+    );
+    // An empty slot is a missing operand, not `Nothing`.
+    expect(raw('f(a,,b)')).toBe(
+      '["InvisibleOperator","f",["Delimiter",["Sequence","a",["Error","\'missing\'"],"b"],"\'(,)\'"]]'
+    );
     expect(raw('(a, \\mathrm{Nothing}, b)')).toBe(
       '["Delimiter",["Sequence","a","Nothing","b"],"\'(,)\'"]'
     );
@@ -42,9 +48,9 @@ describe('AN AUTHORED NOTHING IN A LATEX ARGUMENT LIST', () => {
     );
   });
 
-  test('a Nothing element of a list is erased in the canonical form', () => {
+  test('a Nothing element of a list is kept in the canonical form', () => {
     expect(JSON.stringify(ce.parse('[1, \\mathrm{Nothing}, 2]').json)).toBe(
-      '["List",1,2]'
+      '["List",1,"Nothing",2]'
     );
   });
 
@@ -113,14 +119,15 @@ describe('THE BODY OF A STYLE SWITCH', () => {
     ['x \\color{red} + 1', '["Add","x",1]'],
     ['x \\displaystyle\\large + 1', '["Add","x",1]'],
     ['x \\displaystyle \\, + 1', '["Add","x",1]'],
-    // An element that is only a decoration is an empty element.
+    // An element that is only a decoration is an empty element: a missing
+    // operand.
     [
       'f(a, \\phantom{x}, b)',
-      '["InvisibleOperator","f",["Delimiter",["Sequence","a","Nothing","b"],"\'(,)\'"]]',
+      '["InvisibleOperator","f",["Delimiter",["Sequence","a",["Error","\'missing\'"],"b"],"\'(,)\'"]]',
     ],
     [
       'f(a, \\displaystyle, b)',
-      '["InvisibleOperator","f",["Delimiter",["Sequence","a","Nothing","b"],"\'(,)\'"]]',
+      '["InvisibleOperator","f",["Delimiter",["Sequence","a",["Error","\'missing\'"],"b"],"\'(,)\'"]]',
     ],
     // No infix operator after the switch: the style is kept.
     [
@@ -441,7 +448,7 @@ describe('A NOTHING THAT IS THE ONLY CONTENT OF AN ENCLOSURE', () => {
       '["InvisibleOperator","f",["Delimiter","Nothing"]]'
     );
     expect(JSON.stringify(fresh.parse('f(\\mathrm{Nothing})').json)).toBe(
-      '["f"]'
+      '["f","Nothing"]'
     );
 
     const declared = new ComputeEngine();
@@ -450,7 +457,7 @@ describe('A NOTHING THAT IS THE ONLY CONTENT OF AN ENCLOSURE', () => {
       JSON.stringify(declared.parse('f(\\mathrm{Nothing})', { form: 'raw' }).json)
     ).toBe('["f","Nothing"]');
     expect(JSON.stringify(declared.parse('f(\\mathrm{Nothing})').json)).toBe(
-      '["f"]'
+      '["f","Nothing"]'
     );
     expect(
       JSON.stringify(declared.parse('f(\\mathrm{Nothing}, 1)', { form: 'raw' }).json)
@@ -488,7 +495,7 @@ describe('A NOTHING THAT IS THE ONLY CONTENT OF AN ENCLOSURE', () => {
 
   test('a Nothing in brackets, braces and bars is an element', () => {
     expect(raw('[\\mathrm{Nothing}]')).toBe('["List","Nothing"]');
-    expect(canonical('[\\mathrm{Nothing}]')).toBe('["List"]');
+    expect(canonical('[\\mathrm{Nothing}]')).toBe('["List","Nothing"]');
     expect(raw('\\{\\mathrm{Nothing}\\}')).toBe('["Set","Nothing"]');
     expect(parsed('\\langle\\mathrm{Nothing}\\rangle')).toBe(
       '["AngleBracket","Nothing"]'

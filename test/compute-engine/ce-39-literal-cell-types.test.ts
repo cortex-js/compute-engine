@@ -171,13 +171,18 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
   );
 
   test('a cell that holds Nothing keeps its type', () => {
-    // The `nothing` member of the element type is removed only for a
-    // valueless symbol: the meet of `nothing` and `number` is `never`.
+    // Only a valueless symbol is narrowed by the parameter it fills: the
+    // meet of `nothing` and `number` is `never`. The element `Nothing` is
+    // kept, so it is not a number and the call is an error.
     const ce = new ComputeEngine();
     ce.assign('p', ce.Nothing);
     const expr = ce.box(['Mean', ['List', 'p', 1]]);
     expect(ce.box('p').type.toString()).toBe('nothing');
-    expect(expr.evaluate().json).toBe(1);
+    expect(expr.evaluate().json).toEqual([
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'number'", "'nothing'"],
+      '\'Mean: "Nothing"\'',
+    ]);
   });
 
   test('a transparent alias of a union parameter infers the cells', () => {

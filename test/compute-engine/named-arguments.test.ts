@@ -230,17 +230,14 @@ f(...t, rate: 1)`
   });
 });
 
-describe('`Nothing` as an omitted argument', () => {
-  // `Nothing` is the engine's absent-value marker and cannot survive
-  // positionally — `flatten` drops it unconditionally — so a named argument
-  // carrying it is treated as not written at all, and the ordinary rules
-  // apply to the slot it would have filled.
-  test('a required parameter given `Nothing` is `missing`, not shifted', () => {
+describe('`Nothing` as a named argument', () => {
+  // `Nothing` is a value: a named argument carrying it fills its slot, and a
+  // `number` parameter refuses it with an `incompatible-type` error.
+  test('a required parameter given `Nothing` is an `incompatible-type` error, not shifted', () => {
     const ce = new ComputeEngine();
     ce.declare('q', '(a: number, b: number) -> number');
     const call = ce.box(['q', N('a', 'Nothing'), N('b', 2)] as any);
-    expect(errorCodes(call)).toEqual(['missing']);
-    expect(call.toString()).toContain('no value for parameter `a`');
+    expect(errorCodes(call)).toEqual(['incompatible-type']);
     // The value `2` must NOT have slid into slot 0.
     expect(call.op1.operator).toBe('Error');
     expect(call.op2.toString()).toBe('2');
@@ -272,29 +269,27 @@ describe('`Nothing` as an omitted argument', () => {
     const ce = new ComputeEngine();
     ce.declare('q', '(a: number, b: number) -> number');
     const call = ce.box(['q', N('a', ce.box('Nothing')), N('b', 2)] as any);
-    expect(errorCodes(call)).toEqual(['missing']);
+    expect(errorCodes(call)).toEqual(['incompatible-type']);
     expect(call.op1.operator).toBe('Error');
-    expect(call.op1.toString()).toContain('no value for parameter `a`');
     expect(call.op2.toString()).toBe('2');
   });
 
-  test('a trailing optional given `Nothing` is simply not supplied', () => {
+  test('a trailing optional given `Nothing` is supplied', () => {
     const ce = new ComputeEngine();
     ce.declare('g', '(a: number, b: number?) -> number');
     expect(ce.box(['g', N('a', 1), N('b', 'Nothing')] as any).toString()).toBe(
-      ce.box(['g', N('a', 1)] as any).toString()
+      'g(1, Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing"))'
     );
     expect(
       errorCodes(ce.box(['g', N('a', 1), N('b', 'Nothing')] as any))
-    ).toEqual([]);
+    ).toEqual(['incompatible-type']);
   });
 
-  test('an optional given `Nothing` before a supplied one is an R1 hole', () => {
+  test('an optional given `Nothing` before a supplied one fills its slot', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(a: number, b: number?, c: number?) -> number');
     const call = ce.box(['h', N('a', 1), N('b', 'Nothing'), N('c', 3)] as any);
-    expect(errorCodes(call)).toEqual(['argument-optional-skipped']);
-    expect(call.toString()).toContain('`b` is not');
+    expect(errorCodes(call)).toEqual(['incompatible-type']);
   });
 });
 

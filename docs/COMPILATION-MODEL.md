@@ -15,7 +15,7 @@ when it compiles. A difference that this list does not name is a defect.
   different order of summation, a different library routine for `Sin`,
   `Exp` or `Gamma`.
 - A value where the interpreter gives no number. Where `evaluate()` gives
-  `Missing`, `Nothing`, `Indeterminate`, an unevaluated form or an error,
+  `Missing`, `Nothing`, an unevaluated form or an error,
   the compiled code can give `NaN`, `0`, `±Infinity`, `undefined` or
   `null`, can throw, or can decline. With `q` holding `Missing`, `Sqrt(q)`
   can give `0` on `javascript` where the interpreter gives `Missing`.
@@ -559,8 +559,9 @@ the caller can leave out does not make a path: with `x: real`,
 avoids the decline by giving the local a value on every path before the
 read.
 
-**`Nothing` in a value position declines.** `Nothing` is the erasure marker,
-and the compiled result has no form for it. So these decline on every
+**`Nothing` in a value position declines.** `Nothing` is the value of an
+empty block or of a statement with no value, and the compiled result has no
+form for it. So these decline on every
 target where their value is used (the root, the last statement of a block
 whose value is used, the body of a function, an operand): an empty block, a
 block whose last statement is a declaration with no value
@@ -647,15 +648,13 @@ runtime spellings of the same pole agree. `NaN` remains reserved for the
 genuinely indeterminate (`0/0`, `0 · ∞`) and for NaN propagation under
 Contract B's `propagate` policy.
 
-For an indeterminate form the two routes spell the answer differently, and
-the compiled output did not change for it. Since 2026-09-29 the
-interpreter's exact route answers `Indeterminate` for an exact form with no
-value (`0/0`, `0 · ∞`, `0^0`, `Mod(x, 0)`), and answers `NaN` for the same
-form with a float operand and under `.N()`. Every compiled target has only
-the IEEE `NaN`, so it answers `NaN` for both: an `Indeterminate` constant
-compiles to `NaN` in JavaScript, `np.nan` in Python and `_gpu_nan()` in the
-shaders. This agrees with the interpreter's numeric route. Design:
-`docs/plans/2026-09-28-indeterminate-value.md`.
+For a form with no value (`0/0`, `0 · ∞`, `0^0`, `Mod(x, 0)`) the
+interpreter answers `NaN` on the exact route, with a float operand and
+under `.N()`, and every compiled target answers the IEEE `NaN`: `NaN` in
+JavaScript, `np.nan` in Python and `_gpu_nan()` in the shaders. The input
+spelling `Indeterminate` is `NaN` (user decision of 2026-11-02,
+`docs/ERROR-MODEL.md`, "One static error, one dynamic non-value per
+domain").
 
 The projection is applied where the pole is spelled, not at the result
 boundary, so a SIGNED cofactor can give the two routes different signs:
@@ -698,7 +697,7 @@ differences are accepted; they are not defects:
 | `Heaviside(x)` | `x = ~oo` | `1` | `Error(incompatible-type, "real \| signed_infinity", "~oo")` |
 | `x > 0` | `x = ~oo` | `true` | `False` (`~oo` has no order, user decision 2026-10-21; before, `0 < ~oo`, not decided) |
 | `\{1/x > 0: 1, 0\}` | `x = 0` | `1` (also `python`, with a NumPy `x`) | `0` (`~oo` has no order, user decision 2026-10-21) |
-| `Sign(1/x)` | `x = 0` | `1` | `Indeterminate` (`evaluate()`), `NaN` (`.N()`) |
+| `Sign(1/x)` | `x = 0` | `1` | `NaN` |
 | `Floor(1/x)` | `x = 0` | `Infinity` | `~oo` |
 
 In the first two rows, the argument `~oo` (`{re: Infinity, im: Infinity}`)
@@ -1584,8 +1583,8 @@ sub-expression had no finite value (a pole): a helper at a pole throws an
 internal error that carries the `number`, and one catch around the compiled
 entry (and around a function returned to the host) returns it. `Infinity` is
 the value for a `~oo` of the interpreter (`(−1)!`, a zero divisor with a
-dividend that is not zero, `0` to a negative power), and `NaN` for an
-`Indeterminate` (`Mod(n, 0)`, `0/0`, `0^0`, the square root of a negative
+dividend that is not zero, `0` to a negative power), and `NaN` for a form
+with no value (`Mod(n, 0)`, `0/0`, `0^0`, the square root of a negative
 number, an index out of range). A recursive function has no catch of its
 own: the catch of the entry gets the error. A pole in one cell of a list
 makes the whole result a `number`.
@@ -1603,7 +1602,7 @@ one, but the operators between the pole and the result do not change the
 | `−\|n!\|`                    | `−oo`                       | `Infinity`                 |
 | `n! > 5`                     | `False`                     | `Infinity` (not a boolean) |
 | `g(n!)`, `g := x ↦ 1`        | `1`                         | `Infinity`                 |
-| `Mod(n, m)`                  | `Indeterminate`             | `NaN`                      |
+| `Mod(n, m)`                  | `NaN`                       | `NaN`                      |
 | `Mod(n!, 7)`                 | `incompatible-type` error   | `Infinity`                 |
 | `Map(Range(−1, 1), k ↦ k!)`  | `[~oo, 1, 1]`               | `Infinity` (the whole list) |
 | `If(n < 0, 0, n!)`           | `0`                         | `0n`                       |
@@ -1965,8 +1964,8 @@ declines (a call of a block-local function has the result type of its
 literal; an untyped free input is refused by the admission of the inputs,
 which names it in `unsupported`; an untyped parameter or local is not an
 input there, and declines here). A value whose type can be `Nothing` declines:
-the interpreter leaves out such an entry, and the literal would keep the
-key. Each value compiles as a value operand (`compileValueOperand()`), so an
+the interpreter keeps such an entry with the value `Nothing`, and the
+compiled object has no form for it. Each value compiles as a value operand (`compileValueOperand()`), so an
 assignment in a value declines on Python, as in any other operand. The
 values are not operands of the node, so the shared-subexpression pass does
 not enter them, but it records each assignment in them: a subexpression is

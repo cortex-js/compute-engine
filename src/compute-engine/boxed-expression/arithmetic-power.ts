@@ -26,7 +26,6 @@ import { asRational } from './numerics.js';
 import {
   bignumPreferred,
   getImaginaryFactor,
-  indeterminateAnswerReadsVariable,
 } from './utils.js';
 import {
   exactUnitCircle,
@@ -46,8 +45,6 @@ import {
   isNumber,
   isFunction,
   isSymbol,
-  nanOperandAnswer,
-  indeterminateFormAnswer,
   numericValue,
 } from './type-guards.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
@@ -170,8 +167,8 @@ function complexBaseAtInfiniteExponent(
     if (nv instanceof ExactNumericValue) {
       const t = exactModulusSquaredVsOne(nv);
       // An exact base on the unit circle, other than 1, oscillates with no
-      // limit: the indeterminate form `Indeterminate` (`i^∞`).
-      if (t === 0) return indeterminateFormAnswer(ce, [a]);
+      // limit: `NaN` (`i^∞`).
+      if (t === 0) return ce.NaN;
       if (t === 1) return expPositive ? ce.ComplexInfinity : ce.Zero;
       if (t === -1) return expPositive ? ce.Zero : ce.ComplexInfinity;
     }
@@ -500,17 +497,15 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // Zero as base
   if (isNumber(a) && a.isSame(0)) {
-    // A `NaN`-valued exponent is forwarded (`Indeterminate` stays
-    // `Indeterminate`, see `nanOperandAnswer()`).
+    // A `NaN`-valued exponent is forwarded.
     // A literal only: `isNaN` of a symbol reads its current value, which a
     // canonical form must not depend on (see `canonicalDivide`).
-    if (isNumber(b) && b.isNaN) return nanOperandAnswer(ce, [a, b]);
-    // `0^(imaginary)` and `0^0` have no value: `Indeterminate`, or `NaN`
-    // when an operand is a float (`indeterminateFormAnswer()`).
+    if (isNumber(b) && b.isNaN) return ce.NaN;
+    // `0^(imaginary)` and `0^0` have no value: `NaN`.
     if (b.type.matches('imaginary' as NumericPrimitiveType))
-      return indeterminateFormAnswer(ce, [a, b]);
+      return ce.NaN;
 
-    if (b.isSame(0)) return indeterminateFormAnswer(ce, [a, b]);
+    if (b.isSame(0)) return ce.NaN;
 
     if (b.isInfinity) {
       // 0^∞ = 0 (because for all complex numbers z near 0, z^∞ -> 0).
@@ -552,14 +547,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       a.isFinite !== undefined &&
       (a.isFinite === false || isExactLiteral(b, 0))
     )
-      // A `NaN`-valued base is forwarded (`Indeterminate^0` is
-      // `Indeterminate`); an infinite base is the indeterminate form `∞^0`
-      // (`Indeterminate`, or `NaN` with a float exponent `0.0`).
-      return a.isFinite
-        ? ce.One
-        : a.isNaN === true
-          ? nanOperandAnswer(ce, [a, b])
-          : indeterminateFormAnswer(ce, [a, b]);
+      // A `NaN`-valued base gives `NaN`; an infinite base is the
+      // indeterminate form `∞^0`, also `NaN`.
+      return a.isFinite ? ce.One : ce.NaN;
     return unchanged();
   }
 
@@ -573,8 +563,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   if (aIsNum && isExactLiteral(a, 1)) {
     if (b.isFinite) return ce.One;
     if (isComplexInfinityLiteral(b)) return unchanged();
-    if (isNumber(b) && b.isNaN) return nanOperandAnswer(ce, [a, b]);
-    return indeterminateFormAnswer(ce, [a, b]);
+    return ce.NaN;
   }
 
   // One as exponent: `a^1` is `a` for any base, a matrix too (`g(x)^1`,
@@ -625,11 +614,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // e^∞ = ∞ (handle explicitly before general case)
       if (isSymbol(a, 'ExponentialE')) return ce.PositiveInfinity;
 
-      // (-1)^∞ = Indeterminate, because of oscillations in the limit (`NaN`
-      // for the float `-1.0`). A float base `1.0` is the form `1^∞`: `NaN`
+      // (-1)^∞ = NaN, because of oscillations in the limit. A float
+      // base `1.0` is the form `1^∞`: `NaN`
       // (an exact `1` was handled above; the float fell to the `0` below).
       if (a.isSame(-1) || a.isSame(1))
-        return indeterminateFormAnswer(ce, [a, b]);
+        return ce.NaN;
 
       // The folds below read the value of the base. A canonical form must
       // not depend on a value that can change, so a base that is not a
@@ -647,7 +636,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
         return ce.ComplexInfinity;
       }
 
-      if (isNumber(a) && a.isNaN) return nanOperandAnswer(ce, [a, b]);
+      if (isNumber(a) && a.isNaN) return ce.NaN;
 
       //↓numeric-expr. bases included: e.g. '{2+3}^oo'
       // A comparison that is not known (`undefined`) does not fold: the
@@ -684,9 +673,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // e^(-∞) = 0 (handle explicitly before general case)
       if (isSymbol(a, 'ExponentialE')) return ce.Zero;
 
-      // (-1)^-∞ = Indeterminate, and the float `1.0^-∞` is `NaN`, as for +∞.
+      // (-1)^-∞ = NaN, and so is the float `1.0^-∞`, as for +∞.
       if (a.isSame(-1) || a.isSame(1))
-        return indeterminateFormAnswer(ce, [a, b]);
+        return ce.NaN;
 
       // As for +∞: the folds below read the value of the base, so a base
       // that is not a number literal or a constant stays unfolded.
@@ -695,7 +684,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       //Same result for all infinity types...
       if (a.isInfinity) return ce.Zero;
 
-      if (isNumber(a) && a.isNaN) return nanOperandAnswer(ce, [a, b]);
+      if (isNumber(a) && a.isNaN) return ce.NaN;
 
       // A comparison that is not known (`undefined`) does not fold.
       if (a.isExtendedReal) {
@@ -773,10 +762,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (b.isNegative === true) return zeroOfInfiniteFold(ce, a, b);
     }
 
-    // If the exponent is pure imaginary, the result is NaN
-    // (the indeterminate form `Indeterminate`, or `NaN` with a float operand).
+    // If the exponent is pure imaginary, the result is NaN.
     // This holds for any expression of type `imaginary`.
-    if (b.type.matches('imaginary')) return indeterminateFormAnswer(ce, [a, b]);
+    if (b.type.matches('imaginary')) return ce.NaN;
     // The sign of the real part decides the other complex exponents. Only a
     // number literal has a real part to read here: the value assigned to a
     // symbol must not be folded into a canonical form.
@@ -1501,27 +1489,8 @@ export function pow(
     if (reduced) return reduced;
   }
 
-  // A power with an `Indeterminate` operand is `Indeterminate` unless the
-  // other operand is inexact (`nanOperandAnswer()`), and `NaN` under a
-  // numeric approximation. The numeric kernels below would answer the `NaN`
-  // literal.
-  // Without a numeric approximation, the power is kept when the answer
-  // depends on the value of a variable that the other operand reads
-  // (`indeterminateAnswerReadsVariable()`).
-  if (
-    (isNumber(x) && x.isIndeterminate) ||
-    (typeof exp !== 'number' && isNumber(exp) && exp.isIndeterminate)
-  ) {
-    if (numericApproximation) return x.engine.NaN;
-    const ops = [x, x.engine.expr(exp)];
-    if (indeterminateAnswerReadsVariable(ops))
-      return x.engine._fn('Power', ops);
-    return nanOperandAnswer(x.engine, ops);
-  }
-
   // A kind value in the power (a residue class): only the hooks of the kinds
-  // apply (`kindArithmetic()`). It comes after the `Indeterminate` rule
-  // above, which applies to a class as to any base.
+  // apply (`kindArithmetic()`).
   const residue = kindArithmetic(x.engine, 'Power', [x, x.engine.expr(exp)]);
   if (residue !== undefined) return residue;
 
@@ -2204,7 +2173,7 @@ function rootAtExceptionalPoint(
   const ce = a.engine;
   if (!isNumber(a) && !isNumber(b)) return undefined;
   if ((isNumber(a) && a.isNaN) || (isNumber(b) && b.isNaN))
-    return nanOperandAnswer(ce, [a, b]);
+    return ce.NaN;
   if (isNumber(b)) {
     if (b.isSame(0)) return undefined;
     if (b.isInfinity === true) {
@@ -2212,7 +2181,7 @@ function rootAtExceptionalPoint(
       // the indeterminate NaN for a zero or infinite one.
       if (!isNumber(a)) return undefined;
       if (a.isSame(0) || a.isInfinity === true)
-        return indeterminateFormAnswer(ce, [a, b]);
+        return ce.NaN;
       return ce.One;
     }
   }

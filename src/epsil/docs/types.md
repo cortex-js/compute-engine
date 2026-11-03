@@ -814,8 +814,9 @@ implicit "for all `T`".
 
 Epsil distinguishes three related kinds of absence:
 
-- `nothing` means “no value here” and is removed from function arguments and
-  collection literals.
+- `nothing` is the value of an empty block or of a statement with no value.
+  It is kept as an element, in function arguments and collection literals
+  too: `[1, nothing]` has two elements.
 - `missing` is a position-preserving missing value. Its type is `missing`.
   It is a result only: a selection with no match, a read past the end of a
   collection, or the written `missing`. A declared type cannot name it.
