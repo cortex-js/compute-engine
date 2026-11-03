@@ -237,7 +237,8 @@ selects its operands, so that a scalar `If` keeps its error propagation;
 user kept `If(c, e)` on 2026-11-02, so there is no short form); a
 condition declared `collection<boolean>` is not refused yet (item 3.3).
 
-3.3 **Selection.** The constraints of the survey's §6.3 in the interpreter:
+3.3 **Selection.** Done, commit `e8a75b9c4` (2026-11-02, session
+compute-engine-53; the record is at the end of this item). The constraints of the survey's §6.3 in the interpreter:
 the condition is a boolean or a flat list of booleans (a nested list, an
 uneven list or a `Missing` cell is a static error); every arm is a scalar or
 a flat list of the condition's length, all arms of one element kind; an
@@ -249,7 +250,7 @@ cell; a scalar condition selects an arm whole; `If(c, e1, e2)` is
 `undefined` cells is reversed and recorded.
 
 The result of 3.3 (2026-11-02, session compute-engine-53; base `5a1ceb18a`;
-staged, not committed).
+committed as `e8a75b9c4`).
 
 - **A false scalar condition over a list.** Implemented: the whole-list
   absent value `Missing` for every reader, by rule 4 (the arm is selected
@@ -332,7 +333,13 @@ staged, not committed).
   key changed, as expected: art/njncrg9fkv, the restricted 3-D point list
   `p \text{ where } \mathrm{PointZ}(p)+… < h_{ash}(…)`, whose unmatched cells
   went from `undefined` to `[NaN, NaN, NaN]` (8 values). 77,146 values
-  compared.
+  compared. Tycho's own codegen audit (tycho-f9, 2026-11-02, Tycho
+  `58b767d19`, compared with its run on CE `4a00e7c32`): 17,690 records, no
+  new decline and no decline gone; the compiled code changes in one more
+  document, art/s8ishknvhe (a setup row: the absent cell passed to
+  `_SYS.selectAbsent` goes from `undefined` to `[NaN, NaN, NaN]`, the same
+  change), which the value audit did not sample. Tycho checks both documents
+  when it adopts 3.3.
 - **Code lines** (not blank, `//` or `*`): `library` 77,924 → 78,095,
   `boxed-expression` 83,789 → 83,930, `compilation` 92,482 → 92,398.
   `selectNested` is deleted; the rank-2 selection code that is now
