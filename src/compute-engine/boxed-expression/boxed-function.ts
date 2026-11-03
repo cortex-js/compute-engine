@@ -250,6 +250,8 @@ import {
   isRestriction,
   mayHoldRestriction,
   restrictionParts,
+  selectsElementWise,
+  TWO_VALUED_OPERATORS,
 } from './conditional-value.js';
 import {
   callSiteDefault,
@@ -832,31 +834,6 @@ let _effectsParanoidActive = false;
 /** `CE_CACHE_STATS` only: is a recomputed effect channel the same answer as
  * the entry it replaced? Structural equality over the `ComputedEffects`
  * shapes (`'any'` | label array | co-finite `{not}` | `undefined`). */
-/**
- * The comparison operators and the connectives. Each one is two-valued: it
- * answers `True` or `False`, also when an operand or a cell is absent (an
- * absent value reads as `False` in a connective and makes a comparison
- * `False`; user decision 2026-11-02, two-valued comparisons,
- * `docs/ERROR-MODEL.md`). So the type of such a result has no `missing` arm,
- * in its cells or as a whole.
- */
-const TWO_VALUED_OPERATORS: ReadonlySet<string> = new Set([
-  'Less',
-  'LessEqual',
-  'Greater',
-  'GreaterEqual',
-  'Equal',
-  'NotEqual',
-  'And',
-  'Or',
-  'Not',
-  'Xor',
-  'Equivalent',
-  'Implies',
-  'Nand',
-  'Nor',
-]);
-
 function sameComputedEffects(a: ComputedEffects, b: ComputedEffects): boolean {
   if (a === b) return true;
   if (a === undefined || b === undefined) return false;
@@ -15487,7 +15464,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         // condition. Its type is the type of its present value
         // (`list<integer>` for `If(c, L)`), and its absence is implicit.
         // `Less(If(c, L), 3)` is `False` when `c` is false, so its type is
-        // `boolean | list<boolean>`.
+        // `boolean | list<boolean>`. A selection with a condition that is a
+        // list of booleans (`selectsElementWise()`) is never absent as a
+        // whole: it is a list of the condition's length, so it gives no arm.
+        // With `q: list<real^4>`, `Which(q < 0.1, 2, True, 1) < 2` is
+        // `list<boolean^4>`, and a selection over it has one shape.
         if (def.resolvedMissingBehavior === 'handle' && !threadedAbsence) {
           let absentWhole = false;
           const twoValued = TWO_VALUED_OPERATORS.has(expr.operator);
@@ -15501,6 +15482,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
               if (
                 twoValued &&
                 (isRestriction(x) || isFunction(x, 'Which')) &&
+                !selectsElementWise(x) &&
                 (isBroadcastCollectionTypeOf(x.type.type) ||
                   isFixedShapeCollectionTypeOf(x.type.type))
               )

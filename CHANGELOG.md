@@ -100,7 +100,14 @@
   The number-theory predicates (`IsPrime(Missing)`) are still `Missing`. The
   type of a comparison, a connective or such a predicate has no `missing`
   arm: with `L: list<integer> | missing`, `L < 3` is typed
-  `boolean | list<boolean>` (it was `list<boolean> | missing`). Under a list
+  `boolean | list<boolean>` (it was `list<boolean> | missing`). A selection
+  whose condition is a list of booleans is never absent as a whole, so a
+  comparison over it is a list of its length: with `q: list<real^4>`,
+  `Which(q < 0.1, 2, True, 1) < 2` is typed `list<boolean^4>` (it was
+  `boolean | list<boolean^4>`), and a selection over that comparison has one
+  shape and compiles. The corpus row art/njncrg9fkv declined on JavaScript
+  and now gives the interpreter's four points. No interpreter value changes.
+  (CE-792.) Under a list
   of conditions, a relation position that is not selected is `False` (it
   was `Missing`), and a colour position is `Rgb(NaN, NaN, NaN)`, which a
   plotter reads as "no colour here" (Tycho item 189). A restriction of a

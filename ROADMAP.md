@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-792.
+Next free reference: CE-793.
 
 **Entry format.**
 
@@ -2054,7 +2054,7 @@ reproduction above is the record.
 
 ### CE-785. The compiler's stack limit for a nested expression fell from about 420 to about 370 levels
 
-**Status:** ready; defect, S.
+**Status:** ready; defect, S. User decision 2026-11-03: the nightly fall of the measured limit (first compile in a warm Jest worker) from 347 at `585acfab5` to 346 at `b10958fda` is accepted; it is not a new defect.
 **Witness:** plausible; `test/compute-engine/compile-deep-nesting.test.ts` › "a chain of 350 sines and cosines compiles" fails in the full Jest suite (`success: false`) and passes when the file runs alone.
 
 The compiler is recursive, so an expression nested deeply enough overflows

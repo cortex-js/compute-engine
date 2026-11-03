@@ -4,7 +4,170 @@ import type {
   OperandDescriptor,
 } from '../global-types.js';
 
+import { parseType } from '../../common/type/parse.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { collectionElementType } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+
+/** The type of a condition that selects element-wise: an ordered
+ * collection of booleans, which is a flat list of booleans. */
+export const FLAT_MASK_TYPE = parseType('indexed_collection<boolean>')!;
+
+/**
+ * True when the static type of the condition `cond` says that it is a flat
+ * list of booleans (`FLAT_MASK_TYPE`), so that the selection is element-wise.
+ * A condition of type `list<never>` (the empty list) is not one: it has no
+ * cell to select.
+ */
+export function isListCondition(cond: Expression | undefined): boolean {
+  if (cond === undefined || !cond.isValid) return false;
+  const t = cond.type.type;
+  return (
+    t !== 'never' &&
+    isSubtype(t, FLAT_MASK_TYPE) &&
+    collectionElementType(t) !== 'never'
+  );
+}
+
+/**
+ * The comparison operators and the connectives. Each one is two-valued: it
+ * answers `True` or `False`, also when an operand or a cell is absent (an
+ * absent value reads as `False` in a connective and makes a comparison
+ * `False`; user decision 2026-11-02, two-valued comparisons,
+ * `docs/ERROR-MODEL.md`). So the type of such a result has no `missing` arm,
+ * in its cells or as a whole.
+ */
+export const TWO_VALUED_OPERATORS: ReadonlySet<string> = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+  'And',
+  'Or',
+  'Not',
+  'Xor',
+  'Equivalent',
+  'Implies',
+  'Nand',
+  'Nor',
+]);
+
+/** The coordinate accessors. Over a list of points they map cell by cell:
+ * a point that is absent gives an absent cell, and the list stays. */
+const COORDINATE_READS = new Set(['PointX', 'PointY', 'PointZ']);
+
+/**
+ * True when `expr`, a list condition or an arm of a selection, can be absent
+ * as a whole although its type does not show it. The answer is
+ * conservative: it is true for some values that are always present, which
+ * keeps the scalar arm of a comparison type that did not need it.
+ *
+ * - A single-branch `If` or a `Which` can be absent as a whole, unless it
+ *   selects element-wise (`selectsElementWise()`).
+ * - A coordinate accessor (`PointX`, `PointY`, `PointZ`) maps a list of
+ *   points cell by cell, so it is absent as a whole only when its operand
+ *   is. Another read (`At`, `First`, `Field`, …) can read one element that
+ *   is a list and does not exist, so it can be absent as a whole: with `LL`
+ *   a list of one row, `At(LL, 5)` is `Missing`.
+ * - A collection constructor is present (an element may be absent), and so
+ *   are a discharge (`AssertPresent`, `IsMissing`) and a function literal.
+ * - A comparison or a connective (`TWO_VALUED_OPERATORS`) is the scalar
+ *   `False` (`True` for a negation) when an operand is absent as a whole.
+ *   Its type has a `boolean` arm for an operand that is a collection-typed
+ *   `If` restriction or `Which` (the broadcast typing of `boxed-function.ts`
+ *   adds it), which the type test of a list condition (`isListCondition()`)
+ *   refuses. For every other operand, its type does not show the absence,
+ *   and the operand is walked: `At(LL, 5) < 3` is typed `list<boolean>` but
+ *   is `False`.
+ * - A symbol with a value is walked through that value: a mask stored as
+ *   `m := If(c, [True, False])` is `Missing` when `c` becomes false.
+ * - A call of a user function, an `Apply`, or an operator with no
+ *   definition can be absent as a whole whatever its operands are: with
+ *   `f(t) = If(t, [True, False])`, `f(c)` is `Missing` when `c` is false.
+ * - Any other operator, a library operator, over an operand that is absent
+ *   as a whole is absent as a whole: `Not(If(c, M))` is `Missing` when `c`
+ *   is false.
+ *
+ * `seen` holds the symbols already walked. A symbol met again can be
+ * absent: `a := If(b, M)` and `b := If(a, M)` refer to each other, and the
+ * walk stops there.
+ */
+function mayBeAbsentAsWhole(
+  expr: Expression | undefined,
+  seen: Set<string>
+): boolean {
+  if (expr === undefined) return false;
+  if (isSymbol(expr)) {
+    if (seen.has(expr.symbol)) return true;
+    const value = expr.value;
+    if (value === undefined || value === expr) return false;
+    seen.add(expr.symbol);
+    return mayBeAbsentAsWhole(value, seen);
+  }
+  if (!isFunction(expr)) return false;
+  const h = expr.operator;
+  if (isRestriction(expr) || h === 'Which')
+    return !selectsElementWiseIn(expr, seen);
+  if (COORDINATE_READS.has(h)) return mayBeAbsentAsWhole(expr.ops[0], seen);
+  if (ABSENT_READS.has(h)) return true;
+  if (CONSTRUCTORS.has(h) || DISCHARGES.has(h) || h === 'Function')
+    return false;
+  if (TWO_VALUED_OPERATORS.has(h))
+    return expr.ops.some(
+      (x) =>
+        !(
+          (isRestriction(x) || isFunction(x, 'Which')) &&
+          isSubtype(x.type.type, COLLECTION_SHAPE_TYPE)
+        ) && mayBeAbsentAsWhole(x, seen)
+    );
+  const def = expr.operatorDefinition;
+  if (def === undefined || def.isUserFunctionDefinition || h === 'Apply')
+    return true;
+  return expr.ops.some((x) => mayBeAbsentAsWhole(x, seen));
+}
+
+/**
+ * True when `expr` is an `If` or a `Which` that selects element-wise and
+ * cannot be absent as a whole. Its value is then a list of the length of a
+ * list condition (`isListCondition()`), with a `NaN` cell (or a `NaN`
+ * point) where no condition holds.
+ *
+ * - `If(c, e)`: `c` is a list condition that cannot be absent as a whole.
+ *   An absent condition reads as `False`, and the `If` is then absent as a
+ *   whole: with `c` false, `If(If(c, m), L)` is `Missing`, although the type
+ *   of `If(c, m)` is the list type of `m`.
+ * - `Which(c_1, e_1, c_2, e_2, …)`: the conditions are tried in order, and
+ *   the first list condition selects element-wise. That condition must not
+ *   be absent as a whole, and no arm before it either: an earlier scalar
+ *   condition that is true gives its arm whole, so with `t` true
+ *   `Which(t, If(d, L), m, L)` is `Missing` when `d` is false. An earlier
+ *   condition that is absent reads as `False`, and is no risk.
+ *
+ * A selection with scalar conditions only is absent as a whole when no
+ * condition holds: `If(c, L)` is `Missing` when the boolean `c` is false.
+ */
+export function selectsElementWise(expr: Expression): boolean {
+  return selectsElementWiseIn(expr, new Set());
+}
+
+/** `selectsElementWise()`, with the symbols already walked by
+ * `mayBeAbsentAsWhole()` in `seen`. */
+function selectsElementWiseIn(expr: Expression, seen: Set<string>): boolean {
+  if (isFunction(expr, 'If')) {
+    const c = expr.ops[0];
+    return isListCondition(c) && !mayBeAbsentAsWhole(c, seen);
+  }
+  if (!isFunction(expr, 'Which')) return false;
+  for (let i = 0; i < expr.nops; i += 2) {
+    const c = expr.ops[i];
+    if (isListCondition(c)) return !mayBeAbsentAsWhole(c, seen);
+    if (mayBeAbsentAsWhole(expr.ops[i + 1], seen)) return false;
+  }
+  return false;
+}
 
 /**
  * Producer-side chokepoint for a conditional value (conditional-values design,

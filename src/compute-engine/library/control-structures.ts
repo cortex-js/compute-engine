@@ -124,7 +124,11 @@ import {
   isString,
   sym,
 } from '../boxed-expression/type-guards.js';
-import { isStatementArm } from '../boxed-expression/conditional-value.js';
+import {
+  FLAT_MASK_TYPE,
+  isListCondition,
+  isStatementArm,
+} from '../boxed-expression/conditional-value.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
 import {
@@ -2034,10 +2038,6 @@ function conditionOperand(ce: ComputeEngine, cond: Expression): Expression {
   return refuse();
 }
 
-/** The type of a condition that selects element-wise: an ordered
- * collection of booleans, which is a flat list of booleans. */
-const FLAT_MASK_TYPE = parseType('indexed_collection<boolean>')!;
-
 /**
  * True when no value of the collection type `t` is a flat list of
  * booleans, so that a condition of this type is a static error.
@@ -2081,22 +2081,6 @@ function isNeverFlatMaskType(t: Readonly<Type>): boolean {
   if (cell === undefined || cell === 'any' || cell === 'unknown') return true;
   if (isSubtype('missing', cell)) return true;
   return provablyDisjoint(cell, 'boolean');
-}
-
-/**
- * True when the static type of the condition `cond` says that it is a flat
- * list of booleans (`FLAT_MASK_TYPE`), so that the selection is element-wise.
- * A condition of type `list<never>` (the empty list) is not one: it has no
- * cell to select.
- */
-function isListCondition(cond: Expression | undefined): boolean {
-  if (cond === undefined || !cond.isValid) return false;
-  const t = cond.type.type;
-  return (
-    t !== 'never' &&
-    isSubtype(t, FLAT_MASK_TYPE) &&
-    collectionElementType(t) !== 'never'
-  );
 }
 
 /**
