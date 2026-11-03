@@ -69,6 +69,14 @@
     with `P = []` is `2`). The negation of a real value keeps a `+0`
     imaginary part, so `Ln(-x)` at `x = 2` is `ln 2 + iπ`, as in the
     interpreter (it was `ln 2 − iπ`).
+  - In `mode: 'complex'`, a call of a user function no longer sends a
+    complex object to a parameter that the definition reads as a real
+    number. With `u: real`, `s(x) := x - \lfloor x \rfloor` and
+    `g := t ↦ s(t) + 1`, `g(u)` at `u = 0.25` gave the string
+    `"[object Object]NaN1"`; it is now `1.25`, as in the interpreter. The
+    call passes the real part of a real argument, and `NaN` for an argument
+    with an imaginary part (`g(w)` with `w: complex` at `1.5 + i`; the
+    interpreter gives an `incompatible-type` error).
   See `docs/COMPILATION-MODEL.md`, "Compile modes".
 
 - **One static error, one dynamic non-value per domain.** An `Error` is the

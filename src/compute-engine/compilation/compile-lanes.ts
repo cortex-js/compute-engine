@@ -821,6 +821,51 @@ export function recordUserFunctionLane(
 }
 
 /**
+ * Record the lane on which the JavaScript definition `name` reads each
+ * parameter of `literal`, the literal it emits: complex (`true`) or real
+ * (`false`). Read by a call of the definition (`realLaneArguments` in
+ * `compile-user-calls.ts`).
+ *
+ * The call cannot read this lane from the signature. In `mode: 'complex'`
+ * an untyped parameter has the wide signature type `unknown`, so a call
+ * lifts a wide argument to a `{re, im}` object. But the body can read the
+ * parameter on the real lane: with `s(x) := x - ⌊x⌋`, the use in `Floor`
+ * narrows the parameter symbol `x` to `real | signed_infinity | ~oo`, and
+ * the body is `x + -Math.floor(x)`. A `{re, im}` object there gave the
+ * string `"[object Object]NaN"`.
+ *
+ * Only a parameter whose type is a number type has a lane (`undefined`
+ * otherwise). A parameter that binds a collection whole (`p ↦ p[1]·p[2]`,
+ * typed `tuple<number, number>`) is not a real-lane scalar: the analysis
+ * says "not complex" for its symbol, but its elements keep their own
+ * lanes, and a conversion of the whole argument gave `NaN` for each
+ * complex element (`f([1 + i·t, 2])` gave `NaN` for `2 + 4i`).
+ *
+ * Must be called inside the shape frames that the body compiles under,
+ * with the target that compiles it, as `recordUserFunctionLane` is. It
+ * reads the parameters only, not the body, so it is called before the
+ * body compiles, and a recursive call of the definition reads it too.
+ */
+export function recordUserFunctionParamLanes(
+  target: CompileTarget<Expression>,
+  name: string,
+  literal: Expression & { ops: ReadonlyArray<Expression> }
+): void {
+  const registry = target.userFunctions;
+  if (registry === undefined || target.language !== 'javascript') return;
+  const paramLanes = withBoundVarsOf(target, () =>
+    literal.ops
+      .slice(1)
+      .map((p) =>
+        isSymbol(p) && isSubtype(p.type.type, 'number')
+          ? core.isComplexValued(p)
+          : undefined
+      )
+  );
+  userFunctionLanes(registry).paramsByName.set(name, paramLanes);
+}
+
+/**
  * Run `fn`, an analysis, with the bound names of `target` in force, as
  * `compile()` puts them in force for the compilation of a node with that
  * target: the same `_boundVarsCtx`, and the same unrolled index values

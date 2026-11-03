@@ -388,6 +388,16 @@ export type UserFunctionLanes = {
    * (`userCallElementLane`).
    */
   elementByName: Map<string, 'real' | 'complex' | 'wide'>;
+  /**
+   * Emitted JavaScript definition name → the lane on which its body reads
+   * each parameter, by position: `true` for the complex lane (a `{re, im}`
+   * object), `false` for the real lane (a plain number), `undefined` for a
+   * parameter that is not a plain symbol. Recorded from inside the shape
+   * frames that the body compiles under (`recordUserFunctionParamLanes`).
+   * A call reads it to give the real projection of a complex argument to
+   * a parameter read on the real lane (`realLaneArguments`).
+   */
+  paramsByName: Map<string, ReadonlyArray<boolean | undefined>>;
 };
 
 /**

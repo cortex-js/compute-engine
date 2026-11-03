@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-793.
+Next free reference: CE-794.
 
 **Entry format.**
 
@@ -2108,29 +2108,30 @@ element as real. So option (a) needs a mechanism without a restart: the
 complex lane for a `number` binding at compile time, or the decline of
 option (b). Plan item 3.4.6 records this.
 
-- **CE-751.1** (corpus) In `mode: 'complex'`, a call of a user function
-  sends a complex argument (`_SYS.cplx(ceArg_0)`; an untyped parameter is
-  complex in this mode) to a definition that reads that parameter on the
-  real lane (`_fn_s_x = (x) => ((x - Math.floor(x)) % 1)`).
-  `realProjection` (`compile-user-functions.ts`) converts the argument back
-  only when the declared parameter type is real; here it is `unknown`.
-  Witness: Tycho art/hyvhlz4chj, the colour `asOklab(c_{lavinga})` gives
-  an oklab colour of `NaN` channels where the interpreter gives a real
-  colour (8 sampled values), and Tycho neyret/4d9knkydej `asOklab(g)`
-  (7 values; the call `_fn_r(_SYS.atNoWrap(Z, 1),
-  _SYS.cplx(_SYS.atNoWrap(Z, 2)))` lifts an element of a `list<number>` to a
-  complex object for a definition that reads `ceArg_1` with `Math.atan2`),
-  when Tycho's colour lane compiles a real-mode
-  document in `complex`; Tycho's planned split (the colour lane in
-  `complex` only for a complex-mode document) does not reach it. Plain
-  program: `u: real; s(x) := x - \lfloor x\rfloor; g := t ↦ s(t)+1`;
-  `g(u)` in complex mode gives `"[object Object]NaN1"`, expected `1.25` at
-  `u = 0.25`. Fix: at the call, convert a complex argument for a parameter
-  that the definition reads on the real lane with the real-operand rule
-  (`cisreal ? creal : NaN`), which needs the lane of each parameter of an
-  emitted definition (about 40 to 80 lines); or decline that call (about 15
-  lines). User decision 2026-11-03: fixed before the language release, not
-  in item 3.4.6.
+### CE-793. In `mode: 'complex'`, an inlined `Dot` reads the complex elements of a tuple that a user function returns as real numbers
+
+**Status:** ready; wrong value, S.
+**Witness:** corpus; Tycho art/hyvhlz4chj `asOklab(c_{lavinga})` with every route on `complex` gives an oklab colour of `NaN` channels at 8 of 8 samples, where the `strict` compilation of this real-mode document gives the real colour (`c0 = 0.6225…` at `x = 1.01, y = −2.724, z = 3.052`). No plain program reproduces it yet.
+
+In the document, `p(x, y) = (\cos θ, \sin θ)` with `θ = θ_0(x, y)`, and
+`d_{00} = p(x, y)·(S + (0, 0))` with `S = (−s_x, −s_y)` (also `d_{10}`,
+`d_{01}`, `d_{11}`). In complex mode `_fn_p` returns
+`[_SYS.ccos(…), _SYS.csin(…)]`, a tuple of `{re, im}` objects, but `Dot`
+is emitted by `compileStaticInnerProduct` (`Dot` in
+`javascript-target.ts`), which multiplies each element with the real `*`:
+`((_tv12) => _tv12[0]·(…) + _tv12[1]·(…))(_fn_p(…))`. That lowering declines
+a complex operand, so its lane analysis reads the elements of the call
+`p(x, y)` as real while the definition returns complex elements. Measured
+on the corpus code of the row: with only these 8 element reads converted
+with `_SYS.crealElements`, the 8 values equal the `strict` values exactly.
+Plain programs with the same shape (`p(a, b) := (\cos q, \sin q)` with a
+`where` or `Block` local, `d(x, y) := p(x, y)·((−s(x), −s(y)) + (1, 0))`,
+signatures inferred or declared) compile `Dot` with `_SYS.complexMatmul`
+and give the right value, so the condition that selects the inlined form
+in the document is not found yet. Tycho's adoption (option A of plan item
+3.4.6: the colour lane of a real-mode document compiles in `strict`) does
+not reach it. Found by CE-751.1 (2026-11-03), which fixed the other cause
+of this row.
 
 ### CE-715. The `bigint` compile mode: the shapes it declines
 

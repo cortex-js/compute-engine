@@ -108,6 +108,7 @@ export function userFunctionLanes(
       assumedRealElements: new Set(),
       assumedComplexElements: new Set(),
       elementByName: new Map(),
+      paramsByName: new Map(),
     };
     _userFunctionLanes.set(registry, lanes);
   }
@@ -149,6 +150,7 @@ export function removeDefinitionsAddedSince(
         if (name === added) registry.listLiterals.delete(text);
     lanes.byName.delete(added);
     lanes.elementByName.delete(added);
+    lanes.paramsByName.delete(added);
     lanes.onAsk.delete(added);
   }
 }

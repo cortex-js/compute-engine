@@ -172,16 +172,18 @@ export function complexWrapCode(
  * copies (`trySpecializedUserCall`), which differ only in where they read
  * the callee's signature from, never in how the call is spelled.
  *
- * `coerceToComplex[i]` is `true` for an argument to wrap in the `{ re, im }`
- * convention, and `'real'` for an argument whose real projection the
- * callee receives (`realProjection()`); `paramsAreScalar` says no
- * parameter binds a collection whole.
+ * `declaredCoercions[i]` is `true` for an argument to wrap in the
+ * `{ re, im }` convention, and `'real'` for an argument whose real
+ * projection the callee receives (`realProjection()`); `paramsAreScalar`
+ * says no parameter binds a collection whole. A complex argument whose
+ * entry is `false` is converted with `_SYS.crealElements` when the
+ * definition reads the parameter on the real lane (`realLaneArguments`).
  */
 export function emitUserFunctionCall(
   name: string,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  coerceToComplex: ReadonlyArray<boolean | 'real'>,
+  declaredCoercions: ReadonlyArray<boolean | 'real'>,
   paramsAreScalar: boolean,
   /**
    * Compiled arguments appended after `args` in EVERY call form, and
@@ -207,6 +209,12 @@ export function emitUserFunctionCall(
    */
   mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
 ): TargetSource {
+  const coerceToComplex = realLaneArguments(
+    name,
+    args,
+    target,
+    declaredCoercions
+  );
   // The rank of each argument: the number of list levels that the call
   // maps over. A callee with a parameter that binds a collection whole
   // binds every argument whole, as the interpreter does.
@@ -254,7 +262,9 @@ export function emitUserFunctionCall(
   const coerce = (code: string, i: number) =>
     coerceToComplex[i] === 'real'
       ? `_SYS.creal(${code})`
-      : coerceToComplex[i]
+      : coerceToComplex[i] === 'real-operand'
+        ? `_SYS.crealElements(${code})`
+        : coerceToComplex[i]
         ? complexWrapCode(code, args[i], target)
         : code;
 
@@ -308,6 +318,46 @@ export function emitUserFunctionCall(
 }
 
 /**
+ * The conversion of each argument of a call of the JavaScript definition
+ * `name`: `coerceToComplex`, the conversion that the declared parameter
+ * types ask for, with `'real-operand'` for each argument that it leaves
+ * unconverted, that is complex-valued, and whose parameter the definition
+ * reads on the real lane (`paramsByName`, recorded by
+ * `recordUserFunctionParamLanes`). The call then passes
+ * `_SYS.crealElements` of the argument: its real part when the value is
+ * real, `NaN` otherwise, which is the real-operand rule of the complex
+ * lane (`cisreal ? creal : NaN`).
+ *
+ * In `mode: 'complex'` an untyped parameter has the wide type `unknown`,
+ * so a wide argument is lifted to a `{re, im}` object, while the body can
+ * read the parameter on the real lane (a use in `Floor` narrows it to a
+ * real type). With `s(x) := x - ⌊x⌋` and `g := t ↦ s(t) + 1`, `g(u)` at
+ * `u = 0.25` gave the string `"[object Object]NaN1"`; it is `1.25`, the
+ * value of the interpreter.
+ *
+ * A definition with no record (a multi-clause dispatcher, a list recursion
+ * loop, a recursive call reached before its own record) keeps
+ * `coerceToComplex`.
+ */
+function realLaneArguments(
+  name: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  coerceToComplex: ReadonlyArray<boolean | 'real'>
+): ReadonlyArray<boolean | 'real' | 'real-operand'> {
+  const registry = target.userFunctions;
+  if (target.language !== 'javascript' || registry === undefined)
+    return coerceToComplex;
+  const paramLanes = core.userFunctionParamLanes(registry, name);
+  if (paramLanes === undefined) return coerceToComplex;
+  return coerceToComplex.map((c, i) =>
+    c === false && paramLanes[i] === false && core.isComplexValued(args[i])
+      ? 'real-operand'
+      : c
+  );
+}
+
+/**
  * The call of the function `name`, whose parameters are scalar, when an
  * argument is declared `broadcastable<T>` with `T` a scalar type
  * (`isOpenScalarRankType()`): the host asks for an open rank, so the call
@@ -327,7 +377,7 @@ function openRankCall(
   name: string,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  coerceToComplex: ReadonlyArray<boolean | 'real'>,
+  coerceToComplex: ReadonlyArray<boolean | 'real' | 'real-operand'>,
   held: ReadonlyArray<string>
 ): TargetSource | undefined {
   const helper =

@@ -213,6 +213,7 @@ import {
   realGuardCandidate,
   realOperandChain,
   recordUserFunctionLane,
+  recordUserFunctionParamLanes,
   resolveCompileMode,
   structuralOperandLane,
   userCallElementLane,
@@ -6835,6 +6836,7 @@ export function emitFunctionLiteralDefinition(
             () =>
               withEnforcedParams(literal, () =>
                 withNestedCseHarvest(bodyExpr, bodyTarget, params, () => {
+                  recordUserFunctionParamLanes(bodyTarget, name, literal);
                   const code = compileDefinitionBody(bodyExpr, bodyTarget);
                   complexShaped = complexShapedEmission(bodyExpr);
                   recordUserFunctionLane(bodyTarget, h, name, bodyExpr);
@@ -6870,6 +6872,12 @@ export function emitFunctionLiteralDefinition(
         (registry.memoizable ??= new Map()).set(name, { params, body });
     } catch (e) {
       removeDefinitionsAddedSince(registry, definedBefore);
+      // The parameter lanes are recorded before the body compiles
+      // (`recordUserFunctionParamLanes`), and `name` is not in
+      // `registry.defs` yet, so `removeDefinitionsAddedSince` does not
+      // remove them.
+      if (!definedBefore.has(name))
+        userFunctionLanes(registry).paramsByName.delete(name);
       throw e;
     } finally {
       registry.compiling.delete(name);
@@ -7063,6 +7071,8 @@ const hubs: CoreHooks = {
   assertAdmitted,
   untypedInputsOf,
   isComplexValued,
+  userFunctionParamLanes: (registry, name) =>
+    _userFunctionLanes.get(registry)?.paramsByName.get(name),
   foldCostEstimate,
   linearAlgebraOperandLane,
   bigOpBoundConstant,

@@ -63,6 +63,13 @@ export interface CoreHooks {
     occurrences: ReadonlyMap<string, Expression>
   ): string[];
   isComplexValued(expr: Expression): boolean;
+  /** The lane on which the emitted JavaScript definition `name` reads each
+   * of its parameters (`UserFunctionLanes.paramsByName`), or `undefined`
+   * when the definition has no record. */
+  userFunctionParamLanes(
+    registry: UserFunctionRegistry,
+    name: string
+  ): ReadonlyArray<boolean | undefined> | undefined;
   foldCostEstimate(
     expr: Expression,
     depth?: number,
@@ -252,6 +259,7 @@ export const core: CoreHooks = {
   compile: notInstalled('compile'),
   compileDeclaredUnionDispatch: notInstalled('compileDeclaredUnionDispatch'),
   isComplexValued: notInstalled('isComplexValued'),
+  userFunctionParamLanes: notInstalled('userFunctionParamLanes'),
   foldCostEstimate: notInstalled('foldCostEstimate'),
   linearAlgebraOperandLane: notInstalled('linearAlgebraOperandLane'),
   bigOpBoundConstant: notInstalled('bigOpBoundConstant'),

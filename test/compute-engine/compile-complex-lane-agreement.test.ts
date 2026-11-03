@@ -206,4 +206,58 @@ describe('COMPLEX MODE: the lane analysis agrees with the emitter', () => {
       }
     }
   });
+
+  test('a complex argument at a parameter that the definition reads on the real lane', () => {
+    // The parameter `x` of `s` has the signature type `unknown`, so a call
+    // lifts a wide argument to a `{re, im}` object; the use in `Floor`
+    // narrows `x` to a real type, so the body reads it on the real lane:
+    // `x + -Math.floor(x)`. Before the fix, `g(u)` gave the string
+    // `"[object Object]NaN1"`. The call now passes the real projection:
+    // the real part of a real value, `NaN` for a value with an imaginary
+    // part (the interpreter gives an `incompatible-type` error there).
+    const ce = new ComputeEngine();
+    ce.declare('u', 'real');
+    ce.declare('v', 'number');
+    ce.declare('w', 'complex');
+    ce.declare('Z', 'list<number>');
+    ce.parse('s(x) \\coloneq x - \\lfloor x\\rfloor').evaluate();
+    ce.parse('g \\coloneq t \\mapsto s(t)+1').evaluate();
+    const gu = ce.parse('g(u)');
+    for (const mode of ['complex', 'strict'] as const) {
+      const value = run(gu, { u: 0.25 }, mode);
+      expect(value).toBe(1.25);
+      expect(value).toBe(interpreted(ce, gu, { u: 0.25 }));
+    }
+    expect(run(ce.parse('g(v)'), { v: 2.25 })).toBe(1.25);
+    // A complex input: real at `1.5 + 0i`, not real at `1.5 + i`.
+    const gw = ce.parse('g(w)');
+    expect(run(gw, { w: { re: 1.5, im: 0 } })).toBe(1.5);
+    expect(run(gw, { w: { re: 1.5, im: 1 } })).toBeNaN();
+    expect(run(ce.parse('s(w)'), { w: { re: 1.5, im: 1 } })).toBeNaN();
+    // An element of a `list<number>`, lifted with `_SYS.cplx` at the call.
+    const sz = ce.box(['Add', ['s', ['At', 'Z', 2]], 1]);
+    expect(run(sz, { Z: [0.5, 3.75] })).toBe(1.75);
+  });
+});
+
+describe('COMPLEX MODE: a parameter that binds a collection whole keeps its elements', () => {
+  test('a list argument with a complex element is not converted', () => {
+    // The parameter `p` binds the list whole (`tuple<number, number>`),
+    // so its elements keep their own lanes: the call passes the list as
+    // it is, and `p[1]·p[2]` at `t = 2` is `2 + 4i`, the interpreter's
+    // value.
+    const ce = new ComputeEngine();
+    ce.declare('t', 'real');
+    ce.assign(
+      'f',
+      ce.box(['Function', ['Multiply', ['At', 'p', 1], ['At', 'p', 2]], 'p'])
+    );
+    const e = ce.box([
+      'f',
+      ['List', ['Add', 1, ['Multiply', 'ImaginaryUnit', 't']], 2],
+    ]);
+    expect(run(e, { t: 2 })).toEqual({ re: 2, im: 4 });
+    const expected = e.subs({ t: 2 }).N();
+    expect([expected.re, expected.im]).toEqual([2, 4]);
+  });
 });
