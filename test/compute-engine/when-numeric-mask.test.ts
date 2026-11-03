@@ -167,18 +167,21 @@ describe('the two evaluation routes agree', () => {
     const ce = new ComputeEngine();
     ce.declare('e', 'integer<3<..>');
     ce.assign('e', ce.parse('5\\{a>0\\}'));
-    expect(ce.box('e').evaluate().toString()).toBe('5 {0 < a}');
+    expect(ce.box('e').evaluate().toString()).toBe('If(0 < a, 5)');
     const ce2 = new ComputeEngine();
     ce2.assume(ce2.parse('v > 3'));
     ce2.assign('v', ce2.parse('5\\{a>0\\}'));
-    expect(ce2.box('v').evaluate().toString()).toBe('5 {0 < a}');
+    expect(ce2.box('v').evaluate().toString()).toBe('If(0 < a, 5)');
   });
 
-  test('a selection with no selected clause is unchanged: Missing', () => {
+  test('a selection with no selected clause: Missing, and NaN for an else-less If of a number', () => {
     const ce = engine();
     expect(ce.box(['Which', 'False', 5]).evaluate().toString()).toBe(
       '"Missing"'
     );
-    expect(ce.box(['If', 'False', 5]).evaluate().toString()).toBe('"Missing"');
+    // An else-less `If` is a restriction (decision of 2026-11-02,
+    // `docs/plans/2026-11-02-restriction-binding.md`): a numeric arm masks to
+    // `NaN`.
+    expect(ce.box(['If', 'False', 5]).evaluate().toString()).toBe('NaN');
   });
 });

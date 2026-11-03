@@ -15,6 +15,7 @@ import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
 import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
+import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
 import type { CompileTarget, OperandCompiler, TargetSource } from './types.js';
 import {
   assertNoStatementOperand,
@@ -546,10 +547,14 @@ export function compileExprAssertPresent(
           `cannot distinguish a possible 'Nothing' input from an absent datum.`
       );
     const code = compileValueOperand(operand, target);
+    // A restriction (`If(c, 3)`, `When(3, c)`) is absent where its
+    // condition fails, whatever its type says, and so is an expression that
+    // contains one: it is never proved present.
     const proved =
       !typeContainsMissing(t) &&
       !isSubtype('nan', resolveTypeForCompilation(t)) &&
-      resolveTypeForCompilation(t) !== 'unknown';
+      resolveTypeForCompilation(t) !== 'unknown' &&
+      !mayHoldRestriction(operand);
     if (proved) return code;
     const raise = target.absence?.raise;
     if (raise === undefined) return code;

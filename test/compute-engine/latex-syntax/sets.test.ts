@@ -456,6 +456,17 @@ describe('PARSING INTERVALS', () => {
 //   }); // @fixme
 // });
 
+describe('PARSING A BRACE CONDITION', () => {
+  // A condition alone in braces is the value 1 where it holds, also when the
+  // condition is restricted: the restriction stays over the condition, as in
+  // the branch `\{x>0\{c\}: 5, 1\}`.
+  it('reads a restricted condition alone as If(condition, 1)', () => {
+    expect(
+      ce.parse('\\{x>0\\{c\\}\\}', { canonical: false }).json
+    ).toEqual(['If', ['If', 'c', ['Greater', 'x', 0]], 1]);
+  });
+});
+
 describe('PARSING COMPLEMENT', () => {
   it('should parse complement', () => {
     expect(parse('A^\\complement').json).toMatchObject(['Complement', 'A']);

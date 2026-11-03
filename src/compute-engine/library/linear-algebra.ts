@@ -83,6 +83,10 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import {
+  isRestriction,
+  restrictionParts,
+} from '../boxed-expression/conditional-value.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
 import {
   awaitedOperandOptions,
@@ -2318,7 +2322,8 @@ function pointCellsDotProduct(
  */
 function isPointCell(x: Expression): boolean {
   if (isAbsentSymbol(x) || isTuple(x)) return true;
-  if (isFunction(x, 'When')) return x.nops === 2 && isTuple(x.op1);
+  const restriction = restrictionParts(x);
+  if (restriction !== undefined) return isTuple(restriction.value);
   if (isFunction(x, 'Which'))
     return x.nops >= 2 && x.ops.every((v, i) => i % 2 === 0 || isTuple(v));
   return false;
@@ -2341,7 +2346,7 @@ function hasAbsentCell(op: Expression): boolean {
 
 function hasRestrictedCell(ops: ReadonlyArray<Expression>): boolean {
   return ops.some(
-    (op) => isFunction(op, 'List') && op.ops.some((x) => isFunction(x, 'When'))
+    (op) => isFunction(op, 'List') && op.ops.some((x) => isRestriction(x))
   );
 }
 

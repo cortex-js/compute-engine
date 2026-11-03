@@ -96,6 +96,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import {
   absentCellsArePoints,
+  cellsArePoints,
   threadedPresentType,
 } from './broadcast-lift-type.js';
 import {
@@ -2157,7 +2158,9 @@ export function absentableCollectionOperandValue(
  * `result`, a list computed by an element-wise application, with each `NaN`
  * cell replaced by `Missing` when the application's type says the cell is an
  * absent POINT: its cell type is `missing | tuple<…>` (every present arm a
- * tuple). Otherwise `result` itself.
+ * tuple), or, when its cell type is a tuple, for each cell whose cell in
+ * one of the evaluated operands `evaluatedOps` is absent. Otherwise `result`
+ * itself.
  *
  * The kernel computes each cell from the cell's own operands. An absent
  * operand cell there is the `Missing` symbol, and the cell application
@@ -2173,7 +2176,8 @@ export function absentableCollectionOperandValue(
 export function markAbsentPointCells(
   ce: ComputeEngine,
   expression: Expression | undefined,
-  result: Expression
+  result: Expression,
+  evaluatedOps?: ReadonlyArray<Expression>
 ): Expression {
   if (expression === undefined || !isFunction(result, 'List')) return result;
   // The cells can be at any depth: a MATRIX of points (a list of lists of
@@ -2196,15 +2200,59 @@ export function markAbsentPointCells(
   // absent, are `missing | tuple<…>` (`absentCellsArePoints`). The static
   // typing of the absent cells reads the same predicate
   // (`absorbOperandAbsence`), so the value and its type agree.
-  if (!absentCellsArePoints(expression.type.type)) return result;
-  const mark = (x: Expression): Expression =>
-    isFunction(x, 'List') && hasNaNCell(x)
+  if (absentCellsArePoints(expression.type.type)) {
+    const mark = (x: Expression): Expression =>
+      isFunction(x, 'List') && hasNaNCell(x)
+        ? ce._fn(
+            'List',
+            x.ops.map((y) => (isNaNCell(y) ? ce.Missing : mark(y)))
+          )
+        : x;
+    return mark(result);
+  }
+  // A restricted point `If(c, P)` has the type of `P`, with no `missing`
+  // arm, so `2 · [P{c}, (2, 3)]` is typed `list<tuple<…>>`. Its leaf cells
+  // are points (`cellsArePoints`), but the type does not say which cell is
+  // absent. So each `NaN` cell is decided from the operands that the caller
+  // has already evaluated (`evaluatedOps`): the cell is an absent point only
+  // when the evaluated cell at the same position in one of those lists, or a
+  // row that holds it, is an absent symbol (a restriction whose condition is
+  // false evaluates to `Missing`). Another `NaN` cell is a computed value and
+  // is kept: `[(1, 2){c}, (3, 4)] / [1, NaN]` with `c` true is
+  // `[(1, 2), NaN]`. Nothing is evaluated here: a second evaluation would
+  // repeat the work of the caller and could run an effect again. A caller
+  // that applies the operator to each cell separately does not pass the
+  // operands: there, the application of a cell to an absent point answers
+  // `Missing` itself.
+  if (evaluatedOps === undefined || !cellsArePoints(expression.type.type))
+    return result;
+  // Whether the evaluated cell of `op` at `path` is absent. The walk follows
+  // `List`s only. An absent symbol on the way decides for every cell it
+  // holds: an absent row, or an absent operand that stood for a whole list
+  // (`If(c, [P, Q]) / [1, 1]` with `c` false).
+  const absentAt = (op: Expression, path: readonly number[]): boolean => {
+    let node: Expression | undefined = op;
+    for (let depth = 0; ; depth++) {
+      if (isAbsentScalarSymbol(node!)) return true;
+      if (depth === path.length || !isFunction(node, 'List')) return false;
+      node = node.ops[path[depth]];
+      if (node === undefined) return false;
+    }
+  };
+  const markAt = (x: Expression, path: number[]): Expression =>
+    isFunction(x, 'List')
       ? ce._fn(
           'List',
-          x.ops.map((y) => (isNaNCell(y) ? ce.Missing : mark(y)))
+          x.ops.map((y, i) => {
+            if (isNaNCell(y))
+              return evaluatedOps.some((op) => absentAt(op, [...path, i]))
+                ? ce.Missing
+                : y;
+            return isFunction(y, 'List') ? markAt(y, [...path, i]) : y;
+          })
         )
       : x;
-  return mark(result);
+  return hasNaNCell(result) ? markAt(result, []) : result;
 }
 
 // ————————————————————————————————————————————————————————————————————————

@@ -60,10 +60,11 @@ describe('`When` round-trips the Desmos gates through latex', () => {
   test('the full-plane gate `1>0{cond}` survives, raw and canonical', () => {
     const source = '1>0\\left\\{x=x\\right\\}';
     const parsed = ce.parse(source, { form: 'raw' });
+    // The restriction applies to the whole statement.
     expect(parsed.json).toEqual([
-      'Greater',
-      1,
-      ['When', 0, ['Equal', 'x', 'x']],
+      'If',
+      ['Equal', 'x', 'x'],
+      ['Greater', 1, 0],
     ]);
     expect(raw(parsed.latex)).toEqual(parsed.json);
 
@@ -74,9 +75,9 @@ describe('`When` round-trips the Desmos gates through latex', () => {
   test('the axis-line gate `y=0{cond}` survives', () => {
     const parsed = ce.parse('y=0\\left\\{x>1\\right\\}', { form: 'raw' });
     expect(parsed.json).toEqual([
-      'Equal',
-      'y',
-      ['When', 0, ['Greater', 'x', 1]],
+      'If',
+      ['Greater', 'x', 1],
+      ['Equal', 'y', 0],
     ]);
     expect(raw(parsed.latex)).toEqual(parsed.json);
   });
@@ -88,11 +89,8 @@ describe('`When` keeps a low-precedence subject grouped', () => {
     // the negation applied to the restriction instead of to its subject.
     const expr = ce.box(['When', -1, ['Equal', 'x', 'x']]);
     expect(expr.latex).toEqual('(-1)\\left\\{x=x\\right\\}');
-    expect(ce.parse(expr.latex).json).toEqual([
-      'When',
-      -1,
-      ['Equal', 'x', 'x'],
-    ]);
+    // The parser reads the restriction as `If(c, e)`.
+    expect(ce.parse(expr.latex).json).toEqual(['If', ['Equal', 'x', 'x'], -1]);
   });
 });
 

@@ -149,6 +149,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(real) -> list<real^2>` with the body `t ↦ W` (crafted: the body breaks
   the declared width): `Sum(vector(x))` at `W = [1, 2, 3]` gives 3 (the sum
   is written for two terms); the interpreter gives 6.
+- `javascript`, `c: boolean` at `c = false`, `f := (x = "d") ↦ x`
+  (plausible?): `Block(Declare(a, "unknown", If(c, "s")), f(a))` gives
+  `undefined` (the default is not filled: `argumentMayBeAbsent()` reads the
+  type of the symbol `a`, which is the string type of the branch, and
+  `mayHoldRestriction()` does not follow a symbol to its initializer); the
+  interpreter gives `"d"`. A numeric local, `a ≔ If(c, 3)` with
+  `f := (x = 5) ↦ x + 1`, agrees (6), because a numeric argument is always
+  tested for absence.
 
 ## Shapes are settled at compile time
 

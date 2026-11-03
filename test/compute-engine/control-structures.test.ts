@@ -275,14 +275,15 @@ describe('CONTROL STRUCTURES', () => {
       expect(result.latex).toMatchInlineSnapshot(`99`);
     });
 
-    // Without an else branch a false condition evaluates to Missing (the
-    // no-selection ruling of 2026-08-27); the static type must keep the
-    // `missing` arm.
-    it('types a missing else branch as `| missing`', () => {
+    // Without an else branch a false condition evaluates to the absent value
+    // of the domain of the arm (`NaN` for a number, `Missing` otherwise), and
+    // the static type is the type of the arm, with no `nan` or `missing` arm
+    // (decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`).
+    it('types an else-less If as its arm', () => {
       ce.declare('ifCond57', 'boolean');
       const expr = ce.expr(['If', 'ifCond57', 42]);
       expect(expr.type.matches('integer | missing')).toBe(true);
-      expect(expr.type.matches('integer')).toBe(false);
+      expect(expr.type.matches('integer')).toBe(true);
       const both = ce.expr(['If', 'ifCond57', 42, 99]);
       expect(both.type.matches('integer')).toBe(true);
     });
@@ -314,7 +315,7 @@ describe('CONTROL STRUCTURES', () => {
       // With a condition and a then branch, the call is valid, as before.
       const noElse = ce.box(['If', 'False', 1]);
       expect(noElse.isValid).toBe(true);
-      expect(noElse.evaluate().symbol).toBe('Missing');
+      expect(noElse.evaluate().isNaN).toBe(true);
     });
 
     // An operand after the else branch is refused when the call is

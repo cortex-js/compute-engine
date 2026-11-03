@@ -243,6 +243,7 @@ import {
   integerRangeElements,
   kindValueIsNaN,
 } from './type-guards.js';
+import { restrictionParts } from './conditional-value.js';
 import {
   callSiteDefault,
   parameterDefaultOperands,
@@ -8623,7 +8624,8 @@ export class BoxedFunction
           return markAbsentPointCells(
             this.engine,
             this,
-            this.engine._fn('List', results)
+            this.engine._fn('List', results),
+            tail
           );
         }
       }
@@ -8750,13 +8752,15 @@ export class BoxedFunction
       // read back as that restricted list (`regroupRestrictedCells`).
       //
       // The cheap test of the lift is made first, so that an application with
-      // no `When`, `Which` or `List` operand does not create the steps.
+      // no `When`, `Which`, `List` or single-branch `If` operand does not
+      // create the steps.
       if (
         tail.some(
           (x) =>
             isFunction(x, 'When') ||
             isFunction(x, 'Which') ||
-            isFunction(x, 'List')
+            isFunction(x, 'List') ||
+            (isFunction(x, 'If') && x.nops === 2)
         )
       ) {
         const threaded = runMaterialization(
@@ -10041,7 +10045,8 @@ export class BoxedFunction
             markAbsentPointCells(
               this.engine,
               this,
-              this.engine._fn('List', resolved)
+              this.engine._fn('List', resolved),
+              tail
             )
           );
         }
@@ -10157,14 +10162,15 @@ export class BoxedFunction
       // (`awaitAsyncOnlyDescendants`).
       //
       // A cheap test first, the same one as the lift makes: only a `When`, a
-      // `Which` or a `List` operand can be lifted, so an application with
+      // `Which`, a single-branch `If` or a `List` operand can be lifted, so an application with
       // none of them awaits nothing here.
       if (
         tail.some(
           (x) =>
             isFunction(x, 'When') ||
             isFunction(x, 'Which') ||
-            isFunction(x, 'List')
+            isFunction(x, 'List') ||
+            (isFunction(x, 'If') && x.nops === 2)
         )
       ) {
         const threadTail =
@@ -11961,6 +11967,12 @@ function* threadConditionalOperands(
   options: Partial<EvaluateOptions> | undefined
 ): ConditionalThreadingSteps {
   const ce = expr.engine;
+  // A single-branch `If(c, v)`, the form the parser gives a restriction
+  // `v\{c\}`, is lifted as the restriction `When(v, c)` it stands for, so
+  // that the two spellings give the same value: `Sin(If(c, 3))` is
+  // `When(Sin(3), c)`, as `Sin(When(3, c))` is.
+  if (tail.some((x) => isFunction(x, 'If') && x.nops === 2))
+    tail = tail.map((x) => restrictionAsWhen(ce, x));
   if (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(expr.operator)) {
     if (!tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which')))
       return undefined;
@@ -12038,7 +12050,9 @@ function regroupRestrictedCells(ce: ComputeEngine, x: Expression): Expression {
   let guard: Expression | undefined;
   const bodies: Expression[] = [];
   for (const op of x.ops) {
-    const cell = isFunction(op, 'List') ? regroupRestrictedCells(ce, op) : op;
+    const cell = isFunction(op, 'List')
+      ? regroupRestrictedCells(ce, op)
+      : restrictionAsWhen(ce, op);
     if (!isFunction(cell, 'When') || cell.nops !== 2) return x;
     // A cell restricted by a LIST of conditions is itself an element-wise
     // restriction, not one cell of a restricted list.
@@ -12048,6 +12062,20 @@ function regroupRestrictedCells(ce: ComputeEngine, x: Expression): Expression {
     bodies.push(cell.op1);
   }
   return ce._fn('When', [ce._fn('List', bodies), guard!]);
+}
+
+/**
+ * `x` as `When(v, c)` when it is the single-branch `If(c, v)` that the parser
+ * gives a restriction `v\{c\}`, and `x` itself otherwise. The two forms have
+ * the same value (`restrictionParts()`), and the conditional-value lift
+ * reads `When`.
+ */
+function restrictionAsWhen(ce: ComputeEngine, x: Expression): Expression {
+  if (!isFunction(x, 'If')) return x;
+  const parts = restrictionParts(x);
+  return parts === undefined
+    ? x
+    : ce._fn('When', [parts.value, parts.condition]);
 }
 
 /**
@@ -12426,7 +12454,7 @@ function* threadConditional(
     // `[NaN, NaN, NaN]` when `c` is false). The cell type of THIS
     // application, `missing | tuple<…>`, says each cell is a point, and an
     // absent point is `Missing`.
-    return markAbsentPointCells(ce, application, yield ce._fn(op, tail));
+    return markAbsentPointCells(ce, application, yield ce._fn(op, tail), tail);
   }
 
   return undefined;

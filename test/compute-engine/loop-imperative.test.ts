@@ -180,9 +180,10 @@ describe('Loop — imperative (interpreter)', () => {
     const t = ce.expr(['If', 'True', 7]);
     expect(t.isCanonical).toBe(true);
     expect(t.evaluate().re).toBe(7);
-    // No-selection ruling 2026-08-27: an else-less `If` with a false
-    // condition answers `Missing`, not the splicing `Nothing`.
-    expect(ce.expr(['If', 'False', 7]).evaluate().symbol).toBe('Missing');
+    // An else-less `If` with a false condition answers the absent value of
+    // the domain of its arm (`NaN` for a number), not the splicing
+    // `Nothing`.
+    expect(ce.expr(['If', 'False', 7]).evaluate().isNaN).toBe(true);
   });
 
   test('Return propagates through Block and Loop to the function boundary', () => {

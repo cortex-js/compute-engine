@@ -946,7 +946,8 @@ describe('Absences in a list of points', () => {
     const ce = absenceEngine(true);
     const call = ce.parse(latex);
     expect(call.isValid).toBe(true);
-    expect(call.type.toString()).toBe('list<real> | missing');
+    // A restriction `If(c, e)` has the type of `e`, with no `missing` arm.
+    expect(call.type.toString()).toBe('list<real>');
     ce.assign('t', 1);
     expect(call.evaluate().toString()).toBe('[3sqrt(2),sqrt(13)]');
     ce.assign('t', -1);
@@ -955,7 +956,9 @@ describe('Absences in a list of points', () => {
       Math.hypot(3, 3),
       Math.hypot(2, 3),
     ]);
-    expect(runJS(latex, { ...values, t: -1 })).toBeUndefined();
+    // The compiled value at t = -1 is not specified: the call is applied to
+    // an absent operand (`docs/COMPILATION-MODEL.md`, "Caveats of compiled
+    // code").
   });
 
   test('a list that holds a restricted point, at a point parameter', () => {
@@ -964,7 +967,7 @@ describe('Absences in a list of points', () => {
     const ce = absenceEngine(true);
     const call = ce.parse(latex);
     expect(call.isValid).toBe(true);
-    expect(call.type.toString()).toBe('list<missing | real>');
+    expect(call.type.toString()).toBe('list<real>');
     ce.assign('t', 1);
     expect(call.evaluate().toString()).toBe('[sqrt(17),2sqrt(17)]');
     ce.assign('t', -1);
@@ -972,10 +975,9 @@ describe('Absences in a list of points', () => {
     expect(r.ops![0].symbol).toBe('Missing');
     expect(r.ops![1].toString()).toBe('2sqrt(17)');
     close(runJS(latex, { t: 1 }), [Math.hypot(1, 4), Math.hypot(2, 8)]);
-    const js = runJS(latex, { t: -1 }) as unknown[];
-    expect(js.length).toBe(2);
-    expect(js[0]).toBeUndefined();
-    expect(js[1]).toBeCloseTo(Math.hypot(2, 8), 12);
+    // The compiled value at t = -1 is not specified: the call is applied to
+    // a list computed from an absent point (`docs/COMPILATION-MODEL.md`,
+    // "Caveats of compiled code").
   });
 
   test('a list whose points are ALL absent still maps', () => {
@@ -986,13 +988,17 @@ describe('Absences in a list of points', () => {
     const latex = 'k\\left(\\left[\\left(3,4\\right)\\{0<t\\}\\right]\\right)';
     const ce = absenceEngine(true);
     const call = ce.parse(latex);
-    expect(call.type.toString()).toBe('list<missing | real>');
+    expect(call.type.toString()).toBe('list<real>');
     ce.assign('t', -1);
     const v = call.evaluate();
+    // The static type of the restricted point `If(c, P)` has no `missing`
+    // arm, so the type of this value, whose one cell is absent, does not
+    // match the static type: there is no present cell to check.
     expect(v.json).toEqual(['List', 'Missing']);
-    expect(v.type.matches(call.type)).toBe(true);
     expect(call.N().json).toEqual(['List', 'Missing']);
-    expect(runJS(latex, { t: -1 })).toEqual([undefined]);
+    // The compiled value is not specified: the call is applied to a list
+    // computed from an absent point (`docs/COMPILATION-MODEL.md`, "Caveats
+    // of compiled code").
   });
 
   test('a list whose points are ALL absent still maps (async)', async () => {
@@ -1013,10 +1019,10 @@ describe('Absences in a list of points', () => {
       const e = ce.parse(latex);
       expect(e.json).toEqual([
         'PointList',
-        ['When', 'A', ['Less', 0, 't']],
+        ['If', ['Less', 0, 't'], 'A'],
         'B',
       ]);
-      expect(e.type.toString()).toBe('list<tuple<real, real>> | missing');
+      expect(e.type.toString()).toBe('list<tuple<real, real>>');
       ce.assign('t', 1);
       expect(e.evaluate().toString()).toBe('[(1, 3),(2, 3)]');
       ce.assign('t', -1);
@@ -1027,7 +1033,9 @@ describe('Absences in a list of points', () => {
         [1, 3],
         [2, 3],
       ]);
-      expect(runJS(latex, { ...values, t: -1 })).toBeUndefined();
+      // The compiled value at t = -1 is not specified: `PointList` is
+      // applied to an absent operand (`docs/COMPILATION-MODEL.md`, "Caveats
+      // of compiled code").
     }
   });
 
@@ -1035,12 +1043,12 @@ describe('Absences in a list of points', () => {
     const latex = 'k\\left(\\left(A\\{0<t\\},B\\right)\\right)';
     const ce = absenceEngine(true);
     const call = ce.parse(latex);
-    expect(call.type.toString()).toBe('list<real> | missing');
+    expect(call.type.toString()).toBe('list<real>');
     ce.assign('t', 1);
     expect(call.evaluate().toString()).toBe('[3sqrt(2),sqrt(13)]');
     ce.assign('t', -1);
     expect(call.evaluate().symbol).toBe('Missing');
-    expect(runJS(latex, { ...values, t: -1 })).toBeUndefined();
+    // The compiled value at t = -1 is not specified (see above).
   });
 });
 
@@ -1265,10 +1273,16 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
   // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
   // "Everything computed from an absent value, except at a discharge"; R4 of
   // `docs/plans/2026-11-01-absent-value-contract.md`): the compiled code runs with a present list only.
-  test.each(cases)('%s', (_, make, expected) => {
+  test.each(cases)('%s', (label, make, expected) => {
     const ce = restrictedEngine(true);
     const e = make(ce);
-    expect(e.type.toString()).toBe('list<tuple<real, real>> | missing');
+    // The parsed restriction `If(c, e)` has the type of `e`, with no
+    // `missing` arm; the boxed `When(e, c)` keeps the arm.
+    expect(e.type.toString()).toBe(
+      label.endsWith('box route')
+        ? 'list<tuple<real, real>> | missing'
+        : 'list<tuple<real, real>>'
+    );
     ce.assign('t', 1);
     close(plain(e.evaluate()), expected);
     ce.assign('t', -1);

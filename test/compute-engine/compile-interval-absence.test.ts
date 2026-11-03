@@ -167,9 +167,10 @@ describe('a restriction over a list value', () => {
     to: 'interval-js',
   });
 
-  test('the position typed `list<number> | missing | number` compiles', () => {
+  // A restriction has the type of its value, with no `missing` arm.
+  test('the position typed `list<number> | number` compiles', () => {
     expect(ce.parse('U \\left\\{y > 0\\right\\}').type.toString()).toBe(
-      'list<number> | missing | number'
+      'list<number> | number'
     );
     expect(fn.success).toBe(true);
     expect(fn.code).toBe('_IA.restrict(_IA.less(_k1, _.y), () => _.U)');

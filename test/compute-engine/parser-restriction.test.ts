@@ -13,30 +13,26 @@ function parse(latex: string) {
 
 describe('Parser: restriction braces', () => {
   describe('basic restriction', () => {
-    test('`f(x)\\{0 < x < 2\\}` → When(f(x), 0 < x < 2)', () => {
+    test('`f(x)\\{0 < x < 2\\}` → If(0 < x < 2, f(x))', () => {
       const ast = parse('f(x)\\left\\{0 < x < 2\\right\\}');
-      expect(ast).toEqual([
-        'When',
-        ['f', 'x'],
-        ['Less', 0, 'x', 2],
-      ]);
+      expect(ast).toEqual(['If', ['Less', 0, 'x', 2], ['f', 'x']]);
     });
 
-    test('bare symbol: `x\\{cond\\}` → When(x, cond)', () => {
+    test('bare symbol: `x\\{cond\\}` → If(cond, x)', () => {
       const ast = parse('x\\left\\{x > 0\\right\\}');
       // x > 0 canonicalizes to Less(0, x)
-      expect(ast).toEqual(['When', 'x', ['Less', 0, 'x']]);
+      expect(ast).toEqual(['If', ['Less', 0, 'x'], 'x']);
     });
   });
 
   describe('stacked restrictions canonicalize to And', () => {
-    test('`e\\{c_1\\}\\{c_2\\}` → When(e, And(c_1, c_2))', () => {
+    test('`e\\{c_1\\}\\{c_2\\}` → If(And(c_1, c_2), e)', () => {
       const ast = parse('x\\left\\{x>0\\right\\}\\left\\{x<10\\right\\}');
       // x > 0 canonicalizes to Less(0, x)
       expect(ast).toEqual([
-        'When',
-        'x',
+        'If',
         ['And', ['Less', 0, 'x'], ['Less', 'x', 10]],
+        'x',
       ]);
     });
   });
@@ -110,12 +106,12 @@ describe('Parser: restriction braces', () => {
   // (Tycho 0.72.0 restriction-brace probe, issue 2. Corpus proof: under And,
   // `\{x>4, x<0\}` would be unsatisfiable; the Desmos graph shows segments.)
   describe('comma-separated conditions combine as Or', () => {
-    test('`x^2\\{x\\ge0, x\\le3\\}` → When(x^2, Or(...))', () => {
+    test('`x^2\\{x\\ge0, x\\le3\\}` → If(Or(...), x^2)', () => {
       const ast = parse('x^2\\left\\{x\\ge0, x\\le3\\right\\}');
       expect(ast).toEqual([
-        'When',
-        ['Power', 'x', 2],
+        'If',
         ['Or', ['LessEqual', 0, 'x'], ['LessEqual', 'x', 3]],
+        ['Power', 'x', 2],
       ]);
     });
 
@@ -128,14 +124,14 @@ describe('Parser: restriction braces', () => {
     test('three disjoint segments stay satisfiable (corpus shape)', () => {
       const ast = parse('x\\left\\{x>4, x<0, |x-2|<0.5\\right\\}');
       expect(ast).toEqual([
-        'When',
-        'x',
+        'If',
         [
           'Or',
           ['Less', 4, 'x'],
           ['Less', 'x', 0],
           ['Less', ['Abs', ['Add', 'x', -2]], 0.5],
         ],
+        'x',
       ]);
     });
 

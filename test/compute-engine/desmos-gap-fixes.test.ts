@@ -29,11 +29,11 @@ describe('Desmos gap fixes', () => {
       expect(parse(spaced)).toEqual(parse(unspaced));
     });
 
-    test('t\\ \\{t\\ge0\\} attaches the When restriction across space', () => {
+    test('t\\ \\{t\\ge0\\} attaches the restriction across space', () => {
       expect(parse('t\\ \\left\\{t\\ge0\\right\\}')).toEqual([
-        'When',
-        't',
+        'If',
         ['LessEqual', 0, 't'],
+        't',
       ]);
     });
 

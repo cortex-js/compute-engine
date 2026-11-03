@@ -69,8 +69,8 @@ describe('When: list-condition broadcast', () => {
     const expr = ce.parse(
       'x\\left\\{x>0\\right\\}\\left\\{x\\le\\left[1,2\\right]\\right\\}'
     );
-    // Canonical folds to When(x, And(0 < x, x <= [1,2])).
-    expect(expr.op2.operator).toEqual('And');
+    // Canonical folds to If(And(0 < x, x <= [1,2]), x).
+    expect(expr.op1.operator).toEqual('And');
     // 3 > 0 ∧ 3 <= [1,2] → [False, False]
     expect(expr.evaluate().toString()).toBe('[NaN,NaN]');
   });
@@ -79,10 +79,12 @@ describe('When: list-condition broadcast', () => {
     test('list-of-booleans condition lifts the result to a list type', () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'number');
-      const t = ce
-        .parse('x^{2}\\left\\{\\left[1,2,3\\right]>0\\right\\}')
-        .type.toString();
-      expect(t.startsWith('list<')).toBe(true);
+      // The parsed `If(c, x^2)` is typed by the element-wise selection,
+      // `vector<3>`, a list type whose length is the mask's.
+      const t = ce.parse(
+        'x^{2}\\left\\{\\left[1,2,3\\right]>0\\right\\}'
+      ).type;
+      expect(t.matches('list')).toBe(true);
     });
 
     test('scalar boolean condition keeps expr type', () => {
@@ -106,10 +108,11 @@ describe('When: list-condition broadcast', () => {
       expect(ce.parse('x\\left\\{x>3\\right\\}').evaluate().isNaN).toBe(true);
     });
 
-    test('indeterminate condition → held When', () => {
+    test('indeterminate condition → held If', () => {
+      // The parsed restriction `If(c, e)` is held in the form it was parsed.
       const ce = new ComputeEngine();
       expect(ce.parse('x^{2}\\left\\{x>0\\right\\}').evaluate().operator).toEqual(
-        'When'
+        'If'
       );
     });
   });

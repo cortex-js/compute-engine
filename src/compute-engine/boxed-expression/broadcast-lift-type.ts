@@ -1306,13 +1306,17 @@ function isAbsentPointCellType(t: Type): boolean {
 
 /**
  * Whether the leaf cells of the cell type `t` are points that can be absent
- * (`missing | tuple<…>`). The walk goes down through nested lists, and
- * through a row that can be absent (a union of ONE list arm and `missing`
- * arms, `list<missing | tuple<…>> | missing`), which is read as its list
- * arm. An alias unfolds under the descent guard; at a cut the answer is
- * `false`.
+ * (`missing | tuple<…>`), or, with `isLeaf` set to `isPointCellType`,
+ * points with or without a `missing` arm. The walk goes down through nested
+ * lists, and through a row that can be absent (a union of ONE list arm and
+ * `missing` arms, `list<missing | tuple<…>> | missing`), which is read as
+ * its list arm. An alias unfolds under the descent guard; at a cut the
+ * answer is `false`.
  */
-function hasAbsentPointLeaves(t: Type): boolean {
+function hasAbsentPointLeaves(
+  t: Type,
+  isLeaf: (t: Type) => boolean = isAbsentPointCellType
+): boolean {
   let cell: Type = t;
   let seen: AliasDescent | undefined;
   for (let d = 0; d <= MAX_CELL_DEPTH; d++) {
@@ -1340,7 +1344,7 @@ function hasAbsentPointLeaves(t: Type): boolean {
         seen = rowSeen;
       }
     }
-    if (!isCellListKind(r)) return isAbsentPointCellType(r);
+    if (!isCellListKind(r)) return isLeaf(r);
     cell = r.elements;
     seen = descendIntoConstructor(seen);
   }
@@ -1358,20 +1362,38 @@ function hasAbsentPointLeaves(t: Type): boolean {
  * a list value by this predicate, and `absorbOperandAbsence` chooses the
  * marker of an absent cell by it, so the two cannot disagree.
  */
-export function absentCellsArePoints(t: Type): boolean {
+export function absentCellsArePoints(
+  t: Type,
+  isLeaf: (t: Type) => boolean = isAbsentPointCellType
+): boolean {
   const unfolded = unfoldAliasOnDescent(t, undefined);
   if (unfolded === undefined) return false;
   const r = unfolded.type;
-  if (isCellListKind(r)) return hasAbsentPointLeaves(r.elements);
+  if (isCellListKind(r)) return hasAbsentPointLeaves(r.elements, isLeaf);
   if (typeof r === 'string' || r.kind !== 'union') return false;
   let list = false;
   for (const arm of r.types) {
     const a = resolveTypeAlias(arm);
     if (!isCellListKind(a)) continue;
-    if (!hasAbsentPointLeaves(a.elements)) return false;
+    if (!hasAbsentPointLeaves(a.elements, isLeaf)) return false;
     list = true;
   }
   return list;
+}
+
+/**
+ * Whether the leaf cells of a list of type `t` are points, with or without
+ * a `missing` arm: the test of `absentCellsArePoints()` with a leaf that
+ * need not admit absence. A restricted point `If(c, P)` has the type of `P`,
+ * with no `missing` arm (decision of 2026-11-02,
+ * `docs/plans/2026-11-02-restriction-binding.md`), so a list that holds one,
+ * `[P\{c\}, (2, 3)]`, is typed `list<tuple<…>>` although a cell can be
+ * absent. `markAbsentPointCells` (`validate.ts`) reads this predicate when
+ * an operand holds a restricted cell: a `NaN` cell is then that absent
+ * point, `Missing`.
+ */
+export function cellsArePoints(t: Type): boolean {
+  return absentCellsArePoints(t, isPointCellType);
 }
 
 /**

@@ -154,9 +154,10 @@ describe('KEYWORD COMMAND (\\keyword{…})', () => {
   });
 
   test('\\keyword{where} binding', () => {
+    // In a `where` clause, `x = 2` on a bare symbol binds `x`.
     expect(ce.parse('x \\keyword{where} x = 2').json).toEqual([
       'Block',
-      ['Equal', 'x', 2],
+      ['Declare', 'x', "'unknown'", 2],
       'x',
     ]);
   });
@@ -321,14 +322,12 @@ describe('A KEYWORD THAT DOES NOT APPLY IS TEXT', () => {
   test('a keyword that applies is still read', () => {
     expect(raw('x+1 \\text{ where } x \\coloneq 2')).toEqual([
       'Block',
-      ['Declare', 'x'],
-      ['Assign', 'x', 2],
+      ['Declare', 'x', "'unknown'", 2],
       ['Add', 'x', 1],
     ]);
     expect(raw('x \\operatorname{where} x \\coloneq 2')).toEqual([
       'Block',
-      ['Declare', 'x'],
-      ['Assign', 'x', 2],
+      ['Declare', 'x', "'unknown'", 2],
       'x',
     ]);
     expect(raw('x^2 \\text{ for } x \\ge 0')).toEqual([

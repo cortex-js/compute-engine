@@ -342,9 +342,10 @@ describe('A SELF-REFERENTIAL ALIAS AT A DECLARED POINT PARAMETER', () => {
 });
 
 describe('A CONDITIONAL WITH AN ERROR BRANCH AND NO SELECTED BRANCH', () => {
-  // When no branch is selected, an `If` with no else branch and a `Which`
-  // whose last condition is not `True` give `Missing`. That outcome is not
-  // an error, so the call is not typed `error`.
+  // When no branch is selected, an `If` with no else branch gives the absent
+  // value of the domain of its arm (`NaN` for the numeric arm here), and a
+  // `Which` whose last condition is not `True` gives `Missing`. That outcome
+  // is not an error, so the call is not typed `error`.
   const ce = new ComputeEngine();
   ce.box([
     'Assign',
@@ -383,10 +384,13 @@ describe('A CONDITIONAL WITH AN ERROR BRANCH AND NO SELECTED BRANCH', () => {
     ],
   ]).evaluate();
 
-  test.each(['f', 'g'])('%s(3, False) is not typed error', (name) => {
+  test.each([
+    ['f', 'NaN'],
+    ['g', '"Missing"'],
+  ])('%s(3, False) is not typed error', (name, value) => {
     const e = ce.box([name, 3, 'False']);
     expect(e.type.toString()).not.toBe('error');
-    expect(e.evaluate().toString()).toBe('"Missing"');
+    expect(e.evaluate().toString()).toBe(value);
     expect(valueFits(e)).toBe(true);
   });
 

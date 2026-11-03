@@ -21,7 +21,7 @@ describe('gated value assignment', () => {
       const ce = new ComputeEngine();
       ce.assume(ce.parse('v > 3'));
       ce.assign('v', ce.parse('5\\{a>0\\}'));
-      expect(ce.box('v').evaluate().toString()).toBe('5 {0 < a}');
+      expect(ce.box('v').evaluate().toString()).toBe('If(0 < a, 5)');
     });
 
     test('the ungated value binds (control)', () => {
@@ -74,7 +74,7 @@ describe('gated value assignment', () => {
       const ce = new ComputeEngine();
       ce.declare('e', 'integer<3<..>');
       ce.assign('e', ce.parse('5\\{a>0\\}'));
-      expect(ce.box('e').evaluate().toString()).toBe('5 {0 < a}');
+      expect(ce.box('e').evaluate().toString()).toBe('If(0 < a, 5)');
     });
 
     test('the ungated value binds (control)', () => {
@@ -107,7 +107,7 @@ describe('gated value assignment', () => {
         type: 'integer<3<..>',
         value: ce.parse('5\\{a>0\\}'),
       });
-      expect(ce.box('e').evaluate().toString()).toBe('5 {0 < a}');
+      expect(ce.box('e').evaluate().toString()).toBe('If(0 < a, 5)');
     });
   });
 
@@ -115,13 +115,14 @@ describe('gated value assignment', () => {
     // The refinement lives at the assignment site, not in the `When` type
     // handler: a handler result is widened back to ordinary types, so the
     // handler cannot keep the literal `5` in the type it stores.
-    // A NUMERIC restriction masks to `NaN` (user decision 2026-09-25), so
-    // its type is its tier with a `nan` arm and no `missing` arm; the value
-    // it presents to an assumption or a declared range is the literal it
-    // holds.
-    test('a scalar restriction types its tier with a nan arm', () => {
+    // A restriction is a single-branch `If(c, e)`. With a scalar condition
+    // its type is the type of `e` with no `nan` and no `missing` arm
+    // (decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`);
+    // with a list of conditions it is typed as `When(e, c)`. The value it
+    // presents to an assumption or a declared range is the literal it holds.
+    test('a scalar restriction types its tier', () => {
       const ce = new ComputeEngine();
-      expect(ce.parse('5\\{a>0\\}').type.toString()).toBe('integer | nan');
+      expect(ce.parse('5\\{a>0\\}').type.toString()).toBe('integer');
     });
 
     test('a list-broadcast restriction types a list of numeric cells', () => {

@@ -18,6 +18,7 @@ import {
   isFunction,
   isSymbol,
 } from './type-guards.js';
+import { restrictionParts } from './conditional-value.js';
 
 /**
  * Raised when a value cannot be installed under a symbol's DECLARED type:
@@ -416,7 +417,8 @@ function refusedFailedElement(
   // The number of steps is bounded: a chain of symbols could hold itself.
   let held = value;
   for (let step = 0; step < 16; step++) {
-    if (isFunction(held, 'When') && held.nops === 2) held = held.op1;
+    const restriction = restrictionParts(held);
+    if (restriction !== undefined) held = restriction.value;
     else if (isSymbol(held) && held.value !== undefined && held.value !== held)
       held = held.value;
     else break;

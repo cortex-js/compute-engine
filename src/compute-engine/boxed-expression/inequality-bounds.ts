@@ -4,6 +4,7 @@ import type {
   IntervalBounds,
 } from '../global-types.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { restrictionParts } from './conditional-value.js';
 import {
   type Subject,
   toSubject,
@@ -20,7 +21,8 @@ import {
  * - bare comparisons (`Less`, `LessEqual`, `Greater`, `GreaterEqual`),
  *   including chained forms like `Less(a, x, b)`
  * - `And(c1, c2, ...)` of supported shapes
- * - `When(e, cond)` — unwraps to `cond`
+ * - a restriction, `When(e, cond)` or the parsed form `If(cond, e)` —
+ *   unwraps to `cond`
  * - `Multiply(f, When(...), ...)` — the Desmos parse shape for
  *   `f(x)\{a < x < b\}`; bounds from each `When` factor are merged
  *
@@ -31,12 +33,10 @@ export function extractIntervalBounds(
   expr: Expression,
   symbol: string
 ): IntervalBounds | undefined {
-  // Unwrap When(e, cond) → operate on cond.
-  if (isFunction(expr, 'When')) {
-    const cond = expr.op2;
-    if (!cond) return undefined;
-    return extractIntervalBounds(cond, symbol);
-  }
+  // Unwrap a restriction, When(e, cond) or If(cond, e) → operate on cond.
+  const restriction = restrictionParts(expr);
+  if (restriction !== undefined)
+    return extractIntervalBounds(restriction.condition, symbol);
 
   // Handle Multiply(f, When(e, cond), ...) — the restriction is embedded as
   // a When factor. Desmos-style `f(x)\{0 < x < 5\}` parses to this shape.
@@ -46,7 +46,7 @@ export function extractIntervalBounds(
     if (!ops) return undefined;
     const merged: IntervalBounds = {};
     for (const sub of ops) {
-      if (isFunction(sub, 'When')) {
+      if (restrictionParts(sub) !== undefined) {
         const sub_ = extractIntervalBounds(sub, symbol);
         if (sub_ !== undefined) _mergeBounds(merged, sub_);
       }

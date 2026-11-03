@@ -232,6 +232,22 @@ Corollary rules for the strict regime:
   interval-JavaScript targets refuse a condition that may be a list.
   Tests: `elementwise-which.test.ts` and `compile-elementwise-which.test.ts`,
   "a mask of rank 2 or more".
+- Restriction and single-branch `If` (2026-11-02): the parser reads a
+  restriction `e\{c\}` as `If(c, e)`, not `When(e, c)`, and the restriction
+  covers the whole of the smallest group that holds it: `y=x\{c\}` is
+  `If(c, Equal(y, x))`, `2x\{c\}` is `If(c, 2x)`, `(a\{c\}, b)` is
+  `Tuple(If(c, a), b)`, and stacked restrictions merge,
+  `a\{c_1\}\{c_2\}` is `If(And(c_1, c_2), a)`. A `where` condition gives
+  the same `If`: `(\cos t, \sin t) \text{ where } 0\le t\le\pi` is
+  `If(0\le t\le\pi, Tuple(…))`. A single-branch `If(c, e)` with a scalar
+  condition that is `False` gives the absent value of the domain of `e`, as
+  `When` does: `NaN` for a number, `Missing` otherwise. Its type is the
+  type of `e`, with no `nan` or `missing` arm (`integer` for `If(c, 1)`):
+  the absent value is implicit in every type. With a list condition, `If(c, e)` selects
+  element-wise as in the entries above. `When` stays in the library for a
+  caller that builds it. Rule: `docs/plans/2026-11-02-restriction-binding.md`
+  and `docs/plans/2026-11-02-where-binding.md`. Tests:
+  `latex-syntax/restriction-where-binding.test.ts`.
 
 ## Audit record (2026-07-27)
 

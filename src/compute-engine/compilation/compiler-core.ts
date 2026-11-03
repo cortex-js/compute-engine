@@ -353,9 +353,11 @@ import {
   kleeneCondition,
   kleeneConnective,
   liveSelectionArms,
+  mayBeCollectionCondition,
   withCseOperand,
   withCseRegion,
 } from './compile-conditions.js';
+import { elementwiseMaskRank } from '../library/control-structures.js';
 import {
   compileExprFunctionCall,
   compileExprTupleCall,
@@ -1029,7 +1031,15 @@ function compileExpression(
   // no object axis, so it is exempt. Only object-axis-less targets pay the
   // check (JS/Python declare `object`, so the guard short-circuits).
   if (target.absence !== undefined && target.absence.object === undefined) {
-    const t = compilationType(expr);
+    // A single-branch `If(c, e)` (the parse of the restriction `e\{c\}`) is
+    // typed as its arm `e`, with no `missing` arm: the absent value is
+    // implicit in the type. Its value is absent where `c` fails, as for
+    // `When(e, c)`, whose type has the `missing` arm, so the arm is added
+    // here and the two spellings pass or fail this check alike.
+    const t: Type =
+      isFunction(expr, 'If') && expr.nops === 2 && !isStatementArm(expr.op2)
+        ? { kind: 'union', types: [compilationType(expr), 'missing'] }
+        : compilationType(expr);
     if (typeContainsMissing(t)) {
       // On `interval-js` an enclosure is an interval of the value model,
       // whose absence is the `NaN` interval of a number: its arm is read
@@ -3944,6 +3954,28 @@ export function compileExpr(
   // such an arm in a conditional expression would emit an assignment inside
   // an expression, which Python refuses and the GPU statement model does
   // not admit.
+  //
+  // The interpreter evaluates a value-form `If(c, t)` as the restriction
+  // `When(t, c)`. With a mask of rank 1 as condition, a restriction aligns
+  // a list value with the mask and truncates to the shorter of the two
+  // (`If([True, True], [10, 20, 30])` is `[10, 20]`), where the one-clause
+  // `Which` needs equal lengths. So that case compiles through the `When`
+  // lowering. The `When` lowering compiles a mask of rank 2 or more, or of
+  // a rank that the type does not give, as this `If`, so those cases keep
+  // the `Which` route below and do not loop. The operands are passed
+  // without the `If` node: their indices in a `When` are in the other
+  // order, so the CSE regions of the node do not apply.
+  if (
+    h === 'If' &&
+    args.length === 2 &&
+    !isStatementArm(args[1]) &&
+    (args[0].type.matches('collection<any>') ||
+      mayBeCollectionCondition(args[0].type.type)) &&
+    elementwiseMaskRank([args[0].type.type]) === 1
+  ) {
+    sub = compileExprWhen('When', [args[1], args[0]], target, undefined);
+    if (sub !== undefined) return sub;
+  }
   const selectionHead =
     h === 'If' && args.length === 2 && !isStatementArm(args[1]) ? 'Which' : h;
   if (h === 'If' && args.length === 2 && selectionHead === 'If')

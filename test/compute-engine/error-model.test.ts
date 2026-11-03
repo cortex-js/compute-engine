@@ -2816,7 +2816,7 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
     ).toBe(true);
   });
 
-  test('a selection with no selected value answers Missing, on both operators', () => {
+  test('a selection with no selected value answers its absent value, on both operators', () => {
     // Ruled 2026-08-27: a selection with no selected branch answers `Missing`,
     // the position-preserving absent datum — unconditionally, not the
     // type-directed marker of the arms. Before the ruling the two control
@@ -2831,7 +2831,13 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
     // carries the `missing` arm exactly as a default-less `Which` does.
     const ce2 = new ComputeEngine();
     expect(symbolName(ce2.box(['Which']).evaluate())).toBe('Missing');
-    expect(symbolName(ce2.box(['If', 'False', 5]).evaluate())).toBe('Missing');
+    // Since 2026-11-02 the else-less `If` answers as a restriction does (it
+    // is the form the parser gives `e\\{c\\}`): the absent value of the
+    // domain of its arm, `NaN` for a number and `Missing` otherwise.
+    expect(ce2.box(['If', 'False', 5]).evaluate().isNaN).toBe(true);
+    expect(
+      symbolName(ce2.box(['If', 'False', ['Tuple', 1, 2]]).evaluate())
+    ).toBe('Missing');
     expect(symbolName(ce2.box(['Which', 'False', 1]).evaluate())).toBe(
       'Missing'
     );
@@ -2864,11 +2870,11 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
       // The masked cell is `NaN` (user decision 2026-09-25): the list has
       // three numeric cells, one of them `integer | nan`, and no absent one.
     ).toBe('list<integer | nan^3>');
-    // A restriction over an UNDECLARED symbol types `missing | unknown`, and
-    // juxtaposition still reads it as a product, as it reads a bare `unknown`.
-    // Before the alignment `2x{x>0}` was a product only because `When` hid
-    // the absent case from its type.
-    expect(ce2.parse('2x\\{x>0\\}').operator).toBe('Multiply');
+    // A restriction covers its whole group: `2x{x>0}` is `If(x>0, 2x)`, not
+    // a product with a restricted factor. Juxtaposition still reads a
+    // single-branch `If` over an UNDECLARED symbol (type `unknown`)
+    // as a product, as it reads a bare `unknown`.
+    expect(ce2.parse('2x\\{x>0\\}').operator).toBe('If');
     expect(ce2.parse('2\\operatorname{If}(1<0, x)').operator).toBe('Multiply');
   });
 

@@ -172,7 +172,8 @@ describe('a declared result is checked against the returned value', () => {
     ['Missing', 'Missing', 5, '"Missing"'],
     ['Nothing', 'Nothing', 5, '"Nothing"'],
     ['NaN', 'NaN', 5, 'NaN'],
-    ['an else-less If', ['If', ['Greater', 'n', 0], 1], -1, '"Missing"'],
+    // A numeric arm with a false condition gives `NaN`.
+    ['an else-less If', ['If', ['Greater', 'n', 0], 1], -1, 'NaN'],
   ])('%s passes unchanged', (_, body, arg, expected) => {
     const ce = new ComputeEngine();
     ce.declare('g', '(integer) -> integer');

@@ -21,6 +21,7 @@ import {
   parameterDefaultOperands,
 } from '../boxed-expression/parameter-defaults.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
+import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
 import { typeCannotBeAbsent } from '../library/core.js';
 import { couldMatch } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
@@ -108,7 +109,10 @@ export function mayBeAbsentAtRunTime(t: Type): boolean {
 export function argumentMayBeAbsent(a: Expression, d: Expression): boolean {
   if (isNumber(a) && a.isNaN !== true) return false;
   if (isSymbol(d) && isSymbol(a, d.symbol)) return false;
-  return mayBeAbsentAtRunTime(a.type.type);
+  // A restriction (`If(c, 3)`) is typed as its arm, but is absent where
+  // its condition fails; so is an expression that contains one
+  // (`If(c, If(d, True), False)`).
+  return mayBeAbsentAtRunTime(a.type.type) || mayHoldRestriction(a);
 }
 
 /**

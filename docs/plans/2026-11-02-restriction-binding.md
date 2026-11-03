@@ -18,16 +18,38 @@ to the whole of the smallest group that holds it. A group is:
 - one operand of a connective (`\lor`, `\land`, the operand of `\neg`): the
   brace binds tighter than a connective, so `x>0\{x<1\}\lor x>2\{x<3\}` is
   `Or(If(x<1, x>0), If(x<3, x>2))`, which with the absent boolean read as
-  `False` is Desmos's (0<x<1) or (2<x<3) (corpus row neyret/akconkhexx
-  #721856020, found by the implementer on 2026-11-02);
+  `False` is Desmos's (0<x<1) or (2<x<3). The corpus writes this `Or` as a
+  comma group inside the condition braces (the next rule but one), not with
+  `\lor`; the `\lor` spelling gets the same parse;
 - one side of `\to`;
 - the body of `for` or `where`;
-- one comma-separated item;
+- one comma-separated item, also inside the braces of a condition, where
+  the comma means `Or`: `|y+3|\le.2\{x>0\{x<1\}, x>2\{x<3\}\}` is
+  `If(Or(If(x<1, x>0), If(x<3, x>2)), LessEqual(Abs(y+3), 0.2))` (corpus
+  row neyret/akconkhexx #721856020, found by the implementer on 2026-11-02);
+- the condition before the `:` of a piecewise arm, like the arm after it:
+  `\{x>0\{c\}: 5, 1\}` is `Which(If(c, x>0), 5, True, 1)`. Corpus row
+  neyret/xhlkk7k9aq #1752170633, Desmos
+  `.7=c_3\{0<\{c_1<1\}\{c_2<1\}: …, …, 1\}`, whose condition is
+  `If(c_2<1, Less(0, If(c_1<1, 1)))` (the two inner `\{…\}` with no
+  expression before them are the value 1 where the condition holds, the
+  rule of the paragraph after the table). Without this rule the parse was
+  `Set(If(c, Colon(x>0, 5)), 1)`: the piecewise was lost and the stored row
+  did not read back (the implementer, 2026-11-02);
 - the content of a delimiter or a LaTeX argument: `()`, `[]`, `||`, a part
   of `\frac{}{}`, `\sqrt{}`, a superscript `{}`, a function argument, a
   piecewise arm, the condition of a restriction;
 - the body of a big operator (`\sum`, `\prod`, `\int` before `dx`);
 - the whole row when none of these encloses it.
+
+A condition group (the content of the condition braces, each comma item in
+it, and the condition before a piecewise `:`) accepts `If(c, relation)` as a
+condition, the form that a restriction inside a condition produces. Its
+value where `c` does not hold is the absent boolean, which the two-valued
+rule of `docs/plans/2026-11-02-language-axes-options.md` page 3 (plan item
+3.4) reads as `False`. Until that item lands, the interpreter gives the
+absent-condition error there and the GLSL target declines; the
+xhlkk7k9aq row above shows it where `c_2 ≥ 1`.
 
 The parse is `If(c, e)` directly, with no `When` alias: Tycho classifies rows
 in structural (non-canonical) form, so an alias that only canonicalization
@@ -102,6 +124,7 @@ counts are rows among the 8,231 rows of Tycho's two Desmos corpora, of which
 | `[n\operatorname{for}n=…]\{c\}`             |                                        | `If(c, the comprehension)`                |        |
 | `p\{c\} \text{ where } p \coloneq …`        | `Block(…)` over the whole row          | `If(c, p)` in the body of `where` (`docs/plans/2026-11-02-where-binding.md`) | some |
 | `\{c_1: a\{c_2\}, b\}`                      |                                        | `Which(c_1, If(c_2, a), True, b)`         |        |
+| `\{x>0\{y<1\}: a, b\}`                      | `Set(If(y<1, Colon(x>0, a)), b)`       | `Which(If(y<1, x>0), a, True, b)` (row xhlkk7k9aq); with bare symbols instead of relations the braces are a set-builder, as today |  |
 | `\{c_1: a, b\}\{c_2\}`                      | `When(Which(…), c_2)`                  | `If(c_2, Which(c_1, a, True, b))`         |     14 |
 | `\{c_1: a\}\{c_2\}`                         |                                        | `If(And(c_1, c_2), a)`                    |        |
 | `a\{c_1\}\{c_2\}`                           | `When(When(a, c_1), c_2)`              | `If(And(c_1, c_2), a)` (up to 4 deep)     |     76 |

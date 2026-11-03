@@ -17,6 +17,7 @@ import {
   unhold,
   symbol,
   dictionaryFromEntries,
+  isDictionaryObject,
 } from '../../../math-json/utils.js';
 import {
   ADDITION_PRECEDENCE,
@@ -506,8 +507,10 @@ function parseComponentAccess(
 // When-restriction postfix parse function (D3)
 // ---------------------------------------------------------------------------
 //
-// Handles `expr\left\{cond\right\}` → `When(expr, cond)`.
-// Called after the trigger tokens have been consumed.
+// Handles `expr\left\{cond\right\}` → `If(cond, expr)`, marked as a
+// restriction: the parser moves the condition to the root of the group that
+// holds the restriction (`Parser._liftRestrictions()`), so `y=x\{c\}` is
+// `If(c, Equal(y, x))`. Called after the trigger tokens have been consumed.
 //
 // Two postfix entries use this function:
 //   - trigger ['\\left', '\\{']  → close ['\\right', '\\}']
@@ -537,6 +540,20 @@ function isBraceCondition(expr: MathJsonExpression): boolean {
   );
 }
 
+/** Is this an item of a Desmos brace group that reads as a condition: a
+ * condition on its own (`isBraceCondition()`), or a condition under its own
+ * restriction? The parser moves a restriction to the root of its comma
+ * item, so the item `x>0\{x<1\}` of `e\{x>0\{x<1\}, x>2\{x<3\}\}` is
+ * `If(x<1, Greater(x, 0))`, and the group is still the union of two
+ * conditions. */
+function isBraceGroupCondition(expr: MathJsonExpression): boolean {
+  if (operator(expr) === 'If' && nops(expr) === 2) {
+    const body = operand(expr, 2);
+    return body !== null && isBraceGroupCondition(body);
+  }
+  return isBraceCondition(expr);
+}
+
 /** Build the flat `Which` clause list (`c1, v1, c2, v2, …, True, else?`) for
  * a Desmos piecewise brace group (`{c1: v1, …}` with an optional trailing
  * bare else value). Returns `null` if the elements don't fit that shape. */
@@ -548,7 +565,7 @@ function whichClausesFromBraceGroup(
     const el = elements[i];
     if (operator(el) === 'Colon' && nops(el) === 2) {
       clauses.push(operand(el, 1)!, operand(el, 2)!);
-    } else if (isBraceCondition(el)) {
+    } else if (isBraceGroupCondition(el)) {
       // A bare condition is shorthand for `cond: 1`.
       clauses.push(el, 1);
     } else if (i === elements.length - 1) {
@@ -603,12 +620,12 @@ function parseWhenRestriction(
       const clauses = whichClausesFromBraceGroup(elements);
       if (clauses !== null)
         return ['Multiply', lhs, ['Which', ...clauses]] as MathJsonExpression;
-    } else if (elements.every(isBraceCondition)) {
-      return ['When', lhs, ['Or', ...elements]] as MathJsonExpression;
+    } else if (elements.every(isBraceGroupCondition)) {
+      return parser._restriction(lhs, ['Or', ...elements]);
     }
   }
 
-  return ['When', lhs, cond] as MathJsonExpression;
+  return parser._restriction(lhs, cond);
 }
 
 // function isSpacingToken(token: string): boolean {
@@ -1756,7 +1773,18 @@ function parseColon(
   const rhs = missingIfEmpty(
     parser.parseExpression({ ...until, minPrec: COLON_PRECEDENCE })
   );
-  return ['Colon', lhs, rhs];
+  // Each side is a group: its restrictions stay in it, so the arm
+  // `c_1: a\{c_2\}` of a piecewise is `Colon(c_1, If(c_2, a))`, and an
+  // outer lift does not move `c_2` over the `Colon`. On the left side, the
+  // condition `a\{c\}: 5` of an arm is `Colon(If(c, a), 5)`: if the comma
+  // item held the restriction instead, it would be `If(c, Colon(a, 5))`,
+  // which is not an arm, and `\{a\{c\}: 5, 1\}` would not read as a
+  // piecewise.
+  return [
+    'Colon',
+    parser._liftRestrictions(lhs),
+    parser._liftRestrictions(rhs),
+  ];
 }
 
 /**
@@ -2914,17 +2942,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\left', '['],
     parse: parseAt('\\right', ']'),
   },
-  // When-restriction: `expr\left\{cond\right\}` → `When(expr, cond)`.
+  // Restriction: `expr\left\{cond\right\}` → `If(cond, expr)`.
   //
-  // Precedence 800 binds tighter than juxtaposition and prefix minus, so the
-  // restriction applies to the last factor only: `2x\{c\}` is
-  // `Multiply(2, When(x, c))` and `-x\{c\}` is `Negate(When(x, c))`. A power
-  // or a fraction before it is restricted whole. This matches Desmos, which
-  // reads `\{c\}` as a factor whose value is 1 when `c` holds and undefined
-  // otherwise (`3\{c\}` is 3), so `2x\{c\}` is a product there too. A masked
-  // value is `NaN`, which propagates through the product, so every grouping
-  // gives the same value. User decision 2026-10-30 (ROADMAP CE-650, closed):
-  // keep this precedence.
+  // The postfix reads the expression just before it (precedence 800), and
+  // the parser then moves the condition to the root of the smallest group
+  // that holds the restriction: the whole statement, one side of `\to`, the
+  // body of `for` or `where`, one comma item, the content of a delimiter or
+  // of a LaTeX argument, or the body of a big operator. So `y=x\{c\}` is
+  // `If(c, Equal(y, x))`, `-x\{c\}` is `If(c, Negate(x))` and `(a\{c\}, b)`
+  // is `Tuple(If(c, a), b)`. Stacked restrictions in one group merge:
+  // `a\{c_1\}\{c_2\}` is `If(And(c_1, c_2), a)`. Desmos reads `\{c\}` as a
+  // factor whose value is 1 when `c` holds and undefined otherwise, so the
+  // value of an arithmetic expression is the same for every grouping; the
+  // group decides where a reader of the MathJSON finds the condition.
+  // The rule is in `docs/plans/2026-11-02-restriction-binding.md`.
+  //
+  // The `When` serializer below stays for a `When` that a caller builds;
+  // the parser does not produce `When`.
   {
     name: 'When',
     kind: 'postfix',
@@ -2958,7 +2992,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return `${serializer.wrap(e, 800)}${inner}`;
     },
   },
-  // When-restriction: bare `expr\{cond\}` → `When(expr, cond)`
+  // Restriction: bare `expr\{cond\}` → `If(cond, expr)` (see above)
   {
     kind: 'postfix',
     precedence: 800,
@@ -3384,6 +3418,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (!args || args.length === 0) return '';
+      const where = serializeWhereBlock(serializer, args);
+      if (where !== null) return where;
       // A `Declare(k)` and the `Assign(k, v)` after it are written
       // `k \coloneq v`, which the parser reads back as both (see
       // `buildBlockFromSequence()`). With a type, they are written
@@ -3407,6 +3443,20 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         }
         const name = symbol(operand(a, 1));
         const type = operand(a, 2);
+        // A declaration with its value and no written type,
+        // `Declare(k, "unknown", v)`, is written `k \coloneq v`, which the
+        // parser reads back as that declaration when it is the first
+        // assignment of `k` in the block (see `buildBlockFromSequence()`).
+        if (whereBindingName(a) !== null) {
+          const assign: MathJsonExpression = [
+            'Assign',
+            name!,
+            whereBindingValue(a)!,
+          ];
+          parts.push(serializer.serialize(assign));
+          stmts.push(assign);
+          continue;
+        }
         // A type is written with `let` only when it is a string that the
         // `let` parser reads back: a symbol type (`Declare(k, integer)`)
         // would read back as a string, and a type with a character that
@@ -3513,12 +3563,19 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (!args || args.length < 2) return '';
-      // With no else branch, the keyword form `if c then x` does not parse
-      // back (the parser reads an `if … then` only with its `else`), and an
-      // empty string lost the statement: `Block(If(k = 2, a ≔ 5); a)` gave
-      // `\begin{cases}\\a\end{cases}`. The function form
-      // `\operatorname{If}(c, x)` parses back to `If(c, x)`.
-      if (args.length === 2) return serializer.serializeFunction(expr);
+      // With no else branch, `If(c, e)` is written `e \text{ where } c`,
+      // the form the parser reads from a restriction `e\{c\}` and from a
+      // `where` condition (see `serializeWhereClause()`). When the condition
+      // is not a `where` item, or `e` reads the clause into itself, it is
+      // written in the function form `\operatorname{If}(c, e)`, which parses
+      // back to `If(c, e)`. The keyword form `if c then x` does not parse
+      // back without its `else`.
+      if (args.length === 2) {
+        const items = whereConditionItems(serializer, args[0]);
+        if (items === null || !isWhereBody(args[1]))
+          return serializer.serializeFunction(expr);
+        return serializeWhereClause(serializer, args[1], items);
+      }
       return joinLatex([
         serializeKeyword(serializer, 'if', { trail: true }),
         serializer.serialize(args[0]),
@@ -7208,18 +7265,185 @@ function normalizeQualifierBody(body: MathJsonExpression): MathJsonExpression {
 }
 
 /**
- * Parse the bindings after "where" has been consumed.
- * Bindings are comma-separated expressions (typically Assign).
- * Produces a Block: declarations first, then body (lhs) last.
+ * The name of a binding that `declareWithValue()` builds with no written
+ * type: `Declare(name, "unknown", value)`, `Declare(name, "function",
+ * value)` with a function literal as the value, or `Declare(name,
+ * Dictionary(KeyValuePair("value", value)))` with a dictionary literal as
+ * the value. It is written `name \coloneq value` (the value is
+ * `whereBindingValue()`), which the parser reads back as the same
+ * statement. Otherwise `null`.
+ */
+function whereBindingName(statement: MathJsonExpression): string | null {
+  if (operator(statement) !== 'Declare') return null;
+  if (nops(statement) === 2) {
+    if (whereBindingValue(statement) === null) return null;
+    return symbol(operand(statement, 1));
+  }
+  if (nops(statement) !== 3) return null;
+  const type = stringValue(operand(statement, 2));
+  const isFunction = operator(operand(statement, 3)) === 'Function';
+  if (type !== (isFunction ? 'function' : 'unknown')) return null;
+  return symbol(operand(statement, 1));
+}
+
+/**
+ * The value of a binding that `whereBindingName()` accepts: the third
+ * operand of `Declare(name, type, value)`, or the dictionary literal of
+ * `Declare(name, Dictionary(KeyValuePair("value", value)))` when that is the
+ * only attribute. The attributes can also be a `{dict: {value: …}}` object,
+ * the form of a canonical dictionary. Otherwise `null`.
+ */
+function whereBindingValue(
+  statement: MathJsonExpression
+): MathJsonExpression | null {
+  if (nops(statement) === 3) return operand(statement, 3);
+  const attrs = operand(statement, 2);
+  let value: MathJsonExpression | null = null;
+  if (isDictionaryObject(attrs)) {
+    const keys = Object.keys(attrs.dict);
+    if (keys.length !== 1 || keys[0] !== 'value') return null;
+    value = attrs.dict.value as MathJsonExpression;
+  } else {
+    if (operator(attrs) !== 'Dictionary' || nops(attrs) !== 1) return null;
+    const entry = operand(attrs, 1);
+    if (operator(entry) !== 'KeyValuePair' || nops(entry) !== 2) return null;
+    if (stringValue(operand(entry, 1)) !== 'value') return null;
+    value = operand(entry, 2);
+  }
+  return isDictionaryValue(value) ? value : null;
+}
+
+/**
+ * Can `body` be the body of a `where` clause written after it? An
+ * assignment, a declaration and a function literal (`a \coloneq v`,
+ * `x \mapsto v`) read a `where` that follows them into their value, so
+ * `If(c, Assign(a, 5))` written `a \coloneq 5 \text{ where } c` would read
+ * back as `Assign(a, If(c, 5))`.
+ */
+function isWhereBody(body: MathJsonExpression): boolean {
+  const op = operator(body);
+  return op !== 'Assign' && op !== 'Declare' && op !== 'Function';
+}
+
+/**
+ * The LaTeX of the `where` items of the condition `c` of `If(c, e)`: one
+ * item per operand of an `And` whose operands are all conditions, otherwise
+ * the condition alone. Returns `null` when an item would not read back as a
+ * condition: an expression that is not a relation, or an `=` (or
+ * `\coloneq`) with a symbol on the left, which a `where` clause reads as a
+ * binding (`e \text{ where } a = 3` binds `a`).
+ */
+function whereConditionItems(
+  serializer: Serializer,
+  condition: MathJsonExpression
+): string[] | null {
+  const isItem = (c: MathJsonExpression): boolean => {
+    if (!isBraceCondition(c)) return false;
+    const op = operator(c);
+    if (op !== 'Equal' && op !== 'Assign') return true;
+    const lhs = operand(c, 1);
+    return (
+      nops(c) !== 2 ||
+      (symbol(lhs) === null &&
+        operator(lhs) !== 'Subscript' &&
+        operator(lhs) !== 'At')
+    );
+  };
+  const conditions =
+    operator(condition) === 'And' && operands(condition).every(isItem)
+      ? operands(condition)
+      : [condition];
+  if (!conditions.every(isItem)) return null;
+  return conditions.map((c) => serializer.serialize(c));
+}
+
+/**
+ * Write `body \text{ where } item, item, …`. The clause binds more loosely
+ * than every operator and than the comma between arguments, so a clause
+ * that is not the whole expression being serialized is in parentheses:
+ * `2\left(p \text{ where } p \coloneq 3\right)`,
+ * `\left(\left(a \text{ where } a \coloneq 1\right), 2\right)`.
+ */
+function serializeWhereClause(
+  serializer: Serializer,
+  body: MathJsonExpression,
+  items: string[]
+): string {
+  const latex = joinLatex([
+    serializer.serialize(body),
+    serializeKeyword(serializer, 'where', { lead: true, trail: true }),
+    items.join(', '),
+  ]);
+  return serializer.depth > 0
+    ? joinLatex(['\\left(', latex, '\\right)'])
+    : latex;
+}
+
+/**
+ * The `where` form of a `Block` whose statements are bindings
+ * `Declare(a, "unknown", v)` followed by one expression `e`:
+ * `e \text{ where } a \coloneq v, …`. When `e` is `If(c, e')` with no else,
+ * its condition is the last item: `e' \text{ where } a \coloneq v, c`.
+ * Returns `null` for every other `Block`, which keeps the `;` form.
+ */
+function serializeWhereBlock(
+  serializer: Serializer,
+  args: ReadonlyArray<MathJsonExpression>
+): string | null {
+  if (args.length < 2) return null;
+  const items: string[] = [];
+  for (const statement of args.slice(0, -1)) {
+    const name = whereBindingName(statement);
+    if (name === null) return null;
+    items.push(
+      joinLatex([
+        serializer.serialize(name),
+        '\\coloneq',
+        serializer.serialize(whereBindingValue(statement)),
+      ])
+    );
+  }
+  let body = args[args.length - 1];
+  if (operator(body) === 'If' && nops(body) === 2) {
+    const conditionItems = whereConditionItems(serializer, operand(body, 1)!);
+    if (conditionItems !== null && isWhereBody(operand(body, 2)!)) {
+      items.push(...conditionItems);
+      body = operand(body, 2)!;
+    }
+  }
+  if (!isWhereBody(body)) return null;
+  return serializeWhereClause(serializer, body, items);
+}
+
+/**
+ * Parse the items after "where" has been consumed:
+ * `e \text{ where } item, item, …`. An item is a binding (`a \coloneq v`,
+ * `a = v` with a symbol on the left, possibly with a subscript, or
+ * `\text{let } a \coloneq v`) or a condition (every other relation). The
+ * result is one `Block`: a `Declare(a, "unknown", v)` for each binding in
+ * written order, then the body. The conditions, joined with `And` in written
+ * order, wrap the body in `If(c, e)`, the form of the restriction `e\{c\}`.
+ * With no binding, the result is that `If` alone. Every comma starts an
+ * item: a comma followed by text that is not an item, and a `let` with no
+ * value, are parse errors. The clause binds tighter than `for`, the comma
+ * and `;`, so a trailing `for` applies to the whole clause.
+ *
+ * The rule is in `docs/plans/2026-11-02-where-binding.md`.
  */
 function parseWhereExpression(
   parser: Parser,
   lhs: MathJsonExpression,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
-  // Stop at commas so each binding is parsed separately
-  const bindingTerminator: Terminator = {
-    minPrec: 21, // Above comma (20) and ; (19)
+  // Stop at commas so each item is parsed separately. An item binds tighter
+  // than `where` (21) too: an item that read a second `where` would parse
+  // the rest of a chain `x_1 \text{ where } x_2 \text{ where } …` once for
+  // each item that declines (an item that is not a binding or a condition
+  // declines the clause), which takes a time exponential in the length of
+  // the chain. A second `where` after an item applies to the whole clause
+  // before it.
+  const itemTerminator: Terminator = {
+    minPrec: 22, // Above `where` (21), the comma (20) and ; (19)
     condition: (p) => {
       // Check if the outer terminator says to stop
       if (until?.condition?.(p)) return true;
@@ -7232,78 +7456,151 @@ function parseWhereExpression(
     },
   };
 
-  const bindings: MathJsonExpression[] = [];
+  // A local spelled as a subscript on an indexed collection (`n_{0}` when
+  // `n` is a list) is a new name (`n_0`): its occurrences after its
+  // declaration, in the items and in the body, are that name, not the
+  // element `At(n, 0)`.
+  const statements: MathJsonExpression[] = [];
+  const conditions: MathJsonExpression[] = [];
+  const locals = new Set<string>();
+  let first = true;
   do {
     parser.skipVisualSpace();
-    const binding = parser.parseExpression(bindingTerminator);
-    if (!binding) break;
-    bindings.push(binding);
+    const itemStart = parser.index;
+    const item = parser.parseExpression(itemTerminator);
+    const parsed = item === null ? null : whereItem(parser, item);
+    if (parsed === null) {
+      // The keyword is not followed by an item: it is not a `where` clause.
+      if (first) return null;
+      statements.push(parser.error('expected-where-item', itemStart));
+      break;
+    }
+    first = false;
+    // The name of a binding is a local before its value is read: a value
+    // that reads its own name reads the new local, as in a `;` block
+    // (`buildBlockFromSequence()`).
+    if (parsed.kind === 'binding') {
+      const local = symbol(operand(parsed.expr, 1));
+      if (local !== null) locals.add(local);
+    }
+    const rebound = parser.rebindSubscripts(parsed.expr, locals);
+    if (parsed.kind === 'binding' || parsed.kind === 'error')
+      statements.push(rebound);
+    else conditions.push(rebound);
     parser.skipVisualSpace();
   } while (parser.match(','));
 
-  if (bindings.length === 0) return null;
-
-  // The Declare+Assign statements of the bindings. A local spelled as a
-  // subscript on an indexed collection (`n_{0}` when `n` is a list) is a new
-  // name (`n_0`): its occurrences after its `Declare`, in the bindings and
-  // in the body, are that name, not the element `At(n, 0)`.
-  const statements: MathJsonExpression[] = [];
-  const locals = new Set<string>();
-  for (const b of bindings) {
-    for (let statement of bindingStatements(b)) {
-      statement = parser.rebindSubscripts(statement, locals) ?? statement;
-      const local =
-        operator(statement) === 'Declare'
-          ? symbol(operand(statement, 1))
-          : null;
-      if (local !== null) locals.add(local);
-      statements.push(statement);
-    }
-  }
-  lhs = parser.rebindSubscripts(lhs, locals) ?? lhs;
-
-  // Lookahead for trailing \operatorname{for}. If present, consume the
-  // for-clause and wrap the resulting Loop in the Block carrying the
-  // where-clause bindings. This produces the canonical Block-outermost
-  // shape: Block(Declare, Assign, ..., Loop(body, Element(...))).
-  // matchKeyword consumes on success and rewinds on failure.
-  const forStart = parser.index;
-  if (matchKeyword(parser, 'for')) {
-    const loop = parseForComprehension(parser, lhs, until);
-    if (loop) {
-      // Build Block: Declare+Assign for each binding, Loop last as body.
-      return [
-        'Block',
-        ...statements,
-        parser.rebindSubscripts(loop, locals) ?? loop,
-      ] as MathJsonExpression;
-    }
-    // parseForComprehension failed mid-stream. Restore index and fall
-    // through to the plain Block path.
-    parser.index = forStart;
-  }
-
-  // Build Block: Declare+Assign for each binding, body (lhs) last
-  return ['Block', ...statements, lhs] as MathJsonExpression;
+  let body = parser.rebindSubscripts(lhs, locals) ?? lhs;
+  if (conditions.length > 0)
+    body = [
+      'If',
+      conditions.length === 1 ? conditions[0] : ['And', ...conditions],
+      body,
+    ];
+  if (statements.length === 0) return body;
+  return ['Block', ...statements, body] as MathJsonExpression;
 }
 
 /**
- * The statements of a `where` binding: an assignment declares its name as a
- * local (`Declare` then `Assign`), and a `let` statement is its own
- * statements.
+ * Classify one item of a `where` clause. A binding gives its
+ * `Declare(name, type, value)`, with the type `"unknown"` (the engine infers
+ * it) unless a `let` gave one. A relation that is not a binding is a
+ * condition. A `let` with no value is an error. Any other expression is not
+ * an item: `null`.
+ *
+ * An item is a group: the restrictions in a binding value stay in the value
+ * (`a = v\{c\}` and `a \coloneq v\{c\}` are both `Declare(a, "unknown",
+ * If(c, v))`), and a condition item is lifted as a whole. Otherwise the
+ * lift of the statement would move `c` outside the `Block`.
  */
-function bindingStatements(b: MathJsonExpression): MathJsonExpression[] {
-  if (isLetStatement(b)) return [...operands(undecorated(b))];
-  const normalized = normalizeLocalAssign(b);
-  if (operator(normalized) === 'Assign')
-    return [['Declare', operand(normalized, 1)!], normalized];
-  return [normalized];
+function whereItem(
+  parser: Parser,
+  item: MathJsonExpression
+): {
+  kind: 'binding' | 'condition' | 'error';
+  expr: MathJsonExpression;
+} | null {
+  if (isLetStatement(item)) {
+    const [declare, assign] = operands(undecorated(item));
+    const name = operand(declare, 1);
+    if (
+      name === null ||
+      operator(assign) !== 'Assign' ||
+      symbol(operand(assign, 1)) !== symbol(name)
+    )
+      return { kind: 'error', expr: ['Error', "'missing-let-value'"] };
+    return {
+      kind: 'binding',
+      expr: declareWithValue(
+        name,
+        parser._liftRestrictions(operand(assign, 2)!),
+        operand(declare, 2)
+      ),
+    };
+  }
+  const normalized = normalizeLocalAssign(item);
+  const op = operator(normalized);
+  if (op === 'Assign' || op === 'Equal') {
+    const lhs = operand(normalized, 1);
+    const value = operand(normalized, 2);
+    const name = nops(normalized) === 2 ? parser.binderSymbol(lhs) : null;
+    if (name !== null && value !== null)
+      return {
+        kind: 'binding',
+        expr: declareWithValue(name, parser._liftRestrictions(value)),
+      };
+    if (op === 'Assign') return null;
+  }
+  if (isBraceCondition(normalized))
+    return { kind: 'condition', expr: parser._liftRestrictions(normalized) };
+  return null;
 }
 
 /**
- * Convert a sequence of statements to a Block. An assignment written with
- * `\coloneq` declares its name as a local: `Declare(k)` then `Assign(k, v)`.
- * A `let` statement is its `Declare` and its `Assign`. An assignment written
+ * The statement that declares a local with its value: `Declare(name, type,
+ * value)`. When no type is written, the type is the string `"function"` for
+ * a function literal (`f(u) \coloneq u^2`), so that a later `f(3)` is a
+ * call, and `"unknown"` otherwise, which asks the engine to infer it from
+ * the value. With `"unknown"`, `f(3)` is read as the product `3f`. The
+ * two-operand `Declare(name, type)` reads its second operand as a type, so
+ * it cannot hold a value.
+ *
+ * `Declare` reads a trailing `Dictionary` operand as its attributes (`type`,
+ * `value`, ...), so a dictionary literal in the value position would give
+ * the content of its `value` key, or no value. A dictionary value is
+ * written in the attributes form instead, `Declare(name,
+ * Dictionary(KeyValuePair("value", value)))`, with a `type` entry when a
+ * type is written; no type asks the engine to infer it, as `"unknown"`
+ * does.
+ */
+function declareWithValue(
+  name: MathJsonExpression,
+  value: MathJsonExpression,
+  type?: MathJsonExpression | null
+): MathJsonExpression {
+  if (isDictionaryValue(value)) {
+    const attrs: MathJsonExpression[] = [
+      ['KeyValuePair', "'value'", value] as MathJsonExpression,
+    ];
+    if (type !== undefined && type !== null)
+      attrs.unshift(['KeyValuePair', "'type'", type] as MathJsonExpression);
+    return ['Declare', name, ['Dictionary', ...attrs]] as MathJsonExpression;
+  }
+  type ??= operator(value) === 'Function' ? "'function'" : "'unknown'";
+  return ['Declare', name, type, value] as MathJsonExpression;
+}
+
+/** True if `expr` is a dictionary literal: `Dictionary(…)` or `{dict: …}`. */
+function isDictionaryValue(expr: MathJsonExpression | null): boolean {
+  if (expr === null) return false;
+  return operator(expr) === 'Dictionary' || isDictionaryObject(expr);
+}
+
+/**
+ * Convert a sequence of statements to a Block. The first assignment of a
+ * name written with `\coloneq` declares it as a local with its value, in one
+ * statement: `Declare(k, "unknown", v)` (see `declareWithValue()`); a later
+ * one is an `Assign(k, v)`. A `let` statement is its `Declare` and its `Assign`. An assignment written
  * `\mathrm{Assign}(k, v)` is only the `Assign`, so it changes a `k`
  * outside the block when there is one (the `Block` serializer writes a bare
  * `Assign` that way).
@@ -7345,8 +7642,9 @@ function buildBlockFromSequence(
       node !== null &&
       INFIX_ASSIGNS.has(node)
     ) {
-      block.push(['Declare', name]);
       declared.add(name);
+      block.push(rebind(declareWithValue(name, operand(normalized, 2)!)));
+      continue;
     }
     block.push(rebind(normalized));
   }

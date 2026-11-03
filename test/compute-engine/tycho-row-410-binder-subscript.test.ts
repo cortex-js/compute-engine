@@ -88,20 +88,20 @@ describe('Tycho row 410: a binder spelled as a subscript on a list', () => {
 
   test('a `where` local', () => {
     expect(raw('n_{0}^2\\operatorname{where}n_{0}\\coloneq 3')).toBe(
-      '["Block",["Declare","n_0"],["Assign","n_0",3],["Power","n_0",2]]'
+      '["Block",["Declare","n_0","\'unknown\'",3],["Power","n_0",2]]'
     );
     expect(value('n_{0}^2\\operatorname{where}n_{0}\\coloneq 3')).toBe('9');
     // A later binding sees the local
     expect(
       raw('x\\operatorname{where}n_{0}\\coloneq 3, x\\coloneq n_{0}+1')
     ).toBe(
-      '["Block",["Declare","n_0"],["Assign","n_0",3],["Declare","x"],["Assign","x",["Add","n_0",1]],"x"]'
+      '["Block",["Declare","n_0","\'unknown\'",3],["Declare","x","\'unknown\'",["Add","n_0",1]],"x"]'
     );
   });
 
   test('a block local', () => {
     expect(raw('n_{0}\\coloneq 3; n_{0}+1')).toBe(
-      '["Block",["Declare","n_0"],["Assign","n_0",3],["Add","n_0",1]]'
+      '["Block",["Declare","n_0","\'unknown\'",3],["Add","n_0",1]]'
     );
     expect(value('n_{0}\\coloneq 3; n_{0}+1')).toBe('4');
   });
@@ -113,7 +113,7 @@ describe('Tycho row 410: a binder spelled as a subscript on a list', () => {
     // and the last row.
     const block = '\\begin{cases} n_{0}\\coloneq 3\\\\ n_{0}+1\\end{cases}';
     expect(raw(block)).toBe(
-      '["Block",["Declare","n_0"],["Assign","n_0",3],["Add","n_0",1]]'
+      '["Block",["Declare","n_0","\'unknown\'",3],["Add","n_0",1]]'
     );
     expect(raw(block)).toBe(raw(block, false));
     expect(value(block)).toBe('4');
@@ -123,7 +123,7 @@ describe('Tycho row 410: a binder spelled as a subscript on a list', () => {
     }
     const last = '\\begin{cases} m\\coloneq 1\\\\ n_{0}\\coloneq 3\\end{cases}';
     expect(raw(last)).toBe(
-      '["Block",["Declare","m"],["Assign","m",1],["Declare","n_0"],["Assign","n_0",3]]'
+      '["Block",["Declare","m","\'unknown\'",1],["Declare","n_0","\'unknown\'",3]]'
     );
     const middle =
       '\\begin{cases} m\\coloneq 1\\\\ n_{0}\\coloneq 3\\\\ n_{0}+m\\end{cases}';

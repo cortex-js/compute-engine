@@ -273,14 +273,14 @@ describe('SPACE BEFORE A BRACKET', () => {
       ['Interval', 0, 1],
     ]);
     expect(parse('x^2\\,\\{x>0\\}').json).toEqual([
-      'When',
-      ['Power', 'x', 2],
+      'If',
       ['Less', 0, 'x'],
+      ['Power', 'x', 2],
     ]);
     expect(parse('x^2 \\{x>0\\}').json).toEqual([
-      'When',
-      ['Power', 'x', 2],
+      'If',
       ['Less', 0, 'x'],
+      ['Power', 'x', 2],
     ]);
   });
 });

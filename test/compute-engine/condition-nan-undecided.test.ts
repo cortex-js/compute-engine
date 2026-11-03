@@ -64,10 +64,9 @@ describe('a NaN operand of a branch condition', () => {
     const e = new ComputeEngine();
     e.assign('u', NaN);
     expect(e.box(['If', ['Greater', 'u', 0], 1, -1]).evaluate().re).toBe(-1);
-    // An else-less `If` whose condition is false answers `Missing`.
-    expect(e.box(['If', ['Greater', 'u', 0], 1]).evaluate().symbol).toBe(
-      'Missing'
-    );
+    // An else-less `If` whose condition is false answers the absent value
+    // of the domain of its arm: `NaN` for a number.
+    expect(e.box(['If', ['Greater', 'u', 0], 1]).evaluate().isNaN).toBe(true);
     expect(e.box(['If', ['NotEqual', 'u', 0], 1, -1]).evaluate().re).toBe(1);
   });
 
@@ -516,12 +515,13 @@ describe('a compiled branch comparison over an absent or nested value', () => {
     0,
   ];
 
-  test('a nested else-less If that selects no arm leaves the branch with no arm', () => {
+  test('a nested else-less If that selects no arm takes the else arm', () => {
     const e = new ComputeEngine();
     e.assign('c', -1);
-    // The interpreter: `Missing > 0` is `Missing`, the absent-condition error.
-    expect(e.box(NESTED_ELSELESS).evaluate().operator).toBe('Error');
-    expect(compiled(NESTED_ELSELESS, { c: -1 })).toBeNaN();
+    // The inner `If` with a numeric arm gives `NaN` when its condition is
+    // false, and `NaN > 0` is false: the else arm on both routes.
+    expect(e.box(NESTED_ELSELESS).evaluate().re).toBe(0);
+    expect(compiled(NESTED_ELSELESS, { c: -1 })).toBe(0);
     expect(compiled(NESTED_ELSELESS, { c: 2 })).toBe(1);
     // Arithmetic over the absent value is `NaN` in the interpreter too, and
     // a comparison with it is false: the else arm on both routes.
@@ -550,7 +550,7 @@ describe('a compiled branch comparison over an absent or nested value', () => {
           ],
           { encoding: 'utf8' }
         ).trim();
-      expect(run('-1')).toBe('nan');
+      expect(run('-1')).toBe('0.0');
       expect(run('2')).toBe('1.0');
     }
   );

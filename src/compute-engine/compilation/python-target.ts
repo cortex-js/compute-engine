@@ -76,6 +76,7 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { isRestriction } from '../boxed-expression/conditional-value.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterType,
@@ -4923,13 +4924,14 @@ BaseCompiler.conditionDialects.set('python', PYTHON_CONDITION_DIALECT);
 
 /**
  * True when `expr` can lower to the Python absence value `None`: a
- * restriction (`When`), or any operand whose type holds a `missing` arm at
+ * restriction (`When`, or the single-branch `If` that the parser gives a
+ * restriction, typed as its arm), or any operand whose type holds a `missing` arm at
  * any depth (a `Which` with no default clause, a symbol declared with a
  * `missing` arm, a point with an absent coordinate). numpy functions such as
  * `np.dot` raise for `None`, where the interpreter answers an absence marker.
  */
 function pythonMayBeAbsent(expr: Expression): boolean {
-  return isFunction(expr, 'When') || typeContainsMissing(expr.type.type);
+  return isRestriction(expr) || typeContainsMissing(expr.type.type);
 }
 
 /**

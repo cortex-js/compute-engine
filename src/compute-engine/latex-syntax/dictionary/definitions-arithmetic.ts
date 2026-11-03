@@ -5056,7 +5056,9 @@ function parseBigOp(name: string, minPrec: number) {
     // `\sum ⟨body⟩`, so parsing back to `Reduce(body, op)` made the
     // round-trip lossy.
     if (!sup && !sub) {
-      const collection = parser.parseExpression(body);
+      let collection = parser.parseExpression(body);
+      if (collection !== null)
+        collection = parser._liftRestrictions(collection);
       parser.popSymbolTable();
       if (collection) return [name, collection];
       return null;
@@ -5087,6 +5089,9 @@ function parseBigOp(name: string, minPrec: number) {
 
     const bodyStartToken = parser.index;
     let fn = parser.parseExpression(body);
+    // The body is a group: a restriction in it (`\sum_{n=1}^{N} a_n\{c\}`)
+    // covers the body, and its condition can read the index.
+    if (fn !== null) fn = parser._liftRestrictions(fn);
     if (fn !== null) fn = parser.rebindSubscripts(fn, indexNames) ?? fn;
 
     parser.popSymbolTable();

@@ -74,7 +74,10 @@ sanctioned recovery boundary that can inspect an error explicitly.
 ## Conditional and error values
 
 `When(value, condition)` represents one conditional value. `Which`/`If`
-select among alternatives and are lazy in unselected arms. Arithmetic may
+select among alternatives and are lazy in unselected arms. The LaTeX parser
+reads a restriction `e\{c\}` and a `where` condition as the single-branch
+`If(c, e)`, which has the value of `When(e, c)`, and the type of `e`.
+Arithmetic may
 thread `When` values while preserving their guards. Producers such as `Solve`
 may return guarded results rather than asserting a formula outside its domain.
 

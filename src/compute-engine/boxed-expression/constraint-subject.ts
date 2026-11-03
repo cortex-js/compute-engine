@@ -19,6 +19,7 @@ import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
+import { restrictionParts } from './conditional-value.js';
 import { ExpressionMap } from './expression-map.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { exactArgumentSourceOf } from './exact-argument-source.js';
@@ -785,8 +786,12 @@ export function refutingFact(
     // not canonicalized can still nest, so walk to the innermost operand.
     // (2026-09-22)
     let candidate = value;
-    while (isFunction(candidate, 'When') && candidate.ops.length === 2)
-      candidate = candidate.op1;
+    for (
+      let r = restrictionParts(candidate);
+      r;
+      r = restrictionParts(candidate)
+    )
+      candidate = r.value;
 
     const substituted = fact.subs({ [subject.symbol]: candidate });
     if (substituted.unknowns.length !== 0) continue;

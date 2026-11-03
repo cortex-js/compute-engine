@@ -2,6 +2,96 @@
 
 ### Behavior Changes
 
+- **A restriction `e\{c\}` covers its whole group and parses to `If(c, e)`.**
+  The parser no longer produces `When`. The restriction applies to the whole
+  of the smallest group that holds it: the statement (the relation
+  included), one side of `\to`, the body of `for` or `where`, one comma
+  item, the content of a delimiter or of a LaTeX argument, the body of a
+  big operator, or one operand of a logical connective (`\land`, `\lor`,
+  the operand of `\neg`). A restriction binds tighter than a connective and
+  looser than a relation: `x>0\{x<1\}\lor x>2\{x<3\}` is
+  `Or(If(x<1, x>0), If(x<3, x>2))`. In 0.177.0 it applied to the factor
+  just before it. Examples
+  from Tycho's two Desmos corpora (rows out of 8,231, of which 761 hold a
+  restriction, `docs/plans/2026-11-02-restriction-binding.md`):
+  `y=0\{x\le0\}` is `If(x\le0, Equal(y, 0))`, where it was
+  `Equal(y, When(0, x\le0))` (133 rows of this shape); `x^2+y^2<9\{c\}` is
+  `If(c, Less(…, 9))` (111 rows); `H(x)=3x^2-2x^3\{c\}` is
+  `If(c, Equal(H(x), 3x^2-2x^3))`, where only `2x^3` was restricted (34
+  rows); `-a\{c\}` is `If(c, -a)` (25 rows); `(1,2)\{c\}` is
+  `If(c, Tuple(1, 2))` (79 rows). A restriction inside a group stays in it:
+  `x^{3.1\{c\}}` is `Power(x, If(c, 3.1))` (3 rows), `(a\{c\}, b)` is
+  `Tuple(If(c, a), b)` (15 rows), `\sum_{n=1}^{N} a_n\{c\}` is
+  `Sum(If(c, a_n), …)` (6 rows). `a\{\}` is still a parse error. A false
+  single-branch `If(c, e)` with a scalar condition gives the value that
+  `When(e, c)` gives: `NaN` for a number, `Missing` otherwise (in 0.177.0
+  every false single-branch `If` gave `Missing`). The type of a
+  single-branch `If(c, e)` is the type of `e`, with no `nan` or `missing`
+  arm: the type of `If(c, 1)` is `integer`, where it was
+  `integer | missing`, and a symbol declared `number` accepts the value
+  `If(0 < t, 3)`. Compiled code gives the same values as before.
+  `x \coloneq 1\{c\}` is `Assign(x, If(c, 1))`: the restriction is in the
+  value.
+- **Stacked restrictions in one group merge.** `a\{c_1\}\{c_2\}` is
+  `If(And(c_1, c_2), a)` in written order, up to 4 deep (76 corpus rows),
+  and `a\{c_1\}+b\{c_2\}` is `If(And(c_1, c_2), a+b)`. A restriction of a
+  single-branch piecewise merges too: `\{c_1: a\}\{c_2\}` is
+  `If(And(c_1, c_2), a)`; `\{c_1: a, b\}\{c_2\}` is
+  `If(c_2, Which(c_1, a, True, b))` (14 rows). A comma group in the braces is
+  still `Or` (7 rows). The condition before a piecewise `:` and the arm after
+  it are each a group of their own, and a condition group accepts a condition
+  that has its own restriction: `\{x>0\{y<1\}: a, b\}` is
+  `Which(If(y<1, x>0), a, True, b)`, where it was a `Set` (Tycho row
+  neyret/xhlkk7k9aq #1752170633), and
+  `|y+3|\le.2\{x>0\{x<1\}, x>2\{x<3\}\}` is
+  `If(Or(If(x<1, x>0), If(x<3, x>2)), |y+3|\le 0.2)`, where it was a
+  `Tuple` (row neyret/akconkhexx #721856020).
+- **`\{c\}` alone is `If(c, 1)`**, Desmos's value 1 where `c` holds. In
+  0.177.0, `\{x>1\}` was the set `Set(x>1)`.
+- **The items of a `where` clause are bindings and conditions.** In
+  `e \text{ where } item, item, …` (also `\operatorname{where}`), an item is
+  a binding, `a \coloneq v`, `a = v` with a symbol on the left (it can have
+  a subscript) or `\text{let } a \coloneq v`, or a condition, every other
+  relation. A binding is one statement `Declare(a, "unknown", v)` (with a
+  function literal, `Declare(f, "function", v)`), in written order, and the
+  conditions, joined with `And`, wrap the body in `If(c, e)`:
+  `e \text{ where } a \coloneq 1, b = 2, 0\le t\le 1` is
+  `Block(Declare(a, "unknown", 1), Declare(b, "unknown", 2), If(0\le t\le 1, e))`.
+  With conditions only, the value is the `If`:
+  `(\cos t, \sin t) \text{ where } 0\le t\le\pi` is
+  `If(0\le t\le\pi, Tuple(…))`, where it was a `Block` with the bound as a
+  statement. In 0.177.0 `a \text{ where } b = 2` gave `Block(Equal(b, 2), a)`
+  and bound nothing. Every comma starts another item: a comma followed by
+  text that is not an item is a parse error, and so is a `let` with no
+  value. Witnesses: Graph Paper's stored documents and help pages, and the
+  58 Tycho Desmos rows with `\operatorname{with}`, which Tycho's importer
+  turns into `where` (`docs/plans/2026-11-02-where-binding.md`).
+- **A `for` after a `where` clause applies to the whole clause.**
+  `i \operatorname{where} n \coloneq 3 \operatorname{for} i = \operatorname{Range}(n)`
+  is now `Comprehension(Block(Declare(n, "unknown", 3), i), Element(i, Range(n)))`,
+  so the `n` of `Range(n)` is free; in 0.177.0 the `Block` was outside the
+  comprehension. Tycho's 24 comprehension rows whose binding reads the index
+  need this order. `i \operatorname{for} i = \operatorname{Range}(n) \operatorname{where} n \coloneq 3`
+  keeps its value.
+- **A `;` block declares a local with its value in one statement.**
+  `a \coloneq 2; a+1` is `Block(Declare(a, "unknown", 2), a+1)`, where it was
+  `Block(Declare(a), Assign(a, 2), a+1)`. A later `\coloneq` of the same name
+  is still an `Assign`.
+- **A binding `Block` and a single-branch `If` serialize with `where`.** A
+  `Block` of `Declare(a, "unknown", v)` statements followed by one
+  expression is written `e \text{ where } a \coloneq v, …`, where it was
+  `a\coloneq v; e`, and when the expression is a single-branch `If`, its
+  condition is the last item. Every single-branch `If(c, e)` is written
+  `e \text{ where } c`, where it was `\mathrm{If}(c, e)`. The clause is in
+  parentheses when it is not the whole expression:
+  `2\left(p \text{ where } p \coloneq 3\right)`. The serializer never writes
+  the brace `\{c\}`. `If(c, e)` keeps the function form when `c` is not a
+  relation, when `c` is an `=` with a symbol on the left (`If(a=1, e)`,
+  which `where` would read as a binding), and when `e` is an assignment, a
+  declaration or a function literal, which would read the clause into its
+  value. Every other `Block` keeps the `;` form. The text parses back to the
+  same canonical expression.
+
 - **Compiled code no longer tests for an input that the caller leaves out.**
   The host supplies every input with a value of its declared type; the
   result for an input left out is undefined and can differ per target

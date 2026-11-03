@@ -37,7 +37,12 @@ import {
 } from './compiler-type-facts.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { core } from './compiler-core-hooks.js';
+import { isStatementArm } from '../boxed-expression/conditional-value.js';
 import { tempVar } from './compiler-naming.js';
+
+// `isStatementArm()` is defined beside `restrictionParts()`, which reads a
+// single-branch `If` as a restriction only when its arm is not a statement.
+export { isStatementArm };
 
 /** The JavaScript-family spelling of {@link DecidedNumberTest}. */
 export const DECIDED_NUMBER_JS: DecidedNumberTest = (x) => `${x} === ${x}`;
@@ -508,36 +513,6 @@ export function liveSelectionArms(expr: {
     if (claim === true || isSymbol(ops[i], 'True')) break;
   }
   return arms;
-}
-
-/**
- * Whether an `If` arm is a STATEMENT — an assignment, a loop, a
- * declaration or a jump — rather than an expression with a value. Such an
- * arm has no expression form, so the two-operand `If` around it is a guard
- * statement, never the value-form selection that compiles as a one-clause
- * `Which`.
- *
- * A `Block` is read through to its VALUE statement, its last operand (the
- * same reading `statementBodyHead` gives it): `Block(y ≔ x, y)` is a value
- * arm, `Block(y ≔ x)` and an empty block are statements. A `Loop` is a
- * statement here even though `Break(v)` can give it a value: the
- * conditional-expression lowering has no form for a loop inside a ternary.
- */
-export function isStatementArm(arm: Expression | undefined): boolean {
-  if (arm === undefined || !isFunction(arm)) return false;
-  const h = arm.operator;
-  if (h === 'Block') {
-    if (arm.nops === 0) return true;
-    return isStatementArm(arm.ops[arm.nops - 1]);
-  }
-  return (
-    h === 'Assign' ||
-    h === 'Loop' ||
-    h === 'Declare' ||
-    h === 'Return' ||
-    h === 'Break' ||
-    h === 'Continue'
-  );
 }
 
 export function assertScalarCondition(

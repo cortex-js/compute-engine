@@ -20,10 +20,12 @@ describe('BLOCK - SERIALIZATION', () => {
     ).toMatchInlineSnapshot(`a\\coloneq1; b\\coloneq2; a+b`);
   });
 
-  test('Block round-trip via semicolons', () => {
+  test('a parsed semicolon block of a local is written as a where clause', () => {
     const input = 'x \\coloneq 5; x + 1';
     const parsed = ce.parse(input);
-    expect(parsed.latex).toMatchInlineSnapshot(`x\\coloneq5; x+1`);
+    // The parsed local is `Declare(x, "unknown", 5)`, which is written as a
+    // `where` clause.
+    expect(parsed.latex).toMatchInlineSnapshot(`x+1\\text{ where }x\\coloneq5`);
   });
 
   test('Block round-trip: serialize → re-parse produces same expression', () => {
@@ -85,6 +87,24 @@ describe('BLOCK - ROUND-TRIP', () => {
     const serialized = parsed.latex;
     const reparsed = ce.parse(serialized);
     expect(reparsed.json).toEqual(parsed.json);
+  });
+
+  // A body written in a keyword form that reads a trailing expression (the
+  // else branch of `if`, the body of `for`, the value of `return`) stops
+  // before the `where`: the keyword's operands are read above the precedence
+  // of `where`, so the binding covers the whole body.
+  test.each([
+    ['If', ['If', ['Less', 'x', 0], 'a', ['Add', 'x', 'a']]],
+    ['Return', ['Return', ['Add', 'a', 1]]],
+    [
+      'Loop',
+      ['Loop', ['Add', 'a', 'x'], ['Element', 'i', ['Range', 1, 'a']]],
+    ],
+  ])('where clause with a %s body round-trips', (_, body) => {
+    const block = ['Block', ['Declare', 'a', "'unknown'", 2], body];
+    const serialized = ce.box(block as any, { canonical: false }).latex;
+    expect(serialized).toContain('\\text{ where }a\\coloneq2');
+    expect(ce.parse(serialized, { canonical: false }).json).toEqual(block);
   });
 
   test('three-assignment block round-trips', () => {

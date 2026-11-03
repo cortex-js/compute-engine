@@ -123,11 +123,16 @@ describe('TYCHO ITEM 335: STATIC TYPE OF A MASKED RESTRICTION', () => {
       expect(restriction(ce, c.points).type.toString()).toBe(c.staticType);
     });
 
+    // The parser reads a restriction as the single-branch `If(c, P)`. With
+    // a mask condition it has the type of `When(P, c)`; with a scalar
+    // condition (`P` undeclared), the type of `P`, with no `missing` arm.
     test(`LaTeX route, P: ${label}`, () => {
       const ce = engineFor(c.declared);
       const e = ce.parse(c.points ? 'P\\{P.x > 1\\}' : 'P\\{P > 1\\}');
-      expect(e.operator).toBe('When');
-      expect(e.type.toString()).toBe(c.staticType);
+      expect(e.operator).toBe('If');
+      expect(e.type.toString()).toBe(
+        c.declared === undefined ? 'unknown' : c.staticType
+      );
     });
 
     if (c.value === undefined) continue;
@@ -287,7 +292,7 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
   test('Range(1, ∞), LaTeX restriction-brace route', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('[1...\\infty]\\{[1,2,3]>1\\}');
-    expect(e.operator).toBe('When');
+    expect(e.operator).toBe('If');
     check(ce, e, 'list<number>', '[NaN,2,3]');
   });
 
@@ -306,7 +311,7 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
     const e = ce.parse(
       '[2k \\operatorname{for} k=[1...\\infty]]\\{[1,2,3]>1\\}'
     );
-    expect(e.operator).toBe('When');
+    expect(e.operator).toBe('If');
     check(ce, e, 'list<number>', '[NaN,4,6]');
   });
 
@@ -335,8 +340,9 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
     const e = ce.parse('[1...n]\\{[1,2,3]>1\\}');
-    expect(e.operator).toBe('When');
-    check(ce, e, 'list<number>', 'Range(1, n) {["False","True","True"]}');
+    expect(e.operator).toBe('If');
+    // The held restriction is spelled `If(c, e)`, as it was parsed.
+    check(ce, e, 'list<number>', 'If(["False","True","True"], Range(1, n))');
     ce.assign('n', 2);
     check(ce, e, 'list<number>', '[NaN,2]');
   });

@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-787.
+Next free reference: CE-789.
 
 **Entry format.**
 
@@ -2819,6 +2819,19 @@ reproduction above is the record.
 
 ## LaTeX parsing and serialization
 
+### CE-787. A product with a fraction factor inside a function argument reads back in another form
+
+**Status:** ready; defect, S.
+**Witness:** corpus; Tycho row neyret/xhlkk7k9aq #1752170633: `\sin(90\frac{x}{\sin(k)})` is written `\sin((90x)/\sin(k))`, which reads back as `Divide(Multiply(90, x), Sin(k))`, not `Multiply(90, Divide(x, Sin(k)))`.
+
+The value is the same, but the round trip changes the tree, so a reader that
+compares stored rows by structure sees two rows. The serializer writes a
+`Multiply` whose last factor is a `Divide` with the inline `/` form when the
+product is inside a function argument, and the parser groups the inline `/`
+over the whole product. The fix is in the serializer: keep `\frac{x}{…}` for a
+`Divide` factor of a product, or wrap the factor in parentheses. The same
+behavior is at commit 0cbf41d09ffd, before the language release.
+
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
 **Status:** design needed; defect.
@@ -3849,6 +3862,16 @@ Possible fix: record a successful result with the same dependency stamps as a
 decline.
 
 ## Tests, tools, documentation and release tasks
+
+### CE-788. A test of `compile-elementwise-bigop.test.ts` still expects the scalar identity for an empty range of a vector body
+
+**Status:** ready; defect, S.
+**Witness:** corpus; `test/compute-engine/compile-elementwise-bigop.test.ts` line 66, "an empty constant range answers the scalar identity", fails on `main` at commit 9cca00073fd1: `Sum(Multiply(2, L), Limits(k, 1, 0))` expects `0` and gets `[0, 0, 0]`.
+
+Commit 0cbf41d09ffd (CE-786) made an empty-range `Sum` or `Product` of a
+vector body give the identity vector. This test was not changed with it. Change
+its expectations (and those of the `Product` case after it) to the identity
+vector, or remove the test if another test of CE-786 covers the same case.
 
 ### CE-540. The CI test job fails on `main` in four test files
 

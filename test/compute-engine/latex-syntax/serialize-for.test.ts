@@ -1,6 +1,36 @@
 import { ComputeEngine } from '../../../src/compute-engine';
 import { latex, engine } from '../../utils';
 
+/**
+ * The MathJSON that the parser gives back for `json`. The parser reads a
+ * local `s \coloneq v` as the one statement `Declare(s, "unknown", v)`
+ * (`"function"` when `v` is a function literal), so in a `Block` each
+ * `Declare(s)` that is followed by `Assign(s, v)` is merged into that one
+ * statement. Every other expression is unchanged.
+ */
+function asParsed(json: any): any {
+  if (!Array.isArray(json)) return json;
+  const ops = json.map(asParsed);
+  if (ops[0] !== 'Block') return ops;
+  const result: any[] = ['Block'];
+  for (let i = 1; i < ops.length; i++) {
+    const [d, a] = [ops[i], ops[i + 1]];
+    if (
+      Array.isArray(d) &&
+      d[0] === 'Declare' &&
+      d.length === 2 &&
+      Array.isArray(a) &&
+      a[0] === 'Assign' &&
+      a[1] === d[1]
+    ) {
+      const isFunction = Array.isArray(a[2]) && a[2][0] === 'Function';
+      result.push(['Declare', d[1], isFunction ? "'function'" : "'unknown'", a[2]]);
+      i += 1;
+    } else result.push(d);
+  }
+  return result;
+}
+
 describe('FOR LOOP - SERIALIZATION', () => {
   test('Loop with Element/Range', () => {
     expect(
@@ -86,7 +116,7 @@ describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
     const original = ce.box(blockComprehension);
     const roundTripped = ce.parse(original.latex);
     expect(roundTripped.operator).toBe('Comprehension');
-    expect(roundTripped.json).toEqual(original.json);
+    expect(roundTripped.json).toEqual(asParsed(original.json));
     // A `Comprehension` is a lazy collection: materialize to read the values.
     expect(
       roundTripped.evaluate({ materialization: true }).json
@@ -99,7 +129,7 @@ describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
     const parsed = ce.parse(
       '\\left[\\left(d\\coloneq\\bigl\\lbrack n, 2\\bigr\\rbrack; \\sum d\\right) \\operatorname{for} n = 1..3\\right]'
     );
-    expect(parsed.json).toEqual(blockComprehension);
+    expect(parsed.json).toEqual(asParsed(blockComprehension));
     expect([...parsed.each()].map((x) => x.json)).toEqual([3, 4, 5]);
   });
 
@@ -119,7 +149,7 @@ describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
     expect([...e.each()].map((x) => x.json)).toEqual([11, 21, 31]);
     expect(ce.box('d').evaluate().json).toEqual(99);
     // …and the round trip keeps that shape.
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('a comprehension WITHOUT a block body is not fenced', () => {
@@ -132,7 +162,7 @@ describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\left[n+1 \\operatorname{for} n = 1..3\\right]`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 });
 
@@ -166,7 +196,7 @@ describe('LOOP with a Block body (item 172 sibling)', () => {
     const original = ce.box(blockLoop);
     const roundTripped = ce.parse(original.latex);
     expect(roundTripped.operator).toBe('Loop');
-    expect(roundTripped.json).toEqual(original.json);
+    expect(roundTripped.json).toEqual(asParsed(original.json));
   });
 
   test('a loop WITHOUT a block body is not fenced', () => {
@@ -179,7 +209,7 @@ describe('LOOP with a Block body (item 172 sibling)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\text{for }i\\text{ from }1\\text{ to }3\\text{ do }i+1`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   // The functional fallback spelling — used for loop shapes the `for … do`
@@ -201,7 +231,7 @@ describe('LOOP with a Block body (item 172 sibling)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\operatorname{Loop}(\\left(s\\coloneq2k; s+1\\right), k\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('the fallback leaves a non-block body unfenced', () => {
@@ -214,7 +244,7 @@ describe('LOOP with a Block body (item 172 sibling)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\operatorname{Loop}(k+1, k\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 });
 
@@ -238,7 +268,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\mathrm{Repeat}(\\left(s\\coloneq2; s+1\\right), 3)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('block operand in FIRST position of a 3-operand call', () => {
@@ -248,7 +278,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\mathrm{g3}(\\left(s\\coloneq2; s+1\\right), 1, 2)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('block operand in MIDDLE position of a 3-operand call', () => {
@@ -258,7 +288,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\mathrm{g3}(1, \\left(s\\coloneq2; s+1\\right), 2)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('block operand in LAST position of a 3-operand call', () => {
@@ -268,14 +298,14 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\mathrm{g3}(1, 2, \\left(s\\coloneq2; s+1\\right))`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('non-block operands stay unfenced', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Repeat', ['Add', 's', 1], 3] as any);
     expect(e.latex).toMatchInlineSnapshot(`\\mathrm{Repeat}(s+1, 3)`);
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 });
 
@@ -308,7 +338,9 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
   test('parses back to the same block — with its VALUE, not `Nothing`', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('(s\\coloneq2;)');
-    expect(e.json).toEqual(['Block', ['Declare', 's'], ['Assign', 's', 2]]);
+    expect(e.json).toEqual(
+      asParsed(['Block', ['Declare', 's'], ['Assign', 's', 2]])
+    );
     expect(e.evaluate().json).toEqual(2);
   });
 
@@ -316,7 +348,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     const ce = new ComputeEngine();
     const e = ce.box(single);
     const back = ce.parse(e.latex);
-    expect(back.json).toEqual(e.json);
+    expect(back.json).toEqual(asParsed(e.json));
     expect(back.evaluate().json).toEqual(2);
   });
 
@@ -334,7 +366,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
       ['Assign', 's', 2],
     ] as any);
     expect(local.latex).toMatchInlineSnapshot(`s\\coloneq2;`);
-    expect(ce.parse(local.latex).json).toEqual(local.json);
+    expect(ce.parse(local.latex).json).toEqual(asParsed(local.json));
   });
 
   // A single NON-assign statement gets the marker too, and the marker alone
@@ -343,7 +375,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Block', ['Add', 's', 1]] as any);
     expect(e.latex).toMatchInlineSnapshot(`s+1;`);
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('operand position (wrapArguments)', () => {
@@ -352,7 +384,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\mathrm{Repeat}(\\left(s\\coloneq2;\\right), 3)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
     expect(ce.parse(e.latex).evaluate().json).toEqual(['List', 2, 2, 2]);
   });
 
@@ -366,7 +398,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\text{for }i\\text{ from }1\\text{ to }3\\text{ do }\\left(s\\coloneq2;\\right)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('Loop body, \\operatorname{Loop}(...) fallback spelling', () => {
@@ -379,7 +411,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\operatorname{Loop}(\\left(s\\coloneq2;\\right), k\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
 
   test('Comprehension body', () => {
@@ -392,7 +424,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(e.latex).toMatchInlineSnapshot(
       `\\left[\\left(s\\coloneq2;\\right) \\operatorname{for} n = 1..3\\right]`
     );
-    expect(ce.parse(e.latex).json).toEqual(e.json);
+    expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
     // A `Comprehension` is a LAZY collection — it stays itself under
     // `evaluate()`, so compare the materialized elements.
     expect(ce.parse(e.latex).evaluate().toString()).toEqual('[2,2,2]');
@@ -426,7 +458,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
   test('multi-statement blocks are unchanged (no trailing `;`)', () => {
     const ce = new ComputeEngine();
     expect(ce.box(multi).latex).toMatchInlineSnapshot(`s\\coloneq2; s+1`);
-    expect(ce.parse(ce.box(multi).latex).json).toEqual(ce.box(multi).json);
+    expect(ce.parse(ce.box(multi).latex).json).toEqual(asParsed(ce.box(multi).json));
     expect(
       ce.box(['Repeat', multi, 3] as any).latex
     ).toMatchInlineSnapshot(
@@ -449,7 +481,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     const e = ce.parse('((s\\coloneq2;);)');
     expect(e.json).toEqual([
       'Block',
-      ['Block', ['Declare', 's'], ['Assign', 's', 2]],
+      ['Block', ['Declare', 's', "'unknown'", 2]],
     ]);
     expect(e.evaluate().json).toEqual(2);
   });
@@ -475,15 +507,16 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     const e = ce.parse('(s\\coloneq2;\\mathrm{Nothing})');
     expect(e.json).toEqual([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 2],
+      ['Declare', 's', "'unknown'", 2],
       'Nothing',
     ]);
     expect(e.evaluate().json).toEqual('Nothing');
 
     // The synthetic marker is still dropped: same block, value `2`.
     const marked = ce.parse('(s\\coloneq2;)');
-    expect(marked.json).toEqual(['Block', ['Declare', 's'], ['Assign', 's', 2]]);
+    expect(marked.json).toEqual(
+      asParsed(['Block', ['Declare', 's'], ['Assign', 's', 2]])
+    );
     expect(marked.evaluate().json).toEqual(2);
   });
 });
@@ -515,7 +548,7 @@ describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
     );
 
     // Round-trips to the same expression.
-    expect(ce.parse(lx).json).toEqual(e.json);
+    expect(ce.parse(lx).json).toEqual(asParsed(e.json));
 
     // The lambda parameter `k` must be bound by the `\mapsto`, not leaked as a
     // free preview element (the pre-fix bug emitted three identical `\bigl\lbrack
@@ -538,7 +571,7 @@ describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
     // Still the operator form (no evaluated-result list baked in).
     expect(lx).toContain('\\mathrm{Map}(k\\mapsto');
     expect(lx).toContain(', d)');
-    expect(ce.parse(lx).json).toEqual(e.json);
+    expect(ce.parse(lx).json).toEqual(asParsed(e.json));
   });
 
   test('Filter over a bound-symbol collection serializes faithfully', () => {
@@ -556,7 +589,7 @@ describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
     // printed form (only a written one is), so the LaTeX is the same as on
     // an engine where `d` is unbound, and the round trip below re-infers it.
     expect(lx).toMatchInlineSnapshot(`\\mathrm{Filter}(d, k\\mapsto1\\lt k)`);
-    expect(ce.parse(lx).json).toEqual(e.json);
+    expect(ce.parse(lx).json).toEqual(asParsed(e.json));
     expect(lx.startsWith('\\bigl\\lbrack')).toBe(false);
   });
 });

@@ -257,7 +257,7 @@ function parseIntegralBody(
 
   // The body also stops at the end of a `cases` or matrix cell
   // (`endsTabularCell`), for an integral with no differential.
-  const fn = parser.parseExpression({
+  let fn = parser.parseExpression({
     minPrec: 266,
     condition: () => {
       const start = parser.index;
@@ -266,6 +266,9 @@ function parseIntegralBody(
       return found || endsTabularCell(parser.peek);
     },
   });
+  // The integrand is a group: a restriction in it (`\int_0^1 f(x)\{c\}\,dx`)
+  // covers the integrand, not the integral.
+  if (fn !== null) fn = parser._liftRestrictions(fn);
 
   // If we didn't get a `\operatorname{d}x` or `dx` at the same level as the
   // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}` or `3xdx`

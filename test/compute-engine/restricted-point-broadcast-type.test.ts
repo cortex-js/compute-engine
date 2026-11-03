@@ -12,6 +12,14 @@ import { ComputeEngine } from '../../src/compute-engine';
  * evaluated to `NaN` where `Sin` of an absent point is the absent point
  * `Missing`. The same held for a default-less `Which` with point arms.
  *
+ * Since 2026-11-02 the parser reads a restriction `P{c}` as the single-branch
+ * `If(c, P)`, whose static type is the type of `P`, with no `missing` arm
+ * (`docs/plans/2026-11-02-restriction-binding.md`); the type of a value that
+ * holds an absent cell then has a `missing` arm that the static type does
+ * not show. The restriction also applies to its whole group, so
+ * `2{c}·P` is `If(c, 2·P)`. The box route `When(P, c)` keeps the
+ * `missing` arm.
+ *
  * The rule for the absence marker is in `docs/ERROR-MODEL.md` (an absent
  * operand answers the marker of the application's codomain: `NaN` for a
  * numeric type, `Missing` otherwise; an absent factor beside a point makes
@@ -47,29 +55,29 @@ describe('a broadcast over a restricted point keeps the point and the absence', 
     [
       'Sin',
       String.raw`\sin(${PC})`,
-      'missing | tuple<number, number>',
+      'tuple<number, number>',
       '(0, sin(1))',
     ],
-    ['Power', `(${PC})^2`, 'missing | tuple<number, number>', '(0, 1)'],
-    ['Negate', `-${PC}`, 'missing | tuple<integer, integer>', '(0, -1)'],
+    ['Power', `(${PC})^2`, 'tuple<number, number>', '(0, 1)'],
+    ['Negate', `-${PC}`, 'tuple<integer, integer>', '(0, -1)'],
     // `t` has no declared type, so the type is read before `t` has a value,
     // and `t` can be any number: the components are `number`.
     [
       'a scalar factor',
       String.raw`t\cdot${PC}`,
-      'missing | tuple<number, number>',
+      'tuple<number, number>',
       '(0, 1)',
     ],
     [
       'a scalar divisor',
       String.raw`\frac{${PC}}{t}`,
-      'missing | tuple<number, number>',
+      'tuple<number, number>',
       '(0, 1)',
     ],
     [
       'a point addend',
       `${PC}+${Q}`,
-      'missing | tuple<integer, integer>',
+      'tuple<integer, integer>',
       '(2, 4)',
     ],
   ])('%s', (_label, latex, type, present) => {
@@ -91,14 +99,15 @@ describe('a broadcast over a restricted point keeps the point and the absence', 
     expect(ce.parse(`-${P}`).type.toString()).toBe('tuple<integer, integer>');
   });
 
-  test('a restricted scalar factor beside a point lands in each coordinate', () => {
-    // A masked number is `NaN` (user decision 2026-09-25), and a scalar
-    // restriction beside a point lands in each coordinate, so the absent
-    // product is `(NaN, NaN)`; it was `Missing`, the whole point.
+  test('a restricted scalar factor beside a point restricts the whole point', () => {
+    // The restriction applies to its whole group, here the whole product
+    // `If(0<t, 2·P)`, so the absent value is the absent point `Missing`.
+    // When the restriction was on the factor alone, it landed in each
+    // coordinate and the absent product was `(NaN, NaN)`.
     const r = probe(String.raw`2\left\{0<t\right\}\cdot${P}`);
-    expect(r.type).toBe('tuple<integer | nan, integer | nan>');
+    expect(r.type).toBe('tuple<integer, integer>');
     expect(r.present).toBe('(0, 2)');
-    expect(r.absent).toBe('(NaN, NaN)');
+    expect(r.absent).toBe('"Missing"');
   });
 });
 
@@ -109,22 +118,23 @@ describe('a broadcast over a restricted list keeps the list and the absence', ()
   ])('%s', (_label, latex, present) => {
     const r = probe(latex);
     // It was `number | vector<3>`: the absence arm became a scalar.
-    expect(r.type).toBe('missing | vector<3>');
+    expect(r.type).toBe('vector<3>');
     expect(r.present).toBe(present);
     expect(r.absent).toBe('"Missing"');
   });
 
-  test('a restricted scalar beside a list still lands in each cell', () => {
+  test('a restricted scalar beside a list restricts the whole list', () => {
+    // The restriction applies to the whole sum `If(0<t, [1,2,3]+2)`, so the
+    // absent value is the absent list `Missing`. When the restriction was on
+    // the scalar alone, it landed in each cell, `[NaN,NaN,NaN]`.
     const r = probe(String.raw`[1,2,3]+2\left\{0<t\right\}`);
-    // The cells are `integer | nan`: a masked number is `NaN` (user
-    // decision 2026-09-25).
-    expect(r.type).toBe('list<integer | nan^3>');
-    expect(r.absent).toBe('[NaN,NaN,NaN]');
+    expect(r.type).toBe('vector<integer^3>');
+    expect(r.absent).toBe('"Missing"');
   });
 
   test('a restricted scalar with a scalar result absorbs to NaN', () => {
     const r = probe(String.raw`\sin(2\left\{0<t\right\})`);
-    expect(r.type).toBe('nan | real');
+    expect(r.type).toBe('real');
     expect(r.absent).toBe('NaN');
   });
 });
@@ -168,10 +178,15 @@ describe('shapes that are an error for a restricted point', () => {
   });
 
   test('the product of two restricted points', () => {
+    // The two restrictions apply to the whole product: it is
+    // `If(And(0<t, 0<t), P·Q)`, and the error is its arm. The expression is
+    // invalid; its value is the error when the condition holds, and, since
+    // an `If` evaluates only the arm it selects, the absent value `Missing`
+    // when it does not.
     const r = probe(String.raw`${PC}\cdot${QC}`);
     expect(r.type).toBe('error');
     expect(r.present).toContain('no-product-between-points');
-    expect(r.absent).toContain('no-product-between-points');
+    expect(r.absent).toBe('"Missing"');
   });
 });
 
@@ -316,19 +331,26 @@ describe('a list that holds a restricted point or masked points', () => {
     ce.declare('t', 'real');
     ce.assign('t', 1);
     const src = String.raw`[[(1,2)\{0<t\}, (3,4)], [(5,6), (7,8)\{t<0\}]]`;
-    for (const expr of [
-      src,
-      String.raw`2${src}`,
-      String.raw`${src}+(1,1)`,
-      // The added point is absent, so every cell is.
-      String.raw`${src}+(1,1)\{t<0\}`,
-    ]) {
+    for (const expr of [src, String.raw`2${src}`, String.raw`${src}+(1,1)`]) {
       const e = ce.parse(expr);
       const v = e.evaluate();
-      expect(v.type.matches(e.type)).toBe(true);
+      // The static type of a restriction `If(c, e)` is the type of `e`, with
+      // no `missing` arm, so the type of the value, which holds an absent
+      // cell, has a `missing` arm and does not match it. Only the present
+      // cells are checked against the cell type of the expression.
+      const cellType = (e.type.type as any).elements;
+      for (const row of v.ops!)
+        for (const cell of row.ops!)
+          if (cell.symbol !== 'Missing')
+            expect(cell.type.matches(cellType)).toBe(true);
       expect(v.toString()).not.toContain('NaN');
       expect(v.ops![1].ops![1].symbol).toBe('Missing');
     }
+    // A restriction applies to its whole group, here the whole statement: the
+    // added point is absent, so the whole value is.
+    expect(ce.parse(String.raw`${src}+(1,1)\{t<0\}`).evaluate().symbol).toBe(
+      'Missing'
+    );
   });
 
   test('numeric cells still answer NaN', () => {
@@ -343,12 +365,70 @@ describe('a list that holds a restricted point or masked points', () => {
     const ce = new ComputeEngine();
     ce.assign('t', -1);
     const L = String.raw`[${PC}, (2,3)]`;
+    // The parsed restriction `If(c, P)` has no `missing` arm, so the cells
+    // of the static type do not show the absent point.
     const sin = ce.parse(String.raw`\sin(${L})`);
-    expect(sin.type.toString()).toBe(POINT_PAIR);
+    expect(sin.type.toString()).toBe('list<tuple<number, number>^2>');
     expect(sin.evaluate().toString()).toBe('["Missing",(sin(2), sin(3))]');
     const scaled = ce.parse(String.raw`2\cdot${L}`);
-    expect(scaled.type.toString()).toBe(INTEGER_POINT_PAIR);
+    expect(scaled.type.toString()).toBe('list<tuple<integer, integer>^2>');
     expect(scaled.evaluate().toString()).toBe('["Missing",(4, 6)]');
+  });
+
+  test('only the cell of an absent restricted point becomes Missing', () => {
+    // The `NaN` marker of each cell is decided from the operand cell at the
+    // same position. A restricted point whose condition is false gives
+    // `Missing`; a `NaN` computed from a present cell stays `NaN`, also in a
+    // list that holds a restricted point.
+    const L = String.raw`[(1,2)\left\{0<t\right\}, (3,4)]`;
+    const ce = new ComputeEngine();
+    ce.assign('t', -1);
+    expect(
+      ce.parse(String.raw`2\cdot[${PC}, (2,3)]`).evaluate().toString()
+    ).toBe('["Missing",(4, 6)]');
+    const json = ['Divide', ce.parse(L).json, ['List', 1, 'x']];
+    ce.assign('x', NaN);
+    expect(ce.box(json).evaluate().toString()).toBe('["Missing",NaN]');
+    const ce2 = new ComputeEngine();
+    ce2.assign('t', 1);
+    ce2.assign('x', NaN);
+    expect(ce2.box(json).evaluate().toString()).toBe('[(1, 2),NaN]');
+  });
+
+  test('the condition of a restricted point is evaluated once', async () => {
+    // The absent cells are read from the operands that the evaluation has
+    // already evaluated, so the condition is not evaluated a second time to
+    // decide the marker of a cell. A condition with an effect runs once.
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.declare('TraceCondition', {
+      signature: '() -> integer',
+      pure: false,
+      evaluate: () => {
+        calls++;
+        return ce.number(-1);
+      },
+    });
+    const cell = ['If', ['Less', 0, ['TraceCondition']], ['Tuple', 1, 2]];
+    const json = ['Multiply', 2, ['List', cell, ['Tuple', 2, 3]]];
+    expect(ce.box(json).evaluate().toString()).toBe('["Missing",(4, 6)]');
+    expect(calls).toBe(1);
+    calls = 0;
+    expect((await ce.box(json).evaluateAsync()).toString()).toBe(
+      '["Missing",(4, 6)]'
+    );
+    expect(calls).toBe(1);
+    // A restricted row of points, beside a list of numbers.
+    calls = 0;
+    const row = [
+      'If',
+      ['Less', 0, ['TraceCondition']],
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+    ];
+    expect(
+      ce.box(['Divide', row, ['List', 1, 2]]).evaluate().toString()
+    ).toBe('["Missing","Missing"]');
+    expect(calls).toBe(1);
   });
 
   test('the asynchronous route agrees', async () => {
@@ -452,14 +532,21 @@ describe('a list that holds a restricted point or masked points', () => {
     test('the parse route with a restricted point in a literal list', () => {
       const ce = new ComputeEngine();
       ce.assign('t', -1);
+      // The parsed restriction `If(c, P)` has no `missing` arm, so the
+      // static type of a literal list that holds one has none either.
+      const pair = 'list<tuple<number, number>^2>';
       for (const [src, want, type] of [
-        [String.raw`\sin([(1,2)\{0<t\}, (3,4)])`, cases[0][1], POINT_PAIR],
-        [String.raw`-[(1,2)\{0<t\}, (3,4)]`, cases[1][1], INTEGER_POINT_PAIR],
-        [String.raw`\sqrt{[(1,2)\{0<t\}, (3,4)]}`, cases[2][1], POINT_PAIR],
+        [String.raw`\sin([(1,2)\{0<t\}, (3,4)])`, cases[0][1], pair],
+        [
+          String.raw`-[(1,2)\{0<t\}, (3,4)]`,
+          cases[1][1],
+          'list<tuple<integer, integer>^2>',
+        ],
+        [String.raw`\sqrt{[(1,2)\{0<t\}, (3,4)]}`, cases[2][1], pair],
         [
           String.raw`\sin([[(1,2)\{0<t\}, (3,4)], [(1,4), (9,16)]])`,
           `[${cases[0][1]},${MATRIX_ROW2.Sin}]`,
-          MATRIX_OF_POINTS,
+          'matrix<tuple<number, number>^(2x2)>',
         ],
       ]) {
         const e = ce.parse(src);

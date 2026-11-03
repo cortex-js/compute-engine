@@ -3,20 +3,17 @@ import { engine as ce } from '../../utils';
 describe('SEMICOLON BLOCKS - PARSING', () => {
   test('Semicolon with assignment produces Block', () => {
     expect(ce.parse('a \\coloneq 5; a + 1')).toMatchInlineSnapshot(
-      `["Block", ["Declare", "a"], ["Assign", "a", 5], ["Add", "a", 1]]`
+      `["Block", ["Declare", "a", "'unknown'", 5], ["Add", "a", 1]]`
     );
   });
 
   test('Multiple assignments in semicolon block', () => {
-    expect(
-      ce.parse('a \\coloneq 1; b \\coloneq 2; a + b')
-    ).toMatchInlineSnapshot(`
+    expect(ce.parse('a \\coloneq 1; b \\coloneq 2; a + b'))
+      .toMatchInlineSnapshot(`
       [
         "Block",
-        ["Declare", "a"],
-        ["Assign", "a", 1],
-        ["Declare", "b"],
-        ["Assign", "b", 2],
+        ["Declare", "a", "'unknown'", 1],
+        ["Declare", "b", "'unknown'", 2],
         ["Add", "a", "b"]
       ]
     `);
@@ -28,7 +25,7 @@ describe('SEMICOLON BLOCKS - PARSING', () => {
 
   test('Single assignment with semicolon', () => {
     expect(ce.parse('x \\coloneq 10; x^2')).toMatchInlineSnapshot(
-      `["Block", ["Declare", "x"], ["Assign", "x", 10], ["Square", "x"]]`
+      `["Block", ["Declare", "x", "'unknown'", 10], ["Square", "x"]]`
     );
   });
 
@@ -37,23 +34,19 @@ describe('SEMICOLON BLOCKS - PARSING', () => {
     expect(ce.parse('a \\coloneq x^2;\\; (a+1)')).toMatchInlineSnapshot(`
       [
         "Block",
-        ["Declare", "a"],
-        ["Assign", "a", ["Square", "x"]],
+        ["Declare", "a", "'unknown'", ["Square", "x"]],
         ["Add", "a", 1]
       ]
     `);
   });
 
   test('Multiple semicolons with \\; spacing', () => {
-    expect(
-      ce.parse('a \\coloneq 1;\\; b \\coloneq 2;\\; a + b')
-    ).toMatchInlineSnapshot(`
+    expect(ce.parse('a \\coloneq 1;\\; b \\coloneq 2;\\; a + b'))
+      .toMatchInlineSnapshot(`
       [
         "Block",
-        ["Declare", "a"],
-        ["Assign", "a", 1],
-        ["Declare", "b"],
-        ["Assign", "b", 2],
+        ["Declare", "a", "'unknown'", 1],
+        ["Declare", "b", "'unknown'", 2],
         ["Add", "a", "b"]
       ]
     `);
@@ -67,8 +60,8 @@ describe('SEMICOLON BLOCKS - PARSING', () => {
     const json = JSON.stringify(expr.json);
     expect(json).toContain('"r_1"');
     expect(json).not.toContain('"Subscript"');
-    expect(json).toContain('"Declare"');
-    expect(json).toContain('"Assign"');
+    // The local is one statement, `Declare(r_1, "unknown", x^2 + y^2)`.
+    expect(json).toContain('["Declare","r_1","\'unknown\'",');
   });
 
   test('Subscripted variable with where clause', () => {

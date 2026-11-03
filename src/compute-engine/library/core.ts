@@ -1,5 +1,6 @@
 import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
 import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
+import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
 import {
   runOperandSteps,
   runOperandStepsAsync,
@@ -5614,8 +5615,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             .map((x) => ce.error('unexpected-argument', x.toString())),
         ]);
       },
+      // A held restriction (`If(c, 3)` with `c` undecided), or an
+      // expression that contains one, is absent where `c` fails, so the
+      // test is undecided and stays unevaluated.
       evaluate: ([x], { engine: ce }) =>
-        x !== undefined && isMissingValue(x) ? ce.True : ce.False,
+        x !== undefined && mayHoldRestriction(x)
+          ? undefined
+          : x !== undefined && isMissingValue(x)
+            ? ce.True
+            : ce.False,
     },
 
     Coalesce: {
@@ -5661,8 +5669,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // A value whose type cannot be absent (a list, a tuple, a string,
           // a dictionary, a function literal) is present even when it still
           // carries free variables: `Coalesce([x, 1], 2)` is `[x, 1]`. See
-          // `typeCannotBeAbsent`.
-          if (typeCannotBeAbsent(v.type.type)) return v;
+          // `typeCannotBeAbsent`. A held restriction (`If(c, 3)` with `c`
+          // undecided) is typed as its arm, with no absent member, but its
+          // value is absent where `c` fails: it is not proved present, nor
+          // is an expression that contains one.
+          if (typeCannotBeAbsent(v.type.type) && !mayHoldRestriction(v))
+            return v;
           // An operand whose absence cannot be decided (it still carries free
           // variables and its type admits an absent outcome) leaves the
           // expression partially unevaluated from here
@@ -5744,8 +5756,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `Undefined`, `NaN`, `Indeterminate`), so a type that admits
         // neither is present. Every type is a subtype of `unknown`, so an
         // unresolved symbol keeps the assertion; so does `number`, which
-        // admits `nan`.
-        if (typeCannotBeAbsent(v.type.type)) return v;
+        // admits `nan`. A held restriction (`If(c, 3)` with `c` undecided)
+        // is typed as its arm, but is absent where `c` fails, so the
+        // assertion stays; so does one on an expression that contains a
+        // restriction.
+        if (typeCannotBeAbsent(v.type.type) && !mayHoldRestriction(v)) return v;
         // Undecided (the operand still carries free variables and its type
         // admits an absent outcome): the assertion stays, on the evaluated
         // operand, as `Coalesce` does with an undecided operand.
@@ -7696,7 +7711,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           typeOp: Expression | undefined,
           value: Expression | undefined
         ): void => {
-          if (typeOp !== undefined || value === undefined) return;
+          // A type operand `"unknown"` declares no type (the parse of an
+          // untyped `let k = v`), so it is read as no type operand.
+          const declaresType =
+            typeOp !== undefined &&
+            !(isString(typeOp) && typeOp.string === 'unknown') &&
+            !isSymbol(typeOp, 'unknown');
+          if (declaresType || value === undefined) return;
           if (!value.isValid) return;
           if (isFunction(value, 'Function')) return;
           if (isFunction(symbolExpr, 'Tuple')) {

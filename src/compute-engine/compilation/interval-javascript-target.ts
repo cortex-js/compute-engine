@@ -45,6 +45,7 @@ import {
   isString,
   isCharacter,
 } from '../boxed-expression/type-guards.js';
+import { restrictionParts } from '../boxed-expression/conditional-value.js';
 import {
   collectionElementType,
   kindArmNames,
@@ -682,6 +683,21 @@ function compileIntervalCollectionValue(
   // and `If(c, t)` is `Which(c, t)`. A point arm (`If(c, (x, y), Missing)`)
   // is spelled here as in a `Which`; the `If` handler would compile it as a
   // scalar and decline it.
+  //
+  // A single-branch `If(c, t)` whose arm is not a relation is first read as
+  // a restriction, `When(t, c)` (the parse of `t\{c\}`), so that it gives
+  // the value of `When` below: where the condition is undecided,
+  // `_IA.restrict` clips each element, and the hull of a selection would
+  // answer the absence marker for a list arm.
+  if (
+    literal.operator === 'If' &&
+    literal.ops.length === 2 &&
+    target.unrollSkipHeads?.has('If') !== true &&
+    !literal.ops[1].type.matches('boolean')
+  ) {
+    const restricted = compileIntervalRestrictedValue(literal, target);
+    if (restricted !== undefined) return restricted;
+  }
   if (
     (literal.operator === 'Which' || literal.operator === 'If') &&
     target.unrollSkipHeads?.has(literal.operator) !== true
@@ -1119,14 +1135,18 @@ function compileIntervalRestrictedValue(
   when: Expression,
   target: CompileTarget<Expression>
 ): string | undefined {
-  if (!isFunction(when)) return undefined;
-  const [value, cond] = when.ops;
+  // `when` is `When(value, cond)` or the single-branch `If(cond, value)`
+  // (`restrictionParts()`); the operand index of the value differs.
+  const parts = restrictionParts(when);
+  if (parts === undefined) return undefined;
+  const { value, condition: cond } = parts;
+  const valueIndex = when.operator === 'If' ? 1 : 0;
   // The value is compiled once, in its own region: the same code answers
   // "is the value a collection" and is the code that is emitted (see
   // `compileIntervalSelectionValue`; a probe followed by a second compile
   // is exponential in the depth of nested restrictions and selections).
   let present: string | undefined;
-  const spelled = BaseCompiler.withCseOperand(when, 0, target, () => {
+  const spelled = BaseCompiler.withCseOperand(when, valueIndex, target, () => {
     present = compileIntervalCollectionValue(value, target);
     return present ?? '';
   });
@@ -3799,6 +3819,28 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `bounds` holds what the earlier conditions imply where this arm is
     // reached: each arm is compiled over the inputs narrowed to the part of
     // the interval where it can be selected (`compileNarrowedIntervalArm`).
+    // One clause with no default, `Which(c, t)` or the single-branch
+    // `If(c, t)` (the parse of the restriction `t\{c\}`), is the
+    // restriction `When(t, c)`, and compiles as the `When` handler does, so
+    // that the two spellings give the same interval: where the condition is
+    // undecided, `_IA.restrict` marks the value as clipped by the domain
+    // (`partial`), where the hull of the arm and `empty` would give the arm
+    // unmarked. A relation arm is a verdict, conjoined with the condition.
+    if (
+      args.length === 2 &&
+      !isSymbol(args[0], 'True') &&
+      !isSymbol(args[0], 'False')
+    ) {
+      BaseCompiler.assertScalarCondition(args[0], target);
+      if (args[1].type.matches('boolean')) {
+        const c = intervalConditionVar(target);
+        return (
+          `((${c} = ${compile(args[0])}) === 'false' ? 'false' : ` +
+          `_IA.and(${c}, ${compile(args[1], 1)}))`
+        );
+      }
+      return `_IA.restrict(${compile(args[0])}, () => ${compile(args[1], 1)})`;
+    }
     const buildPiecewise = (i: number, bounds: IntervalArmBounds): string => {
       if (i >= args.length) return `(${INTERVAL_EMPTY})`;
       const cond = args[i];

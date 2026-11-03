@@ -156,20 +156,16 @@ describe('A2 — Compact piecewise parsing', () => {
 });
 
 describe('A2 — Multi-restriction GLSL verification', () => {
-  test('stacked restrictions canonicalize to When(e, And(c1, c2))', () => {
+  test('stacked restrictions canonicalize to If(And(c1, c2), e)', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse(
       'f(x)\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}'
     );
-    // The When may be wrapped in Multiply (per A2.1 finding).
-    // Find the When in the AST.
-    let when = expr.operator === 'When' ? expr : undefined;
-    if (!when && expr.operator === 'Multiply') {
-      when = expr.ops?.find((o) => o.operator === 'When');
-    }
-    expect(when).toBeDefined();
-    expect(when!.op2.operator).toEqual('And');
-    expect(when!.op2.ops!.length).toEqual(2);
+    // A restriction applies to its whole group, here the whole statement, so
+    // the stacked conditions merge into one `If` around it.
+    expect(expr.operator).toEqual('If');
+    expect(expr.op1.operator).toEqual('And');
+    expect(expr.op1.ops!.length).toEqual(2);
   });
 
   test('stacked restrictions compile to a single chained ternary in GLSL', () => {
@@ -247,14 +243,14 @@ describe('A2 — stacked restrictions merge through canonical `And`', () => {
     const a = ce.parse(A);
     const b = ce.parse(B);
     expect(a.json).toEqual([
-      'When',
-      'x',
+      'If',
       ['And', ['Less', ['Abs', 'z'], 5], ['Less', 0, 'y']],
+      'x',
     ]);
     expect(b.json).toEqual([
-      'When',
-      'x',
+      'If',
       ['And', ['Less', 0, 'y'], ['Less', ['Abs', 'z'], 5]],
+      'x',
     ]);
     // Different trees, the same value at every point.
     expect(a.isSame(b)).toBe(false);

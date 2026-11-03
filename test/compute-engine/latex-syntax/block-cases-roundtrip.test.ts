@@ -125,7 +125,9 @@ describe('Block spellings left byte-identical', () => {
   test('multi-statement WITH an Assign keeps the `; ` list', () => {
     // A local (`Declare` then `Assign`) is written `s\\coloneq2`; a bare
     // `Assign`, which changes an `s` outside the block, is written in the
-    // function spelling. Both read back unchanged.
+    // function spelling. The bare `Assign` reads back unchanged; the local
+    // reads back as the one statement `Declare(s, "unknown", 2)`, which is
+    // what the parser gives every `s\\coloneq v` local.
     const local = roundtrip([
       'Block',
       ['Declare', 's'],
@@ -133,7 +135,9 @@ describe('Block spellings left byte-identical', () => {
       ['Add', 's', 1],
     ]);
     expect(local.latex).toBe('s\\coloneq2; s+1');
-    expect(local.after).toBe(local.before);
+    expect(local.after).toBe(
+      JSON.stringify(['Block', ['Declare', 's', "'unknown'", 2], ['Add', 's', 1]])
+    );
     const r = roundtrip(['Block', ['Assign', 's', 2], ['Add', 's', 1]]);
     expect(r.latex).toBe('\\mathrm{Assign}(s, 2); s+1');
     expect(r.after).toBe(r.before);
@@ -293,7 +297,14 @@ describe('fence interplay — the cases block in operand/body position', () => {
     expect(r.latex).toBe(
       '\\mathrm{Repeat}(\\left(q\\coloneq2; q+1\\right), 3)'
     );
-    expect(r.after).toBe(r.before);
+    // The local reads back as one `Declare(q, "unknown", 2)` statement.
+    expect(r.after).toBe(
+      JSON.stringify([
+        'Repeat',
+        ['Block', ['Declare', 'q', "'unknown'", 2], ['Add', 'q', 1]],
+        3,
+      ])
+    );
   });
 
   test('a bare fenced cases block parses as Delimiter(Block)', () => {

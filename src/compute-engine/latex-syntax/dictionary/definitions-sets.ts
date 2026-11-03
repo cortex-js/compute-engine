@@ -488,6 +488,22 @@ const COMPARISON_HEADS = new Set<string>([
 ]);
 
 /**
+ * Is `expr` the condition of a compact-piecewise branch, `{cond: val, …}`,
+ * rather than the body of a set-builder? It is when its operator is one of
+ * `COMPARISON_HEADS`, or when it is such a condition under a restriction:
+ * the parser reads `\{x>0\{c\}: 5, 1\}` with the restriction over the
+ * condition, `If(c, Greater(x, 0))`, and that arm is still a branch.
+ */
+function isPiecewiseCondition(expr: MathJsonExpression): boolean {
+  const op = operator(expr);
+  if (op === 'If' && nops(expr) === 2) {
+    const body = operand(expr, 2);
+    return body !== null && isPiecewiseCondition(body);
+  }
+  return op !== null && COMPARISON_HEADS.has(op);
+}
+
+/**
  * The set-builder `["Set", body, ["Condition", condition]]` of
  * `{body \mid condition}` or `{body : condition}`.
  *
@@ -1253,6 +1269,12 @@ export const DEFINITIONS_SETS: LatexDictionary = [
 
       const h = operator(body);
 
+      // A single condition alone, `\{c\}`, is the value 1 where `c` holds
+      // (Desmos's piecewise shorthand for `\{c: 1\}`): `If(c, 1)`. A brace
+      // after an expression is a restriction, read by the postfix entry. A
+      // restricted condition, `\{x>0\{c\}\}`, is a condition too.
+      if (isPiecewiseCondition(body)) return ['If', body, 1];
+
       // Set-builder via `\mid`: `{expr \mid cond}` parses to Divides(expr, cond).
       if (h === 'Divides') {
         const expr = operand(body, 1);
@@ -1269,8 +1291,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
         const lhs = operand(body, 1);
         const rhs = operand(body, 2);
         if (lhs !== null && rhs !== null) {
-          const lhsOp = operator(lhs);
-          if (lhsOp !== null && COMPARISON_HEADS.has(lhsOp)) {
+          if (isPiecewiseCondition(lhs)) {
             // Compact piecewise with a single branch and no default.
             return ['Which', lhs, rhs];
           }
@@ -1299,8 +1320,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
           colonElements.length > 0 &&
           colonElements.every((el) => {
             const lhs = operand(el, 1);
-            const lhsOp = lhs !== null ? operator(lhs) : null;
-            return lhsOp !== null && COMPARISON_HEADS.has(lhsOp);
+            return lhs !== null && isPiecewiseCondition(lhs);
           });
         if (allPiecewise) {
           const whichOps: MathJsonExpression[] = [];
@@ -1342,12 +1362,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
         if (firstOp === 'Colon' || firstOp === 'Divides') {
           const builderBody = operand(first, 1);
           const cond = operand(first, 2);
-          const builderBodyOp =
-            builderBody !== null ? operator(builderBody) : null;
           if (
             builderBody !== null &&
             cond !== null &&
-            !(builderBodyOp !== null && COMPARISON_HEADS.has(builderBodyOp))
+            !isPiecewiseCondition(builderBody)
           ) {
             const conditions = [cond, ...elements.slice(1)];
             return setBuilder(

@@ -63,6 +63,7 @@ import {
   isSymbol,
   sym,
 } from './type-guards.js';
+import { restrictionParts } from './conditional-value.js';
 import {
   effectiveDischarge,
   mayStoreIntoReceiverOfType,
@@ -497,7 +498,8 @@ function restrictionValueType(
   // Stacked restrictions canonicalize into one `When`, but a value that was
   // not canonicalized can still nest, so walk to the innermost held operand.
   let held: Expression = valueExpr;
-  while (isFunction(held, 'When') && held.ops.length === 2) held = held.op1;
+  for (let r = restrictionParts(held); r; r = restrictionParts(held))
+    held = r.value;
   if (held === valueExpr) return undefined;
   // A NUMERIC restriction is typed with a `nan` arm and no `missing` arm,
   // because it masks to `NaN` (user decision 2026-09-25): the type it

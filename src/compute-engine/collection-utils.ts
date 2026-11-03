@@ -92,6 +92,7 @@ import {
   isSymbol,
   sym,
 } from './boxed-expression/type-guards.js';
+import { restrictionParts } from './boxed-expression/conditional-value.js';
 import { optionalParameterTarget } from './boxed-expression/function-literal.js';
 import {
   callbackParameterNames,
@@ -3681,8 +3682,8 @@ export function isProvablyNumberList(expr: Expression): boolean {
         (op) => isProvablyScalarNumber(op) || isProvablyNumberList(op)
       )
     );
-  if (isFunction(expr, 'When') && expr.nops === 2)
-    return isProvablyNumberList(expr.op1);
+  const restriction = restrictionParts(expr);
+  if (restriction !== undefined) return isProvablyNumberList(restriction.value);
   // The negation of a list of numbers is a list of numbers. A difference is
   // canonicalized to a sum with the negated subtrahend, so without this
   // `(1, 2) - [1, 2]` was not rejected while `(1, 2) + [1, 2]` was.

@@ -66,7 +66,10 @@ import {
   indefiniteIntegralVariables,
 } from '../boxed-expression/binding-sites.js';
 import { isFunctionSymbolName } from '../boxed-expression/implicit-variable-rule.js';
-import { conditionalValue } from '../boxed-expression/conditional-value.js';
+import {
+  conditionalValue,
+  restrictionParts,
+} from '../boxed-expression/conditional-value.js';
 import {
   boundVariableBindings,
   boundVariableNamesInOperand,
@@ -3048,8 +3051,9 @@ function distributedElements(
       ? { head: e.operator as 'List' | 'Tuple', elements: e.ops }
       : undefined;
 
-  if (isFunction(x, 'When') && x.nops === 2) {
-    const [body, cond] = x.ops;
+  const restriction = restrictionParts(x);
+  if (restriction !== undefined) {
+    const { value: body, condition: cond } = restriction;
     const parts = indexed(body);
     if (parts === undefined || mayBeCollection(cond)) return undefined;
     return {

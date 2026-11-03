@@ -323,6 +323,10 @@ import {
   isUnorderedSet,
   sym,
 } from '../boxed-expression/type-guards.js';
+import {
+  isRestriction,
+  restrictionParts,
+} from '../boxed-expression/conditional-value.js';
 import { isNumberThatMayBeAbsent } from '../boxed-expression/tensor-view.js';
 import { sortSetElements } from '../boxed-expression/order.js';
 import { exactOrder } from '../boxed-expression/compare.js';
@@ -6344,7 +6348,20 @@ function presentArmOf(d: OperandDescriptor): OperandDescriptor {
  * its evaluate handler answers `Missing`.
  */
 function isAbsentablePointListSourceType(t: Type): boolean {
-  if (!typeContainsMissing(t)) return false;
+  return typeContainsMissing(t) && isListPointListSourceType(t);
+}
+
+/**
+ * Whether `t` is the type of a `PointList` SOURCE that is a list when it is
+ * present: its present part (the type without a `missing` arm) is an indexed
+ * collection, not a tuple, not a string. The type need not have a `missing`
+ * arm: a restricted list `A\{0 < t\}` is `If(0 < t, A)`, whose static type
+ * is the type of `A`, with no `missing` arm (decision of 2026-11-02,
+ * `docs/plans/2026-11-02-restriction-binding.md`). When the VALUE of such a
+ * source is absent, the whole point list is absent, as for
+ * `isAbsentablePointListSourceType()`.
+ */
+function isListPointListSourceType(t: Type): boolean {
   const present = stripMissingFromType(t);
   if (present === 'never' || present === 'string') return false;
   if (isPointElementType(present)) return false;
@@ -9520,9 +9537,10 @@ function isConditionalValue(e: Expression): boolean {
   return isFunction(e, 'When') || isFunction(e, 'Which');
 }
 
-/** `e` without its restrictions: the body of `When(body, c)`, repeatedly. */
+/** `e` without its restrictions: the body of `When(body, c)` or of the
+ * single-branch `If(c, body)`, repeatedly. */
 function unrestricted(e: Expression): Expression {
-  while (isFunction(e, 'When') && e.nops === 2) e = e.op1;
+  for (let r = restrictionParts(e); r; r = restrictionParts(e)) e = r.value;
   return e;
 }
 
@@ -10199,14 +10217,15 @@ function isPointListListComponentType(t: Type): boolean {
 // does when it is valid, has at least one list component
 // (`isPointListListComponentType`), and every other component has a type
 // that cannot be a collection, so that it is repeated in each point. A
-// component that may be absent (`isAbsentablePointListSourceType`) is
-// declined: when it is absent, the value is `Missing`.
+// component that may be absent (`isAbsentablePointListSourceType`, or a
+// restriction `If(c, A)`, whose type has no `missing` arm) is declined: when
+// it is absent, the value is `Missing`.
 function isCountablePointList(expr: Expression): boolean {
   if (!isFunction(expr) || !expr.isValid) return false;
   let hasList = false;
   for (const op of expr.ops) {
     const t = op.type.type;
-    if (isAbsentablePointListSourceType(t)) return false;
+    if (isAbsentablePointListSourceType(t) || isRestriction(op)) return false;
     if (isPointListListComponentType(t)) hasList = true;
     else if (typeCouldBeCollection(t)) return false;
   }
@@ -12088,7 +12107,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           (op, i) =>
             isAbsentValue(op) &&
             expression.ops[i] !== undefined &&
-            isAbsentablePointListSourceType(expression.ops[i].type.type)
+            isListPointListSourceType(expression.ops[i].type.type)
         )
       )
         return ce.Missing;

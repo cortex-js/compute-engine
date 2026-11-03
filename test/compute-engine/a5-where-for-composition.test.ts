@@ -1,21 +1,25 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 
 describe('A5 — where+for composition (Order 1: where before for)', () => {
-  test('Parse: bindings before iter produces Block-outermost shape', () => {
+  test('Parse: the for applies to the whole where clause', () => {
     // Surface: `i \operatorname{where} n \coloneq 3 \operatorname{for} i = \operatorname{Range}(n)`
-    // Target canonical shape (Block outermost, Comprehension inside).
-    // Note: `Range(n)` canonicalizes to `Range(1, n)` (1-arg Range
-    // means upper bound with default start of 1).
+    // `where` binds tighter than `for`, so the clause is the body of the
+    // comprehension and the `n` of `Range(n)` is free
+    // (`docs/plans/2026-11-02-where-binding.md`, "The `for` order"). Tycho's
+    // 24 comprehension rows with a binding that reads the index need this
+    // order. `Range(n)` canonicalizes to `Range(1, n)`. The free `n` is
+    // declared in the engine that parses it, so this test has its own
+    // engine: the scope tests below check that the shared engine has no `n`.
     expect(
-      ce.parse(
+      new ComputeEngine().parse(
         'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
       )
     ).toMatchInlineSnapshot(`
       [
-        "Block",
-        ["Declare", "n"],
-        ["Assign", "n", 3],
-        ["Comprehension", "i", ["Element", "i", ["Range", 1, "n"]]]
+        "Comprehension",
+        ["Block", ["Declare", "n", "'unknown'", 3], "i"],
+        ["Element", "i", ["Range", 1, "n"]]
       ]
     `);
   });
@@ -24,7 +28,8 @@ describe('A5 — where+for composition (Order 1: where before for)', () => {
 describe('A5 — where+for composition (Order 2: for before where)', () => {
   test('Parse: iter before bindings produces Block-outermost shape', () => {
     // Surface: `i \operatorname{for} i = \operatorname{Range}(n) \operatorname{where} n \coloneq 3`
-    // Same target canonical shape as Order 1.
+    // The clause covers the whole comprehension, so `Range(n)` reads the
+    // binding.
     expect(
       ce.parse(
         'i \\operatorname{for} i = \\operatorname{Range}(n) \\operatorname{where} n \\coloneq 3'
@@ -32,8 +37,7 @@ describe('A5 — where+for composition (Order 2: for before where)', () => {
     ).toMatchInlineSnapshot(`
       [
         "Block",
-        ["Declare", "n"],
-        ["Assign", "n", 3],
+        ["Declare", "n", "'unknown'", 3],
         ["Comprehension", "i", ["Element", "i", ["Range", 1, "n"]]]
       ]
     `);
@@ -41,12 +45,12 @@ describe('A5 — where+for composition (Order 2: for before where)', () => {
 });
 
 describe('A5 — where+for composition (evaluation)', () => {
-  test('Order 1: where before for — iter range can reference binding', () => {
+  test('A parenthesized comprehension before where — iter range can reference binding', () => {
     // n is bound to 3; for-iter ranges over Range(n) = [1,2,3]
     // body is i; result is the list [1, 2, 3]
     const result = ce
       .parse(
-        'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
+        '(i \\operatorname{for} i = \\operatorname{Range}(n)) \\operatorname{where} n \\coloneq 3'
       )
       .evaluate();
     // The comprehension is a lazy collection; materialize to read its
@@ -76,7 +80,7 @@ describe('A5 — where+for composition (scope hygiene)', () => {
       // Inside the where-clause, n is shadowed to 3.
       const result = ce
         .parse(
-          'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
+          'i \\operatorname{for} i = \\operatorname{Range}(n) \\operatorname{where} n \\coloneq 3'
         )
         .evaluate();
       // The comprehension is a lazy collection; materialize to read its
@@ -97,7 +101,7 @@ describe('A5 — where+for composition (scope hygiene)', () => {
       // Outer scope has no `n` at all.
       const result = ce
         .parse(
-          'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
+          'i \\operatorname{for} i = \\operatorname{Range}(n) \\operatorname{where} n \\coloneq 3'
         )
         .evaluate();
       // The comprehension is a lazy collection; materialize to read its
@@ -118,12 +122,12 @@ describe('A5 — where+for composition (scope hygiene)', () => {
 
 describe('A5 — where+for composition (edge cases)', () => {
   test('where without trailing for falls back to plain Block', () => {
-    // Regression: plain `where` (no for clause) must still produce
-    // the original Block(Declare, Assign, body) shape from A4.
+    // A plain `where` (no for clause) is a Block of one declaration with
+    // its value, then the body.
     expect(
       ce.parse('x^2 \\operatorname{where} x \\coloneq 5')
     ).toMatchInlineSnapshot(
-      `["Block", ["Declare", "x"], ["Assign", "x", 5], ["Square", "x"]]`
+      `["Block", ["Declare", "x", "'unknown'", 5], ["Square", "x"]]`
     );
   });
 });

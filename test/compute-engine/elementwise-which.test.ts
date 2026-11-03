@@ -654,13 +654,15 @@ describe('scalar behavior is unchanged', () => {
     expect(r.symbol).toBe('Missing');
   });
 
-  test('scalar If without an else branch is Missing', () => {
-    // No-selection ruling 2026-08-27: a selection with no selected branch
-    // answers `Missing`, the position-preserving absent datum, on `If` and
-    // `Which` alike.
+  test('scalar If without an else branch is the absent value of its arm', () => {
+    // An else-less `If` with a false condition answers the absent value of
+    // the domain of its arm: `NaN` for a number, `Missing` otherwise
+    // (decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`).
     const ce = engine();
-    const r = ce.box(['If', 'False', 1]).evaluate();
-    expect(r.symbol).toBe('Missing');
+    expect(ce.box(['If', 'False', 1]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['If', 'False', ['Tuple', 1, 2]]).evaluate().symbol).toBe(
+      'Missing'
+    );
   });
 
   test('scalar Missing condition is the catchable error', () => {
@@ -939,8 +941,9 @@ describe('type handler', () => {
     expect(
       ce.box(['If', ['Equal', 'n', 0], ['List', 1, 2], 's']).type.toString()
     ).toBe('unknown');
+    // An else-less `If` has the type of its arm, with no `missing` arm.
     expect(ce.box(['If', ['Equal', 'n', 0], 's']).type.toString()).toBe(
-      'missing | unknown'
+      'unknown'
     );
     ce.assign(
       'f',

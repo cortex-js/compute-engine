@@ -94,6 +94,15 @@ import {
 } from './lenient-ambiguity.js';
 
 /**
+ * The precedence of `where` (21). A restriction `e\{c\}` binds tighter than
+ * `where`, the comma (20), `for` and `;` (19): an infix operator at this
+ * precedence or lower ends the group of its left operand, and a
+ * `parseExpression()` call with a `minPrec` at this value or lower reads a
+ * whole group (see `_liftRestrictions()`).
+ */
+const RESTRICTION_GROUP_PRECEDENCE = 21;
+
+/**
  * A collected parse diagnostic with its internal monotonic sequence id. The
  * `_seq` field is used for seq-based checkpoints (see `_Parser.diagnostics`)
  * and is stripped before the diagnostic is forwarded to the sink, so the
@@ -185,13 +194,22 @@ function parseIndexedSequence(expr: MathJsonExpression): MathJsonExpression {
   }
   if (inner === null || operator(inner) !== 'Subscript') return expr;
 
+  // The braces hold one term. A term that is a relation
+  // (`\{c_i = a_i + b_{i+s}\}_{i=1}^m`) does not arrive as a `Set`: a brace
+  // that holds a relation alone is read as Desmos's piecewise shorthand
+  // `If(c, 1)`, so that form is recognized too, and the relation is the term.
   const setNode = operand(inner, 1);
-  if (
-    setNode === null ||
-    operator(setNode) !== 'Set' ||
-    (operands(setNode)?.length ?? 0) !== 1
+  if (setNode === null) return expr;
+  let setTerm: MathJsonExpression | null = null;
+  if (operator(setNode) === 'Set' && operands(setNode).length === 1)
+    setTerm = operand(setNode, 1);
+  else if (
+    operator(setNode) === 'If' &&
+    operands(setNode).length === 2 &&
+    operand(setNode, 2) === 1
   )
-    return expr;
+    setTerm = operand(setNode, 1);
+  if (setTerm === null) return expr;
 
   const sub = operand(inner, 2);
   if (sub === null) return expr;
@@ -216,7 +234,7 @@ function parseIndexedSequence(expr: MathJsonExpression): MathJsonExpression {
 
   if (index === undefined || lower === undefined) return expr;
 
-  const term = liftIndexBinding(operand(setNode, 1)!, index);
+  const term = liftIndexBinding(setTerm, index);
   return upper === undefined
     ? ['IndexedSequence', term, index, lower]
     : ['IndexedSequence', term, index, lower, upper];
@@ -2977,12 +2995,33 @@ export class _Parser implements Parser {
       }
       this.index = start + n;
       const rhs = def.parse(this, rhsUntil);
-      if (rhs !== null) return rhs;
+      if (rhs !== null) return this._liftConnectiveOperands(rhs);
       if (declineKey !== undefined)
         this.recordKeywordResult(start, declineKey, false);
     }
     this.index = start;
     return null;
+  }
+
+  /**
+   * Each operand of a logical connective (`\land`, `\lor`, the operand of
+   * `\neg`) is a group of its own: the restrictions in an operand cover that
+   * operand only. A restriction binds tighter than a connective and looser
+   * than a relation: `x>0\{x<1\}\lor x>2\{x<3\}` is
+   * `Or(If(x<1, x>0), If(x<3, x>2))`. Return `expr` with the restrictions of
+   * each operand lifted to the root of that operand when `expr` is an `And`,
+   * an `Or` or a `Not`, and `expr` unchanged otherwise.
+   */
+  private _liftConnectiveOperands(
+    expr: MathJsonExpression
+  ): MathJsonExpression {
+    if (!this._hasRestrictions) return expr;
+    const h = operator(expr);
+    if (h !== 'And' && h !== 'Or' && h !== 'Not') return expr;
+    const ops = operands(expr);
+    const lifted = ops.map((x) => this._liftRestrictions(x));
+    if (lifted.every((x, i) => x === ops[i])) return expr;
+    return [h, ...lifted] as MathJsonExpression;
   }
 
   /** A number that stands for `obj` in a key, or 0 for no object. */
@@ -3161,7 +3200,24 @@ export class _Parser implements Parser {
           }
         }
         this.index = start + n;
-        const rhs = def.parse(this, lhs, until);
+        // An operator that binds as loosely as `where` or more (`where`,
+        // the comma, `for`, `;`) ends the group of its left operand: the
+        // restrictions in it cover that operand only (`(a\{c\}, b)` is
+        // `Tuple(If(c, a), b)`). Each side of `\to` is a group too,
+        // although `\to` binds tightly.
+        const loose = def.precedence <= RESTRICTION_GROUP_PRECEDENCE;
+        let rhs = def.parse(
+          this,
+          loose ? this._liftRestrictions(lhs) : lhs,
+          until
+        );
+        if (rhs !== null) rhs = this._liftConnectiveOperands(rhs);
+        if (rhs !== null && operator(rhs) === 'To' && nops(rhs) === 2)
+          rhs = [
+            'To',
+            this._liftRestrictions(operand(rhs, 1)!),
+            this._liftRestrictions(operand(rhs, 2)!),
+          ];
         if (rhs !== null) return rhs;
         if (declineKey !== undefined)
           this.recordKeywordResult(start, declineKey, false);
@@ -4268,6 +4324,9 @@ export class _Parser implements Parser {
       this._applicationCopied(e as object, out);
       const atName = this._subscriptAtNames.get(fn);
       if (atName !== undefined) this._subscriptAtNames.set(copy, atName);
+      // A restriction node `If(c, e)` stays a restriction in its copy, so
+      // that the lift of its group still moves `c` to the root.
+      if (this._restrictions.has(fn)) this._restrictions.add(copy);
       if (continuationRanges.has(fn)) continuationRanges.add(copy);
       if (continuationRanges.has(e as object))
         continuationRanges.add(out as object);
@@ -4276,6 +4335,84 @@ export class _Parser implements Parser {
       return out;
     };
     return visit(expr);
+  }
+
+  /**
+   * The `If(c, e)` nodes that the restriction postfix `e\{c\}` built. Their
+   * condition belongs to the root of the group that holds them, and
+   * `_liftRestrictions()` moves it there. The set is keyed by the array of
+   * the node, which a `preserveLatex` decoration (`{ latex, fn }`) keeps.
+   */
+  private _restrictions = new WeakSet<object>();
+  /** True once this parse has built a restriction: until then, closing a
+   * group does not need to walk it. */
+  private _hasRestrictions = false;
+
+  _restriction(
+    subject: MathJsonExpression,
+    condition: MathJsonExpression
+  ): MathJsonExpression {
+    const node: MathJsonExpression = ['If', condition, subject];
+    this._restrictions.add(node as object);
+    this._hasRestrictions = true;
+    return node;
+  }
+
+  _liftRestrictions(expr: MathJsonExpression): MathJsonExpression {
+    if (!this._hasRestrictions) return expr;
+    // The conditions in written order: the condition of a restriction is
+    // written after its subject, so the conditions inside the subject come
+    // first (`a\{c_1\}\{c_2\}` is `If(c_2, If(c_1, a))` before the lift).
+    const conditions: MathJsonExpression[] = [];
+    const visit = (e: MathJsonExpression): MathJsonExpression => {
+      const fn = functionElements(e);
+      if (fn === null) return e;
+      if (this._restrictions.has(fn)) {
+        const subject = visit(fn[2]);
+        conditions.push(fn[1]);
+        return subject;
+      }
+      let changed = false;
+      const ops = fn.map((x) => {
+        const y = visit(x);
+        if (y !== x) changed = true;
+        return y;
+      });
+      if (!changed) return e;
+      // Copy the bookkeeping of the parser that is keyed by the identity of
+      // the expression, as `rebindSubscripts()` does.
+      const decorated = Array.isArray(e) ? null : (e as MathJsonFunctionObject);
+      const copy = ops as [MathJsonSymbol, ...MathJsonExpression[]];
+      const out: MathJsonExpression =
+        decorated === null ? copy : { ...decorated, fn: copy };
+      this._applicationCopied(e as object, out);
+      const atName = this._subscriptAtNames.get(fn);
+      if (atName !== undefined) this._subscriptAtNames.set(copy, atName);
+      if (continuationRanges.has(fn)) continuationRanges.add(copy);
+      if (continuationRanges.has(e as object))
+        continuationRanges.add(out as object);
+      const span = this._exprSpans?.get(fn);
+      if (span !== undefined) this._exprSpans!.set(copy, span);
+      return out;
+    };
+    let body = visit(expr);
+    if (conditions.length === 0) return body;
+    // A group whose root is a single-branch selection, `\{c_1: a\}` or
+    // `\{c_1\}` (`Which(c_1, a)`, `If(c_1, 1)`), merges with the
+    // restrictions of the group: `\{c_1: a\}\{c_2\}` is
+    // `If(And(c_1, c_2), a)`, as stacked restrictions are.
+    const root = functionElements(body);
+    if (
+      root !== null &&
+      root.length === 3 &&
+      (root[0] === 'Which' || root[0] === 'If')
+    ) {
+      conditions.unshift(root[1]);
+      body = root[2];
+    }
+    const condition =
+      conditions.length === 1 ? conditions[0] : ['And', ...conditions];
+    return ['If', condition, body] as MathJsonExpression;
   }
 
   /**
@@ -7310,6 +7447,11 @@ export class _Parser implements Parser {
     }
 
     this._ownedChain = outerOwnedChain;
+    // A call that reads a whole group (the statement, the content of a
+    // delimiter or of a LaTeX argument, one comma item) moves the conditions
+    // of the restrictions in it to its root.
+    if (lhs !== null && until.minPrec <= RESTRICTION_GROUP_PRECEDENCE)
+      lhs = this._liftRestrictions(lhs);
     return this.decorate(lhs, start);
   }
 

@@ -250,8 +250,11 @@ describe('evaluateAsync threads a conditional value', () => {
 
   test.each([
     ['\\sin(3\\{0<t\\})', 'sin(3) {0 < t}'],
-    ['3\\{0<t\\}+1', '4 {0 < t}'],
-    ['[1,2,3]+2\\{0<t\\}', '[3 {0 < t},4 {0 < t},5 {0 < t}]'],
+    // A restriction applies to its whole group, so `3\\{0<t\\}+1` is
+    // `If(0<t, 3+1)`. A held restriction over a list keeps the `When`
+    // spelling.
+    ['3\\{0<t\\}+1', 'If(0 < t, 4)'],
+    ['[1,2,3]+2\\{0<t\\}', '[3,4,5] {0 < t}'],
   ])('%s, parse route', async (tex, expected) => {
     expect(engine().parse(tex).evaluate().toString()).toBe(expected);
     expect((await engine().parse(tex).evaluateAsync()).toString()).toBe(

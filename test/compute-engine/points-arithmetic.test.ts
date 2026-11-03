@@ -1918,7 +1918,7 @@ describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
     });
     expect(f.json).toEqual([
       'Function',
-      ['Block', ['Declare', 'x'], ['Assign', 'x', 1], ['Add', 'x', 1]],
+      ['Block', ['Declare', 'x', "'unknown'", 1], ['Add', 'x', 1]],
       't',
     ]);
     expect(ce.box(['Apply', f, 7]).N().re).toBe(2);

@@ -159,20 +159,18 @@ describe('row 388: a big operator and what follows it', () => {
 });
 
 describe('row 389: a nested Block', () => {
-  const block = [
-    'Block',
-    ['Declare', 'z'],
-    ['Assign', 'z', ['Add', 'Z', 1]],
-    'd',
-  ];
+  // A local binding is the one statement `Declare(z, "unknown", v)`, the
+  // form the parser gives `z \coloneq v`, and is written as a `where`
+  // clause.
+  const block = ['Block', ['Declare', 'z', "'unknown'", ['Add', 'Z', 1]], 'd'];
 
   test('a comparison after it stays outside it', () => {
     const r = roundTrip(['Less', block, 1]);
-    expect(r.latex).toBe('\\left(z\\coloneq Z+1; d\\right)\\lt1');
+    expect(r.latex).toBe('\\left(d\\text{ where }z\\coloneq Z+1\\right)\\lt1');
     expect(r.same).toBe(true);
     // At the top level a block is written bare.
     expect(roundTrip(block)).toEqual({
-      latex: 'z\\coloneq Z+1; d',
+      latex: 'd\\text{ where }z\\coloneq Z+1',
       same: true,
     });
   });
@@ -218,12 +216,7 @@ describe('row 391: the derivative of a function literal', () => {
         'D',
         [
           'Function',
-          [
-            'Block',
-            ['Declare', 'k'],
-            ['Assign', 'k', 2],
-            ['Multiply', 'k', 'x'],
-          ],
+          ['Block', ['Declare', 'k', "'unknown'", 2], ['Multiply', 'k', 'x']],
           'x',
         ],
         'x',
@@ -395,12 +388,13 @@ describe('row 395: the dividend of Mod written as an explicit product', () => {
 });
 
 describe('local and outer assignments in a block', () => {
-  // In a block, `k \coloneq v` declares a local `k` (`Declare` then
-  // `Assign`). `let k \coloneq v` is the same, and `let` also gives a
+  // In a block, `k \coloneq v` declares a local `k` with its value, the
+  // one statement `Declare(k, "unknown", v)` (`"function"` for a function
+  // literal). `let k \coloneq v` is the same, and `let` also gives a
   // declaration its type. A bare `Assign`, which changes a `k` outside the
   // block, is written `\mathrm{Assign}(k, v)`.
   test.each([
-    [['Block', ['Declare', 'k'], ['Assign', 'k', 2], ['Multiply', 'k', 'x']]],
+    [['Block', ['Declare', 'k', "'unknown'", 2], ['Multiply', 'k', 'x']]],
     [['Block', ['Assign', 'k', 2], ['Multiply', 'k', 'x']]],
     [['Block', ['Assign', 'k', 2]]],
     [
@@ -426,8 +420,7 @@ describe('local and outer assignments in a block', () => {
     [
       [
         'Block',
-        ['Declare', 'f'],
-        ['Assign', 'f', ['Function', ['Power', 'x', 2], 'x']],
+        ['Declare', 'f', "'function'", ['Function', ['Power', 'x', 2], 'x']],
         ['f', 3],
       ],
     ],
@@ -439,13 +432,13 @@ describe('local and outer assignments in a block', () => {
     [
       [
         'Block',
-        ['Declare', 'k'],
         [
-          'Assign',
+          'Declare',
           'k',
+          "'function'",
           [
             'Function',
-            ['Block', ['Declare', 'j'], ['Assign', 'j', 'x'], 'j'],
+            ['Block', ['Declare', 'j', "'unknown'", 'x'], 'j'],
             'x',
           ],
         ],

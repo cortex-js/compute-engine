@@ -1181,6 +1181,25 @@ export interface Parser {
     names: ReadonlySet<string>
   ): MathJsonExpression;
 
+  /** @internal Return `If(condition, subject)` for a restriction
+   * `subject\{condition\}`, marked so that `_liftRestrictions()` moves its
+   * condition to the root of the group that holds it. */
+  _restriction(
+    subject: MathJsonExpression,
+    condition: MathJsonExpression
+  ): MathJsonExpression;
+
+  /** @internal Close a group (the whole statement, one comma item, one side
+   * of `\to`, the body of `for`, `where` or a big operator, the content of a
+   * delimiter or of a LaTeX argument): replace each marked restriction in
+   * `expr` by its subject, and wrap `expr` in `If(c, expr)`, where `c` is
+   * the `And` of the conditions in written order. The parser calls it at
+   * the end of each `parseExpression()` that reads a whole group, and
+   * before an infix operator that binds as loosely as `where` or more. A
+   * parse function that reads a group with a higher `minPrec` (the body of
+   * a big operator) calls it on that group. */
+  _liftRestrictions(expr: MathJsonExpression): MathJsonExpression;
+
   /** @internal In non-strict mode, with diagnostics on, record a diagnostic
    * whose code starts with `ambiguous-` for the tokens
    * `[startToken, endToken)`: the text has a second common reading. A

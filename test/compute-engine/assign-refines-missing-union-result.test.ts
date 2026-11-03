@@ -99,11 +99,14 @@ describe('assign keeps a `missing | T` result under a bare `function` declaratio
     expect(ce.parse('\\sin(l(t))').type.toString()).toBe('nan | real');
   });
 
-  it('keeps an else-less `If` result and the other absence marker', () => {
+  it('types an else-less `If` result as its arm, and keeps the other absence marker', () => {
+    // The static type of `If(c, e)` is the type of `e`, with no `missing`
+    // arm, so the result is the arm `1`, widened to `number` as the result
+    // of a literal body is.
     const ce = engine();
     ce.declare('l', 'function');
     ce.assign('l', literal(ce, ['If', ['Less', 't', 1], 1]));
-    expect(ce.parse('l(t)').type.toString()).toBe('integer | missing');
+    expect(ce.parse('l(t)').type.toString()).toBe('number');
 
     const ce2 = engine();
     ce2.declare('l', 'function');
@@ -111,7 +114,7 @@ describe('assign keeps a `missing | T` result under a bare `function` declaratio
     expect(ce2.parse('l(t)').type.toString()).toBe('nothing');
   });
 
-  it('keeps a `nan` result and a marker nested in a collection (unaffected before the fix)', () => {
+  it('keeps a `nan` result and an else-less `If` nested in a collection (unaffected before the fix)', () => {
     const ce = engine();
     ce.declare('l', 'function');
     ce.assign('l', literal(ce, ['Divide', 0, 0]));
@@ -123,8 +126,6 @@ describe('assign keeps a `missing | T` result under a bare `function` declaratio
       'l',
       literal(ce2, ['Tuple', ['If', ['Less', 't', 1], 1], ['Add', 't', 1]])
     );
-    expect(ce2.parse('l(t)').type.toString()).toBe(
-      'tuple<integer | missing, number>'
-    );
+    expect(ce2.parse('l(t)').type.toString()).toBe('tuple<integer, number>');
   });
 });

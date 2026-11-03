@@ -4358,8 +4358,9 @@ const BLOCK_EFFECT_OPERATORS = [
  *
  * Returns `undefined` when the block is not a plain sequence of local
  * declarations and assignments followed by an expression:
- * - a statement other than `Declare(k)` (with no type and no initial value)
- *   or `Assign(k, value)` before the last one, or an assignment to a name
+ * - a statement other than `Declare(k)` (with no type and no initial value),
+ *   `Declare(k, "unknown", value)` or `Assign(k, value)` before the last
+ *   one, or an assignment to a name
  *   the block does not declare (it changes a variable outside the block);
  * - a declaration of the differentiation variable `v` (it would shadow it);
  * - a local name that is still in an expression after the substitution: a
@@ -4403,6 +4404,25 @@ function blockValue(
       const name = sym(statement.op1);
       if (!name || name === v || locals.has(name)) return undefined;
       locals.add(name);
+      continue;
+    }
+    // A binding with no written type, `Declare(k, "unknown", value)` (the
+    // parse of `k \coloneq value;` at the start of a block, and of a `where`
+    // item), is a declaration followed by an assignment. A declaration with
+    // a written type is not reduced: the substitution would skip the check
+    // of the value against that type.
+    if (
+      isFunction(statement, 'Declare') &&
+      statement.nops === 3 &&
+      isString(statement.op2) &&
+      statement.op2.string === 'unknown'
+    ) {
+      const name = sym(statement.op1);
+      if (!name || name === v || locals.has(name)) return undefined;
+      const value = substitute(statement.op3);
+      if (value === undefined || value.isPure === false) return undefined;
+      locals.add(name);
+      values[name] = value;
       continue;
     }
     if (isFunction(statement, 'Assign') && statement.nops === 2) {

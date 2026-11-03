@@ -483,6 +483,7 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
+import { isRestriction } from '../boxed-expression/conditional-value.js';
 import {
   cmp,
   exactConstantValue,
@@ -5497,8 +5498,8 @@ function threadOperandsThatBecameConditional(
   if (
     !evaluated.some(
       (x, i) =>
-        (isFunction(x, 'When') || isFunction(x, 'Which')) &&
-        !isFunction(ops[i], 'When') &&
+        (isRestriction(x) || isFunction(x, 'Which')) &&
+        !isRestriction(ops[i]) &&
         !isFunction(ops[i], 'Which')
     )
   )
@@ -15603,7 +15604,7 @@ function pointListOperand(
     if (p !== undefined) {
       sawPoint = true;
       points.push(p);
-    } else if (cells && (isFunction(el, 'When') || isFunction(el, 'Which'))) {
+    } else if (cells && (isRestriction(el) || isFunction(el, 'Which'))) {
       sawPoint = true;
       points.push(el);
     } else if (cells && isAbsentSymbol(el)) points.push(el);
@@ -17351,7 +17352,7 @@ function addEvaluatedOperands(
     // A quantity or a measurement is a value of a kind: the evaluated
     // operands are numeric already, so an operand that became one under
     // `.N()` (Tycho item 101) went to the kind dispatch above.
-    return markAbsentPointCells(engine!, expression, r);
+    return markAbsentPointCells(engine!, expression, r, evaluated);
   }
   const result = addArray(evaluated);
   // D2: an inexact (float) operand has no exactness to preserve, so it
@@ -17381,7 +17382,7 @@ function addEvaluatedOperands(
     evaluated.some((x) => !isExactNumber(x))
   )
     return result.N();
-  return markAbsentPointCells(engine!, expression, result);
+  return markAbsentPointCells(engine!, expression, result, evaluated);
 }
 
 /**
@@ -17531,7 +17532,7 @@ function mulEvaluatedOperands(
       raw.map((x) => !x)
     );
     // See the matching comment in `Add` (Tycho item 101).
-    return markAbsentPointCells(engine!, expression, r);
+    return markAbsentPointCells(engine!, expression, r, evaluated);
   }
   // `mulFactored`, not `mul`: `evaluate()` promises the most EXACT form,
   // and a product of sums is exactly as exact factored as expanded while
@@ -17555,5 +17556,5 @@ function mulEvaluatedOperands(
     evaluated.some((x) => !isExactNumber(x))
   )
     return result.N();
-  return markAbsentPointCells(engine!, expression, result);
+  return markAbsentPointCells(engine!, expression, result, evaluated);
 }

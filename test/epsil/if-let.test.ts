@@ -259,12 +259,14 @@ describe('EPSIL IF LET — evaluation', () => {
     expect(miss.value?.toString()).toBe('0');
   });
 
-  test('without an else, a refuted if-let is Missing (as a false if is)', () => {
+  test('without an else, a refuted if-let is Missing', () => {
     const r = run('if let [x, y] = [1] { x }');
     expect(r.diagnostics).toEqual([]);
     expect(r.value?.json).toBe('Missing');
-    // The same program with a plain `if`, for comparison.
-    expect(run('if 1 > 2 { 5 }').value?.json).toBe('Missing');
+    // A plain false `if` gives the absent value of the domain of its arm:
+    // `NaN` for the number `5` (decision of 2026-11-02,
+    // `docs/plans/2026-11-02-restriction-binding.md`).
+    expect(run('if 1 > 2 { 5 }').value?.json).toBe('NaN');
   });
 
   test('a typed `!error` binding refuses an error value (the roadmap case)', () => {

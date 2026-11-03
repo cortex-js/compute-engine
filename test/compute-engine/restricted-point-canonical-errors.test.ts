@@ -27,8 +27,15 @@ const P = '(0,1)\\left\\{0<t\\right\\}';
 const Q = '(2,3)\\left\\{0<t\\right\\}';
 const W = '\\begin{cases}(0,1) & t>0\\end{cases}';
 
+/**
+ * The error code of `e`. A restriction `\{c\}` applies to its whole group,
+ * so a parsed `P\cdot Q` is `If(c, Multiply(…))` and the canonical error is
+ * the arm of that `If`: the code is read from the arm.
+ */
 function errorCode(e: { json: unknown }): string | undefined {
-  const j = e.json as unknown[];
+  let j = e.json as unknown[];
+  while (Array.isArray(j) && j[0] === 'If' && j.length === 3)
+    j = j[2] as unknown[];
   if (!Array.isArray(j) || j[0] !== 'Error') return undefined;
   const code = (j[1] as unknown[])?.[1];
   return typeof code === 'string' ? code.replace(/'/g, '') : undefined;
@@ -226,8 +233,10 @@ describe.each([1, -1])('List of points shapes, t = %d', (tv) => {
     const e = ce.parse(`[1,2,3]${P}`);
     expect(e.isValid).toBe(true);
     const v = e.evaluate();
+    // The restriction applies to the whole product, so a false condition
+    // makes the whole list absent.
     if (tv > 0) expect(v.toString()).toBe('[(0, 1),(0, 2),(0, 3)]');
-    else expect(v.json).toEqual(['List', 'Missing', 'Missing', 'Missing']);
+    else expect(v.json).toBe('Missing');
   });
 });
 

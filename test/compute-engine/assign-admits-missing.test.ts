@@ -18,9 +18,13 @@ import { typeToString } from '../../src/common/type/serialize';
  * - a restricted NUMERIC value still binds to a numeric declaration: since
  *   2026-09-25 it masks to `NaN` and types `integer | nan`, and `nan` is a
  *   number;
- * - a restricted non-numeric value and the bare marker need a declaration
- *   that admits absence (`tuple<number, number> | missing`), and the declared
- *   type stays exactly as written;
+ * - the bare marker needs a declaration that admits absence
+ *   (`tuple<number, number> | missing`), and the declared type stays exactly
+ *   as written;
+ * - a restricted value `If(c, e)` has the static type of `e`, with no `nan`
+ *   and no `missing` arm, so a restricted tuple binds to a declared
+ *   `tuple<number, number>` (the restriction-binding decision of 2026-11-02,
+ *   `docs/plans/2026-11-02-restriction-binding.md`);
  * - a declared element contract judges an absent cell (decision P1b);
  * - subtyping is unchanged (`missing <: number` is still false), and a symbol
  *   with NO declaration still infers the `T | missing` arm.
@@ -38,28 +42,24 @@ function gatedScalar(ce: ComputeEngine) {
 }
 
 describe('the type a restriction carries', () => {
-  test('a gated tuple has a `missing` arm', () => {
+  // The static type of a single-branch `If(c, e)` is the type of `e`, with
+  // no `missing` and no `nan` arm.
+  test('a gated tuple has the type of the tuple', () => {
     const ce = new ComputeEngine();
-    expect(gatedTuple(ce).type.toString()).toBe(
-      'missing | tuple<integer, integer>'
-    );
+    expect(gatedTuple(ce).type.toString()).toBe('tuple<integer, integer>');
   });
 
-  test('a gated scalar has a `nan` arm', () => {
-    // A masked number is `NaN` (user decision 2026-09-25); the arm was
-    // `missing`.
+  test('a gated scalar has the type of the scalar', () => {
     const ce = new ComputeEngine();
-    expect(gatedScalar(ce).type.toString()).toBe('integer | nan');
+    expect(gatedScalar(ce).type.toString()).toBe('integer');
   });
 });
 
 describe('ce.assign() of a gated value into a declared type', () => {
-  test('a gated tuple needs a declaration that admits absence', () => {
+  test('a gated tuple binds to a declared tuple, and to one that admits absence', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'tuple<number, number>');
-    expect(() => ce.assign('P', gatedTuple(ce))).toThrow(
-      /not compatible with the type "tuple<number, number>"/
-    );
+    expect(() => ce.assign('P', gatedTuple(ce))).not.toThrow();
     ce.declare('PM', 'tuple<number, number> | missing');
     expect(() => ce.assign('PM', gatedTuple(ce))).not.toThrow();
   });
@@ -148,7 +148,7 @@ describe('the other declared-type routes agree', () => {
     const ce = new ComputeEngine();
     expect(() =>
       ce.declare('R', { type: 'tuple<number, number>', value: gatedTuple(ce) })
-    ).toThrow(/not compatible/);
+    ).not.toThrow();
     ce.declare('RM', {
       type: 'tuple<number, number> | missing',
       value: gatedTuple(ce),
@@ -159,9 +159,9 @@ describe('the other declared-type routes agree', () => {
   test('the `Assign` operator', () => {
     const ce = new ComputeEngine();
     ce.declare('Q', 'tuple<number, number>');
-    expect(ce.box(['Assign', 'Q', gatedTuple(ce)]).evaluate().operator).toBe(
-      'Error'
-    );
+    expect(
+      ce.box(['Assign', 'Q', gatedTuple(ce)]).evaluate().operator
+    ).not.toBe('Error');
     ce.declare('QM', 'tuple<number, number> | missing');
     expect(
       ce.box(['Assign', 'QM', gatedTuple(ce)]).evaluate().operator
@@ -178,11 +178,11 @@ describe('the other declared-type routes agree', () => {
   });
 });
 
-describe('an inferred type still carries the `missing` arm', () => {
-  test('an undeclared symbol keeps `integer | nan`', () => {
+describe('an inferred type follows the restricted value', () => {
+  test('an undeclared symbol takes the type of the restricted value', () => {
     const ce = new ComputeEngine();
     ce.assign('q', ce.parse('3\\left\\{a>0\\right\\}'));
-    expect(ce.box('q').type.toString()).toBe('integer | nan');
+    expect(ce.box('q').type.toString()).toBe('integer');
   });
 });
 

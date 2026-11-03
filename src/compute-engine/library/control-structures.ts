@@ -120,6 +120,7 @@ import {
   isString,
   sym,
 } from '../boxed-expression/type-guards.js';
+import { isStatementArm } from '../boxed-expression/conditional-value.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
 import {
@@ -392,7 +393,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 
     If: {
       description:
-        '`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is `Missing` when `c` is `False`. Only the selected expression is evaluated.\n' +
+        '`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\\{c\\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.\n' +
         'When `c` is a list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is then `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection.',
       lazy: true,
       // Selects among its operands, so an error in an operand it does not
@@ -406,11 +407,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // positions, so their own (production) effects still contribute
       // unchanged — `If(c, Random(), 0)` is still `{random}`.
       invokes: false,
-      // The else branch is optional: `If(cond, expr)` evaluates to `Missing`
-      // when the condition is false — the position-preserving absent datum,
-      // never `Nothing`, whose splicing erasure must not answer a failed
-      // selection (ERROR-MODEL §1; no-selection ruling 2026-08-27, shared
-      // with `Which`).
+      // The else branch is optional: `If(cond, expr)` evaluates to the
+      // absent value of the domain of `expr` when the condition is false
+      // (`maskedValue`): `NaN` for a number, otherwise `Missing`, the
+      // position-preserving absent datum, never `Nothing`, whose splicing
+      // erasure must not answer a failed selection (ERROR-MODEL §1). This is
+      // the value of a restriction `expr\{cond\}`, which the parser reads as
+      // `If(cond, expr)` (user decision 2026-11-02,
+      // `docs/plans/2026-11-02-restriction-binding.md`).
       // The handler reads only the operands' TYPES, so it is declared on the
       // descriptor shape and cannot touch engine state while deriving.
       type: ([cond, ifTrue, ifFalse], context) => {
@@ -429,6 +433,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const armList = [ifTrue, ifFalse]
           .filter((x) => x !== undefined)
           .map((x) => x.type);
+        // Without an else branch, `If(c, e)` is the restriction `e\{c\}`,
+        // which is evaluated as `When(e, c)` (`evaluateIf()`): a list value
+        // is zipped with the mask, to the shorter of the two lengths. So a
+        // mask condition over a collection value that is not a point or a
+        // string types it as `When` does (`whenType()`). A scalar value is
+        // masked whole in each cell, as the element-wise selection below
+        // types it.
+        if (
+          shape &&
+          ifFalse === undefined &&
+          isSubtype(ifTrue.type, COLLECTION_SHAPE_TYPE) &&
+          !isTupleShapedType(ifTrue.type) &&
+          !isSubtype(ifTrue.type, 'string')
+        )
+          return whenType([ifTrue, cond], context);
         if (shape)
           return BoxedType.forResult(
             elementwiseResultType(
@@ -459,16 +478,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             context.engine._typeResolver
           );
         }
-        // Without an else branch a false condition yields `Missing`, and that
-        // arm must survive in the type, so build the union explicitly rather
-        // than through `widen` (which joins toward a common supertype and
-        // would dissolve the absence marker into a top type).
+        // Without an else branch a false condition yields the absent value
+        // of the arm's domain (`maskedValue`: `NaN` for a number, `Missing`
+        // otherwise), as a restriction does. The type is the type of the
+        // arm unchanged, `(boolean, T) -> T`, with no `nan` or `missing`
+        // arm: the absent value is implicit in every signature, so a
+        // restricted value is accepted where its arm is (`n: number`
+        // assigned `If(0 < t, 3)`).
+        // Decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`.
         const scalar: Type =
           ifFalse === undefined
-            ? reduceType({
-                kind: 'union',
-                types: [ifTrue.type, 'missing'],
-              })
+            ? ifTrue.type
             : untypedArm(ifTrue, context.engine) ||
                 untypedArm(ifFalse, context.engine)
               ? 'unknown'
@@ -715,173 +735,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
       lazy: true,
       signature: '(expression, boolean) -> any',
-      type: ([expr, cond], context) => {
-        // A list/vector-of-booleans condition broadcasts: the result is a
-        // list whose element type is `expr`'s type (see the broadcast branch
-        // in `evaluate`). Lazy operators bypass the generic list-broadcast
-        // typing wrapper, so lift the type here explicitly — but only when the
-        // condition's *declared* type is a list/vector of booleans. A scalar
-        // or unknown boolean condition keeps `expr`'s type.
-        //
-        // A false condition masks the value to `Missing`, and that arm must
-        // survive in the type — as it does for a `Which` with no default
-        // clause and for the else-less `If` (no-selection ruling of
-        // 2026-08-27; `When` aligned 2026-09-09). The union is built
-        // explicitly rather than through `widen`, which joins toward a
-        // common supertype and would dissolve the absence marker into a top
-        // type. Only a condition that is the literal `True` symbol can never
-        // mask, so only that case keeps `expr`'s bare type.
-        //
-        // A type read must never crash, whatever the application looks
-        // like, so a malformed arity-0 `When` answers `unknown` here. (An
-        // earlier version of this handler dereferenced `expr.type`
-        // unconditionally and threw on that input.)
-        if (expr === undefined)
-          return BoxedType.forResult('unknown', context.engine._typeResolver);
-        // The handler reads operand VIEWS (the descriptor route), so the
-        // literal is recognized through `structureOf`, exactly as the `Which`
-        // type handler finds its default clause.
-        const condStructure = cond?.structureOf?.();
-        if (condStructure?.kind === 'symbol' && condStructure.name === 'True')
-          return BoxedType.forResult(expr.type, context.engine._typeResolver);
-        // The mask test accepts any collection of booleans, not only a
-        // `list` (see `BOOLEAN_MASK_TYPE`): the `evaluate` handler zips every
-        // finite collection of boolean cells, so a condition typed
-        // `set<boolean>` or `indexed_collection<boolean>` is a mask as much
-        // as a `list<boolean>` is.
-        // A mask of rank 2 or more, or a mask whose rank the type does not
-        // give, selects cell by cell at every level, as the else-less
-        // `If(cond, expr)` does (see the `evaluate` handler), so the result
-        // has the type of that `If`.
-        const shape =
-          cond === undefined
-            ? undefined
-            : elementwiseConditionShape([cond.type]);
-        if (shape !== undefined && shape.rank !== 1)
-          return BoxedType.forResult(
-            elementwiseResultType([expr.type], shape, false),
-            context.engine._typeResolver
-          );
-        if (cond !== undefined && isSubtype(cond.type, BOOLEAN_MASK_TYPE)) {
-          // Built structurally, not from a type STRING: a literal element
-          // type (`When(1, [c1, c2])` types `list<1 | missing>`) has no
-          // string spelling the parser accepts inside a union.
-          //
-          // A list-valued `expr` is zipped with the mask, cell by cell (see
-          // the broadcast branch in `evaluate`), so the cells of the result
-          // are the CELLS of `expr`, not `expr` itself:
-          // `[10,20,30]{[1,2,3] > 2}` is `[Missing, Missing, 30]`, a
-          // `list<integer | missing>`. A scalar `expr` is masked whole in
-          // every cell.
-          //
-          // The `evaluate` handler zips a finite collection value that is
-          // not a tuple (a point is one value) and not a string (atomic
-          // under restriction), and it zips an ORDERED carrier
-          // (`isOrderedCarrierType`) whatever its length, reading only the
-          // elements the mask needs. When the elements of an ordered
-          // carrier cannot be read (a valueless symbol, a range with a free
-          // bound), the restriction is held whole, so its value is typed by
-          // this handler. Otherwise each cell is the WHOLE value. A type
-          // with a tuple or a string arm (`tuple<number, number> |
-          // list<tuple<number, number>>`) is not ordered: it takes the join
-          // branch below, because its value can be one point. The type
-          // follows the same rule:
-          // - a carrier that is finite by type (`FINITE_COLLECTION_TYPE`: a
-          //   `list<T>`, a `vector`, a `matrix`, a `dictionary`, a `record`,
-          //   a `range`) or ordered by type (`indexed_collection<T>`, which
-          //   can be infinite, such as `Range(1, ∞)`) is always zipped, so
-          //   each cell has its ELEMENT type `T`. `When(Range(1, ∞),
-          //   [True, False])` evaluates to `[1, NaN]` (a masked number is
-          //   `NaN`);
-          // - a carrier of an UNORDERED collection type that is not finite
-          //   by type (`collection<T>`, `set<T>`) can hold an infinite set,
-          //   such as `Integers`, which has no first element and is not
-          //   zipped: each cell is then the whole value. So a cell can be
-          //   either an element (a finite set is zipped) or the whole value,
-          //   and its type is the JOIN of the element type and the carrier
-          //   type. `When(Integers, [True, False])` evaluates to
-          //   `[Integers, Missing]`, which the element type `integer` alone
-          //   does not admit;
-          // - a tuple, a string or a scalar value is never zipped, so each
-          //   cell has the type of the whole value.
-          // The result is a `list` whatever the carrier is, because the
-          // value the `evaluate` handler builds is a `List`.
-          const zippable =
-            isSubtype(expr.type, COLLECTION_SHAPE_TYPE) &&
-            !isTupleShapedType(expr.type) &&
-            !isSubtype(expr.type, 'string');
-          const element = zippable
-            ? (collectionElementType(expr.type) ?? 'unknown')
-            : undefined;
-          const cell: Type =
-            element === undefined
-              ? expr.type
-              : isSubtype(expr.type, FINITE_COLLECTION_TYPE) ||
-                  // An ordered type that admits a STRING value
-                  // (`indexed_collection<character>`) takes the join branch:
-                  // a string is one value under a restriction, never zipped
-                  // (`isAtomicCarrierValue`), so a cell can be the whole
-                  // string, which the element type `character` does not
-                  // admit.
-                  (isOrderedCarrierType(expr.type) &&
-                    !isSubtype('string', expr.type))
-                ? element
-                : reduceType({
-                    kind: 'union',
-                    // A masked numeric element of a zipped finite set is
-                    // `NaN`, so a numeric element arm is `number`, the type
-                    // that admits `NaN`, as the zipped branch above answers
-                    // `list<number>`: `When({1, 2}, [True, False])` is
-                    // `[1, NaN]`.
-                    types: [
-                      isNumericValueType(element) ? 'number' : element,
-                      expr.type,
-                    ],
-                  });
-          // A masked NUMERIC cell is `NaN` (`maskedValue`), so the cells are
-          // numbers, `list<number>`: the materialized list the mask answers
-          // (`[NaN, NaN, 30]`) is typed by the `List` handler, which joins a
-          // `NaN` cell and an integer cell to `number`. Any other cell keeps
-          // its `missing` arm.
-          return BoxedType.forResult(
-            {
-              kind: 'list',
-              elements: isNumericValueType(cell)
-                ? 'number'
-                : reduceType({ kind: 'union', types: [cell, 'missing'] }),
-            },
-            context.engine._typeResolver
-          );
-        }
-        // A NUMERIC value masks to `NaN` (`maskedValue`), so its type is its
-        // own tier with the `nan` arm, `integer | nan` for `When(1, c)`, and
-        // no `missing` arm (user decision 2026-09-25; it was
-        // `integer | missing`). The tier is kept — rather than absorbed to
-        // `number` — so that the value stays admitted where the tier matters:
-        // an element read of a restricted row is typed
-        // `integer | missing | nan` by `At`, and a declared range or an
-        // assumption reads the held literal back through it.
-        if (isNumericValueType(expr.type))
-          return BoxedType.forResult(
-            withNanArm(expr.type),
-            context.engine._typeResolver
-          );
-        // A list-like value keeps its own type under the `missing` arm,
-        // `missing | vector<integer^2>` for `When([1,2], c)`: while the
-        // condition is undecided the value is the held `When` itself (never a
-        // copy of the cells into a `List` of `When`s — see the `evaluate`
-        // handler), whose type is this one, and when the condition is decided
-        // the value is the whole list or `Missing`. The cells the held form
-        // enumerates are restricted cells, `When(elem, c)`, each typed
-        // `elem | missing`; an element access carries that arm through its
-        // own marker (`At`, `First`). A LITERAL list of restricted cells,
-        // `[1{c}, 2{c}]`, is a different value, typed `list<integer | missing>`
-        // by the `List` type handler.
-        return BoxedType.forResult(
-          reduceType({ kind: 'union', types: [expr.type, 'missing'] }),
-          context.engine._typeResolver
-        );
-      },
+      type: whenType,
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
         const [expr, cond] = args;
@@ -1542,6 +1396,181 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/**
+ * The type handler of `When(e, c)`. The single-branch `If(c, e)` whose
+ * arm is a value, the form the parser gives a restriction `e\{c\}`, is
+ * evaluated as `When(e, c)` (`evaluateIf()`), so the `If` type handler
+ * calls this function when its condition is a mask, and the type and the
+ * value agree.
+ */
+function whenType(
+  [expr, cond]: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+): BoxedType {
+  // A list/vector-of-booleans condition broadcasts: the result is a
+  // list whose element type is `expr`'s type (see the broadcast branch
+  // in `evaluate`). Lazy operators bypass the generic list-broadcast
+  // typing wrapper, so lift the type here explicitly — but only when the
+  // condition's *declared* type is a list/vector of booleans. A scalar
+  // or unknown boolean condition keeps `expr`'s type.
+  //
+  // A false condition masks the value to `Missing`, and that arm must
+  // survive in the type — as it does for a `Which` with no default
+  // clause and for the else-less `If` (no-selection ruling of
+  // 2026-08-27; `When` aligned 2026-09-09). The union is built
+  // explicitly rather than through `widen`, which joins toward a
+  // common supertype and would dissolve the absence marker into a top
+  // type. Only a condition that is the literal `True` symbol can never
+  // mask, so only that case keeps `expr`'s bare type.
+  //
+  // A type read must never crash, whatever the application looks
+  // like, so a malformed arity-0 `When` answers `unknown` here. (An
+  // earlier version of this handler dereferenced `expr.type`
+  // unconditionally and threw on that input.)
+  if (expr === undefined)
+    return BoxedType.forResult('unknown', context.engine._typeResolver);
+  // The handler reads operand VIEWS (the descriptor route), so the
+  // literal is recognized through `structureOf`, exactly as the `Which`
+  // type handler finds its default clause.
+  const condStructure = cond?.structureOf?.();
+  if (condStructure?.kind === 'symbol' && condStructure.name === 'True')
+    return BoxedType.forResult(expr.type, context.engine._typeResolver);
+  // The mask test accepts any collection of booleans, not only a
+  // `list` (see `BOOLEAN_MASK_TYPE`): the `evaluate` handler zips every
+  // finite collection of boolean cells, so a condition typed
+  // `set<boolean>` or `indexed_collection<boolean>` is a mask as much
+  // as a `list<boolean>` is.
+  // A mask of rank 2 or more, or a mask whose rank the type does not
+  // give, selects cell by cell at every level, as the else-less
+  // `If(cond, expr)` does (see the `evaluate` handler), so the result
+  // has the type of that `If`.
+  const shape =
+    cond === undefined ? undefined : elementwiseConditionShape([cond.type]);
+  if (shape !== undefined && shape.rank !== 1)
+    return BoxedType.forResult(
+      elementwiseResultType([expr.type], shape, false),
+      context.engine._typeResolver
+    );
+  if (cond !== undefined && isSubtype(cond.type, BOOLEAN_MASK_TYPE)) {
+    // Built structurally, not from a type STRING: a literal element
+    // type (`When(1, [c1, c2])` types `list<1 | missing>`) has no
+    // string spelling the parser accepts inside a union.
+    //
+    // A list-valued `expr` is zipped with the mask, cell by cell (see
+    // the broadcast branch in `evaluate`), so the cells of the result
+    // are the CELLS of `expr`, not `expr` itself:
+    // `[10,20,30]{[1,2,3] > 2}` is `[Missing, Missing, 30]`, a
+    // `list<integer | missing>`. A scalar `expr` is masked whole in
+    // every cell.
+    //
+    // The `evaluate` handler zips a finite collection value that is
+    // not a tuple (a point is one value) and not a string (atomic
+    // under restriction), and it zips an ORDERED carrier
+    // (`isOrderedCarrierType`) whatever its length, reading only the
+    // elements the mask needs. When the elements of an ordered
+    // carrier cannot be read (a valueless symbol, a range with a free
+    // bound), the restriction is held whole, so its value is typed by
+    // this handler. Otherwise each cell is the WHOLE value. A type
+    // with a tuple or a string arm (`tuple<number, number> |
+    // list<tuple<number, number>>`) is not ordered: it takes the join
+    // branch below, because its value can be one point. The type
+    // follows the same rule:
+    // - a carrier that is finite by type (`FINITE_COLLECTION_TYPE`: a
+    //   `list<T>`, a `vector`, a `matrix`, a `dictionary`, a `record`,
+    //   a `range`) or ordered by type (`indexed_collection<T>`, which
+    //   can be infinite, such as `Range(1, ∞)`) is always zipped, so
+    //   each cell has its ELEMENT type `T`. `When(Range(1, ∞),
+    //   [True, False])` evaluates to `[1, NaN]` (a masked number is
+    //   `NaN`);
+    // - a carrier of an UNORDERED collection type that is not finite
+    //   by type (`collection<T>`, `set<T>`) can hold an infinite set,
+    //   such as `Integers`, which has no first element and is not
+    //   zipped: each cell is then the whole value. So a cell can be
+    //   either an element (a finite set is zipped) or the whole value,
+    //   and its type is the JOIN of the element type and the carrier
+    //   type. `When(Integers, [True, False])` evaluates to
+    //   `[Integers, Missing]`, which the element type `integer` alone
+    //   does not admit;
+    // - a tuple, a string or a scalar value is never zipped, so each
+    //   cell has the type of the whole value.
+    // The result is a `list` whatever the carrier is, because the
+    // value the `evaluate` handler builds is a `List`.
+    const zippable =
+      isSubtype(expr.type, COLLECTION_SHAPE_TYPE) &&
+      !isTupleShapedType(expr.type) &&
+      !isSubtype(expr.type, 'string');
+    const element = zippable
+      ? (collectionElementType(expr.type) ?? 'unknown')
+      : undefined;
+    const cell: Type =
+      element === undefined
+        ? expr.type
+        : isSubtype(expr.type, FINITE_COLLECTION_TYPE) ||
+            // An ordered type that admits a STRING value
+            // (`indexed_collection<character>`) takes the join branch:
+            // a string is one value under a restriction, never zipped
+            // (`isAtomicCarrierValue`), so a cell can be the whole
+            // string, which the element type `character` does not
+            // admit.
+            (isOrderedCarrierType(expr.type) && !isSubtype('string', expr.type))
+          ? element
+          : reduceType({
+              kind: 'union',
+              // A masked numeric element of a zipped finite set is
+              // `NaN`, so a numeric element arm is `number`, the type
+              // that admits `NaN`, as the zipped branch above answers
+              // `list<number>`: `When({1, 2}, [True, False])` is
+              // `[1, NaN]`.
+              types: [
+                isNumericValueType(element) ? 'number' : element,
+                expr.type,
+              ],
+            });
+    // A masked NUMERIC cell is `NaN` (`maskedValue`), so the cells are
+    // numbers, `list<number>`: the materialized list the mask answers
+    // (`[NaN, NaN, 30]`) is typed by the `List` handler, which joins a
+    // `NaN` cell and an integer cell to `number`. Any other cell keeps
+    // its `missing` arm.
+    return BoxedType.forResult(
+      {
+        kind: 'list',
+        elements: isNumericValueType(cell)
+          ? 'number'
+          : reduceType({ kind: 'union', types: [cell, 'missing'] }),
+      },
+      context.engine._typeResolver
+    );
+  }
+  // A NUMERIC value masks to `NaN` (`maskedValue`), so its type is its
+  // own tier with the `nan` arm, `integer | nan` for `When(1, c)`, and
+  // no `missing` arm (user decision 2026-09-25; it was
+  // `integer | missing`). The tier is kept — rather than absorbed to
+  // `number` — so that the value stays admitted where the tier matters:
+  // an element read of a restricted row is typed
+  // `integer | missing | nan` by `At`, and a declared range or an
+  // assumption reads the held literal back through it.
+  if (isNumericValueType(expr.type))
+    return BoxedType.forResult(
+      withNanArm(expr.type),
+      context.engine._typeResolver
+    );
+  // A list-like value keeps its own type under the `missing` arm,
+  // `missing | vector<integer^2>` for `When([1,2], c)`: while the
+  // condition is undecided the value is the held `When` itself (never a
+  // copy of the cells into a `List` of `When`s — see the `evaluate`
+  // handler), whose type is this one, and when the condition is decided
+  // the value is the whole list or `Missing`. The cells the held form
+  // enumerates are restricted cells, `When(elem, c)`, each typed
+  // `elem | missing`; an element access carries that arm through its
+  // own marker (`At`, `First`). A LITERAL list of restricted cells,
+  // `[1{c}, 2{c}]`, is a different value, typed `list<integer | missing>`
+  // by the `List` type handler.
+  return BoxedType.forResult(
+    reduceType({ kind: 'union', types: [expr.type, 'missing'] }),
+    context.engine._typeResolver
+  );
+}
 
 /** The smallest bound, in characters of the printed value, on the size of
  * an exact number of `FixedPoint` (see `isDivergingFixedPointStep`). */
@@ -3266,8 +3295,17 @@ function evaluateIf(
   const evaluatedCond = sym(evaluated);
   if (evaluatedCond === 'True')
     return ifTrue?.evaluate(armOptions) ?? engine.Missing;
+  // With no else branch, a false condition gives the absent value of the
+  // domain of the arm (`maskedValue`): `NaN` for a number, as a restriction
+  // `e\{c\}` does. A statement arm (`If(k = 2, Assign(a, 5))`) has no
+  // value, so the result is `Missing`.
   if (evaluatedCond === 'False')
-    return ifFalse?.evaluate(armOptions) ?? engine.Missing;
+    return (
+      ifFalse?.evaluate(armOptions) ??
+      (ifTrue === undefined || isStatementArm(ifTrue)
+        ? engine.Missing
+        : maskedValue(engine, ifTrue))
+    );
   // An ABSENT condition (the `Missing` symbol) is a legitimate runtime
   // data state, not a program defect: it is Kleene-undecidable, so
   // branching is an error — but a catchable error EXPRESSION (R's
@@ -3275,6 +3313,22 @@ function evaluateIf(
   // `Coalesce`/`IsMissing` before branching. (§3.D residual, resolved
   // 2026-07-24.)
   if (evaluatedCond === 'Missing') return absentConditionError(engine);
+  // A single-branch `If(c, e)` whose arm is a value is the restriction
+  // `e\{c\}`, which the parser reads as this `If`, and with a condition that
+  // is not an error, not absent and not an undecided comparison of whole
+  // collections (above), it is evaluated as `When(e, c)`, so that a parsed
+  // restriction keeps the value it had as a `When`: a false condition gives
+  // the absent value of the domain of `e`, a list of conditions masks
+  // element by element (truncated to the shorter of the mask and a list
+  // value), and an undecided condition is held. A held restriction is
+  // spelled `If(c, e)` again (`heldRestrictionAsIf()`). The condition is
+  // passed evaluated, so it is evaluated once.
+  // Decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`.
+  if (ops.length === 2 && ifTrue !== undefined && !isStatementArm(ifTrue))
+    return heldRestrictionAsIf(
+      engine,
+      engine._fn('When', [ifTrue, evaluated]).evaluate(options)
+    );
   // A LIST-VALUED condition selects element-wise: `If(c, a, b)` is the
   // two-clause `Which(c, a, True, b)` (see
   // `evaluateElementwiseSelection`). Without an else branch the
@@ -3381,6 +3435,26 @@ function distributeOverListArms(
 }
 
 /**
+ * The value of a single-branch `If(c, e)`, which is evaluated as
+ * `When(e, c)`: when that value is a held restriction `When(v, c')` (its
+ * condition is not decided), it is spelled `If(c', v)`, so that the
+ * evaluation of an `If` is an `If`. Two held forms keep the `When`
+ * spelling: a restriction over a collection, which presents as the
+ * collection of its restricted cells (`whenCollectionHandlers()`; an `If`
+ * has no collection handlers, which would change how it propagates the
+ * errors of its operands), and the restricted cells of a list (the value of
+ * a list of conditions that are not decided).
+ */
+function heldRestrictionAsIf(
+  engine: ComputeEngine,
+  value: Expression
+): Expression {
+  return isFunction(value, 'When') && value.nops === 2 && !value.isCollection
+    ? engine._fn('If', [value.op2, value.op1])
+    : value;
+}
+
+/**
  * The asynchronous twin of `evaluateIf`. The condition is awaited through
  * the asynchronous route — where a relation awaits an asynchronous-only
  * operand of its own before it compares — and the selected arm is awaited
@@ -3428,7 +3502,9 @@ async function evaluateIfAsync(
         : ifTrue.evaluateAsync(evalOptions);
     if (decided === 'False')
       return ifFalse === undefined
-        ? engine.Missing
+        ? ifTrue === undefined || isStatementArm(ifTrue)
+          ? engine.Missing
+          : maskedValue(engine, ifTrue)
         : ifFalse.evaluateAsync(evalOptions);
   }
   return fallback([evaluated, ...ops.slice(1)]);
