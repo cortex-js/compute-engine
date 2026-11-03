@@ -122,12 +122,14 @@ void touched;
 // error below is expected. If they collapse to \`any\`, the error disappears
 // and tsc flags the unused directive instead.
 const ce = new ComputeEngine();
-const groupOptions: groupTheory.GroupTheoryLoadOptions = {maxChainWork: 100000};
+const groupOptions: groupTheory.GroupTheoryLoadOptions = {maxChainWork: 100000, maxFiniteElements: 128, maxFiniteWork: 1000000, maxMatrixActionPoints: 1024};
 const groupReport: groupTheory.GroupTheoryLoadReport = groupTheory.loadGroupTheory(ce, groupOptions);
 const groupCount: number = groupReport.operatorCount;
 void groupCount;
 // @ts-expect-error — resource limits must be numbers, not strings
 groupTheory.loadGroupTheory(ce, {maxChainWork: 'unlimited'});
+// @ts-expect-error — finite limits must be numbers
+groupTheory.loadGroupTheory(ce, {maxFiniteElements: 'unlimited'});
 // @ts-expect-error — parse() returns BoxedExpression, not number
 const n: number = ce.parse('1');
 void n;

@@ -35,6 +35,11 @@ open-source comparators — against what a mature commercial CAS does.
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
 | **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
+| **Finite groups** | `run-group-theory.mjs finite` (`group-theory-finite.ts`) | CE (self; table validation, subgroup structure, automorphisms) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
+| **Matrix groups** | `run-group-theory.mjs matrix` (`group-theory-matrix.ts`) | CE (self; exact construction, actions, order, forms and lattices) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
+| **Finite polycyclic coordinates** | `run-group-theory.mjs polycyclic` (`group-theory-polycyclic.ts`) | CE (self; sequences, sections, coordinate round trips and actions) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
+| **Collected polycyclic presentations** | `run-group-theory.mjs presentation` (`group-theory-presentation.ts`) | CE (self; consistency validation and arithmetic without enumeration) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
+| **Group expression API** | `run-group-theory.mjs api` (`group-theory-api.ts`) | CE (self; fresh-engine loading, boxing and evaluation) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
 
 The first six are the **release baseline** (see below). Benchmark sources
 worth adopting but not yet wired in (WolframMark, SageMath's tour of

@@ -21,6 +21,7 @@ import {
   modularInverse,
 } from './numeric-bigint.js';
 import { bigPrimeFactors, modPow } from './primes.js';
+import { bitLength } from '../../big-decimal/utils.js';
 
 type Deadline = number | DeadlineFrame | undefined;
 
@@ -569,6 +570,42 @@ export function generalizedMultiplicativeOrder(
 }
 
 /**
+ * Find one generator of a cyclic unit group with known order and its complete
+ * set of distinct prime factors. The order test excludes each maximal proper
+ * subgroup. Returns undefined if no candidate exists; callers establish the
+ * cyclic-group precondition. An optional charge reserves work before each
+ * modular power (at most two multiplications per exponent bit).
+ */
+export function primitiveRootFromFactors(
+  n: bigint,
+  order: bigint,
+  factors: readonly bigint[],
+  deadline?: Deadline,
+  charge?: (cost: number) => void
+): bigint | undefined {
+  if (n === 1n) return 0n;
+  if (n === 2n) return 1n;
+  const tests = factors.map((q) => {
+    const exponent = order / q;
+    return { exponent, cost: 2 * bitLength(exponent) };
+  });
+  for (let g = 2n; g < n; g++) {
+    checkDeadline(deadline);
+    charge?.(1);
+    // A unit group of order n-1 has prime modulus; every candidate is a unit.
+    if (order !== n - 1n && gcd(g, n) !== 1n) continue;
+    if (
+      tests.every(({ exponent, cost }) => {
+        charge?.(cost);
+        return modPow(g, exponent, n) !== 1n;
+      })
+    )
+      return g;
+  }
+  return undefined;
+}
+
+/**
  * The primitive roots of `n` ascending (Mathematica's `PrimitiveRootList[n]`):
  * the generators of (ℤ/n)ˣ, which is cyclic exactly for n = 2, 4, pᵏ and 2pᵏ
  * with p an odd prime. The sign of `n` is ignored. `n = 1` gives `[0]`: the
@@ -601,16 +638,9 @@ export function primitiveRootList(
   for (const [q, e] of phiFactors) count *= (q - 1n) * q ** BigInt(e - 1);
   if (count > BigInt(MAX_LISTED)) return undefined;
 
-  let g = 2n;
-  for (;;) {
-    if (
-      gcd(g, n) === 1n &&
-      [...phiFactors.keys()].every((q) => modPow(g, phi / q, n) !== 1n)
-    )
-      break;
-    g += 1n;
-    checkDeadline(deadline);
-  }
+  const g = primitiveRootFromFactors(n, phi, [...phiFactors.keys()], deadline);
+  // The factorization test above proves cyclicity, hence a generator exists.
+  if (g === undefined) return undefined;
   const roots: bigint[] = [];
   let power = 1n;
   for (let k = 1n; k <= phi; k++) {

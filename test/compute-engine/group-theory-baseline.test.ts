@@ -29,12 +29,12 @@ describe('Epsil finite permutation group baseline', () => {
       run(
         ce,
         `
-function groupSize(g: PermutationGroup) -> integer { PermutationGroupOrder(g, options: {maxWork -> 5000000}) }
-function contains(g: PermutationGroup,p: Permutation) -> boolean { PermutationGroupContains(g,p, options: {maxWork -> 5000000}) }
+function groupSize(g: PermutationGroup) -> integer { GroupOrder(g, options: {maxWork -> 5000000}) }
+function contains(g: PermutationGroup,p: Permutation) -> boolean { GroupContains(g,p, options: {maxWork -> 5000000}) }
 let G=PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAction(3))
 let H=PermutationGroup([Permutation([2,3,1])],PermutationAction(3))
 let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
-(groupSize(G),groupSize(S),contains(H,Permutation([2,1])),PermutationSubgroupIndex(G,H, options: {maxWork -> 5000000}),PermutationIsNormal(G,H, options: {maxWork -> 5000000}))
+(groupSize(G),groupSize(S),contains(H,Permutation([2,1])),GroupIndex(G,H, options: {maxWork -> 5000000}),GroupIsNormal(G,H, options: {maxWork -> 5000000}))
 `
       ).json
     ).toEqual(['Tuple', 6, 2, 'False', 2, 'True']);
@@ -45,7 +45,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
       const cases: [MJ, MJ][] = [
         [
           [
-            'PermutationGroupOrder',
+            'GroupOrder',
             G,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
           ],
@@ -53,7 +53,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationGroupContains',
+            'GroupContains',
             H,
             p,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -62,7 +62,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationGroupContains',
+            'GroupContains',
             H,
             c,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -71,7 +71,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationIsSubgroup',
+            'GroupIsSubgroup',
             G,
             H,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -80,7 +80,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationSubgroupIndex',
+            'GroupIndex',
             G,
             H,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -89,7 +89,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationIsNormal',
+            'GroupIsNormal',
             G,
             K,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -98,7 +98,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationGroupEqual',
+            'GroupEqual',
             G,
             H,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -107,7 +107,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationGroupIsAbelian',
+            'GroupIsAbelian',
             H,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
           ],
@@ -115,18 +115,18 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ],
         [
           [
-            'PermutationGroupIsAbelian',
+            'GroupIsAbelian',
             G,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
           ],
           'False',
         ],
         [
-          ['PermutationGroupGenerators', G],
+          ['GroupGenerators', G],
           ['List', p, q],
         ],
         [
-          ['PermutationGroupIdentity', G],
+          ['GroupIdentity', G],
           ['Permutation', ['List']],
         ],
       ];
@@ -148,7 +148,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
       ['PermutationAction', 20],
     ];
     const query: MJ = [
-      'PermutationGroupOrder',
+      'GroupOrder',
       s20,
       ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
     ];
@@ -173,7 +173,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     expect(
       ce
         .box([
-          'PermutationGroupEqual',
+          'GroupEqual',
           G,
           other,
           ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -229,12 +229,12 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     ];
     for (const input of [
       [
-        'PermutationGroupOrder',
+        'GroupOrder',
         forged,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ],
       [
-        'PermutationGroupContains',
+        'GroupContains',
         G,
         ['Permutation', ['List', 1, 1]],
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -246,36 +246,36 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ],
       [
-        'PermutationIsSubgroup',
+        'GroupIsSubgroup',
         G,
         forged,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ],
       [
-        'PermutationSubgroupIndex',
+        'GroupIndex',
         forged,
         H,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ],
       [
-        'PermutationGroupEqual',
+        'GroupEqual',
         forged,
         H,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ],
       [
-        'PermutationIsNormal',
+        'GroupIsNormal',
         G,
         forged,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ],
       [
-        'PermutationGroupIsAbelian',
+        'GroupIsAbelian',
         forged,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ],
-      ['PermutationGroupIdentity', forged],
-      ['PermutationGroupGenerators', forged],
+      ['GroupIdentity', forged],
+      ['GroupGenerators', forged],
       ['PermutationOrder', ['Permutation', ['List', 1, 1]]],
     ] satisfies MJ[])
       for (const form of ['canonical', 'raw', 'structural'] as const)
@@ -285,7 +285,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     expect(
       ce
         .box([
-          'PermutationGroupContains',
+          'GroupContains',
           H,
           p,
           ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -296,7 +296,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
       JSON.stringify(
         ce
           .box([
-            'PermutationSubgroupIndex',
+            'GroupIndex',
             H,
             G,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -313,7 +313,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
       JSON.stringify(
         ce
           .box([
-            'PermutationIsSubgroup',
+            'GroupIsSubgroup',
             G,
             other,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -334,34 +334,16 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
   });
   test('no query runs during boxing and exhaustion is never mathematical false', () => {
     for (const input of [
+      ['GroupOrder', G, ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]]],
+      ['GroupContains', H, p, ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]]],
       [
-        'PermutationGroupOrder',
-        G,
-        ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]],
-      ],
-      [
-        'PermutationGroupContains',
-        H,
-        p,
-        ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]],
-      ],
-      [
-        'PermutationIsSubgroup',
+        'GroupIsSubgroup',
         H,
         G,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]],
       ],
-      [
-        'PermutationIsNormal',
-        G,
-        K,
-        ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]],
-      ],
-      [
-        'PermutationGroupIsAbelian',
-        G,
-        ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]],
-      ],
+      ['GroupIsNormal', G, K, ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]]],
+      ['GroupIsAbelian', G, ['Dictionary', ['Tuple', { str: 'maxWork' }, 0]]],
       [
         'PermutationPointStabilizer',
         G,
@@ -381,7 +363,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     expect(
       ce
         .box([
-          'PermutationGroupOrder',
+          'GroupOrder',
           G,
           ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
         ])
@@ -399,7 +381,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
       expect(
         engine(options)
           .box([
-            'PermutationGroupOrder',
+            'GroupOrder',
             G,
             ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
           ])
@@ -413,11 +395,11 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     const fresh = engine();
     fresh.declare('savedG', 'PermutationGroup');
     const query = fresh.box([
-      'PermutationGroupOrder',
+      'GroupOrder',
       'savedG',
       ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
     ]);
-    expect(query.evaluate().operator).toBe('PermutationGroupOrder');
+    expect(query.evaluate().operator).toBe('GroupOrder');
     fresh.assign('savedG', G);
     expect(query.evaluate().json).toBe(6);
     fresh.declare('exponent', 'integer');
@@ -444,7 +426,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     expect(
       fresh
         .box([
-          'PermutationGroupOrder',
+          'GroupOrder',
           'savedH',
           ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
         ])
@@ -453,7 +435,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     expect(
       fresh
         .box([
-          'PermutationIsSubgroup',
+          'GroupIsSubgroup',
           G,
           'savedH',
           ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
@@ -467,17 +449,17 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
       cp = fresh.checkpoint();
     loadGroupTheory(fresh);
     fresh.restore(cp);
-    expect(fresh.lookupDefinition('PermutationGroupOrder')).toBeUndefined();
+    expect(fresh.lookupDefinition('GroupOrder')).toBeUndefined();
     expect(fresh.lookupDefinition('PermutationPower')).toBeUndefined();
     fresh.discard(cp);
-    fresh.declare('PermutationGroupEqual', 'integer');
+    fresh.declare('GroupEqual', 'integer');
     expect(() => loadGroupTheory(fresh)).toThrow('Already defined');
     expect(fresh.lookupDefinition('Permutation')).toBeUndefined();
   });
   test('cancellation remains separate from bounded failure', () => {
     const fresh = engine(),
       query = fresh.box([
-        'PermutationGroupOrder',
+        'GroupOrder',
         G,
         ['Dictionary', ['Tuple', { str: 'maxWork' }, budget]],
       ]);

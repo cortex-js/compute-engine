@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### New Features
+
+- **Finite-group maps, quotients, matrix groups and polycyclic coordinates.**
+  The optional group-theory library (`@cortex-js/compute-engine/group-theory`)
+  adds checked homomorphisms, quotient projections, structural queries on
+  finite groups (series, Sylow and Hall subgroups, Fitting and Frattini
+  subgroups, socle, automorphisms), exact matrix groups over the rationals
+  and over prime fields, and finite polycyclic sequences. A collected
+  polycyclic presentation (`PcGroup`) supports exact arithmetic without
+  listing the elements of the group, for example in a group of order 2^36.
+  The general finite model holds at most 256 elements, and every limit gives
+  an `Error` expression, never a partial answer. (Contributed by
+  [KingArth0r](https://github.com/KingArth0r) in #484.)
+
 ### Behavior Changes
 
 - **One static error, one dynamic non-value per domain.** An `Error` is the
@@ -434,6 +448,19 @@
   `javascript`, `interval-js` and Python, a bare call `h(u)` included, which
   compiled and returned the list before, and a function value of such a
   function given to a consumer (`Map(h, xs)`). (GitHub issue #488.)
+- **Group-theory queries have one name for every representation.** The
+  permutation-only queries of 0.172.0 are removed. Use the generic names,
+  which accept a permutation group or a matrix group:
+  `PermutationGroupOrder` → `GroupOrder`, `PermutationGroupContains` →
+  `GroupContains`, `PermutationIsSubgroup` → `GroupIsSubgroup`,
+  `PermutationIsNormal` → `GroupIsNormal`, `PermutationGroupIsAbelian` →
+  `GroupIsAbelian`, `PermutationGroupElements` → `GroupElements`,
+  `PermutationGroupGenerators` → `GroupGenerators`,
+  `PermutationGroupEqual` → `GroupEqual`, `PermutationGroupIdentity` →
+  `GroupIdentity` and `PermutationSubgroupIndex` → `GroupIndex`. A permutation group still uses the
+  stabilizer-chain algorithms and their limit options. The operations
+  specific to permutations (`PermutationCompose`, `PermutationCycles`,
+  `PermutationOrbit`, ...) keep their names. (#484.)
 
 ### Resolved Issues
 
