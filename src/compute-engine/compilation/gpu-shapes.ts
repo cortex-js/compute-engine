@@ -440,7 +440,7 @@ export function assertGPUScalarComponents(
  * A NaN matching the SHAPE of `val`: scalar NaN for a scalar value, a
  * broadcast vector constructor (`vec2(_gpu_nan())` / `vec2f(_gpu_nan())`)
  * for a vector-valued one. GLSL has no implicit float→vecN conversion in a
- * ternary, so a masked (`When`/`Which` else) branch whose value is a tuple
+ * ternary, so a masked (restriction or `Which` else) branch whose value is a tuple
  * body (a restricted parametric `(x(t), y(t))`) must emit a NaN of the same
  * component count or the driver rejects the shader (Tycho item 49). WGSL's
  * `select` likewise requires both operands to share one type.

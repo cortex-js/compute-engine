@@ -1,20 +1,20 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
-// A restricted collection, `[1,3,5]{0<t}`, is ONE held `When` over the list
+// A restricted collection, `[1,3,5]{0<t}`, is ONE held restriction over the list
 // (user decision 2026-09-25). A collection operator threads it whole: the
 // result is computed on the present list and restricted by the condition, so
 // it is absent as a whole (`Missing`, or `NaN` for a number) once the
 // condition fails. Before, the lazy operators with a source slot (`TakeWhile`,
 // `DropWhile`, `Scan`, `ArgMax`, `ArgMin`, `Differences`) refused the held
-// `When` before the condition was threaded (step 2c'' of the evaluation,
+// restriction before the condition was threaded (step 2c'' of the evaluation,
 // `heldEagerSources()` in `boxed-expression/boxed-function.ts`), and the
-// operators with no `threadsConditionals` flag read the held `When` cell by
+// operators with no `threadsConditionals` flag read the held restriction cell by
 // cell: `DeleteAt` was refused at boxing, `IndexWhere` stayed unevaluated,
 // `CountIf` threw, `RotateLeft` gave a `Set`, `StartsWith` gave `False`,
 // `ListFrom` gave a list of restricted cells.
 
 const LIST = ['List', 1, 3, 5];
-const RL = ['When', LIST, ['Less', 0, 't']];
+const RL = ['If', ['Less', 0, 't'], LIST];
 const RL_TEX = '[1,3,5]\\{0<t\\}';
 const lt4 = ['Function', ['Less', 'x', 4], 'x'];
 const gt2 = ['Function', ['Greater', 'x', 2], 'x'];
@@ -26,7 +26,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'TakeWhile',
     ['TakeWhile', 'L', lt4],
     '\\operatorname{TakeWhile}(L, x\\mapsto x<4)',
-    'TakeWhile([1,3,5], (x) => x < 4) {0 < t}',
+    'If(0 < t, TakeWhile([1,3,5], (x) => x < 4))',
     '[1,3]',
     '"Missing"',
   ],
@@ -34,7 +34,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'DropWhile',
     ['DropWhile', 'L', lt4],
     '\\operatorname{DropWhile}(L, x\\mapsto x<4)',
-    'DropWhile([1,3,5], (x) => x < 4) {0 < t}',
+    'If(0 < t, DropWhile([1,3,5], (x) => x < 4))',
     '[5]',
     '"Missing"',
   ],
@@ -42,7 +42,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'Scan',
     ['Scan', 'L', 'Add'],
     '\\operatorname{Scan}(L, \\operatorname{Add})',
-    'Scan([1,3,5], "Add") {0 < t}',
+    'If(0 < t, Scan([1,3,5], "Add"))',
     '[1,4,9]',
     '"Missing"',
   ],
@@ -50,7 +50,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'ArgMax',
     ['ArgMax', 'L'],
     '\\operatorname{ArgMax}(L)',
-    '3 {0 < t}',
+    'If(0 < t, 3)',
     '3',
     'NaN',
   ],
@@ -58,7 +58,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'ArgMin',
     ['ArgMin', 'L'],
     '\\operatorname{ArgMin}(L)',
-    '1 {0 < t}',
+    'If(0 < t, 1)',
     '1',
     'NaN',
   ],
@@ -66,7 +66,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'Differences',
     ['Differences', 'L'],
     '\\operatorname{Differences}(L)',
-    'Differences([1,3,5]) {0 < t}',
+    'If(0 < t, Differences([1,3,5]))',
     '[2,2]',
     '"Missing"',
   ],
@@ -74,7 +74,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'DeleteAt',
     ['DeleteAt', 'L', 1],
     '\\operatorname{DeleteAt}(L, 1)',
-    '[3,5] {0 < t}',
+    'If(0 < t, [3,5])',
     '[3,5]',
     '"Missing"',
   ],
@@ -82,7 +82,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'IndexWhere',
     ['IndexWhere', 'L', gt2],
     '\\operatorname{IndexWhere}(L, x\\mapsto x>2)',
-    '2 {0 < t}',
+    'If(0 < t, 2)',
     '2',
     'NaN',
   ],
@@ -90,7 +90,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'CountIf',
     ['CountIf', 'L', gt2],
     '\\operatorname{CountIf}(L, x\\mapsto x>2)',
-    '2 {0 < t}',
+    'If(0 < t, 2)',
     '2',
     'NaN',
   ],
@@ -98,7 +98,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'RotateLeft',
     ['RotateLeft', 'L', 1],
     '\\operatorname{RotateLeft}(L, 1)',
-    'RotateLeft([1,3,5], 1) {0 < t}',
+    'If(0 < t, RotateLeft([1,3,5], 1))',
     '[3,5,1]',
     '"Missing"',
   ],
@@ -106,7 +106,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'RotateRight',
     ['RotateRight', 'L', 1],
     '\\operatorname{RotateRight}(L, 1)',
-    'RotateRight([1,3,5], 1) {0 < t}',
+    'If(0 < t, RotateRight([1,3,5], 1))',
     '[5,1,3]',
     '"Missing"',
   ],
@@ -114,7 +114,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'RangeOf',
     ['RangeOf', 'L', ['List', 3]],
     '\\operatorname{RangeOf}(L, [3])',
-    'Range(2, 2) {0 < t}',
+    'If(0 < t, Range(2, 2))',
     '[2]',
     '"Missing"',
   ],
@@ -122,7 +122,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'ContainsSequence',
     ['ContainsSequence', 'L', ['List', 3, 5]],
     '\\operatorname{ContainsSequence}(L, [3,5])',
-    '"True" {0 < t}',
+    'If(0 < t, "True")',
     '"True"',
     '"Missing"',
   ],
@@ -130,7 +130,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'StartsWith',
     ['StartsWith', 'L', ['List', 1]],
     '\\operatorname{StartsWith}(L, [1])',
-    '"True" {0 < t}',
+    'If(0 < t, "True")',
     '"True"',
     '"Missing"',
   ],
@@ -138,7 +138,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'EndsWith',
     ['EndsWith', 'L', ['List', 5]],
     '\\operatorname{EndsWith}(L, [5])',
-    '"True" {0 < t}',
+    'If(0 < t, "True")',
     '"True"',
     '"Missing"',
   ],
@@ -146,7 +146,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'ListFrom',
     ['ListFrom', 'L'],
     '\\operatorname{ListFrom}(L)',
-    '[1,3,5] {0 < t}',
+    'If(0 < t, [1,3,5])',
     '[1,3,5]',
     '"Missing"',
   ],
@@ -154,7 +154,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'SetFrom',
     ['SetFrom', 'L'],
     '\\operatorname{SetFrom}(L)',
-    'Set(1, 3, 5) {0 < t}',
+    'If(0 < t, Set(1, 3, 5))',
     'Set(1, 3, 5)',
     '"Missing"',
   ],
@@ -162,7 +162,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'TupleFrom',
     ['TupleFrom', 'L'],
     '\\operatorname{TupleFrom}(L)',
-    '(1, 3, 5) {0 < t}',
+    'If(0 < t, (1, 3, 5))',
     '(1, 3, 5)',
     '"Missing"',
   ],
@@ -170,7 +170,7 @@ const CASES: [string, unknown, string, string, string, string][] = [
     'Partition',
     ['Partition', 'L', 2],
     '\\operatorname{Partition}(L, 2)',
-    '[[1,3],[5]] {0 < t}',
+    'If(0 < t, [[1,3],[5]])',
     '[[1,3],[5]]',
     '"Missing"',
   ],
@@ -248,15 +248,15 @@ describe('a collection operator over a restricted list', () => {
     const r = engine()
       .box(['TakeWhile', RL, lt4] as never)
       .evaluate();
-    expect(r.operator).toBe('When');
+    expect(r.operator).toBe('If');
     expect(r.isCollection).toBe(true);
     expect(r.count).toBe(2);
     expect(Array.from(r.each()).map((x) => x.toString())).toEqual([
-      '1 {0 < t}',
-      '3 {0 < t}',
+      'If(0 < t, 1)',
+      'If(0 < t, 3)',
     ]);
     expect(r.evaluate({ materialization: true }).toString()).toBe(
-      '[1,3] {0 < t}'
+      'If(0 < t, [1,3])'
     );
   });
 

@@ -640,15 +640,15 @@ describe('a compiled branch comparison over an absent or nested value', () => {
     // The interpreter at a point of the cell: `Missing`.
     e.assign('x', 0.5);
     expect(e.box(['Greater', which, 0]).evaluate().symbol).toBe('Missing');
-    // A `When` whose condition is false is a numeric undefined value
+    // A restriction whose condition is false is a numeric undefined value
     // (`NaN`) in the interpreter, so a comparison with it is false.
     expect(
-      e.box(['Greater', ['When', 1, ['Greater', 'x', 5]], 0]).evaluate().symbol
+      e.box(['Greater', ['If', ['Greater', 'x', 5], 1], 0]).evaluate().symbol
     ).toBe('False');
     const f = new ComputeEngine();
     f.declare('x', 'real');
     expect(
-      compile(f.box(['Greater', ['When', 1, ['Greater', 'x', 5]], 0]), {
+      compile(f.box(['Greater', ['If', ['Greater', 'x', 5], 1], 0]), {
         to: 'interval-js',
       } as never).run!(X as never)
     ).toBe('false');
@@ -893,7 +893,7 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
     }
     // A real parameter keeps the guard as written.
     expect(ce.parse('\\int_0^1 x^n dx').evaluate().toString()).toBe(
-      '1 / (n + 1) {0 < n + 1}'
+      'If(0 < n + 1, 1 / (n + 1))'
     );
   });
 
@@ -915,7 +915,7 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
         .parse('\\log_a(x) = 3')
         .solve('x')
         ?.map((r) => r.toString())
-    ).toEqual(['a^3 {0 < a && a != 1}']);
+    ).toEqual(['If(0 < a && a != 1, a^3)']);
   });
 
   test('a chain stops at a pair with a value with no order', async () => {

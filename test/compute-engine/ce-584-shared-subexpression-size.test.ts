@@ -363,8 +363,8 @@ describe('CE-584: the size limit of the shader code', () => {
     expect(count(r.code, 'sin(')).toBe(1);
   });
 
-  // `When(value, condition)` writes its condition first, so in
-  // `e_{k+1} = When(sin(e_k), e_k > k)` the condition writes `e_k` and the
+  // `If(condition, value)` writes its condition first, so in
+  // `e_{k+1} = If(e_k > k, sin(e_k))` the condition writes `e_k` and the
   // value reads its temporary. An estimate that walked the operands in
   // their index order counted `e_k` again in the value and refused depth
   // 16. The compilation is checked at depth 8: as for `Arctan2` above, the
@@ -374,9 +374,9 @@ describe('CE-584: the size limit of the shader code', () => {
     const graph = (depth: number) => {
       let e = ce.function('Sin', [ce.symbol('x')]);
       for (let i = 0; i < depth; i++)
-        e = ce.function('When', [
-          ce.function('Sin', [e]),
+        e = ce.function('If', [
           ce.function('Greater', [e, ce.number(i)]),
+          ce.function('Sin', [e]),
         ]);
       return e;
     };
@@ -450,20 +450,22 @@ describe('CE-584: the size limit of the shader code', () => {
     expect(single.code.length).toBeLessThan(10_000);
   });
 
-  // `When(value, False)` is written as a NaN constant, whatever its value.
-  test('wgsl: an operand that is not written is not counted', () => {
+  // The shader targets write every operand of a restriction, also when its
+  // condition is `False`: no form leaves an operand out of the count. So the
+  // graph below `If(False, value)` is counted as a tree, and the compile
+  // declines at the size limit (a decline falls back to the interpreter).
+  test('wgsl: every operand of a decided restriction is counted', () => {
     const ce = engine();
-    const e = ce.function('When', [dag(ce, 20), ce.False]);
-    const r = compile(e, { to: 'wgsl', cse: false });
-    expect(r.success).toBe(true);
-    expect(r.code.length).toBeLessThan(100);
-    expect(gpuWrittenSize(e, undefined)).toBe(1);
-    // A `When` that the caller replaces receives all its operands, so the
-    // graph below it is written, as a tree.
+    const e = ce.function('If', [ce.False, dag(ce, 20)]);
+    const r = compile(e, { to: 'wgsl', cse: false, fallback: true });
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(LIMIT_MESSAGE);
+    expect(gpuWrittenSize(e, undefined)).toBeGreaterThan(50_000);
+    // A restriction that the caller replaces also receives all its operands.
     const replaced = compile(e, {
       to: 'wgsl',
       cse: false,
-      functions: { When: 'myWhen' },
+      functions: { If: 'myWhen' },
       fallback: true,
     });
     expect(replaced.success).toBe(false);

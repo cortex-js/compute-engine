@@ -126,11 +126,7 @@ describe('Tycho row 428: a Gaussian with a symbolic coefficient', () => {
     test('∫_{−∞}^{∞} exp(−z²/(2s²)) dz is √(2π)·√(s²) under the guard √(s⁻²) > 0', () => {
       expect(
         ce.parse('\\int_{-\\infty}^{\\infty} \\exp\\left(-\\frac{z^2}{2s^2}\\right) dz').evaluate().json
-      ).toEqual([
-        'When',
-        ['Multiply', ['Sqrt', 2], ['Sqrt', 'Pi'], ['Sqrt', ['Power', 's', 2]]],
-        ['Less', 0, ['Sqrt', ['Power', 's', -2]]],
-      ]);
+      ).toEqual(['If', ['Less', 0, ['Sqrt', ['Power', 's', -2]]], ['Multiply', ['Sqrt', 2], ['Sqrt', 'Pi'], ['Sqrt', ['Power', 's', 2]]]]);
     });
 
     test('∫_{−∞}^{∞} exp(z²/(2s²)) dz stays an integral (Erfi has no limit)', () => {
@@ -147,7 +143,7 @@ describe('Tycho row 428: a Gaussian with a symbolic coefficient', () => {
 
     test('the normal distribution function is a guarded closed form', () => {
       const E = ce.parse(NORMAL_CDF).evaluate();
-      expect(E.operator).toBe('When');
+      expect(E.operator).toBe('If');
       expect(E.has('Integrate')).toBe(false);
       expect(E.has('Erf')).toBe(true);
       for (const x of [-2, -0.5, 0, 0.25, 1.8]) {
@@ -162,7 +158,7 @@ describe('Tycho row 428: a Gaussian with a symbolic coefficient', () => {
       const E = ce
         .parse('\\frac{1}{\\sqrt{2\\pi}s}\\int_{-\\infty}^{x}\\exp\\left(-\\frac{(z-m)^{2}}{2s^{2}}\\right)dz')
         .evaluate();
-      expect(E.operator).toBe('When');
+      expect(E.operator).toBe('If');
       expect(E.has('Integrate')).toBe(false);
       const m = 0.4;
       for (const x of [-2, 0, 1.8]) {

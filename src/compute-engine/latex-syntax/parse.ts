@@ -6433,7 +6433,7 @@ export class _Parser implements Parser {
 
     const start = this.index;
     // Space before a postfix trigger:
-    //  - A `\{…\}` When-restriction attaches after any space, plain or visual
+    //  - A `\{…\}` restriction attaches after any space, plain or visual
     //    (`\,`, `\quad`), so visual space is skipped before a brace trigger.
     //  - An index bracket (`[`, `\lbrack`, `\left[`, `\left\lbrack`) attaches
     //    after PLAIN whitespace only, because LaTeX ignores that whitespace:

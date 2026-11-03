@@ -97,11 +97,7 @@ describe('the witness: NthPrime over a list', () => {
   });
 
   test('an undecided condition moves out of the application', () => {
-    expect(ce.box(['NthPrime', ['When', 5, 'c']]).evaluate().json).toEqual([
-      'When',
-      11,
-      'c',
-    ]);
+    expect(ce.box(['NthPrime', ['If', 'c', 5]]).evaluate().json).toEqual(['If', 'c', 11]);
   });
 
   test('a scalar operand is unchanged', () => {

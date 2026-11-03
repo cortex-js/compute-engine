@@ -3770,7 +3770,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is `Missing` when `c` is `False`. Only the selected expression is evaluated.\nWhen `c` is a list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is then `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection."
+      "description": "`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\\{c\\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.\nWhen `c` is a list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is then `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection."
     },
     {
       "name": "Im",
@@ -9243,18 +9243,6 @@
       "examples": [
         "Vector(1, 2, 3)"
       ]
-    },
-    {
-      "name": "When",
-      "category": "Control Structures",
-      "arity": "2",
-      "signature": "(expression, boolean) -> any",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": true,
-      "broadcastable": false,
-      "description": "Conditional/restriction value. `When(e, cond)` evaluates to:\n  - `e` when `cond` evaluates to `True`\n  - the absence marker of the type of `e` when `cond` evaluates to `False` (the \"masking rule\"): `NaN` for a number, `Missing` — the position-preserving absent datum, the answer a selection with no selected branch gives — for a point, a list, a string or a value not provably numeric; consumers like 2D plotters skip masked points\n  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\nStacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\nCompiles to ternary `(cond) ? (e) : NaN` in JS and GLSL."
     },
     {
       "name": "Which",

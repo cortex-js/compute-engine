@@ -422,7 +422,7 @@ export function isProvablyNonNumericBigOpBody(body: Expression): boolean {
  * True if the expression provably evaluates to a boolean (`True`/`False`) —
  * a relational (`Less`, `Equal`, …) or logical (`And`/`Or`/`Not`) form, the
  * `True`/`False` symbols, or anything declared `boolean`. Used to decide
- * whether a `Which`/`When` condition needs the fail-closed guard: a provably
+ * whether a `Which`/`If` condition needs the fail-closed guard: a provably
  * boolean condition never diverges from the interpreter, so it is emitted
  * bare.
  */
@@ -443,7 +443,7 @@ export function isBooleanValued(expr: Expression): boolean {
 }
 
 /**
- * Compile a `Which`/`When` condition, wrapping it in the target's fail-closed
+ * Compile a `Which`/`If` condition, wrapping it in the target's fail-closed
  * boolean guard (`target.assertBoolean`) when it is not provably boolean. The
  * interpreter throws on a non-boolean (e.g. `NaN`) condition rather than
  * silently taking the default branch; the guard makes the compiled code match
@@ -451,7 +451,7 @@ export function isBooleanValued(expr: Expression): boolean {
  * condition — the common case — is emitted bare (no overhead, no churn).
  */
 /**
- * A branch condition (`If`/`Which`/`When`) must be a scalar boolean. A
+ * A branch condition (`If`/`Which`) must be a scalar boolean. A
  * collection-valued condition can never be one — the interpreter throws
  * ("Condition must evaluate to True or False") rather than silently taking a
  * branch — so fail closed at compile time. Uses the declared type (not
@@ -462,7 +462,7 @@ export function isBooleanValued(expr: Expression): boolean {
  * a list-constructing body types the condition `boolean`, so the clause above
  * sees nothing and the emitted ternary took a branch off the truthiness of a
  * run-time array. The condition is not an operand of a head in
- * `assertNoContradictedScalarOperand`'s classification (`If`/`Which`/`When`
+ * `assertNoContradictedScalarOperand`'s classification (`If`/`Which`
  * are not broadcastable and consume only this one operand as a scalar), so
  * the gate belongs here — the shared condition guard both `If` and
  * `guardCondition` already funnel through.
@@ -536,7 +536,7 @@ export function assertScalarCondition(
   // not a list of a rank the code did not declare. A target with an
   // element-wise selection (the JavaScript `_SYS.select`,
   // `target.selection`) never reaches this check with such a condition,
-  // and neither does the `When` of the base compiler, which restricts
+  // and neither does the restriction of the base compiler, which restricts
   // element by element (`_SYS.restrict`).
   if (
     target !== undefined &&

@@ -332,8 +332,8 @@ describe('TUPLEFROM RESULT TYPE', () => {
     ],
     [
       'restricted list',
-      ['TupleFrom', ['When', ['List', 1, 2], ['Greater', 'n', 0]]],
-      'missing | tuple<integer, integer>',
+      ['TupleFrom', ['If', ['Greater', 'n', 0], ['List', 1, 2]]],
+      'tuple<integer, integer>',
     ],
     // The operand types do not give the components: the declared `tuple`.
     ['list of unknown length', ['TupleFrom', 'Lu'], 'tuple'],

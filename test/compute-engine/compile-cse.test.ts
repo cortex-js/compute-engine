@@ -2316,7 +2316,7 @@ describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
     ['If (value arms)', ce.box(['If', ['Less', 'x', 0], probe3('u'), 0]), '?'],
     [
       'When (the value arm)',
-      ce.box(['When', probe3('u'), ['Less', 'x', 0]]),
+      ce.box(['If', ['Less', 'x', 0], probe3('u')]),
       '?',
     ],
     // A comparison of two reals always has a boolean value, so the

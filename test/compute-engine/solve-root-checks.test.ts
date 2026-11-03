@@ -73,7 +73,7 @@ describe('Solve of a square root equal to a constant that is not real', () => {
         .parse('\\sqrt{x} = a')
         .solve('x')
         ?.map((r) => JSON.stringify(r.json))
-    ).toEqual(['["When",["Power","a",2],["LessEqual",0,"a"]]']);
+    ).toEqual(['["If",["LessEqual",0,"a"],["Power","a",2]]']);
   });
 });
 

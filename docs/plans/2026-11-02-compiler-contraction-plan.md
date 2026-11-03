@@ -181,6 +181,58 @@ implementer measures that on the tests of `when-collection-value.test.ts`,
 and `threads-conditionals.test.ts` rewritten to `If`. Keeping an internal
 `When` for the held form is not an option: the item removes the operator.
 
+Tycho's use of `When` (answer of the session tycho-f9, 2026-11-02, Tycho
+main `8424e816e`): Tycho builds `["When", body, condition]` and gives it to
+the engine in `plot/ce-compile.ts` (the mask wrapper of the `javascript` and
+`glsl` compiles), `plot/webgl/gpu-implicit.ts`,
+`plot-core/normalize-restrictions.ts`,
+`plot-core/classification-restricted-definition.ts`,
+`plot-core/classification-floor-plane.ts` and
+`graph-paper/desmos-import/normalize/basic.ts`; about 30 readers in
+`plot`, `plot-core`, `graph-paper/graph`, `graph-paper/variables`,
+`graph-paper/actions` and `desmos-import` test the `When` operator; 19 test
+files hold MathJSON `"When"`. No stored document or corpus state holds
+`When` (stored rows are LaTeX, and 0.176.0 wrote a restriction as the
+brace). The detached commit `e87d293fc` rewrites the new `If` forms back to
+`When` for these readers (`withStatementRestrictionAsWhen`). So Tycho must
+build and read only `["If", c, e]` (step 1 of Tycho's
+`requirements/todo/CE_LANGUAGE_RELEASE_ADOPTION.md`) before it can take a
+release without `When`. The corpus measure of 3.2 uses a Tycho commit that
+builds only `If`: the base `4a00e7c32` reads both spellings, so that commit
+gives a comparison of the two engine builds under one Tycho. With a Tycho
+that builds `When`, the measure would count Tycho's own `When` nodes, which
+the candidate no longer knows.
+
+The result of 3.2 (2026-11-02, session compute-engine-cc; base `4a00e7c32`,
+Tycho frozen at `44a25d4e3`, which builds and reads only `If` on both
+builds; its later `58b767d19` differs only on CE 0.176.0). Declines: none
+new (javascript 66, glsl 48, interval-js 90 in both runs). Values: none
+changed. The audit tools were run from a copy whose record key is the
+MathJSON of the compiled expression with `When(e, c)` read as `If(c, e)`
+and whose sample inputs are seeded by the free-symbol names, because the
+LaTeX key changes with the notation (a held restriction is written with
+`where` instead of the brace). 76,718 values under matching keys and 405
+values in 90 records whose key changed are equal. In one document (Planck
+curves over `(0..0.1..1)`), Tycho now compiles the restricted list once,
+where it compiled each of 10 cells (40 records fewer); every cell value
+equals its list cell within a relative 5.7e-13. Where the scalar condition
+is false, that compiled list gives one scalar `NaN` for the whole list (the
+interpreter gives `Missing`, within the caveats of compiled code); Tycho
+checks in its adoption whether its renderer needs a list there. Code lines
+(not blank, `//` or `*`): `library` 77,958 → 77,912, `compilation` 92,700 →
+92,482, the LaTeX dictionary 15,855 → 15,843, `boxed-expression` 83,684 →
+83,713 (the restriction is recognized by its form at the sites that read
+the `missing` arm of the old type).
+
+Choices made in 3.2, each reversible: a held `If(c, L)` over a list whose
+condition is not decided is an indexed collection, mapped cell by cell
+(`\sin([1,2,3]\{0<t\})` at `t = -1` gives `[NaN, NaN, NaN]`; it gave
+`Missing`), the other option being a `missing` arm on the type of a
+collection-valued restriction; `isCollectionHead()` excludes an operator that
+selects its operands, so that a scalar `If` keeps its error propagation;
+`toString()` prints a restriction as `If(c, e)` (it printed `e {c}`); a
+condition declared `collection<boolean>` is not refused yet (item 3.3).
+
 3.3 **Selection.** The constraints of the survey's §6.3 in the interpreter:
 the condition is a boolean or a flat list of booleans (a nested list, an
 uneven list or a `Missing` cell is a static error); every arm is a scalar or

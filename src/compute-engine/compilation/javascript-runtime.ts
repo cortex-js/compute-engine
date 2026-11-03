@@ -4900,7 +4900,7 @@ export const SYS_HELPERS = {
   // rank 2 or more (`AbsentByDepth`), passed to `selectAbsent`.
   absentByDepth: (...values: unknown[]): AbsentByDepth =>
     new AbsentByDepth(values),
-  // The restriction `value\{conditions\}` (`When`) over a LIST of conditions:
+  // The restriction `value\{conditions\}` (a restriction) over a LIST of conditions:
   // one masked value per condition, `absent` (the absence value of one
   // position: `NaN` or its complex form for a number, `undefined` for a
   // point or a string) where the condition is not true. A list
@@ -4928,12 +4928,6 @@ export const SYS_HELPERS = {
     }
     return conds.map((c) => (c === true ? value : absent));
   },
-  // Is the condition `c` a mask of rank 2 or more at run time (an array with
-  // an array in it)? A compiled `When` whose type does not give the rank of
-  // its mask selects as the else-less `If` for such a mask, and restricts
-  // otherwise (`restrict`).
-  isNestedMask: (c: unknown): boolean =>
-    Array.isArray(c) && c.some((x) => Array.isArray(x)),
   // NaN propagates (Contract B `propagate` default, ratified 2026-08-27):
   // without the leading arm both comparisons are false for NaN and the
   // kernel answered the final arm's `1` — a fail-closed violation.

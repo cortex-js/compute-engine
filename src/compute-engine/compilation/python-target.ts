@@ -25,7 +25,7 @@ import {
   compileDiagnosticOf,
   compileSubject,
 } from './diagnostics.js';
-import type { ConditionDialect, ConditionNode } from './base-compiler.js';
+import type { ConditionDialect } from './base-compiler.js';
 import {
   BaseCompiler,
   couldBeCollectionParticipant,
@@ -3504,7 +3504,7 @@ const PY_IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
  * `_ce_predicate(f, kind, mode)`: the predicate `f` of `kind`, checked at each
  * call (`pyFnArg`), with the modes of `PREDICATE_RESULT_MODES`
  * (`javascript-target.ts`, where `_SYS.predicateResult` does the same). A
- * `bool` or a `np.bool_` passes. An absent value is `None` (a `When` whose
+ * `bool` or a `np.bool_` passes. An absent value is `None` (a restriction whose
  * condition fails) or a float `nan` (this target spells `Missing` as
  * `math.nan`, and a guarded branch answers `nan` for a `NaN` element). A
  * `nan` can also be a numeric `NaN`, which the interpreter does not read as
@@ -4924,8 +4924,7 @@ BaseCompiler.conditionDialects.set('python', PYTHON_CONDITION_DIALECT);
 
 /**
  * True when `expr` can lower to the Python absence value `None`: a
- * restriction (`When`, or the single-branch `If` that the parser gives a
- * restriction, typed as its arm), or any operand whose type holds a `missing` arm at
+ * restriction (the single-branch `If`, typed as its arm), or any operand whose type holds a `missing` arm at
  * any depth (a `Which` with no default clause, a symbol declared with a
  * `missing` arm, a point with an absent coordinate). numpy functions such as
  * `np.dot` raise for `None`, where the interpreter answers an absence marker.
@@ -4982,7 +4981,7 @@ function pythonIsWrittenAbsence(
  * The code of the value arm `arm` of a selection whose absence literal is
  * `absent` (`pythonAbsent`). A written `Missing` (or `Undefined`) arm is that
  * literal: beside a point or a list it is `None`, the value the else-less
- * `If(c, (x, y))` and `When((x, y), c)` give, where the written symbol alone
+ * `If(c, (x, y))` gives, where the written symbol alone
  * compiles to `math.nan` on this target (`writtenSymbol: 'numeric'`). Any
  * other arm is compiled as it stands.
  */
@@ -4995,19 +4994,6 @@ function pythonSelectionArm(
   return absent === 'None' && pythonIsWrittenAbsence(arm, target)
     ? 'None'
     : code();
-}
-
-/**
- * Does the branch condition `node` read a sub-expression by its VALUE (a
- * boolean input, a call, any condition that is not a relation)? Such a
- * value can be something other than a boolean at run time, which Python
- * truthiness would read as a decision.
- */
-function conditionReadsAValue(node: ConditionNode): boolean {
-  const t = node.test;
-  if (t.kind === 'value') return true;
-  if (t.kind === 'connective') return t.operands.some(conditionReadsAValue);
-  return false;
 }
 
 /**
@@ -6699,69 +6685,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       target,
       absent
     );
-  },
-  // `When` tests its condition for truth rather than for being a boolean,
-  // because it has only one arm to withhold. A condition that is not a boolean
-  // takes the else path and the value is the absence literal of the value's
-  // domain (`pythonAbsent`) — `float('nan')` for a number — which is the same
-  // answer a two-armed selection gives when it takes neither arm.
-  When: (args, compile, target) => {
-    if (args.length !== 2)
-      throw new Error(
-        'Could not compile `When`: expected exactly 2 arguments (expr, cond)'
-      );
-    // A provably collection-valued condition must fail closed: a non-empty
-    // Python list is TRUTHY, so the conditional expression below would
-    // silently take the value branch for every element instead of selecting.
-    // A condition that MAY be a list at run time is refused too (`target`).
-    BaseCompiler.assertScalarCondition(args[1], target);
-    // The VALUE is the conditional position (operand 0); the condition is
-    // eager — see the `When` entry of the lazy-operand inventory.
-    if (isSymbol(args[1], 'True')) return `(${compile(args[0], 0)})`;
-    const absent = pythonAbsent([args[0]], target);
-    if (isSymbol(args[1], 'False')) return absent;
-    // The condition compiles first, the order of the CSE harvest walk
-    // (`operandEmissionOrder`, `cse.ts`), so the value can read a temporary
-    // that the condition binds.
-    //
-    // A condition read by its VALUE (a boolean input, a call, or a connective
-    // with such an operand) can hold something that is not a boolean, and
-    // Python truthiness would then take the value branch from no evidence:
-    // `c = 1` selected the value. The value is selected only when the
-    // condition is a boolean `True`, as in `If` (`compilePythonBranch`); the
-    // interpreter has no value for such a condition either (ROADMAP CE-569).
-    // A relation, and a connective of relations, is a genuine boolean and
-    // keeps the plain conditional expression.
-    const decidability = BaseCompiler.conditionDecidability(
-      args[1],
-      target.bindExpr !== undefined,
-      target
-    );
-    if (decidability === null || !conditionReadsAValue(decidability)) {
-      const cond = compile(args[1]);
-      return `((${compile(args[0], 0)}) if (${cond}) else ${absent})`;
-    }
-    const connective = decidability.test.kind === 'connective';
-    const { expr, negate } = connective
-      ? { expr: args[1], negate: false }
-      : BaseCompiler.peelNegations(args[1]);
-    const code = connective
-      ? BaseCompiler.kleeneCondition(
-          decidability,
-          target,
-          PYTHON_CONDITION_DIALECT
-        )
-      : compile(expr);
-    const value = compile(args[0], 0);
-    const body = (v: string): string =>
-      `((${value}) if (${pythonIsBoolean(v)} and ${
-        negate ? `not ${v}` : v
-      }) else ${absent})`;
-    if (PYTHON_ATOM.test(code)) return body(code);
-    // A generated name, so the parameter cannot hide a variable of the
-    // value that has the same name.
-    const v = BaseCompiler.tempVar(target);
-    return `(lambda ${v}: ${body(v)})(${code})`;
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)

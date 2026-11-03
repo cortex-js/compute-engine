@@ -1125,7 +1125,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * It does NOT override the structural / control-flow heads, which have
      * their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
      * `Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
-     * `Comprehension`, `If`, `When`, `Match`, `Block`. A handler
+     * `Comprehension`, `If`, `Match`, `Block`. A handler
      * declared on one of those heads is ignored.
      *
      * Exception: `Which` IS overridable (it has no binding structure — its
@@ -1788,7 +1788,7 @@ export interface BaseCollectionHandlers {
 
   /**
    * Optional predicate for operators whose collection-ness depends on their
-   * operands, e.g. `When(value, cond)`, which is a collection exactly when
+   * operands, e.g. `If(cond, value)`, which is a collection exactly when
    * `value` is one.
    *
    * Returning `false` reports the expression as a scalar, as if it had no
@@ -2890,16 +2890,16 @@ export type OperatorDefinitionFlags = {
 
   /**
    * Whether a CONDITIONAL VALUE in an operand — a restriction
-   * `["When", value, condition]` or a piecewise `["Which", …]` whose
+   * `["If", condition, value]` or a piecewise `["Which", …]` whose
    * condition is not decided yet — moves out of the application:
-   * `f(When(v, c))` evaluates to `When(f(v), c)`, and `f(Which(c₁, v₁, …))`
+   * `f(If(c, v))` evaluates to `If(c, f(v))`, and `f(Which(c₁, v₁, …))`
    * to `Which(c₁, f(v₁), …)`.
    *
    * A broadcastable operator already does this (except the logical
    * connectives, which are not strict). Set this flag on an operator that is
    * NOT broadcastable but reads a whole value, such as a point or a vector,
    * so that it gets the same treatment without code of its own. Without the
-   * flag, the handler receives the `When` itself, which is not a point or a
+   * flag, the handler receives the restriction itself, which is not a point or a
    * collection, and usually answers an `incompatible-type` error.
    *
    * - `true` — every operand position threads.
@@ -2909,10 +2909,10 @@ export type OperatorDefinitionFlags = {
    *   threads its operand and not its order.
    *
    * The engine also recognizes the form a restricted LIST takes after
-   * evaluation. With the condition undecided, `When([a, b], c)` evaluates to
-   * the list of restricted cells `[When(a, c), When(b, c)]`. When every cell
+   * evaluation. With the condition undecided, `If(c, [a, b])` evaluates to
+   * the list of restricted cells `[If(c, a), If(c, b)]`. When every cell
    * of a `List` in a threaded position has the same condition, the list is
-   * read as `When([a, b], c)` and the condition moves out as above. A list
+   * read as `If(c, [a, b])` and the condition moves out as above. A list
    * whose cells have different conditions, or only some of them a condition,
    * is given to the handler as it is: only the operator knows whether it
    * maps over the cells (a list of points) or reads the list whole (a
@@ -2920,7 +2920,7 @@ export type OperatorDefinitionFlags = {
    *
    * The rules that apply are those of broadcastable operators:
    * - The type of the application, when a threaded operand can be absent as
-   *   a whole (its type has a `missing` arm, as the type of a `When` does),
+   *   a whole (its type has a `missing` arm, as the type of a restriction does),
    *   is computed from the operand without the `missing` arm. The `missing`
    *   arm then goes to the result as for a `propagate` operator: it is kept
    *   when the result is not a number, and replaced by `NaN` when it is. For
@@ -2935,8 +2935,8 @@ export type OperatorDefinitionFlags = {
    * - A `Which` distributes over at most 16 combinations of branches;
    *   past that the application is given to the handler unchanged.
    *
-   * For example, with `t` free, `PointX(When((1, 2), 0 < t))` is
-   * `When(1, 0 < t)`, which is `1` when `t = 2` and `NaN` (the marker of the
+   * For example, with `t` free, `PointX(If(0 < t, (1, 2)))` is
+   * `If(0 < t, 1)`, which is `1` when `t = 2` and `NaN` (the marker of the
    * numeric coordinate) when `t = -1`.
    *
    * **Default**: `false`
@@ -3587,7 +3587,7 @@ export interface BoxedOperatorDefinition
 
   /** True if the `threadsConditionals` flag of
    * {@link OperatorDefinitionFlags} selects operand position `i`: a
-   * conditional value (`When`, `Which`) there moves out of the application at
+   * conditional value (a restriction, `Which`) there moves out of the application at
    * evaluation. A broadcastable operator threads every position whatever this
    * answers. */
   threadsConditionalsAt(i: number): boolean;

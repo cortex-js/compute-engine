@@ -2,13 +2,13 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
-// 1. The asynchronous evaluation threads a conditional value (`When`/`Which`)
+// 1. The asynchronous evaluation threads a conditional value (a restriction or `Which`)
 //    out of an application of an operator that has only an `evaluateAsync`
 //    handler. The lift applies the operator to the values with
 //    `evaluateAsync()` on that route (`threadConditionalOperands`,
 //    `boxed-expression/boxed-function.ts`), so the handler gets the value and
 //    the result carries the condition. Before, the lift ran only for an
-//    operator with a synchronous handler, and the handler got the `When`:
+//    operator with a synchronous handler, and the handler got the restriction:
 //    `AsyncOnly(1 {0<t})` gave `NaN`. An operand that becomes a list only
 //    when it is evaluated (`[1, 2] {0<t}` with `t = 1`) is broadcast as for an
 //    operator with a synchronous handler. Before, the handler got the whole
@@ -52,7 +52,7 @@ function withHead(json: unknown, head: string): unknown {
 /** [name, MathJSON with `F` for the operator, value of `evaluateAsync()` with
  * `t` free, with `t = 1`, with `t = -1`] */
 const CASES: [string, unknown, string, string, string][] = [
-  ['When', ['F', ['When', 1, POSITIVE]], '6 {0 < t}', '6', 'NaN'],
+  ['restriction', ['F', ['If', POSITIVE, 1]], 'If(0 < t, 6)', '6', 'NaN'],
   [
     'Which',
     ['F', ['Which', POSITIVE, 1, 'True', 2]],
@@ -62,29 +62,29 @@ const CASES: [string, unknown, string, string, string][] = [
   ],
   [
     'restricted list',
-    ['F', ['When', ['List', 1, 2], POSITIVE]],
-    '[6,7] {0 < t}',
+    ['F', ['If', POSITIVE, ['List', 1, 2]]],
+    '[If(0 < t, 6),If(0 < t, 7)]',
     '[6,7]',
-    '"Missing"',
+    '[NaN,NaN]',
   ],
   [
     'list with a restricted cell',
-    ['F', ['List', 1, ['When', 2, POSITIVE]]],
-    '[6,7 {0 < t}]',
+    ['F', ['List', 1, ['If', POSITIVE, 2]]],
+    '[6,If(0 < t, 7)]',
     '[6,7]',
     '[6,NaN]',
   ],
   [
     'in a sum',
-    ['Add', ['F', ['When', 1, POSITIVE]], 1],
-    '7 {0 < t}',
+    ['Add', ['F', ['If', POSITIVE, 1]], 1],
+    'If(0 < t, 7)',
     '7',
     'NaN',
   ],
   [
     'in a Sum',
-    ['Sum', ['F', ['When', 'k', POSITIVE]], ['Limits', 'k', 1, 3]],
-    '21 {0 < t}',
+    ['Sum', ['F', ['If', POSITIVE, 'k']], ['Limits', 'k', 1, 3]],
+    'If(0 < t, 21)',
     '21',
     'NaN',
   ],
@@ -114,10 +114,10 @@ describe('evaluateAsync threads a conditional value out of an async-only operato
   test('the synchronous route keeps the async-only application', () => {
     expect(
       engine()
-        .box(['AsyncOnly', ['When', 1, POSITIVE]])
+        .box(['AsyncOnly', ['If', POSITIVE, 1]])
         .evaluate()
         .toString()
-    ).toBe('AsyncOnly(1) {0 < t}');
+    ).toBe('If(0 < t, AsyncOnly(1))');
     expect(
       engine()
         .box(['AsyncOnly', ['Which', POSITIVE, 1, 'True', 2]])
@@ -128,19 +128,22 @@ describe('evaluateAsync threads a conditional value out of an async-only operato
 
   test('a boolean condition, unknown, true and false', async () => {
     for (const [t, expected] of [
-      [undefined, '6 {t}'],
+      [undefined, 'If(t, 6)'],
       [true, '6'],
       [false, 'NaN'],
     ] as const) {
-      const e = engine(t).box(['AsyncOnly', ['When', 1, 't']]);
+      const e = engine(t).box(['AsyncOnly', ['If', 't', 1]]);
       expect([t, (await e.evaluateAsync()).toString()]).toEqual([t, expected]);
     }
   });
 
   test.each([
-    ['\\operatorname{AsyncOnly}(1\\{0<t\\})', '6 {0 < t}'],
-    ['\\operatorname{AsyncOnly}([1,2]\\{0<t\\})', '[6,7] {0 < t}'],
-    ['\\operatorname{AsyncOnly}(1\\{0<t\\})+1', '7 {0 < t}'],
+    ['\\operatorname{AsyncOnly}(1\\{0<t\\})', 'If(0 < t, 6)'],
+    [
+      '\\operatorname{AsyncOnly}([1,2]\\{0<t\\})',
+      '[If(0 < t, 6),If(0 < t, 7)]',
+    ],
+    ['\\operatorname{AsyncOnly}(1\\{0<t\\})+1', 'If(0 < t, 7)'],
   ])('%s, parse route', async (tex, expected) => {
     expect((await engine().parse(tex).evaluateAsync()).toString()).toBe(
       expected
@@ -149,9 +152,9 @@ describe('evaluateAsync threads a conditional value out of an async-only operato
 
   test('the held result agrees with a fresh evaluation', async () => {
     const ce = engine();
-    const e = ce.box(['AsyncOnly', ['When', 1, POSITIVE]]);
+    const e = ce.box(['AsyncOnly', ['If', POSITIVE, 1]]);
     const held = await e.evaluateAsync();
-    expect(held.toString()).toBe('6 {0 < t}');
+    expect(held.toString()).toBe('If(0 < t, 6)');
     ce.assign('t', 1);
     expect((await held.evaluateAsync()).toString()).toBe('6');
     expect((await e.evaluateAsync()).toString()).toBe('6');

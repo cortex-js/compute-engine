@@ -112,7 +112,7 @@ describe('small powers and conditional CSE', () => {
       const condition = ['Greater', 'y', 0];
       for (const branch of [
         ['If', condition, value, 0],
-        ['When', value, condition],
+        ['If', condition, value],
         ['Which', condition, value, 'True', 0],
         ['Which', condition, 0, ['Greater', value, 0], value, 'True', 0],
       ]) {

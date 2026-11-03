@@ -2,6 +2,7 @@ import { apply } from '../function-utils.js';
 import { checkDeadlineEvery } from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { mayBeMatrixValued } from '../boxed-expression/matrix-operand.js';
+import { restrictionParts } from '../boxed-expression/conditional-value.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import type {
   Expression,
@@ -3807,7 +3808,7 @@ function differentiateBigOp(
     // Over an infinite range, a sum with a closed form is differentiated
     // through it: `Σ_{k≥1} x^k/k!` is `e^x − 1`, whose derivative is `e^x`.
     // The closed form holds on an open set (`|x| < 1` for `Σ_{k≥1} x^k`,
-    // kept as the condition of a `When`), so its derivative is the
+    // kept as the condition of a restriction `If(c, …)`), so its derivative is the
     // derivative of the sum there.
     // The rewrite of the sum to its closed form is recorded as a step, so
     // `explain('D')` shows it before the steps of its derivative. If the
@@ -3817,13 +3818,15 @@ function differentiateBigOp(
       const closed = expr.evaluate();
       if (!containsOperator(closed, 'Sum')) {
         const mark = trace?.length ?? 0;
-        if (isFunction(closed, 'When') && closed.nops === 2) {
+        const restriction = restrictionParts(closed);
+        if (restriction !== undefined) {
+          const { value, condition } = restriction;
           recordD(trace, expr, v, 'derivative.rewrite', () =>
-            ce._fn('When', [dPlaceholder(closed.op1, v), closed.op2])
+            ce._fn('If', [condition, dPlaceholder(value, v)])
           );
-          const d = differentiate(closed.op1, v, depth + 1, trace);
+          const d = differentiate(value, v, depth + 1, trace);
           if (d !== undefined && d.isValid)
-            return ce.function('When', [d, closed.op2]);
+            return ce.function('If', [condition, d]);
         } else {
           recordD(trace, expr, v, 'derivative.rewrite', () =>
             dPlaceholder(closed, v)

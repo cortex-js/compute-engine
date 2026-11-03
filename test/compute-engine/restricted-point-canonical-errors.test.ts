@@ -1,5 +1,5 @@
 /**
- * A RESTRICTED POINT — a point with a condition, `When((0,1), c)`, or a
+ * A RESTRICTED POINT — a point with a condition, `If(c, (0,1))`, or a
  * `Which` with point branches and no default — is typed `missing | tuple<…>`.
  * When present it is a point, so the shapes that have no meaning for a point
  * have no meaning for it either, whatever the value of the condition:
@@ -297,11 +297,11 @@ describe('Declared list of points', () => {
 // a list of points (a list).
 describe('Dot of a restricted point or a restricted list of points', () => {
   const RL = [
-    'When',
-    ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+    'If',
     ['Less', 0, 't'],
+    ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
   ];
-  const RP = ['When', ['Tuple', 1, 2], ['Less', 0, 't']];
+  const RP = ['If', ['Less', 0, 't'], ['Tuple', 1, 2]];
 
   function value(json: unknown, t?: number): string {
     const ce = new ComputeEngine();
@@ -315,42 +315,42 @@ describe('Dot of a restricted point or a restricted list of points', () => {
     [
       'a restricted list of points and a point',
       ['Dot', RL, ['Tuple', 1, 1]],
-      '[3,7] {0 < t}',
+      'If(0 < t, [3,7])',
       '[3,7]',
       '"Missing"',
     ],
     [
       'a point and a restricted list of points',
       ['Dot', ['Tuple', 1, 1], RL],
-      '[3,7] {0 < t}',
+      'If(0 < t, [3,7])',
       '[3,7]',
       '"Missing"',
     ],
     [
       'a restricted list of points and a list of points',
       ['Dot', RL, ['List', ['Tuple', 1, 0], ['Tuple', 0, 1]]],
-      '[1,4] {0 < t}',
+      'If(0 < t, [1,4])',
       '[1,4]',
       '"Missing"',
     ],
     [
       'a restricted point and a point',
       ['Dot', RP, ['Tuple', 1, 1]],
-      '3 {0 < t}',
+      'If(0 < t, 3)',
       '3',
       'NaN',
     ],
     [
       'a restricted point and a restricted list of points',
       ['Dot', RP, RL],
-      '[5,11] {0 < t}',
+      'If(0 < t, [5,11])',
       '[5,11]',
       '"Missing"',
     ],
     [
       'a restricted vector and a vector',
-      ['Dot', ['When', ['List', 1, 2], ['Less', 0, 't']], ['List', 1, 1]],
-      '3 {0 < t}',
+      ['Dot', ['If', ['Less', 0, 't'], ['List', 1, 2]], ['List', 1, 1]],
+      'If(0 < t, 3)',
       '3',
       'NaN',
     ],
@@ -371,7 +371,7 @@ describe('Dot of a restricted point or a restricted list of points', () => {
       ['Tuple', 1, 1],
     ] as never);
     expect(e.isValid).toBe(true);
-    expect(e.evaluate().toString()).toBe('[3,7] {0 < t}');
+    expect(e.evaluate().toString()).toBe('If(0 < t, [3,7])');
   });
 
   test('an element-wise restriction answers NaN at an absent point', () => {
@@ -379,9 +379,9 @@ describe('Dot of a restricted point or a restricted list of points', () => {
       value([
         'Dot',
         [
-          'When',
-          ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+          'If',
           ['List', 'True', 'False'],
+          ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
         ],
         ['Tuple', 1, 1],
       ])
@@ -391,10 +391,10 @@ describe('Dot of a restricted point or a restricted list of points', () => {
   test('the type carries the absent case of a list result only', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Dot', RL, ['Tuple', 1, 1]] as never).type.toString()).toBe(
-      'list<integer> | missing'
+      'list<integer>'
     );
     expect(ce.box(['Dot', RP, ['Tuple', 1, 1]] as never).type.toString()).toBe(
-      'integer | nan'
+      'integer'
     );
   });
 

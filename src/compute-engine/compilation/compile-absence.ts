@@ -373,7 +373,7 @@ export function operandDecidedConjuncts(
  * object, `undefined` in JavaScript. A result whose type is unknown keeps
  * `NaN`: it is a number until proven otherwise, and the object null would
  * turn every arithmetic consumer of the value into a `TypeError` instead
- * of a propagated NaN. See `absenceKind`, which the `When` restriction and
+ * of a propagated NaN. See `absenceKind`, which the restriction and
  * the Python target's selection handlers share, so every selection form
  * answers absence the same way on a target. A target that declares no
  * object literal uses `NaN` for both.
@@ -404,7 +404,7 @@ export function noBranchValue(
  * whose consumers are arithmetic more often than not.
  *
  * Shared by the JavaScript lowering (`noBranchValue`) and the Python
- * target's `If`/`When`/`Which` handlers, so the two targets answer
+ * target's `If`/`Which` handlers, so the two targets answer
  * absence by the same rule with their own spelling.
  */
 export function absenceKind(

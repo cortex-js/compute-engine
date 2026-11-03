@@ -18,7 +18,7 @@ import {
   numericValue,
   sym,
 } from './type-guards.js';
-import { conditionalValue } from './conditional-value.js';
+import { conditionalValue, restrictionParts } from './conditional-value.js';
 import {
   polynomialDegree,
   getPolynomialCoefficients,
@@ -102,7 +102,7 @@ function hasRealUnknown(sub: BoxedSubstitution): boolean {
  *   - guard evaluates to `True`  → the bare `root` (guard discharged);
  *   - guard evaluates to `False` → `null` (the caller drops the root — the
  *     solution-set pruning contract, decision 8);
- *   - otherwise (undecidable)    → `When(root, guard)`, retained until the
+ *   - otherwise (undecidable)    → `If(guard, root)`, retained until the
  *     guard becomes decidable.
  *
  * A numeric ratio always gives a decidable guard: an in-range ratio collapses
@@ -230,16 +230,16 @@ function temporaryUnknownName(
  * is a half turn in the angular unit of the engine (π rad, 180 deg, 200 grad
  * or 1/2 turn). `Arcsin` gives its result in that unit, thus a root written
  * with the constant π is not a root in degree mode. The root exists only when
- * `|c| ≤ 1`, thus it is a `When(root, |c| ≤ 1)`, as the other trig roots are.
+ * `|c| ≤ 1`, thus it is an `If(|c| ≤ 1, root)`, as the other trig roots are.
  *
  * A rule cannot write `H` in its MathJSON template: the template is the same
  * for each angular unit. Thus the rules that use this function have a
  * `replace` function.
  */
 function sineSecondRoot(ce: ComputeEngine, c: Expression): Expression {
-  return ce.function('When', [
-    ce.function('Subtract', [halfTurnAngle(ce), ce.function('Arcsin', [c])]),
+  return ce.function('If', [
     ce.function('LessEqual', [ce.function('Abs', [c]), ce.One]),
+    ce.function('Subtract', [halfTurnAngle(ce), ce.function('Arcsin', [c])]),
   ]);
 }
 
@@ -393,7 +393,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   },
 
   // An exponential with a positive base takes only positive values: each rule
-  // below emits its root as `When(root, guard)`, where the guard requires the
+  // below emits its root as `If(guard, root)`, where the guard requires the
   // value of the exponential to be positive. The rule fires when the sign of
   // that value is known either way. When it is negative or zero (`eˣ = -1`,
   // `eˣ = 0`), the guard drops the root, and the solver knows that the
@@ -407,7 +407,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // a^x + b = 0
   {
     match: ['Add', ['Power', '_a', '_x'], '__b'],
-    replace: ['When', ['Ln', ['Negate', '__b'], '_a'], ['Less', '__b', 0]],
+    replace: ['If', ['Less', '__b', 0], ['Ln', ['Negate', '__b'], '_a']],
     id: 'solve.exponential',
     useVariations: true,
     condition: (sub) =>
@@ -425,9 +425,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       '__c',
     ],
     replace: [
-      'When',
-      ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
+      'If',
       ['Less', ['Divide', '__c', '__a'], 0],
+      ['Divide', ['Ln', ['Negate', ['Divide', '__c', '__a']]], '__b'],
     ],
     id: 'solve.exponential-natural',
     useVariations: true,
@@ -444,9 +444,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Exp', '_x']], '__c'],
     replace: [
-      'When',
-      ['Ln', ['Negate', ['Divide', '__c', '__a']]],
+      'If',
       ['Less', ['Divide', '__c', '__a'], 0],
+      ['Ln', ['Negate', ['Divide', '__c', '__a']]],
     ],
     id: 'solve.exponential-natural-unit-exponent',
     useVariations: true,
@@ -462,7 +462,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // e^(x) + c = 0
   {
     match: ['Add', ['Exp', '_x'], '__c'],
-    replace: ['When', ['Ln', ['Negate', '__c']], ['Less', '__c', 0]],
+    replace: ['If', ['Less', '__c', 0], ['Ln', ['Negate', '__c']]],
     id: 'solve.exponential-natural-simple',
     useVariations: true,
     condition: (sub) =>
@@ -473,9 +473,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Exp', ['Multiply', '__b', '_x']], '__c'],
     replace: [
-      'When',
-      ['Divide', ['Ln', ['Negate', '__c']], '__b'],
+      'If',
       ['Less', '__c', 0],
+      ['Divide', ['Ln', ['Negate', '__c']], '__b'],
     ],
     id: 'solve.exponential-natural-unit-coefficient',
     useVariations: true,
@@ -697,7 +697,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   //
   // A rule whose inverse function has a restricted real domain (arcsin and
   // arccos on [-1, 1], arcosh on [1, ∞), artanh on (-1, 1)) emits its root as
-  // `When(root, guard)`. The rule condition does not test the range: a root
+  // `If(guard, root)`. The rule condition does not test the range: a root
   // whose guard is false is dropped later (`conditionalRoot()`), and the solver
   // then knows that a candidate root existed and was rejected. An empty
   // solution list is then a decision (`sin x = 2` has no real root), not a
@@ -709,9 +709,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
     replace: [
-      'When',
-      ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
+      'If',
       ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+      ['Arcsin', ['Divide', ['Negate', '__b'], '__a']],
     ],
     id: 'solve.sine',
     useVariations: true,
@@ -738,9 +738,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Sin', '_x'], '__b'],
     replace: [
-      'When',
-      ['Arcsin', ['Negate', '__b']],
+      'If',
       ['LessEqual', ['Abs', ['Negate', '__b']], 1],
+      ['Arcsin', ['Negate', '__b']],
     ],
     id: 'solve.sine-unit',
     useVariations: true,
@@ -765,9 +765,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
     replace: [
-      'When',
-      ['Arccos', ['Divide', ['Negate', '__b'], '__a']],
+      'If',
       ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+      ['Arccos', ['Divide', ['Negate', '__b'], '__a']],
     ],
     id: 'solve.cosine',
     useVariations: true,
@@ -778,9 +778,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Cos', '_x']], '__b'],
     replace: [
-      'When',
-      ['Negate', ['Arccos', ['Divide', ['Negate', '__b'], '__a']]],
+      'If',
       ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+      ['Negate', ['Arccos', ['Divide', ['Negate', '__b'], '__a']]],
     ],
     id: 'solve.cosine-negative-branch',
     useVariations: true,
@@ -791,9 +791,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Cos', '_x'], '__b'],
     replace: [
-      'When',
-      ['Arccos', ['Negate', '__b']],
+      'If',
       ['LessEqual', ['Abs', ['Negate', '__b']], 1],
+      ['Arccos', ['Negate', '__b']],
     ],
     id: 'solve.cosine-unit',
     useVariations: true,
@@ -804,9 +804,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Cos', '_x'], '__b'],
     replace: [
-      'When',
-      ['Negate', ['Arccos', ['Negate', '__b']]],
+      'If',
       ['LessEqual', ['Abs', ['Negate', '__b']], 1],
+      ['Negate', ['Arccos', ['Negate', '__b']]],
     ],
     id: 'solve.cosine-unit-negative-branch',
     useVariations: true,
@@ -955,9 +955,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Cosh', '_x']], '__b'],
     replace: [
-      'When',
-      ['Arcosh', ['Divide', ['Negate', '__b'], '__a']],
+      'If',
       ['GreaterEqual', ['Divide', ['Negate', '__b'], '__a'], 1],
+      ['Arcosh', ['Divide', ['Negate', '__b'], '__a']],
     ],
     id: 'solve.hyperbolic-cosine',
     useVariations: true,
@@ -969,9 +969,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Cosh', '_x']], '__b'],
     replace: [
-      'When',
-      ['Negate', ['Arcosh', ['Divide', ['Negate', '__b'], '__a']]],
+      'If',
       ['GreaterEqual', ['Divide', ['Negate', '__b'], '__a'], 1],
+      ['Negate', ['Arcosh', ['Divide', ['Negate', '__b'], '__a']]],
     ],
     id: 'solve.hyperbolic-cosine-negative-branch',
     useVariations: true,
@@ -984,9 +984,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Cosh', '_x'], '__b'],
     replace: [
-      'When',
-      ['Arcosh', ['Negate', '__b']],
+      'If',
       ['GreaterEqual', ['Negate', '__b'], 1],
+      ['Arcosh', ['Negate', '__b']],
     ],
     id: 'solve.hyperbolic-cosine-unit',
     useVariations: true,
@@ -997,9 +997,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Cosh', '_x'], '__b'],
     replace: [
-      'When',
-      ['Negate', ['Arcosh', ['Negate', '__b']]],
+      'If',
       ['GreaterEqual', ['Negate', '__b'], 1],
+      ['Negate', ['Arcosh', ['Negate', '__b']]],
     ],
     id: 'solve.hyperbolic-cosine-unit-negative-branch',
     useVariations: true,
@@ -1012,9 +1012,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Multiply', '__a', ['Tanh', '_x']], '__b'],
     replace: [
-      'When',
-      ['Artanh', ['Divide', ['Negate', '__b'], '__a']],
+      'If',
       ['Less', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
+      ['Artanh', ['Divide', ['Negate', '__b'], '__a']],
     ],
     id: 'solve.hyperbolic-tangent',
     useVariations: true,
@@ -1026,9 +1026,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   {
     match: ['Add', ['Tanh', '_x'], '__b'],
     replace: [
-      'When',
-      ['Artanh', ['Negate', '__b']],
+      'If',
       ['Less', ['Abs', ['Negate', '__b']], 1],
+      ['Artanh', ['Negate', '__b']],
     ],
     id: 'solve.hyperbolic-tangent-unit',
     useVariations: true,
@@ -1309,8 +1309,12 @@ export function withExactIntegerExponents(
  */
 function floatRoot(root: Expression): Expression {
   const ce = root.engine;
-  if (isFunction(root, 'When'))
-    return ce.function('When', [floatRoot(root.op1), root.op2]);
+  const restriction = restrictionParts(root);
+  if (restriction !== undefined)
+    return ce.function('If', [
+      restriction.condition,
+      floatRoot(restriction.value),
+    ]);
   const value = root.N();
   if (!isNumber(value) || !value.isExact) return value;
   const re = value.bignumRe ?? value.re;
@@ -1638,7 +1642,7 @@ function realRootsOfSquaredEquation(
 ): ReadonlyArray<Expression> {
   if (isComplexUnknown(ce, x)) return roots;
   return roots.filter(
-    (root) => isRealRoot(isFunction(root, 'When') ? root.op1 : root) !== false
+    (root) => isRealRoot(restrictionParts(root)?.value ?? root) !== false
   );
 }
 
@@ -1650,7 +1654,7 @@ function realRootsOfSquaredEquation(
  * where `−B/A ≥ 0`. The caller wraps each squared-equation root in this guard
  * through `conditionalValue`: a *numeric* RHS is decidable (the guard collapses
  * to the bare root or prunes it — today's behavior byte-for-byte), a symbolic
- * RHS yields `When(root, 0 ≤ −B/A)`.
+ * RHS yields `If(0 ≤ −B/A, root)`.
  *
  * Returns null for any other shape (x-dependent coefficient — the two-sqrt and
  * `A(x)·√R` cases — multiple or other radicals, or no radical), so the guard is
@@ -2695,8 +2699,8 @@ const MAX_UNIT_RANGE_SHIFTS = 16;
  * `tan` or `cot`). Each root `r` of the list then gives the roots
  * `r + k·P` for each integer `k` such that `r + k·P` is in `[-1, 1]` (with a
  * small margin: the caller checks each root against the equation). The
- * roots of the list are kept as they are. A root `When(r, guard)` gives
- * `When(r + k·P, guard)`.
+ * roots of the list are kept as they are. A root `If(guard, r)` gives
+ * `If(guard, r + k·P)`.
  *
  * Returns `uRoots` when `exprU` does not have this form, or when it would add
  * more than `MAX_UNIT_RANGE_SHIFTS` roots.
@@ -2751,7 +2755,7 @@ function rootsInUnitRange(
   const ranges: Array<{ root: Expression; kmin: number; kmax: number }> = [];
   let count = 0;
   for (const root of uRoots) {
-    const value = isFunction(root, 'When') ? root.op1 : root;
+    const value = restrictionParts(root)?.value ?? root;
     const v = value.N();
     if (!Number.isFinite(v.re) || v.im !== 0) continue;
     const kmin = Math.ceil((-1 - margin - v.re) / periodNum);
@@ -2776,7 +2780,7 @@ function rootsInUnitRange(
 
   const out: Expression[] = [...uRoots];
   for (const { root, kmin, kmax } of ranges) {
-    const value = isFunction(root, 'When') ? root.op1 : root;
+    const value = restrictionParts(root)?.value ?? root;
     for (let k = kmin; k <= kmax; k++) {
       if (k === 0) continue;
       const shifted = ce
@@ -2785,9 +2789,11 @@ function rootsInUnitRange(
           ce.function('Multiply', [ce.number(k), period]),
         ])
         .evaluate();
-      const member = isFunction(root, 'When')
-        ? ce.function('When', [shifted, root.op2])
-        : shifted;
+      const condition = restrictionParts(root)?.condition;
+      const member =
+        condition !== undefined
+          ? ce.function('If', [condition, shifted])
+          : shifted;
       if (!out.some((r) => r.isSame(member))) out.push(member);
     }
   }
@@ -3374,7 +3380,7 @@ function solveSingleLogarithm(
   adoptChildStats(stats, child);
   // `log_b` is defined only for a base `b > 0` with `b ≠ 1`: `log_a(x) = 3`
   // has the root `a^3` only for such an `a`. When this is not known, each
-  // root is guarded (`When(root, 0 < b ∧ b ≠ 1)`), and a guard that is
+  // root is guarded (`If(0 < b ∧ b ≠ 1, root)`), and a guard that is
   // false removes the root (`conditionalRoot()`). The caller checks a
   // guarded root less strictly than a bare root (a check that is not
   // decided keeps it), thus the roots are checked here first against the
@@ -3624,7 +3630,7 @@ function isRealConstant(expr: Expression): boolean {
 function realRootsOnly(roots: ReadonlyArray<Expression>): Expression[] | null {
   const result: Expression[] = [];
   for (const root of roots) {
-    const real = isRealRoot(isFunction(root, 'When') ? root.op1 : root);
+    const real = isRealRoot(restrictionParts(root)?.value ?? root);
     if (real === undefined) return null;
     if (real) result.push(root);
   }
@@ -4458,14 +4464,15 @@ function solveLinearTrigArgument(
   }
   if (uRoots.length === 0 && !stats.candidates) return null;
 
-  // x = (u₀ - b)/a. A root `When(u₀, guard)` keeps its guard.
+  // x = (u₀ - b)/a. A root `If(guard, u₀)` keeps its guard.
   const back = (u0: Expression): Expression =>
     ce.function('Divide', [ce.function('Subtract', [u0, b]), a]).evaluate();
-  const roots = uRoots.map((u0) =>
-    isFunction(u0, 'When')
-      ? ce.function('When', [back(u0.op1), u0.op2])
-      : back(u0)
-  );
+  const roots = uRoots.map((u0) => {
+    const restriction = restrictionParts(u0);
+    return restriction !== undefined
+      ? ce.function('If', [restriction.condition, back(restriction.value)])
+      : back(u0);
+  });
   if (trace) {
     traceStep(trace, 'solve.substitute', ce.function('Equal', [u, commonArg]));
     traceStep(trace, 'solve.substituted-equation', asEquation(exprU, uName));
@@ -5133,13 +5140,14 @@ function univariateRoots(
       if (!trace || matches.length === 0) return;
       if (via) traceStep(trace, via.because, asEquation(via.form, x));
       for (const m of matches) {
-        // A validity-guarded candidate `When(root, guard)` (Phase 2): resolve a
+        // A validity-guarded candidate `If(guard, root)` (Phase 2): resolve a
         // decidable guard for the narrative (a numeric ratio collapses to the
         // bare root, matching the pre-Phase-2 trace; a False guard drops the
-        // step). An undecidable guard is displayed as the `When`.
+        // step). An undecidable guard is displayed as the restriction.
         let value: Expression | null = m.value;
-        if (isFunction(value, 'When'))
-          value = conditionalRoot(ce, value.op1, value.op2);
+        const restriction = restrictionParts(value);
+        if (restriction !== undefined)
+          value = conditionalRoot(ce, restriction.value, restriction.condition);
         if (value === null) continue;
         traceStep(
           trace,
@@ -5432,16 +5440,16 @@ function univariateRoots(
   if (stats && (result.length > 0 || noRoot)) stats.candidates = true;
 
   // Evaluate/simplify each candidate root, resolving any validity guard a
-  // trig rule attached (`When(root, guard)`) through the single chokepoint:
+  // trig rule attached (`If(guard, root)`) through the single chokepoint:
   // a decidable-True guard collapses to the bare root (numeric ratios keep
   // today's behavior), a decidable-False guard drops the root (pruning
-  // contract, decision 8), and an undecidable guard is retained as a `When`
+  // contract, decision 8), and an undecidable guard is retained as a restriction
   // whose *value* is verified below.
   // A single-sqrt equation with an x-free RHS — `√(u(x)) = rhs` and its
   // `k·√u = rhs` variants — needs `rhs ≥ 0` (a square root is non-negative).
   // The squared-equation roots reach here bare; wrap each in that guard through
   // the conditional-value chokepoint. Numeric RHS is decidable and keeps
-  // today's behavior exactly; a symbolic RHS emits `When(root, 0 ≤ rhs)`.
+  // today's behavior exactly; a symbolic RHS emits `If(0 ≤ rhs, root)`.
   const sqrtGuard = sqrtEquationRhsGuard(originalExpr, x);
 
   // The validity guards of the root templates state when a root is REAL
@@ -5460,8 +5468,13 @@ function univariateRoots(
     (isFunction(sqrtGuard) && sqrtGuard.op2.isExtendedReal === true);
   const resolved: Expression[] = [];
   for (const r of result) {
-    if (isFunction(r, 'When')) {
-      const root = conditionalRoot(ce, r.op1.evaluate().simplify(), r.op2);
+    const restriction = restrictionParts(r);
+    if (restriction !== undefined) {
+      const root = conditionalRoot(
+        ce,
+        restriction.value.evaluate().simplify(),
+        restriction.condition
+      );
       if (root !== null) resolved.push(root);
       else if (complexUnknown && stats) stats.undecided = true;
     } else if (sqrtGuard !== null) {
@@ -5592,7 +5605,7 @@ function solveAbsoluteValueSplit(
     if (allRoots.length === 0 && !factorHasNoRoot(branch, x, child))
       combined.partial = true;
     for (const r of allRoots) {
-      const real = isRealRoot(isFunction(r, 'When') ? r.op1 : r);
+      const real = isRealRoot(restrictionParts(r)?.value ?? r);
       // A root that can be real is not removed as a decision
       if (real === undefined) {
         combined.partial = true;
@@ -5644,7 +5657,7 @@ function realRootsOfAbsEquation(
     return roots;
   }
   const kept = roots.filter((root) => {
-    const real = isRealRoot(isFunction(root, 'When') ? root.op1 : root);
+    const real = isRealRoot(restrictionParts(root)?.value ?? root);
     if (real === undefined && stats) stats.undecided = true;
     return real === true;
   });
@@ -6583,16 +6596,18 @@ function validateRoots(
 ): Expression[] {
   const ce = expr.engine;
   const validRoots = roots.filter((root) => {
-    // A validity-guarded root `When(v, guard)` is verified by its *value* `v`
+    // A validity-guarded root `If(guard, v)` is verified by its *value* `v`
     // (the guard already restricts the domain, decision 8): substituting the
-    // `When` itself threads a guard-wrapped residual that never compares equal
-    // to 0. The `When` (guard carried) is what stays in the solution list.
-    const isWhen = isFunction(root, 'When');
-    const probe = isWhen ? root.op1 : root;
+    // restriction itself threads a guard-wrapped residual that never compares
+    // equal to 0. The restriction (guard carried) is what stays in the
+    // solution list.
+    const guarded = restrictionParts(root)?.value;
+    const isRestricted = guarded !== undefined;
+    const probe = guarded ?? root;
     // An infinite value is never a root: `sin(1/x) = 0` gives the candidate
     // `+∞` (from `1/x = 0`), and `sin(1/∞)` evaluates to `0`.
     if (probe.isInfinity === true) return false;
-    if (formulaRoots && !isWhen && probe.isValid && isExactTree(probe))
+    if (formulaRoots && !isRestricted && probe.isValid && isExactTree(probe))
       return probe.isNaN !== true;
     // Evaluate the expression at the root
     const value = expr.subs({ [x]: probe }).canonical.evaluate();
@@ -6640,13 +6655,13 @@ function validateRoots(
     const zero = value.simplify().isIdenticallyEqual(0);
 
     // Three-valued discipline (undefined ≠ false): only a *decidably* extraneous
-    // root is pruned. For a guarded `When` root the substitute-back check can be
+    // root is pruned. For a guarded (restricted) root the substitute-back check can be
     // undecidable — e.g. `√(x+3) = a` at `x = a²−3` gives `|a| − a`, whose
     // vanishing is unknown for free `a` — and the guard (`0 ≤ a`) already carves
     // out the domain, so keep it. A bare root keeps today's strict behavior
     // (undecidable ⇒ dropped), avoiding domain-collapsing false positives.
-    if (!isWhen && zero === undefined && stats) stats.undecided = true;
-    return isWhen ? zero !== false : zero === true;
+    if (!isRestricted && zero === undefined && stats) stats.undecided = true;
+    return isRestricted ? zero !== false : zero === true;
   });
 
   // Record the extraneous candidates rejected by substitution into the
@@ -6730,13 +6745,14 @@ function filterRootsByType(
     // that cannot hold it. Reject a root that is provably infinite; a root
     // whose finiteness is undecided is treated as before.
     if (varTypeObj.matches('real')) {
-      if (isFunction(root, 'When')) {
-        // A root `When(v, guard)` of a root template: the guard states when
+      const guarded = restrictionParts(root)?.value;
+      if (guarded !== undefined) {
+        // A root `If(guard, v)` of a root template: the guard states when
         // `v` is a real root (`|c| ≤ 1` for `arcsin(c)`). When the type of
         // `v` does not decide, and each symbol of `v` is real (by its
         // declared type, or a parameter that the solver reads as real), the
         // guard decides: the root is kept.
-        const v = root.op1.evaluate();
+        const v = guarded.evaluate();
         if (v.isInfinity === true) return false;
         const real = isRealForSolve(v);
         if (real !== undefined) return keep(real);

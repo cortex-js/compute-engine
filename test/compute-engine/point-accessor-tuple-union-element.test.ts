@@ -23,7 +23,7 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
  * The same reading applies to a SINGLE point declared with such a union, and
  * to the `scalar + tuple` rejection in `canonicalAdd`: an operand that is a
  * numeric tuple in every non-absent case — `missing | tuple<number, number>`,
- * what a `When`-gated point has, or a union of numeric tuple spellings — is
+ * what a restricted point has, or a union of numeric tuple spellings — is
  * the same mistake a plain `tuple<number, number>` operand is.
  */
 
@@ -164,7 +164,7 @@ describe('scalar + tuple rejection reads through absence and unions', () => {
     expect(JSON.stringify(sum.json)).toContain('incompatible-type');
   });
 
-  test('a `When`-gated point returned by a user function is rejected', () => {
+  test('a `restriction`-gated point returned by a user function is rejected', () => {
     // `h(t) := (t, t+1) when t > 0` types `missing | tuple<number, number>`.
     // The compiled route used to emit the scalar `2 + _fn_h(1)`, which
     // returned the string "21,2" where the interpreter errored.
@@ -174,7 +174,7 @@ describe('scalar + tuple rejection reads through absence and unions', () => {
       'h',
       [
         'Function',
-        ['When', ['Tuple', 't', ['Add', 't', 1]], ['Greater', 't', 0]],
+        ['If', ['Greater', 't', 0], ['Tuple', 't', ['Add', 't', 1]]],
         't',
       ],
     ]).evaluate();

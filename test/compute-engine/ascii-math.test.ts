@@ -481,8 +481,8 @@ describe('POWER BASE', () => {
     expect(check(['Power', ['Sum', 'n', ['Limits', 'n', 1, 10]], 2])).toBe(
       '(sum_(n=1)^(10)(n))^2'
     );
-    expect(check(['Power', ['When', 'x', ['Greater', 'x', 0]], 2])).toBe(
-      '(x {0 < x})^2'
+    expect(check(['Power', ['If', ['Greater', 'x', 0], 'x'], 2])).toBe(
+      'If(0 < x, x)^2'
     );
     expect(ce.box(['Power', ['Not', 'p'], 2], { form: 'raw' }).toString()).toBe(
       '(!p)^2'

@@ -378,7 +378,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
   });
 
   // REVIEW.md E15: GLSL has the ternary operator, but no `NaN` identifier — the
-  // base compiler's default When/Which emitted a bare `NaN`. GLSL routes its
+  // base compiler's default restriction and Which emitted a bare `NaN`. GLSL routes its
   // masked/else-branch NaN through the overridable `_gpu_nan()` preamble helper
   // instead of a bare, implementation-defined `0.0 / 0.0` literal.
   describe('GLSL control flow (E15)', () => {
@@ -390,7 +390,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     });
 
     it('compiles When with the _gpu_nan() helper, never a bare NaN', () => {
-      const e = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+      const e = ce.expr(['If', ['Greater', 'x', 0], 'x']);
       const result = glsl.compile(e);
       // The else branch calls the helper, not a bare `0.0 / 0.0` literal…
       expect(result.code).toContain('_gpu_nan()');
@@ -543,7 +543,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       for (const [label, expr] of [
         ['If', ['If', ['Greater', 'x', 0], bigSum, 0]],
         ['Which', ['Which', ['Greater', 'x', 0], bigSum, 'True', 0]],
-        ['When', ['When', bigSum, ['Greater', 'x', 0]]],
+        ['restriction', ['If', ['Greater', 'x', 0], bigSum]],
       ] as [string, any][]) {
         it(`${label} arm containing a loop-form Sum`, () => {
           const code = glsl.compile(ce.box(expr), NO_FOLD).code;
@@ -776,7 +776,7 @@ describe('GLSL Length/Norm name collision (Tycho round)', () => {
   });
 });
 
-// A masked (`When`/`Which` else) branch whose value is a tuple body compiles
+// A masked (restriction or `Which` else) branch whose value is a tuple body compiles
 // to a vecN; the NaN branch must match that shape — GLSL has no implicit
 // float→vecN conversion in a ternary, so `cond ? vec2(…) : _gpu_nan()` is
 // rejected by the driver (every restricted parametric member lost its GPU
@@ -784,11 +784,7 @@ describe('GLSL Length/Norm name collision (Tycho round)', () => {
 describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', () => {
   it('restricted parametric tuple body emits a vec2 NaN branch', () => {
     const code = glsl.compile(
-      ce.box([
-        'When',
-        ['Tuple', ['Cos', 't'], ['Sin', 't']],
-        ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]],
-      ])
+      ce.box(['If', ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]], ['Tuple', ['Cos', 't'], ['Sin', 't']]])
     ).code;
     expect(code).toContain('vec2(_gpu_cos(t), _gpu_sin(t))');
     expect(code).toContain('vec2(_gpu_nan())');
@@ -797,7 +793,7 @@ describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', (
 
   it('scalar bodies keep the scalar NaN', () => {
     const code = glsl.compile(
-      ce.box(['When', ['Cos', 't'], ['LessEqual', 't', 1]])
+      ce.box(['If', ['LessEqual', 't', 1], ['Cos', 't']])
     ).code;
     expect(code).toContain(': (_gpu_nan())');
     expect(code).not.toContain('vec2(_gpu_nan())');

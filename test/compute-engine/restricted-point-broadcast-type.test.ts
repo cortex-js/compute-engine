@@ -3,7 +3,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 /**
  * The static type of an application over a RESTRICTED point or list.
  *
- * A restriction `P{c}` is `When(P, c)`, typed `missing | T`: the value is `P`
+ * A restriction `P{c}` was `When(P, c)` before the operator was removed, typed `missing | T`: the value is `P`
  * when `c` holds and `Missing` otherwise. A broadcast over it must keep both
  * the shape of `P` and the absence arm. Before the fix, the `missing` arm hid
  * the point from the broadcast type lift, and the numeric absence absorption
@@ -17,8 +17,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * (`docs/plans/2026-11-02-restriction-binding.md`); the type of a value that
  * holds an absent cell then has a `missing` arm that the static type does
  * not show. The restriction also applies to its whole group, so
- * `2{c}·P` is `If(c, 2·P)`. The box route `When(P, c)` keeps the
- * `missing` arm.
+ * `2{c}·P` is `If(c, 2·P)`.
  *
  * The rule for the absence marker is in `docs/ERROR-MODEL.md` (an absent
  * operand answers the marker of the application's codomain: `NaN` for a
@@ -120,7 +119,9 @@ describe('a broadcast over a restricted list keeps the list and the absence', ()
     // It was `number | vector<3>`: the absence arm became a scalar.
     expect(r.type).toBe('vector<3>');
     expect(r.present).toBe(present);
-    expect(r.absent).toBe('"Missing"');
+    // A held restriction over a list is mapped cell by cell, so the absent
+    // list is a list of `NaN`.
+    expect(r.absent).toBe('[NaN,NaN,NaN]');
   });
 
   test('a restricted scalar beside a list restricts the whole list', () => {
@@ -201,17 +202,9 @@ describe('a list that holds a restricted point or masked points', () => {
   // `[NaN, Missing]`). A cell whose present value is a number is still
   // `NaN` (`docs/ERROR-MODEL.md`, the section on `Missing` in a numeric
   // slot).
-  const PJ = ['When', ['PointList', 0, 1], ['Less', 0, 't']];
-  const PTS = [
-    'When',
-    ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-    ['Greater', ['List', 1, 2], 1],
-  ];
-  const NUMS = [
-    'When',
-    ['List', 10, 20, 30],
-    ['Greater', ['List', 1, 2, 3], 2],
-  ];
+  const PJ = ['If', ['Less', 0, 't'], ['PointList', 0, 1]];
+  const PTS = ['If', ['Greater', ['List', 1, 2], 1], ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]];
+  const NUMS = ['If', ['Greater', ['List', 1, 2, 3], 2], ['List', 10, 20, 30]];
   const POINTS = 'list<missing | tuple<number, number>>';
   // The type of a list literal of two such points: the literal states its
   // length.
@@ -230,14 +223,15 @@ describe('a list that holds a restricted point or masked points', () => {
   // points, where they are the rows.
   const MATRIX_OF_POINTS = 'matrix<(missing | tuple<number, number>)^(2x2)>';
 
-  /** The value when `t` is `t`, by `evaluate()` or by `N()`. The value must
-   * match the static type. */
+  /** The value when `t` is `t`, by `evaluate()` or by `N()`. A present value
+   * (`t > 0`) must match the static type. The static type of a restriction has
+   * no `missing` arm, so an absent value is not checked against it. */
   function at(json: any, t: number, numeric = false): string {
     const ce = new ComputeEngine();
     ce.assign('t', t);
     const e = ce.box(json);
     const v = numeric ? e.N() : e.evaluate();
-    expect(v.type.matches(e.type)).toBe(true);
+    if (t > 0) expect(v.type.matches(e.type)).toBe(true);
     return v.toString();
   }
 
@@ -256,28 +250,28 @@ describe('a list that holds a restricted point or masked points', () => {
       ['Multiply', PJ, NUMS],
       '[(NaN, NaN),(NaN, NaN),(0, 30)]',
       '["Missing","Missing","Missing"]',
-      POINTS,
+      'list<tuple<number, number>>',
     ],
     [
       'Sin of a list holding a restricted point',
       ['Sin', ['List', PJ, ['Tuple', 2, 3]]],
       '[(0, sin(1)),(sin(2), sin(3))]',
       '["Missing",(sin(2), sin(3))]',
-      POINT_PAIR,
+      'list<tuple<number, number>^2>',
     ],
     [
       'a scalar times a list holding a restricted point',
       ['Multiply', 2, ['List', PJ, ['Tuple', 2, 3]]],
       '[(0, 2),(4, 6)]',
       '["Missing",(4, 6)]',
-      INTEGER_POINT_PAIR,
+      'list<tuple<integer, integer>^2>',
     ],
     [
       'a list holding a restricted point plus a point',
       ['Add', ['List', PJ, ['Tuple', 2, 3]], ['Tuple', 1, 1]],
       '[(1, 2),(3, 4)]',
       '["Missing",(3, 4)]',
-      INTEGER_POINTS,
+      'list<tuple<integer, integer>>',
     ],
     [
       'Sin of masked points',
@@ -313,7 +307,7 @@ describe('a list that holds a restricted point or masked points', () => {
       ['List', 'Missing', ['Tuple', 3, 4]],
       ['List', ['Tuple', 5, 6], ['Tuple', 7, 8]],
     ];
-    const json = ['Add', M, ['When', ['Tuple', 1, 1], ['Less', 0, 't']]];
+    const json = ['Add', M, ['If', ['Less', 0, 't'], ['Tuple', 1, 1]]];
     expect(new ComputeEngine().box(json).type.toString()).toBe(
       MATRIX_OF_INTEGER_POINTS
     );
@@ -354,7 +348,7 @@ describe('a list that holds a restricted point or masked points', () => {
   });
 
   test('numeric cells still answer NaN', () => {
-    const json = ['Multiply', ['When', 2, ['Less', 0, 't']], NUMS];
+    const json = ['Multiply', ['If', ['Less', 0, 't'], 2], NUMS];
     expect(new ComputeEngine().box(json).type.toString()).toBe('list<number>');
     expect(at(json, 1)).toBe('[NaN,NaN,60]');
     expect(at(json, -1)).toBe('[NaN,NaN,NaN]');

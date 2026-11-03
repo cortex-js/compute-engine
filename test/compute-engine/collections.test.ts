@@ -78,8 +78,8 @@ describe('LIST TENSOR ELIGIBILITY', () => {
       ]),
       ce.box([
         'List',
-        ['When', ['Tuple', 1, 2], 'c'],
-        ['When', ['Tuple', 3, 4], 'c'],
+        ['If', 'c', ['Tuple', 1, 2]],
+        ['If', 'c', ['Tuple', 3, 4]],
       ]),
     ];
 
@@ -88,30 +88,27 @@ describe('LIST TENSOR ELIGIBILITY', () => {
       // IS shape-regular (isTensor may be true), but tuple cells are NOT
       // kernel-admissible — the value stays a plain List and never enters a
       // numeric kernel (no `list<number>` / `vector` typing). The SHAPE claim
-      // uses `list<any>`: the `Which` rows have no default clause, and the
-      // `When` rows have a condition that may be false, so their elements
-      // type `tuple<…> | missing` (no-selection ruling 2026-08-27; `When`
-      // aligned 2026-09-09) and the values-only bare `list` synonym excludes
-      // an absence-admitting element type by design.
+      // uses `list<any>`: the `Which` rows have no default clause, so their
+      // elements type `tuple<…> | missing` (no-selection ruling 2026-08-27)
+      // and the values-only bare `list` synonym excludes an
+      // absence-admitting element type by design. A single-branch `If(c, e)`
+      // has the type of `e`, with no `missing` arm.
       expect(expr.operator).toBe('List');
       expect(expr.type.matches('list<any>')).toBe(true);
       expect(expr.type.matches('list<number>')).toBe(false);
       expect(expr.type.matches('vector')).toBe(false);
     }
     const absentRows = expressions.filter(
-      (x) => x.ops[0].operator === 'Which' || x.ops[0].operator === 'When'
+      (x) => x.ops[0].operator === 'Which'
     );
     for (const expr of expressions.filter(
-      (x) =>
-        x.ops[0].operator !== 'Hold' &&
-        x.ops[0].operator !== 'Which' &&
-        x.ops[0].operator !== 'When'
+      (x) => x.ops[0].operator !== 'Hold' && x.ops[0].operator !== 'Which'
     )) {
       expect(expr.type.matches('list')).toBe(true);
       expect(expr.type.matches('list<tuple<number, number>>')).toBe(true);
     }
-    // A default-less `Which` element, or a restricted (`When`) one, may
-    // answer `Missing`, and the list type says so.
+    // A default-less `Which` element may answer `Missing`, and the list type
+    // says so.
     for (const expr of absentRows)
       expect(expr.type.matches('list<tuple<number, number> | missing>')).toBe(
         true
@@ -3735,10 +3732,10 @@ describe('THE MATERIALIZATION OPTION DESCRIBES THE RESULT, NOT THE OPERANDS', ()
   test('a held conditional over a list is left as the held form', () => {
     const ce = new ComputeEngine();
     const held = ce
-      .box(['When', ['List', 5, 10], ['Less', 0, 't']])
+      .box(['If', ['Less', 0, 't'], ['List', 5, 10]])
       .evaluate({ materialization: true });
-    expect(held.operator).toBe('When');
-    expect(held.toString()).toBe('[5,10] {0 < t}');
+    expect(held.operator).toBe('If');
+    expect(held.toString()).toBe('If(0 < t, [5,10])');
   });
   test('a nested list or set is materialized once, not once per level', async () => {
     // The `List` and `Set` handlers evaluate each element with the option.

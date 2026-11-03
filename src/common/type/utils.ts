@@ -947,7 +947,7 @@ function broadcastableIndexElementType(cells: Type, seen: AliasDescent): Type {
  *   one path, and the cut answers the alias itself.
  * - A union is read arm by arm, and the elements of the arms that add some
  *   are joined: for `vector<2> | missing` (the cells of `h(x)` for
- *   `h(t) = When([t, 2t], t > 0)`), the elements are `number`.
+ *   `h(t) = If(t > 0, [t, 2t])`), the elements are `number`.
  * - A nested `broadcastable<U>` adds what an index into it returns.
  * - A type that cannot hold a list adds what an index into it returns
  *   (`ownElementsOfIndexableCell`): the slots of a tuple, the characters

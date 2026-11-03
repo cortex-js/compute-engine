@@ -1,4 +1,5 @@
 import { isDeclaredLocal } from './declared-local.js';
+import { isRestriction } from './conditional-value.js';
 import {
   broadcastCellTypeOf,
   couldBeUnkeyedCollectionOperand,
@@ -2112,13 +2113,18 @@ export function absentMarkerIsNumeric(
  * not see the absence. Such an operator evaluates the operand and continues
  * with the value that `settledAbsentableValue` reads off the result.
  *
+ * A restriction `If(c, xs)` is admitted by its form: it is typed as its
+ * value `xs`, with no `missing` member, but it is absent where `c` fails.
+ *
  * An operand that is not pure is excluded: a value that is neither absent
  * nor a collection would be discarded by the caller, which would then
  * evaluate the operand a second time (a `Random` draw consumed twice).
  */
 export function isAbsentableCollectionOperand(op: Expression): boolean {
   if (isAbsentScalarSymbol(op)) return false;
-  const present = threadedPresentType(op.type.type);
+  const present = isRestriction(op)
+    ? op.type.type
+    : threadedPresentType(op.type.type);
   if (present === undefined || !typeCouldBeCollection(present)) return false;
   return op.isPure;
 }
@@ -2129,14 +2135,14 @@ export function isAbsentableCollectionOperand(op: Expression): boolean {
  * (`Missing` or `Undefined`, tested with `isAbsentScalarSymbol`), or a
  * collection that cannot be absent. `undefined` otherwise: an operand that
  * does not evaluate yet, and a restricted list whose condition is not
- * decided, which is still typed `missing | list<…>`; the caller then keeps
+ * decided, which is still a restriction `If(c, xs)`; the caller then keeps
  * the operand as it is.
  */
 export function settledAbsentableValue(
   value: Expression
 ): Expression | undefined {
   if (isAbsentScalarSymbol(value)) return value;
-  if (!value.isCollection) return undefined;
+  if (!value.isCollection || isRestriction(value)) return undefined;
   return threadedPresentType(value.type.type) === undefined ? value : undefined;
 }
 

@@ -340,7 +340,7 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
 });
 
 describe('Tycho row 425: a restricted list, a union T', () => {
-  // `h(t) = When([t, 2t], t > 0)`: `h(x)` is `R | list<R | list<any>>` with
+  // `h(t) = If(t > 0, [t, 2t])`: `h(x)` is `R | list<R | list<any>>` with
   // `R = missing | vector<2>` (ROADMAP CE-371, user decision 2026-10-25: a
   // list `x` of any depth is mapped at its leaves, so the value can be a
   // list of matrices). The `missing` arm cannot hold a list and adds
@@ -353,7 +353,7 @@ describe('Tycho row 425: a restricted list, a union T', () => {
       'h',
       ce.box([
         'Function',
-        ['When', ['List', 't', ['Multiply', 2, 't']], ['Greater', 't', 0]],
+        ['If', ['Greater', 't', 0], ['List', 't', ['Multiply', 2, 't']]],
         't',
       ])
     );
@@ -362,9 +362,7 @@ describe('Tycho row 425: a restricted list, a union T', () => {
 
   test('the index into h(x) holds a number', () => {
     const ce = whenEngine();
-    expect(ce.box(['h', 'x']).type.toString()).toBe(
-      'list<list<any> | missing | number> | missing'
-    );
+    expect(ce.box(['h', 'x']).type.toString()).toBe('list<list<any> | number>');
     expect(
       staticTypeAndValues(ce, ce.box(['At', ['h', 'x'], 1]), 'x', [
         NUMBER_X,

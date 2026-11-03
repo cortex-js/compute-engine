@@ -286,8 +286,7 @@ describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () =
       'Comprehension',
       [
         'Block',
-        ['Declare', 't'],
-        ['Assign', 't', ['Square', 'x']],
+        ['Declare', 't', { str: 'unknown' }, ['Square', 'x']],
         ['Add', 't', 1],
       ],
       ['Element', 'x', ['Range', 1, 4], ['Greater', 'x', 2]],

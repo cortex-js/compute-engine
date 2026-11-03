@@ -705,7 +705,7 @@ export function callbackExcludesNothing(
         return x.nops > 0 && result(x.ops[x.nops - 1]);
       if (x.operator === 'Return') return x.nops > 0 && result(x.op1);
       if (x.operator === 'Apply') return callable(x.op1);
-      if (['N', 'NumericApproximation', 'When'].includes(x.operator))
+      if (['N', 'NumericApproximation'].includes(x.operator))
         return x.nops > 0 && result(x.op1);
       if (isBound(x.operator)) return false;
       const local = target ? blockLocalFunction(x.operator, target) : undefined;

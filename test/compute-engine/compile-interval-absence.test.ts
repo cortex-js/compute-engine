@@ -200,15 +200,11 @@ describe('a restriction over a relation', () => {
   const ce = new ComputeEngine();
   ce.declare('x', 'real');
   ce.declare('y', 'real');
-  const expr = ce.box([
-    'When',
-    ['LessEqual', 'y', ['Sin', 'x']],
-    ['Greater', ['Sin', 'x'], 0],
-  ]);
+  const expr = ce.box(['If', ['Greater', ['Sin', 'x'], 0], ['LessEqual', 'y', ['Sin', 'x']]]);
   const fn = compile(expr, { to: 'interval-js' });
 
   test('the position typed `boolean | missing` compiles to a conjunction at run time', () => {
-    expect(expr.type.toString()).toBe('boolean | missing');
+    expect(expr.type.toString()).toBe('boolean');
     expect(fn.success).toBe(true);
     // x in [1, 1.5]: sin x in [0.84, 1] > 0, y = 0.5 ≤ sin x → 'true'.
     expect(fn.run!({ x: iv(1, 1.5), y: iv(0.5, 0.5) })).toBe('true');

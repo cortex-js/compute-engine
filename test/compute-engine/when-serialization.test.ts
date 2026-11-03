@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 /**
- * Serialization of the `When` restriction `expr\left\{cond\right\}`.
+ * Serialization of the restriction `expr\left\{cond\right\}`.
  *
  * Two defects, both reported by the Desmos-corpus consumer against 0.116.1.
  *
@@ -17,7 +17,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * Separately, the restricted expression was serialized without regard to its
  * own precedence, so a negative subject came back bound the wrong way round.
  *
- * The truthiness test was not unique to `When`: the same shape sat in five
+ * The truthiness test was not unique to the restriction: the same shape sat in five
  * other serializers, each losing a literal `0` operand in its own way. Those
  * are covered at the bottom of this file, since one fix and one class of
  * regression covers them all.
@@ -30,31 +30,38 @@ function raw(latex: string): unknown {
   return ce.parse(latex, { form: 'raw' }).json;
 }
 
-describe('`When` serializes a literal `0` operand', () => {
+describe('`restriction` serializes a literal `0` operand', () => {
   test('a restriction ON zero is not dropped', () => {
-    expect(ce.box(['When', 0, ['Equal', 'x', 'x']]).latex).toEqual(
-      '0\\left\\{x=x\\right\\}'
-    );
+    const expr = ce.box(['If', ['Less', 0, 'x'], 0]);
+    expect(expr.latex).toEqual('0\\text{ where }0\\lt x');
+    expect(ce.parse(expr.latex).json).toEqual(['If', ['Less', 0, 'x'], 0]);
+    // A condition `a = v` with a bare symbol on the left is serialized with
+    // `\mathrm{If}`, and the zero is kept there too.
+    const eq = ce.box(['If', ['Equal', 'x', 'x'], 0]);
+    expect(eq.latex).toEqual('\\mathrm{If}(x=x, 0)');
+    expect(ce.parse(eq.latex).json).toEqual(['If', ['Equal', 'x', 'x'], 0]);
   });
 
   test('a zero CONDITION is not dropped either', () => {
-    expect(ce.box(['When', 'x', 0]).latex).toEqual('x\\left\\{0\\right\\}');
+    // A condition that is not a boolean is an `Error` operand: the zero is
+    // kept inside the error.
+    expect(ce.box(['If', 0, 'x']).latex).toContain('\\error{0}');
   });
 
   test('the operands that always worked are unchanged', () => {
-    expect(ce.box(['When', 1, ['Equal', 'x', 'x']]).latex).toEqual(
-      '1\\left\\{x=x\\right\\}'
-    );
-    expect(ce.box(['When', 0.5, ['Equal', 'x', 'x']]).latex).toEqual(
-      '0.5\\left\\{x=x\\right\\}'
-    );
-    expect(ce.box(['When', 'x', ['Equal', 'x', 'x']]).latex).toEqual(
-      'x\\left\\{x=x\\right\\}'
-    );
+    for (const [value, latex] of [
+      [1, '1\\text{ where }0\\lt x'],
+      [0.5, '0.5\\text{ where }0\\lt x'],
+      ['x', 'x\\text{ where }0\\lt x'],
+    ] as const) {
+      const expr = ce.box(['If', ['Less', 0, 'x'], value]);
+      expect(expr.latex).toEqual(latex);
+      expect(ce.parse(expr.latex).json).toEqual(['If', ['Less', 0, 'x'], value]);
+    }
   });
 });
 
-describe('`When` round-trips the Desmos gates through latex', () => {
+describe('`restriction` round-trips the Desmos gates through latex', () => {
   // A document's persisted cell latex is a string boundary for the consumer,
   // so a serialization that does not reparse is unrecoverable data loss.
   test('the full-plane gate `1>0{cond}` survives, raw and canonical', () => {
@@ -83,14 +90,14 @@ describe('`When` round-trips the Desmos gates through latex', () => {
   });
 });
 
-describe('`When` keeps a low-precedence subject grouped', () => {
-  test('a negative subject reparses as the subject, not as a negated When', () => {
-    // Serialized bare, `-1\left\{c\right\}` reads as `Negate(When(1, c))` —
-    // the negation applied to the restriction instead of to its subject.
-    const expr = ce.box(['When', -1, ['Equal', 'x', 'x']]);
-    expect(expr.latex).toEqual('(-1)\\left\\{x=x\\right\\}');
+describe('`restriction` keeps a low-precedence subject grouped', () => {
+  test('a negative subject reparses as the subject, not as a negated restriction', () => {
+    // The negation must stay on the subject: the LaTeX must not read back as
+    // the negation of the whole restriction.
+    const expr = ce.box(['If', ['Less', 0, 'x'], -1]);
+    expect(expr.latex).toEqual('-1\\text{ where }0\\lt x');
     // The parser reads the restriction as `If(c, e)`.
-    expect(ce.parse(expr.latex).json).toEqual(['If', ['Equal', 'x', 'x'], -1]);
+    expect(ce.parse(expr.latex).json).toEqual(['If', ['Less', 0, 'x'], -1]);
   });
 });
 

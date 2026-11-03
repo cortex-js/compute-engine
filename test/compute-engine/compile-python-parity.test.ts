@@ -80,7 +80,7 @@ const CASES: Case[] = [
   },
   {
     name: 'when_nan',
-    expr: ['When', ['Multiply', 'x', 'x'], ['Greater', 'x', 0]],
+    expr: ['If', ['Greater', 'x', 0], ['Multiply', 'x', 'x']],
     params: ['x'],
     inputs: [{ x: 3 }, { x: -1 }],
   },
@@ -440,19 +440,19 @@ const CASES: Case[] = [
   // spell as `nan` too); see `compile-python.test.ts`.
   {
     name: 'index_of_restricted',
-    expr: ['IndexOf', ['List', 1, 'NaN', 2], ['When', 2, ['Less', 0, 'x']]],
+    expr: ['IndexOf', ['List', 1, 'NaN', 2], ['If', ['Less', 0, 'x'], 2]],
     params: ['x'],
     inputs: [{ x: -1 }, { x: 2 }],
   },
   {
     name: 'contains_restricted',
-    expr: ['Contains', ['List', 1, 'NaN'], ['When', 2, ['Less', 0, 'x']]],
+    expr: ['Contains', ['List', 1, 'NaN'], ['If', ['Less', 0, 'x'], 2]],
     params: ['x'],
     inputs: [{ x: -1 }, { x: 2 }],
   },
   {
     name: 'element_restricted',
-    expr: ['Element', ['When', 1, ['Less', 0, 'x']], ['List', 1, 'NaN']],
+    expr: ['Element', ['If', ['Less', 0, 'x'], 1], ['List', 1, 'NaN']],
     params: ['x'],
     inputs: [{ x: -1 }, { x: 2 }],
   },
@@ -467,7 +467,7 @@ const CASES: Case[] = [
     expr: [
       'Contains',
       ['List', 6, 'NaN'],
-      ['Add', ['When', 5, ['Less', 0, 'x']], 1],
+      ['Add', ['If', ['Less', 0, 'x'], 5], 1],
     ],
     params: ['x'],
     inputs: [{ x: -1 }, { x: 2 }],
@@ -477,7 +477,7 @@ const CASES: Case[] = [
     expr: [
       'IndexOf',
       ['List', 'NaN', 2],
-      ['Which', 'True', ['When', 2, ['Less', 0, 'x']]],
+      ['Which', 'True', ['If', ['Less', 0, 'x'], 2]],
     ],
     params: ['x'],
     inputs: [{ x: -1 }, { x: 2 }],
@@ -1835,7 +1835,7 @@ describeMaybe('PYTHON EXECUTION PARITY — absence marker of element reads (venv
   const python = new PythonTarget();
   const scoped = new ComputeEngine();
   scoped.declare('t', 'real');
-  const W = (x: unknown) => ['When', x, ['Less', 0, 't']];
+  const W = (x: unknown) => ['If', ['Less', 0, 't'], x];
   const M = W(['List', ['List', 1, 2], ['List', 3, 4]]);
   const CASES: Array<[string, unknown]> = [
     ['first_pair', ['First', W(['Tuple', 1, 2])]],

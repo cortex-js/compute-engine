@@ -4762,7 +4762,7 @@ function outlivedWalkSkips(e: Expression & FunctionInterface): boolean {
 
 /** The operators whose definition is `lazy` and whose operands are values
  * that `outlivedWalkSkips` lets the walk enter. The branches of a
- * conditional (`If`, `Which`, `When`) are values: an `If` that stays
+ * conditional (`If`, `Which`) are values: an `If` that stays
  * unevaluated because its condition is free holds the view of a branch, and
  * the view is read when the condition gets a value. */
 const OUTLIVED_WALK_CONTAINERS = new Set([
@@ -4772,7 +4772,6 @@ const OUTLIVED_WALK_CONTAINERS = new Set([
   'KeyValuePair',
   'If',
   'Which',
-  'When',
 ]);
 
 /** Find a referenced name in a value, including the values of a dictionary.

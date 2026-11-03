@@ -1010,7 +1010,7 @@ export interface CompileTarget<Expr = unknown> {
     | undefined;
 
   /**
-   * Wrap a compiled `Which`/`When` condition that is **not** provably boolean so
+   * Wrap a compiled `Which` or restriction condition that is **not** provably boolean so
    * that a non-boolean value (notably `NaN`) fails closed at run time, matching
    * the interpreter — which throws `Condition must evaluate to "True" or
    * "False"` rather than silently taking the default branch. Only applied when
@@ -1019,7 +1019,7 @@ export interface CompileTarget<Expr = unknown> {
    *
    * Targets that cannot throw in expression position (GPU shaders) leave this
    * undefined; they instead keep the documented fail-closed value (the default
-   * branch / NaN) — see the GPU `Which`/`When` handlers.
+   * branch / NaN) — see the GPU `Which` and restriction handlers.
    */
   assertBoolean?: (code: string) => string;
 

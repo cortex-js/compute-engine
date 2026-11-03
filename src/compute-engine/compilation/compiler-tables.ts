@@ -186,7 +186,6 @@ export const CONTROL_FLOW_HEADS: ReadonlySet<string> = new Set([
   'Comprehension',
   'If',
   'Which',
-  'When',
   'Match',
   'Block',
 ]);
@@ -703,7 +702,6 @@ export const ABSENCE_DISCHARGING_HEADS: ReadonlySet<string> = new Set([
   'AssertPresent',
   'If',
   'Which',
-  'When',
 ]);
 
 /**
@@ -783,7 +781,6 @@ export const STRUCTURAL_HEADS: ReadonlySet<string> = new Set([
   'Comprehension',
   'If',
   'Which',
-  'When',
   'Match',
   'Block',
   // Indexing-set wrappers consumed by Sum/Product/Loop — never compiled

@@ -4,7 +4,7 @@
  * Neither GLSL nor WGSL has a `NaN` or an `Infinity` LITERAL, and the number
  * formatter used to reject both outright ("Cannot compile the non-finite
  * value …"). But the mechanism to MAKE those values already existed and was
- * already in use for masked `When`/`Which` branches: a bit pattern, reached
+ * already in use for masked restriction or `Which` branches: a bit pattern, reached
  * through `gpuNonFiniteLiteral` — the overridable `_gpu_nan()` / `_gpu_inf()`
  * preamble helpers, on both targets. (WGSL used an inline
  * `bitcast<f32>(0x7fc00000u)` until that was found to be a shader-creation
@@ -56,9 +56,9 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
   it('a NaN literal is the same symbol a masked branch produces', () => {
     expect(g('NaN')).toBe(NAN.glsl);
     expect(w('NaN')).toBe(NAN.wgsl);
-    // The same symbol the `When` else-branch has always used.
-    expect(g(['When', 'x', ['Greater', 'x', 0]])).toContain(NAN.glsl);
-    expect(w(['When', 'x', ['Greater', 'x', 0]])).toContain(NAN.wgsl);
+    // The same symbol the restriction else-branch has always used.
+    expect(g(['If', ['Greater', 'x', 0], 'x'])).toContain(NAN.glsl);
+    expect(w(['If', ['Greater', 'x', 0], 'x'])).toContain(NAN.wgsl);
   });
 
   it('±∞ is a BIT PATTERN, never `1.0 / 0.0` (fast-math would fold it)', () => {

@@ -794,7 +794,7 @@ export function isRuntimePointShaped(a: Expression): boolean {
  * `missing | C`, where every arm of `C` is an indexed collection that is not
  * a string (a point, a list, or a union of those)?
  *
- * A restriction gives this type: `When(PointList(0, 1), c)` is typed
+ * A restriction gives this type: `If(c, PointList(0, 1))` is typed
  * `missing | tuple<integer, integer>`, and it lowers to the ternary
  * `c ? [0, 1] : undefined`. At run time the value is therefore a JS array or
  * the absent value, never a number. The plain type tests
@@ -881,7 +881,7 @@ export function shapeOperandRefusal(a: Expression): string | undefined {
 /**
  * Is `a` a GATED POINT: a gated indexed collection
  * (`isGatedIndexedCollection`) whose every present arm is a tuple, such as
- * `When((0, 1), c)`? At run time it is a point or the absent value. The
+ * `If(c, (0, 1))`? At run time it is a point or the absent value. The
  * broadcast lowering must then apply the point rules of the interpreter: a
  * point does not add to a number, two points have no product, and a number
  * cannot be divided by a point.
@@ -944,7 +944,7 @@ function gatedCollectionArmsOfType(raw: Type): Type[] | undefined {
 /**
  * The compilation type of `a` without its absence: for a GATED indexed
  * collection with one present arm (`isGatedIndexedCollection`, such as the
- * restricted list of points `PointList(When(A, 0 < t), B)`, typed
+ * restricted list of points `PointList(If(0 < t, A), B)`, typed
  * `list<tuple<real, real>> | missing`), that arm; otherwise the compilation
  * type of `a`. At run time such an operand is an array of the present type,
  * or the absent value `undefined`. The point-list plans of
@@ -1227,7 +1227,7 @@ export function isProvablyNumericListOperand(e: Expression): boolean {
 /**
  * Is `e` a RESTRICTED list of numbers: a gated indexed collection
  * (`isGatedIndexedCollection`, typed `C | missing`) whose every present arm
- * is a flat list of numbers, never a point? `When(A, 0 < t)` with
+ * is a flat list of numbers, never a point? `If(0 < t, A)` with
  * `A: list<real>` is one, typed `list<real> | missing`. At run time it is
  * that list or the absent value. `isProvablyNumericListOperand` refuses it,
  * because the `missing` arm is not a list.

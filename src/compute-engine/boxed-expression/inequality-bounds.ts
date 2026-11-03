@@ -21,10 +21,10 @@ import {
  * - bare comparisons (`Less`, `LessEqual`, `Greater`, `GreaterEqual`),
  *   including chained forms like `Less(a, x, b)`
  * - `And(c1, c2, ...)` of supported shapes
- * - a restriction, `When(e, cond)` or the parsed form `If(cond, e)` —
+ * - a restriction, the single-branch `If(cond, e)` —
  *   unwraps to `cond`
- * - `Multiply(f, When(...), ...)` — the Desmos parse shape for
- *   `f(x)\{a < x < b\}`; bounds from each `When` factor are merged
+ * - `Multiply(f, If(...), ...)` — the Desmos parse shape for
+ *   `f(x)\{a < x < b\}`; bounds from each restriction factor are merged
  *
  * Returns `undefined` if `expr` doesn't carry interval information for
  * `symbol`, or if the information is not a simple lower-upper pair.
@@ -33,14 +33,14 @@ export function extractIntervalBounds(
   expr: Expression,
   symbol: string
 ): IntervalBounds | undefined {
-  // Unwrap a restriction, When(e, cond) or If(cond, e) → operate on cond.
+  // Unwrap a restriction, If(cond, e) → operate on cond.
   const restriction = restrictionParts(expr);
   if (restriction !== undefined)
     return extractIntervalBounds(restriction.condition, symbol);
 
-  // Handle Multiply(f, When(e, cond), ...) — the restriction is embedded as
-  // a When factor. Desmos-style `f(x)\{0 < x < 5\}` parses to this shape.
-  // If multiple When factors are present, merge their bounds.
+  // Handle Multiply(f, If(cond, e), ...) — the restriction is embedded as
+  // a restriction factor. Desmos-style `f(x)\{0 < x < 5\}` parses to this shape.
+  // If multiple restriction factors are present, merge their bounds.
   if (isFunction(expr, 'Multiply')) {
     const ops = expr.ops;
     if (!ops) return undefined;

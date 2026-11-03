@@ -12,11 +12,11 @@ import { isFunction, isSymbol } from './type-guards.js';
  *   - guard evaluates to `True`  → the bare `value` (guard discharged);
  *   - guard evaluates to `False` → `null` (the caller prunes / declines — the
  *     solution-set pruning contract, decision 8);
- *   - otherwise (undecidable)    → `When(value, guard)`, retained until the
+ *   - otherwise (undecidable)    → `If(guard, value)`, retained until the
  *     guard becomes decidable.
  *
- * A single chokepoint enforces "emit `When` only when genuinely undecidable" in
- * one place. Every `When`-producer (Solve validity conditions, Sum/Integrate
+ * A single chokepoint enforces "emit a restriction only when genuinely
+ * undecidable" in one place. Every producer of a restriction (Solve validity conditions, Sum/Integrate
  * convergence conditions) routes through here, so decidable guards keep the
  * pre-conditional behavior exactly.
  */
@@ -28,34 +28,32 @@ export function conditionalValue(
   const g = guard.evaluate();
   if (isSymbol(g, 'True')) return value;
   if (isSymbol(g, 'False')) return null;
-  return ce.function('When', [value, g]);
+  return ce.function('If', [g, value]);
 }
 
 /**
- * Read a restriction: `When(value, condition)`, or a single-branch
- * `If(condition, value)`, which is the form the parser gives a restriction
- * `value\{condition\}`. Both have the same value: `value` where `condition`
- * holds, and the absent value of the domain of `value` (`NaN` for a number,
+ * Read a restriction: a single-branch `If(condition, value)`, which is the
+ * form the parser gives a restriction `value\{condition\}`. Its value is
+ * `value` where `condition` holds, and the absent value of the domain of `value` (`NaN` for a number,
  * `Missing` otherwise) where it does not. Return `undefined` for any other
  * expression: an `If` with an else branch, and a single-branch `If` whose
  * arm is a statement (`isStatementArm()`), which is a guard statement with
  * no value.
  *
- * Every site that reads a restriction calls this function, so that the two
- * spellings give the same result.
+ * Every site that reads a restriction calls this function, so that each
+ * site excludes the same statement arms.
  */
 export function restrictionParts(
   expr: Expression | null | undefined
 ): { value: Expression; condition: Expression } | undefined {
   if (!isFunction(expr) || expr.nops !== 2) return undefined;
-  if (expr.operator === 'When') return { value: expr.op1, condition: expr.op2 };
   if (expr.operator === 'If' && !isStatementArm(expr.op2))
     return { value: expr.op2, condition: expr.op1 };
   return undefined;
 }
 
-/** True if `expr` is a restriction, `When(value, condition)` or a
- * single-branch `If(condition, value)` (see `restrictionParts()`). */
+/** True if `expr` is a restriction, a single-branch `If(condition, value)`
+ * whose arm is a value (see `restrictionParts()`). */
 export function isRestriction(expr: Expression | null | undefined): boolean {
   return restrictionParts(expr) !== undefined;
 }
@@ -82,7 +80,7 @@ const CONSTRUCTORS = new Set([
  * True if `expr`, or one of its sub-expressions, is a restriction
  * (`isRestriction()`). A restriction is typed as its value, so its type does
  * not show that it is absent where its condition fails, and an expression
- * that contains one (`If(c, If(d, True), False)`, `Add(When(P, c), Q)`) can
+ * that contains one (`If(c, If(d, True), False)`, `Add(If(c, P), Q)`) can
  * be absent although its type admits no absent value. A presence proof that
  * reads the type must call this function first.
  *
@@ -94,7 +92,7 @@ const CONSTRUCTORS = new Set([
  * absent. Below the root, the walk enters a constructor like any other
  * operator, because an accessor (`First`, `At`) can give its absent element.
  * The walk enters every operand of a `Coalesce`, whose value is absent when
- * every operand is absent, and every other operator (`Add(When(P, c), Q)`).
+ * every operand is absent, and every other operator (`Add(If(c, P), Q)`).
  * The answer is conservative: it is true for some expressions that are
  * present. This is sound, because an extra presence check or default fill
  * acts only on an absent value.

@@ -761,7 +761,6 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
     'Type',
     'Unevaluated',
     'UnitDimension',
-    'When',
     'WithRandomSeed',
   ]);
 

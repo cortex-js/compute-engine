@@ -1336,7 +1336,7 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
 //   `If(b(u), 1, 2)`        `1` — the WRONG branch, off    `bool _fn_b(float t) {
 //                           the truthiness of an ARRAY       return vec2(…); }`
 //   `Which(b(u), 1, T, 2)`  `1` — same                     same broken preamble
-//   `When(1, b(u))`         same                           same
+//   `If(b(u), 1)`           same                          same
 //   `Not(b(u))`             `false` — a wrong verdict      same
 //   `And(b(u), True)`       the ARRAY, unguarded           same
 //   `b(u) = True`           `false` — a wrong verdict      same
@@ -1347,8 +1347,8 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
 // Two changes, both minimal: the shared declared-type test becomes
 // `isScalarDeclaredType` (`number` OR `boolean`), which every wave reads; and the
 // CONDITION path gets the check, in `assertScalarCondition` — the shared guard
-// `If` and `guardCondition` (Which/When) already funnel through, since `If`/
-// `Which`/`When` are not in `assertNoContradictedScalarOperand`'s head
+// `If` and `guardCondition` (Which) already funnel through, since `If`/
+// `Which` are not in `assertNoContradictedScalarOperand`'s head
 // classification.
 //
 // Exemption-safety: widening to `boolean` cannot touch the ruled item-121
@@ -1401,7 +1401,7 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
    * The positions, as builders over the callee name so the genuine-boolean
    * CONTROL below can reuse exactly the same shapes.
    *
-   * `If`/`When` are `assertScalarCondition`'s callers on every target.
+   * `If` (both forms) is `assertScalarCondition`'s callers on every target.
    * `Which` is listed separately: the GPU lowering is its OWN element-wise
    * entry and never reaches that guard, so glsl/wgsl close it one gate later
    * (the wave-3 DEFINITION backstop, now reading the same `boolean` arm), and
@@ -1410,7 +1410,7 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
    */
   const CONDITIONS = (f: string): [string, any][] => [
     [`If(${f}(u), 1, 2)`, ['If', [f, 'u'], 1, 2]],
-    [`When(1, ${f}(u))`, ['When', 1, [f, 'u']]],
+    [`If(${f}(u), 1)`, ['If', [f, 'u'], 1]],
   ];
   const WHICH = (f: string): any => ['Which', [f, 'u'], 1, 'True', 2];
 
@@ -1429,7 +1429,13 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
           fallback: true,
         } as any);
         expect([label, r?.success ?? false]).toEqual([label, false]);
-        expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
+        // On glsl/wgsl the single-branch `If` is closed by the definition
+        // backstop, which words the contradiction without the condition.
+        if (label.startsWith('If(b(u), 1)') && (to === 'glsl' || to === 'wgsl'))
+          expect((r as any).error).toMatch(
+            /says it returns a scalar .* but its body constructs a collection/s
+          );
+        else expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
         expect((r as any).error).toMatch(/'b'/);
         expect((r as any).error).toMatch(/-> list<number>/);
       }

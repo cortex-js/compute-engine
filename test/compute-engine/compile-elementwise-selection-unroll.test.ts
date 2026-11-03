@@ -209,32 +209,20 @@ describe('A literal index pushed through an element-wise selection', () => {
   });
 
   test('the index is pushed through a When over a list of conditions', () => {
-    // `When(value, cond)` over a list of conditions masks each position:
-    // `NaN` for a number and `Missing` for a point, as the scalar `When`
+    // `If(cond, value)` over a list of conditions masks each position:
+    // `NaN` for a number and `Missing` for a point, as the scalar restriction
     // answers. A scalar or point value is repeated at every position, a list
     // value is read at the index.
     const cond = ['Less', ['List', 'a', 'b', 'c'], 2];
-    const scalar = ce.box(['At', ['When', 'x', cond], 2]);
-    expect(unrollFixedWidthCollections(scalar).json).toEqual([
-      'When',
-      'x',
-      ['Less', 'b', 2],
-    ]);
-    const point = ce.box(['At', ['When', ['Tuple', 'u', 'v'], cond], 3]);
-    expect(unrollFixedWidthCollections(point).json).toEqual([
-      'When',
-      ['Tuple', 'u', 'v'],
-      ['Less', 'c', 2],
-    ]);
-    const list = ce.box(['At', ['When', ['List', 'u', 'v', 'x'], cond], 2]);
-    expect(unrollFixedWidthCollections(list).json).toEqual([
-      'When',
-      'v',
-      ['Less', 'b', 2],
-    ]);
+    const scalar = ce.box(['At', ['If', cond, 'x'], 2]);
+    expect(unrollFixedWidthCollections(scalar).json).toEqual(['If', ['Less', 'b', 2], 'x']);
+    const point = ce.box(['At', ['If', cond, ['Tuple', 'u', 'v']], 3]);
+    expect(unrollFixedWidthCollections(point).json).toEqual(['If', ['Less', 'c', 2], ['Tuple', 'u', 'v']]);
+    const list = ce.box(['At', ['If', cond, ['List', 'u', 'v', 'x']], 2]);
+    expect(unrollFixedWidthCollections(list).json).toEqual(['If', ['Less', 'b', 2], 'v']);
     // A list value of another width is truncated by the interpreter: not
     // walked.
-    const short = ce.box(['At', ['When', ['List', 'u', 'v'], cond], 2]);
+    const short = ce.box(['At', ['If', cond, ['List', 'u', 'v']], 2]);
     expect(unrollFixedWidthCollections(short)).toBe(short);
     // The scalar form and the element-wise form agree at each position.
     for (const [value, masked] of [
@@ -242,22 +230,22 @@ describe('A literal index pushed through an element-wise selection', () => {
       [['Tuple', 1, 2], '"Missing"'],
     ] as const) {
       const whole = ce
-        .box(['When', value, ['Less', ['List', 1, 3], 2]])
+        .box(['If', ['Less', ['List', 1, 3], 2], value])
         .evaluate();
-      const one = ce.box(['When', value, ['Less', 3, 2]]).evaluate();
+      const one = ce.box(['If', ['Less', 3, 2], value]).evaluate();
       expect(whole.ops![1].toString()).toBe(masked);
       expect(one.toString()).toBe(masked);
     }
   });
 
-  test('a When over a list of conditions compiles at one index on every target', () => {
+  test('a restriction over a list of conditions compiles at one index on every target', () => {
     expectAllTargetsAgree(
-      String.raw`\operatorname{When}(7, \vert x+\bigl\lbrack3, 2, 1\bigr\rbrack/3\vert\lt1)[2]`,
+      String.raw`\operatorname{If}(\vert x+\bigl\lbrack3, 2, 1\bigr\rbrack/3\vert\lt1, 7)[2]`,
       [-0.5, 0.2, -1.5]
     );
     // At `x = 0.9` the condition fails: the masked number is `NaN` in the
     // interpreter and in the compiled code.
-    const latex = String.raw`\operatorname{When}(7, \vert x+\bigl\lbrack3, 2, 1\bigr\rbrack/3\vert\lt1)[2]`;
+    const latex = String.raw`\operatorname{If}(\vert x+\bigl\lbrack3, 2, 1\bigr\rbrack/3\vert\lt1, 7)[2]`;
     expect(interpreted(latex, 0.9)).toBeNaN();
     expect(compile(ce.parse(latex), { fallback: false }).run!({ x: 0.9 })).toBeNaN();
   });
@@ -415,7 +403,7 @@ describe('A point arm of the run-time selection is lifted whole', () => {
     ]);
     // The interpreter masks a point position with `Missing` (user decision
     // 2026-10-17); a compiled array spells a missing point with `undefined`,
-    // as a single missing point and the compiled `When` over a list of
+    // as a single missing point and the compiled restriction over a list of
     // conditions do (user decision 2026-10-18).
     expect(expr.evaluate().toString()).toBe('[(1, 2),"Missing","Missing"]');
     const r = compile(expr, { fallback: false });

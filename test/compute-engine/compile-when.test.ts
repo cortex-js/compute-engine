@@ -6,43 +6,43 @@ const ce = new ComputeEngine();
 ce.declare('x', 'number');
 const glsl = new GLSLTarget();
 
-describe('COMPILE When', () => {
+describe('COMPILE single-branch If (restriction)', () => {
   describe('JavaScript target', () => {
-    it('should compile When(x, x > 0) and return x when positive, NaN otherwise', () => {
-      const expr = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+    it('should compile If(x > 0, x) and return x when positive, NaN otherwise', () => {
+      const expr = ce.expr(['If', ['Greater', 'x', 0], 'x']);
       const result = compile(expr)!;
       expect(result.success).toBe(true);
       expect(result.run!({ x: 5 })).toBe(5);
       expect(Number.isNaN(result.run!({ x: -1 }))).toBe(true);
     });
 
-    it('should compile When(5, True) and evaluate to 5', () => {
-      const expr = ce.expr(['When', 5, 'True']);
+    it('should compile If(True, 5) and evaluate to 5', () => {
+      const expr = ce.expr(['If', 'True', 5]);
       const result = compile(expr)!;
       expect(result.success).toBe(true);
       expect(result.run!({})).toBe(5);
     });
 
-    it('should compile When(5, False) and evaluate to NaN', () => {
-      const expr = ce.expr(['When', 5, 'False']);
+    it('should compile If(False, 5) and evaluate to NaN', () => {
+      const expr = ce.expr(['If', 'False', 5]);
       const result = compile(expr)!;
       expect(result.success).toBe(true);
       expect(Number.isNaN(result.run!({}))).toBe(true);
     });
 
     it('should generate ternary code', () => {
-      const expr = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+      const expr = ce.expr(['If', ['Greater', 'x', 0], 'x']);
       const result = compile(expr)!;
       expect(result.code).toContain('?');
       expect(result.code).toContain(':');
       expect(result.code).toContain('NaN');
     });
 
-    it('should compile When nested in an expression', () => {
-      // When(x, x > 0) + 1 should be x+1 for x>0, NaN+1=NaN otherwise
+    it('should compile a restriction nested in an expression', () => {
+      // If(x > 0, x) + 1 should be x+1 for x>0, NaN+1=NaN otherwise
       const expr = ce.expr([
         'Add',
-        ['When', 'x', ['Greater', 'x', 0]],
+        ['If', ['Greater', 'x', 0], 'x'],
         1,
       ]);
       const result = compile(expr)!;
@@ -53,36 +53,35 @@ describe('COMPILE When', () => {
   });
 
   describe('GLSL target', () => {
-    it('should generate ternary code for When', () => {
-      const expr = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+    it('should generate ternary code for a restriction', () => {
+      const expr = ce.expr(['If', ['Greater', 'x', 0], 'x']);
       const code = glsl.compile(expr).code;
       expect(code).toContain('?');
       expect(code).toContain(':');
     });
 
-    it('should compile When(x, True) to just x in GLSL', () => {
-      const expr = ce.expr(['When', 'x', 'True']);
+    it('should compile If(True, x) to just x in GLSL', () => {
+      const expr = ce.expr(['If', 'True', 'x']);
       const code = glsl.compile(expr).code;
       // Condition is True (1 in boolean context) so x is always returned
       expect(code).toContain('x');
     });
   });
 
-  // A non-boolean When condition selects nothing on the JS target: the
-  // interpreter holds `When(5, x/y)` unevaluated, and `If(b, 5)` answers NaN
-  // for a value of `b` that is not a boolean. It raised through `_SYS.cond`
-  // before ROADMAP CE-569.
-  describe('non-boolean condition (JS) selects nothing', () => {
+  // A restriction whose condition is not a boolean is an `Error` operand
+  // (`If(x/y, 5)`), and the compilation declines.
+  describe('non-boolean condition (JS) declines', () => {
     it('tests a numeric/NaN condition for being exactly true', () => {
-      const expr = ce.expr(['When', 5, ['Divide', 'x', 'y']]);
-      const result = compile(expr, { fallback: false })!;
-      expect(result.code).not.toContain('_SYS.cond(');
-      expect(result.run!({ x: 0, y: 0 })).toBeNaN();
-      expect(result.run!({ x: 1, y: 1 })).toBeNaN();
+      const expr = ce.expr(['If', ['Divide', 'x', 'y'], 5]);
+      // `If(x / y, 5)` has a condition that is not a boolean: it is an
+      // `Error` operand, and the compilation declines.
+      expect(() => compile(expr, { fallback: false })).toThrow(
+        'Could not compile invalid expression'
+      );
     });
 
     it('leaves a relational condition unguarded', () => {
-      const expr = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+      const expr = ce.expr(['If', ['Greater', 'x', 0], 'x']);
       const result = compile(expr, { fallback: false })!;
       expect(result.code).not.toContain('_SYS.cond');
       expect(result.run!({ x: 5 })).toBe(5);
@@ -92,13 +91,13 @@ describe('COMPILE When', () => {
 
   // The interval comparisons return the tri-state string
   // 'true' | 'false' | 'maybe' — all truthy, so the generic JS ternary can
-  // never mask. `When` must compile to the tri-state-aware `_IA.restrict`.
+  // never mask. A restriction must compile to the tri-state-aware `_IA.restrict`.
   // (Tycho 0.72.0 restriction-brace probe, issue 1: an input interval
   // entirely outside the condition returned a normal interval result.)
   describe('interval-js target', () => {
     const target = ce._getCompilationTarget('interval-js')!;
 
-    it('compiles When to _IA.restrict, not a bare ternary', () => {
+    it('compiles a restriction to _IA.restrict, not a bare ternary', () => {
       const expr = ce.parse('\\sin(x)\\{x>0\\}');
       const result = target.compile(expr);
       expect(result.success).toBe(true);
@@ -150,7 +149,7 @@ describe('COMPILE When', () => {
 // reduction (`y = x {max(a,x) < 2}` masked its whole curve). Max/Min now
 // type `number` — they always reduce to a scalar (ElementMax/ElementMin
 // are the broadcasting variants).
-describe('When condition containing Max/Min compiles (Tycho item 56)', () => {
+describe('Restriction condition containing Max/Min compiles (Tycho item 56)', () => {
   it('Max over scalars types number, and the comparison types boolean', () => {
     expect(ce.box(['Max', 'x', ['Add', 'x', -4]]).type.toString()).toBe(
       'number'
@@ -158,8 +157,8 @@ describe('When condition containing Max/Min compiles (Tycho item 56)', () => {
     expect(ce.parse('\\max(x,x-4)<2').type.toString()).toBe('boolean');
   });
 
-  it('a When mask with a Max condition compiles and masks correctly', () => {
-    const w = ce.box(['When', 'x', ['Less', ['Max', 'x', ['Add', 'x', -4]], 2]]);
+  it('a restriction mask with a Max condition compiles and masks correctly', () => {
+    const w = ce.box(['If', ['Less', ['Max', 'x', ['Add', 'x', -4]], 2], 'x']);
     const res = compile(w, { to: 'javascript' });
     expect(res.success).toBe(true);
     const run = (res as any).run;

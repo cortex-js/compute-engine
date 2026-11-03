@@ -2,7 +2,7 @@
  * Two compiled forms that need a statement where the expression form has
  * none.
  *
- * 1. WGSL. The expression form of a selection (`If`, `When`, `Which`) is a
+ * 1. WGSL. The expression form of a selection (`If`, `Which`) is a
  *    `select(…)` call, whose operands are expressions, and an assignment is a
  *    statement in WGSL. A selection whose branch assigns a variable declined.
  *    Where the selection is a STATEMENT — a statement of a block that is not
@@ -129,11 +129,11 @@ const ASSIGNING: [string, any][] = [
     ],
   ],
   [
-    'When',
+    'restriction',
     [
       'Block',
       ['Assign', 't', 0],
-      ['When', ['Assign', 't', ['Multiply', 2, 'x']], ['Greater', 'x', 0]],
+      ['If', ['Greater', 'x', 0], ['Assign', 't', ['Multiply', 2, 'x']]],
       't',
     ],
   ],

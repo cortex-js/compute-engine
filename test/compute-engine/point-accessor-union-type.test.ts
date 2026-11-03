@@ -1015,8 +1015,8 @@ describe('the coordinate type of a list of points, empty rows of a broadcastable
       'PointX',
       [
         'List',
-        ['When', ['Tuple', 1, 2], ['Less', 0, 'c']],
-        ['When', ['Tuple', 3, 4], ['Less', 0, 'd']],
+        ['If', ['Less', 0, 'c'], ['Tuple', 1, 2]],
+        ['If', ['Less', 0, 'd'], ['Tuple', 3, 4]],
       ],
     ];
     const cell = { lo: -1, hi: -1 };

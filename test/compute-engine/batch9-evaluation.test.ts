@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
-// 1. The asynchronous evaluation threads a conditional value (`When`/`Which`)
+// 1. The asynchronous evaluation threads a conditional value (a restriction or `Which`)
 //    out of an application, as the synchronous evaluation does (step 4c of
 //    `_computeValue` in `boxed-expression/boxed-function.ts`, and its twin
 //    after step 3b of the asynchronous route). Before, `evaluateAsync()` had
@@ -17,7 +17,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 // 3. A juxtaposition with an operand typed `number | nothing` (`Numerator`,
 //    `Denominator`) is a product, not a `Tuple`.
 
-const RL = ['When', ['List', 1, 3, 5], ['Less', 0, 't']];
+const RL = ['If', ['Less', 0, 't'], ['List', 1, 3, 5]];
 const RL_TEX = '[1,3,5]\\{0<t\\}';
 const lt4 = ['Function', ['Less', 'x', 4], 'x'];
 const gt2 = ['Function', ['Greater', 'x', 2], 'x'];
@@ -41,7 +41,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'TakeWhile',
     ['TakeWhile', 'L', lt4],
     '\\operatorname{TakeWhile}(L, x\\mapsto x<4)',
-    'TakeWhile([1,3,5], (x) => x < 4) {0 < t}',
+    'If(0 < t, TakeWhile([1,3,5], (x) => x < 4))',
     '[1,3]',
     '"Missing"',
   ],
@@ -49,7 +49,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'Scan',
     ['Scan', 'L', 'Add'],
     '\\operatorname{Scan}(L, \\operatorname{Add})',
-    'Scan([1,3,5], "Add") {0 < t}',
+    'If(0 < t, Scan([1,3,5], "Add"))',
     '[1,4,9]',
     '"Missing"',
   ],
@@ -57,7 +57,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'ArgMax',
     ['ArgMax', 'L'],
     '\\operatorname{ArgMax}(L)',
-    '3 {0 < t}',
+    'If(0 < t, 3)',
     '3',
     'NaN',
   ],
@@ -65,7 +65,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'DeleteAt',
     ['DeleteAt', 'L', 1],
     '\\operatorname{DeleteAt}(L, 1)',
-    '[3,5] {0 < t}',
+    'If(0 < t, [3,5])',
     '[3,5]',
     '"Missing"',
   ],
@@ -73,7 +73,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'IndexWhere',
     ['IndexWhere', 'L', gt2],
     '\\operatorname{IndexWhere}(L, x\\mapsto x>2)',
-    '2 {0 < t}',
+    'If(0 < t, 2)',
     '2',
     'NaN',
   ],
@@ -81,7 +81,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'CountIf',
     ['CountIf', 'L', gt2],
     '\\operatorname{CountIf}(L, x\\mapsto x>2)',
-    '2 {0 < t}',
+    'If(0 < t, 2)',
     '2',
     'NaN',
   ],
@@ -89,7 +89,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'RotateLeft',
     ['RotateLeft', 'L', 1],
     '\\operatorname{RotateLeft}(L, 1)',
-    'RotateLeft([1,3,5], 1) {0 < t}',
+    'If(0 < t, RotateLeft([1,3,5], 1))',
     '[3,5,1]',
     '"Missing"',
   ],
@@ -97,7 +97,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'RangeOf',
     ['RangeOf', 'L', ['List', 3]],
     '\\operatorname{RangeOf}(L, [3])',
-    'Range(2, 2) {0 < t}',
+    'If(0 < t, Range(2, 2))',
     '[2]',
     '"Missing"',
   ],
@@ -105,7 +105,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'StartsWith',
     ['StartsWith', 'L', ['List', 1]],
     '\\operatorname{StartsWith}(L, [1])',
-    '"True" {0 < t}',
+    'If(0 < t, "True")',
     '"True"',
     '"Missing"',
   ],
@@ -113,7 +113,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'ListFrom',
     ['ListFrom', 'L'],
     '\\operatorname{ListFrom}(L)',
-    '[1,3,5] {0 < t}',
+    'If(0 < t, [1,3,5])',
     '[1,3,5]',
     '"Missing"',
   ],
@@ -121,7 +121,7 @@ const LIST_CASES: [string, unknown, string, string, string, string][] = [
     'Partition',
     ['Partition', 'L', 2],
     '\\operatorname{Partition}(L, 2)',
-    '[[1,3],[5]] {0 < t}',
+    'If(0 < t, [[1,3],[5]])',
     '[[1,3],[5]]',
     '"Missing"',
   ],
@@ -198,17 +198,21 @@ describe('evaluateAsync threads a conditional value', () => {
 
   // Scalar threading: the same value on both routes, box and parse.
   const SCALAR: [string, unknown, string][] = [
-    ['sin(3{0<t})', ['Sin', ['When', 3, ['Less', 0, 't']]], 'sin(3) {0 < t}'],
-    ['3{0<t} + 1', ['Add', ['When', 3, ['Less', 0, 't']], 1], '4 {0 < t}'],
-    ['0·x{0<t}', ['Multiply', 0, ['When', 'x', ['Less', 0, 't']]], '0 {0 < t}'],
+    ['sin(3{0<t})', ['Sin', ['If', ['Less', 0, 't'], 3]], 'If(0 < t, sin(3))'],
+    ['3{0<t} + 1', ['Add', ['If', ['Less', 0, 't'], 3], 1], 'If(0 < t, 4)'],
+    [
+      '0·x{0<t}',
+      ['Multiply', 0, ['If', ['Less', 0, 't'], 'x']],
+      'If(0 < t, 0)',
+    ],
     [
       'x{0<t} − x{0<t}',
       [
         'Subtract',
-        ['When', 'x', ['Less', 0, 't']],
-        ['When', 'x', ['Less', 0, 't']],
+        ['If', ['Less', 0, 't'], 'x'],
+        ['If', ['Less', 0, 't'], 'x'],
       ],
-      '0 {0 < t}',
+      'If(0 < t, 0)',
     ],
     [
       'Which + 5',
@@ -222,13 +226,13 @@ describe('evaluateAsync threads a conditional value', () => {
     ],
     [
       '[1,2,3] + 2{0<t}',
-      ['Add', ['List', 1, 2, 3], ['When', 2, ['Less', 0, 't']]],
-      '[3 {0 < t},4 {0 < t},5 {0 < t}]',
+      ['Add', ['List', 1, 2, 3], ['If', ['Less', 0, 't'], 2]],
+      '[If(0 < t, 3),If(0 < t, 4),If(0 < t, 5)]',
     ],
     [
       'Dot((1,2){0<t}, (3,4))',
-      ['Dot', ['When', ['Tuple', 1, 2], ['Less', 0, 't']], ['Tuple', 3, 4]],
-      '11 {0 < t}',
+      ['Dot', ['If', ['Less', 0, 't'], ['Tuple', 1, 2]], ['Tuple', 3, 4]],
+      'If(0 < t, 11)',
     ],
   ];
 
@@ -249,12 +253,12 @@ describe('evaluateAsync threads a conditional value', () => {
   });
 
   test.each([
-    ['\\sin(3\\{0<t\\})', 'sin(3) {0 < t}'],
+    ['\\sin(3\\{0<t\\})', 'If(0 < t, sin(3))'],
     // A restriction applies to its whole group, so `3\\{0<t\\}+1` is
-    // `If(0<t, 3+1)`. A held restriction over a list keeps the `When`
+    // `If(0<t, 3+1)`. A held restriction over a list keeps the restriction
     // spelling.
     ['3\\{0<t\\}+1', 'If(0 < t, 4)'],
-    ['[1,2,3]+2\\{0<t\\}', '[3,4,5] {0 < t}'],
+    ['[1,2,3]+2\\{0<t\\}', 'If(0 < t, [3,4,5])'],
   ])('%s, parse route', async (tex, expected) => {
     expect(engine().parse(tex).evaluate().toString()).toBe(expected);
     expect((await engine().parse(tex).evaluateAsync()).toString()).toBe(
@@ -267,7 +271,7 @@ describe('evaluateAsync threads a conditional value', () => {
       [1, '0.141120008059867222101'],
       [-1, 'NaN'],
     ] as const) {
-      const json = ['Sin', ['When', 3.0, ['Less', 0, 't']]];
+      const json = ['Sin', ['If', ['Less', 0, 't'], 3.0]];
       expect(
         engine(t)
           .box(json as never)

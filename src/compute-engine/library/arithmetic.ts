@@ -5502,11 +5502,11 @@ function withoutNaN(t: Type): Type {
  *
  * The threading step of the evaluation driver (step 4c, `boxed-function.ts`)
  * runs BEFORE the operator's handler, on the RAW operands, which is where a
- * lazy operator's operands still are: a raw `When` operand is threaded
+ * lazy operator's operands still are: a raw restriction operand is threaded
  * there, one hidden inside a product was not, and the sum stayed symbolic,
  * `[2,4]{c} + [3,6]{c}` (and `2{c} + 3{c}` for scalars). So the evaluated
  * operands are handed back to the driver as raw operands. The re-entered
- * call sees the `When`s raw and does not come back here for them (its own
+ * call sees the restrictions raw and does not come back here for them (its own
  * operands are already restrictions), so the re-entry happens at most once.
  * Answers `undefined` when no operand became a restriction.
  */
@@ -15606,7 +15606,7 @@ function isCoordinate(x: Expression): boolean {
  * A cell of a written-out `List` may also be an absent point (`Missing` or
  * `Undefined`, such as the point of an element-wise restriction whose
  * condition is false) or a restricted point whose condition is not decided
- * (`When`, `Which`). Such a cell is returned as the expression itself, not
+ * (a restriction, `Which`). Such a cell is returned as the expression itself, not
  * as coordinates, and the caller answers for it. At least one cell must be
  * a point or a restricted point, so a list of absent values is not read as a
  * list of points.

@@ -425,15 +425,15 @@ describe('A scalar integrand', () => {
 });
 
 // Tycho row 459 (the values A_in… of document `neyret/2agcgxq87y`): an
-// integrand that restricts a list, `y·When(c(y), 0 ≤ y ≤ 5)` with `c(y)` an
+// integrand that restricts a list, `y·If(0 ≤ y ≤ 5, c(y))` with `c(y)` an
 // inner integral that reads the list `E`, gave NaN under N(). The type of a
-// `When` has a `missing` arm, and its value is not a `List` until it is
+// restriction has a `missing` arm, and its value is not a `List` until it is
 // distributed over the elements. Closed forms, with E = [0.1, 0.5]:
 // ∫_0^1 y ∫_{-1}^{1} 1/max(ε, |x|) dx dy = 1 + ln(1/ε), and, with
 // E = [1.5, 0.5], ∫_0^1 1/max(ε, y + 1) dy = 1/3 + ln(4/3) for 1.5 and ln 2
 // for 0.5.
 describe('A restricted list integrand', () => {
-  test('a nested integral inside When, under N()', () => {
+  test('a nested integral inside restriction, under N()', () => {
     const ce = new ComputeEngine();
     ce.declare('E', 'list<real>');
     ce.assign('E', ce.box(['List', 0.1, 0.5]));
@@ -447,7 +447,7 @@ describe('A restricted list integrand', () => {
         'Integrate',
         [
           'Function',
-          ['Multiply', 'y', ['When', inner, ['LessEqual', 0, 'y', 5]]],
+          ['Multiply', 'y', ['If', ['LessEqual', 0, 'y', 5], inner]],
           'y',
         ],
         ['Limits', 'y', 0, 1],
@@ -461,7 +461,7 @@ describe('A restricted list integrand', () => {
   const body = ['Divide', 1, ['ElementMax', 'E', ['Add', 'y', 1]]];
 
   for (const [label, integrand] of [
-    ['When', ['When', body, ['LessEqual', 0, 'y', 5]]],
+    ['When', ['If', ['LessEqual', 0, 'y', 5], body]],
     [
       'Which with a default',
       ['Which', ['LessEqual', 0, 'y', 5], body, 'True', 'Nothing'],
@@ -502,7 +502,7 @@ describe('A restricted list integrand', () => {
     const scalar = ce
       .box([
         'Integrate',
-        ['Function', ['When', 'y', ['LessEqual', 'y', 1]], 'y'],
+        ['Function', ['If', ['LessEqual', 'y', 1], 'y'], 'y'],
         ['Limits', 'y', 0, 2],
       ])
       .N();
@@ -512,7 +512,7 @@ describe('A restricted list integrand', () => {
         'Integrate',
         [
           'Function',
-          ['When', ['List', 'y', ['Multiply', 2, 'y']], ['LessEqual', 'y', 1]],
+          ['If', ['LessEqual', 'y', 1], ['List', 'y', ['Multiply', 2, 'y']]],
           'y',
         ],
         ['Limits', 'y', 0, 2],
@@ -529,11 +529,7 @@ describe('A restricted list integrand', () => {
         'Integrate',
         [
           'Function',
-          [
-            'When',
-            ['List', 'y', ['Multiply', 2, 'y']],
-            ['List', 'True', 'True'],
-          ],
+          ['If', ['List', 'True', 'True'], ['List', 'y', ['Multiply', 2, 'y']]],
           'y',
         ],
         ['Limits', 'y', 0, 1],
@@ -631,12 +627,12 @@ describe('A piecewise list integrand', () => {
     const ce = new ComputeEngine();
     ce.declare('B', 'list<boolean>');
     const n = integral(ce, [
-      'When',
-      ['List', 'y', ['Multiply', 2, 'y']],
+      'If',
       'B',
+      ['List', 'y', ['Multiply', 2, 'y']],
     ]).N();
     // The mask `B` has no value: the integral stays held, and is not a list
-    // of integrals of `When(y, B)` and `When(2y, B)`.
+    // of integrals of `If(B, y)` and `If(B, 2y)`.
     expect(n.operator).toBe('Integrate');
     const w = integral(ce, [
       'Which',
@@ -651,9 +647,9 @@ describe('A piecewise list integrand', () => {
   test('a restricted list integrand is typed as a list', () => {
     const ce = new ComputeEngine();
     const i = integral(ce, [
-      'When',
-      ['List', 'y', ['Multiply', 2, 'y']],
+      'If',
       ['Less', 'y', 2],
+      ['List', 'y', ['Multiply', 2, 'y']],
     ]);
     expect(i.type.toString()).toBe('vector<2>');
     // An enclosing integral sees a list integrand: ∫_0^1 ∫_0^1 [xy, 2xy]
@@ -667,9 +663,9 @@ describe('A piecewise list integrand', () => {
           [
             'Function',
             [
-              'When',
-              ['List', ['Multiply', 'x', 'y'], ['Multiply', 2, 'x', 'y']],
+              'If',
               ['Less', 'y', 2],
+              ['List', ['Multiply', 'x', 'y'], ['Multiply', 2, 'x', 'y']],
             ],
             'y',
           ],
@@ -688,9 +684,9 @@ describe('A piecewise list integrand', () => {
   test('a restricted tuple is integrated coordinate by coordinate', () => {
     const ce = new ComputeEngine();
     const i = integral(ce, [
-      'When',
-      ['Tuple', 'y', ['Multiply', 2, 'y']],
+      'If',
       ['Less', 'y', 2],
+      ['Tuple', 'y', ['Multiply', 2, 'y']],
     ]);
     expect(i.type.toString()).toBe('tuple<number, number>');
     const n = i.N();

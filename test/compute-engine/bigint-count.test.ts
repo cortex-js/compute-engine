@@ -417,7 +417,7 @@ describe('VIEWS OVER A SOURCE WITH A BIGINT COUNT', () => {
     expect(
       ce.box(['Map', ['Function', 1, 'p', 'q'], P, ['List', 1, 2, 3]]).count
     ).toBe(3);
-    expect(ce.box(['When', P, 'True']).count).toBe(P20);
+    expect(ce.box(['If', 'True', P]).count).toBe(P20);
     expect(evaluate(['Length', ['Rest', P]]).json).toEqual({
       num: '2432902008176639999',
     });

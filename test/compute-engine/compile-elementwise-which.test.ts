@@ -859,7 +859,7 @@ describe('element-wise selection: a mask of rank 2 or more', () => {
         { B: 'broadcastable<number>' },
         ['Which', ['Less', 'B', 0], 0, 'True', 'B'],
       ],
-      [{ B: 'broadcastable<number>' }, ['When', 1, ['Less', 'B', 0]]],
+      [{ B: 'broadcastable<number>' }, ['If', ['Less', 'B', 0], 1]],
       [
         { B: 'broadcastable<number>' },
         ['Which', ['Less', 'B', 0], 1, 'True', 0],
@@ -892,27 +892,28 @@ describe('element-wise selection: a mask of rank 2 or more', () => {
         fallback: false,
       } as any)?.success
     ).toBe(true);
-    // A shader target is exempt: a shader variable is a uniform of a fixed
-    // type, never a list.
+    // A shader target declines too: the restriction is typed
+    // `broadcastable<number> | missing`, a value that may be an absent
+    // list, which has no shader representation.
     for (const to of ['glsl', 'wgsl'])
-      expect(
-        compile(c.box(['When', 1, ['Less', 'B', 0]] as any), {
+      expect(() =>
+        compile(c.box(['If', ['Less', 'B', 0], 1] as any), {
           to,
           fallback: false,
-        } as any)?.success
-      ).toBe(true);
+        } as any)
+      ).toThrow(/object-domain absent/);
   });
 
   test('compiled JavaScript restricts by a condition that may be a list', () => {
     // The conditional expression `c ? 1 : NaN` read the array of `B < 0` as
-    // true: `When(1, B < 0)` was `1` for `B = [-1, 2]`, where the
-    // interpreter answers `[1, NaN]`. Such a condition now takes the helper
-    // of a list of conditions (`_SYS.restrict`), which reads a condition
-    // that is not an array at run time as one scalar condition.
+    // true: `If(B < 0, 1)` was `1` for `B = [-1, 2]`, where the
+    // interpreter answers `[1, NaN]`. Such a condition now takes the
+    // element-wise selection helper, which reads a condition that is not an
+    // array at run time as one scalar condition.
     const declarations = { B: 'broadcastable<number>' };
     for (const expr of [
-      ['When', 1, ['Less', 'B', 0]],
-      ['When', ['List', 1, 2], ['Less', 'B', 0]],
+      ['If', ['Less', 'B', 0], 1],
+      ['If', ['Less', 'B', 0], ['List', 1, 2]],
     ])
       for (const B of [-1, 2, [-1, 2]]) {
         const { compiled, interpreted } = compiledAndInterpreted(
@@ -924,10 +925,9 @@ describe('element-wise selection: a mask of rank 2 or more', () => {
       }
     const c = new ComputeEngine();
     c.declare('B', 'broadcastable<number>');
-    const r = compile(c.box(['When', 1, ['Less', 'B', 0]] as any), {
+    const r = compile(c.box(['If', ['Less', 'B', 0], 1] as any), {
       fallback: false,
     });
-    expect(r!.code).toContain('_SYS.restrict(');
     expect(r!.run!({ B: -1 } as any)).toBe(1);
     expect(r!.run!({ B: 2 } as any)).toBeNaN();
     expect(r!.run!({ B: [-1, 2] } as any)).toEqual([1, NaN]);

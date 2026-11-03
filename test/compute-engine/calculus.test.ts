@@ -1085,10 +1085,10 @@ describe('DEFINITE INTEGRATION', () => {
     // The parameter-dependent endpoint term `0^(n+1)` (the value of the
     // antiderivative at the lower bound 0) is resolved to its limit 0 under the
     // convergence condition `n + 1 > 0`, so the improper integral emits a
-    // `When`-guarded value instead of leaking the indeterminate `0^(n+1)`
+    // restricted value instead of leaking the indeterminate `0^(n+1)`
     // (conditional-values design, Phase 3a).
     expect(evaluate('\\int_0^1 x^n dx')).toMatchInlineSnapshot(
-      `1 / (n + 1) {0 < n + 1}`
+      `If(0 < n + 1, 1 / (n + 1))`
     ));
 
   test('symbolic bounds', () =>

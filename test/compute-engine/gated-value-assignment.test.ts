@@ -112,13 +112,13 @@ describe('gated value assignment', () => {
   });
 
   describe('the restriction type is unchanged', () => {
-    // The refinement lives at the assignment site, not in the `When` type
+    // The refinement lives at the assignment site, not in the restriction type
     // handler: a handler result is widened back to ordinary types, so the
     // handler cannot keep the literal `5` in the type it stores.
     // A restriction is a single-branch `If(c, e)`. With a scalar condition
     // its type is the type of `e` with no `nan` and no `missing` arm
     // (decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`);
-    // with a list of conditions it is typed as `When(e, c)`. The value it
+    // with a list of conditions it is typed as `If(c, e)`. The value it
     // presents to an assumption or a declared range is the literal it holds.
     test('a scalar restriction types its tier', () => {
       const ce = new ComputeEngine();
@@ -146,7 +146,7 @@ describe('gated value assignment', () => {
       const ce = new ComputeEngine();
       ce.declare('L', 'list<integer>');
       ce.assign('L', ce.parse('5\\{[a>0, b>0]\\}'));
-      expect(ce.box('L').evaluate().toString()).toBe('[5 {0 < a},5 {0 < b}]');
+      expect(ce.box('L').evaluate().toString()).toBe('[If(0 < a, 5),If(0 < b, 5)]');
     });
   });
 });

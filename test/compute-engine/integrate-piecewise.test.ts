@@ -510,7 +510,7 @@ describe('A PIECEWISE INTEGRAND WITH A NOTHING BRANCH', () => {
       'If(x < 1/2, x, Nothing)',
       ['If', ['Less', 'x', ['Rational', 1, 2]], 'x', 'Nothing'],
     ],
-    ['When(x, x < 0.5)', ['When', 'x', ['Less', 'x', 0.5]]],
+    ['When(x, x < 0.5)', ['If', ['Less', 'x', 0.5], 'x']],
     ['Which(x < 0.5, x)', ['Which', ['Less', 'x', 0.5], 'x']],
   ] as [string, ExpressionInput][])(
     '%s has no value on part of [0, 1]',

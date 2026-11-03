@@ -9,7 +9,7 @@ function parse(latex: string): Expression {
 
 describe('Desmos gap fixes', () => {
   describe('Fix 1: postfix restriction after visual space', () => {
-    // A `\{…\}` When-restriction must attach to its base even when separated
+    // A `\{…\}` restriction must attach to its base even when separated
     // by visual space (`\ `). The spaced form must match the unspaced form.
     const spaced =
       's\\left(t\\right)=\\ \\left(1-t\\right)^{2}\\left(1+2t\\right)\\ \\ \\ \\ \\left\\{t\\ge0\\right\\}\\left\\{t\\le1\\right\\}';

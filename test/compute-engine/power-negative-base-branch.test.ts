@@ -774,7 +774,7 @@ describe('NEGATIVE BASE: exact exponent provenance under .N()', () => {
    * KNOWN RESIDUAL, pinned rather than left unstated. Provenance is read off
    * the node's own `op2`, so it survives exactly one hop: a number literal, or
    * a symbol bound to one. An `op2` whose exact value only exists once
-   * something ELSE has run — a `When`'s selected arm — reaches the handler as
+   * something ELSE has run — a restriction's selected arm — reaches the handler as
    * a plain expression, and the float reconstruction decides. Past its cap
    * (`q = 1000001`) that is the COMPLEX branch, so this route still disagrees
    * with the literal one.
@@ -787,12 +787,12 @@ describe('NEGATIVE BASE: exact exponent provenance under .N()', () => {
    * body `(-2)^t` sees the exact rational and gives the real value of the
    * literal route.
    */
-  it('does NOT recover provenance through a When (residual)', () => {
+  it('does NOT recover provenance through a restriction (residual)', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('t \\mapsto (-2)^t'));
     expect(
       engine
-        .box(['Power', -2, ['When', ['Rational', 1000003, 1000001], true]])
+        .box(['Power', -2, ['If', true, ['Rational', 1000003, 1000001]]])
         .N().im
     ).not.toBe(0);
     const applied = engine.box(['f', ['Rational', 1000003, 1000001]]).N();

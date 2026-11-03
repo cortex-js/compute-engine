@@ -933,7 +933,7 @@ function rationalLimitAtInfinity(
  *   - telescoping sums `Σ_{k=a}^{b} (g(k+1) − g(k)) = g(b+1) − g(a)` (and the
  *     mirror orientation);
  *   - the geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio `r` (infinite upper
- *     bound), emitting `When(c·r^{n₀}/(1 − r), |r| < 1)`.
+ *     bound), emitting `If(|r| < 1, c·r^{n₀}/(1 − r))`.
  * Returns undefined when no closed form applies (caller keeps it symbolic).
  */
 export function symbolicSumClosedForm(
@@ -1266,7 +1266,7 @@ function pSeriesClosedForm(
  *     contract: `Σ(1/2)ᵏ → 2`, not `2.`);
  *   - numeric `r` with `|r| ≥ 1`  → `undefined` (decidable-divergent: caller
  *     keeps the sum symbolic, mirroring the p-series entry);
- *   - symbolic `r`                → `When(c·r^{n₀}/(1 − r), |r| < 1)`.
+ *   - symbolic `r`                → `If(|r| < 1, c·r^{n₀}/(1 − r))`.
  *
  * Scope is deliberately just this family: no x-dependent ratios (`Σ n·xⁿ`),
  * symbolic start indices, or derivative-of-geometric shapes.
@@ -1319,7 +1319,7 @@ function geometricSumClosedForm(
  * The value of the geometric series `Σ_{k=n₀}^∞ c·rᵏ = c·r^{n₀}/(1 − r)`,
  * guarded by `|r| < 1` through the `conditionalValue` chokepoint: the bare
  * value for a numeric ratio inside the unit disk, undefined for a numeric
- * ratio outside it (the caller keeps the sum symbolic), and a `When` for a
+ * ratio outside it (the caller keeps the sum symbolic), and a restriction for a
  * symbolic ratio.
  */
 function geometricValue(

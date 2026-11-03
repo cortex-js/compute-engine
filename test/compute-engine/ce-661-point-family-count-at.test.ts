@@ -187,8 +187,8 @@ describe('CE-661: count and at() of a family of points', () => {
     test('a decided gap and an undecided restriction', () => {
       const L = [
         'List',
-        ['When', pt('u', 1), ['Less', 0, 'u']],
-        ['When', pt(1, 1), ['Less', 1, 0]],
+        ['If', ['Less', 0, 'u'], pt('u', 1)],
+        ['If', ['Less', 1, 0], pt(1, 1)],
         pt(2, 3),
       ];
       const sum = ce.box(['Add', L, ['PointList', 1.8, 0]]);
@@ -209,8 +209,8 @@ describe('CE-661: count and at() of a family of points', () => {
     test('a restricted number in a broadcast', () => {
       const A = [
         'List',
-        ['When', 1, ['Less', 1, 0]],
-        ['When', 'u', ['Less', 0, 'u']],
+        ['If', ['Less', 1, 0], 1],
+        ['If', ['Less', 0, 'u'], 'u'],
         3,
       ];
       const sum = ce.box(['Add', A, 1]);

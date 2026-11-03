@@ -1,8 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
-describe('A2 — Interval extraction from When expressions', () => {
-  test('extracts open bounds from When(f(x), a < x < b)', () => {
+describe('A2 — Interval extraction from restriction expressions', () => {
+  test('extracts open bounds from If(a < x < b, f(x))', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('f(x)\\left\\{0 < x < 5\\right\\}');
     const interval = expr.getInterval('x');
@@ -13,7 +13,7 @@ describe('A2 — Interval extraction from When expressions', () => {
     expect(interval?.upperStrict).toBe(true);
   });
 
-  test('extracts closed bounds from When(f(x), a <= x <= b)', () => {
+  test('extracts closed bounds from If(a <= x <= b, f(x))', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('f(x)\\left\\{0 \\le x \\le 5\\right\\}');
     const interval = expr.getInterval('x');
@@ -24,7 +24,7 @@ describe('A2 — Interval extraction from When expressions', () => {
     expect(interval?.upperStrict).toBe(false);
   });
 
-  test('extracts mixed strictness from When(f(x), a < x <= b)', () => {
+  test('extracts mixed strictness from If(a < x <= b, f(x))', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('f(x)\\left\\{0 < x \\le 5\\right\\}');
     const interval = expr.getInterval('x');
@@ -33,9 +33,9 @@ describe('A2 — Interval extraction from When expressions', () => {
     expect(interval?.upperStrict).toBe(false);
   });
 
-  test('extracts from When with And of comparisons', () => {
+  test('extracts from a restriction with And of comparisons', () => {
     const ce = new ComputeEngine();
-    // Two stacked restrictions canonicalize to When(e, And(c1, c2))
+    // Two stacked restrictions canonicalize to If(And(c1, c2), e)
     const expr = ce.parse(
       'f(x)\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}'
     );
@@ -201,34 +201,34 @@ describe('A2 — Multi-restriction GLSL verification', () => {
   });
 });
 
-describe('A2 — When(e, False) masking rule', () => {
-  test('When(e, False) evaluates to NaN for a number', () => {
+describe('A2 — If(False, e) masking rule', () => {
+  test('If(False, e) evaluates to NaN for a number', () => {
     // The mask is the absence marker of the value's type (user decision
     // 2026-09-25): `NaN` for a number, `Missing` for a point.
     const ce = new ComputeEngine();
-    expect(ce.expr(['When', 42, 'False']).evaluate().isNaN).toBe(true);
+    expect(ce.expr(['If', 'False', 42]).evaluate().isNaN).toBe(true);
     expect(
-      ce.expr(['When', ['Tuple', 1, 2], 'False']).evaluate().symbol
+      ce.expr(['If', 'False', ['Tuple', 1, 2]]).evaluate().symbol
     ).toEqual('Missing');
   });
 
-  test('When(e, True) evaluates to e', () => {
+  test('If(True, e) evaluates to e', () => {
     const ce = new ComputeEngine();
-    const expr = ce.expr(['When', 42, 'True']);
+    const expr = ce.expr(['If', 'True', 42]);
     expect(expr.evaluate().re).toEqual(42);
   });
 
-  test('When(e, indeterminate) holds the form', () => {
+  test('If(indeterminate, e) holds the form', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    const expr = ce.expr(['When', 'x', ['Less', 0, 'x']]);
+    const expr = ce.expr(['If', ['Less', 0, 'x'], 'x']);
     const result = expr.evaluate();
-    expect(result.operator).toEqual('When');
+    expect(result.operator).toEqual('If');
   });
 });
 
 describe('A2 — stacked restrictions merge through canonical `And`', () => {
-  // The `When(When(e, c1), c2) → When(e, And(c1, c2))` merge used to build the
+  // The `If(c2, If(c1, e)) → If(And(c1, c2), e)` merge used to build the
   // conjunction with `_fn`, which skipped canonical `And`'s operand handling,
   // so `.json` (which went through `structural`) and `isSame`/`hash` could
   // disagree about the operand order. Since 2026-08-15 `And` is a

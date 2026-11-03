@@ -386,7 +386,7 @@ describe('INTERVAL JS EXECUTION', () => {
     }
 
     // An undecided condition with no default: the arm is a value over part
-    // of the cell only, so the answer is `partial`, as an undecided `When`
+    // of the cell only, so the answer is `partial`, as an undecided restriction
     // answers — not an `interval`, which would claim the value over the
     // whole cell. The same holds for an arm that is itself empty (an `At`
     // out of range) beside the default arm.
@@ -1412,11 +1412,11 @@ describe('INTERVAL JS - element-wise selection declines cleanly', () => {
   });
 
   test('When with a collection condition declines', () => {
-    const fn = compile(ceSel.box(['When', 1, ['List', 'True', 'False']]), {
+    const fn = compile(ceSel.box(['If', ['List', 'True', 'False'], 1]), {
       to: 'interval-js',
     });
     expect(fn.success).toBe(false);
-    expect(fn.error).toContain('branch condition is a collection-valued');
+    expect(fn.error).toContain('its conditional forms take a scalar condition only');
   });
 
   test('a scalar Which is unchanged', () => {

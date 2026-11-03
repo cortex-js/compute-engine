@@ -3,7 +3,7 @@ import { engine as ce } from '../utils';
 
 /**
  * Phase 1 of the conditional-values design
- * (docs/plans/2026-07-12-conditional-values-design.md): the `When`/`Which`
+ * (docs/plans/2026-07-12-conditional-values-design.md): the restriction and `Which`
  * threading algebra (T1–T7), decisions 5/9/10, and conservative predicates.
  * No producer changes — these tests only exercise the threading pre-pass in
  * `_computeValue` and the contained `control-structures.ts` fixes.
@@ -12,84 +12,86 @@ import { engine as ce } from '../utils';
 const gtx = ['Greater', 'x', 0]; // x > 0
 const lty = ['Less', 'y', 1]; // y < 1
 
-// When(x, x > 0)
-const whenX = ['When', 'x', gtx];
-// When(y, y < 1)
-const whenY = ['When', 'y', lty];
+// If(x > 0, x)
+const whenX = ['If', gtx, 'x'];
+// If(y < 1, y)
+const whenY = ['If', lty, 'y'];
 // Which(x > 0, 1, x < 0, -1)
 const whichX = ['Which', gtx, 1, ['Less', 'x', 0], -1];
 
-describe('CONDITIONAL VALUES — When threading (T1–T5)', () => {
-  it('T1: threads a scalar function through a When guard', () => {
-    // sin(When(x, x>0)) → When(sin(x), x>0)
-    expect(ce.box(['Sin', whenX]).evaluate().toString()).toBe('sin(x) {0 < x}');
-  });
-
-  it('T2: absorbs a plain operand into the guard', () => {
-    // When(x, x>0) + 1 → When(x + 1, x>0)
-    expect(ce.box(['Add', whenX, 1]).evaluate().toString()).toBe(
-      'x + 1 {0 < x}'
+describe('CONDITIONAL VALUES — restriction threading (T1–T5)', () => {
+  it('T1: threads a scalar function through a restriction guard', () => {
+    // sin(If(x>0, x)) → If(x>0, sin(x))
+    expect(ce.box(['Sin', whenX]).evaluate().toString()).toBe(
+      'If(0 < x, sin(x))'
     );
   });
 
-  it('T3: conjoins guards of two Whens', () => {
-    // When(x, x>0) · When(y, y<1) → When(x·y, (x>0) ∧ (y<1))
+  it('T2: absorbs a plain operand into the guard', () => {
+    // If(x>0, x) + 1 → If(x>0, x + 1)
+    expect(ce.box(['Add', whenX, 1]).evaluate().toString()).toBe(
+      'If(0 < x, x + 1)'
+    );
+  });
+
+  it('T3: conjoins guards of two restrictions', () => {
+    // If(x>0, x) · If(y<1, y) → If((x>0) ∧ (y<1), x·y)
     expect(ce.box(['Multiply', whenX, whenY]).evaluate().toString()).toBe(
-      'x * y {0 < x && y < 1}'
+      'If(0 < x && y < 1, x * y)'
     );
   });
 
   it('T4: a decidable-True guard collapses to the bare value', () => {
-    // Add(When(5, 3>0), 1) → 6 (guard True, When unwraps, then 5 + 1)
-    const r = ce.box(['Add', ['When', 5, ['Greater', 3, 0]], 1]).evaluate();
+    // Add(If(3>0, 5), 1) → 6 (guard True, the restriction unwraps, then 5 + 1)
+    const r = ce.box(['Add', ['If', ['Greater', 3, 0], 5], 1]).evaluate();
     expect(r.isSame(6)).toBe(true);
   });
 
   it('T4: a decidable-False guard masks a number to NaN', () => {
-    // When(5, 3<0) → NaN: a masked value is the absence marker of its own
+    // If(3<0, 5) → NaN: a masked value is the absence marker of its own
     // type, `NaN` for a number (user decision 2026-09-25; it was `Missing`
     // under the 2026-09-09 alignment with the no-selection ruling).
-    expect(ce.box(['When', 5, ['Less', 3, 0]]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['If', ['Less', 3, 0], 5]).evaluate().isNaN).toBe(true);
     expect(
-      ce.box(['When', ['Tuple', 1, 2], ['Less', 3, 0]]).evaluate().symbol
+      ce.box(['If', ['Less', 3, 0], ['Tuple', 1, 2]]).evaluate().symbol
     ).toBe('Missing');
   });
 
-  it('numericizes a When with a True guard, passing options through', () => {
-    // Opportunistic fix: When(Pi, True).N() must produce a float, not stay `pi`.
-    expect(ce.box(['When', 'Pi', 'True']).N().toString()).toMatch(/^3\.14159/);
+  it('numericizes a restriction with a True guard, passing options through', () => {
+    // Opportunistic fix: If(True, Pi).N() must produce a float, not stay `pi`.
+    expect(ce.box(['If', 'True', 'Pi']).N().toString()).toMatch(/^3\.14159/);
   });
 });
 
 describe('CONDITIONAL VALUES — fold regressions (decision 5)', () => {
-  it('0·When keeps the guard: → When(0, x>0), not plain 0', () => {
+  it('0·restriction keeps the guard: → If(x>0, 0), not plain 0', () => {
     const r = ce.box(['Multiply', 0, whenX]).evaluate();
-    expect(r.operator).toBe('When');
-    expect(r.op1.isSame(0)).toBe(true);
-    expect(r.toString()).toBe('0 {0 < x}');
+    expect(r.operator).toBe('If');
+    expect(r.op2.isSame(0)).toBe(true);
+    expect(r.toString()).toBe('If(0 < x, 0)');
   });
 
-  it('When − When keeps the guard: → When(0, c), not plain 0', () => {
+  it('restriction − restriction keeps the guard: → If(c, 0), not plain 0', () => {
     const r = ce.box(['Subtract', whenX, whenX]).evaluate();
-    expect(r.operator).toBe('When');
-    expect(r.op1.isSame(0)).toBe(true);
+    expect(r.operator).toBe('If');
+    expect(r.op2.isSame(0)).toBe(true);
   });
 
-  it('When / When keeps the guard: → When(1, c), not plain 1', () => {
+  it('restriction / restriction keeps the guard: → If(c, 1), not plain 1', () => {
     const r = ce.box(['Divide', whenX, whenX]).evaluate();
-    expect(r.operator).toBe('When');
-    expect(r.op1.isSame(1)).toBe(true);
+    expect(r.operator).toBe('If');
+    expect(r.op2.isSame(1)).toBe(true);
   });
 });
 
 describe('CONDITIONAL VALUES — logic operators are excluded', () => {
-  it('And(When(B, g), False) stays False (Kleene, not lifted)', () => {
-    const whenB = ['When', 'B', gtx];
+  it('And(If(g, B), False) stays False (Kleene, not lifted)', () => {
+    const whenB = ['If', gtx, 'B'];
     expect(ce.box(['And', whenB, 'False']).evaluate().symbol).toBe('False');
   });
 
-  it('Or(When(B, g), True) stays True (Kleene, not lifted)', () => {
-    const whenB = ['When', 'B', gtx];
+  it('Or(If(g, B), True) stays True (Kleene, not lifted)', () => {
+    const whenB = ['If', gtx, 'B'];
     expect(ce.box(['Or', whenB, 'True']).evaluate().symbol).toBe('True');
   });
 });
@@ -413,18 +415,18 @@ describe('CONDITIONAL VALUES — the cost limit of the Which distribution', () =
 });
 
 describe('CONDITIONAL VALUES — layering normal form (decision 6)', () => {
-  it('mixed When ⊕ Which keeps the guard outermost', () => {
-    // Add(When(x, x>0), Which(...)) → When(Which(...), x>0)
+  it('mixed restriction ⊕ Which keeps the guard outermost', () => {
+    // Add(If(x>0, x), Which(...)) → If(x>0, Which(...))
     const r = ce.box(['Add', whenX, whichX]).evaluate();
-    expect(r.operator).toBe('When');
-    expect(r.op1.operator).toBe('Which');
+    expect(r.operator).toBe('If');
+    expect(r.op2.operator).toBe('Which');
   });
 
-  it('f(When(Which(...), g)) keeps the guard outermost, Which distributed', () => {
-    const wrapped = ['When', whichX, ['Greater', 'z', 0]];
+  it('f(If(g, Which(...))) keeps the guard outermost, Which distributed', () => {
+    const wrapped = ['If', ['Greater', 'z', 0], whichX];
     const r = ce.box(['Sin', wrapped]).evaluate();
-    expect(r.operator).toBe('When');
-    expect(r.op1.operator).toBe('Which');
+    expect(r.operator).toBe('If');
+    expect(r.op2.operator).toBe('Which');
   });
 });
 
@@ -446,8 +448,8 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
     expect(r.symbol).toBe('Missing');
   });
 
-  it('When with an Undefined condition masks (NaN for a number)', () => {
-    expect(ce.box(['When', 5, 'Undefined']).evaluate().isNaN).toBe(true);
+  it('restriction with an Undefined condition masks (NaN for a number)', () => {
+    expect(ce.box(['If', 'Undefined', 5]).evaluate().isNaN).toBe(true);
   });
 
   it('a provably non-boolean Which condition is an error operand', () => {
@@ -544,17 +546,17 @@ describe('CONDITIONAL VALUES — Which operand pairing', () => {
 });
 
 describe('CONDITIONAL VALUES — predicates stay conservative (decision 2)', () => {
-  it('When(x, x>0).isPositive is undefined', () => {
+  it('If(x>0, x).isPositive is undefined', () => {
     expect(ce.box(whenX).isPositive).toBeUndefined();
   });
 
-  it('When(x, x>0).sgn is undefined', () => {
+  it('If(x>0, x).sgn is undefined', () => {
     expect(ce.box(whenX).sgn).toBeUndefined();
   });
 });
 
 /**
- * Phase 2 of the conditional-values design: `Solve` is the first `When`
+ * Phase 2 of the conditional-values design: `Solve` is the first restriction
  * producer. A trig root with a symbolic ratio is emitted with its validity
  * guard (`|−b/a| ≤ 1`); a decidable ratio keeps today's behavior exactly
  * (guard True → bare root, guard False → the rule declines to fire), and a
@@ -577,16 +579,16 @@ describe('CONDITIONAL VALUES — Solve emission (Phase 2)', () => {
   it('symbolic a·sin(x) + b = 0 → both branches guarded by |−b/a| ≤ 1', () => {
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Sin', 'x']], 'b'], 0];
     expect(solveStrings(ce, eq, 'x')).toEqual([
-      '2pi * t + arcsin(-b / a) {|-b / a| <= 1}',
-      '2pi * t - arcsin(-b / a) + pi {|-b / a| <= 1}',
+      'If(|-b / a| <= 1, 2pi * t + arcsin(-b / a))',
+      'If(|-b / a| <= 1, 2pi * t - arcsin(-b / a) + pi)',
     ]);
   });
 
   it('symbolic a·cos(x) + b = 0 → both branches guarded by |−b/a| ≤ 1', () => {
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Cos', 'x']], 'b'], 0];
     expect(solveStrings(ce, eq, 'x')).toEqual([
-      '2pi * t + arccos(-b / a) {|-b / a| <= 1}',
-      '2pi * t - arccos(-b / a) {|-b / a| <= 1}',
+      'If(|-b / a| <= 1, 2pi * t + arccos(-b / a))',
+      'If(|-b / a| <= 1, 2pi * t - arccos(-b / a))',
     ]);
   });
 
@@ -616,14 +618,14 @@ describe('CONDITIONAL VALUES — Solve emission (Phase 2)', () => {
 
   it('a decidable-True guard collapses the guarded root to a bare root', () => {
     // In-range coefficients (|−b/a| = 1/2 ≤ 1): the guard resolves True and
-    // both branches unwrap to bare roots (no `When`). Each root of a family
+    // both branches unwrap to bare roots (no restriction). Each root of a family
     // is in (-π, π]: `7π/6 + 2πt` is `-5π/6 + 2πt`.
     const engine = new ComputeEngine();
     engine.assume(engine.parse('a = 2'));
     engine.assume(engine.parse('b = 1'));
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Sin', 'x']], 'b'], 0];
     const roots = solveStrings(engine, eq, 'x');
-    expect(roots?.every((r) => !r.includes('When'))).toBe(true);
+    expect(roots?.every((r) => !r.includes('If('))).toBe(true);
     expect(roots).toEqual(['2pi * t - 5/6 * pi', '2pi * t - 1/6 * pi']);
   });
 });
@@ -635,7 +637,7 @@ describe('Convergence guards (Phase 3a)', () => {
   // ── The six acceptance rows ────────────────────────────────────────────
 
   it('∫₀^∞ e^(−a·x) dx → 1/a {0 < a}', () => {
-    expect(evalStr('\\int_0^\\infty e^{-a x} dx')).toBe('1 / a {0 < a}');
+    expect(evalStr('\\int_0^\\infty e^{-a x} dx')).toBe('If(0 < a, 1 / a)');
   });
 
   it('∫₀^∞ e^(−2x) dx → 1/2 (decidable, unchanged)', () => {
@@ -643,7 +645,7 @@ describe('Convergence guards (Phase 3a)', () => {
   });
 
   it('∫₀^1 xⁿ dx → 1/(n+1) {−1 < n} (no leaked 0^(n+1))', () => {
-    expect(evalStr('\\int_0^1 x^n dx')).toBe('1 / (n + 1) {0 < n + 1}');
+    expect(evalStr('\\int_0^1 x^n dx')).toBe('If(0 < n + 1, 1 / (n + 1))');
   });
 
   it('∫₀^∞ xⁿ dx diverges for every n: it stays unevaluated (CE-383)', () => {
@@ -654,12 +656,12 @@ describe('Convergence guards (Phase 3a)', () => {
 
   it('∫₁^∞ x^(−s) dx → 1/(s−1) {1 < s} (no leaked ∞^(1−s))', () => {
     expect(evalStr('\\int_1^\\infty x^{-s} dx')).toBe(
-      '-1 / (1 - s) {1 - s < 0}'
+      'If(1 - s < 0, -1 / (1 - s))'
     );
   });
 
   it('Σ_{n=0}^∞ xⁿ → 1/(1−x) {|x| < 1}', () => {
-    expect(evalStr('\\sum_{n=0}^\\infty x^n')).toBe('1 / (1 - x) {|x| < 1}');
+    expect(evalStr('\\sum_{n=0}^\\infty x^n')).toBe('If(|x| < 1, 1 / (1 - x))');
   });
 
   it('Σ_{n=0}^∞ (1/2)ⁿ → 2 (exact)', () => {
@@ -809,7 +811,7 @@ describe('Phase 3b', () => {
   // The improper-integral acceptance behavior is preserved through the general
   // antiderivative path (the `improperExpAntiderivative` workaround is retired).
   it('∫₀^∞ e^(−a·x) dx → 1/a {0 < a} (preserved)', () => {
-    expect(evalStr('\\int_0^\\infty e^{-a x} dx')).toBe('1 / a {0 < a}');
+    expect(evalStr('\\int_0^\\infty e^{-a x} dx')).toBe('If(0 < a, 1 / a)');
   });
 
   it('∫₀^∞ e^(−2x) dx → 1/2 (preserved)', () => {
@@ -828,7 +830,9 @@ describe('Phase 3b', () => {
       .ops?.map((r) => r.toString());
 
   it('√(x+3) = a (symbolic) → one guarded root a² − 3 {0 ≤ a}', () => {
-    expect(solveStrings(ce, '\\sqrt{x+3} = a')).toEqual(['a^2 - 3 {0 <= a}']);
+    expect(solveStrings(ce, '\\sqrt{x+3} = a')).toEqual([
+      'If(0 <= a, a^2 - 3)',
+    ]);
   });
 
   it('the guarded root collapses under substitution', () => {

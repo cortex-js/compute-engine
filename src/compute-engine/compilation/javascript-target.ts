@@ -2016,7 +2016,7 @@ function compileJSCollectionBoolean(
  * (`BaseCompiler.absenceKind`): `NaN` for a number cell, and the object null
  * `undefined` when every arm gives a cell that is not a number — a point
  * lifted whole, a list of points, a string. A single missing point is
- * `undefined` too, and so is a missing cell of the list form of `When`, so
+ * `undefined` too, and so is a missing cell of the list form of a restriction, so
  * the forms agree. `absent` carries that value to the generic branch behind
  * the fused loop's guard, which is compiled without the target.
  */
@@ -3016,13 +3016,19 @@ function compileNthElement(
 
 /**
  * The element read of an operand that may be absent: `?.` when its type has
- * a `missing` arm, so that a restricted operand whose condition is false,
- * which is `undefined` at run time, answers `undefined` (the run-time
- * spelling of `Missing`, the value the interpreter answers) instead of
- * throwing a `TypeError`. Empty otherwise.
+ * a `missing` arm, or when it is a list literal with a restricted cell
+ * `If(c, p)`, so that a restricted operand whose condition is false, which
+ * is `undefined` at run time, answers `undefined` (the run-time spelling of
+ * `Missing`, the value the interpreter answers) instead of throwing a
+ * `TypeError`. The type of `If(c, p)` is the type of `p`, with no `missing`
+ * arm, so such a cell is found by its structure. Empty otherwise.
  */
 function absentRead(arg: Expression): string {
-  return typeContainsMissing(arg.type.type) ? '?.' : '';
+  if (typeContainsMissing(arg.type.type)) return '?.';
+  return isFunction(arg, 'List') &&
+    arg.ops.some((x) => isFunction(x, 'If') && x.nops === 2)
+    ? '?.'
+    : '';
 }
 
 /**
@@ -13887,8 +13893,9 @@ function pipeAppliedLiteral(
  * inner `Pipe`, as an expression that evaluates `topic` exactly once before
  * the call. The interpreter evaluates an inner pipe before it applies the
  * outer stage (the evaluate handler of `Pipe` in `library/core.ts`). The
- * operand of the call itself can be held or dropped: `When(x, False)` never
- * reads `x`, and in `Pipe(Pipe(Assign(c, c + 1), Abs), When(False))` the
+ * operand of the call itself can be held or dropped: `If(False, x)` never
+ * reads `x`, and in a `Pipe` whose last stage is a restriction with the
+ * condition `False` the
  * assignment then did not run in the compiled code. So the call is the body
  * of a literal whose one parameter, typed with the static type of `topic`,
  * takes the place of `topic`, and the literal is applied to `topic` with
@@ -15663,7 +15670,7 @@ function scanForDistinctElement(root: Expression): boolean {
     const integerRange =
       node.operator === 'Range' && integerRangeElements(node) !== undefined;
     if (node.operator === 'Range' && !integerRange) return true;
-    // `isLazyCollection` can count a collection (the `isLazy` of `When`), and
+    // `isLazyCollection` can count a collection (the `isLazy` of a restriction), and
     // that count can call a user callback that throws.
     try {
       if (!integerRange && node.isLazyCollection) return true;

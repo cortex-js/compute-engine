@@ -3,7 +3,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { TEST_PYTHON } from './test-python';
 
-// A `When` or a `Which` over a list that selects no clause at a position
+// A restriction or a `Which` over a list that selects no clause at a position
 // gives `Missing` in that cell in the interpreter. In compiled JavaScript, a
 // missing POINT cell is `undefined`, as a single missing point is; a missing
 // number cell stays `NaN`.
@@ -49,7 +49,7 @@ describe('COMPILED LIST CELL OF A MISSING POINT', () => {
         ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
       ],
     ],
-    ['When', ['When', ['Tuple', 1, 2], ['Greater', 'v', 0]]],
+    ['restriction', ['If', ['Greater', 'v', 0], ['Tuple', 1, 2]]],
   ])('%s: the cell is undefined', (_name, json) => {
     expect(interpreted(json)).toBe('[(1, 2),"Missing"]');
     expect(compiled(json)).toEqual([[1, 2], undefined]);
@@ -63,7 +63,7 @@ describe('COMPILED LIST CELL OF A MISSING POINT', () => {
 
   test.each([
     ['Which', ['Which', ['Greater', 'v', 0], 7]],
-    ['When', ['When', 7, ['Greater', 'v', 0]]],
+    ['restriction', ['If', ['Greater', 'v', 0], 7]],
   ])('%s: a number cell stays NaN', (_name, json) => {
     const out = compiled(json) as unknown[];
     expect(out[0]).toBe(7);
@@ -71,11 +71,11 @@ describe('COMPILED LIST CELL OF A MISSING POINT', () => {
   });
 
   test('a string cell is undefined in both forms', () => {
-    // The list form of `When` gave the object null for a missing string, and
+    // The list form of a restriction gave the object null for a missing string, and
     // the element-wise `Which` gave `NaN`: both give `undefined` now.
     for (const json of [
       ['Which', ['Greater', 'v', 0], { str: 'a' }],
-      ['When', { str: 'a' }, ['Greater', 'v', 0]],
+      ['If', ['Greater', 'v', 0], { str: 'a' }],
     ]) {
       expect(interpreted(json)).toBe('["a","Missing"]');
       expect(compiled(json)).toEqual(['a', undefined]);
@@ -158,18 +158,18 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
       '"True"',
       true,
     ],
-    // A missing complex cell of `When` over a list of conditions is plain
+    // A missing complex cell of a restriction over a list of conditions is plain
     // `NaN`, as the element-wise `Which` gives it: the complex value
     // `{ re: NaN, im: NaN }` was read as present.
     [
       'IsMissing of a missing complex cell of When',
-      ['IsMissing', ['At', ['When', 'z', ['Greater', 'v', 0]], 2]],
+      ['IsMissing', ['At', ['If', ['Greater', 'v', 0], 'z'], 2]],
       '"True"',
       true,
     ],
     [
       'Coalesce of a missing complex cell of When',
-      ['Coalesce', ['At', ['When', 'z', ['Greater', 'v', 0]], 2], 0],
+      ['Coalesce', ['At', ['If', ['Greater', 'v', 0], 'z'], 2], 0],
       '0',
       0,
     ],
@@ -193,11 +193,7 @@ describe('A DISCHARGE READS EVERY SPELLING OF AN ABSENT CELL', () => {
       'IsMissing',
       [
         'Last',
-        [
-          'When',
-          ['Add', 'u', ['Multiply', 'ImaginaryUnit', 'w']],
-          ['Less', ['Multiply', 'w', ['List', 1, 2]], 2],
-        ],
+        ['If', ['Less', ['Multiply', 'w', ['List', 1, 2]], 2], ['Add', 'u', ['Multiply', 'ImaginaryUnit', 'w']]],
       ],
     ]);
     expect(expr.subs({ u: 5, w: 1 }).evaluate().toString()).toBe('"True"');

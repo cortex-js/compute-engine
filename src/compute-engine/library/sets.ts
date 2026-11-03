@@ -2146,11 +2146,11 @@ function boundKleene(
  *
  * Returns `undefined` when membership is indeterminate (design §5.2).
  *
- * Before these steps: an element that holds a conditional value (`When`,
+ * Before these steps: an element that holds a conditional value (a restriction,
  * `Which`) whose condition is not decided is indeterminate. The
  * `Element`/`NotElement` call then stays unevaluated and gives the correct
  * answer once the condition is decided. Before this rule, the `contains`
- * handler compared the `When` node itself with the elements, so
+ * handler compared the restriction node itself with the elements, so
  * `Element(2{c}, [1, 2])` was `False`, and stayed `False` after `c` became
  * true (user decision 2026-09-26: an undecided restricted value is held).
  */

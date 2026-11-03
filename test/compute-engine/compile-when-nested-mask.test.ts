@@ -2,18 +2,18 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
- * `When`, `If` and `Which` over a nested mask, on both routes (ROADMAP
+ * A restriction, `If` and `Which` over a nested mask, on both routes (ROADMAP
  * CE-223).
  *
- * - CE-223.1 (user decision 2026-10-23): `When(v, C)` with a mask `C` of rank
- *   2 or more selects cell by cell at every level, as the else-less
- *   `If(C, v)` does. Before, the interpreter kept the `When` unevaluated, and
+ * - CE-223.1 (user decision 2026-10-23): `If(C, v)` with a mask `C` of rank
+ *   2 or more selects cell by cell at every level. Before, the interpreter
+ *   kept the restriction unevaluated, and
  *   the compiled code read each row as one condition that is not `True`
  *   (`[NaN, NaN]`).
  * - CE-223.2: an arm typed as a point or a list of points that holds one
  *   point at run time is lifted whole, as the interpreter lifts it. Before,
  *   the compiled code indexed the point as a list.
- * - CE-223.3: `When(B, B < 0)` with `B: broadcastable<number>` compiles: such
+ * - CE-223.3: `If(B < 0, B)` with `B: broadcastable<number>` compiles: such
  *   a value cannot be a point, so an array is aligned with the mask and any
  *   other value is repeated.
  */
@@ -76,9 +76,9 @@ describe('CE-223.1: When with a mask of rank 2 selects cell by cell', () => {
 
   test('the interpreter selects at every level', () => {
     const e = ce.box([
-      'When',
-      5,
+      'If',
       ['List', ['List', 'True', 'False'], ['List', 'False', 'True']],
+      5,
     ]);
     expect(e.evaluate().toString()).toBe('[[5,NaN],[NaN,5]]');
     // The same value as the else-less `If`.
@@ -91,13 +91,13 @@ describe('CE-223.1: When with a mask of rank 2 selects cell by cell', () => {
   });
 
   test('the interpreter type of the restriction follows the mask', () => {
-    expect(ce.box(['When', 'v', 'C']).type.toString()).toBe(
+    expect(ce.box(['If', 'C', 'v']).type.toString()).toBe(
       ce.box(['If', 'C', 'v']).type.toString()
     );
   });
 
   test('a matrix value under a matrix mask', () => {
-    check(ce, ['When', 'M', 'C'], {
+    check(ce, ['If', 'C', 'M'], {
       M: [
         [1, 2],
         [3, 4],
@@ -107,21 +107,21 @@ describe('CE-223.1: When with a mask of rank 2 selects cell by cell', () => {
   });
 
   test('a scalar value under a matrix mask', () => {
-    check(ce, ['When', 'v', 'C'], { v: 5, C: mask });
+    check(ce, ['If', 'C', 'v'], { v: 5, C: mask });
   });
 
   test('a mask whose rank is known at run time only', () => {
     // `B < 0` over a `tensor<number>`: a matrix at run time is a mask of
     // rank 2, a vector a mask of rank 1.
-    check(ce, ['When', 'v', ['Less', 'B', 0]], {
+    check(ce, ['If', ['Less', 'B', 0], 'v'], {
       v: 5,
       B: [
         [1, -1],
         [-2, 3],
       ],
     });
-    check(ce, ['When', 'v', ['Less', 'B', 0]], { v: 5, B: [1, -1, -2] });
-    check(ce, ['When', 'B', ['Less', 'B', 0]], {
+    check(ce, ['If', ['Less', 'B', 0], 'v'], { v: 5, B: [1, -1, -2] });
+    check(ce, ['If', ['Less', 'B', 0], 'B'], {
       B: [
         [1, -1],
         [-2, 3],
@@ -133,9 +133,9 @@ describe('CE-223.1: When with a mask of rank 2 selects cell by cell', () => {
     // The interpreter answers `incompatible-dimensions`; compiled code
     // spells the error as `NaN`, as for `If`.
     const e = ce.box([
-      'When',
-      ['List', 10, 20],
+      'If',
       ['List', ['List', 'True', 'False'], ['List', 'False', 'True']],
+      ['List', 10, 20],
     ]);
     expect(e.evaluate().toString()).toContain('incompatible-dimensions');
   });
@@ -198,14 +198,14 @@ describe('CE-223.3: When(B, B < 0) with B: broadcastable<number>', () => {
       ],
     ],
   ])('B = %j', (B) => {
-    const r = compile(ce.box(['When', 'B', ['Less', 'B', 0]]), {
+    const r = compile(ce.box(['If', ['Less', 'B', 0], 'B']), {
       to: 'javascript',
       fallback: false,
     } as any) as any;
     expect(r.success).toBe(true);
     const lit = literal(B);
     const interpreted = plain(
-      ce.box(['When', lit as any, ['Less', lit as any, 0]]).evaluate().json
+      ce.box(['If', ['Less', lit as any, 0], lit as any]).evaluate().json
     );
     expect(r.run({ B })).toEqual(interpreted);
   });

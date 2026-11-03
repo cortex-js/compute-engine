@@ -33,21 +33,16 @@ const C = ['Less', 0, 't'];
 
 describe('a false restriction answers the marker of the value type', () => {
   test.each([
-    ['a number literal', ['When', 1, C], 'integer | nan', 'NaN'],
-    ['a real symbol', ['When', 'x', C], 'nan | real', 'NaN'],
+    ['a number literal', ['If', C, 1], 'integer', 'NaN'],
+    ['a real symbol', ['If', C, 'x'], 'real', 'NaN'],
     [
       'a point',
-      ['When', ['Tuple', 1, 2], C],
-      'missing | tuple<integer, integer>',
+      ['If', C, ['Tuple', 1, 2]],
+      'tuple<integer, integer>',
       '"Missing"',
     ],
-    [
-      'a list',
-      ['When', ['List', 1, 2], C],
-      'missing | vector<integer^2>',
-      '"Missing"',
-    ],
-    ['a string', ['When', { str: 'ab' }, C], 'missing | string', '"Missing"'],
+    ['a list', ['If', C, ['List', 1, 2]], 'vector<integer^2>', '"Missing"'],
+    ['a string', ['If', C, { str: 'ab' }], 'string', '"Missing"'],
   ])('%s', (_label, json, type, absent) => {
     const r = probe(json);
     expect(r.type).toBe(type);
@@ -57,19 +52,19 @@ describe('a false restriction answers the marker of the value type', () => {
 
   test('a value not provably numeric masks to Missing', () => {
     const ce = engine();
-    const e = ce.box(['When', 'q', 'False']);
+    const e = ce.box(['If', 'False', 'q']);
     expect(e.evaluate().toString()).toBe('"Missing"');
   });
 
   test('an Undefined condition masks the same way', () => {
-    expect(engine().box(['When', 1, 'Undefined']).evaluate().isNaN).toBe(true);
+    expect(engine().box(['If', 'Undefined', 1]).evaluate().isNaN).toBe(true);
   });
 
   test('a masked numeric cell of a list mask is NaN', () => {
     const r = probe([
-      'When',
-      ['List', 10, 20, 30],
+      'If',
       ['Greater', ['List', 1, 2, 3], 2],
+      ['List', 10, 20, 30],
     ]);
     expect(r.type).toBe('list<number>');
     expect(r.free).toBe('[NaN,NaN,30]');
@@ -78,43 +73,43 @@ describe('a false restriction answers the marker of the value type', () => {
 
 describe('the two evaluation routes agree', () => {
   test.each([
-    ['2·x{c}', ['Multiply', 2, ['When', 'x', C]], 'nan | real', 'NaN'],
-    ['sin(x{c})', ['Sin', ['When', 'x', C]], 'nan | real', 'NaN'],
+    ['2·x{c}', ['Multiply', 2, ['If', C, 'x']], 'real', 'NaN'],
+    ['sin(x{c})', ['Sin', ['If', C, 'x']], 'real', 'NaN'],
     [
       'Length([1,2]{c})',
-      ['Length', ['When', ['List', 1, 2], C]],
-      'integer | nan',
+      ['Length', ['If', C, ['List', 1, 2]]],
+      'integer',
       'NaN',
     ],
-    ['Sum([1,2]{c})', ['Sum', ['When', ['List', 1, 2], C]], 'number', 'NaN'],
+    ['Sum([1,2]{c})', ['Sum', ['If', C, ['List', 1, 2]]], 'integer', 'NaN'],
     [
       '[1,2,3] + 2{c}',
-      ['Add', ['List', 1, 2, 3], ['When', 2, C]],
-      'list<integer | nan^3>',
+      ['Add', ['List', 1, 2, 3], ['If', C, 2]],
+      'vector<integer^3>',
       '[NaN,NaN,NaN]',
     ],
     [
       '2{c}·(1,2)',
-      ['Multiply', ['When', 2, C], ['Tuple', 1, 2]],
-      'tuple<integer | nan, integer | nan>',
+      ['Multiply', ['If', C, 2], ['Tuple', 1, 2]],
+      'tuple<integer, integer>',
       '(NaN, NaN)',
     ],
     [
       '2{c}·[(1,2),(3,4)]',
-      ['Multiply', ['When', 2, C], ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
-      'list<tuple<integer | nan, integer | nan>^2>',
+      ['Multiply', ['If', C, 2], ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
+      'list<tuple<integer, integer>^2>',
       '[(NaN, NaN),(NaN, NaN)]',
     ],
     [
       '[1,2]{c} + 1',
-      ['Add', ['When', ['List', 1, 2], C], 1],
-      'missing | vector<integer^2>',
-      '"Missing"',
+      ['Add', ['If', C, ['List', 1, 2]], 1],
+      'vector<integer^2>',
+      '[NaN,NaN]',
     ],
     [
       '(1,2){c} + (1,1)',
-      ['Add', ['When', ['Tuple', 1, 2], C], ['Tuple', 1, 1]],
-      'missing | tuple<integer, integer>',
+      ['Add', ['If', C, ['Tuple', 1, 2]], ['Tuple', 1, 1]],
+      'tuple<integer, integer>',
       '"Missing"',
     ],
   ])('%s', (_label, json, type, absent) => {
@@ -127,10 +122,10 @@ describe('the two evaluation routes agree', () => {
   test('a scalar restriction beside a list lands in each cell of the held result', () => {
     // It was the whole-list restriction `[3,4,5]{0 < t}`, `Missing` once
     // `t = -1`, where the fresh route answered `[NaN, NaN, NaN]`.
-    const r = probe(['Add', ['List', 1, 2, 3], ['When', 2, C]]);
-    expect(r.free).toBe('[3 {0 < t},4 {0 < t},5 {0 < t}]');
-    const p = probe(['Multiply', ['When', 2, C], ['Tuple', 1, 2]]);
-    expect(p.free).toBe('(2 {0 < t}, 4 {0 < t})');
+    const r = probe(['Add', ['List', 1, 2, 3], ['If', C, 2]]);
+    expect(r.free).toBe('[If(0 < t, 3),If(0 < t, 4),If(0 < t, 5)]');
+    const p = probe(['Multiply', ['If', C, 2], ['Tuple', 1, 2]]);
+    expect(p.free).toBe('(If(0 < t, 2), If(0 < t, 4))');
   });
 
   test('a list restriction and a scalar restriction with different conditions stay apart', () => {
@@ -143,24 +138,24 @@ describe('the two evaluation routes agree', () => {
     ce.declare('b', 'real');
     const e = ce.box([
       'Add',
-      ['When', ['List', 1, 2], ['Greater', 'a', 0]],
-      ['When', 2, ['Greater', 'b', 0]],
+      ['If', ['Greater', 'a', 0], ['List', 1, 2]],
+      ['If', ['Greater', 'b', 0], 2],
     ]);
     const held = e.evaluate();
-    expect(held.toString()).toBe('[3 {0 < b},4 {0 < b}] {0 < a}');
+    expect(held.toString()).toBe('If(0 < a, [If(0 < b, 3),If(0 < b, 4)])');
     ce.assign('a', -1);
     expect(held.evaluate().toString()).toBe('"Missing"');
     ce.assign('a', ce.symbol('a'));
     ce.assign('b', -1);
-    expect(held.evaluate().toString()).toBe('[NaN,NaN] {0 < a}');
-    expect(e.evaluate().toString()).toBe('[NaN,NaN] {0 < a}');
+    expect(held.evaluate().toString()).toBe('If(0 < a, [NaN,NaN])');
+    expect(e.evaluate().toString()).toBe('If(0 < a, [NaN,NaN])');
     // One condition restricting a scalar and a point is one restriction.
     expect(
       ce
-        .box(['Multiply', ['When', 2, C], ['When', ['Tuple', 1, 2], C]])
+        .box(['Multiply', ['If', C, 2], ['If', C, ['Tuple', 1, 2]]])
         .evaluate()
         .toString()
-    ).toBe('(2, 4) {0 < t}');
+    ).toBe('If(0 < t, (2, 4))');
   });
 
   test('a gated numeric value still binds to a declared range and an assumption', () => {

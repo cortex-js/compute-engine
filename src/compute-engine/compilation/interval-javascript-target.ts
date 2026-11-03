@@ -685,8 +685,8 @@ function compileIntervalCollectionValue(
   // scalar and decline it.
   //
   // A single-branch `If(c, t)` whose arm is not a relation is first read as
-  // a restriction, `When(t, c)` (the parse of `t\{c\}`), so that it gives
-  // the value of `When` below: where the condition is undecided,
+  // a restriction (the parse of `t\{c\}`), compiled by
+  // `compileIntervalRestrictedValue`: where the condition is undecided,
   // `_IA.restrict` clips each element, and the hull of a selection would
   // answer the absence marker for a list arm.
   if (
@@ -703,23 +703,6 @@ function compileIntervalCollectionValue(
     target.unrollSkipHeads?.has(literal.operator) !== true
   )
     return compileIntervalSelectionValue(literal, target);
-  // A `When` in a consuming position is a RESTRICTED collection value
-  // (`[1, 2]\{0 < t\}`, `(1, 2)\{0 < t\}`, or a restricted list inside a
-  // `PointList`): its value operand is spelled the way the position spells
-  // it, and `_IA.restrict` masks it as the `When` handler does for a
-  // list-typed input — the `empty` result where the condition fails, the
-  // elements clipped where it is undecided. A value operand this function
-  // does not spell answers `undefined`, and the handler then compiles the
-  // `When` the ordinary way (a list-typed input, a scalar). A restricted
-  // relation is the handler's too. A `When` the caller overrode keeps its
-  // ordinary dispatch.
-  if (
-    literal.operator === 'When' &&
-    literal.ops.length === 2 &&
-    target.unrollSkipHeads?.has('When') !== true &&
-    !literal.ops[0].type.matches('boolean')
-  )
-    return compileIntervalRestrictedValue(literal, target);
   // A seeded list draw has a fixed value, the list of point intervals
   // `_IA.seededChoice` computes (see `seededRandomChoicePlan`). A draw this
   // target does not compile answers `undefined`, and the ordinary lowering
@@ -1122,9 +1105,10 @@ function compileIntervalSelectionValue(
 }
 
 /**
- * A `When(value, condition)` at a consuming position (see
+ * A restriction `If(condition, value)` at a consuming position (see
  * `compileIntervalCollectionValue`): `_IA.restrict` over the collection
- * spelling of `value`, the same run-time call the `When` handler emits.
+ * spelling of `value`, the same run-time call the `If` handler emits for a
+ * restriction.
  * Answers `undefined` when `value` has no collection spelling, and the
  * handler then compiles the node. The condition is held scalar
  * (`assertScalarCondition`) and is evaluated eagerly; the value is the
@@ -1135,12 +1119,11 @@ function compileIntervalRestrictedValue(
   when: Expression,
   target: CompileTarget<Expression>
 ): string | undefined {
-  // `when` is `When(value, cond)` or the single-branch `If(cond, value)`
-  // (`restrictionParts()`); the operand index of the value differs.
+  // `when` is the single-branch `If(cond, value)` (`restrictionParts()`).
   const parts = restrictionParts(when);
   if (parts === undefined) return undefined;
   const { value, condition: cond } = parts;
-  const valueIndex = when.operator === 'If' ? 1 : 0;
+  const valueIndex = 1;
   // The value is compiled once, in its own region: the same code answers
   // "is the value a collection" and is the code that is emitted (see
   // `compileIntervalSelectionValue`; a probe followed by a second compile
@@ -1611,14 +1594,13 @@ function intervalVarsAccess(id: string): string {
  * a reduction and whose scalar fold runs the gate itself; `Reduce`, whose
  * first operand is the collection it reduces and whose handler
  * (`compileIntervalReduce`) checks the elements itself; and the selection
- * forms `Which`/`When`, whose ARMS may be collection values (a list handed
+ * form `Which`, whose ARMS may be collection values (a list handed
  * whole to whichever arm is selected — the run-time `piecewise`, `restrict`
  * and `hull` read an array arm in its own domain) while their conditions
  * are held scalar by `assertScalarCondition`.
  */
 const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
   'Which',
-  'When',
   'At',
   'Length',
   'PointX',
@@ -1871,7 +1853,7 @@ const GUARDED_INTERVAL_FUNCTIONS = new Map<
  * here, so a kernel is never reachable ungated.
  *
  * The gate runs AFTER the handler, not before: a handler that declines on its
- * own terms (`When`'s `assertScalarCondition` names the collection-valued
+ * own terms (the `assertScalarCondition` of a restriction names the collection-valued
  * BRANCH CONDITION, `Round` its non-constant precision) reports the more
  * specific reason, and a decline discards the whole compilation anyway, so
  * the emission the handler produced first costs nothing.
@@ -2181,8 +2163,8 @@ function isIntervalPointValuedOperand(
     return element !== undefined && pointValued(element);
   };
   // The absence arm of a RESTRICTED point or list of points
-  // (`PointList(When(A, 0 < t), B)`, typed `list<tuple<real, real>> |
-  // missing`) is set aside: at run time that operand is its present value
+  // (`PointList(If(0 < t, A), B)` with a `missing` arm in its type) is set
+  // aside: at run time that operand is its present value
   // or the `empty` result of the failed restriction, which `_IA.bcastPoint`
   // passes through as the value of the whole operation.
   // Only a TOP-LEVEL `missing` arm is set aside; an absent coordinate or an
@@ -3775,38 +3757,6 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       target
     );
   },
-  // Domain restriction: When(body, cond) → body where cond holds, empty
-  // where it doesn't. Must NOT fall through to the generic JS ternary: the
-  // interval comparisons return the tri-state string 'true'|'false'|'maybe',
-  // which is always truthy, so a ternary guard would never mask.
-  When: (args, compile, target) => {
-    if (args.length !== 2)
-      throw new Error(
-        'Could not compile `When`: expected 2 arguments (value, condition)'
-      );
-    // `When` is not a selection form: its condition must be a scalar boolean,
-    // and a condition that may be a list at run time is refused (`target`).
-    BaseCompiler.assertScalarCondition(args[1], target);
-    // A restricted RELATION (`y ≤ K(x) {K(x) > 0}` as one row) is a verdict:
-    // where the restriction fails the relation holds nowhere, where it is
-    // undecided the relation holds at most where it held — the conjunction.
-    // The JavaScript target reads the same way: its absent condition is
-    // falsy. The relation is evaluated only when the condition is not
-    // already `'false'`; evaluating it there would be sound — every
-    // primitive of this target computes a value with no side effect,
-    // `Random()` included, which lowers to its constant support — but the
-    // relation may be the expensive half of the row.
-    if (args[0].type.matches('boolean')) {
-      const c = intervalConditionVar(target);
-      return (
-        `((${c} = ${compile(args[1])}) === 'false' ? 'false' : ` +
-        `_IA.and(${c}, ${compile(args[0], 0)}))`
-      );
-    }
-    // The VALUE is the conditional position (operand 0); the condition is
-    // eager — matching the `When` entry of the lazy-operand inventory.
-    return `_IA.restrict(${compile(args[1])}, () => ${compile(args[0], 0)})`;
-  },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error(
@@ -3820,10 +3770,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // reached: each arm is compiled over the inputs narrowed to the part of
     // the interval where it can be selected (`compileNarrowedIntervalArm`).
     // One clause with no default, `Which(c, t)` or the single-branch
-    // `If(c, t)` (the parse of the restriction `t\{c\}`), is the
-    // restriction `When(t, c)`, and compiles as the `When` handler does, so
-    // that the two spellings give the same interval: where the condition is
-    // undecided, `_IA.restrict` marks the value as clipped by the domain
+    // `If(c, t)` (the parse of the restriction `t\{c\}`), is a
+    // restriction, and compiles to `_IA.restrict`, so that the two
+    // spellings give the same interval: where the condition is undecided, `_IA.restrict` marks the value as clipped by the domain
     // (`partial`), where the hull of the arm and `empty` would give the arm
     // unmarked. A relation arm is a verdict, conjoined with the condition.
     if (
@@ -7023,7 +6972,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // one (see `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
 
-    // A function-valued `If` or `When` at the root is replaced by the
+    // A function-valued `If` at the root is replaced by the
     // function it selects, when its condition is decided at compile time
     // (`selectedFunctionRoot`). The branch that is not selected is not
     // compiled, so the root is kept when it is invalid or has a
@@ -7118,16 +7067,16 @@ function functionValuedRoot(expr: Expression): boolean {
 }
 
 /**
- * The function that a function-valued `If` or `When` at the root selects,
+ * The function that a function-valued `If` at the root selects,
  * when its condition is decided at compile time; otherwise `expr`.
  *
- * The interval lowering of these heads does not give a function: an `If`
- * takes the hull of its arms and `When` wraps its value as an interval
- * result (`_IA.restrict`). A function-valued root reads no free symbol
+ * The interval lowering of `If` does not give a function: it takes the
+ * hull of its arms, or, for a restriction `If(c, t)`, wraps its value as an
+ * interval result (`_IA.restrict`). A function-valued root reads no free symbol
  * (`compileToIntervalTarget` declines one), so its condition is a constant,
  * and the interpreter selects the same function on every call. The
  * condition is evaluated here, and the selected function is the root:
- * `If(1 > 0, x ↦ 2x, x ↦ 3x)` is `x ↦ 2x`. A nested `If` or `When` is
+ * `If(1 > 0, x ↦ 2x, x ↦ 3x)` is `x ↦ 2x`. A nested `If` is
  * selected in the same way. A symbol with a value in the condition is read
  * with that value, as elsewhere in a compilation.
  *
@@ -7135,9 +7084,8 @@ function functionValuedRoot(expr: Expression): boolean {
  * reads a symbol with no value, has an effect (a random draw), or does not
  * evaluate to `True` or `False`, and when the head or a head in the
  * condition is mapped through the `functions` option (`overridesHead`).
- * A `When` is function-valued only when its condition is the literal
- * `True` (otherwise its type also holds `missing`), so it is selected only
- * then.
+ * A restriction `If(c, f)` whose condition is `False` selects no function,
+ * and the root is kept.
  */
 function selectedFunctionRoot(
   expr: Expression,
@@ -7160,9 +7108,9 @@ function selectedFunctionRoot(
   let root = expr;
   while (functionValuedRoot(root)) {
     const head = root.operator;
-    if (head !== 'If' && head !== 'When') break;
+    if (head !== 'If') break;
     if (!isFunction(root) || overridesHead?.(head)) break;
-    const condition = head === 'If' ? root.ops[0] : root.ops[1];
+    const condition = root.ops[0];
     if (
       condition === undefined ||
       condition.unknowns.length > 0 ||
@@ -7177,14 +7125,7 @@ function selectedFunctionRoot(
         ? false
         : undefined;
     if (value === undefined) break;
-    const next =
-      head === 'If'
-        ? value
-          ? root.ops[1]
-          : root.ops[2]
-        : value
-          ? root.ops[0]
-          : undefined;
+    const next = value ? root.ops[1] : root.ops[2];
     if (next === undefined) break;
     root = next;
   }
@@ -7239,7 +7180,7 @@ function interpretedIntervalValue(e: Expression): unknown {
  *
  * - The code must give a JavaScript function: that is so for a `Function`
  *   literal, a symbol whose value is a function, and a block whose last
- *   statement is one of these. Another root, such as `When(x ↦ 2x, True)`,
+ *   statement is one of these. Another root, such as `If(y > 0, x ↦ 2x)`,
  *   can give an interval result that holds the function
  *   (`_IA.restrict` wraps its value), which is not an `IntervalValue`.
  * - The function must not give a function (`x ↦ (y ↦ x + y)`): the inner
@@ -7321,9 +7262,6 @@ function compileToIntervalTarget(
     // A `WithRandomSeed` root is one when its body is a seeded list draw
     // (`seededRandomChoicePlan`); any other body compiles through the
     // `WithRandomSeed` handler as before.
-    // A `When` root is one when its value is spelled as a collection
-    // (`compileIntervalRestrictedValue`: `[1, 2]\{0 < t\}`); any other value
-    // compiles through the `When` handler as before.
     const isCollectionRoot = (rootLiteral: Expression): boolean =>
       COLLECTION_VALUE_HEADS.has(rootLiteral.operator) ||
       rootLiteral.operator === 'Which' ||
@@ -7340,7 +7278,6 @@ function compileToIntervalTarget(
               'collection<any>'
             )
           )) ||
-      rootLiteral.operator === 'When' ||
       (isFunction(rootLiteral, 'WithRandomSeed') &&
         isFunction(rootLiteral.ops[1], 'RandomChoice')) ||
       // A call that maps over a tuple argument is a tuple

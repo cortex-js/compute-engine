@@ -159,8 +159,8 @@ import {
 } from './assignment-evidence.js';
 
 /**
- * The supertype a `When` condition is checked against to be typed as a MASK
- * (one boolean per cell of the value). The `evaluate` handler zips a
+ * The supertype a restriction condition is checked against to be typed as a
+ * MASK (one boolean per cell of the value). `evaluateRestriction()` zips a
  * condition whose value is a finite collection of boolean cells, whatever
  * kind of collection it is: a list, a set, a tuple, an indexed collection. So
  * the test is against the `collection<boolean>` family, which admits all of
@@ -201,9 +201,9 @@ const FINITE_COLLECTION_TYPE = parseType(
  * carrier is read at the first `k` positions only, so an infinite carrier
  * such as `Range(1, ∞)` is never materialized (user decision 2026-09-29).
  *
- * The `evaluate` handler of `When` and `whenCollectionHandlers` both call
- * this predicate with the static type of the carrier OPERAND as written (a
- * symbol's declared type, not the type of the value it holds), so the held
+ * `evaluateRestriction()` and `restrictionCollectionHandlers()` both
+ * call this predicate with the static type of the carrier OPERAND as written
+ * (a symbol's declared type, not the type of the value it holds), so the held
  * form and the evaluated form decide the same way.
  */
 function isOrderedCarrierType(type: Type): boolean {
@@ -422,7 +422,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // The parse and box routes both admit a malformed `If` with no
         // branch at all, which reaches this handler with `ifTrue`
         // undefined; it answers `unknown` rather than dereferencing a
-        // missing operand — the same hardening `When` carries.
+        // missing operand.
         if (ifTrue === undefined)
           return BoxedType.forResult('unknown', context.engine._typeResolver);
         // A condition that is provably a mask (a collection of condition
@@ -433,13 +433,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const armList = [ifTrue, ifFalse]
           .filter((x) => x !== undefined)
           .map((x) => x.type);
-        // Without an else branch, `If(c, e)` is the restriction `e\{c\}`,
-        // which is evaluated as `When(e, c)` (`evaluateIf()`): a list value
-        // is zipped with the mask, to the shorter of the two lengths. So a
-        // mask condition over a collection value that is not a point or a
-        // string types it as `When` does (`whenType()`). A scalar value is
-        // masked whole in each cell, as the element-wise selection below
-        // types it.
+        // Without an else branch, `If(c, e)` is the restriction `e\{c\}`
+        // (`evaluateRestriction()`): a list value is zipped with the mask,
+        // to the shorter of the two lengths. So a mask condition over a
+        // collection value that is not a point or a string is typed by
+        // `restrictionType()`. A scalar value is masked whole in each cell,
+        // as the element-wise selection below types it.
         if (
           shape &&
           ifFalse === undefined &&
@@ -447,7 +446,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           !isTupleShapedType(ifTrue.type) &&
           !isSubtype(ifTrue.type, 'string')
         )
-          return whenType([ifTrue, cond], context);
+          return restrictionType([ifTrue, cond], context);
         if (shape)
           return BoxedType.forResult(
             elementwiseResultType(
@@ -481,14 +480,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // Without an else branch a false condition yields the absent value
         // of the arm's domain (`maskedValue`: `NaN` for a number, `Missing`
         // otherwise), as a restriction does. The type is the type of the
-        // arm unchanged, `(boolean, T) -> T`, with no `nan` or `missing`
-        // arm: the absent value is implicit in every signature, so a
-        // restricted value is accepted where its arm is (`n: number`
-        // assigned `If(0 < t, 3)`).
+        // arm with no `missing` arm (`restrictionType()`): the absent value
+        // `Missing` is implicit in every signature, so a restricted value is
+        // accepted where its arm is (`n: number` assigned `If(0 < t, 3)`).
+        // A numeric arm gets no `nan` arm either: `If(0 < t, 3)` is
+        // `integer`.
         // Decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`.
         const scalar: Type =
           ifFalse === undefined
-            ? ifTrue.type
+            ? restrictionType([ifTrue, cond], context).type
             : untypedArm(ifTrue, context.engine) ||
                 untypedArm(ifFalse, context.engine)
               ? 'unknown'
@@ -567,6 +567,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       evaluateAsync: async (ops, options) =>
         surplusOperandError(options.engine, 'If', ops, options.expression, 3) ??
         evaluateIfAsync(ops, options),
+      // A held single-branch `If(c, L)` over a collection `L` (the restriction
+      // `L\{c\}` with an undecided condition) presents as the collection of
+      // its restricted cells `If(c, elem)`, so `isCollection`, `count` and
+      // `each()` agree with its type. Every other `If` is not a collection.
+      collection: restrictionCollectionHandlers(),
     },
 
     Loop: {
@@ -723,259 +728,6 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     Continue: {
       description: 'Skip to the next iteration of the enclosing loop.',
       signature: '() -> nothing',
-    },
-
-    When: {
-      description:
-        'Conditional/restriction value. `When(e, cond)` evaluates to:\n' +
-        '  - `e` when `cond` evaluates to `True`\n' +
-        '  - the absence marker of the type of `e` when `cond` evaluates to `False` (the "masking rule"): `NaN` for a number, `Missing` — the position-preserving absent datum, the answer a selection with no selected branch gives — for a point, a list, a string or a value not provably numeric; consumers like 2D plotters skip masked points\n' +
-        '  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\n' +
-        'Stacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\n' +
-        'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
-      lazy: true,
-      signature: '(expression, boolean) -> any',
-      type: whenType,
-      canonical: (args, { engine: ce }) => {
-        if (args.length !== 2) return null;
-        const [expr, cond] = args;
-        // Canonicalize stacked restrictions:
-        //   When(When(e, c1), c2)  →  When(e, And(c1, c2))
-        if (isFunction(expr, 'When')) {
-          const inner = expr.op1.canonical;
-          const innerCond = expr.op2.canonical;
-          // Build the merged condition through canonical `And`, not `_fn`:
-          // canonical `And` flattens and validates its operands (in written
-          // order — since 2026-08-15 `And` is a short-circuit form and no
-          // longer sorts; see `canonicalShortCircuit` in `logic.ts`).
-          // Building with `_fn` skipped canonicalization altogether, which
-          // at the time (when `And` still sorted) left the conjunction in
-          // authored order while `.json` (which goes through `structural`)
-          // sorted — so `x{a}{b}` and `x{b}{a}` serialized to identical
-          // MathJSON while `isSame`/`hash` disagreed, and `ce.box(e.json)`
-          // was not `isSame` to `e` (Tycho item-153 seed, the 11
-          // `differs-json-equal` rows). Every view of the tree must come
-          // from the same canonical construction.
-          return ce._fn('When', [
-            inner,
-            ce.function('And', [innerCond, cond.canonical]),
-          ]);
-        }
-        return ce._fn('When', [expr.canonical, cond.canonical]);
-      },
-      evaluate: ([expr, cond], options) => {
-        const ce = options.engine;
-        // The numeric request is forwarded to the guard, as the value is
-        // given it below: a comparison in the guard then reads an exact
-        // operand exactly, as at the top level (see `evaluateIf`).
-        const c = cond.evaluate(
-          options.numericApproximation
-            ? { numericApproximation: true }
-            : undefined
-        );
-
-        // Desmos-style broadcast: a finite indexed collection of booleans
-        // masks element-by-element (one masked branch per element). This
-        // mirrors the boolean-mask branch of `At` in `collections.ts`. Lazy
-        // operators bypass the generic broadcast machinery, so handle it here.
-        if (c.isCollection && isWalkableFiniteCollection(c)) {
-          const conds = Array.from(c.each()) as Expression[];
-          // A cell is a boolean condition when it types `boolean` — or
-          // `broadcastable<boolean>`, the type of a comparison whose broadcast
-          // outcome is not statically settled (`h(x) ≤ 1` with `h`
-          // undeclared; see `comparisonResultType`,
-          // `library/relational-operator.ts`). Such a cell is a scalar
-          // relation here (it is one element of the materialized mask) and
-          // is held exactly like an undecided `boolean` one; gating on
-          // `boolean` alone left `x{h(x) ≤ [1,2,3]}` un-broadcast as
-          // `When(x, [h(x) ≤ 1, …])`.
-          // An EMPTY list of conditions masks nothing: the answer is the
-          // empty list, as the element-wise `Which` answers it. (Before, the
-          // empty list fell through to the branch below and distributed the
-          // value into held restrictions, `[10{[]}, 20{[]}, …]`.)
-          // A mask of rank 2 or more (a list with a list of conditions in
-          // it, such as `M < 0` over a matrix `M`) selects cell by cell at
-          // every level, as `If` and `Which` do (user decision 2026-10-23,
-          // ROADMAP CE-223.1): `When(v, C)` is the else-less `If(C, v)`. A
-          // cell that no condition selects is the masked value of the cell
-          // (`NaN` for a number, `Missing` otherwise), and a value of lower
-          // rank than the mask is an `incompatible-dimensions` error. When
-          // the selection cannot be computed now, the restriction is held.
-          const mask = conditionCells(c);
-          if (
-            mask !== undefined &&
-            mask.cells.some((cell) => typeof cell !== 'string')
-          )
-            return (
-              evaluateElementwiseSelection(
-                ce,
-                [{ cond, arm: expr }],
-                { cond: c, mask },
-                options
-              ) ?? ce._fn('When', [expr, c])
-            );
-          if (
-            conds.every(
-              (ci) =>
-                ci.type.matches('boolean') ||
-                possiblyElementwiseCondition([ci.type.type]) ||
-                isOpenConditionCell(ci.type.type)
-            )
-          ) {
-            // If `expr` itself evaluates to a finite indexed collection, zip
-            // elementwise (expr_i masked by c_i); otherwise mask the scalar
-            // `expr` by each c_i. Different lengths truncate to the shorter,
-            // matching `At`'s mask alignment. A tuple is ONE value — a point
-            // restricted by a list of conditions is that point at every true
-            // position, as `Which` answers — so it is never zipped: with the
-            // zip, `(1, 2){[1, 2, 3] < 2}` answered `[1, Missing]`, the
-            // point's coordinates masked cell by cell. A string is one value
-            // too (the lattice reads it as a collection of its characters).
-            //
-            // A carrier whose static type is ORDERED (`isOrderedCarrierType`:
-            // a list, a vector, a range, an `indexed_collection<T>`) is
-            // zipped whatever its length, over the MASK's length (user
-            // decision 2026-09-29): `When(Range(1, ∞), [True, False])` is
-            // `[1, NaN]`, not `[Range(1, ∞), Missing]`. Only the first `k`
-            // elements are read, with one iterator
-            // (`orderedCarrierPrefix`), so an infinite carrier or a lazy
-            // view over one is never materialized. The static type of such
-            // a restriction is `list<missing | T>`, or `list<number>` when
-            // `T` is numeric, from the element type `T` alone, so the value
-            // must be the zipped cells:
-            // - a TUPLE value held by a symbol declared with an ordered type
-            //   (`P: indexed_collection<number>` assigned `(1, 2)`) is
-            //   zipped too, as the declaration says it is a collection of
-            //   elements (`isAtomicCarrierValue`). A tuple whose own type
-            //   says so is still one value, as above, and a STRING is one
-            //   value whatever the declaration;
-            // - a carrier with fewer elements than the mask follows the
-            //   finite rule: the result is truncated to the shorter length;
-            // - when the elements cannot be read — a valueless symbol
-            //   declared `list<number>`, a range with a free bound such as
-            //   `Range(1, n)`, a lazy `Filter` whose walk stops at the
-            //   iteration limit — the whole restriction is held
-            //   unevaluated, `When(carrier, mask)`, which is typed by the
-            //   type handler. Before, each cell was the whole carrier
-            //   (`[P, Missing, P]`), a value the element-only type does not
-            //   admit. The held form does not present as a collection
-            //   (`isCollection` is false, `count` is undefined) until the
-            //   carrier's elements can be read, as a restriction whose mask
-            //   is not resolved is held.
-            const ev = expr.evaluate(options);
-            const ordered = isOrderedCarrierType(expr.type.type);
-            const atomic = isAtomicCarrierValue(expr.type.type, ev);
-            let zip = false;
-            let elems: Expression[] = [];
-            if (ordered && !atomic) {
-              const prefix = ev.isCollection
-                ? orderedCarrierPrefix(ev, conds.length)
-                : undefined;
-              if (prefix === undefined) return ce._fn('When', [expr, c]);
-              elems = prefix;
-              zip = true;
-            } else if (
-              !atomic &&
-              ev.isCollection &&
-              isWalkableFiniteCollection(ev)
-            ) {
-              // An unordered finite carrier (a finite set), or a carrier
-              // whose static type is not ordered but whose value is a finite
-              // collection: every element is read.
-              elems = Array.from(ev.each()) as Expression[];
-              zip = true;
-            } else if (
-              !atomic &&
-              ev.isCollection &&
-              ev.isFiniteCollection === true
-            ) {
-              // A finite carrier whose elements cannot be computed
-              // (`QuotientRing(Integers, 5)`, `Linspace(a, 1, 3)` with a
-              // symbolic `a`). It is a collection of elements, so the scalar
-              // lifting below does not apply, and its elements cannot be
-              // zipped with the mask: hold the restriction unevaluated, as
-              // the ordered-carrier branch above does.
-              return ce._fn('When', [expr, c]);
-            }
-            const n = zip ? Math.min(conds.length, elems.length) : conds.length;
-            const result: Expression[] = [];
-            for (let i = 0; i < n; i++) {
-              const ci = conds[i];
-              const cis = sym(ci);
-              // The per-element expression: the zipped element, or the scalar.
-              const elem = zip ? elems[i] : ev;
-              if (cis === 'True') result.push(elem);
-              else if (cis === 'False') result.push(maskedValue(ce, elem));
-              // Indeterminate (symbolic boolean): hold `When` on the element.
-              else result.push(ce._fn('When', [zip ? elems[i] : expr, ci]));
-            }
-            return ce._fn('List', result);
-          }
-        }
-
-        const cs = sym(c);
-        if (cs === 'True') return expr.evaluate(options);
-        // A false guard masks the value to the absence marker of the VALUE'S
-        // type (`maskedValue`, user decision 2026-09-25): `NaN` for a number,
-        // `Missing` — the position-preserving absent datum — for a point, a
-        // list or a value not provably numeric. Before, every value masked to
-        // `Missing` (ruling of 2026-09-09), the one place the engine spelled
-        // an absent number as `Missing`; a numeric operator over it answered
-        // `NaN` (`2·Missing` is `NaN`), so `2·x{c}`, threaded to `2x{c}`,
-        // answered `Missing` on the held route and `NaN` when evaluated
-        // fresh. The compiled code has always emitted `NaN` for a masked
-        // number.
-        if (cs === 'False') return maskedValue(ce, expr);
-        // A guard that evaluates to `Undefined` masks (decision 9): no value,
-        // treated as not-True rather than held.
-        if (cs === 'Undefined') return maskedValue(ce, expr);
-
-        // Indeterminate scalar condition over a collection value: the
-        // restriction stays ONE held `When` over the evaluated collection,
-        // and its `collection` handlers (`whenCollectionHandlers`) present it
-        // as a collection whose elements are the restricted cells, so
-        // `isCollection`, `count` and `each()` agree with `.type` (Tycho item
-        // 66). The cells are NOT copied into a `List` of `When`s, whatever
-        // the size (user decision 2026-09-25): a copy forgot that the cells
-        // came from one restriction, so the copied form re-evaluated to
-        // `[Missing, Missing]` once the condition failed, where the same
-        // expression evaluated fresh — and its compiled code — answered the
-        // whole-list `Missing`. Held, the two routes agree. (Before, a
-        // collection of at most `MAX_SIZE_EAGER_COLLECTION` elements was
-        // copied, mirroring `PointList`, and a larger one was held.) The type
-        // check gates the extra `evaluate` so a scalar `When` keeps its held
-        // form unchanged.
-        // A `Tuple` is excluded: it is a fixed-arity structure (a point), not a
-        // list to broadcast over, so a restricted point must stay a point
-        // rather than degrade to a `List`. Mirrors `PointList`'s
-        // `isListComponent` predicate in `collections.ts`.
-        // A tuple-typed value is excluded before it is evaluated: evaluating
-        // it here would force every component of a value the restriction is
-        // meant to keep held, changing the lazy guard semantics for a shape
-        // that can never enter the distribution path anyway.
-        // A STRING is excluded for the same reason a tuple is: it is an
-        // indexed collection of characters, but it is atomic under
-        // element-wise distribution, so `When("ab", c)` must stay a restricted
-        // string rather than become a list of restricted characters.
-        // A CONDITION that is collection-typed but carries no value yet is a
-        // MASK that cannot be read yet, not the scalar guard this branch
-        // handles: `When([1,2], B)` for a valueless `B: list<boolean>` stays
-        // held with `B` unread; the list-condition branch above zips the mask
-        // once it resolves (Tycho item 221).
-        if (
-          expr.type.matches('collection<any>') &&
-          !isTupleShapedType(expr.type.type) &&
-          !expr.type.matches('string') &&
-          !isUnresolvedCollectionOperand(c)
-        ) {
-          const ev = expr.evaluate(options);
-          if (isFiniteBroadcastParticipant(ev)) return ce._fn('When', [ev, c]);
-        }
-
-        // Indeterminate: hold
-        return ce._fn('When', [expr, c]);
-      },
-      collection: whenCollectionHandlers(),
     },
 
     Which: {
@@ -1398,44 +1150,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 ];
 
 /**
- * The type handler of `When(e, c)`. The single-branch `If(c, e)` whose
- * arm is a value, the form the parser gives a restriction `e\{c\}`, is
- * evaluated as `When(e, c)` (`evaluateIf()`), so the `If` type handler
- * calls this function when its condition is a mask, and the type and the
- * value agree.
+ * The type of the restriction `e\{c\}`, the single-branch `If(c, e)` whose
+ * arm is a value, from the descriptors of `e` and `c`, so that the type and
+ * the value of `evaluateRestriction()` agree.
  */
-function whenType(
-  [expr, cond]: ReadonlyArray<OperandDescriptor>,
+function restrictionType(
+  [expr, cond]: ReadonlyArray<OperandDescriptor | undefined>,
   context: TypeHandlerContext
 ): BoxedType {
   // A list/vector-of-booleans condition broadcasts: the result is a
   // list whose element type is `expr`'s type (see the broadcast branch
-  // in `evaluate`). Lazy operators bypass the generic list-broadcast
-  // typing wrapper, so lift the type here explicitly — but only when the
-  // condition's *declared* type is a list/vector of booleans. A scalar
-  // or unknown boolean condition keeps `expr`'s type.
-  //
-  // A false condition masks the value to `Missing`, and that arm must
-  // survive in the type — as it does for a `Which` with no default
-  // clause and for the else-less `If` (no-selection ruling of
-  // 2026-08-27; `When` aligned 2026-09-09). The union is built
-  // explicitly rather than through `widen`, which joins toward a
-  // common supertype and would dissolve the absence marker into a top
-  // type. Only a condition that is the literal `True` symbol can never
-  // mask, so only that case keeps `expr`'s bare type.
-  //
-  // A type read must never crash, whatever the application looks
-  // like, so a malformed arity-0 `When` answers `unknown` here. (An
-  // earlier version of this handler dereferenced `expr.type`
-  // unconditionally and threw on that input.)
+  // of `evaluateRestriction()`), but only when the condition's
+  // *declared* type is a list/vector of booleans. A scalar or unknown
+  // boolean condition keeps `expr`'s type.
   if (expr === undefined)
     return BoxedType.forResult('unknown', context.engine._typeResolver);
-  // The handler reads operand VIEWS (the descriptor route), so the
-  // literal is recognized through `structureOf`, exactly as the `Which`
-  // type handler finds its default clause.
-  const condStructure = cond?.structureOf?.();
-  if (condStructure?.kind === 'symbol' && condStructure.name === 'True')
-    return BoxedType.forResult(expr.type, context.engine._typeResolver);
   // The mask test accepts any collection of booleans, not only a
   // `list` (see `BOOLEAN_MASK_TYPE`): the `evaluate` handler zips every
   // finite collection of boolean cells, so a condition typed
@@ -1454,7 +1183,7 @@ function whenType(
     );
   if (cond !== undefined && isSubtype(cond.type, BOOLEAN_MASK_TYPE)) {
     // Built structurally, not from a type STRING: a literal element
-    // type (`When(1, [c1, c2])` types `list<1 | missing>`) has no
+    // type (`If([c1, c2], 1)` types `list<1 | missing>`) has no
     // string spelling the parser accepts inside a union.
     //
     // A list-valued `expr` is zipped with the mask, cell by cell (see
@@ -1480,8 +1209,8 @@ function whenType(
     //   `list<T>`, a `vector`, a `matrix`, a `dictionary`, a `record`,
     //   a `range`) or ordered by type (`indexed_collection<T>`, which
     //   can be infinite, such as `Range(1, ∞)`) is always zipped, so
-    //   each cell has its ELEMENT type `T`. `When(Range(1, ∞),
-    //   [True, False])` evaluates to `[1, NaN]` (a masked number is
+    //   each cell has its ELEMENT type `T`. `If([True, False],
+    //   Range(1, ∞))` evaluates to `[1, NaN]` (a masked number is
     //   `NaN`);
     // - a carrier of an UNORDERED collection type that is not finite
     //   by type (`collection<T>`, `set<T>`) can hold an infinite set,
@@ -1489,7 +1218,7 @@ function whenType(
     //   zipped: each cell is then the whole value. So a cell can be
     //   either an element (a finite set is zipped) or the whole value,
     //   and its type is the JOIN of the element type and the carrier
-    //   type. `When(Integers, [True, False])` evaluates to
+    //   type. `If([True, False], Integers)` evaluates to
     //   `[Integers, Missing]`, which the element type `integer` alone
     //   does not admit;
     // - a tuple, a string or a scalar value is never zipped, so each
@@ -1520,7 +1249,7 @@ function whenType(
               // A masked numeric element of a zipped finite set is
               // `NaN`, so a numeric element arm is `number`, the type
               // that admits `NaN`, as the zipped branch above answers
-              // `list<number>`: `When({1, 2}, [True, False])` is
+              // `list<number>`: `If([True, False], {1, 2})` is
               // `[1, NaN]`.
               types: [
                 isNumericValueType(element) ? 'number' : element,
@@ -1542,34 +1271,11 @@ function whenType(
       context.engine._typeResolver
     );
   }
-  // A NUMERIC value masks to `NaN` (`maskedValue`), so its type is its
-  // own tier with the `nan` arm, `integer | nan` for `When(1, c)`, and
-  // no `missing` arm (user decision 2026-09-25; it was
-  // `integer | missing`). The tier is kept — rather than absorbed to
-  // `number` — so that the value stays admitted where the tier matters:
-  // an element read of a restricted row is typed
-  // `integer | missing | nan` by `At`, and a declared range or an
-  // assumption reads the held literal back through it.
-  if (isNumericValueType(expr.type))
-    return BoxedType.forResult(
-      withNanArm(expr.type),
-      context.engine._typeResolver
-    );
-  // A list-like value keeps its own type under the `missing` arm,
-  // `missing | vector<integer^2>` for `When([1,2], c)`: while the
-  // condition is undecided the value is the held `When` itself (never a
-  // copy of the cells into a `List` of `When`s — see the `evaluate`
-  // handler), whose type is this one, and when the condition is decided
-  // the value is the whole list or `Missing`. The cells the held form
-  // enumerates are restricted cells, `When(elem, c)`, each typed
-  // `elem | missing`; an element access carries that arm through its
-  // own marker (`At`, `First`). A LITERAL list of restricted cells,
-  // `[1{c}, 2{c}]`, is a different value, typed `list<integer | missing>`
-  // by the `List` type handler.
-  return BoxedType.forResult(
-    reduceType({ kind: 'union', types: [expr.type, 'missing'] }),
-    context.engine._typeResolver
-  );
+  // A scalar condition keeps the type of the value, with no `nan` or
+  // `missing` arm: the `NaN` or `Missing` that a false condition gives
+  // sits outside the declared type, as `NaN` sits outside `real`
+  // (decision 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`).
+  return BoxedType.forResult(expr.type, context.engine._typeResolver);
 }
 
 /** The smallest bound, in characters of the printed value, on the size of
@@ -1677,22 +1383,13 @@ function isNumericValueType(t: Type): boolean {
   return present !== 'never' && isSubtype(present, 'number');
 }
 
-/** `t` less any `missing` arm, joined with `nan`: the type of a masked
- * numeric value. */
-function withNanArm(t: Type): Type {
-  return reduceType({
-    kind: 'union',
-    types: [stripMissingFromType(t), 'nan'],
-  });
-}
-
 /**
  * The value a false restriction answers for `expr`: the absence marker of
  * the value's own type, `NaN` for a number and `Missing` otherwise (user
  * decision 2026-09-25). One rule for absence, then: every operator answers
  * the marker of its codomain for an absent operand (`docs/ERROR-MODEL.md`,
- * §2 rule 4), and a restriction answers the marker of its value. Before,
- * `When` masked every value to `Missing`, so a masked NUMBER read as
+ * §2 rule 4), and a restriction answers the marker of its value. Before, a
+ * restriction masked every value to `Missing`, so a masked NUMBER read as
  * `Missing` on the route that held the restriction and as `NaN` on the route
  * that evaluated it fresh (`2·x{c}` versus `2·Missing`).
  */
@@ -1701,36 +1398,46 @@ function maskedValue(ce: ComputeEngine, expr: Expression): Expression {
 }
 
 /**
- * Lazy indexed-collection handlers for a held `When(value, cond)` (Tycho
- * item 66).
+ * Lazy indexed-collection handlers for a held restriction, the single-branch
+ * `If(c, value)` (Tycho item 66).
  *
- * A restriction over a collection is elementwise: `When(L, c)` presents as
- * `[When(L1, c), …, When(Ln, c)]`. The `evaluate` handler keeps the `When`
- * held over the evaluated collection (it is never copied into a `List` of
- * `When`s: the copy forgot that its cells came from one restriction, user
- * decision 2026-09-25), and these handlers walk the wrapped value, re-wrapping
- * each element with the condition — so the held form is fully enumerable,
- * and `isCollection`/`count`/`each()` agree with `.type`.
+ * A restriction over a collection is elementwise: `If(c, L)` presents as
+ * `[If(c, L1), …, If(c, Ln)]`. Its evaluation keeps the `If` held over the
+ * evaluated collection (it is never copied into a `List` of `If`s: the copy
+ * forgot that its cells came from one restriction, user decision
+ * 2026-09-25), and these handlers walk the wrapped value, re-wrapping each
+ * element with the condition — so the held form is fully enumerable, and
+ * `isCollection`/`count`/`each()` agree with `.type`.
  *
- * A `When` guarding a SCALAR is not a collection: `isCollection` reports
- * `false` and every other handler reports scalar, exactly as before.
+ * An `If` with a SCALAR arm, an `If` with an else branch, and an `If` with
+ * any other number of operands are not collections: `isCollection` reports
+ * `false` and every other handler reports scalar.
  *
  * A MASK condition — a collection of booleans, such as `[1,2,3] > 2` — is
- * zipped with the value cell by cell, exactly as the `evaluate` handler zips
- * it: cell `i` is `When(L_i, c_i)`, and the length is the shorter of the two.
- * (Before, each element was re-wrapped with the WHOLE mask, so a broadcast
- * that walked these handlers, such as `Sin(L{m})` or `2·L{m}`, turned every
- * element into a list and answered a matrix.) A mask with no known length (a
- * symbol with no value), or a condition whose shape is not settled (a
- * comparison typed `broadcastable<boolean>`), cannot be zipped here, so the
- * `When` does not present as a collection until evaluation resolves it.
+ * zipped with the value cell by cell, exactly as `evaluateRestriction()`
+ * zips it: cell `i` is `If(c_i, L_i)`, and the length is the shorter of the
+ * two. A mask with no known length (a symbol with no value), or a condition
+ * whose shape is not settled (a comparison typed `broadcastable<boolean>`),
+ * cannot be zipped here, so the `If` does not present as a collection until
+ * evaluation resolves it.
  */
-function whenCollectionHandlers(): CollectionHandlers {
-  // The wrapped collection value, or `undefined` when `When` guards a scalar.
-  // The predicate matches the `evaluate` handler's distribution rule exactly —
-  // in particular a `Tuple` (a point) is NOT list-like here, so a restricted
-  // point presents as a scalar `When` wrapping the point rather than as a
-  // 2-element collection.
+function restrictionCollectionHandlers(): CollectionHandlers {
+  // The value and the condition of the restriction `expr`, or `undefined`
+  // when `expr` is not a two-operand `If`.
+  const operands = (
+    expr: Expression
+  ): { value: Expression; cond: Expression } | undefined => {
+    if (!isFunction(expr, 'If') || expr.nops !== 2) return undefined;
+    return { value: expr.op2, cond: expr.op1 };
+  };
+  // The restricted cell of `elem` under the condition `c`.
+  const cell = (ce: ComputeEngine, elem: Expression, c: Expression) =>
+    ce._fn('If', [c, elem]);
+  // The wrapped collection value, or `undefined` when the `If` restricts a
+  // scalar. The predicate matches the distribution rule of
+  // `evaluateRestriction()` exactly — in particular a `Tuple` (a point) is
+  // NOT list-like here, so a restricted point presents as a scalar `If`
+  // wrapping the point rather than as a 2-element collection.
   // Returns the wrapped collection, the number of restricted cells, and a
   // `restrict` closure that applies the condition to the element at 1-based
   // index `i` (the whole condition, or its cell `i` for a mask).
@@ -1743,15 +1450,16 @@ function whenCollectionHandlers(): CollectionHandlers {
         restrict: (elem: Expression, i: number) => Expression | undefined;
       }
     | undefined => {
-    if (!isFunction(expr, 'When')) return undefined;
-    const v = expr.op1;
+    const restriction = operands(expr);
+    if (restriction === undefined) return undefined;
+    const v = restriction.value;
     // A string is excluded alongside a tuple: both are indexed collections
-    // that stay ATOMIC under element-wise restriction, so `When("ab", c)` is a
+    // that stay ATOMIC under element-wise restriction, so `If(c, "ab")` is a
     // restricted string, not a collection of restricted characters. This must
-    // agree with the distribution gate in `When`'s evaluate handler, which
+    // agree with the distribution gate in `evaluateRestriction()`, which
     // excludes the same two kinds.
-    // One exception, for a MASK condition only, again as the `evaluate`
-    // handler decides: a TUPLE value held by a symbol declared with an
+    // One exception, for a MASK condition only, again as
+    // `evaluateRestriction()` decides: a TUPLE value held by a symbol declared with an
     // ORDERED collection type (`isOrderedCarrierType`) is zipped. The two
     // sites call the same predicates (`isOrderedCarrierType`,
     // `isAtomicCarrierValue`) with the same inputs: the static type of the
@@ -1762,7 +1470,7 @@ function whenCollectionHandlers(): CollectionHandlers {
     if (!v.isCollection) return undefined;
     const held = (isSymbol(v) ? v.value : undefined) ?? v;
     const atomic = isTuple(held) || isString(held);
-    const cond = expr.op2;
+    const cond = restriction.cond;
     const ce = expr.engine;
     if (isAtomicCarrierValue(v.type.type, held)) return undefined;
     if (possiblyElementwiseCondition([cond.type.type])) return undefined;
@@ -1773,7 +1481,7 @@ function whenCollectionHandlers(): CollectionHandlers {
         // A `bigint` count (a finite count that is not a safe integer)
         // passes through: the walk reads the value's own walk.
         count: v.count,
-        restrict: (elem) => ce._fn('When', [elem, cond]),
+        restrict: (elem) => cell(ce, elem, cond),
       };
     }
     // A mask: zip it with the value, to the shorter length. The mask (and
@@ -1807,7 +1515,7 @@ function whenCollectionHandlers(): CollectionHandlers {
             ci = next.value;
           }
         } else ci = cond.at(i);
-        return ci === undefined ? undefined : ce._fn('When', [elem, ci]);
+        return ci === undefined ? undefined : cell(ce, elem, ci);
       },
     };
   };
@@ -1839,12 +1547,10 @@ function whenCollectionHandlers(): CollectionHandlers {
       // `integer` for `[1,2]{c}`, a `vector<integer^2>` row for a restricted
       // matrix. This handler must never answer wider than the collection's
       // own type (`typeSaturatedSubsetOf`, `collection-utils.ts` relies on
-      // that), and that type, `missing | vector<integer^2>`, says the cells
-      // are integers whenever the collection is present. The cells the
-      // handlers enumerate are restricted cells, `When(elem, cond)`, each
-      // typed `elem | missing`: absent exactly when the collection is, since
-      // they carry its condition. An element access adds its own marker
-      // (`At(M{c}, 2)` is `missing | vector<integer^2>`).
+      // that), and that type, `vector<integer^2>`, says the cells are
+      // integers whenever the collection is present. The cells the handlers
+      // enumerate are restricted cells, `If(cond, elem)`: absent exactly
+      // when the collection is, since they carry its condition.
       return collectionElementType(v.type.type) ?? 'unknown';
     },
 
@@ -2533,8 +2239,8 @@ function evaluateElementwiseSelection(
   // list-valued conditions of that node, as at the top node. A position that
   // no clause selects holds the absence marker of the type of that position
   // (`noMatchCell`, which reads the arms at the depth of the position):
-  // `NaN` when every arm puts a number there, `Missing` otherwise, as `When`
-  // masks a cell by the type of its value. `noMatchArmTypes`, when given,
+  // `NaN` when every arm puts a number there, `Missing` otherwise, as a
+  // restriction masks a cell by the type of its value. `noMatchArmTypes`, when given,
   // replaces the types of the arms of `clauses`: a `Which` whose first mask
   // comes after a scalar clause passes the types of all its reachable arms.
   const armTypes = noMatchArmTypes ?? clauses.map(({ arm }) => arm.type.type);
@@ -3051,10 +2757,10 @@ function possiblyElementwiseResultType(
  * marker of the type of the position, `NaN` when every arm puts a number
  * there and `Missing` otherwise (a point, a list, a string, a value that is
  * not provably numeric). A list arm puts its element there, a scalar or a
- * point arm puts itself (`armElementType`). This is the rule `When` applies
- * to a cell it masks (`maskedValue`), so `Which([1, 5] < 3, (1, 2))` and
- * `When((1, 2), [1, 5] < 3)` are both `[(1, 2), Missing]`, and
- * `Which([1, 5] < 3, 7)` and `When(7, [1, 5] < 3)` are both `[7, NaN]`
+ * point arm puts itself (`armElementType`). This is the rule a restriction
+ * applies to a cell it masks (`maskedValue`), so `Which([1, 5] < 3, (1, 2))`
+ * and `If([1, 5] < 3, (1, 2))` are both `[(1, 2), Missing]`, and
+ * `Which([1, 5] < 3, 7)` and `If([1, 5] < 3, 7)` are both `[7, NaN]`
  * (user decision 2026-10-17). The rule reads the types of the arms and not
  * their values: an arm that no position reaches is not evaluated.
  *
@@ -3269,10 +2975,23 @@ function evaluateIf(
   const armOptions = options.numericApproximation
     ? { numericApproximation: true }
     : undefined;
-  const { value: evaluated, undecided } = evaluateCondition(
+  const { value: evaluatedOnce, undecided } = evaluateCondition(
     cond,
     options.numericApproximation
   );
+  // A held conjunction in a restriction is evaluated once more, before the
+  // verdict checks below, which keeps one copy of each condition: the
+  // restriction of a group of restricted terms is `If(And(c, c), …)`
+  // (`x\{c\} − x\{c\}`), and its held form is `If(c, …)`. A conjunction
+  // that this step decides (`And(C, Not(C))` is `False`) then takes the
+  // route of a condition that was decided from the start.
+  const evaluated =
+    ops.length === 2 &&
+    ifTrue !== undefined &&
+    !isStatementArm(ifTrue) &&
+    isFunction(evaluatedOnce, 'And')
+      ? evaluatedOnce.evaluate(armOptions)
+      : evaluatedOnce;
   // The condition is the one operand `If` ALWAYS demands, so an error
   // in it propagates — the dual obligation of the demanded-operands
   // rule (`docs/ERROR-MODEL.md` §3), which this handler owns because a
@@ -3314,21 +3033,12 @@ function evaluateIf(
   // 2026-07-24.)
   if (evaluatedCond === 'Missing') return absentConditionError(engine);
   // A single-branch `If(c, e)` whose arm is a value is the restriction
-  // `e\{c\}`, which the parser reads as this `If`, and with a condition that
-  // is not an error, not absent and not an undecided comparison of whole
-  // collections (above), it is evaluated as `When(e, c)`, so that a parsed
-  // restriction keeps the value it had as a `When`: a false condition gives
-  // the absent value of the domain of `e`, a list of conditions masks
-  // element by element (truncated to the shorter of the mask and a list
-  // value), and an undecided condition is held. A held restriction is
-  // spelled `If(c, e)` again (`heldRestrictionAsIf()`). The condition is
-  // passed evaluated, so it is evaluated once.
+  // `e\{c\}`, which the parser reads as this `If` (`evaluateRestriction()`):
+  // a list of conditions masks element by element (truncated to the shorter
+  // of the mask and a list value), and an undecided condition is held.
   // Decision of 2026-11-02, `docs/plans/2026-11-02-restriction-binding.md`.
   if (ops.length === 2 && ifTrue !== undefined && !isStatementArm(ifTrue))
-    return heldRestrictionAsIf(
-      engine,
-      engine._fn('When', [ifTrue, evaluated]).evaluate(options)
-    );
+    return evaluateRestriction(engine, ifTrue, evaluated, options);
   // A LIST-VALUED condition selects element-wise: `If(c, a, b)` is the
   // two-clause `Which(c, a, True, b)` (see
   // `evaluateElementwiseSelection`). Without an else branch the
@@ -3435,23 +3145,118 @@ function distributeOverListArms(
 }
 
 /**
- * The value of a single-branch `If(c, e)`, which is evaluated as
- * `When(e, c)`: when that value is a held restriction `When(v, c')` (its
- * condition is not decided), it is spelled `If(c', v)`, so that the
- * evaluation of an `If` is an `If`. Two held forms keep the `When`
- * spelling: a restriction over a collection, which presents as the
- * collection of its restricted cells (`whenCollectionHandlers()`; an `If`
- * has no collection handlers, which would change how it propagates the
- * errors of its operands), and the restricted cells of a list (the value of
- * a list of conditions that are not decided).
+ * The value of the restriction `expr\{c\}`, the single-branch `If(c, expr)`
+ * whose arm is a value, for a condition `c` that is already evaluated and
+ * that is not an error, not `True`, not `False`, not absent and not an
+ * undecided comparison of whole collections (`evaluateIf()` answers these).
+ * A restriction that cannot be decided now is held, spelled `If(c, e)`.
+ *
+ * - A finite collection of conditions (a mask) restricts element by element.
+ *   A mask of rank 2 or more (a list with a list of conditions in it, such
+ *   as `M < 0` over a matrix `M`) selects cell by cell at every level, as
+ *   `Which` does (user decision 2026-10-23, ROADMAP CE-223.1). A mask of
+ *   rank 1 zips a collection value with the mask, to the shorter of the two
+ *   lengths, and restricts a scalar value whole at each position. A cell
+ *   whose condition is `True` is the element, a cell whose condition is
+ *   `False` is its absent value (`maskedValue`: `NaN` for a number,
+ *   `Missing` otherwise), and any other cell is the held `If(c_i, elem_i)`.
+ *   A tuple and a string are one value each and are never zipped. A carrier
+ *   whose static type is ordered (`isOrderedCarrierType`) is zipped whatever
+ *   its length, and only the first `k` elements are read
+ *   (`orderedCarrierPrefix`), so an infinite carrier is never materialized
+ *   (user decision 2026-09-29): `If([True, False], Range(1, ∞))` is
+ *   `[1, NaN]`. When the elements of the carrier cannot be read (a valueless
+ *   symbol declared `list<number>`, `Range(1, n)`), or a finite carrier has
+ *   elements that cannot be computed (`QuotientRing(Integers, 5)`), the
+ *   whole restriction is held.
+ * - A condition that evaluates to `Undefined` has no value, and gives the
+ *   absent value of `expr`.
+ * - Any other condition is undecided, and the restriction is held. Over a
+ *   collection value that is not a tuple or a string, the collection is
+ *   evaluated, and the held `If(c, L)` presents as the collection of its
+ *   restricted cells (`restrictionCollectionHandlers()`, Tycho item 66). The
+ *   cells are not copied into a `List` of `If`s (user decision 2026-09-25): a
+ *   copy forgot that its cells came from one restriction. A condition that
+ *   is collection-typed but has no value yet (a valueless `B:
+ *   list<boolean>`) is a mask that cannot be read yet, and the collection is
+ *   not evaluated (Tycho item 221).
  */
-function heldRestrictionAsIf(
-  engine: ComputeEngine,
-  value: Expression
+function evaluateRestriction(
+  ce: ComputeEngine,
+  expr: Expression,
+  c: Expression,
+  options: Partial<EvaluateOptions> & { engine: ComputeEngine }
 ): Expression {
-  return isFunction(value, 'When') && value.nops === 2 && !value.isCollection
-    ? engine._fn('If', [value.op2, value.op1])
-    : value;
+  const held = (value: Expression) => ce._fn('If', [c, value]);
+  if (c.isCollection && isWalkableFiniteCollection(c)) {
+    const conds = Array.from(c.each()) as Expression[];
+    // A cell is a boolean condition when it types `boolean`, or
+    // `broadcastable<boolean>`, the type of a comparison whose broadcast
+    // outcome is not statically settled (`h(x) ≤ 1` with `h` undeclared).
+    const mask = conditionCells(c);
+    if (
+      mask !== undefined &&
+      mask.cells.some((cell) => typeof cell !== 'string')
+    )
+      return (
+        evaluateElementwiseSelection(
+          ce,
+          [{ cond: c, arm: expr }],
+          { cond: c, mask },
+          options
+        ) ?? held(expr)
+      );
+    if (
+      conds.every(
+        (ci) =>
+          ci.type.matches('boolean') ||
+          possiblyElementwiseCondition([ci.type.type]) ||
+          isOpenConditionCell(ci.type.type)
+      )
+    ) {
+      const ev = expr.evaluate(options);
+      const ordered = isOrderedCarrierType(expr.type.type);
+      const atomic = isAtomicCarrierValue(expr.type.type, ev);
+      let zip = false;
+      let elems: Expression[] = [];
+      if (ordered && !atomic) {
+        const prefix = ev.isCollection
+          ? orderedCarrierPrefix(ev, conds.length)
+          : undefined;
+        if (prefix === undefined) return held(expr);
+        elems = prefix;
+        zip = true;
+      } else if (!atomic && ev.isCollection && isWalkableFiniteCollection(ev)) {
+        elems = Array.from(ev.each()) as Expression[];
+        zip = true;
+      } else if (!atomic && ev.isCollection && ev.isFiniteCollection === true)
+        return held(expr);
+      const n = zip ? Math.min(conds.length, elems.length) : conds.length;
+      const result: Expression[] = [];
+      for (let i = 0; i < n; i++) {
+        const ci = conds[i];
+        const cis = sym(ci);
+        const elem = zip ? elems[i] : ev;
+        if (cis === 'True') result.push(elem);
+        else if (cis === 'False') result.push(maskedValue(ce, elem));
+        else result.push(ce._fn('If', [ci, zip ? elems[i] : expr]));
+      }
+      return ce._fn('List', result);
+    }
+  }
+
+  if (sym(c) === 'Undefined') return maskedValue(ce, expr);
+
+  if (
+    expr.type.matches('collection<any>') &&
+    !isTupleShapedType(expr.type.type) &&
+    !expr.type.matches('string') &&
+    !isUnresolvedCollectionOperand(c)
+  ) {
+    const ev = expr.evaluate(options);
+    if (isFiniteBroadcastParticipant(ev)) return held(ev);
+  }
+  return held(expr);
 }
 
 /**
@@ -3702,8 +3507,7 @@ function evaluateWhich(
   }
 
   // No clause selected: `Missing`, the position-preserving absent datum
-  // (no-selection ruling 2026-08-27, shared with the else-less `If` and,
-  // since 2026-09-09, with the masking answer of the `When` operator).
+  // (no-selection ruling 2026-08-27, shared with the else-less `If`).
   return options.engine.Missing;
 }
 

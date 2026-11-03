@@ -259,13 +259,13 @@ describe('THE NESTED INTEGRAL OF TYCHO ROW HY', () => {
           'Multiply',
           'y',
           [
-            'When',
+            'If',
+            ['LessEqual', 0, 'y', 5],
             [
               'Integrate',
               ['Function', ['n', 'x', 'y', eps], 'x'],
               ['Limits', 'x', -10, 10],
             ],
-            ['LessEqual', 0, 'y', 5],
           ],
         ],
         'y',

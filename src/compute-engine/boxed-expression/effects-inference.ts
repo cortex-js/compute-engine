@@ -495,7 +495,7 @@ function restrictionValueType(
 ): Type | undefined {
   if (valueExpr === undefined) return undefined;
   const t = value.type;
-  // Stacked restrictions canonicalize into one `When`, but a value that was
+  // Stacked restrictions canonicalize into one restriction, but a value that was
   // not canonicalized can still nest, so walk to the innermost held operand.
   let held: Expression = valueExpr;
   for (let r = restrictionParts(held); r; r = restrictionParts(held))

@@ -657,7 +657,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('compiles When to select(...) with a valid NaN, never a bare NaN', () => {
-      const e = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+      const e = ce.expr(['If', ['Greater', 'x', 0], 'x']);
       const code = wgsl.compile(e).code;
       expect(code).toContain('select(');
       expect(code).toContain('_gpu_nan()');
@@ -807,14 +807,14 @@ describe('WGSL COMPILATION', () => {
 });
 
 // WGSL side of Tycho item 49: `select` requires both operands to share one
-// type, so a tuple-valued `When` body needs a vec2f NaN, not a scalar bitcast.
+// type, so a tuple-valued restriction body needs a vec2f NaN, not a scalar bitcast.
 describe('WGSL When NaN branch matches the value shape (Tycho item 49)', () => {
   it('restricted parametric tuple body emits a vec2f NaN branch', () => {
     const code = wgsl.compile(
       ce.box([
-        'When',
-        ['Tuple', ['Cos', 't'], ['Sin', 't']],
+        'If',
         ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]],
+        ['Tuple', ['Cos', 't'], ['Sin', 't']],
       ])
     ).code;
     expect(code).toContain('vec2f(_gpu_cos(t), _gpu_sin(t))');
@@ -823,7 +823,7 @@ describe('WGSL When NaN branch matches the value shape (Tycho item 49)', () => {
 
   it('scalar bodies keep the scalar NaN bit pattern', () => {
     const code = wgsl.compile(
-      ce.box(['When', ['Cos', 't'], ['LessEqual', 't', 1]])
+      ce.box(['If', ['LessEqual', 't', 1], ['Cos', 't']])
     ).code;
     expect(code).toContain('_gpu_nan()');
     expect(code).not.toContain('vec2f(bitcast');

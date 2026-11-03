@@ -177,7 +177,7 @@ const ROOT_BODY = '';
  * The common-subexpression pass binds a node to a temporary in a region, and
  * an arm that is evaluated only conditionally (`lazyOperandRegions`,
  * `cse.ts`: the arms of an `If`, the operands of a `Which` after the first
- * condition, the value of a `When`, the operands of `And`/`Or` after the
+ * condition, the value of a restriction, the operands of `And`/`Or` after the
  * first) can read a temporary of a region that encloses
  * it, but not one of a sibling arm. A node that two sibling arms reach, and
  * that no enclosing region reaches, is written once in each arm.

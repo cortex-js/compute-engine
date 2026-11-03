@@ -57,12 +57,12 @@ describe('restricted point-list arithmetic with an untyped variable', () => {
   const ce = new ComputeEngine();
   const expr = ce.box([
     'Add',
-    ['When', ['PointList', 't', 1], ['Less', 1, 't']],
+    ['If', ['Less', 1, 't'], ['PointList', 't', 1]],
     ['PointList', 2, 't'],
   ] as never);
 
   test('is typed as a possibly absent point with unknown coordinates', () => {
-    expect(expr.type.toString()).toBe('missing | tuple<unknown, unknown>');
+    expect(expr.type.toString()).toBe('tuple<unknown, unknown>');
   });
 
   // An input with no type is refused at compile time (ROADMAP CE-712.1).

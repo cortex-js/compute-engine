@@ -2424,7 +2424,6 @@ const HEADS_WITH_INFINITE_PARTS = new Set([
   'Range',
   'Element',
   'Condition',
-  'When',
   'Which',
   'If',
   'Hold',

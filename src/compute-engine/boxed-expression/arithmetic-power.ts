@@ -1216,7 +1216,7 @@ function unitBaseIntegerPower(
  * safe to call from inside the `Power` handler.
  *
  * Deliberately NOT recursive and deliberately not an evaluation: an arbitrary
- * `op2` (a lambda parameter, a `When`, a `Sum` body) keeps the float
+ * `op2` (a lambda parameter, a restriction, a `Sum` body) keeps the float
  * reconstruction. Evaluating it here would re-enter the engine's hottest
  * operator.
  */

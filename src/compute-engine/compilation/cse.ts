@@ -141,9 +141,6 @@ export const LAZY_OPERANDS: Readonly<Record<string, LazyOperandEntry>> = {
   },
   // `If(cond, then, else)` — one condition, both arms lazy.
   If: { note: 'both value arms', operands: from(1) },
-  // `When(value, cond)` lowers to `(cond) ? (value) : NaN`: the value is the
-  // conditional position; the single condition is eager.
-  When: { note: 'the value arm', operands: () => [0] },
   And: { note: 'operands after the first (short circuit)', operands: from(1) },
   Or: { note: 'operands after the first (short circuit)', operands: from(1) },
   // Compiled coalescing evaluates the defaults lazily, left to right.
@@ -211,17 +208,12 @@ const NO_LAZY_SITES: readonly LazyOperandSite[] = [];
  * (the dominance rule in `Harvester.run`), so the walk must follow the
  * emission order.
  *
- * This order is the operand order, except for `When(value, cond)`: its
- * condition is evaluated on every path and is emitted first, and the value
- * is the conditional arm. Walking the value first made a call that the
- * condition and the value share (`When(T(t), cos(T(t)) > 0)`) compute twice.
- * Each `When` handler (the base compiler, the GPU, interval and Python
- * targets) compiles the condition before the value.
+ * This order is the operand order: a conditional form compiles its
+ * condition, which is its first operand, before its arms.
  */
 export function operandEmissionOrder(
   node: Expression & FunctionInterface
 ): number[] {
-  if (node.operator === 'When' && node.nops === 2) return [1, 0];
   const order: number[] = [];
   for (let i = 0; i < node.nops; i++) order.push(i);
   return order;

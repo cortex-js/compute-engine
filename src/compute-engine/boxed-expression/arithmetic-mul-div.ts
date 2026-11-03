@@ -1723,8 +1723,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     // remedy: name the situation instead of reporting that something wanted a
     // number and got a tuple. There is no alternative operator to suggest here
     // — a point has no reciprocal — so the message says only what is undefined.
-    // A divisor typed `missing | tuple<…>` (a restricted point, `When((0,1),
-    // c)`) is rejected the same way (`isTupleCarrier`): when present it is a
+    // A divisor typed `missing | tuple<…>` (a restricted point, `If(c,
+    // (0,1))`) is rejected the same way (`isTupleCarrier`): when present it is a
     // point, so `t / P` has no meaning whatever the condition, and Desmos
     // rejects it the same way.
     // A divisor that is a list of points (`isPointListCarrier`) is rejected
@@ -2546,7 +2546,7 @@ export function canonicalMultiply(
   // making validity depend on refinement order (Tycho item 158). Use `Dot`
   // for the explicit inner product. `scalar · tuple` is allowed and scales
   // component-wise at evaluation. An operand typed `missing | tuple<…>` (a
-  // restricted point, `When((0,1), c)`, or a `Which` with point branches and
+  // restricted point, `If(c, (0,1))`, or a `Which` with point branches and
   // no default) counts as a tuple here (`isTupleCarrier`): when present it is
   // a point, so the product has no meaning whatever the condition, and
   // Desmos rejects it the same way. A list of points

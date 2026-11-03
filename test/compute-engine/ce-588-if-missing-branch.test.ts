@@ -9,7 +9,7 @@ import { TEST_PYTHON } from './test-python';
  * ROADMAP CE-588: a selection with a written `Missing` (or `NaN`) value beside
  * a point, a list or a complex value must compile that value as the absence
  * marker of the shape of the other value, the marker the else-less
- * `If(c, (x, y))` and `When((x, y), c)` already gave.
+ * `If(c, (x, y))` already gave.
  *
  * - GLSL and WGSL: the written value compiled to a scalar `_gpu_nan()` beside
  *   a `vec2` value. A GLSL ternary and a WGSL `select` need two operands of
@@ -17,7 +17,7 @@ import { TEST_PYTHON } from './test-python';
  *   (`vec2f` in WGSL). Beside a complex value the selection declined ("the
  *   value `Missing` is not a number"); it is now `vec2(_gpu_nan())` too. A
  *   2-element list `[x, y]` beside `Missing` declined, as did the else-less
- *   `If(c, [x, y])` and `When([x, y], c)` ("object-domain absent
+ *   `If(c, [x, y])` ("object-domain absent
  *   position"); the list lowers to a `vec2`, as a point does, and these now
  *   compile with a `vec2` NaN.
  * - Python: the written `Missing` compiled to `math.nan` beside a point or a
@@ -26,8 +26,8 @@ import { TEST_PYTHON } from './test-python';
  *   `None`. Beside a complex value the marker stays `nan`, as for the
  *   else-less `If`.
  * - interval-js: an `If` with a point or a list value declined ("no lowering
- *   for `Tuple`"), with or without a `Missing` value, where `Which` and
- *   `When` compiled. An `If` is now spelled as the `Which` of the same
+ *   for `Tuple`"), with or without a `Missing` value, where `Which`
+ *   compiled. An `If` is now spelled as the `Which` of the same
  *   clauses. A complex value still declines: the target has no complex
  *   numbers.
  * - JavaScript: no change. The values already agreed with the interpreter.
@@ -297,11 +297,11 @@ describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
     ],
     [
       'If(c, When((x, y), d), Missing)',
-      ['If', 'c', ['When', POINT, 'd'], 'Missing'],
+      ['If', 'c', ['If', 'd', POINT], 'Missing'],
       [true, true],
     ],
     ['If(c, If(d, (x, y)))', ['If', 'c', ['If', 'd', POINT]], [true, true]],
-    ['When(If(d, (x, y)), c)', ['When', ['If', 'd', POINT], 'c'], [true, true]],
+    ['When(If(d, (x, y)), c)', ['If', 'c', ['If', 'd', POINT]], [true, true]],
     [
       'If(c, If(d, [x, y], Missing), Missing)',
       ['If', 'c', ['If', 'd', LIST, 'Missing'], 'Missing'],
@@ -393,7 +393,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
     const nan = `${vec2}(_gpu_nan())`;
     for (const json of [
       ['If', 'c', LIST],
-      ['When', LIST, 'c'],
+      ['If', 'c', LIST],
     ]) {
       const { code, f } = shader(json);
       expect(code).toContain(nan);
@@ -545,7 +545,7 @@ describe('CE-588 — interval-js', () => {
     for (const json of [
       ['If', 'c', ['If', 'd', POINT, 'Missing'], 'Missing'],
       ['If', 'c', ['If', 'd', LIST]],
-      ['If', 'c', ['When', POINT, 'd'], 'Missing'],
+      ['If', 'c', ['If', 'd', POINT], 'Missing'],
     ]) {
       const f = run(json);
       expect(f({ c: 'true', d: 'true' })).toEqual([point(X), point(Y)]);
@@ -647,7 +647,7 @@ describe('CE-588 — interval-js', () => {
         ['If', 'c', ['List', 1], ['If', 'd', 'L', ['List', 2]]],
         ['If', 'c', ['If', 'd', 'L', ['List', 2]], ['List', 1]],
         ['Which', 'c', ['List', 1], 'True', ['If', 'd', 'L', ['List', 2]]],
-        ['If', 'c', ['List', 1], ['When', ['If', 'd', 'L', ['List', 2]], 'c']],
+        ['If', 'c', ['List', 1], ['If', 'c', ['If', 'd', 'L', ['List', 2]]]],
       ]) {
         const r = compile(ce.box(json as never), {
           to: 'interval-js',

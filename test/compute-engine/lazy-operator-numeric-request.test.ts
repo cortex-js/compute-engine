@@ -5,7 +5,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 // (`exact-argument-source.ts`): a function that jumps (`Floor`, a
 // comparison) evaluated with the numeric request reads the exact argument
 // again when the float is near the jump. A `lazy` operator in the body
-// (`If`, `Which`, `When`, `Pipe`, the quantifiers) holds its operands and
+// (`If`, `Which`, `Pipe`, the quantifiers) holds its operands and
 // evaluated them EXACTLY, so the comparison or the `Floor` inside read the
 // float: `c((25! − 1)/24!).N()` for `c := x ↦ If(x < 25, 0, 1)` was 1, and
 // `g((25! − 1)/24!).N()` for `g := x ↦ If(True, Floor(x), 0)` was 25. A lazy
@@ -47,11 +47,11 @@ describe('a lazy operator in the body of a user function under .N()', () => {
     expect(n(engineWith(['If', 'False', 0, ['Floor', 'x']]), Q)).toBe('24');
   });
 
-  test('the guard of a Which and of a When', () => {
+  test('the guard of a Which and of a restriction', () => {
     expect(n(engineWith(['Which', ['Less', 'x', 25], 0, 'True', 1]), Q)).toBe(
       '0'
     );
-    expect(n(engineWith(['When', 0, ['Less', 'x', 25]]), Q)).toBe('0');
+    expect(n(engineWith(['If', ['Less', 'x', 25], 0]), Q)).toBe('0');
   });
 
   test('a connective in the condition of an If', () => {

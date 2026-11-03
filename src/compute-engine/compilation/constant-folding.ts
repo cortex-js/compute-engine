@@ -48,7 +48,7 @@ import {
  *
  * Neither GLSL nor WGSL has a `NaN` or an `Infinity` LITERAL — but both can
  * MAKE those values from a bit pattern, and the GPU target already routes the
- * masked (`When` / `Which` fall-through) NaN through exactly that mechanism
+ * masked (restriction or `Which` fall-through) NaN through exactly that mechanism
  * (`gpuNaN` in `gpu-emit.ts`, which delegates here so there is exactly one
  * spelling). A non-finite CONSTANT is the same value reached by another route,
  * so it gets the same spelling instead of failing the compilation.

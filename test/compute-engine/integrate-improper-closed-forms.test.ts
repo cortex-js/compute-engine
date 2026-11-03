@@ -26,35 +26,35 @@ const integral = (body: unknown, v: string, a: unknown, b: unknown) =>
 describe('A POWER WITH A SYMBOLIC EXPONENT AND A ZERO INSIDE THE BOUNDS', () => {
   test('∫₋₁¹ t^(−n) dt carries the condition n < 1', () => {
     expect(ce.parse('\\int_{-1}^1 t^{-n}\\,dt').evaluate().toString()).toBe(
-      '1 / (1 - n) - ((-1)^(1 - n)) / (1 - n) {0 < 1 - n}'
+      'If(0 < 1 - n, 1 / (1 - n) - ((-1)^(1 - n)) / (1 - n))'
     );
   });
 
   test('∫₋₁¹ t^n dt carries the condition n > −1', () => {
     expect(ce.parse('\\int_{-1}^1 t^{n}\\,dt').evaluate().toString()).toBe(
-      '1 / (n + 1) - ((-1)^(n + 1)) / (n + 1) {0 < n + 1}'
+      'If(0 < n + 1, 1 / (n + 1) - ((-1)^(n + 1)) / (n + 1))'
     );
   });
 
   test('a linear base: ∫₀² (t − 1)^(−n) dt and ∫₀³ (2t − 1)^(−n) dt', () => {
     expect(ce.parse('\\int_0^2 (t-1)^{-n}\\,dt').evaluate().toString()).toBe(
-      '1 / (1 - n) - ((-1)^(1 - n)) / (1 - n) {0 < 1 - n}'
+      'If(0 < 1 - n, 1 / (1 - n) - ((-1)^(1 - n)) / (1 - n))'
     );
     // The cut at `1/2` is exact, so the pieces stay exact.
     expect(ce.parse('\\int_0^3 (2t-1)^{-n}\\,dt').evaluate().toString()).toBe(
-      '-((-1)^(1 - n)) / (2(1 - n)) + 5^(1 - n) / (2(1 - n)) {0 < 1 - n}'
+      'If(0 < 1 - n, -((-1)^(1 - n)) / (2(1 - n)) + 5^(1 - n) / (2(1 - n)))'
     );
   });
 
   test('a fraction of the symbol in the exponent', () => {
     expect(ce.parse('\\int_{-1}^1 t^{-n/3}\\,dt').evaluate().toString()).toBe(
-      '1 / (-1/3 * n + 1) - ((-1)^(-1/3 * n + 1)) / (-1/3 * n + 1) {0 < -1/3 * n + 1}'
+      'If(0 < -1/3 * n + 1, 1 / (-1/3 * n + 1) - ((-1)^(-1/3 * n + 1)) / (-1/3 * n + 1))'
     );
   });
 
   test('reversed bounds negate the value', () => {
     expect(ce.parse('\\int_{1}^{-1} t^{-n}\\,dt').evaluate().toString()).toBe(
-      '-1 / (1 - n) + (-1)^(1 - n) / (1 - n) {0 < 1 - n}'
+      'If(0 < 1 - n, -1 / (1 - n) + (-1)^(1 - n) / (1 - n))'
     );
   });
 
@@ -63,12 +63,12 @@ describe('A POWER WITH A SYMBOLIC EXPONENT AND A ZERO INSIDE THE BOUNDS', () => 
     // `0 < −a²` is the one the pieces give at the bound (as for `∫₀¹`).
     expect(
       ce.parse('\\int_{-1}^{1} x^{-a^2-1}\\,dx').evaluate().toString()
-    ).toBe('-a^(-2) + (-1)^(-(a^2)) / a^2 {0 < -(a^2)}');
+    ).toBe('If(0 < -(a^2), -a^(-2) + (-1)^(-(a^2)) / a^2)');
   });
 
   test('a zero AT a bound is not inside: ∫₀¹ tⁿ dt keeps its guarded form', () => {
     expect(ce.parse('\\int_0^1 t^{n}\\,dt').evaluate().toString()).toBe(
-      '1 / (n + 1) {0 < n + 1}'
+      'If(0 < n + 1, 1 / (n + 1))'
     );
   });
 
@@ -82,10 +82,10 @@ describe('A POWER WITH A SYMBOLIC EXPONENT AND A ZERO INSIDE THE BOUNDS', () => 
     // A float cut at `1.4142…` is not a zero of `t² − 2`, so the pieces
     // would see no endpoint `0^(1 − n)` and the condition would be lost.
     expect(ce.parse('\\int_0^3 t(t^2-2)^{-n}\\,dt').evaluate().toString()).toBe(
-      '-((-2)^(1 - n)) / (2(1 - n)) + 7^(1 - n) / (2(1 - n)) {0 < 1 - n}'
+      'If(0 < 1 - n, -((-2)^(1 - n)) / (2(1 - n)) + 7^(1 - n) / (2(1 - n)))'
     );
     expect(ce.parse('\\int_0^3 t(t^2-4)^{-n}\\,dt').evaluate().toString()).toBe(
-      '-((-4)^(1 - n)) / (2(1 - n)) + 5^(1 - n) / (2(1 - n)) {0 < 1 - n}'
+      'If(0 < 1 - n, -((-4)^(1 - n)) / (2(1 - n)) + 5^(1 - n) / (2(1 - n)))'
     );
   });
 
@@ -148,25 +148,25 @@ describe('A POLE WHERE THE INTEGRAND IS COMPLEX ON ONE SIDE', () => {
 describe('THE POWER RULE AT THE EXPONENT −1', () => {
   test('∫₁² t^(−n) dt carries n ≠ 1', () => {
     expect(ce.parse('\\int_1^2 t^{-n}\\,dt').evaluate().toString()).toBe(
-      '-1 / (1 - n) + 2^(1 - n) / (1 - n) {n != 1}'
+      'If(n != 1, -1 / (1 - n) + 2^(1 - n) / (1 - n))'
     );
   });
 
   test('a constant factor and a linear base', () => {
     expect(ce.parse('\\int_1^2 3t^{-n}\\,dt').evaluate().toString()).toBe(
-      '-3 / (1 - n) + (3 * 2^(1 - n)) / (1 - n) {n != 1}'
+      'If(n != 1, -3 / (1 - n) + (3 * 2^(1 - n)) / (1 - n))'
     );
     expect(ce.parse('\\int_2^3 (2t-1)^{-n}\\,dt').evaluate().toString()).toBe(
-      '-(3^(1 - n)) / (2(1 - n)) + 5^(1 - n) / (2(1 - n)) {n != 1}'
+      'If(n != 1, -(3^(1 - n)) / (2(1 - n)) + 5^(1 - n) / (2(1 - n)))'
     );
   });
 
   test('the condition is on the symbol of a linear exponent', () => {
     expect(ce.parse('\\int_1^2 t^{2n-3}\\,dt').evaluate().toString()).toBe(
-      '-1 / (2(n - 1)) + 2^(2n - 2) / (2(n - 1)) {n != 1}'
+      'If(n != 1, -1 / (2(n - 1)) + 2^(2n - 2) / (2(n - 1)))'
     );
     expect(ce.parse('\\int_1^2 t^{a+b}\\,dt').evaluate().toString()).toBe(
-      '-1 / (a + b + 1) + 2^(a + b + 1) / (a + b + 1) {a + b != -1}'
+      'If(a + b != -1, -1 / (a + b + 1) + 2^(a + b + 1) / (a + b + 1))'
     );
   });
 
@@ -183,14 +183,14 @@ describe('THE POWER RULE AT THE EXPONENT −1', () => {
   test('a quotient spelling and the terms of a sum carry the condition', () => {
     expect(
       ce.parse('\\int_1^2 \\frac{a}{t^n}\\,dt').evaluate().toString()
-    ).toBe('-a / (1 - n) + (a * 2^(1 - n)) / (1 - n) {n != 1}');
+    ).toBe('If(n != 1, -a / (1 - n) + (a * 2^(1 - n)) / (1 - n))');
     expect(ce.parse('\\int_1^2 (t^{-n} + 1)\\,dt').evaluate().toString()).toBe(
-      '-1 / (1 - n) + 2^(1 - n) / (1 - n) + 1 {n != 1}'
+      'If(n != 1, -1 / (1 - n) + 2^(1 - n) / (1 - n) + 1)'
     );
     expect(
       ce.parse('\\int_1^2 (t^{-n} + t^{-m})\\,dt').evaluate().toString()
     ).toBe(
-      '-1 / (1 - m) + 2^(1 - m) / (1 - m) - 1 / (1 - n) + 2^(1 - n) / (1 - n) {m != 1 && n != 1}'
+      'If(m != 1 && n != 1, -1 / (1 - m) + 2^(1 - m) / (1 - m) - 1 / (1 - n) + 2^(1 - n) / (1 - n))'
     );
   });
 

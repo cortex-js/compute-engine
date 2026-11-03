@@ -2448,7 +2448,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     }
 
     // An `isCollection` handler declares that collection-ness is decided
-    // per-instance from the operands (e.g. `When`, a collection only when the
+    // per-instance from the operands (e.g. a restriction, a collection only when the
     // value it guards is one). Such an operator's result type is legitimately
     // not a collection type in general, so skip the static signature check.
     if (this.collection && !this.collection.isCollection) {

@@ -630,7 +630,6 @@ const KEPT_HEADS: ReadonlySet<string> = new Set([
   'Comprehension',
   'If',
   'Which',
-  'When',
   'Match',
   'Block',
   'Apply',

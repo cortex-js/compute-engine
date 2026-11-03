@@ -23,7 +23,7 @@ ce.assign('P', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
 const FORCE = { to: 'no-such-target' };
 
 /** `v` shown only when `1 < t`: absent at `t = 0`. */
-const gated = (v: unknown) => ['When', v, ['Less', 1, 't']];
+const gated = (v: unknown) => ['If', ['Less', 1, 't'], v];
 
 function fallbackRun(json: unknown, t: number): unknown {
   const r = compile(ce.box(json as never), FORCE as never);
@@ -119,7 +119,7 @@ describe('Compilation fallback: the spelling of an absent value', () => {
   test('the lambda calling convention spells an absent point undefined', () => {
     const f = ce.box([
       'Function',
-      ['When', ['Tuple', 'x', 1], ['Less', 1, 'x']],
+      ['If', ['Less', 1, 'x'], ['Tuple', 'x', 1]],
       'x',
     ] as never);
     const fallback = compile(f, FORCE as never);

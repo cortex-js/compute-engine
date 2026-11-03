@@ -4799,7 +4799,7 @@ export const GPU_COLOR_LIBRARY_WGSL =
   GPU_COLOR_PREAMBLE_WGSL + GPU_SRGB_ROUNDTRIP_WGSL + GPU_FINITE_COLOR_WGSL;
 
 /**
- * GLSL NaN helper preamble. Centralizes the masked/else-branch NaN (`When` /
+ * GLSL NaN helper preamble. Centralizes the masked/else-branch NaN (restriction /
  * `Which` fall-through) into a single overridable symbol.
  *
  * GLSL has no `NaN` literal. The target assumes GLSL ES 3.00 (`#version

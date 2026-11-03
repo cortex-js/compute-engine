@@ -1200,7 +1200,7 @@ describe('Arithmetic over a MathJSON Tuple with a list coordinate is typed error
 });
 
 describe('A restricted list of points plus a point compiles to JavaScript', () => {
-  // `(A\{0<t\}, B)` is `PointList(When(A, 0 < t), B)`, typed
+  // `(A\{0<t\}, B)` is `PointList(If(0 < t, A), B)`, typed
   // `list<tuple<real, real>> | missing`. The interpreter adds the point to
   // every point of the list, or answers `Missing` when `t` fails the
   // condition. The compiled code gives the same points; for an absent list it
@@ -1237,7 +1237,7 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
           'Add',
           [
             'Delimiter',
-            ['Sequence', ['When', 'A', ['Less', 0, 't']], 'B'],
+            ['Sequence', ['If', ['Less', 0, 't'], 'A'], 'B'],
             "'(,)'",
           ],
           ['Tuple', 1, 1],
@@ -1245,11 +1245,11 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
       shifted,
     ],
     [
-      'PointList(When(A, 0 < t), B) + (1, 1), box route',
+      'PointList(If(0 < t, A), B) + (1, 1), box route',
       (ce) =>
         ce.box([
           'Add',
-          ['PointList', ['When', 'A', ['Less', 0, 't']], 'B'],
+          ['PointList', ['If', ['Less', 0, 't'], 'A'], 'B'],
           ['Tuple', 1, 1],
         ]),
       shifted,
@@ -1277,12 +1277,8 @@ describe('A restricted list of points plus a point compiles to JavaScript', () =
     const ce = restrictedEngine(true);
     const e = make(ce);
     // The parsed restriction `If(c, e)` has the type of `e`, with no
-    // `missing` arm; the boxed `When(e, c)` keeps the arm.
-    expect(e.type.toString()).toBe(
-      label.endsWith('box route')
-        ? 'list<tuple<real, real>> | missing'
-        : 'list<tuple<real, real>>'
-    );
+    // `missing` arm, on the box route as well.
+    expect(e.type.toString()).toBe('list<tuple<real, real>>');
     ce.assign('t', 1);
     close(plain(e.evaluate()), expected);
     ce.assign('t', -1);

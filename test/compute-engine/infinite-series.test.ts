@@ -9,7 +9,7 @@ import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards'
  * before being encoded (Working Discipline: verify math empirically). The
  * recognizers live in `library/utils.ts` (`namedSeriesClosedForm`,
  * `infiniteProductClosedForm`); families with a free ratio return
- * `When`-guarded values through the `conditionalValue` chokepoint.
+ * restricted values through the `conditionalValue` chokepoint.
  */
 describe('Alternating p-series η(s)', () => {
   test('Σ (−1)^{k+1}/k = ln 2', () => {
@@ -175,7 +175,7 @@ describe('simplify() of a geometric series with an infinite upper bound', () => 
     expect(sum.simplify().json).toEqual(sum.json);
     const sum0 = ce.parse('\\sum_{k=0}^{\\infty} x^k');
     expect(sum0.simplify().json).toEqual(sum0.json);
-    expect(sum.evaluate().toString()).toBe('x / (1 - x) {|x| < 1}');
+    expect(sum.evaluate().toString()).toBe('If(|x| < 1, x / (1 - x))');
   });
 
   test('a number ratio: the closed form applies', () => {
@@ -209,11 +209,11 @@ describe('First-moment geometric Σ k·rᵏ = r/(1−r)²', () => {
     expect(e.N().re).toBeCloseTo(0.75, 12);
   });
 
-  test('symbolic ratio is When-guarded on |x| < 1', () => {
+  test('symbolic ratio is If-guarded on |x| < 1', () => {
     const e = ce.parse('\\sum_{k=1}^\\infty k x^k').evaluate();
-    expect(e.operator).toBe('When');
+    expect(e.operator).toBe('If');
     // Value branch is x/(1−x)²
-    const atHalf = e.op1.subs({ x: 0.5 }).N().re;
+    const atHalf = e.op2.subs({ x: 0.5 }).N().re;
     expect(atHalf).toBeCloseTo(0.5 / 0.25, 12);
   });
 
@@ -233,10 +233,10 @@ describe('Logarithmic series Σ rᵏ/k = −ln(1−r)', () => {
     expect(e.N().re).toBeCloseTo(Math.log(2), 12);
   });
 
-  test('symbolic ratio is When-guarded: −ln(1−x) for |x| < 1', () => {
+  test('symbolic ratio is If-guarded: −ln(1−x) for |x| < 1', () => {
     const e = ce.parse('\\sum_{k=1}^\\infty \\frac{x^k}{k}').evaluate();
-    expect(e.operator).toBe('When');
-    const atHalf = e.op1.subs({ x: 0.5 }).N().re;
+    expect(e.operator).toBe('If');
+    const atHalf = e.op2.subs({ x: 0.5 }).N().re;
     expect(atHalf).toBeCloseTo(Math.log(2), 12);
   });
 

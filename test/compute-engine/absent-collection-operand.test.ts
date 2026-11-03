@@ -9,7 +9,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // (`signatureParamsPropagateAbsence`, `boxed-operator-definition.ts`). Before,
 // `Reverse(Missing)` and `Filter(Missing, p)` were `incompatible-type` errors
 // and `Map(f, Missing)` stayed a raw, unevaluated node. A restricted
-// collection, `[1,2]{c}`, is one held `When` and is threaded whole by these
+// collection, `[1,2]{c}`, is one held restriction and is threaded whole by these
 // operators, so the held result and a fresh evaluation agree once the
 // condition is decided.
 
@@ -90,23 +90,23 @@ describe('a collection operator over a restricted collection', () => {
       fresh: e.evaluate().toString(),
     };
   }
-  const RL = ['When', ['List', 1, 2], ['Less', 0, 't']];
+  const RL = ['If', ['Less', 0, 't'], ['List', 1, 2]];
 
   test.each([
-    ['Reverse', ['Reverse', RL], 'Reverse([1,2]) {0 < t}'],
+    ['Reverse', ['Reverse', RL], 'If(0 < t, Reverse([1,2]))'],
     [
       'Sort',
-      ['Sort', ['When', ['List', 2, 1], ['Less', 0, 't']]],
-      '[1,2] {0 < t}',
+      ['Sort', ['If', ['Less', 0, 't'], ['List', 2, 1]]],
+      'If(0 < t, [1,2])',
     ],
-    ['Take', ['Take', RL, 1], 'Take([1,2], 1) {0 < t}'],
-    ['Join', ['Join', RL, ['List', 3]], '[1,2,3] {0 < t}'],
-    ['Zip', ['Zip', RL, ['List', 3, 4]], 'Zip([1,2], [3,4]) {0 < t}'],
-    ['Map', ['Map', f, RL], 'Map((_) => 2 * _, [1,2]) {0 < t}'],
-    ['Filter', ['Filter', RL, p], 'Filter([1,2], (_) => 1 < _) {0 < t}'],
+    ['Take', ['Take', RL, 1], 'If(0 < t, Take([1,2], 1))'],
+    ['Join', ['Join', RL, ['List', 3]], 'If(0 < t, [1,2,3])'],
+    ['Zip', ['Zip', RL, ['List', 3, 4]], 'If(0 < t, Zip([1,2], [3,4]))'],
+    ['Map', ['Map', f, RL], 'If(0 < t, Map((_) => 2 * _, [1,2]))'],
+    ['Filter', ['Filter', RL, p], 'If(0 < t, Filter([1,2], (_) => 1 < _))'],
     // `Any` and `Chunk` are not lazy: their results are computed.
-    ['Any', ['Any', RL, p], '"True" {0 < t}'],
-    ['Chunk', ['Chunk', RL, 1], '[[1,2]] {0 < t}'],
+    ['Any', ['Any', RL, p], 'If(0 < t, "True")'],
+    ['Chunk', ['Chunk', RL, 1], 'If(0 < t, [[1,2]])'],
   ])('%s is threaded whole and both routes agree', (_op, json, free) => {
     const r = probe(json);
     // The held result wraps the operator's lazy view of the present list.
@@ -121,28 +121,28 @@ describe('a collection operator over a restricted collection', () => {
     expect(r.isCollection).toBe(true);
     expect(r.count).toBe(2);
     expect(Array.from(r.each()).map((x) => x.toString())).toEqual([
-      '2 {0 < t}',
-      '1 {0 < t}',
+      'If(0 < t, 2)',
+      'If(0 < t, 1)',
     ]);
   });
 
   test('a literal list with one restricted cell stays per cell', () => {
     expect(
       engine()
-        .box(['Reverse', ['List', ['When', 1, 'c'], 2]])
+        .box(['Reverse', ['List', ['If', 'c', 1], 2]])
         .evaluate()
         .toString()
-    ).toBe('[2,1 {c}]');
+    ).toBe('[2,If(c, 1)]');
   });
 
   test('Map over a restricted list is no longer a set', () => {
     const ce = engine();
     const r = ce.box(['Map', f, RL]).evaluate();
-    expect(r.operator).toBe('When');
+    expect(r.operator).toBe('If');
     expect(r.isCollection).toBe(true);
     expect(Array.from(r.each()).map((x) => x.toString())).toEqual([
-      '2 {0 < t}',
-      '4 {0 < t}',
+      'If(0 < t, 2)',
+      'If(0 < t, 4)',
     ]);
   });
 });
@@ -151,7 +151,7 @@ describe('Insert, ReplaceAt and Append over an absent collection', () => {
   // They answer `Missing` on every route (user decision 2026-09-26). Before,
   // a boxed `Insert(Missing, 1, 2)` was an `incompatible-type` error, and
   // only a restricted collection whose condition failed gave `Missing`.
-  const RL = ['When', ['List', 1, 2], ['Less', 0, 't']];
+  const RL = ['If', ['Less', 0, 't'], ['List', 1, 2]];
   test.each([
     ['Insert', ['Insert', 'Missing', 1, 2], 'list<integer> | missing'],
     ['ReplaceAt', ['ReplaceAt', 'Missing', 1, 2], 'list<integer> | missing'],
@@ -176,13 +176,15 @@ describe('Insert, ReplaceAt and Append over an absent collection', () => {
   });
 
   test.each([
-    ['Insert', ['Insert', RL, 1, 5], '[5,1,2] {0 < t}'],
-    ['ReplaceAt', ['ReplaceAt', RL, 1, 5], '[5,2] {0 < t}'],
-    ['Append', ['Append', RL, 5], '[1,2,5] {0 < t}'],
+    ['Insert', ['Insert', RL, 1, 5], 'If(0 < t, [5,1,2])'],
+    ['ReplaceAt', ['ReplaceAt', RL, 1, 5], 'If(0 < t, [5,2])'],
+    ['Append', ['Append', RL, 5], 'If(0 < t, [1,2,5])'],
   ])('%s over a restricted collection', (_op, json, free) => {
     const ce = engine();
     const e = ce.box(json as never);
-    expect(e.type.toString()).toBe('list<integer> | missing');
+    // The type of `If(c, L)` is the type of `L`: the run-time `Missing` sits
+    // outside the declared type, as `NaN` sits outside `real`.
+    expect(e.type.toString()).toBe('list<integer>');
     const held = e.evaluate();
     expect(held.toString()).toBe(free);
     ce.assign('t', -1);
@@ -420,10 +422,10 @@ describe('Join and the set operators over an absent collection', () => {
   });
 
   test.each([
-    [['Join', ['When', ['List', 1], c], ['List', 2]], '[1,2] {0 < t}'],
-    [['Union', ['When', S, c], T], 'Set(1, 2, 3) {0 < t}'],
-    [['Intersection', ['When', S, c], T], 'Set(2) {0 < t}'],
-    [['SetMinus', ['When', S, c], 1], 'Set(2) {0 < t}'],
+    [['Join', ['If', c, ['List', 1]], ['List', 2]], 'If(0 < t, [1,2])'],
+    [['Union', ['If', c, S], T], 'If(0 < t, Set(1, 2, 3))'],
+    [['Intersection', ['If', c, S], T], 'If(0 < t, Set(2))'],
+    [['SetMinus', ['If', c, S], 1], 'If(0 < t, Set(2))'],
   ])('%j over a restricted collection', (json, free) => {
     const ce = engine();
     const e = ce.box(json as never);
@@ -461,8 +463,8 @@ describe('Join and the set operators over an absent collection', () => {
     [['Join', 'Missing', ['List', 3]]],
     [['Join', ['List', 3], 'Undefined']],
     [['Append', 'Missing', 3]],
-    [['Join', ['When', ['List', 1, 2], c], ['List', 3]]],
-    [['Append', ['When', ['List', 1, 2], c], 3]],
+    [['Join', ['If', c, ['List', 1, 2]], ['List', 3]]],
+    [['Append', ['If', c, ['List', 1, 2]], 3]],
   ])('%j is not a collection view', (json) => {
     const e = engine().box(json as never);
     expect(e.isCollection).toBe(false);
@@ -474,10 +476,10 @@ describe('Join and the set operators over an absent collection', () => {
   test('the unevaluated join of a restricted list prints as written', () => {
     const e = engine().box([
       'Join',
-      ['When', ['List', 1, 2], c],
+      ['If', c, ['List', 1, 2]],
       ['List', 3],
     ] as never);
-    expect(e.toString()).toBe('Join([1,2] {0 < t}, [3])');
+    expect(e.toString()).toBe('Join(If(0 < t, [1,2]), [3])');
   });
 
   test.each([
@@ -497,10 +499,10 @@ describe('Join and the set operators over an absent collection', () => {
   });
 
   test.each([
-    [['Sum', ['Join', ['When', ['List', 1, 2], c], ['List', 3]]], '6', 'NaN'],
-    [['Sum', ['Append', ['When', ['List', 1, 2], c], 3]], '6', 'NaN'],
+    [['Sum', ['Join', ['If', c, ['List', 1, 2]], ['List', 3]]], '6', 'NaN'],
+    [['Sum', ['Append', ['If', c, ['List', 1, 2]], 3]], '6', 'NaN'],
     [
-      ['Length', ['Join', ['When', ['List', 1, 2], c], ['List', 3]]],
+      ['Length', ['Join', ['If', c, ['List', 1, 2]], ['List', 3]]],
       '3',
       'NaN',
     ],
@@ -610,9 +612,9 @@ describe('Element over an absent or restricted collection', () => {
   });
   test('a restricted collection is threaded, and held and fresh agree', () => {
     const ce = engine();
-    const W = ['When', ['List', 1, 2], ['Less', 0, 't']];
+    const W = ['If', ['Less', 0, 't'], ['List', 1, 2]];
     const held = ce.box(['Element', 2, W] as never).evaluate();
-    expect(held.toString()).toBe('"True" {0 < t}');
+    expect(held.toString()).toBe('If(0 < t, "True")');
     ce.assign('t', -1);
     expect(held.evaluate().toString()).toBe('"Missing"');
     expect(ce.box(['Element', 2, W] as never).evaluate().toString()).toBe(

@@ -513,7 +513,7 @@ export function absentCollectionOperandGuard(
   // although its type has no `missing` arm (`mayBeAbsentCollection`:
   // `Take(xs, k)` with a `NaN` count) is guarded.
   // Not an operator that discharges an absent value (`Coalesce`,
-  // `IsMissing`, `AssertPresent`) or a lazy one (`If`, `Which`, `When`):
+  // `IsMissing`, `AssertPresent`) or a lazy one (`If`, `Which`):
   // they read the operand themselves (`ABSENCE_DISCHARGING_HEADS`).
   const handles =
     (operator.resolvedMissingBehavior === 'handle' ||
@@ -2079,6 +2079,10 @@ export function mayBeAbsentCollectionNode(
     !isSubtype(result, 'collection')
   )
     return false;
+  // A restriction, the single-branch `If(c, L)` over a collection, compiles
+  // to `undefined` when its condition is not true, although its type (the
+  // type of `L`) has no `missing` arm.
+  if (a.operator === 'If' && a.nops === 2) return true;
   if (CONTROL_FLOW_HEADS.has(a.operator)) return false;
   const def = lookupApplicable(a.operator, engine.context.lexicalScope);
   if (!isOperatorDef(def)) return false;

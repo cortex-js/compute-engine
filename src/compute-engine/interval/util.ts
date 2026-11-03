@@ -390,7 +390,7 @@ function isPartial(x: unknown): x is {
  * 254). When any operand is `partial` and the operation answered an
  * `interval` (or a bare `{ lo, hi }`), the answer is re-tagged `partial`.
  * The clip side is reported as `'both'`, the conservative "some clipping
- * occurred" the `When` restriction also reports: which end of the RESULT
+ * occurred" a restriction also reports: which end of the RESULT
  * the domain edge maps to is not derivable through an arbitrary operation
  * (a negation swaps the ends). `empty`, `entire` and `singular` answers are
  * returned as they are — they were computed over the defined part and

@@ -1414,7 +1414,7 @@ export function hasUnresolvedCollectionOperand(
  * atomic-under-broadcast kinds (tuples, including a tuple reached through a
  * bare `tuple` declaration or an alias, and strings). Call this directly at a
  * site where the operand that
- * would be spliced is already singled out — `When`'s condition, say — and the
+ * would be spliced is already singled out — the condition of a restriction, say — and the
  * sweep over a whole operand list has nothing to add.
  *
  * The symbol's VALUE is consulted when its own type does not say
@@ -3662,7 +3662,7 @@ export function isProvablyScalarNumber(expr: Expression): boolean {
  *
  * Recognized: a `List` literal whose every element is a provable scalar
  * (`isProvablyScalarNumber`), the same list restricted by a condition
- * (`When([10, 20, 30], c)`: an absent element is `Missing`, and a present one
+ * (`If(c, [10, 20, 30])`: an absent element is `Missing`, and a present one
  * is a number), and a symbol whose DECLARED (not inferred) type, without its
  * absence arm, is a list of numbers. Anything else — an unknown-typed operand,
  * a list of points, a list whose element type was only inferred — is not
@@ -4034,7 +4034,7 @@ export function isRecordShapedType(t: Type): boolean {
  * its coordinates. `isTupleShapedType` alone does not see the arms of a
  * union, so a gate that must exclude such values tests this predicate.
  *
- * Used by the `When` operator (`isOrderedCarrierType`,
+ * Used by the restriction `If(c, v)` (`isOrderedCarrierType`,
  * `library/control-structures.ts`) and by the JavaScript compilation of a
  * restriction (`base-compiler.ts`), which declines such a union.
  */
@@ -4196,8 +4196,8 @@ export function isTuple(expr: Expression): boolean {
 /**
  * `isTuple`, read through an absence arm and across a union of tuple
  * spellings: true when every value the operand can take, other than the
- * absent one, is a tuple. A restricted point `When((0, 1), c)` and a
- * `Which` with point branches and no default are typed
+ * absent one, is a tuple. A restricted point `If(c, (0, 1))` is typed
+ * `tuple<…>`, and a `Which` with point branches and no default is typed
  * `missing | tuple<…>`: when present they are points, and when absent they
  * are `Missing`. So a product of two of them, or a division by one, is the
  * same mistake it is for a bare point, and the `Multiply` and `Divide`
@@ -4270,7 +4270,7 @@ function tupleCarrierType(t: Type): boolean {
  * Recognized from the TYPE, without its absence arm: a list whose every
  * element, other than an absent one, is a tuple. This includes a list
  * literal of points (`list<tuple<…>>`), a restricted list of points
- * (`When([(0,1),(4,5)], c)`, typed `missing | list<tuple<…>>`, or
+ * (`If(c, [(0,1),(4,5)])`, typed `list<tuple<…>>`, or
  * `list<missing | tuple<…>>` when the condition is a list), and a symbol
  * declared or assigned such a list (through its value, as `isTupleCarrier`
  * does). A list literal whose elements are all `isTupleCarrier` also
@@ -4461,8 +4461,9 @@ export function isPointListValue(expr: Expression): boolean {
   // the same test the point accessors use (`isPointElementType`), so `Abs`
   // over a point list and `PointX` over it agree on what a point list is.
   // A point cell that may be absent, `missing | tuple<…>`, is a point cell:
-  // a restricted list of points is typed `missing | list<missing | tuple<…>>`
-  // (the `When` type handler, `library/control-structures.ts`), and a symbol
+  // a list of points restricted by a list of conditions is typed
+  // `list<missing | tuple<…>>` (`restrictionType()`,
+  // `library/control-structures.ts`), and a symbol
   // declared `list<missing | tuple<…>>` with no value is a point list too.
   // Without this `Dot(R, (1, 1))` for such a symbol was an `incompatible-type`
   // error at evaluation, where a valueless point list stays symbolic.
@@ -7095,7 +7096,7 @@ export function isPointOrPointListArgumentType(
 }
 
 /**
- * True when `x` is a conditional value (`When`, `Which`, `If`), or a `List`,
+ * True when `x` is a conditional value (`Which`, `If`), or a `List`,
  * `Tuple` or `Set` that holds one at any depth.
  *
  * The search operators (`Contains`, `IndexOf`, `Count`, `Element`,
@@ -7103,7 +7104,7 @@ export function isPointOrPointListArgumentType(
  * conditional value whose condition is not decided, the search stays
  * unevaluated, and gives the correct answer once the condition is decided
  * (user decision 2026-09-26). An `If` stays in an evaluated value only when
- * its condition is not decided, as a `When` and a `Which` do. Before `If` was
+ * its condition is not decided, as a `Which` does. Before `If` was
  * included, `IndexOf([1, 2], If(0 < t, 1, 3))` with `t` not known compared
  * the `If` node with the elements and gave `0`, and stayed `0` when `t`
  * became positive.
@@ -7111,7 +7112,7 @@ export function isPointOrPointListArgumentType(
 export function holdsConditionalValue(x: Expression): boolean {
   if (!isFunction(x)) return false;
   const h = x.operator;
-  if (h === 'When' || h === 'Which' || h === 'If') return true;
+  if (h === 'Which' || h === 'If') return true;
   if (h !== 'List' && h !== 'Tuple' && h !== 'Set') return false;
   return x.ops.some((op) => holdsConditionalValue(op));
 }

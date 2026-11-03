@@ -8549,7 +8549,7 @@ export class Parser {
         // they evaluate for effect to `Nothing`.)
         if (token.text === 'if') return this.parseIf();
         // `match subject { … }` is an expression (it yields a value, like the
-        // conditional-value heads `Which`/`When`), so it is a primary usable as
+        // conditional-value heads `Which`/`If`), so it is a primary usable as
         // an assignment RHS, argument, or operand — not only a statement.
         if (token.text === 'match') return this.parseMatch();
         // `do { … }` is a block expression: a statement block whose value is

@@ -189,7 +189,7 @@ describe('interval-js: a loop over a literal collection', () => {
   });
 
   test.each([
-    ['When', ['When', ['List', 1, 2], ['Less', 't', 1]]],
+    ['restriction', ['If', ['Less', 't', 1], ['List', 1, 2]]],
     ['If', ['If', ['Less', 't', 1], ['List', 1, 2], 7]],
   ])(
     'a %s source declines: its value is not always an array',

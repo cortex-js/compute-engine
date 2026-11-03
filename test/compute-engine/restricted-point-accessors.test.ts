@@ -3,7 +3,7 @@
  * RESTRICTED point or a restricted list of points whose condition is not
  * decided yet.
  *
- * With `t` free, the restricted point `(1, 2) {0 < t}` stays a `When` after
+ * With `t` free, the restricted point `(1, 2) {0 < t}` stays a restriction after
  * evaluation, and the restricted list `[(1, 2), (3, 4)] {0 < t}` evaluates to
  * the list of its restricted points `[(1, 2) {0 < t}, (3, 4) {0 < t}]`. The
  * operators below read the point in the restriction and move the restriction
@@ -20,10 +20,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const c = ['Less', 0, 't'];
-const RL = ['When', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]], c];
-const RL3 = ['When', ['List', ['Tuple', 1, 2, 3], ['Tuple', 3, 4, 5]], c];
-const RP = ['When', ['Tuple', 1, 2], c];
-const RP3 = ['When', ['Tuple', 1, 2, 3], c];
+const RL = ['If', c, ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]];
+const RL3 = ['If', c, ['List', ['Tuple', 1, 2, 3], ['Tuple', 3, 4, 5]]];
+const RP = ['If', c, ['Tuple', 1, 2]];
+const RP3 = ['If', c, ['Tuple', 1, 2, 3]];
 
 function value(json: unknown, t?: number): string {
   const ce = new ComputeEngine();
@@ -41,31 +41,49 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
     [
       'PointX of a restricted list',
       ['PointX', RL],
-      '[1,3] {0 < t}',
+      'If(0 < t, [1,3])',
       '[1,3]',
       '"Missing"',
     ],
     [
       'PointY of a restricted list',
       ['PointY', RL],
-      '[2,4] {0 < t}',
+      'If(0 < t, [2,4])',
       '[2,4]',
       '"Missing"',
     ],
     [
       'PointZ of a restricted list',
       ['PointZ', RL3],
-      '[3,5] {0 < t}',
+      'If(0 < t, [3,5])',
       '[3,5]',
       '"Missing"',
     ],
-    ['PointX of a restricted point', ['PointX', RP], '1 {0 < t}', '1', 'NaN'],
-    ['PointY of a restricted point', ['PointY', RP], '2 {0 < t}', '2', 'NaN'],
-    ['PointZ of a restricted point', ['PointZ', RP3], '3 {0 < t}', '3', 'NaN'],
+    [
+      'PointX of a restricted point',
+      ['PointX', RP],
+      'If(0 < t, 1)',
+      '1',
+      'NaN',
+    ],
+    [
+      'PointY of a restricted point',
+      ['PointY', RP],
+      'If(0 < t, 2)',
+      '2',
+      'NaN',
+    ],
+    [
+      'PointZ of a restricted point',
+      ['PointZ', RP3],
+      'If(0 < t, 3)',
+      '3',
+      'NaN',
+    ],
     [
       'PointY of a list that holds a restricted point',
       ['PointY', ['List', RP, ['Tuple', 3, 4]]],
-      '[2 {0 < t},4]',
+      '[If(0 < t, 2),4]',
       '[2,4]',
       '["Missing",4]',
     ],
@@ -91,33 +109,32 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
     );
     // An element-wise restriction whose first condition is false.
     const elementwise = [
-      'When',
-      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      'If',
       ['List', c, ['Less', 't', 0]],
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
     ];
     expect(value(['PointX', elementwise], -1)).toBe('["Missing",3]');
     expect(value(['PointX', elementwise], 2)).toBe('[1,"Missing"]');
   });
 
-  test('PointZ of a restricted 2-D point is a dimension error while present', () => {
-    // The error is the one of `PointZ((1, 2))`, with `t` free as when the
-    // condition holds. An absent point answers the absence marker first, as
-    // for `Dot` of points of different widths.
+  test('PointZ of a restricted 2-D point is a dimension error whatever the condition', () => {
+    // The error is the one of `PointZ((1, 2))`. A 2-D point has no coordinate
+    // 3, so this is a static error, also when the condition is false.
     for (const json of [
       ['PointZ', RP],
-      ['PointZ', ['When', ['List', ['Tuple', 1, 2]], c]],
+      ['PointZ', ['If', c, ['List', ['Tuple', 1, 2]]]],
     ]) {
       expect(value(json)).toContain('incompatible-dimensions');
       expect(value(json, 2)).toContain('incompatible-dimensions');
     }
-    expect(value(['PointZ', RP], -1)).toBe('NaN');
+    expect(value(['PointZ', RP], -1)).toContain('incompatible-dimensions');
   });
 
   test('the types', () => {
-    expect(type(['PointX', RL])).toBe('missing | vector<integer^2>');
+    expect(type(['PointX', RL])).toBe('vector<integer^2>');
     expect(type(['PointX', RP])).toBe('integer | nan');
     expect(type(['PointY', ['List', RP, ['Tuple', 3, 4]]])).toBe(
-      'list<integer | missing | nan^2>'
+      'vector<integer^2>'
     );
   });
 });
@@ -126,13 +143,13 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
 // (user decision 2026-09-25, `docs/ERROR-MODEL.md` §2).
 describe('Element access of a restricted point', () => {
   test.each([
-    ['First', ['First', RP], '1 {0 < t}', '1', 'NaN'],
-    ['Last', ['Last', RP], '2 {0 < t}', '2', 'NaN'],
-    ['At', ['At', RP, 2], '2 {0 < t}', '2', 'NaN'],
+    ['First', ['First', RP], 'If(0 < t, 1)', '1', 'NaN'],
+    ['Last', ['Last', RP], 'If(0 < t, 2)', '2', 'NaN'],
+    ['At', ['At', RP, 2], 'If(0 < t, 2)', '2', 'NaN'],
     [
       'At with two indices',
-      ['At', ['When', ['List', ['List', 1, 2], ['List', 3, 4]], c], 2, 1],
-      '3 {0 < t}',
+      ['At', ['If', c, ['List', ['List', 1, 2], ['List', 3, 4]]], 2, 1],
+      'If(0 < t, 3)',
       '3',
       'NaN',
     ],
@@ -148,28 +165,28 @@ describe('Cross of a restricted point', () => {
     [
       'a restricted point and a point',
       ['Cross', RP3, ['Tuple', 1, 1, 1]],
-      '(-1, 2, -1) {0 < t}',
+      'If(0 < t, (-1, 2, -1))',
       '(-1, 2, -1)',
       '"Missing"',
     ],
     [
       'a point and a restricted point',
       ['Cross', ['Tuple', 1, 1, 1], RP3],
-      '(1, -2, 1) {0 < t}',
+      'If(0 < t, (1, -2, 1))',
       '(1, -2, 1)',
       '"Missing"',
     ],
     [
       'two points restricted by the same condition',
-      ['Cross', RP3, ['When', ['Tuple', 1, 1, 1], c]],
-      '(-1, 2, -1) {0 < t}',
+      ['Cross', RP3, ['If', c, ['Tuple', 1, 1, 1]]],
+      'If(0 < t, (-1, 2, -1))',
       '(-1, 2, -1)',
       '"Missing"',
     ],
     [
       'a restricted vector and a vector',
-      ['Cross', ['When', ['List', 1, 2, 3], c], ['List', 1, 1, 1]],
-      '[-1,2,-1] {0 < t}',
+      ['Cross', ['If', c, ['List', 1, 2, 3]], ['List', 1, 1, 1]],
+      'If(0 < t, [-1,2,-1])',
       '[-1,2,-1]',
       // The whole product is absent (user decision 2026-09-25: a collection
       // operator over an absent collection); it was `[NaN, NaN, NaN]`.
@@ -177,8 +194,8 @@ describe('Cross of a restricted point', () => {
     ],
     [
       'a vector and a restricted vector',
-      ['Cross', ['List', 1, 1, 1], ['When', ['List', 1, 2, 3], c]],
-      '[1,-2,1] {0 < t}',
+      ['Cross', ['List', 1, 1, 1], ['If', c, ['List', 1, 2, 3]]],
+      'If(0 < t, [1,-2,1])',
       '[1,-2,1]',
       '"Missing"',
     ],
@@ -208,7 +225,7 @@ describe('Cross of a restricted point', () => {
 
   test('the type of a restricted point product carries the absent case', () => {
     expect(type(['Cross', RP3, ['Tuple', 1, 1, 1]])).toBe(
-      'missing | tuple<number, number, number>'
+      'tuple<number, number, number>'
     );
   });
 

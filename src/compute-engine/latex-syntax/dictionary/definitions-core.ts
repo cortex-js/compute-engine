@@ -504,7 +504,7 @@ function parseComponentAccess(
 }
 
 // ---------------------------------------------------------------------------
-// When-restriction postfix parse function (D3)
+// Restriction postfix parse function (D3)
 // ---------------------------------------------------------------------------
 //
 // Handles `expr\left\{cond\right\}` → `If(cond, expr)`, marked as a
@@ -576,7 +576,7 @@ function whichClausesFromBraceGroup(
   return clauses;
 }
 
-function parseWhenRestriction(
+function parseRestriction(
   parser: Parser,
   lhs: MathJsonExpression,
   close: string[]
@@ -2956,11 +2956,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // value of an arithmetic expression is the same for every grouping; the
   // group decides where a reader of the MathJSON finds the condition.
   // The rule is in `docs/plans/2026-11-02-restriction-binding.md`.
-  //
-  // The `When` serializer below stays for a `When` that a caller builds;
-  // the parser does not produce `When`.
   {
-    name: 'When',
     kind: 'postfix',
     precedence: 800,
     latexTrigger: ['\\left', '\\{'],
@@ -2968,29 +2964,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       parser: Parser,
       lhs: MathJsonExpression
     ): MathJsonExpression | null =>
-      parseWhenRestriction(parser, lhs, ['\\right', '\\}']),
-    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
-      const e = operand(expr, 1);
-      const cond = operand(expr, 2);
-      // Test for ABSENCE, not for falsiness: the MathJSON of the literal `0`
-      // is the number `0`, so a truthiness test discards it and the whole
-      // restriction serializes to the empty string. That silently deleted the
-      // Desmos full-plane gate `1>0\left\{cond\right\}` and the axis-line gate
-      // `y=0\left\{cond\right\}` — `1>0{x=x}` parsed correctly and came back
-      // as `1\gt`, which no longer reparses.
-      if (e === null || cond === null) return '';
-      // Unfold And clauses into stacked braces:
-      const clauses =
-        operator(cond) === 'And' ? (operands(cond) ?? []) : [cond];
-      const inner = clauses
-        .map((c) => `\\left\\{${serializer.serialize(c)}\\right\\}`)
-        .join('');
-      // Parenthesize a restricted expression whose own precedence is below
-      // this postfix operator, so the braces bind to all of it. Serialized
-      // bare, `When(-1, c)` read back as `Negate(When(1, c))` — the negation
-      // applied to the restriction instead of to its subject.
-      return `${serializer.wrap(e, 800)}${inner}`;
-    },
+      parseRestriction(parser, lhs, ['\\right', '\\}']),
   },
   // Restriction: bare `expr\{cond\}` → `If(cond, expr)` (see above)
   {
@@ -3000,7 +2974,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (
       parser: Parser,
       lhs: MathJsonExpression
-    ): MathJsonExpression | null => parseWhenRestriction(parser, lhs, ['\\}']),
+    ): MathJsonExpression | null => parseRestriction(parser, lhs, ['\\}']),
   },
   {
     kind: 'postfix',
@@ -3649,7 +3623,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       // A GUARDED clause, `Element(x, L, cond)`, has no `for` spelling: the
       // `name = expr` binding grammar carries no guard, and `L\{cond\}` would
-      // re-parse as a restriction of the collection (`When`), a different
+      // re-parse as a restriction of the collection (`If`), a different
       // expression. Such a comprehension is written in the function form,
       // which re-parses to the same node. The guarded clause itself is
       // written in function form too: its infix spelling would chain the

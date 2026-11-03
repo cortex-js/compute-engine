@@ -606,7 +606,7 @@ export function readsCallerSource(
  * `List` of provably scalar elements, or a literal `Range` when `ranges` is
  * set, through every head that applies element-wise over such a list and
  * keeps its width — the arithmetic and function heads, the relations, a
- * `Which`/`If` in its element-wise mode, a `When` over a list of booleans,
+ * `Which`/`If` in its element-wise mode, a restriction over a list of booleans,
  * a `PointList` zipped from columns ({@link indexedOperands} lists them and the operand mix each admits).
  * `undefined` for any other operand: a declared width is not read, because
  * a value handed to the compiled code through `vars` is never checked
@@ -1580,7 +1580,6 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
   'Comprehension',
   'Which',
   'If',
-  'When',
   'Abs',
   'Norm',
 ]);
@@ -1776,7 +1775,7 @@ function indexInto(
   // caller-supplied code (`readsCallerSource`) could then run a different
   // number of times, so such a selection is left alone.
   if (
-    (SELECTION_HEADS.has(e.operator) || e.operator === 'When') &&
+    SELECTION_HEADS.has(e.operator) &&
     e.ops.some((op) => readsCallerSource(op, options))
   )
     return undefined;
@@ -1857,11 +1856,11 @@ function isSelectionScalar(op: Expression): boolean {
  *   arm is numeric and `Missing` otherwise (`noMatchCell`,
  *   `library/control-structures.ts`), and the scalar selection answers
  *   `Missing`, which every target spells `NaN` for a number;
- * - `When(value, cond)` whose condition is a list of booleans: the
+ * - `If(cond, value)` with one branch, whose condition is a list of booleans: the
  *   interpreter masks each position by its cell, and a scalar or point value
  *   ({@link isSelectionScalar}) is repeated at every position while a list
  *   value is read at each. A masked position is `NaN` for a number and
- *   `Missing` for a point, as the scalar `When` answers. Both operands must
+ *   `Missing` for a point, as the scalar restriction answers. Both operands must
  *   be pure, as for `Which`.
  */
 function indexedOperands(
@@ -1881,12 +1880,6 @@ function indexedOperands(
   }
   if (SELECTION_HEADS.has(head)) {
     if (e.nops < 2 || isSelectionScalar(e.op1)) return undefined;
-    if (!e.ops.every((op) => op.isPure === true)) return undefined;
-    return new Set(e.ops.filter((op) => !isSelectionScalar(op)));
-  }
-  if (head === 'When') {
-    if (e.nops !== 2 || !e.op2.type.matches('indexed_collection<boolean>'))
-      return undefined;
     if (!e.ops.every((op) => op.isPure === true)) return undefined;
     return new Set(e.ops.filter((op) => !isSelectionScalar(op)));
   }

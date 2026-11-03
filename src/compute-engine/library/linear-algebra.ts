@@ -2240,7 +2240,7 @@ function pointListDotProduct(
  * the list of its restricted points `[(1, 2) {0 < t}, (3, 4) {0 < t}]`, is
  * read back as one restricted list. What reaches this function is a list
  * whose cells do NOT all have the same condition: the value of an
- * element-wise restriction (`When(L, [0 < t, t < 0])`), or a list where only
+ * element-wise restriction (`If([0 < t, t < 0], L)`), or a list where only
  * some points are restricted or absent. `MatrixMultiply` answers an
  * `incompatible-type` error for it, because its cells are not all points.
  *
@@ -2255,8 +2255,8 @@ function pointListDotProduct(
  *
  * Only a list whose every element is a point, a restricted point or an absent
  * value is taken point by point. A restricted VECTOR whose cells have
- * different conditions, such as `When([1, 2], [0 < t, t < 0])`, is a list of
- * `When` cells too, but those cells are numbers, not points, and their inner
+ * different conditions, such as `If([0 < t, t < 0], [1, 2])`, is a list of
+ * restricted cells too, but those cells are numbers, not points, and their inner
  * product is not a list.
  */
 function pointCellsDotProduct(
@@ -2317,7 +2317,7 @@ function pointCellsDotProduct(
 /**
  * True when `x` can be a cell of a list of points once its condition is
  * decided: a point (a tuple), an absent point (`Missing`, `Undefined`), a
- * restricted point `When(P, c)`, or a piecewise value `Which(c₁, P₁, …)`
+ * restricted point `If(c, P)`, or a piecewise value `Which(c₁, P₁, …)`
  * whose every branch is a point.
  */
 function isPointCell(x: Expression): boolean {
@@ -2331,7 +2331,7 @@ function isPointCell(x: Expression): boolean {
 
 /**
  * True when an operand of `ops` is a `List` that holds a restricted cell
- * (`When`). The `threadsConditionals` flag has already moved out a
+ * (`If(c, x)`). The `threadsConditionals` flag has already moved out a
  * condition shared by EVERY cell of such a list, so what is left is a list
  * whose cells have different conditions (an element-wise restriction), or
  * where only some cells are restricted. A product that reads the list whole

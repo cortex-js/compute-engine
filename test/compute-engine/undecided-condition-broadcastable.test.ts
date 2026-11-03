@@ -7,7 +7,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * indexed_collection<boolean>`). That type is a subtype of NEITHER `boolean`
  * nor `indexed_collection<boolean | missing>`, so the evaluate-side condition
  * gates that tested those two — `isBooleanishCondition` behind `If`/`Which`,
- * and the mask-cell gate of `When` — no longer recognized such a condition:
+ * and the mask-cell gate of a restriction — no longer recognized such a condition:
  * `Which(h(x) = 10, 1, True, 0)` THREW the "Condition must evaluate to True
  * or False" spell-check error out of `evaluate()`, where before the round it
  * was held as an ordinary undecided condition, and `x{h(x) ≤ [1,2,3]}` stayed
@@ -45,15 +45,15 @@ describe('an undecided `broadcastable<boolean>` condition is held, not an error'
     }
   });
 
-  test('When over a mask whose cells are such comparisons broadcasts into held Whens', () => {
+  test('restriction over a mask whose cells are such comparisons broadcasts into held restrictions', () => {
     const r = ce
-      .box(['When', 'x', ['LessEqual', ['h', 'x'], ['List', 1, 2, 3]]])
+      .box(['If', ['LessEqual', ['h', 'x'], ['List', 1, 2, 3]], 'x'])
       .evaluate();
     expect(r.json).toEqual([
       'List',
-      ['When', 'x', ['LessEqual', ['h', 'x'], 1]],
-      ['When', 'x', ['LessEqual', ['h', 'x'], 2]],
-      ['When', 'x', ['LessEqual', ['h', 'x'], 3]],
+      ['If', ['LessEqual', ['h', 'x'], 1], 'x'],
+      ['If', ['LessEqual', ['h', 'x'], 2], 'x'],
+      ['If', ['LessEqual', ['h', 'x'], 3], 'x'],
     ]);
   });
 });

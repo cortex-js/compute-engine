@@ -549,7 +549,7 @@ describe('COMPILED PIPE', () => {
   });
 
   test('a chained pipe is evaluated once, before the stage', () => {
-    // `When(x, False)` never reads `x`, but the interpreter evaluates the
+    // The stage `x ↦ 0` never reads `x`, but the interpreter evaluates the
     // inner pipe before it applies the stage, so the assignment runs. Each
     // route has an engine of its own: the interpreter assigns `c`.
     const expr = [
@@ -558,7 +558,7 @@ describe('COMPILED PIPE', () => {
       [
         'Pipe',
         ['Pipe', ['Assign', 'c', ['Add', 'c', 1]], 'Abs'],
-        ['When', 'False'],
+        ['Function', 0, 'x'],
       ],
       'c',
     ];

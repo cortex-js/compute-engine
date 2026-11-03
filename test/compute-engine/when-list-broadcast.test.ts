@@ -3,11 +3,11 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import '../utils'; // For snapshot serializers
 
 /**
- * Desmos-style broadcasting of `When(expr, cond)` over a list-valued
+ * Desmos-style broadcasting of `If(cond, expr)` over a list-valued
  * condition: the restriction is applied element-by-element, producing one
  * masked branch per element (mirrors the boolean-mask branch of `At`).
  */
-describe('When: list-condition broadcast', () => {
+describe('restriction: list-condition broadcast', () => {
   test('all-True list condition → list of the evaluated expr', () => {
     const ce = new ComputeEngine();
     const r = ce
@@ -32,16 +32,16 @@ describe('When: list-condition broadcast', () => {
     expect(r.toString()).toBe('[NaN,2,2]');
   });
 
-  test('indeterminate (symbolic) elements → held When per element', () => {
+  test('indeterminate (symbolic) elements → held restriction per element', () => {
     const ce = new ComputeEngine();
     const r = ce
       .parse('x\\left\\{x\\le\\left[1,2,3\\right]\\right\\}')
       .evaluate();
     expect(r.json).toEqual([
       'List',
-      ['When', 'x', ['LessEqual', 'x', 1]],
-      ['When', 'x', ['LessEqual', 'x', 2]],
-      ['When', 'x', ['LessEqual', 'x', 3]],
+      ['If', ['LessEqual', 'x', 1], 'x'],
+      ['If', ['LessEqual', 'x', 2], 'x'],
+      ['If', ['LessEqual', 'x', 3], 'x'],
     ]);
   });
 
@@ -117,8 +117,8 @@ describe('When: list-condition broadcast', () => {
     });
   });
 
-  describe('compile path: list-condition When is not silently miscompiled', () => {
-    test('GLSL rejects a list-condition When the same way as a list comparison', () => {
+  describe('compile path: list-condition restriction is not silently miscompiled', () => {
+    test('GLSL rejects a list-condition restriction the same way as a list comparison', () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
       const target = new GLSLTarget();
@@ -136,7 +136,7 @@ describe('When: list-condition broadcast', () => {
       ).toThrow();
     });
 
-    test('scalar When still compiles to a ternary', () => {
+    test('scalar restriction still compiles to a ternary', () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
       const target = new GLSLTarget();

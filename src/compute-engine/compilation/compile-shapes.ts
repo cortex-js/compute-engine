@@ -249,7 +249,7 @@ export function vectorComponentCount(
 /**
  * On the plain JavaScript target a complex value is a `{ re, im }` object
  * and a real value a plain number — two incompatible runtime conventions. A
- * branch form (`If`/`Which`/`When`) whose value arms mix the two hands
+ * branch form (`If`/`Which`) whose value arms mix the two hands
  * consumers a value whose slots are sometimes missing (`(0).re` →
  * `undefined` → NaN at every point — Tycho item 60: a constant base-case
  * arm under a complex-ascribed recursive function). When any value arm is

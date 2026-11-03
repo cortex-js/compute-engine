@@ -4521,7 +4521,7 @@ function establishedAntiderivativeInRadians(
   // nonzero). Covers ∫e^x (L′=1), ∫e^{−a·x} (a `Negate`-headed exponent the
   // `Multiply`/`Add`-only linear-substitution and rule paths miss), ∫e^{a·x+b},
   // ∫e^{−x/2}, ∫e^{3−2x}, … The generic convention applies: L′ can be zero only
-  // on a measure-zero set, so no `When` guard is emitted.
+  // on a measure-zero set, so no restriction guard is emitted.
   if (isFunction(fn, 'Exp')) {
     const a = linearIndexCoefficient(fn.op1, index);
     if (a) return fn.div(a);

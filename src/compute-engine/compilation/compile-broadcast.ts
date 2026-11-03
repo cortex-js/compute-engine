@@ -446,7 +446,7 @@ export function tryCompileBroadcast(
   let runtimePointOperand: Expression | undefined;
 
   // A GATED POINT (`isGatedPoint`: a restricted point such as
-  // `When((0, 1), c)`, a point or the absent value at run time) broadcasts
+  // `If(c, (0, 1))`, a point or the absent value at run time) broadcasts
   // as a point does, but the point plans in this method test for a point
   // by its tuple type, which the `missing` arm hides. So only the shapes
   // the interpreter computes component-wise are admitted here: the gated

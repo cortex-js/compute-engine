@@ -204,8 +204,8 @@ describe('CE-616: a definite integral evaluates a held Sum, Product or D', () =>
 
   test('an infinite series is still integrated term by term', () => {
     const ce = new ComputeEngine();
-    // Σ_{n=0}^∞ n·x^n evaluates to the conditional `When(x/(1 − x)^2,
-    // |x| < 1)`, which is not used: the series rules integrate the held
+    // Σ_{n=0}^∞ n·x^n evaluates to the conditional `If(|x| < 1,
+    // x/(1 − x)^2)`, which is not used: the series rules integrate the held
     // sum, and ∫_0^{1/2} Σ n·x^n dx is 1 + ln(1/2).
     check(
       ce.box([

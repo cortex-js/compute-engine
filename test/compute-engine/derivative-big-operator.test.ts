@@ -429,9 +429,9 @@ describe('explain: the derivative of an infinite sum through its closed form', (
       .explain('D');
     expect(explanation.steps[0].id).toBe('derivative.rewrite');
     expect(explanation.steps[0].value.toString()).toBe(
-      'D(x / (1 - x), x) {|x| < 1}'
+      'If(|x| < 1, D(x / (1 - x), x))'
     );
-    expect(explanation.result.toString()).toBe('(1 - x)^(-2) {|x| < 1}');
+    expect(explanation.result.toString()).toBe('If(|x| < 1, (1 - x)^(-2))');
   });
 });
 

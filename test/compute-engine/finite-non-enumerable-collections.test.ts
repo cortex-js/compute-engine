@@ -155,13 +155,13 @@ describe('operators that decide membership or splice elements', () => {
     expect(result.op2.isSame(ce.box(LINSPACE))).toBe(true);
   });
 
-  test('When over a carrier with no computable elements', () => {
-    expect(evaluate(['When', LINSPACE, ['List', 'True', 'False']])).toBe(
-      ce.box(['When', LINSPACE, ['List', 'True', 'False']]).toString()
+  test('restriction over a carrier with no computable elements', () => {
+    expect(evaluate(['If', ['List', 'True', 'False'], LINSPACE])).toBe(
+      ce.box(['If', ['List', 'True', 'False'], LINSPACE]).toString()
     );
     expect(
-      ce.box(['When', LINSPACE, ['List', 'True', 'False']]).evaluate().operator
-    ).toBe('When');
+      ce.box(['If', ['List', 'True', 'False'], LINSPACE]).evaluate().operator
+    ).toBe('If');
   });
 
   // A provably empty collection is walkable: the walk yields no elements, and
@@ -200,7 +200,7 @@ describe('operators that decide membership or splice elements', () => {
         ['Set', 'b', 'f'],
       ])
     ).toBe('Set(b)');
-    expect(evaluate(['When', ['Set', 1, 2], ['List', 'True', 'False']])).toBe(
+    expect(evaluate(['If', ['List', 'True', 'False'], ['Set', 1, 2]])).toBe(
       '[1,NaN]'
     );
     // The range is one element of the list, so it materializes as a nested

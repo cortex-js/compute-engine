@@ -378,7 +378,7 @@ function firstRefusedPart(
  * so does the bare `list`, whose element type is `any`.
  *
  * The walk reads the value, not its type: a `List` or `Set` literal and the
- * literals nested in it, the literal a restriction (`When`) holds, and the
+ * literals nested in it, the literal a restriction holds, and the
  * literal a symbol holds as its value (`s := fs`, with `fs` holding
  * `[1, Error(…)]`). It also reads the slots of a tuple literal and the
  * values of a dictionary literal, whose types are built from the types of

@@ -3,16 +3,16 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { harvestCse } from '../../src/compute-engine/compilation/cse';
 
 /**
- * ROADMAP CE-562: a subexpression that the condition of a `When` and its
+ * ROADMAP CE-562: a subexpression that the condition of a restriction and its
  * value both read is computed once.
  *
- * `When(value, cond)` evaluates its condition on every path and its value
+ * `If(cond, value)` evaluates its condition on every path and its value
  * only when the condition holds. A temporary bound for the condition is
  * therefore available to the value arm. The CSE harvest walked the operands
  * in index order (the value first), so the value occurrence came before the
  * condition occurrence and the arm could not read the temporary: the call was
  * emitted twice. The harvest now walks the operands in emission order (the
- * condition first), and every `When` handler compiles the condition first.
+ * condition first), and every restriction handler compiles the condition first.
  *
  * The witness is the Desmos restriction `T_4(t) = T_3(t) {cos(T_3(t)) > c}`,
  * registered the way Tycho does it (a declared signature, then a `Function`
@@ -42,9 +42,9 @@ const T4 = [
   [
     'Block',
     [
-      'When',
-      ['T_3', 'ceArg_0'],
+      'If',
       ['Less', -0.8164965809277259, ['Cos', ['T_3', 'ceArg_0']]],
+      ['T_3', 'ceArg_0'],
     ],
   ],
   'ceArg_0',
@@ -147,7 +147,7 @@ describe('CE-562 — a top-level When', () => {
     ce.assign('f', ce.parse('t \\mapsto t^2 + \\sin t'));
     return ce;
   }
-  const shared = ['When', ['f', 'x'], ['Less', 0, ['Cos', ['f', 'x']]]];
+  const shared = ['If', ['Less', 0, ['Cos', ['f', 'x']]], ['f', 'x']];
 
   it.each(['javascript', 'glsl', 'wgsl', 'interval-js'] as const)(
     '%s: the call is emitted once',
@@ -194,9 +194,9 @@ describe('CE-562 — a top-level When', () => {
   it('a subexpression that only the value reads stays in the value arm', () => {
     const ce = engineWithF();
     const expr = ce.box([
-      'When',
-      ['Add', ['f', 'x'], ['Sin', ['f', 'x']]],
+      'If',
       ['Less', 0, 'x'],
+      ['Add', ['f', 'x'], ['Sin', ['f', 'x']]],
     ] as never);
     const r = compile(expr, { to: 'javascript' });
     expect(r.success).toBe(true);
@@ -214,9 +214,9 @@ describe('CE-562 — a top-level When', () => {
   it('an impure call is never shared', () => {
     const ce = engineWithF();
     const expr = ce.box([
-      'When',
-      ['Add', ['Random'], ['Sin', 'x']],
+      'If',
       ['Less', 0.5, ['Add', ['Random'], ['Sin', 'x']]],
+      ['Add', ['Random'], ['Sin', 'x']],
     ] as never);
     const js = compile(expr, { to: 'javascript' });
     expect(js.success).toBe(true);

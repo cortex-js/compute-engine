@@ -239,8 +239,9 @@ describe('onAmbiguity', () => {
     for (const latex of ['\\{5!=120\\}', '\\lbrace 5!=120 \\rbrace']) {
       expect(codes(latex)).toContain('ambiguous-factorial');
       expect(json(latex, { ...asError, form: 'raw' })).toEqual([
-        'Set',
+        'If',
         error('ambiguous-factorial', '!='),
+        1,
       ]);
     }
     // The text of a LaTeX group is not checked.

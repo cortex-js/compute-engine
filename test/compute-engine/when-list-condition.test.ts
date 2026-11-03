@@ -1,5 +1,5 @@
 /**
- * `When(value, condition)` — the Desmos restriction `value\{condition\}` —
+ * `If(condition, value)` — the Desmos restriction `value\{condition\}` —
  * with a LIST of conditions.
  *
  * The interpreter restricts element by element: one masked value per
@@ -32,25 +32,25 @@ describe('a restriction with a list of conditions', () => {
   test('a scalar value is repeated at every position, masked per condition', () => {
     // A masked numeric cell is `NaN` (user decision 2026-09-25), as the
     // compiled code always answered.
-    expect(interp(['When', 'u', COND])).toBe('[5,NaN,NaN]');
-    expect(run(['When', 'u', COND])).toEqual([5, NaN, NaN]);
+    expect(interp(['If', COND, 'u'])).toBe('[5,NaN,NaN]');
+    expect(run(['If', COND, 'u'])).toEqual([5, NaN, NaN]);
   });
 
   test('a point is one value: lifted whole at every position, never zipped', () => {
-    expect(interp(['When', ['Tuple', 'u', 'v'], COND])).toBe(
+    expect(interp(['If', COND, ['Tuple', 'u', 'v']])).toBe(
       '[(5, 1),"Missing","Missing"]'
     );
     // A masked point cell is `undefined` in compiled code, as a single
     // missing point is (user decision 2026-10-18); a masked number cell
     // stays `NaN` (test above).
-    expect(run(['When', ['Tuple', 'u', 'v'], COND])).toEqual([
+    expect(run(['If', COND, ['Tuple', 'u', 'v']])).toEqual([
       [5, 1],
       undefined,
       undefined,
     ]);
     expect(
       ce
-        .box(['When', ['Tuple', 1, 2], ['List', 'True', 'False', 'False']])
+        .box(['If', ['List', 'True', 'False', 'False'], ['Tuple', 1, 2]])
         .evaluate()
         .toString()
     ).toBe('[(1, 2),"Missing","Missing"]');
@@ -58,9 +58,9 @@ describe('a restriction with a list of conditions', () => {
 
   test('a list value is zipped with the conditions', () => {
     const json = [
-      'When',
-      ['List', 10, 20, 30],
+      'If',
       ['Greater', ['List', 1, 2, 3], 2],
+      ['List', 10, 20, 30],
     ];
     expect(interp(json)).toBe('[NaN,NaN,30]');
     expect(run(json)).toEqual([NaN, NaN, 30]);
@@ -68,23 +68,23 @@ describe('a restriction with a list of conditions', () => {
 
   test("a list value keeps the interpreter's alignment: truncated to the shorter", () => {
     const shorter = [
-      'When',
-      ['List', 10, 20],
+      'If',
       ['Less', ['List', 'v', ['Multiply', 2, 'v'], ['Multiply', 3, 'v']], 2],
+      ['List', 10, 20],
     ];
     expect(interp(shorter)).toBe('[10,NaN]');
     expect(run(shorter)).toEqual([10, NaN]);
     const longer = [
-      'When',
-      ['List', 10, 20, 30, 40],
+      'If',
       ['Less', ['List', 'v', ['Multiply', 2, 'v']], 2],
+      ['List', 10, 20, 30, 40],
     ];
     expect(interp(longer)).toBe('[10,NaN]');
     expect(run(longer)).toEqual([10, NaN]);
     const allFalse = [
-      'When',
-      ['List', 10, 20],
+      'If',
       ['Greater', ['List', 'v', ['Multiply', 2, 'v']], 5],
+      ['List', 10, 20],
     ];
     expect(interp(allFalse)).toBe('[NaN,NaN]');
     expect(run(allFalse)).toEqual([NaN, NaN]);
@@ -96,9 +96,9 @@ describe('a restriction with a list of conditions', () => {
     // `{ re: NaN, im: NaN }` as present, and they must read the masked cell
     // as absent (R3 of `docs/plans/2026-11-01-absent-value-contract.md`).
     const json = [
-      'When',
-      ['Add', 'u', ['Multiply', ['Complex', 0, 1], 'v']],
+      'If',
       ['Less', ['Multiply', 'v', ['List', 1, 2]], 2],
+      ['Add', 'u', ['Multiply', ['Complex', 0, 1], 'v']],
     ];
     expect(interp(json)).toBe('[(5 + i),NaN]');
     const out = run(json) as unknown[];
@@ -108,7 +108,7 @@ describe('a restriction with a list of conditions', () => {
 
   test('a string is one value, repeated, with the object null as its absence', () => {
     ce.declare('s', 'string');
-    const json = ['When', 's', ['Less', ['Multiply', 'v', ['List', 1, 2]], 2]];
+    const json = ['If', ['Less', ['Multiply', 'v', ['List', 1, 2]], 2], 's'];
     expect(
       ce
         .box(json)
@@ -128,17 +128,17 @@ describe('a restriction with a list of conditions', () => {
     // interpreter answers `[10, Missing, Missing]`.
     ce.declare('w', 'unknown');
     expect(() =>
-      compile(ce.box(['When', 'w', COND]), { fallback: false })
+      compile(ce.box(['If', COND, 'w']), { fallback: false })
     ).toThrow(/may be a list or a point at run time/);
   });
 
   test('an empty list of conditions answers the empty list on both routes', () => {
     expect(
-      ce.box(['When', ['List', 10, 20, 30], ['List']]).evaluate().json
+      ce.box(['If', ['List'], ['List', 10, 20, 30]]).evaluate().json
     ).toEqual(['List']);
-    expect(ce.box(['When', 'u', ['List']]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['If', ['List'], 'u']).evaluate().json).toEqual(['List']);
     expect(
-      compile(ce.box(['When', ['List', 10, 20, 30], ['List']]), {
+      compile(ce.box(['If', ['List'], ['List', 10, 20, 30]]), {
         fallback: false,
       }).run!(VARS)
     ).toEqual([]);
@@ -151,11 +151,11 @@ describe('a restriction with a list of conditions', () => {
     // point is one value, repeated at every position; a list of points is
     // zipped with the conditions. Each result equals the interpreter's.
     ce.declare('Q', 'list<tuple<number, number>> | tuple<number, number>');
-    const r = compile(ce.box(['When', 'Q', COND]), { fallback: false });
+    const r = compile(ce.box(['If', COND, 'Q']), { fallback: false });
     expect(r.success).toBe(true);
     const interpQ = (Q: unknown) =>
       ce
-        .box(['When', 'Q', COND])
+        .box(['If', COND, 'Q'])
         .subs({ Q: ce.box(Q as never), v: 1 })
         .evaluate()
         .toString();
@@ -182,13 +182,13 @@ describe('a restriction with a list of conditions', () => {
 
   test('both routes agree with the one-clause Which', () => {
     expect(run(['Which', COND, ['Tuple', 'u', 'v']])).toEqual(
-      run(['When', ['Tuple', 'u', 'v'], COND])
+      run(['If', COND, ['Tuple', 'u', 'v']])
     );
   });
 
   test('a scalar condition is unchanged', () => {
-    expect(run(['When', 'u', ['Less', 'v', 2]])).toBe(5);
-    expect(run(['When', 'u', ['Greater', 'v', 2]])).toBeNaN();
+    expect(run(['If', ['Less', 'v', 2], 'u'])).toBe(5);
+    expect(run(['If', ['Greater', 'v', 2], 'u'])).toBeNaN();
   });
 
   test('the corpus shape: a 3-D point restricted by a list read off a range', () => {
@@ -196,8 +196,7 @@ describe('a restriction with a list of conditions', () => {
     ce.declare('h', '(number, number) -> number');
     ce.assign('h', ce.parse('(a, b) \\mapsto a + b'));
     const json = [
-      'When',
-      ['Tuple', 'u', 'v', 0],
+      'If',
       [
         'Less',
         [
@@ -207,6 +206,7 @@ describe('a restriction with a list of conditions', () => {
         ],
         ['h', 'u', 'v'],
       ],
+      ['Tuple', 'u', 'v', 0],
     ];
     expect(interp(json)).toBe('[(5, 1, 0),(5, 1, 0),(5, 1, 0)]');
     expect(run(json)).toEqual([
@@ -217,8 +217,8 @@ describe('a restriction with a list of conditions', () => {
   });
 
   test('a shader target still fails closed on a list-valued condition', () => {
-    expect(() => new GLSLTarget().compile(ce.box(['When', 'u', COND]))).toThrow(
-      /branch condition is a collection-valued expression/
+    expect(() => new GLSLTarget().compile(ce.box(['If', COND, 'u']))).toThrow(
+      /object-domain absent/
     );
   });
 });
@@ -228,41 +228,45 @@ describe('an infinite mask is read only as far as needed', () => {
   // element, so an infinite condition list ran out of memory.
   test('a finite value with an infinite mask', () => {
     const expr = ce.box([
-      'When',
-      ['List', 1, 2, 3],
+      'If',
       ['Range', 1, 'PositiveInfinity'],
+      ['List', 1, 2, 3],
     ]);
     expect(expr.count).toBe(3);
     expect([...expr.each()].map((x) => x.toString())).toEqual([
-      '1 {1}',
-      '2 {2}',
-      '3 {3}',
+      'If(Error(ErrorCode("incompatible-type", "boolean", "list<integer>"), Range(1, +oo)), 1)',
+      'If(Error(ErrorCode("incompatible-type", "boolean", "list<integer>"), Range(1, +oo)), 2)',
+      'If(Error(ErrorCode("incompatible-type", "boolean", "list<integer>"), Range(1, +oo)), 3)',
     ]);
   });
 
   test('an infinite value with an infinite mask', () => {
     const expr = ce.box([
-      'When',
+      'If',
       ['Range', 1, 'PositiveInfinity'],
       ['Range', 1, 'PositiveInfinity'],
     ]);
     expect(expr.count).toBe(Infinity);
-    expect(expr.at(4)?.toString()).toBe('4 {4}');
+    expect(expr.at(4)?.toString()).toBe(
+      'If(Error(ErrorCode("incompatible-type", "boolean", "list<integer>"), Range(1, +oo)), 4)'
+    );
     // One element far out is looked up directly, not by reading every
     // condition before it.
-    expect(expr.at(50_000_000)?.toString()).toBe('50000000 {50000000}');
+    expect(expr.at(50_000_000)?.toString()).toBe(
+      'If(Error(ErrorCode("incompatible-type", "boolean", "list<integer>"), Range(1, +oo)), 50000000)'
+    );
   });
 
   test('an infinite value with a finite mask stops at the mask', () => {
     const expr = ce.box([
-      'When',
-      ['Range', 1, 'PositiveInfinity'],
+      'If',
       ['List', 'True', 'False'],
+      ['Range', 1, 'PositiveInfinity'],
     ]);
     expect(expr.count).toBe(2);
     expect([...expr.each()].map((x) => x.toString())).toEqual([
-      '1 {"True"}',
-      '2 {"False"}',
+      'If("True", 1)',
+      'If("False", 2)',
     ]);
     expect(expr.at(3)).toBeUndefined();
   });

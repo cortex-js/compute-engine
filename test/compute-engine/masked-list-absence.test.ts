@@ -46,7 +46,7 @@ describe('a broadcast over a list restricted by a list of conditions', () => {
   test('the box route and the parse route agree', () => {
     const boxed = ce.box([
       'Sin',
-      ['When', ['List', 10, 20, 30], ['Less', 2, ['List', 1, 2, 3]]],
+      ['If', ['Less', 2, ['List', 1, 2, 3]], ['List', 10, 20, 30]],
     ]);
     expect(boxed.evaluate().toString()).toBe('[NaN,NaN,sin(30)]');
     expect(boxed.evaluate().toString()).toBe(
@@ -66,29 +66,29 @@ describe('a broadcast over a list restricted by a list of conditions', () => {
 
   test('the held restriction presents its zipped cells', () => {
     const w = ce.box([
-      'When',
-      ['List', 10, 20, 30],
+      'If',
       ['Less', 2, ['List', 1, 2, 3]],
+      ['List', 10, 20, 30],
     ]);
-    expect(w.operator).toBe('When');
+    expect(w.operator).toBe('If');
     expect(w.isCollection).toBe(true);
     expect(w.count).toBe(3);
-    expect(w.at(1)?.toString()).toBe('10 {"False"}');
-    expect(w.at(3)?.toString()).toBe('30 {"True"}');
+    expect(w.at(1)?.toString()).toBe('If("False", 10)');
+    expect(w.at(3)?.toString()).toBe('If("True", 30)');
     expect(Array.from(w.each()).map((x) => x.toString())).toEqual([
-      '10 {"False"}',
-      '20 {"False"}',
-      '30 {"True"}',
+      'If("False", 10)',
+      'If("False", 20)',
+      'If("True", 30)',
     ]);
   });
 
   test('a scalar condition still restricts every element', () => {
     const c = new ComputeEngine();
     c.declare('b', 'boolean');
-    const w = c.box(['When', ['List', 10, 20], 'b']);
+    const w = c.box(['If', 'b', ['List', 10, 20]]);
     expect(Array.from(w.each()).map((x) => x.toString())).toEqual([
-      '10 {b}',
-      '20 {b}',
+      'If(b, 10)',
+      'If(b, 20)',
     ]);
   });
 
@@ -165,8 +165,8 @@ describe('Norm of an absent operand', () => {
   test.each([
     ['Norm(Missing)', ['Norm', 'Missing']],
     ['Norm(Undefined)', ['Norm', 'Undefined']],
-    ['Norm of an absent point', ['Norm', ['When', ['Tuple', 2, 3], 'c']]],
-    ['Abs of an absent point', ['Abs', ['When', ['Tuple', 2, 3], 'c']]],
+    ['Norm of an absent point', ['Norm', ['If', 'c', ['Tuple', 2, 3]]]],
+    ['Abs of an absent point', ['Abs', ['If', 'c', ['Tuple', 2, 3]]]],
     ['a vector with an absent cell', ['Norm', ['List', 1, 'Missing']]],
     ['the L1 norm', ['Norm', ['List', 1, 'Missing'], 1]],
     ['the L-infinity norm', ['Norm', ['List', 1, 'Missing'], "'Infinity'"]],
@@ -199,7 +199,7 @@ describe('Norm of an absent operand', () => {
     c.assign('c', true);
     expect(
       c
-        .box(['Norm', ['When', ['Tuple', 3, 4], 'c']])
+        .box(['Norm', ['If', 'c', ['Tuple', 3, 4]]])
         .evaluate()
         .toString()
     ).toBe('5');
@@ -257,15 +257,15 @@ describe('Map over a list that holds a restricted point', () => {
     const m = c.box([
       'Map',
       sinFn,
-      ['List', ['When', ['Tuple', 2, 3], 'c'], ['Tuple', 2, 3]],
+      ['List', ['If', 'c', ['Tuple', 2, 3]], ['Tuple', 2, 3]],
     ] as never);
-    expect(m.type.toString()).toBe('list<missing | tuple<number, number>>');
-    expect(m.evaluate().toString()).toBe('["Missing",(sin(2), sin(3))]');
-    expect(m.at(1)?.toString()).toBe('"Missing"');
+    expect(m.type.toString()).toBe('list<tuple<number, number>^2>');
+    expect(m.evaluate().toString()).toBe('[NaN,(sin(2), sin(3))]');
+    expect(m.at(1)?.toString()).toBe('NaN');
     // Same answer as applying `Sin` to the restricted point directly.
     expect(
       c
-        .box(['Sin', ['When', ['Tuple', 2, 3], 'c']])
+        .box(['Sin', ['If', 'c', ['Tuple', 2, 3]]])
         .evaluate()
         .toString()
     ).toBe('"Missing"');
@@ -275,14 +275,14 @@ describe('Map over a list that holds a restricted point', () => {
     const m = c.box([
       'Map',
       ['Function', ['Multiply', 2, 'x'], 'x'],
-      ['List', ['When', ['Tuple', 2, 3], 'c'], ['Tuple', 2, 3]],
+      ['List', ['If', 'c', ['Tuple', 2, 3]], ['Tuple', 2, 3]],
     ] as never);
-    expect(m.evaluate().toString()).toBe('["Missing",(4, 6)]');
+    expect(m.evaluate().toString()).toBe('[NaN,(4, 6)]');
   });
 
   test('a numeric cell is still NaN', () => {
-    const m = c.box(['Map', sinFn, ['List', ['When', 2, 'c'], 3]] as never);
-    expect(m.type.toString()).toBe('list<nan | real^2>');
+    const m = c.box(['Map', sinFn, ['List', ['If', 'c', 2], 3]] as never);
+    expect(m.type.toString()).toBe('vector<real^2>');
     expect(m.evaluate().toString()).toBe('[NaN,sin(3)]');
   });
 });
@@ -317,8 +317,8 @@ describe('a numeric function of a value that can be a list or absent', () => {
   test('a numeric result still absorbs the absence into NaN', () => {
     const c = new ComputeEngine();
     c.declare('b', 'boolean');
-    const e = c.box(['Sin', ['When', 2, 'b']]);
-    expect(e.type.toString()).toBe('nan | real');
+    const e = c.box(['Sin', ['If', 'b', 2]]);
+    expect(e.type.toString()).toBe('real');
     c.assign('b', false);
     expect(e.evaluate().toString()).toBe('NaN');
   });

@@ -1,7 +1,7 @@
 /**
- * Tycho item 335 (filed 2026-09-29): a restriction (`When`) whose condition is
+ * Tycho item 335 (filed 2026-09-29): a restriction whose condition is
  * a LIST of booleans (a mask) zips the value with the mask, cell by cell, so
- * the cells of the result are the ELEMENTS of the value. The `When` type
+ * the cells of the result are the ELEMENTS of the value. The restriction type
  * handler tested the value's shape against `list<any>` only, so a value typed
  * `indexed_collection<T>`, `collection<T>` or `range` was read as a scalar and
  * the whole collection type was put where the element type belongs:
@@ -97,14 +97,14 @@ const CASES: Case[] = [
   },
   // An undeclared carrier is `unknown`: the condition is not a known mask, so
   // the value keeps its own type with the `missing` arm.
-  { declared: undefined, points: false, staticType: 'missing | unknown' },
+  { declared: undefined, points: false, staticType: 'unknown' },
 ];
 
 function restriction(ce: ComputeEngine, points: boolean) {
   return ce.box([
-    'When',
-    'P',
+    'If',
     points ? ['Greater', ['PointX', 'P'], 1] : ['Greater', 'P', 1],
+    'P',
   ]);
 }
 
@@ -124,7 +124,7 @@ describe('TYCHO ITEM 335: STATIC TYPE OF A MASKED RESTRICTION', () => {
     });
 
     // The parser reads a restriction as the single-branch `If(c, P)`. With
-    // a mask condition it has the type of `When(P, c)`; with a scalar
+    // a mask condition it has the type of `If(c, P)`; with a scalar
     // condition (`P` undeclared), the type of `P`, with no `missing` arm.
     test(`LaTeX route, P: ${label}`, () => {
       const ce = engineFor(c.declared);
@@ -202,9 +202,9 @@ describe('TYCHO ITEM 335: CARRIERS THAT ARE NOT ZIPPED, AND NON-LIST MASKS', () 
   test('an infinite ordered carrier is zipped over the mask length', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
-      'When',
-      ['Range', 1, 'PositiveInfinity'],
+      'If',
       ['List', 'True', 'False'],
+      ['Range', 1, 'PositiveInfinity'],
     ]);
     expect(e.type.toString()).toBe('list<number>');
     const staticType = e.type.type;
@@ -217,42 +217,32 @@ describe('TYCHO ITEM 335: CARRIERS THAT ARE NOT ZIPPED, AND NON-LIST MASKS', () 
   // not zipped: each cell is the whole set.
   test('an infinite unordered carrier: each cell is the whole value', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['When', 'Integers', ['List', 'True', 'False']]);
+    const e = ce.box(['If', ['List', 'True', 'False'], 'Integers']);
     const staticType = e.type.type;
     const v = e.evaluate();
     expect(v.json).toEqual(['List', 'Integers', 'Missing']);
     expect(isSubtype(v.type.type, staticType)).toBe(true);
   });
 
-  // A condition that is a SET of booleans (or any other collection of
-  // booleans) is zipped by the `evaluate` handler as a list condition is, so
-  // it is typed as a mask: the result is a list of cells, not the value with
-  // a `missing` arm.
-  test('a set of booleans is a mask', () => {
+  // The condition of a restriction is a boolean or a LIST of booleans (a
+  // mask). A set of booleans, or an unordered collection of booleans, has no
+  // order to pair its cells with the elements of the value, so it is a
+  // static error.
+  test('a set of booleans is not a condition', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['When', ['List', 1, 2], ['Set', 'True', 'False']]);
-    expect(e.type.toString()).toBe('list<number>');
-    const staticType = e.type.type;
-    const v = e.evaluate();
-    // A canonical set stores its elements in the canonical order:
-    // `{True, False}` is `{False, True}`, so the mask is `[False, True]`.
-    expect(v.toString()).toBe('[NaN,2]');
-    expect(isSubtype(v.type.type, staticType)).toBe(true);
+    const e = ce.box(['If', ['Set', 'True', 'False'], ['List', 1, 2]]);
+    expect(e.type.toString()).toBe('error');
   });
 
-  test('a condition declared as a collection of booleans is a mask', () => {
-    for (const declared of ['set<boolean>', 'collection<boolean>']) {
-      const ce = new ComputeEngine();
-      ce.declare('M', declared);
-      const e = ce.box(['When', ['List', 1, 2], 'M']);
-      expect(e.type.toString()).toBe('list<number>');
-      const staticType = e.type.type;
-      ce.assign('M', ce.box(['Set', 'True', 'False']));
-      const v = e.evaluate();
-      // The set is `{False, True}` in the canonical order.
-      expect(v.toString()).toBe('[NaN,2]');
-      expect(isSubtype(v.type.type, staticType)).toBe(true);
-    }
+  // A condition declared `collection<boolean>` is not refused yet: the rule
+  // that a condition is a boolean or a flat list of booleans is plan item 3.3
+  // of docs/plans/2026-11-02-compiler-contraction-plan.md, which adds the
+  // case.
+  test('a condition declared as a set of booleans is not a condition', () => {
+    const ce = new ComputeEngine();
+    ce.declare('M', 'set<boolean>');
+    const e = ce.box(['If', 'M', ['List', 1, 2]]);
+    expect(e.type.toString()).toBe('error');
   });
 });
 
@@ -285,7 +275,7 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
 
   test('Range(1, ∞), box route', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['When', ['Range', 1, 'PositiveInfinity'], MASK as any]);
+    const e = ce.box(['If', MASK as any, ['Range', 1, 'PositiveInfinity']]);
     check(ce, e, 'list<number>', '[1,NaN,3]');
   });
 
@@ -299,9 +289,9 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
   test('a lazy Map over Range(1, ∞), box route', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
-      'When',
-      ['Map', DOUBLE, ['Range', 1, 'PositiveInfinity']],
+      'If',
       MASK,
+      ['Map', DOUBLE, ['Range', 1, 'PositiveInfinity']],
     ] as any);
     check(ce, e, 'list<number>', '[2,NaN,6]');
   });
@@ -322,14 +312,14 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
   test('a range with a free bound, box route', () => {
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
-    const e = ce.box(['When', ['Range', 1, 'n'], MASK as any]);
+    const e = ce.box(['If', MASK as any, ['Range', 1, 'n']]);
     const v = check(
       ce,
       e,
       'list<number>',
-      'Range(1, n) {["True","False","True"]}'
+      'If(["True","False","True"], Range(1, n))'
     );
-    expect(v.operator).toBe('When');
+    expect(v.operator).toBe('If');
     ce.assign('n', 2);
     check(ce, e, 'list<number>', '[1,NaN]');
     ce.assign('n', 5);
@@ -350,14 +340,14 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
   test('a lazy Map over a range with a free bound is held', () => {
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
-    const e = ce.box(['When', ['Map', DOUBLE, ['Range', 1, 'n']], MASK] as any);
+    const e = ce.box(['If', MASK, ['Map', DOUBLE, ['Range', 1, 'n']]] as any);
     const v = check(
       ce,
       e,
       'list<number>',
-      'Map((x) => 2x, Range(1, n)) {["True","False","True"]}'
+      'If(["True","False","True"], Map((x) => 2x, Range(1, n)))'
     );
-    expect(v.operator).toBe('When');
+    expect(v.operator).toBe('If');
   });
 
   // A valueless symbol declared with an ordered type: before, each cell was
@@ -366,9 +356,9 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
     for (const declared of ['list<number>', 'indexed_collection<number>']) {
       const ce = new ComputeEngine();
       ce.declare('P', declared);
-      const e = ce.box(['When', 'P', MASK as any]);
-      const v = check(ce, e, 'list<number>', 'P {["True","False","True"]}');
-      expect(v.operator).toBe('When');
+      const e = ce.box(['If', MASK as any, 'P']);
+      const v = check(ce, e, 'list<number>', 'If(["True","False","True"], P)');
+      expect(v.operator).toBe('If');
       ce.assign('P', ce.box(['List', 1, 2, 3, 4]));
       check(ce, e, 'list<number>', '[1,NaN,3]');
     }
@@ -382,7 +372,7 @@ describe('TYCHO ITEM 335: ORDERED CARRIERS OF UNKNOWN OR INFINITE LENGTH', () =>
     const ce = new ComputeEngine();
     ce.declare('P', 'indexed_collection<number>');
     ce.assign('P', ce.box(['Tuple', 1, 2]));
-    const e = ce.box(['When', 'P', ['List', 'True', 'False']]);
+    const e = ce.box(['If', ['List', 'True', 'False'], 'P']);
     check(ce, e, 'list<number>', '[1,NaN]');
     // The held form enumerates the same cells.
     expect(e.isCollection).toBe(true);
@@ -400,9 +390,9 @@ describe('TYCHO ITEM 335: CARRIERS THAT KEEP THEIR BEHAVIOR', () => {
     ];
     for (const [carrier, evaluated] of probes) {
       const e = ce.box([
-        'When',
-        carrier,
+        'If',
         ['List', 'True', 'False', 'True'],
+        carrier,
       ] as any);
       const declared = e.type.type;
       const v = e.evaluate();
@@ -413,7 +403,7 @@ describe('TYCHO ITEM 335: CARRIERS THAT KEEP THEIR BEHAVIOR', () => {
 
   test('a finite set is zipped, as before', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['When', ['Set', 1, 2], ['List', 'True', 'False']]);
+    const e = ce.box(['If', ['List', 'True', 'False'], ['Set', 1, 2]]);
     const declared = e.type.type;
     const v = e.evaluate();
     expect(v.toString()).toBe('[1,NaN]');
@@ -427,9 +417,9 @@ describe('TYCHO ITEM 335: COMPILED RESTRICTION OVER AN ORDERED CARRIER', () => {
   test('an infinite carrier falls back to the interpreter', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
-      'When',
-      ['Range', 1, 'PositiveInfinity'],
+      'If',
       ['List', 'True', 'False', 'True'],
+      ['Range', 1, 'PositiveInfinity'],
     ]);
     const result = compile(e)!;
     expect(result.success).toBe(false);
@@ -442,9 +432,9 @@ describe('TYCHO ITEM 335: COMPILED RESTRICTION OVER AN ORDERED CARRIER', () => {
     const ce = new ComputeEngine();
     ce.declare('m', 'integer');
     const e = ce.box([
-      'When',
-      ['Range', 1, 'm'],
+      'If',
       ['List', 'True', 'False', 'True'],
+      ['Range', 1, 'm'],
     ]);
     const result = compile(e)!;
     expect(result.success).toBe(true);
@@ -463,7 +453,7 @@ describe('TYCHO ITEM 335: COMPILED RESTRICTION OVER AN ORDERED CARRIER', () => {
   test('a tuple under an ordered declaration agrees with the interpreter', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'indexed_collection<number>');
-    const e = ce.box(['When', 'P', ['List', 'True', 'False']]);
+    const e = ce.box(['If', ['List', 'True', 'False'], 'P']);
     const result = compile(e)!;
     expect(result.success).toBe(true);
     const compiled = result.run!({ P: [1, 2] }) as number[];
@@ -487,7 +477,7 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
   function evaluated(declared: string, value: unknown) {
     const ce = new ComputeEngine();
     ce.declare('P', declared);
-    const e = ce.box(['When', 'P', MASK] as any);
+    const e = ce.box(['If', MASK, 'P'] as any);
     const staticType = e.type.type;
     ce.assign('P', ce.box(value as any));
     const v = e.evaluate();
@@ -532,7 +522,7 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
     const type = 'tuple<number, number> | list<tuple<number, number>>';
     const ce = new ComputeEngine();
     ce.declare('P', type);
-    const result = compile(ce.box(['When', 'P', MASK] as any), {
+    const result = compile(ce.box(['If', MASK, 'P'] as any), {
       fallback: false,
     })!;
     expect(result.success).toBe(true);
@@ -586,9 +576,9 @@ describe('TYCHO ITEM 335: READING THE ELEMENTS OF AN ORDERED CARRIER', () => {
     ];
     const v = ce
       .box([
-        'When',
-        ['Filter', ['Range', 1, 'PositiveInfinity'], 'p'],
+        'If',
         mask,
+        ['Filter', ['Range', 1, 'PositiveInfinity'], 'p'],
       ] as any)
       .evaluate();
     expect(v.count).toBe(50);
@@ -602,7 +592,7 @@ describe('TYCHO ITEM 335: READING THE ELEMENTS OF AN ORDERED CARRIER', () => {
     const ce = new ComputeEngine();
     const start = Date.now();
     const v = ce
-      .box(['When', ['Range', 1, 1_000_000_000], ['List', 'True', 'False']])
+      .box(['If', ['List', 'True', 'False'], ['Range', 1, 1_000_000_000]])
       .evaluate();
     expect(v.toString()).toBe('[1,NaN]');
     // The time depends on the load of the machine, so the limit is asserted
@@ -616,13 +606,9 @@ describe('TYCHO ITEM 335: READING THE ELEMENTS OF AN ORDERED CARRIER', () => {
   test('a range with an infinite lower bound is held', () => {
     const ce = new ComputeEngine();
     const v = ce
-      .box([
-        'When',
-        ['Range', 'NegativeInfinity', 0],
-        ['List', 'True', 'False'],
-      ])
+      .box(['If', ['List', 'True', 'False'], ['Range', 'NegativeInfinity', 0]])
       .evaluate();
-    expect(v.operator).toBe('When');
+    expect(v.operator).toBe('If');
   });
 
   // The length of `TakeWhile(Range(1, ∞), x < 3)` is not known before it is
@@ -632,13 +618,13 @@ describe('TYCHO ITEM 335: READING THE ELEMENTS OF AN ORDERED CARRIER', () => {
   test('a carrier of unknown length that ends early truncates', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
-      'When',
+      'If',
+      ['List', 'True', 'False', 'True'],
       [
         'TakeWhile',
         ['Range', 1, 'PositiveInfinity'],
         ['Function', ['Less', 'x', 3], 'x'],
       ],
-      ['List', 'True', 'False', 'True'],
     ] as any);
     const staticType = e.type.type;
     const v = e.evaluate();
@@ -653,16 +639,16 @@ describe('TYCHO ITEM 335: READING THE ELEMENTS OF AN ORDERED CARRIER', () => {
     const ce = new ComputeEngine();
     const v = ce
       .box([
-        'When',
+        'If',
+        ['List', 'True', 'False', 'True'],
         [
           'Filter',
           ['Range', 1, 'PositiveInfinity'],
           ['Function', ['Less', 'x', 3], 'x'],
         ],
-        ['List', 'True', 'False', 'True'],
       ] as any)
       .evaluate();
-    expect(v.operator).toBe('When');
+    expect(v.operator).toBe('If');
   });
 });
 
@@ -674,7 +660,7 @@ describe('TYCHO ITEM 335: THE HELD FORM AND THE EVALUATED FORM AGREE', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'indexed_collection<number>');
     ce.assign('P', ce.box(['Tuple', 1, 2]));
-    const e = ce.box(['When', 'P', ['List', 'True', ['Greater', 'y', 0]]]);
+    const e = ce.box(['If', ['List', 'True', ['Greater', 'y', 0]], 'P']);
     const v = e.evaluate();
     expect(v.operator).toBe('List');
     expect(e.isCollection).toBe(true);
@@ -690,7 +676,7 @@ describe('TYCHO ITEM 335: THE HELD FORM AND THE EVALUATED FORM AGREE', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'tuple<number, number> | list<number>');
     ce.assign('P', ce.box(['Tuple', 1, 2]));
-    const e = ce.box(['When', 'P', ['List', 'True', ['Greater', 'y', 0]]]);
+    const e = ce.box(['If', ['List', 'True', ['Greater', 'y', 0]], 'P']);
     expect(e.isCollection).toBe(false);
     expect(e.count).toBeUndefined();
     expect(e.evaluate().at(1)!.toString()).toBe('(1, 2)');

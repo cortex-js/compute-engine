@@ -461,13 +461,12 @@ function compileGPUPositional(
   )
     width = booleanVectorWidth(t);
   // Only an `At` call (the guarded element helper) or a conditional with no
-  // arm for the absent case (`When`, `If` with no else branch, `Which`):
-  // their shader value is a `vecN` with NaN components when the point is
-  // absent. A free symbol or a function call of this type has no such value.
+  // arm for the absent case (`If` with no else branch, `Which`): their
+  // shader value is a `vecN` with NaN components when the point is absent.
+  // A free symbol or a function call of this type has no such value.
   else if (
     declaredEntry === undefined &&
     (isFunction(arg, 'At') ||
-      isFunction(arg, 'When') ||
       isFunction(arg, 'If') ||
       isFunction(arg, 'Which')) &&
     typeof t !== 'string' &&
@@ -1942,7 +1941,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // language-appropriate NaN.
   //
   // DIVERGENCE (documented, CO-P2-24): a shader cannot throw. Where the
-  // interpreter throws on a non-boolean/NaN `Which`/`When` condition, the GPU
+  // interpreter throws on a non-boolean/NaN `Which` or restriction condition, the GPU
   // target instead falls through to the documented fail-closed value (the else
   // branch / NaN) — the JS target aligns via a runtime throw, which is not
   // expressible here.
@@ -2011,48 +2010,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // at all reports its own reason first.
     gpuAssertNoEagerCallerCode('If', [args[1], args[2]], target);
     return gpuConditional(cond, whenTrue, whenFalse, target);
-  },
-  When: (args, compile, target) => {
-    if (args.length !== 2)
-      throw new Error(
-        'Could not compile `When`: expected exactly 2 arguments (expr, cond)'
-      );
-    // `When` is deliberately NOT a selection form (elementwise-Which design
-    // §5): its condition must be a scalar boolean. A provably collection-valued
-    // condition would otherwise emit garbage (`(vec2(True, False)) ? …`).
-    BaseCompiler.assertScalarCondition(args[1]);
-    if (isSymbol(args[1], 'True')) return `(${compile(args[0], 0)})`;
-    // The masked branch's NaN must match the value's SHAPE (a tuple-valued
-    // body compiles to a vecN) — see `gpuNaNFor` (Tycho item 49).
-    if (isSymbol(args[1], 'False')) return gpuNaNFor(args[0], target);
-    // A value that needs statements takes the statement form; the clause
-    // list is in `Which` shape (condition, value), the `When` operands the
-    // other way round.
-    if (
-      gpuNeedsStatements(args[0]) ||
-      (gpuCanPlaceStatement(target) &&
-        (gpuArmSharesWork(args[0]) ||
-          gpuArmIsCostlyForSelect(args[0], target) ||
-          gpuArmDrawsWhileBinding(args[0]) ||
-          gpuHasEagerCallerCode([args[0]], target)))
-    ) {
-      const statement = compileGPUStatementSelection(
-        [args[1], args[0]],
-        (e, i) => compile(e, i === 0 ? 1 : 0),
-        target
-      );
-      if (statement !== undefined) return statement;
-    }
-    gpuAssertNoAssignmentOperand('When', args, target);
-    gpuAssertNoEagerDraw('When', [args[0]], target);
-    const cond = compile(args[1], 1);
-    const value = compileGPUConditionalArm(
-      'When',
-      () => compile(args[0], 0),
-      target
-    );
-    gpuAssertNoEagerCallerCode('When', [args[0]], target);
-    return gpuConditional(cond, value, gpuNaNFor(args[0], target), target);
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)

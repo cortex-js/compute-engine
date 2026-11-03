@@ -91,13 +91,13 @@ describe('lazy collection regimes', () => {
       'DropWhile',
       'Filter',
       'FlatMap',
+      'If',
       'List',
       'Map',
       'Scan',
       'Set',
       'Tabulate',
       'TakeWhile',
-      'When',
     ]);
   });
 

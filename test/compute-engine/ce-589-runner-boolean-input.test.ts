@@ -16,7 +16,7 @@ describe('CE-589 a boolean or a string argument of run()', () => {
   ce.declare('L', 'list<string>');
 
   test('a boolean for a symbol declared boolean', () => {
-    const r = compile(ce.box(['When', 'x', 'c']));
+    const r = compile(ce.box(['If', 'c', 'x']));
     expect(r.run!({ x: 2, c: true })).toBe(2);
     expect(r.run!({ x: 2, c: false })).toBeNaN();
     const n = compile(ce.box(['Not', 'c']));
@@ -50,7 +50,7 @@ describe('CE-589 a boolean or a string argument of run()', () => {
     // of `_getCompilationTarget('javascript')` admits a boolean.
     const target = ce._getCompilationTarget('javascript');
     expect(target).toBeDefined();
-    const r = target!.compile(ce.box(['When', 'x', 'c']));
+    const r = target!.compile(ce.box(['If', 'c', 'x']));
     expect(r.run!({ x: 2, c: true })).toBe(2);
   });
 });

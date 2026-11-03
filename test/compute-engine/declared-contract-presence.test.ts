@@ -59,22 +59,31 @@ describe('the engine assignment route', () => {
     expect(ce.box('u').evaluate().symbol).toBe('Missing');
   });
 
-  test('a restricted non-numeric value needs a declaration that admits absence', () => {
+  // A restriction `If(c, e)` has the type of `e`: the absent value it takes
+  // when `c` fails is outside the declared type, as `NaN` is outside `real`
+  // (docs/plans/2026-11-02-language-axes-options.md, page 1, "Typing"). So a
+  // restricted point binds to a declaration of the point type.
+  test('a restricted non-numeric value has the type of its value and binds to its declaration', () => {
     ce.declare('p', 'tuple<number, number>');
     const gated = ce.parse('(1,2) \\{ a > 0 \\}');
-    expect(gated.type.toString()).toBe('missing | tuple<integer, integer>');
-    expect(() => ce.assign('p', gated)).toThrow(/not compatible/);
-    ce.declare('pm', 'tuple<number, number> | missing');
-    ce.assign('pm', gated);
-    expect(ce.box('pm').evaluate().toString()).toBe('(1, 2) {0 < a}');
+    expect(gated.type.toString()).toBe('tuple<integer, integer>');
+    ce.assign('p', gated);
+    expect(ce.box('p').evaluate().toString()).toBe('If(0 < a, (1, 2))');
+    // The value when the condition fails is the absent value.
+    ce.assign('a', -1);
+    expect(gated.evaluate().symbol).toBe('Missing');
   });
 
-  test('a numeric restriction masks to NaN and binds to a numeric declaration', () => {
+  test('a numeric restriction has the type of its value and binds to a numeric declaration', () => {
     ce.declare('n', 'number');
     const gated = ce.parse('3 \\{ a > 0 \\}');
-    expect(gated.type.toString()).toBe('integer | nan');
+    // The static type of a restriction has no `nan` arm.
+    expect(gated.type.toString()).toBe('integer');
     ce.assign('n', gated);
-    expect(ce.box('n').evaluate().toString()).toBe('3 {0 < a}');
+    expect(ce.box('n').evaluate().toString()).toBe('If(0 < a, 3)');
+    // The value when the condition fails is NaN.
+    ce.assign('a', -1);
+    expect(gated.evaluate().toString()).toBe('NaN');
   });
 
   test('a declared element contract is checked (P1b)', () => {

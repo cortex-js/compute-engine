@@ -134,20 +134,20 @@ describe('At: two indices through a row that may be absent', () => {
   engine.declare('t', 'real');
   const rows = engine.parse('[[1,2]\\{0<t\\}, [3,4]]');
 
-  test('the list type', () =>
-    expect(rows.type.toString()).toBe('list<missing | vector<integer^2>>'));
+  test('the list type has no missing arm', () =>
+    expect(rows.type.toString()).toBe('list<vector<integer^2>>'));
 
-  test('At(…, 1, 2) is typed with the missing arm carried', () => {
+  test('At(…, 1, 2) is typed with no missing arm', () => {
     const at = engine.box(['At', rows, 1, 2]);
-    expect(at.type.toString()).toBe('integer | missing | nan');
+    expect(at.type.toString()).toBe('integer | nan');
     const value = at.evaluate();
-    expect(value.toString()).toBe('2 {0 < t}');
+    expect(value.toString()).toBe('If(0 < t, 2)');
     expect(value.type.matches(at.type)).toBe(true);
   });
 
   test('At(…, 2, 1) has the same type', () => {
     const at = engine.box(['At', rows, 2, 1]);
-    expect(at.type.toString()).toBe('integer | missing | nan');
+    expect(at.type.toString()).toBe('integer | nan');
     expect(at.evaluate().toString()).toBe('3');
   });
 });

@@ -41,10 +41,10 @@ describe('UNDEFINED in a numeric slot', () => {
       expect(r.isNaN).toBe(true);
     });
 
-    it('Sin(When(1, False)) is NaN', () => {
-      // `When` masks to `Missing`; the numeric slot of `Sin` absorbs it.
-      expect(ce.box(['Sin', ['When', 1, 'False']]).evaluate().isNaN).toBe(true);
-      expect(ce.box(['Sin', ['When', 1, 'False']]).N().isNaN).toBe(true);
+    it('Sin(If(False, 1)) is NaN', () => {
+      // A restriction masks to `Missing`; the numeric slot of `Sin` absorbs it.
+      expect(ce.box(['Sin', ['If', 'False', 1]]).evaluate().isNaN).toBe(true);
+      expect(ce.box(['Sin', ['If', 'False', 1]]).N().isNaN).toBe(true);
     });
 
     it('an Undefined cell under a broadcast head is NaN at that position, as a Missing cell is', () => {
@@ -277,7 +277,7 @@ describe('UNDEFINED in a numeric slot', () => {
       for (const expr of [
         ['Cos', 'Undefined'],
         ['Add', 'Undefined', 1],
-        ['Sin', ['When', 1, 'False']],
+        ['Sin', ['If', 'False', 1]],
       ]) {
         const result = compile(ce.expr(expr as any))!;
         expect(result.success).toBe(true);
@@ -296,20 +296,18 @@ describe('UNDEFINED in a numeric slot', () => {
     });
   });
 
-  describe('the When restriction', () => {
-    // The masking answer of `When` is the absence marker of the value's own
+  describe('the single-branch If restriction', () => {
+    // The masking answer of a restriction is the absence marker of the value's own
     // type, never `Undefined`: `NaN` for a number (user decision 2026-09-25;
     // the 2026-09-09 ruling had aligned every value with the `Missing` of a
     // default-less `Which`, which a point or a list still answers).
-    it('When(1, False) answers NaN', () => {
-      expect(ce.box(['When', 1, 'False']).evaluate().isNaN).toBe(true);
+    it('If(False, 1) answers NaN', () => {
+      expect(ce.box(['If', 'False', 1]).evaluate().isNaN).toBe(true);
     });
 
-    it('its result type is its tier with a nan arm, no `missing` arm', () => {
-      expect(ce.box(['When', 1, 'False']).type.toString()).toBe(
-        'integer | nan'
-      );
-      expect(ce.box(['When', 1, 'True']).type.toString()).toBe('integer');
+    it('its result type is the type of its value, no `nan` arm and no `missing` arm', () => {
+      expect(ce.box(['If', 'False', 1]).type.toString()).toBe('integer');
+      expect(ce.box(['If', 'True', 1]).type.toString()).toBe('integer');
     });
   });
 });

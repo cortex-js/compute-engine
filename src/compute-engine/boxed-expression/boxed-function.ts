@@ -243,7 +243,11 @@ import {
   integerRangeElements,
   kindValueIsNaN,
 } from './type-guards.js';
-import { restrictionParts } from './conditional-value.js';
+import {
+  isRestriction,
+  mayHoldRestriction,
+  restrictionParts,
+} from './conditional-value.js';
 import {
   callSiteDefault,
   parameterDefaultOperands,
@@ -5963,14 +5967,15 @@ export class BoxedFunction
     );
 
     if (def === undefined) return false;
-    // An operator whose collection-ness depends on its operands (e.g. `When`,
-    // a collection only when the value it guards is one) opts out per-instance.
+    // An operator whose collection-ness depends on its operands (e.g. `If`,
+    // a collection only when the value it restricts is one) opts out
+    // per-instance.
     return def.isCollection?.(this) ?? true;
   }
 
   /**
    * True if this instance explicitly opted out of being a collection via an
-   * `isCollection` handler returning false (e.g. a `Tuple`-valued `When`).
+   * `isCollection` handler returning false (e.g. a `Tuple`-valued `If`).
    * Its remaining collection handlers are inert and must not be consulted.
    *
    * Note this is deliberately narrower than `!isCollection`: an *eager*
@@ -5992,7 +5997,7 @@ export class BoxedFunction
     // An operator that opted out of being a collection for THIS instance is
     // not an indexed collection either — the handlers are present but inert,
     // and reporting otherwise contradicts `isCollection` (e.g. a `Tuple`-
-    // valued `When`, which is deliberately not broadcast over).
+    // valued `If`, which is deliberately not broadcast over).
     if (this._optedOutOfCollection) return false;
 
     // If there is an `at` handler, it _may_ be indexed.
@@ -6000,16 +6005,11 @@ export class BoxedFunction
     // (to access its keys), but can be indexed or not, depending on the
     // input collection.
     //
-    // The type is read WITH its absence arm, so a restricted list,
-    // `[1,2]{c}`, typed `missing | vector<integer^2>` and held as one `When`
-    // while its condition is undecided (user decision 2026-09-25), answers
-    // `false` here although it enumerates its cells (`isCollection` is
-    // `true`). That is deliberate: the broadcast machinery decides what to
-    // map over cell by cell through this predicate
-    // (`isFiniteBroadcastParticipant`), and a conditional value must be
-    // threaded WHOLE instead (`threadConditional`): `Sin([1,2,3]{0<t})` is
-    // `[sin 1, sin 2, sin 3]{0<t}`, `Missing` once `t = -1`, where a
-    // cell-by-cell map gave `[NaN, NaN, NaN]`.
+    // A restricted list, `[1,2]{c}`, held as one `If(c, [1, 2])` while its
+    // condition is undecided, is typed `vector<integer^2>`, with no
+    // `missing` arm, so it is an indexed collection here, and a broadcast
+    // maps it cell by cell: `Sin([1,2,3]{0<t})` is `[NaN, NaN, NaN]` once
+    // `t = -1` (decision 2026-11-02).
     if (this.type.matches(INDEXED_COLLECTION_SHAPE_TYPE)) return true;
 
     // An ABSTRACT collection type (`collection<T>`: not indexed, not a set,
@@ -6816,7 +6816,7 @@ export class BoxedFunction
         : structuralBroadcastAt(this, k);
     // The element is evaluated, as the element that `_materializedAt` reads
     // from the evaluation is: a reader of `at()` can then test it as a value
-    // (the `at` handler of `When` reads the condition `k` of a list of
+    // (the `at` handler of a restriction reads the condition `k` of a list of
     // conditions, `2 < [1, 2, 3]`, and must see `True`, not `2 < 3`), and
     // `at()` agrees with `each()`. The evaluation is that of one element,
     // not of the whole expression.
@@ -8732,7 +8732,7 @@ export class BoxedFunction
       }
 
       //
-      // 4c/ Thread over conditional values (`When`/`Which`) — lift the
+      // 4c/ Thread over conditional values (`If`/`Which`) — lift the
       // conditional outward so arithmetic and function application flow
       // through it (design: docs/plans/2026-07-12-conditional-values-design.md,
       // "Threading rules"). Structurally the same lift as the broadcast steps
@@ -8742,7 +8742,7 @@ export class BoxedFunction
       // `False`), so lifting a guard out of them would be unsound. `Add`/
       // `Multiply` are NOT excluded (unlike step 4b): threading them before the
       // arithmetic evaluate handler is what stops a fold from silently dropping
-      // a guard (`When − When`, `0·When`; see decision 5).
+      // a guard (`a{c} − a{c}`, `0·a{c}`; see decision 5).
       //
       // An operator that is not broadcastable threads the positions its
       // `threadsConditionals` flag selects (`Dot`, `PointX`, `At`, …: the
@@ -8752,12 +8752,11 @@ export class BoxedFunction
       // read back as that restricted list (`regroupRestrictedCells`).
       //
       // The cheap test of the lift is made first, so that an application with
-      // no `When`, `Which`, `List` or single-branch `If` operand does not
-      // create the steps.
+      // no `Which`, `List` or single-branch `If` operand does not create the
+      // steps.
       if (
         tail.some(
           (x) =>
-            isFunction(x, 'When') ||
             isFunction(x, 'Which') ||
             isFunction(x, 'List') ||
             (isFunction(x, 'If') && x.nops === 2)
@@ -10146,9 +10145,9 @@ export class BoxedFunction
       }
 
       //
-      // 3b-cond/ Thread over conditional values (`When`/`Which`) — the async
-      // twin of the sync step 4c, with the same rules
-      // (`threadConditionalOperands`): `Sin(When(3, c))` is `When(Sin(3), c)`
+      // 3b-cond/ Thread over conditional values (a restriction `If(c, v)`,
+      // `Which`) — the async twin of the sync step 4c, with the same rules
+      // (`threadConditionalOperands`): `Sin(If(c, 3))` is `If(c, Sin(3))`
       // on both routes. On this route each application of the operator to
       // the values is evaluated with `evaluateAsync()`
       // (`runMaterializationAsync()`), so an operator that has only an
@@ -10161,13 +10160,12 @@ export class BoxedFunction
       // descendant: those are awaited first, as for the handler in step 5
       // (`awaitAsyncOnlyDescendants`).
       //
-      // A cheap test first, the same one as the lift makes: only a `When`, a
-      // `Which`, a single-branch `If` or a `List` operand can be lifted, so an application with
-      // none of them awaits nothing here.
+      // A cheap test first, the same one as the lift makes: only a `Which`,
+      // a single-branch `If` or a `List` operand can be lifted, so an
+      // application with none of them awaits nothing here.
       if (
         tail.some(
           (x) =>
-            isFunction(x, 'When') ||
             isFunction(x, 'Which') ||
             isFunction(x, 'List') ||
             (isFunction(x, 'If') && x.nops === 2)
@@ -11567,7 +11565,12 @@ function evaluateBroadcastLiftsOnce(
   operator: string
 ): ReadonlyArray<Expression> {
   if (
-    !ops.some((op) => !isBroadcastParticipant(op) || literalMayEraseElement(op))
+    !ops.some(
+      (op) =>
+        !isBroadcastParticipant(op) ||
+        literalMayEraseElement(op) ||
+        isRestriction(op)
+    )
   )
     return ops;
   const erasing = erasingLiteralOptions(options, operator);
@@ -11584,7 +11587,10 @@ function evaluateBroadcastLiftsOnce(
     isBroadcastParticipant(op)
       ? literalMayEraseElement(op)
         ? erasingLiteralValue(op, erasing, options)
-        : op
+        : withEvaluatedRestriction(
+            op,
+            restrictionParts(op)?.condition.evaluate(operandOptions(options))
+          )
       : normalizeLiftedAbsence(
           op,
           op.evaluate(operandOptions(options)) ?? op,
@@ -11602,6 +11608,22 @@ function evaluateBroadcastLiftsOnce(
     : lifted;
 }
 
+/**
+ * The restriction `op`, `If(c, v)`, with its condition replaced by the
+ * value `c` of the condition, or `op` when `c` is `undefined` (`op` is
+ * not a restriction). A restricted collection supplies the cells
+ * `If(c, v_i)` of a broadcast, and each cell is evaluated. Without this
+ * step, each cell evaluated the condition again: a condition with an effect
+ * (a random draw) then had a different value in each cell.
+ */
+function withEvaluatedRestriction(
+  op: Expression,
+  c: Expression | undefined
+): Expression {
+  if (c === undefined || !isFunction(op) || c.isSame(op.op1)) return op;
+  return op.engine._fn('If', [c, op.op2]);
+}
+
 /** Async mirror of `evaluateBroadcastLiftsOnce`. */
 async function evaluateBroadcastLiftsOnceAsync(
   ops: ReadonlyArray<Expression>,
@@ -11609,7 +11631,12 @@ async function evaluateBroadcastLiftsOnceAsync(
   operator: string
 ): Promise<ReadonlyArray<Expression>> {
   if (
-    !ops.some((op) => !isBroadcastParticipant(op) || literalMayEraseElement(op))
+    !ops.some(
+      (op) =>
+        !isBroadcastParticipant(op) ||
+        literalMayEraseElement(op) ||
+        isRestriction(op)
+    )
   )
     return ops;
   const erasing = erasingLiteralOptions(options, operator);
@@ -11620,7 +11647,12 @@ async function evaluateBroadcastLiftsOnceAsync(
       isBroadcastParticipant(op)
         ? literalMayEraseElement(op)
           ? await erasingLiteralValueAsync(op, erasing, options)
-          : op
+          : withEvaluatedRestriction(
+              op,
+              await restrictionParts(op)?.condition.evaluateAsync(
+                operandOptions(options)
+              )
+            )
         : normalizeLiftedAbsence(
             op,
             (await op.evaluateAsync(operandOptions(options))) ?? op,
@@ -11922,7 +11954,7 @@ export function viewOfExpression(x: Expression): BroadcastOperandView {
 /**
  * Broadcastable logic operators excluded from conditional-value threading.
  * Kleene logic is not strict — `And(Undefined, False)` must stay `False` — so
- * lifting a `When` guard out of them would be unsound (design decision 2/9).
+ * lifting a restriction guard out of them would be unsound (design decision 2/9).
  */
 const CONDITIONAL_THREADING_SKIP = new Set([
   'And',
@@ -11938,9 +11970,9 @@ const CONDITIONAL_THREADING_SKIP = new Set([
 /**
  * Step 4c of the evaluation of a function expression, shared by the
  * synchronous and the asynchronous routes: lift a conditional operand
- * (`When`/`Which`) of the evaluated operands `tail` out of the application
- * `expr`, so that the operator applies to the values and the result carries
- * the condition (`Sin(When(3, c))` is `When(Sin(3), c)`). Returns `undefined`
+ * (a restriction `If(c, v)`, `Which`) of the evaluated operands `tail` out of
+ * the application `expr`, so that the operator applies to the values and the
+ * result carries the condition (`Sin(If(c, 3))` is `If(c, Sin(3))`). Returns `undefined`
  * when there is nothing to lift.
  *
  * A broadcastable operator lifts a conditional at any position, except the
@@ -11967,14 +11999,10 @@ function* threadConditionalOperands(
   options: Partial<EvaluateOptions> | undefined
 ): ConditionalThreadingSteps {
   const ce = expr.engine;
-  // A single-branch `If(c, v)`, the form the parser gives a restriction
-  // `v\{c\}`, is lifted as the restriction `When(v, c)` it stands for, so
-  // that the two spellings give the same value: `Sin(If(c, 3))` is
-  // `When(Sin(3), c)`, as `Sin(When(3, c))` is.
-  if (tail.some((x) => isFunction(x, 'If') && x.nops === 2))
-    tail = tail.map((x) => restrictionAsWhen(ce, x));
+  // A restriction is the single-branch `If(c, v)` that the parser gives
+  // `v\{c\}` (`isRestriction()`): `Sin(If(c, 3))` is `If(c, Sin(3))`.
   if (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(expr.operator)) {
-    if (!tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which')))
+    if (!tail.some((x) => isRestriction(x) || isFunction(x, 'Which')))
       return undefined;
     return yield* threadConditional(
       ce,
@@ -11989,15 +12017,13 @@ function* threadConditionalOperands(
   if (
     def.threadsConditionals === false ||
     // A cheap test first, so that an application with no conditional
-    // operand (the common case) allocates nothing: only a `When`, a
+    // operand (the common case) allocates nothing: only a restriction, a
     // `Which`, or a `List` (which can hold restricted cells) at a
     // threaded position can be lifted.
     !tail.some(
       (x, i) =>
         def.threadsConditionalsAt(i) &&
-        (isFunction(x, 'When') ||
-          isFunction(x, 'Which') ||
-          isFunction(x, 'List'))
+        (isRestriction(x) || isFunction(x, 'Which') || isFunction(x, 'List'))
     )
   )
     return undefined;
@@ -12007,8 +12033,7 @@ function* threadConditionalOperands(
   );
   if (
     !regrouped.some(
-      (x, i) =>
-        threadsAt(i) && (isFunction(x, 'When') || isFunction(x, 'Which'))
+      (x, i) => threadsAt(i) && (isRestriction(x) || isFunction(x, 'Which'))
     )
   )
     return undefined;
@@ -12028,20 +12053,18 @@ function* threadConditionalOperands(
  * `x` read back as a restricted list when it is the EVALUATED form of one, or
  * `x` itself otherwise.
  *
- * With its condition undecided, a restricted list `When([a, b], c)`
- * evaluates to the list of its restricted cells `[When(a, c), When(b, c)]`
- * (the `When` evaluate handler distributes the condition, so that the value
- * is a collection). An operator that reads the list whole — the inner
- * product of a vector, the norm, the coordinates of a list of points — gets
- * no point or number from such a cell. When every cell of the `List` is
- * restricted by the same condition, this returns `When([a, b], c)`, so that
- * the conditional-value lift moves the condition out of the application:
- * `Dot([1 {c}, 2 {c}], [1, 1])` is `Dot([1, 2], [1, 1]) {c}`, that is
- * `3 {c}`. A nested `List` whose cells regroup to the same condition counts
- * as a restricted cell.
+ * With its condition undecided, a list of restrictions `[If(c, a), If(c,
+ * b)]` can be a value of the restricted list `If(c, [a, b])`. An operator
+ * that reads the list whole — the inner product of a vector, the norm, the
+ * coordinates of a list of points — gets no point or number from such a
+ * cell. When every cell of the `List` is restricted by the same condition,
+ * this returns `If(c, [a, b])`, so that the conditional-value lift moves the
+ * condition out of the application: `Dot([1 {c}, 2 {c}], [1, 1])` is
+ * `Dot([1, 2], [1, 1]) {c}`, that is `3 {c}`. A nested `List` whose cells
+ * regroup to the same condition counts as a restricted cell.
  *
  * A list whose cells have different conditions (the value of an element-wise
- * restriction, `When(L, [c₁, c₂])`), or where only some cells are
+ * restriction, `If([c₁, c₂], L)`), or where only some cells are
  * restricted, is returned unchanged: there is no single condition to move
  * out, and only the operator knows whether it maps over the cells.
  */
@@ -12050,41 +12073,26 @@ function regroupRestrictedCells(ce: ComputeEngine, x: Expression): Expression {
   let guard: Expression | undefined;
   const bodies: Expression[] = [];
   for (const op of x.ops) {
-    const cell = isFunction(op, 'List')
-      ? regroupRestrictedCells(ce, op)
-      : restrictionAsWhen(ce, op);
-    if (!isFunction(cell, 'When') || cell.nops !== 2) return x;
+    const cell = isFunction(op, 'List') ? regroupRestrictedCells(ce, op) : op;
+    const parts = restrictionParts(cell);
+    if (parts === undefined) return x;
     // A cell restricted by a LIST of conditions is itself an element-wise
     // restriction, not one cell of a restricted list.
-    if (isFunction(cell.op2, 'List')) return x;
-    if (guard === undefined) guard = cell.op2;
-    else if (!guard.isSame(cell.op2)) return x;
-    bodies.push(cell.op1);
+    if (isFunction(parts.condition, 'List')) return x;
+    if (guard === undefined) guard = parts.condition;
+    else if (!guard.isSame(parts.condition)) return x;
+    bodies.push(parts.value);
   }
-  return ce._fn('When', [ce._fn('List', bodies), guard!]);
-}
-
-/**
- * `x` as `When(v, c)` when it is the single-branch `If(c, v)` that the parser
- * gives a restriction `v\{c\}`, and `x` itself otherwise. The two forms have
- * the same value (`restrictionParts()`), and the conditional-value lift
- * reads `When`.
- */
-function restrictionAsWhen(ce: ComputeEngine, x: Expression): Expression {
-  if (!isFunction(x, 'If')) return x;
-  const parts = restrictionParts(x);
-  return parts === undefined
-    ? x
-    : ce._fn('When', [parts.value, parts.condition]);
+  return ce._fn('If', [guard!, ce._fn('List', bodies)]);
 }
 
 /**
  * True when `value` already carries the condition of every guard in
- * `guards` (all the same condition): it is `When(v, g)`, or a `List` or
+ * `guards` (all the same condition): it is `If(g, v)`, or a `List` or
  * `Tuple` whose every cell is. Restricting it again would give
- * `When(When(v, g), g)`, which prints as `v {g} {g}`: the `When` evaluate
- * handler distributes a condition into the cells of a list without merging
- * it with the condition a cell already has.
+ * `If(g, If(g, v))`, which prints the condition twice: the evaluation of a
+ * restriction distributes a condition into the cells of a list without
+ * merging it with the condition a cell already has.
  */
 function sameRestriction(
   value: Expression,
@@ -12093,7 +12101,7 @@ function sameRestriction(
   const g = guards[0];
   if (g === undefined || !guards.every((x) => x.isSame(g))) return false;
   const restricted = (x: Expression): boolean =>
-    isFunction(x, 'When') && x.nops === 2 && x.op2.isSame(g);
+    restrictionParts(x)?.condition.isSame(g) === true;
   if (restricted(value)) return true;
   return (
     (isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
@@ -12106,7 +12114,7 @@ function sameRestriction(
  * `value` with `guard` applied to each of its cells, through nested lists
  * and the coordinates of a point: a `List` or a `Tuple` answers the same
  * container over its restricted cells, and any other value the restricted
- * value itself (`When(value, guard)`, evaluated). Used by `threadConditional`
+ * value itself (`If(guard, value)`, evaluated). Used by `threadConditional`
  * when a scalar restriction lands in the cells of a broadcast result.
  */
 function restrictCells(
@@ -12120,7 +12128,7 @@ function restrictCells(
       value.operator,
       value.ops.map((cell) => restrictCells(ce, cell, guard, options))
     );
-  return ce._fn('When', [value, guard]).evaluate(options);
+  return ce._fn('If', [guard, value]).evaluate(options);
 }
 
 /**
@@ -12192,20 +12200,21 @@ const BARE_FUNCTION_CALLBACK_SLOTS: Readonly<
 > = { Tabulate: [0] };
 
 /**
- * Threading pre-pass for conditional values (`When`/`Which`), modeled on the
- * broadcast lift (step 4b). Given the already-evaluated `tail` of operator
- * `op`, lift a conditional operand outward:
+ * Threading pre-pass for conditional values (a restriction, the
+ * single-branch `If(c, v)`, and `Which`), modeled on the broadcast lift
+ * (step 4b). Given the already-evaluated `tail` of operator `op`, lift a
+ * conditional operand outward:
  *
- * - **When (T1–T3), guard-outermost normal form:** if any operand is a `When`,
- *   strip each `When` to its value and collect its guard, then wrap the
- *   *evaluated* `op(strippedTail)` in a single `When` whose guard is the
- *   conjunction of the collected guards and re-evaluate. `When`'s canonical
- *   handler And-folds the guards and its evaluate handler resolves a decidable
- *   guard (T4/T5), so a True guard collapses to the bare value and a False
- *   guard to `Undefined`. Evaluating the inner application is what lets a fold
- *   run inside the guard (`0·x → 0`, `x − x → 0`) and an inner `Which`
- *   distribute (yielding `When(Which(…), g)`, decision 6).
- * - **Which (T6/T7), only when no `When` operand is present:** distribute over
+ * - **Restriction (T1–T3), guard-outermost normal form:** if any operand is
+ *   a restriction, strip each restriction to its value and collect its
+ *   guard, then wrap the *evaluated* `op(strippedTail)` in a single `If`
+ *   whose guard is the conjunction of the collected guards and evaluate it.
+ *   The evaluation resolves a decidable guard (T4/T5), so a True guard
+ *   collapses to the bare value and a False guard to the absent value.
+ *   Evaluating the inner application is what lets a fold run inside the
+ *   guard (`0·x → 0`, `x − x → 0`) and an inner `Which` distribute
+ *   (yielding `If(g, Which(…))`, decision 6).
+ * - **Which (T6/T7), only when no restriction operand is present:** distribute over
  *   the lexicographic cross-product of branches — a non-`Which` operand is a
  *   single unconditional branch, each branch's condition is the `And` of the
  *   selected operands' conditions, and the branch value is `op` applied to the
@@ -12215,8 +12224,8 @@ const BARE_FUNCTION_CALLBACK_SLOTS: Readonly<
  *
  * `lazy` operators (`Add`/`Multiply`/relations) reach the pre-pass with an
  * *un-evaluated* tail, so operands are evaluated here first — this both
- * surfaces a conditional nested under a lazy operand (e.g. `Negate(When)` in
- * `When − When`) and is a cheap cache hit for the already-evaluated tail of a
+ * surfaces a conditional nested under a lazy operand (e.g. `Negate(If(c, a))`
+ * in `If(c, a) − If(d, b)`) and is a cheap cache hit for the already-evaluated tail of a
  * strict operator.
  *
  * `threadsAt` restricts the lift to some operand positions (the
@@ -12247,16 +12256,18 @@ function* threadConditional(
   const tail = lazy
     ? rawTail.map((x) => x.evaluate(operandOptions(options)))
     : rawTail;
-  const isThreaded = (x: Expression, i: number, head: 'When' | 'Which') =>
-    isFunction(x, head) && (threadsAt === undefined || threadsAt(i));
+  const isThreaded = (x: Expression, i: number, head: 'If' | 'Which') =>
+    (head === 'If' ? isRestriction(x) : isFunction(x, head)) &&
+    (threadsAt === undefined || threadsAt(i));
 
-  // --- `When` lift (guard-outermost) ---
-  if (tail.some((x, i) => isThreaded(x, i, 'When'))) {
+  // --- Restriction lift (guard-outermost) ---
+  if (tail.some((x, i) => isThreaded(x, i, 'If'))) {
     const guards: Expression[] = [];
     const stripped = tail.map((x, i) => {
-      if (isThreaded(x, i, 'When') && isFunction(x)) {
-        guards.push(x.op2);
-        return x.op1;
+      const parts = isThreaded(x, i, 'If') ? restrictionParts(x) : undefined;
+      if (parts !== undefined) {
+        guards.push(parts.condition);
+        return parts.value;
       }
       return x;
     });
@@ -12301,12 +12312,13 @@ function* threadConditional(
       const cellGuards: Expression[] = [];
       const wholeGuards: Expression[] = [];
       for (const x of tail) {
-        if (!isFunction(x, 'When')) continue;
+        const parts = restrictionParts(x);
+        if (parts === undefined) continue;
         const scalar =
-          !x.op1.isCollection &&
-          !isTuple(x.op1) &&
-          !x.op1.type.matches('collection<any>');
-        (scalar ? cellGuards : wholeGuards).push(x.op2);
+          !parts.value.isCollection &&
+          !isTuple(parts.value) &&
+          !parts.value.type.matches('collection<any>');
+        (scalar ? cellGuards : wholeGuards).push(parts.condition);
       }
       // A scalar guard that also restricts a collection operand
       // (`2{c}·P{c}`) is implied by the whole restriction: `(2, 4){c}`, not
@@ -12323,10 +12335,10 @@ function* threadConditional(
           wholeGuards.length === 1
             ? wholeGuards[0]
             : ce._fn('And', wholeGuards);
-        return ce._fn('When', [cells, wholeGuard]).evaluate(options);
+        return ce._fn('If', [wholeGuard, cells]).evaluate(options);
       }
     }
-    return ce._fn('When', [inner, guard]).evaluate(options);
+    return ce._fn('If', [guard, inner]).evaluate(options);
   }
 
   // --- `Which` distribution ---
@@ -12422,7 +12434,7 @@ function* threadConditional(
   }
 
   // Nothing (left) to thread. For a `lazy` operator we already evaluated the
-  // tail above to inspect it — a `When`/`Which` operand that reduced to a plain
+  // tail above to inspect it — a restriction or `Which` operand that reduced to a plain
   // value during that evaluation (e.g. a `Which` whose selected branch has no
   // free variables, `2·{cond: x, y}`) leaves no conditional to lift. Return the
   // folded application of the already-evaluated tail so the caller does not
@@ -19897,9 +19909,16 @@ function evaluateStringPreservingResult(result: Expression): Expression {
  * cases: the absence test answers the marker for an absent operand, and the
  * result over a present operand is a list, which is then materialized
  * (`materializeLazyResult`).
+ *
+ * A node that holds a restriction `If(c, xs)` (`mayHoldRestriction()`) can
+ * be absent too, although its type has no `missing` member: a restriction
+ * is typed as its value.
  */
 function mayBeAbsentAsWhole(expr: Expression): boolean {
-  return threadedPresentType(expr.type.type) !== undefined;
+  return (
+    threadedPresentType(expr.type.type) !== undefined ||
+    mayHoldRestriction(expr)
+  );
 }
 
 /**
@@ -20035,18 +20054,15 @@ function settleAbsentableLazyOperands(
  * `settleHeldEagerSources()` reports the `incompatible-type` error at
  * evaluation, where the boxing admitted the symbol.
  *
- * A function literal is not such an operand. A held conditional (`When`,
- * `Which`, `If`) is not one either: the evaluation lifts it out of the
+ * A function literal is not such an operand. A held conditional (`Which`,
+ * `If`) is not one either: the evaluation lifts it out of the
  * operator (step 4c). A symbol whose value mentions the symbol itself is not
  * one either: its value is not resolved (see `mapSource()` in
  * `library/collections.ts`).
  */
 function isHeldEagerSource(x: Expression): boolean {
   if (isFunction(x, 'Function') || x.isCollection) return false;
-  if (isFunction(x))
-    return (
-      x.operator !== 'When' && x.operator !== 'Which' && x.operator !== 'If'
-    );
+  if (isFunction(x)) return x.operator !== 'Which' && x.operator !== 'If';
   if (!isSymbol(x) || x.valueDefinition?.isSelfReferential) return false;
   const value = x.value;
   if (value === undefined) return false;
@@ -20266,18 +20282,17 @@ function heldEagerSources(
     )
       return [];
     ops.forEach((x, index) => {
-      // A restricted collection, `[1,3,5]{0<t}`, is one held `When` over the
+      // A restricted collection, `[1,3,5]{0<t}`, is one held restriction over the
       // list, and step 4c threads it whole at a position the operator
       // threads (`threadsConditionals`): the operation is computed on the
       // list and the result is restricted by the condition. Such an operand
-      // is not a source here. The held `When` presents its cells through
-      // its collection handlers, but it is not an indexed collection, so
-      // the test for a collection without positions below refused it with
-      // an `incompatible-type` error before step 4c could thread it:
-      // `ArgMax([1,3,5]{0<t})` and `Scan([1,3,5]{0<t}, Add)` were errors.
+      // is not a source here. Before step 4c threaded it, the test for a
+      // collection without positions below refused such an operand with an
+      // `incompatible-type` error: `ArgMax([1,3,5]{0<t})` and
+      // `Scan([1,3,5]{0<t}, Add)` were errors.
       if (
         def.threadsConditionalsAt(index) &&
-        (isFunction(x, 'When') || isFunction(x, 'Which'))
+        (isRestriction(x) || isFunction(x, 'Which'))
       )
         return;
       const held =
@@ -21082,13 +21097,13 @@ function* lazyResultSteps(
     return result.engine.function(result.operator, ops);
   }
   if (!result.isLazyCollection) return result;
-  // A held conditional over a collection (`[5, 10] {0 < t}`, a `When` whose
+  // A held conditional over a collection (`[5, 10] {0 < t}`, a restriction whose
   // guard is not decided) is a lazy collection too, but it is a HELD form,
   // not a view: walking it reads its restricted cells and builds a `Set` of
   // them (`holdsConditionalValue`, `collection-utils.ts`, names the same
   // three heads). Left as it is, it prints as the held list with its guard.
   const h = result.operator;
-  if (h === 'When' || h === 'Which' || h === 'If') return result;
+  if (h === 'Which' || h === 'If') return result;
   const def = result.operatorDefinition;
   if (def === undefined) return result;
   return yield* materializationSteps(result, def, options);

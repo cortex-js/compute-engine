@@ -69,6 +69,7 @@ import { isFunctionSymbolName } from '../boxed-expression/implicit-variable-rule
 import {
   conditionalValue,
   restrictionParts,
+  isRestriction,
 } from '../boxed-expression/conditional-value.js';
 import {
   boundVariableBindings,
@@ -274,7 +275,7 @@ const MAX_NESTED_PARTIAL_ORDER = 64;
 // Power with a base of 0/±∞ and a symbolic exponent (`0^{n+1}`, `∞^{1−s}`), or
 // `e^{c·(±∞)}` with a symbolic rate `c`. Each such term has a limit of 0 on a
 // convergence condition (`n+1 > 0`, `1−s < 0`, `c > 0`); we resolve it to 0 and
-// carry the condition, so the definite integral becomes a `When`-guarded value.
+// carry the condition, so the definite integral becomes a restricted value.
 // `Erf(c·(±∞))` and `Erfc(c·(±∞))`, from the antiderivative of a Gaussian
 // with a symbolic coefficient, saturate to `±1` (`0` or `2`) under `c > 0`.
 // Anything outside this small table fails closed (caller stays inert) rather
@@ -1189,10 +1190,10 @@ function evaluateInnerIntegrals(
   // variable of `D` is the symbol of the integrand, so the value
   // (`3x^2`) is a function of the integration variable. When the value
   // still has the operator (no closed form), the operator is kept. The
-  // operator is kept too when the value is conditional: an infinite series
-  // `Σ_{n=0}^∞ n·x^n` evaluates to `When(x/(1 − x)^2, |x| < 1)`, which no
-  // antiderivative rule reads, where the series rules integrate the held
-  // `Sum` term by term.
+  // operator is kept too when the value holds a restriction `If(c, e)`: an
+  // infinite series `Σ_{n=0}^∞ n·x^n` evaluates to
+  // `If(|x| < 1, x/(1 − x)^2)`, which no antiderivative rule reads, where the
+  // series rules integrate the held `Sum` term by term.
   if (INTEGRAND_BINDERS_EVALUATED_FIRST.has(expr.operator)) {
     // A `Sum` or `Product` with a bound that reads an integration variable
     // is kept (the index of a `Limits` or `Element` clause is not a bound).
@@ -1235,7 +1236,10 @@ function evaluateInnerIntegrals(
         held = expr.engine.function(expr.operator, [expr.op1, ...clauses]);
     }
     const value = held.evaluate();
-    return value.has([expr.operator, 'When']) ? expr : value;
+    return value.has(expr.operator) ||
+      value.getSubexpressions('If').some((x) => isRestriction(x))
+      ? expr
+      : value;
   }
   let changed = false;
   const ops = expr.ops.map((op, i) => {
@@ -2521,10 +2525,11 @@ function integralTypeOf(t: Readonly<Type> | undefined): Type {
  * list or tuple arm, or has an arm that is neither a list, a tuple, a
  * number nor an absence marker.
  *
- * A `missing` arm is removed first: the restriction `When(e, c)` of a list
- * `e` is typed `missing | vector<2>`. The arms of a union are read one by
- * one: the piecewise `Which(y < 1/2, [y, 2y], True, 0)` is typed
- * `integer | vector<2>`, and its value is a list in which each element is a
+ * A `missing` arm is removed first, if the type has one. The restriction
+ * `If(c, e)` of a list `e` is typed as `e`, for example `vector<2>`. The arms
+ * of a union are read one by one: the piecewise
+ * `Which(y < 1/2, [y, 2y], True, 0)` is typed `integer | vector<2>`, and its
+ * value is a list in which each element is a
  * piecewise expression (`distributeRestriction()`).
  */
 function listIntegrandShape(
@@ -2584,7 +2589,7 @@ function integrateListIntegrand(
   // is typed as a list. Checking the type first means that an integrand that
   // is not a list is not evaluated here. The result type can also be a union
   // of a list and scalars or absence markers (`listIntegrandShape()`): a
-  // restriction `When(e, c)` of a list `e` is typed `list<number> | missing`,
+  // restriction `If(c, e)` of a list `e` is typed `list<number>`,
   // and `Which(c, [y, 2y], True, 0)` is typed `integer | vector<2>`. Both
   // are integrated element by element (see `distributeRestriction()`
   // below). The evaluated value decides: when it is not a list, the caller
@@ -2879,7 +2884,7 @@ const HELD_INTEGRAND_OPERATORS = new Set([
  * `Hold`) before it integrates, where the evaluation of the whole integrand
  * does. It evaluates an inner `Integrate`, `Sum`, `Product` or `D`
  * (`evaluateInnerIntegrals`), but it keeps one whose value still has the
- * operator or is conditional (a `When`), and a `Sum` or `Product` with a
+ * operator or is conditional (a restriction), and a `Sum` or `Product` with a
  * bound that reads an integration variable. The evaluation of the whole
  * integrand evaluates them in these cases too. So the split declines for
  * all of them, and `∫_0^1 (Σ_{k=1}^3 k·x)·f(x, E) dx` is `[9/2, 15/2]` on
@@ -3003,25 +3008,25 @@ function rebuildWithBinding(
 
 /**
  * An evaluated integrand that is a restriction of a list by a condition on
- * the integration variable, `When([e1, e2], c)`, is the list
- * `[When(e1, c), When(e2, c)]`: at each point the two forms have the same
+ * the integration variable, `If(c, [e1, e2])`, is the list
+ * `[If(c, e1), If(c, e2)]`: at each point the two forms have the same
  * elements, and the list form lets `integrateListIntegrand` integrate one
  * element at a time. A piecewise `Which(c1, v1, c2, v2, …)` whose values
  * include a list is distributed the same way: element k is
  * `Which(c1, v1[k], c2, v2[k], …)`, where a value that is not a list is the
- * same for every k. A product `Multiply(a, When(L, c))` (or of a `Which`)
+ * same for every k. A product `Multiply(a, If(c, L))` (or of a `Which`)
  * whose other factors are not lists is distributed too, as
- * `[a·When(L1, c), a·When(L2, c)]`. A value of a `Which` that is itself a
- * held `When`, `Which` or product of them (a nested piecewise with an
+ * `[a·If(c, L1), a·If(c, L2)]`. A value of a `Which` that is itself a
+ * held restriction, `Which` or product of them (a nested piecewise with an
  * undecided condition) is distributed the same way, and its element k is
  * used in element k of the outer `Which`.
  *
  * A tuple is distributed as a list is, and the result is a `Tuple`:
- * `When((e1, e2), c)` is `(When(e1, c), When(e2, c))`. The values of a
+ * `If(c, (e1, e2))` is `(If(c, e1), If(c, e2))`. The values of a
  * `Which` that are distributed must all be lists or all be tuples.
  *
  * Nothing is distributed when the type of a condition can hold a
- * collection (a list of booleans is a mask, which `When` and `Which`
+ * collection (a list of booleans is a mask, which a restriction and `Which`
  * already apply element by element, and a symbol declared `list<boolean>`
  * with no value can become one), when two distributed values have
  * different lengths, or when a value or another factor whose type can hold
@@ -3058,7 +3063,7 @@ function distributedElements(
     if (parts === undefined || mayBeCollection(cond)) return undefined;
     return {
       head: parts.head,
-      elements: parts.elements.map((e) => ce.function('When', [e, cond])),
+      elements: parts.elements.map((e) => ce.function('If', [cond, e])),
     };
   }
 
@@ -6505,8 +6510,8 @@ volumes
               )
             : undefined;
         // A result type that is a union of a list and scalars or absence
-        // markers (`missing | vector<2>` for `When([y, 2y], c)`,
-        // `integer | vector<2>` for `Which(c, [y, 2y], True, 0)`) is read arm
+        // markers (`integer | vector<2>` for `Which(c, [y, 2y], True, 0)`;
+        // a restriction `If(c, [y, 2y])` is typed `vector<2>`) is read arm
         // by arm, as `integrateListIntegrand` reads it: each list arm gives a
         // list of integrals, a scalar arm gives a number, and an absence arm
         // gives nothing.
@@ -8111,7 +8116,7 @@ volumes
               const at = ce.expr(['EvaluateAt', F, lower, upper]);
               // Resolve any parameter-dependent endpoint indeterminate left by
               // FTC at a limit-point bound (0, ±∞): emit a convergence-guarded
-              // `When`, or keep the integral inert (fail closed) rather than leak
+              // restriction, or keep the integral inert (fail closed) rather than leak
               // an indeterminate form (`0^…`, `∞^…`).
               let raw =
                 providerEndpoint ?? at.evaluate({ numericApproximation });

@@ -144,7 +144,7 @@ const CASES: Case[] = [
   // piecewise / conditionals / boolean
   { name: 'if', src: ['If', ['Greater', 'x', 0], ['Multiply', 2, 'x'], ['Negate', 'x']] },
   { name: 'which', src: ['Which', ['Less', 'x', 0], ['Negate', 'x'], ['Less', 'x', 2], ['Multiply', 10, 'x'], 'True', ['Power', 'x', 2]] },
-  { name: 'when', src: ['When', ['Power', 'x', 2], ['Greater', 'x', 1]] },
+  { name: 'when', src: ['If', ['Greater', 'x', 1], ['Power', 'x', 2]] },
   { name: 'less', src: ['Less', 'x', 2] },
   { name: 'lesseq', src: ['LessEqual', 'x', 2] },
   { name: 'equal', src: ['Equal', 'x', 2] },

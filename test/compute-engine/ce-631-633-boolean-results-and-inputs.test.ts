@@ -196,7 +196,7 @@ describe('CE-632 a JavaScript boolean for the interval runner', () => {
   ce.declare('x', 'real');
 
   const ifc = compile(ce.box(['If', 'c', 1, 2]), { to: 'interval-js' });
-  const when = compile(ce.box(['When', 'x', 'c']), { to: 'interval-js' });
+  const when = compile(ce.box(['If', 'c', 'x']), { to: 'interval-js' });
 
   test('If(c, 1, 2) with a boolean and with the string form', () => {
     const one = { kind: 'interval', value: { lo: 1, hi: 1 } };

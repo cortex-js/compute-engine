@@ -2,8 +2,8 @@
  * The `threadsConditionals` operator-definition flag.
  *
  * A conditional value whose condition is not decided — a restriction
- * `When(v, c)` or a piecewise `Which(…)` — moves out of an application of an
- * operator that sets the flag: `f(When(v, c))` is `When(f(v), c)`. With its
+ * `If(c, v)` or a piecewise `Which(…)` — moves out of an application of an
+ * operator that sets the flag: `f(If(c, v))` is `If(c, f(v))`. With its
  * condition undecided, a restricted LIST evaluates to the list of its
  * restricted cells, and a list whose every cell has the same condition is
  * read back as one restricted list first. The values below are checked with
@@ -15,14 +15,14 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const c = ['Less', 0, 't'];
-const W = (x: unknown) => ['When', x, c];
+const W = (x: unknown) => ['If', c, x];
 const RP = W(['Tuple', 3, 4]);
 const RL = W(['List', ['Tuple', 3, 4], ['Tuple', 6, 8]]);
 /** A list of points restricted element by element (a list condition). */
 const LE = [
-  'When',
-  ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]],
+  'If',
   ['List', c, ['Less', 't', 0]],
+  ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]],
 ];
 const O = ['Tuple', 0, 0];
 
@@ -41,11 +41,11 @@ function type(json: unknown): string {
 
 describe('Distance of a restricted point or list of points', () => {
   test.each([
-    ['a restricted point', ['Distance', RP, O], '5 {0 < t}', '5', 'NaN'],
+    ['a restricted point', ['Distance', RP, O], 'If(0 < t, 5)', '5', 'NaN'],
     [
       'a restricted list of points',
       ['Distance', RL, O],
-      '[5,10] {0 < t}',
+      'If(0 < t, [5,10])',
       '[5,10]',
       '"Missing"',
     ],
@@ -59,14 +59,14 @@ describe('Distance of a restricted point or list of points', () => {
     [
       'a list that holds a restricted point',
       ['Distance', ['List', RP, ['Tuple', 6, 8]], O],
-      '[5 {0 < t},10]',
+      '[If(0 < t, 5),10]',
       '[5,10]',
       '[NaN,10]',
     ],
     [
       'an element-wise restriction',
       ['Distance', LE, O],
-      '[5 {0 < t},10 {t < 0}]',
+      '[If(0 < t, 5),If(t < 0, 10)]',
       '[5,NaN]',
       '[NaN,10]',
     ],
@@ -84,20 +84,28 @@ describe('Distance of a restricted point or list of points', () => {
     expect(value(json, -1)).toBe(absent);
   });
 
-  test('the types admit the values', () => {
+  test('the types', () => {
+    // The type of `If(c, L)` is the type of `L`: the run-time `NaN` or
+    // `Missing` sits outside the declared type, as `NaN` sits outside `real`.
     expect(type(['Distance', RP, O])).toBe('number');
-    expect(type(['Distance', RL, O])).toBe('list<number> | missing');
+    expect(type(['Distance', RL, O])).toBe('list<number>');
   });
 });
 
 describe('Norm of a restricted point or list of points', () => {
   test.each([
-    ['a restricted point', ['Norm', RP], '5 {0 < t}', '5', 'NaN'],
-    ['a restricted point, order 1', ['Norm', RP, 1], '7 {0 < t}', '7', 'NaN'],
+    ['a restricted point', ['Norm', RP], 'If(0 < t, 5)', '5', 'NaN'],
+    [
+      'a restricted point, order 1',
+      ['Norm', RP, 1],
+      'If(0 < t, 7)',
+      '7',
+      'NaN',
+    ],
     [
       'a restricted list of points',
       ['Norm', RL],
-      '[5,10] {0 < t}',
+      'If(0 < t, [5,10])',
       '[5,10]',
       '"Missing"',
     ],
@@ -111,14 +119,16 @@ describe('Norm of a restricted point or list of points', () => {
     [
       'a list whose first point is restricted',
       ['Norm', ['List', RP, ['Tuple', 6, 8]]],
-      '[5 {0 < t},10]',
+      // With `t` free, the norm of a list that holds a restricted point
+      // stays held.
+      '||[If(0 < t, (3, 4)),(6, 8)]||',
       '[5,10]',
       '[NaN,10]',
     ],
     [
       'an element-wise restriction',
       ['Norm', LE],
-      '[5 {0 < t},10 {t < 0}]',
+      '||[If(0 < t, (3, 4)),If(t < 0, (6, 8))]||',
       '[5,NaN]',
       '[NaN,10]',
     ],
@@ -132,7 +142,7 @@ describe('Norm of a restricted point or list of points', () => {
     // It was typed `number`, the norm of a vector, while its value is one
     // norm per point.
     expect(type(['Norm', ['List', RP, ['Tuple', 6, 8]]])).toBe('list<number>');
-    expect(type(['Norm', RL])).toBe('list<number> | missing');
+    expect(type(['Norm', RL])).toBe('list<number>');
   });
 });
 
@@ -142,13 +152,13 @@ describe('The types of element access of a restricted operand', () => {
     [['At', W(['Tuple', 1, 2]), 2]],
     [['First', W(['Tuple', 1, 2])]],
     [['Last', W(['Tuple', 1, 2])]],
-  ])('%j admits NaN and an integer', (json) => {
+  ])('%j is typed as an integer and is NaN when absent', (json) => {
     const t = type(json);
-    // Before: `missing | vector<integer^2>`, `unknown` and `integer`. An
-    // element read of an absent collection answers the marker of its
+    // An element read of an absent collection answers the marker of its
     // codomain, `NaN` for a number, not `Missing` (user decision
-    // 2026-09-26, `docs/ERROR-MODEL.md` §2).
-    expect(t).toContain('nan');
+    // 2026-09-26, `docs/ERROR-MODEL.md` §2). The type is the element type
+    // of the present collection: `NaN` sits outside it, as `NaN` sits
+    // outside `real`.
     expect(t).not.toContain('missing');
     expect(t).toContain('integer');
     expect(t).not.toContain('vector');
@@ -172,42 +182,141 @@ describe('The types of element access of a restricted operand', () => {
 });
 
 describe('Point accessors over a list whose cells can be absent', () => {
-  // A masked cell of a list is `Missing`, and the list is typed
-  // `list<T | missing>` (user decision of 2026-09-09, `docs/ERROR-MODEL.md`).
-  // The coordinate of an absent point of a list is `Missing` too, so the
-  // type of the coordinate list must admit it. It was `list<number>`.
+  // A masked cell of a list is `Missing`, and the coordinate of an absent
+  // point of a list is `Missing` too. The type of a restricted point
+  // `If(c, p)` is the type of `p`, so the type of the result is the type of
+  // the present values: the run-time `Missing` sits outside it, as `NaN`
+  // sits outside `real`. A written `Missing` cell, and a cell masked by a
+  // list of conditions, keep their `missing` arm.
   const P3 = (a: number, b: number, z: number) => ['Tuple', a, b, z];
-  const lists: [string, unknown][] = [
-    ['a restricted first point', ['List', RP, ['Tuple', 6, 8]]],
-    ['a restricted last point', ['List', ['Tuple', 6, 8], RP]],
-    ['an absent first point', ['List', 'Missing', ['Tuple', 6, 8]]],
-    ['an element-wise restriction', LE],
-  ];
-  const cases: [string, unknown][] = [
-    ...lists.flatMap(([l, L]): [string, unknown][] => [
-      [`PointX of ${l}`, ['PointX', L]],
-      [`PointY of ${l}`, ['PointY', L]],
-      [`First of ${l}`, ['First', L]],
-      [`Last of ${l}`, ['Last', L]],
-    ]),
+  const RF = ['List', RP, ['Tuple', 6, 8]];
+  const RLast = ['List', ['Tuple', 6, 8], RP];
+  const AF = ['List', 'Missing', ['Tuple', 6, 8]];
+  const V = 'vector<integer^2>';
+  const T = 'tuple<integer, integer>';
+  const MV = 'list<integer | missing | nan^2>';
+  const MT = 'missing | tuple<integer, integer>';
+  const ML = 'list<integer | missing | nan>';
+  // The operation, its type, its value with `t = 2`, its value with
+  // `t = -1`.
+  const cases: [string, unknown, string, string, string][] = [
+    [
+      'PointX of a restricted first point',
+      ['PointX', RF],
+      V,
+      '[3,6]',
+      '["Missing",6]',
+    ],
+    [
+      'PointY of a restricted first point',
+      ['PointY', RF],
+      V,
+      '[4,8]',
+      '["Missing",8]',
+    ],
+    [
+      'First of a restricted first point',
+      ['First', RF],
+      T,
+      '(3, 4)',
+      '"Missing"',
+    ],
+    ['Last of a restricted first point', ['Last', RF], T, '(6, 8)', '(6, 8)'],
+    [
+      'PointX of a restricted last point',
+      ['PointX', RLast],
+      V,
+      '[6,3]',
+      '[6,"Missing"]',
+    ],
+    [
+      'PointY of a restricted last point',
+      ['PointY', RLast],
+      V,
+      '[8,4]',
+      '[8,"Missing"]',
+    ],
+    [
+      'First of a restricted last point',
+      ['First', RLast],
+      T,
+      '(6, 8)',
+      '(6, 8)',
+    ],
+    [
+      'Last of a restricted last point',
+      ['Last', RLast],
+      T,
+      '(3, 4)',
+      '"Missing"',
+    ],
+    [
+      'PointX of an absent first point',
+      ['PointX', AF],
+      MV,
+      '["Missing",6]',
+      '["Missing",6]',
+    ],
+    [
+      'PointY of an absent first point',
+      ['PointY', AF],
+      MV,
+      '["Missing",8]',
+      '["Missing",8]',
+    ],
+    [
+      'First of an absent first point',
+      ['First', AF],
+      MT,
+      '"Missing"',
+      '"Missing"',
+    ],
+    ['Last of an absent first point', ['Last', AF], MT, '(6, 8)', '(6, 8)'],
+    [
+      'PointX of an element-wise restriction',
+      ['PointX', LE],
+      ML,
+      '[3,"Missing"]',
+      '["Missing",6]',
+    ],
+    [
+      'PointY of an element-wise restriction',
+      ['PointY', LE],
+      ML,
+      '[4,"Missing"]',
+      '["Missing",8]',
+    ],
+    [
+      'First of an element-wise restriction',
+      ['First', LE],
+      MT,
+      '(3, 4)',
+      '"Missing"',
+    ],
+    [
+      'Last of an element-wise restriction',
+      ['Last', LE],
+      MT,
+      '"Missing"',
+      '(6, 8)',
+    ],
     [
       'PointZ of a list with a restricted 3-D point',
       ['PointZ', ['List', W(P3(1, 2, 3)), P3(3, 4, 5)]],
+      V,
+      '[3,5]',
+      '["Missing",5]',
     ],
   ];
-  test.each(cases)('%s: the type admits the value', (_l, json) => {
-    for (const t of [2, -1]) {
-      const ce = new ComputeEngine();
-      ce.assign('t', t);
-      const e = ce.box(json as never);
-      const v = e.evaluate();
-      expect(v.type.matches(e.type)).toBe(true);
-    }
+  test.each(cases)('%s', (_l, json, t, present, absent) => {
+    expect(type(json)).toBe(t);
+    expect(value(json, 2)).toBe(present);
+    expect(value(json, -1)).toBe(absent);
   });
 
-  test('the coordinate list is typed with a missing cell', () => {
+  test('the coordinate list', () => {
     expect(type(['PointY', ['List', RP, ['Tuple', 6, 8]]])).toBe(
-      'list<integer | missing | nan^2>'
+      'vector<integer^2>'
     );
     expect(value(['PointY', ['List', RP, ['Tuple', 6, 8]]], -1)).toBe(
       '["Missing",8]'
@@ -245,8 +354,8 @@ describe('A custom operator that sets the flag', () => {
   test('the restriction moves out of the application', () => {
     const ce = engine(true);
     const e = ce.box(json as never);
-    expect(e.evaluate().toString()).toBe('(1, 2) {0 < t}');
-    expect(e.type.toString()).toBe('missing | tuple');
+    expect(e.evaluate().toString()).toBe('If(0 < t, (1, 2))');
+    expect(e.type.toString()).toBe('tuple');
     ce.assign('t', 2);
     expect(e.evaluate().toString()).toBe('(1, 2)');
     ce.assign('t', -1);
@@ -255,7 +364,7 @@ describe('A custom operator that sets the flag', () => {
 
   test('without the flag, the handler receives the restriction', () => {
     const e = engine(false).box(json as never);
-    expect(e.evaluate().toString()).toBe('Midpoint((0, 0) {0 < t}, (2, 4))');
+    expect(e.evaluate().toString()).toBe('Midpoint(If(0 < t, (0, 0)), (2, 4))');
   });
 });
 
@@ -343,7 +452,7 @@ describe('Distance of two lists of points with a restricted cell on one side', (
   // one side is paired with the point at the same position on the other
   // side, not with the whole other list.
   const P = (a: number, b: number) => ['Tuple', a, b];
-  const restricted = ['When', P(0, 0), ['Less', 0, 't']];
+  const restricted = ['If', ['Less', 0, 't'], P(0, 0)];
 
   test('the restricted cell is on the right', () => {
     const ce = new ComputeEngine();
@@ -352,7 +461,7 @@ describe('Distance of two lists of points with a restricted cell on one side', (
       ['List', P(3, 4), P(6, 8)],
       ['List', restricted, P(0, 0)],
     ]);
-    expect(e.evaluate().toString()).toBe('[5 {0 < t},10]');
+    expect(e.evaluate().toString()).toBe('[If(0 < t, 5),10]');
     ce.assign('t', 1);
     expect(e.evaluate().toString()).toBe('[5,10]');
   });
@@ -361,10 +470,10 @@ describe('Distance of two lists of points with a restricted cell on one side', (
     const ce = new ComputeEngine();
     const e = ce.box([
       'Distance',
-      ['List', ['When', P(3, 4), ['Less', 0, 't']], P(6, 8)],
+      ['List', ['If', ['Less', 0, 't'], P(3, 4)], P(6, 8)],
       ['List', P(0, 0), P(0, 0)],
     ]);
-    expect(e.evaluate().toString()).toBe('[5 {0 < t},10]');
+    expect(e.evaluate().toString()).toBe('[If(0 < t, 5),10]');
     ce.assign('t', -1);
     expect(e.evaluate().toString()).toBe('[NaN,10]');
   });
@@ -375,10 +484,10 @@ describe('The stored value of Insert and ReplaceAt is not threaded', () => {
   // element, so the other elements are kept once the condition fails, as
   // when the restricted value is evaluated first.
   test.each([
-    [['Insert', ['List', 1], 1, W(2)], '[2 {0 < t},1]', '[2,1]', '[NaN,1]'],
+    [['Insert', ['List', 1], 1, W(2)], '[If(0 < t, 2),1]', '[2,1]', '[NaN,1]'],
     [
       ['ReplaceAt', ['List', 1, 5], 1, W(2)],
-      '[2 {0 < t},5]',
+      '[If(0 < t, 2),5]',
       '[2,5]',
       '[NaN,5]',
     ],
@@ -398,7 +507,7 @@ describe('A search for a restricted value', () => {
   // The searched value is not threaded: with `t` free the application stays
   // unevaluated, and once the condition is decided the search runs on the
   // VALUE the operand then has, on every route (user decision 2026-09-26).
-  // Before, the held value was `When(Contains(…), c)`, which became `Missing`
+  // Before, the held value was `If(c, Contains(…))`, which became `Missing`
   // (or `NaN` for `IndexOf` and `Count`) when `c` failed, while a fresh
   // evaluation gave `False` (or `0`).
   //
@@ -413,26 +522,26 @@ describe('A search for a restricted value', () => {
   test.each([
     [
       ['Contains', L, W(2)],
-      'Contains([1,2,2], 2 {0 < t})',
+      'Contains([1,2,2], If(0 < t, 2))',
       '"True"',
       '"False"',
     ],
-    [['IndexOf', L, W(2)], 'IndexOf([1,2,2], 2 {0 < t})', '2', '0'],
-    [['Count', L, W(2)], 'Count([1,2,2], 2 {0 < t})', '2', '0'],
+    [['IndexOf', L, W(2)], 'IndexOf([1,2,2], If(0 < t, 2))', '2', '0'],
+    [['Count', L, W(2)], 'Count([1,2,2], If(0 < t, 2))', '2', '0'],
     [
       ['Contains', LN, W(1)],
-      'Contains([1,NaN], 1 {0 < t})',
+      'Contains([1,NaN], If(0 < t, 1))',
       '"True"',
       '"True"',
     ],
     [
       ['Contains', LN, W(2)],
-      'Contains([1,NaN], 2 {0 < t})',
+      'Contains([1,NaN], If(0 < t, 2))',
       '"False"',
       '"True"',
     ],
-    [['IndexOf', LN, W(2)], 'IndexOf([1,NaN], 2 {0 < t})', '0', '2'],
-    [['Count', LN, W(2)], 'Count([1,NaN], 2 {0 < t})', '0', '1'],
+    [['IndexOf', LN, W(2)], 'IndexOf([1,NaN], If(0 < t, 2))', '0', '2'],
+    [['Count', LN, W(2)], 'Count([1,NaN], If(0 < t, 2))', '0', '1'],
     // A `Which` with no selected branch is `Missing`, not `NaN`: the two
     // markers are different expressions, so it is not found where `NaN`
     // sits.
@@ -443,19 +552,29 @@ describe('A search for a restricted value', () => {
       '0',
     ],
     // `Element` and `NotElement` follow the same rule. Before, an undecided
-    // restricted value was compared as a `When` node: `Element(2{c}, L)` was
+    // restricted value was compared as a restriction node: `Element(2{c}, L)` was
     // `False` at once, and stayed `False` after `c` became true.
-    [['Element', W(2), L], 'Element(2 {0 < t}, [1,2,2])', '"True"', '"False"'],
+    [
+      ['Element', W(2), L],
+      'Element(If(0 < t, 2), [1,2,2])',
+      '"True"',
+      '"False"',
+    ],
     [
       ['NotElement', W(2), L],
-      'NotElement(2 {0 < t}, [1,2,2])',
+      'NotElement(If(0 < t, 2), [1,2,2])',
       '"False"',
       '"True"',
     ],
-    [['Element', W(2), LN], 'Element(2 {0 < t}, [1,NaN])', '"False"', '"True"'],
+    [
+      ['Element', W(2), LN],
+      'Element(If(0 < t, 2), [1,NaN])',
+      '"False"',
+      '"True"',
+    ],
     [
       ['NotElement', W(2), LN],
-      'NotElement(2 {0 < t}, [1,NaN])',
+      'NotElement(If(0 < t, 2), [1,NaN])',
       '"True"',
       '"False"',
     ],
@@ -554,7 +673,7 @@ describe('A search for a restricted value', () => {
           .box([
             'IndexOf',
             ['List', 'NaN'],
-            ['When', 2, ['Less', ['Random'], 0.5]],
+            ['If', ['Less', ['Random'], 0.5], 2],
           ] as never)
           .evaluate()
           .toString()
@@ -590,7 +709,7 @@ describe('A search for a restricted value', () => {
   });
 
   test('a restricted collection is still threaded', () => {
-    expect(value(['Contains', W(L), 2])).toBe('"True" {0 < t}');
+    expect(value(['Contains', W(L), 2])).toBe('If(0 < t, "True")');
     expect(value(['Contains', W(L), 2], -1)).toBe('"Missing"');
     expect(value(['IndexOf', W(L), 2], -1)).toBe('NaN');
   });

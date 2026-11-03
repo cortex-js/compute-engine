@@ -13,7 +13,6 @@ import {
 } from '../../common/type/utils.js';
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
-import { elementwiseMaskRank } from '../library/control-structures.js';
 import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
 import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
 import type { CompileTarget, OperandCompiler, TargetSource } from './types.js';
@@ -49,7 +48,6 @@ import {
   exactSelect,
   noBranchValue,
 } from './compile-absence.js';
-import { _codeAliases } from './compiler-mode.js';
 import {
   compilationType,
   isProvablyStringOperand,
@@ -290,239 +288,130 @@ export function compileExprWhich(
 }
 
 /**
- * A `When`. A case of `compileExpr`: it returns the code, or `undefined` when
- * `compileExpr` continues with its next case.
+ * The restriction `v\{C\}`, the single-branch `If(C, v)`, whose condition
+ * `C` is a mask of rank 1 (a flat list of conditions) by its type, or may
+ * be one, with `args` in the order `[v, C]`. The caller compiles every
+ * other condition (a scalar, or a mask of rank 2 or more or of a rank that
+ * the type does not give) as the selection of `If`.
+ *
+ * Only the JavaScript target compiles it, with the run-time helper
+ * `_SYS.restrict`. Every other target declines: the conditional forms of
+ * the GPU, interval and Python targets take a scalar condition only.
  */
-export function compileExprWhen(
-  h: string,
+export function compileExprRestriction(
   args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  node: Expression | undefined
-): TargetSource | undefined {
-  if (h === 'When') {
-    if (args.length !== 2)
-      throw new Error(
-        'Could not compile `When`: expected exactly 2 arguments (expr, cond)'
-      );
-    const fn = target.functions?.(h);
-    if (fn) {
-      if (typeof fn === 'function') {
-        return fn(args, operandCompiler(node, target), target);
-      }
-      return `${fn}(${args.map((x) => core.compile(x, target)).join(', ')})`;
-    }
-    // Compile to a ternary: cond ? expr : <absent>. The masked branch is
-    // the codomain's absence marker, the same value a `Which` that matched
-    // no clause emits (`noBranchValue`, which says which domains get the
-    // object null and why an unknown type keeps `NaN`). A complex-valued
-    // arm keeps the masked branch in the same `{ re, im }` convention (see
-    // `branchComplexCoercion`).
-    const coerce = branchComplexCoercion([args[0]], target);
-    const nan = noBranchValue(node, target, coerce !== undefined);
-    // Special-case constant True/False conditions to avoid bare symbol refs
-    if (isSymbol(args[1], 'True'))
-      return `(${compileOp(node, 0, target, 0, args[0])})`;
-    if (isSymbol(args[1], 'False')) return nan;
-    // A list of conditions restricts element by element: `u\{[1, 2, 3] v <
-    // 2\}` is `[u, Missing, Missing]` in the interpreter, one masked value
-    // per condition; a list value is aligned with the conditions and
-    // truncated to the shorter (`[10, 20]\{[v, 2v, 3v] < 2\}` is
-    // `[10, Missing]`), and a point is one value, lifted whole at every
-    // position. The run-time helper `_SYS.restrict` does exactly that; the
-    // scalar guard below would refuse the collection-valued condition.
-    // Whether the value is aligned or repeated is decided from its type:
-    // a point (tuple-shaped) or a scalar is repeated, a list is aligned,
-    // and a value that may be either at run time — a point-or-point-list
-    // union, whose flat array could be a point or a list — fails closed.
-    // Measured on the Tycho corpus (2026-09-15): 11 restriction rows in
-    // four documents declined here.
-    // A condition that MAY be a list (`B < 0` for `B:
-    // broadcastable<number>`) takes the same helper, which reads a
-    // condition that is not an array at run time as one scalar condition.
-    // The scalar guard below would refuse it (`assertScalarCondition`).
-    if (
-      args[1].type.matches('collection<any>') ||
-      mayBeCollectionCondition(args[1].type.type)
-    ) {
-      // A mask of rank 2 or more selects cell by cell at every level, as
-      // the else-less `If(C, v)` does, on both routes (user decision
-      // 2026-10-23, ROADMAP CE-223.1): `When(v, C)` compiles as that `If`
-      // when the type proves the rank, and dispatches on the shape of the
-      // mask at run time when the type does not give the rank (below).
-      const maskRank = elementwiseMaskRank([args[1].type.type]);
-      if (maskRank !== undefined && maskRank >= 2)
-        return core.compileExpr(
-          args[0].engine,
-          'If',
-          [args[1], args[0]],
-          0,
-          target,
-          undefined
-        );
-      const valueType = args[0].type;
-      // A point is one value; so is a string, which the lattice reads as
-      // an indexed collection of its characters but the restriction never
-      // aligns with the conditions.
-      const point =
-        isTupleShapedType(valueType.type) || isProvablyStringOperand(args[0]);
-      // A union with a point or string arm beside a list arm is neither:
-      // a tuple and a string are indexed collections in the lattice, so
-      // `indexed_collection<any>` alone would read such a union as a list.
-      const list =
-        !point &&
-        !hasTupleOrStringArm(valueType.type) &&
-        (valueType.matches('list<any>') ||
-          valueType.matches('indexed_collection<any>'));
-      // A scalar is repeated. Anything else — a value whose type is wide
-      // (`unknown`, `broadcastable<number>`, a point-or-point-list union)
-      // may hold a list or a point at run time, and a flat array cannot
-      // tell the two apart — fails closed rather than guessing.
-      const scalar =
-        !point &&
-        !list &&
-        (valueType.matches('number') || valueType.matches('boolean'));
-      // A value that is a scalar or a tensor of scalars
-      // (`broadcastable<number>`, `broadcastable<boolean>`) cannot be a
-      // point, so its array test at run time decides: an array is aligned
-      // with the conditions, any other value is repeated (`zip` is `null`
-      // for `_SYS.restrict`). (ROADMAP CE-223.3.)
-      const runtimeZip =
-        !point &&
-        !list &&
-        !scalar &&
-        (isSubtype(valueType.type, 'broadcastable<number>') ||
-          isSubtype(valueType.type, 'broadcastable<boolean>'));
-      if (!point && !list && !scalar && !runtimeZip)
-        throw new Error(
-          `Could not compile \`When\`: a restriction by a list of conditions over ` +
-            `a value that may be a list or a point at run time (type ` +
-            `'${valueType.toString()}'): a list is aligned with the ` +
-            `conditions and a point is repeated, and a flat array cannot ` +
-            `tell the two apart.`
-        );
-      // The conditions compile first, as in the scalar case below.
-      //
-      // A literal list of scalar conditions compiles each cell to `true`
-      // exactly when that condition is decided true (`compileGuardTest`),
-      // as the scalar case below selects.
-      const conds =
-        isFunction(args[1], 'List') &&
-        args[1].ops.every(
-          (cell) =>
-            cell.type.matches('boolean') &&
-            !mayBeCollectionCondition(cell.type.type)
-        )
-          ? `[${args[1].ops
-              .map((cell) => compileGuardTest(cell, target))
-              .join(', ')}]`
-          : core.compile(args[1], target);
-      const val = compileOp(node, 0, target, 0, args[0]);
-      // The absence at each position is decided from what one position
-      // holds — a list element, or the whole value — not from the node's
-      // own type, the list of results. A missing number is the numeric
-      // absence (`NaN`); a missing POINT and a missing string are the
-      // object null (`undefined` on JavaScript), as a single missing point
-      // is (R1 of `docs/plans/2026-11-01-absent-value-contract.md`: a
-      // producer gives the absence marker of its result type). The
-      // element-wise `Which` gives the same cells (its selection helper
-      // takes the absence of the cell type, `_SYS.selectAbsent`), so the
-      // two forms of the same selection agree.
-      //
-      // A missing COMPLEX number is plain `NaN`, as the element-wise
-      // `Which` gives it, not the complex value `{ re: NaN, im: NaN }`: a
-      // discharge (`IsMissing`, `Coalesce`) tests `Number.isNaN`, which
-      // reads an object as present, and must read this cell as absent
-      // (R3 of the same plan).
-      const held: Type = list
-        ? (collectionElementType(valueType.type) ?? 'unknown')
-        : valueType.type;
-      const nullLiteral = target.absence?.object?.nullLiteral;
-      const absent =
-        coerce === undefined &&
-        nullLiteral !== undefined &&
-        absenceKind([held], target) === 'object'
-          ? nullLiteral
-          : 'NaN';
-      const zip = runtimeZip ? 'null' : String(list);
-      if (maskRank === 1)
-        return `_SYS.restrict(${conds}, ${val}, ${zip}, ${absent})`;
-      // The type does not give the rank of the mask: a mask with a list
-      // of conditions in it at run time takes the selection of the
-      // else-less `If(C, v)`, any other the restriction above. The mask
-      // and the value are bound once, and each branch reads the bindings
-      // (`_codeAliases`).
-      const c = tempVar(target);
-      const v = tempVar(target);
-      const installed: Array<[Expression, string | undefined]> = [];
-      let nested: string;
-      try {
-        for (const [op, name] of [
-          [args[1], c],
-          [args[0], v],
-        ] as const) {
-          installed.push([op, _codeAliases.get(op)]);
-          _codeAliases.set(op, name);
-        }
-        nested = core.compileExpr(
-          args[0].engine,
-          'If',
-          [args[1], args[0]],
-          0,
-          target,
-          undefined
-        );
-      } finally {
-        for (const [op, previous] of installed.reverse()) {
-          if (previous === undefined) _codeAliases.delete(op);
-          else _codeAliases.set(op, previous);
-        }
-      }
-      return (
-        `((${c}, ${v}) => _SYS.isNestedMask(${c}) ? (${nested}) : ` +
-        `_SYS.restrict(${c}, ${v}, ${zip}, ${absent}))(${conds}, ${val})`
-      );
-    }
-    // The VALUE is the conditional position here (the single condition is
-    // eager) — see the `When` entry of the lazy-operand inventory. The
-    // condition compiles first, the order of the CSE harvest walk
-    // (`operandEmissionOrder`, `cse.ts`), so the value arm can read a
-    // temporary that the condition binds.
-    //
-    // The value is selected only when the condition is decided TRUE (see
-    // "Branch conditions that cannot be decided"). A condition read by its
-    // value (a boolean input `c`, a call) must be exactly `true`: before,
-    // `When(x, c)` with `c = 1` selected `x`. A condition that is false
-    // or undecided gives the same masked value. A condition that is
-    // decided by construction keeps the plain conditional expression.
-    //
-    // A condition read by its value that is not provably boolean-valued
-    // (an undeclared `b`, `x/y`) takes the same strict test: a value that
-    // is not a boolean selects nothing, as in `If`, and the interpreter
-    // holds such a `When` unevaluated. Before, the run-time guard of the
-    // target (`_SYS.cond`) raised for it.
-    const decidability = conditionDecidability(
-      args[1],
-      target.bindExpr !== undefined,
-      target
+  target: CompileTarget<Expression>
+): TargetSource {
+  if (target.language !== 'javascript')
+    throw new Error(
+      `Could not compile a restriction by a list of conditions on target ` +
+        `'${target.language ?? 'unknown'}': its conditional forms take a ` +
+        `scalar condition only.`
     );
-    if (decidability === null) {
-      const cond = guardCondition(args[1], target);
-      const val = compileOp(node, 0, target, 0, args[0]);
-      return `((${cond}) ? (${val}) : ${nan})`;
-    }
-    const compiledCond = compileExactCondition(args[1], decidability, target);
-    const val = compileOp(node, 0, target, 0, args[0]);
-    // A condition read by its value: the value is selected only when the
-    // condition is exactly `true` (`false` under a negation). The false
-    // and the undecided answers are the same masked value, so one strict
-    // comparison is enough, and the condition is evaluated once.
-    if (compiledCond.conjuncts === 'value')
-      return `((${compiledCond.code}) === ${
-        compiledCond.negate ? 'false' : 'true'
-      } ? (${val}) : ${nan})`;
-    return exactSelect(compiledCond, `(${val})`, nan, nan, target);
-  }
-  return undefined;
+  // A complex-valued arm keeps the masked cell in the `{ re, im }`
+  // convention (see `branchComplexCoercion`).
+  const coerce = branchComplexCoercion([args[0]], target);
+  // A list of conditions restricts element by element: `u\{[1, 2, 3] v <
+  // 2\}` is `[u, Missing, Missing]` in the interpreter, one masked value
+  // per condition; a list value is aligned with the conditions and
+  // truncated to the shorter (`[10, 20]\{[v, 2v, 3v] < 2\}` is
+  // `[10, Missing]`), and a point is one value, lifted whole at every
+  // position. The run-time helper `_SYS.restrict` does exactly that.
+  // Whether the value is aligned or repeated is decided from its type:
+  // a point (tuple-shaped) or a scalar is repeated, a list is aligned,
+  // and a value that may be either at run time — a point-or-point-list
+  // union, whose flat array could be a point or a list — fails closed.
+  // Measured on the Tycho corpus (2026-09-15): 11 restriction rows in
+  // four documents declined here.
+  // A condition that MAY be a list (`B < 0` for `B:
+  // broadcastable<number>`) takes the same helper, which reads a
+  // condition that is not an array at run time as one scalar condition.
+  const valueType = args[0].type;
+  // A point is one value; so is a string, which the lattice reads as
+  // an indexed collection of its characters but the restriction never
+  // aligns with the conditions.
+  const point =
+    isTupleShapedType(valueType.type) || isProvablyStringOperand(args[0]);
+  // A union with a point or string arm beside a list arm is neither:
+  // a tuple and a string are indexed collections in the lattice, so
+  // `indexed_collection<any>` alone would read such a union as a list.
+  const list =
+    !point &&
+    !hasTupleOrStringArm(valueType.type) &&
+    (valueType.matches('list<any>') ||
+      valueType.matches('indexed_collection<any>'));
+  // A scalar is repeated. Anything else — a value whose type is wide
+  // (`unknown`, `broadcastable<number>`, a point-or-point-list union)
+  // may hold a list or a point at run time, and a flat array cannot
+  // tell the two apart — fails closed rather than guessing.
+  const scalar =
+    !point &&
+    !list &&
+    (valueType.matches('number') || valueType.matches('boolean'));
+  // A value that is a scalar or a tensor of scalars
+  // (`broadcastable<number>`, `broadcastable<boolean>`) cannot be a
+  // point, so its array test at run time decides: an array is aligned
+  // with the conditions, any other value is repeated (`zip` is `null`
+  // for `_SYS.restrict`). (ROADMAP CE-223.3.)
+  const runtimeZip =
+    !point &&
+    !list &&
+    !scalar &&
+    (isSubtype(valueType.type, 'broadcastable<number>') ||
+      isSubtype(valueType.type, 'broadcastable<boolean>'));
+  if (!point && !list && !scalar && !runtimeZip)
+    throw new Error(
+      `Could not compile a restriction by a list of conditions over ` +
+        `a value that may be a list or a point at run time (type ` +
+        `'${valueType.toString()}'): a list is aligned with the ` +
+        `conditions and a point is repeated, and a flat array cannot ` +
+        `tell the two apart.`
+    );
+  // The conditions compile first, as in the scalar `If`.
+  //
+  // A literal list of scalar conditions compiles each cell to `true`
+  // exactly when that condition is decided true (`compileGuardTest`),
+  // as the scalar `If` selects.
+  const conds =
+    isFunction(args[1], 'List') &&
+    args[1].ops.every(
+      (cell) =>
+        cell.type.matches('boolean') &&
+        !mayBeCollectionCondition(cell.type.type)
+    )
+      ? `[${args[1].ops
+          .map((cell) => compileGuardTest(cell, target))
+          .join(', ')}]`
+      : core.compile(args[1], target);
+  const val = compileOp(undefined, 0, target, 0, args[0]);
+  // The absence at each position is decided from what one position
+  // holds — a list element, or the whole value — not from the node's
+  // own type, the list of results. A missing number is the numeric
+  // absence (`NaN`); a missing POINT and a missing string are the
+  // object null (`undefined` on JavaScript), as a single missing point
+  // is (R1 of `docs/plans/2026-11-01-absent-value-contract.md`: a
+  // producer gives the absence marker of its result type). The
+  // element-wise `Which` gives the same cells (its selection helper
+  // takes the absence of the cell type, `_SYS.selectAbsent`), so the
+  // two forms of the same selection agree.
+  //
+  // A missing COMPLEX number is plain `NaN`, as the element-wise
+  // `Which` gives it, not the complex value `{ re: NaN, im: NaN }`: a
+  // discharge (`IsMissing`, `Coalesce`) tests `Number.isNaN`, which
+  // reads an object as present, and must read this cell as absent
+  // (R3 of the same plan).
+  const held: Type = list
+    ? (collectionElementType(valueType.type) ?? 'unknown')
+    : valueType.type;
+  const nullLiteral = target.absence?.object?.nullLiteral;
+  const absent =
+    coerce === undefined &&
+    nullLiteral !== undefined &&
+    absenceKind([held], target) === 'object'
+      ? nullLiteral
+      : 'NaN';
+  const zip = runtimeZip ? 'null' : String(list);
+  return `_SYS.restrict(${conds}, ${val}, ${zip}, ${absent})`;
 }
 
 /**
@@ -547,7 +436,7 @@ export function compileExprAssertPresent(
           `cannot distinguish a possible 'Nothing' input from an absent datum.`
       );
     const code = compileValueOperand(operand, target);
-    // A restriction (`If(c, 3)`, `When(3, c)`) is absent where its
+    // A restriction (`If(c, 3)`) is absent where its
     // condition fails, whatever its type says, and so is an expression that
     // contains one: it is never proved present.
     const proved =

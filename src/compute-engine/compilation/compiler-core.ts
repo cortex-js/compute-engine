@@ -391,7 +391,7 @@ import {
 import {
   compileExprAssertPresent,
   compileExprIf,
-  compileExprWhen,
+  compileExprRestriction,
   compileExprWhich,
   kleeneValueConnective,
 } from './compile-conditionals.js';
@@ -1032,10 +1032,8 @@ function compileExpression(
   // check (JS/Python declare `object`, so the guard short-circuits).
   if (target.absence !== undefined && target.absence.object === undefined) {
     // A single-branch `If(c, e)` (the parse of the restriction `e\{c\}`) is
-    // typed as its arm `e`, with no `missing` arm: the absent value is
-    // implicit in the type. Its value is absent where `c` fails, as for
-    // `When(e, c)`, whose type has the `missing` arm, so the arm is added
-    // here and the two spellings pass or fail this check alike.
+    // typed as its arm `e`, with no `missing` arm, but its value is absent
+    // where `c` fails, so the arm is added here.
     const t: Type =
       isFunction(expr, 'If') && expr.nops === 2 && !isStatementArm(expr.op2)
         ? { kind: 'union', types: [compilationType(expr), 'missing'] }
@@ -1053,7 +1051,7 @@ function compileExpression(
           : withoutMissing;
       // A NUMERIC-SHAPED type — a tuple of 2 to 4 numeric components — is
       // exempt like a scalar number is: absence fills every lane with NaN
-      // (`vec2(_gpu_nan())`), which is exactly what the `When`/`Which`
+      // (`vec2(_gpu_nan())`), which is exactly what the `If`/`Which`
       // no-match lowering emits for a shaped branch value (Tycho item 49).
       // This is the arm a default-less `Which` over a numeric tuple carries
       // since the no-selection ruling of 2026-08-27 (its value is `Missing`
@@ -1066,7 +1064,7 @@ function compileExpression(
       //
       // A LIST of 2 to 4 real numbers (`vector<real^2>`, the type of
       // `[x, y]`) lowers to a `vecN` as such a tuple does, and is exempt
-      // for the same reason: `If(c, [x, y])`, `When([x, y], c)` and
+      // for the same reason: `If(c, [x, y])` and
       // `If(c, [x, y], Missing)` fill every lane with NaN. A list of
       // another length, or with complex cells, has no `vecN` lowering and
       // stays fail-closed.
@@ -1084,7 +1082,7 @@ function compileExpression(
       // A LIST whose cells are numbers that may be absent
       // (`list<integer | missing>`, the type of `[sin x, x{x > 0}]`) is
       // exempt for the same reason a scalar number is: an absent cell is a
-      // NaN lane, which is exactly what the `When`/`Which` no-match
+      // NaN lane, which is exactly what the `If`/`Which` no-match
       // lowering emits for that cell. The exemption reads the UNSTRIPPED
       // type: only a type that IS a list, with the marker on its element
       // type, qualifies. `missing | list<number>` — the whole list may be
@@ -3379,7 +3377,7 @@ export function compileExpr(
   // handler is an explicit opt-in that takes precedence over the built-in
   // lowering, even for an operator-mapped head (e.g. a custom-tolerance `GCD`
   // or a re-mapped `Add`). Structural/control-flow heads
-  // (`CONTROL_FLOW_HEADS`: Sum/Product/If/When/Match/Block/Function/
+  // (`CONTROL_FLOW_HEADS`: Sum/Product/If/Match/Block/Function/
   // Loop/Comprehension/Sequence, …) are handled by their own bespoke lowering
   // and are NOT overridable — except the carve-outs in
   // `OVERRIDABLE_CONTROL_FLOW_HEADS` (`Which`, Tycho item 180), which have
@@ -3551,7 +3549,7 @@ export function compileExpr(
   // component-wise `abs` the broadcast lowering emitted for it.
   //
   // A GATED point (`isGatedPoint`: a restricted point such as
-  // `When((t, 1), c)`) is a point too when it is present. Without this,
+  // `If(c, (t, 1))`) is a point too when it is present. Without this,
   // the Python target emitted `np.abs(…)` over it, the component-wise
   // `abs`.
   if (h === 'Abs' && args.length === 1 && absCompilesToPointNorm(args[0])) {
@@ -3802,8 +3800,9 @@ export function compileExpr(
   //  - `Add` of a point and a term that is not a point: `incompatible-type`.
   // Canonicalization already turns most of these into an `Error` for a
   // plain point, but not for a GATED point (`isGatedPoint`: a restricted
-  // point such as `When((t, 1), c)`, whose `missing` arm hides the tuple
-  // type), and not for `t + P` with an undeclared `t`. Fail closed instead.
+  // point such as `If(c, (t, 1))`, which is typed as the tuple but whose
+  // value is absent where the condition fails), and not for `t + P` with an
+  // undeclared `t`. Fail closed instead.
   sub = compileExprGpuPoint(h, args, target);
   if (sub !== undefined) return sub;
 
@@ -3956,15 +3955,14 @@ export function compileExpr(
   // not admit.
   //
   // The interpreter evaluates a value-form `If(c, t)` as the restriction
-  // `When(t, c)`. With a mask of rank 1 as condition, a restriction aligns
-  // a list value with the mask and truncates to the shorter of the two
+  // `t\{c\}`. With a mask of rank 1 as condition, a restriction aligns a
+  // list value with the mask and truncates to the shorter of the two
   // (`If([True, True], [10, 20, 30])` is `[10, 20]`), where the one-clause
-  // `Which` needs equal lengths. So that case compiles through the `When`
-  // lowering. The `When` lowering compiles a mask of rank 2 or more, or of
-  // a rank that the type does not give, as this `If`, so those cases keep
-  // the `Which` route below and do not loop. The operands are passed
-  // without the `If` node: their indices in a `When` are in the other
-  // order, so the CSE regions of the node do not apply.
+  // `Which` needs equal lengths. So that case compiles through the
+  // restriction lowering (`compileExprRestriction`). A mask of rank 2 or
+  // more, or of a rank that the type does not give, takes the `Which`
+  // route below. The operands are passed without the `If` node, in the
+  // order `[t, c]`, so the CSE regions of the node do not apply.
   if (
     h === 'If' &&
     args.length === 2 &&
@@ -3972,10 +3970,8 @@ export function compileExpr(
     (args[0].type.matches('collection<any>') ||
       mayBeCollectionCondition(args[0].type.type)) &&
     elementwiseMaskRank([args[0].type.type]) === 1
-  ) {
-    sub = compileExprWhen('When', [args[1], args[0]], target, undefined);
-    if (sub !== undefined) return sub;
-  }
+  )
+    return compileExprRestriction([args[1], args[0]], target);
   const selectionHead =
     h === 'If' && args.length === 2 && !isStatementArm(args[1]) ? 'Which' : h;
   if (h === 'If' && args.length === 2 && selectionHead === 'If')
@@ -3985,9 +3981,6 @@ export function compileExpr(
   if (sub !== undefined) return sub;
 
   sub = compileExprWhich(args, target, node, selectionHead);
-  if (sub !== undefined) return sub;
-
-  sub = compileExprWhen(h, args, target, node);
   if (sub !== undefined) return sub;
 
   if (h === 'Match') {
@@ -4252,7 +4245,7 @@ export function compileExpr(
 }
 
 /**
- * A selection (`If`, `When`, `Which`) in STATEMENT position on a shader
+ * A selection (`If`, `Which`) in STATEMENT position on a shader
  * target, written as an `if (…) { … } else { … }` statement, or
  * `undefined` when the selection keeps its expression form.
  *
@@ -4291,8 +4284,7 @@ export function shaderSelectionStatement(
   if (h === 'If' && (ops.length === 2 || ops.length === 3)) {
     clauses.push([0, 1]);
     if (ops.length === 3) clauses.push([-1, 2]);
-  } else if (h === 'When' && ops.length === 2) clauses.push([1, 0]);
-  else if (h === 'Which' && ops.length >= 2 && ops.length % 2 === 0) {
+  } else if (h === 'Which' && ops.length >= 2 && ops.length % 2 === 0) {
     for (let i = 0; i < ops.length; i += 2)
       clauses.push([isSymbol(ops[i], 'True') ? -1 : i, i + 1]);
   } else return undefined;

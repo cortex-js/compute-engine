@@ -119,11 +119,11 @@ export function gpuParenthesizeIdentity(
  * Emit a NaN value valid for the target shader language.
  *
  * Neither GLSL nor WGSL has a `NaN` identifier (the base compiler's default
- * `If`/`Which`/`When` emit a bare `NaN`, which fails to compile on GPU). WGSL
+ * `If`/`Which` emit a bare `NaN`, which fails to compile on GPU). WGSL
  * rejects a NaN or an infinity produced by any constant expression, `0.0 / 0.0`
  * and a bitcast of a constant bit pattern alike. Both targets therefore route
  * through the `_gpu_nan()` preamble helper (see `GPU_NAN_PREAMBLE_GLSL` and
- * `GPU_NAN_PREAMBLE_WGSL`): a masked (`When`/`Which` else) branch's NaN is thus
+ * `GPU_NAN_PREAMBLE_WGSL`): a masked (restriction or `Which` else) branch's NaN is thus
  * centralized in one overridable symbol, so a host can redefine what a masked
  * branch produces without touching the generated code.
  *

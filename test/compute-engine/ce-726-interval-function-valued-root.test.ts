@@ -146,7 +146,7 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
     expect(r.error).toMatch(/a function whose value is a function/);
   });
 
-  // The interval lowering of `If` and `When` does not give a function, so a
+  // The interval lowering of `If` and of a restriction does not give a function, so a
   // condition decided at compile time selects the function that is the root.
   test.each<[string, MathJsonExpression, number]>([
     [
@@ -179,7 +179,7 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       ],
       9,
     ],
-    ['a `When` with a true condition', ['When', DOUBLE, 'True'], 6],
+    ['a `When` with a true condition', ['If', 'True', DOUBLE], 6],
   ])('%s selects its function', (_, json, expected) => {
     const r = intervalCompile(json);
     expect(r.success).toBe(true);

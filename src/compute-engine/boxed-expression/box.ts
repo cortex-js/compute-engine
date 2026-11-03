@@ -4181,7 +4181,6 @@ const LAZY_VALUE_OPERAND_HEADS: ReadonlySet<string> = new Set([
   'Set',
   'If',
   'Which',
-  'When',
 ]);
 
 function applyOperatorDefinition(

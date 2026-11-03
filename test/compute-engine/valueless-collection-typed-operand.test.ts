@@ -471,20 +471,20 @@ describe('a collection-TYPED but valueless operand', () => {
       ).toEqual(['True', 'True', 'True']);
     });
 
-    // `When`'s restriction distributes over a collection value with the
+    // A restriction distributes over a collection value with the
     // condition spliced into each cell. A collection-typed but valueless
     // condition is a MASK the zip cannot read yet, not a scalar guard.
-    it('holds a When whose mask is a valueless list of booleans', () => {
+    it('holds a restriction whose mask is a valueless list of booleans', () => {
       const ce = new ComputeEngine();
       ce.declare('B', 'list<boolean>');
-      const stored = ce.box(['When', ['List', 1, 2], 'B']).evaluate();
-      expect(stored.operator).toBe('When');
+      const stored = ce.box(['If', 'B', ['List', 1, 2]]).evaluate();
+      expect(stored.operator).toBe('If');
       ce.assign('B', ['List', 'True', 'False']);
       // The captured form was `[1 {B}, 2 {B}]`, which re-evaluated to the
       // nested `[[1,Missing],[2,Missing]]`.
       expect(ce.box(stored.json).evaluate().toString()).toBe(
         ce
-          .box(['When', ['List', 1, 2], 'B'])
+          .box(['If', 'B', ['List', 1, 2]])
           .evaluate()
           .toString()
       );

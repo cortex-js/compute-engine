@@ -88,7 +88,7 @@ describe('an absent value at an annotated parameter', () => {
 
   test('a restricted point whose condition fails is an absent value', () => {
     const src =
-      'function f(p: tuple<number, number>) { p[1] + 1 }\nlet a = -1\nf(When((1, 2), a > 0))';
+      'function f(p: tuple<number, number>) { p[1] + 1 }\nlet a = -1\nf(If(a > 0, (1, 2)))';
     expect(run(src).value).toContain('incompatible-type');
   });
 
@@ -111,7 +111,7 @@ describe('an absent value at an annotated parameter', () => {
   test.each([
     ['a literal NaN', 'NaN'],
     ['a read that finds no number', 'first(filter([1, 2], c => c > 9))'],
-    ['a restricted number whose condition fails', 'When(3.5, 1 > 2)'],
+    ['a restricted number whose condition fails', 'If(1 > 2, 3.5)'],
   ])('%s is accepted at an integer and a real parameter', (_label, arg) => {
     // The argument is a `NaN` value, not `Missing`: the case tests the
     // acceptance of `NaN`, not the reading of an absent value as `NaN`.

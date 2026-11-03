@@ -63,7 +63,6 @@ describe('CSE HARVEST — the lazy-operand inventory', () => {
       'If',
       'Match',
       'Or',
-      'When',
       'Which',
     ]);
   });
@@ -82,12 +81,12 @@ describe('CSE HARVEST — the lazy-operand inventory', () => {
     ).toEqual([1, 2]);
   });
 
-  it('When: the value arm, not the condition', () => {
+  it('single-branch If: the value arm, not the condition', () => {
     expect(
-      lazyOperandRegions(box(['When', 'x', ['Less', 0, 'x']])).map(
+      lazyOperandRegions(box(['If', ['Less', 0, 'x'], 'x'])).map(
         (s) => s.index
       )
-    ).toEqual([0]);
+    ).toEqual([1]);
   });
 
   it('And/Or/Coalesce: operands after the first', () => {

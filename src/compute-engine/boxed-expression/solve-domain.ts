@@ -17,6 +17,7 @@ import type {
 } from '../global-types.js';
 import { isFunction, isNumber, sym } from './type-guards.js';
 import { rewriteWithBinders } from './binders.js';
+import { isRestriction, restrictionParts } from './conditional-value.js';
 import {
   collectBinderNames,
   defaultUnknown,
@@ -2172,7 +2173,7 @@ function periodicRootsComplete(
  * functions: `x·sin(x)`), when `T` is not known exactly, or when a user
  * binding shadows `Pi` (the period would hold the library π). A root that is
  * not a real number (it has a free parameter, an imaginary part, or a
- * guard `When(r, c)`) is kept.
+ * guard `If(c, r)`) is kept.
  */
 export function withoutPeriodicDuplicates(
   ce: ComputeEngine,
@@ -2196,7 +2197,7 @@ export function withoutPeriodicDuplicates(
     return roots;
   const kept: Array<{ root: Expression; value: number }> = [];
   for (const root of roots) {
-    const value = isFunction(root, 'When') ? NaN : realRootValue(root);
+    const value = isRestriction(root) ? NaN : realRootValue(root);
     if (
       Number.isFinite(value) &&
       kept.some(
@@ -3961,8 +3962,8 @@ function alternativeRootFamilies(
 
 /**
  * The expression of the roots of `family` with the integer parameter `t`:
- * `root + spacing·t`. A root `When(r, guard)` gives
- * `When(r + spacing·t, guard)`.
+ * `root + spacing·t`. A root `If(guard, r)` gives
+ * `If(guard, r + spacing·t)`.
  */
 function familyExpression(
   ce: ComputeEngine,
@@ -3973,8 +3974,9 @@ function familyExpression(
   const withStep = (root: Expression): Expression =>
     root.isSame(0) ? step : ce.function('Add', [root, step]);
   const { root } = family;
-  return isFunction(root, 'When')
-    ? ce.function('When', [withStep(root.op1), root.op2])
+  const restriction = restrictionParts(root);
+  return restriction !== undefined
+    ? ce.function('If', [restriction.condition, withStep(restriction.value)])
     : withStep(root);
 }
 

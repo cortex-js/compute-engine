@@ -117,7 +117,7 @@ describe('a comparison with an operand that may be absent', () => {
   ])(
     '%s over a restricted string is undecided in the interpreter',
     (h) => {
-      const json = [h, ['When', { str: 'a' }, ['Less', 1, 't']], { str: 'b' }];
+      const json = [h, ['If', ['Less', 1, 't'], { str: 'a' }], { str: 'b' }];
       expect(interpreted(json, 0)).toBe('Missing');
       expect(run(['If', json, 1, 2], 2)).toBe(h === 'Equal' ? 2 : 1);
     }
@@ -125,7 +125,7 @@ describe('a comparison with an operand that may be absent', () => {
 });
 
 describe('a restricted NUMBER keeps its IEEE comparison', () => {
-  const R = ['When', ['Add', 't', 5], ['Less', 1, 't']];
+  const R = ['If', ['Less', 1, 't'], ['Add', 't', 5]];
   test.each(RELATIONS)('%s', (h) => {
     const json = [h, R, 't'];
     const expected = h === 'NotEqual';

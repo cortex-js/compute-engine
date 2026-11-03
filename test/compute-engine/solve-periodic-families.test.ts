@@ -148,7 +148,7 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
 
   test('a free parameter of the equation is kept', () => {
     expect(solve('\\sin x = a').toString()).toBe(
-      '[2pi * t + arcsin(a) {|a| <= 1},2pi * t - arcsin(a) + pi {|a| <= 1}]'
+      '[If(|a| <= 1, 2pi * t + arcsin(a)),If(|a| <= 1, 2pi * t - arcsin(a) + pi)]'
     );
     expect(solve('\\tan x = a').toString()).toBe('[pi * t + arctan(a)]');
   });

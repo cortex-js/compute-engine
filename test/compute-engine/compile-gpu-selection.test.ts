@@ -219,10 +219,10 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
     // `success: true` — `((u_L == 3.0) ? …)`, `((vec2(True, False)) ? …)`.
     it('a list with absent NUMERIC cells compiles; a whole list that may be absent does not', () => {
       // `[sin x, x{c}]` types `list<number | missing>`: an absent cell is a
-      // NaN lane, which the `When` no-match lowering emits, so the shape is
+      // NaN lane, which the restriction no-match lowering emits, so the shape is
       // admitted on both targets.
-      expect(g(['List', ['Sin', 'x'], ['When', 'x', 'c']])).toMatch(/_gpu_nan/);
-      expect(w(['List', ['Sin', 'x'], ['When', 'x', 'c']])).toMatch(/_gpu_nan/);
+      expect(g(['List', ['Sin', 'x'], ['If', 'c', 'x']])).toMatch(/_gpu_nan/);
+      expect(w(['List', ['Sin', 'x'], ['If', 'c', 'x']])).toMatch(/_gpu_nan/);
       // A default-less `Which` over a list types `missing | list<…>`: the
       // WHOLE list may be absent, and the no-match lowering would pair an
       // array arm with a scalar NaN. That stays fail-closed.
@@ -305,12 +305,12 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
     });
 
     it('declines `When` with a collection condition', () => {
-      // `When` is deliberately NOT a selection form (design §5).
-      expect(() => g(['When', 1, ['List', 'True', 'False']])).toThrow(
-        /branch condition is a collection-valued expression/
+      // A restriction is deliberately NOT a selection form (design §5).
+      expect(() => g(['If', ['List', 'True', 'False'], 1])).toThrow(
+        /object-domain absent/
       );
-      expect(() => w(['When', 1, ['List', 'True', 'False']])).toThrow(
-        /branch condition is a collection-valued expression/
+      expect(() => w(['If', ['List', 'True', 'False'], 1])).toThrow(
+        /object-domain absent/
       );
     });
   });

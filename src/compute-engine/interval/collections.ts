@@ -590,7 +590,7 @@ export function bcastPoint(
   ...args: unknown[]
 ): unknown {
   // A point or list-of-points argument that is not an array is a RESTRICTED
-  // one whose condition failed (`PointList(When(A, 0 < t), B) + (1, 1)`):
+  // one whose condition failed (`PointList(If(0 < t, A), B) + (1, 1)`):
   // the band-less `empty` result of `restrict`, passed through as the value
   // of the whole operation, as the interpreter answers the absent value
   // there, and as `pointList` passes it through.

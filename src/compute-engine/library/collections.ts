@@ -325,6 +325,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   isRestriction,
+  mayHoldRestriction,
   restrictionParts,
 } from '../boxed-expression/conditional-value.js';
 import { isNumberThatMayBeAbsent } from '../boxed-expression/tensor-view.js';
@@ -1193,9 +1194,9 @@ function unindexedCollectionOperandError(
  * or a dictionary, written or held by a symbol of a wider declared type
  * (`collection<integer>`, `unknown`).
  *
- * The test reads the type of the VALUE: a restricted list (`When(L, c)`, an
- * `isCollection` without positions of its own, typed `missing | list<…>`)
- * is not such an operand. Its value is a list when it is present.
+ * The test reads the type of the VALUE: a restricted list (`If(c, L)`, typed
+ * as the list `L` and an indexed collection) is not such an operand. Its
+ * value is a list when it is present.
  */
 function isUnindexedCollectionValue(x: Expression): boolean {
   if (!x.isCollection || x.isIndexedCollection) return false;
@@ -1682,10 +1683,10 @@ const SLICE_SIGNATURE_TEXT =
  * is the numeric-domain conflation of `docs/ERROR-MODEL.md` §1: a number
  * cannot tell "no datum" from "no answer".
  *
- * A restricted value whose condition is NOT decided, `2{c}` (`When(2, c)`),
+ * A restricted value whose condition is NOT decided, `2{c}` (`If(c, 2)`),
  * stays in the application: these operators do not thread conditional values
  * at this position (`threadsConditionals: [0]`). A threaded value would give
- * `When(Contains([1, 2], 2), c)`, which becomes `Missing` when `c` becomes
+ * `If(c, Contains([1, 2], 2))`, which becomes `Missing` when `c` becomes
  * false, but the answer is then the search for `NaN`. So the application
  * stays unevaluated until `c` is decided. The same is true for a `List`,
  * `Tuple` or `Set` that holds such a value.
@@ -4342,8 +4343,7 @@ function resultMayBeNothing(
     if (
       s.head === 'Return' ||
       s.head === 'N' ||
-      s.head === 'NumericApproximation' ||
-      s.head === 'When'
+      s.head === 'NumericApproximation'
     )
       return s.children[0] !== undefined && returned(s.children[0]);
     return result(namedBody(s.head));
@@ -7370,7 +7370,7 @@ function hasPointElementTypeD(d: OperandDescriptor): boolean {
   const elt = d.facts.elementType ?? pointCollectionElementType(d.type);
   // A restricted point cell, typed `missing | tuple<…>`, is a point cell: a
   // restricted list of points reports its elements that way
-  // (the `When` type handler, `library/control-structures.ts`), as the
+  // (the type handler of a restriction, `library/control-structures.ts`), as the
   // list-literal branch of `collectionBroadcastsPointsD` already reads a
   // restricted point as its point.
   return elt !== undefined && isPointElementType(stripMissingFromType(elt));
@@ -9523,7 +9523,7 @@ function chainAbsorbMarker(
 
 /**
  * True when `e` is a conditional value whose condition is not decided yet:
- * a restriction `When(v, c)` or a piecewise `Which(…)`.
+ * a restriction `If(c, v)` or a piecewise `Which(…)`.
  *
  * The accessors thread such an OPERAND through their `threadsConditionals`
  * flag (`types-definitions.ts`) before their evaluate handler runs. A
@@ -9534,11 +9534,11 @@ function chainAbsorbMarker(
  * cell's application.
  */
 function isConditionalValue(e: Expression): boolean {
-  return isFunction(e, 'When') || isFunction(e, 'Which');
+  return isRestriction(e) || isFunction(e, 'Which');
 }
 
-/** `e` without its restrictions: the body of `When(body, c)` or of the
- * single-branch `If(c, body)`, repeatedly. */
+/** `e` without its restrictions: the body of the single-branch
+ * `If(c, body)`, repeatedly. */
 function unrestricted(e: Expression): Expression {
   for (let r = restrictionParts(e); r; r = restrictionParts(e)) e = r.value;
   return e;
@@ -10196,7 +10196,15 @@ function pointAccessorElementAt(
     const xs = pointListOfAccessor(expr, position);
     if (xs === undefined) return undefined;
     const point = xs.at(k);
-    if (point === undefined || !isTupleShapedType(point.type.type))
+    // A point that holds a restriction (`If(c, P)`) is typed as the point,
+    // but it is absent where `c` fails, and the coordinate of an absent
+    // point in the list is `Missing`: the element is read from the
+    // evaluated value instead.
+    if (
+      point === undefined ||
+      !isTupleShapedType(point.type.type) ||
+      mayHoldRestriction(point)
+    )
       return undefined;
     return expr.engine.function(POINT_ACCESSOR_BY_POSITION[position - 1], [
       point,
@@ -11727,7 +11735,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Number of elements in a collection. Returns +oo for an infinite collection (an unbounded Range, `Integers`, `Repeat(5)`, an interval), as `Count` does, an `incompatible-type` error for an operand that is decidably not a collection, `NaN` for an absent operand (`Missing`), and stays unevaluated for a collection whose size is not known (a `Filter` over an infinite source).',
     keywords: ['size'],
     complexity: 4000,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -12147,7 +12155,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Fail closed on a collection component that can be zipped NEITHER
       // eagerly nor lazily — a collection without positions of its own (a
       // set is refused above, but an undecided restriction of a list,
-      // `When(L, c)`, reaches here) or a provably infinite one: stay inert
+      // `If(c, L)`, reaches here) or a provably infinite one: stay inert
       // rather than silently degrading
       // to a plain point, and never hang. A STRING is not such a component:
       // it is broadcast-atomic (see `isTextAtom`) and occupies a scalar slot,
@@ -12469,7 +12477,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['Keys({"a" -> 1, "b" -> 2})'],
     description: 'Return a list of the keys of a dictionary.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -12499,7 +12507,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['Values({"a" -> 1, "b" -> 2})'],
     description: 'Return a list of the values of a dictionary.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -13484,7 +13492,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return True if the collection contains the given element (structural identity, like `===`), False otherwise. An absent element is found where the same marker sits: `Contains([1, NaN], NaN)` is True.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -13559,7 +13567,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     keywords: ['cardinality', 'tally', 'occurrences'],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -13855,7 +13863,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['IsEmpty([])'],
     description: ['Return True if the collection is empty, False otherwise.'],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -13910,7 +13918,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // type; see `CountIf`. The predicate stays optional — `Any(xs)` tests the
     // elements themselves — and the contextual stamp simply never runs when the
     // operand is absent.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -13962,7 +13970,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     // The signature links the predicate parameter to the collection element
     // type, with the same optional predicate as `Any`.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -14015,7 +14023,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'The view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.',
     ],
     complexity: 8200,
-    // A restricted source, `[1,2]{c}`, is ONE held `When` over the list and
+    // A restricted source, `[1,2]{c}`, is ONE held restriction over the list and
     // is threaded whole (user decision 2026-09-25): the result is computed on
     // the present list and re-wrapped, absent as a whole once `c` fails. Read
     // cell by cell through the held form's collection handlers it was not an
@@ -14480,7 +14488,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '`Missing` and markers nested inside a datum still reach the predicate.',
     ],
     complexity: 8200,
-    // A restricted source, `[1,2]{c}`, is ONE held `When` over the list and
+    // A restricted source, `[1,2]{c}`, is ONE held restriction over the list and
     // is threaded whole (user decision 2026-09-25): the result is computed on
     // the present list and re-wrapped, absent as a whole once `c` fails. Read
     // cell by cell through the held form's collection handlers it was not an
@@ -14837,7 +14845,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     //
     // The RESULT stays with the `type:` handler below: it is the reducer's own
     // result type, which the accumulator channel does not carry.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -14965,7 +14973,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // collection at operand 2. The accumulator stays bare (see `Reduce`). The
     // stamp survives this operator's rewrite into a `Reduce`: it runs before
     // the canonical handler, on the raw literal the handler then reuses.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -15026,7 +15034,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).',
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Only the source is threaded: the reducer is not a value, and
@@ -15204,7 +15212,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.',
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -15313,7 +15321,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The predicate is not threaded: it is not a value.
@@ -15510,7 +15518,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The predicate is not threaded: it is not a value.
@@ -15648,7 +15656,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `(T) -> collection<U> | U`: `S` describes the STAMP, never the operator's
     // tolerance, and the scalar-result singleton lift is the `type:` handler's
     // calculation below (§7 rule 2).
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -16058,7 +16066,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (`wrapScalarJoinOperand`), so `Join(L, 5)` and `Join(1, 2, 3)` are
     // accepted without widening the arm to `value` — which would have
     // inferred an undeclared operand as `value` instead of a collection.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -16144,7 +16152,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['Append([1, 2], 3, 4)'],
     description: ['Add one or more elements to the end of a collection.'],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -17709,7 +17717,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // most-specific-wins on every untyped operand and claim `string` for a
     // call that usually returns a list. A bounded variable with no call-site
     // binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -17873,7 +17881,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -18250,7 +18258,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -18339,7 +18347,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -18512,7 +18520,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // type admits `Nothing`; a span that statically excludes it (a literal
     // `2..3`, a `range`-declared symbol) is left to the resolver, so the
     // precise result — and with it string preservation — is untouched.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -18690,7 +18698,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not —
     // which is exactly how the `T: list` arm beside it already behaves.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -18788,7 +18796,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `list<function>` that the ground `(indexed_collection, …)` accepted.
     // `evaluate` splices whatever it is given, so the looser reading is also
     // the honest one.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -18954,7 +18962,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The index is threaded too, as for `Insert`. Only the collection
@@ -19079,7 +19087,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The repeated variable widens the element type to include the replacement
     // value's type (the §4.3 join of the two lower bounds). UNBOUNDED — see
     // `Insert`: a bound would also constrain the SOURCE collection's elements.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -19203,7 +19211,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Rotate the elements of the collection to the left by n positions.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The count is not threaded.
@@ -19336,7 +19344,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Rotate the elements of the collection to the right by n positions.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The count is not threaded.
@@ -19447,7 +19455,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the 1-based index of the first occurrence of value in collection, or 0 if not found. The comparison is structural, so an absent value is found where the same marker sits: `IndexOf([1, NaN], NaN)` is 2. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -19518,7 +19526,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'On a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.',
     ],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Both collections are threaded; the start position is not.
@@ -19595,7 +19603,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Unlike `Contains`, which tests membership of a single element, the needle is read as a sequence: `ContainsSequence("abc", "ab")` is `True` while `Contains("abc", "ab")` is `False`.',
     ],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Both collections are threaded.
@@ -19626,7 +19634,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'On a string the prefix is matched character by character, so a prefix that would end inside a grapheme cluster does not match. An empty prefix matches everything.',
     ],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Both collections are threaded.
@@ -19653,7 +19661,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'On a string the suffix is matched character by character, so a suffix that would begin inside a grapheme cluster does not match. An empty suffix matches everything.',
     ],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Both collections are threaded.
@@ -19684,7 +19692,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the 1-based index of the first element satisfying the predicate, or 0 if not found. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The predicate is not threaded: it is not a value.
@@ -19745,7 +19753,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `CountIf`). The declared result stays the widest `any`: the NOT-FOUND
     // answer is `Nothing`, so the precise `elementType | nothing` is the `type:`
     // handler's below, not something `T` alone could say (§7 rule 1).
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -19785,7 +19793,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The predicate is not threaded: it is not a value.
@@ -19825,7 +19833,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `3` in the iteration order of the set. A literal set is refused when
     // the call is boxed, a set held by a symbol of a wider declared type by
     // `evaluate`.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is
     // computed on the present collection and re-wrapped. Without the flag,
     // the predicate received the restricted cells of the list and the
@@ -19853,7 +19861,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['Ordering([30, 10, 20])'],
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -19900,7 +19908,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -19935,7 +19943,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that maximizes the given key function.',
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -19975,7 +19983,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that minimizes the given key function.',
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -20019,7 +20027,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The key function is not threaded: it is not a value.
@@ -20065,7 +20073,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. The key function is not threaded: it is not a value.
@@ -20133,7 +20141,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -20493,7 +20501,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return a tuple with the unique elements of the collection and their respective counts.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -20530,7 +20538,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -20575,7 +20583,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -20793,7 +20801,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `integer` arm cannot take, so the arrow arm is the resolved one. A
     // size operand (a number, or a symbol holding one) is not a literal, so
     // the SIZE arm is untouched.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -20902,7 +20910,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // win most-specific-wins on every untyped operand and claim `list<string>`
     // for a call that usually returns a list of lists. A bounded variable with
     // no call-site binding does not.
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -21022,7 +21030,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // gave `[[3, 1], [4]]`). A literal set is refused when the call is boxed,
     // a set held by a symbol of a wider declared type by `evaluate`.
     //
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is
     // computed on the present collection and re-wrapped. Without the flag,
     // the runs held the restricted cells of the list.
@@ -21170,7 +21178,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Partition the collection into a dictionary of lists based on the key returned by the function.',
     ],
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -21213,7 +21221,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input. Nothing retains its coordinate and source position; a row whose coordinates are all Missing remains a tuple.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -21585,7 +21593,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Produce an infinite sequence by cycling through the elements of a finite collection.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -21752,7 +21760,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['ListFrom({1, 2}, 3..4)'],
     description: 'Create a list from the elements of a collection.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Every operand is a collection, and every one is threaded.
@@ -21869,7 +21877,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['SetFrom([1, 2, 2, 3])'],
     description: 'Create a set from the elements of a collection.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Every operand is a collection, and every one is threaded.
@@ -21928,7 +21936,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['TupleFrom([1, 2, 3])'],
     description: 'Create a tuple from the elements of a collection.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Every operand is a collection, and every one is threaded.
@@ -21986,7 +21994,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Create a dictionary from the elements of a collection of (key, value) pairs.',
     complexity: 8200,
-    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
     // fails. Read cell by cell through the held form's collection handlers it
@@ -23961,8 +23969,8 @@ const SOURCE_FIRST_COLLECTION_OPERATORS = new Set([
 
 /**
  * True when `op`, a collection operand of `Join` or of `Append`, can be
- * absent: the `Missing` or `Undefined` symbol; a restriction (`When`) or a
- * piecewise value (`Which`, `If`) that is held because its condition is not
+ * absent: the `Missing` or `Undefined` symbol; a restriction (a single-branch
+ * `If`) or a piecewise value (`Which`, `If`) that is held because its condition is not
  * decided when the expression is built; or a nested `Join`, or a collection
  * operator whose source is one of these (`Take(Missing, 1)`).
  *
@@ -23977,12 +23985,7 @@ const SOURCE_FIRST_COLLECTION_OPERATORS = new Set([
  * cells.
  */
 function mayBeAbsentCollectionOperand(op: Expression): boolean {
-  if (
-    isAbsentSymbol(op) ||
-    isFunction(op, 'When') ||
-    isFunction(op, 'Which') ||
-    isFunction(op, 'If')
-  )
+  if (isAbsentSymbol(op) || isFunction(op, 'Which') || isFunction(op, 'If'))
     return true;
   // A nested `Join` (or `ListJoin`, the list literal with a spread) over such
   // an operand may be absent too, and so may an `Append` whose SOURCE (its

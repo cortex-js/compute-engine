@@ -886,8 +886,8 @@ export function emitElementLoops(
     // an endpoint has no finite value, and a `Map` unless its own source
     // has no array value (a `Range` with a NaN or wide bound); the loop
     // then answers `entire`, as a loop over that `Range` does. Its
-    // spelling of a selection (`When`, `If`, `Which`) can give a value
-    // that is not an array (`empty` when the condition of a `When`
+    // spelling of a selection (`If`, `Which`) can give a value
+    // that is not an array (`empty` when the condition of a restriction
     // fails), which a `for … of` cannot iterate, so such a source keeps
     // the ordinary lowering, which declines it.
     else

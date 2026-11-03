@@ -254,11 +254,11 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
   // vector of NaN for an absent point), and an element of an absent point is
   // NaN in the interpreter, so the element is a swizzle.
   test('a conditional point with no absent arm is read with a swizzle', () => {
-    // `When`, `If` with no else branch and `Which` give a vector of NaN
+    // A restriction, `If` with no else branch and `Which` give a vector of NaN
     // when the point is absent, and the interpreter gives NaN.
     for (const to of ['glsl', 'wgsl'] as const) {
       expect(
-        code(to, ['First', ['When', ['Tuple', 'x', 2], ['Less', 0, 'x']]])
+        code(to, ['First', ['If', ['Less', 0, 'x'], ['Tuple', 'x', 2]]])
       ).toMatch(/\)\.x$/);
       expect(
         code(to, ['Second', ['If', ['Less', 0, 'x'], ['Tuple', 'x', 2]]])

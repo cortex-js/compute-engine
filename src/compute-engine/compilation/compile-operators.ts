@@ -347,7 +347,7 @@ export function compileExprOperator(
         // this divert guards against does not arise.
         // A GATED collection (a restricted point or list, typed
         // `missing | C`) is an array at run time too: without it,
-        // `Less(When((t, 1), c), 3)` emitted `[…] < 3`, a plain `false`
+        // `Less(If(c, (t, 1)), 3)` emitted `[…] < 3`, a plain `false`
         // where the interpreter leaves the comparison of a point inert.
         const relationalOverCollection =
           target.language === 'javascript' &&

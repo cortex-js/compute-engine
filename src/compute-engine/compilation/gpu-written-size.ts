@@ -47,7 +47,7 @@ export const GPU_MAX_WRITTEN_NODES = 50_000;
  * source.
  *
  * The first estimate follows the order in which the code is written
- * (`operandEmissionOrder()`, `cse.ts`: the condition of a `When` before
+ * (`operandEmissionOrder()`, `cse.ts`: the condition of a restriction before
  * its value, the other operands in their order). It
  * counts a node once in each conditionally evaluated arm (an `If` branch,
  * a lazy operand: `lazyOperandRegions()`, `cse.ts`) that reaches it, unless
@@ -120,7 +120,7 @@ export function gpuWrittenSize(
   // The nodes whose written operands are not all their operands.
   const reduced = new Set<number>();
   const stack: Array<[Expression, number, readonly Expression[]]> = [
-    [expr, 0, writtenOperands(expr, rules?.isCallerMapped)],
+    [expr, 0, writtenOperands(expr)],
   ];
   while (stack.length > 0) {
     const top = stack[stack.length - 1];
@@ -128,8 +128,7 @@ export function gpuWrittenSize(
     if (next < kept.length) {
       top[1] = next + 1;
       const op = kept[next];
-      if (!idOfNode.has(op))
-        stack.push([op, 0, writtenOperands(op, rules?.isCallerMapped)]);
+      if (!idOfNode.has(op)) stack.push([op, 0, writtenOperands(op)]);
       continue;
     }
     stack.pop();
@@ -393,25 +392,8 @@ function operandRegions(
   return result;
 }
 
-/**
- * The operands of `node` that the shader targets write. `When(value,
- * True)` writes its value only, and `When(value, False)` writes a NaN
- * constant (the `When` handler of `GPU_FUNCTIONS`, `gpu-functions.ts`). A
- * `When` that the caller replaces or compiles with its own handler
- * (`isCallerMapped`) receives all its operands.
- */
-function writtenOperands(
-  node: Expression,
-  isCallerMapped: ((node: Expression) => boolean) | undefined
-): readonly Expression[] {
+/** The operands of `node` that the shader targets write. */
+function writtenOperands(node: Expression): readonly Expression[] {
   if (!isFunction(node)) return [];
-  if (
-    node.operator === 'When' &&
-    node.nops === 2 &&
-    isCallerMapped?.(node) !== true
-  ) {
-    if (isSymbol(node.ops[1], 'True')) return [node.ops[0]];
-    if (isSymbol(node.ops[1], 'False')) return [];
-  }
   return node.ops;
 }

@@ -53,7 +53,7 @@ async function both(
 
 describe('an argument with a free symbol, asynchronous route', () => {
   test.each([
-    [undefined, '6 {0 < t}'],
+    [undefined, 'If(0 < t, 6)'],
     [1, '6'],
     [-1, 'NaN'],
   ] as const)('f(1 {0<t}) with t = %s', async (t, expected) => {
@@ -61,10 +61,10 @@ describe('an argument with a free symbol, asynchronous route', () => {
     const ce = engine(t);
     ce.assign('f', ce.box(['Function', ['AsyncOnly', 'x'], 'x']));
     const direct = await ce
-      .box(['AsyncOnly', ['When', 1, POSITIVE]])
+      .box(['AsyncOnly', ['If', POSITIVE, 1]])
       .evaluateAsync();
     expect(direct.toString()).toBe(expected);
-    const applied = await ce.box(['f', ['When', 1, POSITIVE]]).evaluateAsync();
+    const applied = await ce.box(['f', ['If', POSITIVE, 1]]).evaluateAsync();
     expect(applied.toString()).toBe(expected);
 
     // A function defined with `:=`, parse route.
@@ -78,10 +78,10 @@ describe('an argument with a free symbol, asynchronous route', () => {
     ce.assign('f', ce.box(['Function', ['AsyncOnly', 'x'], 'x']));
     expect(
       ce
-        .box(['f', ['When', 1, POSITIVE]])
+        .box(['f', ['If', POSITIVE, 1]])
         .evaluate()
         .toString()
-    ).toBe('AsyncOnly(1) {0 < t}');
+    ).toBe('If(0 < t, AsyncOnly(1))');
   });
 
   test('an argument that is a free symbol', async () => {
@@ -144,12 +144,12 @@ describe('a recursion over a free symbol is not unrolled, asynchronous route', (
     ce.parse('h(x) := \\operatorname{AsyncOnly}(x)').evaluate();
     const [a, b, c] = await Promise.all([
       ce.box(['g', 'y']).evaluateAsync(),
-      ce.box(['h', ['When', 1, POSITIVE]]).evaluateAsync(),
+      ce.box(['h', ['If', POSITIVE, 1]]).evaluateAsync(),
       ce.box(['h', 2]).evaluateAsync(),
     ]);
     expect([a.toString(), b.toString(), c.toString()]).toEqual([
       'g(y)',
-      '6 {0 < t}',
+      'If(0 < t, 6)',
       '7',
     ]);
   });
@@ -168,7 +168,7 @@ describe('a recursion over a free symbol is not unrolled, asynchronous route', (
 describe('evaluate() and evaluateAsync() agree with no async-only operator', () => {
   test.each([
     ['u(x) := x^2 + 1', ['u', 'y'], 'y^2 + 1'],
-    ['u(x) := x^2 + 1', ['u', ['When', 2, POSITIVE]], '5 {0 < t}'],
+    ['u(x) := x^2 + 1', ['u', ['If', POSITIVE, 2]], 'If(0 < t, 5)'],
     ['u(x) := \\sin(x)', ['u', 'y'], 'sin(y)'],
     ['u(n) := \\operatorname{If}(n \\le 1, 1, n u(n-1))', ['u', 'y'], ''],
     ['u(x) := u(x)', ['u', 'y'], 'u(y)'],

@@ -45,27 +45,27 @@ describe('Parser: restriction braces', () => {
   });
 
   describe('evaluation', () => {
-    test('When(5, True) evaluates to 5', () => {
-      const result = ce.expr(['When', 5, 'True']).evaluate();
+    test('If(True, 5) evaluates to 5', () => {
+      const result = ce.expr(['If', 'True', 5]).evaluate();
       expect(result.json).toBe(5);
     });
 
-    test('When(5, False) evaluates to NaN', () => {
+    test('If(False, 5) evaluates to NaN', () => {
       // A masked number is `NaN` (user decision 2026-09-25); it was `Missing`.
-      const result = ce.expr(['When', 5, 'False']).evaluate();
+      const result = ce.expr(['If', 'False', 5]).evaluate();
       expect(result.isNaN).toBe(true);
     });
 
-    test('When(5, x > 0) holds when x has no value', () => {
+    test('If(x > 0, 5) holds when x has no value', () => {
       const ce2 = new ComputeEngine();
-      const result = ce2.expr(['When', 5, ['Greater', 'x', 0]]).evaluate();
-      expect(result.operator).toBe('When');
+      const result = ce2.expr(['If', ['Greater', 'x', 0], 5]).evaluate();
+      expect(result.operator).toBe('If');
     });
   });
 
   describe('parser recovery on malformed input', () => {
     test('missing close: `f(x)\\{cond` does not corrupt subsequent parses', () => {
-      // Missing \right\}. The When-restriction parse function should clean up
+      // Missing \right\}. The restriction parse function should clean up
       // its boundary on the close-mismatch path; if it leaks, the next parse
       // would see a stray boundary on the parser stack.
       ce.parse('f(x)\\left\\{x > 0').json; // intentionally malformed
@@ -78,16 +78,16 @@ describe('Parser: restriction braces', () => {
   });
 
   describe('round-trip serialization', () => {
-    test('When(e, And(c1, c2)) serializes to stacked braces', () => {
+    test('If(And(c1, c2), e) serializes to a `where` clause', () => {
       const expr = ce.expr([
-        'When',
-        'x',
+        'If',
         ['And', ['Greater', 'x', 0], ['Less', 'x', 10]],
+        'x',
       ]);
       const latex = expr.toLatex();
       // Greater(x,0) canonicalizes to Less(0,x) → serializes as 0\lt x
-      // Should emit stacked braces (not \wedge inside a single pair of braces)
-      expect(latex).toMatch(/\\left\\\{.*\\right\\\}.*\\left\\\{.*\\right\\\}/);
+      // Should emit one `where` clause with the two conditions
+      expect(latex).toMatch(/\\text\{ where \}.*,/);
       // Both conditions appear somewhere in the output
       expect(latex).toContain('0');
       expect(latex).toContain('10');
@@ -149,7 +149,7 @@ describe('Parser: restriction braces', () => {
   // attached by juxtaposition, i.e. multiplication. Parses to
   // Multiply(lhs, Which(...)); a trailing bare value is the else branch.
   // (Tycho 0.72.0 restriction-brace probe, issue 3 — the previous parse
-  // treated the cond:val pairs as a When *gate* for the body.)
+  // treated the cond:val pairs as a restriction *gate* for the body.)
   describe('colon groups parse to a Which value selector', () => {
     test('`x\\{x>0:1, x<0:-1\\}` → Multiply(x, Which(...))', () => {
       const ast = parse('x\\left\\{x>0:1, x<0:-1\\right\\}');

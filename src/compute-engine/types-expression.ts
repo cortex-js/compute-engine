@@ -91,7 +91,7 @@ interface BaseCollectionHandlers {
    * `types-definitions.ts`. */
   isEnumerable?: (collection: Expression) => boolean | undefined;
   /** Whether this instance is a collection at all, for operators whose
-   * collection-ness depends on their operands (e.g. `When`). Absent, it
+   * collection-ness depends on their operands (e.g. a restriction). Absent, it
    * defaults to `true`. Mirror of the handler documented in
    * `types-definitions.ts`. */
   isCollection?: (collection: Expression) => boolean;
@@ -266,7 +266,7 @@ type OperatorDefinitionFlags = {
     | 'single-collection-join'
     | 'surplus-operands'
   >;
-  /** Whether a conditional value (`When`, `Which`) in an operand moves out
+  /** Whether a conditional value (a restriction, `Which`) in an operand moves out
    * of the application: `true` for every position, or the 0-based
    * positions. See `types-definitions.ts`. */
   threadsConditionals: boolean | number[];
@@ -711,7 +711,7 @@ export type OperatorCompileContext = {
  * relational operator). It does NOT override the structural / control-flow
  * heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
  * `Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Which`,
- * `When`, `Match`, `Block`), which have their own bespoke lowering; a handler
+ * `Match`, `Block`), which have their own bespoke lowering; a handler
  * declared on one of those heads is ignored.
  *
  * ```ts
@@ -2601,7 +2601,7 @@ export interface Expression {
   toSignedFunction(): Expression | undefined;
 
   /**
-   * For an expression representing a domain restriction (a `When` whose
+   * For an expression representing a domain restriction (a restriction whose
    * condition is a comparison or `And` of comparisons over `symbol`, or
    * a bare comparison expression), return the lower/upper bounds for
    * `symbol`. Returns `undefined` if no bounds can be extracted.
@@ -2610,9 +2610,9 @@ export interface Expression {
    * - Bare comparisons: `a < x`, `x < b`, etc.
    * - Chained comparisons: `a < x < b` (parsed as `Less(a, x, b)`)
    * - `And(c1, c2, ...)` where each `ci` is a supported shape
-   * - `When(e, cond)` — operates on `cond`
-   * - `Multiply(f, When(...), ...)` — the Desmos parse shape for
-   *   `f(x)\{a < x < b\}`; bounds from each `When` factor are merged
+   * - `If(cond, e)` — operates on `cond`
+   * - `Multiply(f, If(...), ...)` — the Desmos parse shape for
+   *   `f(x)\{a < x < b\}`; bounds from each restriction factor are merged
    *
    * `lowerStrict`/`upperStrict` are `true` for strict (`<`, `>`) bounds
    * and `false` for non-strict (`≤`, `≥`).

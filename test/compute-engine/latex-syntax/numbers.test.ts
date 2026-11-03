@@ -241,7 +241,7 @@ describe('PARSING OF NUMBER', () => {
       // z^{1.} → z^1 → z, proving the exponent lexed as the integer 1.
       expect(parse('z^{1.}')).toMatchInlineSnapshot(`z`);
       expect(parse('\\{1.65>x>1.\\}')).toMatchInlineSnapshot(
-        `["Set", ["Less", 1, "x", 1.65]]`
+        `["If", ["Less", 1, "x", 1.65], 1]`
       );
     });
 

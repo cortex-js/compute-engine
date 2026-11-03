@@ -5,8 +5,8 @@
  *
  * The witnesses are two graphs with one node object per level:
  * - `e_0 = sin(x)`, `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))`;
- * - `e_0 = sin(x)`, `e_{k+1} = When(sin(e_k), e_k > k)` (the condition of a
- *   `When` is written first, and its value is the conditional arm).
+ * - `e_0 = sin(x)`, `e_{k+1} = If(e_k > k, sin(e_k))` (the condition of a
+ *   restriction is written first, and its value is the conditional arm).
  *
  * The arm is a region of its own, so the walk of `e_k` in the arm was not a
  * replay of the walk of `e_k` before the arm: it opened a copy of every
@@ -50,13 +50,13 @@ function ifArmGraph(ce: ComputeEngine, depth: number): Expression {
   return e;
 }
 
-/** `e_{k+1} = When(sin(e_k), e_k > k)`, with `e_0 = sin(x)`. */
+/** `e_{k+1} = If(e_k > k, sin(e_k))`, with `e_0 = sin(x)`. */
 function whenArmGraph(ce: ComputeEngine, depth: number): Expression {
   let e = ce.function('Sin', [ce.symbol('x')]);
   for (let k = 0; k < depth; k++)
-    e = ce.function('When', [
-      ce.function('Sin', [e]),
+    e = ce.function('If', [
       ce.function('Greater', [e, ce.number(k)]),
+      ce.function('Sin', [e]),
     ]);
   return e;
 }
@@ -265,16 +265,16 @@ describe('CE-595: nodes that open no region do not raise the budget', () => {
 
 // A replay is used only for an arm that reads the temporary of the node.
 // When the selection does not credit an arm to a candidate (here `W`, a
-// `When` read again in an arm), the harvest is made again with `W` walked
+// restriction read again in an arm), the harvest is made again with `W` walked
 // in full in its arm, and the other arms still replay. Before, one such arm
 // turned off every replay, and the time was exponential again (2.4 seconds
 // at depth 12).
 describe('CE-595: an arm that does not read a temporary', () => {
   function withUnservedArm(ce: ComputeEngine, depth: number): Expression {
     const x = ce.symbol('x');
-    const W = ce.function('When', [
-      ce.function('Cos', [ce.symbol('y')]),
+    const W = ce.function('If', [
       ce.function('Less', [ce.number(0), ce.function('Sin', [x])]),
+      ce.function('Cos', [ce.symbol('y')]),
     ]);
     const extra = ce.function('Arctan2', [
       W,
@@ -400,7 +400,7 @@ describe('CE-595: below the region budget, the code does not change', () => {
 //   `x > k - 1`), and the arms nested in a narrowed arm are functions that
 //   are compiled once. The values are the same as before.
 // - A check of the block-local functions (`assertSpelledLocalCallsConsumed`)
-//   walked the graph once per path: 8 seconds at depth 28 for the `When`
+//   walked the graph once per path: 8 seconds at depth 28 for the restriction
 //   graph. Now it visits each node object once.
 describe('CE-595: the interval target', () => {
   test('If arm: an arm nested in a narrowed arm is not clamped again', () => {

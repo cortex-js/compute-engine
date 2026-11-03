@@ -783,7 +783,7 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
     const res = compile(
       ce.box([
         'Abs',
-        ['When', ['Multiply', ['Complex', 0, 1], 'x'], ['Less', 'x', 0]],
+        ['If', ['Less', 'x', 0], ['Multiply', ['Complex', 0, 1], 'x']],
       ]),
       { fallback: false }
     );

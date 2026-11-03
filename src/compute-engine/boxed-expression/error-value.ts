@@ -25,11 +25,23 @@ const STRUCTURAL_CONTAINERS = new Set(['Dictionary', 'KeyValuePair']);
  * such block. Deliberately NOT `expr.isCollection`, which is `false` for
  * most invalid expressions (all but the literals of
  * `isIterableWithFailedCells()`) — the only case that reaches here.
+ *
+ * An operator that selects among its operands (`selectsOperands`) is not a
+ * collection head, also when it has a `collection` handler block. `If` has
+ * one, because a held single-branch `If(c, L)` over a list presents as the
+ * collection of its restricted cells. But its operands are a condition and
+ * the arms it selects, not elements: an error in an arm that is not selected
+ * must not bubble, and an error in the selected arm is the value of the `If`
+ * (`defersErrorAbsorption()`). If `If` counted as a collection head, every
+ * `If` would keep an error of an operand in place instead:
+ * `If(False, 1 + "a", 2)` would stay unevaluated instead of giving `2`, and
+ * `Sin(If(False, 1 + "a", 2))` would give the error instead of `sin(2)`.
  */
 export function isCollectionHead(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   if (STRUCTURAL_CONTAINERS.has(expr.operator)) return true;
-  return expr.baseDefinition?.collection !== undefined;
+  if (expr.baseDefinition?.collection === undefined) return false;
+  return expr.operatorDefinition?.selectsOperands !== true;
 }
 
 /**

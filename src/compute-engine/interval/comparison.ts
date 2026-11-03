@@ -82,7 +82,7 @@ export function hullValues(a: unknown, b: unknown): unknown {
   // its condition is undecided, and an arm can itself be `empty` (an
   // out-of-range `At`). The other side is then present over part of the
   // cell only, so it is clipped as an undecided restriction clips it
-  // (`restrict` with `'maybe'`, what `When` answers): an `interval` becomes
+  // (`restrict` with `'maybe'`, what a restriction answers): an `interval` becomes
   // `partial`, a list is clipped element by element. Answering the other
   // side unchanged would claim a value over the whole cell.
   const isEmpty = (x: unknown): boolean =>
@@ -377,7 +377,7 @@ export function hull(a: unknown, b: unknown): IntervalModelValue {
 }
 
 /**
- * Domain restriction (the `When` operator): the value where the condition
+ * Domain restriction (the single-branch `If`, a restriction): the value where the condition
  * holds, no value (`empty`) where it does not.
  *
  * The condition is a tri-state `BoolInterval` — a plain JS truthiness test

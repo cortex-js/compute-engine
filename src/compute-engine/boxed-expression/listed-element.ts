@@ -293,7 +293,7 @@ export function listingCountUpperBound(
  *
  * An element is kept as it is when it is not known to be finite, when its
  * elements cannot be computed, when it is neither indexed nor a set (a
- * keyed view), when it is a held conditional (`When`, `Which`, `If`: a
+ * keyed view), when it is a held conditional (`Which`, `If`: a
  * restricted collection, not a view), when its elements would use more
  * than the rest of the budget, or when the walk throws.
  *
@@ -314,8 +314,7 @@ export function listedElement(
   admitKeyed = false
 ): Expression {
   if (!x.isValid || !x.isLazyCollection) return x;
-  if (isFunction(x, 'When') || isFunction(x, 'Which') || isFunction(x, 'If'))
-    return x;
+  if (isFunction(x, 'Which') || isFunction(x, 'If')) return x;
   // A `Range` element stays a range. Its static type is `range` (or
   // `list<integer>`, `list<real>`), and a range is a value: it reads no
   // variable again at a later read, as a `Map` view can. If it were listed,

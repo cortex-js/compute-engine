@@ -606,7 +606,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     for (const expr of [
       ['If', 'c', 'W', 0],
       ['Which', 'c', 'W', 'True', 0],
-      ['When', 'W', 'c'],
+      ['If', 'c', 'W'],
       ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]],
     ]) {
       const boxed = cev.box(expr);
@@ -634,7 +634,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     for (const expr of [
       ['Add', 'W', ['If', 'c', 'W', 0]],
       ['Add', 'W', ['Which', 'c', 'W', 'True', 0]],
-      ['Add', 'W', ['When', 'W', 'c']],
+      ['Add', 'W', ['If', 'c', 'W']],
       ['Add', 'W', ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]],
     ]) {
       const boxed = cev.box(expr);

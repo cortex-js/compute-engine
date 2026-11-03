@@ -174,7 +174,7 @@ export function canonicalAdd(
   // stay symbolic (inference is retractable evidence; `isProvablyScalarNumber`).
   //
   // An operand whose type carries an ABSENCE arm (`missing | tuple<…>`, what a
-  // `When`-gated point has) or a UNION of numeric tuple spellings is rejected
+  // restricted point has) or a UNION of numeric tuple spellings is rejected
   // the same way, because every non-absent value it can take is a tuple —
   // hence `isNumericTupleCarrier` rather than the exact `isNumericTuple`.
   // Before this, `q + 2` with `q: missing | tuple<number, number>` was

@@ -460,7 +460,6 @@ import {
 import {
   compileExprAssertPresent,
   compileExprIf,
-  compileExprWhen,
   compileExprWhich,
   isDecidedBooleanValue,
   kleeneValueConnective,
@@ -1301,7 +1300,6 @@ export class BaseCompiler {
   static readonly compileExprAssign = compileExprAssign;
   static readonly compileExprIf = compileExprIf;
   static readonly compileExprWhich = compileExprWhich;
-  static readonly compileExprWhen = compileExprWhen;
   static readonly compileExprAssertPresent = compileExprAssertPresent;
   static readonly compileExprTyped = compileExprTyped;
   static readonly noLoweringMessage = noLoweringMessage;

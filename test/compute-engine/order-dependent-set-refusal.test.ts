@@ -175,10 +175,10 @@ describe('the result type of TakeWhile and DropWhile is never a set', () => {
 describe('a restricted list is threaded by Position and ChunkBy', () => {
   // Before, the predicate of `Position` received the restricted cells and the
   // evaluation threw, and the runs of `ChunkBy` held the restricted cells.
-  const W = ['When', ['List', 1, 3, 5], ['Less', 0, 't']];
+  const W = ['If', ['Less', 0, 't'], ['List', 1, 3, 5]];
   test.each([
-    [['Position', W, GREATER_2], '[2,3] {0 < t}', '[2,3]'],
-    [['ChunkBy', W, PARITY], '[[1,3,5]] {0 < t}', '[[1,3,5]]'],
+    [['Position', W, GREATER_2], 'If(0 < t, [2,3])', '[2,3]'],
+    [['ChunkBy', W, PARITY], 'If(0 < t, [[1,3,5]])', '[[1,3,5]]'],
   ])('%j', (input, free, present) => {
     const ce = new ComputeEngine();
     expect(

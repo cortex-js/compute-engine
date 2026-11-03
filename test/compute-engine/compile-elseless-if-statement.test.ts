@@ -209,14 +209,14 @@ describe('an else-less If as a block statement', () => {
     // every domain, and `IsMissing` of a masked string answered `false`.
     ce.declare('x', 'number');
     ce.declare('c', 'boolean');
-    const masked = ce.box(['When', { str: 'ok' }, 'c']);
+    const masked = ce.box(['If', 'c', { str: 'ok' }]);
     expect(compile(masked, { fallback: false }).code).toMatch(
       /\? \("ok"\) : undefined/
     );
     const test = compile(ce.box(['IsMissing', masked]), { fallback: false });
     expect((test.run as any)({ c: false })).toBe(true);
     expect((test.run as any)({ c: true })).toBe(false);
-    const num = compile(ce.box(['When', 'x', 'c']), { fallback: false });
+    const num = compile(ce.box(['If', 'c', 'x']), { fallback: false });
     expect(num.code).toMatch(/: NaN\)$/);
   });
 
@@ -226,7 +226,7 @@ describe('an else-less If as a block statement', () => {
     // a bare undeclared symbol arm is a number until proven otherwise, and
     // `undefined` there would turn its arithmetic consumers into a
     // `TypeError` instead of a propagated NaN. Before this `Which` and the
-    // else-less `If` emitted `undefined` for an unknown arm while `When`
+    // else-less `If` emitted `undefined` for an unknown arm while a restriction
     // emitted `NaN`.
     // `c` may be absent, so the selections test it by its value.
     const e = new ComputeEngine();
@@ -235,11 +235,11 @@ describe('an else-less If as a block statement', () => {
     const js = (j: unknown) => compile(e.box(j as any), { fallback: false });
     expect(js(['Which', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
     expect(js(['If', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
-    expect(js(['When', 'x', 'c']).code).toMatch(/: NaN\)$/);
+    expect(js(['If', 'c', 'x']).code).toMatch(/: NaN\)$/);
     expect(js(['Which', 'c', { str: 's' }]).code).toMatch(
       /\? undefined : undefined\)$/
     );
-    expect(js(['When', { str: 's' }, 'c']).code).toMatch(/: undefined\)$/);
+    expect(js(['If', 'c', { str: 's' }]).code).toMatch(/: undefined\)$/);
     // Mixed string and number arms stay numeric.
     expect(js(['Which', 'c', { str: 's' }, 'c', 1]).code).toMatch(/NaN\)$/);
     // The discharge side reads the same rule: `IsMissing` and `Coalesce`

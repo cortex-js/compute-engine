@@ -530,7 +530,7 @@ export function abstractCollectionCell(
  * one. A gated collection type is `missing | C`, where every arm of `C` is an
  * indexed collection that is not a string: a point, a list, or a union of
  * those. A restriction or a default-less `Which` gives this type:
- * `When(PointList(0, 1), 0 < t)` is typed `missing | tuple<integer, integer>`,
+ * `If(0 < t, PointList(0, 1))` is typed `missing | tuple<integer, integer>`,
  * and its value is the point or `Missing`.
  *
  * The broadcast lift reads the present part: without it, the `missing` arm
@@ -845,8 +845,8 @@ export function withPresentCellAbsence(result: Type, absorbed: Type): Type {
  *
  * An operator that threads conditional values at a position (the
  * `threadsConditionals` flag of `types-definitions.ts`) applies itself to
- * the value of a restriction and moves the condition out: `f(When(v, c))` is
- * `When(f(v), c)`. Its type handler must then see the operand as the value
+ * the value of a restriction and moves the condition out: `f(If(c, v))` is
+ * `If(c, f(v))`. Its type handler must then see the operand as the value
  * it is applied to, without the absent case (a restriction is typed
  * `missing | T`), and the absent case goes to the result. A `handle`
  * operator answers the absence marker of its result when the operand is
@@ -920,9 +920,9 @@ function isCellCollectionType(t: Type): boolean {
  * result, less its `missing` arm, is not a subtype of `number`. Examples:
  *
  * - A GATED collection operand (`gatedCollectionPresentType`: a restricted
- *   point or list). `Sin(When((0, 1), c))` is
+ *   point or list). `Sin(If(c, (0, 1)))` is
  *   `missing | tuple<number, number>` and answers `Missing` when `c` is
- *   false; `Sin(When([1, 2, 3], c))` is `missing | list<number>` (the
+ *   false; `Sin(If(c, [1, 2, 3]))` is `missing | list<number>` (the
  *   operand is `missing | list<integer | missing>`, absent as a whole or
  *   cell by cell, and both absences are absorbed).
  * - A point result. `2{c} · (0, 1)` is `missing | tuple<…>`, because an
@@ -996,7 +996,7 @@ export function absorbOperandAbsence(
     // `list<number>` while it answers `Missing` when it is absent as a
     // whole. (A restricted list, `[1, 2]{c}`, is typed
     // `missing | vector<integer^2>`, whole absence only: it stays one held
-    // `When` while its condition is undecided.)
+    // restriction while its condition is undecided.)
     //
     // An absent COORDINATE (a `missing` component of a tuple) is not
     // absorbed for an operator that reads coordinates

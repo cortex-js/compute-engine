@@ -37,7 +37,6 @@ describe('A LAZY HANDLER THAT GIVES UP', () => {
   const extraOperand: Array<[unknown[], string]> = [
     [['Tail', 'xs', 2], 'Error("unexpected-argument", "2")'],
     [['Head', 'xs', 'Sin'], 'Error("unexpected-argument", "sin")'],
-    [['When', 'xs', 0, F], 'Error("unexpected-argument", "(x) => 2x")'],
   ];
   for (const [call, expected] of extraOperand) {
     test(`\`1 + ${call[0]}(…)\` with an operand left over is canonical and invalid`, () => {

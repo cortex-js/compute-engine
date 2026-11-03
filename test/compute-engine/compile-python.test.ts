@@ -1006,9 +1006,9 @@ describe('PYTHON TARGET', () => {
 
     it('When with no default uses float(nan), not a bare NaN', () => {
       const code = python.compile(
-        ce.box(['When', 'x', ['Greater', 'x', 0]])
+        ce.box(['If', ['Greater', 'x', 0], 'x'])
       ).code;
-      expect(code).toBe("((x) if (0 < x) else float('nan'))");
+      expect(code).toBe("((x) if (0 < x) else (float('nan')))");
       expect(code).not.toContain('NaN');
     });
 
@@ -1017,20 +1017,20 @@ describe('PYTHON TARGET', () => {
       // with the JavaScript lowering: `float('nan')` for a number AND for an
       // unknown type, `None` when every arm is provably not a number, so a
       // compiled `IsMissing` agrees with the interpreter's `Missing` in
-      // every domain and `When`, `If` and `Which` answer alike.
+      // every domain and a restriction, `If` and `Which` answer alike.
       const e = new ComputeEngine();
       e.declare('x', 'real');
       e.declare('c', 'boolean');
       // Unknown arm type: numeric until proven otherwise.
-      expect(python.compile(e.box(['When', 'x', 'c'])).code).toBe(
-        "((x) if (c) else float('nan'))"
+      expect(python.compile(e.box(['If', 'c', 'x'])).code).toBe(
+        "((x) if (c) else (float('nan')))"
       );
       expect(python.compile(e.box(['Which', 'c', 'x'])).code).toContain(
         "float('nan')"
       );
       // A string arm: the object null.
-      expect(python.compile(e.box(['When', { str: 's' }, 'c'])).code).toBe(
-        '(("s") if (c) else None)'
+      expect(python.compile(e.box(['If', 'c', { str: 's' }])).code).toBe(
+        '(("s") if (c) else (None))'
       );
       const which = python.compile(e.box(['Which', 'c', { str: 's' }])).code;
       expect(which).toContain('None');
@@ -2094,7 +2094,7 @@ describe('PYTHON TARGET', () => {
     });
   });
 
-  // The Python `Which`/`When` handlers bypass the base compiler's
+  // The Python `Which` and restriction handlers bypass the base compiler's
   // per-condition guard, and a non-empty Python list is TRUTHY — so a
   // collection-valued condition used to compile to a conditional expression
   // that silently picked the value branch for every element
@@ -2115,13 +2115,13 @@ describe('PYTHON TARGET', () => {
 
     it('declines When with a collection-valued condition', () => {
       // `constantFold: false`, as for `Which` above: since a masked number
-      // is `NaN` (user decision 2026-09-25) the whole `When` is a literal
+      // is `NaN` (user decision 2026-09-25) the whole restriction is a literal
       // list, `[1, NaN]`, which constant folding emits as `[1, np.nan]`.
       expect(() =>
-        python.compile(ce.box(['When', 1, ['List', 'True', 'False']]), {
+        python.compile(ce.box(['If', ['List', 'True', 'False'], 1]), {
           constantFold: false,
         })
-      ).toThrow(/branch condition is a collection-valued expression/);
+      ).toThrow(/its conditional forms take a scalar condition only/);
     });
 
     it('keeps the scalar Which on the ordinary conditional-expression path', () => {
@@ -2186,7 +2186,7 @@ describe('PYTHON TARGET — the absence marker of an element read', () => {
   const scoped = new ComputeEngine();
   scoped.declare('t', 'real');
   scoped.declare('v', 'list<real>');
-  const W = (x: unknown) => ['When', x, ['Less', 0, 't']];
+  const W = (x: unknown) => ['If', ['Less', 0, 't'], x];
   const code = (json: unknown) =>
     python.compile(scoped.box(json as never), { fallback: false }).code;
 
@@ -2278,7 +2278,7 @@ describe('PYTHON TARGET — a search whose value may be Missing fails closed', (
     ce2.declare('x', 'real');
     const target = new PythonTarget();
     const code = target.compile(
-      ce2.box(['IndexOf', ['List', 1, 'NaN'], ['When', 'x', ['Less', 0, 'x']]])
+      ce2.box(['IndexOf', ['List', 1, 'NaN'], ['If', ['Less', 0, 'x'], 'x']])
     ).code;
     expect(code).toContain('_ce_indexof([1, np.nan], ');
     expect(code).not.toContain('_n != _n');

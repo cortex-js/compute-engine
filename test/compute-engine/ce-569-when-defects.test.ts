@@ -4,7 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { TEST_PYTHON } from './test-python';
 
 /**
- * ROADMAP CE-569: defects of the compiled `When(e, c)`, which selected the
+ * ROADMAP CE-569: defects of the compiled `If(c, e)`, which selected the
  * value `e` from a condition that was not decided `True`.
  *
  * - JavaScript: a condition read by its value that is not provably boolean
@@ -45,21 +45,21 @@ const SAMPLES = [-2, -0.5, 0, 0.25, 1, 3, NaN];
 describe('CE-569 — javascript: When over a condition', () => {
   it('When(5, x ≠ 0) has no value', () => {
     const ce = engine();
-    const f = js(ce, ['When', 5, ['NotEqual', 'x', 0]]);
+    const f = js(ce, ['If', ['NotEqual', 'x', 0], 5]);
     expect(f.run!({ x: 1 })).toBe(5);
     expect(f.run!({ x: 0 })).toBeNaN();
   });
 
   it('When(5, ¬(x > 0)) has no value', () => {
     const ce = engine();
-    const f = js(ce, ['When', 5, ['Not', ['Greater', 'x', 0]]]);
+    const f = js(ce, ['If', ['Not', ['Greater', 'x', 0]], 5]);
     expect(f.run!({ x: -1 })).toBe(5);
     expect(f.run!({ x: 1 })).toBeNaN();
   });
 
   it('When(5, ¬c) has no value', () => {
     const ce = engine();
-    const f = js(ce, ['When', 5, ['Not', 'c']]);
+    const f = js(ce, ['If', ['Not', 'c'], 5]);
     expect(f.run!({ c: false })).toBe(5);
     expect(f.run!({ c: true })).toBeNaN();
   });
@@ -67,37 +67,33 @@ describe('CE-569 — javascript: When over a condition', () => {
   it('When(x, c) and When(x, c ∧ x > 0) select x only for c = true', () => {
     const ce = engine();
     for (const json of [
-      ['When', 'x', 'c'],
-      ['When', 'x', ['And', 'c', ['Greater', 'x', 0]]],
+      ['If', 'c', 'x'],
+      ['If', ['And', 'c', ['Greater', 'x', 0]], 'x'],
     ]) {
       const f = js(ce, json);
       expect(f.run!({ x: 2, c: true })).toBe(2);
       expect(f.run!({ x: 2, c: false })).toBeNaN();
     }
     // A `boolean` input is tested by its truthiness.
-    expect(js(ce, ['When', 'x', 'c']).code).toBe('((_.c) ? (_.x) : NaN)');
+    expect(js(ce, ['If', 'c', 'x']).code).toBe('((_.c) ? (_.x) : NaN)');
   });
 
   it('When(x, ¬c) selects x only for c = false', () => {
     const ce = engine();
-    const f = js(ce, ['When', 'x', ['Not', 'c']]);
+    const f = js(ce, ['If', ['Not', 'c'], 'x']);
     expect(f.run!({ x: 2, c: false })).toBe(2);
     expect(f.run!({ x: 2, c: true })).toBeNaN();
   });
 
   it('an ordering relation keeps the plain conditional expression', () => {
     const ce = engine();
-    const f = js(ce, ['When', ['Power', 'x', 2], ['Greater', 'x', 0]]);
+    const f = js(ce, ['If', ['Greater', 'x', 0], ['Power', 'x', 2]]);
     expect(f.code).toBe('((0 < _.x) ? ((_.x * _.x)) : NaN)');
   });
 
   it('an And of ordering relations keeps the plain conditional expression', () => {
     const ce = engine();
-    const f = js(ce, [
-      'When',
-      'x',
-      ['And', ['Greater', 'x', 0], ['Less', 'y', 1]],
-    ]);
+    const f = js(ce, ['If', ['And', ['Greater', 'x', 0], ['Less', 'y', 1]], 'x']);
     expect(f.code).toBe('((0 < _.x && _.y < 1) ? (_.x) : NaN)');
     expect(f.run!({ x: 0.5, y: 0 })).toBe(0.5);
     expect(f.run!({ x: 0.5, y: 2 })).toBeNaN();
@@ -105,19 +101,20 @@ describe('CE-569 — javascript: When over a condition', () => {
 
   it('a relation over a computed operand', () => {
     const ce = engine();
-    const h = js(ce, ['When', 5, ['Greater', ['Heaviside', 'x'], 0]]);
+    const h = js(ce, ['If', ['Greater', ['Heaviside', 'x'], 0], 5]);
     expect(h.run!({ x: 1 })).toBe(5);
     expect(h.run!({ x: -1 })).toBeNaN();
-    const p = js(ce, ['When', 5, ['Greater', ['Power', 'x', 'y'], 0]]);
+    const p = js(ce, ['If', ['Greater', ['Power', 'x', 'y'], 0], 5]);
     expect(p.run!({ x: 2, y: 1 })).toBe(5);
   });
 
   it('a condition that is not provably boolean selects nothing, without raising', () => {
     // `b` is declared `boolean | real`, so it is not provably boolean.
-    // The interpreter holds `When(5, 1)` unevaluated.
+    // The interpreter gives an `Error` for `If(1, 5)`: the condition of an
+    // `If` must be a boolean.
     const ce = engine();
-    expect(ce.box(['When', 5, 1]).evaluate().operator).toBe('When');
-    const f = js(ce, ['When', 5, 'b']);
+    expect(ce.box(['If', 1, 5]).evaluate().operator).toBe('Error');
+    const f = js(ce, ['If', 'b', 5]);
     expect(f.run!({ b: true })).toBe(5);
     expect(f.run!({ b: false })).toBeNaN();
     expect(f.run!({ b: 1 })).toBeNaN();
@@ -133,11 +130,7 @@ describe('CE-569 — javascript: When over a condition', () => {
 
   it('a literal list of conditions agrees with the interpreter in each cell', () => {
     const ce = engine();
-    const json = [
-      'When',
-      5,
-      ['List', ['NotEqual', 'x', 0], ['Not', ['Greater', 'x', 0]]],
-    ];
+    const json = ['If', ['List', ['NotEqual', 'x', 0], ['Not', ['Greater', 'x', 0]]], 5];
     const expr = ce.box(json as never);
     const f = js(ce, json);
     for (const x of SAMPLES) {
@@ -155,9 +148,9 @@ describe('CE-569 — javascript: When over a condition', () => {
   it('the compiled value agrees with the interpreter', () => {
     const ce = engine();
     for (const json of [
-      ['When', ['Power', 'x', 2], ['Greater', 'x', 0]],
-      ['When', 5, ['NotEqual', 'x', 0]],
-      ['When', 'x', ['Not', ['Greater', 'x', 0]]],
+      ['If', ['Greater', 'x', 0], ['Power', 'x', 2]],
+      ['If', ['NotEqual', 'x', 0], 5],
+      ['If', ['Not', ['Greater', 'x', 0]], 'x'],
     ]) {
       const expr = ce.box(json as never);
       const f = js(ce, json);
@@ -174,36 +167,36 @@ describe('CE-569 — javascript: When over a condition', () => {
 describe('CE-569 — python: a boolean condition', () => {
   it('When(x, c) reads a boolean input by its truthiness', () => {
     const ce = engine();
-    const r = compile(ce.box(['When', 'x', 'c']), {
+    const r = compile(ce.box(['If', 'c', 'x']), {
       to: 'python',
       fallback: false,
     } as never);
     expect(r.code).toBe(
-      "((x) if (c) else float('nan'))"
+      "((x) if (c) else (float('nan')))"
     );
   });
 
   it('When(x, ¬c) reads a boolean input by its truthiness', () => {
     const ce = engine();
-    const r = compile(ce.box(['When', 'x', ['Not', 'c']]), {
+    const r = compile(ce.box(['If', ['Not', 'c'], 'x']), {
       to: 'python',
       fallback: false,
     } as never);
     expect(r.code).toBe(
-      "((x) if (not c) else float('nan'))"
+      "((x) if (not c) else (float('nan')))"
     );
   });
 
   it('a relation keeps the plain conditional expression', () => {
     const ce = engine();
     const r = compile(
-      ce.box(['When', ['Power', 'x', 2], ['Greater', 'x', 0]]),
+      ce.box(['If', ['Greater', 'x', 0], ['Power', 'x', 2]]),
       {
         to: 'python',
         fallback: false,
       } as never
     );
-    expect(r.code).toBe("((x ** 2) if (0 < x) else float('nan'))");
+    expect(r.code).toBe("((x ** 2) if (0 < x) else (float('nan')))");
   });
 
   const run = TEST_PYTHON === undefined ? it.skip : it;
@@ -213,17 +206,17 @@ describe('CE-569 — python: a boolean condition', () => {
     // named like the generated parameter is declared.
     ce.declare('_CND', 'real');
     const cases: Array<[unknown, Record<string, string>, string]> = [
-      [['When', 'x', 'c'], { x: '2.0', c: 'True' }, '2.0'],
-      [['When', 'x', 'c'], { x: '2.0', c: 'False' }, 'nan'],
-      [['When', 'x', ['Not', 'c']], { x: '2.0', c: 'False' }, '2.0'],
+      [['If', 'c', 'x'], { x: '2.0', c: 'True' }, '2.0'],
+      [['If', 'c', 'x'], { x: '2.0', c: 'False' }, 'nan'],
+      [['If', ['Not', 'c'], 'x'], { x: '2.0', c: 'False' }, '2.0'],
       [
-        ['When', 'x', ['And', 'c', ['Greater', 'x', 0]]],
+        ['If', ['And', 'c', ['Greater', 'x', 0]], 'x'],
         { x: '2.0', c: 'True' },
         '2.0',
       ],
       // A value that is a variable named like the generated parameter.
       [
-        ['When', '_CND', ['And', 'c', ['Greater', 'x', 0]]],
+        ['If', ['And', 'c', ['Greater', 'x', 0]], '_CND'],
         { _CND: '7', x: '2.0', c: 'True' },
         '7',
       ],
@@ -254,12 +247,12 @@ describe('CE-569 — python: a boolean condition', () => {
 describe('CE-569 — javascript: an equality over booleans', () => {
   it.each([
     [
-      "['When', 5, ['Equal', 'c', 'True']]",
-      ['When', 5, ['Equal', 'c', 'True']],
+      "['If', ['Equal', 'c', 'True'], 5]",
+      ['If', ['Equal', 'c', 'True'], 5],
     ],
     [
-      "['When', 5, ['NotEqual', 'c', 'True']]",
-      ['When', 5, ['NotEqual', 'c', 'True']],
+      "['If', ['NotEqual', 'c', 'True'], 5]",
+      ['If', ['NotEqual', 'c', 'True'], 5],
     ],
     [
       "['If', ['Equal', 'c', 'True'], 5, -1]",
@@ -299,8 +292,8 @@ describe('CE-569 — javascript: a comparison of a boolean or string input', () 
       [{ c: true }, { c: false }],
     ],
     [
-      'When(5, c ≠ True)',
-      ['When', 5, ['NotEqual', 'c', 'True']],
+      'If(c ≠ True, 5)',
+      ['If', ['NotEqual', 'c', 'True'], 5],
       [{ c: true }, { c: false }],
     ],
     [
@@ -309,8 +302,8 @@ describe('CE-569 — javascript: a comparison of a boolean or string input', () 
       [{ s: 'a' }, { s: 'b' }],
     ],
     [
-      'When(5, s ≠ "a")',
-      ['When', 5, ['NotEqual', 's', { str: 'a' }]],
+      'If(s ≠ "a", 5)',
+      ['If', ['NotEqual', 's', { str: 'a' }], 5],
       [{ s: 'a' }, { s: 'b' }],
     ],
   ];
@@ -345,7 +338,7 @@ describe('CE-569 — javascript: an operand that is not a bare numeric read', ()
     const ce = engine();
     ce.declare('s', 'string');
     ce.declare('t', 'string');
-    const json = ['When', 5, ['Less', 's', 't']];
+    const json = ['If', ['Less', 's', 't'], 5];
     const f = js(ce, json);
     expect(f.run!({ s: 'a', t: 'b' })).toBe(5);
     expect(f.run!({ s: 'b', t: 'a' })).toBeNaN();
@@ -355,7 +348,7 @@ describe('CE-569 — javascript: an operand that is not a bare numeric read', ()
     // `a` compiles to its value, `Heaviside(x)`.
     const ce = engine();
     ce.assign('a', ce.box(['Heaviside', 'x']));
-    const json = ['When', 5, ['Greater', 'a', 0]];
+    const json = ['If', ['Greater', 'a', 0], 5];
     const f = js(ce, json);
     expect(f.run!({ x: 1 })).toBe(5);
     expect(f.run!({ x: -1 })).toBeNaN();
@@ -385,7 +378,7 @@ describe('CE-569 — javascript: an operand that is not a bare numeric read', ()
       }
       return n;
     };
-    const w = ['When', 5, ['Less', ['Random'], 'x']];
+    const w = ['If', ['Less', ['Random'], 'x'], 5];
     const i = ['If', ['Less', ['Random'], 'x'], 5, -1];
     expect(draws(w, { x: 2 })).toBe(1);
     expect(draws(i, { x: 2 })).toBe(1);
@@ -395,7 +388,7 @@ describe('CE-569 — javascript: an operand that is not a bare numeric read', ()
 describe('CE-569 — the cases the fixes do not change', () => {
   it('a list of conditions restricts element by element', () => {
     const ce = engine();
-    const json = ['When', 'x', ['List', ['Greater', 'x', 0], ['Less', 'x', 1]]];
+    const json = ['If', ['List', ['Greater', 'x', 0], ['Less', 'x', 1]], 'x'];
     const f = js(ce, json);
     expect(f.code).toBe('_SYS.restrict([0 < _.x, _.x < 1], _.x, false, NaN)');
     for (const x of [-1, 0.5, 2]) {
@@ -418,7 +411,7 @@ describe('CE-569 — the cases the fixes do not change', () => {
 
   it('a point value: the interpreter gives Missing, javascript undefined', () => {
     const ce = engine();
-    const expr = ce.box(['When', ['Tuple', 'x', 'y'], ['Greater', 'x', 0]]);
+    const expr = ce.box(['If', ['Greater', 'x', 0], ['Tuple', 'x', 'y']]);
     expect(expr.subs({ x: 1, y: 2 }).evaluate().toString()).toBe('(1, 2)');
     expect(expr.subs({ x: -1, y: 2 }).evaluate().symbol).toBe('Missing');
     const f = compile(expr, { to: 'javascript', fallback: false });
@@ -428,7 +421,7 @@ describe('CE-569 — the cases the fixes do not change', () => {
 
   it('a complex value: the masked value is the complex NaN', () => {
     const ce = engine();
-    const f = js(ce, ['When', ['Multiply', 'z', 'x'], ['Greater', 'x', 0]]);
+    const f = js(ce, ['If', ['Greater', 'x', 0], ['Multiply', 'z', 'x']]);
     const masked = f.run!({ x: -1, z: { re: 1, im: 2 } }) as {
       re: number;
       im: number;
@@ -446,7 +439,7 @@ describe('CE-569 — the cases the fixes do not change', () => {
     const ce = engine();
     const expr = ce.box([
       'Sum',
-      ['When', 'k', ['Greater', 'k', 'x']],
+      ['If', ['Greater', 'k', 'x'], 'k'],
       ['Limits', 'k', 1, 5],
     ]);
     const f = compile(expr, { to: 'javascript', fallback: false });

@@ -824,7 +824,7 @@ export function gpuArmIsCostlyForSelect(
 
 /**
  * Compile a **conditionally-evaluated** operand of a GPU conditional — an
- * `If`/`When`/`Which`/`Match` arm, or a `Which` condition past the first —
+ * `If`/`Which`/`Match` arm, or a `Which` condition past the first —
  * with hoisting forbidden.
  *
  * GLSL's `?:` short-circuits: an arm runs only when it is selected. A lowering
@@ -1016,7 +1016,7 @@ export function gpuHasEagerCallerCode(
 }
 
 /**
- * Fail closed on WGSL when an operand of a selection (`If`, `When`, `Which`)
+ * Fail closed on WGSL when an operand of a selection (`If`, `Which`)
  * assigns a variable. The selection lowers to `select(…)`, a function call,
  * so its operands are expressions, and a WGSL assignment is a statement:
  * `If(x > 0, t ≔ 1, t ≔ 2)` gave `select(t = 2.0, t = 1.0, 0.0 < x)`, which
@@ -1110,8 +1110,8 @@ function gpuIsWrittenAbsence(
  * is `vec2(NaN)`; beside a point or a list of 2 to 4 numbers it is a `vecN`
  * NaN (`gpuNaNFor`); otherwise it is a scalar NaN. The interpreter gives
  * `Missing` (or `NaN`) there, and the NaN in each lane is the shader
- * spelling of that value, the same value the else-less `If(c, (x, y))` and
- * `When((x, y), c)` give when no arm is selected.
+ * spelling of that value, the same value the else-less `If(c, (x, y))` gives
+ * when no arm is selected.
  */
 function gpuAbsentArm(
   arms: ReadonlyArray<Expression>,

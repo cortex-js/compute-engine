@@ -782,7 +782,7 @@ export function refutingFact(
     // Substituting the whole restriction left the condition's own unknowns in
     // the result, which the undecided test below then skipped: `assume(x = 5)`
     // accepted `x := 7 {a > 0}` while it refused the identical ungated `7`.
-    // Stacked restrictions canonicalize into one `When`, but a value that was
+    // Stacked restrictions canonicalize into one restriction, but a value that was
     // not canonicalized can still nest, so walk to the innermost operand.
     // (2026-09-22)
     let candidate = value;

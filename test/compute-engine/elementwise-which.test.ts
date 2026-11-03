@@ -365,7 +365,7 @@ describe('R4 — the no-match cell follows the type of its position', () => {
   });
 
   // User decision 2026-10-17: a position that no clause selects holds the
-  // absence marker of the type of the position, as `When` masks a cell:
+  // absence marker of the type of the position, as a restriction masks a cell:
   // `NaN` for a number, `Missing` for anything else (a string, a point).
   // Before, the marker was `NaN` whatever the arms were.
   test('a string arm masks to Missing', () => {
@@ -376,11 +376,11 @@ describe('R4 — the no-match cell follows the type of its position', () => {
     expect(cells(r)).toEqual(['"hot"', '"Missing"']);
   });
 
-  test('a point arm masks to Missing, as When and the scalar forms do', () => {
+  test('a point arm masks to Missing, as restriction and the scalar forms do', () => {
     const ce = engine();
     const cond = ['Less', ['List', 1, 5], 3];
     const which = ce.box(['Which', cond, ['Tuple', 1, 2]]).evaluate();
-    const when = ce.box(['When', ['Tuple', 1, 2], cond]).evaluate();
+    const when = ce.box(['If', cond, ['Tuple', 1, 2]]).evaluate();
     expect(cells(which)).toEqual(['(1, 2)', '"Missing"']);
     expect(cells(when)).toEqual(['(1, 2)', '"Missing"']);
     expect(
@@ -391,7 +391,7 @@ describe('R4 — the no-match cell follows the type of its position', () => {
     ).toBe('"Missing"');
     expect(
       ce
-        .box(['When', ['Tuple', 1, 2], ['Less', 5, 3]])
+        .box(['If', ['Less', 5, 3], ['Tuple', 1, 2]])
         .evaluate()
         .toString()
     ).toBe('"Missing"');
@@ -404,7 +404,7 @@ describe('R4 — the no-match cell follows the type of its position', () => {
     const ce = engine();
     const cond = ['Less', ['List', 1, 5], 3];
     expect(cells(ce.box(['Which', cond, 7]).evaluate())).toEqual(['7', 'NaN']);
-    expect(cells(ce.box(['When', 7, cond]).evaluate())).toEqual(['7', 'NaN']);
+    expect(cells(ce.box(['If', cond, 7]).evaluate())).toEqual(['7', 'NaN']);
   });
 
   test('a number arm beside a point arm masks to Missing', () => {

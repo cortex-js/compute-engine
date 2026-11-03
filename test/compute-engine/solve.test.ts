@@ -738,7 +738,7 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     expect(expr('\\cosh(x) = \\frac{1}{2}').solve('x')).toEqual([]);
   });
 
-  test('sin(x) = a wraps symbolic ratios in a validity guard (When)', () => {
+  test('sin(x) = a wraps symbolic ratios in a validity guard (restriction)', () => {
     // Phase 2 of the conditional-values design: a symbolic ratio no longer
     // waves the root through unconditionally — it is emitted with its
     // |−b/a| ≤ 1 validity guard, which collapses (or prunes) once decidable.
@@ -746,8 +746,8 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
       .solve('x')
       ?.map((x) => x.toString());
     expect(result).toEqual([
-      'arcsin(a) {|a| <= 1}',
-      '-arcsin(a) + pi {|a| <= 1}',
+      'If(|a| <= 1, arcsin(a))',
+      'If(|a| <= 1, -arcsin(a) + pi)',
     ]);
   });
 
@@ -760,8 +760,8 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     // t = ±arccos((x² + 1)/(2x)), guarded by the |ratio| ≤ 1 validity
     // condition (conditional-values design, Phase 2).
     expect(result).toEqual([
-      'arccos((x^2 + 1) / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
-      '-arccos((x^2 + 1) / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
+      'If(|(x^2 + 1) / (2x)| <= 1, arccos((x^2 + 1) / (2x)))',
+      'If(|(x^2 + 1) / (2x)| <= 1, -arccos((x^2 + 1) / (2x)))',
     ]);
   });
 
@@ -3064,7 +3064,7 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
     const roots = engine.parse(latex).solve('x');
     expect(roots).not.toBeNull();
     for (const r of roots as any[]) {
-      const root = r.operator === 'When' ? r.op1 : r;
+      const root = r.operator === 'If' && r.nops === 2 ? r.op2 : r;
       const v = root.subs({ a: value }).N().re;
       expect(Math.abs(f(v))).toBeLessThan(1e-9);
     }
@@ -3157,13 +3157,13 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
         .parse('\\log_a(x)=3')
         .solve('x')!
         .map((r) => r.toString())
-    ).toEqual(['a^3 {0 < a && a != 1}']);
+    ).toEqual(['If(0 < a && a != 1, a^3)']);
     expect(
       ce
         .parse('\\log_a(x+1)=3')
         .solve('x')!
         .map((r) => r.toString())
-    ).toEqual(['a^3 - 1 {0 < a && a != 1}']);
+    ).toEqual(['If(0 < a && a != 1, a^3 - 1)']);
     const a = 2.5;
     expect(Math.log(a ** 3 - 1 + 1) / Math.log(a)).toBeCloseTo(3, 12);
     const positive = new ComputeEngine();

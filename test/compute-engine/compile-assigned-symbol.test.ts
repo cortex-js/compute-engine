@@ -15,7 +15,7 @@
  *  - folding on the direct-target `compile(expr, { target })` path; and
  *  - emitting non-finite numbers (`∞`, `NaN`) on GPU targets, which have no
  *    such LITERALS but can make the values from a bit pattern, through the same
- *    overridable symbols a masked `When`/`Which` branch already used.
+ *    overridable symbols a masked restriction or `Which` branch already used.
  *
  * See `TYCHO_ISSUE.md` for the original report.
  */
@@ -254,7 +254,7 @@ describe('COMPILE: assigned-symbol folding', () => {
 
 describe('COMPILE: non-finite numbers on GPU targets', () => {
   // GLSL/WGSL have no infinity or NaN LITERAL — but both can MAKE those values
-  // from a bit pattern, which is what the masked (`When`/`Which` else) branch
+  // from a bit pattern, which is what the masked (restriction or `Which` else) branch
   // already does. A non-finite CONSTANT is the same value reached by another
   // route, so it goes through the same symbols (`gpuNonFiniteLiteral`) instead
   // of failing the compilation: GLSL through the overridable `_gpu_nan()` /
