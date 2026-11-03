@@ -306,6 +306,10 @@ function* executeEpsilRun(
     scope: undefined,
     firstAt: new Map(),
   };
+  // The deadline frame of the run. The statement loop removes it from the
+  // engine when a statement ends with an expired time or step budget (see
+  // the `catch` of the statement loop); it is put back when the run ends.
+  const runFrame = ce._deadlineFrame;
   try {
     // A program runs with no iteration limit: a loop written by its author
     // runs until it ends, and the host's time budget is the bound. A limit
@@ -315,6 +319,7 @@ function* executeEpsilRun(
     ce._liftDefaultIterationLimit();
     return yield* executeEpsilSteps(ce, source, options, laterDeclarations);
   } finally {
+    ce._deadlineFrame = runFrame;
     ce._epsilBatchId = enclosingBatch;
     ce._epsilStatementResultHook = enclosingStatementHook;
     reachLaterDeclarations(laterDeclarations, Infinity);
@@ -682,6 +687,16 @@ function* executeEpsilSteps(
       cancellation = cancellationCause(e);
       constantName = constantAssignmentName(e);
       constantSite = constantAssignmentSite(e);
+      // An expired time or step budget ends the program (see the `break`
+      // after the walks below), but the deadline stays expired. Every box
+      // operation checks the deadline once every 1024 calls
+      // (`boxFunctionInternal()`), so the code that boxes the error value of
+      // this statement, the walks of that value and the work after the loop
+      // would throw the cancellation to the host at an unpredictable point.
+      // The frame is removed for the rest of the run;
+      // `executeEpsilRun()` puts it back when the run ends.
+      if (cancellation === 'timeout' || cancellation === 'step-budget')
+        ce._deadlineFrame = undefined;
       // A cancellation (cap breach) carries a machine-readable `cause` as a
       // second Error operand — additively, so the message operand (which hosts
       // may still string-match, e.g. "Operation canceled" /

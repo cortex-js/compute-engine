@@ -675,28 +675,49 @@ describePython('COMPILE three-valued connectives — Python execution', () => {
     }).trim();
   }
 
-  // The conditions read symbols declared `number | missing`: NaN is the
-  // numeric spelling of their absent value, which leaves a relation
-  // undecided. Over a `real` symbol a relation with a NaN operand is decided
-  // (user decisions 2026-10-20 and 2026-10-23), which the other cases check.
+  // The conditions read symbols declared `number | missing`. A NaN input is
+  // a present value, so it decides `NaN != 0` true, as over a `real` symbol
+  // (two-valued comparisons, `docs/ERROR-MODEL.md`). The absent value of
+  // these symbols is `None` on Python and `undefined` on JavaScript; the
+  // compiled value computed from it is not specified
+  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"), so it is not
+  // tested here.
   const ne = (name: string): unknown[] => ['NotEqual', name, 0];
 
+  /** Each answer of the Python emission equals the answer of the
+   * JavaScript emission for the same inputs, and the expected value. */
+  function expectBoth(
+    json: unknown,
+    cases: [Record<string, number>, number][]
+  ): void {
+    const source = python.compile(ce.expr(json as any)).code;
+    const jsRun = js(ce, json).run;
+    for (const [vars, expected] of cases) {
+      expect(jsRun(vars)).toBe(expected);
+      expect(runPython(source, vars)).toBe(String(expected));
+    }
+  }
+
   it('matches the JavaScript answers for And', () => {
-    const source = python.compile(
-      ce.expr(['If', ['And', ne('p'), ne('q')], 1, -1] as any)
-    ).code;
-    expect(runPython(source, { p: 1, q: NaN })).toBe('nan');
-    expect(runPython(source, { p: 0, q: NaN })).toBe('-1');
-    expect(runPython(source, { p: 1, q: 2 })).toBe('1');
+    expectBoth(
+      ['If', ['And', ne('p'), ne('q')], 1, -1],
+      [
+        [{ p: 1, q: NaN }, 1],
+        [{ p: 0, q: NaN }, -1],
+        [{ p: 1, q: 2 }, 1],
+      ]
+    );
   });
 
   it('matches the JavaScript answers for Or', () => {
-    const source = python.compile(
-      ce.expr(['If', ['Or', ne('p'), ne('q')], 1, -1] as any)
-    ).code;
-    expect(runPython(source, { p: 1, q: NaN })).toBe('1');
-    expect(runPython(source, { p: 0, q: NaN })).toBe('nan');
-    expect(runPython(source, { p: 0, q: 0 })).toBe('-1');
+    expectBoth(
+      ['If', ['Or', ne('p'), ne('q')], 1, -1],
+      [
+        [{ p: 1, q: NaN }, 1],
+        [{ p: 0, q: NaN }, 1],
+        [{ p: 0, q: 0 }, -1],
+      ]
+    );
   });
 
   it('decides a NotEqual with a NaN operand true', () => {

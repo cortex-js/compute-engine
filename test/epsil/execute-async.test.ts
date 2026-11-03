@@ -85,6 +85,52 @@ describe('executeEpsilAsync: time limit and abort', () => {
     expect(ce._deadlineFrame).toBeUndefined();
   }, 30_000);
 
+  // A box operation checks the deadline once every 1024 calls
+  // (`boxFunctionInternal()` in src/compute-engine/boxed-expression/box.ts),
+  // so whether the work that follows an expired deadline (boxing the error
+  // value, the walks of that value) reaches a check depended on the count of
+  // earlier box operations, and the cancellation was sometimes thrown to the
+  // host. The frame's counter is pinned here so that every box operation
+  // checks the deadline: the program must still end with its error value.
+  const checkOnEveryBox = (ce: ComputeEngine): void => {
+    Object.defineProperty(ce._deadlineFrame!, 'tick', {
+      get: () => 0x3ff,
+      set: () => {},
+      configurable: true,
+    });
+  };
+  const loop = 'let c = 0\nwhile c >= 0 { c = c + 1 }';
+
+  test('an expired deadline gives an error value when every box operation checks it (async)', async () => {
+    const ce = new ComputeEngine();
+    let p: Promise<ReturnType<typeof executeEpsil>> | undefined;
+    ce.withTimeLimit({ ms: 50, label: 'test:epsil-async-every-box' }, () => {
+      checkOnEveryBox(ce);
+      p = executeEpsilAsync(ce, loop);
+      return 0;
+    });
+    const { value } = await p!;
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('timeout');
+    expect(ce._deadlineFrame).toBeUndefined();
+  }, 30_000);
+
+  test('an expired deadline gives an error value when every box operation checks it (sync)', () => {
+    const ce = new ComputeEngine();
+    const { value } = ce.withTimeLimit(
+      { ms: 50, label: 'test:epsil-sync-every-box' },
+      () => {
+        checkOnEveryBox(ce);
+        const r = executeEpsil(ce, loop);
+        // The run puts the frame of the span back when it ends.
+        expect(ce._deadlineFrame).toBeDefined();
+        return r;
+      }
+    );
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('timeout');
+  }, 30_000);
+
   test('an aborted signal rejects before the program runs', async () => {
     const ce = new ComputeEngine();
     const controller = new AbortController();
