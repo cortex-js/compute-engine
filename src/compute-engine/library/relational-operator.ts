@@ -1758,12 +1758,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType(
-          'LessEqual',
-          () => 'boolean',
-          ops,
-          engine.tolerance
-        ),
+        comparisonType('LessEqual', () => 'boolean', ops, engine.tolerance),
         engine._typeResolver
       ),
 
@@ -1791,12 +1786,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   GreaterEqual: {
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType(
-          'GreaterEqual',
-          () => 'boolean',
-          ops,
-          engine.tolerance
-        ),
+        comparisonType('GreaterEqual', () => 'boolean', ops, engine.tolerance),
         engine._typeResolver
       ),
     description: 'Greater-than-or-equal comparison (greater than or equal to).',

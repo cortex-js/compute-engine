@@ -23,10 +23,7 @@ export {
 };
 
 import { asRational } from './numerics.js';
-import {
-  bignumPreferred,
-  getImaginaryFactor,
-} from './utils.js';
+import { bignumPreferred, getImaginaryFactor } from './utils.js';
 import {
   exactUnitCircle,
   halfTurnAngle,
@@ -41,12 +38,7 @@ import {
   boxComplexKernelResult,
   complexNumericValueRoute,
 } from './apply.js';
-import {
-  isNumber,
-  isFunction,
-  isSymbol,
-  numericValue,
-} from './type-guards.js';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { realExponentValue } from './imaginary-part.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -502,8 +494,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // canonical form must not depend on (see `canonicalDivide`).
     if (isNumber(b) && b.isNaN) return ce.NaN;
     // `0^(imaginary)` and `0^0` have no value: `NaN`.
-    if (b.type.matches('imaginary' as NumericPrimitiveType))
-      return ce.NaN;
+    if (b.type.matches('imaginary' as NumericPrimitiveType)) return ce.NaN;
 
     if (b.isSame(0)) return ce.NaN;
 
@@ -617,8 +608,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // (-1)^∞ = NaN, because of oscillations in the limit. A float
       // base `1.0` is the form `1^∞`: `NaN`
       // (an exact `1` was handled above; the float fell to the `0` below).
-      if (a.isSame(-1) || a.isSame(1))
-        return ce.NaN;
+      if (a.isSame(-1) || a.isSame(1)) return ce.NaN;
 
       // The folds below read the value of the base. A canonical form must
       // not depend on a value that can change, so a base that is not a
@@ -674,8 +664,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (isSymbol(a, 'ExponentialE')) return ce.Zero;
 
       // (-1)^-∞ = NaN, and so is the float `1.0^-∞`, as for +∞.
-      if (a.isSame(-1) || a.isSame(1))
-        return ce.NaN;
+      if (a.isSame(-1) || a.isSame(1)) return ce.NaN;
 
       // As for +∞: the folds below read the value of the base, so a base
       // that is not a number literal or a constant stays unfolded.
@@ -2172,16 +2161,14 @@ function rootAtExceptionalPoint(
 ): Expression | undefined {
   const ce = a.engine;
   if (!isNumber(a) && !isNumber(b)) return undefined;
-  if ((isNumber(a) && a.isNaN) || (isNumber(b) && b.isNaN))
-    return ce.NaN;
+  if ((isNumber(a) && a.isNaN) || (isNumber(b) && b.isNaN)) return ce.NaN;
   if (isNumber(b)) {
     if (b.isSame(0)) return undefined;
     if (b.isInfinity === true) {
       // The exponent `1/b` is 0: `a^0` is 1 for a finite non-zero base and
       // the indeterminate NaN for a zero or infinite one.
       if (!isNumber(a)) return undefined;
-      if (a.isSame(0) || a.isInfinity === true)
-        return ce.NaN;
+      if (a.isSame(0) || a.isInfinity === true) return ce.NaN;
       return ce.One;
     }
   }

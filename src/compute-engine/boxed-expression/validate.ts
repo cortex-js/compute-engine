@@ -2829,8 +2829,7 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
  * The call is then checked against the value as usual.
  */
 function symbolCellType(el: Expression, element: Type): Type | undefined {
-  if (isSymbol(el) && el.valueDefinition?.value !== undefined)
-    return undefined;
+  if (isSymbol(el) && el.valueDefinition?.value !== undefined) return undefined;
   return withoutNothing(element);
 }
 

@@ -1462,11 +1462,7 @@ export function topTypeBesideAbsence(
   for (const branch of r.types) {
     const b = resolveTypeAlias(branch);
     if (b === 'unknown' || b === 'any' || b === 'value') top ??= b;
-    else if (
-      b !== 'missing' &&
-      b !== 'nothing' &&
-      !isSubtype(b, 'collection')
-    )
+    else if (b !== 'missing' && b !== 'nothing' && !isSubtype(b, 'collection'))
       return undefined;
   }
   return top;

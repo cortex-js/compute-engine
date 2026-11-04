@@ -475,10 +475,7 @@ export function compileBlock(
     // nor typed real in the block's scope is complex-shaped from its
     // declaration (`localComplexDefault`); the strict default is real until
     // a complex first binding.
-    complexFrame.set(
-      local,
-      localComplexDefault(node?.localScope, local)
-    );
+    complexFrame.set(local, localComplexDefault(node?.localScope, local));
     // A typed color may first be assigned inside a loop or conditional,
     // outside the straight-line assignment scan below.
     const declared = declaredVarTypes?.[local];

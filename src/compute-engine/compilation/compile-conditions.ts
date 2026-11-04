@@ -22,10 +22,7 @@ import type {
   TargetSource,
 } from './types.js';
 import { descendantRegionAt, type CseRegion } from './cse.js';
-import type {
-  ConditionDialect,
-  ConditionNode,
-} from './compiler-types.js';
+import type { ConditionDialect, ConditionNode } from './compiler-types.js';
 import {
   LOGICAL_BROADCAST_HEADS,
   SCALAR_ARITHMETIC_HEADS,

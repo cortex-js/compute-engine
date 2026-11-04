@@ -200,12 +200,7 @@ export interface ValueNode extends ASTNode {
   // (the signed `+oo`/`-oo`) because its `value` is the
   // `COMPLEX_INFINITY_VALUE` sentinel rather than a JavaScript number.
   valueType:
-    | 'string'
-    | 'number'
-    | 'boolean'
-    | 'infinity'
-    | 'complex_infinity'
-    | 'nan';
+    'string' | 'number' | 'boolean' | 'infinity' | 'complex_infinity' | 'nan';
 }
 
 export interface DimensionNode extends ASTNode {

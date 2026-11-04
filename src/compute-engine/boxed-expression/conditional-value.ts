@@ -250,12 +250,7 @@ export const ABSENT_READS: ReadonlySet<string> = new Set([
  * is not one of them: a tuple of numbers is a point, and a point whose
  * coordinates are all `NaN` is absent (`(At(xs, j), At(xs, j))` with `j`
  * out of range). */
-const CONSTRUCTORS = new Set([
-  'List',
-  'Set',
-  'Dictionary',
-  'KeyValuePair',
-]);
+const CONSTRUCTORS = new Set(['List', 'Set', 'Dictionary', 'KeyValuePair']);
 
 /**
  * True if `expr`, or one of its sub-expressions, is a restriction

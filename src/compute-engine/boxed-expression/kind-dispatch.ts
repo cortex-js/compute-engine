@@ -28,12 +28,7 @@ import type {
   IComputeEngine as ComputeEngine,
   KindFold,
 } from '../global-types.js';
-import {
-  isExpression,
-  isFunction,
-  isNumber,
-  isString,
-} from './type-guards.js';
+import { isExpression, isFunction, isNumber, isString } from './type-guards.js';
 import { holdsKindValue } from './residue-class.js';
 import {
   kindOfValue,

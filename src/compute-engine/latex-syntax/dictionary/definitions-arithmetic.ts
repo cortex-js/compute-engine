@@ -5387,7 +5387,10 @@ function parseLog(
   if (parser.match('_')) {
     const start = parser.index;
     sub = parser.parseGroup() ?? parser.parseToken();
-    if (sub === 'Nothing' && !parser.latex(start, parser.index).includes('Nothing'))
+    if (
+      sub === 'Nothing' &&
+      !parser.latex(start, parser.index).includes('Nothing')
+    )
       sub = null;
   }
 

@@ -590,12 +590,7 @@ export class _BoxedValueDefinition
       // declared type is refused. An inferred type is not checked: it is
       // derived from a value, not written by the author.
       if (!def.inferred)
-        installParameterDefaults(
-          ce,
-          this,
-          `Symbol "${this.name}"`,
-          type
-        );
+        installParameterDefaults(ce, this, `Symbol "${this.name}"`, type);
 
       this._type = new BoxedType(type, ce._typeResolver);
       this.inferredType = def.inferred ?? false;

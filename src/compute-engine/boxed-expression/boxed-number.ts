@@ -30,10 +30,7 @@ import { explainExpression } from './explain.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { inBroadcastCell } from './broadcast-cell-widening.js';
-import {
-  digest128,
-  hashCode,
-} from './utils.js';
+import { digest128, hashCode } from './utils.js';
 import { match } from './match.js';
 import { same } from './compare.js';
 import { add } from './arithmetic-add.js';
@@ -51,9 +48,7 @@ import {
   immutableNumericValueType,
 } from '../../common/type/immutable.js';
 import type { Type } from '../../common/type/types.js';
-import {
-  COMPLEX_INFINITY_VALUE,
-} from '../../common/type/types.js';
+import { COMPLEX_INFINITY_VALUE } from '../../common/type/types.js';
 import {
   positiveRangeType,
   negativeRangeType,
@@ -653,8 +648,7 @@ export class BoxedNumber
           rhs.isComplexInfinity
         )
           return ce.NaN;
-      } else if (rhs.isZero && this.isFinite === false)
-        return ce.NaN;
+      } else if (rhs.isZero && this.isFinite === false) return ce.NaN;
       return ce.number(rhs.mul(this._value));
     }
 

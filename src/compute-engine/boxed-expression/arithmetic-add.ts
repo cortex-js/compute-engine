@@ -1,7 +1,5 @@
 import type { BigDecimal } from '../../big-decimal/index.js';
-import {
-  getImaginaryFactor,
-} from './utils.js';
+import { getImaginaryFactor } from './utils.js';
 
 import { flatten } from './flatten.js';
 import { isInvalidNonCollection } from './error-value.js';

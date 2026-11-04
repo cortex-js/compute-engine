@@ -602,8 +602,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // No limit at any infinity: the indeterminate form on both routes
         // (the real kernel used to answer NaN for ±∞, and `~oo` stayed
         // inert).
-        if (infinitePoint(x) !== undefined)
-          return ce.NaN;
+        if (infinitePoint(x) !== undefined) return ce.NaN;
         // A non-real argument, or a real one outside [−1, 1], has a value
         // the real kernel cannot compute: stay symbolic, under N() too.
         if (x.isComplex) return undefined;
@@ -692,8 +691,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Mean: {
       complexity: 1200,
       broadcastable: false,
-      signature:
-        '((collection<number> | number | distribution)+) -> number',
+      signature: '((collection<number> | number | distribution)+) -> number',
       // A data-consuming aggregate (§3.C): result type is the numeric base
       // with NO `| missing` arm (I6 absorption) — `number`, NOT `real`,
       // because every arm of the wide type is reachable. An absent datum or
@@ -717,8 +715,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           extendedReductionType('Mean', ops) ?? 'number',
           context.engine._typeResolver
         ),
-      description:
-        'Arithmetic mean (average) of a collection of numbers.',
+      description: 'Arithmetic mean (average) of a collection of numbers.',
       keywords: ['average'],
       evaluate: (ops, { engine, numericApproximation, expression }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
@@ -806,8 +803,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      description:
-        'Median of a collection of numbers.',
+      description: 'Median of a collection of numbers.',
       examples: ['Median([3, 1, 4, 2])  // 5/2'],
       evaluate: (ops, { engine, numericApproximation, expression }) => {
         // The elements of an exact `Range` are an arithmetic sequence, so its
@@ -855,8 +851,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Variance: {
-      description:
-        'Sample variance of a collection of numbers.',
+      description: 'Sample variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature:
@@ -942,12 +937,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     PopulationVariance: {
-      description:
-        'Population variance of a collection of numbers.',
+      description: 'Population variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature:
-        '((collection<number> | number)+) -> real<0..> | nan',
+      signature: '((collection<number> | number)+) -> real<0..> | nan',
       // The population variance is the same mean of SQUARED deviations the
       // sample variance is, over the divisor `n`: real and non-negative even
       // for complex data (`PopulationVariance([1, 1+2i, 3])` is `16/9` — see
@@ -1024,8 +1017,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     StandardDeviation: {
       complexity: 1200,
       broadcastable: false,
-      description:
-        'Sample Standard Deviation of a collection of numbers.',
+      description: 'Sample Standard Deviation of a collection of numbers.',
       keywords: ['stdev', 'std'],
       signature:
         '((collection<number> | number | distribution)+) -> real<0..> | nan',
@@ -1119,10 +1111,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     PopulationStandardDeviation: {
       complexity: 1200,
       broadcastable: false,
-      description:
-        'Population Standard Deviation of a collection of numbers.',
-      signature:
-        '((collection<number> | number)+) -> real<0..> | nan',
+      description: 'Population Standard Deviation of a collection of numbers.',
+      signature: '((collection<number> | number)+) -> real<0..> | nan',
       // The population standard deviation is the square root of a mean of
       // SQUARED deviations over the divisor `n`, so it is real and
       // non-negative even for complex data
@@ -1202,8 +1192,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Kurtosis: {
-      description:
-        'Kurtosis of a collection of numbers.',
+      description: 'Kurtosis of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<number> | number)+) -> real | nan',
@@ -1255,8 +1244,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Skewness: {
-      description:
-        'Skewness of a collection of numbers.',
+      description: 'Skewness of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<number> | number)+) -> real | nan',
@@ -1309,8 +1297,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Mode: {
       examples: ['Mode([1, 2, 2, 3])  // 2'],
-      description:
-        'Most frequently occurring value in a collection.',
+      description: 'Most frequently occurring value in a collection.',
       complexity: 1200,
       broadcastable: false,
       signature:
@@ -1445,12 +1432,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     InterquartileRange: {
-      description:
-        'Interquartile range (Q3 - Q1) of a collection.',
+      description: 'Interquartile range (Q3 - Q1) of a collection.',
       complexity: 1200,
       broadcastable: false,
-      signature:
-        '((collection<number> | number)+) -> real<0..> | +oo | nan',
+      signature: '((collection<number> | number)+) -> real<0..> | +oo | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1556,8 +1541,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Count the number of elements falling into each bin.',
       complexity: 8200,
       // Same widened bin spec as Histogram (non-integer counts stay inert).
-      signature:
-        '(collection<number>, number | list<number>) -> list<number>',
+      signature: '(collection<number>, number | list<number>) -> list<number>',
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
       // Decline-only, same `computeBinning` precondition as `Histogram`.
       canEnumerate: canEnumerateFiniteSource,

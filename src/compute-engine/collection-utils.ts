@@ -2417,14 +2417,9 @@ export function leafwardElementType(t: Readonly<Type>): Type | undefined {
  * read a point here, so a position that a selection does not select is the
  * same `NaN` point in both.
  */
-export function pointArity(
-  t: Readonly<Type>,
-  depth = 0
-): number | undefined {
+export function pointArity(t: Readonly<Type>, depth = 0): number | undefined {
   if (depth > 8) return undefined;
-  const present = resolveTypeAlias(
-    stripMissingFromType(resolveTypeAlias(t))
-  );
+  const present = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(t)));
   if (typeof present === 'string') return undefined;
   if (present.kind === 'union') {
     let n: number | undefined;
@@ -2451,7 +2446,10 @@ export function pointArity(
  * range, a false restriction and an unselected position give for a point.
  */
 export function nanPoint(ce: ComputeEngine, n: number): Expression {
-  return ce._fn('Tuple', Array.from({ length: n }, () => ce.NaN));
+  return ce._fn(
+    'Tuple',
+    Array.from({ length: n }, () => ce.NaN)
+  );
 }
 
 /**

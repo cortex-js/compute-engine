@@ -9124,9 +9124,7 @@ export class BoxedFunction
           lifted.nops === 2 &&
           PLANNED_RESTRICTION_CALLS.has(lifted.op2) &&
           errorValue(lifted.op1) === undefined &&
-          !['True', 'False', 'Missing'].some((s) =>
-            isSymbol(lifted.op1, s)
-          )
+          !['True', 'False', 'Missing'].some((s) => isSymbol(lifted.op1, s))
         ) {
           const value = await lifted.op2.evaluateAsync(options);
           return this.engine
@@ -11558,9 +11556,7 @@ function evaluateBroadcastLiftsOnce(
   options: Partial<EvaluateOptions> | undefined,
   operator: string
 ): ReadonlyArray<Expression> {
-  if (
-    !ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op))
-  )
+  if (!ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op)))
     return ops;
   // A lift is an operand: evaluated without `materialization`
   // (`operandOptions`), or a lift that reveals a lazy collection (a user
@@ -11835,9 +11831,7 @@ async function evaluateBroadcastLiftsOnceAsync(
   options: Partial<EvaluateOptions> | undefined,
   operator: string
 ): Promise<ReadonlyArray<Expression>> {
-  if (
-    !ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op))
-  )
+  if (!ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op)))
     return ops;
   // Awaited together, not in sequence: the lifts are independent, and the sync
   // mirror evaluates them without ordering either.
@@ -14970,11 +14964,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         withMatrixProductNaNCells(
           expr,
           applyContractB(
-          absorbMissing
-            ? absorbed()
-            : threadedAbsence
-              ? withThreadedAbsence(t)
-              : t
+            absorbMissing
+              ? absorbed()
+              : threadedAbsence
+                ? withThreadedAbsence(t)
+                : t
           )
         )
       );
@@ -19397,11 +19391,7 @@ function declaredElementError(
  * it: with `h = (p: tuple<real, real>) ↦ PointX(p)`, `h(At([(1, 2)], [1, 3]))`
  * is `[1, NaN]`. */
 function acceptsNaNPointElement(el: Expression, t: Type): boolean {
-  return (
-    isNaNPointValue(el) &&
-    isFunction(el) &&
-    pointArity(t) === el.nops
-  );
+  return isNaNPointValue(el) && isFunction(el) && pointArity(t) === el.nops;
 }
 
 /** The type an `incompatible-type` error of slot `i` names, in a call that
@@ -19808,8 +19798,7 @@ function genericRuntimeConformance(
     // route where the function is held as a value
     // (`absentAtNumericParameter()`).
     const declared = def._validationSignature ?? def.signature.type;
-    if (absentAtNumericParameter(declared, ops))
-      return ce.Missing;
+    if (absentAtNumericParameter(declared, ops)) return ce.Missing;
     return declaredScalarConformance(
       ce,
       def,

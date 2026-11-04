@@ -793,10 +793,7 @@ function compileGPUAt(
   // the numeric projection of "no value" is NaN. The fold emits neither
   // operand, so neither may be impure. Both symbols that name an absent datum
   // are read alike (user ruling of 2026-09-22).
-  if (
-    isSymbol(index, 'Missing') ||
-    isSubtype(it, 'missing')
-  ) {
+  if (isSymbol(index, 'Missing') || isSubtype(it, 'missing')) {
     requirePureFold('base');
     requirePureFold('index');
     return gpuNaN(target);

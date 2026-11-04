@@ -110,8 +110,7 @@ function enclosureOf(
   b: Expression,
   numericApproximation: boolean
 ): Expression {
-  if (a.isNaN === true || b.isNaN === true || sameInfinity(a, b))
-    return ce.NaN;
+  if (a.isNaN === true || b.isNaN === true || sameInfinity(a, b)) return ce.NaN;
   const o = enclosureEndpointOrder(a, b);
   const [lo, hi] = o !== undefined && o > 0 ? [b, a] : [a, b];
   if (numericApproximation) {

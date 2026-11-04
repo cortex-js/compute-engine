@@ -5150,10 +5150,7 @@ function airyValueAtInfinity(
   if (point === undefined) return undefined;
   if (point === '+oo')
     return kind === 'Ai' || kind === 'AiPrime' ? ce.Zero : ce.PositiveInfinity;
-  if (point === '-oo')
-    return kind === 'Ai' || kind === 'Bi'
-      ? ce.Zero
-      : ce.NaN;
+  if (point === '-oo') return kind === 'Ai' || kind === 'Bi' ? ce.Zero : ce.NaN;
   return ce.NaN;
 }
 
@@ -5258,9 +5255,7 @@ function betaValueAtInfinity(
   // Two infinite operands: `B(+∞, +∞) = 0` (`B(a, b) ≤ 1/a` for `b ≥ 1`;
   // `B(10⁶, 10⁶) = 3.6·10⁻⁶⁰²⁰⁶³`), every other pair has no limit.
   if (pa !== undefined && pb !== undefined)
-    return pa === '+oo' && pb === '+oo'
-      ? ce.Zero
-      : ce.NaN;
+    return pa === '+oo' && pb === '+oo' ? ce.Zero : ce.NaN;
   // One infinite operand. `B(+∞, b)` for a finite `b` with a non-positive
   // real part: see above. At `−∞` and `~oo` there is no limit: the
   // indeterminate form.
@@ -5330,10 +5325,8 @@ function incompleteGammaValueAtInfinity(
   const ps = infinitePoint(s);
   const pz = infinitePoint(z);
   if (ps === undefined && pz === undefined) return undefined;
-  if (ps !== undefined && pz !== undefined)
-    return ce.NaN;
-  if (pz === '+oo')
-    return s.isFinite === false ? ce.NaN : ce.Zero;
+  if (ps !== undefined && pz !== undefined) return ce.NaN;
+  if (pz === '+oo') return s.isFinite === false ? ce.NaN : ce.Zero;
   // `Γ(s, −∞)`: see above. `Γ(s, ~oo)` has no limit: the indeterminate
   // form.
   if (pz === '-oo') {
@@ -5346,8 +5339,7 @@ function incompleteGammaValueAtInfinity(
     if (s.isInteger !== undefined) return ce.ComplexInfinity;
     return ce.NaN;
   }
-  if (pz !== undefined)
-    return isNumber(s) ? ce.NaN : undefined;
+  if (pz !== undefined) return isNumber(s) ? ce.NaN : undefined;
   // s is the infinite operand and z is finite.
   if (ps === '~oo') return ce.NaN;
   if (!isNumber(z) || z.isComplex || z.isPositive !== true) return undefined;
@@ -8351,8 +8343,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               .N();
         }
         // `~oo` has no fractional part: `~oo − Floor(~oo)` is `~oo − ~oo`.
-        if (infinitePoint(x) === '~oo')
-          return ce.NaN;
+        if (infinitePoint(x) === '~oo') return ce.NaN;
         return apply(
           x,
           (x) => x - Math.floor(x),
@@ -12175,8 +12166,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: ([a, b], { engine, numericApproximation, expression }) => {
-        if (isNumber(b) && b.isSame(0))
-          return engine.NaN;
+        if (isNumber(b) && b.isSame(0)) return engine.NaN;
         // `Remainder` jumps where `a/b` is a half-integer, so exact operands
         // are read exactly, as for `Mod`: `exactRemainderUnderN()` under
         // `.N()`, and the exact remainder otherwise. A float operand takes
@@ -12466,8 +12456,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.NegativeOne;
         // `~oo` has no direction.
-        if (infinitePoint(x) === '~oo')
-          return engine.NaN;
+        if (infinitePoint(x) === '~oo') return engine.NaN;
         // A complex number literal off the real line: `z/|z|`, exact when
         // the modulus is (`Sign(3 + 4i)` is `3/5 + 4i/5`). A symbolic
         // operand stays symbolic.
@@ -13775,8 +13764,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Supremum: {
-      description:
-        'Like Max, but defined for open sets.',
+      description: 'Like Max, but defined for open sets.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -13793,8 +13781,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Infimum: {
-      description:
-        'Like Min, but defined for open sets.',
+      description: 'Like Min, but defined for open sets.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -17157,8 +17144,7 @@ function kindEvaluatedOperands(
 ): Expression {
   const ce = options.engine!;
   const numericApproximation = options.numericApproximation === true;
-  if (evaluated.some((x) => isNumber(x) && x.isNaN))
-    return ce.NaN;
+  if (evaluated.some((x) => isNumber(x) && x.isNaN)) return ce.NaN;
   return kindSumOrProduct(
     ce,
     operator,

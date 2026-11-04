@@ -55,12 +55,7 @@ import {
 } from '../collection-utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
-import {
-  isDictionary,
-  isFunction,
-  isNumber,
-  isSymbol,
-} from './type-guards.js';
+import { isDictionary, isFunction, isNumber, isSymbol } from './type-guards.js';
 import { provisionalRecursionResult } from './declared-parameter-result.js';
 import {
   noteStackDependentAnswer,
@@ -329,15 +324,11 @@ function alwaysAbsentAtNumericParameter(
   const params = literal.ops.slice(1);
   let declaredParams: ReadonlyArray<Type> | undefined | null = null;
   return args.some((a, i) => {
-    if (
-      resolveTypeAlias(a.type) !== 'missing' ||
-      i >= params.length
-    )
+    if (resolveTypeAlias(a.type) !== 'missing' || i >= params.length)
       return false;
     if (declaredParams === null)
       declaredParams = declaredParameterTypes(binding);
-    const p =
-      functionLiteralParameterType(params[i]) ?? declaredParams?.[i];
+    const p = functionLiteralParameterType(params[i]) ?? declaredParams?.[i];
     return (
       p !== undefined &&
       p !== 'never' &&

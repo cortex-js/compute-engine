@@ -767,10 +767,7 @@ function serializeJsonFunction(
       return serializeJsonFunction(
         ce,
         'Add',
-        [
-          args[0],
-          ce._fn('Multiply', [args[1] ?? ce.Missing, ce.I]),
-        ],
+        [args[0], ce._fn('Multiply', [args[1] ?? ce.Missing, ce.I])],
         options,
         metadata
       );
@@ -800,10 +797,7 @@ function serializeJsonFunction(
             'Divide',
             [
               ce.One,
-              ce._fn('Power', [
-                args[0] ?? ce.Missing,
-                ce.number([1, -n]),
-              ]),
+              ce._fn('Power', [args[0] ?? ce.Missing, ce.number([1, -n])]),
             ],
             options,
             metadata

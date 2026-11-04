@@ -4354,9 +4354,7 @@ function compilePyJoin(
   // the interpreter answers `Missing` for the whole join (user decision
   // 2026-09-26). The scalar arm below compiled it as one `nan` element
   // (`[math.nan, 3]`), so the call fails closed.
-  const absent = args.findIndex(
-    (a) => isSymbol(a, 'Missing')
-  );
+  const absent = args.findIndex((a) => isSymbol(a, 'Missing'));
   if (absent >= 0)
     throw new Error(
       `Could not compile \`${head}\`: operand ${absent + 1} is absent, and the ` +

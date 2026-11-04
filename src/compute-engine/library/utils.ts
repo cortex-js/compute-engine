@@ -79,10 +79,7 @@ import {
 } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { canonicalValueOperand } from '../boxed-expression/validate.js';
-import {
-  enterFunctionBody,
-  exitFunctionBody,
-} from '../assignment-locals.js';
+import { enterFunctionBody, exitFunctionBody } from '../assignment-locals.js';
 import {
   broadcastingComponentKind,
   isPossiblyCollectionTyped,

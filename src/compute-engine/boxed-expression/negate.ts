@@ -2,11 +2,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import {
-  isNumber,
-  isFunction,
-  isContinuationOperand,
-} from './type-guards.js';
+import { isNumber, isFunction, isContinuationOperand } from './type-guards.js';
 import { sortAddTerms, sortProductOperands } from './order.js';
 import {
   couldBeNumericTuple,

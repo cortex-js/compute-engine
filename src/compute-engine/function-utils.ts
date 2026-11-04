@@ -10002,9 +10002,7 @@ function makeLambda(
     // An absent value at a numeric or a point parameter makes the call
     // `Missing` (see `absentResultParamIndexes`). An error argument outranks
     // it (above).
-    if (
-      absentResultParamIndexes.some((k) => isAbsentSymbol(evaluatedArgs[k]))
-    )
+    if (absentResultParamIndexes.some((k) => isAbsentSymbol(evaluatedArgs[k])))
       return ce.Missing;
 
     // The rest collapse announced in step 2b: the evaluated trailing

@@ -7628,10 +7628,7 @@ export function checkEntry(
       // value gets the default value. A supplied absent value (`null`,
       // `NaN`) is not filled: a default fills only an argument that the
       // call leaves out (`docs/COMPILATION-MODEL.md`, "Function values").
-      if (
-        plan.bigintDefaults?.includes(i) &&
-        argumentsList[i] === undefined
-      )
+      if (plan.bigintDefaults?.includes(i) && argumentsList[i] === undefined)
         continue;
       checkBigintEntry(`argument ${i + 1}`, argumentsList[i]);
     }

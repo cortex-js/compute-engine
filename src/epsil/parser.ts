@@ -6132,11 +6132,11 @@ export class Parser {
                 'a function with a rest parameter has no default values: drop the default or the rest parameter',
             }
           : bound
-          ? {
-              reason:
-                'a `bind` parameter of a `hold` definition cannot have a default value',
-            }
-          : lowerParameterDefault(value, names);
+            ? {
+                reason:
+                  'a `bind` parameter of a `hold` definition cannot have a default value',
+              }
+            : lowerParameterDefault(value, names);
       if ('reason' in lowered) {
         const o = nodeOffsets(value);
         this.error(

@@ -37,12 +37,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import {
-  isNumber,
-  isFunction,
-  isSymbol,
-  numericValue,
-} from './type-guards.js';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { isImaginaryUnitValue, isRealPartZero } from './imaginary-part.js';

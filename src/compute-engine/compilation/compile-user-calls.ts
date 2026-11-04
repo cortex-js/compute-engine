@@ -250,8 +250,8 @@ export function emitUserFunctionCall(
       : coerceToComplex[i] === 'real-operand'
         ? `_SYS.crealElements(${code})`
         : coerceToComplex[i]
-        ? complexWrapCode(code, args[i], target)
-        : code;
+          ? complexWrapCode(code, args[i], target)
+          : code;
 
   if (!ranks.some((r) => r! > 0))
     return `${name}(${[...compiledArgs.map(coerce), ...held].join(', ')})`;

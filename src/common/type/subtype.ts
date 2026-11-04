@@ -3917,8 +3917,7 @@ function isSubtypeRules(
         Number.isNaN(rhs.value) &&
         typeof lhs.value === 'number' &&
         Number.isNaN(lhs.value)) ||
-      (isComplexInfinityValue(rhs.value) &&
-        isComplexInfinityValue(lhs.value))
+      (isComplexInfinityValue(rhs.value) && isComplexInfinityValue(lhs.value))
     );
 
   if (lhs.kind === 'value') {
@@ -3961,9 +3960,7 @@ function isNumeric(type: Type): boolean {
   // The unsigned `~oo` sentinel is a numeric value literal, but it is not a
   // JavaScript number, so it needs its own test to agree with the subtype path.
   if (type.kind === 'value')
-    return (
-      typeof type.value === 'number' || isComplexInfinityValue(type.value)
-    );
+    return typeof type.value === 'number' || isComplexInfinityValue(type.value);
   if (type.kind === 'numeric') return true;
   return false;
 }

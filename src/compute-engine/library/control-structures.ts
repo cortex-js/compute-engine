@@ -551,10 +551,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             }),
             context.engine._typeResolver
           );
-        return BoxedType.forResult(
-          scalar,
-          context.engine._typeResolver
-        );
+        return BoxedType.forResult(scalar, context.engine._typeResolver);
       },
       canonical: (ops, { engine }) => {
         // The condition (op 0) is an ordinary expression, checked for a
@@ -901,10 +898,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             }),
             context.engine._typeResolver
           );
-        return BoxedType.forResult(
-          scalar,
-          context.engine._typeResolver
-        );
+        return BoxedType.forResult(scalar, context.engine._typeResolver);
       },
       canonical: (args, options) => {
         // The operands are strictly PAIRED `(condition, value)`, so the
@@ -2931,10 +2925,7 @@ function armCellType(t: Readonly<Type>, depth = 0): Type {
  * every arm puts a number there, a `NaN` point when every arm puts a point
  * there, `Missing` otherwise.
  */
-function noMatchPositionType(
-  arms: ReadonlyArray<Type>,
-  depth: number
-): Type {
+function noMatchPositionType(arms: ReadonlyArray<Type>, depth: number): Type {
   return widen(...arms.map((t) => armTypeAtDepth(t, depth)));
 }
 
@@ -5214,10 +5205,7 @@ function firstDeclarationIndex(
  * as `ABSENCE_MARKERS` in `library/core.ts`, which imports this file and so
  * cannot be imported here.
  */
-const UNBINDABLE_NAMES: ReadonlySet<string> = new Set([
-  'Nothing',
-  'Missing',
-]);
+const UNBINDABLE_NAMES: ReadonlySet<string> = new Set(['Nothing', 'Missing']);
 
 /**
  * True when the statement `statement` is a function declaration of its

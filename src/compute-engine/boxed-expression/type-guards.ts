@@ -105,10 +105,7 @@ export function isAbsentArithmeticOperand(
  * which also counts a `NaN` point.
  */
 export function isAbsentValue(expr: Expression | null | undefined): boolean {
-  return (
-    isAbsentSymbol(expr) ||
-    (isNumber(expr) && expr.isNaN === true)
-  );
+  return isAbsentSymbol(expr) || (isNumber(expr) && expr.isNaN === true);
 }
 
 /**
@@ -137,9 +134,7 @@ export function isMissingValue(expr: Expression | null | undefined): boolean {
 export function isNaNPointValue(expr: Expression | null | undefined): boolean {
   if (!isFunction(expr) || expr.operator !== 'Tuple') return false;
   const ops = expr.ops;
-  return (
-    ops.length > 0 && ops.every((x) => isNumber(x) && x.isNaN === true)
-  );
+  return ops.length > 0 && ops.every((x) => isNumber(x) && x.isNaN === true);
 }
 
 /**

@@ -201,8 +201,7 @@ function binomialValueAtInfinity(
   // The zero function: `C(n, k) = 0` for every negative integer `k`.
   if (pk === undefined && isNegativeIntegerLiteral(k)) return ce.Zero;
 
-  if (pn !== undefined && pk !== undefined)
-    return ce.NaN;
+  if (pn !== undefined && pk !== undefined) return ce.NaN;
 
   if (pn !== undefined) {
     // `n` is infinite, `k` is finite.
@@ -511,8 +510,7 @@ function pochhammerValueAtInfinity(
   const pa = infinitePoint(a);
   const pk = infinitePoint(k);
   if (pa === undefined && pk === undefined) return undefined;
-  if (pa !== undefined && pk !== undefined)
-    return ce.NaN;
+  if (pa !== undefined && pk !== undefined) return ce.NaN;
 
   if (pa !== undefined) {
     // `a` is infinite, `k` is finite.

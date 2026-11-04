@@ -330,4 +330,3 @@ export const jsIsAbsentPoint = (x: string, n: number): string =>
  * evaluated only then. */
 export const jsCoalescePoint = (x: string, d: string, n: number): string =>
   `((_c) => (${jsPointAbsentTest(n)}) ? ${d} : _c)(${x})`;
-

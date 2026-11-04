@@ -3808,12 +3808,7 @@ function transitiveUnknowns(
   const seen = new Set<object>();
   const collect = (root: Expression, names: ReadonlySet<string>): void => {
     for (const s of root.unknowns)
-      if (
-        !names.has(s) &&
-        s !== 'Missing' &&
-        s !== 'Nothing'
-      )
-        out.add(s);
+      if (!names.has(s) && s !== 'Missing' && s !== 'Nothing') out.add(s);
     const visit = (node: Expression): void => {
       // An ASSIGNED value can itself hold a free symbol (`c` in `b = c + 1`):
       // `b` is known, so neither `unknowns` nor the compiler's fold reports
@@ -7740,8 +7735,7 @@ volumes
                 interiorPoleVerdict(original, variable, lower, upper, ce) ??
                 constantFactorPoleVerdict(ce, original, variable, lower, upper);
               if (verdict) {
-                if (verdict.sign === 'mixed')
-                  return ce.NaN;
+                if (verdict.sign === 'mixed') return ce.NaN;
                 if (verdict.sign === 'positive') return ce.PositiveInfinity;
                 if (verdict.sign === 'negative') return ce.NegativeInfinity;
                 return undefined;
@@ -8117,8 +8111,7 @@ volumes
                     lower,
                     upper
                   );
-                if (endpoint?.sign === 'mixed')
-                  noValue = ce.NaN;
+                if (endpoint?.sign === 'mixed') noValue = ce.NaN;
                 else if (endpoint !== undefined)
                   raw = poleVerdictValue(ce, endpoint);
                 // A complex infinity (`~∞`) is not the value of the integral

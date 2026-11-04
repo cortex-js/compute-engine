@@ -1181,7 +1181,8 @@ function withAbsentCoordinates(
     elements: r.elements.map((e, k) => {
       const marks = coordinates.map((c) => c[k]);
       if (marks.includes('absent')) return { ...e, type: 'missing' };
-      if (marks.includes('maybe')) return { ...e, type: withMissingArm(e.type) };
+      if (marks.includes('maybe'))
+        return { ...e, type: withMissingArm(e.type) };
       return e;
     }),
   };
@@ -2310,7 +2311,9 @@ function pointListBesideCollectionType(
  */
 function plainRankOneList(t: Type): Type | undefined {
   const r = resolveTypeAlias(t);
-  return typeof r !== 'string' && r.kind === 'list' && r.dimensions?.length === 1
+  return typeof r !== 'string' &&
+    r.kind === 'list' &&
+    r.dimensions?.length === 1
     ? { kind: 'list', elements: r.elements }
     : undefined;
 }
@@ -2933,7 +2936,9 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
           views.map((v, i) => {
             const k = broadcasting.indexOf(v);
             if (k !== -1) return armedTypes[k];
-            return readsFixedShape ? (fixedShapeLists[i] ?? undefined) : undefined;
+            return readsFixedShape
+              ? (fixedShapeLists[i] ?? undefined)
+              : undefined;
           }),
           input.armCellResult,
           { componentwise: input.broadcastsOverTuples }

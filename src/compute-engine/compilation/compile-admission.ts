@@ -2464,8 +2464,7 @@ export function unsettledShapeIn(
     const result =
       (valueParents.get(node) ?? []).some((p) =>
         isBranchOf(p, node) ? isInOperand(p) : !isBodyOf(p, node)
-      ) ||
-      (endParents.get(node) ?? []).some(isInOperand);
+      ) || (endParents.get(node) ?? []).some(isInOperand);
     inOperand.set(node, result);
     return result;
   };

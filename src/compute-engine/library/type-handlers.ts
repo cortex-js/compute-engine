@@ -2743,4 +2743,3 @@ export function storedComponentTypeD(d: OperandDescriptor): Type {
   const s = d.structureOf?.();
   return s?.kind === 'number' ? s.tier : d.type;
 }
-

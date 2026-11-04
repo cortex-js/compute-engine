@@ -7162,13 +7162,10 @@ function foldResultTypeD(
       );
       if (shaped !== 'number' && isSubtype(shaped, 'any')) return shaped;
     }
-    if (elt === undefined || !isSubtype(elt, 'number'))
-      return undefined;
+    if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
     if (init === undefined) return withFirst(absorb(elt));
     const seed = init.type;
-    return isSubtype(seed, 'number')
-      ? absorb(widen(elt, seed))
-      : undefined;
+    return isSubtype(seed, 'number') ? absorb(widen(elt, seed)) : undefined;
   }
   return withFirst(absorb(callbackResultTypeD(op, engine)));
 }
@@ -9612,8 +9609,7 @@ function componentAt(
   // `NaN` coordinates for a point (`pointArity()`), and `Missing` otherwise
   // (a row). The answer is a marker, never the operand itself — the
   // marker is what a consumer discharges with `IsMissing`/`Coalesce`.
-  if (isSymbol(xs, 'Missing'))
-    return absentOperandMarker(ce, expression);
+  if (isSymbol(xs, 'Missing')) return absentOperandMarker(ce, expression);
   if (xs.isCollection) {
     // Runtime re-validation of the `indexed_collection` parameter (the static
     // gate is overlap-deferred, so an `unknown`-typed operand can arrive
@@ -11893,8 +11889,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     // Sequence is an explicit splice; Nothing itself occupies one slot.
-    canonical: (ops, { engine }) =>
-      tupleOf(engine, flatten(ops)),
+    canonical: (ops, { engine }) => tupleOf(engine, flatten(ops)),
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
@@ -12550,8 +12545,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(value: T) -> tuple<T> where T',
-    canonical: (ops, { engine }) =>
-      engine.tuple(...checkArity(engine, ops, 1)),
+    canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 1)),
   },
 
   Pair: {
@@ -12563,8 +12557,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(first: T, second: U) -> tuple<T, U> where T, U',
-    canonical: (ops, { engine }) =>
-      engine.tuple(...checkArity(engine, ops, 2)),
+    canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 2)),
   },
 
   Triple: {
@@ -12578,8 +12571,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V',
 
-    canonical: (ops, { engine }) =>
-      engine.tuple(...checkArity(engine, ops, 3)),
+    canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 3)),
   },
 
   //
@@ -17566,10 +17558,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               // the same kind gives, and the other entries are read as
               // usual. Without this test such an entry left the whole gather
               // unevaluated (Tycho ledger row 401).
-              if (
-                isAbsentValue(m) ||
-                (isNumber(m) && m.isInfinity === true)
-              ) {
+              if (isAbsentValue(m) || (isNumber(m) && m.isInfinity === true)) {
                 picked.push(
                   (marker ??= absenceMarker(ce, expr, gatherReadType))
                 );
@@ -24561,8 +24550,7 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     let items: Expression[];
     if (levels[0].arity > 1) {
       if (index < 1) return undefined;
-      const xs = spine.bases
-        .map((c) => mapSource(c).at(index));
+      const xs = spine.bases.map((c) => mapSource(c).at(index));
       if (xs.some((x) => x === undefined)) return undefined;
       items = xs as Expression[];
     } else {
@@ -24585,8 +24573,7 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     // needed (a source with an unknown count still answers `at`).
     const collections = expr.ops.slice(1);
     if (index < 1) return undefined;
-    const items = collections
-      .map((c) => mapSource(c).at(index));
+    const items = collections.map((c) => mapSource(c).at(index));
     if (items.some((x) => x === undefined)) return undefined;
     // Each at() access is its own micro-drain (resets the
     // once-per-drain attempt bound, so a cleared `{symbol}` mark can

@@ -1358,12 +1358,7 @@ export function tryCompileUserFunction(
 
   // A list of points at a parameter declared as a point maps over the
   // points, as the interpreter does (`pointListParamSlots`).
-  const pointList = tryCompilePointListCall(
-    engine,
-    h,
-    args,
-    target
-  );
+  const pointList = tryCompilePointListCall(engine, h, args, target);
   if (pointList !== undefined) return pointList;
   checkListCoordinateTupleArgs(engine, h, args);
   checkPointListAtMatrixUnionArgs(engine, h, args);

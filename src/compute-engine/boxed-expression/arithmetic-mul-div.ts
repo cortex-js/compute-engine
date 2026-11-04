@@ -23,10 +23,7 @@ import {
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { sgn } from './sgn.js';
 import { isStoredAsDouble } from './machine-broadcast.js';
-import {
-  bignumPreferred,
-  hasAssignedVariable,
-} from './utils.js';
+import { bignumPreferred, hasAssignedVariable } from './utils.js';
 import {
   isNumber,
   isFunction,
@@ -1978,10 +1975,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       typeof v2 === 'number' &&
       Number.isInteger(v2)
     ) {
-      if (v2 === 0)
-        return v1 === 0
-          ? ce.NaN
-          : ce.ComplexInfinity;
+      if (v2 === 0) return v1 === 0 ? ce.NaN : ce.ComplexInfinity;
       return ce.number([v1, v2]);
     }
 
@@ -2622,8 +2616,7 @@ export function canonicalMultiply(
             'Multiply',
             sortProductOperands([ce.Zero, ...nonNumeric])
           );
-        if (nonNumeric.some((x) => x.isInfinity || x.isNaN))
-          return ce.NaN;
+        if (nonNumeric.some((x) => x.isInfinity || x.isNaN)) return ce.NaN;
         // A factor typed `error` always evaluates to an error (such as
         // `Sin((A, B))` with `A`, `B` lists). The zero must not erase it:
         // keep the product as `0` times the other factors, so that

@@ -674,12 +674,7 @@ export function compileExprFunctionLiteral(
     if (maps) {
       // A parameter that the consumer leaves out is filled outside the map,
       // so that the map receives a value for it.
-      const mapped = staticMapCallback(
-        callee,
-        ranks!,
-        target,
-        passed?.types
-      );
+      const mapped = staticMapCallback(callee, ranks!, target, passed?.types);
       if (mapped === undefined)
         throw new Error(
           'Could not compile a `Function` literal: its consumer passes it ' +

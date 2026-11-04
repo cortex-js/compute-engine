@@ -144,15 +144,11 @@ export function logarithmAtExceptionalPoint(
 
   // `ln base = 0` (base 1): a non-zero numerator over 0 is `~oo`; `0/0` is
   // the indeterminate form (`NaN`).
-  if (d === 'one')
-    return n === 'one'
-      ? ce.NaN
-      : ce.ComplexInfinity;
+  if (d === 'one') return n === 'one' ? ce.NaN : ce.ComplexInfinity;
 
   // An infinite `ln base` (base 0, ±∞, or ~oo): a finite numerator gives 0,
   // an infinite one the indeterminate form `∞/∞`.
-  if (isInfinitePoint(d!))
-    return isInfinitePoint(n) ? ce.NaN : zero;
+  if (isInfinitePoint(d!)) return isInfinitePoint(n) ? ce.NaN : zero;
 
   // A finite base other than 0 and 1: `ln base` is finite and non-zero.
   if (n === 'finite') return undefined;

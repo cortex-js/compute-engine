@@ -688,10 +688,7 @@ function boxFunctionInternal(
           // Handle division by zero: a/0 = ~∞ (a pole), and 0/0 is the
           // indeterminate form `NaN`. A float operand (`0.0`) does
           // not reach this fold (see above).
-          if (d === 0n)
-            return n === 0n
-              ? ce.NaN
-              : ce.ComplexInfinity;
+          if (d === 0n) return n === 0n ? ce.NaN : ce.ComplexInfinity;
           return ce.number([n, d], options);
         }
       }
@@ -2961,7 +2958,12 @@ function withHandlerDefaults(
   defaults: ReadonlyArray<Expression | undefined> | undefined
 ): ReadonlyArray<Expression> {
   if (defaults === undefined) return xs;
-  return fillParameterDefaults(xs, signature, defaults, suppliedOperandCount(xs));
+  return fillParameterDefaults(
+    xs,
+    signature,
+    defaults,
+    suppliedOperandCount(xs)
+  );
 }
 
 function makeCanonicalFunction(

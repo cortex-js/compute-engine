@@ -4348,14 +4348,7 @@ function assertAssignableValueDef(
       ? ce.type(def._placeholderSkeleton)
       : def.type;
   if (
-    !matchesOrAbsent(
-      ce,
-      value.type,
-      contract,
-      def.effectsDeclared,
-      value,
-      id
-    )
+    !matchesOrAbsent(ce, value.type, contract, def.effectsDeclared, value, id)
   )
     throw declaredTypeError(id, value, contract);
 }

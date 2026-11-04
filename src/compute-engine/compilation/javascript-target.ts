@@ -3902,9 +3902,7 @@ function compileJSJoin(
   // the interpreter answers `Missing` for the whole join (user decision
   // 2026-09-26). The scalar arm below compiled it as one `undefined`
   // element (`[undefined, 3]`), so the call fails closed.
-  const absent = args.findIndex(
-    (a) => isSymbol(a, 'Missing')
-  );
+  const absent = args.findIndex((a) => isSymbol(a, 'Missing'));
   if (absent >= 0)
     throw new Error(
       `Could not compile \`${head}\`: operand ${absent + 1} is absent, and the ` +
@@ -5456,8 +5454,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // The static element type picks the helper `_SYS.atPoint`, so the code
     // tests no type at run time. A gather index reads a point of `NaN`
     // coordinates at each position out of range.
-    const arity =
-      objectDomain && !stringBase ? pointArity(eltT!) : undefined;
+    const arity = objectDomain && !stringBase ? pointArity(eltT!) : undefined;
     if (arity !== undefined)
       return `_SYS.atPoint(${collCode()}, ${compile(index)}, ${arity})`;
     if (objectDomain && scalarIndex)

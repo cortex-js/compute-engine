@@ -347,10 +347,7 @@ export function gpuAtBaseShape(
   // Both symbols that name an absent datum are read alike (user ruling of
   // 2026-09-22); `isAbsentScalarSymbol` (`boxed-expression/validate.ts`)
   // tests the same two names.
-  if (
-    isSymbol(base, 'Missing') ||
-    t === 'missing'
-  )
+  if (isSymbol(base, 'Missing') || t === 'missing')
     return {
       decline:
         'the base is the absence marker (`Missing`), which ' +
@@ -805,10 +802,7 @@ export function compileGPUPointListAt(
       'the index is a collection, so the result is a list of points, which ' +
         'has no shader value shape here'
     );
-  if (
-    isSymbol(index, 'Missing') ||
-    isSubtype(gpuType(index), 'missing')
-  ) {
+  if (isSymbol(index, 'Missing') || isSubtype(gpuType(index), 'missing')) {
     if (!base.isPure)
       decline(
         'the access folds to a vector of NaN components, which would ' +

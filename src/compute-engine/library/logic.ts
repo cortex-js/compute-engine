@@ -575,10 +575,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   },
   Equivalent: {
     type: (ops, context) =>
-      BoxedType.forResult(
-        'boolean',
-        context.engine._typeResolver
-      ),
+      BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
       'Logical equivalence (if and only if): true when both operands have the same truth value.',
     wikidata: 'Q220433',
@@ -608,10 +605,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   },
   Implies: {
     type: (ops, context) =>
-      BoxedType.forResult(
-        'boolean',
-        context.engine._typeResolver
-      ),
+      BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
       'Logical implication: false only when the antecedent is true and the ' +
       'consequent is false. Short-circuits: a `False` antecedent decides ' +
@@ -658,10 +652,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   },
   Nand: {
     type: (ops, context) =>
-      BoxedType.forResult(
-        'boolean',
-        context.engine._typeResolver
-      ),
+      BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
       'Logical NAND: the negation of AND (n-ary). Short-circuits: operands ' +
       'are evaluated left to right and evaluation stops at the first `False`.',
@@ -686,10 +677,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   },
   Nor: {
     type: (ops, context) =>
-      BoxedType.forResult(
-        'boolean',
-        context.engine._typeResolver
-      ),
+      BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
       'Logical NOR: the negation of OR (n-ary). Short-circuits: operands are ' +
       'evaluated left to right and evaluation stops at the first `True`.',

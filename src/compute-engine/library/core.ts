@@ -36,10 +36,7 @@ import {
   collectTuplePattern,
   tuplePatternNames,
 } from '../boxed-expression/tuple-pattern.js';
-import {
-  isInBranch,
-  takePairedFunctionNames,
-} from '../assignment-locals.js';
+import { isInBranch, takePairedFunctionNames } from '../assignment-locals.js';
 import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
 import {
@@ -426,10 +423,7 @@ import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluatio
  * `absence-marker-binding` error; the Epsil static pass reports every other
  * binding form (a parameter, a loop variable, a match pattern) as well.
  */
-const ABSENCE_MARKERS: ReadonlySet<string> = new Set([
-  'Nothing',
-  'Missing',
-]);
+const ABSENCE_MARKERS: ReadonlySet<string> = new Set(['Nothing', 'Missing']);
 
 /**
  * The variables of `expr` when it is a `D`, a `Series` or an indefinite
@@ -3928,7 +3922,8 @@ function widenLocalType(ce: ComputeEngine, t: Type): Type {
       // kept, so a local can hold a longer list later.
       let widened: Type = widenLocalType(ce, t.elements);
       const rank = Math.max(1, t.dimensions?.length ?? 1);
-      for (let i = 0; i < rank; i++) widened = { kind: 'list', elements: widened };
+      for (let i = 0; i < rank; i++)
+        widened = { kind: 'list', elements: widened };
       return widened;
     }
     if (t.kind === 'set')
@@ -3994,7 +3989,9 @@ function localAssignmentMismatch(
     /\b(any|unknown|never|nothing|missing|error)\b/.test(t.toString());
   if (open(valueType) || open(local.type)) return undefined;
   const declared = isDeclaredLocal(local);
-  const target = declared ? local.type.type : widenLocalType(ce, local.type.type);
+  const target = declared
+    ? local.type.type
+    : widenLocalType(ce, local.type.type);
   const t = valueType.type;
   const arms = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
   const accepted = arms.some((arm) => {

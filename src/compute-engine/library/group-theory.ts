@@ -1101,7 +1101,8 @@ export function loadGroupTheory(
           ops
             .slice(1)
             .some(
-              (x) => isFunction(x, 'MatrixGroup') || isFunction(x, 'GroupMatrix')
+              (x) =>
+                isFunction(x, 'MatrixGroup') || isFunction(x, 'GroupMatrix')
             )
         )
           return ce.error('incompatible-group-domains');

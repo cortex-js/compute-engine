@@ -317,8 +317,7 @@ function gammaRegularizedValueAtInfinity(
   const pa = infinitePoint(a);
   const pz = infinitePoint(z);
   if (pa === undefined && pz === undefined) return undefined;
-  if (pa !== undefined && pz !== undefined)
-    return ce.NaN;
+  if (pa !== undefined && pz !== undefined) return ce.NaN;
   if (pz === '+oo') return isProvablyFinite(a) ? ce.Zero : undefined;
   if (pz === '-oo') {
     // Only a LITERAL `a` is classified. A symbol — declared `integer`, or

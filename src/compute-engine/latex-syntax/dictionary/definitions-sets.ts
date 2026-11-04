@@ -21,9 +21,7 @@ import {
   DIVISION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
 } from '../types.js';
-import {
-  tryInferRangeFromElements,
-} from './definitions-core.js';
+import { tryInferRangeFromElements } from './definitions-core.js';
 import { OPEN_DELIMITER_PREFIX } from '../parse.js';
 import { matchingBracket, operandEnd } from '../lenient-ambiguity.js';
 

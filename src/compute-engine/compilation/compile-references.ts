@@ -1539,8 +1539,7 @@ export function buildInterpreterFallback<T extends string>(
     if (typeof r !== 'string' && r.kind === 'tuple') return r.elements[i]?.type;
     return collectionElementType(r) ?? r;
   };
-  const isAbsentValue = (e: Expression): boolean =>
-    isSymbol(e, 'Missing');
+  const isAbsentValue = (e: Expression): boolean => isSymbol(e, 'Missing');
   // Materialize an interpreted result matching the compiled-runner value
   // contract: a scalar yields a `number` (imaginary part exactly zero), a
   // `{re, im}` object (otherwise) or a boolean; a finite indexed collection

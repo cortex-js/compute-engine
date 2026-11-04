@@ -2021,8 +2021,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       ) {
         const binding = this._contextBinding();
         const expr = valueOfBinding(binding);
-        if (expr === undefined)
-          return this;
+        if (expr === undefined) return this;
         if (expr.operator === 'Unevaluated')
           return expr.evaluate(options) ?? this;
         return this._dereferenceMemoized(expr, options);
@@ -2101,8 +2100,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       : numericRead
         ? this._guardedValueOf(binding)
         : valueOfBinding(binding);
-    if (value === undefined)
-      return this;
+    if (value === undefined) return this;
     if (isNumber(value)) return numeric ? value.N() : value.evaluate(options);
     if (numericRead && !def.isConstant && value.symbols.includes(this._id))
       return value;
