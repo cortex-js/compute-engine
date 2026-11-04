@@ -1,0 +1,6052 @@
+{
+  "question": "Constructor frequency and per-construction cost versus canonicalization; no runtime change",
+  "before": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+  "current": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+  "method": {
+    "bundles": "esbuild minified core-only diagnostic, production flags; not shipped multi-entry layout",
+    "timing": "3 independent processes per revision, ABBAAB order;7 trials/process,4000 retained results/batch,1000 warmups; medians of process medians",
+    "counts": "200 warm calls/case; first evaluation separate; probes only in count bundle",
+    "cpu": "uninstrumented,250us requested interval,>=1500ms per case,>=1000samples; one accepted profile/case/revision",
+    "classification": "Source-map CPU leaves to AST spans of instrumented classes/functions; constructor spans exclude methods/accessors. Exclusive buckets disjoint. Inclusive union counts each sample once. Canonicalization bucket covers canonicalAdd/Multiply/Divide, not every helper. Support constructors include numeric values and BoxedType.",
+    "memory": "Inspector sampled allocated bytes include collected objects; not retained heap. Raw costs retain batch for escape/uniqueness controls. No retained-heap comparison.",
+    "zeros": "Absent count keys mean zero. Base/subclass and function/operator counts overlap; do not add."
+  },
+  "counts": {
+    "before": [
+      {
+        "metadata": {
+          "root": "/tmp/wt-boxing-before",
+          "entry": "dist/boxing-counts/core.js",
+          "profilePhase": null,
+          "harnessSha256": "a8afe08aa2634ec2355ef5021fdd177ee1b8c7fcdb4168e9991cdab25015c453",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "be2c8ab5d309d3419869f155c33f84f90cb7aa741f413cc0484a8355be5fdfde",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "construction",
+          "runs": 7,
+          "iterations": 200,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "id": "muladd/exact/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "new.BoxedType": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "muladd/exact/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "new.BoxedType": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedType": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 133
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "muladd/exact/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "new.BoxedType": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "muladd/numeric/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "muladd/numeric/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "muladd/numeric/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "rational/exact/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 7,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.canonicalAdd": 2
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1400,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.canonicalAdd": 400
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 800,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "rational/exact/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 7,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.canonicalAdd": 2
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1400,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.canonicalAdd": 400
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "rational/exact/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 7,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.canonicalAdd": 2
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1400,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.canonicalAdd": 400
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "rational/numeric/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 9,
+          "call.canonicalNumber": 6,
+          "new._BoxedExpression": 6,
+          "new.BoxedNumber": 6,
+          "call.box": 2,
+          "new.MachineNumericValue": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1800,
+            "call.canonicalNumber": 1200,
+            "new._BoxedExpression": 1200,
+            "new.BoxedNumber": 1200,
+            "call.box": 400,
+            "new.MachineNumericValue": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 800,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "rational/numeric/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 9,
+          "call.canonicalNumber": 6,
+          "new._BoxedExpression": 6,
+          "new.BoxedNumber": 6,
+          "call.box": 2,
+          "new.MachineNumericValue": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1800,
+            "call.canonicalNumber": 1160,
+            "new._BoxedExpression": 1160,
+            "new.BoxedNumber": 1160,
+            "call.box": 400,
+            "new.MachineNumericValue": 160
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "rational/numeric/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 9,
+          "call.canonicalNumber": 6,
+          "new._BoxedExpression": 6,
+          "new.BoxedNumber": 6,
+          "call.box": 2,
+          "new.MachineNumericValue": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1800,
+            "call.canonicalNumber": 1200,
+            "new._BoxedExpression": 1200,
+            "new.BoxedNumber": 1200,
+            "call.box": 400,
+            "new.MachineNumericValue": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "transcend/exact/unchanged",
+        "firstCounts": {
+          "call.box": 742,
+          "call.canonicalNumber": 1622,
+          "new._BoxedExpression": 2076,
+          "new.BoxedSymbol": 2,
+          "new.ExactNumericValue": 1866,
+          "new.BoxedNumber": 1161,
+          "call.canonicalAdd": 238,
+          "new.BoxedFunction": 913,
+          "new.BoxedFunction:Add": 280,
+          "call.canonicalDivide": 81,
+          "call.canonicalMultiply": 93,
+          "new.BoxedFunction:Multiply": 192,
+          "new.BoxedType": 56,
+          "call.boxFunction": 341,
+          "new.BoxedFunction:Sqrt": 375,
+          "new.BoxedFunction:Divide": 52,
+          "new.BoxedFunction:Negate": 8,
+          "new.MachineNumericValue": 8,
+          "new.BoxedFunction:Rational": 4,
+          "new.BoxedFunction:Sin": 1,
+          "new.BoxedFunction:Ln": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalAdd": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:Add": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "transcend/exact/relevant",
+        "firstCounts": {
+          "call.box": 742,
+          "call.canonicalNumber": 1622,
+          "new._BoxedExpression": 2076,
+          "new.BoxedSymbol": 2,
+          "new.ExactNumericValue": 1866,
+          "new.BoxedNumber": 1161,
+          "call.canonicalAdd": 238,
+          "new.BoxedFunction": 913,
+          "new.BoxedFunction:Add": 280,
+          "call.canonicalDivide": 81,
+          "call.canonicalMultiply": 93,
+          "new.BoxedFunction:Multiply": 192,
+          "new.BoxedType": 56,
+          "call.boxFunction": 341,
+          "new.BoxedFunction:Sqrt": 375,
+          "new.BoxedFunction:Divide": 52,
+          "new.BoxedFunction:Negate": 8,
+          "new.MachineNumericValue": 8,
+          "new.BoxedFunction:Rational": 4,
+          "new.BoxedFunction:Sin": 1,
+          "new.BoxedFunction:Ln": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new._BoxedExpression": 600,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "new.ExactNumericValue": 400,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "transcend/exact/unrelated",
+        "firstCounts": {
+          "call.box": 742,
+          "call.canonicalNumber": 1622,
+          "new._BoxedExpression": 2076,
+          "new.BoxedSymbol": 2,
+          "new.ExactNumericValue": 1866,
+          "new.BoxedNumber": 1161,
+          "call.canonicalAdd": 238,
+          "new.BoxedFunction": 913,
+          "new.BoxedFunction:Add": 280,
+          "call.canonicalDivide": 81,
+          "call.canonicalMultiply": 93,
+          "new.BoxedFunction:Multiply": 192,
+          "new.BoxedType": 56,
+          "call.boxFunction": 341,
+          "new.BoxedFunction:Sqrt": 375,
+          "new.BoxedFunction:Divide": 52,
+          "new.BoxedFunction:Negate": 8,
+          "new.MachineNumericValue": 8,
+          "new.BoxedFunction:Rational": 4,
+          "new.BoxedFunction:Sin": 1,
+          "new.BoxedFunction:Ln": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new._BoxedExpression": 600,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "new.ExactNumericValue": 400,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "transcend/numeric/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 2,
+          "call.canonicalNumber": 5,
+          "new._BoxedExpression": 5,
+          "new.BoxedNumber": 5,
+          "new.MachineNumericValue": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalNumber": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedNumber": 1000,
+            "new.MachineNumericValue": 600,
+            "call.box": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "transcend/numeric/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 2,
+          "call.canonicalNumber": 5,
+          "new._BoxedExpression": 5,
+          "new.BoxedNumber": 5,
+          "new.MachineNumericValue": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalNumber": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedNumber": 1000,
+            "new.MachineNumericValue": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "transcend/numeric/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 2,
+          "call.canonicalNumber": 5,
+          "new._BoxedExpression": 5,
+          "new.BoxedNumber": 5,
+          "new.MachineNumericValue": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalNumber": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedNumber": 1000,
+            "new.MachineNumericValue": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "call/exact/unchanged",
+        "firstCounts": {
+          "new.BoxedType": 5,
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {},
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "call/exact/relevant",
+        "firstCounts": {
+          "new.BoxedType": 5,
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.BoxedType": 800,
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 133
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "call/exact/unrelated",
+        "firstCounts": {
+          "new.BoxedType": 5,
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "call/numeric/unchanged",
+        "firstCounts": {
+          "new.BoxedType": 4,
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {},
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "call/numeric/relevant",
+        "firstCounts": {
+          "new.BoxedType": 4,
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.BoxedType": 600,
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      },
+      {
+        "id": "call/numeric/unrelated",
+        "firstCounts": {
+          "new.BoxedType": 4,
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 47,
+          "number": 12
+        }
+      }
+    ],
+    "current": [
+      {
+        "metadata": {
+          "root": "/tmp/wt-boxing-profile",
+          "entry": "dist/boxing-counts/core.js",
+          "profilePhase": null,
+          "harnessSha256": "a8afe08aa2634ec2355ef5021fdd177ee1b8c7fcdb4168e9991cdab25015c453",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "a2db0db67344dbc8cf0dfbe9b7383053e29e628017e289f52e774fed2fecf49e",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "construction",
+          "runs": 7,
+          "iterations": 200,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+          "trackedDiffSha256": "4afdd799b205ecf2be00f2d29a3e753125b02c9e9617e1a99684c761c9dde79c"
+        }
+      },
+      {
+        "id": "muladd/exact/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "new.BoxedType": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "muladd/exact/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "new.BoxedType": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedType": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 133
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "muladd/exact/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "new.BoxedType": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "muladd/numeric/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "muladd/numeric/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "muladd/numeric/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 600,
+            "call.canonicalMultiply": 200,
+            "new.BoxedFunction": 400,
+            "new.BoxedFunction:Multiply": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "rational/exact/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 7,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.canonicalAdd": 2
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1400,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.canonicalAdd": 400
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 800,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "rational/exact/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 7,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.canonicalAdd": 2
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1400,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.canonicalAdd": 400
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "rational/exact/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 7,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.canonicalAdd": 2
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1400,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.canonicalAdd": 400
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "rational/numeric/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 9,
+          "call.canonicalNumber": 6,
+          "new._BoxedExpression": 6,
+          "new.BoxedNumber": 6,
+          "call.box": 2,
+          "new.MachineNumericValue": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1800,
+            "call.canonicalNumber": 1200,
+            "new._BoxedExpression": 1200,
+            "new.BoxedNumber": 1200,
+            "call.box": 400,
+            "new.MachineNumericValue": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 800,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "rational/numeric/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 9,
+          "call.canonicalNumber": 6,
+          "new._BoxedExpression": 6,
+          "new.BoxedNumber": 6,
+          "call.box": 2,
+          "new.MachineNumericValue": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1800,
+            "call.canonicalNumber": 1160,
+            "new._BoxedExpression": 1160,
+            "new.BoxedNumber": 1160,
+            "call.box": 400,
+            "new.MachineNumericValue": 160
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "rational/numeric/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 9,
+          "call.canonicalNumber": 6,
+          "new._BoxedExpression": 6,
+          "new.BoxedNumber": 6,
+          "call.box": 2,
+          "new.MachineNumericValue": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 1800,
+            "call.canonicalNumber": 1200,
+            "new._BoxedExpression": 1200,
+            "new.BoxedNumber": 1200,
+            "call.box": 400,
+            "new.MachineNumericValue": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 1400,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "call.canonicalNumber": 400,
+            "call.canonicalAdd": 400,
+            "new.ExactNumericValue": 806,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Add": 400,
+            "call.canonicalDivide": 200,
+            "new.BoxedFunction:Divide": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "transcend/exact/unchanged",
+        "firstCounts": {
+          "call.box": 742,
+          "call.canonicalNumber": 1622,
+          "new._BoxedExpression": 2076,
+          "new.BoxedSymbol": 2,
+          "new.ExactNumericValue": 1866,
+          "new.BoxedNumber": 1161,
+          "call.canonicalAdd": 238,
+          "new.BoxedFunction": 913,
+          "new.BoxedFunction:Add": 280,
+          "call.canonicalDivide": 81,
+          "call.canonicalMultiply": 93,
+          "new.BoxedFunction:Multiply": 192,
+          "new.BoxedType": 56,
+          "call.boxFunction": 341,
+          "new.BoxedFunction:Sqrt": 375,
+          "new.BoxedFunction:Divide": 52,
+          "new.BoxedFunction:Negate": 8,
+          "new.MachineNumericValue": 8,
+          "new.BoxedFunction:Rational": 4,
+          "new.BoxedFunction:Sin": 1,
+          "new.BoxedFunction:Ln": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalAdd": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:Add": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "transcend/exact/relevant",
+        "firstCounts": {
+          "call.box": 742,
+          "call.canonicalNumber": 1622,
+          "new._BoxedExpression": 2076,
+          "new.BoxedSymbol": 2,
+          "new.ExactNumericValue": 1866,
+          "new.BoxedNumber": 1161,
+          "call.canonicalAdd": 238,
+          "new.BoxedFunction": 913,
+          "new.BoxedFunction:Add": 280,
+          "call.canonicalDivide": 81,
+          "call.canonicalMultiply": 93,
+          "new.BoxedFunction:Multiply": 192,
+          "new.BoxedType": 56,
+          "call.boxFunction": 341,
+          "new.BoxedFunction:Sqrt": 375,
+          "new.BoxedFunction:Divide": 52,
+          "new.BoxedFunction:Negate": 8,
+          "new.MachineNumericValue": 8,
+          "new.BoxedFunction:Rational": 4,
+          "new.BoxedFunction:Sin": 1,
+          "new.BoxedFunction:Ln": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new._BoxedExpression": 600,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "new.ExactNumericValue": 400,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "transcend/exact/unrelated",
+        "firstCounts": {
+          "call.box": 742,
+          "call.canonicalNumber": 1622,
+          "new._BoxedExpression": 2076,
+          "new.BoxedSymbol": 2,
+          "new.ExactNumericValue": 1866,
+          "new.BoxedNumber": 1161,
+          "call.canonicalAdd": 238,
+          "new.BoxedFunction": 913,
+          "new.BoxedFunction:Add": 280,
+          "call.canonicalDivide": 81,
+          "call.canonicalMultiply": 93,
+          "new.BoxedFunction:Multiply": 192,
+          "new.BoxedType": 56,
+          "call.boxFunction": 341,
+          "new.BoxedFunction:Sqrt": 375,
+          "new.BoxedFunction:Divide": 52,
+          "new.BoxedFunction:Negate": 8,
+          "new.MachineNumericValue": 8,
+          "new.BoxedFunction:Rational": 4,
+          "new.BoxedFunction:Sin": 1,
+          "new.BoxedFunction:Ln": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new._BoxedExpression": 600,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "new.ExactNumericValue": 400,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "transcend/numeric/unchanged",
+        "firstCounts": {
+          "new.ExactNumericValue": 2,
+          "call.canonicalNumber": 5,
+          "new._BoxedExpression": 5,
+          "new.BoxedNumber": 5,
+          "new.MachineNumericValue": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalNumber": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedNumber": 1000,
+            "new.MachineNumericValue": 600,
+            "call.box": 200
+          },
+          "assignment": {},
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "transcend/numeric/relevant",
+        "firstCounts": {
+          "new.ExactNumericValue": 2,
+          "call.canonicalNumber": 5,
+          "new._BoxedExpression": 5,
+          "new.BoxedNumber": 5,
+          "new.MachineNumericValue": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalNumber": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedNumber": 1000,
+            "new.MachineNumericValue": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "transcend/numeric/unrelated",
+        "firstCounts": {
+          "new.ExactNumericValue": 2,
+          "call.canonicalNumber": 5,
+          "new._BoxedExpression": 5,
+          "new.BoxedNumber": 5,
+          "new.MachineNumericValue": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.ExactNumericValue": 400,
+            "call.canonicalNumber": 1000,
+            "new._BoxedExpression": 1000,
+            "new.BoxedNumber": 1000,
+            "new.MachineNumericValue": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 800,
+            "new._BoxedExpression": 1000,
+            "new.BoxedSymbol": 400,
+            "new.BoxedFunction": 600,
+            "new.BoxedFunction:Sin": 200,
+            "new.BoxedFunction:Ln": 200,
+            "call.canonicalAdd": 200,
+            "new.BoxedFunction:Add": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "call/exact/unchanged",
+        "firstCounts": {
+          "new.BoxedType": 5,
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {},
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "call/exact/relevant",
+        "firstCounts": {
+          "new.BoxedType": 5,
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.BoxedType": 800,
+            "new.ExactNumericValue": 1000,
+            "call.canonicalNumber": 400,
+            "new._BoxedExpression": 400,
+            "new.BoxedNumber": 400,
+            "call.canonicalDivide": 200,
+            "call.canonicalAdd": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 133
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "call/exact/unrelated",
+        "firstCounts": {
+          "new.BoxedType": 5,
+          "new.ExactNumericValue": 5,
+          "call.canonicalNumber": 2,
+          "new._BoxedExpression": 2,
+          "new.BoxedNumber": 2,
+          "call.canonicalDivide": 1,
+          "call.canonicalAdd": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "call/numeric/unchanged",
+        "firstCounts": {
+          "new.BoxedType": 4,
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {},
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "call/numeric/relevant",
+        "firstCounts": {
+          "new.BoxedType": 4,
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {
+            "new.BoxedType": 600,
+            "new.ExactNumericValue": 1200,
+            "call.canonicalNumber": 600,
+            "new._BoxedExpression": 600,
+            "new.BoxedNumber": 600,
+            "call.box": 200
+          },
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 200,
+            "new.BoxedNumber": 200,
+            "new.BoxedType": 200
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      },
+      {
+        "id": "call/numeric/unrelated",
+        "firstCounts": {
+          "new.BoxedType": 4,
+          "new.ExactNumericValue": 6,
+          "call.canonicalNumber": 3,
+          "new._BoxedExpression": 3,
+          "new.BoxedNumber": 3,
+          "call.box": 1
+        },
+        "totals": {
+          "evaluation": {},
+          "assignment": {
+            "call.canonicalNumber": 200,
+            "new._BoxedExpression": 186,
+            "new.BoxedNumber": 186,
+            "new.BoxedType": 100
+          },
+          "boxing": {
+            "call.box": 200,
+            "new._BoxedExpression": 800,
+            "new.BoxedSymbol": 600,
+            "new.BoxedFunction": 200,
+            "new.BoxedFunction:f": 200
+          }
+        },
+        "iterations": 200,
+        "controls": {
+          "number": {
+            "new._BoxedExpression": 1,
+            "new.BoxedNumber": 1
+          },
+          "function": {
+            "new._BoxedExpression": 1,
+            "new.BoxedFunction": 1,
+            "new.BoxedFunction:Add": 1
+          }
+        },
+        "ownFields": {
+          "function": 52,
+          "number": 11
+        }
+      }
+    ]
+  },
+  "cost": {
+    "before": [
+      [
+        {
+          "metadata": {
+            "root": "/tmp/wt-boxing-before",
+            "entry": "dist/boxing-profile/core.js",
+            "profilePhase": null,
+            "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+            "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+            "execArgv": [
+              "--expose-gc"
+            ],
+            "nodeOptions": null,
+            "mode": "boxing-cost",
+            "runs": 7,
+            "iterations": 4000,
+            "node": "v26.13.0",
+            "precision": "machine",
+            "jit": "off",
+            "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+            "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "id": "boxing-cost",
+          "rawFunctionMs": {
+            "median": 0.0001131770000000003,
+            "min": 8.818750000000364e-05,
+            "max": 0.00014767725000000098
+          },
+          "rawNumberMs": {
+            "median": 7.510425000000964e-05,
+            "min": 3.415624999999522e-05,
+            "max": 9.854174999999544e-05
+          },
+          "inputMs": {
+            "median": 0.0150606875,
+            "min": 0.014100864500000001,
+            "max": 0.017187437500000003
+          },
+          "ownFields": {
+            "function": 47,
+            "number": 12
+          },
+          "retainsBatch": true
+        }
+      ],
+      [
+        {
+          "metadata": {
+            "root": "/tmp/wt-boxing-before",
+            "entry": "dist/boxing-profile/core.js",
+            "profilePhase": null,
+            "harnessSha256": "a8afe08aa2634ec2355ef5021fdd177ee1b8c7fcdb4168e9991cdab25015c453",
+            "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+            "execArgv": [
+              "--expose-gc"
+            ],
+            "nodeOptions": null,
+            "mode": "boxing-cost",
+            "runs": 7,
+            "iterations": 4000,
+            "node": "v26.13.0",
+            "precision": "machine",
+            "jit": "off",
+            "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+            "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "id": "boxing-cost",
+          "rawFunctionMs": {
+            "median": 0.00011016650000000539,
+            "min": 8.860400000000368e-05,
+            "max": 0.00014533324999999308
+          },
+          "rawNumberMs": {
+            "median": 7.402074999998832e-05,
+            "min": 3.3895749999999226e-05,
+            "max": 9.67394999999982e-05
+          },
+          "inputMs": {
+            "median": 0.015304281250000003,
+            "min": 0.013799343750000019,
+            "max": 0.01708259375
+          },
+          "ownFields": {
+            "function": 47,
+            "number": 12
+          },
+          "retainsBatch": true
+        }
+      ],
+      [
+        {
+          "metadata": {
+            "root": "/tmp/wt-boxing-before",
+            "entry": "dist/boxing-profile/core.js",
+            "profilePhase": null,
+            "harnessSha256": "a8afe08aa2634ec2355ef5021fdd177ee1b8c7fcdb4168e9991cdab25015c453",
+            "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+            "execArgv": [
+              "--expose-gc"
+            ],
+            "nodeOptions": null,
+            "mode": "boxing-cost",
+            "runs": 7,
+            "iterations": 4000,
+            "node": "v26.13.0",
+            "precision": "machine",
+            "jit": "off",
+            "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+            "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "id": "boxing-cost",
+          "rawFunctionMs": {
+            "median": 0.00012453125000001818,
+            "min": 8.88855000000035e-05,
+            "max": 0.0001647187500000058
+          },
+          "rawNumberMs": {
+            "median": 7.14479999999753e-05,
+            "min": 3.426049999998781e-05,
+            "max": 0.000101822999999996
+          },
+          "inputMs": {
+            "median": 0.015855999999999995,
+            "min": 0.013668666500000001,
+            "max": 0.017258875000000003
+          },
+          "ownFields": {
+            "function": 47,
+            "number": 12
+          },
+          "retainsBatch": true
+        }
+      ]
+    ],
+    "current": [
+      [
+        {
+          "metadata": {
+            "root": "/tmp/wt-boxing-profile",
+            "entry": "dist/boxing-profile/core.js",
+            "profilePhase": null,
+            "harnessSha256": "a8afe08aa2634ec2355ef5021fdd177ee1b8c7fcdb4168e9991cdab25015c453",
+            "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+            "execArgv": [
+              "--expose-gc"
+            ],
+            "nodeOptions": null,
+            "mode": "boxing-cost",
+            "runs": 7,
+            "iterations": 4000,
+            "node": "v26.13.0",
+            "precision": "machine",
+            "jit": "off",
+            "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+            "trackedDiffSha256": "4afdd799b205ecf2be00f2d29a3e753125b02c9e9617e1a99684c761c9dde79c"
+          }
+        },
+        {
+          "id": "boxing-cost",
+          "rawFunctionMs": {
+            "median": 7.547925000000078e-05,
+            "min": 6.920825000000264e-05,
+            "max": 0.0001674062499999991
+          },
+          "rawNumberMs": {
+            "median": 7.073950000000195e-05,
+            "min": 3.309375000000614e-05,
+            "max": 0.00010304175000001692
+          },
+          "inputMs": {
+            "median": 0.015233197749999988,
+            "min": 0.012374177250000002,
+            "max": 0.0165293645
+          },
+          "ownFields": {
+            "function": 52,
+            "number": 11
+          },
+          "retainsBatch": true
+        }
+      ],
+      [
+        {
+          "metadata": {
+            "root": "/tmp/wt-boxing-profile",
+            "entry": "dist/boxing-profile/core.js",
+            "profilePhase": null,
+            "harnessSha256": "a8afe08aa2634ec2355ef5021fdd177ee1b8c7fcdb4168e9991cdab25015c453",
+            "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+            "execArgv": [
+              "--expose-gc"
+            ],
+            "nodeOptions": null,
+            "mode": "boxing-cost",
+            "runs": 7,
+            "iterations": 4000,
+            "node": "v26.13.0",
+            "precision": "machine",
+            "jit": "off",
+            "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+            "trackedDiffSha256": "4afdd799b205ecf2be00f2d29a3e753125b02c9e9617e1a99684c761c9dde79c"
+          }
+        },
+        {
+          "id": "boxing-cost",
+          "rawFunctionMs": {
+            "median": 7.32085000000211e-05,
+            "min": 6.851050000000214e-05,
+            "max": 0.00015506249999999966
+          },
+          "rawNumberMs": {
+            "median": 7.147900000001073e-05,
+            "min": 3.350000000000364e-05,
+            "max": 0.00017038524999999537
+          },
+          "inputMs": {
+            "median": 0.015953156250000006,
+            "min": 0.012505051999999978,
+            "max": 0.01716583324999999
+          },
+          "ownFields": {
+            "function": 52,
+            "number": 11
+          },
+          "retainsBatch": true
+        }
+      ],
+      [
+        {
+          "metadata": {
+            "root": "/tmp/wt-boxing-profile",
+            "entry": "dist/boxing-profile/core.js",
+            "profilePhase": null,
+            "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+            "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+            "execArgv": [
+              "--expose-gc"
+            ],
+            "nodeOptions": null,
+            "mode": "boxing-cost",
+            "runs": 7,
+            "iterations": 4000,
+            "node": "v26.13.0",
+            "precision": "machine",
+            "jit": "off",
+            "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+            "trackedDiffSha256": "ffa33aba15f50a5ae6e24551cd57679c3b56abf5f051629685a3ed09b2031e5f"
+          }
+        },
+        {
+          "id": "boxing-cost",
+          "rawFunctionMs": {
+            "median": 7.223949999999491e-05,
+            "min": 6.927075000001537e-05,
+            "max": 0.00015433349999999279
+          },
+          "rawNumberMs": {
+            "median": 7.232299999998304e-05,
+            "min": 3.3687500000013416e-05,
+            "max": 0.0001002395000000007
+          },
+          "inputMs": {
+            "median": 0.015478353999999996,
+            "min": 0.012775208500000019,
+            "max": 0.017206895749999992
+          },
+          "ownFields": {
+            "function": 52,
+            "number": 11
+          },
+          "retainsBatch": true
+        }
+      ]
+    ]
+  },
+  "profiles": [
+    {
+      "id": "muladd/exact/unchanged",
+      "cpuSamples": 4757,
+      "profileCalls": 226560,
+      "exclusiveSamples": {
+        "other": 4531,
+        "canonicalization": 123,
+        "expression-constructor": 81,
+        "boxing-factory": 22
+      },
+      "inclusiveSamples": {
+        "boxing-factory": 4356,
+        "canonicalization": 1277,
+        "expression-constructor": 281
+      },
+      "inclusiveUnionSamples": 4357,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 216,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Fr",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 181928
+          },
+          "samples": 168,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 144,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "_V",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 6208
+          },
+          "samples": 154,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 204,
+            "column": 16,
+            "mappedName": "revlex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "I1n",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 272,
+            "columnNumber": 26578
+          },
+          "samples": 138,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/engine-expression-entrypoints.ts",
+            "line": 98,
+            "column": 16,
+            "mappedName": "createSymbolExpression",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "type",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 66,
+            "columnNumber": 408175
+          },
+          "samples": 135,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/library/arithmetic.ts",
+            "line": 9697,
+            "column": 12,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "cf",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 21,
+            "columnNumber": 74142
+          },
+          "samples": 127,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/math-json/symbols.ts",
+            "line": 117,
+            "column": 16,
+            "mappedName": "validateSymbol",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "bze",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 514806
+          },
+          "samples": 123,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 12934,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "hM",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 5798
+          },
+          "samples": 94,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 156,
+            "column": 16,
+            "mappedName": "lex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "IZ",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 57,
+            "columnNumber": 34436
+          },
+          "samples": 89,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/canonical-numeric.ts",
+            "line": 343,
+            "column": 16,
+            "mappedName": "canonicalNumericOperator",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "ff",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 54933
+          },
+          "samples": 82,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/binders.ts",
+            "line": 448,
+            "column": 16,
+            "mappedName": "bindingInContext",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 81,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "pe",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 170095
+          },
+          "samples": 78,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/definition-guards.ts",
+            "line": 18,
+            "column": 16,
+            "mappedName": "isValueDef",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 29929.048,
+      "revision": "before",
+      "phase": "boxing",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-before",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "muladd/exact/unchanged"
+          ],
+          "profilePhase": "boxing",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "id": "muladd/exact/unchanged",
+      "cpuSamples": 4765,
+      "profileCalls": 218112,
+      "exclusiveSamples": {
+        "other": 4526,
+        "canonicalization": 121,
+        "expression-constructor": 101,
+        "boxing-factory": 17
+      },
+      "inclusiveSamples": {
+        "boxing-factory": 4364,
+        "canonicalization": 1383,
+        "expression-constructor": 301
+      },
+      "inclusiveUnionSamples": 4365,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 176,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "xo",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 203535
+          },
+          "samples": 172,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 146,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "g7",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 6220
+          },
+          "samples": 142,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 204,
+            "column": 16,
+            "mappedName": "revlex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "V6n",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 277,
+            "columnNumber": 25534
+          },
+          "samples": 139,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/engine-expression-entrypoints.ts",
+            "line": 99,
+            "column": 16,
+            "mappedName": "createSymbolExpression",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "type",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 67,
+            "columnNumber": 414618
+          },
+          "samples": 129,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/library/arithmetic.ts",
+            "line": 9864,
+            "column": 12,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "gcn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 530068
+          },
+          "samples": 119,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 14607,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "gd",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 21,
+            "columnNumber": 74471
+          },
+          "samples": 110,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/math-json/symbols.ts",
+            "line": 117,
+            "column": 16,
+            "mappedName": "validateSymbol",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 107,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "qo",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 21,
+            "columnNumber": 73985
+          },
+          "samples": 93,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/math-json/symbols.ts",
+            "line": 82,
+            "column": 16,
+            "mappedName": "isValidSymbol",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Ky",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 147805
+          },
+          "samples": 90,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/static-typing-view.ts",
+            "line": 197,
+            "column": 16,
+            "mappedName": "staticBindingIn",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "gL",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 5810
+          },
+          "samples": 89,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 156,
+            "column": 16,
+            "mappedName": "lex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "y",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 187476
+          },
+          "samples": 87,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 197,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 31652.688,
+      "revision": "current",
+      "phase": "boxing",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-profile",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "muladd/exact/unchanged"
+          ],
+          "profilePhase": "boxing",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+          "trackedDiffSha256": "ffa33aba15f50a5ae6e24551cd57679c3b56abf5f051629685a3ed09b2031e5f"
+        }
+      }
+    },
+    {
+      "id": "muladd/exact/unchanged",
+      "cpuSamples": 4756,
+      "profileCalls": 473600,
+      "exclusiveSamples": {
+        "other": 4506,
+        "canonicalization": 100,
+        "support-constructor": 92,
+        "expression-constructor": 54,
+        "boxing-factory": 4
+      },
+      "inclusiveSamples": {
+        "canonicalization": 499,
+        "support-constructor": 138,
+        "expression-constructor": 54,
+        "boxing-factory": 12
+      },
+      "inclusiveUnionSamples": 703,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "ct",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 5355
+          },
+          "samples": 329,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/numerics/rationals.ts",
+            "line": 23,
+            "column": 16,
+            "mappedName": "isZero",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 474209
+          },
+          "samples": 270,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 6659,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "h",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 51264
+          },
+          "samples": 240,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 256,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Fr",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 181928
+          },
+          "samples": 147,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 144,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "R",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 50106
+          },
+          "samples": 143,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 41,
+            "column": 16,
+            "mappedName": "isSymbol",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 111,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "evaluate",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 452770
+          },
+          "samples": 98,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 3799,
+            "column": 2,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "e",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 15563
+          },
+          "samples": 84,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/numeric-value/exact-numeric-value.ts",
+            "line": 130,
+            "column": 2,
+            "category": "support-constructor",
+            "name": "ExactNumericValue"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 82,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "get operator",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 272,
+            "columnNumber": 7323
+          },
+          "samples": 75,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-number.ts",
+            "line": 417,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "xn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 25,
+            "columnNumber": 126399
+          },
+          "samples": 72,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/flatten.ts",
+            "line": 24,
+            "column": 16,
+            "mappedName": "flatten",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "C",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 50065
+          },
+          "samples": 69,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 35,
+            "column": 16,
+            "mappedName": "isNumber",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 15455.824,
+      "revision": "before",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-before",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "muladd/exact/unchanged"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "id": "muladd/exact/unchanged",
+      "cpuSamples": 4764,
+      "profileCalls": 484352,
+      "exclusiveSamples": {
+        "other": 4485,
+        "canonicalization": 94,
+        "support-constructor": 118,
+        "expression-constructor": 62,
+        "boxing-factory": 5
+      },
+      "inclusiveSamples": {
+        "canonicalization": 506,
+        "support-constructor": 158,
+        "expression-constructor": 62,
+        "boxing-factory": 10
+      },
+      "inclusiveUnionSamples": 736,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "y",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 187476
+          },
+          "samples": 430,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 197,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "kt",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 3272
+          },
+          "samples": 276,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/numerics/rationals.ts",
+            "line": 23,
+            "column": 16,
+            "mappedName": "isZero",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 483620
+          },
+          "samples": 234,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 7598,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "xo",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 203535
+          },
+          "samples": 160,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 146,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "e",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 13472
+          },
+          "samples": 108,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/numeric-value/exact-numeric-value.ts",
+            "line": 130,
+            "column": 2,
+            "category": "support-constructor",
+            "name": "ExactNumericValue"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 94,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "k",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 186598
+          },
+          "samples": 89,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 41,
+            "column": 16,
+            "mappedName": "isSymbol",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "get operator",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 277,
+            "columnNumber": 7317
+          },
+          "samples": 87,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-number.ts",
+            "line": 381,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "F7",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 180105
+          },
+          "samples": 82,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/arithmetic-mul-div.ts",
+            "line": 3163,
+            "column": 9,
+            "mappedName": "mulImpl",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 78,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "In",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 26,
+            "columnNumber": 151560
+          },
+          "samples": 77,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/flatten.ts",
+            "line": 24,
+            "column": 16,
+            "mappedName": "flatten",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "A",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 186557
+          },
+          "samples": 68,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 35,
+            "column": 16,
+            "mappedName": "isNumber",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 14861.384,
+      "revision": "current",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-profile",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "muladd/exact/unchanged"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+          "trackedDiffSha256": "ffa33aba15f50a5ae6e24551cd57679c3b56abf5f051629685a3ed09b2031e5f"
+        }
+      }
+    },
+    {
+      "id": "rational/exact/unchanged",
+      "cpuSamples": 4780,
+      "profileCalls": 133376,
+      "exclusiveSamples": {
+        "other": 4566,
+        "support-constructor": 23,
+        "canonicalization": 98,
+        "expression-constructor": 80,
+        "boxing-factory": 13
+      },
+      "inclusiveSamples": {
+        "canonicalization": 1733,
+        "boxing-factory": 4455,
+        "support-constructor": 24,
+        "expression-constructor": 164
+      },
+      "inclusiveUnionSamples": 4457,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "yd",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 25,
+            "columnNumber": 93564
+          },
+          "samples": 646,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/utils.ts",
+            "line": 213,
+            "column": 16,
+            "mappedName": "digest128",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "bze",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 514806
+          },
+          "samples": 174,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 12934,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "I",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 64818
+          },
+          "samples": 144,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/common/type/subtype.ts",
+            "line": 2724,
+            "column": 16,
+            "mappedName": "isSubtype",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 137,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "OC",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 284106
+          },
+          "samples": 100,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/factor.ts",
+            "line": 1393,
+            "column": 16,
+            "mappedName": "factor",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Cnn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 66,
+            "columnNumber": 357912
+          },
+          "samples": 85,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/library/arithmetic.ts",
+            "line": 4156,
+            "column": 9,
+            "mappedName": "addTypeOnTypes",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "get digest",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 430466
+          },
+          "samples": 83,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 1577,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Fr",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 181928
+          },
+          "samples": 81,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 144,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 70,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "I1n",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 272,
+            "columnNumber": 26578
+          },
+          "samples": 66,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/engine-expression-entrypoints.ts",
+            "line": 98,
+            "column": 16,
+            "mappedName": "createSymbolExpression",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "ff",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 54933
+          },
+          "samples": 66,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/binders.ts",
+            "line": 448,
+            "column": 16,
+            "mappedName": "bindingInContext",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "sm",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 143709
+          },
+          "samples": 64,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 131,
+            "column": 16,
+            "mappedName": "canonicalAdd",
+            "category": "canonicalization",
+            "name": "canonicalAdd"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 51714.48,
+      "revision": "before",
+      "phase": "boxing",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-before",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "rational/exact/unchanged"
+          ],
+          "profilePhase": "boxing",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "id": "rational/exact/unchanged",
+      "cpuSamples": 4774,
+      "profileCalls": 127232,
+      "exclusiveSamples": {
+        "other": 4571,
+        "expression-constructor": 72,
+        "support-constructor": 13,
+        "canonicalization": 108,
+        "boxing-factory": 10
+      },
+      "inclusiveSamples": {
+        "canonicalization": 1818,
+        "boxing-factory": 4451,
+        "expression-constructor": 186,
+        "support-constructor": 13
+      },
+      "inclusiveUnionSamples": 4453,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "Sc",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 26,
+            "columnNumber": 118798
+          },
+          "samples": 653,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/utils.ts",
+            "line": 211,
+            "column": 16,
+            "mappedName": "digest128",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "R",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 65489
+          },
+          "samples": 157,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/common/type/subtype.ts",
+            "line": 2764,
+            "column": 16,
+            "mappedName": "isSubtype",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "gcn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 530068
+          },
+          "samples": 137,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 14607,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 117,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "y",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 187476
+          },
+          "samples": 111,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 197,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Kvn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 67,
+            "columnNumber": 363226
+          },
+          "samples": 97,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/library/arithmetic.ts",
+            "line": 4208,
+            "column": 9,
+            "mappedName": "addTypeOnTypes",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 93,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "xo",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 203535
+          },
+          "samples": 89,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 146,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "eI",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 285222
+          },
+          "samples": 77,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/factor.ts",
+            "line": 1394,
+            "column": 16,
+            "mappedName": "factor",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Hg",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 145004
+          },
+          "samples": 75,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 127,
+            "column": 16,
+            "mappedName": "canonicalAdd",
+            "category": "canonicalization",
+            "name": "canonicalAdd"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "V6n",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 277,
+            "columnNumber": 25534
+          },
+          "samples": 71,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/engine-expression-entrypoints.ts",
+            "line": 99,
+            "column": 16,
+            "mappedName": "createSymbolExpression",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "$V",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 115,
+            "columnNumber": 47754
+          },
+          "samples": 64,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/box.ts",
+            "line": 1655,
+            "column": 9,
+            "mappedName": "boxInternal",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 55260.984,
+      "revision": "current",
+      "phase": "boxing",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-profile",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "rational/exact/unchanged"
+          ],
+          "profilePhase": "boxing",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+          "trackedDiffSha256": "ffa33aba15f50a5ae6e24551cd57679c3b56abf5f051629685a3ed09b2031e5f"
+        }
+      }
+    },
+    {
+      "id": "rational/exact/unchanged",
+      "cpuSamples": 4757,
+      "profileCalls": 463872,
+      "exclusiveSamples": {
+        "other": 4461,
+        "boxing-factory": 11,
+        "support-constructor": 115,
+        "canonicalization": 99,
+        "expression-constructor": 71
+      },
+      "inclusiveSamples": {
+        "boxing-factory": 23,
+        "canonicalization": 287,
+        "support-constructor": 248,
+        "expression-constructor": 71
+      },
+      "inclusiveUnionSamples": 629,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 474209
+          },
+          "samples": 397,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 6659,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "ct",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 5355
+          },
+          "samples": 321,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/numerics/rationals.ts",
+            "line": 23,
+            "column": 16,
+            "mappedName": "isZero",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "h",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 51264
+          },
+          "samples": 185,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 256,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Fr",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 181928
+          },
+          "samples": 132,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 144,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 124,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "R",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 50106
+          },
+          "samples": 117,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 41,
+            "column": 16,
+            "mappedName": "isSymbol",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "e",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 15563
+          },
+          "samples": 102,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/numeric-value/exact-numeric-value.ts",
+            "line": 130,
+            "column": 2,
+            "category": "support-constructor",
+            "name": "ExactNumericValue"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "um",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 148150
+          },
+          "samples": 97,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 749,
+            "column": 16,
+            "mappedName": "addArray",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "div",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 24774
+          },
+          "samples": 92,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/numeric-value/exact-numeric-value.ts",
+            "line": 900,
+            "column": 2,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "sm",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 143709
+          },
+          "samples": 87,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 131,
+            "column": 16,
+            "mappedName": "canonicalAdd",
+            "category": "canonicalization",
+            "name": "canonicalAdd"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 473658
+          },
+          "samples": 87,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 6602,
+            "column": 13,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 85,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 18600.872,
+      "revision": "before",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-before",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "rational/exact/unchanged"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "id": "rational/exact/unchanged",
+      "cpuSamples": 4752,
+      "profileCalls": 444416,
+      "exclusiveSamples": {
+        "other": 4455,
+        "support-constructor": 116,
+        "canonicalization": 112,
+        "expression-constructor": 59,
+        "boxing-factory": 10
+      },
+      "inclusiveSamples": {
+        "canonicalization": 287,
+        "support-constructor": 251,
+        "boxing-factory": 21,
+        "expression-constructor": 59
+      },
+      "inclusiveUnionSamples": 618,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 483620
+          },
+          "samples": 373,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 7598,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "kt",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 3272
+          },
+          "samples": 323,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/numerics/rationals.ts",
+            "line": 23,
+            "column": 16,
+            "mappedName": "isZero",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "y",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 187476
+          },
+          "samples": 239,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 197,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "xo",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 16,
+            "columnNumber": 203535
+          },
+          "samples": 140,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/cycle-guard.ts",
+            "line": 146,
+            "column": 16,
+            "mappedName": "exitCycleQuery",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 117,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "e",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 13472
+          },
+          "samples": 111,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/numeric-value/exact-numeric-value.ts",
+            "line": 130,
+            "column": 2,
+            "category": "support-constructor",
+            "name": "ExactNumericValue"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Hg",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 145004
+          },
+          "samples": 102,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 127,
+            "column": 16,
+            "mappedName": "canonicalAdd",
+            "category": "canonicalization",
+            "name": "canonicalAdd"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 97,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "zg",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 149449
+          },
+          "samples": 90,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 744,
+            "column": 16,
+            "mappedName": "addArray",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "div",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 22683
+          },
+          "samples": 76,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/numeric-value/exact-numeric-value.ts",
+            "line": 900,
+            "column": 2,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 483069
+          },
+          "samples": 69,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 7541,
+            "column": 13,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "MDe",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 87,
+            "columnNumber": 37721
+          },
+          "samples": 63,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/library/arithmetic.ts",
+            "line": 17187,
+            "column": 9,
+            "mappedName": "addEvaluatedOperands",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 16729.344,
+      "revision": "current",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-profile",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "rational/exact/unchanged"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+          "trackedDiffSha256": "ffa33aba15f50a5ae6e24551cd57679c3b56abf5f051629685a3ed09b2031e5f"
+        }
+      }
+    },
+    {
+      "id": "transcend/exact/unchanged",
+      "cpuSamples": 4787,
+      "profileCalls": 311040,
+      "exclusiveSamples": {
+        "other": 4629,
+        "canonicalization": 99,
+        "expression-constructor": 41,
+        "support-constructor": 18
+      },
+      "inclusiveSamples": {
+        "canonicalization": 725,
+        "expression-constructor": 56,
+        "support-constructor": 19
+      },
+      "inclusiveUnionSamples": 745,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "bze",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 514806
+          },
+          "samples": 200,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 12934,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "get type",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 451398
+          },
+          "samples": 165,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 3608,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "h",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 51264
+          },
+          "samples": 153,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 256,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 149,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "I",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 64818
+          },
+          "samples": 131,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/common/type/subtype.ts",
+            "line": 2724,
+            "column": 16,
+            "mappedName": "isSubtype",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Cnn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 66,
+            "columnNumber": 357912
+          },
+          "samples": 122,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/library/arithmetic.ts",
+            "line": 4156,
+            "column": 9,
+            "mappedName": "addTypeOnTypes",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 474209
+          },
+          "samples": 114,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 6659,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "R",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 50106
+          },
+          "samples": 91,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 41,
+            "column": 16,
+            "mappedName": "isSymbol",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "SL",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 84576
+          },
+          "samples": 87,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/collection-utils.ts",
+            "line": 1095,
+            "column": 9,
+            "mappedName": "isScalarLiftApplication",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 83,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "get contextStack",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 272,
+            "columnNumber": 69974
+          },
+          "samples": 82,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/index.ts",
+            "line": 623,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "sm",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 143709
+          },
+          "samples": 77,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 131,
+            "column": 16,
+            "mappedName": "canonicalAdd",
+            "category": "canonicalization",
+            "name": "canonicalAdd"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 23964.208,
+      "revision": "before",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-before",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "transcend/exact/unchanged"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "id": "transcend/exact/unchanged",
+      "cpuSamples": 4791,
+      "profileCalls": 283904,
+      "exclusiveSamples": {
+        "other": 4599,
+        "canonicalization": 97,
+        "support-constructor": 22,
+        "expression-constructor": 73
+      },
+      "inclusiveSamples": {
+        "canonicalization": 749,
+        "support-constructor": 26,
+        "expression-constructor": 103
+      },
+      "inclusiveUnionSamples": 778,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "get type",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 455536
+          },
+          "samples": 197,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 3934,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "y",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 187476
+          },
+          "samples": 192,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 197,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "gcn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 530068
+          },
+          "samples": 181,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 14607,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "R",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 65489
+          },
+          "samples": 158,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/common/type/subtype.ts",
+            "line": 2764,
+            "column": 16,
+            "mappedName": "isSubtype",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 483620
+          },
+          "samples": 102,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 7598,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Kvn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 67,
+            "columnNumber": 363226
+          },
+          "samples": 101,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/library/arithmetic.ts",
+            "line": 4208,
+            "column": 9,
+            "mappedName": "addTypeOnTypes",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "_0e",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 147205
+          },
+          "samples": 95,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/static-typing-view.ts",
+            "line": 118,
+            "column": 9,
+            "mappedName": "innermostFrame",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 83,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "ge",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 173044
+          },
+          "samples": 82,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/definition-guards.ts",
+            "line": 24,
+            "column": 16,
+            "mappedName": "isOperatorDef",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "e6",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 73709
+          },
+          "samples": 82,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/collection-utils.ts",
+            "line": 1687,
+            "column": 9,
+            "mappedName": "isScalarLiftApplication",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Hg",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 145004
+          },
+          "samples": 79,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/arithmetic-add.ts",
+            "line": 127,
+            "column": 16,
+            "mappedName": "canonicalAdd",
+            "category": "canonicalization",
+            "name": "canonicalAdd"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 74,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 24778.304,
+      "revision": "current",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-profile",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "transcend/exact/unchanged"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+          "trackedDiffSha256": "4d063e2088440a34d44d127fba224c8b42a74e69329310c972308f6f67246e6e"
+        }
+      }
+    },
+    {
+      "id": "transcend/exact/unrelated",
+      "cpuSamples": 4811,
+      "profileCalls": 112384,
+      "exclusiveSamples": {
+        "other": 4653,
+        "expression-constructor": 68,
+        "canonicalization": 64,
+        "boxing-factory": 8,
+        "support-constructor": 18
+      },
+      "inclusiveSamples": {
+        "canonicalization": 598,
+        "expression-constructor": 92,
+        "boxing-factory": 8,
+        "support-constructor": 32
+      },
+      "inclusiveUnionSamples": 705,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 223,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "I",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 64818
+          },
+          "samples": 169,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/common/type/subtype.ts",
+            "line": 2724,
+            "column": 16,
+            "mappedName": "isSubtype",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "bze",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 514806
+          },
+          "samples": 165,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 12934,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 474209
+          },
+          "samples": 140,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 6659,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "_V",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 6208
+          },
+          "samples": 124,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 204,
+            "column": 16,
+            "mappedName": "revlex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "hM",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 5798
+          },
+          "samples": 109,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 156,
+            "column": 16,
+            "mappedName": "lex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 81,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "h",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 51264
+          },
+          "samples": 73,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 256,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "nc",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 160100
+          },
+          "samples": 69,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/numerics/numeric.ts",
+            "line": 208,
+            "column": 16,
+            "mappedName": "canonicalInteger",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "get type",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 55,
+            "columnNumber": 451398
+          },
+          "samples": 67,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 3608,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "_oe",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 65652
+          },
+          "samples": 62,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/common/type/subtype.ts",
+            "line": 2821,
+            "column": 9,
+            "mappedName": "isSubtypeRules",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "R",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-before/dist/boxing-profile/core.js",
+            "lineNumber": 14,
+            "columnNumber": 50106
+          },
+          "samples": 61,
+          "original": {
+            "source": "/private/tmp/wt-boxing-before/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 41,
+            "column": 16,
+            "mappedName": "isSymbol",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 45287.832,
+      "revision": "before",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-before",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "transcend/exact/unrelated"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "id": "transcend/exact/unrelated",
+      "cpuSamples": 4803,
+      "profileCalls": 103168,
+      "exclusiveSamples": {
+        "other": 4676,
+        "expression-constructor": 62,
+        "canonicalization": 44,
+        "support-constructor": 17,
+        "boxing-factory": 4
+      },
+      "inclusiveSamples": {
+        "canonicalization": 488,
+        "expression-constructor": 90,
+        "support-constructor": 27,
+        "boxing-factory": 4
+      },
+      "inclusiveUnionSamples": 586,
+      "cpuSelf": [
+        {
+          "frame": {
+            "functionName": "(garbage collector)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 208,
+          "original": {
+            "category": "other",
+            "source": "(garbage collector)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "gcn",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 530068
+          },
+          "samples": 175,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 14607,
+            "column": 9,
+            "mappedName": "boundCallType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "R",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 65489
+          },
+          "samples": 151,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/common/type/subtype.ts",
+            "line": 2764,
+            "column": 16,
+            "mappedName": "isSubtype",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 483620
+          },
+          "samples": 149,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 7598,
+            "column": 11,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "y",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 187476
+          },
+          "samples": 128,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/type-guards.ts",
+            "line": 197,
+            "column": 16,
+            "mappedName": "isFunction",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "g7",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 6220
+          },
+          "samples": 110,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 204,
+            "column": 16,
+            "mappedName": "revlex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "gL",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 5810
+          },
+          "samples": 106,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/polynomial-degree.ts",
+            "line": 156,
+            "column": 16,
+            "mappedName": "lex",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "get type",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 56,
+            "columnNumber": 455536
+          },
+          "samples": 96,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/boxed-expression/boxed-function.ts",
+            "line": 3934,
+            "column": 6,
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "(program)",
+            "scriptId": "0",
+            "url": "",
+            "lineNumber": -1,
+            "columnNumber": -1
+          },
+          "samples": 80,
+          "original": {
+            "category": "other",
+            "source": "(program)"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "bp",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 163003
+          },
+          "samples": 71,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/compute-engine/numerics/numeric.ts",
+            "line": 208,
+            "column": 16,
+            "mappedName": "canonicalInteger",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Fw",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 2,
+            "columnNumber": 508
+          },
+          "samples": 68,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/common/type/immutable.ts",
+            "line": 44,
+            "column": 16,
+            "mappedName": "immutableNumericValueType",
+            "category": "other"
+          }
+        },
+        {
+          "frame": {
+            "functionName": "Xxe",
+            "scriptId": "174",
+            "url": "file:///private/tmp/wt-boxing-profile/dist/boxing-profile/core.js",
+            "lineNumber": 8,
+            "columnNumber": 66323
+          },
+          "samples": 63,
+          "original": {
+            "source": "/private/tmp/wt-boxing-profile/src/common/type/subtype.ts",
+            "line": 2861,
+            "column": 9,
+            "mappedName": "isSubtypeRules",
+            "category": "other"
+          }
+        }
+      ],
+      "allocationBytesPerCall": 46396.248,
+      "revision": "current",
+      "phase": "evaluate",
+      "metadata": {
+        "metadata": {
+          "root": "/tmp/wt-boxing-profile",
+          "entry": "dist/boxing-profile/core.js",
+          "only": [
+            "transcend/exact/unrelated"
+          ],
+          "profilePhase": "evaluate",
+          "harnessSha256": "22afa965ee05cbef77dda7c0498f49e392bf788632189530ad97edbc31943f35",
+          "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+          "execArgv": [
+            "--expose-gc"
+          ],
+          "nodeOptions": null,
+          "mode": "profile",
+          "runs": 7,
+          "iterations": 4000,
+          "node": "v26.13.0",
+          "precision": "machine",
+          "jit": "off",
+          "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+          "trackedDiffSha256": "4d063e2088440a34d44d127fba224c8b42a74e69329310c972308f6f67246e6e"
+        }
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "file": "/tmp/boxing-final-before3-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-cost-before1-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-cost-before2-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-cost-current1-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-cost-current2-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-current3-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-muladd-box-before-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-muladd-box-profile-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-muladd-eval-before-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": true,
+      "interference": [
+        [
+          60747,
+          191.5,
+          "/Users/arno/dev/tycho/node_modules/@typescript/typescript-darwin-arm64/lib/tsc -p tsconfig.json --emitDeclarationOnly --"
+        ],
+        [
+          60748,
+          179.8,
+          "/Users/arno/dev/tycho/node_modules/@typescript/typescript-darwin-arm64/lib/tsc -p tsconfig.tests.json --noEmit"
+        ]
+      ]
+    },
+    {
+      "file": "/tmp/boxing-final-muladd-eval-before-attempt2-cpu.json",
+      "exit": 0,
+      "excluded": true,
+      "interference": [
+        [
+          60823,
+          111.4,
+          "/Users/arno/.nvm/versions/node/v26.13.0/bin/node --heap-prof-interval=524288 --watch-kill-signal=SIGTERM --inspect-publi"
+        ]
+      ]
+    },
+    {
+      "file": "/tmp/boxing-final-muladd-eval-before-attempt3-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-muladd-eval-profile-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": true,
+      "interference": [
+        [
+          36717,
+          103.4,
+          "/Users/arno/dev/compute-engine/node_modules/@typescript/typescript-darwin-arm64/lib/tsc --lsp --stdio"
+        ]
+      ]
+    },
+    {
+      "file": "/tmp/boxing-final-muladd-eval-profile-attempt2-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-rational-box-before-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-rational-box-profile-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": true,
+      "interference": [
+        [
+          62051,
+          275.3,
+          "/Users/arno/dev/tycho/node_modules/@typescript/typescript-darwin-arm64/lib/tsc -p tsconfig.tests.json --noEmit"
+        ]
+      ]
+    },
+    {
+      "file": "/tmp/boxing-final-rational-box-profile-attempt2-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-rational-eval-before-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-rational-eval-profile-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-transcend-eval-before-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-transcend-eval-profile-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-transcend-write-before-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": true,
+      "interference": [
+        [
+          86318,
+          130.4,
+          "/Users/arno/dev/tycho/node_modules/@typescript/typescript-darwin-arm64/lib/tsc --lsp --stdio"
+        ]
+      ]
+    },
+    {
+      "file": "/tmp/boxing-final-transcend-write-before-attempt2-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    },
+    {
+      "file": "/tmp/boxing-final-transcend-write-profile-attempt1-cpu.json",
+      "exit": 0,
+      "excluded": false,
+      "interference": []
+    }
+  ],
+  "bundleManifests": {
+    "before": {
+      "profile": {
+        "root": "/private/tmp/wt-boxing-before",
+        "entry": "dist/boxing-profile/core.js",
+        "counted": false,
+        "coreOnly": true,
+        "esbuildVersion": "0.28.2",
+        "typescriptVersion": "6.0.3",
+        "nodeVersion": "v26.13.0",
+        "builderSha256": "8d9e7dbb4096bfdeae2ee6ade5773efc8b75b5bd6dc14e380a7ee35a5f5c634a",
+        "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "packageVersion": "0.174.0",
+        "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entrySha256": "d59d1bad8ba8ca70933c752e91bae4cbb7d5f27e3d607c40712780fe62dd3df6",
+        "targets": [],
+        "note": "Core-only diagnostic bundle, production minifier settings. Do not time the counted build."
+      },
+      "counts": {
+        "root": "/private/tmp/wt-boxing-before",
+        "entry": "dist/boxing-counts/core.js",
+        "counted": true,
+        "coreOnly": true,
+        "esbuildVersion": "0.28.2",
+        "typescriptVersion": "6.0.3",
+        "nodeVersion": "v26.13.0",
+        "builderSha256": "8d9e7dbb4096bfdeae2ee6ade5773efc8b75b5bd6dc14e380a7ee35a5f5c634a",
+        "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "packageVersion": "0.174.0",
+        "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entrySha256": "be2c8ab5d309d3419869f155c33f84f90cb7aa741f413cc0484a8355be5fdfde",
+        "targets": [
+          "call.box",
+          "call.boxFunction",
+          "call.canonicalAdd",
+          "call.canonicalDivide",
+          "call.canonicalMultiply",
+          "call.canonicalNumber",
+          "new.BigNumericValue",
+          "new.BoxedFunction",
+          "new.BoxedNumber",
+          "new.BoxedSymbol",
+          "new.BoxedType",
+          "new.ExactNumericValue",
+          "new.MachineNumericValue",
+          "new._BoxedExpression"
+        ],
+        "note": "Core-only diagnostic bundle, production minifier settings. Do not time the counted build."
+      }
+    },
+    "current": {
+      "profile": {
+        "root": "/private/tmp/wt-boxing-profile",
+        "entry": "dist/boxing-profile/core.js",
+        "counted": false,
+        "coreOnly": true,
+        "esbuildVersion": "0.28.2",
+        "typescriptVersion": "6.0.3",
+        "nodeVersion": "v26.13.0",
+        "builderSha256": "8d9e7dbb4096bfdeae2ee6ade5773efc8b75b5bd6dc14e380a7ee35a5f5c634a",
+        "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "packageVersion": "0.177.0",
+        "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+        "trackedDiffSha256": "4afdd799b205ecf2be00f2d29a3e753125b02c9e9617e1a99684c761c9dde79c",
+        "entrySha256": "48de9410d9b1ccce5abd332c9ce8ae1f32f4c053cbe50093acb6bf89f63012c4",
+        "targets": [],
+        "note": "Core-only diagnostic bundle, production minifier settings. Do not time the counted build."
+      },
+      "counts": {
+        "root": "/private/tmp/wt-boxing-profile",
+        "entry": "dist/boxing-counts/core.js",
+        "counted": true,
+        "coreOnly": true,
+        "esbuildVersion": "0.28.2",
+        "typescriptVersion": "6.0.3",
+        "nodeVersion": "v26.13.0",
+        "builderSha256": "8d9e7dbb4096bfdeae2ee6ade5773efc8b75b5bd6dc14e380a7ee35a5f5c634a",
+        "sourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "packageVersion": "0.177.0",
+        "commit": "1cd51b47ee42e1494aa0dfafecf811a431562979",
+        "trackedDiffSha256": "4afdd799b205ecf2be00f2d29a3e753125b02c9e9617e1a99684c761c9dde79c",
+        "entrySha256": "a2db0db67344dbc8cf0dfbe9b7383053e29e628017e289f52e774fed2fecf49e",
+        "targets": [
+          "call.box",
+          "call.boxFunction",
+          "call.canonicalAdd",
+          "call.canonicalDivide",
+          "call.canonicalMultiply",
+          "call.canonicalNumber",
+          "new.BigNumericValue",
+          "new.BoxedFunction",
+          "new.BoxedNumber",
+          "new.BoxedSymbol",
+          "new.BoxedType",
+          "new.ExactNumericValue",
+          "new.MachineNumericValue",
+          "new._BoxedExpression"
+        ],
+        "note": "Core-only diagnostic bundle, production minifier settings. Do not time the counted build."
+      }
+    }
+  }
+}

@@ -3,10 +3,12 @@
  * Run node --expose-gc --import tsx benchmarks/scalar-arithmetic.mjs <checkout>.
  * Fresh-engine calls share a loaded, increasingly warmed runtime; they are not startup.
  * Bundles: ENTRY=dist/esm-min/core.js with node --expose-gc (without tsx).
+ * MODE=construction counts a boxing-build.mjs diagnostic bundle.
+ * MODE=boxing-cost times raw constructors; PROFILE_PHASE=boxing profiles input boxing.
  * MODE=counts or MODE=profile records work counts or inspector samples instead.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { setImmediate } from 'node:timers/promises';
 import { Session } from 'node:inspector';
@@ -17,7 +19,21 @@ import { resolve } from 'node:path';
 
 const root = resolve(process.argv[2] ?? '.');
 const entry = process.env.ENTRY ?? 'src/core.ts';
-assert(['src/core.ts', 'dist/esm/core.js', 'dist/esm-min/core.js'].includes(entry), 'Unknown ENTRY');
+assert(['src/core.ts', 'dist/esm/core.js', 'dist/esm-min/core.js', 'dist/boxing-profile/core.js', 'dist/boxing-counts/core.js'].includes(entry), 'Unknown ENTRY');
+const constructionProbe = {
+  enabled: false,
+  values: Object.create(null),
+  hit(key, detail) {
+    if (!this.enabled) return;
+    this.values[key] = (this.values[key] ?? 0) + 1;
+    if (detail !== undefined) {
+      const name = `${key}:${detail}`;
+      this.values[name] = (this.values[name] ?? 0) + 1;
+    }
+  },
+  reset() { this.values = Object.create(null); },
+};
+globalThis[Symbol.for('ce.benchmarks.boxing.v1')] = constructionProbe;
 const { ComputeEngine } = await import(pathToFileURL(`${root}/${entry}`).href);
 const mode = process.env.MODE ?? 'timing';
 const runs = Number(process.env.RUNS ?? 7);
@@ -25,7 +41,8 @@ const iterations = Number(process.env.ITERATIONS ?? 1000);
 const profileMs = Number(process.env.PROFILE_MS ?? 1500);
 assert(Number.isFinite(profileMs) && profileMs >= 500);
 const only = process.env.ONLY?.split(',');
-assert(['timing', 'counts', 'profile'].includes(mode));
+assert(['timing', 'counts', 'profile', 'construction', 'boxing-cost'].includes(mode));
+assert((entry === 'dist/boxing-counts/core.js') === (mode === 'construction'), 'Counted bundles require construction mode exclusively');
 assert(Number.isInteger(runs) && runs > 0);
 assert(Number.isInteger(iterations) && iterations > 0);
 assert(global.gc, 'Use --expose-gc');
@@ -55,10 +72,16 @@ function setup(name, method, mutation) {
   ]));
   const expr = ce.box(formulas[name]);
   assert.equal(expr.operator, name === 'call' ? 'f' : name === 'rational' ? 'Divide' : 'Add');
+  const FunctionCtor = expr.constructor;
+  const NumberCtor = ce.number(7).constructor;
+  const rawOps = [ce.number(2), ce.number(3)];
+  const rawOptions = { canonical: false };
   let a = 2;
   let writeSerial = 0;
   return {
     ce,
+    rawFunction: () => new FunctionCtor(ce, 'Add', rawOps, rawOptions),
+    rawNumber: () => new NumberCtor(ce, 42),
     evaluate: () => method === 'exact' ? expr.evaluate() : expr.N(),
     write: (i) => {
       if (mutation === 'relevant') {
@@ -96,6 +119,7 @@ async function collect() {
 }
 
 async function timing(name, method, mutation) {
+  assert(entry !== 'dist/boxing-counts/core.js', 'Never time the counted build');
   const first = [], evaluation = [], assignment = [], boxing = [];
   for (let trial = 0; trial < runs; trial++) {
     const work = setup(name, method, mutation);
@@ -158,9 +182,91 @@ function counts(name, method, mutation) {
   return { versionAxes: ['any', 'type', 'evaluation'], versionDeltas: versions().map((x, i) => Number.isFinite(x - before[i]) ? x - before[i] : null), cacheStats: work.ce._cacheStats.snapshot() };
 }
 
-async function profile(name, method, mutation) {
+function construction(name, method, mutation) {
+  assert(entry === 'dist/boxing-counts/core.js', 'Use the counted bundle for construction mode');
   const work = setup(name, method, mutation);
-  for (let i = 0; i < 1000; i++) { work.write(i); work.check(work.evaluate()); }
+  const capture = (fn) => {
+    constructionProbe.reset();
+    constructionProbe.enabled = true;
+    try { return { result: fn(), counts: { ...constructionProbe.values } }; }
+    finally { constructionProbe.enabled = false; }
+  };
+  const first = capture(work.evaluate);
+  work.check(first.result);
+  const controls = setup(name, method, mutation);
+  const numberControl = capture(controls.rawNumber);
+  assert.deepEqual(numberControl.counts, { 'new._BoxedExpression': 1, 'new.BoxedNumber': 1 });
+  const functionControl = capture(controls.rawFunction);
+  assert.deepEqual(functionControl.counts, { 'new._BoxedExpression': 1, 'new.BoxedFunction': 1, 'new.BoxedFunction:Add': 1 });
+  assert.equal(numberControl.result.re, 42);
+  assert.equal(functionControl.result.operator, 'Add');
+  for (let i = 0; i < 100; i++) { work.write(i); work.check(work.evaluate()); }
+  const totals = { evaluation: {}, assignment: {}, boxing: {} };
+  const add = (target, values) => {
+    for (const [key, value] of Object.entries(values)) target[key] = (target[key] ?? 0) + value;
+  };
+  for (let i = 0; i < iterations; i++) {
+    if (mutation !== 'unchanged') add(totals.assignment, capture(() => work.write(i)).counts);
+    const evaluated = capture(work.evaluate);
+    add(totals.evaluation, evaluated.counts);
+    work.check(evaluated.result);
+  }
+  for (let i = 0; i < iterations; i++) {
+    const boxed = capture(work.box);
+    add(totals.boxing, boxed.counts);
+    assert(boxed.result.isValid);
+  }
+  return { firstCounts: first.counts, totals, iterations,
+    controls: { number: numberControl.counts, function: functionControl.counts },
+    ownFields: { function: Object.getOwnPropertyNames(functionControl.result).length,
+      number: Object.getOwnPropertyNames(numberControl.result).length } };
+}
+
+async function boxingCost() {
+  assert(entry !== 'dist/boxing-counts/core.js', 'Never time the counted build');
+  const results = { rawFunction: [], rawNumber: [], input: [] };
+  let ownFields;
+  for (let trial = 0; trial < runs; trial++) {
+    const work = setup('muladd', 'exact', 'unchanged');
+    for (let i = 0; i < 1000; i++) { work.rawFunction(); work.rawNumber(); work.box(); }
+    await collect();
+    let start = performance.now();
+    const functions = [];
+    for (let i = 0; i < iterations; i++) functions.push(work.rawFunction());
+    results.rawFunction.push((performance.now() - start) / iterations);
+    assert.equal(new Set(functions).size, iterations);
+    assert(functions.every((r) => r.operator === 'Add' && !r.isCanonical));
+    await collect();
+    start = performance.now();
+    const numbers = [];
+    for (let i = 0; i < iterations; i++) numbers.push(work.rawNumber());
+    results.rawNumber.push((performance.now() - start) / iterations);
+    assert.equal(new Set(numbers).size, iterations);
+    assert(numbers.every((r) => r.operator === 'Integer' && r.re === 42));
+    await collect();
+    start = performance.now();
+    const inputs = [];
+    for (let i = 0; i < iterations; i++) inputs.push(work.box());
+    results.input.push((performance.now() - start) / iterations);
+    assert.equal(new Set(inputs).size, iterations);
+    assert(inputs.every((r) => r.operator === 'Add' && r.isValid));
+    ownFields = { function: Object.getOwnPropertyNames(work.rawFunction()).length,
+      number: Object.getOwnPropertyNames(work.rawNumber()).length };
+  }
+  return { id: 'boxing-cost', rawFunctionMs: summary(results.rawFunction),
+    rawNumberMs: summary(results.rawNumber), inputMs: summary(results.input), ownFields,
+    retainsBatch: true };
+}
+
+async function profile(name, method, mutation) {
+  assert(entry !== 'dist/boxing-counts/core.js', 'Never profile the counted build');
+  const phase = process.env.PROFILE_PHASE ?? 'evaluate';
+  assert(['evaluate', 'boxing'].includes(phase), 'Unknown PROFILE_PHASE');
+  if (phase === 'boxing') assert(method === 'exact' && mutation === 'unchanged', 'Boxing profiles use exact/unchanged ids');
+  const work = setup(name, method, mutation);
+  const perform = phase === 'boxing' ? work.box : work.evaluate;
+  const check = phase === 'boxing' ? (r) => assert(r.isValid) : work.check;
+  for (let i = 0; i < 1000; i++) { if (phase !== 'boxing') work.write(i); check(perform()); }
   const session = new Session();
   session.connect();
   const post = (command, params = {}) => new Promise((resolve, reject) => {
@@ -174,10 +280,10 @@ async function profile(name, method, mutation) {
     let profileCalls = 0;
     const started = performance.now();
     do {
-      for (let i = 0; i < 256; i++) { work.write(profileCalls++); result = work.evaluate(); }
+      for (let i = 0; i < 256; i++) { if (phase !== 'boxing') work.write(profileCalls); profileCalls++; result = perform(); }
     } while (performance.now() - started < profileMs);
     const { profile: cpu } = await post('Profiler.stop');
-    work.check(result);
+    check(result);
     const nodes = new Map(cpu.nodes.map((node) => [node.id, node]));
     const hits = new Map();
     for (const id of cpu.samples ?? []) hits.set(id, (hits.get(id) ?? 0) + 1);
@@ -197,9 +303,9 @@ async function profile(name, method, mutation) {
       includeObjectsCollectedByMajorGC: true,
       includeObjectsCollectedByMinorGC: true,
     });
-    for (let i = 0; i < 1000; i++) { work.write(i); result = work.evaluate(); }
+    for (let i = 0; i < 1000; i++) { if (phase !== 'boxing') work.write(i); result = perform(); }
     const { profile: heap } = await post('HeapProfiler.stopSampling');
-    work.check(result);
+    check(result);
     const allocations = [];
     const walk = (node, path) => {
       const next = [...path, node.callFrame.functionName || '(anonymous)'];
@@ -216,18 +322,26 @@ async function profile(name, method, mutation) {
     }
     return { profileCalls, profileMs, cpuSamples: cpu.samples?.length ?? 0, cpuSelf, cpuNodes: cpu.nodes, cpuSampleIds: cpu.samples,
       allocationSamples: heap.samples.length, allocationBytesPerCall: allocations.reduce((sum, x) => sum + x.bytes, 0) / 1000,
-      allocationSelf: [...allocatedByFunction.values()].sort((a, b) => b.bytes - a.bytes).slice(0, 30), allocationPaths: allocations.slice(0, 30), includesAssignment: mutation !== 'unchanged' };
+      allocationSelf: [...allocatedByFunction.values()].sort((a, b) => b.bytes - a.bytes).slice(0, 30), allocationPaths: allocations.slice(0, 30), includesAssignment: phase === 'evaluate' && mutation !== 'unchanged' };
   } finally {
     session.disconnect();
   }
 }
 
 const metadata = {
-  root, entry, entrySha256: createHash('sha256').update(readFileSync(`${root}/${entry}`)).digest('hex'),
+  root, entry, only, profilePhase: mode === 'profile' ? process.env.PROFILE_PHASE ?? 'evaluate' : null,
+  harnessSha256: createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'),
+  sourceDiffSha256: createHash('sha256').update(execFileSync('git', ['-C', root, 'diff', 'HEAD', '--', 'src'], { maxBuffer: 64 * 1024 * 1024 })).digest('hex'), entrySha256: createHash('sha256').update(readFileSync(`${root}/${entry}`)).digest('hex'),
   execArgv: process.execArgv, nodeOptions: process.env.NODE_OPTIONS ?? null, mode, runs, iterations, node: process.version, precision: 'machine', jit: 'off',
   commit: execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   trackedDiffSha256: createHash('sha256').update(execFileSync('git', ['-C', root, 'diff', 'HEAD'], {maxBuffer: 64 * 1024 * 1024})).digest('hex'),
 };
+if (entry.startsWith('dist/boxing-')) {
+  const manifest = JSON.parse(readFileSync(`${root}/${entry}.manifest.json`, 'utf8'));
+  for (const key of ['entrySha256', 'commit', 'sourceDiffSha256']) assert.equal(manifest[key], metadata[key], `Stale bundle: ${key}`);
+  assert.equal(manifest.root, realpathSync(root));
+  assert.equal(manifest.counted, mode === 'construction');
+}
 console.log(JSON.stringify({ metadata }));
 // The timer control includes two clock reads, matching each evaluation sample.
 if (mode === 'timing') {
@@ -240,6 +354,12 @@ const ids = Object.keys(formulas).flatMap((name) =>
     ['unchanged', 'relevant', 'unrelated'].map((mutation) => `${name}/${method}/${mutation}`)
   )
 );
+if (mode === 'boxing-cost') {
+  assert(only === undefined, 'ONLY does not apply to boxing-cost mode');
+  console.log(JSON.stringify(await boxingCost()));
+  process.exit(0);
+}
+if (mode === 'profile' && process.env.PROFILE_PHASE === 'boxing') assert(only?.length && only.every((id) => id.endsWith('/exact/unchanged')), 'Boxing profiles require ONLY exact/unchanged cases');
 if (only) assert(only.length > 0 && only.every((id) => ids.includes(id)), 'Unknown or empty ONLY selector');
 for (const name of Object.keys(formulas)) {
   for (const method of ['exact', 'numeric']) {
@@ -247,7 +367,7 @@ for (const name of Object.keys(formulas)) {
       const id = `${name}/${method}/${mutation}`;
       if (only && !only.includes(id)) continue;
       const result = mode === 'timing' ? await timing(name, method, mutation) :
-        mode === 'counts' ? counts(name, method, mutation) : await profile(name, method, mutation);
+        mode === 'counts' ? counts(name, method, mutation) : mode === 'construction' ? construction(name, method, mutation) : await profile(name, method, mutation);
       console.log(JSON.stringify({ id, ...result }));
     }
   }

@@ -1249,3 +1249,112 @@ retain its mathematical controls, and show allocation and first/warm results.
 Do not accept source-loader-only gains. Report context/dependency unification
 separately from reduced walks or allocation so a speedup can be attributed.
 No runtime recovery change is included in this profiling task.
+
+
+## 12. Boxing follow-up (2026-11-03)
+
+### 12.1 Scope and method
+
+This compares `17ba3b407` (before `5029c5d77`) with `1cd51b47e`, the
+scalar-profile commit. Later compiler simplification and release commits are
+outside this comparison. The engine sources are unchanged by this experiment.
+Data and provenance are in
+[`boxing-construction-2026-11-03.json`](../../benchmarks/boxing-construction-2026-11-03.json).
+
+The builder produces minified core-only diagnostic bundles using production
+flags, plus a separate instrumented variant. These have a different entry layout
+from the shipped multi-entry bundle; their absolute costs must not be substituted
+for §11's shipped-bundle timings. Instrumented code is never timed. Constructor
+controls require exactly one base and one specific expression construction.
+All 24 exact/numeric and mutation cases retain independent mathematical checks.
+Counts separate first evaluation, warm evaluation, assignment and canonical input
+boxing. Missing count keys mean zero; base/subclass and operator breakdowns overlap.
+Constructor calls are not a measurement of physical allocations after V8 optimization.
+
+Raw construction uses separate call sites and retains 4000 distinct objects per
+batch, with 1000 warmups and seven trials. Three independent processes per revision
+run in before/after/after/before/before/after order. The table gives medians of
+process medians. This retained lifetime differs from ordinary discarded boxing.
+CPU samples use uninstrumented bundles, a requested 250 µs interval, at least
+1.5 seconds and 1000 samples per case. Contended attempts were excluded and
+retried; the archive records the exclusions. All accepted attempts exited zero.
+
+### 12.2 Measured results
+
+| Retained construction | Before | After |
+| --- | ---: | ---: |
+| Raw non-canonical function | 113 ns | 73 ns |
+| Raw number | 74 ns | 71 ns |
+| Canonical multiply-add input boxing | 15.30 µs | 15.48 µs |
+
+Canonical input-boxing trial ranges overlap. Raw constructors show no increase
+under these conditions. Function instances have 47 versus 52 own fields; that
+field count alone does not predict a slowdown. These measurements do not prove
+that every constructor shape, cold path or escaping lifetime costs the same.
+
+Warm construction totals match exactly between revisions in every one of the
+24 cases. Representative counts per evaluation are:
+
+| Flow | Number expressions | Function expressions | Exact numeric values |
+| --- | ---: | ---: | ---: |
+| Multiply-add, exact | 2 | 0 | 5 |
+| Multiply-add, numeric | 3 | 0 | 6 |
+| Rational, exact | 3 | 0 | 7 |
+| Symbolic transcendental, unchanged | 0 | 1 (`Add`) | 2 |
+| Symbolic transcendental, unrelated write | 0 | 3 (`Sin`, `Ln`, `Add`) | 2 |
+
+Multiply-add input boxing separately constructs two function expressions and
+three symbols. It is not work paid by each evaluation of an existing expression.
+The first exact multiply-add evaluation constructs the same two numbers and five
+numeric values, plus one `BoxedType`; the warmed route constructs no `BoxedType`.
+First-call counts are archived separately for every case.
+
+Source maps and AST spans distinguish constructors from methods and accessors.
+On the current revision, expression-constructor self samples are 1.3% of exact
+multiply-add evaluation and 1.2% of rational evaluation. Numeric/type constructor
+self samples add 2.5% and 2.4%; selected canonicalization entry functions add 2.0%
+and 2.4%. Including callees, the union of these boundaries and boxing factories
+is 15.4% and 13.0%. These inclusive figures count each sample once. The remaining
+self time includes arithmetic helpers, dispatch, validation and other work; it
+must not be assigned to constructors merely because their files contain it.
+
+For explicit input boxing, constructors themselves take about 2% of self samples,
+while the inclusive union of boxing/canonicalization boundaries and their callees
+covers about 92–93%. The large inclusive share is a call-path observation, not
+proof that removing the entry function would remove that work. Each profile is
+one accepted run per case/revision, sufficient to locate work, not establish a
+small CPU-share difference between revisions.
+
+Sampled allocated bytes per exact multiply-add evaluation are 15.5 → 14.9 kB;
+input boxing gives 29.9 → 31.7 kB. Rational evaluation gives 18.6 → 16.7 kB,
+and input boxing 51.7 → 55.3 kB. Here kB means 1000 bytes; the archive preserves bytes. Sampling includes collected objects
+and does not measure retained heap. These single allocation profiles do not
+establish a small allocation regression. Retained-memory growth remains unmeasured.
+
+### 12.3 Interpretation and recovery priorities
+
+The evidence does not support increased plain expression-constructor cost or
+more expression constructions as the explanation for the measured scalar drift.
+It also does not exclude changes in canonicalization, binding, numeric helpers,
+or allocation behavior outside the counted constructors. Numeric preboxed flows
+construct no function expressions, so reducing function-instance fields alone
+has little direct recovery potential there.
+
+Keep the priorities in §11.3: reduce measured temporary numeric/array/thunk work
+and first-visit memo bookkeeping, with exact arithmetic and DAG controls. Treat
+an early numeric-fold path as a separate experiment; counts alone do not show
+which intermediates can safely be omitted. For callers that repeatedly submit
+the same MathJSON, construct the expression once and measure subsequent evaluation
+separately. This avoids repeated input canonicalization without adding a cache.
+
+The symbolic unrelated-write penalty now has a concrete reconstruction witness,
+but the same witness exists before the cache changes. Trace why `Sin` and `Ln`
+lose reusable nodes before introducing finer invalidation or cross-evaluation
+result caching. Cache unification remains a maintenance opportunity, with distinct
+lifetimes and dependency guards preserved; this follow-up supplies no new evidence
+that merging cache kinds would recover ordinary numeric arithmetic performance.
+
+A future recovery comparison should retain these constructor controls, separate
+input boxing from evaluation, compare first and warm calls, and measure shipped
+bundles. Include repeated moderate drift across representative flows alongside
+catastrophic-slowdown guards. No runtime optimization or cache redesign is made here.

@@ -649,3 +649,31 @@ The findings and recommendations are in
 [`evaluation-cache-architecture`, section 11](../docs/plans/2026-10-30-evaluation-cache-architecture.md#11-scalar-arithmetic-profile-2026-11-03).
 Accepted observations are in
 [`scalar-arithmetic-2026-11-03.json`](scalar-arithmetic-2026-11-03.json).
+
+
+The boxing follow-up uses diagnostic, core-only bundles. Build both variants with
+`node benchmarks/boxing-build.mjs /tmp/wt`. The uninstrumented bundle is
+`dist/boxing-profile/core.js`; constructor probes are in
+`dist/boxing-counts/core.js`. Build flags match production minification, but the
+entry layout differs from the shipped multi-entry build. Compare like with like.
+
+```sh
+MODE=construction ENTRY=dist/boxing-counts/core.js ITERATIONS=200 node --expose-gc benchmarks/scalar-arithmetic.mjs /tmp/wt
+MODE=boxing-cost ENTRY=dist/boxing-profile/core.js RUNS=7 ITERATIONS=4000 node --expose-gc benchmarks/scalar-arithmetic.mjs /tmp/wt
+MODE=profile PROFILE_PHASE=boxing ENTRY=dist/boxing-profile/core.js ONLY=muladd/exact/unchanged node --expose-gc benchmarks/scalar-arithmetic.mjs /tmp/wt
+```
+
+Construction mode reports first-call counts separately from warm evaluation,
+assignment and input boxing, with exact raw-constructor controls. Counts measure
+constructor invocations, not physical allocations. Base-class counts overlap
+subclass counts; operator breakdowns overlap the function total. Missing keys mean
+zero. Instrumented bundles are refused by timing and profile modes. Bundle
+manifests check the source revision, tracked source diff and entry hash.
+
+Boxing-cost mode retains each batch and verifies distinct instances, using
+separate loops for raw non-canonical function construction, raw number construction
+and canonical input boxing. It measures a different lifetime from the discarded
+input-boxing phase in ordinary timing mode. Boxing CPU profiles accept only exact,
+unchanged selectors; they exclude assignment. Evaluation profiles include it for
+reactive cases. See evaluation-cache architecture §12 and
+`boxing-construction-2026-11-03.json` for the follow-up evidence and limits.
