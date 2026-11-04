@@ -115,6 +115,25 @@
 
 ### Resolved Issues
 
+- **The accumulator of a fold inside a function literal is typed from the
+  seed when the callback body is a block**
+  ([#506](https://github.com/cortex-js/compute-engine/issues/506), reported by
+  [enumeratio](https://github.com/enumeratio)). `Function(Block(Reduce(1..3,
+  (f, v) ↦ Block(If(f = 0 ∧ us[v] = 1, v, f)), 0)), us: list<integer>)` was
+  typed `(us: list<integer>) -> unknown`, and is now typed
+  `(us: list<integer>) -> number`, as it was without the `Block` wrappers. The
+  canonical MathJSON of a function literal has these wrappers, and the
+  compiler rebuilds a fold callback whose accumulator is a list from this
+  MathJSON. So a fold seeded with a list literal, whose callback holds a
+  second fold that reads the accumulator, declined with "does not settle one
+  shape" since 0.176.0. It compiles again: in the example of the issue,
+  `run({ n: 2 })` gives `[0, 0, 0]`, as `evaluate()` does. The cause: while
+  one expression is canonicalized, each raw node is canonicalized once per
+  lexical scope, and the canonical form is used again. The fold refinement
+  canonicalizes the same raw callback once for each accumulator type that
+  it tries, so every try after the first got the body of the first try,
+  where the accumulator is `unknown`. The body of a function literal now has
+  its own memo.
 - **`serializeEpsil` takes linear time in the indentation of its output**
   ([#508](https://github.com/cortex-js/compute-engine/issues/508), contributed
   by [enumeratio](https://github.com/enumeratio)). The formatter trimmed the
@@ -139,6 +158,18 @@
   elements of `[7, 8, 9, 10]` gave 3. The memo of shared nodes and the lazy
   value memo are now neither read nor written inside a type computation
   during a call.
+- **`Trace` of a matrix of free symbols no longer changes the type of the
+  symbols** ([#505](https://github.com/cortex-js/compute-engine/issues/505),
+  reported by [enumeratio](https://github.com/enumeratio)). A regression in
+  0.176.0. Boxing `Trace([[a, b], [c, d]])` gave `a`, `b`, `c` and `d` the
+  type `number | tensor`, the element type of the parameter `tensor`. A cell
+  of that type can be a list, so `[[a, b], [c, d]]` was then typed
+  `list<list<number | tensor>>`, not `matrix<2x2>`, for the rest of the
+  session, and `Trace`, `Determinant` and `Inverse` of it stayed
+  unevaluated. Now a parameter that is a tensor of unknown rank gives no type
+  to the cells of a list literal, as the parameter `matrix | vector` of
+  `MatrixMultiply` does. `Trace([[a, b], [c, d]])` is `a + d`, and
+  `Determinant` and `Inverse` evaluate after it in the same engine.
 
 ## 0.178.0 _2026-11-03_
 

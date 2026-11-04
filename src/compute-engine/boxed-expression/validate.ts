@@ -2756,7 +2756,10 @@ function elementIsBareOrGround(param: Type | undefined): boolean {
  *
  * A union parameter (`collection<nothing | number> | number` at `Median`)
  * distributes the element type of its one arm that admits a list literal,
- * and nothing when several arms admit one. A valueless symbol cell gets the
+ * and nothing when several arms admit one. A tensor parameter of unknown rank
+ * (`tensor`, `tensor<integer>`) distributes nothing: its element type
+ * `T | tensor<T>` admits a list, so a cell of that type would remove the
+ * shape of the literal. A valueless symbol cell gets the
  * element type without its `nothing` member, and a symbol cell that holds a
  * value gets no type (`symbolCellType()`).
  */
@@ -2802,6 +2805,21 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
     });
     return;
   }
+  // A tensor of unknown rank (`tensor`, at `Trace`) has the element type
+  // `number | tensor`: a cell can be a number or a tensor, as for the
+  // parameter `matrix | vector` above. That type requires nothing that the
+  // literal does not already show, and a cell typed `number | tensor` can
+  // be a list, so the literal loses its shape: after `Trace([[a, b], [c,
+  // d]])`, `[[a, b], [c, d]]` was typed `list<list<number | tensor>>`, not
+  // `matrix<2x2>`, and `Trace`, `Determinant` and `Inverse` stayed
+  // unevaluated for the rest of the session. So it distributes nothing.
+  // (GitHub issue #505.)
+  if (
+    typeof resolved === 'object' &&
+    resolved.kind === 'list' &&
+    resolved.dimensions === null
+  )
+    return;
   const element = collectionElementType(param);
   if (element === undefined || element === 'unknown' || element === 'any')
     return;
