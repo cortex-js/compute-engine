@@ -5423,7 +5423,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     // The sole member of the unit type, `nothing`
     Nothing: {
-      description: 'The absence of a value; the sole member of the unit type.',
+      description:
+        'The value of an empty block or of a statement with no value; the sole member of the unit type. A list keeps it as an element.',
       type: 'nothing',
       examples: ['[1, Nothing, 2]'],
     },

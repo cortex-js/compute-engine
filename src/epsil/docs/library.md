@@ -102,7 +102,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `N` | `(any, (integer \| list<number>)?) -> unknown` | N(expr): numerically evaluate an expression |
 | `nSolve` | `NSolve` | `(any, any*) -> list` | NSolve(equation, unknown): the solutions of an equation as floats. |
 | — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
-| `nothing` | `Nothing` | variable `nothing` | The absence of a value; the sole member of the unit type. |
+| `nothing` | `Nothing` | variable `nothing` | The value of an empty block or of a statement with no value; the sole member of the unit type. |
 | `numberFrom` | `NumberFrom` | `(character \| string, base: (character \| integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
 | `numericApproximation` | `NumericApproximation` | `(any) -> unknown` | Numerically evaluate an expression, as the `.N()` method does (engine-internal). |
 | — | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |

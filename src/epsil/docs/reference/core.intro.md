@@ -32,26 +32,26 @@ keeps its MathJSON spelling.
 
 ## Absent values
 
-Four values mark that a value is absent. They do not behave the same way.
+Three values mark that a value is absent. They do not behave the same way.
 
 | Value       | Meaning                                                                   |
 | :---------- | :------------------------------------------------------------------------ |
-| `nothing`   | No value at all. It is removed from argument lists and collection literals. |
+| `nothing`   | The value of an empty block or of a statement with no value. It is kept where it is written. |
 | `missing`   | A position exists, but its value is absent (R `NA`, Julia `missing`).      |
-| `Undefined` | The result is not defined.                                                 |
 | `NaN`       | A number that is not defined (Not a Number).                              |
 
-`nothing` disappears where it is written. `missing` keeps its position, and an
-arithmetic operation on it gives `missing`:
+`nothing` is kept where it is written, and an arithmetic operation on it is a
+type error. `missing` keeps its position, and an arithmetic operation on it
+gives `missing`:
 
 ```epsil
 [12, nothing, 34]
-// ➔ [12, 34]
+// ➔ [12,"Nothing",34]
 ```
 
 ```epsil
-[nothing + 1, missing + 1]
-// ➔ [1, "Missing"]
+[missing + 1, 2]
+// ➔ ["Missing",2]
 ```
 
 `isMissing` is true for `missing` and `NaN`. `Coalesce` returns
