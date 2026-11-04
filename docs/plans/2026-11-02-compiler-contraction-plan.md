@@ -2654,7 +2654,10 @@ on the same commit; staged, not committed).
   `Nothing` only through a literal `Nothing` or a statement value, which
   decline at their own sites, so that option is also sound; it removes the
   new declines above (two `plausible`) and some older ones over `list<any>`
-  sources (which touches the pending decision on row 409 (a)). (2)
+  sources (which touches the pending decision on row 409 (a)).
+  **Decision (user, 2026-11-04): `any` includes `nothing`**, as committed in
+  `faef4d574`; the two `plausible` declines stay, and the explicit-arm
+  option is not taken. (2)
   `predicateResult` keeps its test (corpus witness, Tycho row 339); the
   alternative is the decline. (3) A condition of type `unknown` declines on
   JavaScript; the alternative is to keep the run-time throw for it. (4) One
