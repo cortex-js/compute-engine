@@ -1505,6 +1505,13 @@ depend on a particular call's argument values. Type handlers must not evaluate;
 Type-cache versions exclude activation declarations and frame pops because
 those events do not change the static bindings. Sign, value, effect and other
 evaluation caches still depend on parameter values: their static-view entries
-use distinct keys (`staticViewDiverges`, `_cacheGeneration`, `_effectsOf`), and
-the application memo is bypassed. An application suspended on another stack
+use distinct keys (`staticViewDiverges`, `_cacheGeneration`, `_effectsOf`).
+Three memos are bypassed instead, because their keys do not change inside the
+view: the application memo of function literals, the memo of shared nodes
+(keyed on the frame of the call) and the lazy value memo of `BoxedFunction`
+(keyed on the generation and the lexical scope). A type handler can evaluate a
+node: the type of `self(self, Take(f, Len(f) - 1))` reads whether the `Take` is
+finite, which evaluates `Len(f)` with `f` unbound. An entry stored then would
+be served to the evaluation of the call (GitHub issue #507). An application
+suspended on another stack
 still contributes to the engine's count of active bodies used by this check.

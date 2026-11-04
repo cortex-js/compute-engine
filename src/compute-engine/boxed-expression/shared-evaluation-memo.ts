@@ -55,6 +55,14 @@
  *   nested evaluation, and an unseeded Monte Carlo estimate, pure for the
  *   effects model, draws through its `entropy` handler.
  *
+ * The memo is neither read nor written inside a type computation while a
+ * call of a function literal is in progress (`staticViewDiverges()`,
+ * `static-typing-view.ts`). A type handler can evaluate a node there (the
+ * `isFinite` handler of `Take` evaluates its count), and it reads the static
+ * view of the bindings, where a parameter of the call has no value. The frame
+ * is the frame of the call, so an entry stored there would serve that value
+ * to the evaluation of the call that follows (GitHub issue #507).
+ *
  * A node does not keep its result when the impure count moved while it was
  * evaluated. A node can look pure and still run an impure evaluation: `t =
  * r + 1` where `r` holds the unevaluated `Random()` (`isPure` does not

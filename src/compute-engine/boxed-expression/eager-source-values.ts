@@ -10,6 +10,7 @@ import {
 import { beginStoreGuard } from './store-guard.js';
 import { noteUncachedHostEvaluation } from './shared-evaluation-memo.js';
 import { topLevelEvaluationEpoch } from './evaluation-epoch.js';
+import { staticViewDiverges } from '../static-typing-view.js';
 
 /**
  * The values of eager sources that a finiteness read of a lazy collection
@@ -185,6 +186,15 @@ export function evaluateEagerSource(source: Expression): Expression {
   // evaluation is a `.N()` of a candidate root, and a kept value is served
   // only to a plain `evaluate()` (no numeric approximation), and the memo
   // keeps a factor only after an exact polynomial division confirms it.
+  //
+  // Nothing is kept inside a type computation while a call of a function
+  // literal is in progress (`staticViewDiverges()`, `static-typing-view.ts`).
+  // There a parameter of the call has no value, and the key of a kept value
+  // (the lexical scope, the generation) is the same as in the evaluation of
+  // the call that follows, which would then use the value computed without
+  // the parameter (GitHub issue #507, where the memo of shared nodes did
+  // this). The cost is a second evaluation of the source.
+  if (staticViewDiverges(source.engine)) return value;
   const hostCode = guard.moved('host');
   keepEagerSourceValue(source, value, objectDeps, hostCode);
   if (collecting !== undefined)
@@ -371,6 +381,10 @@ const hostKeptByEngine = new WeakMap<
 export function keptEagerSourceValue(expr: Expression): Expression | undefined {
   if (keptCount === 0 || cacheOff('eagersource')) return undefined;
   const ce = expr.engine;
+  // Inside a type computation while a call is in progress, a parameter has
+  // no value, so a value computed in the call is not the value there: see
+  // `evaluateEagerSource()`.
+  if (staticViewDiverges(ce)) return undefined;
   // Each store is tried in turn: an ordinary entry that is out of date must
   // not hide a valid entry that host code computed for the same source in
   // this evaluation.

@@ -4364,12 +4364,25 @@ export class BoxedFunction
             noteImpureEvaluation(memo);
           }
         }
+        // The memo is neither read nor written inside a type computation
+        // while a call of a function literal is in progress
+        // (`staticViewDiverges()`, `static-typing-view.ts`). There a
+        // parameter of the call has no value, and the frame (`engine.context`)
+        // that keys the memo is the frame of the call. An entry stored there
+        // would serve the value computed without the parameter to the
+        // evaluation of the call that follows. Example: the type of
+        // `self(self, Take(f, Len(f) - 1))` reads whether the `Take` is
+        // finite, which evaluates `Len(f) - 1` with `f` unbound; with a host
+        // `Len` that gives 0 for a symbol, the call then read `-1` from the
+        // memo and took the last element
+        // (`test/compute-engine/static-view-evaluation-memos.test.ts`).
         if (
           evaluatedBefore &&
           !impure &&
           !uncachedHost &&
           this.isCanonical &&
-          memoizableEvaluateOptions(options)
+          memoizableEvaluateOptions(options) &&
+          !staticViewDiverges(engine)
         ) {
           const hit = rememberedEvaluation(memo, engine, this, numeric);
           if (hit !== undefined) {
@@ -4770,6 +4783,18 @@ export class BoxedFunction
     // do (`_atTransientConfiguration`): in a degree-mode engine `Sin(30)` is
     // `1/2`, and inside a radian window it stays `sin(30)`.
     if (this.engine._atTransientConfiguration) return false;
+    // Not inside a type computation while a call of a function literal is in
+    // progress (`staticViewDiverges()`, `static-typing-view.ts`). There a
+    // parameter of the call has no value, and the key of the memo (the
+    // generation and the lexical scope) is the same as in the evaluation of
+    // the call that follows. An entry stored there would serve the value
+    // computed without the parameter to the call. Example: the type of
+    // `self(self, Take(f, Unbox(Len(f)) - 1))` reads whether the `Take` is
+    // finite, which evaluates `Len(f)` with `f` unbound, and a host `Len`
+    // that gives the symbolic `Box(0)` for a symbol would give `Box(0)` again
+    // in the call, where `f` is a list
+    // (`test/compute-engine/static-view-evaluation-memos.test.ts`).
+    if (staticViewDiverges(this.engine)) return false;
     if (!this.isCanonical) return false;
     const def = this.operatorDefinition;
     // A `List` is `lazy`, but its handler evaluates each element, as the
@@ -4844,9 +4869,11 @@ export class BoxedFunction
   ): boolean {
     if ((options?.materialization ?? false) !== false) return false;
     if ((options?.numericApproximation ?? false) !== false) return false;
-    // Not inside a transient configuration window: see the same test in
-    // `_isMemoizableInertEvaluation`.
+    // Not inside a transient configuration window, and not inside a type
+    // computation while a call of a function literal is in progress: see the
+    // same tests in `_isMemoizableInertEvaluation`.
     if (this.engine._atTransientConfiguration) return false;
+    if (staticViewDiverges(this.engine)) return false;
     if (!this.isCanonical) return false;
     const def = this.operatorDefinition;
     if (!def || def.lazy === true) return false;
