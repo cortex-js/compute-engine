@@ -606,24 +606,6 @@ reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
 
-### CE-796. Evaluating a substituted copy of a block writes a run-time type into the scope that the original block shares
-
-**Status:** ready; wrong value, M.
-**Witness:** plausible; with `x: real`, `e = Block(Declare(k, "unknown", Sqrt(x)), k + 1)`: after `e.subs({x: 4}).evaluate()`, the type of `k` in the scope of `e` is `integer` (it was `number`), and `compile(e, {mode: 'complex'})` gives `NaN` at `x = -4`; it should give `1 + 2i`, the interpreter's value.
-
-The copy that `subs` makes shares the local scope of the block with the
-original, and the evaluation of the copy's `Declare` writes the type of the
-run-time value (`2`, an `integer`) into the binding of `k`. The type of `k`
-in `e` is then narrower than its value `√x` admits. A later `e.N()` writes
-`number` again, so the type depends on the order of earlier evaluations.
-Compiled code follows the static type of a local (`localComplexDefault` in
-`src/compute-engine/compilation/compile-complexness.ts`), so it puts `k` on
-the real lane. With a parent (`e + 1`) the compiled value was wrong before
-that rule too, because the analysis of the parent reads the same type. The
-fix is in the engine: a substituted copy gets its own scope, or the
-evaluation of a `Declare` does not narrow the type of an inferred binding.
-Found by the review of CE-793 (2026-11-03).
-
 ### CE-794. A local function declared with `Declare` in a block of a closure branch is not called
 
 **Status:** ready; wrong value, S.

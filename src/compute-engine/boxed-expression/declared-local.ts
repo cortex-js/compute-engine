@@ -76,3 +76,55 @@ export function markOpenLocal(target: object): void {
 export function isOpenLocal(target: object): boolean {
   return OPEN_LOCALS.has(target);
 }
+
+/**
+ * For each block scope, the binding that the canonicalization of the block
+ * made for each of its locals, by name. The first run of the block removes
+ * these bindings from the scope (`sweepCanonicalizationBindings`,
+ * `library/control-structures.ts`), and each run makes its own bindings,
+ * which stay in the scope after the run. The type of the canonical binding
+ * is the static type of the local: the join of the types of its initializer
+ * and of every assignment to it in the block (`joinAssignmentEvidence`,
+ * `library/core.ts`).
+ *
+ * The `Declare` handler reads it (`canonicalLocalType()`) to give the
+ * binding of a run the static type of the local, not the type of the value
+ * of the run. The block scope is shared by every copy of the block (a copy
+ * made by `subs()` keeps the scope), and the compiler reads the type of a
+ * local from the binding in that scope (`localComplexDefault`,
+ * `compilation/compile-complexness.ts`). If the binding of a run took the
+ * type of its value, then with `x: real` and
+ * `e = Block(Declare(k, "unknown", Sqrt(x)), k + 1)`, a run of
+ * `e.subs({x: 4})` would give `k` the type `integer`, and the compiled code
+ * of `e` in the mode `complex` would put `k` on the real lane and give `NaN`
+ * at `x = -4`, where the interpreter gives `1 + 2i`.
+ */
+const CANONICAL_LOCALS = new WeakMap<object, Map<string, object>>();
+
+/**
+ * Record that `def` is the binding that the canonicalization of the block
+ * with the scope `scope` made for the name `name`.
+ */
+export function recordCanonicalLocal(
+  scope: object,
+  name: string,
+  def: object
+): void {
+  let byName = CANONICAL_LOCALS.get(scope);
+  if (byName === undefined) {
+    byName = new Map();
+    CANONICAL_LOCALS.set(scope, byName);
+  }
+  byName.set(name, def);
+}
+
+/**
+ * The binding that `recordCanonicalLocal()` recorded for `name` in the
+ * block scope `scope`, or `undefined`.
+ */
+export function canonicalLocalOf(
+  scope: object,
+  name: string
+): object | undefined {
+  return CANONICAL_LOCALS.get(scope)?.get(name);
+}

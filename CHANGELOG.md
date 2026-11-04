@@ -599,6 +599,16 @@
   whose type is real holds the real part of each value assigned to it, and
   `NaN` for a value that is not real.
 
+- **An evaluation of a block does not change the type of its locals.** A
+  local declared with no type (`Declare(k, "unknown", v)`, `let k = v`) has
+  the type that the canonical form gives it, also after a run of the block.
+  Before, a run gave the local the type of its value in that run, and a copy
+  made by `subs()` shares the locals of the block. With `x: real` and
+  `e = Block(Declare(k, "unknown", Sqrt(x)), k + 1)`, after
+  `e.subs({x: 4}).evaluate()` the type of `k` was `integer`, and `e`
+  compiled in `mode: 'complex'` gave `NaN` at `x = -4`. It now gives
+  `1 + 2i`, the interpreter's value. (CE-796.)
+
 - **The `sgn` of a power with an exponent that is not provably real is
   `undefined`.** A positive base raised to a complex exponent can be any
   non-zero complex number: `ce.parse('2^{\ln(-3)}').sgn` gave `'positive'`,

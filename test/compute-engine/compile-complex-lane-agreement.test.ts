@@ -399,3 +399,41 @@ describe('COMPLEX MODE: a parameter that binds a collection whole keeps its elem
     expect([expected.re, expected.im]).toEqual([2, 4]);
   });
 });
+
+describe('COMPLEX MODE: a run of a block does not change the lane of its locals', () => {
+  // The scope of a block keeps the bindings of its last run, and a copy
+  // made by `subs()` shares that scope. The compiler reads the type of a
+  // block local from that scope. A run of a `Declare` with no declared type
+  // gives the binding the static type of the local (`number`), not the type
+  // of the value of the run (`2`, an `integer`). Otherwise the compiled code
+  // puts `k` on the real lane and gives `NaN` at `x = -4`.
+  test('a substituted copy of the block is evaluated first', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const e = ce.box([
+      'Block',
+      ['Declare', 'k', "'unknown'", ['Sqrt', 'x']],
+      ['Add', 'k', 1],
+    ]);
+    expect(e.subs({ x: 4 }).evaluate().json).toEqual(3);
+    expect(run(e, { x: -4 })).toEqual({ re: 1, im: 2 });
+    const expected = e.subs({ x: -4 }).N();
+    expect([expected.re, expected.im]).toEqual([1, 2]);
+  });
+
+  test('a substituted copy of an expression that holds the block is evaluated first', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const e = ce.box([
+      'Add',
+      [
+        'Block',
+        ['Declare', 'k', "'unknown'", ['Sqrt', 'x']],
+        ['Add', 'k', 1],
+      ],
+      1,
+    ]);
+    expect(e.subs({ x: 4 }).evaluate().json).toEqual(4);
+    expect(run(e, { x: -4 })).toEqual({ re: 2, im: 2 });
+  });
+});

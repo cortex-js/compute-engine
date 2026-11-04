@@ -89,6 +89,7 @@ import {
   type ApplyOptions,
 } from '../function-utils.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
+import { canonicalLocalOf } from '../boxed-expression/declared-local.js';
 import {
   freeAnonymousSlots,
   functionLiteralArity,
@@ -14216,6 +14217,46 @@ function* assignSteps(
 }
 
 /**
+ * The static type of the block local `name` that a `Declare` statement with
+ * no declared type gives the value `value`, when the statement runs in the
+ * scope `scope`, or `undefined` to infer the type from the value.
+ *
+ * The static type is the type of the binding that the canonicalization of
+ * the block made for the local (`canonicalLocalOf()`,
+ * `boxed-expression/declared-local.ts`): the join of the types of the
+ * initializer and of every assignment to the local in the block. The binding
+ * of a run stays in the block scope after the run, and an analysis that
+ * reads the type of the local from that scope (the compiler,
+ * `localComplexDefault`) must read the static type, which does not depend on
+ * the values of earlier runs. With `x: real`,
+ * `Block(Declare(k, "unknown", Sqrt(x)), k + 1)` keeps `k: number` after a
+ * run at `x = 4`, where `k` is `2`.
+ *
+ * `undefined` when there is no such binding (a function body runs in a call
+ * frame, not in the block scope), when its type is `unknown`, when the value
+ * is a function literal (its type is its signature), or when the type of
+ * the value is not a subtype of the static type. In the last case the value
+ * shows that the static type was not sound, and the binding takes the
+ * type of the value.
+ */
+function canonicalLocalType(
+  ce: ComputeEngine,
+  scope: Scope,
+  name: string,
+  value: Expression
+): Type | undefined {
+  if (isFunction(value, 'Function')) return undefined;
+  const canonical = canonicalLocalOf(
+    scopeActivationTemplate(scope) ?? scope,
+    name
+  ) as BoxedDefinition | undefined;
+  if (canonical === undefined || !isValueDef(canonical)) return undefined;
+  const type = canonical.value.type;
+  if (type.isUnknown || !value.type.matches(type)) return undefined;
+  return type.type;
+}
+
+/**
  * The evaluation of `Declare(name, …)`, as a generator that yields the held
  * value operand to evaluate (`OperandSteps`). The stale binding of a
  * previous run stays hidden while the value is evaluated, on both routes.
@@ -14606,7 +14647,17 @@ function* declareSteps(
     } else {
       // Fresh declaration.
       const def: Partial<ValueDefinition> = {};
-      if (hasType) {
+      const staticType =
+        boundHasValue && !(hasType && !ce.type(type!).isUnknown)
+          ? canonicalLocalType(ce, currentScope, symbolName, boundValue!)
+          : undefined;
+      if (staticType !== undefined) {
+        // A local with no declared type gets the static type that the
+        // canonicalization of its block gave it, not the type of the
+        // value of this run (`canonicalLocalType()`).
+        def.type = staticType;
+        def.inferred = true;
+      } else if (hasType) {
         def.type = type;
         // Only ever set it TRUE: `ce.declare` reads a non-empty
         // specifier off the type itself, and an explicit `false` here

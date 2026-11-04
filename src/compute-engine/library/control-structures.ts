@@ -161,6 +161,7 @@ import {
 } from './utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
+import { recordCanonicalLocal } from '../boxed-expression/declared-local.js';
 import { noteScopeDeclaration } from '../scope-declaration-count.js';
 import {
   asyncEvaluationOf,
@@ -3894,6 +3895,11 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
     // argument of a call reads it in the scope of the block
     // (`sweptCallerBinding`, `binders.ts`).
     markSweptBinding(def, template);
+    // A binding with no value is one that the canonicalization made: its
+    // type is the static type of the local, which the `Declare` handler
+    // gives to the binding of each run (`canonicalLocalType()`,
+    // `library/core.ts`).
+    if (isValueless(def)) recordCanonicalLocal(template, name, def);
     // A binding with a value changed what the name resolves to in this
     // scope, so its removal is counted as a declaration of the scope
     // (`noteScopeDeclaration`).
