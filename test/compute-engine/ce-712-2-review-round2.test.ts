@@ -341,7 +341,10 @@ const CASES: [string, Json, string[]][] = [
   // A literal, and a named function whose body reads its parameter, bind
   // each point whole: `Apply(t ↦ 7, P)` is `[7, 7]` and `Map(fl, P)` is
   // `[2, 2]`.
-  ['Apply(t ↦ 7, P)', ['Apply', SEVEN, 'P'], ['javascript', 'python']],
+  // On javascript the call over one point is typed `any`, which admits
+  // `Nothing`, so the map over the points declines
+  // (`assertNoNothingElement()`).
+  ['Apply(t ↦ 7, P)', ['Apply', SEVEN, 'P'], ['python']],
   ['Map(fl, P)', ['Map', 'fl', 'P'], ['javascript']],
   // Points of two widths: the list levels do not settle one shape, so the
   // call declines with `unsettled-shape` (rule R3).

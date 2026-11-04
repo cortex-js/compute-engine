@@ -61,10 +61,10 @@ export function withBoundScope(
  * existing set unchanged (no allocation).
  *
  * The new set records which set it extends and which names it adds
- * (`recordScopeParent`). A fact keyed on a bound-variable set — a loop
- * index whose values the emitted code produces itself — is then still
- * readable from inside a nested binder, while a name that nested binder
- * rebinds stops at its own frame.
+ * (`recordScopeParent`). A fact keyed on a bound-variable set — a scalar
+ * parameter, a variable local — is then still readable from inside a
+ * nested binder, while a name that nested binder rebinds stops at its own
+ * frame.
  */
 export function withBoundNames(
   target: CompileTarget<Expression>,

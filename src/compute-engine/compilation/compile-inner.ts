@@ -1,5 +1,5 @@
 // The inner compilation of a symbol or node: held values, absent inputs, wide
-// results, collection value blocks, and the omission checks on callbacks.
+// results, collection value blocks, and the decline of a possible `Nothing`.
 
 import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
@@ -11,13 +11,11 @@ import type {
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import {
   collectionElementType,
-  functionResult,
   isNonRealNumber,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
 } from '../../common/type/utils.js';
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { boundVariableNames } from '../boxed-expression/binders.js';
 import { presentedValueType } from '../boxed-expression/effects-inference.js';
 import type { Type } from '../../common/type/types.js';
 import {
@@ -26,7 +24,6 @@ import {
   isFunction,
   isAbsentSymbol,
 } from '../boxed-expression/type-guards.js';
-import { functionLiteralBoundNames } from '../boxed-expression/function-literal.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
   isHostOperatorCallback,
@@ -54,16 +51,15 @@ import { liftWideReference } from './compile-lanes.js';
 import { ABSENT_READS } from '../boxed-expression/conditional-value.js';
 import { tryFoldKnownSymbol } from './compile-folded-values.js';
 import { core } from './compiler-core-hooks.js';
-import {
-  blockLocalFunction,
-  userFunctionLiteral,
-} from './compile-assignment-checks.js';
 import { complexDiscipline } from './compile-declarations.js';
 import { PROMOTABLE_RADICAL_HEADS, wideNumericType } from './compiler-mode.js';
 import { containsReturn } from './compile-conditions.js';
 import { CompilerState } from './compiler-state.js';
 import { compilationType } from './compiler-type-facts.js';
-import { isCompileBoundName } from './compiler-names.js';
+import {
+  nothingOperandDecline,
+  possibleNothingDecline,
+} from './diagnostics.js';
 
 /**
  * The refusal for the name of an operator or a function (`List`, `Sqrt`,
@@ -276,13 +272,13 @@ export function compileInnerSymbol(
     resolved === s ||
     target.boundVars?.has(s) === true ||
     target.varsKeys?.has(s) === true;
-  // `Nothing` is the engine's ERASURE marker, not a value: an arithmetic
-  // operand spelled `Nothing` is dropped at canonicalization, and a form
-  // evaluated for effect — a `Loop` that runs to completion without a
-  // `Break`/`Return` value — evaluates to the bare symbol. Reaching this
-  // point means an emitter is about to splice it in as an ordinary
-  // operand, and every target's free-symbol plumbing then produces
-  // something that looks like success: the shader
+  // `Nothing` is the value of an empty block or of a statement with no
+  // value, and compiled code has no representation of it as a value: a
+  // literal `Nothing` outside a statement position (`[1, Nothing]`, a
+  // branch `If(c, Nothing, 7)`) declines. Reaching this point means an
+  // emitter is about to splice it in as an ordinary operand, and without
+  // this decline every target's free-symbol plumbing produced something
+  // that looks like success: the shader
   // targets emitted the undefined identifier `Nothing` (a driver-side
   // compile error behind `success: true`), the Python target the
   // undefined name `Nothing`, and the interval target a `_.Nothing`
@@ -292,10 +288,7 @@ export function compileInnerSymbol(
   // this guard is what the other targets rely on. A BOUND name or a
   // caller `vars` key spelled `Nothing` is a genuine variable and is
   // served above.
-  if (s === 'Nothing' && !isBoundOrMapped)
-    throw new Error(
-      'Could not compile `Nothing`: the erasure marker is not a value, so it cannot be read as a variable.'
-    );
+  if (s === 'Nothing' && !isBoundOrMapped) throw nothingOperandDecline();
   if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
     // The VALUE position, so a declared-complex parameter needs the
     // coercing shim: this reference may end up as `Map`'s callback, which
@@ -640,161 +633,6 @@ export const OMITTING_NUMERIC_AGGREGATES: ReadonlySet<string> = new Set([
   'InterquartileRange',
 ]);
 
-/** Prove a callback cannot return omission when legacy inference says any.
- * This inspects return paths only; it never evaluates a callback or input. */
-export function callbackExcludesNothing(
-  fn: Expression,
-  target?: CompileTarget<Expression>
-): boolean {
-  // Without the target's local-function table a name could resolve to a
-  // global definition even though the compiled stream uses a local shadow.
-  if (target === undefined) return false;
-  const active = new Set<Expression>();
-  const shields: ReadonlySet<string>[] = [];
-  const isBound = (name: string) =>
-    target.varsKeys?.has(name) === true ||
-    target.foldExcludedOps?.has(name) === true ||
-    shields.some((scope) => scope.has(name));
-  const returnsSafe = (x: Expression): boolean => {
-    if (!isFunction(x) || x.operator === 'Function') return true;
-    if (x.operator === 'Return')
-      return x.nops > 0 && result(x.op1) && returnsSafe(x.op1);
-    return x.ops.every(returnsSafe);
-  };
-  const body = (literal: Expression): boolean => {
-    if (!isFunction(literal, 'Function') || active.has(literal)) return false;
-    active.add(literal);
-    const bound = new Set(functionLiteralBoundNames(literal.ops.slice(1)));
-    const collect = (x: Expression): void => {
-      if (!isFunction(x) || x.operator === 'Function') return;
-      // Shield descendants too: this proof does not enter their compilation
-      // scopes, so their locals cannot be resolved through a global name.
-      for (const name of boundVariableNames(x)) bound.add(name);
-      x.ops.forEach(collect);
-    };
-    collect(literal.op1);
-    shields.push(bound);
-    try {
-      return returnsSafe(literal.op1) && result(literal.op1);
-    } finally {
-      active.delete(literal);
-      shields.pop();
-    }
-  };
-  const declaredResultSafe = (name: string): boolean => {
-    const t = functionResult(target.declaredVarTypes?.[name] ?? 'unknown');
-    return t !== undefined && t !== 'unknown' && !isSubtype('nothing', t);
-  };
-  const callable = (x: Expression): boolean => {
-    if (isFunction(x, 'Function')) return body(x);
-    if (!isSymbol(x) || isBound(x.symbol)) return false;
-    const local = target ? blockLocalFunction(x.symbol, target) : undefined;
-    if (local !== undefined) {
-      if (local !== null) return body(local);
-      // The value of a rebound local is known only at run time, so no
-      // literal shows its return paths (its use declines in
-      // `assertNoFunctionValue()`).
-      if (target.reboundFunctions?.has(x.symbol)) return false;
-      return declaredResultSafe(x.symbol);
-    }
-    // A known local literal is inspectable; other enclosing bindings must
-    // never fall through to a global function with the same spelling.
-    if (isCompileBoundName(x.symbol)) return declaredResultSafe(x.symbol);
-    const own = x.valueDefinition?.value;
-    if (own !== undefined && isFunction(own, 'Function')) return body(own);
-    const literal = userFunctionLiteral(x.engine, x.symbol);
-    if (literal) return body(literal);
-    const declared = x.engine.lookupDefinition(x.symbol);
-    const t =
-      declared && isOperatorDef(declared)
-        ? declared.operator.inferredSignature
-          ? undefined
-          : functionResult(declared.operator.signature.type)
-        : x.valueDefinition?.inferredType === true
-          ? undefined
-          : functionResult(x.type.type);
-    return t !== undefined && t !== 'unknown' && !isSubtype('nothing', t);
-  };
-  const result = (x: Expression): boolean => {
-    if (isFunction(x)) {
-      if (x.operator === 'Function') return true;
-      if (x.operator === 'If') return x.ops.slice(1).every(result);
-      if (x.operator === 'Which')
-        return x.ops.filter((_, i) => i % 2 === 1).every(result);
-      if (x.operator === 'Block')
-        return x.nops > 0 && result(x.ops[x.nops - 1]);
-      if (x.operator === 'Return') return x.nops > 0 && result(x.op1);
-      if (x.operator === 'Apply') return callable(x.op1);
-      if (['N', 'NumericApproximation'].includes(x.operator))
-        return x.nops > 0 && result(x.op1);
-      if (isBound(x.operator)) return false;
-      const local = target ? blockLocalFunction(x.operator, target) : undefined;
-      if (local !== undefined) return local !== null && body(local);
-      if (isCompileBoundName(x.operator)) return false;
-      // The node may call a captured value while the engine has another
-      // function under that name. A different ambient body is no proof
-      // that this callback cannot return an omission.
-      const own =
-        x.valueDefinition?.value ??
-        (x.operatorDefinition as { _lambdaLiteral?: Expression } | undefined)
-          ?._lambdaLiteral;
-      if (own !== undefined && isFunction(own, 'Function')) return body(own);
-      const literal = userFunctionLiteral(x.engine, x.operator);
-      if (literal) return body(literal);
-      if (x.operatorDefinition?.inferredSignature) return false;
-      const declared =
-        x.operatorDefinition &&
-        functionResult(x.operatorDefinition.signature.type);
-      if (
-        declared !== undefined &&
-        declared !== 'unknown' &&
-        !isSubtype('nothing', declared)
-      )
-        return true;
-    }
-    const t = compilationType(x);
-    return t !== 'unknown' && !isSubtype('nothing', t);
-  };
-  return callable(fn);
-}
-
-/**
- * True when `x` reads one element of a collection that cannot hold
- * `Nothing`, and its type is `any` only because the collection declares
- * `any` elements. The reads are `At(xs, i)` with one index, `First`,
- * `Second`, `Third` and `Last`.
- *
- * A bare family or explicit any element can hold a raw omitted position.
- * An element contract excluding Nothing proves that its read cannot be
- * omission; constructor syntax alone cannot prove that for compiled inputs.
- */
-export function isElementReadWithoutNothing(x: Expression): boolean {
-  if (!isFunction(x)) return false;
-  if (x.operator === 'At') {
-    if (x.nops !== 2) return false;
-  } else if (!['First', 'Second', 'Third', 'Last'].includes(x.operator))
-    return false;
-  if (resolveTypeForCompilation(compilationType(x)) !== 'any') return false;
-  const baseExcludesNothing = (type: Type, depth: number): boolean => {
-    if (depth > 8) return false;
-    const t = resolveTypeForCompilation(type);
-    if (typeof t === 'string')
-      return t === 'string' || t === 'range' || t === 'missing';
-    if (t.kind === 'union')
-      return t.types.every((arm) => baseExcludesNothing(arm, depth + 1));
-    if (t.kind === 'tuple')
-      return t.elements.every((slot) => !isSubtype('nothing', slot.type));
-    // Keyed iteration yields entry tuples, but At reads the field value.
-    // Neither an unrestricted dictionary nor an open record proves that
-    // every readable value excludes Nothing.
-    if (t.kind === 'dictionary') return !isSubtype('nothing', t.values);
-    if (t.kind === 'record') return false;
-    const element = collectionElementType(t);
-    return element !== undefined && !isSubtype('nothing', element);
-  };
-  return x.op1 !== undefined && baseExcludesNothing(compilationType(x.op1), 0);
-}
-
 /**
  * Refuse a broadcastable head with an operand that is a read PROVED to
  * find no row or point (`provedAbsentDomainOf()`): `At(M, 7) + 1` for a
@@ -824,146 +662,134 @@ export function assertNoProvedAbsentObjectOperand(
   }
 }
 
-/** Reject omission-sensitive collections until targets can preserve Nothing. */
-export function assertCollectionOmissionSupported(
+/**
+ * Decline an expression whose value can hold `Nothing` as an element or a
+ * coordinate. `Nothing` is a value only of an empty block or of a statement
+ * with no value, and the interpreter keeps it as an element where it
+ * appears, but compiled code has no representation of it as an element.
+ * The test reads only static types, and it adds no analysis to show that a
+ * value cannot be `Nothing`:
+ *
+ * - a `Tuple` declines when the type of a coordinate, or a slot of the type
+ *   of the tuple, admits `nothing`;
+ * - a collection operation that reads elements one by one (an aggregate in
+ *   `OMITTING_NUMERIC_AGGREGATES`, `Map`, `Tabulate`, `Scan`, `Zip`,
+ *   `Filter`, `Count` with a predicate, a `Reduce` by `Multiply`, and the
+ *   paired statistics) declines when the element type of a source
+ *   collection admits `nothing`, and `Map`, `Tabulate` and `Scan` also when
+ *   the element type of their own result admits it. The result type of
+ *   `Map` holds the result type of its callback, so a callback whose result
+ *   type has a `nothing` arm declines.
+ *
+ * A type admits `nothing` when it states so (`provablyAdmits()`): `any`
+ * does, `unknown` does not. The decline has the code `'possible-nothing'`
+ * (`possibleNothingDecline()`), and the interpreter evaluates the
+ * expression.
+ */
+export function assertNoNothingElement(
   h: string,
   args: ReadonlyArray<Expression>,
-  node?: Expression,
-  target?: CompileTarget<Expression>
+  node?: Expression
 ): void {
-  const tupleType = h === 'Tuple' && node ? compilationType(node) : undefined;
-  // A coordinate that reads an element of a collection that cannot hold
-  // `Nothing` is not an omission, although its type `any` admits
-  // `nothing` (`isElementReadWithoutNothing`). The slot `i` of the
-  // tuple's own type is the type of the coordinate `i` when the two have
-  // the same length.
-  const readsNoNothing = (i: number): boolean =>
-    args[i] !== undefined && isElementReadWithoutNothing(args[i]);
-  if (
-    h === 'Tuple' &&
-    (args.some(
-      (x, i) =>
-        provablyAdmits('nothing', compilationType(x)) && !readsNoNothing(i)
-    ) ||
+  if (h === 'Tuple') {
+    const tupleType = node ? compilationType(node) : undefined;
+    if (
+      args.some((x) => provablyAdmits('nothing', compilationType(x))) ||
       (typeof tupleType === 'object' &&
         tupleType.kind === 'tuple' &&
-        tupleType.elements.some(
-          (x, i) =>
-            provablyAdmits('nothing', x.type) &&
-            !(tupleType.elements.length === args.length && readsNoNothing(i))
-        )))
-  )
-    throw new Error(
-      'Could not compile `Tuple`: possible Nothing coordinates require a distinct omission representation.'
-    );
-  // Current targets cannot distinguish an omitted element from a missing
-  // datum. Do not invoke callbacks or compact paired columns independently.
+        tupleType.elements.some((x) => provablyAdmits('nothing', x.type)))
+    )
+      throw possibleNothingDecline(
+        '`Tuple`',
+        'a coordinate can be `Nothing`'
+      );
+    return;
+  }
   const selects =
     h === 'Filter' ||
     (h === 'Count' && args.length === 2 && args[1].isFunction === true);
   // Product(collection) canonicalizes to a built-in multiplication fold.
   const rawProducer = h === 'Tabulate' || h === 'Scan';
-  const callbackIndex = h === 'Scan' ? 1 : 0;
   const numericFold = h === 'Reduce' && isSymbol(args[1], 'Multiply');
   const aggregate = OMITTING_NUMERIC_AGGREGATES.has(h);
   const paired =
     h === 'Covariance' || h === 'PopulationCovariance' || h === 'Correlation';
   if (
-    aggregate ||
-    numericFold ||
-    h === 'Map' ||
-    rawProducer ||
-    h === 'Zip' ||
-    selects ||
-    paired
-  ) {
-    // Limits/Element clauses are binding syntax, not collection operands.
-    // This audit checks the body; it does not inspect an Element domain
-    // for raw Nothing positions (see the deferred compiler audit in ROADMAP).
-    const iteratorFold = (h === 'Sum' || h === 'Product') && args.length > 1;
-    const sources = iteratorFold
-      ? args.slice(0, 1)
-      : h === 'Tabulate'
-        ? []
-        : h === 'Map'
-          ? args.slice(1)
-          : selects || numericFold || h === 'Scan'
-            ? args.slice(0, 1)
-            : args;
-    const pairMayOmit = (
-      type: Type,
-      seen: ReadonlySet<Type> = new Set()
-    ): boolean => {
-      const t = resolveTypeForCompilation(type);
-      if (seen.has(t)) return false;
-      if (provablyAdmits('nothing', t)) return true;
-      if (typeof t !== 'object') return false;
-      if (t.kind === 'tuple')
-        return t.elements.some((e) => provablyAdmits('nothing', e.type));
-      if (t.kind === 'union') {
-        const next = new Set(seen).add(t);
-        return t.types.some((arm) => pairMayOmit(arm, next));
-      }
-      return false;
-    };
-    const collectionMayOmit = (
-      type: Type,
-      paired: boolean,
-      seen: ReadonlySet<Type> = new Set()
-    ): boolean => {
-      const t = resolveTypeForCompilation(type);
-      if (seen.has(t)) return false;
-      if (typeof t === 'object' && t.kind === 'union') {
-        const next = new Set(seen).add(t);
-        return t.types.some((arm) => collectionMayOmit(arm, paired, next));
-      }
-      // Joining tuple slot types can absorb nothing, so inspect each slot
-      // before asking for the collection's common element type.
-      if (
-        typeof t === 'object' &&
-        t.kind === 'tuple' &&
-        t.elements.some((slot) => provablyAdmits('nothing', slot.type))
-      )
-        return true;
-      const element = collectionElementType(t);
-      return (
-        element !== undefined &&
-        (provablyAdmits('nothing', element) ||
-          (paired && pairMayOmit(element)) ||
-          (h === 'Tabulate' &&
-            collectionMayOmit(element, false, new Set(seen).add(t))))
-      );
-    };
-    const hasOmission = sources.some((source) =>
-      collectionMayOmit(compilationType(source), paired && args.length === 1)
-    );
-    const callbackResult =
-      (h === 'Map' || rawProducer) && isSymbol(args[callbackIndex])
-        ? functionResult(
-            target?.declaredVarTypes?.[args[callbackIndex].symbol] ??
-              compilationType(args[callbackIndex])
-          )
-        : undefined;
-    if (
-      hasOmission ||
-      ((h === 'Map' || rawProducer) &&
-        node !== undefined &&
-        (collectionMayOmit(compilationType(node), false) ||
-          // A runtime callable's own contract takes precedence over any
-          // result inference that looked up a global with the same name.
-          (isSymbol(args[callbackIndex]) &&
-            isCompileBoundName(args[callbackIndex].symbol) &&
-            (target?.reboundFunctions?.has(args[callbackIndex].symbol) ===
-              true ||
-              callbackResult === undefined ||
-              callbackResult === 'unknown' ||
-              provablyAdmits('nothing', callbackResult)))) &&
-        !callbackExcludesNothing(args[callbackIndex], target))
+    !(
+      aggregate ||
+      numericFold ||
+      h === 'Map' ||
+      rawProducer ||
+      h === 'Zip' ||
+      selects ||
+      paired
     )
-      throw new Error(
-        `Could not compile \`${h}\`: possible 'Nothing' elements require a distinct omission representation.`
-      );
-  }
+  )
+    return;
+  // Limits/Element clauses are binding syntax, not collection operands.
+  const iteratorFold = (h === 'Sum' || h === 'Product') && args.length > 1;
+  const sources = iteratorFold
+    ? args.slice(0, 1)
+    : h === 'Tabulate'
+      ? []
+      : h === 'Map'
+        ? args.slice(1)
+        : selects || numericFold || h === 'Scan'
+          ? args.slice(0, 1)
+          : args;
+  const pairMayHoldNothing = (
+    type: Type,
+    seen: ReadonlySet<Type> = new Set()
+  ): boolean => {
+    const t = resolveTypeForCompilation(type);
+    if (seen.has(t)) return false;
+    if (provablyAdmits('nothing', t)) return true;
+    if (typeof t !== 'object') return false;
+    if (t.kind === 'tuple')
+      return t.elements.some((e) => provablyAdmits('nothing', e.type));
+    if (t.kind === 'union') {
+      const next = new Set(seen).add(t);
+      return t.types.some((arm) => pairMayHoldNothing(arm, next));
+    }
+    return false;
+  };
+  const elementMayBeNothing = (
+    type: Type,
+    paired: boolean,
+    seen: ReadonlySet<Type> = new Set()
+  ): boolean => {
+    const t = resolveTypeForCompilation(type);
+    if (seen.has(t)) return false;
+    if (typeof t === 'object' && t.kind === 'union') {
+      const next = new Set(seen).add(t);
+      return t.types.some((arm) => elementMayBeNothing(arm, paired, next));
+    }
+    // Joining tuple slot types can absorb nothing, so inspect each slot
+    // before asking for the collection's common element type.
+    if (
+      typeof t === 'object' &&
+      t.kind === 'tuple' &&
+      t.elements.some((slot) => provablyAdmits('nothing', slot.type))
+    )
+      return true;
+    const element = collectionElementType(t);
+    return (
+      element !== undefined &&
+      (provablyAdmits('nothing', element) ||
+        (paired && pairMayHoldNothing(element)) ||
+        (h === 'Tabulate' &&
+          elementMayBeNothing(element, false, new Set(seen).add(t))))
+    );
+  };
+  if (
+    sources.some((source) =>
+      elementMayBeNothing(compilationType(source), paired && args.length === 1)
+    ) ||
+    ((h === 'Map' || rawProducer) &&
+      node !== undefined &&
+      elementMayBeNothing(compilationType(node), false))
+  )
+    throw possibleNothingDecline(`\`${h}\``, 'an element can be `Nothing`');
 }
 
 /**

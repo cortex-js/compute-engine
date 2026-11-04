@@ -2,9 +2,7 @@
 
 import type { Expression } from '../global-types.js';
 import {
-  clearDecidedLoopIndices,
   clearIntegerRanges,
-  recordDecidedLoopIndex,
   recordIntegerRange,
 } from './javascript-value-facts.js';
 import { javascriptStatements } from './javascript-statements.js';
@@ -707,25 +705,6 @@ export function compileElementLoops(
           Math.min(lo.re, hi.re),
           Math.max(lo.re, hi.re)
         );
-      // Whatever the UPPER bound is, both loop shapes this clause can take
-      // bind the name to `start + step · counter` with `counter` a whole
-      // number the emitted loop produces itself (`compileCountedRange` and
-      // `compileRangeIterable` agree on that element rule). So a finite
-      // literal start and step make every value the name ever holds a
-      // finite number — never NaN, never the `undefined` an absent caller
-      // variable reads as. A CALLER-MAPPED source is
-      // excluded: the emitted loop then iterates the caller's own code
-      // instead of the range.
-      if (
-        isNumber(lo) &&
-        !lo.isComplex &&
-        Number.isFinite(lo.re) &&
-        (step === undefined ||
-          (isNumber(step) && !step.isComplex && Number.isFinite(step.re))) &&
-        target.cse?.harvestOptions !== undefined &&
-        !isCallerMapped(range, target.cse.harvestOptions)
-      )
-        recordDecidedLoopIndex(bodyTarget, binder.names[0]);
     }
   }
 
@@ -789,7 +768,6 @@ export function emitElementLoops(
   } finally {
     // Source expressions run outside their own iteration binding.
     clearIntegerRanges(bodyTarget);
-    clearDecidedLoopIndices(bodyTarget);
   }
   for (let i = narrowedElements.length - 1; i >= 0; i--) {
     const elem = narrowedElements[i];

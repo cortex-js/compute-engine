@@ -2365,7 +2365,10 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     expectInvalid(ce, json);
   });
 
-  test('a condition of type unknown whose branches agree', () => {
+  // Compiled code does not test the value of a condition at run time, so a
+  // condition whose static type admits a value that is not a boolean
+  // (`unknown` here) declines (`assertBooleanOrAbsentCondition()`).
+  test('a condition of type unknown whose branches agree declines', () => {
     const ce = engine();
     ce.declare('b', 'boolean');
     const json: MathJsonExpression = [
@@ -2382,10 +2385,10 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ],
       'b',
     ];
-    const r = compile(ce.box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ b: true })).toBe(10);
-    expect(r.run!({ b: false })).toBe(6);
+    const r = compile(ce.box(json));
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.error).toMatch(/the condition can be a value that is not a boolean/);
   });
 });
 

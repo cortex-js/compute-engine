@@ -2,7 +2,6 @@
 // strings, numeric lists, points, tuples, collections and their shapes.
 
 import type { Expression } from '../global-types.js';
-import { isDecidedLoopIndex } from './javascript-value-facts.js';
 import { shapeOfType } from './static-shape.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -47,7 +46,6 @@ import {
   exactDoubleValue,
   exactValueDoubleRoundings,
 } from '../numeric-value/exact-integer-value.js';
-import { CompilerState } from './compiler-state.js';
 import type { SymbolInterface } from '../types-expression.js';
 import { core } from './compiler-core-hooks.js';
 
@@ -1594,32 +1592,6 @@ export function hasBroadcastableCoordinate(t: Type): boolean {
   return t.elements.some(
     (e) => typeof e.type !== 'string' && e.type.kind === 'broadcastable'
   );
-}
-
-/**
- * True when `name` is read as an index of an enclosing binder that the
- * compiler controls: a loop index with literal bounds
- * (`isDecidedLoopIndex`), or the index of an unrolled `Sum`/`Product`
- * term, which compiles to its integer value (`_unrolledIndexValues`).
- * Such an index is never `NaN` and never absent.
- */
-export function isCompiledIndex(
-  name: string,
-  target: CompileTarget<Expression> | undefined
-): boolean {
-  if (isDecidedLoopIndex(name, target?.boundVars)) return true;
-  const frames = CompilerState._unrolledIndexValues;
-  for (let i = frames.length - 1; i >= 0; i--) {
-    if (frames[i].masked.has(name)) return false;
-    if (frames[i].values.has(name)) return true;
-  }
-  // A name that the target compiles to a number literal (the index of
-  // an unrolled term, emitted as its value through the target's
-  // variables).
-  if (target === undefined || !CompilerState._boundVarsCtx?.has(name))
-    return false;
-  const code = target.var?.(name);
-  return code !== undefined && Number.isFinite(Number(code));
 }
 
 /** The type-level half of {@link isNominalAtomicArg}: an opaque nominal

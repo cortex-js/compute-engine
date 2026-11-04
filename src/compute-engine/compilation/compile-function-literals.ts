@@ -4,10 +4,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import {
-  recordDecidedLoopIndex,
-  recordScalarParams,
-} from './javascript-value-facts.js';
+import { recordScalarParams } from './javascript-value-facts.js';
 import { javascriptStatements } from './javascript-statements.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isNonRealNumber } from '../../common/type/utils.js';
@@ -207,7 +204,7 @@ export function compileExprFunctionLiteral(
     if (
       node === undefined ||
       (!checkedLiteralApplications.has(node) &&
-        scalarFedLiterals.get(node) === undefined)
+        !scalarFedLiterals.has(node))
     ) {
       const at = expressionParameterReadAt(
         node ?? engine.function('Function', [...args])
@@ -338,12 +335,9 @@ export function compileExprFunctionLiteral(
     // run-time scalar has said so (`withScalarFedLiteral`). The literal then
     // needs no static map (see below), and its body may read each
     // parameter as a scalar: a nested call of a scalar-parameter function
-    // takes the direct call form. When the values are also finite numbers
-    // by construction (the elements of a range with a finite literal start
-    // and step), a comparison against a parameter needs no NaN or
-    // `undefined` test either, exactly as for an emitted loop index. A
-    // literal with a complex parameter is left as it was, because its
-    // parameters hold `{ re, im }` objects in the body.
+    // takes the direct call form. A literal with a complex parameter is
+    // left as it was, because its parameters hold `{ re, im }` objects in
+    // the body.
     //
     // The claim is about the ARGUMENTS only. A parameter is a binding of its
     // own and the body may reassign it (`q = NaN`, `q = [1, 2]`), and after
@@ -358,8 +352,8 @@ export function compileExprFunctionLiteral(
       !complexParam.some((c) => c) &&
       paramsAreScalar(literal.type.type) &&
       signatureParamsLowerToScalars(literal.type.type)
-        ? scalarFedLiterals.get(node)
-        : undefined;
+        ? scalarFedLiterals.has(node)
+        : false;
     // A literal whose parameters are all scalar, and that no consumer marks
     // as fed with scalars, is applied to one element at a time: the static
     // map below maps it over a list value that its consumer passes, and a
@@ -369,7 +363,7 @@ export function compileExprFunctionLiteral(
     // (`callArgumentMapRank()`), not a decline for an argument of type
     // `unknown`.
     const elementFed =
-      fed === undefined &&
+      !fed &&
       literal !== undefined &&
       params.length > 0 &&
       !complexParam.some((c) => c) &&
@@ -382,14 +376,12 @@ export function compileExprFunctionLiteral(
         new Set(params.filter((name) => name !== '_' && !written.has(name)))
       );
     }
-    if (fed !== undefined) {
+    if (fed) {
       const written = assignedNamesIn(ops[0]);
       const names = new Set(
         params.filter((name) => name !== '_' && !written.has(name))
       );
       recordScalarParams(lambdaTarget, names);
-      if (fed === 'finite')
-        for (const name of names) recordDecidedLoopIndex(lambdaTarget, name);
     }
 
     // A parameter whose complexness comes from the BOUND rather than from its
@@ -646,7 +638,7 @@ export function compileExprFunctionLiteral(
     // argument that could be a collection. So does a literal whose consumer
     // proved that every argument it passes is a scalar (`fed`).
     const ranks =
-      fed === undefined &&
+      !fed &&
       passed !== undefined &&
       params.length > 0 &&
       literal !== undefined &&

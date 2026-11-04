@@ -396,15 +396,13 @@ import {
 } from './compile-operators.js';
 import {
   OMITTING_NUMERIC_AGGREGATES,
-  assertCollectionOmissionSupported,
+  assertNoNothingElement,
   assertHeldValueType,
   assertNoProvedAbsentObjectOperand,
   assertOrderedOperandsAreNumbers,
-  callbackExcludesNothing,
   compileInnerSymbol,
   complexShapedEmission,
   cseParentNode,
-  isElementReadWithoutNothing,
   liftWideResult,
 } from './compile-inner.js';
 import {
@@ -507,7 +505,6 @@ import {
 } from './compile-loops.js';
 import {
   isBooleanBindingType,
-  isCompiledIndex,
   isNominalAtomicType,
 } from './compiler-type-facts.js';
 import {
@@ -1215,12 +1212,9 @@ export class BaseCompiler {
   }
   static readonly compileCollectionValueBlock = compileCollectionValueBlock;
   static readonly OMITTING_NUMERIC_AGGREGATES = OMITTING_NUMERIC_AGGREGATES;
-  static readonly callbackExcludesNothing = callbackExcludesNothing;
-  static readonly isElementReadWithoutNothing = isElementReadWithoutNothing;
   static readonly assertNoProvedAbsentObjectOperand =
     assertNoProvedAbsentObjectOperand;
-  static readonly assertCollectionOmissionSupported =
-    assertCollectionOmissionSupported;
+  static readonly assertNoNothingElement = assertNoNothingElement;
   static readonly assertOrderedOperandsAreNumbers =
     assertOrderedOperandsAreNumbers;
   static get compileExpr() {
@@ -1418,7 +1412,6 @@ export class BaseCompiler {
   static readonly withUnrolledIndexValues = withUnrolledIndexValues;
   static readonly withLoopIndexLowerBound = withLoopIndexLowerBound;
   static readonly _enterUnrolledIndexBinder = _enterUnrolledIndexBinder;
-  static readonly isCompiledIndex = isCompiledIndex;
   static readonly _exitUnrolledIndexBinder = _exitUnrolledIndexBinder;
   static readonly unrolledIndexValueFold = unrolledIndexValueFold;
   static readonly unrolledIndexValuesProveNonNegative =

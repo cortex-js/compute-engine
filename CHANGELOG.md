@@ -55,8 +55,42 @@
   mode promoted to complex. That mode and the `promoted` result field were
   removed in 0.178.0, so nothing read the record. No compiled value
   changes.
+- **`BaseCompiler` static members of the `Nothing` and decidability proofs
+  are removed**: `callbackExcludesNothing`, `isElementReadWithoutNothing`
+  and `isCompiledIndex`. `assertCollectionOmissionSupported` is renamed
+  `assertNoNothingElement`, and takes no `target` argument: it reads only
+  static types. `withScalarFedLiteral` takes no kind argument (its
+  `'finite'` kind gave the same code as `'scalar'`), and
+  `scalarFedLiterals` is a `Set` of the marked literals.
 
 ### Behavior Changes
+
+- **Compilation: a value that can be `Nothing` declines with one
+  diagnostic code, read from static types.** Compiled code has no
+  representation of `Nothing` as a value. A `Tuple` coordinate, an element
+  of a collection operation (`Map`, `Filter`, `Sum`, …), the operand of
+  `IsMissing`, `Coalesce` or `AssertPresent`, a dictionary value and the
+  symbol `Nothing` read as an operand decline with the code
+  `possible-nothing` when their static type admits `nothing` (`any`
+  does). The compiler no longer analyzes the body of a callback to show
+  that it cannot return `Nothing`, so a map whose callback result type is
+  `any` now declines: with `P: list<tuple<real, real>>`, `(u ↦ 7)(P)`
+  declines, where it compiled to `[7, 7, …]`, and so do `Map(h, 1..3)` with
+  a local function `h := k ↦ k + 1`, and `Map(g, P)` with
+  `g := p ↦ Norm(p)`. The interpreter evaluates
+  it. To compile such a map, give the callback a result type with no
+  `nothing` arm. Before, these declines had the generic code
+  `compile-error`.
+- **Compilation to JavaScript: a condition that can be a value other than a
+  boolean declines.** Compiled code no longer tests at run time that the
+  condition of `If`, `Which` or `Boole` is a boolean. When the static
+  type of the condition admits another value (`boolean | integer`,
+  `unknown`), the compilation declines with the code `unsettled-shape`,
+  where the compiled code threw at run time for such a value: with
+  `c: boolean | integer`, `If(c, 1, 2)` and, with an untyped parameter
+  `c`, `(c ↦ If(c, 1, 2))(b)` now decline. The interpreter evaluates them.
+  To compile them, give the condition a boolean type. A condition that can
+  be absent still reads as `false`.
 
 - **Compilation: in the default `strict` mode, a value of type `number`
   must be real.** The compiled code reads a binding typed `number` (an

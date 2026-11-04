@@ -108,23 +108,17 @@ describe('CE-569 — javascript: When over a condition', () => {
     expect(p.run!({ x: 2, y: 1 })).toBe(5);
   });
 
-  it('a condition that is not provably boolean selects nothing, without raising', () => {
+  it('a condition that is not provably boolean declines', () => {
     // `b` is declared `boolean | real`, so it is not provably boolean.
     // The interpreter gives an `Error` for `If(1, 5)`: the condition of an
-    // `If` must be a boolean.
+    // `If` must be a boolean. Compiled code does not test the condition at
+    // run time, so the compilation declines
+    // (`assertBooleanOrAbsentCondition()`).
     const ce = engine();
     expect(ce.box(['If', 1, 5]).evaluate().operator).toBe('Error');
-    const f = js(ce, ['If', 'b', 5]);
-    expect(f.run!({ b: true })).toBe(5);
-    expect(f.run!({ b: false })).toBeNaN();
-    // The same answer as `If(b, 5)`.
-    const g = js(ce, ['If', 'b', 5]);
-    for (const b of [true, false]) {
-      const w = f.run!({ b } as never) as number;
-      const i = g.run!({ b } as never) as number;
-      if (Number.isNaN(i)) expect(w).toBeNaN();
-      else expect(w).toBe(i);
-    }
+    expect(() => js(ce, ['If', 'b', 5])).toThrow(
+      /the condition can be a value that is not a boolean/
+    );
   });
 
   it('a literal list of conditions agrees with the interpreter in each cell', () => {

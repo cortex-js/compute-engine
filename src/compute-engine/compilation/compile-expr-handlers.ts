@@ -91,6 +91,7 @@ import {
 import { tryCompileProtocolDispatch } from './compile-protocol-dispatch.js';
 import { readsAsScalarThroughFreeInputs } from './compile-user-calls.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
+import { possibleNothingDecline } from './diagnostics.js';
 import { multiClauseState } from '../multi-clause.js';
 import { _reservedDeclareNames, assignLValue } from './compile-locals.js';
 import {
@@ -425,9 +426,10 @@ export function compileExprCoalesce(
         .slice(0, -1)
         .some((a) => provablyAdmits('nothing', compilationType(a)))
     )
-      throw new Error(
-        `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' ` +
-          `cannot distinguish a possible 'Nothing' input from an absent datum.`
+      throw possibleNothingDecline(
+        '`Coalesce`',
+        'an operand before the last can be `Nothing`, which is not an ' +
+          'absent value'
       );
     // Test the domain of each operand, not the result: a numeric marker
     // still needs a NaN check when the fallback is a string or a collection.

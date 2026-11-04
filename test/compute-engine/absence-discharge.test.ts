@@ -256,7 +256,8 @@ describe('compiled numeric absence', () => {
       ]) {
         const compiled = compile(expression, { to: 'javascript' });
         expect(compiled.success).toBe(false);
-        expect(compiled.error).toMatch(/cannot distinguish.*Nothing/);
+        expect(compiled.diagnostic?.code).toBe('possible-nothing');
+        expect(compiled.error).toMatch(/can be `Nothing`, which is not an absent value/);
       }
     }
   );

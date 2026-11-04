@@ -88,6 +88,7 @@ import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
 import {
   CompileDeclineError,
+  possibleNothingDecline,
   UNION_DISPATCH_CODE,
   unsettledShapeDecline,
 } from './diagnostics.js';
@@ -312,7 +313,7 @@ import {
   userFunctionLanes,
 } from './compile-definitions.js';
 import {
-  assertCollectionOmissionSupported,
+  assertNoNothingElement,
   assertNoProvedAbsentObjectOperand,
   assertOrderedOperandsAreNumbers,
   compileInnerSymbol,
@@ -3158,14 +3159,12 @@ export function _compileInner(
             `value of the key "${key}" has the type \`${t}\`, which gives ` +
             `it no shape in compiled code. Declare the type of the value.`
         );
-      // The interpreter leaves out an entry whose value is `Nothing`, and
-      // the compiled literal would keep the key, with no value.
+      // The interpreter keeps an entry whose value is `Nothing`, and the
+      // compiled object has no form for that value.
       if (provablyAdmits('nothing', t))
-        throw new Error(
-          `Could not compile the dictionary "${expr.toString()}": the ` +
-            `value of the key "${key}" can be \`Nothing\`, and the ` +
-            `interpreter then leaves out the entry, which the compiled ` +
-            `literal does not do.`
+        throw possibleNothingDecline(
+          `the dictionary "${expr.toString()}"`,
+          `the value of the key "${key}" can be \`Nothing\``
         );
       return [key, compileValueOperand(typed, target, 0)];
     });
@@ -3251,7 +3250,7 @@ export function compileExpr(
   sub = compileExprCapturedBody(engine, h, target, node);
   if (sub !== undefined) return sub;
 
-  assertCollectionOmissionSupported(h, args, node, target);
+  assertNoNothingElement(h, args, node);
   assertNoProvedAbsentObjectOperand(engine, h, args);
 
   // An operation with a value of a value kind, lowered by the kind's
@@ -4016,9 +4015,9 @@ export function compileExpr(
         'Could not compile `IsMissing`: expected exactly one argument'
       );
     if (provablyAdmits('nothing', compilationType(args[0])))
-      throw new Error(
-        `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' ` +
-          `cannot distinguish a possible 'Nothing' input from an absent datum.`
+      throw possibleNothingDecline(
+        '`IsMissing`',
+        'its operand can be `Nothing`, which is not an absent value'
       );
     const axis = absenceAxisForType(args[0].type.type, target, 'IsMissing');
     if (axis.isAbsent === undefined)

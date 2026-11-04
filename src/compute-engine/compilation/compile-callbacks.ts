@@ -2650,40 +2650,35 @@ export function staticMapCallback(
 
 /**
  * The `Function` literals that are being compiled for a consumer which
- * passes them run-time scalars only, and what the consumer proved about
- * those scalars. `'scalar'`: no argument is an array. `'finite'`: every
- * argument is also a finite number, never NaN and never `undefined`.
- * An entry exists only while `withScalarFedLiteral` runs, so the same
- * node compiled in another position is not affected.
+ * passes them run-time scalars only: no argument is an array. An entry
+ * exists only while `withScalarFedLiteral` runs, so the same node compiled
+ * in another position is not affected.
  */
-export const scalarFedLiterals = new Map<Expression, 'scalar' | 'finite'>();
+export const scalarFedLiterals = new Set<Expression>();
 
 /**
  * Run `compile` with `literal` (a `Function` expression) marked as fed
  * run-time scalars only — see `scalarFedLiterals`. The `Function` lowering
  * then emits the bare arrow with no static map, and records its
- * parameters as scalars (and, for `'finite'`, as decided values) for the
- * body. The caller is responsible for the claim: it must pass the
- * resulting function only arguments of the stated kind.
+ * parameters as scalars for the body. The caller is responsible for the
+ * claim: it must pass the resulting function only scalar arguments.
  */
 export function withScalarFedLiteral<T>(
   literal: Expression,
-  kind: 'scalar' | 'finite',
   compile: () => T
 ): T {
-  const map = scalarFedLiterals;
-  const previous = map.get(literal);
-  map.set(literal, kind);
+  const set = scalarFedLiterals;
+  const wasMarked = set.has(literal);
+  set.add(literal);
   try {
     return compile();
   } finally {
-    if (previous === undefined) map.delete(literal);
-    else map.set(literal, previous);
+    if (!wasMarked) set.delete(literal);
   }
 }
 
 /**
- * Mark each of `literals` as fed run-time scalars only (`'scalar'`), as
+ * Mark each of `literals` as fed run-time scalars only, as
  * `withScalarFedLiteral` marks one literal for the time of a callback. The
  * caller runs the returned function when the compilation that needs the
  * marks is done; it restores the marks that were there before.
@@ -2691,14 +2686,12 @@ export function withScalarFedLiteral<T>(
 export function markScalarFedLiterals(
   literals: ReadonlyArray<Expression>
 ): () => void {
-  const map = scalarFedLiterals;
-  const previous = literals.map((literal) => map.get(literal));
-  for (const literal of literals) map.set(literal, 'scalar');
+  const set = scalarFedLiterals;
+  const wasMarked = literals.map((literal) => set.has(literal));
+  for (const literal of literals) set.add(literal);
   return () =>
     literals.forEach((literal, i) => {
-      const kind = previous[i];
-      if (kind === undefined) map.delete(literal);
-      else map.set(literal, kind);
+      if (!wasMarked[i]) set.delete(literal);
     });
 }
 

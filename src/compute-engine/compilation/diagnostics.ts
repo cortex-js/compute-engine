@@ -40,6 +40,51 @@ export const UNSETTLED_SHAPE_CODE = 'unsettled-shape';
 export const UNION_DISPATCH_CODE = 'union-dispatch';
 
 /**
+ * The `code` of the decline of a value that can be `Nothing` where compiled
+ * code needs a value: an element of a collection or a coordinate of a tuple
+ * whose static type admits `nothing` (`assertNoNothingElement()`,
+ * `compile-inner.ts`), the operand of `IsMissing`, `Coalesce` or
+ * `AssertPresent`, the value of an entry of a dictionary literal, and the
+ * symbol `Nothing` read as an operand. `Nothing` is the value of an empty
+ * block or of a statement with no value, and compiled code has no
+ * representation of it as a value.
+ */
+export const POSSIBLE_NOTHING_CODE = 'possible-nothing';
+
+/**
+ * The decline of `subject` (the text after "Could not compile", for example
+ * "`Map`") because a value in it can be `Nothing`. `why` says which value.
+ * The diagnostic has the code `'possible-nothing'` and the kind
+ * `'capability'`.
+ */
+export function possibleNothingDecline(
+  subject: string,
+  why: string
+): CompileDeclineError {
+  return new CompileDeclineError({
+    code: POSSIBLE_NOTHING_CODE,
+    kind: 'capability',
+    message:
+      `Could not compile ${subject}: ${why}, and compiled code has no ` +
+      `representation of \`Nothing\` as a value.`,
+  });
+}
+
+/**
+ * The decline of the symbol `Nothing` read as an operand (`[1, Nothing]`,
+ * `If(c, Nothing, 7)`), with the code `'possible-nothing'`. A name
+ * `Nothing` that a binding or the `vars` option gives a value is a
+ * variable, and does not reach this decline.
+ */
+export function nothingOperandDecline(): CompileDeclineError {
+  return possibleNothingDecline(
+    '`Nothing`',
+    '`Nothing` is the value of an empty block or of a statement with no ' +
+      'value, and it is read here as an operand'
+  );
+}
+
+/**
  * A compile DECLINE carrying a structured `CompileDiagnostic` (see
  * `CompilationResult.diagnostic`). Thrown by the compiler where a plain
  * `Error` would lose the decline's `code`/`kind`; the target's `compile()`

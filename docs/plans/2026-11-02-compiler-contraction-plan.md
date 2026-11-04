@@ -764,7 +764,8 @@ that needs a value gives its ordinary `incompatible-type` error.
   (8) `Slice(xs, Nothing)` → `Nothing` stays: it makes a failed search
   `Slice(xs, RangeOf(xs, needle))` give `Nothing` (user decision of
   2026-08-16, `test/compute-engine/sequence-search.test.ts`). It is a
-  `Nothing` handler against the new rule; the user decides (below).
+  `Nothing` handler against the new rule. Decided 2026-11-04: a failed
+  search gives `Missing` and the handler goes (ROADMAP CE-802).
 - **GitHub issue #355** (the origin of `Indeterminate`): the comment for the
   release is `docs/plans/2026-11-03-issue-355-comment.md`. At the release
   the user runs, in this repo,
@@ -1433,7 +1434,8 @@ code:
   host constant or an Epsil `const` declines at every fill site (the simple
   sound version: a name test of the call site was wrong both ways in
   review), so `f := (k = W0) ↦ k + 1` with `W0` declared `isConstant`
-  compiles `f()` to a decline while the interpreter gives 6.
+  compiles `f()` to a decline while the interpreter gives 6 (decided
+  2026-11-04: compiled code fills it, ROADMAP CE-803).
 - **User decision 2026-11-03** (relayed by compute-engine-24; option B of
   rule 4): a constant symbol is a valid default; the purpose of rule 4 is to
   remove the call-site scoping rule, not to forbid a symbol as a value.
@@ -1636,6 +1638,27 @@ The line counts name the modules; the lines that each step removes are
 measured by the step. A step that finds a corpus expression depending on the
 removed code stops and reports: that expression is a `corpus` witness, and
 the rule for it is decided by the user, not by the implementer.
+
+Row 8 is empty: the decision of 2026-11-02 (options document, page 7) kept
+WGSL, Python and the value kinds, so no feature was dropped by name.
+
+Row 9, user decision 2026-11-04: the host provides the finite proof. On the
+shader targets a guarded call (`sin`, `cos`, `max`, `min`, `clamp`) uses
+the built-in when its argument is proven finite in f32 from the declared
+types and ranges of the inputs and parameters, the number literals and the
+operators of the expression (the bound arithmetic through sums, products,
+small powers, quotients and modulo, and the bounded heads stay); the rules
+that derive facts the host did not state (the proofs of the bodies of user
+functions, the call-site facts, the definition-parameter facts, the
+loop-index facts, the interval bound of `cos`) go. A call whose argument
+is not proven keeps its NaN-safe helper; it does not decline, since Tycho's
+audit of 0.176.0 had 124 shader records in 12 documents with helpers,
+which a decline would turn into corpus witnesses. The measure of the row
+is the count of corpus records that gain a helper (a performance cost the
+user accepted), beside the usual zero changed values and zero new declines.
+The alternative readings, not chosen: remove the proof and the helpers and
+accept an undefined value on overflow (a wrong pixel where the interpreter
+has a hole); keep the full proof (the state before the row).
 
 The result of step 4, row 1 (selection; 2026-11-03, session
 compute-engine-57; base `1359a1279`; committed as `ea4f58fa8`).
@@ -2483,6 +2506,169 @@ staged, not committed; part 2 stopped for a user decision).
   changed by this row. With decision (d) for CE-751, a `number` binding stays
   real, so row 7 can treat a complex value at a `number` binding in
   `strict` as outside the contract.
+
+The result of step 4, row 7 (the error model; 2026-11-04, session
+compute-engine-49; base `0c201d2e95ef73c262a5229881d2389714b1f3a1`; worked
+in `/tmp/wt-compute-engine-49` by one implementer; applied to the main tree
+on the same commit; staged, not committed).
+
+- **The survey and what was removed.**
+  - (a) `Nothing`. Removed: `callbackExcludesNothing()` (the proof that a
+    callback cannot return `Nothing`), `isElementReadWithoutNothing()`, and
+    the test of a callback's result inside
+    `assertCollectionOmissionSupported()`. Kept as one decline:
+    `assertNoNothingElement()` in `compile-inner.ts` (the renamed function;
+    no `target` argument), which reads only static types. It declines a
+    `Tuple` whose coordinate or slot type admits `nothing`, and a
+    collection operation (the same operators as before) whose source or
+    result element type admits it. `any` admits `nothing`, `unknown` does
+    not (`provablyAdmits`). One diagnostic code, `possible-nothing`
+    (`possibleNothingDecline()` and `nothingOperandDecline()` in
+    `diagnostics.ts`), also for the symbol `Nothing` read as an operand,
+    for the operand of the three discharges, and for a dictionary value.
+    Not changed: the declines of a statement used as a value (`loop-value`,
+    `nothing-value`, a block that ends in a `Declare` with no value).
+  - (b) `Indeterminate`. The symbol-table entries of the JavaScript, Python
+    and interval-js targets are removed. `ce.box("Indeterminate")` gives
+    `NaN` before compilation; a non-canonical box reaches the targets and
+    still compiles to `NaN` on the four targets. No other spelling is left in
+    `compilation/`.
+  - (c) Run-time tests. `_SYS.cond` is `c === true`, with no throw. The
+    static check that replaces the throw is
+    `assertBooleanOrAbsentCondition()`, called from `guardCondition()` on the
+    targets that set `assertBoolean` (JavaScript) and from the JavaScript
+    `Boole`: a condition whose type has an arm that is not `boolean`,
+    `missing`, `nan` or `never` (`unknown` counts as such an arm) declines
+    with `unsettled-shape`. Kept: the non-boolean throw of
+    `predicateResult`. The type of a predicate literal is computed without
+    the element type of its source (`c ↦ c[4] == d` over a list of 4-tuples
+    has the type `boolean | list<…>`), and a decline in place of the test
+    made the gasket program of Tycho row 339 decline
+    (`recursive-list-builder-compile.test.ts`), a corpus witness. Kept, not
+    surveyed further: the throw of `_SYS.select` for a condition cell that is
+    not a boolean.
+  - (d) `javascript-value-facts.ts`. Removed: `recordDecidedLoopIndex`,
+    `clearDecidedLoopIndices`, `isDecidedLoopIndex`, with their one reader
+    `isCompiledIndex()` (`compiler-type-facts.ts`) and its three call sites,
+    since only the removed decidedness code read them. Kept, each with the
+    lowering that reads it: `recordIntegerRange` (`canIndexArrayDirectly`,
+    the `At` lowering), `recordScopeParent`/`boundNamesAddedBy` (the parent
+    walk of the scalar and local facts), `recordScalarParams`/`isScalarParam`
+    (the direct call form), `recordVariableLocals`/`isVariableLocal`
+    (`compile-blocks`, GPU indexing), `recordConstructedPointParams`/
+    `provenPointWidth` (the point width), `numericArrayCells` (`At`),
+    `isScalarValue` (the scalar term of `Sum`), `provenScalarPointWidth`
+    (`compiler-core`, `compile-linear-algebra`), `recordBlockScalarLocals`
+    (`compile-blocks`). The `'finite'` kind of `scalarFedLiterals` lost its
+    one reader; the review removed it (`scalarFedLiterals` is a set).
+  - (e) `compile-absence.ts` and `absent-tuple-read.ts`: every export has a
+    reader, so nothing was removed. `absenceAxisForType` (`compiler-core`,
+    `compile-expr-handlers`, `compile-conditionals`), `noBranchValue`
+    (`compile-conditionals`), `absenceKind` (the JavaScript and Python
+    targets, `compile-conditionals`), `isNumericOrVerdictShaped`
+    (`compiler-core`), `nanPointLiteral` and `unmatchedCellLiteral`
+    (`collection-utils`, `javascript-target`, `compile-conditionals`),
+    `isNumericShaped` and `absentDomainIsObject` (inside `compile-absence.ts`
+    only), `tupleSlotReadType` and `absentBaseReadIsNumeric` (the JavaScript
+    and Python targets).
+- **Public API.** Removed `BaseCompiler` statics: `callbackExcludesNothing`,
+  `isElementReadWithoutNothing`, `isCompiledIndex`;
+  `assertCollectionOmissionSupported` is renamed `assertNoNothingElement`
+  and takes no `target`; `withScalarFedLiteral` takes no kind argument and
+  `scalarFedLiterals` is a set. New diagnostic code `possible-nothing`.
+  CHANGELOG `[Unreleased]`: one "Breaking changes" entry, two "Behavior
+  Changes" entries.
+- **Forms that compiled before and decline now** (no corpus record; the
+  measure below): a map whose callback call is typed `any`
+  (`(u ↦ 7)(P)` and `Apply(u ↦ Norm(u), P)` with
+  `P: list<tuple<real, real>>`, crafted); a callback with a parameter
+  declared `any` (`Map((t: any) ↦ 2t, [1, 2])`, crafted); `k(PointList(x,
+  y))` with `k: (unknown) -> number` (crafted); a local function mapped over
+  a range (Epsil `let h = (k) => k + 1; map(h, 1..3)`, whose result type is
+  the bare `list`, `plausible`); `Map(g, P)` with `g := p ↦ Norm(p)`, typed
+  `list<any>` (`plausible?`); a JavaScript condition whose type admits a
+  value that is not a boolean (`If(c, 1, 2)` and `Boole(c)` with
+  `c: boolean | integer`, crafted; an untyped parameter used as a
+  condition, `c ↦ Block(t ≔ 0; If(c, t ≔ 1, t ≔ 2); t)`, `plausible?`).
+  **Forms that declined before and compile now**, because the removed
+  callback-result test was their only decline: a root literal whose
+  parameter has a function type, `(h: function) ↦ Map(h, [1, 2])`,
+  `(h: (real) -> unknown) ↦ …`, and an untyped `h`; the compiled code calls
+  the host's function and gives the interpreter's value. A root literal with
+  `h: (real) -> real` already compiled; `docs/COMPILATION-MODEL.md`,
+  "Function values", now states that the root is the exception to the
+  decline of a function-typed parameter.
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation`
+  90,125 → 89,924 (−201). Source: 18 files, 319 insertions, 541 deletions.
+- **Tests.** No test file deleted, no snapshot changed. Deleted cases: in
+  `map-omission-inference`, the `(real) -> unknown` and `function` cases of
+  "an enclosing parameter" (they compile now), the `build('h')` assertion of
+  the inner-parameter test, the shadowed assertions of the loop test; in
+  `compile-cse`, an untyped `/Nothing/` assertion. Rewritten to expect the
+  new declines: `map-omission-inference`, `compile-admission` (a condition
+  of type `unknown`), `ce-569-when-defects`, `compile.test`,
+  `compile-block-local-function`, `ce-712-2-review-round2`,
+  `compile-python-collection-at-scalar-parameter`, `block-scope-capture` (a
+  range source), `compile-point-untyped-parameter` (`Map(g3, P)`),
+  `compile-complex-point-argument`, `tuple-of-lists-as-point-list`,
+  `function-body-local-assignment` (Epsil). Message or code only:
+  `compile-nothing-fails-closed`, `absence-discharge`, `tycho-item-218`.
+- **The corpus measure** (Tycho frozen at `a34405ae0`, the copy of rows 1 to
+  6, records keyed by MathJSON; tycho-f9 had no session to ask; a new base
+  run on `0c201d2e9`, since #505, #506 and #507 changed compiler code after
+  row 5's run; the base equals row 6's run): candidate before the review and
+  candidate on the final source, each 17,825 compiles, 13,707 keys and
+  77,267 values as in the base; 0 changed values, 0 new throws; declines
+  javascript 47, glsl 44, interval-js 61 in all runs, none new, none gone.
+- **Review**: Claude and Codex, one round. Codex: no finding. Claude: three
+  low findings and one nit, all fixed (three comments that still described
+  the run-time throw of `_SYS.cond`; the boolean and colour cells missing
+  from the list of non-values in `docs/ERROR-MODEL.md` §6; the unused
+  `'finite'` kind, removed; four comment lines not rewrapped). No second
+  round: no finding was `high` or `medium`.
+- **Checks.** In the worktree: typecheck, `oxlint` on the changed files,
+  `check:deps`, 183 targeted test files, `test:core`, `npm run test:python`
+  (49 suites, 2,768 passed), and the full suite on the final source (it
+  found the 9 test failures that the last five test files above fix; the 16
+  changed test files then passed, 1,883 tests). In the main tree, on the
+  review fixes: typecheck, `oxlint`, 21 test files (2,658 passed),
+  `test:core`. The nightly full run at `0c201d2e9` passed (the five-commit
+  limit was reached).
+- **Documents.** `docs/ERROR-MODEL.md` §6: the compiled rule (the one
+  `possible-nothing` decline, the non-values, no run-time test of a value);
+  §7 keeps its paragraphs and gets a dated note (2026-11-04) at its top that
+  names the compiled mechanisms that rows 2 and 7 removed, so that the
+  section stays readable as a dated record. `docs/COMPILATION-MODEL.md`: an
+  R5 item for conditions (with the reason why `predicateResult` stays), the
+  `_SYS.cond` paragraph, the paragraph "A possible `Nothing` element
+  declines", the sentence on an `unknown` condition, the root exception of
+  "Function values", and one known-limitations line (`crafted`: on Python,
+  `If(c, 1, 2)` with `c: boolean | integer` gives `1` at `c = 1`). No page
+  under `~/dev/cortexjs.io/docs/compute-engine/` describes a removed
+  mechanism; `13-guide-compile.md`, "Inputs With No Type and Values With No
+  Settled Shape", does not yet name the code `possible-nothing` or the
+  condition decline (not edited).
+- **Choices, each reversible.** (1) `any` admits `nothing`, as the brief of
+  this row reads "a list that may hold one declines". The alternative is to
+  decline only for an explicit `nothing` arm: compiled code produces
+  `Nothing` only through a literal `Nothing` or a statement value, which
+  decline at their own sites, so that option is also sound; it removes the
+  new declines above (two `plausible`) and some older ones over `list<any>`
+  sources (which touches the pending decision on row 409 (a)). (2)
+  `predicateResult` keeps its test (corpus witness, Tycho row 339); the
+  alternative is the decline. (3) A condition of type `unknown` declines on
+  JavaScript; the alternative is to keep the run-time throw for it. (4) One
+  new code, `possible-nothing`; the alternative was `compile-error`. (5) The
+  decline order is unchanged: the `Nothing` check runs before the lane check
+  of a callback parameter, so `Map(ha, P)` gets the `Nothing` message (both
+  are declines).
+- **What row 8 (the features dropped by name) can rely on.** Row 8 is empty
+  by the decision of 2026-11-02. If a later step drops a target: in
+  `python-target.ts` this row removed only the `Indeterminate` entry of the
+  symbol table; no WGSL or GPU module (`gpu-shader-target.ts`,
+  `wgsl-field-function.ts`, `gpu-*.ts`) changed. The condition decline
+  (`assertBooleanOrAbsentCondition()`) applies only to a target that sets
+  `assertBoolean`; Python and the shader targets do not.
 
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 

@@ -2286,9 +2286,10 @@ function wholeAbsent(absent: unknown): unknown {
  *   or `undefined` when `absent` is a point (`wholeAbsent`).
  *   A condition or a condition cell that is absent (`undefined`, `null` or
  *   `NaN`) is not selected, as `false` is, as in the interpreter;
- * - a scalar condition that is neither boolean nor an array fails closed with
- *   the same message as `_SYS.cond`, so a conditional that is scalar at run
- *   time behaves exactly like the ternary chain it replaced.
+ * - a scalar condition that is neither boolean nor an array fails closed
+ *   with a throw. This check is the runtime's own: `_SYS.cond` no longer
+ *   throws, because the compiler declines a scalar condition whose static
+ *   type admits a value that is not a boolean.
  */
 function select(...clauses: Array<() => unknown>): unknown {
   return selectWith(NaN, clauses);
@@ -4598,14 +4599,13 @@ export const SYS_HELPERS = {
     }
     return Math.pow(x, 1 / n);
   },
-  // The Which/When condition guard. `true` and `false` pass. `undefined`,
-  // `null` and `NaN` (an absent value) read as `false`, as the interpreter
-  // does not select an absent condition. Any other value throws.
-  cond: (c: unknown): boolean => {
-    if (c === true || c === false) return c;
-    if (c === undefined || c === null || c !== c) return false;
-    throw new Error('Condition must evaluate to "True" or "False".');
-  },
+  // The Which/When condition guard of a condition whose static type admits
+  // an absent value. `true` passes, and `false` and an absent value
+  // (`undefined`, `null`, `NaN`) read as `false`, as the interpreter does
+  // not select an absent condition. A condition whose static type admits
+  // another value declines at compile time
+  // (`assertBooleanOrAbsentCondition()`, `compile-conditions.ts`).
+  cond: (c: unknown): boolean => c === true,
   // Element-wise `Which`/`If` selection over a condition that may be a
   // collection at run time — see `select` and `compileJSSelection`.
   select,

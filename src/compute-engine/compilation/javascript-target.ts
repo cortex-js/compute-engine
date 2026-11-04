@@ -52,7 +52,6 @@ import {
   numericArrayCells,
   recordIntegerRange,
   recordScalarParams,
-  recordDecidedLoopIndex,
 } from './javascript-value-facts.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import {
@@ -564,6 +563,7 @@ import {
   type LoopInvariantBinding,
 } from './base-compiler.js';
 import { isDeclaredTopOperand } from './compiler-type-facts.js';
+import { assertBooleanOrAbsentCondition } from './compile-conditions.js';
 import { assertNoDeclaredTopOperands } from './compile-admission.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
@@ -581,6 +581,7 @@ import {
   bigintLaneError,
   CompileDeclineError,
   compileDiagnosticOf,
+  nothingOperandDecline,
   UNSETTLED_SHAPE_CODE,
   unsettledShapeDecline,
 } from './diagnostics.js';
@@ -843,8 +844,6 @@ const JAVASCRIPT_CONSTANTS: Record<string, string> = {
   True: 'true',
   False: 'false',
   NaN: 'Number.NaN',
-  // The exact indeterminate form has only the IEEE `NaN` as a machine value.
-  Indeterminate: 'Number.NaN',
   ImaginaryUnit: '({ re: 0, im: 1 })',
   Half: '0.5',
   MachineEpsilon: 'Number.EPSILON',
@@ -7084,12 +7083,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // --- Core scalar operators ---------------------------------------------
   // Iverson bracket: 1 if the boolean argument is true, 0 if false. A
-  // provably-boolean condition compiles bare; otherwise the `_SYS.cond`
-  // guard rethrows on a non-boolean at runtime (the interpreter stays
-  // symbolic for an undetermined predicate — no numeric equivalent).
+  // provably-boolean condition compiles bare; a condition whose static
+  // type admits an absent value reads it as `false` through the `_SYS.cond`
+  // guard. A condition whose static type admits another value declines
+  // (the interpreter stays symbolic for an undetermined predicate, and
+  // compiled code does not test the value at run time).
   Boole: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Boole`: missing argument');
+    assertBooleanOrAbsentCondition(args[0]);
     const c = compile(args[0]);
     if (BaseCompiler.isBooleanValued(args[0])) return `((${c}) ? 1 : 0)`;
     return `(_SYS.cond(${c}) ? 1 : 0)`;
@@ -7265,7 +7267,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args.slice(1).map((a) => compile(a)),
         compile,
         () =>
-          BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
+          BaseCompiler.withScalarFedLiteral(literal, () =>
             compile(literal)
           ),
         target
@@ -7280,7 +7282,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args.slice(1).map((a) => compile(a)),
         compile,
         () =>
-          BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
+          BaseCompiler.withScalarFedLiteral(literal, () =>
             compile(literal)
           ),
         target
@@ -7297,7 +7299,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       literal.nops === args.length &&
       paramsAreScalar(literal.type.type)
     ) {
-      const arrow = BaseCompiler.withScalarFedLiteral(literal, 'scalar', () =>
+      const arrow = BaseCompiler.withScalarFedLiteral(literal, () =>
         compile(literal)
       );
       return BaseCompiler.emitUserFunctionCall(
@@ -10928,8 +10930,10 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // `Math.sin(_.x)` at every step evaluated it once per iteration; an
       // unrolled body repeated it once per term.
       hoistScalarInvariants: true,
-      // A condition that is neither a boolean nor absent fails closed at
-      // run time (`_SYS.cond`).
+      // `_SYS.cond` reads an absent condition (`undefined`, `null`, `NaN`)
+      // as `false`. A condition whose static type admits another value that
+      // is not a boolean declines before this runs
+      // (`assertBooleanOrAbsentCondition()` in `guardCondition()`).
       assertBoolean: (code) => `_SYS.cond(${code})`,
       // Element-wise `Which`/`If` selection over a collection-valued condition.
       selection: (args, compile, target, compileUnder) =>
@@ -11402,19 +11406,17 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           if (typeof v === 'string' && !opaqueVar(id)) varsObjectRefs.add(id);
           return typeof v === 'string' ? v : JSON.stringify(v);
         }
-        // `Nothing` is the engine's ERASURE marker, not a variable (contrast
-        // `Missing`/`NaN`, which are position-preserving). Reaching here means
-        // some emitter is about to splice it in as an ordinary operand, where
-        // the `_.Nothing` vars-object lookup reads `undefined` at run time and
-        // silently degrades: an indefinite integral's missing bounds made
-        // quadrature "converge" to 0, an unbounded `Sum` bound makes the trip
-        // count NaN so the loop returns its identity. Fail closed instead.
+        // `Nothing` is the value of an empty block or of a statement with no
+        // value, and compiled code has no representation of it as a value.
+        // Reaching here means some emitter is about to splice it in as an
+        // ordinary operand, where the `_.Nothing` vars-object lookup reads
+        // `undefined` at run time and silently degrades: an indefinite
+        // integral's missing bounds made quadrature "converge" to 0, an
+        // unbounded `Sum` bound makes the trip count NaN so the loop returns
+        // its identity. Fail closed instead.
         // (A caller that genuinely pins a variable named `Nothing` in `vars` is
         // served by the lookup above, which runs first.)
-        if (id === 'Nothing')
-          throw new Error(
-            'Could not compile `Nothing`: the erasure marker is not a value, so it cannot be read as a variable.'
-          );
+        if (id === 'Nothing') throw nothingOperandDecline();
         // A library constant whose name a user binding shadows is read as
         // any other symbol (see the symbol branch of `BaseCompiler.compile`).
         const result = JAVASCRIPT_CONSTANTS[id];
@@ -13047,8 +13049,9 @@ function emitLazyStream(
       'Could not compile the collection: it is not lazily compilable'
     );
   const op = expr.operator;
-  // Stream stages bypass compileExpr, so enforce the same omission contract here.
-  BaseCompiler.assertCollectionOmissionSupported(op, expr.ops, expr, target);
+  // Stream stages bypass compileExpr, so decline a possible `Nothing`
+  // element here too.
+  BaseCompiler.assertNoNothingElement(op, expr.ops, expr);
   if (op === 'Range') {
     const step = infiniteRangeStep(expr);
     if (step === undefined)
@@ -13100,12 +13103,7 @@ function lazyStreamElement(
   if (isFunction(expr, 'Map') && expr.nops === 2) {
     const element = rangeElement(expr.ops[1]);
     if (element !== undefined) {
-      BaseCompiler.assertCollectionOmissionSupported(
-        'Map',
-        expr.ops,
-        expr,
-        target
-      );
+      BaseCompiler.assertNoNothingElement('Map', expr.ops, expr);
       return `(${fnArg('Map', expr.ops[0], expr.ops[1], compile)})(${element})`;
     }
   }
@@ -14509,7 +14507,7 @@ function callbackArg(
   }
   // A one-parameter literal fed the elements of a range whose start and step
   // are finite literals receives a finite number at every call. It needs no
-  // static map, and its body needs no NaN test on its parameter.
+  // static map.
   if (
     extraArgTypes.length === 0 &&
     target !== undefined &&
@@ -14517,7 +14515,7 @@ function callbackArg(
     callback.nops === 2 &&
     isFiniteLiteralRange(source, target)
   )
-    return BaseCompiler.withScalarFedLiteral(callback, 'finite', () =>
+    return BaseCompiler.withScalarFedLiteral(callback, () =>
       hoistedCallbackLambda(callback, compile, target)
     );
   // A parameter declared `expression` is checked against the type of the
@@ -14537,9 +14535,8 @@ function callbackArg(
  * construction: its start and its step are finite real literals (a
  * one-operand range starts at 1, and a two-operand range steps by 1 or −1).
  * The upper bound does not matter: element `i` is `start + i × step` for
- * every count the bound gives, and a `NaN` bound gives no elements. The
- * same rule makes an emitted loop index a decided value
- * (`recordDecidedLoopIndex`). A source the caller maps to its own code
+ * every count the bound gives, and a `NaN` bound gives no elements. A
+ * source the caller maps to its own code
  * (`isCallerMapped`) is excluded, because the elements are then the caller's.
  */
 function isFiniteLiteralRange(
@@ -17536,12 +17533,8 @@ function emitSumProduct(
   };
   // The counter is a safe integer at every iteration: the loop starts
   // only when both bounds are (the entry guard below), and steps by 1. So
-  // it is never NaN and never absent (`recordDecidedLoopIndex`): a count
-  // or a comparison that reads it takes no test at each iteration.
-  if (!writesCounter(body)) {
-    recordScalarParams(innerTarget, new Set([index]));
-    recordDecidedLoopIndex(innerTarget, index);
-  }
+  // it is a scalar.
+  if (!writesCounter(body)) recordScalarParams(innerTarget, new Set([index]));
   if (BaseCompiler.isEmissionSkippable([body], indices, target)) {
     // Inspect only a complete numeric spelling, optionally floored by
     // compileBound; a numeric prefix of runtime code is not a constant.

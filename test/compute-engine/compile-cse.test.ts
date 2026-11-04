@@ -1723,12 +1723,6 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
     const mapped = ['Sum', ['Map', 'f', ['List', 1, 2, 3, 4]]];
-    const untyped = engine.box([
-      'Function',
-      ['Add', mapped, mapped],
-      'f',
-    ] as any);
-    expect(() => compile(untyped, { fallback: false })).toThrow(/Nothing/);
     const expr = engine.box([
       'Function',
       ['Add', mapped, mapped],

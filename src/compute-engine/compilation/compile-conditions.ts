@@ -8,6 +8,7 @@ import type {
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import {
   isSymbol,
@@ -31,6 +32,7 @@ import {
 } from './compiler-type-facts.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { core } from './compiler-core-hooks.js';
+import { unsettledShapeDecline } from './diagnostics.js';
 import { isStatementArm } from '../boxed-expression/conditional-value.js';
 
 // `isStatementArm()` is defined beside `restrictionParts()`, which reads a
@@ -550,18 +552,53 @@ export function mayBeCollectionCondition(
 }
 
 /**
+ * Throw the `unsettled-shape` decline when the static type of the
+ * condition `cond` admits a value that is neither a boolean nor absent:
+ * `If(c, 1, 2)` with `c` declared `boolean | integer`, or a condition of
+ * type `unknown`. The interpreter leaves such a conditional unevaluated
+ * for a value that is not a boolean, and compiled code does not test the
+ * value at run time (rule R5 of `docs/COMPILATION-MODEL.md`). An absent
+ * value (a `missing` or `nan` arm) is accepted: it reads as `false`. A
+ * condition whose type cannot be a boolean (`integer`) is already a static
+ * type error, which declines before this test.
+ */
+export function assertBooleanOrAbsentCondition(cond: Expression): void {
+  if (isBooleanValued(cond)) return;
+  const arms = (t: Type): Type[] => {
+    const r = resolveTypeForCompilation(t);
+    return typeof r === 'object' && r.kind === 'union'
+      ? r.types.flatMap(arms)
+      : [r];
+  };
+  const other = arms(compilationType(cond)).some(
+    (arm) =>
+      arm !== 'missing' &&
+      arm !== 'nan' &&
+      arm !== 'never' &&
+      (arm === 'unknown' || !isSubtype(arm, 'boolean'))
+  );
+  if (other)
+    throw unsettledShapeDecline(
+      cond,
+      'the condition can be a value that is not a boolean'
+    );
+}
+
+/**
  * Compile a `Which`/`If` condition, wrapped in the target's boolean guard
- * (`target.assertBoolean`) when it is not provably boolean. The JavaScript
- * guard (`_SYS.cond`) passes `true` and `false`, reads an absent value (`undefined`, `null`,
- * `NaN`) as `false`, as the interpreter does not select an absent
- * condition, and throws for any other value. A provably boolean condition
- * is emitted bare.
+ * (`target.assertBoolean`) when it is not provably boolean. A condition
+ * that can be a value that is neither a boolean nor absent declines
+ * (`assertBooleanOrAbsentCondition()`), so the guard only reads an absent
+ * value: the JavaScript guard (`_SYS.cond`) reads `undefined`, `null`
+ * and `NaN` as `false`, as the interpreter does not select an absent
+ * condition. A provably boolean condition is emitted bare.
  */
 export function guardCondition(
   cond: Expression,
   target: CompileTarget<Expression>
 ): TargetSource {
   assertScalarCondition(cond, target);
+  if (target.assertBoolean) assertBooleanOrAbsentCondition(cond);
   const code = core.compile(cond, target);
   if (target.assertBoolean && !isBooleanValued(cond))
     return target.assertBoolean(code);

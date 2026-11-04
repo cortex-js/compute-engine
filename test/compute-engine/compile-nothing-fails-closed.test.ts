@@ -9,7 +9,8 @@
  * driver-side compile error), Python the undefined name `Nothing`, and the
  * interval target a `_.Nothing` vars-object read that is `undefined` at run
  * time. The refusal now lives on the symbol route all targets share
- * (`BaseCompiler.compile`), so each target declines with the same message.
+ * (`BaseCompiler.compile`), so each target declines with the same message
+ * and the code `possible-nothing`.
  *
  * Found while fixing Tycho item 224 (2026-08-22).
  */
@@ -23,7 +24,7 @@ function compileOn(to: (typeof TARGETS)[number], json: unknown) {
   return compile(ce.box(json as never), { to } as never) as unknown as {
     success: boolean;
     code?: string;
-    diagnostic?: { message?: string };
+    diagnostic?: { code?: string; message?: string };
     error?: string;
   };
 }
@@ -32,8 +33,9 @@ describe('a bare Nothing fails closed on every target', () => {
   test.each(TARGETS)('%s: bare `Nothing` is declined', (to) => {
     const r = compileOn(to, 'Nothing');
     expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('possible-nothing');
     expect(r.diagnostic?.message ?? r.error ?? '').toMatch(
-      /erasure marker is not a value/
+      /read here as an operand/
     );
   });
 

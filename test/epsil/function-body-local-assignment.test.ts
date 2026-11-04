@@ -1085,10 +1085,11 @@ describe('COMPILED CODE AND A LOCAL ASSIGNED IN A BRANCH', () => {
     expect(result.success).toBe(true);
   });
 
-  test('compiles: an assignment in each branch of a condition read by its value', () => {
-    // The condition `c` selects a branch only when it is `true` or `false`.
-    // Any other value runs no branch: the local keeps the value of its
-    // declaration.
+  test('declines: an assignment in each branch of a condition of type unknown', () => {
+    // The parameter `c` has no declared type, so the condition can be a
+    // value that is not a boolean. Compiled JavaScript does not test the
+    // condition at run time, so the compilation declines
+    // (`assertBooleanOrAbsentCondition()`), and the interpreter evaluates it.
     const fn = literal([
       'Block',
       ['Assign', 't', 0],
@@ -1100,9 +1101,9 @@ describe('COMPILED CODE AND A LOCAL ASSIGNED IN A BRANCH', () => {
       ],
       't',
     ]);
-    expect(
-      compile(fn, { to: 'javascript', fallback: false } as never)!.success
-    ).toBe(true);
+    expect(() =>
+      compile(fn, { to: 'javascript', fallback: false } as never)
+    ).toThrow(/the condition can be a value that is not a boolean/);
     expect(fn.engine.box(['Apply', fn, 'True'] as never).evaluate().json).toBe(
       1
     );

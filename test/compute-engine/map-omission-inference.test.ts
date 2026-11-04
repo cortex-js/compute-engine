@@ -55,32 +55,37 @@ describe('Map result-type inference preserves the remaining data contract', () =
   );
 });
 
-describe('compiled Map proves a possible Nothing separately from a broad result type', () => {
-  test.each([[7], [['Multiply', 2, 'u']]])(
-    'a tuple callback returning %j compiles',
-    (body) => {
-      const ce = new ComputeEngine();
-      ce.declare('points', 'list<tuple<real, real>>');
-      const expr = ce.box(['Apply', ['Function', body, 'u'], 'points']);
-      const result = compile(expr);
-      expect(result.success).toBe(true);
-      expect(
-        result.run!({
-          points: [
-            [1, 2],
-            [3, 4],
-          ],
-        })
-      ).toEqual(
-        body === 7
-          ? [7, 7]
-          : [
-              [2, 4],
-              [6, 8],
-            ]
-      );
-    }
-  );
+describe('compiled Map declines a result type that admits Nothing', () => {
+  test('a tuple callback with a tuple result compiles', () => {
+    const ce = new ComputeEngine();
+    ce.declare('points', 'list<tuple<real, real>>');
+    const expr = ce.box(['Apply', ['Function', ['Multiply', 2, 'u'], 'u'], 'points']);
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(
+      result.run!({
+        points: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+  });
+
+  test('a tuple callback whose call over a point is typed `any` declines', () => {
+    // The compiler maps the literal over the points with
+    // `Map(_point ↦ Apply(u ↦ 7, _point), points)`, and the call over one
+    // point has the type `any`, which admits `Nothing`. No analysis of
+    // the body of the callback removes the decline.
+    const ce = new ComputeEngine();
+    ce.declare('points', 'list<tuple<real, real>>');
+    const result = compile(ce.box(['Apply', ['Function', 7, 'u'], 'points']));
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('possible-nothing');
+  });
 
   test.each(
     [
@@ -110,26 +115,23 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
     expect(result.error).toMatch(/Nothing/);
   });
 
-  test.each(['(real) -> any', '(real) -> unknown', 'function'])(
-    'an enclosing %s parameter cannot borrow a global callback proof',
-    (type) => {
-      const ce = new ComputeEngine();
-      ce.assign('h', ce.box(['Function', 7, 'u']));
-      const expr = ce.box([
-        'Function',
-        ['Map', 'h', ['List', 1, 2]],
-        ['Typed', 'h', type],
-      ]);
-      const result = compile(expr);
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/Nothing/);
-      const safe = compile(ce.box(['Map', 'h', ['List', 1, 2]]));
-      expect(safe.success).toBe(true);
-      expect(safe.run!({})).toEqual([7, 7]);
-    }
-  );
+  test('an enclosing `(real) -> any` parameter does not read a global function of the same name', () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.box(['Function', 7, 'u']));
+    const expr = ce.box([
+      'Function',
+      ['Map', 'h', ['List', 1, 2]],
+      ['Typed', 'h', '(real) -> any'],
+    ]);
+    const result = compile(expr);
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('possible-nothing');
+    const safe = compile(ce.box(['Map', 'h', ['List', 1, 2]]));
+    expect(safe.success).toBe(true);
+    expect(safe.run!({})).toEqual([7, 7]);
+  });
 
-  test('an untyped inner parameter shadows an outer callable contract', () => {
+  test('an inner parameter declared with a function type declines', () => {
     const ce = new ComputeEngine();
     const build = (inner: any) =>
       ce.box([
@@ -137,7 +139,6 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
         ['Function', ['Map', 'h', ['List', 1, 2]], inner],
         ['Typed', 'h', '(real) -> real'],
       ]);
-    expect(compile(build('h')).success).toBe(false);
     // A parameter declared with a function type declines in compiled code
     // (`docs/COMPILATION-MODEL.md`, "Function values").
     const typed = compile(build(['Typed', 'h', '(real) -> real']));
@@ -167,7 +168,7 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
   });
 
   test.each([false, true])(
-    'a loop shadows outer callable provenance (mutable: %s)',
+    'a map over a block-local function (mutable: %s)',
     (mutable) => {
       const source =
         'function run(fs: list<function>) { let h = (k) => k + 1; ' +
@@ -179,9 +180,6 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
         expect(diagnostics).toEqual([]);
         return compile(ce.box(resolveLibraryNames(program, src, ce)));
       };
-      const shadowed = build(source);
-      expect(shadowed.success).toBe(false);
-      expect(shadowed.error).toMatch(/Nothing/);
       const captured = build(source.replace('for h in fs', 'for item in fs'));
       // A local function that is assigned twice is a function value stored
       // in a local, which compiled code does not compile
@@ -192,7 +190,7 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
         return;
       }
       expect(captured.success).toBe(true);
-      const run = captured.run!({}) as Function;
+      const run = captured.run!({}) as (fs: unknown[]) => unknown;
       expect(run([() => undefined])).toEqual([[2, 3]]);
     }
   );

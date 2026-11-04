@@ -1001,6 +1001,16 @@ describe('COMPILE a call of a block-local function with a tuple argument', () =>
     test.each(ARGS)(
       'an untyped parameter takes %s whole',
       (_, arg, expected) => {
+        // Over a list of tuples the compiler maps the call over the tuples
+        // with `Map(_point ↦ g(_point), P)`, whose call over one tuple is
+        // typed `any`, which admits `Nothing`: it declines
+        // (`assertNoNothingElement()`), and the interpreter evaluates it.
+        if (arg === 'P') {
+          expect(() => compare(form(F(7, 'v'), ['g', arg]))).toThrow(
+            /an element can be .Nothing./
+          );
+          return;
+        }
         for (const shadow of [false, true]) {
           const r = compare(form(F(7, 'v'), ['g', arg]), shadow);
           expect(r).toEqual({ compiled: expected, interpreted: expected });

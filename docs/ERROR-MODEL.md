@@ -2264,7 +2264,31 @@ maps its channels onto it:
 - The compiled targets have only the IEEE `NaN`, so every form with no
   value compiles to the target's `NaN` (`NaN` in JavaScript, `np.nan` in
   Python, `_gpu_nan()` in the shaders). This agrees with the interpreter,
-  which also answers `NaN` (§1), so it is not a divergence.
+  which also answers `NaN` (§1), so it is not a divergence. `Indeterminate`
+  is an input spelling of `NaN` and reaches no target as a symbol.
+- The non-values of compiled code are one per domain: `NaN` for a
+  number, the `NaN` point for a point, and the absent value of the target
+  (`undefined` in JavaScript) otherwise. A cell of an element-wise
+  selection that no clause selects is `false` when the cells are booleans
+  and a colour with `NaN` channels when they are colours
+  (`unmatchedCellLiteral()` in `compile-absence.ts`). Compiled code has no
+  representation of `Nothing` as a value. A compilation declines, with the
+  diagnostic code `possible-nothing`, when the static type of an element of
+  a collection or of a coordinate of a tuple admits `nothing` (`any`
+  does, `unknown` does not), when the operand of `IsMissing`, `Coalesce`
+  or `AssertPresent` or the value of a dictionary entry admits it, and
+  when the symbol `Nothing` is read as an operand (`[1, Nothing]`,
+  `If(c, Nothing, 7)`). The test reads only static types: `Map(u ↦ If(c,
+  Nothing, 7), xs)` declines, and no analysis of a callback body shows
+  that it cannot return `Nothing`.
+- Compiled code does not test a value against its own static type at run
+  time (rule R5 of `docs/COMPILATION-MODEL.md`). On JavaScript, a
+  condition of `If`, `Which` or `Boole` whose static type admits a value
+  that is neither a boolean nor absent (`boolean | integer`, `unknown`)
+  declines with the code `unsettled-shape`, and an absent condition reads
+  as `false`. The result of a predicate (`Filter`, `Count`, `Any`,
+  `TakeWhile`, …) whose static type does not prove a boolean is still
+  checked at each call (`_SYS.predicateResult`).
 
 An earlier revision of this document proposed that compiled code "sheds
 the Error channel" and leaves residual failures to target semantics; that
@@ -2281,6 +2305,16 @@ comparisons, a point divided by zero), and the `NaN` of a compiled fold over
 rows of unequal length.
 
 ## 7. Conformance snapshot and open questions
+
+**Note of 2026-11-04 on compiled code.** Several entries below describe
+compiled mechanisms that are gone. The three-valued (Kleene) lowering of
+conditions and the decidability guards of comparisons were removed in step
+4, row 2 of `docs/plans/2026-11-02-compiler-contraction-plan.md` (a
+comparison is two-valued). The proofs that a callback or an element read
+cannot give `Nothing`, and the run-time throw of `_SYS.cond` for a
+condition that is not a boolean, were removed in row 7 of the same plan. §6 states
+the compiled rule as it is now. The entries are kept as the record of what
+was probed and decided at their dates.
 
 First probed 2026-08-24/25 against `src/` and re-probed 2026-08-28/29
 after the conformance round (route: `ce.box(json)` then `.evaluate()` /

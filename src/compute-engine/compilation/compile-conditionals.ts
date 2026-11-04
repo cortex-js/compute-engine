@@ -37,6 +37,7 @@ import {
   withCseOperand,
 } from './compile-conditions.js';
 import { branchComplexCoercion } from './compile-shapes.js';
+import { possibleNothingDecline } from './diagnostics.js';
 import { core } from './compiler-core-hooks.js';
 import {
   absenceAxisForType,
@@ -362,9 +363,9 @@ export function compileExprAssertPresent(
     const operand = args[0];
     const t = compilationType(operand);
     if (provablyAdmits('nothing', t))
-      throw new Error(
-        `Could not compile \`AssertPresent\`: target '${target.language ?? 'unknown'}' ` +
-          `cannot distinguish a possible 'Nothing' input from an absent datum.`
+      throw possibleNothingDecline(
+        '`AssertPresent`',
+        'its operand can be `Nothing`, which is not an absent value'
       );
     const code = compileValueOperand(operand, target);
     // A restriction (`If(c, 3)`) is absent where its

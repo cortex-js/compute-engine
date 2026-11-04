@@ -320,18 +320,17 @@ describe('PYTHON: A CALLBACK PARAMETER DECLARED ANY OR VALUE', () => {
     expect(result.success).toBe(false);
   });
 
-  test('Map over a list of numbers at a parameter declared any compiles', () => {
+  // The result type of the callback is `any`, which admits `Nothing`, so
+  // the map declines (`assertNoNothingElement()`); no analysis of the body
+  // shows that it cannot return `Nothing`.
+  test('Map over a list of numbers at a parameter declared any declines', () => {
     const { result } = compilePython([
       'Map',
       ['Function', ['Multiply', 2, 't'], param('any')],
       ['List', 1, 2],
     ]);
-    expect(result.success).toBe(true);
-    expect(result.code).toBe(
-      '(lambda _f: [_f(_x) for _x in [1, 2]])((lambda t: 2 * t))'
-    );
-    if (TEST_PYTHON === undefined) return;
-    expect(runPython(result.code)).toBe('[2, 4]');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/an element can be .Nothing./);
   });
 });
 

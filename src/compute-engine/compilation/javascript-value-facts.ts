@@ -83,57 +83,6 @@ export function boundNamesAddedBy(
   return scopeParents.get(scope)?.added ?? [];
 }
 
-// Names an emitted loop binds to the successive values of a `Range` whose
-// start and step are FINITE numeric literals. Such a name holds
-// `start + step · counter` on every turn, with `counter` a whole number the
-// emitted loop itself produces, so it is a finite number at every read: it is
-// never NaN, and never the `undefined` an absent caller variable reads as.
-// That is what `isDecidedLoopIndex` is asked, and it is why a comparison
-// against such a name needs no run-time decidedness test.
-const decidedLoopIndices = new WeakMap<ReadonlySet<string>, Set<string>>();
-
-/**
- * Record that, inside the body compiling under `target`, `name` is bound to
- * the successive values of a range whose start and step are finite literals.
- */
-export function recordDecidedLoopIndex(
-  target: CompileTarget<Expression>,
-  name: string
-): void {
-  if (!target.boundVars) return;
-  let names = decidedLoopIndices.get(target.boundVars);
-  if (!names) decidedLoopIndices.set(target.boundVars, (names = new Set()));
-  names.add(name);
-}
-
-export function clearDecidedLoopIndices(
-  target: CompileTarget<Expression>
-): void {
-  if (target.boundVars) decidedLoopIndices.delete(target.boundVars);
-}
-
-/**
- * True when `name`, read under `boundVars`, is a loop index recorded by
- * {@link recordDecidedLoopIndex} — in this scope or in one that encloses it,
- * up to the frame that rebinds the name.
- */
-export function isDecidedLoopIndex(
-  name: string,
-  boundVars: ReadonlySet<string> | undefined
-): boolean {
-  let scope = boundVars;
-  while (scope !== undefined) {
-    if (decidedLoopIndices.get(scope)?.has(name) === true) return true;
-    const link = scopeParents.get(scope);
-    // A frame that BINDS the name without recording it has shadowed whatever
-    // an enclosing frame knew, so the search stops rather than reading a fact
-    // about a different variable of the same name.
-    if (link === undefined || link.added.includes(name)) return false;
-    scope = link.parent;
-  }
-  return false;
-}
-
 // Scalar bindings established by emission: scalar function parameters,
 // numeric counters and block locals whose assignments remain scalar. A new
 // bound-variable set masks enclosing facts for every name it rebinds.

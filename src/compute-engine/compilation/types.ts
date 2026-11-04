@@ -992,16 +992,18 @@ export interface CompileTarget<Expr = unknown> {
     | undefined;
 
   /**
-   * Wrap a compiled `Which` or restriction condition that is **not** provably boolean so
-   * that a non-boolean value (notably `NaN`) fails closed at run time, matching
-   * the interpreter — which throws `Condition must evaluate to "True" or
-   * "False"` rather than silently taking the default branch. Only applied when
-   * the source condition is not a relational/logical/boolean expression (the
-   * common case emits a bare, unwrapped condition, so there is no overhead).
+   * Wrap a compiled `Which` or restriction condition that is **not** a
+   * relational, logical or boolean expression, so that an absent value
+   * (`undefined`, `null`, `NaN`) reads as `false`, as in the interpreter.
+   * A target that sets this hook also has `guardCondition()` decline a
+   * condition whose static type admits a value that is neither a boolean
+   * nor absent (`assertBooleanOrAbsentCondition()`), so the wrapper does
+   * not test for such a value at run time. A condition that is a
+   * relational, logical or boolean expression is emitted bare.
    *
-   * Targets that cannot throw in expression position (GPU shaders) leave this
-   * undefined; they instead keep the documented fail-closed value (the default
-   * branch / NaN) — see the GPU `Which` and restriction handlers.
+   * Targets that leave this undefined (the GPU shaders) keep their
+   * documented value for such a condition (the default branch or `NaN`);
+   * see the GPU `Which` and restriction handlers.
    */
   assertBoolean?: (code: string) => string;
 

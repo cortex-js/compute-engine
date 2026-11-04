@@ -169,6 +169,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `c = true`, `w = y = 0`: `Unique(If(c, Take(xs, w/y), xs))` gives `[]` (the
   `If` hides the slice with no value from the guard of `Unique`); the
   interpreter leaves it unevaluated.
+- `python`, `c: boolean | integer`: `If(c, 1, 2)` at `c = 1` compiles to
+  `((1) if (c) else (2))` and gives `1`; the interpreter leaves it
+  unevaluated. The JavaScript target declines it.
 - `javascript`, the interpreter fallback of a decline: with `L: list<real>`
   and `p: any` assigned `2L`, `compile(p + 1, { constantFold: false })`
   declines and `run({ L: [1, 2] })` gives `null` (the fallback does not pass
@@ -300,6 +303,22 @@ host.
   `_fn_g(_.y)` and gives `5` at `y = 2.5`, where the interpreter gives an
   `incompatible-type` error. Only an argument whose static type has no value
   of the parameter type declines.
+- A condition: compiled JavaScript does not test at run time that a
+  condition of `If`, `Which` or `Boole` is a boolean. When the static type
+  of the condition admits a value that is neither a boolean nor absent, the
+  compilation to JavaScript declines with `'unsettled-shape'`
+  (`assertBooleanOrAbsentCondition()`, `compilation/compile-conditions.ts`):
+  with `c: boolean | integer`, `If(c, 1, 2)` declines, and so does a
+  condition of type `unknown` (the untyped parameter `c` of
+  `(c ↦ If(c, 1, 2))(b)`). The interpreter gives an unevaluated form for
+  such a value. One run-time check of this kind stays: the result of the
+  predicate of `Filter`, `Count`, `Any`, `TakeWhile` and the other
+  operators that take one, when its static type does not prove a boolean,
+  goes through `_SYS.predicateResult`, which throws for a value that is not
+  a boolean (`predicateResultCheck()`, `javascript-target.ts`). The type of
+  a predicate literal is computed without the element type of its source,
+  so it often does not prove a boolean (`c ↦ c[4] = d` over a list of
+  tuples is typed `boolean | list<…>`).
 - A value that the host gives outside the declared type of an input: the
   result is undefined. It can equal the value of the interpreter, differ
   from it, throw or not end, and it can differ between targets. With
@@ -507,8 +526,10 @@ branch for some elements only. With `L: list<real>`,
 `Block(p ≔ 0; If(L > 0, p ≔ 5); 2p)` declines. A condition of type `any`
 can be a list, and the interpreter then selects element by element: with
 `M: list<any>`, `Block(p ≔ 0; If(M[1], p ≔ 5); 2p)` declines. A condition
-of type `unknown` (an untyped parameter of a function literal) is read as a
-boolean, so the branches of its conditional are compared as alternatives.
+of type `unknown` (an untyped parameter of a function literal) declines on
+JavaScript, which does not test at run time that it is a boolean (R5); on
+the other targets it is read as a boolean, so the branches of its
+conditional are compared as alternatives.
 On the targets that are not shaders, a conditional whose
 value the code discards is not checked: a statement of a `Block` that is not
 its last one, the body of a `Loop`, and a branch of such a conditional. An
@@ -716,6 +737,32 @@ no value is found: the initial value of the local (here `0`) takes its
 place, and `r ≔ Nothing` declines. A loop in a case of a `Match` whose value
 is used is checked in the same way. The loop check is `unsettledShapeIn()`
 (`compilation/compile-admission.ts`).
+
+**A possible `Nothing` element declines.** The interpreter keeps `Nothing`
+as an element where it appears (`[1, Block()]` is `[1, Nothing]`), and
+compiled code has no representation of it. A compilation declines with the
+diagnostic code `'possible-nothing'` when the symbol `Nothing` is read as
+an operand (`[1, Nothing]`, `If(c, Nothing, 7)`), when the static type of a
+coordinate of a `Tuple` admits `nothing`, and when the element type of a
+source or of the result of a collection operation that reads elements one by
+one (`Map`, `Tabulate`, `Scan`, `Zip`, `Filter`, `Count` with a
+predicate, a `Reduce` by `Multiply`, the aggregates such as `Sum`, `Mean`
+and `Max`, and the paired statistics) admits it. `any` admits `nothing`;
+`unknown` does not. The test reads only static types:
+`Map(u ↦ If(c, Nothing, 7), [1, 2])` declines, and so does a map whose
+callback result type is `any`, such as `(u ↦ 7)(P)` over a list of points
+`P: list<tuple<real, real>>`, which the compiler maps over the points with a
+call typed `any`. To compile such a map, give the callback a result type
+with no `nothing` arm. The operand of `IsMissing`, `Coalesce` or
+`AssertPresent`, and the value of a dictionary entry, decline with the same
+code when their type admits `nothing` (`assertNoNothingElement()` and
+`possibleNothingDecline()`, `compilation/compile-inner.ts` and
+`compilation/diagnostics.ts`). An inferred type can admit `nothing` in
+the same way: a local function mapped over a range (`h := k ↦ k + 1`,
+`Map(h, 1..3)`) has the bare type `list`, whose elements admit `Nothing`,
+and `Map(g, P)` with `g := p ↦ Norm(p)` and `P: list<tuple<real, real>>`
+has the type `list<any>`. Both decline. Over a list literal,
+`Map(h, [1, 2])` compiles.
 
 On the shader targets, a conditional whose value the code discards (with
 branches of different shapes) declines too, because its shader code is a
@@ -941,10 +988,11 @@ JavaScript) is a boolean, and so is a whole-collection comparison. With
 interpreter gives `[True, False]`; the compiled cell is a value computed from
 an absent operand, which the caveats of compiled code leave unspecified. A
 branch condition compiles to the same code as the comparison. A condition
-that is not provably a boolean goes through `_SYS.cond` on JavaScript, which
-reads `undefined`, `null` and `NaN` as `false`, so a branch with an absent
-condition takes its next arm, as in the interpreter. The element-wise
-selection runtime (`_SYS.select`) reads an absent condition cell the same way:
+whose static type admits a value that is neither a boolean nor absent
+declines (R5). A condition that can be absent goes through `_SYS.cond` on
+JavaScript, which reads `undefined`, `null` and `NaN` as `false`, so a
+branch with an absent condition takes its next arm, as in the interpreter.
+The element-wise selection runtime (`_SYS.select`) reads an absent condition cell the same way:
 the position is not selected by that clause, and a later clause can select
 it. A comprehension guard that is not provably a boolean is tested with
 `=== true` on JavaScript and with the Python test of `pythonGuardTest()` on
@@ -1869,7 +1917,10 @@ These forms decline, with a reason that names the form:
 - a function value passed as an argument to a user function or to `Apply`
   (`h(x ↦ x + u)`), and a function literal with a parameter declared with a
   function type (`h = (g: function) ↦ g(1)`) (`assertNoFunctionValue()`,
-  `compile-function-values.ts`);
+  `compile-function-values.ts`). The root of a compilation is the
+  exception: its parameters are the inputs of the compiled function, and
+  the host passes a JavaScript function for a function-typed one, so
+  `(h: (real) -> real) ↦ Map(h, [1, 2])` compiles and calls `h`;
 - a call whose value is a function: a function returned from a function
   (`Apply(mk(1), u)` with `mk = a ↦ (x ↦ x + a)`);
 - a call of a function value stored in a local: a block-local function that is
