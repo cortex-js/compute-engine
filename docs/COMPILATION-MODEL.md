@@ -134,6 +134,11 @@ once, or a `ROADMAP.md` entry.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
+- `javascript`, `L: list<real>`, `n: integer`: `Sum(Take(Sum(L·i, i, 1,
+  n), 2))` and `Sum(TakeWhile(Sum(L·i, i, 1, n), x ↦ x > 0))` at `n = 0`
+  throw (`.slice is not a function`, `findIndex is not a function`): the
+  empty indexed `Sum` is the number `0`, and the `Take` lowering reads it
+  as an array. The interpreter gives `0`.
 - A custom target whose own `var` hook resolves a symbol `C` declared with
   the bare type `list` while `C` holds a list of numbers: an element read
   `C[i]` is compiled as a number (`isHeldNumericListRead()` in
@@ -389,7 +394,16 @@ operand, alone or beside other operands, the fold of `Sum` or `Product` of
 a collection of numbers or of lists, and the fold of `interval-js`. A
 number is then the fold or the extremum of itself, as in the interpreter:
 with the same `L` and `n`, `Sum(Sum(L·i, i, 1, n))` and
-`Max(2·Sum(L·i, i, 1, n), 1)` are `0` and `1` at `n = 0`. The fold of a
+`Max(2·Sum(L·i, i, 1, n), 1)` are `0` and `1` at `n = 0`. `Max`, `Min`
+and the fold of `Sum` or `Product` of a collection of numbers also test no
+shape of a symbol with a declared list type (a parameter of a function
+literal, or a local of a `Declare` statement), of a `Take` or `TakeWhile`,
+and of an `If` or `Which` whose value branches are all such values
+(`foldNeedsNoShapeTest()`). The interpreter gives an `incompatible-type`
+error for a number at a declared parameter or local, and the compiled code
+throws there. A `Take` or `TakeWhile` of an array or of a lazy stream
+(`Sum(Take(Map(x ↦ x², 1..∞), 10))`) gives an array; of a number it
+throws (see "Known limitations"). The fold of a
 list whose type states a width of fewer than five terms (`vector<3>`) is
 written term by term with no test: an indexed `Sum` or `Product` of such a term is a list of
 that width for an empty range, not a number.

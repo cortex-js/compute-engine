@@ -15823,17 +15823,18 @@ function compileExtremum(
     // one position, because `rangeGatherSource` declines a gather with no
     // position at all, so the empty-input branch above has no counterpart
     // there.
-    // An operand that is not an array by its structure
-    // (`isGuaranteedArray`: an input typed as a list, a list literal, or
-    // arithmetic over one) can be a number at run time, also when its
-    // static type is a list: an indexed `Sum` or `Product` over a list of
-    // unknown length is `0` or `1` for an empty range
-    // (`Max(Sum(L·i, i, 1, n))` with `L: list<real>` at `n = 0`). Such an
-    // operand keeps the test of its shape, and a number is the extremum of
-    // itself, as in the interpreter. A gather that the loop takes reads
-    // its source by position, and the interpreter gives an error for a
+    // An operand can be a number at run time, also when its static type is
+    // a list: an indexed `Sum` or `Product` over a list of unknown length is
+    // `0` or `1` for an empty range (`Max(Sum(L·i, i, 1, n))` with
+    // `L: list<real>` at `n = 0`). Such an operand keeps the test of its
+    // shape, and a number is the extremum of itself, as in the interpreter.
+    // An operand that is an array by its structure (an input typed as a
+    // list, a list literal, arithmetic over one), or that the interpreter
+    // refuses as a number (a declared parameter), needs no test
+    // (`foldNeedsNoShapeTest`). A gather that the loop takes reads its
+    // source by position, and the interpreter gives an error for a
     // position into a number, so the loop needs no such test.
-    const array = isGuaranteedArray(args[0], target);
+    const array = foldNeedsNoShapeTest(args[0], target);
     if (nested[0])
       return array
         ? guardedReduce(`${compile(args[0])}.flat(Infinity)`)
@@ -15969,15 +15970,15 @@ function compileExtremum(
       `for (const _x of ${p}) { ${step('_x')} }`;
     const body = args.map((a, i) => {
       const p = params[i]!;
-      // A list operand that is not an array by its structure
-      // (`isGuaranteedArray`) can be a number at run time: an indexed `Sum`
-      // or `Product` over a list of unknown length is `0` or `1` for an
-      // empty range (`Max(2·Sum(L·i, i, 1, n), 1)` with `L: list<real>` at
-      // `n = 0`). Such an operand keeps the test of its shape, and a number
-      // is one element of the extremum, as in the interpreter. An operand
-      // that is not an indexed collection is read through `_SYS.elts`,
-      // which gives an array or throws, so it needs no such test.
-      if (isIndexedCollectionOperand(a) && !isGuaranteedArray(a, target))
+      // A list operand for which `foldNeedsNoShapeTest` is false can be a
+      // number at run time: an indexed `Sum` or `Product` over a list of
+      // unknown length is `0` or `1` for an empty range
+      // (`Max(2·Sum(L·i, i, 1, n), 1)` with `L: list<real>` at `n = 0`).
+      // Such an operand keeps the test of its shape, and a number is one
+      // element of the extremum, as in the interpreter. An operand that is
+      // not an indexed collection is read through `_SYS.elts`, which gives
+      // an array or throws, so it needs no such test.
+      if (isIndexedCollectionOperand(a) && !foldNeedsNoShapeTest(a, target))
         return `if (Array.isArray(${p})) { ${loop(nested[i] ? `${p}.flat(Infinity)` : p)} } else { ${step(p)} }`;
       if (isFolded(a, i)) return loop(nested[i] ? `${p}.flat(Infinity)` : p);
       // An operand that may be an array at run time is flattened at every
@@ -16759,15 +16760,17 @@ function emitCollectionReduce(
   // exactly-real total back as a plain number.
   if (!guarded) {
     const identity = kind === 'Sum' ? '0' : '1';
-    // A source that is not an array by its structure (`isGuaranteedArray`:
-    // an input typed as a list, a list literal, or arithmetic over one) can
-    // be a number at run time, also when its static type is a list: an
-    // indexed `Sum` or `Product` over a list of unknown length is `0` or `1`
-    // for an empty range, as in the interpreter (`Sum(Sum(L·i, i, 1, n))`
-    // with `L: list<real>` at `n = 0`). Such a source keeps the test of its
-    // shape, and a number is the fold of itself, as in the interpreter
-    // (`Sum(0)` is 0, `Product(1)` is 1).
-    const array = isGuaranteedArray(coll, target);
+    // A source can be a number at run time, also when its static type is a
+    // list: an indexed `Sum` or `Product` over a list of unknown length is
+    // `0` or `1` for an empty range, as in the interpreter
+    // (`Sum(Sum(L·i, i, 1, n))` with `L: list<real>` at `n = 0`). Such a
+    // source keeps the test of its shape, and a number is the fold of
+    // itself, as in the interpreter (`Sum(0)` is 0, `Product(1)` is 1). A
+    // source that is an array by its structure (an input typed as a list, a
+    // list literal, arithmetic over one, a `Take`), or that the interpreter
+    // refuses as a number (a declared parameter), needs no test
+    // (`foldNeedsNoShapeTest`).
+    const array = foldNeedsNoShapeTest(coll, target);
     const testShape = (fold: (read: string) => string): string =>
       array
         ? fold(code)
@@ -17213,7 +17216,16 @@ function settledFoldElementShapeOf(
  * type `unknown` or `any`.
  */
 function isSettledListSource(coll: Expression): boolean {
-  const t = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
+  return isSettledListType(jsType(coll));
+}
+
+/**
+ * True when the type `type`, without the `missing` arm, is a list type, a
+ * tuple or an `indexed_collection<T>`, other than a string: the test of
+ * `isSettledListSource`, applied to a type.
+ */
+function isSettledListType(type: Type): boolean {
+  const t = resolveTypeForCompilation(stripMissingFromType(type));
   return (
     t !== 'never' &&
     !isSubtype(t, 'string') &&
@@ -17291,6 +17303,64 @@ export function isGuaranteedArray(
       return x.ops.every((a) => isGuaranteedArray(a, target));
   }
   return false;
+}
+
+/**
+ * True when a fold (`Sum`, `Product`) or an extremum (`Max`, `Min`) of the
+ * list `e` needs no run-time test that its value is an array. An indexed
+ * `Sum` or `Product` over a list of unknown length gives the number `0` or
+ * `1` for an empty range, as the interpreter does, so a value typed as a
+ * list can be a number at run time. The consumer reads such a number as the
+ * fold or the extremum of itself, and needs the test for that. The static
+ * type of `e` must be a list type (`isSettledListSource`), and `e` must be
+ * one of these:
+ *
+ * - A value for which `isGuaranteedArray` is true.
+ * - A symbol that has a declared list type in `target.declaredVarTypes`: a
+ *   parameter of a function literal, or a local of a `Declare` statement.
+ *   The interpreter tests each argument and each assigned value against
+ *   the declared type, and gives an `incompatible-type` error for a
+ *   number. The compiled consumer reads a number as an array, which
+ *   throws (`(0).reduce`, `for (const x of 0)`). A parameter of the entry
+ *   function literal is an input of the host, which supplies a value of
+ *   the declared type.
+ * - An `If` with two branches or a `Which`, where this function is true
+ *   for each value branch.
+ * - `Take(xs, n)` or `TakeWhile(xs, p)`. The compiled code is `xs.slice()`
+ *   or `xs.findIndex()` for an array, or a lazy stream read by
+ *   `_SYS.takeIter()` or `_SYS.takeWhileIter()`, which gives an array, so
+ *   its result is never a number. When `xs` is a number at run time (an
+ *   empty indexed `Sum` of a list), the `Take` itself throws before the
+ *   consumer runs, where the interpreter gives `0`: a known limitation
+ *   (`docs/COMPILATION-MODEL.md`, "Known limitations"), and a test of the
+ *   shape in the consumer would not change it. A `NaN` count gives an
+ *   empty array (`slice(0, NaN)`); the interpreter leaves such a `Take`
+ *   unevaluated, so the value is unspecified.
+ *
+ * Any other value is false, and its consumer keeps the test.
+ */
+function foldNeedsNoShapeTest(
+  e: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isSettledListSource(e)) return false;
+  if (isGuaranteedArray(e, target)) return true;
+  if (isSymbol(e)) {
+    const declared = target.declaredVarTypes?.[e.symbol];
+    return declared !== undefined && isSettledListType(declared);
+  }
+  if (!isFunction(e)) return false;
+  const op = e.operator;
+  if (op === 'If' && e.nops === 3)
+    return (
+      foldNeedsNoShapeTest(e.ops[1], target) &&
+      foldNeedsNoShapeTest(e.ops[2], target)
+    );
+  if (op === 'Which' && e.nops > 0 && e.nops % 2 === 0)
+    return e.ops.every(
+      (a, i) => i % 2 === 0 || foldNeedsNoShapeTest(a, target)
+    );
+  return op === 'Take' || op === 'TakeWhile';
 }
 
 /**

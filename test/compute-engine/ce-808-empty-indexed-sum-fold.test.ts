@@ -6,9 +6,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // interpreter, so a value typed as a list can be a number at run time. The
 // fold of `Sum` or `Product` over a list of numbers, and `Max` or `Min` of a
 // list operand, alone or beside other operands, test the shape of a value
-// that is not an array by its structure (`isGuaranteedArray()` in
+// that can be such a number (`foldNeedsNoShapeTest()` in
 // `compilation/javascript-target.ts`): a number is the fold or the extremum
-// of itself. The code for an input typed as a list does not change.
+// of itself. An input typed as a list, a declared parameter, a `Take`, and
+// an `If` or `Which` of such values get no test.
 
 const DECLS: Record<string, string> = {
   L: 'list<real>',
@@ -118,6 +119,73 @@ describe('AN INPUT TYPED AS A LIST TESTS NO SHAPE (CE-808)', () => {
   ] as const)('%j', (expr, expected) => {
     const { code, compiled, evaluated } = compiledAndEvaluated(expr, 0);
     expect(code).toBe(expected);
+    expect(compiled).toEqual(evaluated);
+  });
+});
+
+describe('A VALUE THAT CANNOT BE AN EMPTY INDEXED SUM TESTS NO SHAPE (CE-808)', () => {
+  // `Take` of a lazy stream gives an array (`_SYS.takeIter`).
+  test('a Sum of a Take of an infinite Map', () => {
+    const ce = new ComputeEngine();
+    const r = compile(
+      ce.box([
+        'Sum',
+        [
+          'Take',
+          [
+            'Map',
+            ['Function', ['Square', 'x'], 'x'],
+            ['Range', 1, 'PositiveInfinity'],
+          ],
+          10,
+        ],
+      ] as any),
+      { constantFold: false }
+    )!;
+    expect(r.code).not.toContain('Array.isArray');
+    expect(r.code).toContain('_SYS.takeIter(');
+    expect(r.run!({} as never)).toBe(385);
+  });
+
+  // Each value branch of the `Which` is a list literal.
+  test.each([true, false])('a Sum of a Which of list literals, c = %s', (c) => {
+    const ce = engine();
+    ce.declare('c', 'boolean');
+    const expr = ['Sum', ['Which', 'c', ['List', 1, 2], 'True', ['List', 3]]];
+    const r = compile(ce.box(expr as any), { to: 'javascript' } as any);
+    expect(r.code).not.toContain('Array.isArray');
+    expect(r.run!({ c } as never)).toBe(3);
+  });
+
+  // A declared parameter: the interpreter gives an `incompatible-type`
+  // error for a number argument, and the compiled fold throws.
+  test('a declared parameter of a function literal', () => {
+    const ce = engine();
+    const fn = ['Function', ['Sum', 'xs'], ['Typed', 'xs', 'list<number>']];
+    const r = compile(ce.box(fn as any), { constantFold: false })!;
+    expect(r.code).not.toContain('Array.isArray');
+    expect(r.run!([1, 2, 3] as never)).toBe(6);
+
+    const applied = ['Apply', fn, S];
+    const c = compile(engine().box(applied as any), {
+      to: 'javascript',
+      fallback: false,
+    } as any);
+    expect(c.code).not.toContain('Array.isArray');
+    expect(() => c.run!({ ...INPUTS, n: 0 } as never)).toThrow();
+    const ev = engine();
+    ev.assign('L', ev.box(['List', ...INPUTS.L]));
+    ev.assign('n', 0);
+    expect(JSON.stringify(ev.box(applied as any).evaluate().json)).toContain(
+      'incompatible-type'
+    );
+  });
+
+  // A branch computed through an indexed `Sum` keeps the test.
+  test.each([0, 2])('a Which with an indexed Sum branch at n = %d', (n) => {
+    const expr = ['Sum', ['Which', ['Greater', 'n', -1], S, 'True', ['List', 3]]];
+    const { code, compiled, evaluated } = compiledAndEvaluated(expr, n);
+    expect(code).toContain('Array.isArray');
     expect(compiled).toEqual(evaluated);
   });
 });
