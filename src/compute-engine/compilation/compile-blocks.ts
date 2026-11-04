@@ -21,14 +21,9 @@ import {
   assertLocalsAssignedBeforeRead,
   assertNoUseBeforeDeclare,
   blockLocalValueFrame,
-  chainedLocalDeclares,
-  classifyLocalReads,
-  nestedAssignmentsTo,
-  nestedOnlyLocals,
   noteReservedDeclares,
   refuseEffectContractViolations,
   spellReservedLocals,
-  splitChainedAssignments,
   withDefineFunctionDeclares,
   withFreshBlockLocals,
   withImplicitLocalDeclares,
@@ -117,27 +112,7 @@ export function compileStatementList(
   // value-position `Declare` handler, which fails closed.
   if (isFunction(expr, 'Declare') && isFunction(expr.ops[0], 'Tuple'))
     return compileBlock([expr], target, undefined, false);
-  // A lone assignment whose value is another assignment is two statements
-  // (`splitChainedAssignments`): `t = u = s;` is not valid WGSL.
-  const split = splitChainedAssignments([expr]);
-  const chained = split.args;
-  // The interpreter declares the inner target in the scope of the loop
-  // when no enclosing scope has the name. This route has no `Block` node
-  // whose scope `withImplicitLocalDeclares` can read, so the test is on the
-  // compilation instead: a name is bound outside when it is a parameter or
-  // a loop index (`boundVars`), or a local of an enclosing compiled block
-  // or function (`localShapeFrameOf`). Each other inner target gets a
-  // declaration, and the statements then compile as a block, which
-  // declares it in the loop body. Without the declaration, the shader
-  // wrote an undeclared name.
-  if (chained.length > 1) {
-    const declares = chainedLocalDeclares(chained, split.chained, target);
-    if (declares.length > 0)
-      return compileBlock([...declares, ...chained], target, undefined, false);
-  }
-  const stmts =
-    desugarPatternAssign(expr, target) ??
-    (chained.length > 1 ? [...chained] : null);
+  const stmts = desugarPatternAssign(expr, target);
   // On a shader target the lone statement gets a statement sink of its own
   // (see `compileListStatement`): a loop-form `Sum` on the right of the
   // assignment has nowhere else to put its loop. A selection whose branches
@@ -238,10 +213,7 @@ export function compileBlock(
   // …then the block-locals introduced by bare ASSIGNMENT, which carry no
   // `Declare` statement of their own. Synthesize the missing declaration so
   // everything below treats them exactly like a declared local.
-  // An assignment whose value is another assignment is split into two
-  // statements first, so the inner target can get its declaration too.
-  const split = splitChainedAssignments(args);
-  args = withImplicitLocalDeclares(split.args, target, node, split.chained);
+  args = withImplicitLocalDeclares(args, target, node);
 
   // Get all the Declare statements
   const locals: string[] = [];
@@ -273,9 +245,6 @@ export function compileBlock(
 
   assertNoUseBeforeDeclare(args);
   assertLocalsAssignedBeforeRead(args, locals);
-  // A read of a local that may have no value is refused here, on every
-  // target (`classifyLocalReads`).
-  classifyLocalReads(args, locals, node);
 
   // A lone EMPTY block in a statement list evaluated for effect (a shader
   // loop body reaching `compileStatementList`) is an empty statement.
@@ -516,9 +485,6 @@ export function compileBlock(
   const shadowSpellings: string[] = [];
   let localValueFrame: LocalValueFrame | undefined;
   try {
-    // The locals that only an assignment in a nested block gives a value
-    // (`nestedOnlyLocals`). Their shape is read from these assignments.
-    const nestedLocals = nestedOnlyLocals(args, locals);
     for (const arg of args) {
       // Complex-ness first, then width — the width of a complex value is
       // read THROUGH the complex frame (`aggregateComponentCount`).
@@ -530,14 +496,6 @@ export function compileBlock(
         if (arg.ops[1] !== undefined)
           noteVectorWidth(arg.ops[0].symbol, arg.ops[1]);
       }
-      if (nestedLocals.size > 0)
-        for (const { assign, name, value } of nestedAssignmentsTo(
-          arg,
-          nestedLocals
-        )) {
-          core.noteLocalComplex(assign, complexFrame);
-          noteVectorWidth(name, value);
-        }
     }
 
     // GPU type hints for block locals.
@@ -941,6 +899,30 @@ export function compileBlock(
       return target.bareStatementBlocks
         ? statementLines(target, result)
         : result.join(`;${target.ws('\n')}`);
+
+    // The last statement is an assignment or a declaration, so the value of
+    // the block is `Nothing`. This check runs only when the lowering uses
+    // the value of the block (`valueUsed`). Where the admission search also
+    // counts that value as used, the compilation declines after the code
+    // is generated (`assertAdmitted()`, reason `'nothing-value'`), so it
+    // declines here, before the code of the value is generated. A block
+    // that the lowering compiles as a value but whose value the search
+    // does not count as used (the branch of a conditional that is a
+    // statement) compiles on only when the compilation has no other value
+    // with no settled shape: on JavaScript and GLSL, where an assignment is
+    // an expression, the code below returns the assignment. In Python and
+    // WGSL an assignment is a statement, with no form that the code below
+    // can return, so the block declines.
+    if (isFunction(lastArg, 'Assign') || isFunction(lastArg, 'Declare')) {
+      core.throwPendingUnsettledShape();
+      if (target.language === 'python' || target.language === 'wgsl')
+        throw new Error(
+          `Could not compile \`Block\`: the last statement of the block is ` +
+            `an assignment or a declaration, so the value of the block is ` +
+            `\`Nothing\`, which has no compiled representation. End the ` +
+            `block with the value it should have.`
+        );
+    }
 
     // A multi-statement block that is a VALUE OPERAND on a shader target —
     // a `with` clause as a `Sum` term, or on one side of an addition — has

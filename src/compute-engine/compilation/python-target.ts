@@ -1651,9 +1651,6 @@ function compilePythonStatements(
     // The checks of `compileBlock` on the order of the statements.
     BaseCompiler.assertNoUseBeforeDeclare(stmts);
     BaseCompiler.assertLocalsAssignedBeforeRead(stmts, declared);
-    // A read of a local that may have no value is refused here
-    // (`classifyLocalReads`).
-    BaseCompiler.classifyLocalReads(stmts, declared, scopeNode);
     // Python has no block scope: the statements of the block run in the
     // scope of the enclosing function. Two things keep a local of the block
     // apart from the other variables of the function:
@@ -1669,8 +1666,10 @@ function compilePythonStatements(
     //   A `Declare` with a value emits `t = <value>`. The `declare` hook of
     //   this target emits nothing for a `Declare`, so without this
     //   assignment the value was lost and a read of `t` raised `NameError`.
-    //   A `Declare` with no value emits nothing: every read of the local
-    //   comes after an assignment on every path (`classifyLocalReads`).
+    //   A `Declare` with no value emits nothing. Only
+    //   `withImplicitLocalDeclares` adds one, for a local that a first
+    //   assignment at the level of the list declares, and a read before
+    //   that assignment is the static error `read-before-declaration`.
     const compileStatements = (
       spelled?: ReadonlyMap<string, string>
     ): string => {
@@ -3674,24 +3673,6 @@ function pythonAssertExpressionBody(subject: string, expr: Expression): void {
 }
 
 /**
- * Whether the first line of the Python statement list `body` that names
- * `name` is an assignment of `name` at the top level of the list (not in a
- * loop or a branch, so it always runs), whose value does not read `name`.
- * Then no statement reads `name` before it has a value. Any other first
- * occurrence (a read, a write in an indented block, a mention in a string)
- * gives `false`.
- */
-function pythonWrittenFirst(body: string, name: string): boolean {
-  const word = new RegExp(`(?<![\\w.])${name}(?!\\w)`);
-  for (const line of body.split('\n')) {
-    if (!word.test(line)) continue;
-    if (!line.startsWith(`${name} = `)) return false;
-    return !word.test(line.slice(name.length + 3));
-  }
-  return false;
-}
-
-/**
  * Fail closed when `compileFunction()`'s body is STRUCTURALLY a statement.
  *
  * `compileFunction()` is the statement-capable route the rest of this class
@@ -3715,13 +3696,10 @@ function pythonWrittenFirst(body: string, name: string): boolean {
  * branch (`Block(s ≔ x; s)` → `def f(x):\n    s = x\n    return s\n`).
  *
  * A `Block` whose last statement is an assignment to a name, or a `Declare`
- * with an initializer (`isTailAssignmentBlock`), is not declined here. The
- * block hook emits such a last statement as the assignment followed by
- * `return <name>` (`Block(s ≔ x; t ≔ s)` → `s = x`, `t = s`, `return t`), so
- * the multi-line branch carries it, as `compile()` does for the same body.
- * `compileFunction()` checks the emitted body after compiling it instead
- * (`pythonAssertReturnedBlock`): a single-statement block with no local is
- * unwrapped to the single line `s = x`, which stays declined.
+ * with an initializer (`isTailAssignmentBlock`), is not declined here. Its
+ * value is `Nothing`, and the compilation of the body declines for it, with
+ * the decline of a used value of an assignment (`'nothing-value'`,
+ * `assertAdmitted()`), as `compile()` does for the same body.
  */
 function pythonAssertReturnableBody(subject: string, expr: Expression): void {
   pythonAssertReturnableSelection(subject, expr);
@@ -3793,39 +3771,6 @@ function pythonAssertReturnableSelection(
           `other branch would be lost.`
       );
   }
-}
-
-/**
- * Fail closed when `compileFunction()` was given a block whose last statement
- * is an assignment (`isTailAssignmentBlock`, which `pythonAssertReturnableBody`
- * lets through) and the emitted body is not a statement sequence that ends
- * with `return <name>`. A single-statement block with no local is unwrapped to
- * its statement and emits the single line `s = x`, which the single-line
- * branch of `compileFunction()` would turn into `return s = x`.
- *
- * The body is accepted only when its last line is `return <name>` and the
- * line before it is the assignment `<name> = …`. A last line that only starts
- * with `return` is not enough: when the block hook does not recognize the
- * assignment target, it puts `return` in front of the whole assignment
- * (`return a[0] = x`), which does not parse; and a last assignment whose
- * value is a nested block can emit a `return` of that block before
- * `return <name>`.
- */
-function pythonAssertReturnedBlock(
-  subject: string,
-  expr: Expression,
-  body: string
-): void {
-  if (!isTailAssignmentBlock(expr)) return;
-  const lines = body.split('\n');
-  const returned = /^return\s+([^\s;]+);?$/.exec(lines[lines.length - 1]);
-  if (
-    lines.length > 1 &&
-    returned !== null &&
-    lines[lines.length - 2].startsWith(`${returned[1]} = `)
-  )
-    return;
-  throw pythonStatementBodyError(subject, statementBodyHead(expr) ?? 'Assign');
 }
 
 /**
@@ -7606,20 +7551,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
         else if (
           !/^return\b/.test(stmts[last]) &&
           !/\nreturn\b[^\n]*$/.test(stmts[last])
-        ) {
-          // A last statement that is an assignment (`Assign(s, x)`, or a
-          // `Declare` with an initializer, which this target emits as the
-          // same `s = x`) is a Python STATEMENT, so `return s = x` does not
-          // parse. The value of the block is the assigned value, so keep the
-          // assignment as a statement and return the name it wrote: the
-          // written name has the same spelling as every read of that name,
-          // so the `return` reads the value just stored. The pattern cannot
-          // match an expression statement: no Python expression starts with
-          // a token free of spaces and brackets followed by a single ` = `.
-          const assigned = /^([^\s()[\]{}'"=,:]+) = /.exec(stmts[last]);
-          if (assigned !== null) stmts.push(`return ${assigned[1]}`);
-          else stmts[last] = `return ${stmts[last]}`;
-        }
+        )
+          // A last statement that is an assignment, which has no `return`
+          // form in Python, does not reach this hook: the block declines
+          // first (`compileBlock()`).
+          stmts[last] = `return ${stmts[last]}`;
         return stmts.join('\n');
       },
       // Per-compilation naming state for generated temporaries (see the
@@ -7715,10 +7651,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
 
   private compileOrThrow(
     expr: Expression,
-    options: CompilationOptions<Expression> = {},
-    writtenInputs?: ReadonlyArray<string>
+    options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
-    const source = expr;
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     // Infer the parameter types of applied literals from collection
@@ -7736,17 +7670,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
     });
     const vars = options.vars as Record<string, string> | undefined;
     const resolveVar = this.makeVarResolver(vars);
-    // The local copy of each input that the body writes (the second
-    // compilation, see below).
-    const inputLocals = new Map<string, string>();
     // Root compilation boundary: fresh, deterministic numbering for the
     // generated temporaries, seeded with the names this compilation must not
     // reuse (see `NamingContext`).
     const target = this.createTarget({
-      var: (id) => inputLocals.get(id) ?? resolveVar(id),
-      // See `CompileTarget.inputWrites`.
-      inputWrites: new Set<string>(),
-      inputLocals,
+      var: resolveVar,
       // A `vars`-mapped symbol is a live runtime input: the constant folder
       // must never fold a subtree that mentions one, even when the symbol
       // has an engine value (`CompileTarget.varsKeys`).
@@ -7781,32 +7709,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
       isVarsKey: (name) =>
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
-    for (const name of writtenInputs ?? [])
-      inputLocals.set(name, BaseCompiler.tempVar(target));
     pythonAssertReturnableSelection('compile()', expr, true);
     let body = compilePythonRoot(expr, target);
-    // The body assigns an input (`u ≔ u + 1`, when an engine scope binds
-    // `u`). The code has no `def`, and a host runs it in a context that this
-    // target does not know: at the top level of a module, or in a function
-    // that the host writes around it. In a function, an assignment of `u`
-    // makes `u` a local of the whole function, so a read of `u` before the
-    // write raised `UnboundLocalError` when `u` is a global of the host. A
-    // write also changed the value that the host gave. The expression is
-    // compiled again, with each written input read and written as a local
-    // copy that starts with the value of the input (`_tv1 = u`). The copy
-    // reads `u` in each of these contexts: a global, a parameter of the
-    // host's function, or a variable of an enclosing function. The
-    // initialization is not emitted when the first statement that names the
-    // copy is a write that always runs (`pythonWrittenFirst`). The Python
-    // target spells a free symbol with its own name (`pythonCheckIdentifier`),
-    // so a recorded spelling is the name of the symbol.
-    if (writtenInputs === undefined && target.inputWrites!.size > 0)
-      return this.compileOrThrow(source, options, [...target.inputWrites!]);
-    const initializations = [...inputLocals]
-      .filter(([, local]) => !pythonWrittenFirst(body, local))
-      .map(([name, local]) => `${local} = ${resolveVar(name) ?? name}`);
-    if (initializations.length > 0)
-      body = [...initializations, body].join('\n');
     body = pythonDistinctIdentifiers(body, {
       callerSources: pythonVarsSources(vars),
       hostNames: () =>
@@ -7940,9 +7844,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // single-line one wraps it in `return`, the multi-line one relies on the
     // block hook having done so. A root that is an assignment or a declaration
     // has neither emission (D6). A block whose last statement is an
-    // assignment (`isTailAssignmentBlock`) takes the multi-line branch, since
-    // the block hook emits the assignment followed by `return <name>`; the
-    // emitted body is checked after it is compiled (`pythonAssertReturnedBlock`).
+    // assignment (`isTailAssignmentBlock`) declines when its body is compiled
+    // (`'nothing-value'`).
     pythonAssertReturnableBody('compileFunction()', expr);
     // The function name and the declared parameters are emitted as bare
     // Python identifiers, so a Python keyword fails closed, as it does for a
@@ -7962,7 +7865,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
       var: this.makeVarResolver(undefined, parameters),
       constantFold: options?.constantFold,
       naming: pythonRootNaming(expr, undefined, parameters),
-      inputWrites: new Set<string>(),
     });
     // A point value is written in place of its symbol, as in `compile()`
     // (`inlinePointValuesAtRoot`). The declared parameters are resolved by
@@ -7971,7 +7873,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // CSE is default-enabled; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
     let body = compilePythonRoot(expr, target);
-    pythonAssertReturnedBlock('compileFunction()', expr, body);
     // Two different names stay two different Python identifiers
     // (`pythonDistinctIdentifiers`). The function name and the parameters
     // are written outside the body, with the same replacement. The host
@@ -7987,46 +7888,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ],
     });
     body = ids.body;
-    // A free symbol that is not a parameter is read as a module global. When
-    // the body also assigns it (an input that an engine scope binds, as in
-    // `u ≔ u + 1`), Python makes the name a local of the whole function, and
-    // a read before the first write raised `UnboundLocalError`. The local
-    // is initialized from the module global instead (`None` when there is
-    // none), so the read gives the value of the global, and the write does
-    // not change the global. The initialization is not necessary when the
-    // first statement that names the symbol is a write that always runs (an
-    // assignment at the top level of the body whose value does not read the
-    // symbol), and it is then not emitted.
-    //
-    // The initialization reads the module globals with the builtin
-    // `globals()` through `__import__("builtins")`, because `globals` is a
-    // valid name for a parameter, a local or a free symbol: a parameter named
-    // `globals` made the bare call `globals()` raise `TypeError`, and a
-    // written input named `globals` raised `UnboundLocalError`. The name
-    // `__import__` itself is refused (fail closed) when the expression or the
-    // parameters use it.
-    const writtenGlobals = [...target.inputWrites!].filter(
-      (name) =>
-        !parameters.includes(name) && !pythonWrittenFirst(body, ids.name(name))
-    );
-    if (writtenGlobals.length > 0) {
-      if (
-        parameters.includes('__import__') ||
-        expr.symbols.includes('__import__')
-      )
-        throw new Error(
-          `"__import__" cannot be used as a symbol or parameter name in a Python function that assigns a module global. Rename it before compiling to Python (fail closed).`
-        );
-      // Python stores a global under the NFKC form of its name (`ﬁ = 1`
-      // stores `fi`), so the key of the lookup is that form.
-      body = [
-        ...writtenGlobals.map(
-          (name) =>
-            `${ids.name(name)} = __import__("builtins").globals().get(${JSON.stringify(ids.name(name).normalize('NFKC'))})`
-        ),
-        /^return\b/.test(body) || body.includes('\n') ? body : `return ${body}`,
-      ].join('\n');
-    }
 
     const params = parameters.map(ids.name).join(', ');
     let code = '';

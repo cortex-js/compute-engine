@@ -2433,6 +2433,37 @@ export function assertAdmitted(
 }
 
 /**
+ * Decline the outermost compilation in progress now, with the decline for
+ * a value with no settled shape that `assertAdmitted()` would throw after
+ * the code was generated (`CompilerState._pendingAdmission`), when there
+ * is one. Nothing happens when there is none.
+ *
+ * A lowering calls it before it generates the code of a form that always
+ * has such a decline: the last statement of a block whose value is used
+ * is an assignment or a declaration (reason `'nothing-value'`). The code
+ * of that form would be thrown away, so no code is generated for it. A
+ * decline of the code generation that came before the call stays the
+ * reason; one that would come after it does not.
+ *
+ * When a caller's `compile` handler writes code, the search here sees only
+ * the handler nodes reached so far, and the first search did not know
+ * which nodes a handler would lower. So this check can decline where the
+ * search of `assertAdmitted()`, which runs with the full record, would
+ * not. The result is a decline, never a different value; no corpus
+ * expression reaches the case.
+ */
+export function throwPendingUnsettledShape(): void {
+  const pending = CompilerState._pendingAdmission;
+  if (pending === undefined) return;
+  let unsettled = pending.unsettled;
+  // As in `assertAdmitted()`: the code that a caller's `compile` handler
+  // wrote can change what the search finds.
+  if ([...CompilerState._callerLowered.values()].includes(true))
+    unsettled = unsettledShapeIn(pending.root, pending.target);
+  if (unsettled !== undefined) throwUnsettledShape(unsettled);
+}
+
+/**
  * Decline the compilation for the value with no settled shape `unsettled`.
  * The diagnostic has the code `'unsettled-shape'` and the kind
  * `'capability'`; its `value` is the node, as `toString()` writes it.

@@ -897,13 +897,6 @@ function compileGPUAt(
       ? inPlaceTest.code
       : undefined;
   const compileBase = (): string => (baseCode ??= compile(base));
-  // The local copy of an input that the body writes is a function-scope
-  // `var`, which WGSL indexes with a run-time index as it is. So a proven
-  // index reads it directly, with no second copy.
-  const isInputLocal =
-    isSymbol(base) &&
-    !target.boundVars?.has(base.symbol) &&
-    target.inputLocals?.has(base.symbol) === true;
   // A `Block` local is a function-scope `var` too. A function parameter of
   // the same name is a value, so `isVariableLocal` stops at the frame of the
   // parameter. The spelling of the local must be a plain identifier: the
@@ -935,7 +928,6 @@ function compileGPUAt(
     (target.language !== 'wgsl' ||
       n <= 4 ||
       inPlace !== undefined ||
-      isInputLocal ||
       isBlockVariable ||
       (BaseCompiler.canHoist(target) &&
         !conditionalGPUSinks.has(target.hoist!)))
@@ -945,7 +937,6 @@ function compileGPUAt(
     if (
       target.language === 'wgsl' &&
       n > 4 &&
-      !isInputLocal &&
       !(isBlockVariable && code === localSpelling)
     ) {
       gpuAssertWGSLCopyFits(base, n, 4, decline);

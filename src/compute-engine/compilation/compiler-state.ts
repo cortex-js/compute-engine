@@ -12,6 +12,7 @@ import type {
   ElementLane,
   UnrolledIndexFrame,
   UnsafeIntegerOperand,
+  UnsettledShape,
 } from './compiler-types.js';
 
 /**
@@ -462,6 +463,23 @@ export class CompilerState {
    * does not run these checks again.
    */
   static _rootAdmission = false;
+  /**
+   * The admission checks of the outermost compilation in progress: its
+   * root, its target, and the value with no settled shape that
+   * `unsettledShapeIn()` found before the code was generated. `compile()`
+   * and `compileCseRoot()` set it, and `assertAdmitted()` declines for it
+   * after the code was generated. A lowering that would generate code for
+   * a form that then declines (a block whose value is the `Nothing` of an
+   * assignment) declines for it at once
+   * (`throwPendingUnsettledShape()`, `compile-admission.ts`).
+   */
+  static _pendingAdmission:
+    | {
+        root: Expression;
+        target: CompileTarget<Expression>;
+        unsettled: UnsettledShape | undefined;
+      }
+    | undefined = undefined;
   /**
    * The nodes of the outermost compilation in progress whose operator has
    * a caller-supplied `compile` handler (a handler on the definition that

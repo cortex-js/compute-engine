@@ -90,7 +90,6 @@ import {
   gpuSpellValueType,
   gpuTypeOfDeclaredType,
   gpuTypeOfValue,
-  gpuWrittenFirst,
 } from './gpu-declared-types.js';
 import type {
   GPUShaderDeclaration,
@@ -575,24 +574,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               `construct) cannot be the final statement of a block — a shader ` +
               `block must evaluate to a typed value.`
           );
-        // In WGSL an assignment is a STATEMENT, so a last statement that is
-        // an assignment (`Assign(s, x)`, or a `Declare` with an initializer,
-        // which the block emits as `var s: f32` followed by the same
-        // `s = x`) cannot be returned: `return s = x;` is invalid WGSL. The
-        // value of the block is the assigned value, so keep the assignment
-        // as a statement and return the name it wrote: the written name has
-        // the same spelling as every read of that name, so the `return`
-        // reads the value just stored. The pattern cannot match an
-        // expression statement: no WGSL expression starts with a token free
-        // of spaces and brackets followed by a single ` = `. GLSL is left as
-        // it is: an assignment is an expression there, and `return s = x;`
-        // is valid GLSL.
-        const assigned =
-          this.languageId === 'wgsl'
-            ? /^([^\s()[\]{}'"=,:;]+) = /.exec(stmts[last])
-            : null;
-        if (assigned !== null) stmts.push(`return ${assigned[1]}`);
-        else stmts[last] = `return ${stmts[last]}`;
+        // A last statement that is an assignment is returned as it is in
+        // GLSL, where an assignment is an expression (`return s = x;`). In
+        // WGSL an assignment is a statement, and such a block declines
+        // before it reaches this hook (`compileBlock()`).
+        stmts[last] = `return ${stmts[last]}`;
         // A statement a list member hoisted (a loop, a compound block) is
         // already terminated; the joiner adds `;` only where one is missing.
         return BaseCompiler.joinShaderStatements(stmts);
@@ -1441,35 +1427,23 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   protected compileDeclaredFunctionBody(
     expr: Expression,
     parameters: ReadonlyArray<[name: string, type: string]>,
-    options?: { constantFold?: boolean },
-    writtenInputs?: ReadonlyArray<string>
+    options?: { constantFold?: boolean }
   ): string {
     // The engine's angular unit, in radian-based code, as `compile()` does
-    // at its entry. The second compilation of the body (with a local copy
-    // of each written input, `writtenInputs`) receives the expression that
-    // was already rewritten, so nothing is converted twice.
-    if (writtenInputs === undefined) expr = rewriteAngularUnit(expr);
+    // at its entry.
+    expr = rewriteAngularUnit(expr);
     const declarations = parameters.map(([name, type]) => ({ name, type }));
-    // The local copy of each input that the body writes, as in `compile()`
-    // (`compileOrThrow`).
-    const inputLocals = new Map<string, string>();
     const bodyTarget = this.createTargetFor(expr, undefined, {
       constantFold: options?.constantFold,
-      inputWrites: new Set<string>(),
-      inputLocals,
     });
-    const innerVar = bodyTarget.var;
-    bodyTarget.var = (id) => inputLocals.get(id) ?? innerVar(id);
     // A declared parameter that the body does not read is not in the names
-    // of the expression, so a local copy could take its name (`_tv1`) and
+    // of the expression, so a temporary could take its name (`_tv1`) and
     // the declaration would conflict with the parameter.
     const naming = BaseCompiler.namingContext(bodyTarget);
     for (const [name] of parameters) naming.usedNames.add(name);
-    for (const name of writtenInputs ?? [])
-      inputLocals.set(name, BaseCompiler.tempVar(bodyTarget));
     const target = gpuDeclaredBodyTarget(bodyTarget, declarations);
     BaseCompiler.beginRootPreprocessing(expr, target);
-    let body = BaseCompiler.withLocalShapeFrame(
+    const body = BaseCompiler.withLocalShapeFrame(
       new Map(),
       gpuDeclaredShapeFrame(declarations),
       () =>
@@ -1504,25 +1478,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // or in the body's value position (which `compileFunction` return-prefixes),
     // is source no driver accepts (D6).
     gpuAssertReturnPlacement('this function body', body, this.languageId);
-    // A write of an input that an engine scope binds: compiled again with a
-    // local copy of each written input (see `compileOrThrow`). A parameter
-    // is bound by the body target, so its write is not recorded here.
-    if (writtenInputs === undefined && bodyTarget.inputWrites!.size > 0)
-      return this.compileDeclaredFunctionBody(expr, parameters, options, [
-        ...bodyTarget.inputWrites!,
-      ]);
-    if (inputLocals.size > 0) {
-      const references: Pick<
-        CompilationResult,
-        'freeSymbols' | 'freeSymbolTypes'
-      > = {};
-      BaseCompiler.withReferences(references, expr, target);
-      body = this.withInputLocalCopies(
-        body,
-        inputLocals,
-        references.freeSymbolTypes
-      );
-    }
     return body;
   }
 
@@ -1587,10 +1542,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   private compileOrThrow(
     expr: Expression,
     options: CompilationOptions<Expression> = {},
-    storage?: CompileTarget<Expression>['storage'],
-    writtenInputs?: ReadonlyArray<string>
+    storage?: CompileTarget<Expression>['storage']
   ): CompilationResult {
-    const source = expr;
     // WebGL2 has no storage buffers, so a `'storage-buffer'` hint has no
     // lowering on GLSL. It is a decline, which the interpreter fallback can
     // take, not an error of the option: the same options can serve the WGSL
@@ -1662,14 +1615,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const constants = this.getConstants();
 
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
-    // The local copy of each input that the body writes (the second
-    // compilation, see below). It is filled when the target exists, because
-    // its names come from the naming context of the target.
-    const inputLocals = new Map<string, string>();
     const target = this.createTargetFor(expr, undefined, {
-      // See `CompileTarget.inputWrites`.
-      inputWrites: new Set<string>(),
-      inputLocals,
       // Constant-folder contract (`BaseCompiler.tryConstantFold`): a
       // `vars`-mapped symbol is a live runtime input (a uniform) and a
       // caller-overridden function must run the caller's implementation, so
@@ -1711,11 +1657,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       constant: (id) =>
         id === 'ImaginaryUnit' ? `${v2}(0.0, 1.0)` : constants[id],
       var: (id) => {
-        // A written input is read from its local copy (`inputLocals`), also
-        // when `vars` maps it: the copy starts with the value of the mapped
-        // source.
-        const local = inputLocals.get(id);
-        if (local !== undefined) return local;
         // Own-property test — see the `vars` lookup in `javascript-target.ts`:
         // `in` finds `Object.prototype` members on a caller-supplied map.
         // A mapping to a bare identifier is checked like a free symbol's own
@@ -1747,8 +1688,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         ...(vars ? Object.values(vars) : []),
       ]),
     });
-    for (const name of writtenInputs ?? [])
-      inputLocals.set(name, BaseCompiler.tempVar(target));
     // The `vars` names, for the seed ABI check (§7): a seed that resolves to a
     // HOST-supplied uniform is the deferred ABI row, and must fail loudly
     // rather than silently draw a different stream than the host.
@@ -1864,20 +1803,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // `code` is spliced into a shader function body by the caller, so the same
     // placement rule applies here as inside an emitted definition (D6).
     gpuAssertReturnPlacement('this expression', code, this.languageId);
-    // The body assigns an input that an engine scope binds (`u ≔ u + 1`
-    // after `ce.declare('u', 'real')`). The input is a uniform, which a
-    // shader cannot write, so the expression is compiled again with each
-    // written input read and written as a local copy that starts with the
-    // value of the input. The written names are known only after a first
-    // compilation: an assignment of a name that no scope of the expression
-    // binds is a write of the input, and the block compilation decides that
-    // (`withImplicitLocalDeclares`). The shader targets spell a free symbol
-    // with its own name (`gpuCheckIdentifier`), so a recorded spelling is
-    // the name of the symbol.
-    if (writtenInputs === undefined && target.inputWrites!.size > 0)
-      return this.compileOrThrow(source, options, storage, [
-        ...target.inputWrites!,
-      ]);
     const result: CompilationResult = {
       target: this.languageId,
       success: true,
@@ -1918,101 +1843,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       const entry = result.freeSymbolTypes?.[layout.symbol];
       if (entry !== undefined) entry.lowered = layout.struct;
     }
-    if (inputLocals.size > 0)
-      result.code = this.withInputLocalCopies(
-        result.code,
-        inputLocals,
-        result.freeSymbolTypes,
-        (name) =>
-          vars !== undefined && Object.hasOwn(vars, name)
-            ? (vars[name] as string)
-            : name
-      );
     return result;
-  }
-
-  /**
-   * The body `code`, started with a declaration of the local copy of each
-   * input that the body writes (`CompileTarget.inputLocals`), initialized
-   * with the value of the input (`initial` gives its source: the name of
-   * the input, or its `vars` mapping): `float _tv1 = u;` in GLSL,
-   * `var _tv1: f32 = u;` in WGSL. The type of the local is the shader type of
-   * the input (`types`, the `CompilationResult.freeSymbolTypes` of the
-   * compilation), which is the type of the uniform that the host declares.
-   *
-   * A declaration is a statement, so a code that is one expression becomes
-   * a function body: `u = u + 1.0` (the root `u ≔ u + 1`) becomes the
-   * declaration, the statement `_tv1 = _tv1 + 1.0;` and `return _tv1;`, and
-   * any other expression `e` becomes the declaration and `return e;`. A code
-   * of several lines is a function body already.
-   *
-   * The local is declared with no initial value when the first statement
-   * that names it is a write that always runs and does not read it
-   * (`gpuWrittenFirst`): the body then does not read the input, and the host
-   * need not give a value to it.
-   *
-   * A user-defined function that the body calls is declared outside the body
-   * (in the preamble), so it cannot read the local copy: its read of the
-   * input gives the value that the host gave, where the interpreter reads the
-   * written value. The compilation fails then. The definitions are compiled
-   * against the target of the body (`CompileTarget.userFunctions.root`), so
-   * such a read is spelled with the name of the local, which is a generated
-   * name that no other code uses.
-   */
-  private withInputLocalCopies(
-    code: string,
-    inputLocals: ReadonlyMap<string, string>,
-    types: CompilationResult['freeSymbolTypes'],
-    initial: (name: string) => string = (name) => name
-  ): string {
-    const isWGSL = this.languageId === 'wgsl';
-    const definitions = [
-      ...(this.currentUserFunctions?.defs?.values() ?? []),
-    ].join('\n');
-    const declarations: string[] = [];
-    for (const [name, local] of inputLocals) {
-      if (new RegExp(`\\b${local}\\b`).test(definitions))
-        throw new Error(
-          `Could not compile \`Assign\`: the body writes "${name}", an input ` +
-            `of the shader, and a user-defined function that the body calls ` +
-            `reads "${name}". The body writes a local copy of the input, ` +
-            `because the shader cannot write an input, and the function, ` +
-            `which is declared outside the body, cannot read that local.`
-        );
-      const type = types?.[name]?.lowered;
-      if (type === undefined)
-        throw new Error(
-          `Could not compile \`Assign\`: the body writes "${name}", an input ` +
-            `of the shader, and the shader type of "${name}" is not known, so ` +
-            `the local copy that the body writes cannot be declared.`
-        );
-      // The local copy is a function-scope variable, and WGSL guarantees
-      // only 8192 bytes of them per function.
-      const bytes = isWGSL ? gpuWGSLArrayBytes(type) : undefined;
-      if (bytes !== undefined && bytes > GPU_WGSL_FUNCTION_SCOPE_BYTES)
-        throw new Error(
-          `Could not compile \`Assign\`: the body writes "${name}", an input ` +
-            `of the shader, so it reads and writes a local copy of it, and ` +
-            `the copy (\`${type}\`, ${bytes} bytes) is larger than the ` +
-            `${GPU_WGSL_FUNCTION_SCOPE_BYTES} bytes of function-scope ` +
-            `variables that WGSL guarantees per function. Write a new name ` +
-            `instead of "${name}", or read "${name}" from a storage buffer ` +
-            `(the storage kind 'storage-buffer'), which the body cannot write.`
-        );
-      const value = gpuWrittenFirst(code, local) ? '' : ` = ${initial(name)}`;
-      declarations.push(
-        isWGSL ? `var ${local}: ${type}${value};` : `${type} ${local}${value};`
-      );
-    }
-    let body = code;
-    if (!body.includes('\n')) {
-      const assigned = /^([A-Za-z_]\w*) = /.exec(body)?.[1];
-      body =
-        assigned !== undefined && [...inputLocals.values()].includes(assigned)
-          ? `${body};\nreturn ${assigned};`
-          : `return ${body};`;
-    }
-    return [...declarations, body].join('\n');
   }
 
   /**

@@ -87,11 +87,8 @@ export interface FieldFunctionHost {
    * emitted (`GPUShaderTarget.emittedUserFunctionNames`). */
   emittedUserFunctionNames(): string[];
   /** Throw when `expr` has no value to return from a WGSL function
-   * (`wgslFunctionBodyShape`); the result is given to `assertBody`. */
-  bodyShape(expr: Expression): unknown;
-  /** Throw when the emitted `body` of `expr` does not end with the
-   * `return` of its value (`wgslAssertFunctionBody`). */
-  assertBody(expr: Expression, body: string, shape: unknown): void;
+   * (`wgslAssertFunctionBodyShape`). */
+  assertBodyShape(expr: Expression): void;
 }
 
 /** A WGSL identifier that the field function can declare. */
@@ -649,9 +646,8 @@ export function compileWGSLFieldFunction(
   const ce = expr.engine;
   // The body must have a value to return (the check of
   // `WGSLTarget.compileFunction()`).
-  let bodyShape: unknown;
   try {
-    bodyShape = host.bodyShape(expr);
+    host.assertBodyShape(expr);
   } catch (e) {
     throwIfCallerCancellation(e, ce._deadlineFrame);
     return declined(compileDiagnosticOf(e));
@@ -1121,7 +1117,6 @@ export function compileWGSLFieldFunction(
       })
     );
     userNames = host.emittedUserFunctionNames();
-    if (result.success) host.assertBody(expr, result.code, bodyShape);
   } catch (e) {
     throwIfCallerCancellation(e, ce._deadlineFrame);
     return declined(compileDiagnosticOf(e));

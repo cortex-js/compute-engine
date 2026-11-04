@@ -1343,9 +1343,7 @@ export const GPU_WGSL_FUNCTION_SCOPE_BYTES = 8192;
  *  - the target is WGSL and the copy needs more than 8192 bytes;
  *  - the base is a symbol that no enclosing binding form binds (a `Block`
  *    local is a function-scope name, which a helper at module scope cannot
- *    see), that the body does not write (a written input is read from a
- *    function-scope copy, `CompileTarget.inputLocals`), and that has no
- *    `storage` hint (a texture has its own helper);
+ *    see), and that has no `storage` hint (a texture has its own helper);
  *  - its emission is a plain identifier that does not start with the
  *    reserved prefix `_gpu_`. A symbol with an assigned value emits that
  *    value, and a `vars` mapping to a field (`u.S`) emits a path; neither is
@@ -1367,7 +1365,6 @@ export function gpuWGSLInPlaceArray(
   )
     return undefined;
   if (target.boundVars?.has(base.symbol)) return undefined;
-  if (target.inputLocals?.has(base.symbol)) return undefined;
   if (target.storage?.get(base.symbol) !== undefined) return undefined;
   const code = compile(base);
   return /^[A-Za-z_]\w*$/.test(code) && !code.startsWith('_gpu_')

@@ -1308,10 +1308,10 @@ describe('AN OPERAND EVALUATED FOR EACH ELEMENT OWNS ITS NAMES', () => {
 });
 
 describe('A READ OF A LOCAL NEXT TO ANOTHER BINDING OF ITS NAME', () => {
-  // A read of an assignment local that can come before its first
-  // assignment makes the compilation fail (`classifyLocalReads()`,
-  // `src/compute-engine/compilation/compile-locals.ts`). A read of another
-  // binding with the same name is not a read of the local.
+  // A read of an assignment local before its first assignment is the
+  // static error `read-before-declaration`. A read of another binding with
+  // the same name is not a read of the local, and the compilation
+  // succeeds.
 
   test('a function defined in the engine with a parameter of the same name', () => {
     // The definition of `h` compiles while the body of the caller compiles.

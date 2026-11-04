@@ -341,23 +341,6 @@ export function gpuDeclaredBodyTarget(
 }
 
 /**
- * Whether the first line of the shader statement list `body` that names
- * `name` is an assignment of `name` at the top level of the list (not in a
- * loop or a branch, whose lines are indented or start with a keyword), whose
- * value does not read `name`. Then no statement reads `name` before it has a
- * value. Any other first occurrence gives `false`.
- */
-export function gpuWrittenFirst(body: string, name: string): boolean {
-  const word = new RegExp(`(?<![\\w.])${name}(?!\\w)`);
-  for (const line of body.split('\n')) {
-    if (!word.test(line)) continue;
-    if (!line.startsWith(`${name} = `)) return false;
-    return !word.test(line.slice(name.length + 3));
-  }
-  return false;
-}
-
-/**
  * Is `t` a component a shader `vecN` can hold? A `vecN` is N REAL floats: a
  * boolean, a string, a complex value (itself a `vec2`) and a nested aggregate
  * all have a lowering of their own that does not fit a component slot.

@@ -62,19 +62,16 @@ export function statementBodyHead(
 }
 
 /**
- * Whether `expr` is a `Block` whose last statement is an assignment that the
- * block hook of a target where assignment is a STATEMENT (Python, WGSL) can
- * return: an `Assign` to a name, or a `Declare` with an initializer, which
- * these targets emit as the same assignment. The hook keeps such a statement
- * and adds `return <name>` after it, so `Block(s ≔ x; t ≔ s)` has a value on
- * those targets (`s = x`, `t = s`, `return t`).
+ * Whether `expr` is a `Block` whose last statement is an `Assign` to a name,
+ * or a `Declare` with an initializer: `Block(s ≔ x; t ≔ s)`. The value of
+ * such a block is `Nothing`, and a compilation that uses it declines
+ * (`'nothing-value'`, `assertAdmitted()`). The function-body entry points of
+ * the targets where assignment is a STATEMENT (Python, WGSL) let such a body
+ * through their checks before the compilation, so that this decline is the
+ * reason that the result reports.
  *
- * Not such a block: a last statement that is a nested `Block` (its emission
- * is a statement sequence the hook does not return), a `Declare` without an
- * initializer (the block's value is `Nothing`), and an assignment to
- * anything else than a name. A single-statement block with no local is
- * unwrapped to its statement by `compileBlock` and emits the single line
- * `s = x`; a caller must also check the emission for the final `return`.
+ * Not such a block: a last statement that is a nested `Block`, a `Declare`
+ * without an initializer, and an assignment to anything else than a name.
  */
 export function isTailAssignmentBlock(expr: Expression | undefined): boolean {
   if (expr === undefined || !isFunction(expr, 'Block') || expr.nops === 0)

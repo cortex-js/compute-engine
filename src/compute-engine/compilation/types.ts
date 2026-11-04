@@ -2069,44 +2069,6 @@ export interface CompileTarget<Expr = unknown> {
   varsObjectRefs?: Set<MathJsonSymbol>;
 
   /**
-   * When provided, the compiler records into this set the spelling of every
-   * free symbol that an `Assign` WRITES: the name of the member of the vars
-   * object (`_.<id> = …` in the JavaScript targets), or the bare identifier
-   * of a target that reads a free symbol by its name (Python). Such a symbol
-   * is an input that an engine scope outside the expression binds
-   * (`ce.declare('u', 'real')`), and the body changes it. The compiled code
-   * must not change a binding of the caller:
-   * - The JavaScript targets make the vars object a local copy before the
-   *   body runs (`BaseCompiler.localVarsObjectStatement`).
-   * - Python `compileFunction()` starts the function with a local of the
-   *   same name, initialized from the module global, for each written name
-   *   that is not a parameter (a parameter is a local already).
-   * - The GLSL and WGSL `compile()` and `compileFunction()` and the Python
-   *   `compile()` compile the expression a second time, with each written
-   *   name read and written as a local copy (`inputLocals`) that starts with
-   *   the value of the input. On these routes the set also records a written
-   *   `vars` key, by its name: it is an input that the host gives too.
-   *
-   * Survives the compiler's `{ ...target }` spreads by reference.
-   */
-  inputWrites?: Set<MathJsonSymbol>;
-
-  /**
-   * The local copy of each input that the body writes: the name of the free
-   * symbol, mapped to the identifier of a local variable that the target
-   * declares before the body, with the value of the input. The `var` hook of
-   * the target resolves each read of the name to the local, and an `Assign`
-   * of the name writes the same local (`BaseCompiler.assignLValue`). A shader
-   * cannot write an input (a uniform is read-only), and a Python body that
-   * assigns a global name makes it a local of the enclosing function, so a
-   * read before the write fails. The local avoids both, and the value that
-   * the host gives (a uniform, a Python name) does not change. The
-   * interpreter changes the engine's binding, which is not a value of the
-   * host.
-   */
-  inputLocals?: ReadonlyMap<MathJsonSymbol, string>;
-
-  /**
    * The emitted code names identifiers that exist only where the compilation
    * ran: a caller function given by name (`functions: { f: 'hostFn' }`), a
    * `vars` mapping to anything but a read of the vars object, or a caller

@@ -539,9 +539,10 @@ export function gpuPlainUniformRead(
  * and the interpreter gives the answer.
  *
  * A self-mapped entry (`vars: { T: 'T' }`) is not refused: the source is the
- * symbol's own spelling, and a written input is read from a local copy
- * (`inputLocals` in `compileOrThrow`). A source that names a symbol the code
- * only reads is not refused either. An entry whose key the code never reads
+ * symbol's own spelling, and the compiled code does not write an input (a
+ * write to an input declines, `assignLValue()`). A source that names a
+ * symbol the code only reads is not refused either. An entry whose key the
+ * code never reads
  * (`all`) is not refused: a host can pass one `vars` map for many
  * expressions.
  */

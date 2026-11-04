@@ -60,7 +60,6 @@ import {
 import {
   OPERAND_READ,
   UNREADABLE_OPERAND,
-  chainedAmbientWrite,
 } from './compile-locals.js';
 import {
   appliedDerivativeLiteral,
@@ -139,20 +138,6 @@ export function analyzeReferences(
   // `unknown` where the read `u` is `complex`), so a read of the same name
   // that the walk meets later replaces it in `occurrences`.
   const assignTargets = new Set<Expression>();
-  // The inner targets of the chained assignment statement `stmt`
-  // (`t ≔ (w ≔ t + i)`) that the compiled code declares as locals of the
-  // statement list: those that no engine scope outside the expression binds
-  // (`chainedAmbientWrite`). They were reported as free symbols: `w`
-  // above, when `w` is not declared.
-  const chainedLocals = (stmt: Expression | undefined): string[] => {
-    const names: string[] = [];
-    let value = isFunction(stmt, 'Assign') ? stmt.ops[1] : undefined;
-    while (isFunction(value, 'Assign') && isSymbol(value.ops[0])) {
-      if (!chainedAmbientWrite(value.ops[0])) names.push(value.ops[0].symbol);
-      value = value.ops[1];
-    }
-    return names;
-  };
   // The `Assign` whose target the walk visits now, when the target is a
   // name or a `Tuple` of names.
   let writing: Expression | undefined;
@@ -889,9 +874,7 @@ export function analyzeReferences(
       h === 'Loop' ||
       h === 'Comprehension'
     ) {
-      // A loop body that is one chained assignment declares its inner
-      // targets as locals of the body (`chainedLocalDeclares`).
-      const indices: string[] = h === 'Loop' ? chainedLocals(ops[0]) : [];
+      const indices: string[] = [];
       const limitExprs: Array<[Expression, ReadonlySet<string>]> = [];
       // The names that the clauses of a `Comprehension` or an `Integrate`
       // bind before the clause being read: a later clause reads an earlier
@@ -989,9 +972,7 @@ export function analyzeReferences(
       return;
     }
     if (h === 'Block') {
-      // The inner targets of a chained assignment statement are locals of
-      // the block (`withImplicitLocalDeclares`).
-      const locals: string[] = ops.flatMap(chainedLocals);
+      const locals: string[] = [];
       // A destructuring declare (`let (x, y) = …`) binds every symbol leaf
       // of its tuple pattern (`_` binds nothing; patterns nest).
       const collectPatternLeaves = (p: Expression): void => {
@@ -1233,9 +1214,8 @@ function isDeclaredFreeSymbol(
  * The target of an assignment is not bound to a definition (it has no
  * `valueDefinition`, and its type is `unknown`). When it is the only
  * occurrence of an input (`If(c, u ≔ 1, …)` writes `u` and does not read
- * it), the type is read from the definition in scope instead: it was
- * `unknown`, and a shader declared the local copy of a boolean input as a
- * `float`.
+ * it), the type is read from the definition in scope instead, so that the
+ * input has its declared type and not `unknown`.
  */
 export function freeSymbolOccurrence(
   name: string,

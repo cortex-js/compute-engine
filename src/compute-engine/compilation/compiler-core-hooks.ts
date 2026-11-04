@@ -52,6 +52,11 @@ export interface CoreHooks {
     target: CompileTarget<Expression>,
     unsettled: UnsettledShape | undefined
   ): void;
+  /** Decline the outermost compilation in progress now, for the value with
+   * no settled shape that `assertAdmitted()` would decline for after the
+   * code was generated, when there is one
+   * (`throwPendingUnsettledShape()`, `compile-admission.ts`). */
+  throwPendingUnsettledShape(): void;
   /** The inputs with no type of `expr`, from its reference analysis
    * (`untypedInputsOf()`, `compile-admission.ts`). */
   untypedInputsOf(

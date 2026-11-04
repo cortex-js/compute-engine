@@ -398,12 +398,9 @@ import { compileBlock, compileStatementList } from './compile-blocks.js';
 import {
   assertLocalsAssignedBeforeRead,
   assertNoUseBeforeDeclare,
-  chainedLocalDeclares,
-  classifyLocalReads,
   refuseEffectContractViolations,
   _reservedDeclareNames,
   reservedLoopLocals,
-  splitChainedAssignments,
   withDefineFunctionDeclares,
   withImplicitLocalDeclares,
 } from './compile-locals.js';
@@ -429,6 +426,7 @@ import { identifierPattern } from './compile-folded-values.js';
 import {
   assertAdmitted,
   declaredUnionInputsOf,
+  throwPendingUnsettledShape,
   unsettledShapeIn,
   untypedInputsOf,
 } from './compile-admission.js';
@@ -475,6 +473,7 @@ export function compile(
   // of such a root does not check again (`CompilerState._rootAdmission`).
   const admission: { unsettled?: UnsettledShape } = {};
   const callerLowered = CompilerState._callerLowered;
+  const pending = CompilerState._pendingAdmission;
   CompilerState._callerLowered = new Map();
   try {
     const code = compileExpression(expr, target, prec, admission);
@@ -482,6 +481,7 @@ export function compile(
     return code;
   } finally {
     CompilerState._callerLowered = callerLowered;
+    CompilerState._pendingAdmission = pending;
   }
 }
 
@@ -904,7 +904,10 @@ function compileExpression(
     if (CompilerState._rootAdmission) assertNoStaticTypeError(expr, target);
     else {
       const unsettled = unsettledShapeIn(expr, target, true);
-      if (admission !== undefined) admission.unsettled = unsettled;
+      if (admission !== undefined) {
+        admission.unsettled = unsettled;
+        CompilerState._pendingAdmission = { root: expr, target, unsettled };
+      }
     }
   }
   // First-class type values do not compile — a reified type expression has
@@ -4366,17 +4369,9 @@ export function compileLoopBody(
     // Every statement of a loop body is in statement position, the last one
     // included, so each of them lowers. Without this step such a declare
     // reached the value-position `Declare` handler, which fails closed.
-    // An assignment whose value is another assignment
-    // (`t ≔ (u ≔ t + i)`) is split into two statements, as in
-    // `compileBlock`, so the inner target is declared in the loop body
-    // when no enclosing scope binds it. Without the split the write went to
-    // the caller's `vars` object (`t = _.u = …`).
-    const split = splitChainedAssignments(
-      expr.ops
-        .flatMap((s) => desugarPatternDeclare(s, target) ?? [s])
-        .flatMap((s) => desugarPatternAssign(s, target) ?? [s])
-    );
-    const stmts = split.args;
+    const stmts = expr.ops
+      .flatMap((s) => desugarPatternDeclare(s, target) ?? [s])
+      .flatMap((s) => desugarPatternAssign(s, target) ?? [s]);
     // …and so does the `function`-definition rewrite, so a definition made
     // INSIDE a loop body lowers and is callable there, exactly as one made
     // in an ordinary block is. A loop body carries no value, hence
@@ -4387,21 +4382,16 @@ export function compileLoopBody(
     const withDecls = withImplicitLocalDeclares(
       withDefineFunctionDeclares(stmts, target, false),
       target,
-      expr,
-      split.chained
+      expr
     );
     // The checks of `compileBlock` on the order of the statements: no use
-    // of a local before its `Declare`, and no read of a local before a
-    // statement gives it a value. Each pass of the loop runs the body
-    // with new locals, so a value of the previous pass does not count.
+    // of a local before its `Declare`, and no first value of a local that
+    // reads the name of the local.
     assertNoUseBeforeDeclare(withDecls);
     const bodyLocals = withDecls.flatMap((s) =>
       isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
     );
     assertLocalsAssignedBeforeRead(withDecls, bodyLocals);
-    // A read of a local of the body that may have no value is refused, as
-    // in `compileBlock` (`classifyLocalReads`).
-    classifyLocalReads(withDecls, bodyLocals, expr);
     // A body-scoped `localFunctions`, filled in statement order below. Held
     // as its own binding because the field on `CompileTarget` is a
     // `ReadonlyMap`: the target exposes it for READS during compilation, and
@@ -4477,20 +4467,6 @@ export function compileLoopBody(
     if (stmts !== null) return compileLoopBodyStatements(stmts, target);
   }
 
-  // A loop body that is one chained assignment (`t ≔ (u ≔ t + i)`) is
-  // two statements, and the inner target is declared in the loop body
-  // when nothing outside binds it (`chainedLocalDeclares`).
-  if (h === 'Assign') {
-    const split = splitChainedAssignments([expr]);
-    if (split.args.length > 1) {
-      const stmts = [
-        ...chainedLocalDeclares(split.args, split.chained, target),
-        ...split.args,
-      ];
-      return compileLoopBodyStatements(stmts, target);
-    }
-  }
-
   // A loop body that is one `Declare` of a local with the name of an
   // identifier that the emitted code uses declares a fresh name. A `Declare`
   // that is a statement of a longer loop body has its fresh name already.
@@ -4513,10 +4489,10 @@ export function compileLoopBody(
 
 /**
  * Compile `stmts`, the statements of a loop body that is not a `Block` (a
- * destructuring declare or assign, or a chained assignment, split into
- * statements), in one scope. A local with the name of an identifier that
- * the emitted code uses (`_SYS`) gets a fresh name, as in `compileBlock`,
- * at its `Declare` and at each read and write.
+ * destructuring declare or assign, split into statements), in one scope.
+ * A local with the name of an identifier that the emitted code uses
+ * (`_SYS`) gets a fresh name, as in `compileBlock`, at its `Declare` and at
+ * each read and write.
  */
 function compileLoopBodyStatements(
   stmts: ReadonlyArray<Expression>,
@@ -6664,6 +6640,7 @@ const hubs: CoreHooks = {
   compileDeclaredUnionDispatch,
   unsettledShapeIn,
   assertAdmitted,
+  throwPendingUnsettledShape,
   untypedInputsOf,
   isComplexValued,
   userFunctionParamLanes: (registry, name) =>

@@ -353,8 +353,7 @@ const WGSL_SHAPE_RULES: GPUShapeRules = {
  * Whether `expr` is a `Block` whose last statement is a `Block` that ends,
  * at any depth of nested blocks, with an assignment to a name or a `Declare`
  * with an initializer (`isTailAssignmentBlock`): `Block(s ≔ x;
- * Block(t ≔ s + 1))`. The value of such a block is the value of that last
- * assignment.
+ * Block(t ≔ s + 1))`. The value of such a block is `Nothing`.
  */
 function isNestedTailAssignmentBlock(expr: Expression): boolean {
   if (!isFunction(expr, 'Block') || expr.nops === 0) return false;
@@ -362,15 +361,6 @@ function isNestedTailAssignmentBlock(expr: Expression): boolean {
   if (!isFunction(last, 'Block')) return false;
   return isTailAssignmentBlock(last) || isNestedTailAssignmentBlock(last);
 }
-
-/**
- * What `wgslFunctionBodyShape` found about a body before its compilation,
- * for `wgslAssertFunctionBody` to check the emitted body.
- */
-type WGSLFunctionBodyShape = {
-  tailAssignment: boolean;
-  nestedTailAssignment: boolean;
-};
 
 /**
  * Decline a body that has no value before it is compiled, for an entry
@@ -385,64 +375,18 @@ type WGSLFunctionBodyShape = {
  * assignment is a STATEMENT, unlike GLSL (see `gpuAssertExpressionBody`).
  *
  * A block whose last statement is an assignment to a name, or a `Declare`
- * with an initializer (`isTailAssignmentBlock`), is not declined before it
- * is compiled: the block hook emits that statement followed by
- * `return <name>;` (`Block(s ≔ x; t ≔ s)` → `s = x;`, `t = s;`,
- * `return t;`), as `compile()` does for the same body. The emitted body is
- * checked instead (`wgslAssertFunctionBody`): a single-statement block with
- * no local is unwrapped to its statement and emits the single line `s = x`,
- * which stays declined.
- *
- * A block whose last statement is a nested block that ends with such an
- * assignment (`Block(s ≔ x; Block(t ≔ s + 1))`) is not declined before it is
- * compiled either. The block compilation gives the nested block a
- * temporary, which the nested block assigns last, and the outer block
- * returns it (`var _tv1: f32;`, `{ … _tv1 = t; }`, `return _tv1;`), as on
- * GLSL. The emitted body is checked for that final `return <name>;`.
+ * with an initializer (`isTailAssignmentBlock`), or a nested block that ends
+ * with one (`Block(s ≔ x; Block(t ≔ s + 1))`), is not declined here. Its
+ * value is `Nothing`, and the compilation of the body declines for it, with
+ * the decline of a used value of an assignment (`'nothing-value'`,
+ * `assertAdmitted()`), as `compile()` does for the same body.
  */
-export function wgslFunctionBodyShape(
+export function wgslAssertFunctionBodyShape(
   subject: string,
   expr: Expression
-): WGSLFunctionBodyShape {
-  const tailAssignment = isTailAssignmentBlock(expr);
-  const nestedTailAssignment =
-    !tailAssignment && isNestedTailAssignmentBlock(expr);
-  if (!tailAssignment && !nestedTailAssignment)
-    gpuAssertExpressionBody(subject, expr, 'wgsl');
-  return { tailAssignment, nestedTailAssignment };
-}
-
-/**
- * Decline the emitted `body` of a block that `wgslFunctionBodyShape`
- * accepted because it ends with an assignment. The body is accepted only
- * when its last line is `return <name>;` and, for an assignment, the line
- * before it is the assignment `<name> = …;`: when the block hook does not
- * recognize the assignment target, it puts `return` in front of the whole
- * assignment (`return a[0] = x;`), which is not valid WGSL.
- */
-export function wgslAssertFunctionBody(
-  subject: string,
-  expr: Expression,
-  body: string,
-  shape: WGSLFunctionBodyShape
 ): void {
-  const lines = body.split('\n');
-  if (shape.tailAssignment) {
-    const returned = /^return\s+([^\s;]+);?$/.exec(lines[lines.length - 1]);
-    if (
-      lines.length < 2 ||
-      returned === null ||
-      !lines[lines.length - 2].startsWith(`${returned[1]} = `)
-    )
-      gpuAssertExpressionBody(subject, expr, 'wgsl');
-  }
-  if (shape.nestedTailAssignment) {
-    if (
-      lines.length < 2 ||
-      !/^return\s+[A-Za-z_]\w*;?$/.test(lines[lines.length - 1])
-    )
-      gpuAssertExpressionBody(subject, expr, 'wgsl');
-  }
+  if (isTailAssignmentBlock(expr) || isNestedTailAssignmentBlock(expr)) return;
+  gpuAssertExpressionBody(subject, expr, 'wgsl');
 }
 
 /**
@@ -526,14 +470,8 @@ export class WGSLTarget extends GPUShaderTarget {
         withTargetExtension: (extension, fn) =>
           this.withTargetExtension(extension, fn),
         emittedUserFunctionNames: () => this.emittedUserFunctionNames(),
-        bodyShape: (e) => wgslFunctionBodyShape('compileFieldFunction()', e),
-        assertBody: (e, body, shape) =>
-          wgslAssertFunctionBody(
-            'compileFieldFunction()',
-            e,
-            body,
-            shape as WGSLFunctionBodyShape
-          ),
+        assertBodyShape: (e) =>
+          wgslAssertFunctionBodyShape('compileFieldFunction()', e),
       },
       expr,
       options
@@ -547,8 +485,8 @@ export class WGSLTarget extends GPUShaderTarget {
     parameters: Array<[name: string, type: string]>,
     options?: { constantFold?: boolean }
   ): string {
-    // The body must have a value (`wgslFunctionBodyShape`).
-    const shape = wgslFunctionBodyShape('compileFunction()', expr);
+    // The body must have a value (`wgslAssertFunctionBodyShape`).
+    wgslAssertFunctionBodyShape('compileFunction()', expr);
     // A WGSL function parameter is an immutable value, so an assignment to it
     // (`x = x + 1.0;` in `fn f(x: f32)`) is not valid source. GLSL passes a
     // parameter as a copy that the body can write, so only WGSL declines. The
@@ -568,7 +506,6 @@ export class WGSLTarget extends GPUShaderTarget {
     // Compiled under the caller's declared parameter shapes, so the body
     // analysis agrees with the signature emitted below.
     const body = this.compileDeclaredFunctionBody(expr, parameters, options);
-    wgslAssertFunctionBody('compileFunction()', expr, body, shape);
 
     const params = parameters
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)

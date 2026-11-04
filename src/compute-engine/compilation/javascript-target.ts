@@ -11124,7 +11124,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
    * each read of a shared list of `names` at a scalar index is a direct
    * read of the checked array (`batchListRead`). `undefined` when the body
    * would read the vars object anyway (a definition that reads it by its own
-   * spelling), writes an input, draws random numbers, or names an
+   * spelling), draws random numbers, or names an
    * identifier of the host: the batch then runs the ordinary body. Called by
    * `compileToTarget` after the ordinary compilation of the same
    * expression, with the same engine state, so both bodies fold the same
@@ -11148,7 +11148,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     );
     if (target.hostNames === true) return undefined;
     const js = BaseCompiler.compileCseRoot(rewritten, target);
-    if (BaseCompiler.localVarsObjectStatement(target)) return undefined;
     // No last-call memo (`memoizeSharedDefinitions`): its key holds the
     // vars-object reads of a definition, and a definition here reads the
     // parameters of the body instead. A memo changes no value.
@@ -11362,8 +11361,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       unrollTypedPointLists: true,
       operators: operatorLookup,
       varsObjectRefs,
-      // See `CompileTarget.inputWrites`.
-      inputWrites: new Set<MathJsonSymbol>(),
       // See `CompileTarget.varsObjectName`: free symbols read as `_.<id>`, so
       // a lambda parameter spelled `_` must not shadow the vars object.
       varsObjectName: '_',
@@ -12360,21 +12357,14 @@ function compileToTarget(
     : undefined;
   const broadcastOutputs = broadcastStrideOfType(expr.type.type);
   const reconstructionDigits = realPowerReconstructionDigits();
-  // A body that writes an input first makes the vars object a local copy, so
-  // the object of the caller does not change (`localVarsObjectStatement`).
-  // The copy is the first operand of a comma expression in `code`, which is
-  // an expression, and the first statement of the statement form.
-  const localVars = BaseCompiler.localVarsObjectStatement(target);
   const statementBody = javascriptStatements(target)?.functionBody(js);
   const fn = new ComputeEngineFunction(
     expr.engine,
-    localVars ? `(${localVars}, ${js})` : js,
+    js,
     perCall,
     entryPlan,
     split.hoisted,
-    localVars && statementBody
-      ? `${localVars};\n${statementBody}`
-      : statementBody,
+    statementBody,
     reconstructionDigits,
     kinds !== undefined || keyedResult(expr)
   );
@@ -12393,7 +12383,6 @@ function compileToTarget(
     batchBody !== undefined &&
     candidates !== undefined &&
     candidates.size > 0 &&
-    !localVars &&
     target.hostNames !== true
   ) {
     try {
@@ -12416,7 +12405,7 @@ function compileToTarget(
     target: 'javascript' as const,
     success: true,
     runtimeVersion: RUNTIME_VERSION,
-    code: localVars ? `(${localVars}, ${js})` : js,
+    code: js,
     // The helper preamble plus the emitted definitions (`_fn_*` user
     // functions, `_val_*` bound symbol values), which `code` reads by name.
     ...(preamble ? { preamble } : {}),

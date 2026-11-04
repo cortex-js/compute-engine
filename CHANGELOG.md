@@ -22,6 +22,17 @@
   and `CONDITION_DIALECT_JS`. A custom target compiles a branch condition
   with `BaseCompiler.compile`, or with `BaseCompiler.guardCondition` for the
   check that the condition is a boolean.
+- **Custom compile targets: the code for an input that the compiled code
+  writes is removed.** A write to an input already declines ("is not a
+  local of the compiled expression"), so the `CompileTarget` fields
+  `inputWrites` and `inputLocals` are gone, and a target no longer makes a
+  local copy of an input or compiles the expression a second time. The
+  `BaseCompiler` static members `classifyLocalReads`, `loopRunsOnce`,
+  `localReadWithNoWrite`, `nestedOnlyLocals`, `chainedLocalDeclares`,
+  `chainedAmbientWrite`, `scopeChainBinds`, `splitChainedAssignments` and
+  `localVarsObjectStatement` are removed too: the forms that they handled
+  (a read of a local before it has a value, a chained assignment) are
+  static errors since 0.178.0. No compiled value changes.
 
 ### Behavior Changes
 

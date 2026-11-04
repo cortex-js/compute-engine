@@ -1111,9 +1111,11 @@ export function compileCseRoot(
   const session = target.cse;
   let code: TargetSource;
   const callerLowered = CompilerState._callerLowered;
+  const pending = CompilerState._pendingAdmission;
   if (admit) {
     CompilerState._rootAdmission = true;
     CompilerState._callerLowered = new Map();
+    CompilerState._pendingAdmission = { root: expr, target, unsettled };
   }
   try {
     try {
@@ -1128,7 +1130,10 @@ export function compileCseRoot(
     }
     if (admit) core.assertAdmitted(expr, target, unsettled);
   } finally {
-    if (admit) CompilerState._callerLowered = callerLowered;
+    if (admit) {
+      CompilerState._callerLowered = callerLowered;
+      CompilerState._pendingAdmission = pending;
+    }
   }
   return code;
 }

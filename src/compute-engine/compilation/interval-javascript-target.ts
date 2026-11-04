@@ -6842,8 +6842,6 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
-      // See `CompileTarget.inputWrites`.
-      inputWrites: new Set<string>(),
       // Constant folding is UNSOUND on this target, unconditionally: it bakes
       // a subtree's `.N()` value as a zero-width point, discarding the
       // outward-rounded enclosure the structural interval code computes. A
@@ -7418,13 +7416,7 @@ function compileToIntervalTarget(
   const preamble = [target.preamble, declarations, hoisted.definitions]
     .filter((part) => part)
     .join('\n');
-  // A body that writes an input first makes the vars object a local copy
-  // (`localVarsObjectStatement`). `run()` gives the body a converted copy of
-  // the caller's object already (`processInput`), but `code` is also run by
-  // hosts that pass their own object.
-  const localVars = BaseCompiler.localVarsObjectStatement(target);
-  const withLocals = localVars ? `(${localVars}, ${hoistedJs})` : hoistedJs;
-  const body = withLocals;
+  const body = hoistedJs;
   // The inputs that the code reads off the vars object (`varsObjectRefs`)
   // and whose declared type is a collection with no `missing` arm: the code
   // reads each one as a list, so `broadcast()` binds it once for the whole

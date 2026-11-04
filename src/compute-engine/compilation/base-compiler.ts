@@ -471,19 +471,10 @@ import {
   bindsLocalFunctions,
   blockLocalOf,
   blockLocalValueFrame,
-  chainedAmbientWrite,
-  chainedLocalDeclares,
-  classifyLocalReads,
   freshBlockLocalName,
   localNameKey,
-  localReadWithNoWrite,
-  localVarsObjectStatement,
-  loopRunsOnce,
   nestedAssignmentsTo,
-  nestedOnlyLocals,
   refuseEffectContractViolations,
-  scopeChainBinds,
-  splitChainedAssignments,
   unassignedLocalRead,
   withDefineFunctionDeclares,
   withFreshBlockLocals,
@@ -1350,21 +1341,13 @@ export class BaseCompiler {
   static readonly refuseEffectContractViolations =
     refuseEffectContractViolations;
   static readonly bindingStatesEffects = bindingStatesEffects;
-  static readonly chainedLocalDeclares = chainedLocalDeclares;
   static readonly withImplicitLocalDeclares = withImplicitLocalDeclares;
   static readonly _localValueFrames = _localValueFrames;
   static readonly blockLocalValueFrame = blockLocalValueFrame;
   static readonly _localNameKeys = _localNameKeys;
   static readonly localNameKey = localNameKey;
   static readonly blockLocalOf = blockLocalOf;
-  static readonly classifyLocalReads = classifyLocalReads;
-  static readonly loopRunsOnce = loopRunsOnce;
-  static readonly localReadWithNoWrite = localReadWithNoWrite;
-  static readonly nestedOnlyLocals = nestedOnlyLocals;
   static readonly nestedAssignmentsTo = nestedAssignmentsTo;
-  static readonly chainedAmbientWrite = chainedAmbientWrite;
-  static readonly scopeChainBinds = scopeChainBinds;
-  static readonly splitChainedAssignments = splitChainedAssignments;
   static readonly assertLocalsAssignedBeforeRead =
     assertLocalsAssignedBeforeRead;
   static readonly assertNoUseBeforeDeclare = assertNoUseBeforeDeclare;
@@ -1381,7 +1364,6 @@ export class BaseCompiler {
   static readonly withFreshBlockLocals = withFreshBlockLocals;
   static readonly freshBlockLocalName = freshBlockLocalName;
   static readonly assignLValue = assignLValue;
-  static readonly localVarsObjectStatement = localVarsObjectStatement;
   static readonly compileBlock = compileBlock;
   static readonly compileForLoop = compileForLoop;
   static readonly compileComprehension = compileComprehension;

@@ -1,5 +1,6 @@
-// Block locals: value frames, local reads and writes, chained assignments,
-// use-before-declare checks and the classification of local reads.
+// Block locals: value frames, local reads and writes, and the checks of the
+// order of the statements (use before declaration, a first value that reads
+// the name of its local).
 
 import type { Scope } from '../types-evaluation.js';
 import type {
@@ -13,15 +14,11 @@ import type { EffectSet } from '../../common/type/types.js';
 import { isFunctionDeclarationStatement } from '../library/control-structures.js';
 import {
   isSymbol,
-  isNumber,
   isString,
   isFunction,
-  isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralDeclaredEffects } from '../boxed-expression/function-literal.js';
 import type { CompileTarget, TargetSource } from './types.js';
-import { lazyOperandRegions } from './cse.js';
-import { rangeCount } from '../numerics/range-count.js';
 import {
   assignmentLocalsOf,
   laterDeclarationLocalsOf,
@@ -37,8 +34,6 @@ import type {
   LocalEntry,
   LocalValueFrame,
 } from './compiler-types.js';
-import { STRICT_OPERATORS } from './compiler-tables.js';
-import { booleanClaim } from './compile-conditions.js';
 import { tempVar } from './compiler-naming.js';
 import { CompilerState } from './compiler-state.js';
 
@@ -379,50 +374,6 @@ export function bindingStatesEffects(
 }
 
 /**
- * The `Declare` statements for the inner targets of a chained assignment
- * that `splitChainedAssignments` moved to statement position, in a
- * statement list that has no `Block` node whose scope
- * `withImplicitLocalDeclares` can read (a loop body that is one
- * statement). The interpreter declares such a target in the scope of the
- * loop when no enclosing scope has the name. The test is on the
- * compilation: a name is bound outside when it is a parameter or a loop
- * index (`boundVars`), or a local of an enclosing compiled block or
- * function (`boundVars`, or `localShapeFrameOf` on the shader targets).
- * A name that an engine scope outside the expression binds is not
- * declared either: it is written as an input (`chainedAmbientWrite`).
- * Each other name gets one declaration, as in the block route
- * (`withImplicitLocalDeclares`).
- */
-export function chainedLocalDeclares(
-  stmts: ReadonlyArray<Expression>,
-  chained: ReadonlySet<string>,
-  target: CompileTarget<Expression>
-): Expression[] {
-  const declared = new Set<string>();
-  return stmts.flatMap((s) => {
-    if (!isFunction(s, 'Assign') || !isSymbol(s.ops[0])) return [];
-    const lhs = s.ops[0];
-    const name = lhs.symbol;
-    if (
-      !chained.has(name) ||
-      declared.has(name) ||
-      target.boundVars?.has(name) ||
-      localShapeFrameOf(name) !== undefined ||
-      chainedAmbientWrite(lhs)
-    )
-      return [];
-    declared.add(name);
-    // Raw, as in `withImplicitLocalDeclares`: a canonical `Declare`
-    // would register the name in the scope the compilation runs under.
-    return [
-      lhs.engine._fn('Declare', [lhs, lhs.engine.string('unknown')], {
-        canonical: false,
-      }),
-    ];
-  });
-}
-
-/**
  * Prepend the `Declare` statements a statement list is MISSING: one per
  * block-local that the block introduces by bare ASSIGNMENT.
  *
@@ -454,10 +405,7 @@ export function chainedLocalDeclares(
 export function withImplicitLocalDeclares(
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  node: Expression | undefined,
-  /** The targets of the assignments `splitChainedAssignments` moved out of
-   * the value of another assignment. */
-  chained: ReadonlySet<string> = new Set()
+  node: Expression | undefined
 ): ReadonlyArray<Expression> {
   const scope = node?.localScope;
   if (!scope) return args;
@@ -482,27 +430,10 @@ export function withImplicitLocalDeclares(
       laterDeclarationLocalsOf(scope)?.includes(name) !== true
     )
       continue;
-    // The canonicalizer hoists only a TOP-LEVEL assignment into the block's
-    // scope. An assignment that was the value of another one (`t ≔ (u ≔
-    // s)`) is declared by the interpreter when it runs, in the scope of the
-    // block, unless an enclosing scope already has the name. So such a
-    // name is a block-local when no enclosing scope binds it.
-    //
-    // Two kinds of enclosing binding are not a compiled local (which
-    // `boundVars` above, or a shader shape frame, would name). A binding
-    // of an engine scope outside the expression (`ce.declare('u', …)`)
-    // is changed by the interpreter, and is an input of the compiled code
-    // (`chainedAmbientWrite`). A binding that the canonical form gives a
-    // read of the name in an enclosing block of the expression (a `u` read
-    // after a loop) is not changed by the interpreter, whose loop body
-    // declares its own `u`: the name is a block-local here too.
-    if (!scope.bindings.has(name)) {
-      if (!chained.has(name)) continue;
-      if (scopeChainBinds(scope.parent, name)) {
-        if (chainedAmbientWrite(lhs)) continue;
-        if (localShapeFrameOf(name) !== undefined) continue;
-      }
-    }
+    // The canonicalizer hoists a top-level assignment into the block's
+    // scope. A name that the scope of the block does not bind is a write of
+    // an enclosing binding.
+    if (!scope.bindings.has(name)) continue;
     if (
       args.some(
         (a) =>
@@ -678,525 +609,6 @@ export function localNameKey(name: string): object {
 }
 
 /**
- * Classify each read of a local of the statement list `args` that its
- * `Declare` gives no value (`Declare(n, integer)`, or the `Declare` that
- * `withImplicitLocalDeclares` makes for a bare assignment). There are
- * three classes of read:
- *
- * 1. The local is assigned on every path before the read. The read
- *    compiles with no check.
- * 2. The local is assigned on no path before the read. The compilation
- *    fails, with a message that names the local (`localReadWithNoWrite`).
- * 3. The local is assigned on some paths only. The compilation fails too,
- *    on every target (`localReadOnSomePaths`), after the walk, so that a
- *    read of class 2 gives its own message first.
- *
- * A declaration has a value, and a first assignment of a name in a branch
- * or a loop body is a static error (`declaration-without-value`,
- * `first-assignment-in-branch`), so the canonical form of a valid block
- * has no read of class 2 or 3: an expression with such a read has the
- * static type `error`, and its compilation declines before this analysis.
- * The analysis stays as a second check. Without the refusal, JavaScript read
- * `undefined` (`undefined != 1` is `true`), Python read the value of the
- * previous pass of a loop, WGSL read the zero that a `var` starts with,
- * and GLSL read an undefined value.
- *
- * The analysis follows the order of evaluation with two facts for each
- * local: it is certainly assigned (on every path), and it is possibly
- * assigned (on one path at least). A read is of class 1 when the first
- * fact holds, of class 3 when only the second holds, and of class 2 when
- * neither holds.
- * - A `Block` is walked in order. An `Assign` of the local sets both
- *   facts after its value is walked.
- * - The branches of an `If` start after its condition. After the `If`,
- *   the local is certainly assigned when both branches assign it (a
- *   missing branch assigns nothing), and possibly assigned when one
- *   branch can. A `Which` is walked as a chain of `If`, and an `And` or an
- *   `Or` as its first operand followed by the others, which may not run.
- * - `Break` and `Continue` end the path that reaches them: the facts of
- *   that path do not count after a branch. A `Return` does not end a
- *   path, because a target can compile a nested block to a function of
- *   its own, which the `Return` leaves.
- * - A loop body can run several times, so a read in the body sees an
- *   assignment of an earlier pass as possible. After the loop, an
- *   assignment of the body is certain only when the loop runs at least
- *   once (each clause is a constant `Range` or a `List` or `Tuple` literal
- *   with an element) and the body has no `Break`, `Continue` or `Return`.
- *   A loop that can stop early is not analyzed further: a read after
- *   `Loop(Block(y ≔ i; If(i > 3, Break)), i ∈ 1..10)` is refused,
- *   although the first pass assigns `y` before the `Break`.
- * - A read in a function literal happens when the function is called,
- *   which can be later. It is of class 1 when the local is certainly
- *   assigned where the literal is, and of class 3 otherwise, never of
- *   class 2. An assignment in a function literal is possible after it.
- * - In the operands of any other operator, whose order of evaluation is
- *   not known, an assignment is possible but not certain for a read in
- *   another operand. After the expression it is certain only for an
- *   operator that evaluates every operand (`STRICT_OPERATORS`).
- * - A nested block that declares the same name again, and an operator
- *   whose index or parameter has the name, bind another variable: they
- *   are not walked.
- *
- * Each approximation makes a read of class 1 a read of class 3, never the
- * other way, and a read is of class 2 only when no path can assign the
- * local before it. A node that several paths reach is walked once for each
- * state, so the time is linear in the size of the statements.
- *
- * A read is compared by its binding: a symbol that is bound to another
- * definition (a parameter of a function with the same name) is not a read
- * of the local. A symbol with no binding is.
- */
-export function classifyLocalReads(
-  args: ReadonlyArray<Expression>,
-  locals: ReadonlyArray<string>,
-  node: Expression | undefined
-): void {
-  // The first local that has a read of class 3.
-  let unproved: string | undefined;
-  const valueless = locals.filter((name) => {
-    const decl = args.find(
-      (s) => isFunction(s, 'Declare') && isSymbol(s.ops[0], name)
-    );
-    return isFunction(decl) && declareValueOperand(decl.ops) === undefined;
-  });
-  if (valueless.length === 0) return;
-  const scope = node?.localScope;
-  // The state of a path is two bits: MUST (the local is certainly
-  // assigned) and MAY (it is possibly assigned). On a live path MUST
-  // implies MAY, so MUST without MAY marks a path that does not continue
-  // (after a `Break`, `Continue` or `Return`). That state is the neutral
-  // element of `join`, the merge of two paths.
-  const MUST = 1;
-  const MAY = 2;
-  const ENDED = MUST;
-  const join = (a: number, b: number): number =>
-    (a & b & MUST) | ((a | b) & MAY);
-  const withMay = (s: number, may: boolean): number =>
-    may && s !== ENDED ? s | MAY : s;
-  // The value of a condition that is known at compile time.
-  const provedCondition = (cond: Expression): boolean | undefined =>
-    isSymbol(cond, 'True')
-      ? true
-      : isSymbol(cond, 'False')
-        ? false
-        : booleanClaim(cond);
-  for (const name of valueless) {
-    const binding = scope?.bindings.get(name);
-    const def =
-      binding !== undefined && 'value' in binding ? binding.value : undefined;
-    const isOurs = (e: Expression): boolean =>
-      isSymbol(e, name) &&
-      (def === undefined ||
-        e.valueDefinition === undefined ||
-        e.valueDefinition === def);
-    // A construct that binds another variable with the name: a block that
-    // declares it again, or a function literal with a parameter of that
-    // name. An operator with an index of that name (`Sum`, `Loop`) is
-    // walked by `walkBinder`.
-    const isOther = (e: Expression): boolean =>
-      (isFunction(e, 'Function') &&
-        e.localScope?.binderNames?.has(name) === true) ||
-      (isFunction(e, 'Block') &&
-        e.ops.some(
-          (op) =>
-            (isFunction(op, 'Declare') || isFunction(op, 'DefineFunction')) &&
-            isSymbol(op.ops[0], name)
-        ));
-    // Whether a subtree can assign the name: an `Assign` whose target has
-    // the name anywhere (a destructuring target too). It is an
-    // over-approximation, used only for the MAY fact.
-    const writesMemo = new Map<Expression, boolean>();
-    const mayWrite = (e: Expression): boolean => {
-      if (!isFunction(e)) return false;
-      const known = writesMemo.get(e);
-      if (known !== undefined) return known;
-      writesMemo.set(e, false);
-      const mentions = (t: Expression): boolean =>
-        isSymbol(t, name) || (isFunction(t) && t.ops.some(mentions));
-      const result =
-        (e.operator === 'Assign' &&
-          e.ops[0] !== undefined &&
-          mentions(e.ops[0])) ||
-        e.ops.some(mayWrite);
-      writesMemo.set(e, result);
-      return result;
-    };
-    // Whether a subtree has a `Return` outside a function literal, at any
-    // depth.
-    const returnsMemo = new Map<Expression, boolean>();
-    const hasReturn = (e: Expression): boolean => {
-      if (!isFunction(e) || e.operator === 'Function') return false;
-      const known = returnsMemo.get(e);
-      if (known !== undefined) return known;
-      returnsMemo.set(e, false);
-      const result = e.operator === 'Return' || e.ops.some(hasReturn);
-      returnsMemo.set(e, result);
-      return result;
-    };
-    // Whether a subtree has a `Break`, a `Continue` or a `Return`, at any
-    // depth.
-    const jumpsMemo = new Map<Expression, boolean>();
-    const hasJump = (e: Expression): boolean => {
-      if (!isFunction(e)) return false;
-      const known = jumpsMemo.get(e);
-      if (known !== undefined) return known;
-      jumpsMemo.set(e, false);
-      const result =
-        e.operator === 'Break' ||
-        e.operator === 'Continue' ||
-        e.operator === 'Return' ||
-        e.ops.some(hasJump);
-      jumpsMemo.set(e, result);
-      return result;
-    };
-    // `deferred`: inside a function literal, whose body runs when the
-    // function is called.
-    // `stmt`: in statement position of the statement list, or of a
-    // statement of it (a nested block, a branch, a loop body). There a
-    // `Return`, a `Break` or a `Continue` ends the path. Elsewhere (the
-    // value of an assignment, an operand) a block is compiled as a value of
-    // its own (an immediately applied function on JavaScript), and a
-    // `Return` in it gives the value of that block only.
-    const memo = new Map<Expression, number[]>();
-    const walk = (
-      e: Expression,
-      s: number,
-      deferred: boolean,
-      stmt: boolean
-    ): number => {
-      const key = s + (deferred ? 4 : 0) + (stmt ? 8 : 0);
-      let byState = memo.get(e);
-      if (byState === undefined) memo.set(e, (byState = []));
-      const known = byState[key];
-      if (known !== undefined) return known;
-      let result = walkNode(e, s, deferred, stmt);
-      // A construct in value position that holds a `Return`, a `Break` or
-      // a `Continue` can end before its assignments: they are not certain
-      // after it.
-      if (!stmt && isFunction(e) && e.operator !== 'Function' && hasJump(e))
-        result = withMay(s, mayWrite(e) || (result & MAY) !== 0);
-      // A nested block with a `Return`, in any position, keeps only the
-      // facts from before it. JavaScript can compile a nested block to a
-      // function of its own (`(() => { if (c) { return 0 }; y = 1 })()`):
-      // the `Return` leaves that function only, and the statements after
-      // the block run with the assignments after the `Return` not made.
-      else if (isFunction(e, 'Block') && hasReturn(e))
-        result = withMay(s, mayWrite(e) || (result & MAY) !== 0);
-      byState[key] = result;
-      return result;
-    };
-    // The operands of an operator whose order of evaluation is not known:
-    // each one starts with the state before the operator, with MAY set
-    // when one of them can assign the local.
-    const walkOperands = (
-      ops: ReadonlyArray<Expression>,
-      s: number,
-      deferred: boolean
-    ): number => {
-      const after = withMay(s, ops.some(mayWrite));
-      for (const op of ops) walk(op, after, deferred, false);
-      return after;
-    };
-    // An operator with an index of the name (`Sum(n, Limits(n, 1, n))`,
-    // `Loop(…, Element(n, …))`). The body and the index are another
-    // variable. The clauses before the one of that index, and the bounds or
-    // the collection of that clause, are evaluated in the enclosing scope,
-    // so their reads are reads of the local. A condition of the clause
-    // (`Element(n, xs, cond)`) sees the index, and a later clause can too:
-    // they are not walked. A clause of another shape ends the walk.
-    const walkBinder = (
-      e: Expression & { ops: ReadonlyArray<Expression> },
-      s: number,
-      deferred: boolean
-    ): number => {
-      const after = withMay(s, mayWrite(e));
-      for (const clause of e.ops.slice(1)) {
-        if (
-          !isFunction(clause) ||
-          (clause.operator !== 'Limits' && clause.operator !== 'Element') ||
-          clause.nops < 2
-        )
-          break;
-        const ownIndex = isSymbol(clause.ops[0], name);
-        const evaluated =
-          ownIndex && clause.operator === 'Element'
-            ? clause.ops.slice(1, 2)
-            : clause.ops.slice(1);
-        for (const op of evaluated) walk(op, after, deferred, false);
-        if (ownIndex) break;
-      }
-      return after;
-    };
-    const walkNode = (
-      e: Expression,
-      s: number,
-      deferred: boolean,
-      stmt: boolean
-    ): number => {
-      if (isSymbol(e)) {
-        if (!isOurs(e)) return s;
-        if ((s & MUST) !== 0) return s;
-        if (deferred || (s & MAY) !== 0) unproved ??= name;
-        else localReadWithNoWrite(name);
-        return s;
-      }
-      if (isDictionary(e)) return walkOperands([...e.values], s, deferred);
-      if (!isFunction(e) || isOther(e)) return s;
-      const ops = e.ops;
-      if (
-        e.operator !== 'Block' &&
-        e.operator !== 'Function' &&
-        e.localScope?.binderNames?.has(name) === true
-      )
-        return walkBinder(e, s, deferred);
-      switch (e.operator) {
-        case 'Function': {
-          // The body runs when the function is called. The parameters
-          // are names, not reads.
-          if (ops[0] !== undefined) walk(ops[0], s, true, true);
-          return withMay(s, mayWrite(e));
-        }
-        case 'Assign': {
-          const after =
-            ops[1] === undefined ? s : walk(ops[1], s, deferred, false);
-          if (!isSymbol(ops[0], name)) {
-            // A target that is not a name or a destructuring pattern (an
-            // indexed target) reads its operands.
-            const target = ops[0];
-            if (isFunction(target) && target.operator !== 'Tuple')
-              walkOperands(target.ops, s, deferred);
-            return withMay(after, mayWrite(e));
-          }
-          // In a function literal, the assignment happens only when the
-          // function is called.
-          if (deferred || after === ENDED) return after;
-          return MUST | MAY;
-        }
-        case 'Declare': {
-          // The target is a name, not a read. A `Declare` of the local
-          // with a value assigns it.
-          const value = declareValueOperand(ops);
-          if (value === undefined) return s;
-          const after = walk(value, s, deferred, false);
-          if (!isSymbol(ops[0], name) || deferred || after === ENDED)
-            return after;
-          return MUST | MAY;
-        }
-        case 'Block': {
-          // The statements of a block in value position are in statement
-          // position of that block: a `Return` there ends the rest of
-          // the block (the result is then corrected by `walk`).
-          let a = s;
-          for (const op of ops) a = walk(op, a, deferred, true);
-          return a;
-        }
-        case 'If': {
-          if (ops[0] === undefined) return s;
-          // A condition that is the symbol `True` or `False`, or whose
-          // type proves its value (`booleanClaim`), selects one arm when
-          // the code runs: the other arm never runs.
-          const claim = provedCondition(ops[0]);
-          if (claim !== undefined) {
-            const arm = claim ? ops[1] : ops[2];
-            return arm === undefined ? s : walk(arm, s, deferred, stmt);
-          }
-          const c = walk(ops[0], s, deferred, false);
-          const yes =
-            ops[1] === undefined ? c : walk(ops[1], c, deferred, stmt);
-          const no = ops[2] === undefined ? c : walk(ops[2], c, deferred, stmt);
-          const both = join(yes, no);
-          return both;
-        }
-        case 'Which': {
-          // `Which(c1, v1, c2, v2, …)`: each condition is evaluated after
-          // the conditions before it, when they are false.
-          // When no condition holds, no value is evaluated, except after
-          // a condition that is the symbol `True`, which ends the chain.
-          let c = s;
-          let result = ENDED;
-          let fallThrough = true;
-          for (let i = 0; i < ops.length; i += 2) {
-            const cond = ops[i];
-            const value = ops[i + 1];
-            // A condition that `booleanClaim` proves false selects
-            // nothing, and one that it proves true ends the chain, as the
-            // symbol `True` does.
-            const claim = provedCondition(cond);
-            if (claim === false) continue;
-            if (claim === true) {
-              if (value !== undefined)
-                result = join(result, walk(value, c, deferred, stmt));
-              fallThrough = value === undefined;
-              break;
-            }
-            c = walk(cond, c, deferred, false);
-            if (value !== undefined)
-              result = join(result, walk(value, c, deferred, stmt));
-          }
-          return fallThrough ? join(result, c) : result;
-        }
-        case 'And':
-        case 'Or': {
-          // The first operand is always evaluated, the others may not be.
-          if (ops[0] === undefined) return s;
-          let a = walk(ops[0], s, deferred, false);
-          for (const op of ops.slice(1))
-            a = withMay(a, (walk(op, a, deferred, false) & MAY) !== 0);
-          return a;
-        }
-        case 'Loop': {
-          // The clauses (the collection of each `Element`) are evaluated
-          // before the body, which `Loop` stores first.
-          let a = s;
-          for (const op of ops.slice(1)) a = walk(op, a, deferred, false);
-          if (ops[0] === undefined) return a;
-          const writes = mayWrite(e);
-          const end = walk(ops[0], withMay(a, writes), deferred, true);
-          const certain =
-            (a & MUST) !== 0 ||
-            (!deferred &&
-              (end & MUST) !== 0 &&
-              !hasJump(ops[0]) &&
-              loopRunsOnce(ops.slice(1)));
-          if (a === ENDED) return ENDED;
-          return (certain ? MUST : 0) | ((a & MAY) !== 0 || writes ? MAY : 0);
-        }
-        case 'Break':
-        case 'Continue': {
-          walkOperands(ops, s, deferred);
-          return ENDED;
-        }
-        case 'Return':
-          // A `Return` does not end a path here. Some targets compile a
-          // nested block to a function of its own, which a `Return`
-          // leaves, and the statements after the block still run. A read
-          // after an early `Return` is therefore of class 3 when the local
-          // is assigned on the other path only, and the compilation fails
-          // (`localReadOnSomePaths`).
-          return walkOperands(ops, s, deferred);
-        case 'Apply': {
-          // A function literal applied in place runs here, after its
-          // arguments, so a read in its body is classified as any other
-          // read. An assignment in its body is not certain after it: it
-          // can write a local of the function body.
-          const fn = ops[0];
-          if (!isFunction(fn, 'Function') || isOther(fn))
-            return walkOperands(ops, s, deferred);
-          const a = walkOperands(ops.slice(1), s, deferred);
-          if (fn.ops[0] !== undefined) walk(fn.ops[0], a, deferred, true);
-          return withMay(a, mayWrite(fn));
-        }
-        default: {
-          // An operator that evaluates each operand once (`Add`), in an
-          // order that is not known: a read in an operand sees only the
-          // state before the operator, and an assignment that an operand
-          // makes on every path is certain after the operator. An operand
-          // with a `Break`, a `Continue` or a `Return` can end before its
-          // assignment.
-          const after = withMay(s, ops.some(mayWrite));
-          const results = ops.map((op) => walk(op, after, deferred, false));
-          if (
-            after === ENDED ||
-            !STRICT_OPERATORS.has(e.operator) ||
-            lazyOperandRegions(e).length > 0
-          )
-            return after;
-          const certain = ops.some(
-            (op, i) => (results[i] & MUST) !== 0 && !hasJump(op)
-          );
-          return certain ? after | MUST : after;
-        }
-      }
-    };
-    let state = 0;
-    for (const arg of args) state = walk(arg, state, false, true);
-  }
-  if (unproved !== undefined) localReadOnSomePaths(unproved);
-}
-
-/**
- * Whether a `Loop` with the clauses `clauses` runs its body at least once:
- * each clause is `Element(index, collection)` with no condition, over a
- * `Range` whose bounds and step are number literals and that has an
- * element, or over a `List` or `Tuple` literal with an element.
- */
-export function loopRunsOnce(clauses: ReadonlyArray<Expression>): boolean {
-  if (clauses.length === 0) return false;
-  return clauses.every((clause) => {
-    if (!isFunction(clause, 'Element') || clause.nops !== 2) return false;
-    const coll = clause.ops[1];
-    if (isFunction(coll, 'List') || isFunction(coll, 'Tuple'))
-      return coll.nops > 0;
-    if (!isFunction(coll, 'Range') || coll.nops < 2 || coll.nops > 3)
-      return false;
-    const [lo, hi, step] = coll.ops;
-    if (!isNumber(lo) || !isNumber(hi)) return false;
-    if (step !== undefined && !isNumber(step)) return false;
-    const values = [lo.re, hi.re, step === undefined ? 1 : step.re];
-    if (!values.every((v) => Number.isFinite(v))) return false;
-    return rangeCount(values[0], values[1], values[2]) >= 1;
-  });
-}
-
-/** The failure for a read of class 2 (`classifyLocalReads`). */
-export function localReadWithNoWrite(name: string): never {
-  throw new Error(
-    `Could not compile \`Block\`: a statement reads the block local ` +
-      `"${name}", and no path to that read gives "${name}" a value. ` +
-      `A local is declared with a value (\`Declare(${name}, type, value)\`, ` +
-      `or a first assignment at the level of the block); the compiled ` +
-      `code would read an uninitialized ` +
-      `variable. Give "${name}" a value first, or give the local another ` +
-      `name, so that "${name}" is the input.`
-  );
-}
-
-/**
- * The failure for a read of class 3 (`classifyLocalReads`): the local
- * `name` is assigned on some paths before the read, but not on all of
- * them. The interpreter has no value for the read on a path with no
- * assignment, and compiled code would read an uninitialized variable, so
- * no target compiles it.
- */
-export function localReadOnSomePaths(name: string): never {
-  throw new Error(
-    `Could not compile \`Block\`: a statement can read the block local ` +
-      `"${name}" when no assignment gave it a value (the assignment is on ` +
-      `some paths only, for example in one branch of an \`If\`). The ` +
-      `interpreter has no value for that read, and the compiled code ` +
-      `would read an uninitialized variable. Give the local a value on ` +
-      `every path before the read.`
-  );
-}
-
-/**
- * The locals of the statement list `args` that no statement of the list
- * assigns or declares with a value, so that only an assignment in a
- * nested block (a branch of an `if`, a loop body) gives them a value: a
- * name that the canonicalization made a local of a function body because
- * a nested block assigns it (`withImplicitLocalDeclares`), or a `let`
- * with no value. Their shape is read from these nested assignments.
- */
-export function nestedOnlyLocals(
-  args: ReadonlyArray<Expression>,
-  locals: ReadonlyArray<string>
-): ReadonlySet<string> {
-  return new Set(
-    locals.filter(
-      (name) =>
-        !args.some(
-          (a) =>
-            ((isFunction(a, 'Assign') && a.ops[1] !== undefined) ||
-              (isFunction(a, 'Declare') &&
-                declareValueOperand(a.ops) !== undefined)) &&
-            isSymbol(a.ops[0]) &&
-            a.ops[0].symbol === name
-        )
-    )
-  );
-}
-
-/**
  * The assignments in `expr`, in the order of the operands, whose target is
  * a symbol in `names`. An assignment in a function literal is not
  * included, nor an assignment in a nested block that declares the name
@@ -1238,97 +650,23 @@ export function nestedAssignmentsTo(
 }
 
 /**
- * Whether the inner target `lhs` of a chained assignment is bound by an
- * engine scope outside the compiled expression (a scope of the engine's
- * current evaluation context, such as the global scope after
- * `ce.declare('u', 'real')` or `ce.assign('u', 2)`). The interpreter then
- * changes that binding, and the name is an input of the compiled code.
- * The targets write it as a free name, in a local copy of the input
- * (`CompileTarget.inputWrites`): the vars object of the JavaScript
- * targets, a local variable of the shader and Python targets
- * (`CompileTarget.inputLocals`). A shader cannot write an input, because a
- * uniform is read-only.
+ * Fail closed when the first value of a local of a block reads the name of
+ * the local: `Block(x ≔ x + 1, 2x)` where no enclosing scope binds `x`, or
+ * `Declare(x, "unknown", x + 1)`, which the parse of `x \coloneq x+1; 2x`
+ * gives. The interpreter reads the enclosing binding of `x` in that value
+ * (the symbol `x`, left symbolic), and the compiled code has no value for
+ * it: JavaScript read `undefined` and answered `NaN`, WGSL read the zero a
+ * `var` starts with, GLSL read an uninitialized variable, and Python read
+ * a parameter of the same name.
  *
- * No program reaches this code now. A chained assignment is a static error
- * at canonicalization (`assignment-in-operand`), and a write to an input or
- * to a symbol of the engine declines (`engineSymbolWriteDecline()`): the
- * compiled code writes only the locals that it declares. The local copy of
- * an input that this function serves is removed in step 4 of
- * `docs/plans/2026-11-02-compiler-contraction-plan.md`.
- */
-export function chainedAmbientWrite(
-  lhs: Expression & { symbol: string }
-): boolean {
-  return scopeChainBinds(lhs.engine.context.lexicalScope, lhs.symbol);
-}
-
-/** Whether `scope` or one of its parents binds `name`. */
-export function scopeChainBinds(
-  scope: NonNullable<Expression['localScope']> | null | undefined,
-  name: string
-): boolean {
-  for (let s = scope; s; s = s.parent) if (s.bindings.has(name)) return true;
-  return false;
-}
-
-/**
- * Split each statement `Assign(t, Assign(u, v))` of a statement list into
- * `Assign(u, v)` followed by `Assign(t, u)`, which is the same program: the
- * value of an assignment is the value it stores. Several levels split the
- * same way, innermost first.
- *
- * Without the split, the nested assignment was spliced into the outer one
- * (`t = u = s`). That is not valid where an assignment is a statement
- * (WGSL), and `u` was never declared: its write went to an undeclared
- * name on the shader targets and to the caller's `vars` object on
- * JavaScript (`_.u`), where the interpreter declares `u` in the scope of
- * the block.
- *
- * Returns the statements, and the names the split moved to statement
- * position (`withImplicitLocalDeclares` decides whether they are locals).
- */
-export function splitChainedAssignments(args: ReadonlyArray<Expression>): {
-  args: ReadonlyArray<Expression>;
-  chained: Set<string>;
-} {
-  const chained = new Set<string>();
-  const isChained = (a: Expression): boolean =>
-    isFunction(a, 'Assign') &&
-    isSymbol(a.ops[0]) &&
-    isFunction(a.ops[1], 'Assign') &&
-    isSymbol(a.ops[1].ops[0]);
-  if (!args.some(isChained)) return { args, chained };
-  const split = (a: Expression): Expression[] => {
-    if (!isChained(a) || !isFunction(a)) return [a];
-    const inner = a.ops[1];
-    if (!isFunction(inner) || !isSymbol(inner.ops[0])) return [a];
-    const innerTarget = inner.ops[0];
-    chained.add(innerTarget.symbol);
-    return [...split(inner), a.engine._fn('Assign', [a.ops[0], innerTarget])];
-  };
-  return { args: args.flatMap(split), chained };
-}
-
-/**
- * Fail closed when a statement of a block reads one of the block's locals
- * before any statement gives it a value.
- *
- * A declaration has a value, so in a valid canonical block no statement
- * reads a local before its declaration: such a read is a static error of
- * the canonicalization (`read-before-declaration`), and the compilation
- * of an expression with a static error declines before this check. The
- * check stays as a second check. The compiled code has no value to give
- * such a read: JavaScript read
- * `undefined` and answered `NaN`, WGSL read the zero a `var` starts with,
- * GLSL read an uninitialized variable, and Python read a parameter of the
- * same name.
- *
- * The test is on the statements in order. A local has a value after a
- * statement that assigns it anywhere (in a branch or a loop too, so the
- * test declines only a read that comes before every write), or after a
- * `Declare` with an initial value. A read inside a function literal is not
- * counted, since it happens when the function is called, nor is a read in
- * a nested scope that declares the same name again.
+ * The first value of a local is the value of the first statement of the
+ * list that declares it with a value or assigns it. A read of the local in
+ * an earlier statement is the static error `read-before-declaration`, and
+ * a first assignment in a branch or a loop body is the static error
+ * `first-assignment-in-branch`, so this test looks at that one value only.
+ * A read inside a function literal is not counted, since it happens when
+ * the function is called, nor is a read in a nested scope that declares
+ * the same name again.
  */
 export function assertLocalsAssignedBeforeRead(
   stmts: ReadonlyArray<Expression>,
@@ -1364,50 +702,16 @@ export function assertLocalsAssignedBeforeRead(
     };
     return walk(root);
   };
-  const writes = (root: Expression, name: string): boolean => {
-    const seen = new Set<Expression>();
-    const walk = (e: Expression): boolean => {
-      if (!isFunction(e) || seen.has(e)) return false;
-      seen.add(e);
-      if (
-        e.operator === 'Assign' &&
-        isSymbol(e.ops[0]) &&
-        e.ops[0].symbol === name
-      )
-        return true;
-      return e.ops.some(walk);
-    };
-    return walk(root);
-  };
   for (const stmt of stmts) {
-    for (const name of [...pending]) {
-      if (
-        isFunction(stmt, 'Declare') &&
-        isSymbol(stmt.ops[0]) &&
-        stmt.ops[0].symbol === name
-      ) {
-        // The initial value is read before the local has it.
-        const value = declareValueOperand(stmt.ops);
-        if (value !== undefined) {
-          if (reads(value, name)) unassignedLocalRead(name);
-          pending.delete(name);
-        }
-        continue;
-      }
-      const assignsHere =
-        isFunction(stmt, 'Assign') &&
-        isSymbol(stmt.ops[0]) &&
-        stmt.ops[0].symbol === name;
-      // `x ≔ x + 1` reads `x` before it writes it; any other statement
-      // that writes the local is taken to give it a value first.
-      if (
-        assignsHere
-          ? reads(stmt, name)
-          : !writes(stmt, name) && reads(stmt, name)
-      )
-        unassignedLocalRead(name);
-      if (assignsHere || writes(stmt, name)) pending.delete(name);
-    }
+    if (!isFunction(stmt) || !isSymbol(stmt.ops[0])) continue;
+    const isDeclare = stmt.operator === 'Declare';
+    if (!isDeclare && stmt.operator !== 'Assign') continue;
+    const name = stmt.ops[0].symbol;
+    if (!pending.has(name)) continue;
+    const value = isDeclare ? declareValueOperand(stmt.ops) : stmt.ops[1];
+    if (value === undefined) continue;
+    if (reads(value, name)) unassignedLocalRead(name);
+    pending.delete(name);
     if (pending.size === 0) return;
   }
 }
@@ -1709,13 +1013,8 @@ export function assignLValue(
       localShapeFrameOf(name) === undefined
     )
       throw engineSymbolWriteDecline(name);
-    const spelled = target.mangleId ? target.mangleId(name) : name;
-    target.inputWrites?.add(spelled);
-    return spelled;
+    return target.mangleId ? target.mangleId(name) : name;
   }
-  // The local copy of an input that the body writes: reads and writes of
-  // the name both use it (`CompileTarget.inputLocals`).
-  if (target.inputLocals?.get(name) === resolved) return resolved;
   // A `vars` key that no binding of the expression shadows names an input
   // that the host gives (a uniform, a Python name, a JavaScript `vars`
   // mapping that spells the name as itself): the write declines, on every
@@ -1751,71 +1050,6 @@ export function assignLValue(
       `compiles reads of "${name}" as \`${resolved}\`, which is not an ` +
       `assignable reference (a constant, a folded value, or a baked ` +
       `\`vars\` mapping), so the write would be invisible to every read.`
-  );
-}
-
-/**
- * The statement that makes the vars object of a JavaScript-family target a
- * local copy, or `undefined` when the body writes no input
- * (`CompileTarget.inputWrites`).
- *
- * An `Assign` whose target is an input that an engine scope binds
- * (`ce.declare('u', 'real')`, then `u ≔ u + 1`) is written `_.u = …`, the
- * same spelling as a read. Without a copy, the write changed the object
- * that the caller gave to `run()`. The interpreter changes the engine's
- * binding instead, and the caller's object is not an engine binding.
- *
- * The copy has the caller's object as its prototype, so a read that comes
- * before any write gives the caller's value, and an accessor of the
- * caller's object is still read. The compiled code tests an own property
- * only for a name of `Object.prototype` (`toString`: it reads
- * `Object.prototype.hasOwnProperty.call(_, "toString")`), so the own
- * properties of the caller's object with such a name are also own
- * properties of the copy, and the test gives the same answer as on the
- * caller's object. The other own properties are not copied: a copy of
- * each one made each run take a time that grows with the number of
- * properties of the caller's object (2,000 runs with 2,001 properties took
- * 1.1 s). With no vars object (`run()` with no argument), the copy is an
- * empty object with no prototype, so a body that writes an input before it
- * reads it gives a value.
- *
- * The properties of the copy are DEFINED (the second argument of
- * `Object.create`), not assigned. An assignment would fail on a property
- * that the caller's object, now the prototype, makes read-only
- * (`run(Object.freeze({ u: 5 }))` threw "Cannot assign to read only
- * property"), and would call a setter that the caller's object inherits.
- * An own property that is copied keeps its descriptor, so a getter is not
- * called before the body reads the property, and a data property is made
- * writable. Each input that the body writes is defined as a writable data
- * property with the value that a read gives, so that the write in the body
- * is to an own writable property of the copy, also when the caller's object
- * only inherits it. A getter of an input that the body does not write is
- * never called by the copy.
- *
- * The statement assigns the parameter `_` of the compiled function. The
- * definitions of the preamble that the body calls read `_` when they run,
- * so they read the copy too.
- *
- * No program reaches the copy of an input now: a write to an input or to a
- * symbol of the engine declines (`engineSymbolWriteDecline()`), and the
- * compiled code writes only the locals that it declares. The local copy of
- * the vars object is removed in step 4 of
- * `docs/plans/2026-11-02-compiler-contraction-plan.md`.
- */
-export function localVarsObjectStatement(
-  target: CompileTarget<Expression>
-): string | undefined {
-  const vars = target.varsObjectName;
-  if (vars === undefined || !target.inputWrites?.size) return undefined;
-  const written = JSON.stringify([...target.inputWrites]);
-  return (
-    `${vars} = ((s) => { const d = {}; ` +
-    `if (s != null) for (const k of Object.getOwnPropertyNames(Object.prototype)) { ` +
-    `const p = Object.getOwnPropertyDescriptor(s, k); ` +
-    `if (p) { if ('value' in p) { p.writable = true; p.configurable = true; } d[k] = p; } } ` +
-    `for (const k of ${written}) d[k] = { value: s == null ? undefined : s[k], ` +
-    `writable: true, enumerable: true, configurable: true }; ` +
-    `return Object.create(s || null, d); })(${vars})`
   );
 }
 

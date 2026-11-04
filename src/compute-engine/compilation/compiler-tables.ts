@@ -55,26 +55,6 @@ export function memoFor<V>(
 }
 
 /**
- * The operators whose compiled code evaluates each operand exactly once, on
- * every target (`classifyLocalReads`): an assignment that an operand makes is
- * then certain after the operator. An operator that is not in the list, or
- * that has a lazy operand (`lazyOperandRegions`, a chained relation), is
- * taken to evaluate an operand maybe not at all.
- *
- * A lowering that skips an operand keeps an operator out of the list:
- * `Power(b, 0)` compiles to `1` and `Multiply` with a `0` operand compiles to
- * `0` on JavaScript and the shader targets, with no evaluation of the other
- * operands. The lowerings of these operators skip only number literals
- * (`tryGetConstant`), which assign nothing.
- */
-export const STRICT_OPERATORS: ReadonlySet<string> = new Set([
-  'Add',
-  'Subtract',
-  'Negate',
-  'List',
-  'Tuple',
-]);
-/**
  * Precedence used when compiling a folded symbol value. Higher than any
  * target's infix operator precedence, so a compound value parenthesizes
  * itself when spliced into a surrounding expression. See

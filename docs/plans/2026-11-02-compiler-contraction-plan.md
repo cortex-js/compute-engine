@@ -2063,6 +2063,195 @@ not committed).
   `assignedTypesOf`, `targetTypesOf`, `statedTypeOf`, `complexMode` and
   `assignedTypesConflict` (75).
 
+The result of step 4, row 4 (block locals; 2026-11-04, session
+compute-engine-33; base `877a7aa9b20fde51f68c22e81106dea9bf1ae1a9`; worked
+in `/tmp/wt-compute-engine-33` by two implementers in turn; staged, not
+committed).
+
+- **The survey.** A counter at each decline or at the entry of each
+  lowering (removed after), the 389 test files that call `compile` and name
+  `Assign`, `Declare`, `Block`, `Loop` or `vars` (20,551 tests), and direct
+  compilations on `javascript`, `glsl`, `wgsl`, `interval-js` and `python`
+  (also Python, GLSL and WGSL `compileFunction()` and WGSL
+  `compileFieldFunction()`). Removed, with the error or decline that comes
+  first:
+  - `classifyLocalReads`, `localReadWithNoWrite`, `localReadOnSomePaths`,
+    `loopRunsOnce`, and `STRICT_OPERATORS` (`compiler-tables.ts`, read only
+    by this analysis): a read of a local on no path or on some paths only
+    is `read-before-declaration` or `first-assignment-in-branch` at
+    canonicalization (`Block(Declare(a), If(c, Assign(a, 1)), a)`,
+    `Block(If(c, Assign(a, 1)), a)`). No test reached either decline.
+  - `splitChainedAssignments`, `chainedLocalDeclares`,
+    `chainedAmbientWrite`, the `chained` option of
+    `withImplicitLocalDeclares`, the chained branch of
+    `compileStatementList` and of the loop-body statements,
+    `chainedLocals` (`compile-references.ts`) and `scopeChainBinds` (no
+    caller left): `Block(Assign(t, Assign(u, x)), t + u)` is
+    `assignment-in-operand`, and LaTeX and Epsil `a := b := v` is the parse
+    error `chained-assignment`.
+  - `nestedOnlyLocals` and the loop of `compileBlock` that read the shape
+    of a local from the assignments in nested blocks: a local whose only
+    value is in a branch is `first-assignment-in-branch` or
+    `declaration-without-value`.
+  - `localVarsObjectStatement` (three uses, JavaScript and interval-js):
+    it copied the `vars` object only when `inputWrites` was not empty.
+  - `inputWrites` and `inputLocals` (`CompileTarget`), the record of a
+    write in `assignLValue()`, every target's local copy of a written input
+    and its second compilation (JavaScript, interval-js, the Python
+    `compileOrThrow` and the module-global copy of `compileFunction()`, the
+    shader `compileOrThrow`, `compileDeclaredFunctionBody` and
+    `withInputLocalCopies`), `gpuWrittenFirst`, `pythonWrittenFirst`, and
+    the input-local tests of `gpu-at.ts` and `gpu-functions.ts`:
+    `Block(Assign(x, x + 1), x)` with `x: real` declines on every target
+    with "`x` is not a local of the compiled expression"
+    (`assignLValue()`) before any write is recorded.
+  - The tail-assignment code of Python and WGSL (the `return <name>` after
+    a last assignment in both block hooks, `pythonAssertReturnedBlock`,
+    `wgslAssertFunctionBody`, `WGSLFunctionBodyShape` and the
+    field-function host member `assertBody`): see "The block that ends in
+    an assignment" below.
+
+  Reduced: `assertLocalsAssignedBeforeRead` now checks only the first
+  value of a local, and its decline is needed: in `Block(Assign(x, x + 1),
+  2x)` with no binding of `x`, and in the parse `x \coloneq x+1; 2x`, the
+  first value reads the enclosing binding, which compiled code does not
+  have (`compile-assignment-value-shapes.test.ts`). Its walk of the other
+  statements is gone.
+
+  Kept, with the compiled input that reaches it:
+  - `nestedAssignmentsTo`: the decline of a write to a loop index in
+    `compileForLoop` and `compileComprehension` (`Loop(Block(Assign(i, 5),
+    …), Element(i, Range(1, 3)))`, `Comprehension(Block(Assign(i, 5), i),
+    Element(i, Range(1, 3)))`; `compile-admission.test.ts`,
+    `function-body-local-assignment.test.ts`). These are valid programs,
+    and the decline guards a wrong value (the emitted loop would keep the
+    written index).
+  - The local shape frames (`withLocalShapeFrame`, `_pushLocalComplex`,
+    `_popLocalComplex`, `_localComplex`, `_localVector`): every block
+    local, parameter, loop body and callback reaches them on every target.
+    They give a shader local its declared type (`float`, `vec2` for a
+    complex local, `vecN` or an array) and the lane analysis the
+    complex-ness of a local, and `assignLValue()` reads them to tell a local
+    from an input. The 3.4.4 record said they serve only a local with no
+    target spelling; they serve every local. Replacing them with a read of
+    the static type is a redesign, not a removal.
+  - `reachesCallerCode` (`compile-folding.ts`): it also finds the code of
+    `functions` and `operators` entries and of `compile` handlers
+    (`compile-gpu-extremum.test.ts`, `random-compile.test.ts`).
+  - The effects contract of `vars` code: reached (`vars: { W:
+    'nextValue()' }` in the same tests). Its predicate is read in about 25
+    places (CSE, the fixed-width unroll, constant folding, the bigint lane,
+    the draw order of the shader targets), and `isOpaqueVarsSource` also
+    counts a plain read such as `'u_u'` as caller code, so removing it
+    changes the compiled code of plain `vars` maps. Not done; it would be
+    its own item, with the paragraph of `docs/COMPILATION-MODEL.md` that
+    starts "Code that the caller supplies is held to the interpreter's
+    order".
+  - The loop-value lowering: the bare loop `(() => { while (true) { … }
+    })()` whose `return` gives the value compiles (`Block(Assign(k, 0),
+    Loop(Block(Assign(k, k + 1), If(k > x, Return(k), Nothing))))` on
+    JavaScript, interval-js and Python), so it stays.
+  - Row 3's list in `compile-admission.ts` (`isBindingBlock`,
+    `hasKeptBreak`, `isUnrepresentableLoopValue`, the `nothing-value`,
+    `block-value` and `loop-value` search of `unsettledShapeIn()`,
+    `returnInLoopIn`, the local-shape part of `assignmentConflictIn` with
+    `assignedTypesOf`, `targetTypesOf`, `statedTypeOf`, `complexMode`,
+    `assignedTypesConflict`): each serves a decline that stays. The
+    local-shape part of `assignmentConflictIn` is reached by a local whose
+    first value has type `unknown` and that later gets a list (3.4.4,
+    choice 10) and by `Block(a ≔ 1, If(c > 0, a ≔ √(-x)), a)` in `strict`
+    (3.4.4, rule 7).
+- **The block that ends in an assignment.** The declines `nothing-value`,
+  `block-value` and `loop-value` are found before the code is generated
+  (`unsettledShapeIn()`) and thrown after it (`assertAdmitted()`), so a
+  more specific decline of the code generation stays the reason (90 of
+  the 216 such findings in the tests). Thrown before the code generation,
+  26 tests in 14 files change their decline code or message (for example
+  `shared-impure-operand` becomes `unsettled-shape`); that option was
+  rejected. Done instead: `CompilerState._pendingAdmission` holds the root,
+  the target and the search result of the outermost compilation
+  (`compile()`, `compileCseRoot()`), and `compileBlock()` calls
+  `throwPendingUnsettledShape()` when the last statement of a block whose
+  value is used is an `Assign` or a `Declare`, after the statements are
+  compiled (so their declines, and the `assignLValue()` decline of a write
+  to an input, stay first) and before the value is lowered. On Python and
+  WGSL the site declines also when no decline is pending (no input reaches
+  that case). The JavaScript IIFE code of a last `Declare` and the shader
+  `valueBlock` hoist of a last assignment stay: a block that the lowering
+  compiles as a value but whose value the admission search does not count
+  as used reaches them and compiles (`If(0 < x, Block(Assign(y, 1),
+  Assign(y, y + 1)), Assign(y, 3))` on JavaScript, interval-js and GLSL;
+  a nested block that is a statement on JavaScript and interval-js). No
+  lowering serves only a `block-value` case (the same IIFE and hoist lower
+  a binding block). One decline message changed, and no test asserts it:
+  Python `[1, Block(Assign(b, 2))]` gave the generic "a multi-statement
+  construct … cannot be used as a sub-expression" and now gives the
+  `nothing-value` message.
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation`
+  91,017 → 90,277 (−740): 712 for the first part, 28 net for the block
+  that ends in an assignment (its mechanism adds about 45 lines).
+  `compile-locals.ts` 1,136 → 675, `gpu-shader-target.ts`,
+  `python-target.ts` and `wgsl-target.ts` most of the rest. Source: 22
+  files, 209 insertions, 1,479 deletions with the one test comment. The
+  3.4.4 record listed 742 lines: of those, the frames (104 by that
+  record), `reachesCallerCode` (55) and `nestedAssignmentsTo` (33) stay,
+  reached as above, and the input re-compile paths of the targets, which
+  that list did not count, went.
+- **Tests.** No test file deleted, no assertion or snapshot changed; one
+  comment that named `classifyLocalReads()` rewritten
+  (`test/epsil/function-body-local-assignment.test.ts`). The removed code
+  had no test of its own left after 3.4.4.
+- **The corpus measure** (Tycho frozen at `a34405ae0`, the plain
+  `git archive` of rows 1 to 3, records keyed by MathJSON; base run: row
+  3's final run `cand3`, on `2e3ac5fd4` with row 3's final patch, whose
+  source hunks are those of `877a7aa9b`; tycho-f9 had no base run). One
+  candidate on the final source before the review fixes (the fixes are
+  comments and one `?? null`): 17,825 compiles, 13,707 keys and 77,267
+  values in both runs; 0 changed values, 0 new throws; declines javascript
+  47, glsl 44, interval-js 61 in both, none new and none gone. Tycho main
+  now has the 0.178.0 adoption (`f51646a04`, tycho-f9, 2026-11-04), a
+  base for a later row that wants Tycho's current routes.
+- **Review**: Claude and Codex, one round. Codex: no finding. Claude: three
+  low (the decline of `throwPendingUnsettledShape()` with a caller
+  `compile` handler can come where `assertAdmitted()` would not decline,
+  crafted, documented in its comment; a `compileBlock` comment that named
+  a case the check never sees; a comment of `freeSymbolOccurrence()` that
+  named the removed local copy) and two nits (a `?? null` that did
+  nothing, two long comment lines), all fixed. No round 2: round 1 had no
+  `high` or `medium` finding.
+- **Checks** in the worktree, on the final tree (the 23 files are byte for
+  byte the files copied to the main tree): `npm run typecheck`, `oxlint` on
+  the changed files, `check:deps`, the 389 test files (20,179 passed), the
+  full suite (1,821 suites, 77,814 tests, 0 failed, 4,295 snapshots),
+  `npm run test:python` (49 suites, 2,768 tests, 0 failed), the corpus
+  measure.
+- **Documents.** CHANGELOG, "Breaking changes": the removed
+  `CompileTarget` fields `inputWrites`, `inputLocals` and the nine
+  `BaseCompiler` static members. `docs/COMPILATION-MODEL.md` describes
+  none of the removed mechanisms (no edit). User-facing page edited:
+  `~/dev/cortexjs.io/docs/compute-engine/13-guide-compile.md` (the WGSL
+  storage-buffer paragraph said a body that writes an input reads and
+  writes a local copy; it now says such a write declines on every target).
+- **Choices, each reversible.** (1) The block that ends in an assignment
+  declines at its site, after the statements of the block (the
+  alternative: keep the code generation and the late decline, 28 lines
+  more and no new state; or decline before the code generation, which
+  changes 26 decline codes). (2) The local shape frames,
+  `reachesCallerCode`, the `vars` effects contract and the loop-value
+  lowering stay (reached; their removal is a redesign or changes compiled
+  code). (3) `assertLocalsAssignedBeforeRead` keeps the check of the first
+  value (its decline is reached).
+- **What row 5 (function values) can rely on.** The static type of a
+  local, its target spelling, the `Declare` with a value, the local shape
+  frames, `_localValueFrames`, `_localNameKeys`, `blockLocalOf` and
+  `assignLValue()` are unchanged, so row 5 starts from a local whose type
+  is known. No compiled code writes an input, and no target compiles an
+  expression a second time for a write. None of the function-value code
+  that the 3.4.5 record lists (`absentFilledArguments`,
+  `literalDefaultFills`, `defaultFillingWrapper`, the currying and
+  partial-application lowering, the function-typed variable references)
+  was touched.
+
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 
 Two numbers per commit in the nightly run, kept with its result: the code
