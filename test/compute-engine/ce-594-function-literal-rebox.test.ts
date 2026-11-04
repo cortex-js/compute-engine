@@ -1,27 +1,8 @@
 /**
- * CE-594: assigning a function literal whose body shares its nodes takes
- * time and memory linear in the number of distinct nodes.
- *
- * Two parts of `ce.assign()` box a canonical literal again, so that its
- * body is canonicalized afresh:
- * - a literal that names the function it is assigned to (a recursive
- *   definition) is boxed again once the name is declared as a function, so
- *   that the self-call binds to it;
- * - under a declared signature, the declared result or parameter types are
- *   written on the literal (`Typed`), and the literal is boxed again.
- * Each boxed the MathJSON of the literal, which has one copy of a shared
- * node for each path from the root. Both now box a raw copy of the literal
- * that keeps shared nodes shared. The recursion check of a recursive
- * literal (`nestedLiteralCallsCycle()`) read each path too.
- *
- * Measured on 2026-10-28 before the change: a recursive literal over
- * `Max(t, t)` nested 18 deep took 20 s to assign (3.5 GB), and the body
- * `e_{k+1} = e_k + sin(e_k)` 18 deep under `(real) -> real` took 9 s
- * (2.4 GB); at depth 20 both ran out of memory. After: under 50 ms at
- * depth 30.
- *
- * Each test measures its own time: a jest time limit cannot stop a
- * synchronous test. The limit of 2 s is far above the expected time.
+ * Function-literal analysis and reboxing preserve shared nodes. A doubling
+ * graph has linear distinct-node count and exponentially many paths.
+ * Timing ceilings run only in the serial CE_PERF suite; structural and value
+ * assertions also run in ordinary tests.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
@@ -90,7 +71,7 @@ describe('CE-594: a recursive literal over a shared tower', () => {
   test('is assigned in linear time', () => {
     const ce = new ComputeEngine();
     const ms = assignRecursiveTower(ce, DEPTH);
-    expect(ms).toBeLessThan(2000);
+    if (process.env.CE_PERF === '1') expect(ms).toBeLessThan(2000);
     expect(distinctNodes(storedLiteral(ce, 'r'))).toBeLessThan(100);
     expect(ce.box(['r', 2]).type.toString()).toBe('integer');
   });
@@ -115,7 +96,7 @@ describe('CE-594: a literal over a shared graph under a declared signature', () 
   test('the result ascription takes linear time', () => {
     const ce = new ComputeEngine();
     const ms = assignDeclaredChain(ce, '(real) -> real', DEPTH);
-    expect(ms).toBeLessThan(2000);
+    if (process.env.CE_PERF === '1') expect(ms).toBeLessThan(2000);
     expect(distinctNodes(storedLiteral(ce, 'h'))).toBeLessThan(500);
     expect(ce.box(['h', 0.5]).type.toString()).toBe('real');
   });
@@ -124,7 +105,7 @@ describe('CE-594: a literal over a shared graph under a declared signature', () 
   test('the parameter ascription takes linear time', () => {
     const ce = new ComputeEngine();
     const ms = assignDeclaredChain(ce, '(list<real>) -> real', DEPTH);
-    expect(ms).toBeLessThan(2000);
+    if (process.env.CE_PERF === '1') expect(ms).toBeLessThan(2000);
     expect(distinctNodes(storedLiteral(ce, 'h'))).toBeLessThan(500);
   });
 

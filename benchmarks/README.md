@@ -691,3 +691,32 @@ The rejected all-number dispatch experiment and its production measurements are
 in `scalar-add-dispatch-2026-11-03.json` and evaluation-cache architecture §13.
 The archive includes the experiment patch; it is not an optimization in the
 current engine.
+
+## Shared-expression traversal (`shared-traversal.mjs`)
+
+Compare source checkouts with `node --import tsx benchmarks/shared-traversal.mjs
+/path/to/checkout`. Hold the box lock, check CPU activity throughout, and run
+comparators serially in alternating order. `MODE=check` validates all fixtures
+without timing claims; `ONLY` selects comma-separated full ids and rejects
+unknown ids. Defaults are seven fresh-engine trials, five warmup calls and seven
+batches of 25 calls (`RUNS` and `ITERATIONS`). Setup and validation are untimed.
+First calls use fresh engines in an already loaded process, not fresh processes.
+Warm calls reuse the expression and engine, including their applicable caches.
+The declined-type warm figure is explicitly labeled as a cached result lookup.
+Its check mode also requires a scalar sibling to reach the body derivation.
+
+The synthetic matrix varies depth (4–24), width (1–64 independent towers) and
+references per parent (1, 2, 4). It measures raw substitution, callee reachability,
+CSE harvesting and full JavaScript compilation. Declined callback-body typing is
+separate. Slider shader compilation and a compiled Map callback are small host
+controls; they do not substitute for a document corpus or GPU execution.
+Substitution is checked with a memoized arithmetic oracle over its result,
+compilation with numeric results, and shader compilation with success and emitted
+operators. Type-search and decline checks assert their expected negative answers.
+CSE checks diagnostics; end-to-end compilation supplies its numeric control.
+
+`test/compute-engine/shared-traversal-work.test.ts` bounds actual operand-array
+reads independently of elapsed time and CSE's weighted path diagnostics. Its
+mutation controls and the review's measurements and limitations are recorded in
+`shared-traversal-2026-11-03.json` and
+`../docs/plans/2026-11-03-shared-traversal-review.md`.

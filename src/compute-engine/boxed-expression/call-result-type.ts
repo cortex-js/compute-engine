@@ -1997,7 +1997,11 @@ function literalBodyResultType(
       if (env.has(expr.operator)) return undefined;
       if (memo.has(expr)) return memo.get(expr);
       const children = expr.ops.map(walk);
-      if (children.some((x) => x === undefined)) return undefined;
+      if (children.some((x) => x === undefined)) {
+        // A failed child also settles this node in the current environment.
+        memo.set(expr, undefined);
+        return undefined;
+      }
       const operands = children as OperandDescriptor[];
       // A call that reaches a function whose body is being derived (a
       // self-call, or a call of a mutually recursive function) has no
