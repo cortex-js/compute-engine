@@ -451,15 +451,15 @@ describe('STORED ROWS READ BACK', () => {
   });
 
   // neyret/xhlkk7k9aq #1752170633: a restricted condition in a piecewise
-  // arm. `90\frac{x}{\sin(k)}` is written back `(90x)/\sin(k)`, which
-  // parses to another canonical form of the same value (also before the
-  // restriction change), so the test compares the second round trip: its
-  // text is the same as the first, and the conditions keep their `If`.
+  // arm. The product `90\frac{x}{\sin(k)}` reads back as the same tree,
+  // `Multiply(90, Divide(x, Sin(k)))`, and the conditions keep their `If`.
   test('neyret/xhlkk7k9aq #1752170633', () => {
     const latex =
       "0.7=c_3\\begin{cases}\\left(1\\keyword{where}\\sin(90\\frac{x}{\\sin(k)})\\gt0\\right)&\\left(0\\lt\\left(1\\keyword{where}c_1\\lt1\\right)\\keyword{where}c_2\\lt1\\right)\\\\\\left(1\\keyword{where}\\sin(40\\frac{x}{\\sin(k)})\\gt0\\right)&0\\lt\\begin{cases}1&c_1\\lt1\\\\1&c_2\\lt1\\\\\\operatorname{NaN}&\\top\\end{cases}\\\\1&\\top\\end{cases}";
-    const text = ce.parse(latex).latex;
+    const first = ce.parse(latex);
+    const text = first.latex;
     const again = ce.parse(text);
+    expect(again.json).toEqual(first.json);
     expect(again.latex).toBe(text);
     expect(ce.parse(again.latex).json).toEqual(again.json);
     const product = (again.json as MathJsonExpression[])[2] as MathJsonExpression[];

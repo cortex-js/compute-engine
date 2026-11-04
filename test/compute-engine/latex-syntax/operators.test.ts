@@ -156,7 +156,7 @@ describe('OPERATOR invisible', () => {
   test('2\\frac{a}{b} // Invisible MULTIPLY operator', () =>
     expect(check('2\\frac{a}{b}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Divide", "a", "b"]]
-      canonical = ["Divide", ["Multiply", 2, "a"], "b"]
+      canonical = ["Multiply", 2, ["Divide", "a", "b"]]
       simplify  = (2a) / b
     `));
 

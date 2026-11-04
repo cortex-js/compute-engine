@@ -275,7 +275,9 @@ describe('345 the fraction sign keeps digits and round-trips structurally', () =
     expect(syntax.serialize(json as any, { prettify: false })).toBe(
       '-y\\frac{x}{4}'
     );
-    expect(syntax.serialize(json as any)).toBe('-\\frac{yx}{4}');
+    // With prettify, a product whose only denominator is that of a `Divide`
+    // factor is also written factor by factor (ROADMAP CE-787).
+    expect(syntax.serialize(json as any)).toBe('-y\\frac{x}{4}');
     const box = ce.box(json as any, { canonical: false });
     expect(ce.parse(box.latex).isSame(box.canonical)).toBe(true);
   });

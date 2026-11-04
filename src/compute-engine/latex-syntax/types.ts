@@ -1712,7 +1712,11 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   /**
    * If true, prettify the LaTeX output.
    *
-   * For example, render `\frac{a}{b}\frac{c}{d}` as `\frac{ac}{bd}`
+   * For example, render `x\cdot y^{-1}` as `\frac{x}{y}`, and
+   * `\frac{1}{a}\cdot\frac{1}{b}` as `\frac{1}{ab}`. A product whose only
+   * denominators are those of quotients with a numerator other than 1 keeps
+   * its factors, so that it reads back as the same expression:
+   * `90\frac{x}{y}` stays `90\times\frac{x}{y}`.
    *
    */
   prettify: boolean;

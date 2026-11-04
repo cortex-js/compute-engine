@@ -333,7 +333,7 @@ describe('CUSTOM LATEX SERIALIZING', () => {
   test('Prettify', () => {
     const expr = ce.parse('\\frac{a}{b}\\frac{c}{d}');
     expect(expr.toLatex({ prettify: true })).toMatchInlineSnapshot(
-      `\\frac{ac}{bd}`
+      `\\frac{a}{b}\\frac{c}{d}`
     );
     expect(expr.toLatex({ prettify: false })).toMatchInlineSnapshot(
       `\\frac{a}{b}\\frac{c}{d}`
@@ -775,5 +775,85 @@ describe('A NUMBER TO A NEGATIVE POWER', () => {
     expect(
       ce.box(['Multiply', ['Power', 'y', -1], ['Power', 10, -30]]).latex
     ).toBe('\\frac{1}{y}\\times10^{-30}');
+  });
+});
+
+describe('A PRODUCT WITH A DIVIDE FACTOR', () => {
+  // When the only denominators of a product are those of its `Divide`
+  // factors, the product is written factor by factor. One fraction for the
+  // whole product, `\frac{90x}{\sin(k)}`, reads back as
+  // `Divide(Multiply(90, x), Sin(k))`, which is another tree (corpus row
+  // neyret/xhlkk7k9aq #1752170633, ROADMAP CE-787).
+  test.each([
+    '\\sin(90\\frac{x}{\\sin(k)})',
+    '90\\frac{x}{\\sin(k)}',
+    '\\frac{a}{b}\\frac{c}{d}',
+    'ab\\frac{x}{y}',
+    '-2\\frac{x}{y}',
+  ])('%s reads back as the same tree', (input) => {
+    const expr = ce.parse(input);
+    expect(ce.parse(expr.latex).json).toEqual(expr.json);
+  });
+
+  test('the factors are written side by side', () => {
+    expect(
+      ce.parse('\\sin(90\\frac{x}{\\sin(k)})').latex
+    ).toMatchInlineSnapshot(`\\sin(90\\times\\frac{x}{\\sin(k)})`);
+    expect(ce.parse('\\frac{a}{b}\\frac{c}{d}').latex).toMatchInlineSnapshot(
+      `\\frac{a}{b}\\frac{c}{d}`
+    );
+  });
+
+  // A quotient written with a solidus (at a deep level, or with the
+  // `inline-solidus` style) is a factor in parentheses: juxtaposed, `u/vx/y`
+  // reads back as `u/(vxy)`. A power with a symbolic exponent is a factor of
+  // the numerator, so it does not make the product one fraction.
+  const deep = (x: MathJsonExpression): MathJsonExpression => [
+    'Sin',
+    ['Sin', ['Sin', ['Sin', x]]],
+  ];
+  test.each([
+    deep(['Multiply', ['Divide', 'u', 'v'], ['Divide', 'x', 'y']]),
+    deep(['Multiply', 'a', ['Divide', 'x', ['Sin', 'k']]]),
+    deep(['Multiply', 90, ['Divide', 'x', ['Sin', 'k']]]),
+    deep(['Multiply', ['Divide', ['Add', 'u', 1], 'v'], ['Sin', 'k']]),
+    deep(['Multiply', ['Divide', ['Add', 'u', 1], 'v'], ['Divide', 'x', 'y']]),
+    ['Multiply', ['Divide', 'a', 'b'], ['Power', 'ExponentialE', 'x']],
+    ['Multiply', ['Power', 2, 'n'], ['Divide', 'x', 'y']],
+  ] as MathJsonExpression[])('%j reads back as the same tree', (json) => {
+    const expr = ce.box(json);
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+    const solidus = expr.toLatex({ fractionStyle: () => 'inline-solidus' });
+    expect(ce.parse(solidus).isSame(expr)).toBe(true);
+  });
+
+  test('a quotient with a solidus is a factor in parentheses', () => {
+    expect(
+      ce
+        .box(['Multiply', ['Divide', 'u', 'v'], ['Divide', 'x', 'y']])
+        .toLatex({ fractionStyle: () => 'inline-solidus' })
+    ).toMatchInlineSnapshot(`(u/v)(x/y)`);
+  });
+
+  // The `factor` style writes a quotient as a product, `\frac{1}{y}x`, so
+  // the text reads back as a product with a reciprocal: the same value, not
+  // the same tree. In parentheses, the next factor is not read as the
+  // argument of a call of `x`.
+  test('a quotient in the factor style is a factor in parentheses', () => {
+    const expr = ce.box(['Multiply', ['Divide', 'x', 'y'], ['Add', 'a', 'b']]);
+    const text = expr.toLatex({ fractionStyle: () => 'factor' });
+    expect(text).toMatchInlineSnapshot(`(\\frac{1}{y}x)(a+b)`);
+    expect(ce.parse(text).json).toEqual([
+      'Multiply',
+      'x',
+      ['Divide', 1, 'y'],
+      ['Add', 'a', 'b'],
+    ]);
+  });
+
+  test('a product with another denominator is still one fraction', () => {
+    expect(
+      latex(['Multiply', 'a', ['Divide', 'x', 'y'], ['Power', 'z', -1]])
+    ).toMatchInlineSnapshot(`\\frac{ax}{yz}`);
   });
 });

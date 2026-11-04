@@ -2823,19 +2823,6 @@ reproduction above is the record.
 
 ## LaTeX parsing and serialization
 
-### CE-787. A product with a fraction factor inside a function argument reads back in another form
-
-**Status:** ready; defect, S.
-**Witness:** corpus; Tycho row neyret/xhlkk7k9aq #1752170633: `\sin(90\frac{x}{\sin(k)})` is written `\sin((90x)/\sin(k))`, which reads back as `Divide(Multiply(90, x), Sin(k))`, not `Multiply(90, Divide(x, Sin(k)))`.
-
-The value is the same, but the round trip changes the tree, so a reader that
-compares stored rows by structure sees two rows. The serializer writes a
-`Multiply` whose last factor is a `Divide` with the inline `/` form when the
-product is inside a function argument, and the parser groups the inline `/`
-over the whole product. The fix is in the serializer: keep `\frac{x}{…}` for a
-`Divide` factor of a product, or wrap the factor in parentheses. The same
-behavior is at commit 0cbf41d09ffd, before the language release.
-
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
 **Status:** design needed; defect.

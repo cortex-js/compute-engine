@@ -589,6 +589,17 @@
 
 ### Resolved Issues
 
+- **A product with a quotient factor reads back as the same expression.**
+  `\sin(90\frac{x}{\sin(k)})` was written `\sin(\frac{90x}{\sin(k)})`, which
+  reads back as `Sin(Divide(Multiply(90, x), Sin(k)))`, not as the product
+  `Sin(Multiply(90, Divide(x, Sin(k))))`. A product whose only denominators
+  are those of quotients with a numerator other than 1 is now written factor
+  by factor: `\sin(90\times\frac{x}{\sin(k)})`, and `\frac{a}{b}\frac{c}{d}`
+  stays `\frac{a}{b}\frac{c}{d}`. A product with a reciprocal or a negative
+  power is still one fraction: `2\cdot\frac{1}{a}` is `\frac{2}{a}`. The
+  prettified MathJSON (`toMathJson({ prettify: true })`) follows the same
+  rule. (CE-787.)
+
 - **A returned closure calls a local function that a nested block declares.**
   `Apply(Apply(w ↦ (x ↦ If(x > 0, Block(Declare(g, "unknown", z ↦ 3),
   x + g(0)), 0)), 1), 5)` gave `5 + g(0)`; it now gives `8`. When a call

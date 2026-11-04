@@ -310,6 +310,22 @@ function numeratorDenominator(
 }
 
 /**
+ * True when `numeratorDenominator()` would put a part of the factor `expr`
+ * of a product in the denominator, or in the list of powers of numbers
+ * with a negative exponent that are written after the fraction.
+ */
+function hasDenominator(
+  expr: MathJsonExpression,
+  serializer: Serializer
+): boolean {
+  const [, denom, powers] = numeratorDenominator(
+    ['Multiply', expr],
+    serializer
+  );
+  return denom.length > 0 || powers.length > 0;
+}
+
+/**
  * True when `expr` is a power with a negative integer exponent whose base
  * can be a matrix (the call `g(x)` of a function that was not declared, see
  * the `readsAsMatrixPowerBase` option). Such a power is the matrix inverse
@@ -1256,7 +1272,34 @@ function serializeMultiply(
   // Is it a fraction?
   // (i.e. does it have a denominator, i.e. some factors with a negative power)
   //
-  if (serializer.options.prettify === true && !isContinuationProduct) {
+  // A product whose only denominators are those of its `Divide` factors
+  // with a numerator other than 1 (`Multiply(90, Divide(x, Sin(k)))`) is
+  // written factor by factor, `90\times\frac{x}{\sin(k)}`. One fraction for
+  // the whole product, `\frac{90x}{\sin(k)}`, reads back as
+  // `Divide(Multiply(90, x), Sin(k))`, which is another tree, while
+  // `90\times\frac{x}{\sin(k)}` reads back as the product. A `Divide` with the
+  // numerator 1 is the canonical form of a reciprocal, and it still goes
+  // into one fraction: `Multiply(2, Divide(1, a))` is `\frac{2}{a}`
+  // (ROADMAP CE-787).
+  // Only the exact integer 1 makes a reciprocal: a float numerator `1.0` is
+  // kept in the quotient, as `isNonReciprocalDivide()` in `serialize.ts`
+  // does.
+  const isNonReciprocalDivide = (x: MathJsonExpression): boolean => {
+    if (operator(x) !== 'Divide') return false;
+    const numer = operand(x, 1);
+    return numer === null || !isExactOne(numer);
+  };
+  const onlyDivideDenominators =
+    operands(expr).some(isNonReciprocalDivide) &&
+    operands(expr).every(
+      (x) => isNonReciprocalDivide(x) || !hasDenominator(x, serializer)
+    );
+
+  if (
+    serializer.options.prettify === true &&
+    !isContinuationProduct &&
+    !onlyDivideDenominators
+  ) {
     const [numer, denom, powers] = numeratorDenominator(expr, serializer);
     if (denom.length === 1 && denom[0] === 1) numer.push(...powers);
     if (denom.length > 0) {
@@ -1413,6 +1456,32 @@ function serializeMultiply(
         : isFoldBarrierFactor(arg)
           ? serializer.wrap(arg, MULTIPLICATION_PRECEDENCE + 1)
           : serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
+
+    // A quotient factor that is not written as one `\frac`, `\dfrac` or
+    // `\tfrac` group is written in parentheses. These are the solidus styles
+    // (the inline style of a deep level, `inline-solidus`, `nice-solidus`),
+    // the `reciprocal` style (`xy^{-1}`) and the `factor` style
+    // (`\frac{1}{y}x`). Juxtaposed, the next factor is read into the
+    // quotient: `Multiply(Divide(u, v), Divide(x, y))` written `u/vx/y`
+    // reads back as `u/(vxy)`, `Multiply(Divide(u+1, v), Sin(k))` written
+    // `(u+1)/v\sin(k)` reads back with `\sin(k)` in the denominator, and
+    // `\frac{1}{y}x(a+b)` reads as a call of `x`. The style is the one that
+    // the `Divide` serializer chooses: `serialize()` calls it one level
+    // deeper, and it uses `quotient` without prettify.
+    if (
+      arg !== null &&
+      (operator(arg) === 'Divide' || operator(arg) === 'Rational') &&
+      count > 2 &&
+      !['quotient', 'block-quotient', 'inline-quotient'].includes(
+        serializer.options.prettify
+          ? serializer.fractionStyle(arg, serializer.level + 1)
+          : 'quotient'
+      )
+    )
+      term = serializer.wrapString(
+        term,
+        serializer.options.groupStyle(arg, serializer.level + 1)
+      );
 
     // A factor that serializes with a leading sign (a fraction such as
     // `Divide(x, -4)`, written `-\frac{x}{4}`) gives its sign to the whole

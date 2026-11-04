@@ -116,9 +116,14 @@ describe('Products WITHOUT a ContinuationPlaceholder are unchanged', () => {
     expect(serialized('3\\cdot\\frac{1}{2}')).toBe('\\frac{3}{2}');
     expect(serialized('2x^2y')).toBe('2yx^2');
     expect(serialized('\\frac{2x}{3y}')).toBe('\\frac{2x}{3y}');
-    // Quotient factors are still aggregated into a single `\frac`.
+    // Reciprocal factors are still aggregated into a single `\frac`.
     expect(serialized('\\frac{1}{a}\\cdot\\frac{1}{b}')).toBe('\\frac{1}{ab}');
     expect(serialized('x\\cdot y^{-1}')).toBe('\\frac{x}{y}');
-    expect(serialized('\\frac{a}{b}\\cdot\\frac{c}{d}')).toBe('\\frac{ac}{bd}');
+    // A product whose only denominators are those of `Divide` factors with a
+    // numerator other than 1 is written factor by factor, so that it reads
+    // back as the same tree (ROADMAP CE-787).
+    expect(serialized('\\frac{a}{b}\\cdot\\frac{c}{d}')).toBe(
+      '\\frac{a}{b}\\frac{c}{d}'
+    );
   });
 });

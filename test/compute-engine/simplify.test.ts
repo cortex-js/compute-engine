@@ -480,7 +480,7 @@ describe('Rules: Powers: Multiplication (float exponents)', () => {
 
 describe('Rules: Powers and Denominators', () => {
   test('x/(pi/y)^3 = x*y^3/pi^3', () =>
-    checkSimplify('x/(\\pi/y)^3', 'x*y^3/\\pi^3'));
+    checkSimplify('x/(\\pi/y)^3', 'xy^3/\\pi^3'));
 });
 
 describe('Rules: Powers: Division (misc)', () => {

@@ -198,6 +198,44 @@ function mayContributeDenominator(x: Expression): boolean {
 }
 
 /**
+ * Does the factor `x` of a product give a part to the denominator of the
+ * product? These are the factors that `numeratorDenominator()` in the LaTeX
+ * dictionary puts in a denominator: a `Divide` or a `Rational`, a power with
+ * a negative number or a `Negate` as exponent, and an exact number that is
+ * not an integer. A power with a symbolic exponent (`e^x`, `2^n`) is a
+ * factor of the numerator. Unlike `mayContributeDenominator()`, this test
+ * does not look inside the factor.
+ *
+ * One difference: `numeratorDenominator()` keeps a negative integer power of
+ * a base that can be a matrix (`g(t)^{-1}` with `g` not declared) in the
+ * numerator, and this test counts it as a denominator. So
+ * `Multiply(Divide(x, y), Power(g(t), -1))` is still one quotient here,
+ * which gives the same value.
+ */
+function hasDenominator(x: Expression): boolean {
+  if (isNumber(x)) return x.isExact && x.isInteger !== true;
+  if (!isFunction(x)) return false;
+  if ((x.operator === 'Divide' || x.operator === 'Rational') && x.nops === 2)
+    return true;
+  if (x.operator === 'Power' && x.nops === 2) {
+    const exp = x.op2;
+    if (isFunction(exp, 'Negate')) return true;
+    return isNumber(exp) && exp.im === 0 && exp.re < 0;
+  }
+  return false;
+}
+
+/**
+ * Is `x` a `Divide` whose numerator is not the exact number 1
+ * (`Divide(x, y)`, not `Divide(1, y)`)?
+ */
+function isNonReciprocalDivide(x: Expression): boolean {
+  if (!isFunction(x, 'Divide') || x.nops !== 2) return false;
+  const num = x.op1;
+  return !(isNumber(num) && num.isExact && asSmallInteger(num) === 1);
+}
+
+/**
  * Is `x` a number literal raised to an exact negative integer other than -1
  * (`10^{-30}`, `2^{-3}`)?
  *
@@ -401,7 +439,20 @@ function serializePrettyJsonFunction(
     // pattern (`…` drifts to the front) — neither re-parses to the same
     // product. Depth-aware for the same reason the canonicalization barrier
     // is: a held-back nested product carries its ellipsis below the surface.
-    !args.some((x) => containsContinuationOperand(x))
+    !args.some((x) => containsContinuationOperand(x)) &&
+    // A product whose only denominators are those of its `Divide` factors
+    // with a numerator other than 1 (`Multiply(90, Divide(x, Sin(k)))`) is
+    // written as it is, `90\times\frac{x}{\sin(k)}`. One quotient for the
+    // whole product, `\frac{90x}{\sin(k)}`, reads back as
+    // `Divide(Multiply(90, x), Sin(k))`, which is another tree. A `Divide`
+    // with the numerator 1 is the canonical form of a reciprocal, and it
+    // still goes into one quotient: `Multiply(2, Divide(1, a))` is
+    // `\frac{2}{a}`. The LaTeX serializer of `Multiply` has the same rule
+    // (`serializeMultiply()` in `definitions-arithmetic.ts`; ROADMAP CE-787).
+    !(
+      args.some(isNonReciprocalDivide) &&
+      args.every((x) => isNonReciprocalDivide(x) || !hasDenominator(x))
+    )
   ) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree.
