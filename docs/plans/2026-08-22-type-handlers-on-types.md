@@ -156,6 +156,22 @@ canonicalized or evaluated; no state event is emitted. Filling a memo
 (`_type`, `_sgn`, a `cachedValue` slot) is not a state change in this
 sense — memos are what the invariant protects.
 
+One exception, decided by the user on 2026-11-04 (ROADMAP CE-610, option
+(a)): the runtime purity guard does not count the advances of the `any`
+and `callable` versions that SCRATCH events make (a `declare`,
+`binding-repair` or `inference` on a binding under a registered scratch
+scope). A handler can read the type of a recursive function literal for
+the first time; that derives the literal's signature, which boxes a copy
+of its body in a scratch scope, where a use narrows a parameter (`n` in
+`n - 1`) and advances the `callable` version at once. No cache that
+outlives the computation keys on such a binding, so the advance poisons no
+cache, but it is still a boxing during a `.type` read, which this design
+wants to remove. The engine keeps the counts
+(`EngineConfigurationLifecycle.scratchAnyAdvances` and
+`scratchCallableAdvances`), and `guardedTypeHandlerCall` in
+`boxed-expression/operand-descriptor.ts` subtracts them. When type reads
+no longer derive signatures, the counts and the exception go.
+
 Out of scope here: a broader "validation phase" that canonicalization
 would call and internal constructions could skip (ROADMAP "A
 pre-canonicalization validation phase"). The user raised it alongside

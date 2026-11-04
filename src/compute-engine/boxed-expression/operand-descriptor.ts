@@ -1047,10 +1047,24 @@ function guardedCall<T>(
   operator: string,
   call: () => T
 ): T {
-  const any = engine._anyVersion;
+  // The `any` and `callable` versions are read less the advances that
+  // SCRATCH events made (`_scratchAnyAdvances`, `_scratchCallableAdvances`).
+  // A handler can read the type of a recursive function literal for the
+  // first time, which derives its signature: the derivation boxes a copy of
+  // the body in a scratch scope, and a use there narrows a parameter (`n`
+  // in `n - 1`), which advances the `callable` version at once. No cache
+  // that outlives the computation keys on a binding in a scratch scope, so
+  // this is not the cache poisoning that the check looks for. The check
+  // still reports the registration of a scratch scope that the handler does
+  // not remove before it returns (`scratch-scopes` below). The cost: the
+  // check no longer reports a handler that registers a scratch scope,
+  // canonicalizes in it and removes it before it returns, although a type
+  // handler must not canonicalize. `docs/plans/2026-08-22-type-handlers-on-types.md`
+  // §1 records this exception, decided for ROADMAP CE-610.
+  const any = engine._anyVersion - engine._scratchAnyAdvances;
   const semantic = engine._semanticVersion;
   const world = engine._worldVersion;
-  const callable = engine._callableVersion;
+  const callable = engine._callableVersion - engine._scratchCallableAdvances;
   const scratch = engine._scratchDeclarationScopes.length;
   // The comparison runs after the call whether or not it threw, so a
   // handler that mutates state AND throws is still reported as a purity
@@ -1101,10 +1115,12 @@ function reportAxisMovement(
 ): void {
   {
     const moved: string[] = [];
-    if (engine._anyVersion !== any) moved.push('any');
+    if (engine._anyVersion - engine._scratchAnyAdvances !== any)
+      moved.push('any');
     if (engine._semanticVersion !== semantic) moved.push('semantic');
     if (engine._worldVersion !== world) moved.push('world');
-    if (engine._callableVersion !== callable) moved.push('callable');
+    if (engine._callableVersion - engine._scratchCallableAdvances !== callable)
+      moved.push('callable');
     if (engine._scratchDeclarationScopes.length !== scratch)
       moved.push('scratch-scopes');
     if (moved.length > 0)

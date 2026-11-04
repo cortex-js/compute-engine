@@ -296,6 +296,33 @@ describe('row 426: routes and values', () => {
       expect(interpreted[i + 1]).toBeCloseTo(expected[i], 12);
     }
   });
+
+  test('typing the applied literal of case 12 trips no purity report', () => {
+    // The `Map` type handler reads the type of the recursive literal `r` for
+    // the first time. That derives the signature of `r`, which boxes a copy
+    // of its body in a scratch scope, where `n - 1` narrows `n`. The purity
+    // check of type handlers does not count the version advances of such
+    // scratch events, so the canonicalization of `Apply` does not fail and
+    // log "modified engine state while deriving a type".
+    const ce = new ComputeEngine();
+    ce.declare('s', 'real');
+    ce.declare('r', 'function');
+    ce.assign(
+      'r',
+      ce.parse(
+        'n \\mapsto \\begin{cases} 0 & n \\le 0 \\\\ s + r(n-1) & \\text{otherwise}\\end{cases}'
+      )
+    );
+    ce.declare('N', 'list<real>');
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const expr = ce.box(['Apply', F(['Block', ['Map', 'r', 'v']], 'v'), 'N']);
+      expect(expr.type.toString()).toBe('list<number>');
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 /**

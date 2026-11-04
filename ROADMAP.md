@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-802.
+Next free reference: CE-804.
 
 **Entry format.**
 
@@ -403,10 +403,12 @@ that.
 
 ### CE-800. An assignment refuses a symbolic point whose component type only overlaps the declared type, where a call accepts it (Tycho row 483)
 
-**Status:** decision needed; design, M. Tycho row 483
-(`~/dev/tycho/docs/COMPUTE_ENGINE.md`). Changes the documented contract of a
-declared type at assignment (`08-guide-types.md`: a declared symbol refuses a
-value whose type is not compatible).
+**Status:** ready; design, M. User decision 2026-11-04: option 1 below, the
+overlap rule. Tycho row 483 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`). Changes
+the documented contract of a declared type at assignment
+(`08-guide-types.md`: a declared symbol refuses a value whose type is not
+compatible): the page, `docs/TYPE-SYSTEM.md` and the CHANGELOG state the new
+rule with the example below.
 **Witness:** corpus; with `E = real | signed_infinity | nan`, `a` and `n`
 declared `real`, and `P` declared `tuple<E, E>`, `ce.assign("P",
 ce.parse("(-\\sqrt{1-a^2}, a)"))` throws `The value "(-sqrt(1 - a^2), a)" of
@@ -454,6 +456,36 @@ question is the rule, not the mechanism:
 - **Keep the match rule**: Tycho declares its points with `number` components
   (today's state) and loses the extended-real arithmetic of 0.178.0 for them.
 
+**The decision (2026-11-04).** Option 1: an assignment to a symbol with a
+declared type accepts a value whose static type overlaps the declared type;
+each evaluation of the symbol tests the computed value against the declared
+type, as a call tests a bound argument, and a value outside the type is the
+`incompatible-type` error expression at that read (measured: `g((-sqrt(1 -
+a^2), a))` with a `tuple<E, E>` parameter gives `-0.366` at `a = 0.5` and
+the error expression at `a = 5`). A value with no overlap (`ce.assign("t",
+2)` for `t: gf8`) still throws at the assignment. Compiled code is unchanged
+(R5: no test, no complex lane; the real lane gives `[NaN, 5]` at `a = 5` in
+`strict`). Beside it, the user asks Tycho to declare its sliders with their
+bounds (option 2), so that `-sqrt(1 - a^2)` with `a: real<-1..1>` is typed
+`real` and the check never fails; a document whose slider bounds change is
+recompiled, which is rare. Sent to Tycho's session on 2026-11-04.
+
+**Tycho's answer (tycho-desk, 2026-11-04, Tycho main `ffb4d1879`).** Tycho
+already declares each slider with its bounds (`_declareDocumentVariable`,
+`src/graph-paper/graph/document-ce-manager.ts`, since Tycho commit
+`3b9f91cdc`, 2026-10-27): `a: real<-1..1>`, `k: integer<1..10>`. When the
+bounds change, the document is registered again in a new scope and every
+kernel compiled under the old declarations is retired (the recompile). No
+bounds are declared for a slider whose bound reads another variable
+(`k ∈ [0, n]`; the bound moves during a drag), for a soft bound that a value
+has crossed (that side stays open), for a bound that is not finite or not
+ordered, and for every name that is not a slider (the coordinates of a
+draggable point, a defined value such as `c = 1/a`). So the check of option
+1 can still find a value outside the declared type in those cases, and
+option 2 does not replace option 1. Tycho's points still have `number`
+components today; the bounds matter once Tycho redeclares them with E,
+which it does when this entry and CE-801 ship.
+
 ### CE-801. A point list plus a point over extended-real components types the components `infinity | nan | real` (Tycho row 483, second part)
 
 **Status:** ready; defect, S. Tycho row 483.
@@ -471,6 +503,50 @@ the entries near "incompatible-dimensions"), and apply the same component
 rule to the broadcast over a list of points. Expected: `L + (1, 1)` typed
 `list<tuple<E, E>>`; a symbol declared `list<tuple<E, E>>` accepts the
 result.
+
+### CE-802. A failed sequence search gives `Missing`, not `Nothing`, and the `Slice(xs, Nothing)` handler goes
+
+**Status:** ready; design, S. User decision 2026-11-04: option 3 of the
+question in the 3.4.3 record of
+`docs/plans/2026-11-02-compiler-contraction-plan.md` (choice 8). Replaces the
+user decision of 2026-08-16 that made the failed search `Nothing`.
+**Witness:** plausible; `Slice([1, 2, 3], RangeOf([1, 2, 3], [9]))` gives
+`Nothing` on `0c201d2e9` (and `Slice([1, 2, 3], Nothing)` gives `Nothing`,
+typed `nothing`), where `At([1, 2, 3], Nothing)` is the `incompatible-type`
+error that the error model of 0.178.0 prescribes for an operator that
+receives `Nothing`.
+
+The error model (`docs/ERROR-MODEL.md`, "One static error, one dynamic
+non-value per domain", user decision 2026-11-02) keeps `Nothing` only as the
+value of an empty block or of a statement with no value; `Missing` is the
+dynamic non-value for everything that is not a number or a point. One
+handler stayed against the rule: `RangeOf(xs, needle)` gives `Nothing` when
+the needle does not occur, and the `Slice` handler folds `Slice(xs,
+Nothing)` to `Nothing` so that `Slice(xs, RangeOf(xs, needle))` is `Nothing`
+on a failed search (`library/collections.ts`, the `Slice` entry around line
+18515, and the span reader around line 26416, which returns `null` for a
+`Nothing` span so that it is not read as an omitted argument).
+
+The change: a failed `RangeOf` search gives `Missing`; the `Slice` handler
+loses the `Nothing` fold and the `null` span case, and `Slice(xs, Missing)`
+gives `Missing` by the propagation rule of 3.4.2 (an operator with an absent
+operand gives `Missing`), so `Slice(xs, RangeOf(xs, needle))` is `Missing` on
+a failed search with no handler; `Slice(xs, Nothing)` is the ordinary
+`incompatible-type` error. The result type of `RangeOf` is `range | missing`
+(it was `nothing | range`), and the type of a `Slice` over it carries the
+`missing` arm. A program that tested the search with a comparison to
+`Nothing` uses `IsMissing` or `Coalesce`. Tests: `sequence-search.test.ts`
+(the 2026-08-16 assertions change to `Missing`), the `Slice` tests of the
+`Nothing` fold. Documents: the `RangeOf` and `Slice` descriptions in
+`library/collections.ts` (the generated reference follows), `docs/ERROR-MODEL.md`
+(the exception is gone), the user-facing collections reference under
+`~/dev/cortexjs.io/docs/compute-engine/`, a CHANGELOG entry under "Behavior
+Changes" with the old and the new value. Compiled code: check what the
+JavaScript lowering of `Slice` and `RangeOf` gives for the failed search
+today (a decline, or `undefined`) and keep it within the caveats (the absent
+value at a producer; `Missing` is read only by a discharge or an accessor).
+The other options, not chosen: keep the handler as a documented exception;
+remove it and let a failed search inside a `Slice` be an error.
 
 ### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
 
@@ -993,49 +1069,6 @@ plain local, `Block(Assign(c, 1), Add(c, 1))`, gives `[]`. The free-variable
 walk (`collectReferences`, `abstract-boxed-expression.ts`) does not count the
 symbols of a `Tuple` target of `Assign` as locals of the block. Same on main
 before CE-597.
-
-### CE-610. Canonicalizing `Apply` of a literal whose body maps a recursive function trips the type-handler purity check
-
-**Status:** decision needed; defect, S. Found 2026-10-28 while fixing a CE-597
-regression.
-**Witness:** corpus; Tycho row 426 case 12; only a log line under jest, values right.
-
-With `r` assigned a recursive function literal (`n ↦ 0` when `n ≤ 0`, else
-`s + r(n − 1)`) and `N: list<real>`,
-`ce.box(['Apply', ['Function', ['Block', ['Map', 'r', 'v']], 'v'], 'N'])` under
-the purity check (`CE_TYPE_PURITY_GUARD`, always on under jest) logs "error
-canonicalizing `Apply`: The type handler of "Map" modified engine state while
-deriving a type (moved: callable)". The `Apply` handler recovers and the result
-is right (`list<number>`); outside tests nothing is logged. Test:
-`tycho-row-426-apply-lambda-type.test.ts`, "the step of Tycho case 12".
-
-Cause: to check whether the callback can return `Nothing`, the `Map` type
-handler reads the type of `r`'s literal for the first time (`namedBody`,
-`library/collections.ts`). For a recursive literal this derives its signature
-(`resultUnderDeclaredParameters`), which boxes a copy of the body in a scratch
-scope, where `n + (-1)` narrows the scratch `n` from `unknown` to `number`. A
-scratch inference advances the callable cache version at once
-(`engine-configuration-lifecycle.ts`, "Scratch events"), and the purity check
-(`guardedCall` in `operand-descriptor.ts`) reports it. If the type of `r` is
-read once before the `Apply` is boxed, nothing is logged.
-
-Options:
-
-- (a) The purity check ignores the version advances that scratch events make
-  (a per-engine count of scratch advances, about four small hunks). No change
-  outside tests. Cost: it departs from the rule of
-  `docs/plans/2026-08-22-type-handlers-on-types.md` §1 (no version counter
-  advances across a `.type` read), and it hides boxing during type reads,
-  which that plan wants to find and remove; §1 would get the exception.
-- (b) A scratch inference that only narrows a type advances the callable
-  version when the outer computation ends, as the `any` version does. This
-  changes cache invalidation, and it is sound only if a narrowing can never
-  make a cached effect set wrong (not checked).
-- (c) Type reads stop deriving signatures, the long-term goal of that plan. A
-  design task.
-
-Recommended: (a), because it is small and changes no result outside tests. If
-nothing is decided, the message stays in the test log.
 
 ### CE-537. The free-variable walk misreads two binders
 
@@ -2222,6 +2255,39 @@ interpreter's value `[(2, 2), (4, 4)]` for both declarations; Tycho's pin is
 `tests/node/graph-paper/signature-propagation.test.ts` ("a point-returning
 head with a bare point parameter is refined to return the point"), marked
 `todo`.
+
+### CE-803. Compiled code fills a parameter default that is a constant the host declares
+
+**Status:** ready; capability, S. User decision 2026-11-04 (option 2 of the
+3.4.5 reversible choice, plan record 3.4.5 of
+`docs/plans/2026-11-02-compiler-contraction-plan.md`).
+**Witness:** corpus; GitHub issue #490: the 0.178.0 reply told the user that
+a default is a constant and, for any value other than a library constant or
+a listed symbol, to "declare a constant and name it". With `W0` declared
+`ce.declare("W0", { isConstant: true, value: 5 })` and `f := (k = W0) ↦ k +
+1`, the interpreter gives 6 for `f()` and the compilation of `f()` declines
+on every target (`compiledSymbolDefaultDeclines()`,
+`compilation/compile-parameter-defaults.ts`; its callers in
+`compile-callbacks.ts`, `compile-function-literals.ts`,
+`fixed-width-unroll.ts`, `javascript-target.ts`, `python-target.ts`).
+
+Item 3.4.5 chose the decline because compiled code fills a symbol default
+by its name at the call site or in a callback wrapper, where a local of the
+same name or a `vars` entry would give another value, and a name test of
+the call site was wrong both ways in review. The fill for a host constant
+or an Epsil `const` reads the constant's value where the function is
+declared, as the interpreter does (`isConstantSymbolDefault()`,
+`boxed-expression/parameter-defaults.ts`): the compiler folds the value of
+the constant into the completed argument at compile time (a number, a
+string, a boolean, `[]`, `{}`, or a literal the target can emit), instead of
+emitting the name. A constant whose value the target cannot emit keeps the
+decline. The library-constant and listed-symbol fills are unchanged. Tests:
+the 3.4.5 tests that pin the decline become value tests (`f()` compiles to
+6); `docs/COMPILATION-MODEL.md` (the defaults paragraph and the
+known-limitations line on a hidden library constant, if the fold also
+removes that limitation: say so) and a CHANGELOG entry under "Behavior
+Changes" (a form that declined and now compiles). The other option, not
+chosen: leave the decline.
 
 ### CE-785. The compiler's stack limit for a nested expression fell from about 420 to about 370 levels
 

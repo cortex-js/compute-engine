@@ -422,6 +422,8 @@ export class EngineConfigurationLifecycle {
   private _ephemeralWriteDepth = 0;
   private _factSuppressionDepth = 0;
   private _scratchDeclarationScopes: object[] = [];
+  private _scratchAnyAdvances = 0;
+  private _scratchCallableAdvances = 0;
   /** A deferred `inference-settled` advance is waiting (`noteStateEvent`). */
   private _inferencePending = false;
   private _tracker = new ConfigurationChangeTracker();
@@ -543,6 +545,34 @@ export class EngineConfigurationLifecycle {
   }
 
   /**
+   * The number of advances of the `any` version, and of the `callable`
+   * version, that SCRATCH events made (a `declare`, `binding-repair` or
+   * `inference` with `scratch: true`; see "Scratch events" in the
+   * documentation of `axisMaskOf`). Each count is part of the version it
+   * names: the version less the count is the number of advances made by the
+   * other events. The repair that shadows a binding outside the scratch
+   * scopes (`shadowing`, a value shield) is not counted: expressions outside
+   * the computation read that name.
+   *
+   * The purity check of type handlers (`guardedTypeHandlerCall`,
+   * `boxed-expression/operand-descriptor.ts`) compares the versions less
+   * these counts. A type handler can read the type of a function literal for
+   * the first time, and for a recursive literal that derives its signature:
+   * the derivation boxes a copy of the body in a scratch scope, where a use
+   * narrows a parameter (`n` in `n - 1`, from `unknown` to `number`). That
+   * scratch inference advances the `callable` version at once. No cache that
+   * outlives the computation keys on what a scratch event changes, so the
+   * check does not report it.
+   */
+  get scratchAnyAdvances(): number {
+    return this._scratchAnyAdvances;
+  }
+
+  get scratchCallableAdvances(): number {
+    return this._scratchCallableAdvances;
+  }
+
+  /**
    * The only writer of the invalidation versions. Callers report a semantic
    * event, and the dispatch functions decide which versions advance.
    */
@@ -572,6 +602,18 @@ export class EngineConfigurationLifecycle {
       });
     }
     const m = axisMaskOf(e);
+    const scratch =
+      (e.kind === 'declare' ||
+        e.kind === 'inference' ||
+        e.kind === 'binding-repair') &&
+      e.scratch === true;
+    // The counts of `scratchAnyAdvances` and `scratchCallableAdvances` leave
+    // out the repair that shadows a binding outside the scratch scopes (a
+    // value shield of a function-valued symbol, `shadowing`): expressions
+    // outside the computation read that name through the current scope
+    // chain, so its advances are not private to the computation.
+    const countsAsScratch =
+      scratch && !(e.kind === 'binding-repair' && e.shadowing === true);
     if (
       e.kind === 'declare'
         ? (e.shadowsCallable || e.changesFrameBinding === true) &&
@@ -584,7 +626,10 @@ export class EngineConfigurationLifecycle {
       if (e.kind !== 'value-write' || !e.ephemeral)
         this._persistentEvaluationVersion += 1;
     }
-    if (m.any) this._anyVersion += 1;
+    if (m.any) {
+      this._anyVersion += 1;
+      if (countsAsScratch) this._scratchAnyAdvances += 1;
+    }
     if (
       m.any &&
       !((e.kind === 'declare' || e.kind === 'scope-pop') && e.activation)
@@ -592,7 +637,10 @@ export class EngineConfigurationLifecycle {
       this._typeVersion += 1;
     if (m.semantic) this._semanticVersion += 1;
     if (m.world) this._worldVersion += 1;
-    if (callableAxisSelects(e)) this._callableVersion += 1;
+    if (callableAxisSelects(e)) {
+      this._callableVersion += 1;
+      if (countsAsScratch) this._scratchCallableAdvances += 1;
+    }
     // A value-type inference (a symbol narrowed by a use, such as `unknown`
     // to `number` for a free `T` read by `sin(4x - T)`) does not advance the
     // definition version, for the same reason its deferred
@@ -636,11 +684,6 @@ export class EngineConfigurationLifecycle {
     // The `binding-repair` of a FRESH declaration (`fresh`: the target scope
     // held no binding of the name) does not advance it either. The reasons
     // are in `updateDef`, which emits it.
-    const scratch =
-      (e.kind === 'declare' ||
-        e.kind === 'inference' ||
-        e.kind === 'binding-repair') &&
-      e.scratch === true;
     if (
       !scratch &&
       (e.kind === 'type-write' ||

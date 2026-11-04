@@ -1537,6 +1537,19 @@ export interface IComputeEngine {
    * `axisMaskOf`. @internal */
   readonly _scratchDeclarationScopes: object[];
 
+  /** The number of advances of `_anyVersion` that scratch events made (a
+   * `declare`, `binding-repair` or `inference` on a binding under a scratch
+   * scope). The purity check of type handlers subtracts it, so that the
+   * version advances of a scratch event (a parameter narrowed while a
+   * signature derivation, which a type read can reach, boxes a function
+   * body) are not reported (`EngineConfigurationLifecycle.scratchAnyAdvances`).
+   * @internal */
+  readonly _scratchAnyAdvances: number;
+
+  /** The number of advances of `_callableVersion` that scratch events made;
+   * see `_scratchAnyAdvances`. @internal */
+  readonly _scratchCallableAdvances: number;
+
   /** Run `fn` with the precision of the engine and of the big decimals set
    * to `digits`, and restore both afterwards, also when `fn` throws. There
    * is no reset: the tolerance (an `'auto'` tolerance is not recomputed

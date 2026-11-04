@@ -1481,6 +1481,18 @@ export class ComputeEngine implements IComputeEngine {
     return this._configurationLifecycle.scratchDeclarationScopes;
   }
 
+  /** See `IComputeEngine._scratchAnyAdvances`.
+   * @internal */
+  get _scratchAnyAdvances(): number {
+    return this._configurationLifecycle.scratchAnyAdvances;
+  }
+
+  /** See `IComputeEngine._scratchCallableAdvances`.
+   * @internal */
+  get _scratchCallableAdvances(): number {
+    return this._configurationLifecycle.scratchCallableAdvances;
+  }
+
   /** See `IComputeEngine._checkpointWindow`.
    * @internal */
   _checkpointWindow: CheckpointWindow | undefined = undefined;
