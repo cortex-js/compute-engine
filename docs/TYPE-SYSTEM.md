@@ -305,7 +305,23 @@ the type of a list literal, a broadcast or a `Map` result: `[[1, 2], [3, 4]]` is
 `[(1, 2), (3, 4)]` is `list<tuple<integer, integer>^2>`, `M < 3` with
 `M := [[1, 2], [3, 4]]` is `matrix<boolean^(2x2)>`, `(1, 2) * M` is
 `matrix<tuple<integer, integer>^(2x2)>`, and the ragged `[[1], [2, 3]]`
-is `list<vector<integer^1> | vector<integer^2>>`. A broadcast whose result rank
+is `list<vector<integer^1> | vector<integer^2>>`.
+
+A free symbol cell (a symbol with no value) whose type is `unknown` or a number
+type is read as a number cell: `[[a, b], [c, d]]` is `matrix<2x2>`, and the list
+does not infer the symbols (`narrowFreeSymbolCells()`, `canonical-utils.ts`). A
+cell whose type can hold a list (`matrix`, `tensor`, `number | tensor`, `value`)
+removes the shape of the literal, because the cell can be a matrix and the
+literal a block matrix: after `Determinant(a)`, which gives `a` the type
+`matrix`, `[[a, b], [c, d]]` is `list<list<unknown>>`, and the matrix operators
+leave it unevaluated. The same holds after `Trace(a)` (`number | tensor`, the
+parameter of `Trace`), `Norm(a)`, `Flatten(a)`, or a declaration of `a` with
+such a type. A literal operand of a parameter that is a tensor of unknown rank
+does not give its cells the element type `number | tensor`
+(`distributeLiteralElementInference()`, `validate.ts`; GitHub issue #505), so
+`Trace([[a, b], [c, d]])` keeps the shape of its own operand.
+
+A broadcast whose result rank
 is not known (over operands of different ranks, over an operand whose type is a
 union of ranks, or over a tensor of unknown rank) is typed `tensor<R>` for a
 result `R` that cannot hold a list: `U + 1` with
